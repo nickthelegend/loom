@@ -260,6 +260,8 @@ export class LoomDaemon {
       this.server = this.app.listen(this.port, this.host, () => resolve());
       this.server.on("error", reject);
     });
+    const addr = this.server!.address();
+    if (addr && typeof addr === "object") this.port = addr.port; // ephemeral port support
 
     this.wss = new WebSocketServer({ server: this.server!, path: "/ws" });
     this.wss.on("connection", (ws, req) => {
