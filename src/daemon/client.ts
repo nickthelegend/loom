@@ -166,8 +166,14 @@ export async function ensureDaemon(): Promise<DaemonClient> {
   let cfg = readDaemonConfig();
   if (cfg && (await healthy(cfg))) return new DaemonClient(cfg);
 
-  const cliEntry = fileURLToPath(new URL("../cli/index.js", import.meta.url));
-  const child = spawn(process.execPath, [cliEntry, "daemon"], {
+  const compiled = fileURLToPath(new URL("../cli/index.js", import.meta.url));
+  const devSource = fileURLToPath(new URL("../cli/index.ts", import.meta.url));
+  const { existsSync } = await import("node:fs");
+  // Built install → node dist/cli/index.js; dev checkout → tsx src/cli/index.ts.
+  const [entry, extraArgs] = existsSync(compiled)
+    ? [compiled, [] as string[]]
+    : [devSource, ["--import", "tsx"]];
+  const child = spawn(process.execPath, [...extraArgs, entry, "daemon"], {
     detached: true,
     stdio: "ignore",
     env: process.env,
