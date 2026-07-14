@@ -82,4 +82,18 @@ export class BatonManager {
     const holder = this.holder();
     if (holder !== agentId) throw new NotHolderError(agentId, holder);
   }
+
+  /**
+   * Clear a holder unconditionally — used when the persisted holder no
+   * longer exists in the project config (agent removed/renamed).
+   */
+  forceClear(reason = "holder removed"): void {
+    const state = readProjectState(this.projectDir);
+    if (!state.holder) return;
+    const from = state.holder;
+    state.holder = null;
+    delete state.holderSince;
+    writeProjectState(this.projectDir, state);
+    this.log.append({ kind: "handoff", payload: { from, to: null, reason } });
+  }
 }

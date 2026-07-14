@@ -109,6 +109,19 @@ export class ProjectRuntime {
   }
 
   /**
+   * The persisted holder, unless it refers to an agent that has since been
+   * removed from the config — ghost holders are cleared, not fatal.
+   */
+  private validHolder(): string | null {
+    const holder = this.baton.holder();
+    if (holder && !this.agents.has(holder)) {
+      this.baton.forceClear(`agent "${holder}" no longer in config`);
+      return null;
+    }
+    return holder;
+  }
+
+  /**
    * Send a user message. Routing rules (decided in the design interview):
    *  - no explicit agent → goes to the baton holder (or defaultAgent/first
    *    adapter on first contact, which acquires the baton);
@@ -116,13 +129,13 @@ export class ProjectRuntime {
    *    prompt the user to confirm a handoff (explicit, never silent).
    */
   async sendMessage(text: string, agentId?: string): Promise<{ agentId: string }> {
-    let target = agentId ?? this.baton.holder() ?? this.defaultAdapterId();
+    let target = agentId ?? this.validHolder() ?? this.defaultAdapterId();
     const agent = this.agent(target);
     if (!isAdapter(agent)) {
       throw new Error(`agent "${target}" is a bridge (read-only) — it cannot take turns`);
     }
 
-    const holder = this.baton.holder();
+    const holder = this.validHolder();
     if (holder === null) {
       this.baton.acquire(target);
     } else if (holder !== target) {
@@ -178,7 +191,7 @@ export class ProjectRuntime {
       throw new Error(`cannot hand the baton to "${to}" — bridges are read-only by design`);
     }
 
-    const holder = this.baton.holder();
+    const holder = this.validHolder();
     if (holder && holder !== to) {
       const current = this.agent(holder);
       if (isAdapter(current) && current.busy()) {
@@ -205,7 +218,7 @@ export class ProjectRuntime {
   }
 
   async interrupt(): Promise<{ interrupted: string | null }> {
-    const holder = this.baton.holder();
+    const holder = this.validHolder();
     if (!holder) return { interrupted: null };
     const agent = this.agent(holder);
     if (isAdapter(agent) && agent.busy()) {
@@ -220,7 +233,7 @@ export class ProjectRuntime {
   // -------------------------------------------------------------------------
 
   async status(): Promise<ProjectStatus> {
-    const holder = this.baton.holder();
+    const holder = this.validHolder();
     const agents = await Promise.all(
       this.config.agents.map(async (cfg) => {
         const agent = this.agent(cfg.id);

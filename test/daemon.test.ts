@@ -177,6 +177,21 @@ describe("loom daemon end-to-end", () => {
     expect(project.agents.map((a) => a.id)).toContain("reviewbot");
   });
 
+  it("clears a ghost baton holder left by a removed agent", async () => {
+    const stateFile = path.join(projectDir, ".loom", "state.json");
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8")) as Record<string, unknown>;
+    state.holder = "agent-that-was-deleted";
+    fs.writeFileSync(stateFile, JSON.stringify(state));
+    // Routing must recover (clear the ghost, fall back to the default adapter)…
+    const { agentId } = await client.send(projectId, "who picks this up?");
+    expect(agentId).toBe("plannerbot");
+    // …and the board must never display a ghost.
+    const { project } = await client.project(projectId);
+    expect(project.holder).toBe("plannerbot");
+    // Restore execbot as holder for the following tests.
+    await client.handoff(projectId, "execbot");
+  });
+
   it("interrupt stops a long-running turn", async () => {
     await client.send(projectId, "sleep:5000");
     await waitUntil(async () => {
