@@ -232,7 +232,15 @@ export class LoomDaemon {
     const info: ProjectInfo | undefined = findProject(idOrName);
     if (!info) throw new Error(`unknown project "${idOrName}" — run loom init first`);
     const existing = this.runtimes.get(info.id);
-    if (existing) return existing;
+    if (existing) {
+      // Hot-reload edited .loom/config.json once the project is quiet.
+      if (existing.configStale() && !existing.anyBusy()) {
+        await existing.close();
+        this.runtimes.delete(info.id);
+      } else {
+        return existing;
+      }
+    }
     const rt = await ProjectRuntime.open(info);
     rt.log.onEvent((e) => this.broadcast(info.id, e));
     this.runtimes.set(info.id, rt);

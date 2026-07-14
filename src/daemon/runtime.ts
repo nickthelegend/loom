@@ -4,6 +4,7 @@
  * the single source of truth.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import type {
   AnyAgent,
@@ -35,6 +36,7 @@ export class ProjectRuntime {
   readonly baton: BatonManager;
   private agents = new Map<string, AnyAgent>();
   private startedAgents = new Set<string>();
+  private configMtime = 0;
 
   private constructor(info: ProjectInfo, config: ProjectConfig, log: EventLog) {
     this.info = info;
@@ -56,7 +58,19 @@ export class ProjectRuntime {
     const config = readProjectConfig(info.dir);
     if (!config) throw new Error(`project at ${info.dir} has no .loom/config.json — run loom init`);
     const log = await EventLog.open(projectLoomDir(info.dir));
-    return new ProjectRuntime(info, config, log);
+    const rt = new ProjectRuntime(info, config, log);
+    rt.configMtime = configMtimeOf(info.dir);
+    return rt;
+  }
+
+  /** Has .loom/config.json changed since this runtime was opened? */
+  configStale(): boolean {
+    return configMtimeOf(this.info.dir) > this.configMtime;
+  }
+
+  /** Any adapter mid-turn? (Hot reloads are deferred while work is in flight.) */
+  anyBusy(): boolean {
+    return [...this.agents.values()].some((a) => isAdapter(a) && a.busy());
   }
 
   agent(id: string): AnyAgent {
@@ -252,4 +266,12 @@ export class ProjectRuntime {
 
 export function relativeToProject(projectDir: string, p: string): string {
   return path.isAbsolute(p) ? path.relative(projectDir, p) : p;
+}
+
+function configMtimeOf(projectDir: string): number {
+  try {
+    return fs.statSync(path.join(projectDir, ".loom", "config.json")).mtimeMs;
+  } catch {
+    return 0;
+  }
 }

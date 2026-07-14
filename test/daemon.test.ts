@@ -163,6 +163,20 @@ describe("loom daemon end-to-end", () => {
     expect(seen.some((e) => e.kind === "message" && e.agentId === "execbot")).toBe(true);
   });
 
+  it("hot-reloads an edited .loom/config.json once the project is quiet", async () => {
+    const cfgFile = path.join(projectDir, ".loom", "config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgFile, "utf8")) as {
+      agents: Array<Record<string, unknown>>;
+    };
+    cfg.agents.push({ id: "reviewbot", kind: "echo", role: "reviewer" });
+    fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2));
+    // mtime granularity can be coarse — nudge it forward explicitly.
+    const future = new Date(Date.now() + 2000);
+    fs.utimesSync(cfgFile, future, future);
+    const { project } = await client.project(projectId);
+    expect(project.agents.map((a) => a.id)).toContain("reviewbot");
+  });
+
   it("interrupt stops a long-running turn", async () => {
     await client.send(projectId, "sleep:5000");
     await waitUntil(async () => {
