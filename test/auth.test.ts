@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { AuthManager } from "../src/daemon/auth.js";
 import { tmpDir } from "./helpers.js";
-import { ensureDaemonConfig } from "../src/core/registry.js";
+import { ensureDaemonConfig, readDaemonConfig, writeDaemonConfig } from "../src/core/registry.js";
 
 describe("auth + pairing", () => {
   beforeEach(() => {
@@ -47,5 +47,18 @@ describe("auth + pairing", () => {
   it("rejects unknown pairing tokens", () => {
     const { auth } = fresh();
     expect(auth.claim("deadbeef")).toBeNull();
+  });
+
+  it("claim does not clobber fields written after the manager snapshotted", () => {
+    const { cfg, auth } = fresh();
+    // Daemon writes pid/host/port at listen time, after AuthManager exists.
+    const onDisk = { ...cfg, pid: 12345, port: 9999 };
+    writeDaemonConfig(onDisk);
+    const { token } = auth.newPairingToken();
+    expect(auth.claim(token, "phone")).not.toBeNull();
+    const after = readDaemonConfig()!;
+    expect(after.pid).toBe(12345); // survived the claim
+    expect(after.port).toBe(9999);
+    expect(after.clients).toHaveLength(1);
   });
 });

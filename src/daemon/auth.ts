@@ -62,12 +62,16 @@ export class AuthManager {
       token: crypto.randomBytes(32).toString("hex"),
       createdAt: Date.now(),
     };
+    // Read-modify-write: never clobber fields (pid, host, port) that the
+    // daemon wrote after this manager snapshotted the config.
+    this.reload();
     this.config.clients.push(client);
     writeDaemonConfig(this.config);
     return { clientToken: client.token, clientId: client.id };
   }
 
   revoke(clientId: string): boolean {
+    this.reload();
     const before = this.config.clients.length;
     this.config.clients = this.config.clients.filter((c) => c.id !== clientId);
     if (this.config.clients.length !== before) {
