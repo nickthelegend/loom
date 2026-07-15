@@ -44,7 +44,8 @@ export function formatEvent(e: LoomEvent): string | null {
     case "handoff": {
       const from = (e.payload.from as string | null) ?? "—";
       const to = (e.payload.to as string | null) ?? "—";
-      return pc.magenta(`  ⟶ baton: ${from} → ${to}`);
+      const dirty = e.payload.dirty ? pc.dim("  · uncommitted changes in tree") : "";
+      return pc.magenta(`  ⟶ baton: ${from} → ${to}`) + dirty;
     }
     case "suggestion":
       return pc.yellow(

@@ -209,6 +209,35 @@ describe("loom daemon end-to-end", () => {
     await client.handoff(projectId, "execbot");
   });
 
+  it('auto-captures "Decision:" lines from agent replies into shared memory', async () => {
+    await client.send(projectId, "note this\nDecision: use sqlite for the log");
+    await waitUntil(async () =>
+      (await eventsOf("decision")).some(
+        (d) => d.payload.auto === true && String(d.payload.text).includes("use sqlite"),
+      ),
+    );
+    // …and the decision survives into the next projection.
+    await client.handoff(projectId, "plannerbot");
+    const memory = fs.readFileSync(
+      path.join(projectDir, ".loom", "memory", "plannerbot.md"),
+      "utf8",
+    );
+    expect(memory).toContain("use sqlite for the log");
+    await client.handoff(projectId, "execbot"); // restore holder for later tests
+  });
+
+  it("handoff records the outgoing agent's dirty working tree", async () => {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["init", "-q"], { cwd: projectDir });
+    fs.writeFileSync(path.join(projectDir, "scratch.txt"), "uncommitted");
+    await client.handoff(projectId, "plannerbot");
+    const handoffs = await eventsOf("handoff");
+    const last = handoffs[handoffs.length - 1]!;
+    expect(last.payload.dirty).toBe(true);
+    expect(String(last.payload.diff)).toContain("scratch.txt");
+    await client.handoff(projectId, "execbot");
+  });
+
   it("interrupt stops a long-running turn", async () => {
     await client.send(projectId, "sleep:5000");
     await waitUntil(async () => {

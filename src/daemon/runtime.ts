@@ -118,12 +118,30 @@ export class ProjectRuntime {
         title: `Loom · ${this.info.name}`,
         body: `${event.agentId} finished its turn`,
       });
-    } else if (event.kind === "message" && !this.routes.isActive()) {
-      // A route drives its own handoffs — suggestions would be noise.
-      const suggestion = suggestHandoff(event, this.config, this.baton.holder());
-      if (suggestion) {
-        this.log.append({ kind: "suggestion", payload: { ...suggestion, from: event.agentId } });
+    } else if (event.kind === "message") {
+      if (event.agentId) this.captureDecisions(event);
+      if (!this.routes.isActive()) {
+        // A route drives its own handoffs — suggestions would be noise.
+        const suggestion = suggestHandoff(event, this.config, this.baton.holder());
+        if (suggestion) {
+          this.log.append({ kind: "suggestion", payload: { ...suggestion, from: event.agentId } });
+        }
       }
+    }
+  }
+
+  /**
+   * Convention: any agent line starting "Decision: …" is pinned into shared
+   * memory automatically — it survives every future handoff projection.
+   */
+  private captureDecisions(event: LoomEvent): void {
+    const text = String(event.payload.text ?? "");
+    const matches = [...text.matchAll(/^[ \t]*decision:\s*(.+)$/gim)].slice(0, 5);
+    for (const m of matches) {
+      this.log.append({
+        kind: "decision",
+        payload: { text: m[1]!.trim(), author: event.agentId, auto: true },
+      });
     }
   }
 
@@ -226,11 +244,16 @@ export class ProjectRuntime {
     }
     if ((opts.source ?? "user") === "user") this.routes.onManualHandoff();
 
+    // Audit trail: snapshot the outgoing holder's working-tree state into the
+    // handoff event, so "who left what uncommitted" is always answerable.
+    let handoffMeta: Record<string, unknown> = { projected: true };
     const holder = this.validHolder();
     if (holder && holder !== to) {
       const current = this.agent(holder);
-      if (isAdapter(current) && current.busy()) {
-        await current.interrupt();
+      if (isAdapter(current)) {
+        if (current.busy()) await current.interrupt();
+        const diff = await current.diff().catch(() => "");
+        if (diff) handoffMeta = { ...handoffMeta, dirty: true, diff: diff.slice(0, 2000) };
       }
     }
 
@@ -256,7 +279,7 @@ export class ProjectRuntime {
       await bystander.injectMemory(bridgeView).catch(() => {});
     }
 
-    const { from } = this.baton.handoff(to, { projected: true });
+    const { from } = this.baton.handoff(to, handoffMeta);
     await this.ensureStarted(to);
     return { from };
   }
