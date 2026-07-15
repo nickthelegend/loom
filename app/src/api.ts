@@ -97,6 +97,16 @@ export async function claim(url: string, pairToken: string): Promise<Creds> {
   return { url: base, token: json.clientToken };
 }
 
+/**
+ * Registered by App.tsx: called when any request 401s (token revoked or
+ * expired) so the app can clear creds and return to the pair screen — the
+ * same behavior the web app gets from logout().
+ */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
+
 export async function api<T>(creds: Creds, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${creds.url}${path}`, {
     ...init,
@@ -107,7 +117,11 @@ export async function api<T>(creds: Creds, path: string, init?: RequestInit): Pr
     },
   });
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 401) throw new Error("unauthorized — pair again");
+  if (res.status === 401) {
+    await clearCreds();
+    onUnauthorized?.();
+    throw new Error("unauthorized — pair again");
+  }
   if (!res.ok) throw new Error(String(json.message ?? json.error ?? `HTTP ${res.status}`));
   return json as T;
 }

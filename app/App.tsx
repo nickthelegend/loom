@@ -7,7 +7,7 @@
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { SafeAreaView, View } from "react-native";
-import { loadCreds, type Creds, type Project } from "./src/api";
+import { loadCreds, setUnauthorizedHandler, type Creds, type Project } from "./src/api";
 import { enablePush } from "./src/push";
 import { BoardScreen, PairScreen, ProjectScreen, unpair } from "./src/screens";
 import { T } from "./src/theme";
@@ -33,6 +33,15 @@ export default function App() {
   useEffect(() => {
     if (creds) void enablePush(creds);
   }, [creds]);
+
+  // A revoked/expired token anywhere sends us back to the pair screen.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setCreds(null);
+      setRoute({ name: "pair" });
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.bg }}>
