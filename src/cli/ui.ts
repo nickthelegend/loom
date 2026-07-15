@@ -21,6 +21,11 @@ export function timeShort(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+export function fmtUsd(usd: number): string {
+  if (usd >= 0.01) return `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(4)}`;
+}
+
 export function formatEvent(e: LoomEvent): string | null {
   const who = e.agentId ?? String(e.payload.author ?? "");
   const paint = agentColor(who || "system");
@@ -78,8 +83,11 @@ export function formatEvent(e: LoomEvent): string | null {
       );
     case "route_resumed":
       return pc.cyan(`  ➤ route resumed`);
-    case "route_completed":
-      return pc.green(`  ✔ route completed (${Number(e.payload.steps)} steps)`);
+    case "route_completed": {
+      const cost = Number(e.payload.costUsd ?? 0);
+      const costNote = cost > 0 ? pc.dim(` · ${fmtUsd(cost)}`) : "";
+      return pc.green(`  ✔ route completed (${Number(e.payload.steps)} steps)`) + costNote;
+    }
     case "route_failed":
       return e.payload.aborted
         ? pc.yellow(`  ⊘ route stopped: ${String(e.payload.reason ?? "")}`)
@@ -117,7 +125,8 @@ export function formatProjectRow(p: ProjectStatus): string {
             (p.route.status === "waiting_human" ? " ⏸" : ""),
         )
       : "";
-  return `${flag}  ${pc.bold(p.name)} ${pc.dim(`(${p.id})`)}  baton: ${holder}${route}  ${last}`;
+  const cost = p.costUsd && p.costUsd > 0 ? pc.dim(`  ${fmtUsd(p.costUsd)}`) : "";
+  return `${flag}  ${pc.bold(p.name)} ${pc.dim(`(${p.id})`)}  baton: ${holder}${route}${cost}  ${last}`;
 }
 
 export function formatAgentRow(a: ProjectStatus["agents"][number]): string {

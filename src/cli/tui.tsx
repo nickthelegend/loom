@@ -386,7 +386,12 @@ function App({ client, initial }: AppProps) {
       </Box>
       <Box justifyContent="space-between">
         <Text>
-          <Text dimColor>{`  ~ ${project.name} · baton ${project.holder ?? "—"}`}</Text>
+          <Text dimColor>
+            {`  ~ ${project.name} · baton ${project.holder ?? "—"}` +
+              (project.costUsd && project.costUsd > 0
+                ? ` · ${project.costUsd >= 0.01 ? `$${project.costUsd.toFixed(2)}` : `$${project.costUsd.toFixed(4)}`}`
+                : "")}
+          </Text>
           <Text>{routeBadge}</Text>
         </Text>
         <Text dimColor>{project.needsInput ? pc.yellow("● needs input ") : ""}</Text>

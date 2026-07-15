@@ -180,6 +180,7 @@ export const APP_HTML = `<!doctype html>
             (act ? '<span class="badge">&#10148; ' + esc(r.name || "route") + " " + (r.current + 1) + "/" + r.steps.length + (r.status === "waiting_human" ? " &#9208;" : "") + "</span>" : "") +
             '</div>' +
             '<div class="row2">baton: ' + esc(p.holder || "\\u2014") +
+            (p.costUsd > 0 ? " &middot; $" + (p.costUsd >= 0.01 ? p.costUsd.toFixed(2) : p.costUsd.toFixed(4)) : "") +
             (p.needsInput ? ' &middot; <span style="color:var(--warn)">needs input</span>' : "") + "</div></div>";
         }).join("");
         Array.prototype.forEach.call(el.querySelectorAll(".card"), function(card){
@@ -313,7 +314,11 @@ export const APP_HTML = `<!doctype html>
         };
       } else { bar.innerHTML = ""; }
       var stat = document.getElementById("pstat");
-      stat.textContent = p.needsInput ? "needs input" : "";
+      stat.textContent = p.needsInput
+        ? "needs input"
+        : p.costUsd > 0
+          ? "$" + (p.costUsd >= 0.01 ? p.costUsd.toFixed(2) : p.costUsd.toFixed(4))
+          : "";
     }
 
     function refresh(){

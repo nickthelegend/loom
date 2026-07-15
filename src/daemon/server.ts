@@ -292,6 +292,13 @@ export class LoomDaemon {
       }),
     );
 
+    app.get(
+      "/api/projects/:id/costs",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ costs: rt.costSummary() });
+      }),
+    );
+
     app.delete(
       "/api/projects/:id/route",
       withRuntime(async (rt, _req, res) => {

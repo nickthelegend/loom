@@ -51,6 +51,8 @@ export interface RouteHost {
   send(text: string, agentId: string): Promise<unknown>;
   interrupt(): Promise<unknown>;
   isAdapterId(id: string): boolean;
+  /** Lifetime project spend (USD) — used to attribute cost to routes. */
+  costTotal(): number;
 }
 
 export interface ResolvedSteps {
@@ -171,6 +173,7 @@ export class RouteEngine {
       current: 0,
       status: "running",
       mode: "static",
+      costStartUsd: this.host.costTotal(),
       startedAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -201,6 +204,7 @@ export class RouteEngine {
       mode: "dynamic",
       router,
       maxHops: opts.maxHops ?? DEFAULT_MAX_HOPS,
+      costStartUsd: this.host.costTotal(),
       startedAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -340,13 +344,24 @@ export class RouteEngine {
   // Step mechanics
   // ---------------------------------------------------------------------
 
+  private routeCost(r: RouteState): number {
+    return Math.max(0, this.host.costTotal() - (r.costStartUsd ?? 0));
+  }
+
   private complete(r: RouteState, note?: string): void {
     r.status = "completed";
     if (note) r.reason = note;
+    r.costUsd = this.routeCost(r);
     this.write(r);
     this.host.log.append({
       kind: "route_completed",
-      payload: { routeId: r.id, steps: r.steps.length, task: r.task, ...(note ? { note } : {}) },
+      payload: {
+        routeId: r.id,
+        steps: r.steps.length,
+        task: r.task,
+        costUsd: r.costUsd,
+        ...(note ? { note } : {}),
+      },
     });
     notify({
       title: `Loom · ${this.host.projectName}`,
@@ -429,6 +444,7 @@ export class RouteEngine {
     this.clearTimer();
     r.status = status;
     r.reason = reason;
+    r.costUsd = this.routeCost(r);
     delete r.pendingQuestion;
     this.write(r);
     this.host.log.append({

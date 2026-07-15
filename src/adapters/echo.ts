@@ -56,9 +56,11 @@ export class EchoAdapter extends AdapterBase {
       if (askMatch) {
         this.emit({ kind: "needs_input", payload: { question: askMatch[1]!.trim() } });
       }
+      // Deterministic fake cost so telemetry is exercisable without a model.
+      this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: 0.001 } });
       this.emit({
         kind: "run_complete",
-        payload: { durationMs: Date.now() - started, costUsd: 0 },
+        payload: { durationMs: Date.now() - started, costUsd: 0.001 },
       });
     } finally {
       this._busy = false;

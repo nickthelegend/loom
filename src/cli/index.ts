@@ -22,7 +22,7 @@ import {
 } from "../daemon/client.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
-import { formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
+import { fmtUsd, formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
 
 const program = new Command();
 
@@ -353,6 +353,28 @@ program
   });
 
 program
+  .command("costs")
+  .description("what this project has spent, per agent")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { costs } = await client.costs(project.id);
+    console.log(
+      pc.bold(`${project.name}`) +
+        pc.dim(
+          `  total ${fmtUsd(costs.totalUsd)} · ${costs.turns} turns · ${(costs.totalMs / 1000).toFixed(0)}s agent time`,
+        ),
+    );
+    for (const a of costs.byAgent) {
+      console.log(
+        `  ${pc.bold(a.agentId.padEnd(14))} ${fmtUsd(a.usd).padStart(9)}  ${String(a.turns).padStart(4)} turns  ${(a.ms / 1000).toFixed(0).padStart(5)}s`,
+      );
+    }
+    if (!costs.byAgent.length) console.log(pc.dim("  no turns recorded yet"));
+    console.log(pc.dim("\n(costs come from agents that report them — claude-code and opencode do)"));
+  });
+
+program
   .command("decision <text...>")
   .description("record a decision into shared memory (projected on every handoff)")
   .action(async (words: string[]) => {
@@ -424,6 +446,7 @@ program
         );
         if (route.pendingQuestion) console.log(pc.yellow(`  ⏸ asks: ${route.pendingQuestion}`));
         if (route.reason) console.log(pc.dim(`  reason: ${route.reason}`));
+        if (route.costUsd && route.costUsd > 0) console.log(pc.dim(`  cost: ${fmtUsd(route.costUsd)}`));
         return;
       }
       if (opts.abort) {

@@ -192,6 +192,11 @@ export class OpenCodeAdapter extends AdapterBase {
           if (text) this.emit({ kind: "message", payload: { text } });
         }
         this.textParts.delete(messageID);
+        // Best-effort per-turn cost (present on opencode assistant messages).
+        const cost = Number(info.cost ?? 0);
+        if (cost > 0) {
+          this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
+        }
       }
       return;
     }

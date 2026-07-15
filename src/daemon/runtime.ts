@@ -7,7 +7,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  AgentCost,
   AnyAgent,
+  CostSummary,
   LoomEvent,
   ProjectConfig,
   ProjectInfo,
@@ -65,6 +67,7 @@ export class ProjectRuntime {
       handoff: (to) => this.handoff(to, { source: "route" }),
       send: (text, agentId) => this.sendMessage(text, agentId, { source: "route" }),
       interrupt: () => this.interrupt({ source: "route" }),
+      costTotal: () => this.costs.totalUsd,
       isAdapterId: (id) => {
         const agent = this.agents.get(id);
         return Boolean(agent && isAdapter(agent));
@@ -78,7 +81,54 @@ export class ProjectRuntime {
     const log = await EventLog.open(projectLoomDir(info.dir));
     const rt = new ProjectRuntime(info, config, log);
     rt.configMtime = configMtimeOf(info.dir);
+    rt.rehydrateCosts();
     return rt;
+  }
+
+  // -------------------------------------------------------------------------
+  // Cost telemetry — O(1) incremental, rehydrated from the log on open
+  // -------------------------------------------------------------------------
+
+  private costs = { totalUsd: 0, turns: 0, totalMs: 0 };
+  private costsByAgent = new Map<string, { usd: number; turns: number; ms: number }>();
+
+  private rehydrateCosts(): void {
+    for (const event of this.log.list({ kinds: ["status", "run_complete"] })) {
+      this.trackCost(event);
+    }
+  }
+
+  private trackCost(event: LoomEvent): void {
+    const agentId = event.agentId ?? "unknown";
+    const entry =
+      this.costsByAgent.get(agentId) ?? { usd: 0, turns: 0, ms: 0 };
+    if (event.kind === "status" && event.payload.state === "turn_cost") {
+      const usd = Number(event.payload.costUsd ?? 0);
+      if (usd > 0) {
+        this.costs.totalUsd += usd;
+        entry.usd += usd;
+        this.costsByAgent.set(agentId, entry);
+      }
+    } else if (event.kind === "run_complete") {
+      const ms = Number(event.payload.durationMs ?? 0);
+      this.costs.turns += 1;
+      this.costs.totalMs += ms;
+      entry.turns += 1;
+      entry.ms += ms;
+      this.costsByAgent.set(agentId, entry);
+    }
+  }
+
+  costSummary(): CostSummary {
+    const byAgent: AgentCost[] = [...this.costsByAgent.entries()]
+      .map(([agentId, c]) => ({ agentId, ...c }))
+      .sort((a, b) => b.usd - a.usd || b.turns - a.turns);
+    return {
+      totalUsd: this.costs.totalUsd,
+      turns: this.costs.turns,
+      totalMs: this.costs.totalMs,
+      byAgent,
+    };
   }
 
   /** Has .loom/config.json changed since this runtime was opened? */
@@ -108,6 +158,7 @@ export class ProjectRuntime {
 
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
+    this.trackCost(event);
     this.routes.handleAgentEvent(event);
     if (event.kind === "needs_input") {
       notify({
@@ -407,6 +458,7 @@ export class ProjectRuntime {
       needsInput,
       route: this.routes.state(),
       routeNames: ["auto", ...Object.keys(this.config.routes ?? {})],
+      costUsd: this.costs.totalUsd,
     };
   }
 

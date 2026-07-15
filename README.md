@@ -162,6 +162,7 @@ detects at least two roles.
 | `loom interrupt` | Stop the current holder's turn (cancels an active route) |
 | `loom decision <text>` | Record a decision into shared memory |
 | `loom log [-f]` | Show (or follow) the project event log |
+| `loom costs` | Project spend: total + per-agent turns, $ and agent time |
 | `loom agents` / `loom projects` / `loom status` | Who's who, board of projects, daemon health |
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
@@ -204,6 +205,11 @@ agents without a stable API can't be trusted with interrupt-safe writes. See
   the outgoing agent's working-tree state (dirty flag + `git status`) into the log.
 - **Decisions** — `loom decision <text>` pins a fact, and any agent line starting
   `Decision: …` is captured automatically. Decisions ride every future projection.
+- **Cost telemetry** — agents that report per-turn cost (Claude Code, OpenCode) feed a
+  live ledger: `loom costs` breaks it down per agent, the board/TUI/phone app show the
+  project total, and every route logs exactly what it spent
+  (`✔ route completed (3 steps) · $0.0421`). Totals rehydrate from the event log, so
+  they survive restarts.
 - **Daemon** — one process, many projects. REST for commands, WebSocket for the live
   stream. Config edits hot-reload when the project is quiet.
 

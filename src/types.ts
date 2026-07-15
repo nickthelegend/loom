@@ -115,6 +115,10 @@ export interface RouteState {
   updatedAt: number;
   reason?: string;
   pendingQuestion?: string;
+  /** Project cost total when the route started (internal baseline). */
+  costStartUsd?: number;
+  /** Spend attributed to this route (set when it ends). */
+  costUsd?: number;
 }
 
 export interface ProjectInfo {
@@ -204,4 +208,24 @@ export interface ProjectStatus {
   route?: RouteState | null;
   /** Named pipelines defined in config (for pickers/dropdowns). */
   routeNames?: string[];
+  /** Lifetime spend across all agents in this project (USD). */
+  costUsd?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Cost telemetry
+// ---------------------------------------------------------------------------
+
+export interface AgentCost {
+  agentId: string;
+  usd: number;
+  turns: number;
+  ms: number;
+}
+
+export interface CostSummary {
+  totalUsd: number;
+  turns: number;
+  totalMs: number;
+  byAgent: AgentCost[];
 }
