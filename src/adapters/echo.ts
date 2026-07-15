@@ -51,7 +51,8 @@ export class EchoAdapter extends AdapterBase {
         ? `Here is the approach. 1) analyze 2) implement 3) verify. The plan is complete and ready to execute.${briefingNote}`
         : `echo(${this.id}): ${input.text}${briefingNote}`;
       this.emit({ kind: "message", payload: { text } });
-      const askMatch = input.text.match(/ask:\s*([^\n]+)/i);
+      // Lookbehind so "Task:" (…t-ask:) doesn't read as a question.
+      const askMatch = input.text.match(/(?<![a-z])ask:\s*([^\n]+)/i);
       if (askMatch) {
         this.emit({ kind: "needs_input", payload: { question: askMatch[1]!.trim() } });
       }

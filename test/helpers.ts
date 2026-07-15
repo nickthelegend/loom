@@ -17,6 +17,7 @@ export function makeProjectDir(config?: Partial<ProjectConfig>): string {
       { id: "execbot", kind: "echo", role: "executor" },
     ],
     ...(config?.defaultAgent ? { defaultAgent: config.defaultAgent } : {}),
+    ...(config?.routes ? { routes: config.routes } : {}),
   };
   writeProjectConfig(dir, cfg);
   return dir;
