@@ -1,0 +1,24 @@
+{
+  "name": "loom-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loom desktop — an Electron shell around the loom daemon's web app.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.loom.desktop",
+    "productName": "Loom",
+    "files": ["main.js", "loom-app.js", "../dist/**/*", "../package.json"],
+    "mac": { "category": "public.app-category.developer-tools", "target": "dmg" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage", "category": "Development" }
+  }
+}

@@ -76,9 +76,14 @@ Then verify the setup:
 loom doctor        # checks node, agents, tailscale, daemon, and your project
 ```
 
-**The native app** lives in [`app/`](app/README.md) — `cd app && npx expo install &&
-npx expo start`, scan with Expo Go. The daemon-served web app needs no install at all
-(`loom pair` → scan).
+Surfaces, all talking to the same daemon:
+- **TUI / CLI** — `loom` (default), `loom chat`, `loom send`, …
+- **Desktop app** — [`desktop/`](desktop/README.md): `cd desktop && npm install && npm
+  start` opens a native Electron window (starts the daemon and pairs itself). Our own
+  thin shell around the web app — not an IDE.
+- **Phone app** — [`app/`](app/README.md): `cd app && npx expo install && npx expo start`,
+  scan with Expo Go (voice input, per-prompt diffs, push).
+- **Web app** — no install; `loom pair` → open the link.
 
 ## Quickstart
 

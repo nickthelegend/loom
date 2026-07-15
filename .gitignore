@@ -9,3 +9,4 @@ coverage/
 *.db-journal
 .env
 _references_/
+desktop/dist/
