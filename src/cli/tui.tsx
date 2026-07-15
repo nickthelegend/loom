@@ -16,10 +16,13 @@ import {
   HELP_LINES,
   SPINNER_FRAMES,
   cycleAgent,
+  filterPalette,
   logoLines,
+  paletteItems,
   parseSlash,
   renderInput,
   switchableAgents,
+  type PaletteItem,
 } from "./tui-model.js";
 import { formatAgentRow, formatEvent } from "./ui.js";
 
@@ -45,9 +48,20 @@ function App({ client, initial }: AppProps) {
   const [cursor, setCursor] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [frame, setFrame] = useState(0);
+  const [palette, setPalette] = useState<{ open: boolean; query: string; index: number }>({
+    open: false,
+    query: "",
+    index: 0,
+  });
   const lastId = useRef(0);
   const history = useRef<string[]>([]);
   const histIdx = useRef(-1);
+  const routeNames = useRef<string[]>([]);
+
+  useEffect(() => {
+    const dir = currentProjectDir();
+    routeNames.current = Object.keys((dir && readProjectConfig(dir)?.routes) || {});
+  }, []);
 
   const push = useCallback((...added: Array<string | null>) => {
     const real = added.filter((l): l is string => l !== null && l !== undefined);
@@ -205,8 +219,56 @@ function App({ client, initial }: AppProps) {
     }
   }, [value, selected, project.holder, project.id, client, push, runCommand]);
 
+  const runPaletteItem = useCallback(
+    (item: PaletteItem | undefined) => {
+      setPalette({ open: false, query: "", index: 0 });
+      if (!item) return;
+      const action = item.action;
+      if (action.type === "shift") {
+        setSelected(action.agentId);
+      } else if (action.type === "insert") {
+        setValue(action.text);
+        setCursor(action.text.length);
+      } else {
+        void runCommand(`/${action.cmd}`);
+      }
+    },
+    [runCommand],
+  );
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") return exit();
+
+    // ctrl+p — command palette (opencode style)
+    if (key.ctrl && input === "p") {
+      setPalette((p) => ({ open: !p.open, query: "", index: 0 }));
+      return;
+    }
+    if (palette.open) {
+      const matches = filterPalette(
+        paletteItems(project.agents, routeNames.current, selected),
+        palette.query,
+      );
+      if (key.escape) return setPalette({ open: false, query: "", index: 0 });
+      if (key.return) return runPaletteItem(matches[Math.min(palette.index, matches.length - 1)]);
+      if (key.upArrow)
+        return setPalette((p) => ({ ...p, index: Math.max(0, p.index - 1) }));
+      if (key.downArrow)
+        return setPalette((p) => ({
+          ...p,
+          index: Math.min(Math.max(matches.length - 1, 0), p.index + 1),
+        }));
+      if (key.tab) return; // tab is reserved outside the palette
+      if (key.backspace || key.delete) {
+        setPalette((p) => ({ ...p, query: p.query.slice(0, -1), index: 0 }));
+        return;
+      }
+      if (input && !key.ctrl && !key.meta) {
+        setPalette((p) => ({ ...p, query: p.query + input, index: 0 }));
+      }
+      return;
+    }
+
     if (key.escape) {
       void client
         .interrupt(project.id)
@@ -269,6 +331,10 @@ function App({ client, initial }: AppProps) {
     ? `${pc.yellow(SPINNER_FRAMES[frame % SPINNER_FRAMES.length]!)} ${pc.dim(`${busyAgent.id} working…`)}`
     : "";
 
+  const paletteMatches = palette.open
+    ? filterPalette(paletteItems(project.agents, routeNames.current, selected), palette.query)
+    : [];
+
   return (
     <Box flexDirection="column">
       <Static items={lines}>
@@ -276,6 +342,24 @@ function App({ client, initial }: AppProps) {
       </Static>
       <Box height={1} />
       {notice ? <Text color="yellow">{`  ${notice}`}</Text> : null}
+      {palette.open ? (
+        <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
+          <Text>
+            {pc.cyan("⌘ ")}
+            {renderInput(palette.query, palette.query.length, "type to filter commands…")}
+          </Text>
+          {paletteMatches.slice(0, 8).map((item, i) => {
+            const active = i === Math.min(palette.index, paletteMatches.length - 1);
+            const label = `${item.label}${item.hint ? pc.dim(`  ${item.hint}`) : ""}`;
+            return (
+              <Text key={item.id}>
+                {active ? pc.cyan(`› ${label}`) : `  ${label}`}
+              </Text>
+            );
+          })}
+          {!paletteMatches.length ? <Text dimColor>{"  no matches"}</Text> : null}
+        </Box>
+      ) : null}
       <Box borderStyle="round" borderDimColor paddingX={1} flexDirection="column">
         <Text>
           {pc.cyan("› ")}
@@ -289,7 +373,7 @@ function App({ client, initial }: AppProps) {
         </Text>
       </Box>
       <Box justifyContent="space-between">
-        <Text dimColor>{"  tab shift agent · /help · esc interrupt · ctrl+c quit"}</Text>
+        <Text dimColor>{"  tab shift agent · ctrl+p palette · esc interrupt · ctrl+c quit"}</Text>
         <Text dimColor>{"loom 0.1.0 "}</Text>
       </Box>
       <Box justifyContent="space-between">

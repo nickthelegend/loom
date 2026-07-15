@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   centerPad,
   cycleAgent,
+  filterPalette,
   logoLines,
+  paletteItems,
   parseSlash,
   renderInput,
   stripAnsi,
@@ -74,5 +76,30 @@ describe("tui model", () => {
     expect(lines).toHaveLength(6);
     const widths = lines.slice(0, 4).map((l) => stripAnsi(l).trimEnd().length);
     expect(new Set(widths).size).toBe(1);
+  });
+});
+
+describe("command palette", () => {
+  it("builds shift entries for other adapters only, plus routes and commands", () => {
+    const items = paletteItems(AGENTS, ["ship"], "claude-code");
+    const ids = items.map((i) => i.id);
+    expect(ids).toContain("shift:opencode");
+    expect(ids).not.toContain("shift:claude-code"); // already selected
+    expect(ids).not.toContain("shift:antigravity"); // bridge
+    expect(ids).toContain("route:ship");
+    expect(ids).toContain("cmd:interrupt");
+    const ship = items.find((i) => i.id === "route:ship")!;
+    expect(ship.action).toEqual({ type: "insert", text: "/route ship " });
+  });
+
+  it("filters: substring beats subsequence, earlier match wins", () => {
+    const items = paletteItems(AGENTS, ["ship"], null);
+    const byQuery = (q: string) => filterPalette(items, q).map((i) => i.id);
+    expect(byQuery("ship")[0]).toBe("route:ship");
+    expect(byQuery("open")[0]).toBe("shift:opencode");
+    expect(byQuery("")).toEqual(items.map((i) => i.id)); // no query → everything
+    expect(byQuery("zzzz")).toEqual([]);
+    // subsequence still matches: "abr" → "abort route"
+    expect(byQuery("abr")).toContain("cmd:abort");
   });
 });

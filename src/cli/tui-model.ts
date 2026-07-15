@@ -105,3 +105,78 @@ export function renderInput(value: string, cursor: number, placeholder: string):
 }
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+// ---------------------------------------------------------------------------
+// ctrl+p command palette
+// ---------------------------------------------------------------------------
+
+export type PaletteAction =
+  | { type: "shift"; agentId: string } // change selected agent
+  | { type: "insert"; text: string } // drop a template into the input
+  | { type: "command"; cmd: string }; // run a slash command immediately
+
+export interface PaletteItem {
+  id: string;
+  label: string;
+  hint?: string;
+  action: PaletteAction;
+}
+
+export function paletteItems(
+  agents: AgentStatus[],
+  routeNames: string[],
+  selected: string | null,
+): PaletteItem[] {
+  const items: PaletteItem[] = [];
+  for (const a of switchableAgents(agents)) {
+    if (a.id === selected) continue;
+    items.push({
+      id: `shift:${a.id}`,
+      label: `shift → ${a.id}`,
+      hint: a.role,
+      action: { type: "shift", agentId: a.id },
+    });
+  }
+  for (const name of routeNames) {
+    items.push({
+      id: `route:${name}`,
+      label: `route: ${name}`,
+      hint: "pipeline",
+      action: { type: "insert", text: `/route ${name} ` },
+    });
+  }
+  items.push(
+    { id: "route:custom", label: "route: custom steps…", hint: "a,b,c task", action: { type: "insert", text: "/route " } },
+    { id: "decision", label: "decision…", hint: "pin to shared memory", action: { type: "insert", text: "/decision " } },
+    { id: "cmd:agents", label: "agents", hint: "who's here", action: { type: "command", cmd: "agents" } },
+    { id: "cmd:routes", label: "routes", hint: "named pipelines", action: { type: "command", cmd: "routes" } },
+    { id: "cmd:interrupt", label: "interrupt", hint: "stop current turn", action: { type: "command", cmd: "interrupt" } },
+    { id: "cmd:abort", label: "abort route", hint: "stop the pipeline", action: { type: "command", cmd: "abort" } },
+    { id: "cmd:pair", label: "pair phone", hint: "QR in terminal", action: { type: "command", cmd: "pair" } },
+    { id: "cmd:help", label: "help", action: { type: "command", cmd: "help" } },
+    { id: "cmd:quit", label: "quit", hint: "daemon keeps running", action: { type: "command", cmd: "quit" } },
+  );
+  return items;
+}
+
+/** Substring beats subsequence; earlier match beats later; stable otherwise. */
+export function filterPalette(items: PaletteItem[], query: string): PaletteItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  const scored: Array<{ item: PaletteItem; rank: number; idx: number }> = [];
+  for (const item of items) {
+    const hay = `${item.label} ${item.hint ?? ""}`.toLowerCase();
+    const idx = hay.indexOf(q);
+    if (idx >= 0) {
+      scored.push({ item, rank: 0, idx });
+      continue;
+    }
+    let i = 0;
+    for (const ch of hay) {
+      if (ch === q[i]) i++;
+      if (i === q.length) break;
+    }
+    if (i === q.length) scored.push({ item, rank: 1, idx: hay.length });
+  }
+  return scored.sort((a, b) => a.rank - b.rank || a.idx - b.idx).map((s) => s.item);
+}
