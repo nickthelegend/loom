@@ -142,10 +142,10 @@ export const APP_HTML = `<!doctype html>
   .sheet .row{display:flex;gap:8px}
   .sheet .row button{flex:1}
   .sheet label{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.12em;text-transform:uppercase}
-  .composer{position:fixed;bottom:0;left:0;right:0;z-index:6;
+  .composer{z-index:6;
     background:linear-gradient(180deg,rgba(10,13,19,.65),rgba(10,13,19,.97));backdrop-filter:blur(14px);
     border-top:1px solid var(--line);padding:12px 14px calc(12px + env(safe-area-inset-bottom))}
-  .composer .inner{max-width:760px;margin:0 auto;display:flex;gap:9px;align-items:center}
+  .composer .inner{max-width:900px;margin:0 auto;display:flex;gap:9px;align-items:center}
   .composer input{flex:1;background:var(--panel-2);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;font:inherit;font-size:15px;outline:none;transition:border-color .15s,box-shadow .15s}
   .composer input:focus{border-color:var(--thread);box-shadow:0 0 0 3px rgba(103,232,249,.12)}
   .hint{color:var(--faint);font-size:11px;font-family:var(--mono);letter-spacing:.02em;max-width:760px;margin:7px auto 0;text-align:center}
@@ -167,6 +167,41 @@ export const APP_HTML = `<!doctype html>
   .pairwrap .help b{color:var(--dim);font-weight:600}
   .spin{display:inline-block;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
+  /* thread as a self-contained flex panel: header/chips fixed rows, feed scrolls, composer docked */
+  .panel{display:flex;flex-direction:column;height:100dvh;min-height:0}
+  .panel .scroll{flex:1;min-height:0;overflow-y:auto;padding:16px 16px 20px}
+  .panel .scroll::-webkit-scrollbar{width:9px}
+  .panel .scroll::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:9px;border:3px solid transparent;background-clip:content-box}
+  .panel > .chips{position:static;top:auto}
+  .panel > header{position:static}
+  /* desktop workspace shell: projects rail + conversation */
+  .dshell{display:grid;grid-template-columns:304px 1fr;height:100dvh}
+  .sidebar{border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0;
+    background:linear-gradient(180deg,var(--ink-2),var(--ink))}
+  .sidebar .shead{display:flex;align-items:center;gap:11px;padding:18px 16px 14px;border-bottom:1px solid var(--line)}
+  .sidebar .slist{flex:1;overflow-y:auto;padding:10px}
+  .sidebar .stitle{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.14em;text-transform:uppercase;padding:6px 8px 8px}
+  .srow{padding:11px 12px;border-radius:10px;border:1px solid transparent;cursor:pointer;margin-bottom:4px;transition:background .12s,border-color .12s}
+  .srow:hover{background:var(--panel-2)}
+  .srow.sel{background:var(--panel);border-color:var(--line-2)}
+  .srow .n{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px}
+  .srow .m{color:var(--dim);font-family:var(--mono);font-size:11.5px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dmain{min-width:0;display:flex;flex-direction:column;position:relative}
+  .dmain .panel{height:100%}
+  .dmain .composer .inner,.dmain .hint{max-width:none}
+  .dempty{flex:1;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;color:var(--faint);font-family:var(--mono);font-size:13px}
+  .dempty .biglogo{font-size:40px;font-weight:700;letter-spacing:2px;color:var(--text)}
+  .dempty .biglogo b{color:var(--thread)}
+  /* on wide screens the app-shell fills the window and owns the height */
+  @media (min-width:900px){
+    #root{max-width:none;height:100dvh;display:block}
+    /* readable, centered conversation column — messages never stretch full width */
+    .dmain .scroll > #feed,.dmain .scroll > #routesheet,.dmain .scroll > #routebar{max-width:840px;margin-inline:auto}
+    .dmain .composer .inner{max-width:840px}
+    .dmain .msg .bubble{max-width:82%}
+    .dmain > .panel > header{padding-left:20px;padding-right:18px}
+    .srow .badge{font-size:10px;padding:1px 7px}
+  }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -223,6 +258,7 @@ export const APP_HTML = `<!doctype html>
   }
   function renderPair(){
     clearTimers();
+    clearShell();
     root.innerHTML =
       '<div class="pairwrap">' +
       '<div class="biglogo">lo<b>om</b></div>' +
@@ -244,6 +280,7 @@ export const APP_HTML = `<!doctype html>
   // ---- board ---------------------------------------------------------------
   function renderBoard(){
     clearTimers();
+    clearShell();
     root.innerHTML =
       '<header><span class="logo">lo<b>om</b></span><span class="sub">projects</span>' +
       '<span class="spacer"></span>' +
@@ -318,11 +355,13 @@ export const APP_HTML = `<!doctype html>
     return "";
   }
 
-  function renderThread(pid){
+  function renderThread(pid, mount){
+    mount = mount || root;
     clearTimers();
     state.pid = pid; state.lastId = 0; state.selected = null;
-    root.innerHTML =
-      '<header><button id="back" class="iconbtn">&larr;</button>' +
+    mount.innerHTML =
+      '<div class="panel">' +
+      '<header>' + (isDesktop() ? "" : '<button id="back" class="iconbtn">&larr;</button>') +
       '<span class="logo" id="pname" style="font-size:16px">&hellip;</span><span class="sub" id="pstat"></span>' +
       '<span class="spacer"></span>' +
       '<button id="brainbtn" class="iconbtn" title="unified memory">&#129504;</button>' +
@@ -330,12 +369,14 @@ export const APP_HTML = `<!doctype html>
       '<button id="routebtn" class="iconbtn" title="routes">&#10148;</button>' +
       '<button id="stop" class="iconbtn" title="interrupt">&#9632;</button></header>' +
       '<div class="chips" id="chips"></div>' +
-      '<main><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div></main>' +
+      '<div class="scroll"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div></div>' +
       '<div class="composer"><form class="inner" id="cform">' +
       '<input id="box" placeholder="Message&hellip;" autocomplete="off">' +
       '<button class="primary" id="send" type="submit">&#10148;</button></form>' +
-      '<div class="hint" id="hint"></div></div>';
-    document.getElementById("back").onclick = function(){ location.hash = ""; };
+      '<div class="hint" id="hint"></div></div>' +
+      '</div>';
+    var backBtn = document.getElementById("back");
+    if (backBtn) backBtn.onclick = function(){ location.hash = ""; };
     document.getElementById("stop").onclick = function(){
       api("/api/projects/" + pid + "/interrupt", { method: "POST", body: "{}" })
         .then(function(j){ toast(j.interrupted ? "interrupted " + j.interrupted : "nothing running"); })
@@ -488,7 +529,9 @@ export const APP_HTML = `<!doctype html>
         html += lineFor(e);
       });
       if (html) { feed.insertAdjacentHTML("beforeend", html);
-        window.scrollTo(0, document.body.scrollHeight); }
+        var sc = feed.parentNode;
+        if (sc && sc.scrollHeight) sc.scrollTop = sc.scrollHeight;
+        else window.scrollTo(0, document.body.scrollHeight); }
     }
 
     api("/api/projects/" + pid + "/events?limit=60")
@@ -533,13 +576,81 @@ export const APP_HTML = `<!doctype html>
   }
 
   // ---- router ----------------------------------------------------------
+  var mq = window.matchMedia("(min-width:900px)");
+  function isDesktop(){ return mq.matches; }
+  function clearShell(){ if (state.shellTimer) { clearInterval(state.shellTimer); state.shellTimer = null; } }
+
+  // Desktop workspace: projects rail + live conversation, side by side.
+  function renderShell(){
+    clearTimers();
+    clearShell();
+    var m = location.hash.match(/^#p\\/(.+)$/);
+    var cur = m ? m[1] : null;
+    root.innerHTML =
+      '<div class="dshell">' +
+      '<aside class="sidebar">' +
+        '<div class="shead"><span class="logo">lo<b>om</b></span><span class="spacer"></span>' +
+        '<button id="unpair" class="iconbtn" title="unpair this device" style="width:auto;padding:0 12px;font-size:12px">unpair</button></div>' +
+        '<div class="stitle">projects</div>' +
+        '<div class="slist" id="slist">' + LOADER + '</div>' +
+      '</aside>' +
+      '<section class="dmain" id="dmain"></section>' +
+      '</div>';
+    document.getElementById("unpair").onclick = logout;
+    var dmain = document.getElementById("dmain");
+    function drawEmpty(){
+      dmain.innerHTML = '<div class="dempty"><div class="biglogo">lo<b>om</b></div>' +
+        "<div>select a project to open its thread</div></div>";
+    }
+    function markSel(){
+      Array.prototype.forEach.call(document.querySelectorAll("#slist .srow"), function(row){
+        row.className = "srow" + (row.getAttribute("data-id") === cur ? " sel" : "");
+      });
+    }
+    function select(pid){
+      cur = pid;
+      history.replaceState(null, "", "#p/" + pid);
+      renderThread(pid, dmain);
+      markSel();
+    }
+    function refresh(){
+      api("/api/projects").then(function(j){
+        state.projects = j.projects || [];
+        var el = document.getElementById("slist"); if (!el) return;
+        if (!state.projects.length) {
+          el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.6">no projects yet<br><span style="color:var(--faint)">run <b style="color:var(--dim)">loom init</b></span></div>';
+          drawEmpty(); return;
+        }
+        el.innerHTML = state.projects.map(function(p){
+          var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
+          return '<div class="srow" data-id="' + esc(p.id) + '">' +
+            '<div class="n"><span class="dot' + (p.needsInput ? " hot" : "") + '"></span>' + esc(p.name) +
+            (act ? '<span class="badge" style="margin-left:auto">&#10148; ' + (r.current + 1) + "</span>" : "") + "</div>" +
+            '<div class="m">baton ' + esc(p.holder || "\\u2014") +
+            (p.costUsd > 0 ? " \\u00b7 $" + (p.costUsd >= 0.01 ? p.costUsd.toFixed(2) : p.costUsd.toFixed(4)) : "") + "</div></div>";
+        }).join("");
+        Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
+          row.onclick = function(){ select(row.getAttribute("data-id")); };
+        });
+        var exists = state.projects.some(function(p){ return p.id === cur; });
+        if ((!cur || !exists) && !document.getElementById("feed")) select(state.projects[0].id);
+        else markSel();
+      }).catch(function(err){ toast(err.message); });
+    }
+    if (!cur) drawEmpty();
+    refresh();
+    state.shellTimer = setInterval(refresh, 5000);
+  }
+
   function route(){
     if (!state.token) return renderPair();
+    if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
     if (m) return renderThread(m[1]);
     renderBoard();
   }
-  window.addEventListener("hashchange", route);
+  window.addEventListener("hashchange", function(){ if (!isDesktop()) route(); });
+  mq.addEventListener("change", function(){ clearShell(); route(); });
   pairFromHash().then(function(paired){
     if (paired) toast("paired \\u2713");
     route();
