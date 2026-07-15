@@ -1,6 +1,8 @@
 # Loom
 
 [![ci](https://github.com/nickthelegend/loom/actions/workflows/ci.yml/badge.svg)](https://github.com/nickthelegend/loom/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/agent-loom)](https://www.npmjs.com/package/agent-loom)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **One CLI for all your coding agents.** Loom weaves Claude Code, OpenCode — and bridges
 like Antigravity — into a single shared thread per project: one conversation, one shared
@@ -52,27 +54,24 @@ Loom fixes the seam:
 
 ## Install
 
-Requires **Node ≥ 22.5** (Loom's event log uses the built-in `node:sqlite`) and git.
-
-**One-liner** (clones to `~/.loom-src`, builds, links `loom` onto your PATH):
+Requires **Node ≥ 22.5** (Loom's event log uses the built-in `node:sqlite`).
 
 ```bash
+npm install -g agent-loom          # → `loom` on your PATH
+```
+
+Other paths:
+
+```bash
+# one-liner from source (clones ~/.loom-src, builds, links; re-run to update)
 curl -fsSL https://raw.githubusercontent.com/nickthelegend/loom/main/scripts/install.sh | bash
-```
 
-Re-run the same command any time to **update** — it pulls and rebuilds in place.
-
-**Manual** (same thing, by hand):
-
-```bash
-git clone https://github.com/nickthelegend/loom.git && cd loom
-npm install && npm run build && npm link       # → `loom` on your PATH
-```
-
-**Straight from git via npm** (no checkout kept around):
-
-```bash
+# straight from git
 npm install -g github:nickthelegend/loom
+
+# hackable checkout
+git clone https://github.com/nickthelegend/loom.git && cd loom
+npm install && npm run build && npm link
 ```
 
 Then verify the setup:
@@ -80,9 +79,6 @@ Then verify the setup:
 ```bash
 loom doctor        # checks node, agents, tailscale, daemon, and your project
 ```
-
-> While the repo is private, all three paths need your GitHub auth (`gh auth login`
-> or an SSH remote). They work for everyone the moment the repo flips public.
 
 **The native app** lives in [`app/`](app/README.md) — `cd app && npx expo install &&
 npx expo start`, scan with Expo Go. The daemon-served web app needs no install at all

@@ -1,15 +1,33 @@
 {
-  "name": "loom-agents",
+  "name": "agent-loom",
   "version": "0.1.0",
-  "description": "Loom — local-first control plane for coding agents: one CLI, shared memory, baton handoffs across Claude Code, OpenCode, and friends.",
+  "description": "Loom — local-first control plane for coding agents: one CLI, shared memory, baton handoffs and routes across Claude Code, OpenCode, and friends.",
   "type": "module",
-  "private": true,
   "license": "MIT",
   "author": "Nivesh Gajengi <niveshgajengi@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nickthelegend/loom.git"
+    "url": "git+https://github.com/nickthelegend/loom.git"
   },
+  "homepage": "https://github.com/nickthelegend/loom#readme",
+  "bugs": "https://github.com/nickthelegend/loom/issues",
+  "keywords": [
+    "ai-agents",
+    "claude-code",
+    "opencode",
+    "orchestration",
+    "cli",
+    "tui",
+    "llm",
+    "routing",
+    "tailscale"
+  ],
+  "files": [
+    "dist",
+    "docs",
+    "CHANGELOG.md",
+    "ARCHITECTURE.md"
+  ],
   "engines": {
     "node": ">=22.5.0"
   },
