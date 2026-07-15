@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "expo": "~52.0.0",
+    "expo-build-properties": "~0.13.3",
     "expo-notifications": "~0.29.0",
     "expo-secure-store": "~14.0.0",
     "expo-speech-recognition": "^56.0.1",

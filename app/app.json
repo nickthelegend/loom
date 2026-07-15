@@ -19,6 +19,14 @@
     },
     "plugins": [
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      [
         "expo-speech-recognition",
         {
           "microphonePermission": "Loom uses the microphone for voice input",
