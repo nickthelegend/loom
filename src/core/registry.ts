@@ -9,7 +9,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AgentConfig, ProjectConfig, ProjectInfo } from "../types.js";
+import type { AgentConfig, AgentRole, ProjectConfig, ProjectInfo, RouteState } from "../types.js";
 
 export function loomHome(): string {
   return process.env.LOOM_HOME ?? path.join(os.homedir(), ".loom");
@@ -103,6 +103,8 @@ export interface ProjectState {
   holder: string | null;
   holderSince?: number;
   agents: Record<string, Record<string, unknown>>;
+  /** Active (or last) multi-hop route. */
+  route?: RouteState;
 }
 
 export function readProjectState(projectDir: string): ProjectState {
@@ -173,6 +175,15 @@ export function ensureDaemonConfig(defaults: { host: string; port: number }): Da
   };
   writeDaemonConfig(cfg);
   return cfg;
+}
+
+/** Default "ship" pipeline over whichever of planner/executor/reviewer exist. */
+export function buildDefaultRoutes(
+  agents: AgentConfig[],
+): Record<string, string[]> | undefined {
+  const order: AgentRole[] = ["planner", "executor", "reviewer"];
+  const steps = order.filter((role) => agents.some((a) => a.role === role));
+  return steps.length >= 2 ? { ship: steps } : undefined;
 }
 
 export function defaultAgentConfigs(availability: Record<string, boolean>): AgentConfig[] {

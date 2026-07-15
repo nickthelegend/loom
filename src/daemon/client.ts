@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import type { LoomEvent, ProjectStatus } from "../types.js";
+import type { LoomEvent, ProjectStatus, RouteState } from "../types.js";
 import {
   readDaemonConfig,
   type DaemonConfig,
@@ -106,6 +106,21 @@ export class DaemonClient {
 
   decision(id: string, text: string): Promise<{ event: LoomEvent }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/decisions`, { text });
+  }
+
+  startRoute(id: string, task: string, spec?: string | string[]): Promise<{ route: RouteState }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/route`, {
+      task,
+      ...(spec !== undefined ? { spec } : {}),
+    });
+  }
+
+  routeState(id: string): Promise<{ route: RouteState | null }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/route`);
+  }
+
+  abortRoute(id: string): Promise<{ route: RouteState }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/route`);
   }
 
   newPairingToken(): Promise<{ token: string; expiresAt: number; url: string }> {

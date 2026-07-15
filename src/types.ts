@@ -22,6 +22,12 @@ export type EventKind =
   | "agent_join"
   | "agent_leave"
   | "role_change"
+  | "route_started" // multi-hop routing lifecycle
+  | "route_step"
+  | "route_paused"
+  | "route_resumed"
+  | "route_completed"
+  | "route_failed"
   | "status" // adapter/bridge lifecycle info
   | "error";
 
@@ -64,6 +70,30 @@ export interface ProjectConfig {
   agents: AgentConfig[];
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
+  /** Named multi-hop pipelines; steps are agent ids or roles. */
+  routes?: Record<string, string[]>;
+}
+
+// ---------------------------------------------------------------------------
+// Routing — automated multi-hop handoffs
+// ---------------------------------------------------------------------------
+
+export type RouteStatus = "running" | "waiting_human" | "completed" | "failed" | "aborted";
+
+export interface RouteState {
+  id: string;
+  name?: string;
+  task: string;
+  /** Resolved agent ids, in order. */
+  steps: string[];
+  stepRoles: AgentRole[];
+  /** Index of the step currently executing (or last executed). */
+  current: number;
+  status: RouteStatus;
+  startedAt: number;
+  updatedAt: number;
+  reason?: string;
+  pendingQuestion?: string;
 }
 
 export interface ProjectInfo {
@@ -150,4 +180,5 @@ export interface ProjectStatus {
   agents: AgentStatus[];
   lastEvent: LoomEvent | null;
   needsInput: boolean;
+  route?: RouteState | null;
 }

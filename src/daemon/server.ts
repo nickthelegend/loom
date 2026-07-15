@@ -12,7 +12,9 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { WebSocketServer, WebSocket } from "ws";
 import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
+import { RouteActiveError } from "../core/routes.js";
 import {
+  buildDefaultRoutes,
   defaultAgentConfigs,
   ensureDaemonConfig,
   findProject,
@@ -135,9 +137,12 @@ export class LoomDaemon {
             "claude-code": await cliAvailable("claude"),
             opencode: await cliAvailable("opencode"),
           };
+          const agents = defaultAgentConfigs(availability);
+          const routes = buildDefaultRoutes(agents);
           config = {
             name: name ?? path.basename(resolved),
-            agents: defaultAgentConfigs(availability),
+            agents,
+            ...(routes ? { routes } : {}),
           };
           writeProjectConfig(resolved, config);
         }
@@ -162,6 +167,10 @@ export class LoomDaemon {
                 agentId: err.agentId,
                 message: err.message,
               });
+              return;
+            }
+            if (err instanceof RouteActiveError) {
+              res.status(409).json({ error: "route_active", message: err.message });
               return;
             }
             res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
@@ -220,6 +229,33 @@ export class LoomDaemon {
         if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
         const event = rt.log.append({ kind: "decision", payload: { text } });
         res.json({ event });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/route",
+      withRuntime(async (rt, req, res) => {
+        const { task, spec } = (req.body ?? {}) as {
+          task?: string;
+          spec?: string | string[];
+        };
+        if (!task?.trim()) return void res.status(400).json({ error: "missing task" });
+        const route = await rt.startRoute({ task, ...(spec !== undefined ? { spec } : {}) });
+        res.json({ route });
+      }),
+    );
+
+    app.get(
+      "/api/projects/:id/route",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ route: rt.routeState() });
+      }),
+    );
+
+    app.delete(
+      "/api/projects/:id/route",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ route: await rt.abortRoute() });
       }),
     );
   }

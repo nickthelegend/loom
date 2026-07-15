@@ -14,11 +14,13 @@ import type {
   ProjectStatus,
   SendInput,
 } from "../types.js";
+import type { RouteState } from "../types.js";
 import { isAdapter } from "../types.js";
 import { createAgent } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { EventLog } from "../core/eventlog.js";
 import { notify } from "../core/notify.js";
+import { RouteEngine } from "../core/routes.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
 import {
   projectLoomDir,
@@ -34,6 +36,7 @@ export class ProjectRuntime {
   readonly config: ProjectConfig;
   readonly log: EventLog;
   readonly baton: BatonManager;
+  readonly routes: RouteEngine;
   private agents = new Map<string, AnyAgent>();
   private startedAgents = new Set<string>();
   private configMtime = 0;
@@ -52,6 +55,20 @@ export class ProjectRuntime {
         this.afterAgentEvent(event);
       });
     }
+
+    this.routes = new RouteEngine({
+      projectName: info.name,
+      projectDir: info.dir,
+      config,
+      log,
+      handoff: (to) => this.handoff(to, { source: "route" }),
+      send: (text, agentId) => this.sendMessage(text, agentId, { source: "route" }),
+      interrupt: () => this.interrupt({ source: "route" }),
+      isAdapterId: (id) => {
+        const agent = this.agents.get(id);
+        return Boolean(agent && isAdapter(agent));
+      },
+    });
   }
 
   static async open(info: ProjectInfo): Promise<ProjectRuntime> {
@@ -88,8 +105,9 @@ export class ProjectRuntime {
     return agent;
   }
 
-  /** Fire-and-notify hooks + suggested handoffs, driven off the log. */
+  /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
+    this.routes.handleAgentEvent(event);
     if (event.kind === "needs_input") {
       notify({
         title: `Loom · ${this.info.name}`,
@@ -100,7 +118,8 @@ export class ProjectRuntime {
         title: `Loom · ${this.info.name}`,
         body: `${event.agentId} finished its turn`,
       });
-    } else if (event.kind === "message") {
+    } else if (event.kind === "message" && !this.routes.isActive()) {
+      // A route drives its own handoffs — suggestions would be noise.
       const suggestion = suggestHandoff(event, this.config, this.baton.holder());
       if (suggestion) {
         this.log.append({ kind: "suggestion", payload: { ...suggestion, from: event.agentId } });
@@ -128,7 +147,12 @@ export class ProjectRuntime {
    *  - explicit agent that is NOT the holder → NotHolderError; surfaces
    *    prompt the user to confirm a handoff (explicit, never silent).
    */
-  async sendMessage(text: string, agentId?: string): Promise<{ agentId: string }> {
+  async sendMessage(
+    text: string,
+    agentId?: string,
+    opts: { source?: "user" | "route" } = {},
+  ): Promise<{ agentId: string }> {
+    const source = opts.source ?? "user";
     let target = agentId ?? this.validHolder() ?? this.defaultAdapterId();
     const agent = this.agent(target);
     if (!isAdapter(agent)) {
@@ -142,7 +166,13 @@ export class ProjectRuntime {
       throw new NotHolderError(target, holder);
     }
 
-    this.log.append({ kind: "message", payload: { text, author: "user" } });
+    // A user reply to a paused route's question resumes the route.
+    if (source === "user") this.routes.onUserMessage(target);
+
+    this.log.append({
+      kind: "message",
+      payload: { text, author: source === "route" ? "loom" : "user" },
+    });
     await this.ensureStarted(target);
 
     const pendingBriefing = this.consumePendingBriefing(target);
@@ -184,12 +214,17 @@ export class ProjectRuntime {
   /**
    * Explicit baton pass: interrupt the current holder if mid-turn, project
    * the log into the target's namespaced memory, arm the one-shot briefing.
+   * A *manual* handoff cancels any active route — the human outranks it.
    */
-  async handoff(to: string): Promise<{ from: string | null }> {
+  async handoff(
+    to: string,
+    opts: { source?: "user" | "route" } = {},
+  ): Promise<{ from: string | null }> {
     const target = this.agent(to);
     if (!isAdapter(target)) {
       throw new Error(`cannot hand the baton to "${to}" — bridges are read-only by design`);
     }
+    if ((opts.source ?? "user") === "user") this.routes.onManualHandoff();
 
     const holder = this.validHolder();
     if (holder && holder !== to) {
@@ -212,12 +247,24 @@ export class ProjectRuntime {
     writeMemoryFile(this.info.dir, to, projection); // idempotent with default impl
     this.pendingBriefings.set(to, buildBriefing(input));
 
+    // Bridges (GUI agents) are passive observers — keep their shared-context
+    // files fresh on every hop so e.g. Antigravity always sees the weave.
+    for (const cfg of this.config.agents) {
+      const bystander = this.agents.get(cfg.id);
+      if (!bystander || isAdapter(bystander) || cfg.id === to) continue;
+      const bridgeView = buildProjection({ ...input, targetAgentId: cfg.id });
+      await bystander.injectMemory(bridgeView).catch(() => {});
+    }
+
     const { from } = this.baton.handoff(to, { projected: true });
     await this.ensureStarted(to);
     return { from };
   }
 
-  async interrupt(): Promise<{ interrupted: string | null }> {
+  async interrupt(
+    opts: { source?: "user" | "route" } = {},
+  ): Promise<{ interrupted: string | null }> {
+    if ((opts.source ?? "user") === "user") this.routes.onManualInterrupt();
     const holder = this.validHolder();
     if (!holder) return { interrupted: null };
     const agent = this.agent(holder);
@@ -226,6 +273,53 @@ export class ProjectRuntime {
       return { interrupted: holder };
     }
     return { interrupted: null };
+  }
+
+  // -------------------------------------------------------------------------
+  // Routing
+  // -------------------------------------------------------------------------
+
+  /**
+   * Start a multi-hop route. `spec` may be: an array of steps, a named route
+   * from config, or a comma list of agent ids/roles. Undefined → the "ship"
+   * route if defined, else every adapter in config order.
+   */
+  async startRoute(opts: { task: string; spec?: string | string[] }): Promise<RouteState> {
+    let steps: string[] | undefined;
+    let name: string | undefined;
+    if (Array.isArray(opts.spec)) {
+      steps = opts.spec;
+    } else if (typeof opts.spec === "string" && opts.spec.trim()) {
+      const named = this.config.routes?.[opts.spec.trim()];
+      if (named) {
+        steps = named;
+        name = opts.spec.trim();
+      } else {
+        steps = opts.spec.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+    } else {
+      const ship = this.config.routes?.["ship"];
+      if (ship) {
+        steps = ship;
+        name = "ship";
+      } else {
+        steps = this.config.agents
+          .filter((a) => {
+            const agent = this.agents.get(a.id);
+            return agent && isAdapter(agent);
+          })
+          .map((a) => a.id);
+      }
+    }
+    return this.routes.start(steps ?? [], opts.task, name);
+  }
+
+  async abortRoute(): Promise<RouteState> {
+    return this.routes.abort();
+  }
+
+  routeState(): RouteState | null {
+    return this.routes.state();
   }
 
   // -------------------------------------------------------------------------
@@ -265,6 +359,7 @@ export class ProjectRuntime {
       agents,
       lastEvent,
       needsInput,
+      route: this.routes.state(),
     };
   }
 

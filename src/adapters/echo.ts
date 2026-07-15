@@ -5,6 +5,7 @@
  * Prompt tricks (for exercising the machinery without a real model):
  *   - text containing "make a plan"  → replies in planner voice ("plan is complete")
  *   - text containing "sleep:<ms>"   → stays busy that long (interrupt testing)
+ *   - text containing "ask: <q>"     → asks the human (needs_input; route pausing)
  */
 
 import type { SendInput } from "../types.js";
@@ -50,6 +51,10 @@ export class EchoAdapter extends AdapterBase {
         ? `Here is the approach. 1) analyze 2) implement 3) verify. The plan is complete and ready to execute.${briefingNote}`
         : `echo(${this.id}): ${input.text}${briefingNote}`;
       this.emit({ kind: "message", payload: { text } });
+      const askMatch = input.text.match(/ask:\s*([^\n]+)/i);
+      if (askMatch) {
+        this.emit({ kind: "needs_input", payload: { question: askMatch[1]!.trim() } });
+      }
       this.emit({
         kind: "run_complete",
         payload: { durationMs: Date.now() - started, costUsd: 0 },
