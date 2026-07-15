@@ -12,6 +12,28 @@ npx expo install        # installs deps pinned for the Expo SDK
 npx expo start          # scan the QR with Expo Go (Android/iOS)
 ```
 
+## Build the APK (standalone, includes voice input)
+
+```bash
+cd app
+npx expo prebuild -p android --no-install
+cd android && ./gradlew assembleRelease
+# → app/build/outputs/apk/release/app-release.apk
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+Testing over USB without Tailscale: `adb reverse tcp:7420 tcp:7420` makes the phone's
+`127.0.0.1:7420` reach the daemon on your computer — pair with a
+`http://127.0.0.1:7420/app#pair=…` link while plugged in. For wireless, use
+`loom up --restart --tailnet && loom pair` as usual.
+
+## Voice input
+
+The composer has a mic button (APK / dev builds): tap → speak → live transcript lands
+in the input (appended to anything already typed), tap again or hit send to stop.
+On-device recognition via expo-speech-recognition; the button hides itself in
+environments without the native module (e.g. plain Expo Go).
+
 Your phone must reach the daemon — same tailnet, daemon bound to it:
 
 ```bash
