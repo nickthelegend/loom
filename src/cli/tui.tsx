@@ -177,7 +177,10 @@ function App({ client, initial }: AppProps) {
             const { token, url } = await client.newPairingToken();
             const link = `${url}/app#pair=${token}`;
             qrcode.generate(link, { small: true }, (qr) => {
-              push("", ...qr.split("\n"), pc.bold(`  ${link}`), pc.dim("  scan with your phone camera · single use · 10 min"), "");
+              const warn = /127\.0\.0\.1|localhost/.test(url)
+                ? [pc.yellow("  ⚠ daemon is on localhost — phones can't reach this QR. Run: loom up --restart --tailnet")]
+                : [];
+              push("", ...qr.split("\n"), pc.bold(`  ${link}`), pc.dim("  scan with your phone camera · single use · 10 min"), ...warn, "");
             });
             break;
           }

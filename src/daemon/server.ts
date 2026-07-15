@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import type { Server } from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express, { type Request, type Response, type NextFunction } from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import type { LoomEvent, ProjectInfo } from "../types.js";
@@ -38,6 +39,20 @@ export interface DaemonOptions {
 }
 
 export const DEFAULT_PORT = 7420;
+
+/**
+ * Build fingerprint — the mtime of this compiled module. A daemon started
+ * from an older build reports an older rev than a freshly built CLI expects,
+ * and the CLI restarts it automatically ("failed to fetch" after upgrades
+ * usually meant a stale daemon serving yesterday's code).
+ */
+export const BUILD_REV = (() => {
+  try {
+    return String(Math.floor(fs.statSync(fileURLToPath(import.meta.url)).mtimeMs));
+  } catch {
+    return "dev";
+  }
+})();
 
 export class LoomDaemon {
   private app = express();
@@ -75,7 +90,7 @@ export class LoomDaemon {
       res.type("application/manifest+json").send(JSON.stringify(APP_MANIFEST));
     });
     app.get("/api/health", (_req, res) => {
-      res.json({ ok: true, name: "loom", version: "0.1.0" });
+      res.json({ ok: true, name: "loom", version: "0.1.0", rev: BUILD_REV });
     });
     app.post("/api/pair/claim", (req, res) => {
       const { token, name } = (req.body ?? {}) as { token?: string; name?: string };

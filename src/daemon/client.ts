@@ -11,7 +11,7 @@ import {
   readDaemonConfig,
   type DaemonConfig,
 } from "../core/registry.js";
-import { DEFAULT_PORT } from "./server.js";
+import { BUILD_REV, DEFAULT_PORT } from "./server.js";
 
 export class DaemonError extends Error {
   constructor(
@@ -162,24 +162,42 @@ export class DaemonClient {
 // Lifecycle helpers
 // ---------------------------------------------------------------------------
 
-async function healthy(cfg: DaemonConfig): Promise<boolean> {
+async function healthProbe(cfg: DaemonConfig): Promise<{ ok: boolean; rev?: string }> {
   try {
     const res = await fetch(`http://${cfg.host}:${cfg.port}/api/health`, {
       signal: AbortSignal.timeout(1500),
     });
-    return res.ok;
+    if (!res.ok) return { ok: false };
+    const body = (await res.json().catch(() => ({}))) as { rev?: string };
+    return { ok: true, ...(body.rev ? { rev: body.rev } : {}) };
   } catch {
-    return false;
+    return { ok: false };
   }
+}
+
+async function healthy(cfg: DaemonConfig): Promise<boolean> {
+  return (await healthProbe(cfg)).ok;
 }
 
 /**
  * Get a client for a running daemon, starting one (detached) if needed.
- * The daemon entry is this same CLI with the `daemon` subcommand.
+ * A healthy daemon running an OLDER BUILD than this CLI is restarted —
+ * stale daemons are the classic "failed to fetch / missing route" cause.
  */
 export async function ensureDaemon(): Promise<DaemonClient> {
   let cfg = readDaemonConfig();
-  if (cfg && (await healthy(cfg))) return new DaemonClient(cfg);
+  if (cfg) {
+    const probe = await healthProbe(cfg);
+    if (probe.ok && probe.rev === BUILD_REV) return new DaemonClient(cfg);
+    if (probe.ok && probe.rev !== BUILD_REV) {
+      // Stale build — restart it in place.
+      await stopDaemon();
+      const gone = Date.now() + 5000;
+      while (Date.now() < gone && (await healthy(cfg))) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+  }
 
   const compiled = fileURLToPath(new URL("../cli/index.js", import.meta.url));
   const devSource = fileURLToPath(new URL("../cli/index.ts", import.meta.url));

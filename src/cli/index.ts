@@ -107,10 +107,25 @@ program
   .command("up")
   .description("start the loom daemon in the background")
   .option("--tailnet", "bind to this machine's Tailscale IP", false)
-  .action(async (opts: { tailnet: boolean }) => {
-    if (await daemonRunning()) {
-      console.log(pc.dim("daemon already running"));
-      return;
+  .option("--restart", "restart even if a daemon is already running", false)
+  .action(async (opts: { tailnet: boolean; restart: boolean }) => {
+    const running = await daemonRunning();
+    if (running) {
+      const { BUILD_REV } = await import("../daemon/server.js");
+      const health = (await fetch(`http://${running.host}:${running.port}/api/health`)
+        .then((r) => r.json())
+        .catch(() => ({}))) as { rev?: string };
+      const stale = health.rev !== BUILD_REV;
+      if (!opts.restart && !stale) {
+        console.log(pc.dim("daemon already running (loom up --restart to bounce it)"));
+        return;
+      }
+      console.log(pc.dim(stale ? "daemon is running an older build — restarting" : "restarting daemon"));
+      await stopDaemon();
+      const gone = Date.now() + 6000;
+      while (Date.now() < gone && (await daemonRunning())) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
     }
     const self = fileURLToPath(import.meta.url);
     const args = [self, "daemon", ...(opts.tailnet ? ["--tailnet"] : [])];
@@ -465,15 +480,25 @@ program
 program
   .command("pair")
   .description("pair a phone/device: QR with a short-lived, single-use token")
-  .action(async () => {
+  .option("--allow-local", "mint a localhost QR anyway (same-machine testing)", false)
+  .action(async (opts: { allowLocal: boolean }) => {
     const client = await ensureDaemon();
     const cfg = await daemonRunning();
-    if (cfg && cfg.host === "127.0.0.1") {
-      console.log(
-        pc.yellow(
-          "note: daemon is bound to localhost — for phone access restart with `loom down && loom up --tailnet`",
+    const loopback = cfg && ["127.0.0.1", "localhost", "::1"].includes(cfg.host);
+    if (loopback && !opts.allowLocal) {
+      // A localhost QR is unreachable from a phone — the #1 "failed to
+      // fetch" cause. Refuse and say exactly what to run instead.
+      console.error(pc.red("✗ daemon is bound to localhost — your phone cannot reach 127.0.0.1"));
+      console.error(pc.bold("\n  fix:"));
+      console.error(pc.bold("    loom up --restart --tailnet"));
+      console.error(pc.bold("    loom pair"));
+      console.error(
+        pc.dim(
+          "\n  needs Tailscale on this machine (`tailscale up`) and on your phone (same tailnet).\n" +
+            "  testing on this machine only? loom pair --allow-local",
         ),
       );
+      process.exit(1);
     }
     const { token, expiresAt, url } = await client.newPairingToken();
     // Deep link: scanning with any camera opens the phone app, which claims
