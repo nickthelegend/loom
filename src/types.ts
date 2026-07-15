@@ -80,16 +80,23 @@ export interface ProjectConfig {
 
 export type RouteStatus = "running" | "waiting_human" | "completed" | "failed" | "aborted";
 
+export type RouteMode = "static" | "dynamic";
+export type RouterKind = "rules" | "llm";
+
 export interface RouteState {
   id: string;
   name?: string;
   task: string;
-  /** Resolved agent ids, in order. */
+  /** Resolved agent ids, in order. Dynamic routes grow this per hop. */
   steps: string[];
   stepRoles: AgentRole[];
   /** Index of the step currently executing (or last executed). */
   current: number;
   status: RouteStatus;
+  /** static = fixed pipeline; dynamic = a router picks each next hop. */
+  mode: RouteMode;
+  router?: RouterKind;
+  maxHops?: number;
   startedAt: number;
   updatedAt: number;
   reason?: string;
@@ -181,4 +188,6 @@ export interface ProjectStatus {
   lastEvent: LoomEvent | null;
   needsInput: boolean;
   route?: RouteState | null;
+  /** Named pipelines defined in config (for pickers/dropdowns). */
+  routeNames?: string[];
 }

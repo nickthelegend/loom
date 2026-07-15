@@ -108,10 +108,17 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/decisions`, { text });
   }
 
-  startRoute(id: string, task: string, spec?: string | string[]): Promise<{ route: RouteState }> {
+  startRoute(
+    id: string,
+    task: string,
+    spec?: string | string[],
+    opts: { router?: "rules" | "llm"; maxHops?: number } = {},
+  ): Promise<{ route: RouteState }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/route`, {
       task,
       ...(spec !== undefined ? { spec } : {}),
+      ...(opts.router ? { router: opts.router } : {}),
+      ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
     });
   }
 

@@ -259,12 +259,19 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/route",
       withRuntime(async (rt, req, res) => {
-        const { task, spec } = (req.body ?? {}) as {
+        const { task, spec, router, maxHops } = (req.body ?? {}) as {
           task?: string;
           spec?: string | string[];
+          router?: "rules" | "llm";
+          maxHops?: number;
         };
         if (!task?.trim()) return void res.status(400).json({ error: "missing task" });
-        const route = await rt.startRoute({ task, ...(spec !== undefined ? { spec } : {}) });
+        const route = await rt.startRoute({
+          task,
+          ...(spec !== undefined ? { spec } : {}),
+          ...(router ? { router } : {}),
+          ...(maxHops ? { maxHops: Number(maxHops) } : {}),
+        });
         res.json({ route });
       }),
     );

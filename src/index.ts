@@ -10,6 +10,8 @@ export { BatonManager, NotHolderError } from "./core/baton.js";
 export { buildBriefing, buildProjection } from "./core/projection.js";
 export { suggestHandoff } from "./core/suggestions.js";
 export { RouteEngine, RouteActiveError, resolveSteps } from "./core/routes.js";
+export { rulesRouter, llmRouter } from "./core/router.js";
+export type { HopDecision, RouterContext } from "./core/router.js";
 export {
   listProjects,
   findProject,

@@ -390,16 +390,24 @@ program
 program
   .command("route [spec] [task...]")
   .description(
-    "run a task through a pipeline of agents (spec: route name, or ids/roles like planner,executor)",
+    "run a task through agents — spec: \"auto\" (LLM picks each hop), a route name, or ids/roles like planner,executor",
   )
   .option("--status", "show the current/last route", false)
   .option("--abort", "abort the active route", false)
   .option("-d, --detach", "don't follow — notifications will tell you when it's done", false)
+  .option("--router <kind>", "for auto: llm (default) or rules")
+  .option("--max-hops <n>", "for auto: hop budget (default 8)")
   .action(
     async (
       spec: string | undefined,
       words: string[],
-      opts: { status: boolean; abort: boolean; detach: boolean },
+      opts: {
+        status: boolean;
+        abort: boolean;
+        detach: boolean;
+        router?: "rules" | "llm";
+        maxHops?: string;
+      },
     ) => {
       const client = await ensureDaemon();
       const project = await currentProject(client);
@@ -429,9 +437,16 @@ program
         );
       }
 
-      const { route } = await client.startRoute(project.id, words.join(" "), spec);
+      const { route } = await client.startRoute(project.id, words.join(" "), spec, {
+        ...(opts.router ? { router: opts.router } : {}),
+        ...(opts.maxHops ? { maxHops: Number(opts.maxHops) } : {}),
+      });
       console.log(
-        pc.cyan(`➤ route${route.name ? ` "${route.name}"` : ""}: ${route.steps.join(" → ")}`),
+        pc.cyan(
+          route.mode === "dynamic"
+            ? `➤ route "auto" (${route.router} picks each hop, budget ${route.maxHops}): started with ${route.steps.join(" → ")}`
+            : `➤ route${route.name ? ` "${route.name}"` : ""}: ${route.steps.join(" → ")}`,
+        ),
       );
       if (opts.detach) {
         console.log(pc.dim("running in the background — you'll be notified at each pause/finish"));

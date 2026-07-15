@@ -18,12 +18,20 @@
  * failed rather than pretending nothing happened.
  */
 
-import type { AgentRole, LoomEvent, ProjectConfig, RouteState } from "../types.js";
+import type {
+  AgentRole,
+  LoomEvent,
+  ProjectConfig,
+  RouteState,
+  RouterKind,
+} from "../types.js";
 import type { EventLog } from "./eventlog.js";
 import { notify } from "./notify.js";
 import { newId, readProjectState, writeProjectState } from "./registry.js";
+import { llmRouter, rulesRouter, type HopDecision, type RouterContext } from "./router.js";
 
 const DEFAULT_STEP_TIMEOUT_MS = 45 * 60 * 1000;
+const DEFAULT_MAX_HOPS = 8;
 
 export class RouteActiveError extends Error {
   constructor() {
@@ -145,16 +153,82 @@ export class RouteEngine {
       stepRoles,
       current: 0,
       status: "running",
+      mode: "static",
       startedAt: Date.now(),
       updatedAt: Date.now(),
     };
     this.write(route);
     this.host.log.append({
       kind: "route_started",
-      payload: { routeId: route.id, name: name ?? null, steps, task },
+      payload: { routeId: route.id, name: name ?? null, mode: "static", steps, task },
     });
     await this.beginStep(route);
     return this.read()!;
+  }
+
+  /** Dynamic route: a router (LLM or rules) picks every next hop. */
+  async startDynamic(
+    task: string,
+    opts: { router?: RouterKind; maxHops?: number } = {},
+  ): Promise<RouteState> {
+    if (this.isActive()) throw new RouteActiveError();
+    const router = opts.router ?? "llm";
+    const route: RouteState = {
+      id: newId(4),
+      name: "auto",
+      task,
+      steps: [],
+      stepRoles: [],
+      current: -1,
+      status: "running",
+      mode: "dynamic",
+      router,
+      maxHops: opts.maxHops ?? DEFAULT_MAX_HOPS,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    this.write(route);
+    this.host.log.append({
+      kind: "route_started",
+      payload: { routeId: route.id, name: "auto", mode: "dynamic", router, task },
+    });
+    const decision = await this.decide(route);
+    if (decision.next === "done") {
+      this.finish(route, "failed", `router declined to start: ${decision.reason}`);
+      return this.read()!;
+    }
+    this.pushHop(route, decision);
+    await this.beginStep(route);
+    return this.read()!;
+  }
+
+  private routerContext(r: RouteState): RouterContext {
+    const agents = this.host.config.agents
+      .filter((a) => this.host.isAdapterId(a.id))
+      .map((a) => ({ id: a.id, role: a.role }));
+    const recent = this.host.log
+      .list({ kinds: ["message"], limit: 12 })
+      .map((e) => ({
+        author: e.agentId ?? String(e.payload.author ?? "user"),
+        text: String(e.payload.text ?? ""),
+      }));
+    return { task: r.task, hops: [...r.steps], agents, recent };
+  }
+
+  private async decide(r: RouteState): Promise<HopDecision> {
+    const ctx = this.routerContext(r);
+    if (r.router === "llm") return llmRouter(ctx);
+    return rulesRouter(ctx);
+  }
+
+  private pushHop(r: RouteState, decision: HopDecision): void {
+    const role =
+      this.host.config.agents.find((a) => a.id === decision.next)?.role ?? "general";
+    r.steps.push(decision.next);
+    r.stepRoles.push(role);
+    r.current = r.steps.length - 1;
+    r.reason = decision.reason;
+    this.write(r);
   }
 
   async abort(reason = "aborted by user"): Promise<RouteState> {
@@ -248,20 +322,41 @@ export class RouteEngine {
   // Step mechanics
   // ---------------------------------------------------------------------
 
+  private complete(r: RouteState, note?: string): void {
+    r.status = "completed";
+    if (note) r.reason = note;
+    this.write(r);
+    this.host.log.append({
+      kind: "route_completed",
+      payload: { routeId: r.id, steps: r.steps.length, task: r.task, ...(note ? { note } : {}) },
+    });
+    notify({
+      title: `Loom · ${this.host.projectName}`,
+      body: `route complete: ${r.steps.join(" → ")}`,
+    });
+  }
+
   private async advance(r: RouteState): Promise<void> {
     this.clearTimer();
+
+    if (r.mode === "dynamic") {
+      if (r.steps.length >= (r.maxHops ?? DEFAULT_MAX_HOPS)) {
+        this.complete(r, `hop budget (${r.maxHops ?? DEFAULT_MAX_HOPS}) reached`);
+        return;
+      }
+      const decision = await this.decide(r);
+      if (decision.next === "done") {
+        this.complete(r, decision.reason);
+        return;
+      }
+      this.pushHop(r, decision);
+      await this.beginStep(r);
+      return;
+    }
+
     r.current += 1;
     if (r.current >= r.steps.length) {
-      r.status = "completed";
-      this.write(r);
-      this.host.log.append({
-        kind: "route_completed",
-        payload: { routeId: r.id, steps: r.steps.length, task: r.task },
-      });
-      notify({
-        title: `Loom · ${this.host.projectName}`,
-        body: `route complete: ${r.steps.join(" → ")}`,
-      });
+      this.complete(r);
       return;
     }
     this.write(r);
@@ -274,7 +369,13 @@ export class RouteEngine {
     this.lastQuestion = undefined;
     this.host.log.append({
       kind: "route_step",
-      payload: { routeId: r.id, step: r.current, of: r.steps.length, agent },
+      payload: {
+        routeId: r.id,
+        step: r.current,
+        of: r.mode === "static" ? r.steps.length : null,
+        agent,
+        ...(r.mode === "dynamic" && r.reason ? { reason: r.reason } : {}),
+      },
     });
     this.armTimer(r.id, r.current);
     try {
@@ -295,7 +396,8 @@ export class RouteEngine {
   private instruction(r: RouteState): string {
     const i = r.current;
     const role = r.stepRoles[i] ?? "general";
-    const header = `[Loom route${r.name ? ` "${r.name}"` : ""} — step ${i + 1}/${r.steps.length} (${role})]`;
+    const position = r.mode === "static" ? `step ${i + 1}/${r.steps.length}` : `hop ${i + 1}`;
+    const header = `[Loom route${r.name ? ` "${r.name}"` : ""} — ${position} (${role})]`;
     const continuity =
       i === 0
         ? ""

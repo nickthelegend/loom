@@ -172,6 +172,48 @@ describe("routes end-to-end", () => {
     expect(project.holder).toBe("execbot");
   });
 
+  it("dynamic route: the router picks every hop and stops at done", async () => {
+    const { id } = await freshProject({
+      agents: [
+        { id: "plannerbot", kind: "echo", role: "planner" },
+        { id: "execbot", kind: "echo", role: "executor" },
+        { id: "reviewbot", kind: "echo", role: "reviewer" },
+      ],
+    } as Partial<ProjectConfig>);
+    const { route } = await client.startRoute(id, "build the widget", "auto", {
+      router: "rules",
+      maxHops: 6,
+    });
+    expect(route.mode).toBe("dynamic");
+    expect(route.steps).toEqual(["plannerbot"]); // first hop chosen by the router
+
+    await waitUntil(async () => (await events(id, "route_completed")).length === 1);
+    const { route: final } = await client.routeState(id);
+    expect(final?.status).toBe("completed");
+    // plan → execute → review, then the router said done.
+    expect(final?.steps).toEqual(["plannerbot", "execbot", "reviewbot"]);
+
+    // Every dynamically chosen hop logged its reason.
+    const steps = await events(id, "route_step");
+    expect(steps.length).toBe(3);
+    for (const s of steps) expect(String(s.payload.reason ?? "")).not.toBe("");
+    expect(steps[1]!.payload.reason).toContain("execute");
+  });
+
+  it("dynamic route respects the hop budget", async () => {
+    const { id } = await freshProject({
+      agents: [
+        // Two executors ping-ponging would never finish — budget caps it.
+        { id: "plannerbot", kind: "echo", role: "planner" },
+        { id: "execbot", kind: "echo", role: "executor" },
+      ],
+    } as Partial<ProjectConfig>);
+    await client.startRoute(id, "tiny task", "auto", { router: "rules", maxHops: 2 });
+    await waitUntil(async () => (await events(id, "route_completed")).length === 1);
+    const { route } = await client.routeState(id);
+    expect(route?.steps.length).toBeLessThanOrEqual(2);
+  });
+
   it("route instructions carry role guidance and step position", async () => {
     const { id } = await freshProject();
     await client.startRoute(id, "tiny task", ["plannerbot", "execbot"]);

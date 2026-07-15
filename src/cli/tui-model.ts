@@ -146,6 +146,7 @@ export function paletteItems(
     });
   }
   items.push(
+    { id: "route:auto", label: "route: auto", hint: "LLM picks each hop", action: { type: "insert", text: "/route auto " } },
     { id: "route:custom", label: "route: custom steps…", hint: "a,b,c task", action: { type: "insert", text: "/route " } },
     { id: "decision", label: "decision…", hint: "pin to shared memory", action: { type: "insert", text: "/decision " } },
     { id: "cmd:agents", label: "agents", hint: "who's here", action: { type: "command", cmd: "agents" } },

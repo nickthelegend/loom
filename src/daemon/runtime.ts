@@ -14,7 +14,7 @@ import type {
   ProjectStatus,
   SendInput,
 } from "../types.js";
-import type { RouteState } from "../types.js";
+import type { RouteState, RouterKind } from "../types.js";
 import { isAdapter } from "../types.js";
 import { createAgent } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
@@ -280,11 +280,23 @@ export class ProjectRuntime {
   // -------------------------------------------------------------------------
 
   /**
-   * Start a multi-hop route. `spec` may be: an array of steps, a named route
-   * from config, or a comma list of agent ids/roles. Undefined → the "ship"
-   * route if defined, else every adapter in config order.
+   * Start a multi-hop route. `spec` may be: "auto" (dynamic — a router picks
+   * every hop), an array of steps, a named route from config, or a comma
+   * list of agent ids/roles. Undefined → the "ship" route if defined, else
+   * every adapter in config order.
    */
-  async startRoute(opts: { task: string; spec?: string | string[] }): Promise<RouteState> {
+  async startRoute(opts: {
+    task: string;
+    spec?: string | string[];
+    router?: RouterKind;
+    maxHops?: number;
+  }): Promise<RouteState> {
+    if (typeof opts.spec === "string" && opts.spec.trim() === "auto") {
+      return this.routes.startDynamic(opts.task, {
+        ...(opts.router ? { router: opts.router } : {}),
+        ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
+      });
+    }
     let steps: string[] | undefined;
     let name: string | undefined;
     if (Array.isArray(opts.spec)) {
@@ -360,6 +372,7 @@ export class ProjectRuntime {
       lastEvent,
       needsInput,
       route: this.routes.state(),
+      routeNames: ["auto", ...Object.keys(this.config.routes ?? {})],
     };
   }
 

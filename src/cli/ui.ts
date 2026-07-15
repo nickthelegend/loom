@@ -64,10 +64,12 @@ export function formatEvent(e: LoomEvent): string | null {
       const name = e.payload.name ? ` "${String(e.payload.name)}"` : "";
       return pc.cyan(`  ➤ route${name} started: ${steps.join(" → ")}`);
     }
-    case "route_step":
-      return pc.cyan(
-        `  ➤ step ${Number(e.payload.step) + 1}/${Number(e.payload.of)} → ${String(e.payload.agent)}`,
-      );
+    case "route_step": {
+      const n = Number(e.payload.step) + 1;
+      const of = e.payload.of ? `/${Number(e.payload.of)}` : "";
+      const reason = e.payload.reason ? pc.dim(`  (${String(e.payload.reason)})`) : "";
+      return pc.cyan(`  ➤ ${e.payload.of ? "step" : "hop"} ${n}${of} → ${String(e.payload.agent)}`) + reason;
+    }
     case "route_paused":
       return pc.yellow(
         `  ⏸ route paused — ${String(e.payload.agent)} asks: ${String(e.payload.question ?? "")}` +
