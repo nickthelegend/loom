@@ -130,13 +130,23 @@ What happens per hop: interrupt-safe **handoff** → shared-memory **projection*
 route running server-side. One route per project at a time (the baton is one write
 lock); run routes across *different* projects in parallel freely.
 
-Define named pipelines in `.loom/config.json` (steps are roles or agent ids):
+Define named pipelines in `.loom/config.json` — steps are roles or agent ids, and any
+step can carry its own focus:
 
 ```json
-"routes": { "ship": ["planner", "executor", "reviewer"] }
+"routes": {
+  "ship": ["planner", "executor", "reviewer"],
+  "api-only": [
+    { "step": "planner",  "instruction": "design the endpoint contract only" },
+    { "step": "executor", "instruction": "only touch src/api — no schema changes" },
+    "reviewer"
+  ]
+}
 ```
 
-`loom init` seeds a `ship` route automatically when it detects at least two roles.
+Per-step instructions are appended to the role guidance for exactly that step — the
+next hop never sees them. `loom init` seeds a `ship` route automatically when it
+detects at least two roles.
 
 ## Commands
 
@@ -181,7 +191,13 @@ agents without a stable API can't be trusted with interrupt-safe writes. See
 - **Projection** — on handoff, Loom distills the log into
   `.loom/memory/<agent>.md` (persistent, namespaced) and arms a short one-shot briefing
   injected with the target's next turn (system-prompt append for Claude Code, delimited
-  preamble for OpenCode).
+  preamble for OpenCode). Two renderers behind one interface:
+  - **template** (default) — deterministic, instant, free;
+  - **llm** — a small Claude model distills the recent log into a dense doc
+    (mission / current state / decisions / risks / next moves). Opt in per project:
+    `"projection": { "mode": "llm", "model": "haiku" }`. Any failure or timeout falls
+    back to the template — a broken Claude never blocks a handoff. Bridges always get
+    template views (no N×LLM waste per hop).
 - **Baton** — persisted per project (`.loom/state.json`). Messages route to the holder;
   addressing a non-holder returns `409 not_holder` and the surface asks you to confirm a
   handoff. Ghost holders (agent removed from config) self-heal. Every handoff snapshots
