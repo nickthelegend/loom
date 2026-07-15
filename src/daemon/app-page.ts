@@ -214,6 +214,7 @@ export const APP_HTML = `<!doctype html>
     if (e.kind === "suggestion") return '<div class="sys warn">&#128161; ' + esc(p.reason || "handoff suggested") + "</div>";
     if (e.kind === "needs_input") return '<div class="sys warn">&#9208; ' + esc(e.agentId) + " asks: " + esc(p.question) + "</div>";
     if (e.kind === "decision") return '<div class="sys">&#9733; ' + esc(p.text) + "</div>";
+    if (e.kind === "memory_import") return '<div class="sys" style="color:var(--accent)">&#129504; imported ' + esc(p.file) + " into the shared brain</div>";
     if (e.kind === "error") return '<div class="sys err">&#10007; ' + esc(p.message) + "</div>";
     if (e.kind === "route_started") {
       if (p.mode === "dynamic") return '<div class="sys">&#10148; route "auto" started &mdash; ' + esc(p.router) + " picks each hop</div>";
@@ -238,7 +239,8 @@ export const APP_HTML = `<!doctype html>
     root.innerHTML =
       '<header><button id="back">&larr;</button>' +
       '<span class="logo" id="pname">&hellip;</span><span class="sub" id="pstat"></span>' +
-      '<button id="treebtn" title="working tree" style="margin-left:auto">&plusmn;</button>' +
+      '<button id="brainbtn" title="unified memory" style="margin-left:auto">&#129504;</button>' +
+      '<button id="treebtn" title="working tree" style="margin-left:8px">&plusmn;</button>' +
       '<button id="routebtn" title="routes" style="margin-left:8px">&#10148;</button>' +
       '<button id="stop" title="interrupt" style="margin-left:8px">&#9632;</button></header>' +
       '<div class="chips" id="chips"></div>' +
@@ -254,9 +256,38 @@ export const APP_HTML = `<!doctype html>
         .catch(function(err){ toast(err.message); });
     };
 
+    var brainOpen = false;
+    document.getElementById("brainbtn").onclick = function(){
+      brainOpen = !brainOpen; treeOpen = false;
+      var el = document.getElementById("routesheet");
+      if (!brainOpen) { el.innerHTML = ""; return; }
+      el.innerHTML = '<div class="sheet"><label>unified memory</label><div class="sys">loading&hellip;</div></div>';
+      api("/api/projects/" + pid + "/memory").then(function(j){
+        if (!brainOpen) return;
+        var m = j.memory || {};
+        var head = '<label>&#129504; one brain &middot; ' + (m.sources || []).length +
+          ' ADE source(s) &middot; ' + (m.decisions || []).length + ' decision(s)</label>';
+        var src = (m.sources || []).map(function(s){
+          return '<div class="tool">' + esc(s.agentId) + " \\u2190 " + esc(s.file) + "</div>";
+        }).join("");
+        var body = esc(m.document || "").split("\\n").map(function(line){
+          var c = line.charAt(0) === "#" ? "var(--accent)" : line.slice(0,3) === "###" ? "var(--mag)" : "var(--text)";
+          return '<div style="color:' + c + ';white-space:pre-wrap;word-break:break-word;font-size:12px">' + (line||" ") + "</div>";
+        }).join("");
+        el.innerHTML = '<div class="sheet">' + head + src +
+          '<div style="max-height:46vh;overflow:auto;border-top:1px solid var(--line);padding-top:8px">' + body + "</div>" +
+          '<button class="primary" id="reimport">re-import ADE memory</button></div>';
+        document.getElementById("reimport").onclick = function(){
+          api("/api/projects/" + pid + "/memory/import", { method: "POST", body: "{}" })
+            .then(function(r){ toast(r.imported ? "imported " + r.imported + " source(s)" : "brain already current"); brainOpen=false; document.getElementById("brainbtn").click(); })
+            .catch(function(err){ toast(err.message); });
+        };
+      }).catch(function(err){ toast(err.message); });
+    };
+
     var treeOpen = false;
     document.getElementById("treebtn").onclick = function(){
-      treeOpen = !treeOpen;
+      treeOpen = !treeOpen; brainOpen = false;
       var el = document.getElementById("routesheet");
       if (!treeOpen) { el.innerHTML = ""; return; }
       el.innerHTML = '<div class="sheet"><label>working tree</label><div class="sys">loading&hellip;</div></div>';
