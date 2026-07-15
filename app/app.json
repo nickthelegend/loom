@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Loom",
+    "slug": "loom",
+    "version": "0.1.0",
+    "scheme": "loom",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0b0e14",
+    "splash": {
+      "backgroundColor": "#0b0e14"
+    },
+    "ios": {
+      "bundleIdentifier": "dev.loom.app",
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "dev.loom.app"
+    }
+  }
+}
