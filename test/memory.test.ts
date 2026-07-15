@@ -74,11 +74,13 @@ describe("memory end-to-end", () => {
     daemon = new LoomDaemon({ host: "127.0.0.1", port: 0 });
     await daemon.listen();
     client = new DaemonClient(readDaemonConfig()!);
+    // Echo agents (no external binaries in CI) with explicit memoryFiles, so
+    // the test exercises unified memory without needing claude/opencode.
     dir = makeProjectDir({
       name: "brain",
       agents: [
-        { id: "claude-code", kind: "claude-code", role: "planner" },
-        { id: "opencode", kind: "opencode", role: "executor" },
+        { id: "planner", kind: "echo", role: "planner", memoryFiles: ["CLAUDE.md"] },
+        { id: "executor", kind: "echo", role: "executor", memoryFiles: ["AGENTS.md"] },
       ],
     } as Partial<ProjectConfig>);
     fs.writeFileSync(path.join(dir, "CLAUDE.md"), "Claude knows: the parser is recursive descent.\n");
@@ -119,10 +121,10 @@ describe("memory end-to-end", () => {
       return events.some((e) => e.kind === "run_complete");
     });
     await client.decision(id, "cross-ADE decision: use pino for logs");
-    await client.handoff(id, "opencode");
-    const memoryFile = path.join(dir, ".loom", "memory", "opencode.md");
+    await client.handoff(id, "executor");
+    const memoryFile = path.join(dir, ".loom", "memory", "executor.md");
     const projected = fs.readFileSync(memoryFile, "utf8");
-    // opencode's projected memory now includes claude-code's native knowledge.
+    // executor's projected memory now includes the planner's native knowledge.
     expect(projected).toContain("recursive descent");
     expect(projected).toContain("use pino for logs");
   });
