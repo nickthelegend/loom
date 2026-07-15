@@ -192,6 +192,14 @@ export const APP_HTML = `<!doctype html>
   .dempty{flex:1;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center;color:var(--faint);font-family:var(--mono);font-size:13px}
   .dempty .biglogo{font-size:40px;font-weight:700;letter-spacing:2px;color:var(--text)}
   .dempty .biglogo b{color:var(--thread)}
+  /* native desktop chrome when running inside the Electron shell */
+  html[data-electron] .sidebar .shead,
+  html[data-electron] .dmain > .panel > header{-webkit-app-region:drag}
+  html[data-electron] .sidebar .shead button,
+  html[data-electron] .dmain > .panel > header button,
+  html[data-electron] .sidebar .shead .logo{-webkit-app-region:no-drag}
+  html[data-electron="darwin"] .sidebar .shead{padding-top:30px}
+  html[data-electron="darwin"] .dmain > .panel > header{padding-top:22px}
   /* on wide screens the app-shell fills the window and owns the height */
   @media (min-width:900px){
     #root{max-width:none;height:100dvh;display:block}

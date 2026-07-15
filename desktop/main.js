@@ -2,8 +2,11 @@
 // Our own code: it starts the loom daemon and loads the same /app surface the
 // phone and browser use. No IDE, no editor — the continuity layer, on desktop.
 
+import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Menu, shell } from "electron";
 import { prepareAppUrl } from "./loom-app.js";
+
+const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 
 const BG = "#0b0e14";
 let win = null;
@@ -17,9 +20,11 @@ async function createWindow() {
     backgroundColor: BG,
     title: "Loom",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: PRELOAD,
     },
   });
 
