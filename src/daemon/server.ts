@@ -123,6 +123,15 @@ export class LoomDaemon {
       res.json({ clients: this.auth.clients() });
     });
 
+    app.delete("/api/pair/clients/:clientId", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      const revoked = this.auth.revoke(String(req.params.clientId));
+      if (!revoked) return void res.status(404).json({ error: "unknown client" });
+      res.json({ revoked: true });
+    });
+
     app.get("/api/projects", (_req, res) => {
       void (async () => {
         const projects = [];

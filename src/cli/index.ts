@@ -493,6 +493,27 @@ program
 // ---------------------------------------------------------------------------
 
 program
+  .command("clients")
+  .description("list paired devices, or revoke one")
+  .option("--revoke <id>", "revoke a paired device's access")
+  .action(async (opts: { revoke?: string }) => {
+    const client = await ensureDaemon();
+    if (opts.revoke) {
+      await client.revokeClient(opts.revoke);
+      console.log(pc.green(`✓ revoked ${opts.revoke}`));
+      return;
+    }
+    const { clients } = await client.pairedClients();
+    if (!clients.length) return void console.log(pc.dim("no paired devices — loom pair"));
+    for (const c of clients) {
+      console.log(
+        ` ${pc.bold(c.name)} ${pc.dim(`(${c.id})`)} paired ${new Date(c.createdAt).toLocaleString()}`,
+      );
+    }
+    console.log(pc.dim("\nrevoke one: loom clients --revoke <id>"));
+  });
+
+program
   .command("pair")
   .description("pair a phone/device: QR with a short-lived, single-use token")
   .option("--allow-local", "mint a localhost QR anyway (same-machine testing)", false)

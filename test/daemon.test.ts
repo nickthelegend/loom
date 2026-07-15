@@ -167,6 +167,37 @@ describe("loom daemon end-to-end", () => {
     expect(mint.status).toBe(403);
   });
 
+  it("revoking a paired client kills its access immediately", async () => {
+    const { token } = await client.newPairingToken();
+    const claim = (await (
+      await fetch(`${baseUrl}/api/pair/claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, name: "lost-phone" }),
+      })
+    ).json()) as { clientToken: string; clientId: string };
+
+    const before = await fetch(`${baseUrl}/api/projects`, {
+      headers: { authorization: `Bearer ${claim.clientToken}` },
+    });
+    expect(before.status).toBe(200);
+
+    // Non-admins cannot revoke.
+    const forbidden = await fetch(`${baseUrl}/api/pair/clients/${claim.clientId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${claim.clientToken}` },
+    });
+    expect(forbidden.status).toBe(403);
+
+    await client.revokeClient(claim.clientId);
+    const after = await fetch(`${baseUrl}/api/projects`, {
+      headers: { authorization: `Bearer ${claim.clientToken}` },
+    });
+    expect(after.status).toBe(401);
+    const { clients } = await client.pairedClients();
+    expect(clients.some((c) => c.id === claim.clientId)).toBe(false);
+  });
+
   it("websocket delivers live events for the project", async () => {
     const seen: LoomEvent[] = [];
     const unsubscribe = client.subscribe((pid, e) => {

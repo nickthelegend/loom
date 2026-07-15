@@ -138,6 +138,10 @@ export class DaemonClient {
     return this.request("GET", "/api/pair/clients");
   }
 
+  revokeClient(clientId: string): Promise<{ revoked: boolean }> {
+    return this.request("DELETE", `/api/pair/clients/${encodeURIComponent(clientId)}`);
+  }
+
   /** Live event stream; returns a close function. */
   subscribe(
     onEvent: (projectId: string, event: LoomEvent) => void,
