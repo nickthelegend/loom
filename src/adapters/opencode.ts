@@ -239,7 +239,8 @@ export class OpenCodeAdapter extends AdapterBase {
 
   private handleSse(evt: Json): void {
     const type = String(evt.type ?? "");
-    const props = (evt.properties ?? evt) as Json;
+    // Payload wrapping varies across opencode builds: {properties} or {data}.
+    const props = (evt.properties ?? evt.data ?? evt) as Json;
     const mySession = this.sessionId;
 
     if (type === "message.part.updated") {
@@ -307,21 +308,26 @@ export class OpenCodeAdapter extends AdapterBase {
     }
   }
 
-  /** Assistant messages currently in the session (info objects). */
-  private async listAssistants(sid: string): Promise<Json[]> {
+  /** All messages in the session, oldest first (info objects). */
+  private async listMessages(sid: string): Promise<Json[]> {
     const res = await fetchJson<Json>(`${this.baseUrl}/api/session/${sid}/message`);
     const data = (res.data ?? res) as unknown;
     const items = Array.isArray(data) ? (data as Json[]) : [];
     return items
       .map((m) => ((m as Json).info ?? m) as Json)
-      .filter((m) => (m.type ?? m.role) === "assistant");
+      .sort(
+        (a, b) =>
+          Number((a.time as Json | undefined)?.created ?? 0) -
+          Number((b.time as Json | undefined)?.created ?? 0),
+      );
   }
 
   /**
-   * Wait for a NEW completed assistant message (id not in `baseline`).
-   * `/wait` is tried first but opencode 1.17 returns 503 for it, so the
-   * reliable path is polling the message list — which also reconciles any
-   * events the SSE stream missed.
+   * Wait until the TURN is over — not just the first assistant message.
+   * opencode runs a turn as a sequence of assistant messages (one per step),
+   * so completion = the newest message is a completed assistant AND that
+   * fact holds across two consecutive polls (nothing new started).
+   * `/wait` is tried first but returns 503 on 1.17.
    */
   private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
     try {
@@ -334,11 +340,30 @@ export class OpenCodeAdapter extends AdapterBase {
       // 503 "not available yet" on 1.17 — fall through to polling.
     }
     const deadline = Date.now() + timeoutMs;
+    let stableId: string | null = null;
     while (Date.now() < deadline) {
-      const fresh = (await this.listAssistants(sid).catch(() => [] as Json[])).filter(
-        (m) => !baseline.has(String(m.id)) && (m.time as Json | undefined)?.completed,
+      const messages = await this.listMessages(sid).catch(() => [] as Json[]);
+      const newest = messages[messages.length - 1];
+      const newAssistants = messages.filter(
+        (m) =>
+          (m.type ?? m.role) === "assistant" &&
+          !baseline.has(String(m.id)) &&
+          (m.time as Json | undefined)?.completed,
       );
-      if (fresh.length) return fresh[fresh.length - 1]!;
+      const turnLooksDone =
+        newest &&
+        (newest.type ?? newest.role) === "assistant" &&
+        (newest.time as Json | undefined)?.completed &&
+        newAssistants.length > 0;
+      if (turnLooksDone) {
+        // Errors are terminal immediately; otherwise require stability
+        // across two polls so multi-step turns aren't cut short.
+        if (newest!.finish === "error" || newest!.error) return newest!;
+        if (stableId === String(newest!.id)) return newest!;
+        stableId = String(newest!.id);
+      } else {
+        stableId = null;
+      }
       await new Promise((r) => setTimeout(r, 3000));
     }
     return null;
@@ -353,7 +378,7 @@ export class OpenCodeAdapter extends AdapterBase {
     try {
       const sid = await this.ensureSession();
       const baseline = new Set(
-        (await this.listAssistants(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
+        (await this.listMessages(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
       );
       // No per-prompt system field in the API, so the handoff briefing is
       // prepended to the first turn, clearly delimited.
