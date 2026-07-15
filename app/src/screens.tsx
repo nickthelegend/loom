@@ -71,16 +71,26 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
   };
 
   return (
-    <View style={{ flex: 1, justifyContent: "center", padding: 24, gap: 12 }}>
-      <Text style={{ color: T.text, fontSize: 34, fontFamily: T.mono, fontWeight: "700", textAlign: "center" }}>
-        lo<Text style={{ color: T.accent }}>om</Text>
+    <View style={{ flex: 1, justifyContent: "center", padding: 26, gap: 14 }}>
+      <Text
+        style={{
+          color: T.text,
+          fontSize: 42,
+          fontFamily: T.mono,
+          fontWeight: "700",
+          textAlign: "center",
+          letterSpacing: 2,
+        }}
+      >
+        lo<Text style={{ color: T.thread }}>om</Text>
       </Text>
-      <Text style={{ color: T.dim, textAlign: "center", marginBottom: 8 }}>
-        one thread · every agent
+      <View style={{ height: 2, width: 64, alignSelf: "center", backgroundColor: T.thread, opacity: 0.85, borderRadius: 2 }} />
+      <Text style={{ color: T.dim, textAlign: "center", fontSize: 14, lineHeight: 21, marginBottom: 4 }}>
+        the shared-memory layer for your AI dev environments
       </Text>
-      <Text style={{ color: T.dim, fontSize: 13 }}>
+      <Text style={{ color: T.faint, fontSize: 12.5, textAlign: "center", lineHeight: 19 }}>
         On your computer: loom up --tailnet, then loom pair. Enter the daemon URL and the
-        pairing token (or paste the whole link into either box).
+        pairing token — or paste the whole link into either box.
       </Text>
       <TextInput
         style={field}
@@ -100,8 +110,8 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         placeholder="pairing token"
         placeholderTextColor={T.dim}
       />
-      {err && <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text>}
-      <Btn label="Pair this phone" primary onPress={go} />
+      {err && <Text style={{ color: T.err, fontSize: 13, textAlign: "center" }}>{err}</Text>}
+      <Btn label="Pair this device" primary onPress={go} />
     </View>
   );
 }
@@ -136,11 +146,31 @@ export function BoardScreen(props: {
 
   return (
     <View style={{ flex: 1 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", padding: 14, gap: 10 }}>
-        <Text style={{ color: T.text, fontFamily: T.mono, fontWeight: "700", fontSize: 18 }}>
-          lo<Text style={{ color: T.accent }}>om</Text>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 16,
+          paddingTop: 14,
+          paddingBottom: 14,
+          gap: 11,
+          borderBottomWidth: 1,
+          borderBottomColor: T.line,
+        }}
+      >
+        <View>
+          <Text style={{ color: T.text, fontFamily: T.mono, fontWeight: "700", fontSize: 19, letterSpacing: 0.5 }}>
+            lo<Text style={{ color: T.thread }}>om</Text>
+          </Text>
+          <View
+            style={{ height: 2, marginTop: 2, borderRadius: 2, backgroundColor: T.threadDim, opacity: 0.7 }}
+          />
+        </View>
+        <Text
+          style={{ color: T.faint, fontSize: 11, fontFamily: T.mono, letterSpacing: 1, textTransform: "uppercase" }}
+        >
+          projects
         </Text>
-        <Text style={{ color: T.dim, fontSize: 12 }}>projects</Text>
         <View style={{ flex: 1 }} />
         <Btn small label="unpair" onPress={props.onUnpair} />
       </View>
@@ -167,32 +197,57 @@ export function BoardScreen(props: {
           return (
             <TouchableOpacity
               onPress={() => props.onOpen(p)}
+              activeOpacity={0.85}
               style={{
                 backgroundColor: T.panel,
                 borderColor: T.line,
                 borderWidth: 1,
                 borderRadius: 14,
-                padding: 14,
+                paddingTop: 15,
+                paddingBottom: 14,
+                paddingHorizontal: 16,
+                overflow: "hidden",
               }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              {/* top thread-line — the loom's warp edge */}
+              <View
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 16,
+                  right: 16,
+                  height: 1,
+                  backgroundColor: T.threadDim,
+                  opacity: 0.7,
+                }}
+              />
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <View
                   style={{
                     width: 8,
                     height: 8,
                     borderRadius: 4,
-                    backgroundColor: p.needsInput ? T.warn : "#3d475d",
+                    backgroundColor: p.needsInput ? T.warn : "#3a4557",
                   }}
                 />
-                <Text style={{ color: T.text, fontWeight: "600", fontSize: 16 }}>{p.name}</Text>
+                <Text style={{ color: T.text, fontWeight: "600", fontSize: 15.5 }}>{p.name}</Text>
                 {active && (
-                  <Text style={{ color: T.accent, fontSize: 11, marginLeft: "auto" }}>
+                  <Text
+                    style={{
+                      color: T.thread,
+                      fontSize: 11,
+                      fontFamily: T.mono,
+                      marginLeft: "auto",
+                    }}
+                  >
                     ➤ {r!.name ?? "route"} {r!.current + 1}
                     {r!.status === "waiting_human" ? " ⏸" : ""}
                   </Text>
                 )}
               </View>
-              <Text style={{ color: T.dim, fontSize: 12.5, marginTop: 3 }}>
+              <Text
+                style={{ color: T.dim, fontSize: 12.5, fontFamily: T.mono, marginTop: 5 }}
+              >
                 baton: {p.holder ?? "—"}
                 {p.costUsd ? ` · ${usd(p.costUsd)}` : ""}
                 {p.needsInput ? " · needs input" : ""}

@@ -1,23 +1,42 @@
-/** Same palette as the daemon-served web app — one visual language. */
+/** Loom's weave identity — same design language as the daemon-served web app. */
 export const T = {
-  bg: "#0b0e14",
-  panel: "#131826",
-  line: "#1e2436",
-  text: "#dbe2f0",
-  dim: "#7c88a1",
-  accent: "#67e8f9",
-  accentDark: "#06121a",
-  warn: "#fbbf24",
-  err: "#f87171",
+  // surfaces
+  bg: "#0a0d13",
+  ink2: "#0c1017",
+  panel: "#111725",
+  panel2: "#161d2c",
+  line: "#1f2838",
+  line2: "#2a3446",
+  // text
+  text: "#e6ecf6",
+  dim: "#8a97ad",
+  faint: "#57627a",
+  // accents — thread (live/primary) + shuttle (baton)
+  thread: "#67e8f9",
+  threadDim: "#2b525e",
+  shuttle: "#e879f9",
+  // signals
   ok: "#4ade80",
-  mag: "#e879f9",
+  warn: "#fbbf24",
+  err: "#fb7185",
   mono: "Menlo",
+  // legacy aliases kept so existing components don't churn
+  accent: "#67e8f9",
+  accentDark: "#04141a",
+  mag: "#e879f9",
 } as const;
 
 export function hue(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return `hsl(${h}, 60%, 70%)`;
+  return `hsl(${h}, 65%, 72%)`;
+}
+
+/** A dimmer variant of an agent's thread color, for selvage edges. */
+export function selvage(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+  return `hsl(${h}, 50%, 52%)`;
 }
 
 export function usd(n?: number): string {

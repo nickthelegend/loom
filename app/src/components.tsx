@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import type { LoomEvent } from "./api";
-import { T, hue } from "./theme";
+import { T, hue, selvage } from "./theme";
 
 export function Btn(props: {
   label: string;
@@ -39,7 +39,16 @@ export function Btn(props: {
 
 export function Sys(props: { text: string; color?: string }) {
   return (
-    <Text style={{ color: props.color ?? T.dim, fontSize: 12, textAlign: "center", marginVertical: 6 }}>
+    <Text
+      style={{
+        color: props.color ?? T.dim,
+        fontSize: 12,
+        fontFamily: T.mono,
+        textAlign: "center",
+        marginVertical: 8,
+        letterSpacing: 0.2,
+      }}
+    >
       {props.text}
     </Text>
   );
@@ -93,23 +102,40 @@ export function EventLine(props: { e: LoomEvent }) {
     }
     const mine = !e.agentId;
     return (
-      <View style={{ alignItems: mine ? "flex-end" : "flex-start", marginVertical: 4 }}>
+      <View style={{ alignItems: mine ? "flex-end" : "flex-start", marginVertical: 5 }}>
         {!mine && (
-          <Text style={{ color: hue(author), fontSize: 11, marginBottom: 2, marginHorizontal: 6 }}>
+          <Text
+            style={{
+              color: hue(author),
+              fontSize: 11,
+              fontFamily: T.mono,
+              marginBottom: 3,
+              marginHorizontal: 4,
+              letterSpacing: 0.4,
+            }}
+          >
             {author}
           </Text>
         )}
         <View
           style={{
-            maxWidth: "86%",
-            backgroundColor: mine ? "#1b2a3a" : T.panel,
-            borderColor: mine ? "#24405c" : T.line,
+            maxWidth: "88%",
+            backgroundColor: mine ? "#102430" : T.panel,
+            borderColor: mine ? T.threadDim : T.line,
             borderWidth: 1,
-            borderRadius: 14,
-            padding: 10,
+            // agent messages carry a selvage edge in their own thread color
+            borderLeftWidth: mine ? 1 : 2,
+            borderLeftColor: mine ? T.threadDim : selvage(author),
+            borderRadius: 13,
+            borderBottomRightRadius: mine ? 4 : 13,
+            borderBottomLeftRadius: mine ? 13 : 4,
+            paddingVertical: 10,
+            paddingHorizontal: 13,
           }}
         >
-          <Text style={{ color: T.text, fontSize: 14 }}>{String(p.text ?? "")}</Text>
+          <Text style={{ color: mine ? "#eafaff" : T.text, fontSize: 14.5, lineHeight: 21 }}>
+            {String(p.text ?? "")}
+          </Text>
         </View>
       </View>
     );
@@ -145,7 +171,7 @@ export function EventLine(props: { e: LoomEvent }) {
   if (e.kind === "tool_call") return <Sys text={`⚙ ${String(p.summary ?? p.tool ?? "tool")}`} />;
   if (e.kind === "file_edit") return <Sys text={`✎ ${String(p.path ?? "")}`} />;
   if (e.kind === "handoff")
-    return <Sys color={T.mag} text={`⟶ baton: ${String(p.from ?? "—")} → ${String(p.to ?? "—")}`} />;
+    return <Sys color={T.shuttle} text={`${String(p.from ?? "—")}  ⟿  ${String(p.to ?? "—")}`} />;
   if (e.kind === "needs_input")
     return <Sys color={T.warn} text={`⏸ ${e.agentId} asks: ${String(p.question ?? "")}`} />;
   if (e.kind === "suggestion") return <Sys color={T.warn} text={`💡 ${String(p.reason ?? "")}`} />;
