@@ -100,6 +100,31 @@ export abstract class BridgeBase extends AgentBase implements Bridge {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Env for spawning agent CLIs. When Loom itself runs inside a Claude Code
+ * session (CLAUDECODE=1), the environment carries session-internal plumbing
+ * (CLAUDE_CODE_*, a session-scoped ANTHROPIC_BASE_URL, …) that breaks nested
+ * agent spawns — strip it so child agents auth like a fresh terminal.
+ */
+export function agentEnv(): NodeJS.ProcessEnv {
+  if (!process.env.CLAUDECODE) return process.env;
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (
+      key === "CLAUDECODE" ||
+      key.startsWith("CLAUDE_CODE_") ||
+      key === "CLAUDE_AGENT_SDK_VERSION" ||
+      key === "CLAUDE_EFFORT" ||
+      key === "ANTHROPIC_BASE_URL" ||
+      key === "BAGGAGE" ||
+      key === "AI_AGENT"
+    ) {
+      delete env[key];
+    }
+  }
+  return env;
+}
+
 /** Is a CLI on PATH (exit 0 for `--version`)? */
 export function cliAvailable(cmd: string, args: string[] = ["--version"]): Promise<boolean> {
   return new Promise((resolve) => {

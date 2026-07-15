@@ -6,6 +6,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { agentEnv } from "../adapters/base.js";
 
 export interface ClaudeCliOptions {
   /** Model alias or id; small+fast is right for internal jobs. */
@@ -26,7 +27,7 @@ export function claudeText(prompt: string, opts: ClaudeCliOptions = {}): Promise
         opts.model ?? "haiku",
         "--no-session-persistence",
       ],
-      { stdio: ["ignore", "pipe", "ignore"] },
+      { stdio: ["ignore", "pipe", "ignore"], env: agentEnv() },
     );
     let out = "";
     const timer = setTimeout(() => {

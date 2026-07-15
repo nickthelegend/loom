@@ -13,7 +13,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import readline from "node:readline";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, cliAvailable } from "./base.js";
+import { AdapterBase, agentEnv, cliAvailable } from "./base.js";
 
 interface ClaudeOptions {
   /** claude permission mode for baton turns; default "acceptEdits". */
@@ -80,7 +80,7 @@ export class ClaudeCodeAdapter extends AdapterBase {
         const child = spawn("claude", args, {
           cwd: this.projectDir,
           stdio: ["ignore", "pipe", "pipe"],
-          env: process.env,
+          env: agentEnv(),
         });
         this.child = child;
         let lastAssistantText = "";

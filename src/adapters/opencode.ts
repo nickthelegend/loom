@@ -14,7 +14,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, cliAvailable, fetchJson, freePort, waitFor } from "./base.js";
+import { AdapterBase, agentEnv, cliAvailable, fetchJson, freePort, waitFor } from "./base.js";
 
 interface OpenCodeOptions {
   /** Reuse an already-running server instead of spawning one. */
@@ -66,7 +66,7 @@ export class OpenCodeAdapter extends AdapterBase {
       const child = spawn(
         "opencode",
         ["serve", "--port", String(port), "--hostname", "127.0.0.1", ...(this.options.extraArgs ?? [])],
-        { cwd: this.projectDir, stdio: "ignore", env: process.env },
+        { cwd: this.projectDir, stdio: "ignore", env: agentEnv() },
       );
       this.child = child;
       child.on("close", (code) => {
