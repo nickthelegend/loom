@@ -493,6 +493,30 @@ program
 // ---------------------------------------------------------------------------
 
 program
+  .command("doctor")
+  .description("diagnose the environment, daemon, and current project")
+  .action(async () => {
+    const { envChecks, projectChecks } = await import("./doctor.js");
+    const checks = await envChecks();
+    const dir = currentProjectDir();
+    if (dir) checks.push(...projectChecks(dir));
+    else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
+
+    let failures = 0;
+    for (const c of checks) {
+      const icon =
+        c.status === "ok" ? pc.green("✓") : c.status === "warn" ? pc.yellow("⚠") : pc.red("✗");
+      if (c.status === "fail") failures++;
+      console.log(` ${icon} ${pc.bold(c.name.padEnd(8))} ${c.status === "ok" ? pc.dim(c.detail) : c.detail}`);
+    }
+    if (failures) {
+      console.log(pc.red(`\n${failures} problem${failures > 1 ? "s" : ""} found`));
+      process.exit(1);
+    }
+    console.log(pc.green("\nall clear"));
+  });
+
+program
   .command("clients")
   .description("list paired devices, or revoke one")
   .option("--revoke <id>", "revoke a paired device's access")
