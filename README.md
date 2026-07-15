@@ -87,8 +87,9 @@ loom               # opens the TUI — one full-screen thread over every agent
 
 **`tab` shifts the active agent/IDE** — claude-code → opencode → back. The handoff
 (interrupt-safe, memory projected, briefing armed) happens when you hit enter, so
-switching is one keystroke, not a ceremony. `esc` interrupts, `/help` lists commands
-(`/route`, `/handoff`, `/agents`, `/decision`, `/pair` — QR right in the terminal).
+switching is one keystroke, not a ceremony. **`ctrl+p` opens the command palette**
+(fuzzy-filtered: shift to any agent, launch a named route, decision, interrupt, pair…).
+`esc` interrupts, `/help` lists the slash commands.
 
 Prefer plain line-mode (SSH, scripts)? `loom chat` is the same thread as a classic REPL,
 and every action also exists as a one-shot command (`loom send`, `loom handoff`, …).
@@ -173,6 +174,32 @@ agents without a stable API can't be trusted with interrupt-safe writes. See
   handoff. Ghost holders (agent removed from config) self-heal.
 - **Daemon** — one process, many projects. REST for commands, WebSocket for the live
   stream. Config edits hot-reload when the project is quiet.
+
+## Your phone (Android today, over Tailscale)
+
+The daemon serves a full phone app at `/app` — board, live thread, agent chips, routes.
+No app store, no build step; it ships inside Loom.
+
+```bash
+loom up --tailnet     # daemon binds to your Tailscale IP (never 0.0.0.0)
+loom pair             # QR appears in the terminal
+```
+
+Scan the QR with your phone camera (phone must be on your tailnet — install the
+Tailscale app and sign in). The link opens `…/app#pair=<token>`; the app claims the
+**single-use, 10-minute** pairing token from the URL fragment (fragments never hit the
+network log) and exchanges it for its own client token. Then:
+
+- **Board** — every project, needs-input dots, baton holder, live route progress.
+- **Thread** — the same shared conversation, streaming over WebSocket.
+- **Agent chips** — tap `opencode`, hit send: baton shifts (projection + briefing
+  included), exactly like `tab` in the TUI.
+- **Routes** — banner with step progress; when a route pauses on a question, answer
+  from your phone and it resumes.
+- Chrome menu → *Add to Home screen* installs it like an app.
+
+A native app (push notifications) stays on the roadmap — this is the same daemon API
+it will use.
 
 ## Security model
 

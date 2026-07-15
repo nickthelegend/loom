@@ -221,9 +221,9 @@ export const APP_HTML = `<!doctype html>
       '<button id="stop" title="interrupt">&#9632;</button></header>' +
       '<div class="chips" id="chips"></div>' +
       '<main><div id="routebar"></div><div id="feed"><div class="sys">loading&hellip;</div></div></main>' +
-      '<div class="composer"><div class="inner">' +
+      '<div class="composer"><form class="inner" id="cform">' +
       '<input id="box" placeholder="Message&hellip;" autocomplete="off">' +
-      '<button class="primary" id="send">&#10148;</button></div>' +
+      '<button class="primary" id="send" type="submit">&#10148;</button></form>' +
       '<div class="hint" id="hint"></div></div>';
     document.getElementById("back").onclick = function(){ location.hash = ""; };
     document.getElementById("stop").onclick = function(){
@@ -318,9 +318,8 @@ export const APP_HTML = `<!doctype html>
         return api("/api/projects/" + pid + "/messages", { method: "POST", body: JSON.stringify({ text: text, agentId: state.selected || undefined }) });
       }).then(refresh).catch(function(err){ toast(err.message); });
     }
-    document.getElementById("send").onclick = send;
-    document.getElementById("box").addEventListener("keydown", function(ev){
-      if (ev.key === "Enter") { ev.preventDefault(); send(); }
+    document.getElementById("cform").addEventListener("submit", function(ev){
+      ev.preventDefault(); send();
     });
   }
 
