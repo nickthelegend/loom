@@ -6,8 +6,6 @@
  * shared thread per project: one conversation, one baton, shared memory.
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -15,7 +13,6 @@ import { Command } from "commander";
 import pc from "picocolors";
 import qrcode from "qrcode-terminal";
 import type { LoomEvent, ProjectStatus } from "../types.js";
-import { findProject } from "../core/registry.js";
 import {
   DaemonClient,
   DaemonError,
@@ -24,6 +21,7 @@ import {
   stopDaemon,
 } from "../daemon/client.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
+import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
 import { formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
 
 const program = new Command();
@@ -42,29 +40,13 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-/** Walk up from cwd to the nearest directory containing .loom/config.json. */
-function currentProjectDir(): string | null {
-  let dir = process.cwd();
-  for (;;) {
-    if (fs.existsSync(path.join(dir, ".loom", "config.json"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
 async function currentProject(client: DaemonClient): Promise<ProjectStatus> {
-  const dir = currentProjectDir();
-  if (!dir) fail("no Loom project here — run `loom init` in your project directory");
-  let info = findProject(dir);
-  if (!info) {
-    // Directory has .loom but isn't registered (e.g. cloned repo) — register.
-    await client.addProject(dir);
-    info = findProject(dir);
+  try {
+    return await resolveCurrentProject(client);
+  } catch (err) {
+    if (err instanceof NoProjectError) fail(err.message);
+    throw err;
   }
-  if (!info) fail(`could not register project at ${dir}`);
-  const { project } = await client.project(info.id);
-  return project;
 }
 
 function confirm(question: string): Promise<boolean> {
@@ -81,6 +63,21 @@ function printEvent(e: LoomEvent): void {
   const line = formatEvent(e);
   if (line) console.log(line);
 }
+
+// ---------------------------------------------------------------------------
+// tui — the default face of loom (bare `loom` lands here)
+// ---------------------------------------------------------------------------
+
+program
+  .command("tui", { isDefault: true })
+  .description("full-screen TUI: one thread, tab shifts agents (default command)")
+  .action(async () => {
+    if (!process.stdout.isTTY || !process.stdin.isTTY) {
+      fail("the loom TUI needs a TTY — use `loom chat`, `loom send`, or `loom log` here");
+    }
+    const { runTui } = await import("./tui.js");
+    await runTui();
+  });
 
 // ---------------------------------------------------------------------------
 // daemon / up / down / status
