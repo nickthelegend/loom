@@ -30,6 +30,7 @@ import {
   type WorkingTree,
 } from "./api";
 import { Btn, DiffView, EventLine, Sys } from "./components";
+import { useStt } from "./stt";
 import { T, usd } from "./theme";
 
 const field = {
@@ -222,6 +223,12 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
   const lastId = useRef(0);
   const listRef = useRef<FlatList<LoomEvent>>(null);
 
+  // Voice input: dictation appends to whatever is already typed.
+  const sttBase = useRef("");
+  const stt = useStt((transcript) => {
+    setText(sttBase.current ? `${sttBase.current} ${transcript}` : transcript);
+  });
+
   // History + live WS.
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -281,9 +288,11 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
   }, [tab]);
 
   const send = async () => {
+    if (stt.listening) void stt.toggle(); // stop dictation on send
     const message = text.trim();
     if (!message) return;
     setText("");
+    sttBase.current = "";
     setErr(null);
     try {
       if (selected && selected !== project.holder) await handoff(creds, project.id, selected);
@@ -382,20 +391,44 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
               );
             })}
           </ScrollView>
-          <View style={{ flexDirection: "row", gap: 8, padding: 10 }}>
+          <View style={{ flexDirection: "row", gap: 8, padding: 10, alignItems: "center" }}>
             <TextInput
               style={{ ...field, flex: 1, paddingVertical: 10 }}
               value={text}
               onChangeText={setText}
               placeholder={
-                selected && selected !== project.holder
-                  ? `send shifts baton to ${selected}`
-                  : "Message…"
+                stt.listening
+                  ? "listening…"
+                  : selected && selected !== project.holder
+                    ? `send shifts baton to ${selected}`
+                    : "Message…"
               }
-              placeholderTextColor={T.dim}
+              placeholderTextColor={stt.listening ? T.err : T.dim}
               onSubmitEditing={send}
               returnKeyType="send"
             />
+            {stt.available && (
+              <TouchableOpacity
+                onPress={() => {
+                  sttBase.current = text.trim();
+                  void stt.toggle().then((ok) => {
+                    if (!ok) setErr("microphone permission needed for voice input");
+                  });
+                }}
+                style={{
+                  backgroundColor: stt.listening ? T.err : T.panel,
+                  borderColor: stt.listening ? T.err : T.line,
+                  borderWidth: 1,
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                }}
+              >
+                <Text style={{ color: stt.listening ? "#fff" : T.text, fontSize: 15 }}>
+                  {stt.listening ? "◉" : "🎙"}
+                </Text>
+              </TouchableOpacity>
+            )}
             <Btn primary label="➤" onPress={send} />
           </View>
         </>

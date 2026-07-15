@@ -16,6 +16,15 @@
     },
     "android": {
       "package": "dev.loom.app"
-    }
+    },
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Loom uses the microphone for voice input",
+          "speechRecognitionPermission": "Loom converts your speech to text so you can dictate messages"
+        }
+      ]
+    ]
   }
 }
