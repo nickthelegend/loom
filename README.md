@@ -40,6 +40,9 @@ Loom fixes the seam:
   explicit, confirmed, and interrupt-safe.
 - **Roles** — declare a planner / executor / reviewer; Loom *suggests* handoffs at
   natural boundaries ("plan looks complete — hand to the executor?"). You confirm.
+- **Routes** — or let Loom drive the chain: `loom route ship "add dark mode"` runs
+  plan → execute → review as one command, pausing (and notifying you) whenever an agent
+  has a question, resuming when you answer.
 - **Fire-and-notify** — agents run in the background across many projects; Loom notifies
   you when one finishes or needs input.
 - **Phone-ready** — bind the daemon to your Tailscale interface, pair a device with a
@@ -78,6 +81,39 @@ opencode …executes with full knowledge of the plan…
 `@agent message` addresses a specific agent (Loom asks before moving the baton — it will
 interrupt in-flight work). `/decision <text>` pins a fact into shared memory forever.
 
+## Routing — multi-hop pipelines
+
+Handoffs are unlimited and manual by default. **Routes** automate a chain of them:
+
+```bash
+loom route ship "add a dark-mode toggle"          # named pipeline from config
+loom route planner,executor "fix the flaky test"  # ad-hoc: roles…
+loom route claude-code,opencode,claude-code "…"   # …or agent ids, any length
+```
+
+What happens per hop: interrupt-safe **handoff** → shared-memory **projection** →
+**briefing** → the step's role instruction. Then:
+
+- step finishes cleanly → Loom advances to the next agent automatically;
+- the agent asks a question → the route **pauses** (`waiting_human`), you get a
+  notification, `loom route --status` and the board show the question; you answer in
+  the shared thread (`loom send "…"`) and the route **resumes by itself**;
+- an agent errors or a step times out (45 min default) → the route fails loudly;
+- **you always outrank the route**: any manual `handoff`/`interrupt` cancels it, and
+  `loom route --abort` stops it and interrupts the in-flight turn.
+
+`--detach` returns immediately (fire-and-notify); following with Ctrl-C also leaves the
+route running server-side. One route per project at a time (the baton is one write
+lock); run routes across *different* projects in parallel freely.
+
+Define named pipelines in `.loom/config.json` (steps are roles or agent ids):
+
+```json
+"routes": { "ship": ["planner", "executor", "reviewer"] }
+```
+
+`loom init` seeds a `ship` route automatically when it detects at least two roles.
+
 ## Commands
 
 | Command | What it does |
@@ -86,7 +122,9 @@ interrupt in-flight work). `/decision <text>` pins a fact into shared memory for
 | `loom chat` | Interactive shared thread (`/handoff`, `/interrupt`, `/decision`, `@agent`) |
 | `loom send <text>` | One-shot message (`-a <agent>` to address someone specific) |
 | `loom handoff <agent>` | Pass the baton — interrupts, projects memory, briefs the target |
-| `loom interrupt` | Stop the current holder's turn |
+| `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
+| `loom routes` | List named pipelines defined for this project |
+| `loom interrupt` | Stop the current holder's turn (cancels an active route) |
 | `loom decision <text>` | Record a decision into shared memory |
 | `loom log [-f]` | Show (or follow) the project event log |
 | `loom agents` / `loom projects` / `loom status` | Who's who, board of projects, daemon health |
@@ -175,7 +213,8 @@ with its why: [ARCHITECTURE.md](ARCHITECTURE.md).
     { "id": "antigravity", "kind": "antigravity", "role": "general",
       "options": { "debugPort": 9222 } }
   ],
-  "defaultAgent": "claude-code"
+  "defaultAgent": "claude-code",
+  "routes": { "ship": ["planner", "executor", "planner"] }
 }
 ```
 
@@ -195,7 +234,8 @@ npm run dev       # run the CLI from source (tsx)
 
 - **v1.5** — native iOS app (React Native): live thread, push on *needs input / done*,
   QR pairing against the same daemon API.
-- Auto-routing on top of roles (suggestions already ship; autonomy is opt-in later).
+- Dynamic routing (an LLM picks the next hop from results) on top of the shipped
+  pipeline engine.
 - LLM-synthesized projections behind the same interface.
 - More adapters/bridges via the SDK — contributions welcome.
 

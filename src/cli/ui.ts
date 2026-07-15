@@ -27,7 +27,14 @@ export function formatEvent(e: LoomEvent): string | null {
   switch (e.kind) {
     case "message": {
       const text = String(e.payload.text ?? "");
-      if (!e.agentId) return `${pc.dim(timeShort(e.ts))} ${pc.bold("you")} ${text}`;
+      if (!e.agentId) {
+        const author = String(e.payload.author ?? "you");
+        if (author === "loom") {
+          // Route-generated instructions: show compactly, not as the human.
+          return pc.dim(`${timeShort(e.ts)} loom ⟶ ${text.split("\n")[0] ?? ""}`);
+        }
+        return `${pc.dim(timeShort(e.ts))} ${pc.bold("you")} ${text}`;
+      }
       return `${pc.dim(timeShort(e.ts))} ${paint(pc.bold(who))} ${text}`;
     }
     case "tool_call":
