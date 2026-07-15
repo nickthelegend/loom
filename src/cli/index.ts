@@ -352,6 +352,36 @@ program
     console.log(pc.dim(interrupted ? `interrupted ${interrupted}` : "nothing running"));
   });
 
+const memoryCmd = program
+  .command("memory")
+  .description("the unified brain — one memory across every connected ADE")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { memory } = await client.memory(project.id);
+    console.log(memory.document);
+    console.log(
+      pc.dim(
+        `\n${memory.sources.length} ADE memory source(s), ${memory.decisions.length} decision(s)` +
+          (memory.sources.length ? " · " + memory.sources.map((s) => s.file).join(", ") : ""),
+      ),
+    );
+  });
+
+memoryCmd
+  .command("import")
+  .description("pull each connected ADE's native memory into the shared brain")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { imported, sources } = await client.importMemory(project.id);
+    console.log(
+      imported
+        ? pc.green(`✓ imported ${imported} memory source(s): ${sources.join(", ")}`)
+        : pc.dim("shared brain already current — nothing new to import"),
+    );
+  });
+
 program
   .command("costs")
   .description("what this project has spent, per agent")

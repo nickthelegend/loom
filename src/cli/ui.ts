@@ -75,6 +75,10 @@ export function formatEvent(e: LoomEvent): string | null {
     }
     case "decision":
       return pc.blue(`  ★ decision: ${String(e.payload.text ?? "")}`);
+    case "memory_import":
+      return pc.blue(
+        `  🧠 memory: imported ${String(e.payload.file ?? "")} from ${who} into the shared brain`,
+      );
     case "route_started": {
       const steps = (e.payload.steps as string[] | undefined) ?? [];
       const name = e.payload.name ? ` "${String(e.payload.name)}"` : "";

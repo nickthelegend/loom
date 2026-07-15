@@ -8,6 +8,7 @@ export * from "./types.js";
 export { EventLog } from "./core/eventlog.js";
 export { BatonManager, NotHolderError } from "./core/baton.js";
 export { buildBriefing, buildProjection } from "./core/projection.js";
+export { buildUnifiedMemory, readNativeMemory, nativeMemoryFiles } from "./core/memory.js";
 export { suggestHandoff } from "./core/suggestions.js";
 export { RouteEngine, RouteActiveError, resolveSteps, stepName } from "./core/routes.js";
 export { rulesRouter, llmRouter } from "./core/router.js";

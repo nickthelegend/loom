@@ -337,6 +337,20 @@ export class LoomDaemon {
       }),
     );
 
+    app.get(
+      "/api/projects/:id/memory",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ memory: rt.unifiedMemory() });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/memory/import",
+      withRuntime(async (rt, _req, res) => {
+        res.json(rt.importMemories());
+      }),
+    );
+
     app.delete(
       "/api/projects/:id/route",
       withRuntime(async (rt, _req, res) => {

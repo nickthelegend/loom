@@ -15,6 +15,7 @@ import type {
   ProjectInfo,
   ProjectStatus,
   SendInput,
+  UnifiedMemory,
 } from "../types.js";
 import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
 import { isAdapter } from "../types.js";
@@ -22,6 +23,12 @@ import { createAgent } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { EventLog } from "../core/eventlog.js";
 import { renderProjection } from "../core/distill.js";
+import {
+  buildUnifiedMemory,
+  hashContent,
+  readNativeMemory,
+  type ImportedBlock,
+} from "../core/memory.js";
 import { notify } from "../core/notify.js";
 import { RouteEngine } from "../core/routes.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
@@ -88,6 +95,12 @@ export class ProjectRuntime {
     const rt = new ProjectRuntime(info, config, log);
     rt.configMtime = configMtimeOf(info.dir);
     rt.rehydrateCosts();
+    // Pull each connected ADE's native memory into the shared brain on open.
+    try {
+      rt.importMemories();
+    } catch {
+      // Memory import is best-effort; never block opening a project.
+    }
     return rt;
   }
 
@@ -190,6 +203,46 @@ export class ProjectRuntime {
 
   workingTree(): Promise<WorkingTree> {
     return workingTree(this.info.dir);
+  }
+
+  // -------------------------------------------------------------------------
+  // Unified memory — "multiple memory in one"
+  // -------------------------------------------------------------------------
+
+  /** Freshly read every connected ADE's native memory from disk. */
+  private importedMemory(): ImportedBlock[] {
+    return readNativeMemory(this.info.dir, this.config);
+  }
+
+  /** The merged brain: decisions + imported ADE memories + shared context. */
+  unifiedMemory(): UnifiedMemory {
+    return buildUnifiedMemory(this.info.name, this.log.list(), this.importedMemory());
+  }
+
+  /**
+   * Pull each ADE's native memory into the shared log. Idempotent — a source
+   * whose content hasn't changed since its last import is skipped, so this is
+   * safe to call on connect, on demand, or on a timer.
+   */
+  importMemories(): { imported: number; sources: string[] } {
+    const seen = new Map<string, string>(); // file -> last imported hash
+    for (const e of this.log.list({ kinds: ["memory_import"] })) {
+      seen.set(String(e.payload.file), String(e.payload.hash));
+    }
+    const sources: string[] = [];
+    let imported = 0;
+    for (const block of this.importedMemory()) {
+      const hash = hashContent(block.content);
+      if (seen.get(block.file) === hash) continue;
+      this.log.append({
+        kind: "memory_import",
+        agentId: block.agentId,
+        payload: { file: block.file, kind: block.kind, chars: block.content.length, hash },
+      });
+      sources.push(block.file);
+      imported += 1;
+    }
+    return { imported, sources };
   }
 
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
@@ -350,6 +403,9 @@ export class ProjectRuntime {
       }
     }
 
+    // Refresh the shared brain from every ADE's native memory before handing
+    // off, so the incoming agent inherits what the others knew.
+    this.importMemories();
     const events = this.log.list({ limit: PROJECTION_WINDOW });
     const input = {
       projectName: this.info.name,
@@ -362,8 +418,15 @@ export class ProjectRuntime {
     // falling back to the template so a broken Claude never blocks a handoff.
     const distillStart = Date.now();
     const rendered = await renderProjection(input, this.config.projection);
-    await target.injectMemory(rendered.content);
-    writeMemoryFile(this.info.dir, to, rendered.content); // idempotent with default impl
+    // Append the unified cross-ADE memory so the incoming agent sees the
+    // whole brain, not just this project's log.
+    const unified = this.unifiedMemory();
+    const enriched =
+      unified.sources.length > 0
+        ? `${rendered.content}\n\n---\n${unified.document}`
+        : rendered.content;
+    await target.injectMemory(enriched);
+    writeMemoryFile(this.info.dir, to, enriched); // idempotent with default impl
     this.pendingBriefings.set(to, buildBriefing(input));
     if (rendered.mode === "llm") {
       this.log.append({

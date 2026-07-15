@@ -29,6 +29,7 @@ export type EventKind =
   | "route_completed"
   | "route_failed"
   | "turn_diff" // working-tree changes attributed to one agent turn
+  | "memory_import" // an ADE's native memory pulled into the shared brain
   | "status" // adapter/bridge lifecycle info
   | "error";
 
@@ -64,6 +65,24 @@ export interface AgentConfig {
   kind: string;
   role: AgentRole;
   options?: Record<string, unknown>;
+  /** Override the ADE's native memory files to import into the shared brain. */
+  memoryFiles?: string[];
+}
+
+/** One ADE's native memory pulled into the unified brain. */
+export interface MemorySource {
+  agentId: string;
+  kind: string;
+  file: string;
+  chars: number;
+}
+
+export interface UnifiedMemory {
+  projectName: string;
+  decisions: string[];
+  sources: MemorySource[];
+  /** The merged brain document (decisions + imported ADE memories + context). */
+  document: string;
 }
 
 /** A route step: an agent id/role, optionally with step-specific focus. */

@@ -8,3 +8,4 @@ coverage/
 *.db
 *.db-journal
 .env
+_references_/

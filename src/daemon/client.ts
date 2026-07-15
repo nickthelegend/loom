@@ -6,7 +6,14 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import type { CostSummary, LoomEvent, ProjectStatus, RouteState, RouteStepSpec } from "../types.js";
+import type {
+  CostSummary,
+  LoomEvent,
+  ProjectStatus,
+  RouteState,
+  RouteStepSpec,
+  UnifiedMemory,
+} from "../types.js";
 import {
   readDaemonConfig,
   type DaemonConfig,
@@ -132,6 +139,14 @@ export class DaemonClient {
 
   costs(id: string): Promise<{ costs: CostSummary }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/costs`);
+  }
+
+  memory(id: string): Promise<{ memory: UnifiedMemory }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/memory`);
+  }
+
+  importMemory(id: string): Promise<{ imported: number; sources: string[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/memory/import`, {});
   }
 
   tree(id: string): Promise<{
