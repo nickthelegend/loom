@@ -270,7 +270,7 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         const { task, spec, router, maxHops } = (req.body ?? {}) as {
           task?: string;
-          spec?: string | string[];
+          spec?: string | Array<string | { step: string; instruction?: string }>;
           router?: "rules" | "llm";
           maxHops?: number;
         };

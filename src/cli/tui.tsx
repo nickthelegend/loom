@@ -154,7 +154,12 @@ function App({ client, initial }: AppProps) {
             push(
               "",
               ...(entries.length
-                ? entries.map(([name, steps]) => `  ${pc.cyan(pc.bold(name))}  ${steps.join(" → ")}`)
+                ? entries.map(
+                    ([name, steps]) =>
+                      `  ${pc.cyan(pc.bold(name))}  ${steps
+                        .map((s) => (typeof s === "string" ? s : s.step))
+                        .join(" → ")}`,
+                  )
                 : [pc.dim("  no named routes — add them under \"routes\" in .loom/config.json")]),
               "",
             );

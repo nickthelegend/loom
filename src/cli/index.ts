@@ -483,7 +483,12 @@ program
       return;
     }
     for (const [name, steps] of Object.entries(routes)) {
-      console.log(`${pc.cyan(pc.bold(name))}  ${steps.join(" → ")}`);
+      const rendered = steps
+        .map((s) =>
+          typeof s === "string" ? s : `${s.step}${s.instruction ? pc.dim(` ("${s.instruction}")`) : ""}`,
+        )
+        .join(" → ");
+      console.log(`${pc.cyan(pc.bold(name))}  ${rendered}`);
     }
     console.log(pc.dim('\nrun one: loom route <name> "<task>" · ad-hoc: loom route a,b,c "<task>"'));
   });

@@ -23,6 +23,7 @@ import type {
   LoomEvent,
   ProjectConfig,
   RouteState,
+  RouteStepSpec,
   RouterKind,
 } from "../types.js";
 import type { EventLog } from "./eventlog.js";
@@ -52,29 +53,44 @@ export interface RouteHost {
   isAdapterId(id: string): boolean;
 }
 
-/** Resolve step specs (agent ids or roles) to concrete adapter ids. */
+export interface ResolvedSteps {
+  ids: string[];
+  /** Parallel to ids; null when the step carries no custom instruction. */
+  instructions: Array<string | null>;
+}
+
+export function stepName(spec: RouteStepSpec): string {
+  return typeof spec === "string" ? spec : spec.step;
+}
+
+/** Resolve step specs (ids/roles, optionally with instructions) to adapter ids. */
 export function resolveSteps(
-  spec: string[],
+  spec: RouteStepSpec[],
   config: ProjectConfig,
   isAdapterId: (id: string) => boolean,
-): string[] {
+): ResolvedSteps {
   if (!spec.length) throw new Error("a route needs at least one step");
-  return spec.map((step) => {
+  const ids: string[] = [];
+  const instructions: Array<string | null> = [];
+  for (const entry of spec) {
+    const step = stepName(entry);
     const byId = config.agents.find((a) => a.id === step);
     const byRole = config.agents.find((a) => a.role === step && isAdapterId(a.id));
     const cfg = byId ?? byRole;
     if (!cfg) {
-      throw new Error(
-        `route step "${step}" matches no agent id or role in this project`,
-      );
+      throw new Error(`route step "${step}" matches no agent id or role in this project`);
     }
     if (!isAdapterId(cfg.id)) {
       throw new Error(
         `route step "${step}" resolves to "${cfg.id}", a bridge — bridges never hold the baton`,
       );
     }
-    return cfg.id;
-  });
+    ids.push(cfg.id);
+    instructions.push(
+      typeof entry === "object" && entry.instruction?.trim() ? entry.instruction.trim() : null,
+    );
+  }
+  return { ids, instructions };
 }
 
 const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
@@ -139,18 +155,19 @@ export class RouteEngine {
   // Lifecycle
   // ---------------------------------------------------------------------
 
-  async start(spec: string[], task: string, name?: string): Promise<RouteState> {
+  async start(spec: RouteStepSpec[], task: string, name?: string): Promise<RouteState> {
     if (this.isActive()) throw new RouteActiveError();
-    const steps = resolveSteps(spec, this.host.config, this.host.isAdapterId);
-    const stepRoles = steps.map(
+    const resolved = resolveSteps(spec, this.host.config, this.host.isAdapterId);
+    const stepRoles = resolved.ids.map(
       (id) => this.host.config.agents.find((a) => a.id === id)!.role,
     );
     const route: RouteState = {
       id: newId(4),
       ...(name ? { name } : {}),
       task,
-      steps,
+      steps: resolved.ids,
       stepRoles,
+      stepInstructions: resolved.instructions,
       current: 0,
       status: "running",
       mode: "static",
@@ -160,7 +177,7 @@ export class RouteEngine {
     this.write(route);
     this.host.log.append({
       kind: "route_started",
-      payload: { routeId: route.id, name: name ?? null, mode: "static", steps, task },
+      payload: { routeId: route.id, name: name ?? null, mode: "static", steps: resolved.ids, task },
     });
     await this.beginStep(route);
     return this.read()!;
@@ -226,6 +243,7 @@ export class RouteEngine {
       this.host.config.agents.find((a) => a.id === decision.next)?.role ?? "general";
     r.steps.push(decision.next);
     r.stepRoles.push(role);
+    r.stepInstructions = [...(r.stepInstructions ?? []), null];
     r.current = r.steps.length - 1;
     r.reason = decision.reason;
     this.write(r);
@@ -402,7 +420,9 @@ export class RouteEngine {
       i === 0
         ? ""
         : "The previous step has completed; its full context was handed to you via the Loom briefing and .loom/memory.\n";
-    return `${header}\nTask: ${r.task}\n${continuity}${ROLE_INSTRUCTIONS[role] ?? ROLE_INSTRUCTIONS.general}`;
+    const custom = r.stepInstructions?.[i];
+    const focus = custom ? `\nStep-specific instructions: ${custom}` : "";
+    return `${header}\nTask: ${r.task}\n${continuity}${ROLE_INSTRUCTIONS[role] ?? ROLE_INSTRUCTIONS.general}${focus}`;
   }
 
   private finish(r: RouteState, status: "failed" | "aborted", reason: string): void {

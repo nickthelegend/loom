@@ -9,9 +9,11 @@ export { EventLog } from "./core/eventlog.js";
 export { BatonManager, NotHolderError } from "./core/baton.js";
 export { buildBriefing, buildProjection } from "./core/projection.js";
 export { suggestHandoff } from "./core/suggestions.js";
-export { RouteEngine, RouteActiveError, resolveSteps } from "./core/routes.js";
+export { RouteEngine, RouteActiveError, resolveSteps, stepName } from "./core/routes.js";
 export { rulesRouter, llmRouter } from "./core/router.js";
 export type { HopDecision, RouterContext } from "./core/router.js";
+export { renderProjection } from "./core/distill.js";
+export { claudeText } from "./core/claude-cli.js";
 export {
   listProjects,
   findProject,

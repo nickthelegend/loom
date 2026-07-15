@@ -65,13 +65,25 @@ export interface AgentConfig {
   options?: Record<string, unknown>;
 }
 
+/** A route step: an agent id/role, optionally with step-specific focus. */
+export type RouteStepSpec = string | { step: string; instruction?: string };
+
+/** How shared memory is rendered on handoff. */
+export interface ProjectionConfig {
+  /** "template" (default, free, instant) or "llm" (distilled by a small Claude). */
+  mode?: "template" | "llm";
+  model?: string;
+  timeoutMs?: number;
+}
+
 export interface ProjectConfig {
   name: string;
   agents: AgentConfig[];
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
-  /** Named multi-hop pipelines; steps are agent ids or roles. */
-  routes?: Record<string, string[]>;
+  /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */
+  routes?: Record<string, RouteStepSpec[]>;
+  projection?: ProjectionConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +102,8 @@ export interface RouteState {
   /** Resolved agent ids, in order. Dynamic routes grow this per hop. */
   steps: string[];
   stepRoles: AgentRole[];
+  /** Optional per-step focus text (parallel to steps; null = role default only). */
+  stepInstructions?: Array<string | null>;
   /** Index of the step currently executing (or last executed). */
   current: number;
   status: RouteStatus;

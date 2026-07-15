@@ -10,8 +10,8 @@
  * every decision lands in the event log with its reason.
  */
 
-import { spawn } from "node:child_process";
 import type { AgentRole } from "../types.js";
+import { claudeText } from "./claude-cli.js";
 
 export interface RouterAgent {
   id: string;
@@ -125,7 +125,7 @@ export async function llmRouter(
   opts: LlmRouterOptions = {},
 ): Promise<HopDecision> {
   try {
-    const raw = await claudeJson(routerPrompt(ctx), opts);
+    const raw = await claudeText(routerPrompt(ctx), opts);
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error("no JSON in router reply");
     const parsed = JSON.parse(match[0]) as { next?: string; reason?: string };
@@ -139,41 +139,3 @@ export async function llmRouter(
   }
 }
 
-function claudeJson(prompt: string, opts: LlmRouterOptions): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      "claude",
-      [
-        "-p",
-        prompt,
-        "--output-format",
-        "json",
-        "--model",
-        opts.model ?? "haiku",
-        "--no-session-persistence",
-      ],
-      { stdio: ["ignore", "pipe", "ignore"] },
-    );
-    let out = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error("router timed out"));
-    }, opts.timeoutMs ?? 45_000);
-    timer.unref?.();
-    child.stdout.on("data", (d: Buffer) => (out += d.toString()));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (code !== 0) return reject(new Error(`claude exited ${code}`));
-      try {
-        const wrapper = JSON.parse(out) as { result?: string };
-        resolve(String(wrapper.result ?? out));
-      } catch {
-        resolve(out);
-      }
-    });
-  });
-}

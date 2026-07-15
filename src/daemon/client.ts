@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
-import type { LoomEvent, ProjectStatus, RouteState } from "../types.js";
+import type { LoomEvent, ProjectStatus, RouteState, RouteStepSpec } from "../types.js";
 import {
   readDaemonConfig,
   type DaemonConfig,
@@ -111,7 +111,7 @@ export class DaemonClient {
   startRoute(
     id: string,
     task: string,
-    spec?: string | string[],
+    spec?: string | RouteStepSpec[],
     opts: { router?: "rules" | "llm"; maxHops?: number } = {},
   ): Promise<{ route: RouteState }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/route`, {

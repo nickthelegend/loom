@@ -53,17 +53,28 @@ describe("resolveSteps", () => {
   const isAdapter = (id: string) => id !== "ag";
 
   it("resolves ids and roles", () => {
-    expect(resolveSteps(["cc", "executor"], config, isAdapter)).toEqual(["cc", "oc"]);
-    expect(resolveSteps(["planner", "executor", "planner"], config, isAdapter)).toEqual([
+    expect(resolveSteps(["cc", "executor"], config, isAdapter).ids).toEqual(["cc", "oc"]);
+    expect(resolveSteps(["planner", "executor", "planner"], config, isAdapter).ids).toEqual([
       "cc",
       "oc",
       "cc",
     ]);
   });
 
+  it("resolves object steps and carries per-step instructions", () => {
+    const resolved = resolveSteps(
+      ["planner", { step: "executor", instruction: "only touch src/api" }, { step: "cc" }],
+      config,
+      isAdapter,
+    );
+    expect(resolved.ids).toEqual(["cc", "oc", "cc"]);
+    expect(resolved.instructions).toEqual([null, "only touch src/api", null]);
+  });
+
   it("rejects unknown steps and bridge steps", () => {
     expect(() => resolveSteps(["ghost"], config, isAdapter)).toThrow(/matches no agent/);
     expect(() => resolveSteps(["ag"], config, isAdapter)).toThrow(/bridge/);
+    expect(() => resolveSteps([{ step: "ag" }], config, isAdapter)).toThrow(/bridge/);
     expect(() => resolveSteps([], config, isAdapter)).toThrow(/at least one step/);
   });
 });
@@ -212,6 +223,41 @@ describe("routes end-to-end", () => {
     await waitUntil(async () => (await events(id, "route_completed")).length === 1);
     const { route } = await client.routeState(id);
     expect(route?.steps.length).toBeLessThanOrEqual(2);
+  });
+
+  it("per-step instructions from config reach exactly their step", async () => {
+    const { id } = await freshProject({
+      routes: {
+        focus: [
+          { step: "planner", instruction: "ONLY design the schema, nothing else" },
+          "executor",
+        ],
+      },
+    } as Partial<ProjectConfig>);
+    await client.startRoute(id, "ship the schema", "focus");
+    await waitUntil(async () => (await events(id, "route_completed")).length === 1);
+    const loomMessages = (await events(id, "message")).filter((m) => m.payload.author === "loom");
+    expect(loomMessages).toHaveLength(2);
+    expect(String(loomMessages[0]!.payload.text)).toContain(
+      "Step-specific instructions: ONLY design the schema",
+    );
+    expect(String(loomMessages[1]!.payload.text)).not.toContain("Step-specific instructions");
+  });
+
+  it("llm projection mode falls back to the template and never blocks a handoff", async () => {
+    const { dir, id } = await freshProject({
+      projection: { mode: "llm", model: "haiku", timeoutMs: 8000 },
+    } as Partial<ProjectConfig>);
+    // claude is unavailable/logged-out in test environments — the distiller
+    // must fall back to the template without failing the handoff.
+    await client.send(id, "hello");
+    await waitUntil(async () => (await events(id, "run_complete")).length >= 1);
+    await client.handoff(id, "execbot");
+    const memory = fs.readFileSync(path.join(dir, ".loom", "memory", "execbot.md"), "utf8");
+    expect(memory).toContain("# Loom shared context —");
+    expect(memory).toContain("execbot");
+    const { project } = await client.project(id);
+    expect(project.holder).toBe("execbot");
   });
 
   it("route instructions carry role guidance and step position", async () => {

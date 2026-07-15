@@ -94,6 +94,9 @@ export function formatEvent(e: LoomEvent): string | null {
       if (state === "turn_cost") {
         return pc.dim(`  · cost $${Number(e.payload.costUsd ?? 0).toFixed(4)}`);
       }
+      if (state === "projection") {
+        return pc.dim(`  · shared memory distilled by llm (${Number(e.payload.ms ?? 0)}ms)`);
+      }
       return null; // lifecycle noise stays out of the chat
     }
     default:

@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { readDaemonConfig, readProjectConfig, readProjectState } from "../core/registry.js";
-import { resolveSteps } from "../core/routes.js";
+import { resolveSteps, stepName } from "../core/routes.js";
 import { isAdapter, type AgentRole } from "../types.js";
 import { BUILD_REV } from "../daemon/server.js";
 
@@ -82,7 +82,7 @@ export function projectChecks(dir: string): Check[] {
   for (const [name, steps] of Object.entries(config.routes ?? {})) {
     try {
       resolveSteps(steps, config, (id) => adapterIds.has(id));
-      checks.push(ok("routes", `"${name}": ${steps.join(" → ")}`));
+      checks.push(ok("routes", `"${name}": ${steps.map(stepName).join(" → ")}`));
     } catch (err) {
       checks.push(fail("routes", `"${name}" is broken: ${err instanceof Error ? err.message : err}`));
     }

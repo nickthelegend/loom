@@ -14,11 +14,12 @@ import type {
   ProjectStatus,
   SendInput,
 } from "../types.js";
-import type { RouteState, RouterKind } from "../types.js";
+import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
 import { isAdapter } from "../types.js";
 import { createAgent } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { EventLog } from "../core/eventlog.js";
+import { renderProjection } from "../core/distill.js";
 import { notify } from "../core/notify.js";
 import { RouteEngine } from "../core/routes.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
@@ -265,13 +266,23 @@ export class ProjectRuntime {
       targetAgentId: to,
       fromAgentId: holder,
     };
-    const projection = buildProjection(input);
-    await target.injectMemory(projection);
-    writeMemoryFile(this.info.dir, to, projection); // idempotent with default impl
+    // Template by default; LLM-distilled when the project opts in — always
+    // falling back to the template so a broken Claude never blocks a handoff.
+    const distillStart = Date.now();
+    const rendered = await renderProjection(input, this.config.projection);
+    await target.injectMemory(rendered.content);
+    writeMemoryFile(this.info.dir, to, rendered.content); // idempotent with default impl
     this.pendingBriefings.set(to, buildBriefing(input));
+    if (rendered.mode === "llm") {
+      this.log.append({
+        kind: "status",
+        payload: { state: "projection", mode: "llm", ms: Date.now() - distillStart },
+      });
+    }
 
     // Bridges (GUI agents) are passive observers — keep their shared-context
     // files fresh on every hop so e.g. Antigravity always sees the weave.
+    // (Always template views: N bridges × LLM calls per hop would be waste.)
     for (const cfg of this.config.agents) {
       const bystander = this.agents.get(cfg.id);
       if (!bystander || isAdapter(bystander) || cfg.id === to) continue;
@@ -310,7 +321,7 @@ export class ProjectRuntime {
    */
   async startRoute(opts: {
     task: string;
-    spec?: string | string[];
+    spec?: string | RouteStepSpec[];
     router?: RouterKind;
     maxHops?: number;
   }): Promise<RouteState> {
@@ -320,7 +331,7 @@ export class ProjectRuntime {
         ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
       });
     }
-    let steps: string[] | undefined;
+    let steps: RouteStepSpec[] | undefined;
     let name: string | undefined;
     if (Array.isArray(opts.spec)) {
       steps = opts.spec;
