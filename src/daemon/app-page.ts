@@ -204,6 +204,12 @@ export const APP_HTML = `<!doctype html>
     }
     if (e.kind === "tool_call") return '<div class="tool">&#9881; ' + esc(p.summary || p.tool) + "</div>";
     if (e.kind === "file_edit") return '<div class="tool">&#9998; ' + esc(p.path) + "</div>";
+    if (e.kind === "turn_diff") {
+      var fl = (p.files || []).map(function(f){ return f.path; });
+      return '<div class="sys">&#9998; changed ' + fl.length + " file" + (fl.length === 1 ? "" : "s") +
+        " (+" + Number(p.added || 0) + " &minus;" + Number(p.removed || 0) + "): " +
+        esc(fl.slice(0, 3).join(", ")) + (fl.length > 3 ? " &hellip;" : "") + "</div>";
+    }
     if (e.kind === "handoff") return '<div class="sys mag">&#10230; baton: ' + esc(p.from || "\\u2014") + " &rarr; " + esc(p.to || "\\u2014") + "</div>";
     if (e.kind === "suggestion") return '<div class="sys warn">&#128161; ' + esc(p.reason || "handoff suggested") + "</div>";
     if (e.kind === "needs_input") return '<div class="sys warn">&#9208; ' + esc(e.agentId) + " asks: " + esc(p.question) + "</div>";
@@ -232,7 +238,8 @@ export const APP_HTML = `<!doctype html>
     root.innerHTML =
       '<header><button id="back">&larr;</button>' +
       '<span class="logo" id="pname">&hellip;</span><span class="sub" id="pstat"></span>' +
-      '<button id="routebtn" title="routes" style="margin-left:auto">&#10148;</button>' +
+      '<button id="treebtn" title="working tree" style="margin-left:auto">&plusmn;</button>' +
+      '<button id="routebtn" title="routes" style="margin-left:8px">&#10148;</button>' +
       '<button id="stop" title="interrupt" style="margin-left:8px">&#9632;</button></header>' +
       '<div class="chips" id="chips"></div>' +
       '<main><div id="routesheet"></div><div id="routebar"></div><div id="feed"><div class="sys">loading&hellip;</div></div></main>' +
@@ -247,8 +254,33 @@ export const APP_HTML = `<!doctype html>
         .catch(function(err){ toast(err.message); });
     };
 
+    var treeOpen = false;
+    document.getElementById("treebtn").onclick = function(){
+      treeOpen = !treeOpen;
+      var el = document.getElementById("routesheet");
+      if (!treeOpen) { el.innerHTML = ""; return; }
+      el.innerHTML = '<div class="sheet"><label>working tree</label><div class="sys">loading&hellip;</div></div>';
+      api("/api/projects/" + pid + "/tree").then(function(j){
+        if (!treeOpen) return;
+        var t = j.tree || {};
+        if (!t.git) { el.innerHTML = '<div class="sheet"><label>working tree</label><div class="sys">not a git repository</div></div>'; return; }
+        var head = "<label>working tree &middot; " + esc(t.branch || "") + " &middot; " +
+          (t.files || []).length + " changed</label>";
+        var list = (t.files || []).map(function(f){
+          return '<div class="tool">' + esc(f.status) + " " + esc(f.path) + "</div>";
+        }).join("");
+        var patch = (t.patch || "").split("\\n").map(function(line){
+          var c = line.charAt(0) === "+" ? "var(--ok)" : line.charAt(0) === "-" ? "var(--err)" : "var(--dim)";
+          return '<div style="color:' + c + ';white-space:pre-wrap;word-break:break-all">' + esc(line) + "</div>";
+        }).join("");
+        el.innerHTML = '<div class="sheet">' + head + list +
+          '<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;max-height:40vh;overflow:auto;border-top:1px solid var(--line);padding-top:8px">' +
+          (patch || '<div class="sys">clean</div>') + "</div></div>";
+      }).catch(function(err){ toast(err.message); });
+    };
+
     var sheetOpen = false;
-    document.getElementById("routebtn").onclick = function(){ sheetOpen = !sheetOpen; drawSheet(); };
+    document.getElementById("routebtn").onclick = function(){ sheetOpen = !sheetOpen; treeOpen = false; drawSheet(); };
     function drawSheet(){
       var el = document.getElementById("routesheet"); if (!el) return;
       if (!sheetOpen) { el.innerHTML = ""; return; }

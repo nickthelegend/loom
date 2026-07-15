@@ -6,8 +6,11 @@
  *   - text containing "make a plan"  → replies in planner voice ("plan is complete")
  *   - text containing "sleep:<ms>"   → stays busy that long (interrupt testing)
  *   - text containing "ask: <q>"     → asks the human (needs_input; route pausing)
+ *   - text containing "write:<path>" → writes a small file (turn_diff testing)
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import type { SendInput } from "../types.js";
 import { AdapterBase } from "./base.js";
 
@@ -45,6 +48,13 @@ export class EchoAdapter extends AdapterBase {
       if (this.aborted) {
         this.emit({ kind: "status", payload: { state: "interrupted" } });
         return;
+      }
+      const writeMatch = input.text.match(/write:([\w./-]+)/);
+      if (writeMatch && !writeMatch[1]!.includes("..")) {
+        const target = path.join(this.projectDir, writeMatch[1]!);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, `echo(${this.id}) wrote this\n`);
+        this.emit({ kind: "file_edit", payload: { path: writeMatch[1]! } });
       }
       const briefingNote = input.briefing ? ` (briefed: ${input.briefing.length} chars)` : "";
       const text = /make a plan/i.test(input.text)

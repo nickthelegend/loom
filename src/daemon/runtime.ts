@@ -31,6 +31,12 @@ import {
   writeMemoryFile,
 } from "../core/registry.js";
 import { suggestHandoff } from "../core/suggestions.js";
+import {
+  diffSinceSnapshot,
+  porcelainStatus,
+  workingTree,
+  type WorkingTree,
+} from "../core/worktree.js";
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
 
@@ -156,10 +162,43 @@ export class ProjectRuntime {
     return agent;
   }
 
+  /** Pre-turn porcelain snapshots, for per-prompt diff attribution. */
+  private preTurnTree = new Map<string, string>();
+
+  /** After a turn: log which files that prompt changed (turn_diff). */
+  private captureTurnDiff(agentId: string): void {
+    const before = this.preTurnTree.get(agentId);
+    if (before === undefined) return;
+    this.preTurnTree.delete(agentId);
+    void diffSinceSnapshot(this.info.dir, before)
+      .then((diff) => {
+        if (!diff) return;
+        this.log.append({
+          kind: "turn_diff",
+          agentId,
+          payload: {
+            files: diff.files,
+            added: diff.added,
+            removed: diff.removed,
+            patch: diff.patch,
+            truncated: diff.truncated,
+          },
+        });
+      })
+      .catch(() => {});
+  }
+
+  workingTree(): Promise<WorkingTree> {
+    return workingTree(this.info.dir);
+  }
+
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
     this.routes.handleAgentEvent(event);
+    if (event.kind === "run_complete" && event.agentId) {
+      this.captureTurnDiff(event.agentId);
+    }
     if (event.kind === "needs_input") {
       notify({
         title: `Loom · ${this.info.name}`,
@@ -247,6 +286,8 @@ export class ProjectRuntime {
 
     const pendingBriefing = this.consumePendingBriefing(target);
     const input: SendInput = pendingBriefing ? { text, briefing: pendingBriefing } : { text };
+    // Snapshot the tree so this prompt's changes can be attributed to it.
+    this.preTurnTree.set(target, await porcelainStatus(this.info.dir));
     // Fire-and-notify: the turn runs in the background; progress streams
     // into the log and completion lands as run_complete.
     void agent.send(input).catch((err) => {

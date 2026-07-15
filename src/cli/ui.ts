@@ -46,6 +46,16 @@ export function formatEvent(e: LoomEvent): string | null {
       return pc.dim(`  ⚙ ${String(e.payload.summary ?? e.payload.tool ?? "tool")}`);
     case "file_edit":
       return pc.dim(`  ✎ ${String(e.payload.path ?? "")}`);
+    case "turn_diff": {
+      const files = (e.payload.files as Array<{ path: string }> | undefined) ?? [];
+      const added = Number(e.payload.added ?? 0);
+      const removed = Number(e.payload.removed ?? 0);
+      const names = files.slice(0, 3).map((f) => f.path).join(", ");
+      const more = files.length > 3 ? ` +${files.length - 3} more` : "";
+      return pc.dim(
+        `  ✎ this prompt changed ${files.length} file${files.length === 1 ? "" : "s"} (+${added} −${removed}): ${names}${more}`,
+      );
+    }
     case "handoff": {
       const from = (e.payload.from as string | null) ?? "—";
       const to = (e.payload.to as string | null) ?? "—";

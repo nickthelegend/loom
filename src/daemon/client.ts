@@ -134,6 +134,18 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/costs`);
   }
 
+  tree(id: string): Promise<{
+    tree: {
+      git: boolean;
+      branch?: string;
+      files: Array<{ status: string; path: string }>;
+      patch: string;
+      truncated: boolean;
+    };
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/tree`);
+  }
+
   newPairingToken(): Promise<{ token: string; expiresAt: number; url: string }> {
     return this.request("POST", "/api/pair/new", {});
   }

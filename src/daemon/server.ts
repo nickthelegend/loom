@@ -299,6 +299,13 @@ export class LoomDaemon {
       }),
     );
 
+    app.get(
+      "/api/projects/:id/tree",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ tree: await rt.workingTree() });
+      }),
+    );
+
     app.delete(
       "/api/projects/:id/route",
       withRuntime(async (rt, _req, res) => {

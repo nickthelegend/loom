@@ -28,6 +28,7 @@ export type EventKind =
   | "route_resumed"
   | "route_completed"
   | "route_failed"
+  | "turn_diff" // working-tree changes attributed to one agent turn
   | "status" // adapter/bridge lifecycle info
   | "error";
 
