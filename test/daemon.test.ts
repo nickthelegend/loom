@@ -55,6 +55,23 @@ describe("loom daemon end-to-end", () => {
     expect(res.status).toBe(401);
   });
 
+  it("serves the phone app publicly (shell only — API stays authed)", async () => {
+    const app = await fetch(`${baseUrl}/app`);
+    expect(app.status).toBe(200);
+    expect(app.headers.get("content-type")).toContain("text/html");
+    const html = await app.text();
+    expect(html).toContain('id="loom-app"');
+    expect(html).toContain("/api/pair/claim");
+
+    const manifest = await fetch(`${baseUrl}/app/manifest.webmanifest`);
+    expect(manifest.status).toBe(200);
+    expect(((await manifest.json()) as { name: string }).name).toBe("Loom");
+
+    const rootRedirect = await fetch(`${baseUrl}/`, { redirect: "manual" });
+    expect(rootRedirect.status).toBe(302);
+    expect(rootRedirect.headers.get("location")).toBe("/app");
+  });
+
   it("first message auto-acquires the baton and the agent streams back", async () => {
     const { agentId } = await client.send(projectId, "hello there");
     expect(agentId).toBe("plannerbot");

@@ -175,9 +175,9 @@ function App({ client, initial }: AppProps) {
           }
           case "pair": {
             const { token, url } = await client.newPairingToken();
-            const payload = JSON.stringify({ v: 1, kind: "loom-pair", url, token });
-            qrcode.generate(payload, { small: true }, (qr) => {
-              push("", ...qr.split("\n"), pc.dim(`  single use · 10 min · ${url}`), "");
+            const link = `${url}/app#pair=${token}`;
+            qrcode.generate(link, { small: true }, (qr) => {
+              push("", ...qr.split("\n"), pc.bold(`  ${link}`), pc.dim("  scan with your phone camera · single use · 10 min"), "");
             });
             break;
           }

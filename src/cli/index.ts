@@ -476,14 +476,17 @@ program
       );
     }
     const { token, expiresAt, url } = await client.newPairingToken();
-    const payload = JSON.stringify({ v: 1, kind: "loom-pair", url, token });
-    qrcode.generate(payload, { small: true }, (qr) => console.log(qr));
-    console.log(pc.dim(`payload: ${payload}`));
+    // Deep link: scanning with any camera opens the phone app, which claims
+    // the (single-use, 10-min) token from the URL fragment and pairs itself.
+    const link = `${url}/app#pair=${token}`;
+    qrcode.generate(link, { small: true }, (qr) => console.log(qr));
+    console.log(pc.bold(`  ${link}`));
     console.log(
       pc.dim(
-        `single use · expires ${new Date(expiresAt).toLocaleTimeString()} · claim: POST ${url}/api/pair/claim {"token":"…"}`,
+        `  scan with your phone camera · single use · expires ${new Date(expiresAt).toLocaleTimeString()}`,
       ),
     );
+    console.log(pc.dim(`  (manual claim: POST ${url}/api/pair/claim {"token":"${token.slice(0, 6)}…"})`));
   });
 
 program.parseAsync().catch((err) => {

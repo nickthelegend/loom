@@ -26,6 +26,7 @@ import {
   writeProjectConfig,
 } from "../core/registry.js";
 import { cliAvailable } from "../adapters/base.js";
+import { APP_HTML, APP_MANIFEST } from "./app-page.js";
 import { AuthManager, bearerToken } from "./auth.js";
 import { ProjectRuntime } from "./runtime.js";
 
@@ -64,7 +65,15 @@ export class LoomDaemon {
     const app = this.app;
     app.use(express.json({ limit: "2mb" }));
 
-    // Public: health + pairing claim (the pairing token IS the auth).
+    // Public: the phone app shell (its API calls are bearer-authed),
+    // health, and the pairing claim (the pairing token IS the auth).
+    app.get("/", (_req, res) => res.redirect("/app"));
+    app.get("/app", (_req, res) => {
+      res.type("html").send(APP_HTML);
+    });
+    app.get("/app/manifest.webmanifest", (_req, res) => {
+      res.type("application/manifest+json").send(JSON.stringify(APP_MANIFEST));
+    });
     app.get("/api/health", (_req, res) => {
       res.json({ ok: true, name: "loom", version: "0.1.0" });
     });
