@@ -4,53 +4,49 @@
 [![npm](https://img.shields.io/npm/v/threadloom)](https://www.npmjs.com/package/threadloom)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**One CLI for all your coding agents.** Loom weaves Claude Code, OpenCode — and bridges
-like Antigravity — into a single shared thread per project: one conversation, one shared
-memory, one baton.
+**The shared-memory layer for AI dev environments.** Every coding agent — Claude Code,
+OpenCode, Antigravity, Codex, … — keeps its own brain in its own files. Loom makes them
+**one brain**: connect your ADEs, and their memory, decisions, and context become a
+single shared thread that flows from one agent to the next.
+
+Loom is **not** another IDE. It's the thin layer *between* your agents — the continuity
+and memory they don't share on their own.
 
 ```
-        iOS app  ── tailnet ──┐          (v1.5)
-        laptop CLI ───────────┤          (v1 · now)
-                              ▼
-                        loom daemon
-                              │
-              ┌───────────────┼───────────────┐
-          project A        project B       project C     ← independent batons
-              │
-      ┌───────┴────────┐
-      │ event log (SoT)│   ← every message/tool call/edit, streamed live
-      └───────┬────────┘
-        projections on handoff
-     ┌────────┼─────────────┐
- [adapter]  [adapter]    [bridge]
- Claude     OpenCode     Antigravity
- Code       serve API    debug port (read-only)
-     └── one working tree · baton = write lock ──┘
+   CLAUDE.md      AGENTS.md      .antigravity/     ← each ADE's native memory
+       │              │               │
+       └──────────────┼───────────────┘   import
+                      ▼
+            ╔═══════════════════╗
+            ║  ONE SHARED BRAIN ║   decisions · imported ADE memory · the thread
+            ╚═════════╤═════════╝
+                      │  projected on every handoff
+       ┌──────────────┼───────────────┐
+   Claude Code ──▶ OpenCode ──▶ Claude Code      ← baton carries the brain forward
+     (plan)        (execute)      (review)
 ```
 
 ## Why
 
 Every coding agent keeps its own brain. Claude Code's memory can't be read by
-Antigravity; OpenCode doesn't know what you decided with Claude an hour ago. Switching
-tools means re-explaining your project, every time.
+OpenCode; Antigravity doesn't know what you decided with Claude an hour ago. Switch
+tools and you re-explain your project every time.
 
-Loom fixes the seam:
+Other multi-agent tools answer this by keeping agents **apart** — each in its own
+worktree, run in parallel, compare and merge. Loom makes the opposite bet: keep the
+agents' **memory together** so work *continues* across them instead of forking.
 
-- **Shared thread** — one conversation; agents take turns.
-- **Shared memory** — an append-only event log is the source of truth; on every handoff
-  it's *projected* into the next agent's native context (namespaced — your own
-  `CLAUDE.md`/`AGENTS.md` are never touched).
-- **The baton** — exactly one agent holds the write lock per project. Handoffs are
-  explicit, confirmed, and interrupt-safe.
-- **Roles** — declare a planner / executor / reviewer; Loom *suggests* handoffs at
-  natural boundaries ("plan looks complete — hand to the executor?"). You confirm.
-- **Routes** — or let Loom drive the chain: `loom route ship "add dark mode"` runs
-  plan → execute → review as one command, pausing (and notifying you) whenever an agent
-  has a question, resuming when you answer.
-- **Fire-and-notify** — agents run in the background across many projects; Loom notifies
-  you when one finishes or needs input.
-- **Phone-ready** — bind the daemon to your Tailscale interface, pair a device with a
-  single-use QR token, and every surface talks to the same API. (Native iOS app: v1.5.)
+- **One brain across every ADE** — Loom imports each agent's native memory
+  (`CLAUDE.md`, `AGENTS.md`, …) into a unified store, merges it with your decisions and
+  the shared thread, and hands the whole thing to whoever picks up next. `loom memory`.
+- **The baton** — exactly one agent works at a time; passing it *carries the context*
+  (interrupt-safe, memory projected, briefing armed). Not isolation — continuation.
+- **Routes** — let Loom drive the chain: `loom route ship "add dark mode"` runs
+  plan → execute → review as one command, the brain flowing hop to hop; or `loom route
+  auto` lets an LLM pick each next agent.
+- **Every surface, one daemon** — a full-screen TUI, a phone app (voice input, per-prompt
+  diffs, push), and a web app — all talking to the same local daemon over your tailnet.
+- **Local-first & yours** — one `npm i -g`, no account, MIT, runs headless on a server.
 
 ## Install
 
@@ -185,6 +181,7 @@ detects at least two roles.
 | `loom routes` | List named pipelines defined for this project |
 | `loom interrupt` | Stop the current holder's turn (cancels an active route) |
 | `loom decision <text>` | Record a decision into shared memory |
+| `loom memory [import]` | The unified brain — one memory across every connected ADE |
 | `loom log [-f]` | Show (or follow) the project event log |
 | `loom costs` | Project spend: total + per-agent turns, $ and agent time |
 | `loom agents` / `loom projects` / `loom status` | Who's who, board of projects, daemon health |
@@ -227,6 +224,13 @@ agents without a stable API can't be trusted with interrupt-safe writes. See
   addressing a non-holder returns `409 not_holder` and the surface asks you to confirm a
   handoff. Ghost holders (agent removed from config) self-heal. Every handoff snapshots
   the outgoing agent's working-tree state (dirty flag + `git status`) into the log.
+- **Unified memory ("multiple memory in one")** — each connected ADE keeps its own
+  native memory (`CLAUDE.md`, `AGENTS.md`, …). Loom imports them all into one brain
+  (`memory_import` events, content-hash deduped), merges them with the project's
+  decisions and shared thread, and projects the union into whoever holds the baton.
+  Connect a new agent → its knowledge joins the brain, and everything the others learned
+  flows into it. `loom memory` shows the merged brain; it refreshes on open and on every
+  handoff. This is the seam an isolation-first tool (separate worktrees) can't own.
 - **Decisions** — `loom decision <text>` pins a fact, and any agent line starting
   `Decision: …` is captured automatically. Decisions ride every future projection.
 - **Cost telemetry** — agents that report per-turn cost (Claude Code, OpenCode) feed a
