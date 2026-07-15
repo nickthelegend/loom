@@ -299,8 +299,9 @@ with its why: [ARCHITECTURE.md](ARCHITECTURE.md).
 ```
 
 Roles: `planner` · `executor` · `reviewer` · `general`. Claude Code options:
-`permissionMode` (default `acceptEdits`), `model`. OpenCode options: `baseUrl` to reuse
-a running server.
+`permissionMode` (default `acceptEdits`), `model`. OpenCode options:
+`model` (`"providerID/modelID"`, e.g. `"opencode/minimax-m2.5"` — **set this**: headless
+sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running server.
 
 ## Development
 

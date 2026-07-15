@@ -11,7 +11,7 @@
  * Surface verified against opencode 1.17.20 — see docs/integration-notes.md.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, agentEnv, cliAvailable, fetchJson, freePort, waitFor } from "./base.js";
@@ -21,9 +21,25 @@ interface OpenCodeOptions {
   baseUrl?: string;
   /** Extra args for `opencode serve`. */
   extraArgs?: string[];
+  /**
+   * Model for this project's session, as "providerID/modelID"
+   * (e.g. "opencode/minimax-m2.5"). Without it, opencode's own default
+   * applies — which may differ from your TUI default and may not work
+   * headless (learned the hard way).
+   */
+  model?: string;
+  /** opencode agent to use (e.g. "build"). */
+  agent?: string;
 }
 
 type Json = Record<string, unknown>;
+
+/** "providerID/modelID" → ModelRef body for session create ({providerID, id}). */
+export function parseModelRef(model: string): { providerID: string; id: string } | null {
+  const idx = model.indexOf("/");
+  if (idx <= 0 || idx === model.length - 1) return null;
+  return { providerID: model.slice(0, idx), id: model.slice(idx + 1) };
+}
 
 export class OpenCodeAdapter extends AdapterBase {
   private child: ChildProcess | null = null;
@@ -35,6 +51,8 @@ export class OpenCodeAdapter extends AdapterBase {
   /** text parts per in-flight assistant message */
   private textParts = new Map<string, Map<string, string>>();
   private roles = new Map<string, string>();
+  /** assistant messages whose text already went to the log (SSE path) */
+  private emittedText = new Set<string>();
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "opencode", projectDir);
@@ -56,11 +74,40 @@ export class OpenCodeAdapter extends AdapterBase {
     return cliAvailable("opencode");
   }
 
+  /** Kill a serve child left behind by a previous daemon (verified by cmdline). */
+  private async reapOrphanServe(): Promise<void> {
+    const state = readProjectState(this.projectDir);
+    const pid = Number(state.agents[this.id]?.servePid ?? 0);
+    if (!pid) return;
+    const cmd = await new Promise<string>((resolve) => {
+      execFile("ps", ["-p", String(pid), "-o", "command="], (err, stdout) =>
+        resolve(err ? "" : stdout.trim()),
+      );
+    });
+    if (/opencode serve/.test(cmd)) {
+      try {
+        process.kill(pid, "SIGTERM");
+        this.emit({ kind: "status", payload: { state: "reaped_orphan_serve", pid } });
+      } catch {
+        // already gone
+      }
+    }
+    delete state.agents[this.id]?.servePid;
+    writeProjectState(this.projectDir, state);
+  }
+
+  private recordServePid(pid: number | undefined): void {
+    const state = readProjectState(this.projectDir);
+    state.agents[this.id] = { ...state.agents[this.id], servePid: pid };
+    writeProjectState(this.projectDir, state);
+  }
+
   async start(): Promise<void> {
     if (this.started) return;
     if (this.options.baseUrl) {
       this.baseUrl = this.options.baseUrl.replace(/\/$/, "");
     } else {
+      await this.reapOrphanServe();
       const port = await freePort();
       this.baseUrl = `http://127.0.0.1:${port}`;
       const child = spawn(
@@ -69,6 +116,7 @@ export class OpenCodeAdapter extends AdapterBase {
         { cwd: this.projectDir, stdio: "ignore", env: agentEnv() },
       );
       this.child = child;
+      this.recordServePid(child.pid);
       child.on("close", (code) => {
         if (this.started) {
           this.emit({ kind: "error", payload: { message: `opencode serve exited (${code})` } });
@@ -80,6 +128,7 @@ export class OpenCodeAdapter extends AdapterBase {
       await fetchJson(`${this.baseUrl}/api/health`);
       return true;
     });
+    await this.assertModelAvailable();
     await this.ensureSession();
     this.startSse();
     this.started = true;
@@ -89,9 +138,45 @@ export class OpenCodeAdapter extends AdapterBase {
     });
   }
 
+  private get sessionModel(): string | undefined {
+    return readProjectState(this.projectDir).agents[this.id]?.sessionModel as string | undefined;
+  }
+
+  private set sessionModel(value: string | undefined) {
+    const state = readProjectState(this.projectDir);
+    state.agents[this.id] = { ...state.agents[this.id], sessionModel: value };
+    writeProjectState(this.projectDir, state);
+  }
+
+  /**
+   * A session whose model can't be resolved is a silent trap: opencode
+   * "admits" prompts and never runs them (ModelUnavailableError only shows
+   * in server logs). Validate against /api/model — the list of models the
+   * server can actually run — and fail loudly with suggestions instead.
+   */
+  private async assertModelAvailable(): Promise<void> {
+    if (!this.options.model) return;
+    const res = await fetchJson<Json>(`${this.baseUrl}/api/model`).catch(() => null);
+    const models = Array.isArray(res?.data) ? (res!.data as Json[]) : [];
+    if (!models.length) return; // endpoint unavailable — don't block
+    const ids = models.map((m) => `${String(m.providerID)}/${String(m.id)}`);
+    if (ids.includes(this.options.model)) return;
+    const base = this.options.model.split("/").pop()!.split("-")[0]!.toLowerCase();
+    const near = ids.filter((id) => id.toLowerCase().includes(base)).slice(0, 5);
+    const free = ids.filter((id) => id.endsWith("-free")).slice(0, 3);
+    throw new Error(
+      `opencode cannot run model "${this.options.model}" (listed ≠ available). ` +
+        `Close matches: ${near.length ? near.join(", ") : "none"}. ` +
+        `Free options: ${free.join(", ")}. Fix .loom/config.json agent options.model.`,
+    );
+  }
+
   private async ensureSession(): Promise<string> {
     const existing = this.sessionId;
-    if (existing) {
+    // Session model is fixed at creation — a changed config model means the
+    // old session must be replaced, or turns keep running on the old model.
+    const modelChanged = (this.options.model ?? undefined) !== this.sessionModel;
+    if (existing && !modelChanged) {
       try {
         await fetchJson(`${this.baseUrl}/api/session/${existing}`);
         return existing;
@@ -99,15 +184,22 @@ export class OpenCodeAdapter extends AdapterBase {
         // stale session (server state moved on) — create a fresh one
       }
     }
+    const body: Json = {};
+    if (this.options.model) {
+      const ref = parseModelRef(this.options.model);
+      if (ref) body.model = ref;
+    }
+    if (this.options.agent) body.agent = this.options.agent;
     const res = await fetchJson<Json>(`${this.baseUrl}/api/session`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify(body),
     });
     const data = (res.data ?? res) as Json;
     const id = String(data.id ?? "");
     if (!id) throw new Error("opencode: could not create session");
     this.sessionId = id;
+    this.sessionModel = this.options.model ?? undefined;
     return id;
   }
 
@@ -189,7 +281,10 @@ export class OpenCodeAdapter extends AdapterBase {
         const parts = this.textParts.get(messageID);
         if (parts && parts.size) {
           const text = [...parts.values()].join("").trim();
-          if (text) this.emit({ kind: "message", payload: { text } });
+          if (text) {
+            this.emit({ kind: "message", payload: { text } });
+            this.emittedText.add(messageID);
+          }
         }
         this.textParts.delete(messageID);
         // Best-effort per-turn cost (present on opencode assistant messages).
@@ -212,13 +307,54 @@ export class OpenCodeAdapter extends AdapterBase {
     }
   }
 
+  /** Assistant messages currently in the session (info objects). */
+  private async listAssistants(sid: string): Promise<Json[]> {
+    const res = await fetchJson<Json>(`${this.baseUrl}/api/session/${sid}/message`);
+    const data = (res.data ?? res) as unknown;
+    const items = Array.isArray(data) ? (data as Json[]) : [];
+    return items
+      .map((m) => ((m as Json).info ?? m) as Json)
+      .filter((m) => (m.type ?? m.role) === "assistant");
+  }
+
+  /**
+   * Wait for a NEW completed assistant message (id not in `baseline`).
+   * `/wait` is tried first but opencode 1.17 returns 503 for it, so the
+   * reliable path is polling the message list — which also reconciles any
+   * events the SSE stream missed.
+   */
+  private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
+    try {
+      await fetchJson(
+        `${this.baseUrl}/api/session/${sid}/wait`,
+        { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+        timeoutMs,
+      );
+    } catch {
+      // 503 "not available yet" on 1.17 — fall through to polling.
+    }
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const fresh = (await this.listAssistants(sid).catch(() => [] as Json[])).filter(
+        (m) => !baseline.has(String(m.id)) && (m.time as Json | undefined)?.completed,
+      );
+      if (fresh.length) return fresh[fresh.length - 1]!;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    return null;
+  }
+
   async send(input: SendInput): Promise<void> {
     if (!this.started) await this.start();
     if (this._busy) throw new Error(`opencode agent "${this.id}" is busy`);
     this._busy = true;
     const started = Date.now();
+    const timeoutMs = 60 * 60 * 1000;
     try {
       const sid = await this.ensureSession();
+      const baseline = new Set(
+        (await this.listAssistants(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
+      );
       // No per-prompt system field in the API, so the handoff briefing is
       // prepended to the first turn, clearly delimited.
       const text = input.briefing
@@ -229,18 +365,41 @@ export class OpenCodeAdapter extends AdapterBase {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: { text } }),
       });
-      try {
-        // Blocks until the session goes idle. Generous ceiling for long turns.
-        await fetchJson(
-          `${this.baseUrl}/api/session/${sid}/wait`,
-          { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
-          60 * 60 * 1000,
-        );
-      } catch (err) {
-        this.emit({
-          kind: "status",
-          payload: { state: "wait_failed", detail: String(err).slice(0, 200) },
-        });
+
+      const turn = await this.waitForTurn(sid, baseline, timeoutMs);
+      if (!turn) {
+        this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
+      } else {
+        const turnId = String(turn.id);
+        // Fetch the full message: parts (in case SSE missed them) + errors.
+        const detail = await fetchJson<Json>(
+          `${this.baseUrl}/api/session/${sid}/message/${turnId}`,
+        ).catch(() => null);
+        const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
+        if (info.finish === "error" || info.error) {
+          const err = (info.error ?? {}) as Json;
+          this.emit({
+            kind: "error",
+            payload: {
+              message: String(err.message ?? "opencode turn failed").slice(0, 500),
+            },
+          });
+        } else if (!this.emittedText.has(turnId)) {
+          const content = Array.isArray(info.content) ? (info.content as Json[]) : [];
+          const text = content
+            .filter((p) => p.type === "text" && typeof p.text === "string")
+            .map((p) => String(p.text))
+            .join("")
+            .trim();
+          if (text) {
+            this.emit({ kind: "message", payload: { text } });
+            this.emittedText.add(turnId);
+          }
+        }
+        const cost = Number(info.cost ?? 0);
+        if (cost > 0) {
+          this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
+        }
       }
       this.emit({ kind: "run_complete", payload: { durationMs: Date.now() - started } });
     } finally {

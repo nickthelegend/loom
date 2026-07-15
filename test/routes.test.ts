@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LoomEvent, ProjectConfig } from "../src/types.js";
+import { parseModelRef } from "../src/adapters/opencode.js";
 import { readDaemonConfig, writeProjectConfig } from "../src/core/registry.js";
 import { resolveSteps } from "../src/core/routes.js";
 import { DaemonClient } from "../src/daemon/client.js";
@@ -76,6 +77,23 @@ describe("resolveSteps", () => {
     expect(() => resolveSteps(["ag"], config, isAdapter)).toThrow(/bridge/);
     expect(() => resolveSteps([{ step: "ag" }], config, isAdapter)).toThrow(/bridge/);
     expect(() => resolveSteps([], config, isAdapter)).toThrow(/at least one step/);
+  });
+});
+
+describe("opencode model refs", () => {
+  it("parses provider/model strings into {providerID, id}, rejects malformed", () => {
+    expect(parseModelRef("opencode/minimax-m2.5")).toEqual({
+      providerID: "opencode",
+      id: "minimax-m2.5",
+    });
+    // model id may itself contain slashes (split on the first only)
+    expect(parseModelRef("openrouter/deepseek/deepseek-v4")).toEqual({
+      providerID: "openrouter",
+      id: "deepseek/deepseek-v4",
+    });
+    expect(parseModelRef("no-slash")).toBeNull();
+    expect(parseModelRef("/leading")).toBeNull();
+    expect(parseModelRef("trailing/")).toBeNull();
   });
 });
 
