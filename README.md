@@ -194,7 +194,7 @@ detects at least two roles.
 | `loom agents` / `loom projects` / `loom status` | Who's who, board of projects, daemon health |
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
-| `loom clients [--revoke <id>]` | List paired devices, revoke a lost one |
+| `loom clients [--revoke <id>] [--ping]` | Paired devices: list, revoke, or send a test push |
 | `loom doctor` | Diagnose env, daemon, binding, and project config — with fixes |
 
 ## Supported agents
@@ -266,8 +266,11 @@ network log) and exchanges it for its own client token. Then:
   there and it resumes.
 - Chrome menu → *Add to Home screen* installs it like an app.
 
-A native app (push notifications) stays on the roadmap — this is the same daemon API
-it will use.
+**Push notifications** come with the native app ([`app/`](app/README.md)): open it once
+after pairing and it registers its Expo push token with the daemon. From then on your
+phone buzzes when an agent **needs input**, when a **route completes or fails**, and
+when a solo turn finishes — route hops are deliberately silent (a 5-step pipeline
+buzzes once, not five times). Verify with `loom clients --ping`.
 
 ## Security model
 

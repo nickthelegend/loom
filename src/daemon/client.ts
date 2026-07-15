@@ -150,8 +150,14 @@ export class DaemonClient {
     return this.request("POST", "/api/pair/new", {});
   }
 
-  pairedClients(): Promise<{ clients: Array<{ id: string; name: string; createdAt: number }> }> {
+  pairedClients(): Promise<{
+    clients: Array<{ id: string; name: string; createdAt: number; push?: boolean }>;
+  }> {
     return this.request("GET", "/api/pair/clients");
+  }
+
+  pushTest(): Promise<{ sent: number }> {
+    return this.request("POST", "/api/push/test", {});
   }
 
   revokeClient(clientId: string): Promise<{ revoked: boolean }> {

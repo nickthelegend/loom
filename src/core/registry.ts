@@ -139,6 +139,9 @@ export interface PairedClient {
   name: string;
   token: string;
   createdAt: number;
+  /** Expo push token, when the device registered for notifications. */
+  pushToken?: string;
+  platform?: string;
 }
 
 export interface DaemonConfig {

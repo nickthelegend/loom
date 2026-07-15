@@ -32,8 +32,16 @@ Credentials are stored in the device keychain (expo-secure-store).
 - `src/components.tsx` — event renderer; `turn_diff` events are expandable cards
   showing exactly what a prompt changed.
 
+## Push notifications
+
+Open the app once after pairing — it asks permission, fetches its Expo push token, and
+registers it with the daemon (`POST /api/push/register`, attached to this device's
+paired-client record). The daemon then pushes on `needs_input`, `route_completed`,
+`route_failed`, and solo `run_complete` — route hops are suppressed on the server so
+pipelines buzz once. Test from the computer: `loom clients --ping`.
+
 ## Notes
 
 - If dependency versions drift from your Expo SDK: `npx expo install --fix`.
-- Push notifications are the next step (expo-notifications + a daemon hook on
-  `needs_input` / `run_complete`).
+- Remote push in **Expo Go** works on SDK 52 (this app's pin); for store builds use a
+  dev build / EAS as usual.

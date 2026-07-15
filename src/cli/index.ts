@@ -546,23 +546,34 @@ program
 
 program
   .command("clients")
-  .description("list paired devices, or revoke one")
+  .description("list paired devices, revoke one, or ping them with a test push")
   .option("--revoke <id>", "revoke a paired device's access")
-  .action(async (opts: { revoke?: string }) => {
+  .option("--ping", "send a test push notification to all registered devices", false)
+  .action(async (opts: { revoke?: string; ping: boolean }) => {
     const client = await ensureDaemon();
     if (opts.revoke) {
       await client.revokeClient(opts.revoke);
       console.log(pc.green(`✓ revoked ${opts.revoke}`));
       return;
     }
+    if (opts.ping) {
+      const { sent } = await client.pushTest();
+      console.log(
+        sent
+          ? pc.green(`✓ test push sent to ${sent} device${sent === 1 ? "" : "s"}`)
+          : pc.dim("no devices registered for push — open the Loom app once after pairing"),
+      );
+      return;
+    }
     const { clients } = await client.pairedClients();
     if (!clients.length) return void console.log(pc.dim("no paired devices — loom pair"));
     for (const c of clients) {
       console.log(
-        ` ${pc.bold(c.name)} ${pc.dim(`(${c.id})`)} paired ${new Date(c.createdAt).toLocaleString()}`,
+        ` ${pc.bold(c.name)} ${pc.dim(`(${c.id})`)} paired ${new Date(c.createdAt).toLocaleString()}` +
+          (c.push ? pc.green("  ·push✓") : pc.dim("  ·no push")),
       );
     }
-    console.log(pc.dim("\nrevoke one: loom clients --revoke <id>"));
+    console.log(pc.dim("\nrevoke: loom clients --revoke <id> · test push: loom clients --ping"));
   });
 
 program

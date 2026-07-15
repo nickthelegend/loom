@@ -29,6 +29,7 @@ import {
 import { cliAvailable } from "../adapters/base.js";
 import { APP_HTML, APP_MANIFEST } from "./app-page.js";
 import { AuthManager, bearerToken } from "./auth.js";
+import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
 import { ProjectRuntime } from "./runtime.js";
 
 export interface DaemonOptions {
@@ -130,6 +131,36 @@ export class LoomDaemon {
       const revoked = this.auth.revoke(String(req.params.clientId));
       if (!revoked) return void res.status(404).json({ error: "unknown client" });
       res.json({ revoked: true });
+    });
+
+    // A paired device registers (or clears) its Expo push token.
+    app.post("/api/push/register", (req, res) => {
+      const me = this.auth.clientFor(bearerToken(req.headers.authorization));
+      if (!me) return void res.status(403).json({ error: "device tokens only — pair first" });
+      const { token, platform } = (req.body ?? {}) as { token?: string; platform?: string };
+      if (!token?.trim()) return void res.status(400).json({ error: "missing token" });
+      this.auth.setPushToken(me.id, token.trim(), platform);
+      res.json({ registered: true });
+    });
+
+    app.delete("/api/push/register", (req, res) => {
+      const me = this.auth.clientFor(bearerToken(req.headers.authorization));
+      if (!me) return void res.status(403).json({ error: "device tokens only" });
+      this.auth.setPushToken(me.id, null);
+      res.json({ registered: false });
+    });
+
+    // Admin: fire a test push at every registered device.
+    app.post("/api/push/test", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      const tokens = this.pushTokens();
+      void sendExpoPush(tokens, {
+        title: "Loom",
+        body: "test notification — pairing works ✓",
+      });
+      res.json({ sent: tokens.length });
     });
 
     app.get("/api/projects", (_req, res) => {
@@ -344,6 +375,29 @@ export class LoomDaemon {
       if (sub.project && sub.project !== projectId) continue;
       ws.send(frame);
     }
+    this.maybePush(projectId, event);
+  }
+
+  private pushTokens(): string[] {
+    const cfg = readDaemonConfig();
+    return (cfg?.clients ?? [])
+      .map((c) => c.pushToken)
+      .filter((t): t is string => Boolean(t));
+  }
+
+  /** Fire-and-notify to phones. Route hops stay quiet; the outcome pushes. */
+  private maybePush(projectId: string, event: LoomEvent): void {
+    if (!PUSH_KINDS.has(event.kind)) return;
+    if (event.kind === "run_complete" && this.runtimes.get(projectId)?.routes.isActive()) {
+      return; // a pipeline in flight buzzes once at the end, not per hop
+    }
+    const tokens = this.pushTokens();
+    if (!tokens.length) return;
+    const name = listProjects().find((p) => p.id === projectId)?.name ?? "project";
+    void sendExpoPush(tokens, {
+      ...pushContent(name, event),
+      data: { projectId, kind: event.kind },
+    });
   }
 
   // -------------------------------------------------------------------------

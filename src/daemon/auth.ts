@@ -81,8 +81,36 @@ export class AuthManager {
     return false;
   }
 
-  clients(): Array<{ id: string; name: string; createdAt: number }> {
-    return this.config.clients.map(({ id, name, createdAt }) => ({ id, name, createdAt }));
+  clients(): Array<{ id: string; name: string; createdAt: number; push: boolean }> {
+    return this.config.clients.map(({ id, name, createdAt, pushToken }) => ({
+      id,
+      name,
+      createdAt,
+      push: Boolean(pushToken),
+    }));
+  }
+
+  /** Which paired client does this bearer token belong to? (admin → null) */
+  clientFor(token: string | undefined): { id: string; name: string } | null {
+    if (!token) return null;
+    const client = this.config.clients.find((c) => timingSafeEqualStr(token, c.token));
+    return client ? { id: client.id, name: client.name } : null;
+  }
+
+  /** Attach/detach a push token on a paired client (read-modify-write). */
+  setPushToken(clientId: string, pushToken: string | null, platform?: string): boolean {
+    this.reload();
+    const client = this.config.clients.find((c) => c.id === clientId);
+    if (!client) return false;
+    if (pushToken) {
+      client.pushToken = pushToken;
+      if (platform) client.platform = platform;
+    } else {
+      delete client.pushToken;
+      delete client.platform;
+    }
+    writeDaemonConfig(this.config);
+    return true;
   }
 
   /** Re-read clients from disk (another process may have paired). */

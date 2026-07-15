@@ -8,6 +8,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { SafeAreaView, View } from "react-native";
 import { loadCreds, type Creds, type Project } from "./src/api";
+import { enablePush } from "./src/push";
 import { BoardScreen, PairScreen, ProjectScreen, unpair } from "./src/screens";
 import { T } from "./src/theme";
 
@@ -27,6 +28,11 @@ export default function App() {
       setBooted(true);
     });
   }, []);
+
+  // Register for pushes whenever we have credentials (idempotent).
+  useEffect(() => {
+    if (creds) void enablePush(creds);
+  }, [creds]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.bg }}>
