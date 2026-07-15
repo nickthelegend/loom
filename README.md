@@ -63,23 +63,35 @@ npm install && npm run build && npm link   # → `loom` on your PATH
 ```bash
 cd your-project
 loom init          # detects installed agents (claude, opencode), assigns roles
-loom chat          # one shared thread with all of them
+loom               # opens the TUI — one full-screen thread over every agent
 ```
 
-Inside `loom chat`:
-
 ```
-you> make a plan for the auth refactor
-claude-code …streams its plan…
-  💡 plan looks complete — hand to the executor?  (/handoff opencode)
-you> /handoff opencode
-  ⟶ baton: claude-code → opencode        (shared context projected + briefed)
-you> continue the work
-opencode …executes with full knowledge of the plan…
+  ██      ▄████▄  ▄████▄  ▄█▄▄█▄
+  ██      ██  ██  ██  ██  ██▀▀██
+  ██      ██  ██  ██  ██  ██  ██
+  ██████  ▀████▀  ▀████▀  ██  ██
+        one thread · every agent
+
+  10:44 claude-code  here's the plan: …
+   ⟶ baton: claude-code → opencode
+  10:45 opencode     implementing step 1 …
+
+ ╭──────────────────────────────────────────────╮
+ │ › Ask anything… "/route ship: add dark mode" │
+ │ opencode · executor ⟵ baton                  │
+ ╰──────────────────────────────────────────────╯
+   tab shift agent · /help · esc interrupt        loom 0.1.0
+   ~ my-project · baton opencode  ➤ ship 2/3
 ```
 
-`@agent message` addresses a specific agent (Loom asks before moving the baton — it will
-interrupt in-flight work). `/decision <text>` pins a fact into shared memory forever.
+**`tab` shifts the active agent/IDE** — claude-code → opencode → back. The handoff
+(interrupt-safe, memory projected, briefing armed) happens when you hit enter, so
+switching is one keystroke, not a ceremony. `esc` interrupts, `/help` lists commands
+(`/route`, `/handoff`, `/agents`, `/decision`, `/pair` — QR right in the terminal).
+
+Prefer plain line-mode (SSH, scripts)? `loom chat` is the same thread as a classic REPL,
+and every action also exists as a one-shot command (`loom send`, `loom handoff`, …).
 
 ## Routing — multi-hop pipelines
 
@@ -118,8 +130,9 @@ Define named pipelines in `.loom/config.json` (steps are roles or agent ids):
 
 | Command | What it does |
 |---|---|
+| `loom` | **The TUI** — full-screen thread, `tab` shifts agents, `/`-commands inline |
 | `loom init` | Make the current directory a Loom project (auto-detects agents) |
-| `loom chat` | Interactive shared thread (`/handoff`, `/interrupt`, `/decision`, `@agent`) |
+| `loom chat` | Same thread as a plain line REPL (`/handoff`, `/interrupt`, `@agent`) |
 | `loom send <text>` | One-shot message (`-a <agent>` to address someone specific) |
 | `loom handoff <agent>` | Pass the baton — interrupts, projects memory, briefs the target |
 | `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
