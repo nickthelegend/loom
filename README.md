@@ -99,10 +99,19 @@ and every action also exists as a one-shot command (`loom send`, `loom handoff`,
 Handoffs are unlimited and manual by default. **Routes** automate a chain of them:
 
 ```bash
+loom route auto "add a dark-mode toggle"          # DYNAMIC: an LLM picks each hop
 loom route ship "add a dark-mode toggle"          # named pipeline from config
 loom route planner,executor "fix the flaky test"  # ad-hoc: roles…
 loom route claude-code,opencode,claude-code "…"   # …or agent ids, any length
 ```
+
+**`auto` is dynamic routing**: after every hop, a router looks at the task, the hop
+history, and the last replies, then picks the next agent — or declares the task done.
+The router is Claude (headless, small model, JSON out) with a deterministic
+plan→execute→review rules engine as automatic fallback, so routes never stall on a
+router failure. Every decision is logged with its reason
+(`➤ hop 2 → opencode (plan ready — execute it)`), a hop budget caps runaways
+(`--max-hops`, default 8), and `--router rules` skips the LLM entirely.
 
 What happens per hop: interrupt-safe **handoff** → shared-memory **projection** →
 **briefing** → the step's role instruction. Then:
@@ -194,8 +203,10 @@ network log) and exchanges it for its own client token. Then:
 - **Thread** — the same shared conversation, streaming over WebSocket.
 - **Agent chips** — tap `opencode`, hit send: baton shifts (projection + briefing
   included), exactly like `tab` in the TUI.
-- **Routes** — banner with step progress; when a route pauses on a question, answer
-  from your phone and it resumes.
+- **Routes** — the ➤ button opens a picker: choose **auto** (LLM picks each hop), any
+  named pipeline, or custom steps, type the task, go. Live banner with hop progress and
+  reasons, an abort button, and when a route pauses on a question you answer right
+  there and it resumes.
 - Chrome menu → *Add to Home screen* installs it like an app.
 
 A native app (push notifications) stays on the roadmap — this is the same daemon API
@@ -272,10 +283,8 @@ npm run dev       # run the CLI from source (tsx)
 
 ## Roadmap
 
-- **v1.5** — native iOS app (React Native): live thread, push on *needs input / done*,
-  QR pairing against the same daemon API.
-- Dynamic routing (an LLM picks the next hop from results) on top of the shipped
-  pipeline engine.
+- Native mobile app (push notifications on *needs input / done*) on the same daemon
+  API the served app already uses.
 - LLM-synthesized projections behind the same interface.
 - More adapters/bridges via the SDK — contributions welcome.
 

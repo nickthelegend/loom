@@ -71,6 +71,12 @@ export const APP_HTML = `<!doctype html>
   .tool{color:var(--dim);font-size:12px;font-family:ui-monospace,Menlo,monospace;margin:2px 0 2px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .routebar{position:sticky;top:97px;z-index:3;background:#122032;border:1px solid #1d3a55;border-radius:12px;padding:8px 12px;margin:10px 0;font-size:13px}
   .routebar .q{color:var(--warn);margin-top:4px}
+  .routebar .abort{float:right;font-size:11px;padding:3px 10px}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin:10px 0;display:flex;flex-direction:column;gap:8px}
+  .sheet select,.sheet input{background:#0e1420;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:9px 10px;font:inherit;width:100%}
+  .sheet .row{display:flex;gap:8px}
+  .sheet .row button{flex:1}
+  .sheet label{font-size:11px;color:var(--dim)}
   .composer{position:fixed;bottom:0;left:0;right:0;background:rgba(11,14,20,.96);backdrop-filter:blur(8px);border-top:1px solid var(--line);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
   .composer .inner{max-width:720px;margin:0 auto;display:flex;gap:8px}
   .composer input{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:10px 12px;font:inherit;outline:none}
@@ -202,8 +208,15 @@ export const APP_HTML = `<!doctype html>
     if (e.kind === "needs_input") return '<div class="sys warn">&#9208; ' + esc(e.agentId) + " asks: " + esc(p.question) + "</div>";
     if (e.kind === "decision") return '<div class="sys">&#9733; ' + esc(p.text) + "</div>";
     if (e.kind === "error") return '<div class="sys err">&#10007; ' + esc(p.message) + "</div>";
-    if (e.kind === "route_started") return '<div class="sys">&#10148; route started: ' + esc((p.steps || []).join(" \\u2192 ")) + "</div>";
-    if (e.kind === "route_step") return '<div class="sys">&#10148; step ' + (Number(p.step) + 1) + "/" + Number(p.of) + " \\u2192 " + esc(p.agent) + "</div>";
+    if (e.kind === "route_started") {
+      if (p.mode === "dynamic") return '<div class="sys">&#10148; route "auto" started &mdash; ' + esc(p.router) + " picks each hop</div>";
+      return '<div class="sys">&#10148; route started: ' + esc((p.steps || []).join(" \\u2192 ")) + "</div>";
+    }
+    if (e.kind === "route_step") {
+      var pos = p.of ? "step " + (Number(p.step) + 1) + "/" + Number(p.of) : "hop " + (Number(p.step) + 1);
+      return '<div class="sys">&#10148; ' + pos + " \\u2192 " + esc(p.agent) +
+        (p.reason ? ' <span style="opacity:.7">(' + esc(p.reason) + ")</span>" : "") + "</div>";
+    }
     if (e.kind === "route_paused") return '<div class="sys warn">&#9208; route paused &mdash; ' + esc(p.agent) + " asks: " + esc(p.question) + "</div>";
     if (e.kind === "route_resumed") return '<div class="sys">&#10148; route resumed</div>';
     if (e.kind === "route_completed") return '<div class="sys" style="color:var(--ok)">&#10004; route completed</div>';
@@ -218,9 +231,10 @@ export const APP_HTML = `<!doctype html>
     root.innerHTML =
       '<header><button id="back">&larr;</button>' +
       '<span class="logo" id="pname">&hellip;</span><span class="sub" id="pstat"></span>' +
-      '<button id="stop" title="interrupt">&#9632;</button></header>' +
+      '<button id="routebtn" title="routes" style="margin-left:auto">&#10148;</button>' +
+      '<button id="stop" title="interrupt" style="margin-left:8px">&#9632;</button></header>' +
       '<div class="chips" id="chips"></div>' +
-      '<main><div id="routebar"></div><div id="feed"><div class="sys">loading&hellip;</div></div></main>' +
+      '<main><div id="routesheet"></div><div id="routebar"></div><div id="feed"><div class="sys">loading&hellip;</div></div></main>' +
       '<div class="composer"><form class="inner" id="cform">' +
       '<input id="box" placeholder="Message&hellip;" autocomplete="off">' +
       '<button class="primary" id="send" type="submit">&#10148;</button></form>' +
@@ -231,6 +245,37 @@ export const APP_HTML = `<!doctype html>
         .then(function(j){ toast(j.interrupted ? "interrupted " + j.interrupted : "nothing running"); })
         .catch(function(err){ toast(err.message); });
     };
+
+    var sheetOpen = false;
+    document.getElementById("routebtn").onclick = function(){ sheetOpen = !sheetOpen; drawSheet(); };
+    function drawSheet(){
+      var el = document.getElementById("routesheet"); if (!el) return;
+      if (!sheetOpen) { el.innerHTML = ""; return; }
+      var names = (state.project && state.project.routeNames) || ["auto"];
+      el.innerHTML = '<div class="sheet">' +
+        "<label>pipeline</label>" +
+        '<select id="rsel">' +
+        names.map(function(n){
+          return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>";
+        }).join("") +
+        '<option value="__custom">custom steps&hellip;</option></select>' +
+        '<input id="rsteps" placeholder="steps e.g. planner,executor" style="display:none">' +
+        '<input id="rtask" placeholder="what should they do?">' +
+        '<div class="row"><button class="primary" id="rgo">Start route</button></div></div>';
+      document.getElementById("rsel").onchange = function(){
+        document.getElementById("rsteps").style.display = this.value === "__custom" ? "" : "none";
+      };
+      document.getElementById("rgo").onclick = function(){
+        var sel = document.getElementById("rsel").value;
+        var task = (document.getElementById("rtask").value || "").trim();
+        if (!task) return toast("describe the task first");
+        var spec = sel === "__custom" ? (document.getElementById("rsteps").value || "").trim() : sel;
+        if (!spec) return toast("give steps like planner,executor");
+        api("/api/projects/" + pid + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: spec }) })
+          .then(function(){ sheetOpen = false; drawSheet(); refresh(); toast("route started"); })
+          .catch(function(err){ toast(err.message); });
+      };
+    }
 
     function drawChips(){
       var p = state.project; if (!p) return;
@@ -253,9 +298,19 @@ export const APP_HTML = `<!doctype html>
       var bar = document.getElementById("routebar");
       var r = p.route;
       if (r && (r.status === "running" || r.status === "waiting_human")) {
-        bar.innerHTML = '<div class="routebar">&#10148; ' + esc(r.name || "route") + " step " + (r.current + 1) + "/" + r.steps.length +
-          " &middot; " + esc(r.steps[r.current]) +
+        var pos = r.mode === "dynamic"
+          ? "hop " + (r.current + 1) + (r.maxHops ? " of \\u2264" + r.maxHops : "")
+          : "step " + (r.current + 1) + "/" + r.steps.length;
+        bar.innerHTML = '<div class="routebar"><button class="abort" id="rabort">abort</button>&#10148; ' +
+          esc(r.name || "route") + " " + pos + " &middot; " + esc(r.steps[r.current]) +
+          (r.mode === "dynamic" && r.reason ? '<span style="opacity:.7"> &mdash; ' + esc(r.reason) + "</span>" : "") +
           (r.status === "waiting_human" ? '<div class="q">&#9208; ' + esc(r.pendingQuestion || "waiting for you") + " &mdash; reply below to resume</div>" : "") + "</div>";
+        var ab = document.getElementById("rabort");
+        if (ab) ab.onclick = function(){
+          api("/api/projects/" + pid + "/route", { method: "DELETE" })
+            .then(function(){ toast("route aborted"); refresh(); })
+            .catch(function(err){ toast(err.message); });
+        };
       } else { bar.innerHTML = ""; }
       var stat = document.getElementById("pstat");
       stat.textContent = p.needsInput ? "needs input" : "";
