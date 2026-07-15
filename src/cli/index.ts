@@ -372,6 +372,96 @@ program
   });
 
 // ---------------------------------------------------------------------------
+// route — automated multi-hop pipelines
+// ---------------------------------------------------------------------------
+
+program
+  .command("route [spec] [task...]")
+  .description(
+    "run a task through a pipeline of agents (spec: route name, or ids/roles like planner,executor)",
+  )
+  .option("--status", "show the current/last route", false)
+  .option("--abort", "abort the active route", false)
+  .option("-d, --detach", "don't follow — notifications will tell you when it's done", false)
+  .action(
+    async (
+      spec: string | undefined,
+      words: string[],
+      opts: { status: boolean; abort: boolean; detach: boolean },
+    ) => {
+      const client = await ensureDaemon();
+      const project = await currentProject(client);
+
+      if (opts.status) {
+        const { route } = await client.routeState(project.id);
+        if (!route) return void console.log(pc.dim("no route has run in this project"));
+        const flow = route.steps
+          .map((s, i) => (i === route.current ? pc.bold(s) : s))
+          .join(" → ");
+        console.log(
+          `${pc.cyan(route.name ?? "route")} [${route.status}] ${flow}` +
+            pc.dim(`  task: ${route.task.slice(0, 80)}`),
+        );
+        if (route.pendingQuestion) console.log(pc.yellow(`  ⏸ asks: ${route.pendingQuestion}`));
+        if (route.reason) console.log(pc.dim(`  reason: ${route.reason}`));
+        return;
+      }
+      if (opts.abort) {
+        const { route } = await client.abortRoute(project.id);
+        console.log(pc.yellow(`⊘ route stopped: ${route.reason ?? "aborted"}`));
+        return;
+      }
+      if (!spec || !words.length) {
+        fail(
+          'usage: loom route <name|steps> "<task>"   e.g. loom route planner,executor "add dark mode"\n  (or: loom route --status / --abort)',
+        );
+      }
+
+      const { route } = await client.startRoute(project.id, words.join(" "), spec);
+      console.log(
+        pc.cyan(`➤ route${route.name ? ` "${route.name}"` : ""}: ${route.steps.join(" → ")}`),
+      );
+      if (opts.detach) {
+        console.log(pc.dim("running in the background — you'll be notified at each pause/finish"));
+        return;
+      }
+
+      console.log(pc.dim("following — Ctrl-C detaches, the route keeps running\n"));
+      const lastSeen = { id: 0 };
+      await new Promise<void>((resolve) => {
+        client.subscribe((pid, e) => {
+          if (pid !== project.id || e.id <= lastSeen.id) return;
+          lastSeen.id = e.id;
+          printEvent(e);
+          if (e.kind === "route_completed" || e.kind === "route_failed") resolve();
+        }, project.id);
+      });
+      const { route: finalState } = await client.routeState(project.id);
+      process.exit(finalState?.status === "completed" ? 0 : 1);
+    },
+  );
+
+program
+  .command("routes")
+  .description("named routes defined for the current project")
+  .action(async () => {
+    const client = await ensureDaemon();
+    await currentProject(client); // validates we're in a project
+    const dir = currentProjectDir()!;
+    const { readProjectConfig } = await import("../core/registry.js");
+    const cfg = readProjectConfig(dir);
+    const routes = cfg?.routes ?? {};
+    if (!Object.keys(routes).length) {
+      console.log(pc.dim('no named routes — add {"routes":{"ship":["planner","executor"]}} to .loom/config.json'));
+      return;
+    }
+    for (const [name, steps] of Object.entries(routes)) {
+      console.log(`${pc.cyan(pc.bold(name))}  ${steps.join(" → ")}`);
+    }
+    console.log(pc.dim('\nrun one: loom route <name> "<task>" · ad-hoc: loom route a,b,c "<task>"'));
+  });
+
+// ---------------------------------------------------------------------------
 // pair
 // ---------------------------------------------------------------------------
 

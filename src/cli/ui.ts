@@ -52,6 +52,28 @@ export function formatEvent(e: LoomEvent): string | null {
     }
     case "decision":
       return pc.blue(`  ★ decision: ${String(e.payload.text ?? "")}`);
+    case "route_started": {
+      const steps = (e.payload.steps as string[] | undefined) ?? [];
+      const name = e.payload.name ? ` "${String(e.payload.name)}"` : "";
+      return pc.cyan(`  ➤ route${name} started: ${steps.join(" → ")}`);
+    }
+    case "route_step":
+      return pc.cyan(
+        `  ➤ step ${Number(e.payload.step) + 1}/${Number(e.payload.of)} → ${String(e.payload.agent)}`,
+      );
+    case "route_paused":
+      return pc.yellow(
+        `  ⏸ route paused — ${String(e.payload.agent)} asks: ${String(e.payload.question ?? "")}` +
+          pc.dim("  (answer with loom send / chat; route resumes automatically)"),
+      );
+    case "route_resumed":
+      return pc.cyan(`  ➤ route resumed`);
+    case "route_completed":
+      return pc.green(`  ✔ route completed (${Number(e.payload.steps)} steps)`);
+    case "route_failed":
+      return e.payload.aborted
+        ? pc.yellow(`  ⊘ route stopped: ${String(e.payload.reason ?? "")}`)
+        : pc.red(`  ✗ route failed: ${String(e.payload.reason ?? "")}`);
     case "error":
       return pc.red(`  ✗ ${who}: ${String(e.payload.message ?? "error")}`);
     case "status": {
@@ -75,7 +97,14 @@ export function formatProjectRow(p: ProjectStatus): string {
   const last = p.lastEvent
     ? pc.dim(`${timeShort(p.lastEvent.ts)} ${p.lastEvent.kind}`)
     : pc.dim("no activity");
-  return `${flag}  ${pc.bold(p.name)} ${pc.dim(`(${p.id})`)}  baton: ${holder}  ${last}`;
+  const route =
+    p.route && (p.route.status === "running" || p.route.status === "waiting_human")
+      ? pc.cyan(
+          `  ➤ ${p.route.name ?? "route"} ${p.route.current + 1}/${p.route.steps.length}` +
+            (p.route.status === "waiting_human" ? " ⏸" : ""),
+        )
+      : "";
+  return `${flag}  ${pc.bold(p.name)} ${pc.dim(`(${p.id})`)}  baton: ${holder}${route}  ${last}`;
 }
 
 export function formatAgentRow(a: ProjectStatus["agents"][number]): string {

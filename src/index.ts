@@ -9,6 +9,7 @@ export { EventLog } from "./core/eventlog.js";
 export { BatonManager, NotHolderError } from "./core/baton.js";
 export { buildBriefing, buildProjection } from "./core/projection.js";
 export { suggestHandoff } from "./core/suggestions.js";
+export { RouteEngine, RouteActiveError, resolveSteps } from "./core/routes.js";
 export {
   listProjects,
   findProject,
