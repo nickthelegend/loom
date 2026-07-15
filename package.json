@@ -1,5 +1,5 @@
 {
-  "name": "agent-loom",
+  "name": "threadloom",
   "version": "0.1.0",
   "description": "Loom — local-first control plane for coding agents: one CLI, shared memory, baton handoffs and routes across Claude Code, OpenCode, and friends.",
   "type": "module",

@@ -1,7 +1,7 @@
 # Loom
 
 [![ci](https://github.com/nickthelegend/loom/actions/workflows/ci.yml/badge.svg)](https://github.com/nickthelegend/loom/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/agent-loom)](https://www.npmjs.com/package/agent-loom)
+[![npm](https://img.shields.io/npm/v/threadloom)](https://www.npmjs.com/package/threadloom)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **One CLI for all your coding agents.** Loom weaves Claude Code, OpenCode — and bridges
@@ -57,7 +57,7 @@ Loom fixes the seam:
 Requires **Node ≥ 22.5** (Loom's event log uses the built-in `node:sqlite`).
 
 ```bash
-npm install -g agent-loom          # → `loom` on your PATH
+npm install -g threadloom          # → `loom` on your PATH
 ```
 
 Other paths:
