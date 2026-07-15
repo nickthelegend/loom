@@ -1,5 +1,7 @@
 # Loom
 
+[![ci](https://github.com/nickthelegend/loom/actions/workflows/ci.yml/badge.svg)](https://github.com/nickthelegend/loom/actions/workflows/ci.yml)
+
 **One CLI for all your coding agents.** Loom weaves Claude Code, OpenCode — and bridges
 like Antigravity — into a single shared thread per project: one conversation, one shared
 memory, one baton.
@@ -151,8 +153,10 @@ Define named pipelines in `.loom/config.json` (steps are roles or agent ids):
 | `loom decision <text>` | Record a decision into shared memory |
 | `loom log [-f]` | Show (or follow) the project event log |
 | `loom agents` / `loom projects` / `loom status` | Who's who, board of projects, daemon health |
-| `loom up [--tailnet]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
-| `loom pair` | QR with a single-use pairing token for a phone/device |
+| `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
+| `loom pair` | QR deep link that pairs a phone (single-use token) |
+| `loom clients [--revoke <id>]` | List paired devices, revoke a lost one |
+| `loom doctor` | Diagnose env, daemon, binding, and project config — with fixes |
 
 ## Supported agents
 
@@ -180,7 +184,10 @@ agents without a stable API can't be trusted with interrupt-safe writes. See
   preamble for OpenCode).
 - **Baton** — persisted per project (`.loom/state.json`). Messages route to the holder;
   addressing a non-holder returns `409 not_holder` and the surface asks you to confirm a
-  handoff. Ghost holders (agent removed from config) self-heal.
+  handoff. Ghost holders (agent removed from config) self-heal. Every handoff snapshots
+  the outgoing agent's working-tree state (dirty flag + `git status`) into the log.
+- **Decisions** — `loom decision <text>` pins a fact, and any agent line starting
+  `Decision: …` is captured automatically. Decisions ride every future projection.
 - **Daemon** — one process, many projects. REST for commands, WebSocket for the live
   stream. Config edits hot-reload when the project is quiet.
 
