@@ -40,15 +40,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header block (monogram, role, baton, project dir); sidebar projects wear
   hash-hued repo glyphs and the status bar a real spend meter. `BUILD_REV`
   now also hashes the served app so UI-only rebuilds bump the rev.
-- Collapsible source-control rail: hidden by default, toggled from the tab
-  strip (PanelRight) or the rail's own close button, state persisted.
+- Right rail is a 4-view panel (Explorer / Search / Source Control / Tasks)
+  with a top icon switcher, open by default on the Explorer. Explorer is a
+  lazy project file tree (folders expand on click; files open in the dock —
+  changed files as a diff, others as a read-only preview). Search finds files
+  by name; Source Control lists the branch + changed files; Tasks holds a
+  per-project New-task button and the agent roster. Backed by new sandboxed
+  daemon endpoints: `GET /files`, `/file` (400KB cap), `/find` (200 results).
+- The Changes/diff view is no longer an always-on split — it's a dock to the
+  right of the chat that opens only when you click a change (an `Update(…)`
+  card in the thread, or a file in Explorer / Search / Source Control) and
+  closes with an X. The rail itself collapses from the tab strip (PanelRight).
 - Real terminals: the daemon runs commands in the project directory
   (`POST /exec`, streamed over the project WebSocket, 8-run / 2MB caps) and
   the workspace gains a bottom terminal dock — multiple tabs, streamed
   output with exit codes, `clear`, drag-resize, and a Ctrl+backtick toggle.
-- New Task flow (Orca's Create Worktree): a sidebar action + `n` shortcut
-  opens a modal to pick a project + agent + task (or a pipeline) and start
-  it, then open that workspace.
+- New Task flow (Orca's Create Worktree): a sidebar action, the Tasks rail
+  view, and the `n` shortcut open a modal to pick a project, a task, and
+  **one ADE or several** — one agent messages it directly; several run it as
+  a pipeline hop to hop (e.g. claude → codex).
 - Phone home rebuilt to the Orca mobile layout: Welcome-back hero, stat
   tiles (Projects / Agents / Spend), a Daemon card, a Resume card, hue-glyph
   project cards, and quick-action pills.
