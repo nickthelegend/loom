@@ -424,6 +424,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     color:var(--muted-foreground);border:1px solid var(--border);border-radius:5px;
     padding:0 5px;line-height:14px;text-transform:uppercase}
   .arow.cur .abadge{color:var(--sidebar-accent-foreground)}
+  /* a role is a name you chose, so it reads as editable text, not a label */
+  .role.edit{cursor:text;border-radius:4px;padding:0 3px;margin-right:-3px}
+  .role.edit:hover{background:color-mix(in srgb, var(--muted-foreground) 22%, transparent);
+    color:var(--sidebar-accent-foreground)}
+  .roleinput{width:9ch;background:var(--background);border:1px solid var(--ring);border-radius:4px;
+    color:var(--foreground);font-family:var(--font-mono);font-size:10.5px;padding:0 3px;outline:none}
   /* a bridge is read-only: no hover affordance, because it can't be targeted */
   .arow.bridge{cursor:default;opacity:.82}
   .arow.bridge:hover{background:transparent;color:inherit}
@@ -3122,7 +3128,9 @@ ${BRAND_SPRITE}
               '<span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
               '<span class="anm">' + brandMark(a.kind) + esc(a.id) +
               (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") + "</span>" +
-              '<span class="role">' + esc(a.role) + "</span></div>";
+              // the role is yours to name — click it and type
+              '<span class="role edit" data-role-p="' + esc(p.id) + '" data-role-a="' + esc(a.id) +
+              '" title="click to rename this job">' + esc(a.role || "\\u2026") + "</span></div>";
           }).join("");
           // Bridges too. They never hold the baton, so they aren't targets for
           // a message — but a configured bridge that renders nowhere reads as
@@ -3140,6 +3148,41 @@ ${BRAND_SPRITE}
       }).join("");
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
+      });
+      // Rename a job in place. Roles are free text — "architect", "the one that
+      // writes docs", whatever your project actually does. Bound before the row
+      // handler and stops propagation, or clicking it would also re-target.
+      Array.prototype.forEach.call(el.querySelectorAll("[data-role-a]"), function(tag){
+        tag.onclick = function(ev){
+          ev.stopPropagation();
+          if (tag.querySelector("input")) return;
+          var was = tag.textContent;
+          var inp = document.createElement("input");
+          inp.className = "roleinput";
+          inp.value = was === "\\u2026" ? "" : was;
+          inp.maxLength = 40;
+          tag.textContent = "";
+          tag.appendChild(inp);
+          inp.focus();
+          inp.select();
+          var done = false;
+          function finish(save){
+            if (done) return; done = true;
+            var next = inp.value.trim();
+            if (!save || !next || next === was) { drawList(); return; }
+            api("/api/projects/" + tag.getAttribute("data-role-p") + "/agents/" +
+                tag.getAttribute("data-role-a") + "/role",
+                { method: "POST", body: JSON.stringify({ role: next }) })
+              .then(function(){ refresh(); toast("role \\u2192 " + next); })
+              .catch(function(err){ toast(err.message); drawList(); });
+          }
+          inp.onkeydown = function(e){
+            if (e.key === "Enter") { e.preventDefault(); finish(true); }
+            else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+          };
+          inp.onblur = function(){ finish(true); };
+          inp.onclick = function(e){ e.stopPropagation(); };
+        };
       });
       // [data-a] on purpose: bridge rows carry no agent id because they can't
       // be targeted, and binding them would select an agent that can't reply

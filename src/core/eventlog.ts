@@ -9,15 +9,24 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import type { EventKind, LoomEvent, NewEvent } from "../types.js";
+import { MAIN_CHAT } from "../types.js";
 
 export interface ListOpts {
   since?: number; // exclusive event id
   limit?: number;
   kinds?: EventKind[];
+  /**
+   * Only this conversation. Asking for the main chat also returns events
+   * written before chats existed — they have no id and belong to it.
+   * Omit to read the whole project, which is what the brain wants.
+   */
+  chat?: string;
 }
 
 interface EventStore {
-  append(e: Required<Omit<NewEvent, "agentId">> & { agentId?: string }): LoomEvent;
+  append(
+    e: Required<Omit<NewEvent, "agentId" | "chat">> & { agentId?: string; chat?: string },
+  ): LoomEvent;
   list(opts?: ListOpts): LoomEvent[];
   lastId(): number;
   close(): void;
@@ -40,22 +49,41 @@ class SqliteStore implements EventStore {
         ts INTEGER NOT NULL,
         kind TEXT NOT NULL,
         agent_id TEXT,
+        chat TEXT,
         payload TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind, id);
     `);
+    // Migrate BEFORE indexing chat. A log written before chats existed already
+    // has an `events` table, so CREATE TABLE IF NOT EXISTS is a no-op and the
+    // column is still missing — indexing it here would throw "no such column"
+    // and take the whole log down with it. Add the column, then index.
+    // The log is append-only and those events are history: a NULL chat reads
+    // as the main conversation rather than being rewritten.
+    const cols = this.db.prepare("PRAGMA table_info(events)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "chat")) {
+      this.db.exec("ALTER TABLE events ADD COLUMN chat TEXT");
+    }
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_chat ON events(chat, id)");
   }
 
-  append(e: Required<Omit<NewEvent, "agentId">> & { agentId?: string }): LoomEvent {
+  append(e: Required<Omit<NewEvent, "agentId" | "chat">> & { agentId?: string; chat?: string }): LoomEvent {
     const stmt = this.db.prepare(
-      "INSERT INTO events (ts, kind, agent_id, payload) VALUES (?, ?, ?, ?)",
+      "INSERT INTO events (ts, kind, agent_id, chat, payload) VALUES (?, ?, ?, ?, ?)",
     );
-    const res = stmt.run(e.ts, e.kind, e.agentId ?? null, JSON.stringify(e.payload));
+    const res = stmt.run(
+      e.ts,
+      e.kind,
+      e.agentId ?? null,
+      e.chat ?? null,
+      JSON.stringify(e.payload),
+    );
     return {
       id: Number(res.lastInsertRowid),
       ts: e.ts,
       kind: e.kind,
       ...(e.agentId ? { agentId: e.agentId } : {}),
+      ...(e.chat ? { chat: e.chat } : {}),
       payload: e.payload,
     };
   }
@@ -71,6 +99,15 @@ class SqliteStore implements EventStore {
       clauses.push(`kind IN (${opts.kinds.map(() => "?").join(",")})`);
       params.push(...opts.kinds);
     }
+    if (opts.chat !== undefined) {
+      if (opts.chat === MAIN_CHAT) {
+        // pre-chat history has no id and belongs to the main conversation
+        clauses.push("(chat = ? OR chat IS NULL)");
+      } else {
+        clauses.push("chat = ?");
+      }
+      params.push(opts.chat);
+    }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     // When limiting, we want the *most recent* N in ascending order.
     const sql = opts.limit
@@ -82,6 +119,7 @@ class SqliteStore implements EventStore {
       ts: number;
       kind: string;
       agent_id: string | null;
+      chat: string | null;
       payload: string;
     }>;
     return rows.map((r) => ({
@@ -89,6 +127,7 @@ class SqliteStore implements EventStore {
       ts: r.ts,
       kind: r.kind as EventKind,
       ...(r.agent_id ? { agentId: r.agent_id } : {}),
+      ...(r.chat ? { chat: r.chat } : {}),
       payload: JSON.parse(r.payload) as Record<string, unknown>,
     }));
   }
@@ -130,12 +169,13 @@ class JsonlStore implements EventStore {
     this.nextId = (this.cache[this.cache.length - 1]?.id ?? 0) + 1;
   }
 
-  append(e: Required<Omit<NewEvent, "agentId">> & { agentId?: string }): LoomEvent {
+  append(e: Required<Omit<NewEvent, "agentId" | "chat">> & { agentId?: string; chat?: string }): LoomEvent {
     const ev: LoomEvent = {
       id: this.nextId++,
       ts: e.ts,
       kind: e.kind,
       ...(e.agentId ? { agentId: e.agentId } : {}),
+      ...(e.chat ? { chat: e.chat } : {}),
       payload: e.payload,
     };
     fs.appendFileSync(this.file, JSON.stringify(ev) + "\n");
@@ -147,6 +187,12 @@ class JsonlStore implements EventStore {
     let out = this.cache;
     if (opts.since !== undefined) out = out.filter((e) => e.id > opts.since!);
     if (opts.kinds?.length) out = out.filter((e) => opts.kinds!.includes(e.kind));
+    // must match SqliteStore exactly: an event with no chat is main's
+    if (opts.chat !== undefined) {
+      out = out.filter((e) =>
+        opts.chat === MAIN_CHAT ? (e.chat ?? MAIN_CHAT) === MAIN_CHAT : e.chat === opts.chat,
+      );
+    }
     if (opts.limit && out.length > opts.limit) out = out.slice(-opts.limit);
     return [...out];
   }
@@ -175,12 +221,20 @@ export class EventLog {
   static async open(loomDir: string): Promise<EventLog> {
     fs.mkdirSync(loomDir, { recursive: true });
     if (process.env.LOOM_STORE !== "jsonl") {
+      let sqlite: SqliteModule;
       try {
-        const sqlite = await import("node:sqlite");
-        return new EventLog(new SqliteStore(sqlite, path.join(loomDir, "log.db")));
+        sqlite = await import("node:sqlite");
       } catch {
-        // Fall through to JSONL on runtimes without node:sqlite.
+        // No node:sqlite in this runtime — the JSONL store is the whole point
+        // of the fallback. This is the ONLY thing it catches.
+        return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")));
       }
+      // Deliberately outside the catch. If node:sqlite exists but the log won't
+      // open — corrupt file, failed migration, bad permissions — falling back
+      // would silently start an EMPTY jsonl log beside a database full of your
+      // history, and write new events there. Losing the thread is worse than
+      // failing loudly, so this throws.
+      return new EventLog(new SqliteStore(sqlite, path.join(loomDir, "log.db")));
     }
     return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")));
   }
@@ -191,6 +245,7 @@ export class EventLog {
       kind: e.kind,
       payload: e.payload,
       ...(e.agentId ? { agentId: e.agentId } : {}),
+      ...(e.chat ? { chat: e.chat } : {}),
     });
     this.emitter.emit("event", ev);
     return ev;

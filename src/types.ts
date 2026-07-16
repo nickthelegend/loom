@@ -33,27 +33,57 @@ export type EventKind =
   | "status" // adapter/bridge lifecycle info
   | "error";
 
+/**
+ * The chat every event belongs to. A project can hold several conversations;
+ * they share one brain, one baton and one working tree — only the talking is
+ * split. Events written before chats existed carry no id and read as MAIN.
+ */
+export const MAIN_CHAT = "main";
+
 export interface LoomEvent {
   id: number;
   ts: number; // epoch ms
   kind: EventKind;
   /** Author agent id; absent for human/system events. */
   agentId?: string;
+  /** Conversation this belongs to. Absent means the main chat. */
+  chat?: string;
   payload: Record<string, unknown>;
 }
 
 export type NewEvent = {
   kind: EventKind;
   agentId?: string;
+  chat?: string;
   payload: Record<string, unknown>;
   ts?: number;
 };
+
+/** A named conversation inside a project. */
+export interface ChatInfo {
+  id: string;
+  title: string;
+  createdAt: number;
+}
 
 // ---------------------------------------------------------------------------
 // Agents & projects
 // ---------------------------------------------------------------------------
 
-export type AgentRole = "planner" | "executor" | "reviewer" | "general";
+/**
+ * An agent's job, in your words. Free text: call an agent "architect",
+ * "tester", "the one that writes docs" — whatever your project actually does.
+ *
+ * A few names carry extra meaning if you use them, and none if you don't:
+ * `buildDefaultRoutes` seeds a plan→execute→review pipeline when it sees
+ * planner/executor/reviewer, the rules router prefers a reviewer last, and a
+ * route step matches an agent by role as well as by id (so a route named
+ * ["architect","tester"] just works). Nothing requires them.
+ */
+export type AgentRole = string;
+
+/** Roles Loom suggests when it sets a project up. Only suggestions. */
+export const SUGGESTED_ROLES = ["planner", "executor", "reviewer", "general"] as const;
 
 /** Adapter = full-duplex; bridge = read-mostly, never holds the baton. */
 export type AgentTier = "adapter" | "bridge";

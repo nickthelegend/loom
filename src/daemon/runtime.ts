@@ -35,6 +35,7 @@ import { buildBriefing, buildProjection } from "../core/projection.js";
 import {
   projectLoomDir,
   readProjectConfig,
+  writeProjectConfig,
   writeMemoryFile,
 } from "../core/registry.js";
 import { suggestHandoff } from "../core/suggestions.js";
@@ -153,6 +154,24 @@ export class ProjectRuntime {
   /** Has .loom/config.json changed since this runtime was opened? */
   configStale(): boolean {
     return configMtimeOf(this.info.dir) > this.configMtime;
+  }
+
+  /**
+   * Rename an agent's job. Writes .loom/config.json (the source of truth) and
+   * updates this runtime in place — the generic hot-reload would do it too, but
+   * only once the project is quiet, and a label you just typed shouldn't wait
+   * on an agent's turn to finish. Nothing is torn down: a role is a name, not
+   * a capability, so no adapter needs restarting.
+   */
+  setAgentRole(agentId: string, role: string): { id: string; role: string } | null {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) return null;
+    cfg.role = role;
+    writeProjectConfig(this.info.dir, this.config);
+    // we just wrote the file, so don't let configStale() see our own write and
+    // schedule a pointless reload
+    this.configMtime = configMtimeOf(this.info.dir);
+    return { id: agentId, role };
   }
 
   /** Any adapter mid-turn? (Hot reloads are deferred while work is in flight.) */

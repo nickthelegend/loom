@@ -353,6 +353,21 @@ export class LoomDaemon {
       }),
     );
 
+    // Rename an agent's role. It's free text — your project decides what jobs
+    // exist, not us. Writes .loom/config.json, which is the source of truth.
+    app.post(
+      "/api/projects/:id/agents/:agentId/role",
+      withRuntime(async (rt, req, res) => {
+        const { role } = (req.body ?? {}) as { role?: string };
+        if (typeof role !== "string") return void res.status(400).json({ error: "missing role" });
+        const clean = role.trim().slice(0, 40);
+        if (!clean) return void res.status(400).json({ error: "role cannot be empty" });
+        const updated = rt.setAgentRole(String(req.params.agentId), clean);
+        if (!updated) return void res.status(404).json({ error: "unknown agent" });
+        res.json(updated);
+      }),
+    );
+
     app.post(
       "/api/projects/:id/interrupt",
       withRuntime(async (rt, _req, res) => {
