@@ -103,6 +103,35 @@ async function ensureDaemon() {
   throw new Error("loom daemon did not start");
 }
 
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Open ~/.loom/daemon.log for append, rolling it once it gets big.
+ *
+ * `loom up` has a twin of this (src/cli/index.ts). The daemon has to leave a
+ * trace whichever of the two started it, and the desktop app is the one most
+ * people use — a crash here used to go to stdio:"ignore" and vanish. Kept
+ * local rather than imported from dist because this file stays dependency-free
+ * on purpose, the same way it re-implements loomHome() above.
+ *
+ * Falls back to "ignore" if the log can't be opened: no log is bad, but a
+ * desktop app that won't start because of it is worse.
+ */
+export function openDaemonLog() {
+  const file = path.join(loomHome(), "daemon.log");
+  try {
+    fs.mkdirSync(loomHome(), { recursive: true });
+    if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, `${file}.1`);
+  } catch {
+    /* no log yet, or it vanished — open a fresh one below */
+  }
+  try {
+    return fs.openSync(file, "a");
+  } catch {
+    return "ignore";
+  }
+}
+
 /**
  * Spawn the daemon under a real Node runtime. Electron's bundled Node is too
  * old for node:sqlite (Loom needs >=22.5), so a daemon spawned with the
@@ -125,21 +154,34 @@ async function spawnDaemon() {
   }
   attempts.push(["node", process.env]);
   attempts.push([process.execPath, { ...process.env, ELECTRON_RUN_AS_NODE: "1" }]);
-  for (const [cmd, env] of attempts) {
-    const ok = await new Promise((resolve) => {
-      let child;
-      try {
-        child = spawn(cmd, [CLI_ENTRY, "daemon"], { detached: true, stdio: "ignore", env });
-      } catch {
-        return resolve(false);
-      }
-      child.once("spawn", () => {
-        child.unref();
-        resolve(true);
+  const log = openDaemonLog();
+  try {
+    for (const [cmd, env] of attempts) {
+      const ok = await new Promise((resolve) => {
+        let child;
+        try {
+          child = spawn(cmd, [CLI_ENTRY, "daemon"], { detached: true, stdio: ["ignore", log, log], env });
+        } catch {
+          return resolve(false);
+        }
+        child.once("spawn", () => {
+          child.unref();
+          resolve(true);
+        });
+        child.once("error", () => resolve(false));
       });
-      child.once("error", () => resolve(false));
-    });
-    if (ok) return;
+      if (ok) return;
+    }
+  } finally {
+    // The child dup'd the fd at spawn; this one is ours to let go of. Electron
+    // main outlives the spawn, so leaving it open would leak a descriptor.
+    if (typeof log === "number") {
+      try {
+        fs.closeSync(log);
+      } catch {
+        /* already gone */
+      }
+    }
   }
   throw new Error("could not find a Node runtime to start the loom daemon");
 }

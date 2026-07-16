@@ -13,7 +13,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error — plain ESM JS, no types; that's the point of the seam
-import { isStaleDaemon, localBuildRev, prepareAppUrl } from "../desktop/loom-app.js";
+import { isStaleDaemon, localBuildRev, openDaemonLog, prepareAppUrl } from "../desktop/loom-app.js";
 import { tmpDir } from "./helpers.js";
 
 /** A fixture dist/daemon dir, so the hash isn't tied to the real build. */
@@ -150,5 +150,59 @@ describe("desktop · rev mirrors the daemon", () => {
     const { BUILD_REV } = (await import(pathToFileURL(built).href)) as { BUILD_REV: string };
     expect(BUILD_REV).toMatch(/^[0-9a-f]{16}$/);
     expect(localBuildRev()).toBe(BUILD_REV);
+  });
+});
+
+/**
+ * The desktop app is the one most people run, so it's the one whose daemon must
+ * leave a trace. It spawned with stdio:"ignore" for most of this project's life:
+ * the daemon could die at 3am and there was nothing to read afterwards.
+ */
+describe("desktop · daemon log", () => {
+  const withHome = <T,>(home: string, fn: () => T): T => {
+    const prev = process.env.LOOM_HOME;
+    process.env.LOOM_HOME = home;
+    try {
+      return fn();
+    } finally {
+      if (prev === undefined) delete process.env.LOOM_HOME;
+      else process.env.LOOM_HOME = prev;
+    }
+  };
+
+  it("opens an appendable log under LOOM_HOME, creating the home if needed", () => {
+    const home = path.join(tmpDir("log-home"), "not-yet-there");
+    const fd = withHome(home, openDaemonLog);
+    expect(typeof fd).toBe("number");
+    fs.writeSync(fd as number, "daemon said something\n");
+    fs.closeSync(fd as number);
+    expect(fs.readFileSync(path.join(home, "daemon.log"), "utf8")).toBe("daemon said something\n");
+  });
+
+  it("appends rather than truncating — yesterday's crash is still evidence", () => {
+    const home = tmpDir("log-append");
+    fs.writeFileSync(path.join(home, "daemon.log"), "older\n");
+    const fd = withHome(home, openDaemonLog) as number;
+    fs.writeSync(fd, "newer\n");
+    fs.closeSync(fd);
+    expect(fs.readFileSync(path.join(home, "daemon.log"), "utf8")).toBe("older\nnewer\n");
+  });
+
+  it("rolls a big log aside instead of eating the disk", () => {
+    const home = tmpDir("log-roll");
+    const file = path.join(home, "daemon.log");
+    fs.writeFileSync(file, "x".repeat(5 * 1024 * 1024 + 1));
+    const fd = withHome(home, openDaemonLog) as number;
+    fs.writeSync(fd, "after the roll\n");
+    fs.closeSync(fd);
+    expect(fs.readFileSync(file, "utf8")).toBe("after the roll\n");
+    expect(fs.statSync(`${file}.1`).size).toBe(5 * 1024 * 1024 + 1);
+  });
+
+  it("falls back to \"ignore\" when the log can't be opened, rather than refusing to launch", () => {
+    // A file where the home directory should be: every path under it is unusable.
+    const blocked = path.join(tmpDir("log-blocked"), "home");
+    fs.writeFileSync(blocked, "not a directory");
+    expect(withHome(blocked, openDaemonLog)).toBe("ignore");
   });
 });
