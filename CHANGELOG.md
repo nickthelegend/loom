@@ -5,6 +5,29 @@ All notable changes to Loom are documented here.
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Design — quiet graphite (2026-07-16)
+
+- Every surface redesigned on one system adapted from
+  [Orca](https://github.com/stablyai/orca) (MIT): neutral monochrome tokens,
+  1px hairlines, three elevation tiers with a glass floating layer, and color
+  reserved for state — thread cyan (live), shuttle magenta (baton), selvage
+  edges per agent. Spec in `docs/design-system.md`.
+- Web app: light + dark themes with a persisted in-app toggle, Geist variable
+  type served by the daemon at `/app/fonts/geist.woff2` (SIL OFL 1.1, embedded
+  — no CDN), SVG icon set replacing emoji, Orca button/input/card/chip
+  variants, sleek scrollbars, and a readable centered thread column.
+- Desktop shell: Orca window chrome — canvas-colored background, macOS
+  traffic lights at x16/y18 centered in 48px drag strips, 600×400 minimums,
+  restyled failure page.
+- Phone app: graphite surfaces, near-white primary CTA, accessory-key agent
+  chips, session top bar + neutral-underline tabs, command-dock composer with
+  an arming send button, diff washes, numbered pairing steps.
+- Fixed: the desktop web shell now renders the hash-addressed project on
+  first load; live websocket frames buffer until history hydrates (an early
+  event could previously wipe the rendered backlog).
+
 ## [0.1.0] — 2026-07-15
 
 ### Core engine

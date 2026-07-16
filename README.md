@@ -342,7 +342,7 @@ sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running 
 ## Development
 
 ```bash
-npm test          # 37 tests: unit + full HTTP/WS end-to-end
+npm test          # 96 tests: unit + full HTTP/WS end-to-end
 npm run build     # tsc → dist/
 npm run dev       # run the CLI from source (tsx)
 ```
@@ -353,6 +353,15 @@ npm run dev       # run the CLI from source (tsx)
   API the served app already uses.
 - LLM-synthesized projections behind the same interface.
 - More adapters/bridges via the SDK — contributions welcome.
+
+## Design
+
+Every Loom surface (web app, desktop shell, phone app) wears one design system —
+**quiet graphite**: neutral monochrome chrome, hairline borders, Geist type, and
+color reserved for state (thread cyan = live, shuttle magenta = the baton).
+Adapted from the [Orca](https://github.com/stablyai/orca) design system (MIT,
+© Lovecast Inc.); the Geist typeface is © Vercel under the SIL Open Font
+License 1.1. Tokens and rules: [docs/design-system.md](docs/design-system.md).
 
 ## License
 
