@@ -1,0 +1,61 @@
+<!--
+  Loom's mark: a weave.
+
+  Three warp threads held under tension, three weft threads crossing over and
+  under them. That is what a loom is, and it is what this does — one thread per
+  agent, crossing, held in one frame.
+
+  Built by layering rather than by gapping: warp, then weft over it, then the
+  warp patched back in at alternating crossings. The obvious way — drawing the
+  weft in segments with gaps at each crossing — doesn't work, because round line
+  caps paint half a stroke-width past their endpoint and fill the very gaps that
+  make the interlace. Every crossing came out weft-over and the weave vanished.
+  The patches use butt caps for the same reason.
+
+  Drawn at 1024 because that's the size electron-builder derives every other
+  from. Graphite and a single warm thread: the app's palette, quiet on a dock
+  that's already full.
+-->
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2A2D32"/>
+      <stop offset="1" stop-color="#16181B"/>
+    </linearGradient>
+    <linearGradient id="warp" x1="512" y1="180" x2="512" y2="844" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FAFAFA" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#FAFAFA" stop-opacity="0.6"/>
+    </linearGradient>
+    <linearGradient id="weft" x1="180" y1="512" x2="844" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E8A87C"/>
+      <stop offset="1" stop-color="#C9743C"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+
+  <!-- 1. the warp: on the frame, taut, full length -->
+  <g stroke="url(#warp)" stroke-width="44" stroke-linecap="round">
+    <path d="M368 200 V824"/>
+    <path d="M512 200 V824"/>
+    <path d="M656 200 V824"/>
+  </g>
+
+  <!-- 2. the weft, laid across all of it -->
+  <g stroke="url(#weft)" stroke-width="44" stroke-linecap="round">
+    <path d="M200 344 H824"/>
+    <path d="M200 512 H824"/>
+    <path d="M200 680 H824"/>
+  </g>
+
+  <!-- 3. the warp patched back over alternate crossings: the interlace.
+       A checkerboard — outer warps on top of rows 1 and 3, the middle warp on
+       top of row 2 — so each thread alternates over, under, over. -->
+  <g stroke="url(#warp)" stroke-width="44" stroke-linecap="butt">
+    <path d="M368 320 V368"/>
+    <path d="M656 320 V368"/>
+    <path d="M512 488 V536"/>
+    <path d="M368 656 V704"/>
+    <path d="M656 656 V704"/>
+  </g>
+</svg>

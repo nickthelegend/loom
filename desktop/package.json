@@ -3,11 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Loom desktop — an Electron shell around the loom daemon's web app.",
+  "description": "Loom desktop — an Electron shell around the loom daemon's web app. See BUILD.md for why the build config looks like this.",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nickthelegend/loom.git"
+  },
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "stage": "node ../scripts/stage-daemon.mjs",
+    "dist": "npm run stage && electron-builder",
+    "dist:dir": "npm run stage && electron-builder --dir"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -16,9 +22,57 @@
   "build": {
     "appId": "dev.loom.desktop",
     "productName": "Loom",
-    "files": ["main.js", "loom-app.js", "../dist/**/*", "../package.json"],
-    "mac": { "category": "public.app-category.developer-tools", "target": "dmg" },
-    "win": { "target": "nsis" },
-    "linux": { "target": "AppImage", "category": "Development" }
+    "directories": {
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "loom-app.js",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/daemon",
+        "to": "daemon",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "publish": null,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "artifactName": "Loom-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "maintainer": "nickthelegend"
+    }
   }
 }

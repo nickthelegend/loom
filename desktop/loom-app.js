@@ -13,8 +13,32 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const CLI_ENTRY = path.resolve(here, "..", "dist", "cli", "index.js");
-const DIST_ROOT = path.resolve(here, "..", "dist");
+
+/**
+ * Where the daemon's build lives — which depends on whether this is a checkout
+ * or an installed app.
+ *
+ * In a checkout it's ../dist, next to the desktop folder. In a packaged app
+ * this file is inside app.asar (`…/Resources/app.asar/loom-app.js`), where
+ * ../dist resolves to a path inside the archive that holds nothing: the daemon
+ * is staged alongside as an unpacked resource, because it must be a real
+ * directory on disk — Node has to spawn it, and node_modules has to be readable
+ * by a child process that knows nothing about asar.
+ *
+ * `process.resourcesPath` only exists under Electron; in tests and under plain
+ * node it's undefined, so the checkout path is the default rather than the
+ * special case.
+ */
+function daemonRoot() {
+  const resources = process.resourcesPath;
+  if (resources && here.includes("app.asar")) {
+    return path.join(resources, "daemon");
+  }
+  return path.resolve(here, "..");
+}
+
+const CLI_ENTRY = path.join(daemonRoot(), "dist", "cli", "index.js");
+const DIST_ROOT = path.join(daemonRoot(), "dist");
 
 function loomHome() {
   return process.env.LOOM_HOME ?? path.join(os.homedir(), ".loom");

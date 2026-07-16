@@ -1,0 +1,289 @@
+{
+  "generated": "2026-07-16T07:42:39+00:00",
+  "files": [
+    {
+      "path": "exports/orchestrator-pad-assembled.glb",
+      "bytes": 3121108,
+      "triangles": 36996,
+      "watertight": true
+    },
+    {
+      "path": "exports/orchestrator-pad-exploded.glb",
+      "bytes": 3121112,
+      "triangles": 36996,
+      "watertight": true
+    },
+    {
+      "path": "exports/tray.stl",
+      "bytes": 337284,
+      "triangles": 6744,
+      "watertight": true
+    },
+    {
+      "path": "exports/plate.stl",
+      "bytes": 515884,
+      "triangles": 10316,
+      "watertight": true
+    },
+    {
+      "path": "exports/caps-all.stl",
+      "bytes": 844284,
+      "triangles": 16884,
+      "watertight": true
+    },
+    {
+      "path": "exports/knob.stl",
+      "bytes": 152684,
+      "triangles": 3052,
+      "watertight": true
+    }
+  ],
+  "totals": {
+    "files": 6,
+    "bytes": 8092356,
+    "triangles": 110988,
+    "watertight": true
+  },
+  "items": [
+    {
+      "name": "tray",
+      "triangles": 6744,
+      "shells": 28,
+      "volume_mm3": 30504.82,
+      "watertight": true
+    },
+    {
+      "name": "plate",
+      "triangles": 10316,
+      "shells": 11,
+      "volume_mm3": 11275.07,
+      "watertight": true
+    },
+    {
+      "name": "preset1",
+      "triangles": 1020,
+      "shells": 3,
+      "volume_mm3": 1052.98,
+      "watertight": true
+    },
+    {
+      "name": "preset2",
+      "triangles": 1536,
+      "shells": 4,
+      "volume_mm3": 1033.54,
+      "watertight": true
+    },
+    {
+      "name": "preset3",
+      "triangles": 1732,
+      "shells": 4,
+      "volume_mm3": 1031.03,
+      "watertight": true
+    },
+    {
+      "name": "codex",
+      "triangles": 1052,
+      "shells": 3,
+      "volume_mm3": 1027.31,
+      "watertight": true
+    },
+    {
+      "name": "claude",
+      "triangles": 1388,
+      "shells": 3,
+      "volume_mm3": 1029.63,
+      "watertight": true
+    },
+    {
+      "name": "antigravity",
+      "triangles": 1088,
+      "shells": 4,
+      "volume_mm3": 1027.73,
+      "watertight": true
+    },
+    {
+      "name": "opencode",
+      "triangles": 1680,
+      "shells": 4,
+      "volume_mm3": 1023.51,
+      "watertight": true
+    },
+    {
+      "name": "kiro",
+      "triangles": 1068,
+      "shells": 3,
+      "volume_mm3": 1024.45,
+      "watertight": true
+    },
+    {
+      "name": "run",
+      "triangles": 852,
+      "shells": 3,
+      "volume_mm3": 1046.43,
+      "watertight": true
+    },
+    {
+      "name": "approve",
+      "triangles": 968,
+      "shells": 3,
+      "volume_mm3": 1040.97,
+      "watertight": true
+    },
+    {
+      "name": "reject",
+      "triangles": 1052,
+      "shells": 3,
+      "volume_mm3": 1031.92,
+      "watertight": true
+    },
+    {
+      "name": "prompt",
+      "triangles": 984,
+      "shells": 3,
+      "volume_mm3": 1042.28,
+      "watertight": true
+    },
+    {
+      "name": "voice",
+      "triangles": 1620,
+      "shells": 3,
+      "volume_mm3": 1934.96,
+      "watertight": true
+    },
+    {
+      "name": "send",
+      "triangles": 844,
+      "shells": 3,
+      "volume_mm3": 1045.23,
+      "watertight": true
+    },
+    {
+      "name": "knob",
+      "triangles": 3052,
+      "shells": 4,
+      "volume_mm3": 3097.16,
+      "watertight": true
+    }
+  ],
+  "legend": {
+    "parts": {
+      "tray": "#AEB4BC",
+      "plate": "#F4F5F7",
+      "knob": "#E8E9EB"
+    },
+    "keys": [
+      {
+        "id": "preset1",
+        "glyph": "dot",
+        "units": 1,
+        "x": -9.525,
+        "y": 28.575000000000003,
+        "color": "#D8DCE2"
+      },
+      {
+        "id": "preset2",
+        "glyph": "ring",
+        "units": 1,
+        "x": 9.525,
+        "y": 28.575000000000003,
+        "color": "#D8DCE2"
+      },
+      {
+        "id": "preset3",
+        "glyph": "target",
+        "units": 1,
+        "x": 28.575000000000003,
+        "y": 28.575000000000003,
+        "color": "#D8DCE2"
+      },
+      {
+        "id": "codex",
+        "glyph": "X",
+        "units": 1,
+        "x": -28.575000000000003,
+        "y": 9.525,
+        "color": "#1A1A1A"
+      },
+      {
+        "id": "claude",
+        "glyph": "C",
+        "units": 1,
+        "x": -9.525,
+        "y": 9.525,
+        "color": "#D97757"
+      },
+      {
+        "id": "antigravity",
+        "glyph": "A",
+        "units": 1,
+        "x": 9.525,
+        "y": 9.525,
+        "color": "#2D6BFF"
+      },
+      {
+        "id": "opencode",
+        "glyph": "O",
+        "units": 1,
+        "x": 28.575000000000003,
+        "y": 9.525,
+        "color": "#19B36B"
+      },
+      {
+        "id": "kiro",
+        "glyph": "K",
+        "units": 1,
+        "x": -28.575000000000003,
+        "y": -9.525,
+        "color": "#7A3FF2"
+      },
+      {
+        "id": "run",
+        "glyph": "bolt",
+        "units": 1,
+        "x": -9.525,
+        "y": -9.525,
+        "color": "#FFFFFF"
+      },
+      {
+        "id": "approve",
+        "glyph": "check",
+        "units": 1,
+        "x": 9.525,
+        "y": -9.525,
+        "color": "#FFFFFF"
+      },
+      {
+        "id": "reject",
+        "glyph": "cross",
+        "units": 1,
+        "x": 28.575000000000003,
+        "y": -9.525,
+        "color": "#FFFFFF"
+      },
+      {
+        "id": "prompt",
+        "glyph": "prompt",
+        "units": 1,
+        "x": -28.575000000000003,
+        "y": -28.575000000000003,
+        "color": "#FFFFFF"
+      },
+      {
+        "id": "voice",
+        "glyph": "mic",
+        "units": 2,
+        "x": 0.0,
+        "y": -28.575000000000003,
+        "color": "#FFFFFF"
+      },
+      {
+        "id": "send",
+        "glyph": "send",
+        "units": 1,
+        "x": 28.575000000000003,
+        "y": -28.575000000000003,
+        "color": "#FFFFFF"
+      }
+    ]
+  }
+}

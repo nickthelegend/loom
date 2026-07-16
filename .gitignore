@@ -10,3 +10,8 @@ coverage/
 .env
 _references_/
 desktop/dist/
+# The daemon staged for packaging: a copy of dist/ plus ~78MB of production
+# node_modules, rebuilt by `npm run stage` on every `npm run dist`. Output, not
+# source. (The icons next to it under desktop/build/ ARE source — hence the
+# narrow path rather than desktop/build/.)
+desktop/build/daemon/

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hardened runtime entitlements.
+
+  Loom's whole job is to spawn other people's coding agents — claude, codex,
+  grok, a shell for the terminal pane — and a hardened-runtime app can't spawn
+  an unsigned child or JIT without saying so first. Without these the daemon
+  starts and every agent turn dies on launch.
+
+  allow-jit and allow-unsigned-executable-memory are Electron's (V8 compiles).
+  allow-dyld-environment-variables and disable-library-validation are what let a
+  child process inherit the environment and load node-pty's native module.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.inherit</key>
+  <true/>
+</dict>
+</plist>

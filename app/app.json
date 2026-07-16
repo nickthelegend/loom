@@ -7,15 +7,32 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#111111",
+    "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
       "backgroundColor": "#111111"
     },
     "ios": {
       "bundleIdentifier": "dev.loom.app",
-      "supportsTablet": false
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "Loom talks to the daemon on your own computer, over your tailnet or LAN."
+      }
     },
     "android": {
-      "package": "dev.loom.app"
+      "package": "dev.loom.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1B1D21"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       [
