@@ -490,7 +490,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   /* terminal-style turn cards (Update blocks) in the thread */
   .turncard{max-width:88%;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
     padding:9px 12px;margin:10px 0;cursor:pointer;font-family:var(--font-mono);
-    box-shadow:0 1px 2px rgb(0 0 0 / .04)}
+    box-shadow:0 1px 2px rgb(0 0 0 / .04);
+    transition:border-color .12s,background .12s}
+  .turncard:hover{border-color:color-mix(in srgb, var(--muted-foreground) 38%, transparent);
+    background:color-mix(in srgb, var(--accent) 40%, var(--card))}
+  .turncard:hover .tchev{color:var(--foreground)}
   .turncard .tch{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:600}
   .turncard .tca{color:var(--git-add);margin-left:auto}
   .turncard .tcd{color:var(--git-del)}
@@ -1246,7 +1250,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       focusTermInput();
       // open the shell for this tab; the daemon reports its starting cwd
       api("/api/projects/" + pid + "/term/open", { method: "POST", body: JSON.stringify({ term: id }) })
-        .then(function(r){ t.cwd = r.cwd || t.cwd; drawPrompt(); })
+        .then(function(r){
+          t.cwd = r.cwd || t.cwd;
+          termAppend(t, '<div class="hintl">shell in ' + esc(shortCwd(t.cwd)) +
+            " \\u00b7 \\u2303C interrupt \\u00b7 \\u2303L clear \\u00b7 \\u2191 history</div>");
+          drawPrompt();
+        })
         .catch(function(err){ termAppend(t, '<div class="eo">loom: ' + esc(err.message) + "</div>"); });
     }
     function closeTerm(id){
@@ -1666,10 +1675,16 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         if (state.railView === "explorer") drawExplorer(document.getElementById("railbody"));
       }).catch(function(err){ toast(err.message); });
     }
+    state.refreshExplorer = function(){
+      expl.kids = {}; // keep folders open, re-read their contents
+      var open = Object.keys(expl.open).filter(function(k){ return expl.open[k]; });
+      drawExplorer(document.getElementById("railbody"));
+      open.forEach(function(d){ loadDir(d); });
+    };
     function drawExplorer(el){
       railTitle('<span class="b">' + esc(state.project ? state.project.name : "Explorer") + "</span>");
       if (!expl.kids["."]) { el.innerHTML = LOADER; loadDir("."); return; }
-      el.innerHTML = renderTreeLevel(".", 0) || '<div class="rempty">empty</div>';
+      el.innerHTML = renderTreeLevel(".", 0) || '<div class="rempty">this project has no files yet</div>';
       Array.prototype.forEach.call(el.querySelectorAll(".trow"), function(row){
         row.onclick = function(){
           var d = row.getAttribute("data-dir");
@@ -1686,7 +1701,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     }
     function drawSearch(el){
       railTitle('<span class="b">Search</span>');
-      el.innerHTML = '<div class="rsearch"><input id="rsearchi" placeholder="find files by name\\u2026" autocomplete="off" spellcheck="false"></div><div class="sres" id="sres"></div>';
+      el.innerHTML = '<div class="rsearch"><input id="rsearchi" placeholder="find files by name\\u2026" autocomplete="off" spellcheck="false"></div>' +
+        '<div class="sres" id="sres"></div>' +
+        '<div class="rempty" id="shint">type to find files by name in this project</div>';
       var inp = document.getElementById("rsearchi");
       if (state.railSearchQ) inp.value = state.railSearchQ;
       var to;
@@ -1698,6 +1715,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     function runSearch(){
       var q = (state.railSearchQ || "").trim();
       var res = document.getElementById("sres"); if (!res) return;
+      var hint = document.getElementById("shint");
+      if (hint) hint.style.display = q ? "none" : "";
       if (!q) { res.innerHTML = ""; return; }
       res.innerHTML = '<div class="rempty">searching\\u2026</div>';
       api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q)).then(function(j){
@@ -2228,9 +2247,16 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       document.getElementById("adddir").focus();
     };
     document.getElementById("railrefresh").onclick = function(){
+      // refresh whichever view is showing: Explorer re-reads the file tree,
+      // the others re-read the working tree / project state.
+      if (state.refreshExplorer && state.railView === "explorer") { state.refreshExplorer(); return; }
+      state.tree = null;
+      if (state.drawRail) state.drawRail();
       api("/api/projects/" + (cur || "") + "/tree").then(function(j){
-        state.tree = j.tree || {}; toast("tree refreshed"); refresh();
+        state.tree = j.tree || {};
+        if (state.drawRail) state.drawRail();
       }).catch(function(err){ toast(err.message); });
+      refresh();
     };
     var dmain = document.getElementById("dmain");
     function drawEmpty(){

@@ -662,7 +662,11 @@ export class LoomDaemon {
         sess.buf = sess.buf.slice(idx);
         return;
       }
-      this.emitTerm(sess, sess.buf.slice(0, idx));
+      // the sentinel is printed with a leading newline so it lands on its own
+      // line; drop that one newline back off so output isn't padded by a blank
+      let pre = sess.buf.slice(0, idx);
+      if (pre.endsWith("\n")) pre = pre.slice(0, -1);
+      this.emitTerm(sess, pre);
       const line = sess.buf.slice(idx + TERM_MARK.length, nl);
       const tab = line.indexOf("\t");
       const code = Number(tab === -1 ? line : line.slice(0, tab));
