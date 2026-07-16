@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page imply it's the last issue. GitLab and Linear appear disabled — the row
   shows which providers exist and which one Loom can actually read.
 
+- **The phone gets Tasks too**, which is where the feature always wanted to
+  live: see an issue on the train, tap it, confirm, and an agent is working
+  before you look up. Same daemon endpoint, same honest unavailable states. It
+  asks for confirmation first — the desktop shows the brief in an editable field
+  before it goes, and a tap on a scrolling list has no such beat.
+
 ### New project
 
 - A **New project** button in the sidebar (shortcut <kbd>P</kbd>) with a proper

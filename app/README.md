@@ -1,8 +1,9 @@
 # Loom — native app (Expo / React Native)
 
-The native carrier of the loom daemon API: board, live thread, agent chips, and the
-**Changes** view — per-prompt diffs (`turn_diff` events) and the live working tree
-(`GET /api/projects/:id/tree`).
+The native carrier of the loom daemon API: board, live thread, agent chips, the
+**Tasks** view — the repo's open issues/PRs, where one tap hands an issue to an agent —
+and the **Changes** view: per-prompt diffs (`turn_diff` events) and the live working
+tree (`GET /api/projects/:id/tree`).
 
 ## Run it
 
@@ -49,10 +50,19 @@ Credentials are stored in the device keychain (expo-secure-store).
 - `App.tsx` — hand-rolled 3-screen router (Pair → Board → Project), no nav deps.
 - `src/api.ts` — daemon client (REST + WS URL builder), typed to the loom API.
 - `src/screens.tsx` — Board (needs-input dots, route badges, $), Project with
-  **Thread** (live WS events, chips that shift the baton on send, route banner) and
-  **Changes** (working tree: branch, changed files, colored patch).
-- `src/components.tsx` — event renderer; `turn_diff` events are expandable cards
-  showing exactly what a prompt changed.
+  **Thread** (live WS events, chips that shift the baton on send, route banner),
+  **Tasks** (issues/PRs from `GET /api/projects/:id/tasks`, read through the daemon
+  host's own `gh`), and **Changes** (working tree: branch, changed files, colored
+  patch).
+- `src/components.tsx` — event renderer (`turn_diff` events are expandable cards
+  showing exactly what a prompt changed) and `TaskRow`.
+
+**Tasks is the "check from my phone" story finished**: see an issue on the train, tap
+it, confirm, and an agent is working before you look up. It confirms first because the
+desktop shows you the brief in an editable field and a tap has no such beat — and this
+one spends money and moves the baton. When the daemon host has no `gh`, is signed out,
+or the project has no GitHub remote, the tab says which; it never shows an empty list to
+mean "unavailable".
 
 ## Push notifications
 

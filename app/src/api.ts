@@ -59,6 +59,28 @@ export interface WorkingTree {
   truncated: boolean;
 }
 
+/** An issue or PR on the project's GitHub remote, read through the host's gh CLI. */
+export interface TaskItem {
+  id: number;
+  title: string;
+  author: string;
+  labels: Array<{ name: string; color: string }>;
+  assignees: string[];
+  state: string;
+  updatedAt: string;
+  url: string;
+  kind: "issue" | "pr";
+  draft?: boolean;
+}
+
+/**
+ * Either a list, or the reason there isn't one. The daemon never returns an
+ * empty list to mean "unavailable" — an empty table would read as "no issues".
+ */
+export type TaskResult =
+  | { available: true; repo: string; items: TaskItem[]; capped: boolean }
+  | { available: false; reason: "no-cli" | "no-auth" | "no-remote" | "error"; detail: string };
+
 const URL_KEY = "loomUrl";
 const TOKEN_KEY = "loomToken";
 
@@ -133,6 +155,8 @@ export const getEvents = (c: Creds, id: string, limit = 60) =>
   api<{ events: LoomEvent[] }>(c, `/api/projects/${id}/events?limit=${limit}`);
 export const getTree = (c: Creds, id: string) =>
   api<{ tree: WorkingTree }>(c, `/api/projects/${id}/tree`);
+export const getTasks = (c: Creds, id: string, kind: "issue" | "pr", search: string) =>
+  api<TaskResult>(c, `/api/projects/${id}/tasks?kind=${kind}&search=${encodeURIComponent(search)}`);
 export const sendMessage = (c: Creds, id: string, text: string, agentId?: string) =>
   api(c, `/api/projects/${id}/messages`, {
     method: "POST",

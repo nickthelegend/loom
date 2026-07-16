@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -18,6 +19,7 @@ import {
   getEvents,
   getProject,
   getProjects,
+  getTasks,
   getTree,
   handoff,
   interrupt,
@@ -27,9 +29,11 @@ import {
   type Creds,
   type LoomEvent,
   type Project,
+  type TaskItem,
+  type TaskResult,
   type WorkingTree,
 } from "./api";
-import { Btn, DiffView, EventLine, Sys } from "./components";
+import { Btn, DiffView, EventLine, Sys, TaskRow } from "./components";
 import { useStt } from "./stt";
 import { T, radii, spacing, usd } from "./theme";
 
@@ -506,9 +510,12 @@ export function BoardScreen(props: {
 export function ProjectScreen(props: { creds: Creds; project: Project; onBack: () => void }) {
   const { creds } = props;
   const [project, setProject] = useState(props.project);
-  const [tab, setTab] = useState<"thread" | "changes">("thread");
+  const [tab, setTab] = useState<"thread" | "tasks" | "changes">("thread");
   const [events, setEvents] = useState<LoomEvent[]>([]);
   const [tree, setTree] = useState<WorkingTree | null>(null);
+  const [tasks, setTasks] = useState<TaskResult | null>(null);
+  const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
+  const [taskBusy, setTaskBusy] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(
     props.project.holder ?? props.project.agents.find((a) => a.tier === "adapter")?.id ?? null,
   );
@@ -580,6 +587,78 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  // Tasks: refetch when the tab opens or the kind flips. Not polled — gh shells
+  // out to the network, and a phone in your pocket shouldn't drive that.
+  //
+  // `live` matters: the daemon runs two gh commands per fetch, so flipping
+  // Issues↔PRs leaves two responses racing. Without this, a late PR response
+  // wins while the Issues pill is lit — and tapping a row would hand an agent
+  // a brief for the kind you aren't looking at.
+  useEffect(() => {
+    if (tab !== "tasks") return;
+    let live = true;
+    setTasks(null);
+    void getTasks(creds, project.id, taskKind, `is:${taskKind} is:open`)
+      .then((r) => {
+        if (live) setTasks(r);
+      })
+      .catch((e) => {
+        if (live) {
+          setTasks({ available: false, reason: "error", detail: String(e instanceof Error ? e.message : e) });
+        }
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, taskKind, project.id]);
+
+  /**
+   * Hand an issue to an agent: the same brief the desktop drafts, sent to the
+   * baton holder. This is the whole point of Tasks on a phone — see it, start
+   * it, put the phone away.
+   *
+   * Confirm first. The desktop shows this brief in an editable field before it
+   * goes anywhere; a tap on a scrolling list has no such beat, and this spends
+   * money and moves the baton. The prompt names the agent, so a mis-tap costs
+   * one "Cancel" instead of a run.
+   */
+  const startTask = (item: TaskItem) => {
+    if (taskBusy !== null) return; // one start at a time — a second would hand off twice
+    const agent = selected ?? project.holder;
+    if (!agent) return setErr("no agent to start this with");
+    const noun = item.kind === "pr" ? "PR" : "issue";
+    Alert.alert(
+      `Start ${noun} #${item.id}?`,
+      `${item.title}\n\n${agent} will read it and start work${
+        agent !== project.holder ? `, taking the baton from ${project.holder ?? "nobody"}` : ""
+      }.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Start", onPress: () => void run(item, agent, noun) },
+      ],
+    );
+  };
+
+  const run = async (item: TaskItem, agent: string, noun: string) => {
+    setErr(null);
+    setTaskBusy(item.id);
+    try {
+      if (agent !== project.holder) await handoff(creds, project.id, agent);
+      await sendMessage(
+        creds,
+        project.id,
+        `${noun} #${item.id}: ${item.title}\n${item.url}\n\nRead the ${noun}, then implement it.`,
+        agent,
+      );
+      setTab("thread");
+    } catch (e) {
+      setErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setTaskBusy(null);
+    }
+  };
 
   const send = async () => {
     if (stt.listening) void stt.toggle(); // stop dictation on send
@@ -658,11 +737,13 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
           borderBottomColor: T.line,
         }}
       >
-        {(["thread", "changes"] as const).map((name) => (
+        {(["thread", "tasks", "changes"] as const).map((name) => (
           <TouchableOpacity
             key={name}
             onPress={() => setTab(name)}
             activeOpacity={0.7}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === name }}
             style={{
               paddingVertical: 9,
               borderBottomWidth: 2,
@@ -677,7 +758,7 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
                 fontSize: 13,
               }}
             >
-              {name === "thread" ? "Thread" : "Changes"}
+              {name === "thread" ? "Thread" : name === "tasks" ? "Tasks" : "Changes"}
             </Text>
           </TouchableOpacity>
         ))}
@@ -835,6 +916,73 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
             </View>
           </View>
         </>
+      ) : tab === "tasks" ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md }}>
+          {/* Issues / PRs */}
+          <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md }}>
+            {(["issue", "pr"] as const).map((k) => (
+              <TouchableOpacity
+                key={k}
+                onPress={() => setTaskKind(k)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityState={{ selected: taskKind === k }}
+                style={{
+                  backgroundColor: taskKind === k ? T.raised : "transparent",
+                  borderColor: taskKind === k ? T.line2 : T.line,
+                  borderWidth: 1,
+                  borderRadius: radii.pill,
+                  paddingVertical: 5,
+                  paddingHorizontal: 13,
+                }}
+              >
+                <Text style={{ color: taskKind === k ? T.text : T.dim, fontSize: 12, fontWeight: "600" }}>
+                  {k === "issue" ? "Issues" : "PRs"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            {tasks?.available && (
+              <Text
+                style={{ color: T.faint, fontFamily: T.mono, fontSize: 11, marginLeft: "auto", alignSelf: "center" }}
+              >
+                {tasks.repo}
+              </Text>
+            )}
+          </View>
+
+          {!tasks ? (
+            <Sys text="loading…" />
+          ) : !tasks.available ? (
+            // never an empty list to mean "unavailable" — say which it is
+            <View style={{ gap: 6, paddingVertical: spacing.lg }}>
+              <Sys
+                color={T.warn}
+                text={
+                  tasks.reason === "no-remote"
+                    ? "no GitHub remote"
+                    : tasks.reason === "no-auth"
+                      ? "gh is signed out"
+                      : tasks.reason === "no-cli"
+                        ? "GitHub CLI not found on the daemon host"
+                        : "couldn't load tasks"
+                }
+              />
+              <Sys text={tasks.detail} />
+            </View>
+          ) : !tasks.items.length ? (
+            <Sys text={`no open ${taskKind === "pr" ? "pull requests" : "issues"}`} />
+          ) : (
+            <>
+              <Text style={{ color: T.faint, fontSize: 11, marginBottom: spacing.sm }}>
+                tap one to hand it to {selected ?? project.holder ?? "an agent"} — you&apos;ll confirm first
+              </Text>
+              {tasks.items.map((it) => (
+                <TaskRow key={it.id} item={it} onStart={startTask} busy={taskBusy === it.id} />
+              ))}
+              {tasks.capped && <Sys text={`showing the first ${tasks.items.length}`} />}
+            </>
+          )}
+        </ScrollView>
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, gap: spacing.sm + 2 }}>
           {!tree ? (

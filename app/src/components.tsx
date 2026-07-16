@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
-import type { LoomEvent } from "./api";
-import { T, hue, radii, selvage } from "./theme";
+import type { LoomEvent, TaskItem } from "./api";
+import { T, hue, radii, selvage, spacing } from "./theme";
 
 /**
  * Buttons follow Orca mobile: the one primary action per screen is a
@@ -203,4 +203,109 @@ export function EventLine(props: { e: LoomEvent }) {
   if (e.kind === "route_failed")
     return <Sys color={p.aborted ? T.warn : T.err} text={`⊘ ${String(p.reason ?? "route ended")}`} />;
   return null;
+}
+
+/** "2 hours ago" — the phone has no room for a timestamp. */
+export function ago(iso: string): string {
+  const t = new Date(iso).getTime();
+  // an unparseable date compares false against every bound below and would
+  // fall through to "NaNy ago"; say nothing instead
+  if (!Number.isFinite(t)) return "";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  const m = s / 60;
+  if (m < 60) return `${Math.floor(m)}m ago`;
+  const h = m / 60;
+  if (h < 24) return `${Math.floor(h)}h ago`;
+  const d = h / 24;
+  if (d < 30) return `${Math.floor(d)}d ago`;
+  const mo = d / 30;
+  return mo < 12 ? `${Math.floor(mo)}mo ago` : `${Math.floor(mo / 12)}y ago`;
+}
+
+// the only colour in a task row is state — shuttle magenta for merged, the
+// same token the baton uses everywhere else
+const STATE_COLOR: Record<string, string> = {
+  open: T.ok,
+  closed: T.err,
+  merged: T.shuttle,
+  draft: T.dim,
+};
+
+/**
+ * One issue/PR. Tapping it hands the issue to an agent — the whole reason
+ * Tasks is on the phone: see it, start it, put the phone away.
+ * Labels wear the colours GitHub reports; everything else stays graphite.
+ */
+export function TaskRow(props: { item: TaskItem; onStart: (item: TaskItem) => void; busy?: boolean }) {
+  const { item } = props;
+  const st = item.draft ? "draft" : item.state;
+  const color = STATE_COLOR[st] ?? T.dim;
+  return (
+    <TouchableOpacity
+      onPress={() => props.onStart(item)}
+      activeOpacity={0.7}
+      disabled={props.busy}
+      accessibilityRole="button"
+      accessibilityLabel={`Start ${item.kind === "pr" ? "PR" : "issue"} ${item.id}: ${item.title}`}
+      style={{
+        backgroundColor: T.panel,
+        borderWidth: 1,
+        borderColor: T.line,
+        borderRadius: radii.card,
+        padding: spacing.md,
+        marginBottom: spacing.sm,
+        opacity: props.busy ? 0.5 : 1,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+        <Text style={{ color, fontFamily: T.mono, fontSize: 11 }}>
+          {item.kind === "pr" ? "⑂" : "◉"} #{item.id}
+        </Text>
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: color,
+            borderRadius: radii.pill,
+            paddingHorizontal: 6,
+            paddingVertical: 1,
+          }}
+        >
+          <Text style={{ color, fontSize: 9, fontWeight: "600" }}>
+            {st.charAt(0).toUpperCase() + st.slice(1)}
+          </Text>
+        </View>
+        <Text style={{ color: T.faint, fontSize: 10, fontFamily: T.mono, marginLeft: "auto" }}>
+          {ago(item.updatedAt)}
+        </Text>
+      </View>
+      <Text style={{ color: T.text, fontSize: 14, fontWeight: "600", marginTop: 6 }} numberOfLines={2}>
+        {item.title}
+      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+        <Text style={{ color: T.dim, fontSize: 11, fontFamily: T.mono }}>{item.author}</Text>
+        {item.labels.slice(0, 2).map((l) => {
+          // sanitise: a label name is attacker-controlled on any repo you read
+          const hex = /^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(l.color) ? `#${l.color}` : T.dim;
+          return (
+            <View
+              key={l.name}
+              style={{
+                borderWidth: 1,
+                borderColor: hex,
+                borderRadius: radii.pill,
+                paddingHorizontal: 6,
+                paddingVertical: 1,
+              }}
+            >
+              <Text style={{ color: hex, fontSize: 9 }} numberOfLines={1}>
+                {l.name}
+              </Text>
+            </View>
+          );
+        })}
+        <Text style={{ color: T.faint, fontSize: 11, marginLeft: "auto" }}>start →</Text>
+      </View>
+    </TouchableOpacity>
+  );
 }
