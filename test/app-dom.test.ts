@@ -1,0 +1,323 @@
+/**
+ * The web app, actually executed.
+ *
+ * app-page.test.ts greps the served HTML for markers, which proves the string
+ * contains some text and nothing about whether the app runs. This file loads
+ * that same HTML into a DOM, lets its JavaScript boot, and drives it by
+ * clicking — against a REAL daemon on an ephemeral port, with a real project
+ * and a real pairing token.
+ *
+ * Against the real daemon on purpose: canned fetch responses would be a third
+ * copy of the API's shape, and it would drift from the server the moment
+ * someone renamed a field. Here, a route that changes breaks this test.
+ *
+ * Ephemeral port on purpose too: a fixed one would collide with the daemon the
+ * developer is running, and the loser serves someone a stale app.
+ */
+
+import { JSDOM, VirtualConsole } from "jsdom";
+import WebSocket from "ws";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { readDaemonConfig } from "../src/core/registry.js";
+import { APP_HTML } from "../src/daemon/app-page.js";
+import { DaemonClient } from "../src/daemon/client.js";
+import { LoomDaemon } from "../src/daemon/server.js";
+import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
+
+let daemon: LoomDaemon;
+let baseUrl: string;
+let clientToken: string;
+let projectId: string;
+
+beforeAll(async () => {
+  process.env.LOOM_HOME = tmpDir("home");
+  process.env.LOOM_NO_NOTIFY = "1";
+  daemon = new LoomDaemon({ host: "127.0.0.1", port: 0 });
+  const { host, port } = await daemon.listen();
+  baseUrl = `http://${host}:${port}`;
+
+  const client = new DaemonClient(readDaemonConfig()!);
+  projectId = (await client.addProject(makeProjectDir({ name: "weave" }))).project.id;
+
+  // pair the way the desktop shell does: mint, then claim once
+  const { token } = await client.newPairingToken();
+  const claim = await fetch(`${baseUrl}/api/pair/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, name: "jsdom" }),
+  });
+  clientToken = ((await claim.json()) as { clientToken: string }).clientToken;
+}, 30_000);
+
+/**
+ * Every window a test mounts, closed after it whether it passed or threw. A
+ * leaked window keeps its WebSocket open, and then daemon.close() waits on it
+ * forever — a failing assertion turns into an unrelated hook timeout.
+ */
+const live: Mounted[] = [];
+afterEach(() => {
+  while (live.length) live.pop()!.close();
+});
+
+afterAll(async () => {
+  await daemon.close();
+});
+
+interface Mounted {
+  window: JSDOM["window"];
+  /** Uncaught exceptions thrown by the page's own JavaScript. */
+  errors: string[];
+  close: () => void;
+}
+
+/**
+ * Boot the app in a DOM. `desktop` drives the same media query the app uses to
+ * choose its layout, so both are reachable from a test.
+ */
+function mount({ desktop = true, hash = "", token = clientToken as string | null } = {}): Mounted {
+  const errors: string[] = [];
+  const virtualConsole = new VirtualConsole();
+  virtualConsole.on("jsdomError", (e: Error) => errors.push(e.message));
+  virtualConsole.on("error", (msg: string) => errors.push(String(msg)));
+
+  // The app is a live thing: it polls on intervals and holds a WebSocket. Both
+  // outlive the assertion unless someone takes them away.
+  const sockets: WebSocket[] = [];
+  let closed = false;
+  const never = new Promise<never>(() => {}); // settles never, so nothing runs post-teardown
+
+  const dom = new JSDOM(APP_HTML, {
+    url: `${baseUrl}/app${hash}`,
+    runScripts: "dangerously",
+    pretendToBeVisual: true,
+    virtualConsole,
+    beforeParse(window) {
+      // jsdom has no matchMedia; the app picks its layout with one
+      window.matchMedia = ((q: string) => ({
+        matches: /min-width/.test(q) ? desktop : false,
+        media: q,
+        onchange: null,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent: () => false,
+      })) as typeof window.matchMedia;
+      // relative paths, resolved against the real daemon. Once the window is
+      // torn down, in-flight requests are dropped rather than resolved into a
+      // document that no longer exists — that noise isn't the app's fault.
+      window.fetch = ((input: string, init?: RequestInit) => {
+        if (closed) return never;
+        return fetch(new URL(String(input), baseUrl), init).then((r) => (closed ? never : r));
+      }) as typeof window.fetch;
+      // jsdom has no WebSocket either. A real one, remembered so close() can
+      // hang up: an open socket keeps the daemon's server.close() waiting.
+      window.WebSocket = class extends WebSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols);
+          sockets.push(this);
+        }
+      } as unknown as typeof window.WebSocket;
+      if (token) window.localStorage.setItem("loomClientToken", token);
+    },
+  });
+
+  const m: Mounted = {
+    window: dom.window,
+    errors,
+    close: () => {
+      closed = true;
+      for (const s of sockets) {
+        try {
+          // Drop the page's handlers first, then kill the socket outright.
+          // A polite close() would fire the app's onclose into a document that
+          // is about to stop existing. terminate() doesn't, but a socket killed
+          // mid-handshake emits "closed before the connection was established" —
+          // and with every listener gone, an emitted "error" on an EventEmitter
+          // is thrown rather than delivered. Hence the deliberate empty ear.
+          s.removeAllListeners();
+          s.on("error", () => {});
+          s.terminate();
+        } catch {
+          /* already gone */
+        }
+      }
+      dom.window.close(); // stops the app's intervals
+    },
+  };
+  live.push(m);
+  return m;
+}
+
+const $ = (m: Mounted, sel: string) => m.window.document.querySelector(sel);
+const text = (m: Mounted, sel: string) => $(m, sel)?.textContent?.trim() ?? "";
+const click = (el: Element | null) => {
+  if (!el) throw new Error("clicked an element that isn't there");
+  (el as HTMLElement).dispatchEvent(new (el.ownerDocument.defaultView as Window & typeof globalThis).MouseEvent("click", { bubbles: true }));
+};
+
+describe("web app · boot", () => {
+  it("an unpaired visitor gets the pairing screen, not a broken shell", async () => {
+    const m = mount({ token: null });
+    await waitUntil(() => !!$(m, "#ptok, .pairbox, .pair"));
+    expect(m.errors).toEqual([]);
+  });
+
+  it("a paired desktop client renders the workspace against the real daemon", async () => {
+    const m = mount();
+    // the sidebar is filled from GET /api/projects — real data, real token
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    expect(text(m, "#slist")).toContain("weave");
+    expect(m.errors).toEqual([]);
+  });
+
+  it("the phone layout renders the project board without throwing", async () => {
+    const m = mount({ desktop: false });
+    await waitUntil(() => !!$(m, "#list .card"));
+    expect(text(m, "#list")).toContain("weave");
+    expect(m.errors).toEqual([]);
+  });
+});
+
+/**
+ * The theme toggle moved out of the tab strip (it sat one pixel from Interrupt,
+ * which stops an agent mid-turn) down to the sidebar foot beside unpair. A
+ * layout regression that puts it back is exactly what a string-grep test can't
+ * see: the markup would still contain a theme button.
+ */
+describe("web app · theme toggle", () => {
+  it("lives in the sidebar foot next to unpair, not beside Interrupt", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, ".sfoot #themebtn"));
+    const foot = $(m, ".sfoot")!;
+    expect(foot.querySelector("#unpair")).toBeTruthy();
+    // and nowhere near the tab strip's interrupt button
+    expect($(m, ".tabs #themebtn, .pane #themebtn")).toBeNull();
+  });
+
+  it("actually flips the theme and remembers it", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, ".sfoot #themebtn"));
+    const html = m.window.document.documentElement;
+    expect(html.classList.contains("dark")).toBe(true);
+
+    click($(m, "#themebtn"));
+    expect(html.classList.contains("dark")).toBe(false);
+    expect(m.window.localStorage.getItem("loomTheme")).toBe("light");
+
+    click($(m, "#themebtn"));
+    expect(html.classList.contains("dark")).toBe(true);
+    expect(m.window.localStorage.getItem("loomTheme")).toBe("dark");
+    expect(m.errors).toEqual([]);
+  });
+});
+
+/** Open a project's board tab and wait for its columns. */
+async function openBoard(): Promise<Mounted> {
+  const m = mount({ hash: `#p/${projectId}` });
+  await waitUntil(() => !!$(m, '.tab[data-tab="board"]'));
+  click($(m, '.tab[data-tab="board"]'));
+  await waitUntil(() => !!$(m, ".bcol"));
+  return m;
+}
+
+describe("web app · board", () => {
+  it("draws every column, even with no GitHub to talk to", async () => {
+    const m = await openBoard();
+    const cols = [...m.window.document.querySelectorAll(".bcol")].map((c) =>
+      c.getAttribute("data-col"),
+    );
+    expect(cols).toEqual(["working", "needs-you", "in-review", "ready"]);
+    // this project isn't a git repo and gh isn't signed in here: the PR half
+    // can't load, and the board still has to draw rather than blank out
+    expect(m.errors).toEqual([]);
+  });
+
+  /**
+   * The board is work in flight, not a roster. An idle agent is not a card —
+   * board.ts drops it on purpose — so a project whose agents are all sitting
+   * still shows four empty columns, and that's correct rather than broken.
+   * (Agents you can hand work to appear in the modal instead; see below.)
+   */
+  it("doesn't invent cards for idle agents", async () => {
+    const m = await openBoard();
+    expect(text(m, ".bcols")).not.toContain("plannerbot is working");
+    expect(m.window.document.querySelectorAll(".bempty").length).toBe(4);
+    expect(m.errors).toEqual([]);
+  });
+});
+
+/**
+ * "New task" on the board used to be a prompt() — a browser dialog with one
+ * line and no notion of what a task is. It's a real modal now, and these drive
+ * it the way a person does: click the +, type, submit, and expect a card.
+ */
+describe("web app · board task modal", () => {
+  it("the column's + opens the modal, aimed at that column", async () => {
+    const m = await openBoard();
+    click($(m, '.badd[data-add="needs-you"]'));
+    await waitUntil(() => !!$(m, "#bmtitle"));
+
+    expect($(m, "#bmcol")).toBeTruthy();
+    expect($(m, "#bmagsel")).toBeTruthy();
+    // it lands in the column whose + you pressed, not a default
+    expect(($(m, "#bmcol") as HTMLSelectElement).value).toBe("needs-you");
+    // "Create & start" stays hidden until an agent is actually picked
+    expect(($(m, "#bmstart") as HTMLElement).style.display).toBe("none");
+    expect(m.errors).toEqual([]);
+  });
+
+  it("offers the project's agents to hand the task to", async () => {
+    const m = await openBoard();
+    click($(m, '.badd[data-add="working"]'));
+    await waitUntil(() => !!$(m, "#bmagsel .agchip, #bmagsel .chip, #bmagsel button"));
+    expect(text(m, "#bmagsel")).toContain("plannerbot");
+    expect(m.errors).toEqual([]);
+  });
+
+  it("Escape closes it without creating anything", async () => {
+    const m = await openBoard();
+    const before = m.window.document.querySelectorAll(".bcard, .card").length;
+    click($(m, '.badd[data-add="working"]'));
+    await waitUntil(() => !!$(m, "#bmtitle"));
+
+    m.window.document.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await waitUntil(() => !$(m, ".scrim"));
+    expect(m.window.document.querySelectorAll(".bcard, .card").length).toBe(before);
+    expect(m.errors).toEqual([]);
+  });
+
+  it("creates a real card that survives a reload", async () => {
+    const m = await openBoard();
+    click($(m, '.badd[data-add="needs-you"]'));
+    await waitUntil(() => !!$(m, "#bmtitle"));
+
+    const title = `ship the fingerprint fix ${Date.now()}`;
+    ($(m, "#bmtitle") as HTMLTextAreaElement).value = title;
+    click($(m, "#bmcreate"));
+
+    // the modal closes and the column redraws with it
+    await waitUntil(() => !$(m, ".scrim"));
+    await waitUntil(() => text(m, '.bcol[data-col="needs-you"]').includes(title));
+    expect(m.errors).toEqual([]);
+
+    // and it's the daemon's card now, not a DOM flourish: a fresh window sees it
+    const m2 = await openBoard();
+    await waitUntil(() => text(m2, '.bcol[data-col="needs-you"]').includes(title));
+    expect(m2.errors).toEqual([]);
+  });
+
+  it("refuses an empty task instead of creating a blank card", async () => {
+    const m = await openBoard();
+    click($(m, '.badd[data-add="working"]'));
+    await waitUntil(() => !!$(m, "#bmtitle"));
+
+    click($(m, "#bmcreate"));
+    await waitUntil(() => !!$(m, "#toast.show"));
+    expect(text(m, "#toast")).toContain("what needs doing");
+    expect($(m, ".scrim")).toBeTruthy(); // still open, nothing created
+    expect(m.errors).toEqual([]);
+  });
+});
