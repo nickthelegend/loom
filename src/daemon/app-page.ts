@@ -735,6 +735,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     display:inline-flex;align-items:center;gap:5px;transition:background .12s,color .12s}
   .pgbtn:hover:not(:disabled){background:var(--accent);color:var(--foreground)}
   .pgbtn:disabled{opacity:.4;cursor:default}
+  .tcap{padding:0 12px 12px;text-align:center;font-size:11px;color:var(--muted-foreground)}
   .pgbtn.active{background:var(--secondary);color:var(--foreground);border-color:var(--border);font-weight:600}
   .tsetup{padding:36px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
   .tsetup .th{font-size:14px;font-weight:600;color:var(--foreground)}
@@ -889,7 +890,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     external: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'),
     issue: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>'),
     pr: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7"/><circle cx="18" cy="18" r="2.5"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="m13 3-2 3 2 3"/>'),
-    // GitHub's mark, filled — the one place a brand asset is warranted
+    // Brand marks, filled — the one place brand assets are warranted. GitLab
+    // and Linear ride along disabled: the row says which providers exist and
+    // which one Loom can actually read.
+    gitlab:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22.65 14.39 12 22.13 1.35 14.39a.84.84 0 0 1-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 0 1 4.82 2a.43.43 0 0 1 .58.11l.11.15 2.44 7.53h8.1l2.44-7.51a.42.42 0 0 1 .11-.19.43.43 0 0 1 .58.11l.11.15 2.44 7.53L23 13.45a.84.84 0 0 1-.35.94z"/></svg>',
+    linear:
+      '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2.14 13.5a10 10 0 0 0 8.36 8.36zM2 11.66 12.34 22a10 10 0 0 0 2.2-.45L2.45 9.46a10 10 0 0 0-.45 2.2M3.1 7.65l13.25 13.25a10 10 0 0 0 1.55-1.06L4.16 6.1a10 10 0 0 0-1.06 1.55M5.6 4.53l13.87 13.87a10 10 0 1 0-13.87-13.87"/></svg>',
     github:
       '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>'
   };
@@ -1151,6 +1158,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   function renderProject(pid, mount, desktop){
     mount = mount || root;
     clearTimers();
+    // Point state.project at the new project NOW. refresh() below replaces it
+    // with the fuller per-project payload, but that lands a fetch later — and
+    // everything drawn in the meantime (the Explorer's title above all) would
+    // otherwise render the project we just navigated away from.
+    state.project = (state.projects || []).filter(function(p){ return p.id === pid; })[0] || null;
     state.pid = pid; state.lastId = 0; state.selected = null;
     state.tab = "thread"; state.tree = null; state.lastQuestion = null;
     var expl = { kids: {}, open: {} }; // explorer tree cache — declared before any drawRail() call
@@ -1858,6 +1870,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       var head =
         '<div class="provrow">' +
           '<button class="provbtn active" title="GitHub" aria-label="GitHub">' + ICONS.github + "</button>" +
+          '<button class="provbtn" disabled title="GitLab \\u2014 Loom doesn\\u2019t read GitLab yet" aria-label="GitLab (not supported yet)">' + ICONS.gitlab + "</button>" +
+          '<button class="provbtn" disabled title="Linear \\u2014 Loom doesn\\u2019t read Linear yet" aria-label="Linear (not supported yet)">' + ICONS.linear + "</button>" +
         "</div>" +
         '<div class="taskbar">' +
           '<div class="seg">' +
@@ -1945,6 +1959,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
                   }).join("") +
                   '<button class="pgbtn" id="pgnext"' + (tasks.page === pages ? " disabled" : "") + ">Next" + ICONS.chevron + "</button>" +
                   "</div>"
+                : "") +
+              // the fetch is capped, so the last page is not the last issue —
+              // say so instead of letting the pager imply completeness
+              (d.capped
+                ? '<div class="tcap">showing the first ' + items.length +
+                  " \\u00b7 narrow the query to reach the rest</div>"
                 : "")
             : '<div class="tsetup"><div class="th">Nothing matches</div>' +
               '<div class="td">No ' + (tasks.kind === "pr" ? "pull requests" : "issues") +

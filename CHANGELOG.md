@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needs no token, no OAuth app, no PAT of its own. It shells out the same way
   the adapters shell out to the coding agents you have installed.
 - When it can't list, it says why (`gh` not installed, signed out, or no GitHub
-  remote) instead of showing an empty table that reads as "no issues".
+  remote) instead of showing an empty table that reads as "no issues". The
+  fetch is capped at 60, and a capped list says so rather than letting the last
+  page imply it's the last issue. GitLab and Linear appear disabled — the row
+  shows which providers exist and which one Loom can actually read.
 
 ### New project
 
@@ -30,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In the desktop app the folder comes from a **native macOS picker**; in a
   browser the path is typed, since the daemon may be on another host. The
   preload exposes only that one call — no `require`, no ipc passthrough.
+
+### Fixed
+
+- The right rail showed the project you just navigated away from: it renders
+  from `state.project`, which only a fetch filled in, so every switch left it
+  one project behind until you touched it.
 
 ### Terminal — real PTYs
 

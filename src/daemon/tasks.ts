@@ -37,6 +37,11 @@ export interface TaskList {
   available: true;
   repo: string;
   items: TaskItem[];
+  /**
+   * The list hit the fetch limit, so it is a prefix of the real result — the
+   * UI has to say so rather than let the last page read as the last issue.
+   */
+  capped: boolean;
 }
 
 export type TaskResult = TaskList | TaskUnavailable;
@@ -118,13 +123,15 @@ export async function listTasks(
     kind === "pr"
       ? "number,title,author,labels,assignees,state,updatedAt,url,isDraft"
       : "number,title,author,labels,assignees,state,updatedAt,url";
-  const args = [kind, "list", "--json", fields, "--limit", String(opts.limit ?? 60)];
+  const limit = opts.limit ?? 60;
+  const args = [kind, "list", "--json", fields, "--limit", String(limit)];
   // gh defaults to open-only; an explicit search must carry its own state
   // filter, which is exactly what the query box shows.
   if (opts.search?.trim()) args.push("--search", opts.search.trim());
   try {
     const out = await run("gh", args, dir);
-    return { available: true, repo, items: normalize(JSON.parse(out) as GhItem[], kind) };
+    const items = normalize(JSON.parse(out) as GhItem[], kind);
+    return { available: true, repo, items, capped: items.length >= limit };
   } catch (err) {
     return { available: false, reason: "error", detail: String((err as Error).message).slice(0, 300) };
   }

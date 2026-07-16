@@ -108,6 +108,15 @@ describe("web app page", () => {
     expect(APP_HTML).toContain("window.loomNative && window.loomNative.pickFolder");
   });
 
+  it("points state.project at the new project before drawing it", () => {
+    // refresh() fills state.project from a fetch that lands *after* the first
+    // paint, so renderProject must seed it synchronously from the already
+    // loaded list — otherwise the rail renders the project you just left.
+    expect(APP_HTML).toContain(
+      'state.project = (state.projects || []).filter(function(p){ return p.id === pid; })[0] || null;',
+    );
+  });
+
   it("manifest is installable and matches the theme", () => {
     expect(APP_MANIFEST.name).toBe("Loom");
     expect(APP_MANIFEST.display).toBe("standalone");
