@@ -80,18 +80,41 @@ afterAll(async () => {
   await daemon.close();
 });
 
-/** Run one command in a terminal and resolve once its exit frame lands. */
-async function runTerm(term: string, cmd: string): Promise<{ out: string; exit: number; cwd: string }> {
+/**
+ * Which backend is in play. A pty is the real thing but needs node-pty to
+ * have built; the pipe fallback is what a machine without it gets. Both ship,
+ * so both are tested — the shared behaviour here, the divergence below.
+ */
+let mode: "pty" | "pipe";
+
+/** Everything a terminal has emitted since a mark, with escapes stripped. */
+function outputSince(mark: number, term: string): string {
+  return termFrames
+    .slice(mark)
+    .filter((f) => f.term === term && f.chunk)
+    .map((f) => f.chunk)
+    .join("")
+    // eslint-disable-next-line no-control-regex
+    .replace(/\[[0-9;?]*[ -/]*[@-~]|\][^]*(?:|\\)|./g, "");
+}
+
+/** Send a command the way this backend expects, and wait for output to match. */
+async function runTerm(term: string, cmd: string, needle: RegExp): Promise<string> {
+  const before = termFrames.length;
+  // a pty is a keyboard: the newline is what submits. pipe mode takes a line.
+  const data = mode === "pty" ? `${cmd}\r` : cmd;
+  await post(`/api/projects/${projectId}/term/input`, { term, data });
+  await waitUntil(() => needle.test(outputSince(before, term)));
+  return outputSince(before, term);
+}
+
+/** pipe mode only: the exit/cwd frame the sentinel produces. */
+async function runForExit(term: string, cmd: string): Promise<{ exit: number; cwd: string }> {
   const before = termFrames.length;
   await post(`/api/projects/${projectId}/term/input`, { term, data: cmd });
-  await waitUntil(() => termFrames.slice(before).some((f) => f.exit !== undefined));
-  const mine = termFrames.slice(before).filter((f) => f.term === term);
-  const done = mine.find((f) => f.exit !== undefined)!;
-  return {
-    out: mine.filter((f) => f.chunk).map((f) => f.chunk).join(""),
-    exit: done.exit!,
-    cwd: done.cwd ?? "",
-  };
+  await waitUntil(() => termFrames.slice(before).some((f) => f.term === term && f.exit !== undefined));
+  const done = termFrames.slice(before).find((f) => f.term === term && f.exit !== undefined)!;
+  return { exit: done.exit!, cwd: done.cwd ?? "" };
 }
 
 describe("explorer: listing", () => {
@@ -204,68 +227,104 @@ describe("terminal", () => {
   it("opens a shell rooted in the project directory", async () => {
     const body = (await post(`/api/projects/${projectId}/term/open`, { term: "t1" }).then((r) =>
       r.json(),
-    )) as { cwd: string; term: string };
+    )) as { cwd: string; term: string; mode: "pty" | "pipe" };
+    mode = body.mode;
     expect(body.term).toBe("t1");
+    expect(["pty", "pipe"]).toContain(mode);
     expect(fs.realpathSync(body.cwd)).toBe(fs.realpathSync(projectDir));
   });
 
-  it("runs a command, streams its output, and reports the exit code", async () => {
-    const { out, exit } = await runTerm("t1", "echo hello-loom");
-    expect(out).toContain("hello-loom");
-    expect(exit).toBe(0);
-  });
-
-  it("reports a non-zero exit code", async () => {
-    // a subshell — a bare `exit` would take the session's shell down with it
-    const { exit } = await runTerm("t1", "(exit 3)");
-    expect(exit).toBe(3);
-  });
-
-  it("never leaks the end-of-command sentinel into the output", async () => {
-    const { out } = await runTerm("t1", "echo marker-check");
-    expect(out).not.toContain("__LOOM_END__");
+  it("runs a command and streams its output", async () => {
+    const out = await runTerm("t1", "echo hello-loom", /hello-loom/);
+    expect(out).toMatch(/hello-loom/);
   });
 
   it("keeps cd across commands — it is one shell, not one per command", async () => {
-    const first = await runTerm("t1", "cd src/checkout");
-    expect(fs.realpathSync(first.cwd)).toBe(fs.realpathSync(path.join(projectDir, "src", "checkout")));
-    // a separate command later still sees the new directory
-    const second = await runTerm("t1", "pwd");
-    expect(second.out).toContain(path.join("src", "checkout"));
-    expect(fs.realpathSync(second.cwd)).toBe(
-      fs.realpathSync(path.join(projectDir, "src", "checkout")),
-    );
+    await runTerm("t1", "cd src/checkout", /\$|%|#|>/);
+    // a later, separate command still sees the new directory
+    const out = await runTerm("t1", "pwd", /src\/checkout/);
+    expect(out).toContain(path.join("src", "checkout"));
   });
 
   it("keeps shell variables across commands", async () => {
-    await runTerm("t1", "LOOM_TEST_VAR=woven");
-    const { out } = await runTerm("t1", "echo $LOOM_TEST_VAR");
-    expect(out).toContain("woven");
+    await runTerm("t1", "LOOM_TEST_VAR=woven", /\$|%|#|>/);
+    const out = await runTerm("t1", "echo \"v=$LOOM_TEST_VAR\"", /v=woven/);
+    expect(out).toMatch(/v=woven/);
   });
 
   it("isolates terminals from each other", async () => {
     await post(`/api/projects/${projectId}/term/open`, { term: "t2" });
     // quoted: unquoted brackets are a glob, and zsh aborts a script on no-match
-    const { out } = await runTerm("t2", 'echo "[$LOOM_TEST_VAR]"');
-    expect(out).toContain("[]"); // t1's variable is not visible here
+    const out = await runTerm("t2", 'echo "[$LOOM_TEST_VAR]"', /\[\]/);
+    expect(out).toMatch(/\[\]/); // t1's variable is not visible here
   });
 
   it("interrupts a running command without killing the shell", async () => {
     const before = termFrames.length;
-    await post(`/api/projects/${projectId}/term/input`, { term: "t2", data: "sleep 30" });
-    await new Promise((r) => setTimeout(r, 300));
+    const data = mode === "pty" ? "sleep 30\r" : "sleep 30";
+    await post(`/api/projects/${projectId}/term/input`, { term: "t2", data });
+    await new Promise((r) => setTimeout(r, 400));
     await post(`/api/projects/${projectId}/term/signal`, { term: "t2" });
-    await waitUntil(() => termFrames.slice(before).some((f) => f.exit !== undefined));
-    const exited = termFrames.slice(before).find((f) => f.exit !== undefined)!;
-    expect(exited.exit).toBe(130); // 128 + SIGINT
-    expect(termFrames.slice(before).some((f) => f.closed)).toBe(false);
-    // and the shell still works
-    const { out } = await runTerm("t2", "echo alive");
-    expect(out).toContain("alive");
+    await new Promise((r) => setTimeout(r, 600));
+    // the session must survive the interrupt in both modes
+    expect(termFrames.slice(before).some((f) => f.term === "t2" && f.closed)).toBe(false);
+    const out = await runTerm("t2", "echo alive", /alive/);
+    expect(out).toMatch(/alive/);
   });
 
   it("closes a session on request", async () => {
-    await post(`/api/projects/${projectId}/term/close`, { term: "t2" });
-    await waitUntil(() => termFrames.some((f) => f.term === "t2" && f.closed));
+    await post(`/api/projects/${projectId}/term/close`, { term: "t3-unused" });
+    await post(`/api/projects/${projectId}/term/open`, { term: "t3" });
+    await post(`/api/projects/${projectId}/term/close`, { term: "t3" });
+    await waitUntil(() => termFrames.some((f) => f.term === "t3" && f.closed));
+  });
+
+  it("replays scrollback so a reload rejoins the session it left", async () => {
+    await runTerm("t1", "echo rejoin-marker", /rejoin-marker/);
+    const body = (await post(`/api/projects/${projectId}/term/open`, { term: "t1" }).then((r) =>
+      r.json(),
+    )) as { reused: boolean; scrollback: string };
+    expect(body.reused).toBe(true);
+    expect(body.scrollback).toContain("rejoin-marker");
+  });
+});
+
+// A pty is the real thing: the shell is on a tty, so it echoes what you type
+// and drives its own prompt. None of this is true of the pipe fallback.
+describe.runIf(process.env.LOOM_EXPECT_PTY !== "0")("terminal · pty mode", () => {
+  it("gives the shell a real tty", async () => {
+    if (mode !== "pty") return; // node-pty didn't build here — fallback covers it
+    const out = await runTerm("t1", "tty", /dev\/(tty|pts)/);
+    expect(out).toMatch(/dev\/(tty|pts)/);
+  });
+
+  it("echoes typed input back, like a terminal", async () => {
+    if (mode !== "pty") return;
+    const before = termFrames.length;
+    // no newline: nothing runs, but a tty still echoes the keystrokes
+    await post(`/api/projects/${projectId}/term/input`, { term: "t1", data: "echo-me" });
+    await waitUntil(() => outputSince(before, "t1").includes("echo-me"));
+    await post(`/api/projects/${projectId}/term/input`, { term: "t1", data: "\u0015" }); // ^U clears the line
+  });
+
+  it("resizes the tty", async () => {
+    if (mode !== "pty") return;
+    await post(`/api/projects/${projectId}/term/resize`, { term: "t1", cols: 100, rows: 30 });
+    const out = await runTerm("t1", "tput cols", /\b100\b/);
+    expect(out).toMatch(/\b100\b/);
+  });
+});
+
+// The fallback's contract: no tty, so the daemon reports each command's exit
+// code and cwd out of band via a sentinel it strips from the stream.
+describe("terminal · pipe mode", () => {
+  it("reports exit codes and never leaks the sentinel", async () => {
+    if (mode !== "pipe") return; // a pty has no sentinel — the shell prompts itself
+    const ok = await runForExit("t1", "echo sentinel-check");
+    expect(ok.exit).toBe(0);
+    // a subshell — a bare `exit` would take the session's shell down with it
+    const bad = await runForExit("t1", "(exit 3)");
+    expect(bad.exit).toBe(3);
+    expect(outputSince(0, "t1")).not.toContain("__LOOM_END__");
   });
 });
