@@ -264,9 +264,14 @@ describe("tasks", () => {
 });
 
 describe("board", () => {
-  it("still builds a board when the project has no GitHub remote", async () => {
-    // the agent half is ours and always real; only the PR half needs gh, and
-    // losing it must degrade to a note, not to an error page
+  /**
+   * The agent half of the board is the daemon's own state; only the PR half
+   * needs gh. However gh fails here — absent, signed out (CI), no remote (this
+   * fixture) — it must degrade to a note, never to an error page. Which reason
+   * comes back depends on the host, so don't assert it; assert that the board
+   * survives it, which is the part that was wrong.
+   */
+  it("still builds a board when gh can't help", async () => {
     const res = await get(`/api/projects/${projectId}/board`);
     expect(res.ok).toBe(true);
     const body = (await res.json()) as {
@@ -277,8 +282,10 @@ describe("board", () => {
     };
     expect(body.available).toBe(true);
     expect(Array.isArray(body.cards)).toBe(true);
+    // the fixture has no GitHub remote, so the PR half can't have loaded
     expect(body.repo).toBeNull();
-    expect(["no-remote", "no-cli"]).toContain(body.ghError?.reason);
+    expect(body.ghError, "a missing PR half must say why").toBeTruthy();
+    expect(["no-remote", "no-cli", "no-auth", "error"]).toContain(body.ghError?.reason);
     expect(body.ghError?.detail).toBeTruthy();
   });
 

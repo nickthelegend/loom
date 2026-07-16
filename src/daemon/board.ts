@@ -50,14 +50,19 @@ export interface BoardCard {
 
 export interface BoardData {
   available: true;
-  /** null when the project has no GitHub remote — agent cards still work. */
+  /** null when we couldn't read a GitHub repo here — agent cards still work. */
   repo: string | null;
   /** Present only when the PR half failed; the agent half is still real. */
   ghError?: { reason: TaskUnavailable["reason"]; detail: string };
   cards: BoardCard[];
 }
 
-export type BoardResult = BoardData | TaskUnavailable;
+/**
+ * Always available. The agent half of the board is the daemon's own state, so
+ * there is no version of "gh is unhappy" that should leave you staring at an
+ * error page instead of the agents you're running. gh's failure becomes a note.
+ */
+export type BoardResult = BoardData;
 
 /** The daemon's own view of an agent, as /api/projects/:id reports it. */
 export interface BoardAgent {
@@ -156,17 +161,16 @@ export async function buildBoard(
   // 2. GitHub: everything that reached a PR.
   const repoRes = await ghRepo(dir);
   if (!repoRes.ok) {
-    // The agent half is real even when gh isn't set up — show it, and say why
-    // the rest is missing rather than dropping the board entirely.
-    if (repoRes.err.reason === "no-cli" || repoRes.err.reason === "no-remote") {
-      return {
-        available: true,
-        repo: null,
-        ghError: { reason: repoRes.err.reason, detail: repoRes.err.detail },
-        cards,
-      };
-    }
-    return repoRes.err;
+    // EVERY gh failure degrades to a note — missing, signed out, no remote, a
+    // timeout, a 500. The agents above are the daemon's own state and stay
+    // true regardless, so none of these is a reason to show you an error page
+    // instead of the work you're running.
+    return {
+      available: true,
+      repo: null,
+      ghError: { reason: repoRes.err.reason, detail: repoRes.err.detail },
+      cards,
+    };
   }
 
   try {
