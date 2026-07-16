@@ -44,7 +44,7 @@
  * worse one.
  */
 
-import { CdpSession, cdpTargets, cdpUp, workbenchTarget } from "./cdp.js";
+import { CdpSession, cdpTargets, cdpUp, chatTargets } from "./cdp.js";
 import { CHATTY, FORBIDDEN_ANCESTORS, GENERIC, profileFor, type AppProfile } from "./profiles.js";
 
 export interface GuiChatSelectors {
@@ -69,6 +69,41 @@ export interface GuiChatOptions {
 const MARK = "data-loom-composer";
 
 /**
+ * Every document this target can reach: its own, plus any same-origin child
+ * frame's.
+ *
+ * Kiro is why. Its chat panel is a `vscode-webview` target whose top document
+ * holds eight nodes and an iframe — VS Code nests the extension's real HTML one
+ * frame deeper, and that inner frame is not a CDP target of its own. Searching
+ * only the top document found nothing and reported "the chat panel has no input
+ * in it", which was true of the document I was looking at and false about Kiro.
+ *
+ * Cross-origin frames throw on contentDocument; they're skipped rather than
+ * fataled, because one unreachable ad frame shouldn't hide a chat box.
+ */
+const DOCS = `
+  const docs = [document];
+  for (const f of document.querySelectorAll("iframe, frame")) {
+    try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) { /* cross-origin */ }
+  }
+  const findIn = (sel) => {
+    for (const d of docs) {
+      let el = null;
+      try { el = d.querySelector(sel); } catch (e) {}
+      if (el) return el;
+    }
+    return null;
+  };
+  const allIn = (sel) => {
+    const out = [];
+    for (const d of docs) {
+      try { out.push(...d.querySelectorAll(sel)); } catch (e) {}
+    }
+    return out;
+  };
+`;
+
+/**
  * Find the composer and stamp it.
  *
  * Returns a marker attribute rather than an element handle: the page is a live
@@ -77,15 +112,16 @@ const MARK = "data-loom-composer";
  */
 function discoverExpr(p: AppProfile, explicit: string | undefined): string {
   return `(() => {
+  ${DOCS}
   const MARK = ${JSON.stringify(MARK)};
   const forbidden = ${JSON.stringify(FORBIDDEN_ANCESTORS)};
   const vis = (el) => !!(el.offsetParent || el.getClientRects().length);
   const banned = (el) => forbidden.some((sel) => el.closest(sel));
-  document.querySelectorAll('[' + MARK + ']').forEach((el) => el.removeAttribute(MARK));
+  allIn('[' + MARK + ']').forEach((el) => el.removeAttribute(MARK));
 
   const explicit = ${explicit ? JSON.stringify(explicit) : "null"};
   if (explicit) {
-    const el = document.querySelector(explicit);
+    const el = findIn(explicit);
     if (!el) return { ok: false, reason: "nothing matches the selector you set: " + explicit };
     if (banned(el)) return { ok: false, reason: "that selector points inside the code editor" };
     el.setAttribute(MARK, "1");
@@ -97,9 +133,13 @@ function discoverExpr(p: AppProfile, explicit: string | undefined): string {
   const roots = ${JSON.stringify(p.chatRoots)};
   let root = null;
   for (const sel of roots) {
-    try { root = document.querySelector(sel); } catch { root = null; }
+    root = findIn(sel);
     if (root) break;
   }
+  // No named panel anywhere? A webview whose whole document IS the chat has
+  // nothing to scope to — fall back to its body, which is still not the
+  // workbench and so still can't reach Monaco.
+  if (!root && docs.length > 1) root = docs[docs.length - 1].body;
   if (!root) {
     return { ok: false, reason: ${JSON.stringify(`no chat panel in ${p.name} — sign in, and open a chat`)} };
   }
@@ -160,13 +200,14 @@ function discoverExpr(p: AppProfile, explicit: string | undefined): string {
  */
 function focusExpr(p: AppProfile): string {
   return `(() => {
+  ${DOCS}
   const MARK = ${JSON.stringify(MARK)};
   const vis = (el) => !!(el && (el.offsetParent || el.getClientRects().length));
 
-  ${p.busy ? `const busy = document.querySelector(${JSON.stringify(p.busy)});
+  ${p.busy ? `const busy = findIn(${JSON.stringify(p.busy)});
   if (vis(busy)) return { ok: false, reason: "busy" };` : ""}
 
-  const editor = document.querySelector('[' + MARK + ']');
+  const editor = findIn('[' + MARK + ']');
   if (!editor) return { ok: false, reason: "the composer went away" };
 
   editor.scrollIntoView({ block: "center" });
@@ -214,8 +255,9 @@ function submitExpr(p: AppProfile, text: string, sendSel: string | undefined): s
   // your phone. The settle wait happens on the Node side now, where a timer is
   // a timer.
   return `(() => {
+  ${DOCS}
   const MARK = ${JSON.stringify(MARK)};
-  const editor = document.querySelector('[' + MARK + ']');
+  const editor = findIn('[' + MARK + ']');
   if (!editor) return { ok: false, reason: "the composer went away" };
   const text = ${safe};
 
@@ -238,8 +280,7 @@ function submitExpr(p: AppProfile, text: string, sendSel: string | undefined): s
   const candidates = explicit ? [explicit] : ${JSON.stringify(p.send)};
   let sawDisabled = false;
   for (const sel of candidates) {
-    let el = null;
-    try { el = document.querySelector(sel); } catch {}
+    const el = findIn(sel);
     if (!el) continue;
     const btn = el.closest("button") || (el.tagName === "BUTTON" ? el : null) || el;
     if (btn.disabled) { sawDisabled = true; continue; }
@@ -273,12 +314,13 @@ function submitExpr(p: AppProfile, text: string, sendSel: string | undefined): s
 function transcriptExpr(p: AppProfile, explicit: string | undefined): string {
   const roots = explicit ? [explicit] : p.transcript;
   return `(() => {
+  ${DOCS}
   const roots = ${JSON.stringify(roots)};
   const composerish = ['[data-lexical-editor]', '[contenteditable="true"]', 'textarea', '[data-loom-composer]'];
   for (const sel of roots) {
-    let el = null;
-    try { el = document.querySelector(sel); } catch {}
+    const el = findIn(sel);
     if (!el) continue;
+    const doc = el.ownerDocument;
     const clone = el.cloneNode(true);
     composerish.forEach((c) => clone.querySelectorAll(c).forEach((n) => n.remove()));
     // innerText needs layout, which a detached node has none of; attach it
@@ -287,18 +329,21 @@ function transcriptExpr(p: AppProfile, explicit: string | undefined): string {
     clone.style.position = 'fixed';
     clone.style.left = '-99999px';
     clone.style.top = '0';
-    document.body.appendChild(clone);
+    doc.body.appendChild(clone);
     const text = (clone.innerText || "").slice(-20000);
     clone.remove();
     return text;
   }
-  return (document.body.innerText || "").slice(-20000);
+  const last = docs[docs.length - 1];
+  return (last.body ? last.body.innerText || "" : "").slice(-20000);
 })()`;
 }
 
 export class GuiChatDriver {
   private profile: AppProfile;
   private readonly appName: string;
+  /** The target that had the chat last time; tried first, never trusted. */
+  private lastTargetId: string | null = null;
 
   constructor(appName: string, private readonly options: GuiChatOptions, kind?: string) {
     this.profile = profileFor(kind ?? appName.toLowerCase());
@@ -324,11 +369,48 @@ export class GuiChatDriver {
     return cdpUp(this.endpoint);
   }
 
-  private async session(): Promise<CdpSession> {
-    const targets = await cdpTargets(this.endpoint);
-    const target = workbenchTarget(targets);
-    if (!target) throw new Error(`${this.appName} is running but has no window to talk to`);
-    return CdpSession.open(target);
+  /**
+   * A session on the target that actually has the chat in it.
+   *
+   * There is usually more than one candidate and the right one isn't
+   * predictable from the app: Antigravity's chat is in its page, Kiro's is in a
+   * webview target. So every candidate is asked "is there a composer here?" and
+   * the first that says yes wins. The answer is remembered — the targets don't
+   * move around between two calls a second apart — but it's re-derived whenever
+   * that target has gone.
+   */
+  private async session(): Promise<{ session: CdpSession; found: { ok: boolean; reason?: string } }> {
+    const targets = chatTargets(await cdpTargets(this.endpoint));
+    if (!targets.length) throw new Error(`${this.appName} is running but has no window to talk to`);
+
+    const ordered = this.lastTargetId
+      ? [...targets].sort((a, b) => (a.id === this.lastTargetId ? -1 : b.id === this.lastTargetId ? 1 : 0))
+      : targets;
+
+    let firstReason: string | undefined;
+    for (const target of ordered) {
+      let session: CdpSession;
+      try {
+        session = await CdpSession.open(target, 4000);
+      } catch {
+        continue; // a target that won't attach isn't the one
+      }
+      try {
+        const found = await session.evaluate<{ ok: boolean; reason?: string }>(
+          discoverExpr(this.profile, this.options.selectors?.composer),
+          8000,
+        );
+        if (found.ok) {
+          this.lastTargetId = target.id;
+          return { session, found };
+        }
+        firstReason ??= found.reason;
+      } catch {
+        /* this target can't answer; try the next */
+      }
+      session.close();
+    }
+    throw new Error(firstReason ?? `no chat panel in ${this.appName}`);
   }
 
   /**
@@ -339,11 +421,8 @@ export class GuiChatDriver {
     if (!(await this.reachable())) return { ok: false, reason: this.launchHint };
     let session: CdpSession | null = null;
     try {
-      session = await this.session();
-      const found = await session.evaluate<{ ok: boolean; reason?: string }>(
-        discoverExpr(this.profile, this.options.selectors?.composer),
-      );
-      return found.ok ? { ok: true } : { ok: false, reason: found.reason };
+      ({ session } = await this.session());
+      return { ok: true };
     } catch (err) {
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     } finally {
@@ -361,13 +440,9 @@ export class GuiChatDriver {
    * to have something structured.
    */
   async ask(text: string, onProgress?: (partial: string) => void): Promise<string> {
-    const session = await this.session();
+    // session() finds the target whose chat exists and marks the composer in it
+    const { session } = await this.session();
     try {
-      const found = await session.evaluate<{ ok: boolean; reason?: string }>(
-        discoverExpr(this.profile, this.options.selectors?.composer),
-      );
-      if (!found.ok) throw new Error(`can't reach ${this.appName}'s chat box: ${found.reason}`);
-
       const before = await session.evaluate<string>(
         transcriptExpr(this.profile, this.options.selectors?.transcript),
       );

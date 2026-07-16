@@ -48,8 +48,44 @@ export async function cdpTargets(endpoint: string, timeoutMs = 3000): Promise<Cd
  * gets you an animated ellipsis with no chat in it.
  */
 export function workbenchTarget(targets: CdpTarget[]): CdpTarget | null {
-  const pages = targets.filter((t) => t.type === "page" && t.webSocketDebuggerUrl);
-  return pages.find((t) => !String(t.url ?? "").startsWith("data:")) ?? pages[0] ?? null;
+  return chatTargets(targets)[0] ?? null;
+}
+
+/**
+ * Every target that could hold a chat, best first.
+ *
+ * A page is not enough. Kiro keeps its chat in a `vscode-webview` target — a
+ * separate CDP target of type `iframe` — so a page-only filter finds the
+ * workbench, reports "no chat panel", and is wrong about the whole app.
+ * Antigravity keeps its chat in its page. Both have to be reachable, so this
+ * returns candidates and the driver asks each one whether a chat is in it.
+ *
+ * Ordering, not exclusion, is the tool here. AntiGravity-AutoAccept drops
+ * http(s) targets outright, because Antigravity's *Manager* is an https page
+ * behind a sign-in with no chat in it — a real trap, and it cost an afternoon.
+ * But "no chat" is a question the driver already asks, and answering it by URL
+ * scheme also throws away any app that legitimately serves its UI over http.
+ * So the Manager sorts last and eliminates itself by having no composer, which
+ * is both true and non-fatal.
+ *
+ * Workers are dropped for real: there is no DOM in one.
+ */
+export function chatTargets(targets: CdpTarget[]): CdpTarget[] {
+  const usable = targets.filter((t) => {
+    if (!t.webSocketDebuggerUrl) return false;
+    const url = String(t.url ?? "");
+    if (!url || url === "about:blank") return false;
+    if (t.type === "service_worker" || t.type === "worker" || t.type === "shared_worker") return false;
+    return t.type === "page" || t.type === "iframe" || url.includes("webview");
+  });
+  const rank = (t: CdpTarget): number => {
+    const url = String(t.url ?? "");
+    if (url.startsWith("data:")) return 4; // a splash screen
+    if (url.startsWith("http://") || url.startsWith("https://")) return 3; // probably a Manager
+    if (url.includes("webview")) return 1; // where a panel's chat tends to live
+    return 0;
+  };
+  return [...usable].sort((a, b) => rank(a) - rank(b));
 }
 
 /** One CDP session against one target. */
