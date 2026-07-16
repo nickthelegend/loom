@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type served by the daemon at `/app/fonts/geist.woff2` (SIL OFL 1.1, embedded
   — no CDN), SVG icon set replacing emoji, Orca button/input/card/chip
   variants, sleek scrollbars, and a readable centered thread column.
+- Desktop web shell (≥900px) is the full Orca workspace: project groups with
+  nested agent rows in the sidebar (status dots, baton badge, click-to-target),
+  a tab strip over the pane (Thread | Changes | Brain | Routes), per-file diff
+  cards with add/delete washes, a Source-control right rail (≥1200px) whose
+  file rows jump to their diff, and a status bar (websocket liveness, host,
+  baton, working count, total spend).
 - Desktop shell: Orca window chrome — canvas-colored background, macOS
   traffic lights at x16/y18 centered in 48px drag strips, 600×400 minimums,
   restyled failure page.

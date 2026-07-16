@@ -70,6 +70,27 @@ Rules:
   muted-foreground.
 - Icons: inline SVG, 16px, stroke 2, `currentColor`. Never emoji.
 
+## Workspace shell (desktop web + Electron, ≥900px)
+
+The Orca workspace layout, drawn from Loom's real model:
+
+- **Left sidebar (264px)** — project groups with nested agent rows: status dot
+  (amber pulse = working), `baton` badge on the holder, role labels. Clicking
+  an agent targets it for the next send.
+- **Tab strip (37px)** — Thread | Changes (badge = changed-file count) |
+  Brain | Routes; the active tab merges into the canvas. The composer docks
+  under Thread only.
+- **Changes pane** — per-file diff cards on `--editor-surface` with
+  add/delete washes and hunk headers; Loom's `.loom/` state files filtered.
+- **Right rail (304px, ≥1200px)** — Source control: branch, changed files
+  with colored status letters (click jumps to the file's diff), live route
+  and needs-input cards.
+- **Status bar (25px)** — websocket liveness, daemon host, baton holder,
+  working-agent count, project count, total spend.
+
+Mobile (<900px) keeps the single-column thread: chips row, glass sheets, and
+the docked composer.
+
 ## Window chrome (Electron)
 
 Matches Orca: `titleBarStyle: hiddenInset` (macOS) with traffic lights at
