@@ -35,7 +35,7 @@ function scratchRepo() {
 const ADAPTERS = [
   { id: "claude-code", kind: "claude-code" },
   { id: "codex", kind: "codex" },
-  { id: "opencode", kind: "opencode" },
+  { id: "opencode", kind: "opencode", options: { model: process.env.LOOM_OC_MODEL || "opencode/north-mini-code-free" } },
   { id: "grok-code", kind: "grok-code" },
 ];
 const BRIDGES = [
@@ -113,7 +113,7 @@ console.log(`\n  ${working}/${results.length} working`);
 const FIX = {
   "claude-code": "run `claude` in a terminal and log in",
   codex: "codex login",
-  opencode: "opencode auth login  (a Personal Access Token is rejected by some providers)",
+  opencode: "its model pin is stale — `opencode models` then set options.model in .loom/config.json",
   "grok-code": "run `grok` in a terminal and log in",
   antigravity: 'open -a "Antigravity IDE" --args --remote-debugging-port=9333, sign in, open a chat',
   kiro: 'open -a "Kiro" --args --remote-debugging-port=9334, then open its chat panel',
