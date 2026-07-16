@@ -260,6 +260,8 @@ export interface ProjectStatus {
    * board puts a name on the card, not just "someone is blocked".
    */
   blockedAgent?: string | null;
+  /** Conversations in this project, main first. */
+  chats?: ChatInfo[];
   route?: RouteState | null;
   /** Named pipelines defined in config (for pickers/dropdowns). */
   routeNames?: string[];

@@ -9,6 +9,7 @@ import path from "node:path";
 import type {
   AgentCost,
   AnyAgent,
+  ChatInfo,
   CostSummary,
   LoomEvent,
   ProjectConfig,
@@ -18,7 +19,7 @@ import type {
   UnifiedMemory,
 } from "../types.js";
 import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
-import { isAdapter } from "../types.js";
+import { isAdapter, MAIN_CHAT } from "../types.js";
 import { createAgent } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { EventLog } from "../core/eventlog.js";
@@ -33,9 +34,12 @@ import { notify } from "../core/notify.js";
 import { RouteEngine } from "../core/routes.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
 import {
+  newId,
   projectLoomDir,
   readProjectConfig,
+  readProjectState,
   writeProjectConfig,
+  writeProjectState,
   writeMemoryFile,
 } from "../core/registry.js";
 import { suggestHandoff } from "../core/suggestions.js";
@@ -57,6 +61,12 @@ export class ProjectRuntime {
   private agents = new Map<string, AnyAgent>();
   private startedAgents = new Set<string>();
   private configMtime = 0;
+  /**
+   * Which conversation each agent's current turn belongs to. Set when a turn
+   * starts and left in place afterwards — an agent's trailing events (a late
+   * run_complete, a diff) still belong to the chat that prompted them.
+   */
+  private turnChat = new Map<string, string>();
 
   private constructor(info: ProjectInfo, config: ProjectConfig, log: EventLog) {
     this.info = info;
@@ -68,7 +78,16 @@ export class ProjectRuntime {
       const agent = createAgent(agentCfg, info.dir);
       this.agents.set(agentCfg.id, agent);
       agent.onEvent((e) => {
-        const event = this.log.append({ kind: e.kind, agentId: agent.id, payload: e.payload });
+        // An agent streams events long after the send returns, and it has no
+        // idea which conversation prompted it. Tag them with the chat that
+        // started this turn, so its reply lands where you asked the question.
+        const chat = this.turnChat.get(agent.id);
+        const event = this.log.append({
+          kind: e.kind,
+          agentId: agent.id,
+          ...(chat ? { chat } : {}),
+          payload: e.payload,
+        });
         this.afterAgentEvent(event);
       });
     }
@@ -172,6 +191,64 @@ export class ProjectRuntime {
     // schedule a pointless reload
     this.configMtime = configMtimeOf(this.info.dir);
     return { id: agentId, role };
+  }
+
+  // -------------------------------------------------------------------------
+  // Chats — several conversations, one brain
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every conversation in this project, main first. Main is implicit: it's
+   * always there and it owns every event written before chats existed, so it
+   * is never stored. The rest live in state.json — a chat you created and
+   * haven't spoken in yet has no events to derive it from.
+   */
+  chats(): ChatInfo[] {
+    const stored = readProjectState(this.info.dir).chats ?? [];
+    return [
+      { id: MAIN_CHAT, title: "Main", createdAt: 0 },
+      ...stored.filter((c) => c.id !== MAIN_CHAT),
+    ];
+  }
+
+  createChat(title: string): ChatInfo {
+    const state = readProjectState(this.info.dir);
+    const chat: ChatInfo = {
+      id: newId(4),
+      // numbered, not "New chat" — the button already says New chat, and a
+      // sidebar of identical rows tells you nothing
+      title: title.trim().slice(0, 60) || `Chat ${(state.chats ?? []).length + 2}`,
+      createdAt: Date.now(),
+    };
+    state.chats = [...(state.chats ?? []), chat];
+    writeProjectState(this.info.dir, state);
+    return chat;
+  }
+
+  renameChat(id: string, title: string): ChatInfo | null {
+    if (id === MAIN_CHAT) return null; // main's name is not yours to change
+    const state = readProjectState(this.info.dir);
+    const chat = (state.chats ?? []).find((c) => c.id === id);
+    if (!chat) return null;
+    chat.title = title.trim().slice(0, 60) || chat.title;
+    writeProjectState(this.info.dir, state);
+    return chat;
+  }
+
+  /**
+   * Forget a conversation. Its events stay in the log — it's append-only, and
+   * the brain is built from all of them; deleting the thread you had with an
+   * agent shouldn't quietly rewrite what the project decided. The chat just
+   * stops being listed.
+   */
+  deleteChat(id: string): boolean {
+    if (id === MAIN_CHAT) return false; // there is always a main chat
+    const state = readProjectState(this.info.dir);
+    const before = (state.chats ?? []).length;
+    state.chats = (state.chats ?? []).filter((c) => c.id !== id);
+    if (state.chats.length === before) return false;
+    writeProjectState(this.info.dir, state);
+    return true;
   }
 
   /** Any adapter mid-turn? (Hot reloads are deferred while work is in flight.) */
@@ -331,9 +408,10 @@ export class ProjectRuntime {
   async sendMessage(
     text: string,
     agentId?: string,
-    opts: { source?: "user" | "route" } = {},
+    opts: { source?: "user" | "route"; chat?: string } = {},
   ): Promise<{ agentId: string }> {
     const source = opts.source ?? "user";
+    const chat = opts.chat ?? MAIN_CHAT;
     let target = agentId ?? this.validHolder() ?? this.defaultAdapterId();
     const agent = this.agent(target);
     if (!isAdapter(agent)) {
@@ -350,8 +428,11 @@ export class ProjectRuntime {
     // A user reply to a paused route's question resumes the route.
     if (source === "user") this.routes.onUserMessage(target);
 
+    // everything this turn produces belongs to the chat you sent from
+    this.turnChat.set(target, chat);
     this.log.append({
       kind: "message",
+      chat,
       payload: { text, author: source === "route" ? "loom" : "user" },
     });
     await this.ensureStarted(target);
@@ -582,6 +663,7 @@ export class ProjectRuntime {
       // which agent is waiting, not just that someone is — the board needs a
       // name to put on the card, and every caller already gets needsInput
       blockedAgent: needsInput ? (lastNeedsInput?.agentId ?? null) : null,
+      chats: this.chats(),
       route: this.routes.state(),
       routeNames: ["auto", ...Object.keys(this.config.routes ?? {})],
       costUsd: this.costs.totalUsd,

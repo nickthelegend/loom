@@ -329,16 +329,23 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         const since = req.query.since ? Number(req.query.since) : undefined;
         const limit = req.query.limit ? Number(req.query.limit) : 200;
-        res.json({ events: rt.log.list({ since, limit }) });
+        // no ?chat= means the whole project — old clients keep seeing the
+        // whole thread, which is what they've always shown
+        const chat = req.query.chat ? String(req.query.chat) : undefined;
+        res.json({ events: rt.log.list({ since, limit, ...(chat ? { chat } : {}) }) });
       }),
     );
 
     app.post(
       "/api/projects/:id/messages",
       withRuntime(async (rt, req, res) => {
-        const { text, agentId } = (req.body ?? {}) as { text?: string; agentId?: string };
+        const { text, agentId, chat } = (req.body ?? {}) as {
+          text?: string;
+          agentId?: string;
+          chat?: string;
+        };
         if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
-        const result = await rt.sendMessage(text, agentId);
+        const result = await rt.sendMessage(text, agentId, chat ? { chat } : {});
         res.json(result);
       }),
     );
@@ -350,6 +357,44 @@ export class LoomDaemon {
         if (!to) return void res.status(400).json({ error: "missing to" });
         const result = await rt.handoff(to);
         res.json({ ...result, to });
+      }),
+    );
+
+    // Chats — several conversations inside one project. They share the brain,
+    // the baton and the working tree; only the talking is separate.
+    app.get(
+      "/api/projects/:id/chats",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ chats: rt.chats() });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/chats",
+      withRuntime(async (rt, req, res) => {
+        const { title } = (req.body ?? {}) as { title?: string };
+        res.json({ chat: rt.createChat(String(title ?? "")) });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/chats/:chatId/rename",
+      withRuntime(async (rt, req, res) => {
+        const { title } = (req.body ?? {}) as { title?: string };
+        if (!title?.trim()) return void res.status(400).json({ error: "missing title" });
+        const chat = rt.renameChat(String(req.params.chatId), title);
+        if (!chat) return void res.status(400).json({ error: "cannot rename that chat" });
+        res.json({ chat });
+      }),
+    );
+
+    app.delete(
+      "/api/projects/:id/chats/:chatId",
+      withRuntime(async (rt, req, res) => {
+        if (!rt.deleteChat(String(req.params.chatId))) {
+          return void res.status(400).json({ error: "cannot delete that chat" });
+        }
+        res.json({ deleted: true });
       }),
     );
 

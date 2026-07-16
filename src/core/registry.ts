@@ -9,7 +9,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AgentConfig, AgentRole, ProjectConfig, ProjectInfo, RouteState } from "../types.js";
+import type {
+  AgentConfig,
+  AgentRole,
+  ChatInfo,
+  ProjectConfig,
+  ProjectInfo,
+  RouteState,
+} from "../types.js";
 
 export function loomHome(): string {
   return process.env.LOOM_HOME ?? path.join(os.homedir(), ".loom");
@@ -105,6 +112,13 @@ export interface ProjectState {
   agents: Record<string, Record<string, unknown>>;
   /** Active (or last) multi-hop route. */
   route?: RouteState;
+  /**
+   * Named conversations. The main chat is implicit — every project has it and
+   * it holds everything written before chats existed, so it isn't stored here.
+   * Kept in state rather than derived from the log so a chat you just made,
+   * and haven't said anything in yet, still exists.
+   */
+  chats?: ChatInfo[];
 }
 
 export function readProjectState(projectDir: string): ProjectState {

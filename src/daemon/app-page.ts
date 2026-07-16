@@ -424,12 +424,36 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     color:var(--muted-foreground);border:1px solid var(--border);border-radius:5px;
     padding:0 5px;line-height:14px;text-transform:uppercase}
   .arow.cur .abadge{color:var(--sidebar-accent-foreground)}
+  /* ── chats: a project's conversations, nested under it ── */
+  .crow{display:flex;align-items:center;gap:7px;padding:5px 8px 5px 24px;margin-top:1px;
+    border-radius:var(--radius-sm);cursor:pointer;color:var(--sidebar-foreground);
+    font-size:12.5px;border:1px solid transparent}
+  .crow:hover{background:var(--sidebar-accent);color:var(--sidebar-accent-foreground)}
+  .crow.cur{background:var(--sidebar-accent);color:var(--sidebar-accent-foreground);border-color:var(--border)}
+  .crow .ci{flex:none;display:inline-flex;align-items:center;color:var(--muted-foreground)}
+  .crow .ci svg{width:12px;height:12px}
+  .crow.cur .ci{color:var(--sidebar-accent-foreground)}
+  .crow .cnm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .crow .cx{width:18px;height:18px;margin-left:auto;flex:none;opacity:0;border-radius:4px}
+  .crow .cx svg{width:11px;height:11px}
+  .crow:hover .cx{opacity:.6}
+  .crow .cx:hover{opacity:1;background:color-mix(in srgb, var(--err) 18%, transparent);color:var(--err)}
+  .crow.add{color:var(--muted-foreground)}
+  .crow.add:hover{color:var(--sidebar-accent-foreground)}
+  .chatinput{width:100%;background:var(--background);border:1px solid var(--ring);border-radius:4px;
+    color:var(--foreground);font:inherit;font-size:12.5px;padding:0 3px;outline:none}
   /* a role is a name you chose, so it reads as editable text, not a label */
   .role.edit{cursor:text;border-radius:4px;padding:0 3px;margin-right:-3px}
   .role.edit:hover{background:color-mix(in srgb, var(--muted-foreground) 22%, transparent);
     color:var(--sidebar-accent-foreground)}
   .roleinput{width:9ch;background:var(--background);border:1px solid var(--ring);border-radius:4px;
     color:var(--foreground);font-family:var(--font-mono);font-size:10.5px;padding:0 3px;outline:none}
+  /* the rail's agent roster: click to aim, click the role to rename it */
+  .frow.agentrow{cursor:pointer}
+  .frow.agentrow.cur{background:var(--accent);border-radius:var(--radius-sm)}
+  .frow .role{margin-left:auto;flex:none;font-family:var(--font-mono);font-size:10.5px;
+    color:var(--muted-foreground)}
+  .frow.bridge{opacity:.75}
   /* a bridge is read-only: no hover affordance, because it can't be targeted */
   .arow.bridge{cursor:default;opacity:.82}
   .arow.bridge:hover{background:transparent;color:inherit}
@@ -936,6 +960,47 @@ ${BRAND_SPRITE}
     for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i].kind;
     return null;
   }
+
+  /**
+   * Rename a job in place, wherever a role is drawn. Roles are free text —
+   * "architect", "the one that writes docs", whatever your project actually
+   * does — so the label is the editor. Stops propagation because these sit
+   * inside rows that do something else when clicked.
+   */
+  function wireRoleEditors(root, redraw){
+    Array.prototype.forEach.call(root.querySelectorAll("[data-role-a]"), function(tag){
+      tag.onclick = function(ev){
+        ev.stopPropagation();
+        if (tag.querySelector("input")) return;
+        var was = tag.textContent;
+        var inp = document.createElement("input");
+        inp.className = "roleinput";
+        inp.value = was === "\\u2026" ? "" : was;
+        inp.maxLength = 40;
+        tag.textContent = "";
+        tag.appendChild(inp);
+        inp.focus();
+        inp.select();
+        var done = false;
+        function finish(save){
+          if (done) return; done = true;
+          var next = inp.value.trim();
+          if (!save || !next || next === was) { redraw(); return; }
+          api("/api/projects/" + tag.getAttribute("data-role-p") + "/agents/" +
+              tag.getAttribute("data-role-a") + "/role",
+              { method: "POST", body: JSON.stringify({ role: next }) })
+            .then(function(){ toast("role \\u2192 " + next); redraw(); })
+            .catch(function(err){ toast(err.message); redraw(); });
+        }
+        inp.onkeydown = function(e){
+          if (e.key === "Enter") { e.preventDefault(); finish(true); }
+          else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+        };
+        inp.onblur = function(){ finish(true); };
+        inp.onclick = function(e){ e.stopPropagation(); };
+      };
+    });
+  }
   var LOADER = '<div class="loader"><i></i><i></i><i></i><i></i></div>';
 
   // Inline icon set — 24px grid, stroke 2, currentColor (no emoji, no CDN).
@@ -953,6 +1018,7 @@ ${BRAND_SPRITE}
     route: svg('<circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="5.5" r="2.5"/><path d="M8 18.5h5.5a4 4 0 0 0 4-4V8"/>'),
     // three columns of differing fill — a kanban board at 13px
     board: svg('<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="6" rx="1.5"/>'),
+    chat: svg('<path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/>'),
     info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>'),
     branch: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M15.5 8.5H11a5 5 0 0 0-5 5"/>'),
     refresh: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>'),
@@ -1250,6 +1316,10 @@ ${BRAND_SPRITE}
   function renderProject(pid, mount, desktop){
     mount = mount || root;
     clearTimers();
+    // Which conversation this view is showing. The daemon streams the whole
+    // project over one socket, so the thread filters to this chat itself.
+    var chatId = state.currentChat ? state.currentChat() : "main";
+    state.chat = chatId;
     // Point state.project at the new project NOW. refresh() below replaces it
     // with the fuller per-project payload, but that lands a fetch later — and
     // everything drawn in the meantime (the Explorer's title above all) would
@@ -2537,20 +2607,42 @@ ${BRAND_SPRITE}
           '</div><div class="rm">\\u25b8 ' + esc(r.steps[r.current] || "") +
           (r.status === "waiting_human" ? " \\u2014 \\u23f8 " + esc(r.pendingQuestion || "waiting") : "") + "</div></div>";
       }
-      html += '<div class="rsec">Assign to</div>';
+      // The agents live here now — the sidebar belongs to the project's chats.
+      // Agents work the whole project, not one conversation, so this is the
+      // honest place for them.
+      html += '<div class="rsec">Agents</div>';
       if (!adapters.length) html += '<div class="rempty">no agents configured</div>';
       else adapters.forEach(function(a){
         var hh = hue(a.id);
-        html += '<div class="frow" data-agent="' + esc(a.id) + '"><span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
+        var curA = a.id === state.selected;
+        html += '<div class="frow agentrow' + (curA ? " cur" : "") + '" data-agent="' + esc(a.id) + '"' +
+          ' title="click to aim your next message at ' + esc(a.id) + '">' +
+          '<span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
           brandMark(a.kind) +
           '<span class="fp" style="color:hsl(' + hh + ',55%,var(--agent-l))">' + esc(a.id) + "</span>" +
-          '<span style="margin-left:auto;color:var(--muted-foreground);font-size:10.5px">' + esc(a.role) + "</span></div>";
+          (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") +
+          // your project decides what jobs exist — click and type
+          '<span class="role edit" data-role-p="' + esc(pid) + '" data-role-a="' + esc(a.id) +
+          '" title="click to rename this job">' + esc(a.role || "\\u2026") + "</span></div>";
+      });
+      var bridges = p ? p.agents.filter(function(a){ return a.tier === "bridge"; }) : [];
+      bridges.forEach(function(a){
+        html += '<div class="frow bridge" title="' + esc(a.id) +
+          ' is a bridge \\u2014 Loom reads it, but it never holds the baton">' +
+          '<span class="adot"></span>' + brandMark(a.kind) +
+          '<span class="fp">' + esc(a.id) + '</span> <span class="abadge">bridge</span>' +
+          '<span class="role" style="margin-left:auto">' + esc(a.role) + "</span></div>";
       });
       el.innerHTML = html;
       document.getElementById("railnewtask").onclick = function(){ openTaskModal(pid); };
       Array.prototype.forEach.call(el.querySelectorAll(".frow[data-agent]"), function(row){
-        row.onclick = function(){ openTaskModal(pid, [row.getAttribute("data-agent")]); };
+        row.onclick = function(){
+          state.selected = row.getAttribute("data-agent");
+          drawRail();
+          drawStatus();
+        };
       });
+      wireRoleEditors(el, function(){ drawRail(); });
     }
     state.drawRail = drawRail;
 
@@ -2665,7 +2757,7 @@ ${BRAND_SPRITE}
       historyLoaded = true;
       if (pendingWs.length) { append(pendingWs); pendingWs = []; }
     }
-    api("/api/projects/" + pid + "/events?limit=60")
+    api("/api/projects/" + pid + "/events?limit=60&chat=" + encodeURIComponent(chatId))
       .then(function(j){ append(j.events || []); flushPending(); })
       .catch(function(err){ toast(err.message); flushPending(); });
     refresh();
@@ -2692,6 +2784,9 @@ ${BRAND_SPRITE}
           var frame = JSON.parse(ev.data);
           if (frame.type === "term") { onTermFrame(frame); return; }
           if (frame.type === "event" && frame.event) {
+            // one socket carries the whole project; this thread is one chat.
+            // An event with no chat predates chats and belongs to main.
+            if ((frame.event.chat || "main") !== chatId) return;
             if (historyLoaded) append([frame.event]);
             else pendingWs.push(frame.event);
           }
@@ -2715,7 +2810,9 @@ ${BRAND_SPRITE}
         chain = api("/api/projects/" + pid + "/handoff", { method: "POST", body: JSON.stringify({ to: state.selected }) });
       }
       chain.then(function(){
-        return api("/api/projects/" + pid + "/messages", { method: "POST", body: JSON.stringify({ text: text, agentId: state.selected || undefined }) });
+        // into the chat you're looking at — the agent's reply comes back here
+        return api("/api/projects/" + pid + "/messages", { method: "POST",
+          body: JSON.stringify({ text: text, agentId: state.selected || undefined, chat: chatId }) });
       }).then(refresh).catch(function(err){ toast(err.message); });
     }
     document.getElementById("cform").addEventListener("submit", function(ev){
@@ -2917,7 +3014,10 @@ ${BRAND_SPRITE}
           ? api("/api/projects/" + mproj + "/handoff", { method: "POST", body: JSON.stringify({ to: agent }) })
           : Promise.resolve();
         work = chain.then(function(){
-          return api("/api/projects/" + mproj + "/messages", { method: "POST", body: JSON.stringify({ text: task, agentId: agent }) });
+          // a new task starts in the project's main chat, not in whichever
+          // conversation happened to be open when you hit N
+          return api("/api/projects/" + mproj + "/messages", { method: "POST",
+            body: JSON.stringify({ text: task, agentId: agent, chat: "main" }) });
         });
         note = "task sent to " + agent;
       }
@@ -3122,58 +3222,75 @@ ${BRAND_SPRITE}
           '<div class="m">baton ' + esc(p.holder || "\\u2014") +
           (p.costUsd > 0 ? " \\u00b7 " + money(p.costUsd) : "") + "</div></div>";
         if (sel) {
-          rows += adapters.map(function(a){
-            var curA = a.id === state.selected;
-            return '<div class="arow' + (curA ? " cur" : "") + '" data-p="' + esc(p.id) + '" data-a="' + esc(a.id) + '"' + (curA ? ' data-current="true"' : "") + ">" +
-              '<span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
-              '<span class="anm">' + brandMark(a.kind) + esc(a.id) +
-              (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") + "</span>" +
-              // the role is yours to name — click it and type
-              '<span class="role edit" data-role-p="' + esc(p.id) + '" data-role-a="' + esc(a.id) +
-              '" title="click to rename this job">' + esc(a.role || "\\u2026") + "</span></div>";
+          // A project holds conversations. The agents that work them live in
+          // the rail's roster — they belong to the project, not to one chat.
+          var chats = p.chats || [{ id: "main", title: "Main", createdAt: 0 }];
+          rows += chats.map(function(c){
+            var curC = c.id === currentChat();
+            return '<div class="crow' + (curC ? " cur" : "") + '" data-p="' + esc(p.id) +
+              '" data-chat="' + esc(c.id) + '"' + (curC ? ' data-current="true"' : "") + ">" +
+              '<span class="ci">' + ICONS.chat + "</span>" +
+              '<span class="cnm">' + esc(c.title) + "</span>" +
+              (c.id === "main"
+                ? ""
+                : '<button class="cx iconbtn" data-delchat="' + esc(c.id) +
+                  '" title="forget this chat" aria-label="forget chat ' + esc(c.title) + '">' + ICONS.x + "</button>") +
+              "</div>";
           }).join("");
-          // Bridges too. They never hold the baton, so they aren't targets for
-          // a message — but a configured bridge that renders nowhere reads as
-          // "Loom ignored my config". Shown, marked, and not clickable.
-          rows += (p.agents || []).filter(function(a){ return a.tier === "bridge"; }).map(function(a){
-            return '<div class="arow bridge" title="' + esc(a.id) +
-              ' is a bridge \\u2014 Loom reads it, but it never holds the baton">' +
-              '<span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
-              '<span class="anm">' + brandMark(a.kind) + esc(a.id) +
-              ' <span class="abadge">bridge</span></span>' +
-              '<span class="role">' + esc(a.role) + "</span></div>";
-          }).join("");
+          rows += '<div class="crow add" data-newchat="' + esc(p.id) + '">' +
+            '<span class="ci">' + ICONS.plus + '</span><span class="cnm">New chat</span></div>';
         }
         return '<div class="sgroup">' + rows + "</div>";
       }).join("");
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
       });
-      // Rename a job in place. Roles are free text — "architect", "the one that
-      // writes docs", whatever your project actually does. Bound before the row
-      // handler and stops propagation, or clicking it would also re-target.
-      Array.prototype.forEach.call(el.querySelectorAll("[data-role-a]"), function(tag){
-        tag.onclick = function(ev){
+      // Switch conversation. Same project, same brain, same baton — a
+      // different thread of talking.
+      Array.prototype.forEach.call(el.querySelectorAll(".crow[data-chat]"), function(row){
+        row.onclick = function(){
+          var pidC = row.getAttribute("data-p"), cid = row.getAttribute("data-chat");
+          setChat(pidC, cid);
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-delchat]"), function(b){
+        b.onclick = function(ev){
           ev.stopPropagation();
-          if (tag.querySelector("input")) return;
-          var was = tag.textContent;
+          var cid = b.getAttribute("data-delchat");
+          api("/api/projects/" + cur + "/chats/" + cid, { method: "DELETE" })
+            .then(function(){
+              // its events stay in the log; only the listing goes
+              if (currentChat() === cid) setChat(cur, "main");
+              refresh();
+              toast("chat forgotten \\u00b7 its history stays in the brain");
+            })
+            .catch(function(err){ toast(err.message); });
+        };
+      });
+      // Double-click to rename a conversation — it's your name for it.
+      Array.prototype.forEach.call(el.querySelectorAll(".crow[data-chat]"), function(row){
+        var cid = row.getAttribute("data-chat");
+        if (cid === "main") return; // main's name isn't yours to change
+        row.ondblclick = function(ev){
+          ev.stopPropagation();
+          var nm = row.querySelector(".cnm");
+          if (!nm || nm.querySelector("input")) return;
+          var was = nm.textContent;
           var inp = document.createElement("input");
-          inp.className = "roleinput";
-          inp.value = was === "\\u2026" ? "" : was;
-          inp.maxLength = 40;
-          tag.textContent = "";
-          tag.appendChild(inp);
-          inp.focus();
-          inp.select();
+          inp.className = "chatinput";
+          inp.value = was;
+          inp.maxLength = 60;
+          nm.textContent = "";
+          nm.appendChild(inp);
+          inp.focus(); inp.select();
           var done = false;
           function finish(save){
             if (done) return; done = true;
             var next = inp.value.trim();
             if (!save || !next || next === was) { drawList(); return; }
-            api("/api/projects/" + tag.getAttribute("data-role-p") + "/agents/" +
-                tag.getAttribute("data-role-a") + "/role",
-                { method: "POST", body: JSON.stringify({ role: next }) })
-              .then(function(){ refresh(); toast("role \\u2192 " + next); })
+            api("/api/projects/" + cur + "/chats/" + cid + "/rename",
+                { method: "POST", body: JSON.stringify({ title: next }) })
+              .then(function(){ refresh(); })
               .catch(function(err){ toast(err.message); drawList(); });
           }
           inp.onkeydown = function(e){
@@ -3184,21 +3301,13 @@ ${BRAND_SPRITE}
           inp.onclick = function(e){ e.stopPropagation(); };
         };
       });
-      // [data-a] on purpose: bridge rows carry no agent id because they can't
-      // be targeted, and binding them would select an agent that can't reply
-      Array.prototype.forEach.call(el.querySelectorAll(".arow[data-a]"), function(row){
-        row.onclick = function(){
-          var pidA = row.getAttribute("data-p"), aid = row.getAttribute("data-a");
-          if (pidA !== cur) { select(pidA); state.selected = aid; }
-          else { state.selected = aid; }
-          drawList();
-          var hint = document.getElementById("hint");
-          var holder = state.project && state.project.holder;
-          if (hint) hint.textContent = aid !== holder
-            ? "send will shift the baton to " + aid
-            : "baton already with " + aid;
-        };
-      });
+      var addRow = el.querySelector("[data-newchat]");
+      if (addRow) addRow.onclick = function(){
+        var pidN = addRow.getAttribute("data-newchat");
+        api("/api/projects/" + pidN + "/chats", { method: "POST", body: "{}" })
+          .then(function(j){ refresh(); setChat(pidN, j.chat.id); })
+          .catch(function(err){ toast(err.message); });
+      };
     }
     function select(pid){
       cur = pid;
@@ -3207,6 +3316,19 @@ ${BRAND_SPRITE}
       drawList();
     }
     state.selectProject = select;
+    /** The conversation you're in, per project, remembered across reloads. */
+    function currentChat(){
+      if (!cur) return "main";
+      try { return localStorage.getItem("loomChat:" + cur) || "main"; } catch (e) { return "main"; }
+    }
+    function setChat(pidC, cid){
+      try { localStorage.setItem("loomChat:" + pidC, cid); } catch (e) {}
+      if (pidC !== cur) { select(pidC); return; }
+      state.chat = cid;
+      renderProject(cur, dmain, true); // reload the thread for this chat
+      drawList();
+    }
+    state.currentChat = currentChat;
     function refresh(){
       api("/api/projects").then(function(j){
         state.projects = j.projects || [];
