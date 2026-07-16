@@ -20,6 +20,14 @@ interface ClaudeOptions {
   permissionMode?: string;
   /** Optional model override. */
   model?: string;
+  /**
+   * Path to the claude binary, when it isn't `claude` on PATH.
+   *
+   * Same escape hatch codex and grok have, and the seam these tests drive: an
+   * adapter whose job is to parse another program's output can be tested
+   * properly by handing it another program.
+   */
+  bin?: string;
   /** Extra CLI args, escape hatch. */
   extraArgs?: string[];
 }
@@ -44,8 +52,12 @@ export class ClaudeCodeAdapter extends AdapterBase {
     writeProjectState(this.projectDir, state);
   }
 
+  private get bin(): string {
+    return this.options.bin ?? "claude";
+  }
+
   async available(): Promise<boolean> {
-    return cliAvailable("claude");
+    return cliAvailable(this.bin);
   }
 
   async start(): Promise<void> {
@@ -77,7 +89,7 @@ export class ClaudeCodeAdapter extends AdapterBase {
 
     try {
       await new Promise<void>((resolve, reject) => {
-        const child = spawn("claude", args, {
+        const child = spawn(this.bin, args, {
           cwd: this.projectDir,
           stdio: ["ignore", "pipe", "pipe"],
           env: agentEnv(),
@@ -116,9 +128,9 @@ export class ClaudeCodeAdapter extends AdapterBase {
           if (code !== 0 && !sawResult) {
             this.emit({
               kind: "error",
-              payload: { message: `claude exited ${code}`, stderr: stderrTail },
+              payload: { message: `${this.bin} exited ${code}`, stderr: stderrTail },
             });
-            reject(new Error(`claude exited ${code}: ${stderrTail.slice(0, 200)}`));
+            reject(new Error(`${this.bin} exited ${code}: ${stderrTail.slice(0, 200)}`));
             return;
           }
           // Blocked-on-human heuristic: the turn ended on a question.

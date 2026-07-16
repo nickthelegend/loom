@@ -19,9 +19,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GuiChatDriver, delta } from "../src/adapters/bridges/gui-chat.js";
-import { cdpUp } from "../src/adapters/bridges/cdp.js";
+import { CdpSession, cdpTargets, cdpUp, workbenchTarget } from "../src/adapters/bridges/cdp.js";
 import { tmpDir } from "./helpers.js";
 
 /**
@@ -36,8 +36,10 @@ import { tmpDir } from "./helpers.js";
  * thing the driver must never type into.
  *
  * The composer refuses assignment on purpose: `textContent = …` leaves it
- * "empty" as far as the submit button is concerned, exactly like Lexical. Only
- * a real editing event counts. A driver that cheats fails here.
+ * "empty" as far as the submit button is concerned, exactly like Lexical. Only a
+ * real `beforeinput` counts. A driver that cheats fails here — which is how the
+ * execCommand path was caught: it fires `input` and not `beforeinput`, so it
+ * filled the box and sent nothing.
  */
 const PAGE = `<!doctype html>
 <html><body style="margin:0">
@@ -57,8 +59,8 @@ const PAGE = `<!doctype html>
 
   <script>
     // Lexical keeps its own model and only trusts real editing events. Assigning
-    // to the DOM updates what you see and nothing else — which is the entire
-    // reason the driver uses execCommand rather than textContent.
+    // to the DOM updates what you see and nothing else — which is why the driver
+    // types with CDP Input.insertText, the only path that fires beforeinput.
     const composer = document.getElementById('composer');
     let model = '';
     composer.addEventListener('beforeinput', (e) => {
@@ -177,6 +179,37 @@ beforeAll(async () => {
   }
 }, 50_000);
 
+/**
+ * A clean page for every test.
+ *
+ * These all share one browser, and each `ask()` leaves the page changed — a
+ * grown transcript, a composer that was typed into, a fixture with its own
+ * model of what it has been told. Without this, a test passes alone and fails
+ * after its neighbours, which is exactly what happened: "leaves the code
+ * untouched" timed out in sequence and passed in isolation. That's a broken
+ * test, not a broken driver, and the fix is to stop sharing state rather than
+ * to widen the timeout until the flake hides.
+ */
+beforeEach(async () => {
+  if (!chromiumAvailable) return;
+  const session = await CdpSession.open(
+    workbenchTarget(await cdpTargets(`http://127.0.0.1:${debugPort}`))!,
+  );
+  try {
+    await session.send("Page.reload", { ignoreCache: true });
+  } finally {
+    session.close();
+  }
+  // reload is async; wait for the app to be there again rather than guessing
+  const probe = new GuiChatDriver("Antigravity", { debugPort }, "antigravity");
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if ((await probe.driveable()).ok) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error("the fixture page didn't come back after reload");
+});
+
 afterAll(async () => {
   chrome?.kill("SIGKILL");
   await new Promise<void>((r) => server.close(() => r()));
@@ -242,15 +275,36 @@ describe("gui-chat · refusing to type into your source file", () => {
     expect(d.reason).toContain("code editor");
   });
 
+  /**
+   * The claim, checked directly: a send changes the conversation and not your
+   * source file.
+   *
+   * This used to send twice and assert on the reply text, which was both vague
+   * and slow enough to flake — two full round trips, and under coverage's
+   * slowdown it timed out. Read the editor, send once, read it again. The
+   * question is "did my code change", so ask the code.
+   */
   it("leaves the code untouched after a send", async ({ skip }) => {
     if (!chromiumAvailable) return skip();
-    await driver().ask("third message");
-    const still = await driver().driveable();
-    expect(still.ok).toBe(true);
-    // the transcript grew; the editor's content did not
-    const reply = await driver().ask("fourth message");
-    expect(reply).not.toContain("const x = 1;fourth");
-  }, 40_000);
+    const codeNow = async (): Promise<string> => {
+      const session = await CdpSession.open(
+        workbenchTarget(await cdpTargets(`http://127.0.0.1:${debugPort}`))!,
+      );
+      try {
+        return await session.evaluate<string>(`document.getElementById('yourcode').innerText`);
+      } finally {
+        session.close();
+      }
+    };
+
+    const before = await codeNow();
+    expect(before).toContain("const x = 1;");
+
+    const reply = await driver().ask("third message");
+    expect(reply).toContain("I heard third message"); // the send really happened
+
+    expect(await codeNow()).toBe(before); // ...and the file is exactly as it was
+  }, 30_000);
 
   it("refuses a selector that matches nothing rather than falling back", async ({ skip }) => {
     if (!chromiumAvailable) return skip();
