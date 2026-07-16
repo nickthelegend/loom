@@ -384,6 +384,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .srow .n{font-weight:500;font-size:13px;display:flex;align-items:center;gap:8px;min-width:0}
   .srow .n .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .srow .n .cnt{margin-left:auto;flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+  .pglyph{width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);font-size:9.5px;font-weight:700;flex:none;position:relative}
+  .pglyph.hot::after{content:"";position:absolute;inset:-3px;border-radius:8px;
+    border:1px solid var(--live);opacity:.6;animation:pulse 1.8s ease-out infinite}
   .srow .m{color:var(--muted-foreground);font-family:var(--font-mono);font-size:11px;margin-top:3px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .arow{display:flex;align-items:center;gap:8px;padding:5px 10px 5px 24px;margin-top:1px;
@@ -429,10 +433,45 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     border:1px solid var(--border);border-radius:4px;padding:0 4px;line-height:13px}
   .tabstrip .spacer{margin-left:auto}
   .pane{flex:1;min-height:0;overflow-y:auto;padding:16px 16px 20px}
-  .dmain .pane > #feed,.dmain .pane > #routebar{max-width:840px;margin-inline:auto}
+  .dmain .pane > #feed,.dmain .pane > #routebar,.dmain .pane > .agenthead{max-width:840px;margin-inline:auto}
   .dmain .msg .bubble{max-width:82%}
   .pane-inner{max-width:840px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
   .formcol{display:flex;flex-direction:column;gap:10px;max-width:520px}
+  /* split workspace: changes docked beside the thread (Orca two-group layout) */
+  .paneswrap{flex:1;min-height:0;min-width:0;display:flex}
+  .mainpane{flex:1;min-width:0;display:flex;flex-direction:column}
+  .dockpane{width:46%;min-width:360px;max-width:760px;flex:none;display:flex;flex-direction:column;min-height:0;
+    border-right:1px solid var(--border)}
+  .dockpane .pane{flex:1}
+  .dockpane .diffwrap{max-width:none}
+  .dockhead{height:32px;flex:none;display:flex;align-items:center;gap:7px;padding:0 12px;min-width:0;
+    border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+  .dockhead .b{color:var(--foreground);font-weight:600}
+  .dockhead .sep{opacity:.6}
+  .iconbtn.active{background:var(--accent);color:var(--foreground)}
+  /* agent header block — who holds the pane (Orca terminal header) */
+  .agenthead{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:0 0 10px;
+    border:1px solid var(--border);border-radius:var(--radius);background:var(--card);
+    box-shadow:0 1px 2px rgb(0 0 0 / .04)}
+  .agenthead .ag{width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);font-size:11px;font-weight:700;flex:none}
+  .agenthead .meta{min-width:0;display:flex;flex-direction:column;gap:1px}
+  .agenthead .l1{font-size:12.5px;font-weight:600;display:flex;gap:8px;align-items:baseline}
+  .agenthead .l1 .role{font-family:var(--font-mono);font-size:10.5px;font-weight:400;color:var(--muted-foreground)}
+  .agenthead .l2{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .agenthead .kind{margin-left:auto}
+  /* terminal-style turn cards (Update blocks) in the thread */
+  .turncard{max-width:88%;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    padding:9px 12px;margin:10px 0;cursor:pointer;font-family:var(--font-mono);
+    box-shadow:0 1px 2px rgb(0 0 0 / .04)}
+  .turncard .tch{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:600}
+  .turncard .tca{color:var(--git-add);margin-left:auto}
+  .turncard .tcd{color:var(--git-del)}
+  .turncard .tchev{color:var(--muted-foreground)}
+  .turncard .tcf{color:var(--muted-foreground);font-size:11px;margin-top:3px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}
   /* changes pane — per-file diff cards on the editor surface */
   .diffwrap{max-width:1000px;margin:0 auto}
   .dhead{display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:12px;
@@ -446,8 +485,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dfh .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dfh .cadd{margin-left:auto;color:var(--git-add);flex:none}
   .dfh .cdel{color:var(--git-del);flex:none}
-  .dcode{font-family:var(--font-mono);font-size:11.5px;line-height:1.55;overflow-x:auto;padding:6px 0}
-  .dl{white-space:pre;padding:0 12px}
+  .dcode{font-family:var(--font-mono);font-size:11.5px;line-height:1.6;overflow-x:auto;padding:6px 0}
+  .dl{display:grid;grid-template-columns:34px 34px 14px 1fr;white-space:pre;min-width:max-content}
+  .dl .ln{color:color-mix(in srgb, var(--muted-foreground) 55%, transparent);text-align:right;
+    padding-right:7px;user-select:none;font-size:10px;line-height:inherit}
+  .dl .lm{user-select:none;text-align:center}
+  .dl .lc{padding-right:14px}
+  .dl.full{display:block;padding:0 12px;min-width:0}
   .dl.add{background:color-mix(in srgb, var(--git-add) 13%, transparent);color:var(--git-add)}
   .dl.del{background:color-mix(in srgb, var(--git-del) 13%, transparent);color:var(--git-del)}
   .dl.hunk{color:var(--thread-ink);opacity:.85;padding-top:3px;padding-bottom:3px}
@@ -486,6 +530,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .statusbar .sit{display:inline-flex;align-items:center;gap:6px;flex:none}
   .sdot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
   .sdot.off{background:color-mix(in srgb, var(--muted-foreground) 50%, transparent)}
+  .meter{width:56px;height:4px;border-radius:2px;flex:none;overflow:hidden;
+    background:color-mix(in srgb, var(--muted-foreground) 25%, transparent)}
+  .meter i{display:block;height:100%;border-radius:2px;
+    background:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
   .dempty{flex:1;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;
     color:var(--muted-foreground);font-family:var(--font-mono);font-size:13px}
   .dempty .biglogo{font-size:36px;font-weight:650;letter-spacing:-.02em;color:var(--foreground)}
@@ -562,7 +610,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     unpair: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'),
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>'),
     help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.8-2.6 2.2-2.6 3.6"/><path d="M12 17h.01"/>'),
-    plus: svg('<path d="M12 5v14"/><path d="M5 12h14"/>')
+    plus: svg('<path d="M12 5v14"/><path d="M5 12h14"/>'),
+    split: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M12 4.5v15"/>')
   };
 
   function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
@@ -694,9 +743,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
-      return '<div class="sys">\\u270e changed ' + fl.length + " file" + (fl.length === 1 ? "" : "s") +
-        " (+" + Number(p.added || 0) + " &minus;" + Number(p.removed || 0) + "): " +
-        esc(fl.slice(0, 3).join(", ")) + (fl.length > 3 ? " &hellip;" : "") + "</div>";
+      return '<div class="turncard"><div class="tch"><span>\\u270e Update(' + fl.length + " file" + (fl.length === 1 ? "" : "s") + ")</span>" +
+        '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\\u2212' + Number(p.removed || 0) + "</span>" +
+        '<span class="tchev">\\u25b8</span></div>' +
+        '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \\u2026" : "") + "</div>" +
+        (p.patch ? '<div class="tcdiff" style="display:none"><div class="dcode">' + renderDiffLines(String(p.patch).split("\\n")) + "</div></div>" : "") +
+        "</div>";
     }
     if (e.kind === "handoff") return '<div class="handoff"><span class="a">' + esc(p.from || "\\u2014") + '</span><span class="shuttle">\\u27ff</span><span class="b">' + esc(p.to || "\\u2014") + "</span></div>";
     if (e.kind === "suggestion") return '<div class="sys warn">\\u2726 ' + esc(p.reason || "handoff suggested") + "</div>";
@@ -745,6 +797,35 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     if (line.slice(0, 2) === "@@") return "hunk";
     return "";
   }
+  // Unified diff lines with an old/new line-number gutter (Orca diff view).
+  function renderDiffLines(lines){
+    var oldN = 0, newN = 0, out = "";
+    lines.forEach(function(line){
+      var m = line.match(/^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
+      if (m) {
+        oldN = Number(m[1]); newN = Number(m[2]);
+        out += '<div class="dl hunk full">' + esc(line) + "</div>";
+        return;
+      }
+      var c = diffLineClass(line);
+      if (c === "meta") { out += '<div class="dl meta full">' + (esc(line) || " ") + "</div>"; return; }
+      var ch = line.charAt(0);
+      if (!oldN && !newN && ch !== "+" && ch !== "-") {
+        out += '<div class="dl full">' + (esc(line) || " ") + "</div>";
+        return;
+      }
+      var lo = "", ln = "", mark = "";
+      if (c === "add") { ln = String(newN++); mark = "+"; }
+      else if (c === "del") { lo = String(oldN++); mark = "\\u2212"; }
+      else { lo = String(oldN++); ln = String(newN++); }
+      var content = ch === "+" || ch === "-" || ch === " " ? line.slice(1) : line;
+      out += '<div class="dl' + (c ? " " + c : "") + '">' +
+        '<span class="ln">' + lo + '</span><span class="ln">' + ln + "</span>" +
+        '<span class="lm">' + mark + "</span>" +
+        '<span class="lc">' + (esc(content) || " ") + "</span></div>";
+    });
+    return out;
+  }
   function renderDiffFiles(tree){
     var files = splitPatch(tree.patch).filter(function(f){ return !isLoomInternal(f.path); });
     files.forEach(function(f){
@@ -756,10 +837,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       return '<div class="dfile" id="df-' + i + '">' +
         '<div class="dfh">' + ICONS.tree + '<span class="p">' + esc(f.path || "patch") + "</span>" +
         '<span class="cadd">+' + f.add + "</span><span class=\\"cdel\\">\\u2212" + f.del + "</span></div>" +
-        '<div class="dcode">' + f.lines.map(function(line){
-          var c = diffLineClass(line);
-          return '<div class="dl' + (c ? " " + c : "") + '">' + (esc(line) || " ") + "</div>";
-        }).join("") + "</div></div>";
+        '<div class="dcode">' + renderDiffLines(f.lines) + "</div></div>";
     }).join("");
   }
 
@@ -790,17 +868,22 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         // Orca chrome: the strip is the window top — context, tabs, actions.
         '<div class="tabstrip" id="tabstrip">' +
         '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
-        '<button class="tab active" data-tab="thread">' + ICONS.thread + "Thread</button>" +
-        '<button class="tab" data-tab="changes">' + ICONS.tree + 'Changes<span class="tbadge" id="tb-changes" style="display:none"></span></button>' +
-        '<button class="tab" data-tab="brain">' + ICONS.memory + "Brain</button>" +
-        '<button class="tab" data-tab="routes">' + ICONS.route + "Routes</button>" +
-        '<span class="spacer"></span>' + headerActions +
+        '<span id="tabsbox" style="display:contents"></span>' +
+        '<span class="spacer"></span>' +
+        '<button id="splitbtn" class="iconbtn" title="dock changes beside the thread">' + ICONS.split + "</button>" +
+        headerActions +
         "</div>" +
-        '<div class="pane scroll" id="pane-thread"><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
+        '<div class="paneswrap">' +
+        '<div class="dockpane" id="dockpane" style="display:none">' +
+        '<div class="dockhead" id="dockhead"></div>' +
         '<div class="pane scroll" id="pane-changes" style="display:none">' + LOADER + "</div>" +
+        "</div>" +
+        '<div class="mainpane" id="mainpane">' +
+        '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-routes" style="display:none"></div>' +
         composerHtml +
+        "</div></div>" +
         "</div>";
     } else {
       mount.innerHTML =
@@ -822,10 +905,57 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         .catch(function(err){ toast(err.message); });
     };
 
-    // ---- desktop tabs ------------------------------------------------------
+    // ---- desktop tabs + dockable split -------------------------------------
+    var SPLIT_KEY = "loomSplit";
+    function splitOn(){
+      if (!desktop) return false;
+      var v = localStorage.getItem(SPLIT_KEY);
+      if (v === null) return window.innerWidth >= 1280;
+      return v === "1";
+    }
+    function drawTabs(){
+      var box = document.getElementById("tabsbox"); if (!box) return;
+      var tabs = splitOn() ? ["thread", "brain", "routes"] : ["thread", "changes", "brain", "routes"];
+      if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
+      var files = state.tree && state.tree.git ? visibleFiles(state.tree).length : 0;
+      var LBL = { thread: [ICONS.thread, "Thread"], changes: [ICONS.tree, "Changes"],
+                  brain: [ICONS.memory, "Brain"], routes: [ICONS.route, "Routes"] };
+      box.innerHTML = tabs.map(function(tb){
+        return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
+          LBL[tb][0] + LBL[tb][1] +
+          (tb === "changes" ? '<span class="tbadge" id="tb-changes"' + (files ? "" : ' style="display:none"') + ">" + files + "</span>" : "") +
+          "</button>";
+      }).join("");
+      Array.prototype.forEach.call(box.querySelectorAll(".tab"), function(tb){
+        tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
+      });
+    }
+    function applySplit(){
+      var dock = document.getElementById("dockpane");
+      var pc = document.getElementById("pane-changes");
+      if (!dock || !pc) return;
+      var on = splitOn();
+      dock.style.display = on ? "" : "none";
+      if (on) {
+        dock.appendChild(pc);
+        pc.style.display = "";
+        if (state.tab === "changes") state.tab = "thread";
+        refreshTree(false);
+      } else {
+        var mainp = document.getElementById("mainpane");
+        if (mainp) mainp.insertBefore(pc, document.getElementById("pane-brain"));
+        pc.style.display = state.tab === "changes" ? "" : "none";
+      }
+      var sb = document.getElementById("splitbtn");
+      if (sb) sb.classList.toggle("active", on);
+      drawTabs();
+      showTab(state.tab);
+    }
     function showTab(name){
+      if (splitOn() && name === "changes") name = "thread";
       state.tab = name;
       ["thread", "changes", "brain", "routes"].forEach(function(t){
+        if (splitOn() && t === "changes") return; // docked — always visible
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -844,10 +974,24 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       }
     }
     if (desktop) {
-      Array.prototype.forEach.call(document.querySelectorAll("#tabstrip .tab"), function(tb){
-        tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
-      });
+      document.getElementById("splitbtn").onclick = function(){
+        localStorage.setItem(SPLIT_KEY, splitOn() ? "0" : "1");
+        applySplit();
+      };
+      applySplit();
     }
+    // expandable Update(…) turn cards in the feed
+    document.getElementById("feed").addEventListener("click", function(ev){
+      var t = ev.target;
+      while (t && t !== this && !(t.classList && t.classList.contains("turncard"))) t = t.parentNode;
+      if (!t || t === this) return;
+      if (ev.target.closest && ev.target.closest(".tcdiff")) return; // let diff text select/scroll
+      var d = t.querySelector(".tcdiff"); if (!d) return;
+      var open = d.style.display !== "none";
+      d.style.display = open ? "none" : "";
+      var ch = t.querySelector(".tchev");
+      if (ch) ch.textContent = open ? "\\u25b8" : "\\u25be";
+    });
 
     // ---- working tree (changes pane + right rail) --------------------------
     function refreshTree(force){
@@ -860,11 +1004,20 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     function drawChanges(){
       var el = document.getElementById("pane-changes"); if (!el) return;
       var t = state.tree;
+      var dh = document.getElementById("dockhead");
       if (!t) { el.innerHTML = LOADER; return; }
-      if (!t.git) { el.innerHTML = '<div class="diffwrap"><div class="sys">not a git repository</div></div>'; return; }
+      if (!t.git) {
+        if (dh) dh.innerHTML = '<span class="b">' + esc(state.project ? state.project.name : "") + "</span><span>not a git repository</span>";
+        el.innerHTML = '<div class="diffwrap"><div class="sys">not a git repository</div></div>';
+        return;
+      }
       var files = visibleFiles(t);
       var tb = document.getElementById("tb-changes");
       if (tb) { tb.textContent = String(files.length); tb.style.display = files.length ? "" : "none"; }
+      if (dh) dh.innerHTML =
+        '<span class="b">' + esc(state.project ? state.project.name : "") + "</span>" +
+        '<span class="sep">/</span><span>' + esc(t.branch || "") + "</span>" +
+        '<span class="sep">\\u2192</span><span>' + files.length + " changed</span>";
       el.innerHTML = '<div class="diffwrap">' +
         '<div class="dhead">' + ICONS.branch + '<span class="branch">' + esc(t.branch || "") + "</span>" +
         "<span>" + files.length + " changed file" + (files.length === 1 ? "" : "s") + "</span></div>" +
@@ -1051,7 +1204,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       el.innerHTML = html;
       Array.prototype.forEach.call(el.querySelectorAll(".frow[data-df]"), function(row){
         row.onclick = function(){
-          showTab("changes");
+          if (!splitOn()) showTab("changes"); // docked pane is already visible
           var target = document.getElementById("df-" + row.getAttribute("data-df"));
           if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
         };
@@ -1087,6 +1240,25 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         ? "send will shift the baton to " + state.selected
         : (desktop ? "select an agent in the sidebar \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
       if (!desktop) drawChips();
+      // agent header block — who the composer talks to, and where
+      var ah = document.getElementById("agenthead");
+      if (ah) {
+        var focus = null;
+        adapters.forEach(function(a){ if (a.id === (state.selected || p.holder)) focus = a; });
+        if (!focus) focus = adapters[0] || null;
+        if (focus) {
+          var hh = hue(focus.id);
+          ah.innerHTML =
+            '<span class="ag" style="background:color-mix(in srgb, hsl(' + hh + ',60%,50%) 18%, transparent);color:hsl(' + hh + ',60%,var(--agent-l))">' + esc(focus.id.slice(0, 2)) + "</span>" +
+            '<span class="meta"><span class="l1">' + esc(focus.id) +
+            '<span class="role">' + esc(focus.role) + (focus.id === p.holder ? " \\u00b7 baton" : "") + (focus.busy ? " \\u00b7 working\\u2026" : "") + "</span></span>" +
+            '<span class="l2">' + esc(p.dir || p.name) + "</span></span>" +
+            '<span class="badge kind">' + esc(focus.kind || "agent") + "</span>";
+          ah.style.display = "";
+        } else {
+          ah.style.display = "none";
+        }
+      }
       var bar = document.getElementById("routebar");
       var r = p.route;
       if (bar) {
@@ -1200,10 +1372,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       total += pr.costUsd > 0 ? pr.costUsd : 0;
       (pr.agents || []).forEach(function(a){ if (a.busy) busy++; });
     });
+    var share = p && p.costUsd > 0 && total > 0 ? Math.min(100, Math.round((p.costUsd / total) * 100)) : 0;
     el.innerHTML =
       '<span class="sit"><span class="sdot' + (state.wsLive ? "" : " off") + '"></span>' + (state.wsLive ? "live" : "offline") + "</span>" +
       '<span class="sit">' + esc(location.host) + "</span>" +
       (p ? '<span class="sit">baton ' + esc(p.holder || "\\u2014") + "</span>" : "") +
+      (p && p.costUsd > 0
+        ? '<span class="sit"><span class="meter"><i style="width:' + share + '%"></i></span>' + money(p.costUsd) + " \\u00b7 " + share + "% of \\u03a3</span>"
+        : "") +
       '<span class="spacer"></span>' +
       (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
       '<span class="sit">' + (state.projects || []).length + " project" + ((state.projects || []).length === 1 ? "" : "s") + "</span>" +
@@ -1291,8 +1467,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
         var adapters = (p.agents || []).filter(function(a){ return a.tier === "adapter"; });
         var sel = p.id === cur;
+        var gh = hue(p.id + p.name);
         var rows = '<div class="srow' + (sel ? " sel" : "") + '" data-id="' + esc(p.id) + '">' +
-          '<div class="n"><span class="dot' + (p.needsInput ? " hot" : "") + '"></span><span class="nm">' + esc(p.name) + "</span>" +
+          '<div class="n"><span class="pglyph' + (p.needsInput ? " hot" : "") + '" style="background:color-mix(in srgb, hsl(' + gh + ',60%,50%) 20%, transparent);color:hsl(' + gh + ',60%,var(--agent-l))">' + esc((p.name || "?").slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(p.name) + "</span>" +
           (act ? '<span class="badge live" style="margin-left:auto">' + (r.current + 1) + "/" + r.steps.length + "</span>" : '<span class="cnt">' + adapters.length + "</span>") + "</div>" +
           '<div class="m">baton ' + esc(p.holder || "\\u2014") +
           (p.costUsd > 0 ? " \\u00b7 " + money(p.costUsd) : "") + "</div></div>";

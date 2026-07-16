@@ -40,13 +40,21 @@ async function health(cfg) {
 }
 
 // Mirror of the daemon's BUILD_REV (content hash of the compiled server
-// module), so the shell can tell when a running daemon is serving
-// yesterday's UI. Content-based, not mtime — exFAT volumes report different
-// mtimes to different runtimes, which made mtime revs lie.
+// module + the served web app), so the shell can tell when a running daemon
+// is serving yesterday's UI. Content-based, not mtime — exFAT volumes report
+// different mtimes to different runtimes, which made mtime revs lie.
 function localBuildRev() {
   try {
-    const server = path.resolve(here, "..", "dist", "daemon", "server.js");
-    return crypto.createHash("sha256").update(fs.readFileSync(server)).digest("hex").slice(0, 16);
+    const daemonDir = path.resolve(here, "..", "dist", "daemon");
+    const hash = crypto
+      .createHash("sha256")
+      .update(fs.readFileSync(path.join(daemonDir, "server.js")));
+    try {
+      hash.update(fs.readFileSync(path.join(daemonDir, "app-page.js")));
+    } catch {
+      /* app page missing — the server hash alone still fingerprints */
+    }
+    return hash.digest("hex").slice(0, 16);
   } catch {
     return null;
   }

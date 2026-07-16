@@ -44,17 +44,25 @@ export interface DaemonOptions {
 export const DEFAULT_PORT = 7420;
 
 /**
- * Build fingerprint — a content hash of this compiled module. A daemon
- * started from an older build reports a different rev than a freshly built
- * CLI or desktop shell expects, and they restart it automatically ("failed
- * to fetch" after upgrades usually meant a stale daemon serving yesterday's
- * code). Content-based on purpose: mtimes are unreliable across runtimes on
- * some filesystems (exFAT drives skew them by the local timezone offset).
+ * Build fingerprint — a content hash of this compiled module AND the served
+ * web app. A daemon started from an older build reports a different rev than
+ * a freshly built CLI or desktop shell expects, and they restart it
+ * automatically ("failed to fetch" after upgrades usually meant a stale
+ * daemon serving yesterday's code). Content-based on purpose: mtimes are
+ * unreliable across runtimes on some filesystems (exFAT drives skew them by
+ * the local timezone offset). app-page.js is included so UI-only rebuilds
+ * change the rev too.
  */
 export const BUILD_REV = (() => {
   try {
-    const bytes = fs.readFileSync(fileURLToPath(import.meta.url));
-    return crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+    const me = fileURLToPath(import.meta.url);
+    const hash = crypto.createHash("sha256").update(fs.readFileSync(me));
+    try {
+      hash.update(fs.readFileSync(path.join(path.dirname(me), "app-page.js")));
+    } catch {
+      /* app page missing — the server hash alone still fingerprints */
+    }
+    return hash.digest("hex").slice(0, 16);
   } catch {
     return "dev";
   }
