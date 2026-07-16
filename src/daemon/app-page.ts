@@ -571,6 +571,47 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .terminput .pr{color:var(--ok);font-family:var(--font-mono);font-size:12px;flex:none}
   .terminput input{flex:1;background:none;border:none;outline:none;box-shadow:none!important;color:var(--foreground);
     font-family:var(--font-mono);font-size:12px;letter-spacing:0}
+  /* ── Sidebar top nav (Orca: Tasks / Search) ───────────── */
+  .topnav{display:flex;flex-direction:column;gap:1px;padding:8px 8px 4px}
+  .navitem{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--radius-md);
+    font-size:13px;font-weight:500;color:var(--sidebar-foreground);cursor:pointer;border:1px solid transparent;
+    transition:background .12s}
+  .navitem:hover{background:var(--sidebar-accent)}
+  .navitem svg{width:15px;height:15px;color:var(--muted-foreground)}
+  .navitem .kbd{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
+    border:1px solid var(--border);border-radius:4px;padding:0 5px;line-height:15px}
+  /* ── Modal (Create task — Orca Create Worktree) ───────── */
+  .scrim{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.5);
+    backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
+    display:flex;align-items:center;justify-content:center;padding:24px;animation:fade .15s ease}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .modal{width:100%;max-width:440px;background:var(--popover);color:var(--popover-foreground);
+    border:1px solid var(--glass-border);border-radius:var(--radius);overflow:hidden;
+    box-shadow:0 24px 72px rgba(0,0,0,.42), inset 0 1px 0 var(--glass-highlight);animation:pop .16s ease}
+  @keyframes pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+  .modalhead{display:flex;align-items:center;height:48px;padding:0 12px 0 16px;
+    border-bottom:1px solid var(--border);font-size:15px;font-weight:600}
+  .modalhead .iconbtn{margin-left:auto}
+  .modalbody{padding:16px;display:flex;flex-direction:column;gap:14px;max-height:70vh;overflow-y:auto}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field label{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+    color:var(--muted-foreground);font-family:var(--font-mono)}
+  .field select,.field input,.field textarea{width:100%;background:transparent;border:1px solid var(--input);
+    border-radius:var(--radius-md);color:var(--foreground);font:inherit;font-size:14px;outline:none;
+    transition:border-color .15s,box-shadow .15s}
+  .field select,.field input{height:38px;padding:0 11px}
+  .field textarea{min-height:70px;padding:9px 11px;resize:vertical;line-height:1.55}
+  .dark .field select,.dark .field input,.dark .field textarea{background:color-mix(in srgb, var(--input) 30%, transparent)}
+  .dark .field select option{background:var(--popover);color:var(--popover-foreground)}
+  .field select:focus-visible,.field input:focus-visible,.field textarea:focus-visible{border-color:var(--ring);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent)}
+  .field .hintx{font-size:11px;color:var(--muted-foreground)}
+  .disclose{font-size:12px;color:var(--muted-foreground);cursor:pointer;user-select:none;
+    display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono)}
+  .modalfoot{display:flex;gap:8px;justify-content:flex-end;align-items:center;
+    padding:12px 16px;border-top:1px solid var(--border)}
+  .modalfoot .kbd{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
+    border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:6px}
   /* ── Native desktop chrome (Electron shell) ───────────── */
   html[data-electron] .sidebar .shead,
   html[data-electron] .tabstrip,
@@ -1572,6 +1613,85 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     applyRail();
   }
 
+  // ---- New Task modal (Orca's Create Worktree, mapped to Loom) -------------
+  function openTaskModal(prefillPid){
+    var projects = state.projects || [];
+    if (!projects.length) { toast("add a project first"); return; }
+    if (document.querySelector(".scrim")) return;
+    var pid = prefillPid || state.pid || projects[0].id;
+    function proj(id){ for (var i = 0; i < projects.length; i++) if (projects[i].id === id) return projects[i]; return null; }
+    function agentsFor(id){ var p = proj(id); return p ? p.agents.filter(function(a){ return a.tier === "adapter"; }) : []; }
+    function routesFor(id){ var p = proj(id); return (p && p.routeNames) || ["auto"]; }
+    function projOpts(){ return projects.map(function(p){ return '<option value="' + esc(p.id) + '"' + (p.id === pid ? " selected" : "") + ">" + esc(p.name) + "</option>"; }).join(""); }
+    function agentOpts(id){ return agentsFor(id).map(function(a){ return '<option value="' + esc(a.id) + '">' + esc(a.id) + " \\u2014 " + esc(a.role) + "</option>"; }).join(""); }
+    function routeOpts(id){ return '<option value="">\\u2014 single agent \\u2014</option>' + routesFor(id).map(function(n){ return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>"; }).join(""); }
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal">' +
+      '<div class="modalhead">Create task<button class="iconbtn" id="mclose">' + ICONS.x + "</button></div>" +
+      '<div class="modalbody">' +
+        '<div class="field"><label>Project</label><select id="mproj">' + projOpts() + "</select></div>" +
+        '<div class="field"><label>Task</label><textarea id="mtask" placeholder="what should the agent do?"></textarea></div>' +
+        '<div class="field"><label>Agent</label><select id="magent">' + agentOpts(pid) + "</select></div>" +
+        '<div class="disclose" id="madv">\\u25b8 Advanced</div>' +
+        '<div class="field" id="mroutewrap" style="display:none"><label>Run as pipeline</label>' +
+          '<select id="mroute">' + routeOpts(pid) + "</select>" +
+          '<span class="hintx">a pipeline hands the task hop to hop instead of one agent.</span></div>' +
+      "</div>" +
+      '<div class="modalfoot"><button class="btn ghost" id="mcancel">Cancel</button>' +
+      '<button class="btn primary" id="mcreate">Create task<span class="kbd">\\u2318\\u21b5</span></button></div>' +
+    "</div>";
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("mclose").onclick = close;
+    document.getElementById("mcancel").onclick = close;
+    var advOpen = false;
+    document.getElementById("madv").onclick = function(){
+      advOpen = !advOpen;
+      this.textContent = (advOpen ? "\\u25be" : "\\u25b8") + " Advanced";
+      document.getElementById("mroutewrap").style.display = advOpen ? "" : "none";
+    };
+    document.getElementById("mproj").onchange = function(){
+      pid = this.value;
+      document.getElementById("magent").innerHTML = agentOpts(pid);
+      document.getElementById("mroute").innerHTML = routeOpts(pid);
+    };
+    setTimeout(function(){ var ta = document.getElementById("mtask"); if (ta) ta.focus(); }, 30);
+    function create(){
+      var mproj = document.getElementById("mproj").value;
+      var task = (document.getElementById("mtask").value || "").trim();
+      var agent = document.getElementById("magent").value;
+      var spec = document.getElementById("mroute").value;
+      if (!task) return toast("describe the task first");
+      var btn = document.getElementById("mcreate"); btn.disabled = true;
+      var work;
+      if (spec) {
+        work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: spec }) });
+      } else {
+        var holder = (proj(mproj) || {}).holder;
+        var chain = agent && agent !== holder
+          ? api("/api/projects/" + mproj + "/handoff", { method: "POST", body: JSON.stringify({ to: agent }) })
+          : Promise.resolve();
+        work = chain.then(function(){
+          return api("/api/projects/" + mproj + "/messages", { method: "POST", body: JSON.stringify({ text: task, agentId: agent || undefined }) });
+        });
+      }
+      work.then(function(){
+        close();
+        toast(spec ? "route started" : "task sent to " + agent);
+        if (state.selectProject) state.selectProject(mproj);
+        else location.hash = "#p/" + mproj;
+      }).catch(function(err){ btn.disabled = false; toast(err.message); });
+    }
+    document.getElementById("mcreate").onclick = create;
+    function onKey(e){
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+      else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); create(); }
+    }
+    document.addEventListener("keydown", onKey);
+  }
+
   // ---- router ----------------------------------------------------------
   var mq = window.matchMedia("(min-width:900px)");
   function isDesktop(){ return mq.matches; }
@@ -1587,6 +1707,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       '<div class="dshell">' +
       '<aside class="sidebar">' +
         '<div class="shead"><span class="wordmark">lo<b>om</b></span></div>' +
+        '<div class="topnav"><button class="navitem" id="newtask">' + ICONS.tasks + "New task<span class=\\"kbd\\">N</span></button></div>" +
         '<div class="snav">' + ICONS.search + '<input id="sfilter" placeholder="Search" autocomplete="off" spellcheck="false"></div>' +
         '<div class="stitle">projects<button id="addproj" class="iconbtn" title="add a project by path">' + ICONS.plus + "</button></div>" +
         '<div id="addwrap"></div>' +
@@ -1605,6 +1726,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       "</div>";
     document.getElementById("unpair").onclick = logout;
     document.getElementById("railclose").onclick = toggleRail;
+    document.getElementById("newtask").onclick = function(){ openTaskModal(cur); };
     applyRail();
     var filter = "";
     document.getElementById("sfilter").oninput = function(){
@@ -1696,6 +1818,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       renderProject(pid, dmain, true);
       drawList();
     }
+    state.selectProject = select;
     function refresh(){
       api("/api/projects").then(function(j){
         state.projects = j.projects || [];
@@ -1715,6 +1838,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   function route(){
     applyTheme();
     state.toggleTerm = null;
+    state.selectProject = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
@@ -1723,10 +1847,22 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   }
   window.addEventListener("hashchange", function(){ if (!isDesktop()) route(); });
   mq.addEventListener("change", function(){ clearShell(); route(); });
-  // Ctrl+backtick toggles the terminal dock (Orca), when a workspace is mounted.
+  // Global shortcuts: Ctrl+backtick toggles the terminal; "n" opens New task
+  // (both only while a desktop workspace is mounted, never while typing).
+  function typingInField(t){
+    if (!t) return false;
+    var tag = t.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable;
+  }
   document.addEventListener("keydown", function(e){
     if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "\`" || e.key === "~")) {
       if (state.toggleTerm) { e.preventDefault(); state.toggleTerm(); }
+      return;
+    }
+    if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey &&
+        isDesktop() && state.token && !typingInField(e.target) && !document.querySelector(".scrim")) {
+      e.preventDefault();
+      openTaskModal(state.pid);
     }
   });
   pairFromHash().then(function(paired){
