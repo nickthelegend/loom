@@ -391,9 +391,9 @@ export function BoardScreen(props: {
 
         {err && <Sys color={T.err} text={err} />}
 
-        {/* daemon (maps to Orca's Desktops) */}
+        {/* the machine you're paired to — Orca calls this Desktops */}
         <View>
-          <SectionLabel text="Daemon" />
+          <SectionLabel text="Desktops" />
           <View
             style={{
               flexDirection: "row",
@@ -437,6 +437,60 @@ export function BoardScreen(props: {
           <View>
             <SectionLabel text="Resume" />
             <ProjectCard p={active} onPress={() => props.onOpen(active)} />
+          </View>
+        )}
+
+        {/* Tasks — opens the board, which reads real issues and PRs from gh.
+            No count is shown on purpose: the board fetches them per project when
+            you open it, so a number here would be a second source of truth that
+            drifts, or a guess. The row is the door, not the answer. */}
+        {projects.length > 0 && (
+          <View>
+            <SectionLabel text="Tasks" />
+            <TouchableOpacity
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Open the board: issues and pull requests"
+              onPress={() => props.onOpen(active ?? projects[0]!)}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                backgroundColor: T.panel,
+                borderColor: T.line,
+                borderWidth: 1,
+                borderRadius: radii.card,
+                paddingVertical: 12,
+                paddingHorizontal: 14,
+                minHeight: 44,
+              }}
+            >
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 11,
+                  backgroundColor: T.raised,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 3,
+                }}
+              >
+                {[0, 1, 2].map((i) => (
+                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                    <View style={{ width: 4, height: 4, borderRadius: 1, backgroundColor: T.thread }} />
+                    <View style={{ width: 9, height: 1.5, borderRadius: 1, backgroundColor: T.dim }} />
+                  </View>
+                ))}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: T.text, fontWeight: "600", fontSize: 15 }}>Tasks</Text>
+                <Text style={{ color: T.dim, fontSize: 12, marginTop: 3 }} numberOfLines={1}>
+                  issues and pull requests, on the board
+                </Text>
+              </View>
+              <Text style={{ color: T.dim, fontSize: 18 }}>{"\u203a"}</Text>
+            </TouchableOpacity>
           </View>
         )}
 
