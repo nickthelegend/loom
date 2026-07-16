@@ -68,6 +68,20 @@ export const BUILD_REV = (() => {
   }
 })();
 
+/** Sentinel the shell prints after every command: `<MARK><rc>\t<cwd>\n`. */
+const TERM_MARK = "__LOOM_END__";
+
+interface TermSession {
+  child: ChildProcess;
+  projectId: string;
+  termId: string;
+  /** Pending stdout/stderr text not yet scanned for the sentinel. */
+  buf: string;
+  cwd: string;
+  /** Bytes streamed for the current command (reset per input). */
+  sent: number;
+}
+
 export class LoomDaemon {
   private app = express();
   private server: Server | null = null;
@@ -75,8 +89,8 @@ export class LoomDaemon {
   private auth: AuthManager;
   private runtimes = new Map<string, ProjectRuntime>();
   private sockets = new Map<WebSocket, { project?: string }>();
-  /** Live terminal command runs, keyed by `${projectId}:${runId}`. */
-  private termProcs = new Map<string, ChildProcess>();
+  /** Live terminal shells, keyed by `${projectId}:${termId}`. */
+  private termSessions = new Map<string, TermSession>();
   host: string;
   port: number;
 
@@ -385,63 +399,83 @@ export class LoomDaemon {
       }),
     );
 
-    // Terminal: run a command in the project directory and stream its output
-    // over the project WebSocket. A command runner, not a live PTY — each
-    // submission spawns a fresh shell, so there is no shared shell state
-    // between commands (cd doesn't persist; chain with `&&` instead). Bearer
-    // auth + the tailnet are the trust boundary, same as the agents the
+    // Terminal: one long-lived shell per terminal tab, streamed over the
+    // project WebSocket. Not a PTY (no native deps), but a real shell session:
+    // `cd` and exported vars persist, and Ctrl+C interrupts the foreground job
+    // because the shell is its own process-group leader. After each command we
+    // write a sentinel that reports the exit code and the new cwd, which the
+    // daemon strips from the stream and reports as a `term-exit` frame.
+    // Bearer auth + the tailnet are the trust boundary, same as the agents the
     // daemon already runs.
-    app.post("/api/projects/:id/exec", (req, res) => {
+    app.post("/api/projects/:id/term/open", (req, res) => {
       const info = findProject(String(req.params.id));
       if (!info) return void res.status(404).json({ error: "unknown project" });
-      const { cmd, term } = (req.body ?? {}) as { cmd?: string; term?: string };
-      if (!cmd?.trim()) return void res.status(400).json({ error: "missing cmd" });
-      const live = [...this.termProcs.keys()].filter((k) => k.startsWith(`${info.id}:`)).length;
-      if (live >= 8) return void res.status(429).json({ error: "too many running commands" });
-      const runId = crypto.randomBytes(6).toString("hex");
-      const key = `${info.id}:${runId}`;
-      const termId = String(term ?? "t1");
-      const isWin = process.platform === "win32";
-      const child = isWin
-        ? spawn("cmd.exe", ["/d", "/s", "/c", cmd], { cwd: info.dir, env: process.env })
-        : spawn(process.env.SHELL || "/bin/sh", ["-lc", cmd], { cwd: info.dir, env: process.env });
-      this.termProcs.set(key, child);
-      let sent = 0;
-      const MAX = 2_000_000; // cap a single run's streamed output at ~2MB
-      const pump = (stream: "out" | "err") => (buf: Buffer) => {
-        if (sent >= MAX) return;
-        let chunk = buf.toString("utf8");
-        if (sent + chunk.length > MAX) {
-          chunk = chunk.slice(0, MAX - sent) + "\n…output truncated…\n";
-        }
-        sent += chunk.length;
-        this.broadcastTerm(info.id, { type: "term", term: termId, runId, stream, chunk });
-      };
-      child.stdout?.on("data", pump("out"));
-      child.stderr?.on("data", pump("err"));
-      child.on("error", (err) => {
-        this.broadcastTerm(info.id, {
-          type: "term",
-          term: termId,
-          runId,
-          stream: "err",
-          chunk: `loom: ${err.message}\n`,
-        });
-      });
-      child.on("close", (code) => {
-        this.termProcs.delete(key);
-        this.broadcastTerm(info.id, { type: "term", term: termId, runId, exit: code ?? 0 });
-      });
-      res.json({ runId, term: termId });
+      const termId = String((req.body ?? {}).term ?? "t1");
+      const key = `${info.id}:${termId}`;
+      if (this.termSessions.has(key)) {
+        return void res.json({ term: termId, cwd: this.termSessions.get(key)!.cwd, reused: true });
+      }
+      if (this.termSessions.size >= 12) {
+        return void res.status(429).json({ error: "too many terminal sessions" });
+      }
+      let sess: TermSession;
+      try {
+        sess = this.openTermSession(info.id, info.dir, termId);
+      } catch (err) {
+        return void res.status(500).json({ error: (err as Error).message });
+      }
+      res.json({ term: termId, cwd: sess.cwd });
     });
 
-    app.post("/api/projects/:id/exec/:runId/kill", (req, res) => {
+    app.post("/api/projects/:id/term/input", (req, res) => {
       const info = findProject(String(req.params.id));
       if (!info) return void res.status(404).json({ error: "unknown project" });
-      const child = this.termProcs.get(`${info.id}:${String(req.params.runId)}`);
-      if (!child) return void res.json({ killed: false });
-      child.kill("SIGINT");
-      res.json({ killed: true });
+      const { term, data } = (req.body ?? {}) as { term?: string; data?: string };
+      const termId = String(term ?? "t1");
+      let sess = this.termSessions.get(`${info.id}:${termId}`);
+      if (!sess) {
+        try {
+          sess = this.openTermSession(info.id, info.dir, termId);
+        } catch (err) {
+          return void res.status(500).json({ error: (err as Error).message });
+        }
+      }
+      const line = String(data ?? "");
+      sess.sent = 0; // per-command output budget
+      // Run the command, then report `exit-code<TAB>cwd` on its own line.
+      const probe =
+        process.platform === "win32"
+          ? `\r\necho ${TERM_MARK}%ERRORLEVEL%\t%CD%\r\n`
+          : `\n__loom_rc=$?; printf '\\n${TERM_MARK}%s\\t%s\\n' "$__loom_rc" "$PWD"\n`;
+      sess.child.stdin?.write(line + probe);
+      res.json({ ok: true });
+    });
+
+    app.post("/api/projects/:id/term/signal", (req, res) => {
+      const info = findProject(String(req.params.id));
+      if (!info) return void res.status(404).json({ error: "unknown project" });
+      const termId = String((req.body ?? {}).term ?? "t1");
+      const sess = this.termSessions.get(`${info.id}:${termId}`);
+      if (!sess?.child.pid) return void res.json({ signalled: false });
+      try {
+        // negative pid → the whole process group, i.e. the foreground job
+        process.kill(-sess.child.pid, "SIGINT");
+      } catch {
+        try {
+          sess.child.kill("SIGINT");
+        } catch {
+          /* already gone */
+        }
+      }
+      res.json({ signalled: true });
+    });
+
+    app.post("/api/projects/:id/term/close", (req, res) => {
+      const info = findProject(String(req.params.id));
+      if (!info) return void res.status(404).json({ error: "unknown project" });
+      const termId = String((req.body ?? {}).term ?? "t1");
+      this.closeTermSession(`${info.id}:${termId}`);
+      res.json({ closed: true });
     });
 
     // Explorer: list a directory, read a file, search filenames. All strictly
@@ -570,6 +604,114 @@ export class LoomDaemon {
     }
   }
 
+  /** Start a long-lived shell for one terminal tab, reading commands on stdin. */
+  private openTermSession(projectId: string, dir: string, termId: string): TermSession {
+    const isWin = process.platform === "win32";
+    const shell = isWin ? "cmd.exe" : process.env.SHELL || "/bin/sh";
+    const child = spawn(shell, isWin ? [] : ["-s"], {
+      cwd: dir,
+      // own process group, so SIGINT reaches the foreground job like Ctrl+C
+      detached: !isWin,
+      env: {
+        ...process.env,
+        TERM: "xterm-256color",
+        // no tty, so tools suppress color unless forced
+        FORCE_COLOR: "1",
+        CLICOLOR_FORCE: "1",
+        // and never block waiting on a pager
+        PAGER: "cat",
+        GIT_PAGER: "cat",
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const key = `${projectId}:${termId}`;
+    const sess: TermSession = { child, projectId, termId, buf: "", cwd: dir, sent: 0 };
+    this.termSessions.set(key, sess);
+    // Ctrl+C signals the whole process group. A non-interactive shell dies on
+    // SIGINT by default, taking the session with it — installing a no-op
+    // handler keeps the shell alive. Children reset handled signals to their
+    // default on exec, so the foreground job still dies, as in a real terminal.
+    if (!isWin) child.stdin?.write("trap ':' INT\n");
+    const onData = (b: Buffer) => this.pumpTerm(sess, b.toString("utf8"));
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+    child.on("error", (err) => {
+      this.broadcastTerm(projectId, { type: "term", term: termId, chunk: `loom: ${err.message}\n` });
+    });
+    child.on("close", () => {
+      this.termSessions.delete(key);
+      this.broadcastTerm(projectId, { type: "term", term: termId, closed: true });
+    });
+    return sess;
+  }
+
+  /**
+   * Scan shell output for the end-of-command sentinel, stripping it from the
+   * stream and turning it into an exit/cwd frame. A sentinel can straddle two
+   * chunks, so any trailing partial match is held back until the next read.
+   */
+  private pumpTerm(sess: TermSession, text: string): void {
+    sess.buf += text;
+    for (;;) {
+      const idx = sess.buf.indexOf(TERM_MARK);
+      if (idx === -1) break;
+      const nl = sess.buf.indexOf("\n", idx);
+      if (nl === -1) {
+        // sentinel began but isn't complete — emit what precedes it and wait
+        this.emitTerm(sess, sess.buf.slice(0, idx));
+        sess.buf = sess.buf.slice(idx);
+        return;
+      }
+      this.emitTerm(sess, sess.buf.slice(0, idx));
+      const line = sess.buf.slice(idx + TERM_MARK.length, nl);
+      const tab = line.indexOf("\t");
+      const code = Number(tab === -1 ? line : line.slice(0, tab));
+      const cwd = tab === -1 ? "" : line.slice(tab + 1).trim();
+      if (cwd) sess.cwd = cwd;
+      sess.buf = sess.buf.slice(nl + 1);
+      this.broadcastTerm(sess.projectId, {
+        type: "term",
+        term: sess.termId,
+        exit: Number.isFinite(code) ? code : 0,
+        cwd: sess.cwd,
+      });
+    }
+    let hold = 0;
+    for (let i = Math.min(TERM_MARK.length - 1, sess.buf.length); i > 0; i--) {
+      if (sess.buf.endsWith(TERM_MARK.slice(0, i))) {
+        hold = i;
+        break;
+      }
+    }
+    const emit = sess.buf.slice(0, sess.buf.length - hold);
+    sess.buf = sess.buf.slice(sess.buf.length - hold);
+    this.emitTerm(sess, emit);
+  }
+
+  private emitTerm(sess: TermSession, chunk: string): void {
+    if (!chunk) return;
+    const MAX = 2_000_000; // per-command output budget
+    if (sess.sent >= MAX) return;
+    let out = chunk;
+    if (sess.sent + out.length > MAX) {
+      out = out.slice(0, MAX - sess.sent) + "\n…output truncated…\n";
+    }
+    sess.sent += out.length;
+    this.broadcastTerm(sess.projectId, { type: "term", term: sess.termId, chunk: out });
+  }
+
+  private closeTermSession(key: string): void {
+    const sess = this.termSessions.get(key);
+    if (!sess) return;
+    this.termSessions.delete(key);
+    try {
+      if (sess.child.pid && process.platform !== "win32") process.kill(-sess.child.pid, "SIGKILL");
+      else sess.child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+
   private pushTokens(): string[] {
     const cfg = readDaemonConfig();
     return (cfg?.clients ?? [])
@@ -639,8 +781,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
-    for (const child of this.termProcs.values()) child.kill("SIGKILL");
-    this.termProcs.clear();
+    for (const key of [...this.termSessions.keys()]) this.closeTermSession(key);
     for (const rt of this.runtimes.values()) await rt.close();
     this.runtimes.clear();
     this.wss?.close();

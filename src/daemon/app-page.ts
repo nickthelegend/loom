@@ -345,13 +345,25 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .scroll::-webkit-scrollbar-thumb:hover,.slist::-webkit-scrollbar-thumb:hover,.rbody::-webkit-scrollbar-thumb:hover{
     background-color:color-mix(in srgb, var(--muted-foreground) 48%, transparent)}
   /* ── Desktop workspace shell (Orca layout) ────────────── */
-  /* rail collapsed by default — toggle adds .railopen to widen the grid */
+  /* column widths are drag-resizable and persisted; the rail column only
+     exists while .railopen is set. */
   .dshell{display:grid;height:100dvh;
-    grid-template-columns:264px minmax(0,1fr);
+    --sbw:264px;--railw:304px;
+    grid-template-columns:var(--sbw) minmax(0,1fr);
     grid-template-rows:minmax(0,1fr) 25px}
-  .dshell.railopen{grid-template-columns:264px minmax(0,1fr) 304px}
+  .dshell.railopen{grid-template-columns:var(--sbw) minmax(0,1fr) var(--railw)}
+  /* drag handles: wide hit area, hairline that lights up on hover (Orca) */
+  .rz{position:absolute;top:0;bottom:0;width:9px;z-index:12;cursor:col-resize}
+  .rz::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;
+    transform:translateX(-50%);background:transparent;transition:background .12s}
+  .rz:hover::after,.rz.dragging::after{background:var(--ring)}
+  .rz-sidebar{right:-4px}
+  .rz-rail{left:-4px}
+  .rz-dock{left:-4px}
+  body.resizing-x{cursor:col-resize;user-select:none}
+  body.resizing-x *{pointer-events:none}
   .sidebar{grid-column:1;grid-row:1;border-right:1px solid var(--sidebar-border);
-    display:flex;flex-direction:column;min-width:0;
+    display:flex;flex-direction:column;min-width:0;position:relative;
     background:var(--sidebar);color:var(--sidebar-foreground)}
   .sidebar .shead{display:flex;align-items:center;gap:10px;height:40px;flex:none;padding:0 12px 0 16px;
     box-shadow:inset 0 -1px 0 var(--sidebar-border)}
@@ -442,8 +454,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   /* diff/preview dock — opens to the RIGHT of the chat on click, closed by default */
   .paneswrap{flex:1;min-height:0;min-width:0;display:flex}
   .mainpane{flex:1;min-width:0;display:flex;flex-direction:column}
-  .dockpane{width:48%;min-width:340px;max-width:820px;flex:none;display:none;flex-direction:column;min-height:0;
-    border-left:1px solid var(--border);background:var(--editor-surface)}
+  .dockpane{width:var(--dockw,48%);min-width:280px;flex:none;display:none;flex-direction:column;min-height:0;
+    position:relative;border-left:1px solid var(--border);background:var(--editor-surface)}
   .dockpane.open{display:flex}
   .dockpane .pane{flex:1}
   .dockpane .diffwrap{max-width:none}
@@ -490,7 +502,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .diffwrap{max-width:1000px;margin:0 auto}
   .dhead{display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:12px;
     color:var(--muted-foreground);margin:2px 2px 12px}
-  .dhead svg,.dfh svg,.frow svg{width:14px;height:14px;flex:none}
+  /* every inline icon in a header/row is 14px — an unsized svg fills its
+     container and reads as a stray glyph. */
+  .dhead svg,.dfh svg,.frow svg,.dockhead svg,.rhead svg{width:14px;height:14px;flex:none}
   .dhead .branch{color:var(--foreground);font-weight:600}
   .dfile{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;
     background:var(--editor-surface);box-shadow:0 1px 2px rgb(0 0 0 / .05)}
@@ -511,7 +525,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dl.hunk{color:var(--thread-ink);opacity:.85;padding-top:3px;padding-bottom:3px}
   .dl.meta{color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
   /* right rail — multi-view: Explorer / Search / Source Control / Tasks (Orca) */
-  .rail{display:none;grid-column:3;grid-row:1;flex-direction:column;min-width:0;
+  .rail{display:none;grid-column:3;grid-row:1;flex-direction:column;min-width:0;position:relative;
     background:var(--sidebar);color:var(--sidebar-foreground);border-left:1px solid var(--sidebar-border)}
   .railbar{display:flex;align-items:center;gap:2px;height:40px;flex:none;padding:0 6px;
     box-shadow:inset 0 -1px 0 var(--sidebar-border)}
@@ -605,17 +619,29 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .termtabs .iconbtn{width:24px;height:24px}
   .termtabs .iconbtn svg{width:13px;height:13px}
   .termbody{flex:1;min-height:0;overflow-y:auto;padding:8px 12px;font-family:var(--font-mono);font-size:12px;
-    line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--foreground)}
+    line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--foreground);cursor:text}
   .termbody .pl{color:var(--muted-foreground)}
   .termbody .pl b{color:var(--ok);font-weight:400}
   .termbody .cmd{color:var(--foreground)}
   .termbody .eo{color:var(--err)}
   .termbody .ex{color:color-mix(in srgb, var(--muted-foreground) 75%, transparent)}
+  .termbody .exbad{color:var(--err);opacity:.9}
   .termbody .hintl{color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
+  .termbody .run{color:var(--muted-foreground);opacity:.8}
+  /* ANSI SGR → tokens (16-colour + bold/dim/underline) */
+  .a-b{font-weight:700}.a-d{opacity:.65}.a-u{text-decoration:underline}.a-i{font-style:italic}
+  .a-30{color:#555}.a-31{color:var(--git-del)}.a-32{color:var(--git-add)}.a-33{color:var(--warn)}
+  .a-34{color:var(--thread-ink)}.a-35{color:var(--shuttle-ink)}.a-36{color:var(--thread-ink)}.a-37{color:var(--foreground)}
+  .a-90{color:var(--muted-foreground)}.a-91{color:var(--err)}.a-92{color:var(--ok)}.a-93{color:var(--warn)}
+  .a-94{color:var(--thread-ink)}.a-95{color:var(--shuttle-ink)}.a-96{color:var(--thread-ink)}.a-97{color:var(--foreground)}
   .terminput{flex:none;display:flex;align-items:center;gap:8px;padding:7px 12px;border-top:1px solid var(--border)}
-  .terminput .pr{color:var(--ok);font-family:var(--font-mono);font-size:12px;flex:none}
+  .terminput .pr{color:var(--ok);font-family:var(--font-mono);font-size:12px;flex:none;
+    max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .terminput .pr b{color:var(--muted-foreground);font-weight:400}
   .terminput input{flex:1;background:none;border:none;outline:none;box-shadow:none!important;color:var(--foreground);
-    font-family:var(--font-mono);font-size:12px;letter-spacing:0}
+    font-family:var(--font-mono);font-size:12px;letter-spacing:0;caret-color:var(--ok)}
+  .terminput.busy input{opacity:.6}
+  .terminput .st{flex:none;font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground)}
   /* ── Sidebar top nav (Orca: Tasks / Search) ───────────── */
   .topnav{display:flex;flex-direction:column;gap:1px;padding:8px 8px 4px}
   .navitem{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--radius-md);
@@ -729,7 +755,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     stop: svg('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
     thread: svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
     memory: svg('<path d="m12 3 8.5 4.7L12 12.5 3.5 7.7 12 3Z"/><path d="m3.5 12.2 8.5 4.8 8.5-4.8"/><path d="m3.5 16.6 8.5 4.8 8.5-4.8"/>'),
-    tree: svg('<path d="M12 4.5v6"/><path d="M9 7.5h6"/><path d="M9 17h6"/><path d="M4 12.5h16" opacity=".35"/>'),
+    // a changed file: document outline with a small +/- pair inside
+    tree: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/><path d="M12 11.5v4"/><path d="M10 13.5h4"/><path d="M10 18h4"/>'),
     route: svg('<circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="5.5" r="2.5"/><path d="M8 18.5h5.5a4 4 0 0 0 4-4V8"/>'),
     branch: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M15.5 8.5H11a5 5 0 0 0-5 5"/>'),
     refresh: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>'),
@@ -1021,7 +1048,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         composerHtml +
         "</div>" +
         '<div class="dockpane" id="dockpane">' +
-        '<div class="dockhead" id="dockhead"><span class="p">changes</span><span class="spacer"></span>' +
+        '<div class="rz rz-dock" id="rz-dock" title="drag to resize"></div>' +
+        '<div class="dockhead" id="dockhead"><span class="di" id="dockicon"></span>' +
+        '<span class="p" id="dockpath">changes</span><span class="spacer"></span>' +
         '<button id="dockclose" class="iconbtn" title="close">' + ICONS.x + "</button></div>" +
         '<div class="pane scroll" id="pane-changes">' + LOADER + "</div>" +
         "</div>" +
@@ -1034,7 +1063,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<button id="termhide" class="iconbtn" title="hide terminal">' + ICONS.x + "</button></div>" +
         '<div class="termbody" id="termbody"></div>' +
         '<form class="terminput" id="termform"><span class="pr">&#10095;</span>' +
-        '<input id="terminput" placeholder="run a command in the project dir\\u2026" autocomplete="off" autocapitalize="off" spellcheck="false"></form>' +
+        '<input id="terminput" placeholder="run a command\\u2026" autocomplete="off" autocapitalize="off" spellcheck="false">' +
+        '<span class="st"></span></form>' +
         "</div>" +
         "</div>";
     } else {
@@ -1095,11 +1125,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     function dockShowing(){ var d = document.getElementById("dockpane"); return d && d.classList.contains("open"); }
     function openDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.add("open"); }
     function closeDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.remove("open"); }
-    function dockTitle(html){ var h = document.querySelector("#dockhead .p"); if (h) h.innerHTML = html; }
+    function dockTitle(icon, label){
+      var i = document.getElementById("dockicon"); if (i) i.innerHTML = icon || "";
+      var h = document.getElementById("dockpath"); if (h) h.textContent = label || "";
+    }
     // Show a working-tree file's diff (from the tree patch), or the whole tree.
     function openChangesDock(focusPath){
       openDock();
-      dockTitle(focusPath ? ICONS.tree + '<span class="p">' + esc(focusPath) + "</span>" : "Source control");
+      dockTitle(focusPath ? ICONS.tree : ICONS.branch, focusPath || "Source control");
       var render = function(){
         var el = document.getElementById("pane-changes"); if (!el) return;
         var t = state.tree;
@@ -1119,7 +1152,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     // Show a turn's combined patch (from a turn_diff card in the thread).
     function openPatchDock(patch, label){
       openDock();
-      dockTitle(ICONS.tree + '<span class="p">' + esc(label || "changes") + "</span>");
+      dockTitle(ICONS.tree, label || "changes");
       var el = document.getElementById("pane-changes");
       var files = splitPatch(patch);
       el.innerHTML = '<div class="diffwrap">' + (files.length
@@ -1135,7 +1168,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     // Show a read-only file preview (from Explorer clicks).
     function openFileDock(relPath){
       openDock();
-      dockTitle(ICONS.file + '<span class="p">' + esc(relPath) + "</span>");
+      dockTitle(ICONS.file, relPath);
       var el = document.getElementById("pane-changes"); el.innerHTML = LOADER;
       api("/api/projects/" + pid + "/file?path=" + encodeURIComponent(relPath)).then(function(j){
         var lines = String(j.content || "").split("\\n");
@@ -1153,18 +1186,37 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       state.openFileDock = openFileDock;
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
+      var dockEl = document.getElementById("dockpane");
+      var savedDock = Number(localStorage.getItem("loomDockW"));
+      if (savedDock) dockEl.style.width = savedDock + "px";
+      makeResizer("rz-dock", {
+        get: function(){ return dockEl.offsetWidth; },
+        set: function(w){ dockEl.style.width = w + "px"; },
+        min: 280,
+        max: function(){
+          var wrap = document.querySelector(".paneswrap");
+          return Math.max(320, (wrap ? wrap.offsetWidth : window.innerWidth) - 380);
+        },
+        def: 520, key: "loomDockW", invert: true,
+      });
       drawTabs();
       showTab("thread");
       drawRail();
     }
 
-    // ---- terminal dock (command runner in the project dir) -----------------
+    // ---- terminal dock (a real shell session per tab) ----------------------
     var TERM_KEY = "loomTerm";
     var terms = [], activeTerm = null, termSeq = 0;
-    function cwdLabel(){
-      var d = (state.project && state.project.dir) || "";
+    function shortCwd(abs){
+      var d = String(abs || "");
+      var base = (state.project && state.project.dir) || "";
+      if (base && d.indexOf(base) === 0) {
+        var rest = d.slice(base.length).replace(/^[\\\\/]/, "");
+        var name = base.split(/[\\\\/]/).filter(Boolean).pop() || "~";
+        return rest ? name + "/" + rest : name;
+      }
       var parts = d.split(/[\\\\/]/).filter(Boolean);
-      return parts.length ? "~/" + parts[parts.length - 1] : "~";
+      return parts.length ? parts[parts.length - 1] : "~";
     }
     function curTerm(){ for (var i = 0; i < terms.length; i++) if (terms[i].id === activeTerm) return terms[i]; return null; }
     function termOpen(){ return desktop && localStorage.getItem(TERM_KEY) === "1"; }
@@ -1180,28 +1232,28 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       localStorage.setItem(TERM_KEY, termOpen() ? "0" : "1");
       applyTerm();
     }
-    function ensureTerm(){ if (!terms.length) addTerm(true); }
+    function ensureTerm(){ if (!terms.length) addTerm(); }
     function focusTermInput(){ var i = document.getElementById("terminput"); if (i && termOpen()) setTimeout(function(){ i.focus(); }, 0); }
-    function addTerm(silent){
+    function addTerm(){
       termSeq++;
       var id = "t" + termSeq;
-      var t = { id: id, title: "Terminal " + termSeq, html: "", run: null };
-      if (!silent || terms.length === 0) {
-        t.html = '<div class="hintl">commands run in ' + esc(cwdLabel()) +
-          " \\u00b7 each line is a fresh shell (cd won\\u2019t persist \\u2014 chain with &amp;&amp;)</div>";
-      }
+      var t = { id: id, title: "Terminal " + termSeq, html: "", busy: false,
+                cwd: (state.project && state.project.dir) || "", hist: [], hi: -1, draft: "" };
       terms.push(t);
       activeTerm = id;
       drawTermTabs();
       drawTermBody();
       focusTermInput();
+      // open the shell for this tab; the daemon reports its starting cwd
+      api("/api/projects/" + pid + "/term/open", { method: "POST", body: JSON.stringify({ term: id }) })
+        .then(function(r){ t.cwd = r.cwd || t.cwd; drawPrompt(); })
+        .catch(function(err){ termAppend(t, '<div class="eo">loom: ' + esc(err.message) + "</div>"); });
     }
     function closeTerm(id){
       var idx = -1;
       for (var i = 0; i < terms.length; i++) if (terms[i].id === id) idx = i;
       if (idx < 0) return;
-      var t = terms[idx];
-      if (t.run) api("/api/projects/" + pid + "/exec/" + t.run + "/kill", { method: "POST", body: "{}" }).catch(function(){});
+      api("/api/projects/" + pid + "/term/close", { method: "POST", body: JSON.stringify({ term: id }) }).catch(function(){});
       terms.splice(idx, 1);
       if (activeTerm === id) activeTerm = terms.length ? terms[Math.max(0, idx - 1)].id : null;
       if (!terms.length) { localStorage.setItem(TERM_KEY, "0"); applyTerm(); return; }
@@ -1212,14 +1264,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       var box = document.getElementById("termtabs"); if (!box) return;
       box.innerHTML = terms.map(function(t){
         return '<span class="termtab' + (t.id === activeTerm ? " active" : "") + '" data-t="' + t.id + '">' +
-          (t.run ? '<span class="busy" style="width:8px;height:8px;color:var(--live)"></span>' : "") +
+          (t.busy ? '<span class="busy" style="width:8px;height:8px;color:var(--live)"></span>' : "") +
           esc(t.title) + '<span class="tx" data-close="' + t.id + '">' + ICONS.x + "</span></span>";
       }).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".termtab"), function(el){
         el.onclick = function(ev){
           var c = ev.target.closest ? ev.target.closest("[data-close]") : null;
           if (c) { closeTerm(c.getAttribute("data-close")); return; }
-          activeTerm = el.getAttribute("data-t"); drawTermTabs(); drawTermBody(); focusTermInput();
+          activeTerm = el.getAttribute("data-t"); drawTermTabs(); drawTermBody(); drawPrompt(); focusTermInput();
         };
       });
     }
@@ -1229,43 +1281,160 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       body.innerHTML = t.html;
       body.scrollTop = body.scrollHeight;
     }
+    function drawPrompt(){
+      var t = curTerm(); if (!t) return;
+      var pr = document.querySelector(".terminput .pr");
+      if (pr) pr.innerHTML = esc(shortCwd(t.cwd)) + " <b>\\u276f</b>";
+      var row = document.querySelector(".terminput");
+      if (row) row.classList.toggle("busy", !!t.busy);
+      var st = document.querySelector(".terminput .st");
+      if (st) st.textContent = t.busy ? "running \\u00b7 \\u2303C to stop" : "";
+    }
     function termAppend(t, html){
       t.html += html;
       if (t.id === activeTerm) {
         var body = document.getElementById("termbody");
-        if (body) { body.insertAdjacentHTML("beforeend", html); body.scrollTop = body.scrollHeight; }
+        if (body) {
+          var atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
+          body.insertAdjacentHTML("beforeend", html);
+          if (atBottom) body.scrollTop = body.scrollHeight;
+        }
       }
+    }
+    /**
+     * Minimal ANSI renderer: SGR colour/bold/underline become spans, other
+     * escape sequences are dropped, and \\r rewinds to the last newline the way
+     * a terminal overwrites a line (progress bars, spinners).
+     */
+    function ansiToHtml(text, openRef){
+      var out = "";
+      var i = 0;
+      var cls = openRef.cls || [];
+      function openSpan(){ return cls.length ? '<span class="' + cls.join(" ") + '">' : ""; }
+      function closeSpan(){ return cls.length ? "</span>" : ""; }
+      out += openSpan();
+      while (i < text.length) {
+        var ch = text.charAt(i);
+        if (ch === "\\u001b") {
+          var m = /^\\u001b\\[([0-9;]*)m/.exec(text.slice(i));
+          if (m) {
+            out += closeSpan();
+            var codes = m[1] === "" ? ["0"] : m[1].split(";");
+            codes.forEach(function(c){
+              var n = Number(c);
+              if (n === 0) cls = [];
+              else if (n === 1) { if (cls.indexOf("a-b") < 0) cls.push("a-b"); }
+              else if (n === 2) { if (cls.indexOf("a-d") < 0) cls.push("a-d"); }
+              else if (n === 3) { if (cls.indexOf("a-i") < 0) cls.push("a-i"); }
+              else if (n === 4) { if (cls.indexOf("a-u") < 0) cls.push("a-u"); }
+              else if (n === 22) cls = cls.filter(function(x){ return x !== "a-b" && x !== "a-d"; });
+              else if (n === 24) cls = cls.filter(function(x){ return x !== "a-u"; });
+              else if (n === 39) cls = cls.filter(function(x){ return !/^a-[39]\\d$/.test(x); });
+              else if ((n >= 30 && n <= 37) || (n >= 90 && n <= 97)) {
+                cls = cls.filter(function(x){ return !/^a-[39]\\d$/.test(x); });
+                cls.push("a-" + n);
+              }
+            });
+            out += openSpan();
+            i += m[0].length;
+            continue;
+          }
+          // any other escape sequence: drop it
+          var other = /^\\u001b[\\[\\]][0-9;?]*[a-zA-Z]?/.exec(text.slice(i));
+          i += other ? other[0].length : 1;
+          continue;
+        }
+        if (ch === "\\r") { i++; continue; } // \\r\\n handled by the \\n
+        out += esc(ch);
+        i++;
+      }
+      out += closeSpan();
+      openRef.cls = cls;
+      return out;
     }
     function runCmd(cmd){
       var t = curTerm(); if (!t) return;
-      termAppend(t, '<div><span class="pl">' + esc(cwdLabel()) + " <b>\\u276f</b></span> " +
+      termAppend(t, '<div><span class="pl">' + esc(shortCwd(t.cwd)) + " <b>\\u276f</b></span> " +
         '<span class="cmd">' + esc(cmd) + "</span></div>");
-      api("/api/projects/" + pid + "/exec", { method: "POST", body: JSON.stringify({ cmd: cmd, term: t.id }) })
-        .then(function(r){ t.run = r.runId; drawTermTabs(); })
-        .catch(function(err){ termAppend(t, '<div class="eo">loom: ' + esc(err.message) + "</div>"); });
+      t.busy = true; drawTermTabs(); drawPrompt();
+      api("/api/projects/" + pid + "/term/input", { method: "POST", body: JSON.stringify({ term: t.id, data: cmd }) })
+        .catch(function(err){
+          t.busy = false; drawTermTabs(); drawPrompt();
+          termAppend(t, '<div class="eo">loom: ' + esc(err.message) + "</div>");
+        });
+    }
+    function interruptTerm(){
+      var t = curTerm(); if (!t || !t.busy) return;
+      termAppend(t, '<div class="run">^C</div>');
+      api("/api/projects/" + pid + "/term/signal", { method: "POST", body: JSON.stringify({ term: t.id }) })
+        .catch(function(){});
     }
     function onTermFrame(frame){
       var t = null;
       for (var i = 0; i < terms.length; i++) if (terms[i].id === frame.term) t = terms[i];
       if (!t) return;
       if (frame.chunk !== undefined) {
-        termAppend(t, '<span' + (frame.stream === "err" ? ' class="eo"' : "") + ">" + esc(frame.chunk) + "</span>");
+        if (!t.ansi) t.ansi = { cls: [] };
+        termAppend(t, ansiToHtml(String(frame.chunk), t.ansi));
       }
       if (frame.exit !== undefined) {
-        t.run = null; drawTermTabs();
-        termAppend(t, '<div class="ex">\\u2514 exit ' + Number(frame.exit) + "</div>");
+        t.busy = false;
+        if (frame.cwd) t.cwd = frame.cwd;
+        var code = Number(frame.exit);
+        if (code !== 0) termAppend(t, '<div class="exbad">\\u2514 exit ' + code + "</div>");
+        drawTermTabs(); drawPrompt();
+      }
+      if (frame.closed) {
+        t.busy = false;
+        termAppend(t, '<div class="ex">\\u2514 shell exited</div>');
+        drawTermTabs(); drawPrompt();
       }
     }
     if (desktop) {
       document.getElementById("termhide").onclick = function(){ localStorage.setItem(TERM_KEY, "0"); applyTerm(); };
-      document.getElementById("termadd").onclick = function(){ addTerm(false); };
+      document.getElementById("termadd").onclick = function(){ addTerm(); };
+      // clicking anywhere in the output focuses the input, like a real terminal
+      document.getElementById("termbody").addEventListener("mousedown", function(ev){
+        if (String(window.getSelection() || "")) return; // don't steal a text selection
+        if (ev.target.closest && ev.target.closest("a")) return;
+        setTimeout(focusTermInput, 0);
+      });
+      var tin = document.getElementById("terminput");
+      tin.addEventListener("keydown", function(e){
+        var t = curTerm(); if (!t) return;
+        if (e.ctrlKey && (e.key === "c" || e.key === "C")) {
+          if (!String(window.getSelection() || "")) { e.preventDefault(); interruptTerm(); }
+          return;
+        }
+        if (e.ctrlKey && (e.key === "l" || e.key === "L")) {
+          e.preventDefault(); t.html = ""; t.ansi = { cls: [] }; drawTermBody(); return;
+        }
+        if (e.key === "ArrowUp") {
+          if (!t.hist.length) return;
+          e.preventDefault();
+          if (t.hi === -1) { t.draft = this.value; t.hi = t.hist.length - 1; }
+          else if (t.hi > 0) t.hi--;
+          this.value = t.hist[t.hi];
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          if (t.hi === -1) return;
+          e.preventDefault();
+          if (t.hi < t.hist.length - 1) { t.hi++; this.value = t.hist[t.hi]; }
+          else { t.hi = -1; this.value = t.draft || ""; }
+        }
+      });
       document.getElementById("termform").addEventListener("submit", function(ev){
         ev.preventDefault();
         var inp = document.getElementById("terminput");
         var cmd = (inp.value || "").trim();
+        var t = curTerm();
         inp.value = "";
-        if (cmd === "clear") { var t = curTerm(); if (t) { t.html = ""; drawTermBody(); } return; }
-        if (cmd) runCmd(cmd);
+        if (t) { t.hi = -1; t.draft = ""; }
+        if (!cmd || !t) return;
+        if (t.hist[t.hist.length - 1] !== cmd) t.hist.push(cmd);
+        if (cmd === "clear") { t.html = ""; t.ansi = { cls: [] }; drawTermBody(); return; }
+        runCmd(cmd);
       });
       // drag the top edge to resize the dock
       var rz = document.getElementById("termresize");
@@ -1273,10 +1442,17 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         ev.preventDefault();
         var dock = document.getElementById("termdock");
         var startY = ev.clientY, startH = dock.offsetHeight;
+        document.body.classList.add("resizing-x");
         function mv(e){ dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, startH + (startY - e.clientY))) + "px"; }
-        function up(){ document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); }
+        function up(){
+          document.body.classList.remove("resizing-x");
+          localStorage.setItem("loomTermH", String(dock.offsetHeight));
+          document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up);
+        }
         document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
       });
+      var savedH = Number(localStorage.getItem("loomTermH"));
+      if (savedH) document.getElementById("termdock").style.height = savedH + "px";
       state.toggleTerm = toggleTerm;
       applyTerm();
     }
@@ -1795,6 +1971,52 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     applyRail();
   }
 
+  // ---- column resizing -----------------------------------------------------
+  function shellEl(){ return document.querySelector(".dshell"); }
+  function cssPx(el, name, fallback){
+    if (!el) return fallback;
+    var n = parseInt(getComputedStyle(el).getPropertyValue(name), 10);
+    return isNaN(n) ? fallback : n;
+  }
+  /**
+   * Drag a handle to resize a column: clamped, persisted, double-click resets.
+   * opts.invert is for handles on a panel's left edge, where dragging left widens.
+   */
+  function makeResizer(handleId, opts){
+    var h = document.getElementById(handleId); if (!h) return;
+    h.addEventListener("mousedown", function(ev){
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      var startX = ev.clientX, startW = opts.get();
+      h.classList.add("dragging");
+      document.body.classList.add("resizing-x");
+      function mv(e){
+        var dx = (e.clientX - startX) * (opts.invert ? -1 : 1);
+        opts.set(Math.max(opts.min, Math.min(opts.max(), startW + dx)));
+      }
+      function up(){
+        h.classList.remove("dragging");
+        document.body.classList.remove("resizing-x");
+        document.removeEventListener("mousemove", mv);
+        document.removeEventListener("mouseup", up);
+        if (opts.key) localStorage.setItem(opts.key, String(opts.get()));
+      }
+      document.addEventListener("mousemove", mv);
+      document.addEventListener("mouseup", up);
+    });
+    h.addEventListener("dblclick", function(){
+      opts.set(opts.def);
+      if (opts.key) localStorage.setItem(opts.key, String(opts.def));
+    });
+  }
+  function applyWidths(){
+    var s = shellEl(); if (!s) return;
+    var sb = Number(localStorage.getItem("loomSbW")) || 264;
+    var rw = Number(localStorage.getItem("loomRailW")) || 304;
+    s.style.setProperty("--sbw", sb + "px");
+    s.style.setProperty("--railw", rw + "px");
+  }
+
   // ---- New Task modal (Orca's Create Worktree, mapped to Loom) -------------
   // One ADE runs it directly; several run it as a pipeline, hop to hop.
   function openTaskModal(prefillPid, prefillAgents){
@@ -1939,9 +2161,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<a class="iconbtn" title="Loom on GitHub" href="https://github.com/nickthelegend/loom" target="_blank" rel="noreferrer">' + ICONS.help + "</a>" +
         '<span class="spacer"></span>' +
         '<button id="unpair" class="iconbtn" title="unpair this device">' + ICONS.unpair + "</button></div>" +
+        '<div class="rz rz-sidebar" id="rz-sidebar" title="drag to resize"></div>' +
       "</aside>" +
       '<section class="dmain" id="dmain"></section>' +
       '<aside class="rail">' +
+        '<div class="rz rz-rail" id="rz-rail" title="drag to resize"></div>' +
         '<div class="railbar">' +
           '<button class="iconbtn rvbtn" data-view="explorer" title="Explorer">' + ICONS.files + "</button>" +
           '<button class="iconbtn rvbtn" data-view="search" title="Search">' + ICONS.search + "</button>" +
@@ -1959,6 +2183,19 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     document.getElementById("railclose").onclick = toggleRail;
     document.getElementById("newtask").onclick = function(){ openTaskModal(cur); };
     if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
+    applyWidths();
+    makeResizer("rz-sidebar", {
+      get: function(){ return cssPx(shellEl(), "--sbw", 264); },
+      set: function(w){ shellEl().style.setProperty("--sbw", w + "px"); },
+      min: 200, max: function(){ return Math.min(520, window.innerWidth - 480); },
+      def: 264, key: "loomSbW",
+    });
+    makeResizer("rz-rail", {
+      get: function(){ return cssPx(shellEl(), "--railw", 304); },
+      set: function(w){ shellEl().style.setProperty("--railw", w + "px"); },
+      min: 220, max: function(){ return Math.min(620, window.innerWidth - 520); },
+      def: 304, key: "loomRailW", invert: true,
+    });
     Array.prototype.forEach.call(document.querySelectorAll(".railbar .rvbtn"), function(b){
       b.onclick = function(){
         state.railView = b.getAttribute("data-view");
