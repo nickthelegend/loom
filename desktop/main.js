@@ -3,7 +3,7 @@
 // phone and browser use. No IDE, no editor — the continuity layer, on desktop.
 
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, Menu, screen, shell } from "electron";
 import { prepareAppUrl } from "./loom-app.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -14,9 +14,11 @@ const BG = "#0a0a0a";
 let win = null;
 
 async function createWindow() {
+  // Orca-style: fill the work area on launch (never larger than the display).
+  const area = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
-    width: 1100,
-    height: 820,
+    width: Math.min(1512, area.width),
+    height: Math.min(945, area.height),
     minWidth: 600,
     minHeight: 400,
     backgroundColor: BG,

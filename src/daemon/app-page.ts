@@ -10,7 +10,10 @@
  * Design: the "quiet graphite" system adapted from Orca (github.com/stablyai/
  * orca, MIT) — neutral monochrome chrome, hairline borders, Geist type, and
  * color reserved for state: thread cyan = live, shuttle magenta = the baton.
- * See docs/design-system.md.
+ * Desktop (>=900px) is the Orca workspace shell: projects/agents tree in the
+ * left sidebar, a tabbed center pane (Thread | Changes | Brain | Routes), a
+ * source-control right rail (>=1200px), and a status bar. Mobile keeps the
+ * single-column thread. See docs/design-system.md.
  */
 
 export const APP_MANIFEST = {
@@ -55,6 +58,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     --font-mono:'SF Mono',SFMono-Regular,ui-monospace,'Cascadia Code',Menlo,Consolas,'Liberation Mono',monospace;
     --radius:10px;--radius-sm:6px;--radius-md:8px;--radius-xl:14px;
     --background:#fff;--foreground:#0a0a0a;
+    --editor-surface:#ffffff;
     --card:#fff;--card-foreground:#0a0a0a;
     --popover:#fff;--popover-foreground:#0a0a0a;
     --primary:#171717;--primary-foreground:#fafafa;
@@ -72,6 +76,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     --thread:#67e8f9;--shuttle:#e879f9;
     --thread-ink:#0e7490;--shuttle-ink:#a21caf;
     --ok:#15803d;--warn:#b45309;--err:#e40014;--live:#eab308;
+    --git-add:#587c0c;--git-mod:#895503;--git-del:#ad0707;
     --agent-l:36%;--selvage-l:44%;
     --warp:rgba(0,0,0,.018);
     /* legacy aliases so older inline styles keep resolving */
@@ -79,6 +84,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   }
   .dark{
     --background:#0a0a0a;--foreground:#fafafa;
+    --editor-surface:#141414;
     --card:#171717;--card-foreground:#fafafa;
     --popover:#171717;--popover-foreground:#fafafa;
     --primary:#e5e5e5;--primary-foreground:#171717;
@@ -94,6 +100,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     --glass-highlight:rgba(255,255,255,.06);
     --thread-ink:#67e8f9;--shuttle-ink:#e879f9;
     --ok:#10b981;--warn:#eab308;--err:#ff6568;--live:#eab308;
+    --git-add:#81b88b;--git-mod:#e2c08d;--git-del:#c74e39;
     --agent-l:70%;--selvage-l:52%;
     --warp:rgba(255,255,255,.012);
   }
@@ -184,7 +191,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .badge.live{color:var(--foreground);
     border-color:color-mix(in srgb, var(--thread) 45%, transparent);
     background:color-mix(in srgb, var(--thread) 9%, transparent)}
-  /* ── Agent chips ──────────────────────────────────────── */
+  /* ── Agent chips (mobile thread) ──────────────────────── */
   .chips{display:flex;gap:6px;overflow-x:auto;padding:10px 16px;position:sticky;z-index:4;
     top:calc(48px + env(safe-area-inset-top));
     background:color-mix(in srgb, var(--background) 88%, transparent);
@@ -240,7 +247,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .loader i:nth-child(4)::after{animation-delay:.42s}
   @keyframes weave{0%{left:-40%}100%{left:100%}}
   /* ── Route banner + sheets (floating tier) ────────────── */
-  .routebar{position:sticky;top:calc(96px + env(safe-area-inset-top));z-index:3;
+  .routebar{position:sticky;top:8px;z-index:3;
     background:var(--popover);border:1px solid var(--border);
     border-left:2px solid color-mix(in srgb, var(--thread) 60%, transparent);
     border-radius:var(--radius);padding:10px 13px;margin:12px 0;font-size:13px;
@@ -254,16 +261,18 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
     animation:sheetin .18s ease}
   @keyframes sheetin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-  .sheet select,.sheet input{height:36px;background:transparent;border:1px solid var(--input);
+  .sheet select,.sheet input,.formcol select,.formcol input{
+    height:36px;background:transparent;border:1px solid var(--input);
     border-radius:var(--radius-md);color:var(--foreground);padding:0 11px;font:inherit;font-size:14px;width:100%;
     transition:border-color .15s,box-shadow .15s;outline:none}
-  .dark .sheet select,.dark .sheet input{background:color-mix(in srgb, var(--input) 30%, transparent)}
-  .dark .sheet select option{background:var(--popover);color:var(--popover-foreground)}
-  .sheet select:focus-visible,.sheet input:focus-visible{border-color:var(--ring);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent)}
+  .dark .sheet select,.dark .sheet input,.dark .formcol select,.dark .formcol input{
+    background:color-mix(in srgb, var(--input) 30%, transparent)}
+  .dark .sheet select option,.dark .formcol select option{background:var(--popover);color:var(--popover-foreground)}
+  .sheet select:focus-visible,.sheet input:focus-visible,.formcol select:focus-visible,.formcol input:focus-visible{
+    border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent)}
   .sheet .row{display:flex;gap:8px}
   .sheet .row .btn{flex:1}
-  .sheet label{font-size:11px;font-weight:600;color:var(--muted-foreground);
+  .sheet label,.formcol label{font-size:11px;font-weight:600;color:var(--muted-foreground);
     letter-spacing:.05em;text-transform:uppercase;font-family:var(--font-mono)}
   /* ── Composer ─────────────────────────────────────────── */
   .composer{z-index:6;flex:none;
@@ -326,35 +335,130 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .panel > .chips{position:static;top:auto}
   .panel .scroll{flex:1;min-height:0;overflow-y:auto;padding:16px 16px 20px}
   /* sleek scrollbars (Orca) */
-  .scroll,.slist,.sheet .scrollable{scrollbar-width:thin;
+  .scroll,.slist,.rbody,.sheet .scrollable{scrollbar-width:thin;
     scrollbar-color:color-mix(in srgb, var(--muted-foreground) 34%, transparent) transparent}
-  .scroll::-webkit-scrollbar,.slist::-webkit-scrollbar{width:12px;height:12px}
-  .scroll::-webkit-scrollbar-track,.slist::-webkit-scrollbar-track{background:transparent}
-  .scroll::-webkit-scrollbar-thumb,.slist::-webkit-scrollbar-thumb{
+  .scroll::-webkit-scrollbar,.slist::-webkit-scrollbar,.rbody::-webkit-scrollbar{width:12px;height:12px}
+  .scroll::-webkit-scrollbar-track,.slist::-webkit-scrollbar-track,.rbody::-webkit-scrollbar-track{background:transparent}
+  .scroll::-webkit-scrollbar-thumb,.slist::-webkit-scrollbar-thumb,.rbody::-webkit-scrollbar-thumb{
     background:color-mix(in srgb, var(--muted-foreground) 28%, transparent);
     border:3px solid transparent;border-radius:7px;background-clip:padding-box;min-height:28px}
-  .scroll::-webkit-scrollbar-thumb:hover,.slist::-webkit-scrollbar-thumb:hover{
+  .scroll::-webkit-scrollbar-thumb:hover,.slist::-webkit-scrollbar-thumb:hover,.rbody::-webkit-scrollbar-thumb:hover{
     background-color:color-mix(in srgb, var(--muted-foreground) 48%, transparent)}
-  /* ── Desktop workspace shell: projects rail + thread ──── */
-  .dshell{display:grid;grid-template-columns:280px 1fr;height:100dvh}
-  .sidebar{border-right:1px solid var(--sidebar-border);display:flex;flex-direction:column;min-width:0;
+  /* ── Desktop workspace shell (Orca layout) ────────────── */
+  .dshell{display:grid;height:100dvh;
+    grid-template-columns:264px minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr) 25px}
+  .sidebar{grid-column:1;grid-row:1;border-right:1px solid var(--sidebar-border);
+    display:flex;flex-direction:column;min-width:0;
     background:var(--sidebar);color:var(--sidebar-foreground)}
   .sidebar .shead{display:flex;align-items:center;gap:10px;height:48px;flex:none;padding:0 12px 0 16px;
     box-shadow:inset 0 -1px 0 var(--sidebar-border)}
   .sidebar .slist{flex:1;overflow-y:auto;padding:8px}
-  .sidebar .stitle{font-size:11px;font-weight:600;color:var(--muted-foreground);
+  .sidebar .stitle{display:flex;align-items:center;font-size:11px;font-weight:600;color:var(--muted-foreground);
     letter-spacing:.05em;text-transform:uppercase;padding:8px 8px 6px;font-family:var(--font-mono)}
-  .srow{padding:9px 10px;border-radius:var(--radius-md);border:1px solid transparent;cursor:pointer;
-    margin-bottom:2px;transition:background .12s,border-color .12s}
+  .sgroup{margin-bottom:2px}
+  .srow{padding:8px 10px;border-radius:var(--radius-md);border:1px solid transparent;cursor:pointer;
+    transition:background .12s,border-color .12s}
   .srow:hover{background:var(--sidebar-accent)}
   .srow.sel{background:var(--sidebar-accent);border-color:var(--border)}
   .srow .n{font-weight:500;font-size:13px;display:flex;align-items:center;gap:8px;min-width:0}
   .srow .n .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .srow .n .cnt{margin-left:auto;flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
   .srow .m{color:var(--muted-foreground);font-family:var(--font-mono);font-size:11px;margin-top:3px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dmain{min-width:0;display:flex;flex-direction:column;position:relative;background:var(--background)}
+  .arow{display:flex;align-items:center;gap:8px;padding:5px 10px 5px 24px;margin-top:1px;
+    border-radius:var(--radius-md);border:1px solid transparent;cursor:pointer;
+    font-size:12.5px;color:var(--muted-foreground);transition:background .12s,color .12s}
+  .arow:hover{background:var(--sidebar-accent);color:var(--sidebar-accent-foreground)}
+  .arow.cur{background:var(--sidebar-accent);color:var(--sidebar-accent-foreground);border-color:var(--border)}
+  .arow .anm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+  .arow .role{margin-left:auto;flex:none;font-family:var(--font-mono);font-size:10.5px;
+    color:color-mix(in srgb, var(--muted-foreground) 75%, transparent)}
+  .adot{width:7px;height:7px;border-radius:50%;flex:none;position:relative;
+    background:color-mix(in srgb, var(--muted-foreground) 40%, transparent)}
+  .adot.busy{background:var(--live)}
+  .adot.busy::after{content:"";position:absolute;inset:-3px;border-radius:50%;
+    border:1px solid var(--live);opacity:.5;animation:pulse 1.8s ease-out infinite}
+  .abadge{flex:none;font-size:9.5px;font-family:var(--font-mono);letter-spacing:.04em;
+    color:var(--muted-foreground);border:1px solid var(--border);border-radius:5px;
+    padding:0 5px;line-height:14px;text-transform:uppercase}
+  .arow.cur .abadge{color:var(--sidebar-accent-foreground)}
+  .dmain{grid-column:2;grid-row:1;min-width:0;display:flex;flex-direction:column;position:relative;background:var(--background)}
   .dmain .panel{height:100%}
   .dmain .composer .inner,.dmain .hint{max-width:none}
+  /* tab strip — the Orca workspace signature */
+  .tabstrip{display:flex;align-items:flex-end;gap:2px;height:37px;flex:none;padding:0 10px;
+    background:var(--sidebar);border-bottom:1px solid var(--border)}
+  .tab{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 13px;
+    border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;
+    font-size:12.5px;font-weight:500;color:var(--muted-foreground);cursor:pointer;position:relative;
+    transition:color .12s,background .12s}
+  .tab:hover{color:var(--foreground);background:color-mix(in srgb, var(--sidebar-accent) 70%, transparent)}
+  .tab.active{background:var(--background);color:var(--foreground);border-color:var(--border)}
+  .tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--background)}
+  .tab svg{width:13px;height:13px}
+  .tab .tbadge{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
+    border:1px solid var(--border);border-radius:4px;padding:0 4px;line-height:13px}
+  .tabstrip .spacer{margin-left:auto}
+  .tabstrip .iconbtn{width:28px;height:28px;margin-bottom:3px}
+  .pane{flex:1;min-height:0;overflow-y:auto;padding:16px 16px 20px}
+  .dmain .pane > #feed,.dmain .pane > #routebar{max-width:840px;margin-inline:auto}
+  .dmain .msg .bubble{max-width:82%}
+  .pane-inner{max-width:840px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+  .formcol{display:flex;flex-direction:column;gap:10px;max-width:520px}
+  /* changes pane — per-file diff cards on the editor surface */
+  .diffwrap{max-width:1000px;margin:0 auto}
+  .dhead{display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:12px;
+    color:var(--muted-foreground);margin:2px 2px 12px}
+  .dhead svg,.dfh svg,.frow svg{width:14px;height:14px;flex:none}
+  .dhead .branch{color:var(--foreground);font-weight:600}
+  .dfile{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;
+    background:var(--editor-surface);box-shadow:0 1px 2px rgb(0 0 0 / .05)}
+  .dfh{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--card);
+    border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:12px;min-width:0}
+  .dfh .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dfh .cadd{margin-left:auto;color:var(--git-add);flex:none}
+  .dfh .cdel{color:var(--git-del);flex:none}
+  .dcode{font-family:var(--font-mono);font-size:11.5px;line-height:1.55;overflow-x:auto;padding:6px 0}
+  .dl{white-space:pre;padding:0 12px}
+  .dl.add{background:color-mix(in srgb, var(--git-add) 13%, transparent);color:var(--git-add)}
+  .dl.del{background:color-mix(in srgb, var(--git-del) 13%, transparent);color:var(--git-del)}
+  .dl.hunk{color:var(--thread-ink);opacity:.85;padding-top:3px;padding-bottom:3px}
+  .dl.meta{color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
+  /* right rail — source control (Orca) */
+  .rail{display:none;grid-column:3;grid-row:1;flex-direction:column;min-width:0;
+    background:var(--sidebar);color:var(--sidebar-foreground);border-left:1px solid var(--sidebar-border)}
+  .rail .rhead{display:flex;align-items:center;gap:8px;height:48px;flex:none;padding:0 14px;
+    font-size:13px;font-weight:600;box-shadow:inset 0 -1px 0 var(--sidebar-border)}
+  .rail .rbody{flex:1;overflow-y:auto;padding:12px}
+  .rsec{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
+    color:var(--muted-foreground);font-family:var(--font-mono);margin:12px 2px 8px}
+  .rsec:first-child{margin-top:0}
+  .frow{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:var(--radius-sm);
+    font-family:var(--font-mono);font-size:12px;cursor:pointer;min-width:0}
+  .frow:hover{background:var(--sidebar-accent)}
+  .frow .fst{width:14px;flex:none;text-align:center;font-weight:600}
+  .frow .fp{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fst.add{color:var(--git-add)}
+  .fst.mod{color:var(--git-mod)}
+  .fst.del{color:var(--git-del)}
+  .railcard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    padding:10px 12px;margin-bottom:8px;box-shadow:0 1px 2px rgb(0 0 0 / .05)}
+  .railcard .rt{font-weight:600;font-size:12px;margin-bottom:3px;display:flex;align-items:center;gap:7px}
+  .railcard .rm{color:var(--muted-foreground);font-family:var(--font-mono);font-size:11px;line-height:1.5;
+    word-break:break-word}
+  .railcard.warnc{border-left:2px solid var(--warn)}
+  .railcard.threadc{border-left:2px solid color-mix(in srgb, var(--thread) 60%, transparent)}
+  .rempty{color:color-mix(in srgb, var(--muted-foreground) 80%, transparent);
+    font-family:var(--font-mono);font-size:11.5px;padding:2px 2px 6px}
+  /* status bar (Orca, 25px) */
+  .statusbar{grid-column:1 / -1;grid-row:2;display:flex;align-items:center;gap:14px;
+    padding:0 12px;background:var(--sidebar);border-top:1px solid var(--sidebar-border);
+    font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);
+    user-select:none;min-width:0;overflow:hidden;white-space:nowrap}
+  .statusbar .sit{display:inline-flex;align-items:center;gap:6px;flex:none}
+  .sdot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+  .sdot.off{background:color-mix(in srgb, var(--muted-foreground) 50%, transparent)}
   .dempty{flex:1;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;
     color:var(--muted-foreground);font-family:var(--font-mono);font-size:13px}
   .dempty .biglogo{font-size:36px;font-weight:650;letter-spacing:-.02em;color:var(--foreground)}
@@ -365,11 +469,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   html[data-electron] .dmain > .panel > header,
   html[data-electron] #root > .panel > header,
   html[data-electron] header.appbar,
+  html[data-electron] .rail .rhead,
   html[data-electron] .dragstrip{-webkit-app-region:drag;user-select:none}
   html[data-electron] .sidebar .shead button,
   html[data-electron] .dmain > .panel > header button,
   html[data-electron] #root > .panel > header button,
   html[data-electron] header.appbar button,
+  html[data-electron] .rail .rhead button,
   html[data-electron] .sidebar .shead .wordmark{-webkit-app-region:no-drag}
   .dragstrip{position:fixed;top:0;left:0;right:0;height:36px;z-index:50}
   html[data-electron="darwin"] .sidebar .shead{padding-left:84px}
@@ -378,12 +484,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   /* on wide screens the app-shell fills the window and owns the height */
   @media (min-width:900px){
     #root{max-width:none;height:100dvh;display:block}
-    /* readable, centered conversation column — messages never stretch full width */
-    .dmain .scroll > #feed,.dmain .scroll > #routesheet,.dmain .scroll > #routebar{max-width:840px;margin-inline:auto}
     .dmain .composer .inner{max-width:840px}
-    .dmain .msg .bubble{max-width:82%}
     .dmain > .panel > header{padding-left:18px;padding-right:14px}
     .srow .badge{font-size:10px;padding:0 7px}
+  }
+  @media (min-width:1200px){
+    .dshell{grid-template-columns:264px minmax(0,1fr) 304px}
+    .rail{display:flex}
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -397,7 +504,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   var TOKEN_KEY = "loomClientToken";
   var THEME_KEY = "loomTheme";
   var state = { token: localStorage.getItem(TOKEN_KEY) || "", projects: [], pid: null,
-                project: null, selected: null, lastId: 0, ws: null, timers: [] };
+                project: null, selected: null, lastId: 0, ws: null, timers: [],
+                tab: "thread", tree: null, wsLive: false, lastQuestion: null };
   var root = document.getElementById("root");
 
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -405,6 +513,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   function toast(msg){ var t = document.getElementById("toast"); t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   function hue(id){ var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
+  function money(n){ return "$" + (n >= 0.01 ? n.toFixed(2) : n.toFixed(4)); }
   var LOADER = '<div class="loader"><i></i><i></i><i></i><i></i></div>';
 
   // Inline icon set — 24px grid, stroke 2, currentColor (no emoji, no CDN).
@@ -415,9 +524,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     back: svg('<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>'),
     up: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
     stop: svg('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
+    thread: svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
     memory: svg('<path d="m12 3 8.5 4.7L12 12.5 3.5 7.7 12 3Z"/><path d="m3.5 12.2 8.5 4.8 8.5-4.8"/><path d="m3.5 16.6 8.5 4.8 8.5-4.8"/>'),
     tree: svg('<path d="M12 4.5v6"/><path d="M9 7.5h6"/><path d="M9 17h6"/><path d="M4 12.5h16" opacity=".35"/>'),
     route: svg('<circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="5.5" r="2.5"/><path d="M8 18.5h5.5a4 4 0 0 0 4-4V8"/>'),
+    branch: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M15.5 8.5H11a5 5 0 0 0-5 5"/>'),
+    refresh: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>'),
     sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/>'),
     moon: svg('<path d="M20 12.5A8.5 8.5 0 1 1 11.5 4a6.7 6.7 0 0 0 8.5 8.5Z"/>'),
     unpair: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>')
@@ -500,7 +612,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     };
   }
 
-  // ---- board ---------------------------------------------------------------
+  // ---- board (mobile) ------------------------------------------------------
   function renderBoard(){
     clearTimers();
     clearShell();
@@ -525,7 +637,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
             (act ? '<span class="badge live">' + esc(r.name || "route") + " " + (r.current + 1) + "/" + r.steps.length + (r.status === "waiting_human" ? " \\u00b7 paused" : "") + "</span>" : "") +
             '</div>' +
             '<div class="row2">baton: ' + esc(p.holder || "\\u2014") +
-            (p.costUsd > 0 ? " &middot; $" + (p.costUsd >= 0.01 ? p.costUsd.toFixed(2) : p.costUsd.toFixed(4)) : "") +
+            (p.costUsd > 0 ? " &middot; " + money(p.costUsd) : "") +
             (p.needsInput ? ' &middot; <span style="color:var(--warn)">needs input</span>' : "") + "</div></div>";
         }).join("");
         Array.prototype.forEach.call(el.querySelectorAll(".card"), function(card){
@@ -537,7 +649,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     state.timers.push(setInterval(refresh, 5000));
   }
 
-  // ---- thread --------------------------------------------------------------
+  // ---- event rendering -----------------------------------------------------
   function lineFor(e){
     var p = e.payload || {};
     if (e.kind === "message") {
@@ -579,27 +691,98 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     return "";
   }
 
-  function renderThread(pid, mount){
+  // ---- diff parsing (changes pane + rail) ---------------------------------
+  // Loom's own state dir is workspace noise, not the user's change set.
+  function isLoomInternal(path){ return String(path || "").indexOf(".loom/") === 0; }
+  function visibleFiles(t){ return (t && t.files ? t.files : []).filter(function(f){ return !isLoomInternal(f.path); }); }
+  function splitPatch(patch){
+    var parts = [];
+    var cur = null;
+    String(patch || "").split("\\n").forEach(function(line){
+      var m = line.match(/^diff --git a\\/(.+) b\\/(.+)$/);
+      if (m) { cur = { path: m[2], lines: [], add: 0, del: 0 }; parts.push(cur); return; }
+      if (!cur) { cur = { path: "", lines: [], add: 0, del: 0 }; parts.push(cur); }
+      cur.lines.push(line);
+      if (line.charAt(0) === "+" && line.slice(0, 3) !== "+++") cur.add++;
+      if (line.charAt(0) === "-" && line.slice(0, 3) !== "---") cur.del++;
+    });
+    return parts.filter(function(f){ return f.path || f.lines.join("").trim(); });
+  }
+  function diffLineClass(line){
+    if (line.slice(0, 3) === "+++" || line.slice(0, 3) === "---" || line.slice(0, 5) === "index" || line.slice(0, 3) === "new" || line.slice(0, 7) === "deleted") return "meta";
+    if (line.charAt(0) === "+") return "add";
+    if (line.charAt(0) === "-") return "del";
+    if (line.slice(0, 2) === "@@") return "hunk";
+    return "";
+  }
+  function renderDiffFiles(tree){
+    var files = splitPatch(tree.patch).filter(function(f){ return !isLoomInternal(f.path); });
+    files.forEach(function(f){
+      f.lines = f.lines.filter(function(l){ return !/^\\?\\? new file: \\.loom\\//.test(l); });
+    });
+    files = files.filter(function(f){ return f.path || f.lines.join("").trim(); });
+    if (!files.length) return '<div class="sys">working tree is clean</div>';
+    return files.map(function(f, i){
+      return '<div class="dfile" id="df-' + i + '">' +
+        '<div class="dfh">' + ICONS.tree + '<span class="p">' + esc(f.path || "patch") + "</span>" +
+        '<span class="cadd">+' + f.add + "</span><span class=\\"cdel\\">\\u2212" + f.del + "</span></div>" +
+        '<div class="dcode">' + f.lines.map(function(line){
+          var c = diffLineClass(line);
+          return '<div class="dl' + (c ? " " + c : "") + '">' + (esc(line) || " ") + "</div>";
+        }).join("") + "</div></div>";
+    }).join("");
+  }
+
+  // ---- project view (mobile: sheets · desktop: Orca workspace tabs) -------
+  function renderProject(pid, mount, desktop){
     mount = mount || root;
     clearTimers();
     state.pid = pid; state.lastId = 0; state.selected = null;
-    mount.innerHTML =
-      '<div class="panel">' +
-      "<header>" + (isDesktop() ? "" : '<button id="back" class="iconbtn" title="back">' + ICONS.back + "</button>") +
-      '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
-      '<span class="spacer"></span>' +
-      (isDesktop() ? THEME_BTN : "") +
-      '<button id="brainbtn" class="iconbtn" title="unified memory">' + ICONS.memory + "</button>" +
-      '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
-      '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>" +
-      '<button id="stop" class="iconbtn" title="interrupt">' + ICONS.stop + "</button></header>" +
-      '<div class="chips" id="chips"></div>' +
-      '<div class="scroll"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
-      '<div class="composer"><form class="inner" id="cform">' +
+    state.tab = "thread"; state.tree = null; state.lastQuestion = null;
+
+    var headerActions =
+      (desktop ? THEME_BTN : "") +
+      (desktop ? "" :
+        '<button id="brainbtn" class="iconbtn" title="unified memory">' + ICONS.memory + "</button>" +
+        '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
+        '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>") +
+      '<button id="stop" class="iconbtn" title="interrupt">' + ICONS.stop + "</button>";
+
+    var composerHtml =
+      '<div class="composer" id="composerwrap"><form class="inner" id="cform">' +
       '<input id="box" placeholder="Message&hellip;" autocomplete="off">' +
       '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button></form>" +
-      '<div class="hint" id="hint"></div></div>' +
-      "</div>";
+      '<div class="hint" id="hint"></div></div>';
+
+    if (desktop) {
+      mount.innerHTML =
+        '<div class="panel">' +
+        "<header>" +
+        '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
+        '<span class="spacer"></span>' + headerActions + "</header>" +
+        '<div class="tabstrip" id="tabstrip">' +
+        '<button class="tab active" data-tab="thread">' + ICONS.thread + "Thread</button>" +
+        '<button class="tab" data-tab="changes">' + ICONS.tree + 'Changes<span class="tbadge" id="tb-changes" style="display:none"></span></button>' +
+        '<button class="tab" data-tab="brain">' + ICONS.memory + "Brain</button>" +
+        '<button class="tab" data-tab="routes">' + ICONS.route + "Routes</button>" +
+        "</div>" +
+        '<div class="pane scroll" id="pane-thread"><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
+        '<div class="pane scroll" id="pane-changes" style="display:none">' + LOADER + "</div>" +
+        '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
+        '<div class="pane scroll" id="pane-routes" style="display:none"></div>' +
+        composerHtml +
+        "</div>";
+    } else {
+      mount.innerHTML =
+        '<div class="panel">' +
+        "<header>" + '<button id="back" class="iconbtn" title="back">' + ICONS.back + "</button>" +
+        '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
+        '<span class="spacer"></span>' + headerActions + "</header>" +
+        '<div class="chips" id="chips"></div>' +
+        '<div class="scroll" id="pane-thread"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
+        composerHtml +
+        "</div>";
+    }
     bindTheme();
     var backBtn = document.getElementById("back");
     if (backBtn) backBtn.onclick = function(){ location.hash = ""; };
@@ -609,17 +792,62 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         .catch(function(err){ toast(err.message); });
     };
 
-    var brainOpen = false;
-    document.getElementById("brainbtn").onclick = function(){
-      brainOpen = !brainOpen; treeOpen = false;
-      var el = document.getElementById("routesheet");
-      if (!brainOpen) { el.innerHTML = ""; return; }
-      el.innerHTML = '<div class="sheet"><label>unified memory</label>' + LOADER + "</div>";
+    // ---- desktop tabs ------------------------------------------------------
+    function showTab(name){
+      state.tab = name;
+      ["thread", "changes", "brain", "routes"].forEach(function(t){
+        var p = document.getElementById("pane-" + t);
+        if (p) p.style.display = t === name ? "" : "none";
+      });
+      var strip = document.getElementById("tabstrip");
+      if (strip) Array.prototype.forEach.call(strip.querySelectorAll(".tab"), function(tb){
+        tb.classList.toggle("active", tb.getAttribute("data-tab") === name);
+      });
+      var cw = document.getElementById("composerwrap");
+      if (cw) cw.style.display = name === "thread" ? "" : "none";
+      if (name === "changes") refreshTree(true);
+      if (name === "brain") refreshBrain();
+      if (name === "routes") drawRoutesPane();
+      if (name === "thread") {
+        var sc = document.getElementById("pane-thread");
+        if (sc) sc.scrollTop = sc.scrollHeight;
+      }
+    }
+    if (desktop) {
+      Array.prototype.forEach.call(document.querySelectorAll("#tabstrip .tab"), function(tb){
+        tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
+      });
+    }
+
+    // ---- working tree (changes pane + right rail) --------------------------
+    function refreshTree(force){
+      api("/api/projects/" + pid + "/tree").then(function(j){
+        state.tree = j.tree || {};
+        drawChanges();
+        drawRail();
+      }).catch(function(err){ if (force) toast(err.message); });
+    }
+    function drawChanges(){
+      var el = document.getElementById("pane-changes"); if (!el) return;
+      var t = state.tree;
+      if (!t) { el.innerHTML = LOADER; return; }
+      if (!t.git) { el.innerHTML = '<div class="diffwrap"><div class="sys">not a git repository</div></div>'; return; }
+      var files = visibleFiles(t);
+      var tb = document.getElementById("tb-changes");
+      if (tb) { tb.textContent = String(files.length); tb.style.display = files.length ? "" : "none"; }
+      el.innerHTML = '<div class="diffwrap">' +
+        '<div class="dhead">' + ICONS.branch + '<span class="branch">' + esc(t.branch || "") + "</span>" +
+        "<span>" + files.length + " changed file" + (files.length === 1 ? "" : "s") + "</span></div>" +
+        renderDiffFiles(t) + "</div>";
+    }
+
+    // ---- brain pane ---------------------------------------------------------
+    function refreshBrain(){
+      var el = document.getElementById("pane-brain"); if (!el) return;
+      el.innerHTML = '<div class="pane-inner">' + LOADER + "</div>";
       api("/api/projects/" + pid + "/memory").then(function(j){
-        if (!brainOpen) return;
+        el = document.getElementById("pane-brain"); if (!el) return;
         var m = j.memory || {};
-        var head = "<label>one brain &middot; " + (m.sources || []).length +
-          " ADE source(s) &middot; " + (m.decisions || []).length + " decision(s)</label>";
         var src = (m.sources || []).map(function(s){
           return '<div class="tool">' + esc(s.agentId) + " \\u2190 " + esc(s.file) + "</div>";
         }).join("");
@@ -628,50 +856,23 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
           var w = line.charAt(0) === "#" ? "600" : "400";
           return '<div style="color:' + c + ";font-weight:" + w + ';white-space:pre-wrap;word-break:break-word;font-size:12px;font-family:var(--font-mono)">' + (line || " ") + "</div>";
         }).join("");
-        el.innerHTML = '<div class="sheet">' + head + src +
-          '<div class="scrollable" style="max-height:46vh;overflow:auto;border-top:1px solid var(--border);padding-top:8px">' + body + "</div>" +
-          '<button class="btn primary" id="reimport">re-import ADE memory</button></div>';
+        el.innerHTML = '<div class="pane-inner">' +
+          '<span class="sub">one brain &middot; ' + (m.sources || []).length + " ADE source(s) &middot; " +
+          (m.decisions || []).length + " decision(s)</span>" + src +
+          '<div style="border-top:1px solid var(--border);padding-top:10px">' + body + "</div>" +
+          '<div><button class="btn primary sm" id="reimport">re-import ADE memory</button></div></div>';
         document.getElementById("reimport").onclick = function(){
           api("/api/projects/" + pid + "/memory/import", { method: "POST", body: "{}" })
-            .then(function(r){ toast(r.imported ? "imported " + r.imported + " source(s)" : "brain already current"); brainOpen=false; document.getElementById("brainbtn").click(); })
+            .then(function(r){ toast(r.imported ? "imported " + r.imported + " source(s)" : "brain already current"); refreshBrain(); })
             .catch(function(err){ toast(err.message); });
         };
       }).catch(function(err){ toast(err.message); });
-    };
+    }
 
-    var treeOpen = false;
-    document.getElementById("treebtn").onclick = function(){
-      treeOpen = !treeOpen; brainOpen = false;
-      var el = document.getElementById("routesheet");
-      if (!treeOpen) { el.innerHTML = ""; return; }
-      el.innerHTML = '<div class="sheet"><label>working tree</label>' + LOADER + "</div>";
-      api("/api/projects/" + pid + "/tree").then(function(j){
-        if (!treeOpen) return;
-        var t = j.tree || {};
-        if (!t.git) { el.innerHTML = '<div class="sheet"><label>working tree</label><div class="sys">not a git repository</div></div>'; return; }
-        var head = "<label>working tree &middot; " + esc(t.branch || "") + " &middot; " +
-          (t.files || []).length + " changed</label>";
-        var list = (t.files || []).map(function(f){
-          return '<div class="tool">' + esc(f.status) + " " + esc(f.path) + "</div>";
-        }).join("");
-        var patch = (t.patch || "").split("\\n").map(function(line){
-          var c = line.charAt(0) === "+" ? "var(--ok)" : line.charAt(0) === "-" ? "var(--err)" : "var(--muted-foreground)";
-          return '<div style="color:' + c + ';white-space:pre-wrap;word-break:break-all">' + esc(line) + "</div>";
-        }).join("");
-        el.innerHTML = '<div class="sheet">' + head + list +
-          '<div class="scrollable" style="font-family:var(--font-mono);font-size:11px;max-height:40vh;overflow:auto;border-top:1px solid var(--border);padding-top:8px">' +
-          (patch || '<div class="sys">clean</div>') + "</div></div>";
-      }).catch(function(err){ toast(err.message); });
-    };
-
-    var sheetOpen = false;
-    document.getElementById("routebtn").onclick = function(){ sheetOpen = !sheetOpen; treeOpen = false; drawSheet(); };
-    function drawSheet(){
-      var el = document.getElementById("routesheet"); if (!el) return;
-      if (!sheetOpen) { el.innerHTML = ""; return; }
+    // ---- routes pane (desktop) / sheet (mobile) -----------------------------
+    function routeFormHtml(){
       var names = (state.project && state.project.routeNames) || ["auto"];
-      el.innerHTML = '<div class="sheet">' +
-        "<label>pipeline</label>" +
+      return "<label>pipeline</label>" +
         '<select id="rsel">' +
         names.map(function(n){
           return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>";
@@ -679,25 +880,159 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<option value="__custom">custom steps&hellip;</option></select>' +
         '<input id="rsteps" placeholder="steps e.g. planner,executor" style="display:none">' +
         '<input id="rtask" placeholder="what should they do?">' +
-        '<div class="row"><button class="btn primary" id="rgo">Start route</button></div></div>';
-      document.getElementById("rsel").onchange = function(){
+        '<div class="row"><button class="btn primary" id="rgo">Start route</button></div>';
+    }
+    function bindRouteForm(after){
+      var sel = document.getElementById("rsel"); if (!sel) return;
+      sel.onchange = function(){
         document.getElementById("rsteps").style.display = this.value === "__custom" ? "" : "none";
       };
       document.getElementById("rgo").onclick = function(){
-        var sel = document.getElementById("rsel").value;
         var task = (document.getElementById("rtask").value || "").trim();
         if (!task) return toast("describe the task first");
-        var spec = sel === "__custom" ? (document.getElementById("rsteps").value || "").trim() : sel;
+        var spec = sel.value === "__custom" ? (document.getElementById("rsteps").value || "").trim() : sel.value;
         if (!spec) return toast("give steps like planner,executor");
         api("/api/projects/" + pid + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: spec }) })
-          .then(function(){ sheetOpen = false; drawSheet(); refresh(); toast("route started"); })
+          .then(function(){ refresh(); toast("route started"); if (after) after(); })
+          .catch(function(err){ toast(err.message); });
+      };
+    }
+    function drawRoutesPane(){
+      var el = document.getElementById("pane-routes"); if (!el) return;
+      var p = state.project;
+      var r = p && p.route;
+      var live = r && (r.status === "running" || r.status === "waiting_human");
+      el.innerHTML = '<div class="pane-inner">' +
+        (live
+          ? '<div class="railcard threadc" style="margin:0"><div class="rt">' + esc(r.name || "route") + " \\u00b7 " +
+            (r.mode === "dynamic" ? "hop " + (r.current + 1) : "step " + (r.current + 1) + "/" + r.steps.length) +
+            '</div><div class="rm">' + esc(r.steps[r.current] || "") +
+            (r.status === "waiting_human" ? " \\u2014 \\u23f8 " + esc(r.pendingQuestion || "waiting for you") : "") + "</div>" +
+            '<div style="margin-top:8px"><button class="btn xs outline" id="rabort2">abort route</button></div></div>'
+          : "") +
+        '<div class="formcol">' + routeFormHtml() + "</div></div>";
+      bindRouteForm(function(){ drawRoutesPane(); });
+      var ab = document.getElementById("rabort2");
+      if (ab) ab.onclick = function(){
+        api("/api/projects/" + pid + "/route", { method: "DELETE" })
+          .then(function(){ toast("route aborted"); refresh(); drawRoutesPane(); })
           .catch(function(err){ toast(err.message); });
       };
     }
 
+    // ---- mobile sheets -------------------------------------------------------
+    var brainOpen = false, treeOpen = false, sheetOpen = false;
+    if (!desktop) {
+      document.getElementById("brainbtn").onclick = function(){
+        brainOpen = !brainOpen; treeOpen = false;
+        var el = document.getElementById("routesheet");
+        if (!brainOpen) { el.innerHTML = ""; return; }
+        el.innerHTML = '<div class="sheet"><label>unified memory</label>' + LOADER + "</div>";
+        api("/api/projects/" + pid + "/memory").then(function(j){
+          if (!brainOpen) return;
+          var m = j.memory || {};
+          var head = "<label>one brain &middot; " + (m.sources || []).length +
+            " ADE source(s) &middot; " + (m.decisions || []).length + " decision(s)</label>";
+          var src = (m.sources || []).map(function(s){
+            return '<div class="tool">' + esc(s.agentId) + " \\u2190 " + esc(s.file) + "</div>";
+          }).join("");
+          var body = esc(m.document || "").split("\\n").map(function(line){
+            var c = line.charAt(0) === "#" ? "var(--foreground)" : "var(--muted-foreground)";
+            return '<div style="color:' + c + ';white-space:pre-wrap;word-break:break-word;font-size:12px;font-family:var(--font-mono)">' + (line || " ") + "</div>";
+          }).join("");
+          el.innerHTML = '<div class="sheet">' + head + src +
+            '<div class="scrollable" style="max-height:46vh;overflow:auto;border-top:1px solid var(--border);padding-top:8px">' + body + "</div>" +
+            '<button class="btn primary" id="reimport">re-import ADE memory</button></div>';
+          document.getElementById("reimport").onclick = function(){
+            api("/api/projects/" + pid + "/memory/import", { method: "POST", body: "{}" })
+              .then(function(r){ toast(r.imported ? "imported " + r.imported + " source(s)" : "brain already current"); brainOpen = false; document.getElementById("brainbtn").click(); })
+              .catch(function(err){ toast(err.message); });
+          };
+        }).catch(function(err){ toast(err.message); });
+      };
+      document.getElementById("treebtn").onclick = function(){
+        treeOpen = !treeOpen; brainOpen = false;
+        var el = document.getElementById("routesheet");
+        if (!treeOpen) { el.innerHTML = ""; return; }
+        el.innerHTML = '<div class="sheet"><label>working tree</label>' + LOADER + "</div>";
+        api("/api/projects/" + pid + "/tree").then(function(j){
+          if (!treeOpen) return;
+          var t = j.tree || {};
+          if (!t.git) { el.innerHTML = '<div class="sheet"><label>working tree</label><div class="sys">not a git repository</div></div>'; return; }
+          var head = "<label>working tree &middot; " + esc(t.branch || "") + " &middot; " +
+            (t.files || []).length + " changed</label>";
+          var list = (t.files || []).map(function(f){
+            return '<div class="tool">' + esc(f.status) + " " + esc(f.path) + "</div>";
+          }).join("");
+          var patch = (t.patch || "").split("\\n").map(function(line){
+            var c = line.charAt(0) === "+" ? "var(--git-add)" : line.charAt(0) === "-" ? "var(--git-del)" : "var(--muted-foreground)";
+            return '<div style="color:' + c + ';white-space:pre-wrap;word-break:break-all">' + esc(line) + "</div>";
+          }).join("");
+          el.innerHTML = '<div class="sheet">' + head + list +
+            '<div class="scrollable" style="font-family:var(--font-mono);font-size:11px;max-height:40vh;overflow:auto;border-top:1px solid var(--border);padding-top:8px">' +
+            (patch || '<div class="sys">clean</div>') + "</div></div>";
+        }).catch(function(err){ toast(err.message); });
+      };
+      document.getElementById("routebtn").onclick = function(){
+        sheetOpen = !sheetOpen; treeOpen = false; brainOpen = false;
+        var el = document.getElementById("routesheet"); if (!el) return;
+        if (!sheetOpen) { el.innerHTML = ""; return; }
+        el.innerHTML = '<div class="sheet">' + routeFormHtml() + "</div>";
+        bindRouteForm(function(){ sheetOpen = false; document.getElementById("routesheet").innerHTML = ""; });
+      };
+    }
+
+    // ---- right rail (source control) ----------------------------------------
+    function drawRail(){
+      var el = document.getElementById("railbody"); if (!el) return;
+      var p = state.project;
+      var t = state.tree;
+      var html = "";
+      var r = p && p.route;
+      var live = r && (r.status === "running" || r.status === "waiting_human");
+      if (p && p.needsInput) {
+        html += '<div class="railcard warnc"><div class="rt"><span class="dot hot"></span>needs input</div>' +
+          '<div class="rm">' + esc(state.lastQuestion || (r && r.pendingQuestion) || "an agent is waiting for you \\u2014 reply in the thread") + "</div></div>";
+      }
+      if (live) {
+        html += '<div class="railcard threadc"><div class="rt">' + esc(r.name || "route") + " \\u00b7 " +
+          (r.mode === "dynamic" ? "hop " + (r.current + 1) : "step " + (r.current + 1) + "/" + r.steps.length) +
+          '</div><div class="rm">\\u25b8 ' + esc(r.steps[r.current] || "") + "</div></div>";
+      }
+      html += '<div class="rsec">Working tree</div>';
+      if (!t) html += '<div class="rempty">loading\\u2026</div>';
+      else if (!t.git) html += '<div class="rempty">not a git repository</div>';
+      else {
+        html += '<div class="frow" style="cursor:default"><span style="display:inline-flex;color:var(--muted-foreground)">' + ICONS.branch + "</span>" +
+          '<span class="fp" style="color:var(--foreground);font-weight:600">' + esc(t.branch || "") + "</span></div>";
+        var files = visibleFiles(t);
+        var diffIdx = {};
+        splitPatch(t.patch).filter(function(f){ return !isLoomInternal(f.path); })
+          .forEach(function(f, i){ diffIdx[f.path] = i; });
+        if (!files.length) html += '<div class="rempty">clean \\u2014 nothing to stage</div>';
+        else files.forEach(function(f){
+          var st = String(f.status || "").trim();
+          var cls = st.indexOf("D") >= 0 ? "del" : (st.indexOf("M") >= 0 ? "mod" : "add");
+          var di = diffIdx[f.path];
+          html += '<div class="frow"' + (di !== undefined ? ' data-df="' + di + '"' : "") + '><span class="fst ' + cls + '">' + esc(st) + "</span>" +
+            '<span class="fp">' + esc(f.path) + "</span></div>";
+        });
+      }
+      el.innerHTML = html;
+      Array.prototype.forEach.call(el.querySelectorAll(".frow[data-df]"), function(row){
+        row.onclick = function(){
+          showTab("changes");
+          var target = document.getElementById("df-" + row.getAttribute("data-df"));
+          if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
+        };
+      });
+    }
+
+    // ---- status (title, chips, routebar, rail, statusbar) --------------------
     function drawChips(){
       var p = state.project; if (!p) return;
-      var chips = document.getElementById("chips"); if (!chips) return;
+      var chips = document.getElementById("chips");
+      if (!chips) return;
       var adapters = p.agents.filter(function(a){ return a.tier === "adapter"; });
       if (state.selected === null) state.selected = p.holder || (adapters[0] && adapters[0].id) || null;
       chips.innerHTML = adapters.map(function(a){
@@ -707,45 +1042,51 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
           (a.busy ? ' <span class="busy"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(chips.querySelectorAll(".chip"), function(chip){
-        chip.onclick = function(){ state.selected = chip.getAttribute("data-id"); drawChips(); };
+        chip.onclick = function(){ state.selected = chip.getAttribute("data-id"); drawStatus(); };
       });
+    }
+    function drawStatus(){
+      var p = state.project; if (!p) return;
+      var adapters = p.agents.filter(function(a){ return a.tier === "adapter"; });
+      if (state.selected === null) state.selected = p.holder || (adapters[0] && adapters[0].id) || null;
+      var nm = document.getElementById("pname"); if (nm) nm.textContent = p.name;
+      var stat = document.getElementById("pstat");
+      if (stat) stat.textContent = p.needsInput ? "needs input" : p.costUsd > 0 ? money(p.costUsd) : "";
       var hint = document.getElementById("hint");
-      hint.textContent = state.selected && state.selected !== p.holder
+      if (hint) hint.textContent = state.selected && state.selected !== p.holder
         ? "send will shift the baton to " + state.selected
-        : "tap a chip to shift agents \\u00b7 baton: " + (p.holder || "\\u2014");
+        : (desktop ? "select an agent in the sidebar \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
+      if (!desktop) drawChips();
       var bar = document.getElementById("routebar");
       var r = p.route;
-      if (r && (r.status === "running" || r.status === "waiting_human")) {
-        var pos = r.mode === "dynamic"
-          ? "hop " + (r.current + 1) + (r.maxHops ? " of \\u2264" + r.maxHops : "")
-          : "step " + (r.current + 1) + "/" + r.steps.length;
-        bar.innerHTML = '<div class="routebar"><button class="abort btn xs outline" id="rabort">abort</button>\\u25b8 ' +
-          esc(r.name || "route") + " " + pos + " &middot; " + esc(r.steps[r.current]) +
-          (r.mode === "dynamic" && r.reason ? '<span style="opacity:.7"> &mdash; ' + esc(r.reason) + "</span>" : "") +
-          (r.status === "waiting_human" ? '<div class="q">\\u23f8 ' + esc(r.pendingQuestion || "waiting for you") + " \\u2014 reply below to resume</div>" : "") + "</div>";
-        var ab = document.getElementById("rabort");
-        if (ab) ab.onclick = function(){
-          api("/api/projects/" + pid + "/route", { method: "DELETE" })
-            .then(function(){ toast("route aborted"); refresh(); })
-            .catch(function(err){ toast(err.message); });
-        };
-      } else { bar.innerHTML = ""; }
-      var stat = document.getElementById("pstat");
-      stat.textContent = p.needsInput
-        ? "needs input"
-        : p.costUsd > 0
-          ? "$" + (p.costUsd >= 0.01 ? p.costUsd.toFixed(2) : p.costUsd.toFixed(4))
-          : "";
+      if (bar) {
+        if (r && (r.status === "running" || r.status === "waiting_human")) {
+          var pos = r.mode === "dynamic"
+            ? "hop " + (r.current + 1) + (r.maxHops ? " of \\u2264" + r.maxHops : "")
+            : "step " + (r.current + 1) + "/" + r.steps.length;
+          bar.innerHTML = '<div class="routebar"><button class="abort btn xs outline" id="rabort">abort</button>\\u25b8 ' +
+            esc(r.name || "route") + " " + pos + " &middot; " + esc(r.steps[r.current]) +
+            (r.mode === "dynamic" && r.reason ? '<span style="opacity:.7"> &mdash; ' + esc(r.reason) + "</span>" : "") +
+            (r.status === "waiting_human" ? '<div class="q">\\u23f8 ' + esc(r.pendingQuestion || "waiting for you") + " \\u2014 reply below to resume</div>" : "") + "</div>";
+          var ab = document.getElementById("rabort");
+          if (ab) ab.onclick = function(){
+            api("/api/projects/" + pid + "/route", { method: "DELETE" })
+              .then(function(){ toast("route aborted"); refresh(); })
+              .catch(function(err){ toast(err.message); });
+          };
+        } else { bar.innerHTML = ""; }
+      }
+      if (desktop) { drawRail(); drawStatusbar(); }
     }
 
     function refresh(){
       api("/api/projects/" + pid).then(function(j){
         state.project = j.project;
-        var nm = document.getElementById("pname"); if (nm) nm.textContent = j.project.name;
-        drawChips();
+        drawStatus();
       }).catch(function(err){ toast(err.message); });
     }
 
+    // ---- feed + live websocket ----------------------------------------------
     function append(events){
       var feed = document.getElementById("feed"); if (!feed) return;
       // only the loading placeholder gets cleared — never real history
@@ -754,6 +1095,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       events.forEach(function(e){
         if (e.id <= state.lastId) return;
         state.lastId = e.id;
+        if (e.kind === "needs_input" && e.payload) state.lastQuestion = e.payload.question || null;
         html += lineFor(e);
       });
       if (html) { feed.insertAdjacentHTML("beforeend", html);
@@ -774,11 +1116,16 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       .catch(function(err){ toast(err.message); flushPending(); });
     refresh();
     state.timers.push(setInterval(refresh, 4000));
+    if (desktop) {
+      refreshTree(false);
+      state.timers.push(setInterval(function(){ refreshTree(false); }, 5000));
+    }
 
     function connect(){
       var proto = location.protocol === "https:" ? "wss://" : "ws://";
       var ws = new WebSocket(proto + location.host + "/ws?token=" + encodeURIComponent(state.token) + "&project=" + encodeURIComponent(pid));
       state.ws = ws;
+      ws.onopen = function(){ state.wsLive = true; drawStatusbar(); };
       ws.onmessage = function(ev){
         try {
           var frame = JSON.parse(ev.data);
@@ -789,6 +1136,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         } catch (e) {}
       };
       ws.onclose = function(){
+        state.wsLive = false; drawStatusbar();
         if (state.pid === pid) state.timers.push(setTimeout(connect, 3000));
       };
     }
@@ -813,12 +1161,31 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     });
   }
 
+  // ---- status bar (desktop shell) ------------------------------------------
+  function drawStatusbar(){
+    var el = document.getElementById("statusbar"); if (!el) return;
+    var p = state.project;
+    var busy = 0, total = 0;
+    (state.projects || []).forEach(function(pr){
+      total += pr.costUsd > 0 ? pr.costUsd : 0;
+      (pr.agents || []).forEach(function(a){ if (a.busy) busy++; });
+    });
+    el.innerHTML =
+      '<span class="sit"><span class="sdot' + (state.wsLive ? "" : " off") + '"></span>' + (state.wsLive ? "live" : "offline") + "</span>" +
+      '<span class="sit">' + esc(location.host) + "</span>" +
+      (p ? '<span class="sit">baton ' + esc(p.holder || "\\u2014") + "</span>" : "") +
+      '<span class="spacer"></span>' +
+      (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
+      '<span class="sit">' + (state.projects || []).length + " project" + ((state.projects || []).length === 1 ? "" : "s") + "</span>" +
+      (total > 0 ? '<span class="sit">\\u03a3 ' + money(total) + "</span>" : "");
+  }
+
   // ---- router ----------------------------------------------------------
   var mq = window.matchMedia("(min-width:900px)");
   function isDesktop(){ return mq.matches; }
   function clearShell(){ if (state.shellTimer) { clearInterval(state.shellTimer); state.shellTimer = null; } }
 
-  // Desktop workspace: projects rail + live conversation, side by side.
+  // Desktop workspace: projects/agents rail + tabbed pane + source-control rail.
   function renderShell(){
     clearTimers();
     clearShell();
@@ -833,51 +1200,83 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<div class="slist" id="slist">' + LOADER + "</div>" +
       "</aside>" +
       '<section class="dmain" id="dmain"></section>' +
+      '<aside class="rail"><div class="rhead">Source control' +
+        '<span class="spacer"></span><button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button></div>" +
+        '<div class="rbody" id="railbody"><div class="rempty">select a project</div></div></aside>' +
+      '<div class="statusbar" id="statusbar"></div>' +
       "</div>";
     document.getElementById("unpair").onclick = logout;
+    document.getElementById("railrefresh").onclick = function(){
+      api("/api/projects/" + (cur || "") + "/tree").then(function(j){
+        state.tree = j.tree || {}; toast("tree refreshed"); refresh();
+      }).catch(function(err){ toast(err.message); });
+    };
     var dmain = document.getElementById("dmain");
     function drawEmpty(){
       dmain.innerHTML = '<div class="dempty"><div class="biglogo">loom</div><div class="hair"></div>' +
-        "<div>select a project to open its thread</div></div>";
+        "<div>select a project to open its workspace</div></div>";
     }
-    function markSel(){
-      Array.prototype.forEach.call(document.querySelectorAll("#slist .srow"), function(row){
-        var sel = row.getAttribute("data-id") === cur;
-        row.className = "srow" + (sel ? " sel" : "");
-        if (sel) row.setAttribute("data-current", "true"); else row.removeAttribute("data-current");
+    function drawList(){
+      var el = document.getElementById("slist"); if (!el) return;
+      if (!state.projects.length) {
+        el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span></div>';
+        return;
+      }
+      el.innerHTML = state.projects.map(function(p){
+        var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
+        var adapters = (p.agents || []).filter(function(a){ return a.tier === "adapter"; });
+        var sel = p.id === cur;
+        var rows = '<div class="srow' + (sel ? " sel" : "") + '" data-id="' + esc(p.id) + '">' +
+          '<div class="n"><span class="dot' + (p.needsInput ? " hot" : "") + '"></span><span class="nm">' + esc(p.name) + "</span>" +
+          (act ? '<span class="badge live" style="margin-left:auto">' + (r.current + 1) + "/" + r.steps.length + "</span>" : '<span class="cnt">' + adapters.length + "</span>") + "</div>" +
+          '<div class="m">baton ' + esc(p.holder || "\\u2014") +
+          (p.costUsd > 0 ? " \\u00b7 " + money(p.costUsd) : "") + "</div></div>";
+        if (sel) {
+          rows += adapters.map(function(a){
+            var curA = a.id === state.selected;
+            return '<div class="arow' + (curA ? " cur" : "") + '" data-p="' + esc(p.id) + '" data-a="' + esc(a.id) + '"' + (curA ? ' data-current="true"' : "") + ">" +
+              '<span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
+              '<span class="anm">' + esc(a.id) + (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") + "</span>" +
+              '<span class="role">' + esc(a.role) + "</span></div>";
+          }).join("");
+        }
+        return '<div class="sgroup">' + rows + "</div>";
+      }).join("");
+      Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
+        row.onclick = function(){ select(row.getAttribute("data-id")); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll(".arow"), function(row){
+        row.onclick = function(){
+          var pidA = row.getAttribute("data-p"), aid = row.getAttribute("data-a");
+          if (pidA !== cur) { select(pidA); state.selected = aid; }
+          else { state.selected = aid; }
+          drawList();
+          var hint = document.getElementById("hint");
+          var holder = state.project && state.project.holder;
+          if (hint) hint.textContent = aid !== holder
+            ? "send will shift the baton to " + aid
+            : "baton already with " + aid;
+        };
       });
     }
     function select(pid){
       cur = pid;
       history.replaceState(null, "", "#p/" + pid);
-      renderThread(pid, dmain);
-      markSel();
+      renderProject(pid, dmain, true);
+      drawList();
     }
     function refresh(){
       api("/api/projects").then(function(j){
         state.projects = j.projects || [];
-        var el = document.getElementById("slist"); if (!el) return;
-        if (!state.projects.length) {
-          el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span></div>';
-          drawEmpty(); return;
-        }
-        el.innerHTML = state.projects.map(function(p){
-          var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
-          return '<div class="srow" data-id="' + esc(p.id) + '">' +
-            '<div class="n"><span class="dot' + (p.needsInput ? " hot" : "") + '"></span><span class="nm">' + esc(p.name) + "</span>" +
-            (act ? '<span class="badge live">' + (r.current + 1) + "/" + r.steps.length + "</span>" : "") + "</div>" +
-            '<div class="m">baton ' + esc(p.holder || "\\u2014") +
-            (p.costUsd > 0 ? " \\u00b7 $" + (p.costUsd >= 0.01 ? p.costUsd.toFixed(2) : p.costUsd.toFixed(4)) : "") + "</div></div>";
-        }).join("");
-        Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
-          row.onclick = function(){ select(row.getAttribute("data-id")); };
-        });
+        if (!state.projects.length) { drawList(); drawEmpty(); drawStatusbar(); return; }
         var exists = state.projects.some(function(p){ return p.id === cur; });
         if (!document.getElementById("feed")) select(cur && exists ? cur : state.projects[0].id);
-        else markSel();
+        else drawList();
+        drawStatusbar();
       }).catch(function(err){ toast(err.message); });
     }
     if (!cur) drawEmpty();
+    drawStatusbar();
     refresh();
     state.shellTimer = setInterval(refresh, 5000);
   }
@@ -887,7 +1286,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
-    if (m) return renderThread(m[1]);
+    if (m) return renderProject(m[1], root, false);
     renderBoard();
   }
   window.addEventListener("hashchange", function(){ if (!isDesktop()) route(); });
