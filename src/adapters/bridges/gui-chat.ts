@@ -4,39 +4,48 @@
  * Shared by the Antigravity and Kiro bridges, because the problem is identical:
  * an Electron app with a chat panel, no API, and a DOM we can reach.
  *
- * ## Why this refuses to guess
+ * The approach — and most of the hard-won detail — comes from two projects that
+ * do this for real every day: krishnakanthb13/antigravity_phone_chat for the
+ * shape of the chat, yazanbaker94/AntiGravity-AutoAccept for how to attach.
+ * Both MIT. Connect over CDP, find the composer inside the chat panel, type
+ * through the browser's own input pipeline, click the app's own submit button.
+ * Never touch the provider APIs, never lift a token: drive the app that's
+ * already signed in, the way a person would.
  *
- * Both apps are VS Code-family, and Monaco — the code editor holding YOUR
- * SOURCE FILE — is itself a `contenteditable`. A cheerful "find the editable
- * box" heuristic will eventually find that one, and then Loom types your prompt
- * into your code and presses Enter. There is no error message that makes up for
- * that.
+ * ## Why Input.insertText and not `el.textContent = …`
  *
- * So the search is deliberately narrow, and refuses when it isn't sure:
+ * Antigravity's composer is a Lexical editor; Kiro's is React. Both keep their
+ * own model of the text and only update it when the browser tells them about an
+ * edit. Assigning to the DOM changes what you see and nothing else — the app
+ * still believes the box is empty and submits nothing.
  *
- *   - anything inside .monaco-editor, .editor-instance or [role="code"] is
- *     never a candidate, full stop;
- *   - a candidate must look like a chat box — a placeholder or aria-label that
- *     says ask/message/chat/prompt/plan/type;
- *   - if nothing matches, or several do, it fails and tells you to name the
- *     selector yourself.
+ * CDP's `Input.insertText` is what's used, and the choice was measured rather
+ * than assumed. In a real Chromium:
  *
- * Refusing to send is a bad outcome. Sending into the wrong box is a worse one.
+ *   document.execCommand("insertText")  → fires `input` only
+ *   Input.insertText (CDP)              → fires `beforeinput` AND `input`
  *
- * ## What is and isn't verified
+ * `beforeinput` is the one an editor builds its model from, so execCommand is
+ * the worse tool despite being the obvious one — it fills the box while leaving
+ * the app convinced it's empty, which then looks like a send bug. It survives
+ * only as a fallback, after synthesising the events by hand.
  *
- * The mechanism — connect, find, focus, type, submit, read back — is tested
- * against a real Chromium page in test/gui-chat.test.ts.
+ * ## Why it refuses
  *
- * The selectors inside Antigravity and Kiro are NOT verified. Neither app will
- * show a composer until you sign in (Antigravity) or open the chat panel
- * (Kiro), so there was nothing to read them from. That's why discovery is a
- * heuristic with an override rather than a hardcoded string copied off a
- * screenshot: when it misses, `options.selectors.composer` is the fix, and the
- * error says so.
+ * Both apps are VS Code family, and Monaco — the editor holding YOUR SOURCE
+ * FILE — is a `contenteditable`. A driver that hunts the document for something
+ * editable will eventually find that one, type a prompt into your code and press
+ * Enter. No error message repairs that afterwards.
+ *
+ * So the composer is only ever looked for *inside* the chat panel
+ * (profiles.ts), never in the document at large; anything under `.monaco-editor`
+ * is excluded even then; and no match, or an ambiguous one, is a refusal that
+ * names the fix. Not sending is a bad outcome. Sending into the wrong box is a
+ * worse one.
  */
 
 import { CdpSession, cdpTargets, cdpUp, workbenchTarget } from "./cdp.js";
+import { CHATTY, FORBIDDEN_ANCESTORS, GENERIC, profileFor, type AppProfile } from "./profiles.js";
 
 export interface GuiChatSelectors {
   /** CSS selector for the chat input. Set this when discovery can't. */
@@ -46,109 +55,6 @@ export interface GuiChatSelectors {
   /** CSS selector for the transcript container, to read replies from. */
   transcript?: string;
 }
-
-/** Places a prompt must never be typed. */
-const FORBIDDEN_ANCESTORS = [".monaco-editor", ".editor-instance", '[role="code"]'];
-
-/** What a chat box tends to call itself. */
-const CHATTY = /ask|message|chat|prompt|plan|type .*here|what.*build|reply/i;
-
-/**
- * Find the composer, in the page.
- *
- * Returns a marker attribute rather than an element handle: the page is React
- * and re-renders between calls, so a handle goes stale while an attribute we
- * stamped ourselves survives.
- */
-const DISCOVER = (explicit: string | undefined, forbidden: string[], chatty: string): string => `
-(() => {
-  const MARK = "data-loom-composer";
-  const forbidden = ${JSON.stringify(forbidden)};
-  const chatty = new RegExp(${JSON.stringify(chatty)}, "i");
-  const visible = (el) => !!(el.offsetParent || el.getClientRects().length);
-  const inForbidden = (el) => forbidden.some((sel) => el.closest(sel));
-
-  const explicit = ${explicit ? JSON.stringify(explicit) : "null"};
-  if (explicit) {
-    const el = document.querySelector(explicit);
-    if (!el) return { ok: false, reason: "no element matches the selector you set: " + explicit };
-    if (inForbidden(el)) return { ok: false, reason: "that selector points inside the code editor" };
-    el.setAttribute(MARK, "1");
-    return { ok: true, how: "selector" };
-  }
-
-  const all = [...document.querySelectorAll('textarea, [contenteditable="true"], [contenteditable=""]')];
-  const candidates = all.filter((el) => visible(el) && !inForbidden(el));
-  if (!candidates.length) {
-    return {
-      ok: false,
-      reason: all.length
-        ? "the only editable areas are inside the code editor — is the chat panel open?"
-        : "no chat box on screen — sign in and open a chat",
-    };
-  }
-  const labelled = candidates.filter((el) => {
-    const hay = [
-      el.getAttribute("placeholder"),
-      el.getAttribute("data-placeholder"),
-      el.getAttribute("aria-label"),
-      el.getAttribute("title"),
-    ].filter(Boolean).join(" ");
-    return chatty.test(hay);
-  });
-  const pick = labelled.length === 1 ? labelled[0] : null;
-  if (!pick) {
-    return {
-      ok: false,
-      reason: labelled.length
-        ? "found " + labelled.length + " things that look like a chat box; name one with options.selectors.composer"
-        : "found " + candidates.length + " editable areas, none labelled like a chat box; name one with options.selectors.composer",
-    };
-  }
-  pick.setAttribute(MARK, "1");
-  return { ok: true, how: "heuristic" };
-})()`;
-
-/** Focus the marked composer and clear whatever was in it. */
-const FOCUS = `
-(() => {
-  const el = document.querySelector('[data-loom-composer]');
-  if (!el) return { ok: false, reason: "composer vanished" };
-  el.scrollIntoView({ block: "center" });
-  el.focus();
-  if (document.activeElement !== el && el.querySelector('[contenteditable]')) {
-    el.querySelector('[contenteditable]').focus();
-  }
-  // Clear via the app's own pipeline: select-all, and let insertText replace.
-  document.execCommand && document.execCommand("selectAll", false, undefined);
-  return { ok: true };
-})()`;
-
-const readTranscript = (selector: string | undefined): string => `
-(() => {
-  const sel = ${selector ? JSON.stringify(selector) : "null"};
-  const el = sel ? document.querySelector(sel) : null;
-  const root = el || document.body;
-  return (root.innerText || "").slice(-20000);
-})()`;
-
-const clickSend = (selector: string | undefined): string => `
-(() => {
-  const sel = ${selector ? JSON.stringify(selector) : "null"};
-  if (sel) {
-    const el = document.querySelector(sel);
-    if (!el) return { ok: false, reason: "no send button matches " + sel };
-    el.click();
-    return { ok: true };
-  }
-  const buttons = [...document.querySelectorAll('button, [role="button"]')].filter(
-    (b) => !!(b.offsetParent || b.getClientRects().length) && !b.disabled,
-  );
-  const send = buttons.find((b) => /^(send|submit)$/i.test((b.getAttribute("aria-label") || b.innerText || "").trim()));
-  if (!send) return { ok: false, reason: "no send button found" };
-  send.click();
-  return { ok: true };
-})()`;
 
 export interface GuiChatOptions {
   host?: string;
@@ -160,20 +66,253 @@ export interface GuiChatOptions {
   settleMs?: number;
 }
 
+const MARK = "data-loom-composer";
+
+/**
+ * Find the composer and stamp it.
+ *
+ * Returns a marker attribute rather than an element handle: the page is a live
+ * React/Lexical tree that re-renders between calls, so a handle goes stale while
+ * an attribute we wrote survives.
+ */
+function discoverExpr(p: AppProfile, explicit: string | undefined): string {
+  return `(() => {
+  const MARK = ${JSON.stringify(MARK)};
+  const forbidden = ${JSON.stringify(FORBIDDEN_ANCESTORS)};
+  const vis = (el) => !!(el.offsetParent || el.getClientRects().length);
+  const banned = (el) => forbidden.some((sel) => el.closest(sel));
+  document.querySelectorAll('[' + MARK + ']').forEach((el) => el.removeAttribute(MARK));
+
+  const explicit = ${explicit ? JSON.stringify(explicit) : "null"};
+  if (explicit) {
+    const el = document.querySelector(explicit);
+    if (!el) return { ok: false, reason: "nothing matches the selector you set: " + explicit };
+    if (banned(el)) return { ok: false, reason: "that selector points inside the code editor" };
+    el.setAttribute(MARK, "1");
+    return { ok: true, how: "your selector" };
+  }
+
+  // The composer is only ever looked for inside the chat panel. This is what
+  // keeps the source editor out of reach — it isn't in here.
+  const roots = ${JSON.stringify(p.chatRoots)};
+  let root = null;
+  for (const sel of roots) {
+    try { root = document.querySelector(sel); } catch { root = null; }
+    if (root) break;
+  }
+  if (!root) {
+    return { ok: false, reason: ${JSON.stringify(`no chat panel in ${p.name} — sign in, and open a chat`)} };
+  }
+
+  ${p.signedOut ? `
+  // A signed-out app is the cruellest failure here: the chat renders, the box
+  // takes text, and the send button is disabled forever. Say so plainly.
+  const panel = (root.innerText || "").replace(/\\s+/g, " ");
+  if (new RegExp(${JSON.stringify(p.signedOut.source)}, "i").test(panel)) {
+    return { ok: false, reason: ${JSON.stringify(`${p.name} is signed out — log in from its window, then try again`)} };
+  }` : ""}
+
+  const found = [...root.querySelectorAll(${JSON.stringify(p.composer)})].filter((el) => vis(el) && !banned(el));
+  if (!found.length) {
+    return { ok: false, reason: "the chat panel has no input in it — is a conversation open?" };
+  }
+
+  // Last visible wins: when a page has several, the live composer is the one at
+  // the bottom of the panel. (antigravity_phone_chat takes .at(-1) too.)
+  let pick = found.at(-1);
+
+  // Generic profile only: with no real chat panel to scope to, the box has to
+  // look like a chat box before we'll type in it.
+  const generic = ${JSON.stringify(p.chatRoots)}.length === 1 && ${JSON.stringify(p.chatRoots[0])} === "body";
+  if (generic) {
+    const chatty = new RegExp(${JSON.stringify(CHATTY.source)}, "i");
+    const labelled = found.filter((el) => chatty.test([
+      el.getAttribute("placeholder"),
+      el.getAttribute("data-placeholder"),
+      el.getAttribute("aria-label"),
+      el.getAttribute("title"),
+    ].filter(Boolean).join(" ")));
+    if (labelled.length !== 1) {
+      return {
+        ok: false,
+        reason: labelled.length
+          ? labelled.length + " things look like a chat box; name one with options.selectors.composer"
+          : found.length + " editable areas, none labelled like a chat box; name one with options.selectors.composer",
+      };
+    }
+    pick = labelled[0];
+  }
+
+  pick.setAttribute(MARK, "1");
+  return { ok: true, how: "profile" };
+})()`;
+}
+
+/**
+ * Focus the composer and select whatever is in it, so the next keystroke
+ * replaces it.
+ *
+ * Selecting the node's *contents* rather than calling execCommand("selectAll")
+ * is deliberate: selectAll acts on whatever the document considers selected,
+ * and if that isn't scoped to the box it's scoped to the page. A range over the
+ * editor's contents can only ever affect the editor. It doubles as the clear —
+ * inserting replaces a selection, so there's nothing to delete first.
+ */
+function focusExpr(p: AppProfile): string {
+  return `(() => {
+  const MARK = ${JSON.stringify(MARK)};
+  const vis = (el) => !!(el && (el.offsetParent || el.getClientRects().length));
+
+  ${p.busy ? `const busy = document.querySelector(${JSON.stringify(p.busy)});
+  if (vis(busy)) return { ok: false, reason: "busy" };` : ""}
+
+  const editor = document.querySelector('[' + MARK + ']');
+  if (!editor) return { ok: false, reason: "the composer went away" };
+
+  editor.scrollIntoView({ block: "center" });
+  editor.focus();
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch {}
+
+  // Hand back where it is, so a caller that finds focus didn't take can click
+  // it like a person would.
+  const r = editor.getBoundingClientRect();
+  return {
+    ok: true,
+    focused: document.activeElement === editor || editor.contains(document.activeElement),
+    x: Math.round(r.left + r.width / 2),
+    y: Math.round(r.top + r.height / 2),
+  };
+})()`;
+}
+
+/**
+ * Submit, having typed.
+ *
+ * Also the fallback path: if CDP's typing didn't land (the box is still empty),
+ * try the page's own editing command, and failing that assign and synthesise
+ * the events by hand. Each rung down is less like real typing and less likely
+ * to convince a framework, which is why they're in this order.
+ */
+function submitExpr(p: AppProfile, text: string, sendSel: string | undefined): string {
+  // JSON.stringify handles quotes, newlines, backslashes and unicode. This is a
+  // string being pasted into a program being pasted into a browser; nothing else
+  // is safe enough.
+  const safe = JSON.stringify(text);
+  return `(async () => {
+  const MARK = ${JSON.stringify(MARK)};
+  const editor = document.querySelector('[' + MARK + ']');
+  if (!editor) return { ok: false, reason: "the composer went away" };
+  const text = ${safe};
+
+  // If the typing didn't land, synthesise the same events by hand — including
+  // beforeinput, which is the one that matters. execCommand("insertText") is
+  // deliberately NOT the fallback: measured here, it fires only \`input\`, so it
+  // fills the box while leaving a beforeinput-driven editor (Lexical, and this
+  // is what Antigravity uses) still believing it's empty. That's worse than
+  // failing, because the box then LOOKS full and every check downstream passes
+  // while the send button quietly does nothing.
+  let how = "typed";
+  if (!(editor.innerText || editor.value || "").trim()) {
+    how = "synthesised";
+    if ("value" in editor) editor.value = text; else editor.textContent = text;
+    editor.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: text }));
+    editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+  }
+
+  // Let the framework commit the edit before asking it to submit; without this
+  // the button is still disabled from when the box was empty.
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  const explicit = ${sendSel ? JSON.stringify(sendSel) : "null"};
+  const candidates = explicit ? [explicit] : ${JSON.stringify(p.send)};
+  let sawDisabled = false;
+  for (const sel of candidates) {
+    let el = null;
+    try { el = document.querySelector(sel); } catch {}
+    if (!el) continue;
+    const btn = el.closest("button") || (el.tagName === "BUTTON" ? el : null) || el;
+    if (btn.disabled) { sawDisabled = true; continue; }
+    btn.click();
+    return { ok: true, how: how + " → clicked " + sel };
+  }
+
+  // The app's own send button, disabled with text in the box, is the app
+  // telling us it won't send — a dead account, a missing model, a turn already
+  // running. Pressing Enter at that point pretends we didn't hear.
+  if (sawDisabled) {
+    return { ok: false, reason: "the send button is disabled — is it signed in, with a model selected?" };
+  }
+
+  // Most of them submit on Enter anyway.
+  editor.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter", code: "Enter" }));
+  editor.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter", code: "Enter" }));
+  return { ok: true, how: how + " → enter" };
+})()`;
+}
+
+/**
+ * Read the conversation, minus the box you type into.
+ *
+ * The composer lives *inside* the transcript container in Antigravity
+ * (`#conversation` holds both), so a naive innerText includes whatever is
+ * currently typed. The reply is computed as a diff of this text, which meant
+ * the "reply" was your own prompt sitting in the box — every ask returned what
+ * you just said. The composer is cloned out before reading.
+ */
+function transcriptExpr(p: AppProfile, explicit: string | undefined): string {
+  const roots = explicit ? [explicit] : p.transcript;
+  return `(() => {
+  const roots = ${JSON.stringify(roots)};
+  const composerish = ['[data-lexical-editor]', '[contenteditable="true"]', 'textarea', '[data-loom-composer]'];
+  for (const sel of roots) {
+    let el = null;
+    try { el = document.querySelector(sel); } catch {}
+    if (!el) continue;
+    const clone = el.cloneNode(true);
+    composerish.forEach((c) => clone.querySelectorAll(c).forEach((n) => n.remove()));
+    // innerText needs layout, which a detached node has none of; attach it
+    // offscreen for the read rather than settling for textContent, which would
+    // glue every word together and make the diff meaningless.
+    clone.style.position = 'fixed';
+    clone.style.left = '-99999px';
+    clone.style.top = '0';
+    document.body.appendChild(clone);
+    const text = (clone.innerText || "").slice(-20000);
+    clone.remove();
+    return text;
+  }
+  return (document.body.innerText || "").slice(-20000);
+})()`;
+}
+
 export class GuiChatDriver {
-  constructor(
-    private readonly appName: string,
-    private readonly options: GuiChatOptions,
-  ) {}
+  private profile: AppProfile;
+  private readonly appName: string;
+
+  constructor(appName: string, private readonly options: GuiChatOptions, kind?: string) {
+    this.profile = profileFor(kind ?? appName.toLowerCase());
+    // The profile knows the app's real name; "Antigravity" is the other program.
+    this.appName = this.profile === GENERIC ? appName : this.profile.name;
+  }
 
   get endpoint(): string {
     const host = this.options.host ?? "127.0.0.1";
-    const port = this.options.debugPort ?? 9222;
+    const port = this.options.debugPort ?? this.profile.defaultPort;
     return `http://${host}:${port}`;
   }
 
+  /** How to start this app with a debugger, on this OS. */
   get launchHint(): string {
-    return `launch ${this.appName} with --remote-debugging-port=${this.options.debugPort ?? 9222}`;
+    const os = process.platform;
+    const how =
+      this.profile.launch[os === "win32" ? "win32" : os === "darwin" ? "darwin" : "linux"];
+    return `${this.appName} isn't listening — ${how}`;
   }
 
   reachable(): Promise<boolean> {
@@ -189,7 +328,7 @@ export class GuiChatDriver {
 
   /**
    * Can we actually drive it right now? Reachable is not enough: a signed-out
-   * Antigravity answers CDP happily and has no chat in it.
+   * Antigravity answers CDP happily and has no chat in it at all.
    */
   async driveable(): Promise<{ ok: boolean; reason?: string }> {
     if (!(await this.reachable())) return { ok: false, reason: this.launchHint };
@@ -197,7 +336,7 @@ export class GuiChatDriver {
     try {
       session = await this.session();
       const found = await session.evaluate<{ ok: boolean; reason?: string }>(
-        DISCOVER(this.options.selectors?.composer, FORBIDDEN_ANCESTORS, CHATTY.source),
+        discoverExpr(this.profile, this.options.selectors?.composer),
       );
       return found.ok ? { ok: true } : { ok: false, reason: found.reason };
     } catch (err) {
@@ -208,34 +347,62 @@ export class GuiChatDriver {
   }
 
   /**
-   * Type a prompt into the app and submit it, then wait for the transcript to
-   * stop growing and return what was added.
+   * Type a prompt into the app, submit it, and wait for the panel to stop
+   * growing.
    *
-   * The reply is a diff of the panel's text, not a structured message: these
-   * apps don't hand out their conversation, they render it. It's the same trade
-   * the phone-chat project makes — mirror what's on screen, don't pretend to
-   * have the model's actual response object.
+   * What comes back is the panel's text, not the model's response object —
+   * these apps render their conversation, they don't hand it out. Same trade
+   * the phone-chat project makes: mirror what's on screen rather than pretend
+   * to have something structured.
    */
   async ask(text: string, onProgress?: (partial: string) => void): Promise<string> {
     const session = await this.session();
     try {
       const found = await session.evaluate<{ ok: boolean; reason?: string }>(
-        DISCOVER(this.options.selectors?.composer, FORBIDDEN_ANCESTORS, CHATTY.source),
+        discoverExpr(this.profile, this.options.selectors?.composer),
       );
       if (!found.ok) throw new Error(`can't reach ${this.appName}'s chat box: ${found.reason}`);
 
-      const before = await session.evaluate<string>(readTranscript(this.options.selectors?.transcript));
+      const before = await session.evaluate<string>(
+        transcriptExpr(this.profile, this.options.selectors?.transcript),
+      );
 
-      const focused = await session.evaluate<{ ok: boolean; reason?: string }>(FOCUS);
-      if (!focused.ok) throw new Error(`can't focus ${this.appName}'s chat box: ${focused.reason}`);
+      const focused = await session.evaluate<{
+        ok: boolean;
+        reason?: string;
+        focused?: boolean;
+        x?: number;
+        y?: number;
+      }>(focusExpr(this.profile));
+      if (!focused.ok) {
+        throw new Error(
+          focused.reason === "busy"
+            ? `${this.appName} is already working on something — let it finish or stop it there`
+            : `can't focus ${this.appName}'s chat box: ${focused.reason}`,
+        );
+      }
 
+      // focus() is a request, and sometimes the page says no — a re-render, a
+      // framework that owns focus. When it does, click the box like a person
+      // and re-select. This is what made the second ask in a session flaky:
+      // typing went somewhere else, silently.
+      if (!focused.focused && focused.x !== undefined && focused.y !== undefined) {
+        await session.clickAt(focused.x, focused.y);
+        await session.evaluate(focusExpr(this.profile));
+      }
+
+      // Type through the browser's own input pipeline. This matters more than
+      // it looks: measured in a real Chromium, execCommand("insertText") fires
+      // only `input`, while Input.insertText fires `beforeinput` AND `input` —
+      // which is what a keyboard does, and what an editor like Lexical builds
+      // its model from. Typing with execCommand filled the box visually and
+      // left the app believing it was empty, so the send button did nothing.
       await session.insertText(text);
 
-      const clicked = await session.evaluate<{ ok: boolean; reason?: string }>(
-        clickSend(this.options.selectors?.send),
+      const sent = await session.evaluate<{ ok: boolean; reason?: string; how?: string }>(
+        submitExpr(this.profile, text, this.options.selectors?.send),
       );
-      // No send button is normal — most of these submit on Enter.
-      if (!clicked.ok) await session.pressEnter();
+      if (!sent.ok) throw new Error(`couldn't send to ${this.appName}: ${sent.reason}`);
 
       return await this.waitForReply(session, before, onProgress);
     } finally {
@@ -252,6 +419,7 @@ export class GuiChatDriver {
     const timeout = this.options.replyTimeoutMs ?? 300_000;
     const settle = this.options.settleMs ?? 2500;
     const deadline = Date.now() + timeout;
+    const expr = transcriptExpr(this.profile, this.options.selectors?.transcript);
     let last = before;
     let lastChange = Date.now();
 
@@ -259,7 +427,7 @@ export class GuiChatDriver {
       await new Promise((r) => setTimeout(r, 500));
       let now: string;
       try {
-        now = await session.evaluate<string>(readTranscript(this.options.selectors?.transcript));
+        now = await session.evaluate<string>(expr);
       } catch {
         break; // the window went away mid-answer
       }
@@ -280,13 +448,12 @@ export class GuiChatDriver {
 /**
  * What the panel gained.
  *
- * Not a real diff: the transcript is a rendered panel, and it scrolls, collapses
+ * Not a real diff: the transcript is a rendered panel that scrolls, collapses
  * and reflows. When `after` simply grew, the tail is the new part; when it
- * changed shape, we can only hand back what's there now.
+ * changed shape, the common prefix is the best we can honestly do.
  */
 export function delta(before: string, after: string): string {
   if (after.startsWith(before)) return after.slice(before.length).trim();
-  // Fall back to the longest common prefix, which handles a scrolled-off head.
   let i = 0;
   while (i < before.length && i < after.length && before[i] === after[i]) i++;
   return after.slice(i).trim();

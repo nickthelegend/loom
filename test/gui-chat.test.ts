@@ -24,38 +24,72 @@ import { GuiChatDriver, delta } from "../src/adapters/bridges/gui-chat.js";
 import { cdpUp } from "../src/adapters/bridges/cdp.js";
 import { tmpDir } from "./helpers.js";
 
-/** A page shaped like the apps we're aiming at: a chat box, and a code editor. */
+/**
+ * A page shaped like Antigravity actually is.
+ *
+ * Not a convenient page — the real one. The structure comes from
+ * antigravity_phone_chat's selectors: a `#conversation` panel, a Lexical
+ * composer inside it (`data-lexical-editor`), a submit button that is an
+ * `svg.lucide-arrow-right` wrapped in a `<button>`, and a cancel button carrying
+ * `data-tooltip-id="input-send-button-cancel-tooltip"` that appears while it's
+ * generating. Plus the Monaco editor holding a source file, because that's the
+ * thing the driver must never type into.
+ *
+ * The composer refuses assignment on purpose: `textContent = …` leaves it
+ * "empty" as far as the submit button is concerned, exactly like Lexical. Only
+ * a real editing event counts. A driver that cheats fails here.
+ */
 const PAGE = `<!doctype html>
 <html><body style="margin:0">
-  <div id="transcript"><div class="msg">previous answer</div></div>
+  <div id="conversation">
+    <div class="msg">previous answer</div>
+    <div class="mx-8 mb-8">
+      <div contenteditable="true" data-lexical-editor="true" id="composer" data-placeholder="Ask anything"></div>
+      <button id="sendbtn"><svg class="lucide lucide-arrow-right"></svg></button>
+      <button id="cancelbtn" data-tooltip-id="input-send-button-cancel-tooltip" style="display:none">Stop</button>
+    </div>
+  </div>
 
-  <!-- the trap: Monaco is a contenteditable, and it holds your source file -->
+  <!-- the trap: Monaco is a contenteditable too, and it holds your source file -->
   <div class="monaco-editor">
     <div contenteditable="true" id="yourcode" aria-label="Editor content">const x = 1;</div>
   </div>
 
-  <div id="panel">
-    <div contenteditable="true" id="composer" data-placeholder="Ask Antigravity"></div>
-    <button id="sendbtn" aria-label="Send">Send</button>
-  </div>
-
   <script>
-    // Answer the way the real thing does: the panel grows.
+    // Lexical keeps its own model and only trusts real editing events. Assigning
+    // to the DOM updates what you see and nothing else — which is the entire
+    // reason the driver uses execCommand rather than textContent.
+    const composer = document.getElementById('composer');
+    let model = '';
+    composer.addEventListener('beforeinput', (e) => {
+      if (e.inputType === 'insertText' && typeof e.data === 'string') model += e.data;
+      if (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteByCommand') model = '';
+    });
+    // execCommand("delete") on a selection fires this
+    document.addEventListener('selectionchange', () => {});
+    composer.addEventListener('input', (e) => {
+      if (e.inputType && e.inputType.startsWith('delete')) model = composer.innerText.trim();
+    });
+
     document.getElementById('sendbtn').addEventListener('click', () => {
-      const c = document.getElementById('composer');
-      const said = c.innerText.trim();
+      // the app trusts its model, not the DOM
+      const said = (model || '').trim();
       if (!said) return;
-      c.innerText = '';
-      const t = document.getElementById('transcript');
+      model = '';
+      composer.innerHTML = '';
+      const t = document.getElementById('conversation');
       const you = document.createElement('div');
       you.className = 'msg';
       you.textContent = 'you: ' + said;
       t.appendChild(you);
+      // while it answers, the cancel button is visible — the busy signal
+      document.getElementById('cancelbtn').style.display = 'block';
       setTimeout(() => {
         const a = document.createElement('div');
         a.className = 'msg';
         a.textContent = 'agent: I heard ' + said;
         t.appendChild(a);
+        document.getElementById('cancelbtn').style.display = 'none';
       }, 150);
     });
   </script>
@@ -129,7 +163,7 @@ beforeAll(async () => {
   // fails for a reason that has nothing to do with the code — which is exactly
   // what happened: the first run failed here and the second passed. Flaky is
   // broken.
-  const probe = new GuiChatDriver("TestApp", { debugPort });
+  const probe = new GuiChatDriver("Antigravity", { debugPort }, "antigravity");
   const deadline = Date.now() + 25_000;
   while (Date.now() < deadline) {
     if (await cdpUp(`http://127.0.0.1:${debugPort}`)) {
@@ -148,8 +182,13 @@ afterAll(async () => {
   await new Promise<void>((r) => server.close(() => r()));
 });
 
+/** The Antigravity profile, against the Antigravity-shaped page. */
 const driver = (selectors?: Record<string, string>): GuiChatDriver =>
-  new GuiChatDriver("TestApp", { debugPort, settleMs: 700, replyTimeoutMs: 15_000, selectors });
+  new GuiChatDriver(
+    "Antigravity",
+    { debugPort, settleMs: 700, replyTimeoutMs: 15_000, selectors },
+    "antigravity",
+  );
 
 describe("gui-chat · finding the chat box", () => {
   it("reaches a running app", async ({ skip }) => {
@@ -158,7 +197,7 @@ describe("gui-chat · finding the chat box", () => {
   });
 
   it("says so when nothing is listening, instead of hanging", async () => {
-    const dead = new GuiChatDriver("TestApp", { debugPort: 1 });
+    const dead = new GuiChatDriver("Antigravity", { debugPort: 1 }, "antigravity");
     expect(await dead.reachable()).toBe(false);
     const d = await dead.driveable();
     expect(d.ok).toBe(false);
@@ -217,7 +256,7 @@ describe("gui-chat · refusing to type into your source file", () => {
     if (!chromiumAvailable) return skip();
     const d = await driver({ composer: "#not-a-thing" }).driveable();
     expect(d.ok).toBe(false);
-    expect(d.reason).toContain("no element matches");
+    expect(d.reason).toContain("nothing matches the selector you set");
   });
 });
 

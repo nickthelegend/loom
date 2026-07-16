@@ -45,7 +45,9 @@ export class AntigravityBridge extends BridgeBase {
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}, kind = "antigravity", appName = "Antigravity") {
     super(id, kind, projectDir);
-    this.driver = new GuiChatDriver(appName, options as GuiChatOptions);
+    // The kind picks the profile — which selectors, and which chat panel to
+    // scope the search to. See bridges/profiles.ts.
+    this.driver = new GuiChatDriver(appName, options as GuiChatOptions, kind);
   }
 
   async available(): Promise<boolean> {

@@ -150,6 +150,21 @@ export class CdpSession {
     await this.send("Input.insertText", { text });
   }
 
+  /**
+   * Click where a person would.
+   *
+   * `el.focus()` is a request the page can decline — a re-render, an overlay, a
+   * framework that manages focus itself — and when it's declined, Input.insertText
+   * types into whatever else has focus, which is nowhere useful. A real mouse
+   * event at real coordinates is how a human gets the caret into a box, and it
+   * doesn't ask.
+   */
+  async clickAt(x: number, y: number): Promise<void> {
+    const base = { x, y, button: "left", clickCount: 1 };
+    await this.send("Input.dispatchMouseEvent", { ...base, type: "mousePressed" });
+    await this.send("Input.dispatchMouseEvent", { ...base, type: "mouseReleased" });
+  }
+
   async pressEnter(): Promise<void> {
     for (const type of ["keyDown", "keyUp"]) {
       await this.send("Input.dispatchKeyEvent", {
