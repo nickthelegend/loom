@@ -46,7 +46,8 @@
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "verify:adapters": "node scripts/verify-adapters.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
