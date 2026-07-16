@@ -770,7 +770,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>'),
     help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.8-2.6 2.2-2.6 3.6"/><path d="M12 17h.01"/>'),
     plus: svg('<path d="M12 5v14"/><path d="M5 12h14"/>'),
-    split: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M12 4.5v15"/>'),
     panelRight: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>'),
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
@@ -780,6 +779,29 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     file: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/>'),
     chevron: svg('<path d="m9 6 6 6-6 6"/>')
   };
+
+  /**
+   * Icon-only controls hold an <svg aria-hidden> and no text, so they have no
+   * accessible name. Every one already carries a title for the tooltip, so
+   * mirror that into aria-label. Done with an observer rather than at each
+   * call site because most of this UI is rendered from strings, and a missed
+   * call site is an unnamed button.
+   */
+  function nameIcon(b){
+    if (b.getAttribute("aria-label") || b.textContent.trim()) return;
+    b.setAttribute("aria-label", b.getAttribute("title"));
+  }
+  function labelIcons(el){
+    if (el.matches && el.matches("button[title],a[title]")) nameIcon(el);
+    Array.prototype.forEach.call(el.querySelectorAll("button[title],a[title]"), nameIcon);
+  }
+  new MutationObserver(function(muts){
+    muts.forEach(function(m){
+      Array.prototype.forEach.call(m.addedNodes, function(n){
+        if (n.nodeType === 1) labelIcons(n);
+      });
+    });
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
   function applyTheme(){
@@ -1040,7 +1062,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
         '<span id="tabsbox" style="display:contents"></span>' +
         '<span class="spacer"></span>' +
-        '<button id="termbtn" class="iconbtn" title="toggle terminal (\\u2303\\u2018)">' + ICONS.terminal + "</button>" +
+        // &#96; is a backtick — a literal one would close this template literal
+        '<button id="termbtn" class="iconbtn" title="toggle terminal (\\u2303&#96;)">' + ICONS.terminal + "</button>" +
         '<button id="railbtn" class="iconbtn" title="toggle right panel">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
