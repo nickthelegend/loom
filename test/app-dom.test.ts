@@ -391,3 +391,69 @@ describe("web app · chats", () => {
     expect(m.errors.join("\n")).toBe("");
   });
 });
+
+describe("web app · the rest of the shell", () => {
+  it("switches tabs between the thread, the board and the brain", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '.tab[data-tab="brain"]'));
+
+    click($(m, '.tab[data-tab="brain"]'));
+    await waitUntil(() => ($(m, "#pane-brain") as HTMLElement).style.display !== "none");
+    expect(($(m, "#pane-thread") as HTMLElement).style.display).toBe("none");
+
+    click($(m, '.tab[data-tab="thread"]'));
+    await waitUntil(() => ($(m, "#pane-thread") as HTMLElement).style.display !== "none");
+    expect(($(m, "#pane-brain") as HTMLElement).style.display).toBe("none");
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("filters the project list as you type, and says so when nothing matches", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, "#slist .srow"));
+
+    const filter = $(m, "#sfilter") as HTMLInputElement;
+    filter.value = "weave";
+    filter.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    expect(text(m, "#slist")).toContain("weave");
+
+    filter.value = "definitely-not-a-project";
+    filter.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+    await waitUntil(() => !$(m, "#slist .srow"));
+    expect(text(m, "#slist")).toContain("no matches");
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("opens the agent task modal from the sidebar, and from the N key", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#newtask"));
+
+    click($(m, "#newtask"));
+    await waitUntil(() => !!$(m, "#mtask"));
+    expect($(m, "#magsel")).toBeTruthy(); // which agents to hand it to
+    m.window.document.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await waitUntil(() => !$(m, ".scrim"));
+
+    // the same modal, from the keyboard
+    m.window.document.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "n", bubbles: true }),
+    );
+    await waitUntil(() => !!$(m, "#mtask"));
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("doesn't fire the N shortcut while you're typing a message", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#box"));
+    const box = $(m, "#box") as HTMLInputElement;
+    box.focus();
+
+    // "n" typed into the composer is a letter, not a command
+    box.dispatchEvent(new m.window.KeyboardEvent("keydown", { key: "n", bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    expect($(m, "#mtask")).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
