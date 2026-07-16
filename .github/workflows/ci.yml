@@ -30,3 +30,26 @@ jobs:
         env:
           LOOM_NO_NOTIFY: "1"
           LOOM_NO_PTY: "1"
+
+  # The phone app has its own dependency tree and never gets built by the job
+  # above, so nothing here noticed when it broke. It can't be rendered in CI —
+  # this at least keeps it compiling against the daemon's types.
+  #
+  # `npm install`, not `npm ci`: app/package-lock.json is missing transitive
+  # entries that npm 10 insists on and npm 11 tolerates, so `npm ci` fails here
+  # while passing locally. Regenerating that lock moves an Expo/RN tree and can
+  # shift the APK build, so it's a deliberate change to make on its own — not a
+  # side effect of adding a typecheck.
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm install --no-audit --no-fund
+        working-directory: app
+      - run: npx tsc --noEmit
+        working-directory: app
