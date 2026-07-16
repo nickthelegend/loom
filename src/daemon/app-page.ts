@@ -781,6 +781,34 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .modalhead .iconbtn{margin-left:auto}
   .modalbody{padding:16px;display:flex;flex-direction:column;gap:14px;max-height:70vh;overflow-y:auto}
   .field{display:flex;flex-direction:column;gap:6px}
+  /* Setup: a status list, not a form. Wider than the other modals because every
+     row carries a command you're meant to copy, and wrapping a shell command
+     mid-flag makes it useless. */
+  .modal.wide{max-width:620px}
+  .setupbody{gap:0;padding:8px 16px 16px}
+  .sgrouph{font-size:11px;font-weight:560;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--muted-foreground);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+  .sgrouph:first-child{margin-top:8px}
+  .srow2{display:flex;gap:10px;align-items:flex-start;padding:7px 0}
+  .sdot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:6px;background:var(--muted-foreground)}
+  .sdot.ok{background:var(--ok)}
+  .sdot.warn{background:var(--warn)}
+  .sdot.bad{background:var(--danger,#e5484d)}
+  .sdot.off{background:var(--border)}
+  .sdot.info{background:var(--muted-foreground);opacity:.5}
+  .sdot.no{background:transparent;border:1px solid var(--border)}
+  .sbody{min-width:0;flex:1}
+  .st{font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px}
+  .st svg{width:13px;height:13px;flex:none}
+  .sd{font-size:12px;color:var(--muted-foreground);line-height:1.5;margin-top:1px}
+  .sd.how{color:var(--foreground);opacity:.75;margin-top:3px}
+  .sport{font-size:10px;color:var(--muted-foreground);font-weight:400;border:1px solid var(--border);
+    border-radius:4px;padding:0 4px;line-height:15px}
+  .scmd{display:block;margin-top:5px;font-size:11.5px;background:var(--muted);color:var(--foreground);
+    border:1px solid var(--border);border-radius:5px;padding:5px 7px;overflow-x:auto;white-space:pre;
+    user-select:all}
+  .snote{font-size:12px;color:var(--muted-foreground);background:var(--muted);border:1px solid var(--border);
+    border-radius:6px;padding:8px 10px;margin:4px 0 8px;line-height:1.5}
   .field label{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
     color:var(--muted-foreground);font-family:var(--font-mono)}
   .field select,.field input,.field textarea{width:100%;background:transparent;border:1px solid var(--input);
@@ -942,6 +970,8 @@ ${BRAND_SPRITE}
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
   }
   var ICONS = {
+    // lucide sliders-horizontal: setup is knobs, not a spinning cog
+    gear: svg('<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>'),
     back: svg('<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>'),
     up: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
     stop: svg('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
@@ -2983,6 +3013,101 @@ ${BRAND_SPRITE}
    * folder. Inside Electron that folder comes from the OS picker — in a
    * browser the daemon may be on another host, so the path is typed.
    */
+  /**
+   * Setup — what this machine still needs, answered by the daemon that can see
+   * it.
+   *
+   * Everything is read from /api/setup rather than baked into the page: the
+   * page cannot know whether you have codex installed, and the daemon can. A
+   * checklist that says the same thing on every machine is a brochure, not a
+   * setup screen.
+   */
+  function openSetupModal(){
+    if (document.querySelector(".scrim")) return;
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal wide">' +
+      '<div class="modalhead">Setup<button class="iconbtn" id="sclose" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="modalbody setupbody" id="setupbody">' + LOADER + "</div>" +
+      '<div class="modalfoot"><span class="hintx" id="setupfoot"></span><span class="spacer"></span>' +
+      '<button class="btn ghost" id="srefresh">Re-check</button>' +
+      '<button class="btn primary" id="sdone">Done</button></div>' +
+    "</div>";
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    function onKey(e){ if (e.key === "Escape") { e.preventDefault(); close(); } }
+    document.addEventListener("keydown", onKey);
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("sclose").onclick = close;
+    document.getElementById("sdone").onclick = close;
+    document.getElementById("srefresh").onclick = function(){ load(); };
+
+    function row(state, title, detail, cmd){
+      return '<div class="srow2">' +
+        '<span class="sdot ' + state + '"></span>' +
+        '<div class="sbody"><div class="st">' + title + "</div>" +
+        (detail ? '<div class="sd">' + detail + "</div>" : "") +
+        (cmd ? '<code class="scmd">' + esc(cmd) + "</code>" : "") +
+        "</div></div>";
+    }
+
+    function load(){
+      var body = document.getElementById("setupbody");
+      body.innerHTML = LOADER;
+      api("/api/setup").then(function(s){
+        var osname = s.platform === "darwin" ? "macOS" : s.platform === "win32" ? "Windows" : "Linux";
+        var html = "";
+
+        html += '<div class="sgrouph">Runtime</div>';
+        html += row(s.node.ok ? "ok" : "bad", "Node " + esc(s.node.version),
+          s.node.ok ? "new enough for the event log"
+            : "Loom needs \\u2265" + esc(s.node.needed) + " \\u2014 on anything older your history is silently dropped",
+          s.node.ok ? "" : (s.platform === "darwin" ? "brew install node"
+            : s.platform === "win32" ? "winget install OpenJS.NodeJS" : "install node 22.5 or newer"));
+
+        html += '<div class="sgrouph">Agents that can take a turn</div>';
+        if (!s.ready) {
+          html += '<div class="snote">Nothing here can hold the baton yet \\u2014 install one and Loom has something to drive.</div>';
+        }
+        s.agents.forEach(function(a){
+          html += row(a.found ? "ok" : "warn",
+            brandMark(a.kind) + " " + esc(a.label),
+            a.found ? "installed \\u2014 which isn\\u2019t the same as signed in:" : "not installed",
+            a.found ? a.auth : a.install);
+        });
+
+        html += '<div class="sgrouph">Agents you drive in their own window</div>';
+        s.bridges.forEach(function(b){
+          html += row(b.driveable ? "ok" : b.reachable ? "warn" : "off",
+            brandMark(b.kind) + " " + esc(b.label) + ' <span class="sport">:' + b.port + "</span>",
+            b.driveable ? "ready to drive" : esc(b.reason || "not running"),
+            b.driveable ? "" : b.launch);
+        });
+
+        html += '<div class="sgrouph">Permissions on ' + osname + "</div>";
+        s.permissions.forEach(function(p){
+          html += '<div class="srow2">' +
+            '<span class="sdot ' + (p.refused ? "no" : "info") + '"></span>' +
+            '<div class="sbody"><div class="st">' + esc(p.title) + (p.refused ? ' <span class="sport">not needed</span>' : "") + "</div>" +
+            '<div class="sd">' + esc(p.why) + "</div>" +
+            '<div class="sd how">' + esc(p.how) + "</div></div></div>";
+        });
+
+        html += '<div class="sgrouph">Your phone</div>';
+        html += row("info", "Let it reach this machine",
+          "Loom listens on localhost by default, which your phone can\\u2019t see.", "loom up --restart --tailnet");
+        html += row("info", "Pair the device", "Prints a QR code. Single use.", "loom pair");
+
+        body.innerHTML = html;
+        document.getElementById("setupfoot").textContent =
+          s.ready ? "This machine can run agents." : "No agents installed yet.";
+      }).catch(function(err){
+        body.innerHTML = '<div class="snote">Couldn\\u2019t read setup: ' + esc(err.message) + "</div>";
+      });
+    }
+    load();
+  }
+
   function openProjectModal(){
     if (document.querySelector(".scrim")) return;
     var native = !!(window.loomNative && window.loomNative.pickFolder);
@@ -3067,6 +3192,7 @@ ${BRAND_SPRITE}
         '<div class="slist" id="slist">' + LOADER + "</div>" +
         '<div class="sfoot">' +
         '<a class="iconbtn" title="Loom on GitHub" href="https://github.com/nickthelegend/loom" target="_blank" rel="noreferrer">' + ICONS.help + "</a>" +
+        '<button id="setupbtn" class="iconbtn" title="Setup and permissions" aria-label="setup and permissions">' + ICONS.gear + "</button>" +
         '<span class="spacer"></span>' +
         THEME_BTN +
         '<button id="unpair" class="iconbtn" title="unpair this device">' + ICONS.unpair + "</button></div>" +
@@ -3089,6 +3215,7 @@ ${BRAND_SPRITE}
       '<div class="statusbar" id="statusbar"></div>' +
       "</div>";
     document.getElementById("unpair").onclick = logout;
+    document.getElementById("setupbtn").onclick = openSetupModal;
     // The toggle lives in the shell's foot now, so bind it here — renderProject
     // also calls bindTheme, but it never runs when no project is selected.
     bindTheme();

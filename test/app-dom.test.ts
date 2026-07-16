@@ -164,7 +164,7 @@ function mount({ desktop = true, hash = "", token = clientToken as string | null
 }
 
 const $ = (m: Mounted, sel: string) => m.window.document.querySelector(sel);
-const text = (m: Mounted, sel: string) => $(m, sel)?.textContent?.trim() ?? "";
+const text_ = (m: Mounted, sel: string) => $(m, sel)?.textContent?.trim() ?? "";
 const click = (el: Element | null) => {
   if (!el) throw new Error("clicked an element that isn't there");
   (el as HTMLElement).dispatchEvent(new (el.ownerDocument.defaultView as Window & typeof globalThis).MouseEvent("click", { bubbles: true }));
@@ -181,14 +181,14 @@ describe("web app · boot", () => {
     const m = mount();
     // the sidebar is filled from GET /api/projects — real data, real token
     await waitUntil(() => !!$(m, "#slist .srow"));
-    expect(text(m, "#slist")).toContain("weave");
+    expect(text_(m, "#slist")).toContain("weave");
     expect(m.errors.join("\n")).toBe("");
   });
 
   it("the phone layout renders the project board without throwing", async () => {
     const m = mount({ desktop: false });
     await waitUntil(() => !!$(m, "#list .card"));
-    expect(text(m, "#list")).toContain("weave");
+    expect(text_(m, "#list")).toContain("weave");
     expect(m.errors.join("\n")).toBe("");
   });
 });
@@ -255,7 +255,7 @@ describe("web app · board", () => {
    */
   it("doesn't invent cards for idle agents", async () => {
     const m = await openBoard();
-    expect(text(m, ".bcols")).not.toContain("plannerbot is working");
+    expect(text_(m, ".bcols")).not.toContain("plannerbot is working");
     expect(m.window.document.querySelectorAll(".bempty").length).toBe(4);
     expect(m.errors.join("\n")).toBe("");
   });
@@ -285,7 +285,7 @@ describe("web app · board task modal", () => {
     const m = await openBoard();
     click($(m, '.badd[data-add="working"]'));
     await waitUntil(() => !!$(m, "#bmagsel .agchip, #bmagsel .chip, #bmagsel button"));
-    expect(text(m, "#bmagsel")).toContain("plannerbot");
+    expect(text_(m, "#bmagsel")).toContain("plannerbot");
     expect(m.errors.join("\n")).toBe("");
   });
 
@@ -314,12 +314,12 @@ describe("web app · board task modal", () => {
 
     // the modal closes and the column redraws with it
     await waitUntil(() => !$(m, ".scrim"));
-    await waitUntil(() => text(m, '.bcol[data-col="needs-you"]').includes(title));
+    await waitUntil(() => text_(m, '.bcol[data-col="needs-you"]').includes(title));
     expect(m.errors.join("\n")).toBe("");
 
     // and it's the daemon's card now, not a DOM flourish: a fresh window sees it
     const m2 = await openBoard();
-    await waitUntil(() => text(m2, '.bcol[data-col="needs-you"]').includes(title));
+    await waitUntil(() => text_(m2, '.bcol[data-col="needs-you"]').includes(title));
     expect(m2.errors.join("\n")).toBe("");
   });
 
@@ -330,7 +330,7 @@ describe("web app · board task modal", () => {
 
     click($(m, "#bmcreate"));
     await waitUntil(() => !!$(m, "#toast.show"));
-    expect(text(m, "#toast")).toContain("what needs doing");
+    expect(text_(m, "#toast")).toContain("what needs doing");
     expect($(m, ".scrim")).toBeTruthy(); // still open, nothing created
     expect(m.errors.join("\n")).toBe("");
   });
@@ -354,7 +354,7 @@ describe("web app · the thread", () => {
     );
 
     // what you said shows up as yours
-    await waitUntil(() => text(m, "#thread, .thread, #pane-thread").includes(said));
+    await waitUntil(() => text_(m, "#thread, .thread, #pane-thread").includes(said));
     // ...and echo answers with it, delivered by the WebSocket rather than a reload
     await waitUntil(() => {
       const bubbles = [...m.window.document.querySelectorAll(".bubble")];
@@ -384,10 +384,79 @@ describe("web app · chats", () => {
   it("lists Main under the selected project, and offers a new one", async () => {
     const m = mount({ hash: `#p/${projectId}` });
     await waitUntil(() => !!$(m, ".crow[data-chat]"));
-    expect(text(m, ".sgroup")).toContain("Main");
+    expect(text_(m, ".sgroup")).toContain("Main");
     expect($(m, ".crow.add[data-newchat]")).toBeTruthy();
     // main is implicit: there is nothing to forget
     expect($(m, '.crow[data-chat="main"] [data-delchat]')).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+/**
+ * Setup — the onboarding screen.
+ *
+ * It reads /api/setup from the daemon rather than hardcoding a checklist, and
+ * that's the thing worth locking: a setup screen that says the same words on
+ * every machine is a brochure. These run against the real daemon, so the agent
+ * list is whatever this machine actually has.
+ */
+describe("web app · setup", () => {
+  it("opens from the sidebar foot and reads this machine, not a script", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, "#setupbody .sgrouph"));
+    // wait for the fetch, not just the shell
+    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 0);
+
+    const groups = [...m.window.document.querySelectorAll(".sgrouph")].map((g) => g.textContent);
+    expect(groups.join("|")).toContain("Runtime");
+    expect(groups.join("|")).toContain("Agents that can take a turn");
+    expect(groups.join("|")).toContain("Permissions");
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("names every agent Loom can drive, with the command to check it", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, "#setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
+
+    const text = text_(m, "#setupbody");
+    for (const label of ["Claude Code", "Codex", "OpenCode", "Grok Code", "Antigravity IDE", "Kiro"]) {
+      expect(text, `${label} missing from setup`).toContain(label);
+    }
+    // and the phone, which is the part people never find on their own
+    expect(text).toContain("loom up --restart --tailnet");
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  /**
+   * The refusal is a feature. People expect a tool that drives other apps to
+   * want Accessibility, which makes "grant Accessibility to Loom" a convincing
+   * thing for something else to ask. Saying so, in the app, is the defence.
+   */
+  it("says which permissions it does NOT want", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, "#setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
+
+    expect(text_(m, "#setupbody")).toContain("Accessibility");
+    expect(text_(m, "#setupbody")).toMatch(/not needed/i);
+    expect($(m, "#setupbody .sdot.no"), "the refused row should be marked as such").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("closes on Escape", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, "#setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, "#setupbody"));
+    m.window.document.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await waitUntil(() => !$(m, ".scrim"));
     expect(m.errors.join("\n")).toBe("");
   });
 });
@@ -415,12 +484,12 @@ describe("web app · the rest of the shell", () => {
     filter.value = "weave";
     filter.dispatchEvent(new m.window.Event("input", { bubbles: true }));
     await waitUntil(() => !!$(m, "#slist .srow"));
-    expect(text(m, "#slist")).toContain("weave");
+    expect(text_(m, "#slist")).toContain("weave");
 
     filter.value = "definitely-not-a-project";
     filter.dispatchEvent(new m.window.Event("input", { bubbles: true }));
     await waitUntil(() => !$(m, "#slist .srow"));
-    expect(text(m, "#slist")).toContain("no matches");
+    expect(text_(m, "#slist")).toContain("no matches");
     expect(m.errors.join("\n")).toBe("");
   });
 

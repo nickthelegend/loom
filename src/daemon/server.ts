@@ -17,6 +17,7 @@ import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
 import { RouteActiveError } from "../core/routes.js";
 import { buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
+import { setupReport } from "../core/setup.js";
 import {
   ensureDaemonConfig,
   findProject,
@@ -196,6 +197,23 @@ export class LoomDaemon {
         rev: BUILD_REV,
         terminal: this.terminals.mode,
       });
+    });
+
+    /**
+     * What this machine still needs — the same answer `loom doctor` gives.
+     *
+     * Authed like everything else: it enumerates which agents you have
+     * installed and which GUI apps are open, which is a small inventory of your
+     * machine and none of a stranger's business.
+     *
+     * Probing GUI bridges means a couple of HTTP round trips to their debug
+     * ports, so this is a request you make when you open Setup, not something
+     * the app polls.
+     */
+    app.get("/api/setup", (_req, res) => {
+      void setupReport()
+        .then((report) => res.json(report))
+        .catch((err) => res.status(500).json({ error: String(err?.message ?? err) }));
     });
     app.post("/api/pair/claim", (req, res) => {
       const { token, name } = (req.body ?? {}) as { token?: string; name?: string };
