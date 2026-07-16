@@ -345,9 +345,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .scroll::-webkit-scrollbar-thumb:hover,.slist::-webkit-scrollbar-thumb:hover,.rbody::-webkit-scrollbar-thumb:hover{
     background-color:color-mix(in srgb, var(--muted-foreground) 48%, transparent)}
   /* ── Desktop workspace shell (Orca layout) ────────────── */
+  /* rail collapsed by default — toggle adds .railopen to widen the grid */
   .dshell{display:grid;height:100dvh;
     grid-template-columns:264px minmax(0,1fr);
     grid-template-rows:minmax(0,1fr) 25px}
+  .dshell.railopen{grid-template-columns:264px minmax(0,1fr) 304px}
   .sidebar{grid-column:1;grid-row:1;border-right:1px solid var(--sidebar-border);
     display:flex;flex-direction:column;min-width:0;
     background:var(--sidebar);color:var(--sidebar-foreground)}
@@ -539,6 +541,36 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dempty .biglogo{font-size:36px;font-weight:650;letter-spacing:-.02em;color:var(--foreground)}
   .dempty .hair{width:48px;height:2px;border-radius:1px;
     background:linear-gradient(90deg,transparent,var(--thread),transparent)}
+  /* ── Terminal dock (Orca bottom terminal splits) ──────── */
+  .termdock{flex:none;display:none;flex-direction:column;height:240px;min-height:110px;max-height:70vh;
+    border-top:1px solid var(--border);background:var(--editor-surface)}
+  .termdock.open{display:flex}
+  .termresize{height:5px;flex:none;cursor:row-resize;margin-top:-3px;position:relative;z-index:2}
+  .termresize::after{content:"";position:absolute;left:0;right:0;top:2px;height:1px;background:transparent;transition:background .12s}
+  .termresize:hover::after{background:var(--ring)}
+  .termtabs{display:flex;align-items:center;gap:2px;height:30px;flex:none;padding:0 8px;
+    border-bottom:1px solid var(--border);background:var(--sidebar)}
+  .termtab{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 8px 0 10px;border-radius:6px;
+    font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);cursor:pointer;border:1px solid transparent}
+  .termtab:hover{color:var(--foreground);background:color-mix(in srgb, var(--accent) 55%, transparent)}
+  .termtab.active{background:var(--editor-surface);color:var(--foreground);border-color:var(--border)}
+  .termtab .tx{display:inline-flex;opacity:.5;border-radius:3px;width:15px;height:15px;align-items:center;justify-content:center}
+  .termtab .tx:hover{opacity:1;background:var(--accent)}
+  .termtab .tx svg{width:11px;height:11px}
+  .termtabs .iconbtn{width:24px;height:24px}
+  .termtabs .iconbtn svg{width:13px;height:13px}
+  .termbody{flex:1;min-height:0;overflow-y:auto;padding:8px 12px;font-family:var(--font-mono);font-size:12px;
+    line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--foreground)}
+  .termbody .pl{color:var(--muted-foreground)}
+  .termbody .pl b{color:var(--ok);font-weight:400}
+  .termbody .cmd{color:var(--foreground)}
+  .termbody .eo{color:var(--err)}
+  .termbody .ex{color:color-mix(in srgb, var(--muted-foreground) 75%, transparent)}
+  .termbody .hintl{color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
+  .terminput{flex:none;display:flex;align-items:center;gap:8px;padding:7px 12px;border-top:1px solid var(--border)}
+  .terminput .pr{color:var(--ok);font-family:var(--font-mono);font-size:12px;flex:none}
+  .terminput input{flex:1;background:none;border:none;outline:none;box-shadow:none!important;color:var(--foreground);
+    font-family:var(--font-mono);font-size:12px;letter-spacing:0}
   /* ── Native desktop chrome (Electron shell) ───────────── */
   html[data-electron] .sidebar .shead,
   html[data-electron] .tabstrip,
@@ -563,10 +595,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     .dmain > .panel > header{padding-left:18px;padding-right:14px}
     .srow .badge{font-size:10px;padding:0 7px}
   }
-  @media (min-width:1200px){
-    .dshell{grid-template-columns:264px minmax(0,1fr) 304px}
-    .rail{display:flex}
-  }
+  .dshell.railopen .rail{display:flex}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -611,7 +640,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>'),
     help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.8-2.6 2.2-2.6 3.6"/><path d="M12 17h.01"/>'),
     plus: svg('<path d="M12 5v14"/><path d="M5 12h14"/>'),
-    split: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M12 4.5v15"/>')
+    split: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M12 4.5v15"/>'),
+    panelRight: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>'),
+    terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
+    x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
+    tasks: svg('<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>')
   };
 
   function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
@@ -870,7 +903,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
         '<span id="tabsbox" style="display:contents"></span>' +
         '<span class="spacer"></span>' +
+        '<button id="termbtn" class="iconbtn" title="toggle terminal (\\u2303\\u2018)">' + ICONS.terminal + "</button>" +
         '<button id="splitbtn" class="iconbtn" title="dock changes beside the thread">' + ICONS.split + "</button>" +
+        '<button id="railbtn" class="iconbtn" title="toggle source control">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
         '<div class="paneswrap">' +
@@ -884,6 +919,16 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<div class="pane scroll" id="pane-routes" style="display:none"></div>' +
         composerHtml +
         "</div></div>" +
+        '<div class="termdock" id="termdock">' +
+        '<div class="termresize" id="termresize"></div>' +
+        '<div class="termtabs"><span id="termtabs" style="display:contents"></span>' +
+        '<button id="termadd" class="iconbtn" title="new terminal">' + ICONS.plus + "</button>" +
+        '<span class="spacer"></span>' +
+        '<button id="termhide" class="iconbtn" title="hide terminal">' + ICONS.x + "</button></div>" +
+        '<div class="termbody" id="termbody"></div>' +
+        '<form class="terminput" id="termform"><span class="pr">&#10095;</span>' +
+        '<input id="terminput" placeholder="run a command in the project dir\\u2026" autocomplete="off" autocapitalize="off" spellcheck="false"></form>' +
+        "</div>" +
         "</div>";
     } else {
       mount.innerHTML =
@@ -978,7 +1023,133 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         localStorage.setItem(SPLIT_KEY, splitOn() ? "0" : "1");
         applySplit();
       };
+      document.getElementById("railbtn").onclick = toggleRail;
+      document.getElementById("termbtn").onclick = toggleTerm;
+      applyRail();
       applySplit();
+    }
+
+    // ---- terminal dock (command runner in the project dir) -----------------
+    var TERM_KEY = "loomTerm";
+    var terms = [], activeTerm = null, termSeq = 0;
+    function cwdLabel(){
+      var d = (state.project && state.project.dir) || "";
+      var parts = d.split(/[\\\\/]/).filter(Boolean);
+      return parts.length ? "~/" + parts[parts.length - 1] : "~";
+    }
+    function curTerm(){ for (var i = 0; i < terms.length; i++) if (terms[i].id === activeTerm) return terms[i]; return null; }
+    function termOpen(){ return desktop && localStorage.getItem(TERM_KEY) === "1"; }
+    function applyTerm(){
+      var dock = document.getElementById("termdock"); if (!dock) return;
+      var on = termOpen();
+      dock.classList.toggle("open", on);
+      var tb = document.getElementById("termbtn");
+      if (tb) tb.classList.toggle("active", on);
+      if (on) { ensureTerm(); focusTermInput(); }
+    }
+    function toggleTerm(){
+      localStorage.setItem(TERM_KEY, termOpen() ? "0" : "1");
+      applyTerm();
+    }
+    function ensureTerm(){ if (!terms.length) addTerm(true); }
+    function focusTermInput(){ var i = document.getElementById("terminput"); if (i && termOpen()) setTimeout(function(){ i.focus(); }, 0); }
+    function addTerm(silent){
+      termSeq++;
+      var id = "t" + termSeq;
+      var t = { id: id, title: "Terminal " + termSeq, html: "", run: null };
+      if (!silent || terms.length === 0) {
+        t.html = '<div class="hintl">commands run in ' + esc(cwdLabel()) +
+          " \\u00b7 each line is a fresh shell (cd won\\u2019t persist \\u2014 chain with &amp;&amp;)</div>";
+      }
+      terms.push(t);
+      activeTerm = id;
+      drawTermTabs();
+      drawTermBody();
+      focusTermInput();
+    }
+    function closeTerm(id){
+      var idx = -1;
+      for (var i = 0; i < terms.length; i++) if (terms[i].id === id) idx = i;
+      if (idx < 0) return;
+      var t = terms[idx];
+      if (t.run) api("/api/projects/" + pid + "/exec/" + t.run + "/kill", { method: "POST", body: "{}" }).catch(function(){});
+      terms.splice(idx, 1);
+      if (activeTerm === id) activeTerm = terms.length ? terms[Math.max(0, idx - 1)].id : null;
+      if (!terms.length) { localStorage.setItem(TERM_KEY, "0"); applyTerm(); return; }
+      drawTermTabs();
+      drawTermBody();
+    }
+    function drawTermTabs(){
+      var box = document.getElementById("termtabs"); if (!box) return;
+      box.innerHTML = terms.map(function(t){
+        return '<span class="termtab' + (t.id === activeTerm ? " active" : "") + '" data-t="' + t.id + '">' +
+          (t.run ? '<span class="busy" style="width:8px;height:8px;color:var(--live)"></span>' : "") +
+          esc(t.title) + '<span class="tx" data-close="' + t.id + '">' + ICONS.x + "</span></span>";
+      }).join("");
+      Array.prototype.forEach.call(box.querySelectorAll(".termtab"), function(el){
+        el.onclick = function(ev){
+          var c = ev.target.closest ? ev.target.closest("[data-close]") : null;
+          if (c) { closeTerm(c.getAttribute("data-close")); return; }
+          activeTerm = el.getAttribute("data-t"); drawTermTabs(); drawTermBody(); focusTermInput();
+        };
+      });
+    }
+    function drawTermBody(){
+      var body = document.getElementById("termbody"); var t = curTerm();
+      if (!body || !t) return;
+      body.innerHTML = t.html;
+      body.scrollTop = body.scrollHeight;
+    }
+    function termAppend(t, html){
+      t.html += html;
+      if (t.id === activeTerm) {
+        var body = document.getElementById("termbody");
+        if (body) { body.insertAdjacentHTML("beforeend", html); body.scrollTop = body.scrollHeight; }
+      }
+    }
+    function runCmd(cmd){
+      var t = curTerm(); if (!t) return;
+      termAppend(t, '<div><span class="pl">' + esc(cwdLabel()) + " <b>\\u276f</b></span> " +
+        '<span class="cmd">' + esc(cmd) + "</span></div>");
+      api("/api/projects/" + pid + "/exec", { method: "POST", body: JSON.stringify({ cmd: cmd, term: t.id }) })
+        .then(function(r){ t.run = r.runId; drawTermTabs(); })
+        .catch(function(err){ termAppend(t, '<div class="eo">loom: ' + esc(err.message) + "</div>"); });
+    }
+    function onTermFrame(frame){
+      var t = null;
+      for (var i = 0; i < terms.length; i++) if (terms[i].id === frame.term) t = terms[i];
+      if (!t) return;
+      if (frame.chunk !== undefined) {
+        termAppend(t, '<span' + (frame.stream === "err" ? ' class="eo"' : "") + ">" + esc(frame.chunk) + "</span>");
+      }
+      if (frame.exit !== undefined) {
+        t.run = null; drawTermTabs();
+        termAppend(t, '<div class="ex">\\u2514 exit ' + Number(frame.exit) + "</div>");
+      }
+    }
+    if (desktop) {
+      document.getElementById("termhide").onclick = function(){ localStorage.setItem(TERM_KEY, "0"); applyTerm(); };
+      document.getElementById("termadd").onclick = function(){ addTerm(false); };
+      document.getElementById("termform").addEventListener("submit", function(ev){
+        ev.preventDefault();
+        var inp = document.getElementById("terminput");
+        var cmd = (inp.value || "").trim();
+        inp.value = "";
+        if (cmd === "clear") { var t = curTerm(); if (t) { t.html = ""; drawTermBody(); } return; }
+        if (cmd) runCmd(cmd);
+      });
+      // drag the top edge to resize the dock
+      var rz = document.getElementById("termresize");
+      rz.addEventListener("mousedown", function(ev){
+        ev.preventDefault();
+        var dock = document.getElementById("termdock");
+        var startY = ev.clientY, startH = dock.offsetHeight;
+        function mv(e){ dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, startH + (startY - e.clientY))) + "px"; }
+        function up(){ document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); }
+        document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
+      });
+      state.toggleTerm = toggleTerm;
+      applyTerm();
     }
     // expandable Update(…) turn cards in the feed
     document.getElementById("feed").addEventListener("click", function(ev){
@@ -1331,6 +1502,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       ws.onmessage = function(ev){
         try {
           var frame = JSON.parse(ev.data);
+          if (frame.type === "term") { onTermFrame(frame); return; }
           if (frame.type === "event" && frame.event) {
             if (historyLoaded) append([frame.event]);
             else pendingWs.push(frame.event);
@@ -1386,6 +1558,20 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       (total > 0 ? '<span class="sit">\\u03a3 ' + money(total) + "</span>" : "");
   }
 
+  // ---- rail (source control) toggle — collapsed by default -----------------
+  var RAIL_KEY = "loomRail";
+  function railOpen(){ return localStorage.getItem(RAIL_KEY) === "1"; }
+  function applyRail(){
+    var shell = document.querySelector(".dshell");
+    if (shell) shell.classList.toggle("railopen", railOpen());
+    var rb = document.getElementById("railbtn");
+    if (rb) rb.classList.toggle("active", railOpen());
+  }
+  function toggleRail(){
+    localStorage.setItem(RAIL_KEY, railOpen() ? "0" : "1");
+    applyRail();
+  }
+
   // ---- router ----------------------------------------------------------
   var mq = window.matchMedia("(min-width:900px)");
   function isDesktop(){ return mq.matches; }
@@ -1412,11 +1598,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       "</aside>" +
       '<section class="dmain" id="dmain"></section>' +
       '<aside class="rail"><div class="rhead">Source control' +
-        '<span class="spacer"></span><button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button></div>" +
+        '<span class="spacer"></span><button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button>" +
+        '<button id="railclose" class="iconbtn" title="hide">' + ICONS.x + "</button></div>" +
         '<div class="rbody" id="railbody"><div class="rempty">select a project</div></div></aside>' +
       '<div class="statusbar" id="statusbar"></div>' +
       "</div>";
     document.getElementById("unpair").onclick = logout;
+    document.getElementById("railclose").onclick = toggleRail;
+    applyRail();
     var filter = "";
     document.getElementById("sfilter").oninput = function(){
       filter = (this.value || "").trim().toLowerCase();
@@ -1525,6 +1714,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
 
   function route(){
     applyTheme();
+    state.toggleTerm = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
@@ -1533,6 +1723,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   }
   window.addEventListener("hashchange", function(){ if (!isDesktop()) route(); });
   mq.addEventListener("change", function(){ clearShell(); route(); });
+  // Ctrl+backtick toggles the terminal dock (Orca), when a workspace is mounted.
+  document.addEventListener("keydown", function(e){
+    if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "\`" || e.key === "~")) {
+      if (state.toggleTerm) { e.preventDefault(); state.toggleTerm(); }
+    }
+  });
   pairFromHash().then(function(paired){
     if (paired) toast("paired \\u2713");
     route();

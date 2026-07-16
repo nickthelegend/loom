@@ -4,7 +4,7 @@
  * event stream.
  */
 
-import { execFile } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import type { Server } from "node:http";
@@ -75,6 +75,8 @@ export class LoomDaemon {
   private auth: AuthManager;
   private runtimes = new Map<string, ProjectRuntime>();
   private sockets = new Map<WebSocket, { project?: string }>();
+  /** Live terminal command runs, keyed by `${projectId}:${runId}`. */
+  private termProcs = new Map<string, ChildProcess>();
   host: string;
   port: number;
 
@@ -382,6 +384,65 @@ export class LoomDaemon {
         res.json({ route: await rt.abortRoute() });
       }),
     );
+
+    // Terminal: run a command in the project directory and stream its output
+    // over the project WebSocket. A command runner, not a live PTY — each
+    // submission spawns a fresh shell, so there is no shared shell state
+    // between commands (cd doesn't persist; chain with `&&` instead). Bearer
+    // auth + the tailnet are the trust boundary, same as the agents the
+    // daemon already runs.
+    app.post("/api/projects/:id/exec", (req, res) => {
+      const info = findProject(String(req.params.id));
+      if (!info) return void res.status(404).json({ error: "unknown project" });
+      const { cmd, term } = (req.body ?? {}) as { cmd?: string; term?: string };
+      if (!cmd?.trim()) return void res.status(400).json({ error: "missing cmd" });
+      const live = [...this.termProcs.keys()].filter((k) => k.startsWith(`${info.id}:`)).length;
+      if (live >= 8) return void res.status(429).json({ error: "too many running commands" });
+      const runId = crypto.randomBytes(6).toString("hex");
+      const key = `${info.id}:${runId}`;
+      const termId = String(term ?? "t1");
+      const isWin = process.platform === "win32";
+      const child = isWin
+        ? spawn("cmd.exe", ["/d", "/s", "/c", cmd], { cwd: info.dir, env: process.env })
+        : spawn(process.env.SHELL || "/bin/sh", ["-lc", cmd], { cwd: info.dir, env: process.env });
+      this.termProcs.set(key, child);
+      let sent = 0;
+      const MAX = 2_000_000; // cap a single run's streamed output at ~2MB
+      const pump = (stream: "out" | "err") => (buf: Buffer) => {
+        if (sent >= MAX) return;
+        let chunk = buf.toString("utf8");
+        if (sent + chunk.length > MAX) {
+          chunk = chunk.slice(0, MAX - sent) + "\n…output truncated…\n";
+        }
+        sent += chunk.length;
+        this.broadcastTerm(info.id, { type: "term", term: termId, runId, stream, chunk });
+      };
+      child.stdout?.on("data", pump("out"));
+      child.stderr?.on("data", pump("err"));
+      child.on("error", (err) => {
+        this.broadcastTerm(info.id, {
+          type: "term",
+          term: termId,
+          runId,
+          stream: "err",
+          chunk: `loom: ${err.message}\n`,
+        });
+      });
+      child.on("close", (code) => {
+        this.termProcs.delete(key);
+        this.broadcastTerm(info.id, { type: "term", term: termId, runId, exit: code ?? 0 });
+      });
+      res.json({ runId, term: termId });
+    });
+
+    app.post("/api/projects/:id/exec/:runId/kill", (req, res) => {
+      const info = findProject(String(req.params.id));
+      if (!info) return void res.status(404).json({ error: "unknown project" });
+      const child = this.termProcs.get(`${info.id}:${String(req.params.runId)}`);
+      if (!child) return void res.json({ killed: false });
+      child.kill("SIGINT");
+      res.json({ killed: true });
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -415,6 +476,16 @@ export class LoomDaemon {
       ws.send(frame);
     }
     this.maybePush(projectId, event);
+  }
+
+  /** Fan a terminal frame out to every socket watching this project. */
+  private broadcastTerm(projectId: string, frame: Record<string, unknown>): void {
+    const payload = JSON.stringify(frame);
+    for (const [ws, sub] of this.sockets) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      if (sub.project && sub.project !== projectId) continue;
+      ws.send(payload);
+    }
   }
 
   private pushTokens(): string[] {
@@ -486,6 +557,8 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    for (const child of this.termProcs.values()) child.kill("SIGKILL");
+    this.termProcs.clear();
     for (const rt of this.runtimes.values()) await rt.close();
     this.runtimes.clear();
     this.wss?.close();
