@@ -79,11 +79,43 @@ loom doctor        # checks node, agents, tailscale, daemon, and your project
 Surfaces, all talking to the same daemon:
 - **TUI / CLI** — `loom` (default), `loom chat`, `loom send`, …
 - **Desktop app** — [`desktop/`](desktop/README.md): `cd desktop && npm install && npm
-  start` opens a native Electron window (starts the daemon and pairs itself). Our own
-  thin shell around the web app — not an IDE.
+  start` opens a native Electron window (starts the daemon and pairs itself) on the
+  workspace below.
 - **Phone app** — [`app/`](app/README.md): `cd app && npx expo install && npx expo start`,
   scan with Expo Go (voice input, per-prompt diffs, push).
-- **Web app** — no install; `loom pair` → open the link.
+- **Web app** — no install; `loom pair` → open the link. Same workspace in the browser.
+
+## The workspace
+
+On a wide screen the web app (and the desktop shell around it) is a full workspace for
+*driving* agents — still not an editor: Loom shows you the context and the agents do
+the writing.
+
+```
+┌───────────┬────────────────────────────┬──────────────┐
+│ projects  │  Thread · Brain · Routes   │  Explorer    │
+│  └ agents │                            │  Search      │
+│           │  the conversation, with    │  Source ctl  │
+│ New task  │  Update(n files) cards ────┼─▶ diff opens │
+│ Search    │                            │  Tasks       │
+│           ├────────────────────────────┤              │
+│           │  terminal (a real shell)   │              │
+└───────────┴────────────────────────────┴──────────────┘
+  live · host · baton · spend                    ← status bar
+```
+
+- **Projects + agents** in the left rail; click an agent to aim your next message at it.
+- **Thread** is the shared conversation; **Brain** is the unified memory; **Routes**
+  starts a pipeline.
+- **Click any change** — an `Update(n files)` card, or a file in Source Control — and the
+  diff opens to the right of the chat. It stays closed until you ask for it.
+- **Explorer / Search / Source Control / Tasks** in the right panel; every column is
+  drag-resizable (double-click a handle to reset).
+- **Terminal** (`Ctrl` + `` ` ``) is a real shell in the project directory: `cd` and
+  variables persist, `Ctrl+C` interrupts the running job without killing the shell,
+  output keeps its colours, and `↑` walks your history.
+- **New task** (`n`) picks a project, a task, and **one agent — or several**, which run
+  it as a pipeline, hop to hop.
 
 ## Quickstart
 
@@ -342,7 +374,7 @@ sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running 
 ## Development
 
 ```bash
-npm test          # 96 tests: unit + full HTTP/WS end-to-end
+npm test          # 124 tests: unit + full HTTP/WS end-to-end
 npm run build     # tsc → dist/
 npm run dev       # run the CLI from source (tsx)
 ```

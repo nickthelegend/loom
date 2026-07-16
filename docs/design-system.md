@@ -72,30 +72,65 @@ Rules:
 
 ## Workspace shell (desktop web + Electron, ≥900px)
 
-The Orca workspace layout, drawn from Loom's real model:
+The Orca workspace layout, drawn from Loom's real model. Every column is
+drag-resizable and persisted; double-click a handle to reset
+(`loomSbW` / `loomRailW` / `loomDockW` / `loomTermH`).
 
-- **Left sidebar (264px)** — project groups with nested agent rows: status dot
-  (amber pulse = working), `baton` badge on the holder, role labels. Clicking
-  an agent targets it for the next send.
-- **Tab strip (37px)** — Thread | Changes (badge = changed-file count) |
-  Brain | Routes; the active tab merges into the canvas. The composer docks
-  under Thread only.
-- **Changes pane** — per-file diff cards on `--editor-surface` with
-  add/delete washes and hunk headers; Loom's `.loom/` state files filtered.
-- **Right rail (304px)** — Source control: branch, changed files with
-  colored status letters (click jumps to the file's diff), live route and
-  needs-input cards. **Collapsed by default** — toggled from the tab strip
-  (PanelRight) or its close button, state persisted (`loomRail`).
-- **Terminal dock** — a bottom, resizable command runner: multiple tabs,
-  a prompt showing the project dir, streamed stdout/stderr with exit codes,
-  a `clear` builtin, Ctrl+backtick toggle. Each line is a fresh shell in the
-  project directory (`POST /api/projects/:id/exec` → WS `term` frames).
-- **New Task modal** — Orca's Create Worktree, mapped to Loom: project +
-  agent + task (or pipeline) → hands the baton and starts the work. Scrim +
-  glass panel; `n` opens, Cmd/Ctrl+Enter submits, Esc closes.
+- **Left sidebar (264px)** — New task + Search, then project groups with
+  nested agent rows: status dot (amber pulse = working), `baton` badge on the
+  holder, role labels. Clicking an agent targets it for the next send.
+- **Tab strip (40px)** — *is* the window chrome: project context, then
+  Thread | Brain | Routes, then the terminal / right-panel / theme toggles.
+  The active tab merges into the canvas; the composer docks under Thread only.
+- **Diff dock (right of the chat, closed by default)** — opens only when you
+  click a change: an `Update(n files)` card in the thread, or a file in
+  Explorer / Search / Source Control. Per-file diff cards on
+  `--editor-surface` with add/delete washes, hunk headers and old/new line
+  gutters; Loom's `.loom/` state files filtered. Closes with an X.
+- **Right rail (304px, `loomRail`, open by default on Explorer)** — four
+  views behind an icon switcher (`loomRailView`):
+  - *Explorer* — lazy project file tree; a file opens its diff if changed,
+    else a read-only preview.
+  - *Search* — filename find across the project.
+  - *Source Control* — branch, changed files with colored status letters,
+    live route and needs-input cards.
+  - *Tasks* — per-project New task + the agent roster.
+- **Terminal dock** — a bottom, resizable strip of real shells (`loomTerm`,
+  Ctrl+backtick). See *Terminal* below.
+- **New Task modal** — Orca's Create Worktree, mapped to Loom: project + task
+  + **one agent, or several** (several = a pipeline through them, in the order
+  you picked). Scrim + glass panel; `n` opens, Cmd/Ctrl+Enter submits, Esc
+  closes.
 - **Status bar (25px)** — websocket liveness, daemon host, baton holder,
   spend meter (project share of total), working-agent count, project count,
   total spend.
+
+### Terminal
+
+Each tab owns a long-lived shell in the project directory, so it behaves like
+a terminal rather than a command runner:
+
+- `cd` and exported variables **persist** between commands; tabs are isolated.
+- After each command the shell prints a sentinel carrying the exit code and
+  cwd. The daemon strips it from the stream (holding back partial matches
+  across chunk boundaries) and emits an exit/cwd frame — that's how the prompt
+  tracks the live directory and how failures surface.
+- **Ctrl+C** signals the shell's process group. The shell survives because it
+  is sent a no-op `INT` trap at open — handled signals reset to default in
+  children, so the foreground job still dies. Real `^C → exit 130 → prompt`.
+- ANSI SGR renders against the theme tokens; other escapes are stripped.
+  `FORCE_COLOR` and a `cat` pager are set so tools still colourise and never
+  block without a tty.
+- It is **not a PTY** (that needs a native dep, which would break
+  `npm i -g threadloom`), so there's no echo or job control.
+
+### The file sandbox
+
+Explorer endpoints (`/files`, `/file`, `/find`) hand file contents to any
+paired client, so containment is checked twice: lexically (stops `../`, and
+covers paths that don't exist yet) and again via `realpath` (stops a symlink
+*inside* the project pointing out of it — `path.resolve` resolves straight
+through links). Both are covered by `test/workspace.test.ts`.
 
 Mobile home mirrors the Orca companion: a Welcome-back hero, three stat
 tiles (Projects / Agents / Spend), a Daemon card (host + counts), a Resume
