@@ -98,6 +98,34 @@ function run(cmd: string, args: string[], cwd: string): Promise<string> {
   });
 }
 
+/**
+ * Run gh in a project. Shared with board.ts — `execFile` with an args array, so
+ * nothing a caller passes can reach a shell.
+ */
+export function runGh(args: string[], cwd: string): Promise<string> {
+  return run("gh", args, cwd);
+}
+
+/** Which GitHub repo is this directory, if any — or why we can't tell. */
+export async function ghRepo(
+  dir: string,
+): Promise<{ ok: true; repo: string } | { ok: false; err: TaskUnavailable }> {
+  if (!(await cliAvailable("gh"))) {
+    return {
+      ok: false,
+      err: { available: false, reason: "no-cli", detail: "GitHub CLI not found. Install gh, then reload." },
+    };
+  }
+  try {
+    const repo = (
+      await runGh(["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], dir)
+    ).trim();
+    return { ok: true, repo };
+  } catch (err) {
+    return { ok: false, err: classifyGhFailure(String((err as Error).message)) };
+  }
+}
+
 /** Map gh's shape onto ours, so the client renders issues and PRs the same. */
 function normalize(raw: GhItem[], kind: "issue" | "pr"): TaskItem[] {
   return raw.map((r) => ({
@@ -124,19 +152,9 @@ export async function listTasks(
   opts: { kind?: "issue" | "pr"; search?: string; limit?: number } = {},
 ): Promise<TaskResult> {
   const kind = opts.kind ?? "issue";
-  if (!(await cliAvailable("gh"))) {
-    return {
-      available: false,
-      reason: "no-cli",
-      detail: "GitHub CLI not found. Install gh, then reload.",
-    };
-  }
-  let repo: string;
-  try {
-    repo = (await run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], dir)).trim();
-  } catch (err) {
-    return classifyGhFailure(String((err as Error).message));
-  }
+  const repoRes = await ghRepo(dir);
+  if (!repoRes.ok) return repoRes.err;
+  const repo = repoRes.repo;
 
   const fields =
     kind === "pr"
@@ -148,7 +166,7 @@ export async function listTasks(
   // filter, which is exactly what the query box shows.
   if (opts.search?.trim()) args.push("--search", opts.search.trim());
   try {
-    const out = await run("gh", args, dir);
+    const out = await runGh(args, dir);
     const items = normalize(JSON.parse(out) as GhItem[], kind);
     return { available: true, repo, items, capped: items.length >= limit };
   } catch (err) {

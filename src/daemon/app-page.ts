@@ -11,10 +11,12 @@
  * orca, MIT) — neutral monochrome chrome, hairline borders, Geist type, and
  * color reserved for state: thread cyan = live, shuttle magenta = the baton.
  * Desktop (>=900px) is the Orca workspace shell: projects/agents tree in the
- * left sidebar, a tabbed center pane (Thread | Tasks | Brain | Routes), a diff
+ * left sidebar, a tabbed center pane (Thread | Tasks | Brain | Board), a diff
  * dock right of the chat, a 4-view right rail, a terminal dock, and a status
  * bar. Mobile keeps the single-column thread. See docs/design-system.md.
  */
+
+import { BRAND_SPRITE, BRAND_TITLES } from "./brand-icons.js";
 
 export const APP_MANIFEST = {
   name: "Loom",
@@ -146,6 +148,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .iconbtn:hover{background:var(--accent);color:var(--foreground)}
   .iconbtn svg{width:16px;height:16px}
   .iconbtn.spin svg{animation:spin .9s linear infinite}
+  /* ADE brand marks. These are the one place real colour enters the chrome —
+     they're the agent's identity, not our state palette, so they keep their own
+     hues. opencode's mark is mono and inherits currentColor by design. */
+  .brand{width:14px;height:14px;flex:none;display:inline-block;vertical-align:middle}
+  .brand.lg{width:18px;height:18px}
+  .brand.xl{width:22px;height:22px}
   .sendbtn{display:inline-flex;align-items:center;justify-content:center;flex:none;
     width:34px;height:34px;border-radius:17px;background:var(--primary);color:var(--primary-foreground);
     transition:opacity .15s,transform .1s}
@@ -213,7 +221,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   /* ── Thread feed ──────────────────────────────────────── */
   .msg{margin:10px 0;display:flex;flex-direction:column}
   .msg .who{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);
-    margin:0 2px 4px;letter-spacing:.04em}
+    margin:0 2px 4px;letter-spacing:.04em;display:flex;align-items:center;gap:5px}
   .msg .bubble{max-width:88%;padding:9px 13px;border-radius:var(--radius-xl);
     white-space:pre-wrap;word-break:break-word;font-size:14px;line-height:1.55}
   .msg.user{align-items:flex-end}
@@ -262,18 +270,18 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
     animation:sheetin .18s ease}
   @keyframes sheetin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-  .sheet select,.sheet input,.formcol select,.formcol input{
+  .sheet select,.sheet input{
     height:36px;background:transparent;border:1px solid var(--input);
     border-radius:var(--radius-md);color:var(--foreground);padding:0 11px;font:inherit;font-size:14px;width:100%;
     transition:border-color .15s,box-shadow .15s;outline:none}
-  .dark .sheet select,.dark .sheet input,.dark .formcol select,.dark .formcol input{
+  .dark .sheet select,.dark .sheet input{
     background:color-mix(in srgb, var(--input) 30%, transparent)}
-  .dark .sheet select option,.dark .formcol select option{background:var(--popover);color:var(--popover-foreground)}
-  .sheet select:focus-visible,.sheet input:focus-visible,.formcol select:focus-visible,.formcol input:focus-visible{
+  .dark .sheet select option{background:var(--popover);color:var(--popover-foreground)}
+  .sheet select:focus-visible,.sheet input:focus-visible{
     border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent)}
   .sheet .row{display:flex;gap:8px}
   .sheet .row .btn{flex:1}
-  .sheet label,.formcol label{font-size:11px;font-weight:600;color:var(--muted-foreground);
+  .sheet label{font-size:11px;font-weight:600;color:var(--muted-foreground);
     letter-spacing:.05em;text-transform:uppercase;font-family:var(--font-mono)}
   /* ── Composer ─────────────────────────────────────────── */
   .composer{z-index:6;flex:none;
@@ -416,6 +424,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     color:var(--muted-foreground);border:1px solid var(--border);border-radius:5px;
     padding:0 5px;line-height:14px;text-transform:uppercase}
   .arow.cur .abadge{color:var(--sidebar-accent-foreground)}
+  /* a bridge is read-only: no hover affordance, because it can't be targeted */
+  .arow.bridge{cursor:default;opacity:.82}
+  .arow.bridge:hover{background:transparent;color:inherit}
   .dmain{grid-column:2;grid-row:1;min-width:0;display:flex;flex-direction:column;position:relative;background:var(--background)}
   .dmain .panel{height:100%}
   .dmain .composer .inner,.dmain .hint{max-width:none}
@@ -443,7 +454,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dmain .pane > #feed,.dmain .pane > #routebar,.dmain .pane > .agenthead{max-width:840px;margin-inline:auto}
   .dmain .msg .bubble{max-width:82%}
   .pane-inner{max-width:840px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
-  .formcol{display:flex;flex-direction:column;gap:10px;max-width:520px}
   /* diff/preview dock — opens to the RIGHT of the chat on click, closed by default */
   .paneswrap{flex:1;min-height:0;min-width:0;display:flex}
   .mainpane{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -475,6 +485,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     box-shadow:0 1px 2px rgb(0 0 0 / .04)}
   .agenthead .ag{width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;
     font-family:var(--font-mono);font-size:11px;font-weight:700;flex:none}
+  /* a real logo brings its own colour, so its tile stays neutral */
+  .agenthead .ag.brandbox{background:var(--secondary);border:1px solid var(--border)}
   .agenthead .meta{min-width:0;display:flex;flex-direction:column;gap:1px}
   .agenthead .l1{font-size:12.5px;font-weight:600;display:flex;gap:8px;align-items:baseline}
   .agenthead .l1 .role{font-family:var(--font-mono);font-size:10.5px;font-weight:400;color:var(--muted-foreground)}
@@ -648,6 +660,49 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     font-family:var(--font-mono);font-size:12px;letter-spacing:0;caret-color:var(--ok)}
   .terminput.busy input{opacity:.6}
   .terminput .st{flex:none;font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground)}
+  /* ── Board (work flowing from working → needs you → review → merge) ── */
+  .boardview{display:flex;flex-direction:column;gap:14px;height:100%}
+  .bhead{display:flex;align-items:baseline;gap:12px;flex:none}
+  .bhead .bt{font-size:20px;font-weight:650;letter-spacing:-.01em}
+  .bhead .bs{font-size:12.5px;color:var(--muted-foreground)}
+  .bhead .spacer{margin-left:auto}
+  .bcols{display:grid;grid-template-columns:repeat(4,minmax(210px,1fr));gap:12px;
+    flex:1;min-height:0;overflow-x:auto}
+  .bcol{display:flex;flex-direction:column;min-height:0;border:1px solid var(--border);
+    border-radius:var(--radius-xl);background:var(--card);transition:border-color .12s,background .12s}
+  /* the live drop target — only the column under the pointer lights up */
+  .bcol.over{border-color:color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+    background:color-mix(in srgb, var(--accent) 55%, var(--card))}
+  .bch{display:flex;align-items:center;gap:8px;padding:12px 13px;flex:none;
+    border-bottom:1px solid var(--border);font-size:11px;font-weight:650;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--muted-foreground)}
+  .bch .bdot{width:7px;height:7px;border-radius:50%;flex:none}
+  .bch .bn{margin-left:auto;font-family:var(--font-mono);font-size:11px;letter-spacing:0}
+  .bcb{flex:1;min-height:0;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+  .bcard{border:1px solid var(--border);border-radius:var(--radius-md);background:var(--background);
+    padding:10px 11px;cursor:grab;transition:border-color .12s,transform .06s,box-shadow .12s}
+  .bcard:hover{border-color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)}
+  .bcard:active{cursor:grabbing}
+  .bcard.drag{opacity:.4}
+  .bcr1{display:flex;align-items:center;gap:6px;font-size:11px}
+  .bcr1 .st{font-weight:500}
+  .bcr1 .who{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;
+    color:var(--muted-foreground);display:flex;align-items:center;gap:5px}
+  .bct{font-size:13px;font-weight:600;color:var(--foreground);line-height:1.35;margin-top:7px}
+  .bcbr{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);margin-top:5px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bcf{margin-top:9px;padding-top:8px;border-top:1px solid var(--border);
+    font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);
+    display:flex;align-items:center;gap:6px}
+  .bcf a{color:inherit}
+  .bcf a:hover{color:var(--foreground)}
+  .bpin{margin-left:auto;font-family:var(--font-sans);font-size:9.5px;letter-spacing:.04em;
+    color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:0 5px;
+    cursor:pointer}
+  .bpin:hover{color:var(--foreground);border-color:var(--muted-foreground)}
+  .bempty{padding:14px 4px;text-align:center;font-size:11.5px;color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
+  .bnote{flex:none;font-size:11.5px;color:var(--muted-foreground);display:flex;align-items:center;gap:6px}
+
   /* ── Tasks view (issues / PRs from the project's remote) ── */
   .tasksview{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
   .provrow{display:flex;gap:8px}
@@ -827,6 +882,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
 </style>
 </head>
 <body id="loom-app">
+<!-- ADE brand marks, defined once (see brand-icons.ts). Every agent glyph on
+     the page is a <use> of one of these symbols. -->
+${BRAND_SPRITE}
 <div id="root"></div>
 <div id="toast"></div>
 <!-- xterm.js, served by the daemon from node_modules: the app has no build
@@ -851,6 +909,27 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   function hue(id){ var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
   function money(n){ return "$" + (n >= 0.01 ? n.toFixed(2) : n.toFixed(4)); }
+
+  // ---- ADE brand marks -----------------------------------------------------
+  var BRAND_TITLES = ${JSON.stringify(BRAND_TITLES)};
+  /**
+   * The agent's own logo, drawn from the sprite in <body>. Keyed by adapter
+   * kind, not by the instance id — you can name an agent anything, but its
+   * kind is what it actually is. An unknown kind (a custom adapter, "echo")
+   * has no logo to show, so callers fall back to the hue monogram rather than
+   * guessing with someone else's brand.
+   */
+  function brandMark(kind, cls){
+    if (!kind || !BRAND_TITLES[kind]) return "";
+    return '<svg class="' + (cls || "brand") + '" aria-hidden="true"><use href="#brand-' + kind + '"></use></svg>';
+  }
+  function hasBrand(kind){ return !!(kind && BRAND_TITLES[kind]); }
+  /** Look up an agent's kind from the project payload (rows only carry ids). */
+  function kindOf(id){
+    var p = state.project, list = (p && p.agents) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i].kind;
+    return null;
+  }
   var LOADER = '<div class="loader"><i></i><i></i><i></i><i></i></div>';
 
   // Inline icon set — 24px grid, stroke 2, currentColor (no emoji, no CDN).
@@ -866,6 +945,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     // a changed file: document outline with a small +/- pair inside
     tree: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/><path d="M12 11.5v4"/><path d="M10 13.5h4"/><path d="M10 18h4"/>'),
     route: svg('<circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="5.5" r="2.5"/><path d="M8 18.5h5.5a4 4 0 0 0 4-4V8"/>'),
+    // three columns of differing fill — a kanban board at 13px
+    board: svg('<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="6" rx="1.5"/>'),
+    info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>'),
     branch: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7"/><path d="M15.5 8.5H11a5 5 0 0 0-5 5"/>'),
     refresh: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>'),
     sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/>'),
@@ -1050,7 +1132,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         return '<div class="msg user"><div class="bubble">' + esc(p.text) + "</div></div>";
       }
       var h = hue(e.agentId);
-      return '<div class="msg agent"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' + esc(e.agentId) + '</div><div class="bubble" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + esc(p.text) + "</div></div>";
+      return '<div class="msg agent"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
+        brandMark(kindOf(e.agentId)) + esc(e.agentId) +
+        '</div><div class="bubble" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + esc(p.text) + "</div></div>";
     }
     if (e.kind === "tool_call") return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool) + "</div>";
     if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";
@@ -1200,7 +1284,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<div class="mainpane" id="mainpane">' +
         '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
-        '<div class="pane scroll" id="pane-routes" style="display:none"></div>' +
+        '<div class="pane scroll" id="pane-board" style="display:none"></div>' +
         '<div class="pane scroll" id="pane-tasks" style="display:none"></div>' +
         composerHtml +
         "</div>" +
@@ -1248,10 +1332,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     // mobile has no #tabsbox, so this is a no-op there by construction
     function drawTabs(){
       var box = document.getElementById("tabsbox"); if (!box) return;
-      var tabs = ["thread", "tasks", "brain", "routes"];
+      var tabs = ["thread", "tasks", "brain", "board"];
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
       var LBL = { thread: [ICONS.thread, "Thread"], tasks: [ICONS.tasks, "Tasks"],
-                  brain: [ICONS.memory, "Brain"], routes: [ICONS.route, "Routes"] };
+                  brain: [ICONS.memory, "Brain"], board: [ICONS.board, "Board"] };
       box.innerHTML = tabs.map(function(tb){
         return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
           LBL[tb][0] + LBL[tb][1] + "</button>";
@@ -1262,7 +1346,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     }
     function showTab(name){
       state.tab = name;
-      ["thread", "tasks", "brain", "routes"].forEach(function(t){
+      ["thread", "tasks", "brain", "board"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -1273,7 +1357,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       var cw = document.getElementById("composerwrap");
       if (cw) cw.style.display = name === "thread" ? "" : "none";
       if (name === "brain") refreshBrain();
-      if (name === "routes") drawRoutesPane();
+      // first open fetches; later opens keep the board (and your pins)
+      if (name === "board") { if (board.data) drawBoardPane(); else loadBoard(); }
       // first open fetches; later opens keep whatever was listed (and its page)
       if (name === "tasks") { if (tasks.data) drawTasksPane(); else loadTasks(); }
       if (name === "thread") {
@@ -2091,27 +2176,153 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         el.onkeydown = function(e){ if (e.key === "Enter") { e.preventDefault(); start(); } };
       });
     }
-    function drawRoutesPane(){
-      var el = document.getElementById("pane-routes"); if (!el) return;
-      var p = state.project;
-      var r = p && p.route;
-      var live = r && (r.status === "running" || r.status === "waiting_human");
-      el.innerHTML = '<div class="pane-inner">' +
-        (live
-          ? '<div class="railcard threadc" style="margin:0"><div class="rt">' + esc(r.name || "route") + " \\u00b7 " +
-            (r.mode === "dynamic" ? "hop " + (r.current + 1) : "step " + (r.current + 1) + "/" + r.steps.length) +
-            '</div><div class="rm">' + esc(r.steps[r.current] || "") +
-            (r.status === "waiting_human" ? " \\u2014 \\u23f8 " + esc(r.pendingQuestion || "waiting for you") : "") + "</div>" +
-            '<div style="margin-top:8px"><button class="btn xs outline" id="rabort2">abort route</button></div></div>'
+    // ---- board pane ---------------------------------------------------------
+    // Cards are derived from live state (see board.ts): which agents are
+    // running or blocked, and what GitHub says about each PR. Nothing here is
+    // stored except your pins.
+    var board = { data: null, loading: false, pins: null };
+    var BCOLS = [
+      ["working", "Working", "var(--warn)"],
+      ["needs-you", "Needs you", "var(--warn)"],
+      ["in-review", "In review", "var(--muted-foreground)"],
+      ["ready", "Ready to merge", "var(--ok)"],
+    ];
+    var BSTATES = {
+      "working": ["Working", "var(--warn)"],
+      "input-needed": ["Input needed", "var(--warn)"],
+      "ci-failed": ["CI failed", "var(--err)"],
+      "changes-requested": ["Changes requested", "var(--warn)"],
+      "review-pending": ["Review pending", "var(--muted-foreground)"],
+      "draft": ["Draft PR", "var(--muted-foreground)"],
+      "approved": ["Approved", "var(--ok)"],
+      "ready": ["Ready", "var(--ok)"],
+    };
+    var PINKEY = "loomBoardPins:" + pid;
+    function boardPins(){
+      if (board.pins) return board.pins;
+      try { board.pins = JSON.parse(localStorage.getItem(PINKEY) || "{}"); }
+      catch (e) { board.pins = {}; }
+      return board.pins;
+    }
+    function savePins(){ try { localStorage.setItem(PINKEY, JSON.stringify(board.pins || {})); } catch (e) {} }
+    function loadBoard(){
+      board.loading = true;
+      drawBoardPane();
+      api("/api/projects/" + pid + "/board")
+        .then(function(r){ board.data = r; board.loading = false; drawBoardPane(); })
+        .catch(function(err){
+          board.data = { available: false, reason: "error", detail: err.message };
+          board.loading = false; drawBoardPane();
+        });
+    }
+    function drawBoardPane(){
+      var el = document.getElementById("pane-board"); if (!el) return;
+      var d = board.data;
+      var head = '<div class="bhead"><span class="bt">Board</span>' +
+        '<span class="bs">Live work flowing from working \\u2192 review \\u2192 merge.</span>' +
+        '<span class="spacer"></span>' +
+        '<button class="iconbtn' + (board.loading ? " spin" : "") + '" id="brefresh" title="refresh" aria-label="refresh">' + ICONS.refresh + "</button></div>";
+      if (!d) { el.innerHTML = '<div class="boardview">' + head + LOADER + "</div>"; return; }
+      if (!d.available) {
+        el.innerHTML = '<div class="boardview">' + head +
+          '<div class="tsetup"><div class="th">Couldn\\u2019t build the board</div>' +
+          '<div class="td">' + esc(d.detail) + "</div></div></div>";
+        wireBoardHead();
+        return;
+      }
+
+      var pins = boardPins();
+      var cards = (d.cards || []).slice();
+      // a pin only moves a card; it never edits what the card reports
+      cards.forEach(function(c){ c.shown = pins[c.id] || c.column; });
+
+      var cols = BCOLS.map(function(col){
+        var key = col[0];
+        var mine = cards.filter(function(c){ return c.shown === key; });
+        return '<div class="bcol" data-col="' + key + '">' +
+          '<div class="bch"><span class="bdot" style="background:' + col[2] + '"></span>' + esc(col[1]) +
+            '<span class="bn">' + mine.length + "</span></div>" +
+          '<div class="bcb" data-drop="' + key + '">' +
+            (mine.length ? mine.map(boardCard).join("") : '<div class="bempty">nothing here</div>') +
+          "</div></div>";
+      }).join("");
+
+      el.innerHTML = '<div class="boardview">' + head +
+        '<div class="bcols">' + cols + "</div>" +
+        (d.ghError
+          ? '<div class="bnote">' + ICONS.info + " Pull requests aren\\u2019t shown: " + esc(d.ghError.detail) + "</div>"
           : "") +
-        '<div class="formcol">' + routeFormHtml() + "</div></div>";
-      bindRouteForm(function(){ drawRoutesPane(); });
-      var ab = document.getElementById("rabort2");
-      if (ab) ab.onclick = function(){
-        api("/api/projects/" + pid + "/route", { method: "DELETE" })
-          .then(function(){ toast("route aborted"); refresh(); drawRoutesPane(); })
-          .catch(function(err){ toast(err.message); });
-      };
+        "</div>";
+      wireBoardHead();
+      wireBoardDnd();
+    }
+    function boardCard(c){
+      var st = BSTATES[c.state] || [c.state, "var(--muted-foreground)"];
+      var pinned = (board.pins || {})[c.id];
+      return '<div class="bcard" draggable="true" data-card="' + esc(c.id) + '" data-home="' + esc(c.column) + '">' +
+        '<div class="bcr1"><span class="bdot" style="background:' + st[1] + '"></span>' +
+          '<span class="st" style="color:' + st[1] + '">' + esc(st[0]) + "</span>" +
+          '<span class="who">' + brandMark(c.kind) + esc(c.agent || "\\u2014") + "</span></div>" +
+        '<div class="bct">' + esc(c.title) + "</div>" +
+        (c.branch ? '<div class="bcbr">' + esc(c.branch) + "</div>" : "") +
+        '<div class="bcf">' +
+          (c.pr
+            ? '<a href="' + esc(c.pr.url) + '" target="_blank" rel="noreferrer">PR #' + c.pr.number + "</a> \\u00b7 " +
+              esc(c.pr.draft ? "draft" : c.pr.state)
+            : "no PR yet") +
+          (pinned ? '<span class="bpin" data-unpin="' + esc(c.id) + '" title="you moved this card \\u2014 click to let its real state place it">pinned</span>' : "") +
+        "</div></div>";
+    }
+    function wireBoardHead(){
+      var r = document.getElementById("brefresh");
+      if (r) r.onclick = loadBoard;
+    }
+    /**
+     * Drag to move a card. This pins it where you dropped it — it does not tell
+     * GitHub anything. A PR is "ready" when a human approved it and CI passed,
+     * and dragging a card can't make either true, so the badge keeps saying what
+     * is actually so and the card just wears a "pinned" mark.
+     */
+    function wireBoardDnd(){
+      var el = document.getElementById("pane-board"); if (!el) return;
+      var dragging = null;
+      Array.prototype.forEach.call(el.querySelectorAll(".bcard"), function(card){
+        card.ondragstart = function(ev){
+          dragging = card.getAttribute("data-card");
+          card.classList.add("drag");
+          ev.dataTransfer.effectAllowed = "move";
+          // Firefox won't start a drag without payload
+          ev.dataTransfer.setData("text/plain", dragging);
+        };
+        card.ondragend = function(){ card.classList.remove("drag"); dragging = null; };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll(".bcb"), function(body){
+        var col = body.closest(".bcol");
+        body.ondragover = function(ev){ ev.preventDefault(); ev.dataTransfer.dropEffect = "move"; col.classList.add("over"); };
+        body.ondragleave = function(){ col.classList.remove("over"); };
+        body.ondrop = function(ev){
+          ev.preventDefault();
+          col.classList.remove("over");
+          var id = dragging || ev.dataTransfer.getData("text/plain");
+          if (!id) return;
+          var target = body.getAttribute("data-drop");
+          var card = (board.data.cards || []).filter(function(c){ return c.id === id; })[0];
+          if (!card) return;
+          var pins = boardPins();
+          // dropping a card back where its state says it belongs clears the pin
+          if (target === card.column) delete pins[id]; else pins[id] = target;
+          savePins();
+          drawBoardPane();
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-unpin]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          delete boardPins()[b.getAttribute("data-unpin")];
+          savePins();
+          drawBoardPane();
+        };
+      });
     }
 
     // ---- mobile sheets -------------------------------------------------------
@@ -2325,6 +2536,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       else adapters.forEach(function(a){
         var hh = hue(a.id);
         html += '<div class="frow" data-agent="' + esc(a.id) + '"><span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
+          brandMark(a.kind) +
           '<span class="fp" style="color:hsl(' + hh + ',55%,var(--agent-l))">' + esc(a.id) + "</span>" +
           '<span style="margin-left:auto;color:var(--muted-foreground);font-size:10.5px">' + esc(a.role) + "</span></div>";
       });
@@ -2346,7 +2558,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       chips.innerHTML = adapters.map(function(a){
         var sel = a.id === state.selected;
         return '<button class="chip' + (sel ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
-          esc(a.id) + ' <span class="role">' + esc(a.role) + (a.id === p.holder ? " \\u2190" : "") + "</span>" +
+          brandMark(a.kind) + esc(a.id) + ' <span class="role">' + esc(a.role) + (a.id === p.holder ? " \\u2190" : "") + "</span>" +
           (a.busy ? ' <span class="busy"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(chips.querySelectorAll(".chip"), function(chip){
@@ -2374,7 +2586,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         if (focus) {
           var hh = hue(focus.id);
           ah.innerHTML =
-            '<span class="ag" style="background:color-mix(in srgb, hsl(' + hh + ',60%,50%) 18%, transparent);color:hsl(' + hh + ',60%,var(--agent-l))">' + esc(focus.id.slice(0, 2)) + "</span>" +
+            // the agent's own logo when we have it; the hue monogram is only
+            // for kinds with no mark (a custom adapter, echo)
+            (hasBrand(focus.kind)
+              ? '<span class="ag brandbox" title="' + esc(BRAND_TITLES[focus.kind]) + '">' + brandMark(focus.kind, "brand xl") + "</span>"
+              : '<span class="ag" style="background:color-mix(in srgb, hsl(' + hh + ',60%,50%) 18%, transparent);color:hsl(' + hh + ',60%,var(--agent-l))">' + esc(focus.id.slice(0, 2)) + "</span>") +
             '<span class="meta"><span class="l1">' + esc(focus.id) +
             '<span class="role">' + esc(focus.role) + (focus.id === p.holder ? " \\u00b7 baton" : "") + (focus.busy ? " \\u00b7 working\\u2026" : "") + "</span></span>" +
             '<span class="l2">' + esc(p.dir || p.name) + "</span></span>" +
@@ -2627,7 +2843,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       box.innerHTML = agents.map(function(a){
         var order = picked.indexOf(a.id);
         return '<button type="button" class="agchip' + (order >= 0 ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
-          '<span class="num">' + (order >= 0 ? order + 1 : "") + "</span>" + esc(a.id) +
+          '<span class="num">' + (order >= 0 ? order + 1 : "") + "</span>" +
+          brandMark(a.kind) + esc(a.id) +
           '<span class="role">' + esc(a.role) + "</span></button>";
       }).join("") || '<span class="hintx">no agents configured for this project</span>';
       Array.prototype.forEach.call(box.querySelectorAll(".agchip"), function(ch){
@@ -2903,7 +3120,19 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
             var curA = a.id === state.selected;
             return '<div class="arow' + (curA ? " cur" : "") + '" data-p="' + esc(p.id) + '" data-a="' + esc(a.id) + '"' + (curA ? ' data-current="true"' : "") + ">" +
               '<span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
-              '<span class="anm">' + esc(a.id) + (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") + "</span>" +
+              '<span class="anm">' + brandMark(a.kind) + esc(a.id) +
+              (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") + "</span>" +
+              '<span class="role">' + esc(a.role) + "</span></div>";
+          }).join("");
+          // Bridges too. They never hold the baton, so they aren't targets for
+          // a message — but a configured bridge that renders nowhere reads as
+          // "Loom ignored my config". Shown, marked, and not clickable.
+          rows += (p.agents || []).filter(function(a){ return a.tier === "bridge"; }).map(function(a){
+            return '<div class="arow bridge" title="' + esc(a.id) +
+              ' is a bridge \\u2014 Loom reads it, but it never holds the baton">' +
+              '<span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
+              '<span class="anm">' + brandMark(a.kind) + esc(a.id) +
+              ' <span class="abadge">bridge</span></span>' +
               '<span class="role">' + esc(a.role) + "</span></div>";
           }).join("");
         }
@@ -2912,7 +3141,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
       });
-      Array.prototype.forEach.call(el.querySelectorAll(".arow"), function(row){
+      // [data-a] on purpose: bridge rows carry no agent id because they can't
+      // be targeted, and binding them would select an agent that can't reply
+      Array.prototype.forEach.call(el.querySelectorAll(".arow[data-a]"), function(row){
         row.onclick = function(){
           var pidA = row.getAttribute("data-p"), aid = row.getAttribute("data-a");
           if (pidA !== cur) { select(pidA); state.selected = aid; }

@@ -101,6 +101,36 @@ describe("web app page", () => {
     expect(APP_HTML).toContain("if (tasks.data) drawTasksPane(); else loadTasks();");
   });
 
+  it("ships the Board in place of Routes, without orphaning routes", () => {
+    expect(APP_HTML).toContain('id="pane-board"');
+    expect(APP_HTML).toContain('var tabs = ["thread", "tasks", "brain", "board"];');
+    expect(APP_HTML).not.toContain('id="pane-routes"');
+    // Routes lost its tab, not its home: named pipelines and custom steps live
+    // in the New task modal, live state and abort in the Source Control rail,
+    // and mobile keeps its own route sheet.
+    expect(APP_HTML).toContain('id="mroute"'); // named pipeline picker
+    expect(APP_HTML).toContain('picked.join(",")'); // several agents = a pipeline
+    expect(APP_HTML).toContain('id="rabort"'); // abort, in the rail
+    expect(APP_HTML).toContain("routeFormHtml()"); // mobile sheet
+  });
+
+  it("lets a dragged card move without letting it lie", () => {
+    // A pin changes which column a card sits in and nothing else — dropping a
+    // red PR on "Ready to merge" must not restate it as ready.
+    expect(APP_HTML).toContain("c.shown = pins[c.id] || c.column");
+    expect(APP_HTML).toContain("if (target === card.column) delete pins[id]; else pins[id] = target;");
+    // the badge is always read from the card's real state
+    expect(APP_HTML).toContain("var st = BSTATES[c.state]");
+  });
+
+  it("draws agents with their own brand mark, and never guesses one", () => {
+    expect(APP_HTML).toContain('<use href="#brand-');
+    expect(APP_HTML).toContain("if (!kind || !BRAND_TITLES[kind]) return \"\";");
+    for (const kind of ["claude-code", "antigravity", "opencode", "kiro", "codex"]) {
+      expect(APP_HTML, `no sprite symbol for ${kind}`).toContain(`<symbol id="brand-${kind}"`);
+    }
+  });
+
   it("keeps the New project flow (button, modal, native picker fallback)", () => {
     expect(APP_HTML).toContain('id="newproj"');
     expect(APP_HTML).toContain("function openProjectModal()");

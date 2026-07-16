@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Board — everything in flight, in one place
+
+- A **Board** tab replaces Routes: four columns — working → needs you → in
+  review → ready to merge — holding every piece of live work in the project.
+- Cards are derived from real state, never stored. Loom supplies the ones with
+  no PR yet (which agent is running, which is blocked on a question); the
+  project's GitHub remote supplies the rest through your own `gh`: draft,
+  review pending, CI failed, changes requested, approved. A card shows the
+  agent's own logo, the branch, and links to the PR.
+- **Drag a card** and it stays where you put it (per project, across reloads).
+  A pin only moves a card — the badge keeps reporting what GitHub and the daemon
+  actually say, because a drag can't approve a review or turn a red build green.
+  Drop it back where its state says it belongs, or click its `pinned` mark, and
+  it goes back to being placed by reality.
+- No remote, or no `gh`? The agent half of the board is ours and still real —
+  it renders, with a line saying why the pull requests are missing.
+- **Routes lost its tab, not its home**: named pipelines and custom step lists
+  both live in the New task modal (several agents *is* a pipeline), and live
+  route state plus abort live in the Source Control rail. The mobile route sheet
+  is untouched.
+
+### ADE brand marks
+
+- Claude Code, Antigravity, opencode, Kiro and Codex now appear as their own
+  logos wherever an agent does: the sidebar, the thread, agent chips, the New
+  task modal, and board cards. Rendered from
+  [@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT) by
+  `scripts/gen-brand-icons.mjs` and frozen into an SVG sprite — the web app has
+  no build step and no CDN, so it can't import React components.
+- Keyed by adapter *kind*, not by name: you can call an agent anything, but its
+  kind is what it is. A kind with no mark (a custom adapter, `echo`) keeps the
+  hue monogram rather than borrowing someone else's brand.
+- **Bridges are visible at last.** Antigravity is a bridge, and every view
+  filtered bridges out — so a configured bridge rendered nowhere and Loom looked
+  like it had ignored your config. Bridges now show in the sidebar, marked as
+  bridges and not clickable, because they never hold the baton.
+
 ### Tasks — start work from a real GitHub issue
 
 - New **Tasks** tab per project: the repo's open issues and pull requests in a
@@ -146,7 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that resolve. Every new test above was checked by breaking the code and
   watching it go red.
 - CI now typechecks `app/`, which nothing was compiling.
-- Suite: 96 → 158.
+- Suite: 96 → 173.
 
 ### Accessibility
 

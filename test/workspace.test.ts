@@ -263,6 +263,34 @@ describe("tasks", () => {
   });
 });
 
+describe("board", () => {
+  it("still builds a board when the project has no GitHub remote", async () => {
+    // the agent half is ours and always real; only the PR half needs gh, and
+    // losing it must degrade to a note, not to an error page
+    const res = await get(`/api/projects/${projectId}/board`);
+    expect(res.ok).toBe(true);
+    const body = (await res.json()) as {
+      available: boolean;
+      repo: string | null;
+      ghError?: { reason: string; detail: string };
+      cards: unknown[];
+    };
+    expect(body.available).toBe(true);
+    expect(Array.isArray(body.cards)).toBe(true);
+    expect(body.repo).toBeNull();
+    expect(["no-remote", "no-cli"]).toContain(body.ghError?.reason);
+    expect(body.ghError?.detail).toBeTruthy();
+  });
+
+  it("404s for an unknown project", async () => {
+    expect((await get(`/api/projects/does-not-exist/board`)).status).toBe(404);
+  });
+
+  it("requires authentication", async () => {
+    expect((await fetch(`${baseUrl}/api/projects/${projectId}/board`)).status).toBe(401);
+  });
+});
+
 describe("terminal", () => {
   it("opens a shell rooted in the project directory", async () => {
     const body = (await post(`/api/projects/${projectId}/term/open`, { term: "t1" }).then((r) =>

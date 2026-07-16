@@ -225,6 +225,11 @@ export interface ProjectStatus {
   agents: AgentStatus[];
   lastEvent: LoomEvent | null;
   needsInput: boolean;
+  /**
+   * The agent whose question is still unanswered, when `needsInput` — the
+   * board puts a name on the card, not just "someone is blocked".
+   */
+  blockedAgent?: string | null;
   route?: RouteState | null;
   /** Named pipelines defined in config (for pickers/dropdowns). */
   routeNames?: string[];

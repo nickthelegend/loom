@@ -34,6 +34,7 @@ import { GEIST_WOFF2 } from "./geist-font.js";
 import { AuthManager, bearerToken } from "./auth.js";
 import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
 import { ProjectRuntime } from "./runtime.js";
+import { buildBoard } from "./board.js";
 import { listTasks } from "./tasks.js";
 import { TerminalManager, TooManySessionsError } from "./terminals.js";
 
@@ -515,6 +516,21 @@ export class LoomDaemon {
       if (!info) return void res.status(404).json({ error: "unknown project" });
       this.terminals.close(info.id, String((req.body ?? {}).term ?? "t1"));
       res.json({ closed: true });
+    });
+
+    // The board: live agents (from us) + pull requests (from gh), sorted into
+    // working → needs you → in review → ready. See board.ts.
+    app.get("/api/projects/:id/board", async (req, res) => {
+      const info = findProject(String(req.params.id));
+      if (!info) return void res.status(404).json({ error: "unknown project" });
+      try {
+        const rt = await this.runtime(info.id);
+        const status = await rt.status();
+        const blocked = status.blockedAgent ? [status.blockedAgent] : [];
+        res.json(await buildBoard(info.dir, status.agents, blocked));
+      } catch (err) {
+        res.status(500).json({ error: (err as Error).message });
+      }
     });
 
     // Issues / PRs for the project's GitHub remote, read through the user's

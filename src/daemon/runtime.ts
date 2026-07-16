@@ -560,6 +560,9 @@ export class ProjectRuntime {
       agents,
       lastEvent,
       needsInput,
+      // which agent is waiting, not just that someone is — the board needs a
+      // name to put on the card, and every caller already gets needsInput
+      blockedAgent: needsInput ? (lastNeedsInput?.agentId ?? null) : null,
       route: this.routes.state(),
       routeNames: ["auto", ...Object.keys(this.config.routes ?? {})],
       costUsd: this.costs.totalUsd,

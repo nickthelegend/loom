@@ -80,7 +80,7 @@ drag-resizable and persisted; double-click a handle to reset
   nested agent rows: status dot (amber pulse = working), `baton` badge on the
   holder, role labels. Clicking an agent targets it for the next send.
 - **Tab strip (40px)** — *is* the window chrome: project context, then
-  Thread | Tasks | Brain | Routes, then the terminal / right-panel / theme
+  Thread | Tasks | Brain | Board, then the terminal / right-panel / theme
   toggles.
   The active tab merges into the canvas; the composer docks under Thread only.
 - **Diff dock (right of the chat, closed by default)** — opens only when you
@@ -108,6 +108,23 @@ drag-resizable and persisted; double-click a handle to reset
   GitHub's own label hues, which are data, not chrome. Every unavailable
   reason (`no-cli` / `no-auth` / `no-remote`) gets a written panel — an empty
   table would claim "no issues", which is a different fact.
+- **Board pane** — Orca's board, on Loom's data. Four columns (working / needs
+  you / in review / ready to merge), each a card list; a card is a status dot +
+  label, the agent (with its brand mark), title, branch, and PR link or "no PR
+  yet". Colour is state only: amber working/blocked, red CI, grey review, green
+  ready. **Cards are derived, never stored** — dragging one pins it in a column
+  (`loomBoardPins:<pid>`) and nothing more, so the badge always reports what
+  GitHub and the daemon say. Dropping a card in its computed column clears the
+  pin. Replaced the Routes tab; routes live on in the New Task modal (named
+  pipelines, or several agents = custom steps) and the Source Control rail
+  (live state + abort).
+- **Brand marks** — ADE logos from @lobehub/icons (MIT), frozen into an SVG
+  sprite by `scripts/gen-brand-icons.mjs` and instantiated with
+  `<use href="#brand-<kind>">`. They are the one exception to the monochrome
+  rule: a logo is the agent's identity, not our state palette, so it keeps its
+  own colours. Keyed by adapter **kind**; an unknown kind keeps the hue
+  monogram rather than wearing another vendor's mark. A sprite, not inline
+  copies, because Antigravity and Codex carry internal ids.
 - **New Task modal** — Orca's Create Worktree, mapped to Loom: project + task
   + **one agent, or several** (several = a pipeline through them, in the order
   you picked). Scrim + glass panel; `n` opens, Cmd/Ctrl+Enter submits, Esc

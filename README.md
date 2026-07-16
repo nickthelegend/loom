@@ -95,7 +95,7 @@ the writing.
 ```
 ┌───────────┬────────────────────────────┬──────────────┐
 │ projects  │ Thread · Tasks · Brain ·   │  Explorer    │
-│  └ agents │                   Routes   │  Search      │
+│  └ agents │                    Board   │  Search      │
 │           │  the conversation, with    │  Source ctl  │
 │ New task  │  Update(n files) cards ────┼─▶ diff opens │
 │ New proj  │                            │  Tasks       │
@@ -106,8 +106,14 @@ the writing.
 ```
 
 - **Projects + agents** in the left rail; click an agent to aim your next message at it.
-- **Thread** is the shared conversation; **Brain** is the unified memory; **Routes**
-  starts a pipeline.
+- **Thread** is the shared conversation; **Brain** is the unified memory; **Board**
+  is everything in flight.
+- **Board** is four columns — working → needs you → in review → ready to merge —
+  built from real state: which agents are running or blocked (ours), and what
+  GitHub says about each PR (draft, CI failed, changes requested, approved),
+  read through your own `gh`. Drag a card and it stays where you put it, but the
+  badge keeps telling the truth: a drag can't approve a review or turn CI green.
+  Each card wears its agent's own logo.
 - **Click any change** — an `Update(n files)` card, or a file in Source Control — and the
   diff opens to the right of the chat. It stays closed until you ask for it.
 - **Explorer / Search / Source Control / Tasks** in the right panel; every column is
@@ -382,7 +388,7 @@ sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running 
 ## Development
 
 ```bash
-npm test          # 158 tests: unit + full HTTP/WS end-to-end
+npm test          # 173 tests: unit + full HTTP/WS end-to-end
 npm run build     # tsc → dist/
 npm run dev       # run the CLI from source (tsx)
 ```
