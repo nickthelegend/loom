@@ -10,7 +10,7 @@ import path from "node:path";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { readDaemonConfig, readProjectConfig, readProjectState } from "../core/registry.js";
 import { resolveSteps, stepName } from "../core/routes.js";
-import { isAdapter, type AgentRole } from "../types.js";
+import { isAdapter } from "../types.js";
 import { BUILD_REV } from "../daemon/server.js";
 
 export interface Check {
@@ -18,8 +18,6 @@ export interface Check {
   status: "ok" | "warn" | "fail";
   detail: string;
 }
-
-const ROLES: AgentRole[] = ["planner", "executor", "reviewer", "general"];
 
 function ok(name: string, detail: string): Check {
   return { name, status: "ok", detail };
@@ -58,8 +56,11 @@ export function projectChecks(dir: string): Check[] {
       );
       continue;
     }
-    if (!ROLES.includes(agent.role)) {
-      checks.push(fail("agents", `"${agent.id}" has invalid role "${agent.role}"`));
+    // No role whitelist: a role is free text you chose ("architect", "the one
+    // that writes docs"). Only an empty one is a problem — it's the label the
+    // pipeline matches steps against, so a blank means nothing can target it.
+    if (!agent.role || !String(agent.role).trim()) {
+      checks.push(fail("agents", `"${agent.id}" has no role — give it a name, any name`));
       continue;
     }
     try {

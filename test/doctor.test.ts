@@ -18,6 +18,20 @@ describe("loom doctor — project checks", () => {
     expect(checks.find((c) => c.name === "routes")!.detail).toContain("ship");
   });
 
+  it("accepts a role you made up — they're names, not a menu", () => {
+    // Roles went free-form, but doctor kept a planner|executor|reviewer|general
+    // whitelist and hard-failed anything else. Calling an agent "architect" is
+    // the whole point; doctor must not tell you your project is broken for it.
+    const dir = makeProjectDir({
+      agents: [
+        { id: "a", kind: "echo", role: "architect" },
+        { id: "b", kind: "echo", role: "the one that writes docs" },
+      ],
+    } as Partial<ProjectConfig>);
+    const checks = projectChecks(dir);
+    expect(statusOf(checks, "agents")).not.toContain("fail");
+  });
+
   it("fails on missing config, unknown kinds, bad roles, broken routes", () => {
     const empty = tmpDir("doc-empty");
     expect(statusOf(projectChecks(empty), "project")).toEqual(["fail"]);
@@ -27,7 +41,7 @@ describe("loom doctor — project checks", () => {
       name: "bad",
       agents: [
         { id: "a", kind: "no-such-kind", role: "planner" },
-        { id: "b", kind: "echo", role: "wizard" as never },
+        { id: "b", kind: "echo", role: "" }, // blank: nothing can target it
         { id: "b", kind: "echo", role: "executor" }, // duplicate id
       ],
       defaultAgent: "ghost",
@@ -36,7 +50,7 @@ describe("loom doctor — project checks", () => {
     const checks = projectChecks(dir);
     expect(statusOf(checks, "agents")).toContain("fail");
     expect(checks.some((c) => c.detail.includes('unknown kind "no-such-kind"'))).toBe(true);
-    expect(checks.some((c) => c.detail.includes('invalid role "wizard"'))).toBe(true);
+    expect(checks.some((c) => c.detail.includes("has no role"))).toBe(true);
     expect(checks.some((c) => c.detail.includes('duplicate agent id "b"'))).toBe(true);
     expect(checks.some((c) => c.detail.includes('defaultAgent "ghost"'))).toBe(true);
     expect(checks.some((c) => c.name === "routes" && c.status === "fail")).toBe(true);
