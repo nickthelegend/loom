@@ -594,15 +594,26 @@ program
     else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
 
     let failures = 0;
+    let warnings = 0;
     for (const c of checks) {
       const icon =
         c.status === "ok" ? pc.green("✓") : c.status === "warn" ? pc.yellow("⚠") : pc.red("✗");
       if (c.status === "fail") failures++;
-      console.log(` ${icon} ${pc.bold(c.name.padEnd(8))} ${c.status === "ok" ? pc.dim(c.detail) : c.detail}`);
+      if (c.status === "warn") warnings++;
+      console.log(` ${icon} ${pc.bold(c.name.padEnd(11))} ${c.status === "ok" ? pc.dim(c.detail) : c.detail}`);
     }
     if (failures) {
       console.log(pc.red(`\n${failures} problem${failures > 1 ? "s" : ""} found`));
       process.exit(1);
+    }
+    // "all clear" over a screen of warnings is a lie, and it's the lie that
+    // teaches people to stop reading this command. Nothing is broken; several
+    // things aren't set up. Those are different sentences.
+    if (warnings) {
+      console.log(
+        pc.yellow(`\nnothing broken · ${warnings} thing${warnings > 1 ? "s" : ""} not set up (see above)`),
+      );
+      return;
     }
     console.log(pc.green("\nall clear"));
   });

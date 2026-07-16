@@ -8,10 +8,32 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
+import { ADES, detectAdes } from "../core/ades.js";
+import { GuiChatDriver } from "../adapters/bridges/gui-chat.js";
+import { profileFor } from "../adapters/bridges/profiles.js";
 import { readDaemonConfig, readProjectConfig, readProjectState } from "../core/registry.js";
 import { resolveSteps, stepName } from "../core/routes.js";
 import { isAdapter } from "../types.js";
 import { BUILD_REV } from "../daemon/server.js";
+
+/**
+ * How to check an agent is actually logged in.
+ *
+ * Doctor can tell you a CLI exists. It cannot tell you it will work, because
+ * "installed" and "authenticated" look identical from out here — the binary
+ * answers --version either way and only fails once it's holding your turn. So
+ * it hands you the command that WILL tell you.
+ */
+const AUTH_HINT: Record<string, string> = {
+  "claude-code": "check auth: run `claude` once",
+  codex: "check auth: `codex login status`",
+  opencode: "check auth: `opencode auth list`",
+  "grok-code": "check auth: run `grok` once",
+};
+
+function launchOs(): "darwin" | "win32" | "linux" {
+  return process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "win32" : "linux";
+}
 
 export interface Check {
   name: string;
@@ -136,14 +158,38 @@ export async function envChecks(): Promise<Check[]> {
     checks.push(fail("node", `v${process.versions.node} — Loom needs ≥ 22.5 (node:sqlite)`));
   }
 
-  for (const [name, cmd, hint] of [
-    ["claude", "claude", "install Claude Code for the claude-code adapter"],
-    ["opencode", "opencode", "install OpenCode for the opencode adapter"],
-    ["tailscale", "tailscale", "install Tailscale for phone access"],
-  ] as const) {
-    const v = await version(cmd);
-    checks.push(v !== null ? ok(name, v) : warn(name, `not found — ${hint}`));
+  // Every ADE Loom can drive, from the one list — not a hardcoded pair. The
+  // whole point of core/ades.ts is that this answer lives in one place.
+  const available = await detectAdes();
+  for (const ade of ADES.filter((a) => a.tier === "adapter")) {
+    if (!available[ade.kind]) {
+      checks.push(warn(ade.kind, `not found — install ${ade.label} to use the ${ade.kind} adapter`));
+      continue;
+    }
+    // Installed is not the same as usable: an unauthenticated CLI answers
+    // --version happily and then fails the first real turn. Doctor can't log in
+    // for you, so it says which ones it can't vouch for.
+    checks.push(ok(ade.kind, `${ade.label} found${AUTH_HINT[ade.kind] ? ` · ${AUTH_HINT[ade.kind]}` : ""}`));
   }
+
+  // The GUI agents: reachable and driveable are different questions.
+  for (const ade of ADES.filter((a) => a.tier === "bridge")) {
+    const profile = profileFor(ade.kind);
+    const driver = new GuiChatDriver(profile.name, {}, ade.kind);
+    if (!(await driver.reachable())) {
+      checks.push(warn(ade.kind, `not listening on ${profile.defaultPort} — ${profile.launch[launchOs()]}`));
+      continue;
+    }
+    const drive = await driver.driveable();
+    checks.push(
+      drive.ok
+        ? ok(ade.kind, `${profile.name} · ready to drive on ${profile.defaultPort}`)
+        : warn(ade.kind, `${profile.name} is up but not driveable — ${drive.reason}`),
+    );
+  }
+
+  const tv = await version("tailscale");
+  checks.push(tv !== null ? ok("tailscale", tv) : warn("tailscale", "not found — install Tailscale for phone access"));
 
   const cfg = readDaemonConfig();
   if (!cfg) {
