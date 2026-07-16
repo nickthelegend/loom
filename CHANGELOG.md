@@ -30,9 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Phone app: graphite surfaces, near-white primary CTA, accessory-key agent
   chips, session top bar + neutral-underline tabs, command-dock composer with
   an arming send button, diff washes, numbered pairing steps.
+- Desktop chrome tightened to Orca's: tabs live in the 40px top strip beside
+  the project context; the sidebar gains a Search row (filters projects and
+  agents), an add-project action, and a bottom utility rail.
 - Fixed: the desktop web shell now renders the hash-addressed project on
   first load; live websocket frames buffer until history hydrates (an early
   event could previously wipe the rendered backlog).
+- Fixed: the desktop shell could open yesterday's UI. `BUILD_REV` is now a
+  content hash (mtimes skew across runtimes on exFAT), the shell restarts a
+  stale daemon before loading, spawns the daemon under a real Node runtime
+  (Electron's bundled Node predates `node:sqlite`, silently degrading the
+  event store), and `/app` is served `Cache-Control: no-store`.
 
 ## [0.1.0] — 2026-07-15
 
