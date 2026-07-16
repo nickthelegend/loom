@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Board — everything in flight, and Tasks folded into it
+
+- **The Tasks tab is gone.** The Board covers it: search issues and pull
+  requests from the board itself, in GitHub's own query language
+  (`is:issue is:open label:bug`), and **Start** still hands an issue to an
+  agent. Tabs are Thread | Board | Brain.
+- **Add your own cards.** `+ Task`, or the `+` in any column — including Ready
+  to merge. These are yours, so the column *is* the state: dragging one really
+  moves it and it persists. That's the difference from a PR card, whose truth
+  belongs to GitHub and can only be pinned. Click a card's title to retitle it.
+- Issues only appear when you search for them — a repo's whole backlog would
+  bury the work actually in flight. And asking for issues no longer also hands
+  back unrelated PRs: `gh pr list --search "is:issue …"` ignores the qualifier
+  and returns open PRs, so the board now asks for what you actually asked for.
+
 ### Board — everything in flight, in one place
 
 - A **Board** tab replaces Routes: four columns — working → needs you → in
@@ -27,6 +42,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both live in the New task modal (several agents *is* a pipeline), and live
   route state plus abort live in the Source Control rail. The mobile route sheet
   is untouched.
+
+### Chats, and roles you name yourself
+
+- **A project holds conversations.** The sidebar nests chats under each
+  project; create, rename (double-click), and forget them. Everything else
+  stays shared — one brain, one baton, one working tree. Only the talking is
+  split. Forgetting a chat unlists it and nothing more: the log is append-only
+  and the brain is built from all of it, so deleting a conversation shouldn't
+  quietly rewrite what the project decided.
+- Agents moved to the rail's roster, which is where they belong — an agent
+  works the whole project, not one conversation.
+- **Roles are free text.** Not planner|executor|reviewer|general any more: call
+  an agent "architect" or "the one that writes docs". Click the role and type.
+  Those three names still mean something if you use them (they seed the default
+  ship pipeline, the rules router prefers a reviewer last, a route step matches
+  by role) and nothing if you don't.
+- The event log gained a `chat` column. **The first cut of that migration
+  destroyed logs**: the chat index was created before the column was added,
+  sqlite threw "no such column", and `EventLog.open` caught it and quietly
+  started an *empty* JSONL log beside a database full of history. Migrate
+  first, then index — and that catch now only covers the one case it was for
+  (a runtime with no `node:sqlite`). If the module is there and the log won't
+  open, it throws: losing the thread is worse than failing loudly.
 
 ### ADE brand marks
 

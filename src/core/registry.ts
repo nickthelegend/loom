@@ -119,6 +119,23 @@ export interface ProjectState {
    * and haven't said anything in yet, still exists.
    */
   chats?: ChatInfo[];
+  /** Task cards you wrote yourself. See BoardTask. */
+  tasks?: BoardTask[];
+}
+
+/**
+ * A card you made, as opposed to the ones the board derives from live agents
+ * and pull requests. Yours, so its column IS its state — dragging one really
+ * moves it, unlike a PR card whose truth belongs to GitHub.
+ */
+export interface BoardTask {
+  id: string;
+  title: string;
+  /** working | needs-you | in-review | ready — the column it lives in. */
+  column: string;
+  /** Optional agent this is meant for. */
+  agent?: string;
+  createdAt: number;
 }
 
 export function readProjectState(projectDir: string): ProjectState {

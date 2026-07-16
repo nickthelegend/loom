@@ -87,24 +87,21 @@ describe("web app page", () => {
     }
   });
 
-  it("wires the Tasks view to the real gh-backed endpoint, never to fixtures", () => {
-    expect(APP_HTML).toContain("/tasks?kind=");
-    // both kinds, and the query box that gh gets verbatim
-    expect(APP_HTML).toContain('tasks.kind === "pr" ? "is:pr" : "is:issue"');
-    expect(APP_HTML).toContain('id="taskq"');
-    // every unavailable reason the backend can return needs a panel, or the
-    // view silently renders an empty table that reads as "no issues"
-    for (const reason of ["no-cli", "no-auth", "no-remote"]) {
-      expect(APP_HTML, `Tasks view has no state for "${reason}"`).toContain(`"${reason}"`);
-    }
-    // opening the tab must fetch — drawing alone would show a false empty state
-    expect(APP_HTML).toContain("if (tasks.data) drawTasksPane(); else loadTasks();");
+  it("folds Tasks into the Board: one place, and it can search", () => {
+    // the Tasks tab is gone; the Board covers it
+    expect(APP_HTML).toContain('var tabs = ["thread", "board", "brain"];');
+    expect(APP_HTML).not.toContain('id="pane-tasks"');
+    expect(APP_HTML).not.toContain('id="pane-routes"');
+    // issues and PRs are searchable from the board, in GitHub's own language
+    expect(APP_HTML).toContain('id="bq"');
+    expect(APP_HTML).toContain('"?search=" + encodeURIComponent(board.q)');
+    // and an issue can still be handed to an agent, as the Tasks tab allowed
+    expect(APP_HTML).toContain("[data-start]");
+    expect(APP_HTML).toContain("Read the issue, then implement it.");
   });
 
   it("ships the Board in place of Routes, without orphaning routes", () => {
     expect(APP_HTML).toContain('id="pane-board"');
-    expect(APP_HTML).toContain('var tabs = ["thread", "tasks", "brain", "board"];');
-    expect(APP_HTML).not.toContain('id="pane-routes"');
     // Routes lost its tab, not its home: named pipelines and custom steps live
     // in the New task modal, live state and abort in the Source Control rail,
     // and mobile keeps its own route sheet.
@@ -114,13 +111,23 @@ describe("web app page", () => {
     expect(APP_HTML).toContain("routeFormHtml()"); // mobile sheet
   });
 
-  it("lets a dragged card move without letting it lie", () => {
-    // A pin changes which column a card sits in and nothing else — dropping a
-    // red PR on "Ready to merge" must not restate it as ready.
+  it("lets you move your own cards for real, and only pin the rest", () => {
+    // A card you wrote has no truth beyond the column you put it in, so the
+    // drag persists. A PR's truth is GitHub's: dropping it elsewhere only pins
+    // where you see it, and the badge keeps saying what is actually so.
+    expect(APP_HTML).toContain("if (card.own) {");
     expect(APP_HTML).toContain("c.shown = pins[c.id] || c.column");
-    expect(APP_HTML).toContain("if (target === card.column) delete pins[id]; else pins[id] = target;");
-    // the badge is always read from the card's real state
     expect(APP_HTML).toContain("var st = BSTATES[c.state]");
+  });
+
+  it("lists a project's chats in the sidebar, and keeps them apart", () => {
+    expect(APP_HTML).toContain("data-newchat");
+    expect(APP_HTML).toContain('class="crow');
+    // the socket carries the whole project; a thread shows one conversation
+    expect(APP_HTML).toContain('if ((frame.event.chat || "main") !== chatId) return;');
+    // and a role is text you type, wherever it's drawn
+    expect(APP_HTML).toContain("function wireRoleEditors(");
+    expect(APP_HTML).toContain("/role");
   });
 
   it("draws agents with their own brand mark, and never guesses one", () => {
@@ -145,10 +152,11 @@ describe("web app page", () => {
     expect(APP_HTML).toContain('["rtask", "rsteps"].forEach');
   });
 
-  it("wires the Tasks head while the first gh fetch is still in flight", () => {
-    // the loading branch returns early; without its own wireTasksHead the
-    // Issues/PRs toggle is dead for the whole round-trip
-    expect(APP_HTML).toMatch(/head \+ LOADER \+ "<\/div>";\s*\n\s*wireTasksHead\(el\);/);
+  it("wires the Board head while the first fetch is still in flight", () => {
+    // The loading branch returns early. Without wiring it, the search box and
+    // refresh are dead for exactly as long as anyone would be looking at them
+    // — which is the whole gh round-trip.
+    expect(APP_HTML).toMatch(/head \+ LOADER \+ "<\/div>";\s*\n\s*wireBoardHead\(\);\s*\n\s*return;/);
   });
 
   it("points state.project at the new project before drawing it", () => {

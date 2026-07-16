@@ -41,6 +41,7 @@ import {
   writeProjectConfig,
   writeProjectState,
   writeMemoryFile,
+  type BoardTask,
 } from "../core/registry.js";
 import { suggestHandoff } from "../core/suggestions.js";
 import {
@@ -247,6 +248,49 @@ export class ProjectRuntime {
     const before = (state.chats ?? []).length;
     state.chats = (state.chats ?? []).filter((c) => c.id !== id);
     if (state.chats.length === before) return false;
+    writeProjectState(this.info.dir, state);
+    return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // Board tasks — the cards you write yourself
+  // -------------------------------------------------------------------------
+
+  boardTasks(): BoardTask[] {
+    return readProjectState(this.info.dir).tasks ?? [];
+  }
+
+  createTask(input: { title: string; column?: string; agent?: string }): BoardTask {
+    const state = readProjectState(this.info.dir);
+    const task: BoardTask = {
+      id: newId(4),
+      title: input.title.trim().slice(0, 200),
+      column: input.column ?? "working",
+      ...(input.agent ? { agent: input.agent } : {}),
+      createdAt: Date.now(),
+    };
+    state.tasks = [...(state.tasks ?? []), task];
+    writeProjectState(this.info.dir, state);
+    return task;
+  }
+
+  /** Move or retitle a card. Yours, so this is the real state — not a hint. */
+  updateTask(id: string, patch: { title?: string; column?: string; agent?: string }): BoardTask | null {
+    const state = readProjectState(this.info.dir);
+    const task = (state.tasks ?? []).find((t) => t.id === id);
+    if (!task) return null;
+    if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 200) || task.title;
+    if (patch.column !== undefined) task.column = patch.column;
+    if (patch.agent !== undefined) task.agent = patch.agent;
+    writeProjectState(this.info.dir, state);
+    return task;
+  }
+
+  deleteTask(id: string): boolean {
+    const state = readProjectState(this.info.dir);
+    const before = (state.tasks ?? []).length;
+    state.tasks = (state.tasks ?? []).filter((t) => t.id !== id);
+    if (state.tasks.length === before) return false;
     writeProjectState(this.info.dir, state);
     return true;
   }

@@ -731,37 +731,26 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     cursor:pointer}
   .bpin:hover{color:var(--foreground);border-color:var(--muted-foreground)}
   .bempty{padding:14px 4px;text-align:center;font-size:11.5px;color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
+  /* your own cards: a hairline accent, because these you can really move */
+  .bcard.own{border-left:2px solid color-mix(in srgb, var(--muted-foreground) 45%, transparent)}
+  .bcard.own .bct{cursor:text;border-radius:4px;margin:7px -3px 0;padding:0 3px}
+  .bcard.own .bct:hover{background:color-mix(in srgb, var(--muted-foreground) 14%, transparent)}
+  .bcedit{width:100%;background:var(--background);border:1px solid var(--ring);border-radius:4px;
+    color:var(--foreground);font:inherit;font-size:13px;font-weight:600;padding:1px 3px;outline:none}
+  .bpin.del{border:none;padding:0;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center}
+  .bpin.del svg{width:10px;height:10px}
+  .bpin.del:hover{color:var(--err);background:color-mix(in srgb, var(--err) 16%, transparent)}
+  .badd{width:100%;flex:none;height:24px;border:1px dashed var(--border);border-radius:var(--radius-sm);
+    background:transparent;color:var(--muted-foreground);cursor:pointer;font-size:13px;opacity:0;
+    transition:opacity .12s,border-color .12s}
+  .bcol:hover .badd{opacity:.7}
+  .badd:hover{opacity:1;border-color:var(--muted-foreground);color:var(--foreground)}
+  .bstart{margin-left:auto;height:20px;padding:0 7px;font-size:10.5px}
+  .qbox.bq{flex:none;width:min(340px,34vw);height:28px}
+  .qbox.bq input{font-size:11.5px}
   .bnote{flex:none;font-size:11.5px;color:var(--muted-foreground);display:flex;align-items:center;gap:6px}
 
-  /* ── Tasks view (issues / PRs from the project's remote) ── */
-  .tasksview{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
-  .provrow{display:flex;gap:8px}
-  .provbtn{width:34px;height:34px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
-    border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:default;
-    transition:background .12s,border-color .12s}
-  .provbtn svg{width:17px;height:17px}
-  /* only a live provider gets a click affordance — today none do */
-  button.provbtn:not(:disabled){cursor:pointer}
-  button.provbtn:not(:disabled):hover{background:var(--accent)}
-  .provbtn.active{border-color:color-mix(in srgb, var(--muted-foreground) 45%, transparent);background:var(--accent)}
-  .provbtn:disabled{opacity:.35}
-  .taskbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--muted)}
-  .segbtn{height:26px;padding:0 12px;border-radius:7px;font-size:12.5px;font-weight:500;
-    color:var(--muted-foreground);cursor:pointer;background:transparent;border:none;transition:background .12s,color .12s}
-  .segbtn:hover{color:var(--foreground)}
-  .segbtn.active{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgb(0 0 0 / .06)}
-  .repopill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 11px;border-radius:9px;
-    border:1px solid var(--border);background:var(--card);color:var(--foreground);font-size:12.5px;cursor:default}
-  .repopill .rdot{width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none}
-  .taskpanel{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--card);
-    overflow:hidden;box-shadow:0 1px 2px rgb(0 0 0 / .05)}
-  .chiprow{display:flex;gap:8px;padding:14px 14px 0}
-  .fchip{height:28px;padding:0 12px;border-radius:8px;font-size:12.5px;font-weight:500;cursor:pointer;
-    border:1px solid transparent;background:transparent;color:var(--muted-foreground);transition:background .12s,color .12s}
-  .fchip:hover{background:var(--accent);color:var(--foreground)}
-  .fchip.active{background:var(--secondary);color:var(--foreground);border-color:var(--border)}
-  .qrow{display:flex;align-items:center;gap:8px;padding:12px 14px}
+  /* the board's search box */
   .qbox{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:32px;padding:0 11px;
     border:1px solid var(--input);border-radius:9px;transition:border-color .15s,box-shadow .15s}
   .dark .qbox{background:color-mix(in srgb, var(--input) 30%, transparent)}
@@ -769,61 +758,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .qbox svg{width:14px;height:14px;flex:none;color:var(--muted-foreground)}
   .qbox input{flex:1;min-width:0;background:none;border:none;outline:none;box-shadow:none!important;
     color:var(--foreground);font-family:var(--font-mono);font-size:12.5px}
-  /* fixed columns + a scroller: the rail and the terminal dock can squeeze this
-     pane well below the table's natural width, and a clipped Start button is
-     worse than a scrollbar */
-  .ttwrap{overflow-x:auto}
-  .tasktable{width:100%;min-width:640px;border-collapse:collapse;table-layout:fixed}
-  .tasktable th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
-    color:var(--muted-foreground);font-family:var(--font-mono);padding:8px 12px;
-    border-top:1px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap}
-  .tasktable td{padding:11px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
-  .tasktable tr:last-child td{border-bottom:none}
-  .tasktable tbody tr{transition:background .1s}
-  .tasktable tbody tr:hover{background:color-mix(in srgb, var(--accent) 45%, transparent)}
-  .idpill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;
-    border:1px solid var(--border);font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);white-space:nowrap}
-  .idpill svg{width:12px;height:12px;flex:none}
-  .idpill.open{color:var(--ok)}
-  .idpill.merged{color:var(--shuttle-ink)}
-  .idpill.closed{color:var(--err)}
-  .ttitle{font-size:13.5px;font-weight:600;color:var(--foreground);line-height:1.35;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tmeta{display:flex;align-items:center;gap:7px;margin-top:4px;font-size:11.5px;color:var(--muted-foreground);
-    font-family:var(--font-mono);flex-wrap:nowrap;overflow:hidden}
-  .tmeta .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:18ch}
-  .lbl{height:17px;display:inline-flex;align-items:center;padding:0 7px;border-radius:999px;font-size:10.5px;
-    font-weight:500;font-family:var(--font-sans);white-space:nowrap;flex:none;
-    overflow:hidden;text-overflow:ellipsis;max-width:20ch}
-  .avs{display:flex}
-  .av{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
-    font-size:10px;font-weight:600;font-family:var(--font-mono);border:1px solid var(--border);
-    background:var(--muted);color:var(--muted-foreground);margin-left:-6px}
-  .av:first-child{margin-left:0}
-  .stbadge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11px;font-weight:500}
-  .stbadge.open{color:var(--ok);background:color-mix(in srgb, var(--ok) 12%, transparent);
-    border:1px solid color-mix(in srgb, var(--ok) 35%, transparent)}
-  .stbadge.closed{color:var(--err);background:color-mix(in srgb, var(--err) 12%, transparent);
-    border:1px solid color-mix(in srgb, var(--err) 35%, transparent)}
-  .stbadge.merged{color:var(--shuttle-ink);background:color-mix(in srgb, var(--shuttle) 12%, transparent);
-    border:1px solid color-mix(in srgb, var(--shuttle) 35%, transparent)}
-  .stbadge.draft{color:var(--muted-foreground);background:var(--muted);border:1px solid var(--border)}
-  .tupd{font-size:12px;color:var(--muted-foreground);white-space:nowrap}
-  .startbtn{opacity:.55;transition:opacity .12s}
-  .tasktable tbody tr:hover .startbtn{opacity:1}
-  .pager{display:flex;align-items:center;justify-content:center;gap:6px;padding:12px;border-top:1px solid var(--border)}
-  .pgbtn{height:28px;min-width:28px;padding:0 9px;border-radius:8px;font-size:12.5px;cursor:pointer;
-    border:1px solid transparent;background:transparent;color:var(--muted-foreground);
-    display:inline-flex;align-items:center;gap:5px;transition:background .12s,color .12s}
-  .pgbtn:hover:not(:disabled){background:var(--accent);color:var(--foreground)}
-  .pgbtn:disabled{opacity:.4;cursor:default}
-  .tcap{padding:0 12px 12px;text-align:center;font-size:11px;color:var(--muted-foreground)}
-  .pgbtn.active{background:var(--secondary);color:var(--foreground);border-color:var(--border);font-weight:600}
-  .tsetup{padding:36px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
-  .tsetup .th{font-size:14px;font-weight:600;color:var(--foreground)}
-  .tsetup .td{font-size:12.5px;color:var(--muted-foreground);max-width:44ch;line-height:1.6}
-  .tsetup code{font-family:var(--font-mono);font-size:11.5px;background:var(--muted);border:1px solid var(--border);
-    border-radius:5px;padding:1px 6px}
   /* ── Sidebar top nav (Orca: Tasks / Search) ───────────── */
   .topnav{display:flex;flex-direction:column;gap:1px;padding:8px 8px 4px}
   .navitem{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--radius-md);
@@ -1361,8 +1295,7 @@ ${BRAND_SPRITE}
         '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-board" style="display:none"></div>' +
-        '<div class="pane scroll" id="pane-tasks" style="display:none"></div>' +
-        composerHtml +
+                composerHtml +
         "</div>" +
         '<div class="dockpane" id="dockpane">' +
         '<div class="rz rz-dock" id="rz-dock" title="drag to resize"></div>' +
@@ -1408,10 +1341,10 @@ ${BRAND_SPRITE}
     // mobile has no #tabsbox, so this is a no-op there by construction
     function drawTabs(){
       var box = document.getElementById("tabsbox"); if (!box) return;
-      var tabs = ["thread", "tasks", "brain", "board"];
+      var tabs = ["thread", "board", "brain"];
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
-      var LBL = { thread: [ICONS.thread, "Thread"], tasks: [ICONS.tasks, "Tasks"],
-                  brain: [ICONS.memory, "Brain"], board: [ICONS.board, "Board"] };
+      var LBL = { thread: [ICONS.thread, "Thread"], board: [ICONS.board, "Board"],
+                  brain: [ICONS.memory, "Brain"] };
       box.innerHTML = tabs.map(function(tb){
         return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
           LBL[tb][0] + LBL[tb][1] + "</button>";
@@ -1422,7 +1355,7 @@ ${BRAND_SPRITE}
     }
     function showTab(name){
       state.tab = name;
-      ["thread", "tasks", "brain", "board"].forEach(function(t){
+      ["thread", "board", "brain"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -1435,8 +1368,6 @@ ${BRAND_SPRITE}
       if (name === "brain") refreshBrain();
       // first open fetches; later opens keep the board (and your pins)
       if (name === "board") { if (board.data) drawBoardPane(); else loadBoard(); }
-      // first open fetches; later opens keep whatever was listed (and its page)
-      if (name === "tasks") { if (tasks.data) drawTasksPane(); else loadTasks(); }
       if (name === "thread") {
         var sc = document.getElementById("pane-thread");
         if (sc) sc.scrollTop = sc.scrollHeight;
@@ -1978,218 +1909,6 @@ ${BRAND_SPRITE}
       }).catch(function(err){ if (force) toast(err.message); });
     }
 
-    // ---- tasks pane (issues / PRs from the project's GitHub remote) --------
-    var tasks = { kind: "issue", scope: "open", q: "is:issue is:open", page: 1, data: null, loading: false };
-    var TASKS_PER_PAGE = 8;
-    function tasksQuery(){
-      // the box is the source of truth; the chips just rewrite it, so whatever
-      // you type wins and gh gets the same query language as github.com
-      var base = tasks.kind === "pr" ? "is:pr" : "is:issue";
-      return base + " is:open" + (tasks.scope === "mine" ? " assignee:@me" : "");
-    }
-    function setTasksScope(scope){
-      tasks.scope = scope;
-      tasks.q = tasksQuery();
-      tasks.page = 1;
-      loadTasks();
-    }
-    function ago(iso){
-      var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-      if (s < 60) return "just now";
-      var m = s / 60; if (m < 60) return Math.floor(m) + (Math.floor(m) === 1 ? " minute ago" : " minutes ago");
-      var h = m / 60; if (h < 24) return Math.floor(h) + (Math.floor(h) === 1 ? " hour ago" : " hours ago");
-      var d = h / 24;
-      if (d < 2) return "yesterday";
-      if (d < 30) return Math.floor(d) + " days ago";
-      var mo = d / 30; if (mo < 12) return Math.floor(mo) + (Math.floor(mo) === 1 ? " month ago" : " months ago");
-      return Math.floor(mo / 12) + "y ago";
-    }
-    /**
-     * GitHub ships each label's own colour — use it rather than inventing one.
-     * Constrained to hex: this lands in a style attribute, and a label name is
-     * attacker-controlled on any repo you might be reading.
-     */
-    function labelStyle(hex){
-      var raw = String(hex == null ? "" : hex).replace(/^#/, "");
-      var c = "#" + (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(raw) ? raw : "8b949e");
-      return "color:" + c + ";background:color-mix(in srgb, " + c + " 16%, transparent);" +
-        "border:1px solid color-mix(in srgb, " + c + " 40%, transparent)";
-    }
-    function loadTasks(){
-      tasks.loading = true;
-      drawTasksPane();
-      api("/api/projects/" + pid + "/tasks?kind=" + tasks.kind + "&search=" + encodeURIComponent(tasks.q))
-        .then(function(r){ tasks.data = r; tasks.loading = false; drawTasksPane(); })
-        .catch(function(err){
-          tasks.data = { available: false, reason: "error", detail: err.message };
-          tasks.loading = false; drawTasksPane();
-        });
-    }
-    function drawTasksPane(){
-      var el = document.getElementById("pane-tasks"); if (!el) return;
-      var d = tasks.data;
-      var head =
-        // GitHub is a state marker, not a control: it's the only provider Loom
-        // reads, so there is nothing to switch to. A <span> can't imply a click
-        // the way an enabled <button> does.
-        '<div class="provrow">' +
-          '<span class="provbtn active" title="GitHub \\u2014 the provider Loom reads" aria-current="true" role="img" aria-label="GitHub">' + ICONS.github + "</span>" +
-          '<button class="provbtn" disabled title="GitLab \\u2014 Loom doesn\\u2019t read GitLab yet" aria-label="GitLab (not supported yet)">' + ICONS.gitlab + "</button>" +
-          '<button class="provbtn" disabled title="Linear \\u2014 Loom doesn\\u2019t read Linear yet" aria-label="Linear (not supported yet)">' + ICONS.linear + "</button>" +
-        "</div>" +
-        '<div class="taskbar">' +
-          '<div class="seg">' +
-            '<button class="segbtn' + (tasks.kind === "issue" ? " active" : "") + '" data-kind="issue">Issues</button>' +
-            '<button class="segbtn' + (tasks.kind === "pr" ? " active" : "") + '" data-kind="pr">PRs</button>' +
-          "</div>" +
-          (d && d.available
-            ? '<span class="repopill"><span class="rdot"></span>' + esc(d.repo) + "</span>" +
-              '<a class="iconbtn" title="open on GitHub" target="_blank" rel="noreferrer" href="https://github.com/' +
-                esc(d.repo) + '">' + ICONS.external + "</a>"
-            : "") +
-        "</div>";
-
-      // no data yet is a loading state, never an empty one — an empty table
-      // here would read as "this repo has no issues", which we don't know.
-      // Still wire the head: the gh round-trip is slow enough that an unwired
-      // Issues/PRs toggle is a dead control for as long as anyone would use it.
-      if (!d) {
-        el.innerHTML = '<div class="tasksview">' + head + LOADER + "</div>";
-        wireTasksHead(el);
-        return;
-      }
-      if (d && !d.available) {
-        var hint = d.reason === "no-cli"
-          ? "Loom reads issues through your own <code>gh</code> CLI, so it never needs a token of its own."
-          : d.reason === "no-auth"
-            ? "gh is installed but signed out."
-            : d.reason === "no-remote"
-              ? "Add a GitHub remote to this project and reload."
-              : "gh could not list tasks.";
-        el.innerHTML = '<div class="tasksview">' + head +
-          '<div class="taskpanel"><div class="tsetup">' +
-          '<div class="th">' + (d.reason === "no-remote" ? "No GitHub remote" : d.reason === "no-auth" ? "Sign in to GitHub" : d.reason === "no-cli" ? "GitHub CLI not found" : "Couldn\\u2019t load tasks") + "</div>" +
-          '<div class="td">' + esc(d.detail) + "</div>" +
-          '<div class="td">' + hint + "</div>" +
-          "</div></div></div>";
-        wireTasksHead(el);
-        return;
-      }
-
-      var items = (d && d.items) || [];
-      var pages = Math.max(1, Math.ceil(items.length / TASKS_PER_PAGE));
-      if (tasks.page > pages) tasks.page = pages;
-      var slice = items.slice((tasks.page - 1) * TASKS_PER_PAGE, tasks.page * TASKS_PER_PAGE);
-
-      var rows = slice.map(function(it){
-        var st = it.draft ? "draft" : it.state;
-        var avs = it.assignees.length
-          ? '<span class="avs">' + it.assignees.slice(0, 3).map(function(a){
-              return '<span class="av" title="' + esc(a) + '">' + esc(a.slice(0, 1).toUpperCase()) + "</span>";
-            }).join("") + "</span>"
-          : '<span class="tupd">\\u2014</span>';
-        return '<tr data-id="' + it.id + '">' +
-          '<td><span class="idpill ' + esc(st) + '">' + (it.kind === "pr" ? ICONS.pr : ICONS.issue) + "#" + it.id + "</span></td>" +
-          '<td><div class="ttitle" title="' + esc(it.title) + '">' + esc(it.title) + "</div>" +
-            '<div class="tmeta"><span class="who">' + esc(it.author) + "</span>" +
-            it.labels.slice(0, 3).map(function(l){
-              return '<span class="lbl" style="' + labelStyle(l.color) + '">' + esc(l.name) + "</span>";
-            }).join("") + "</div></td>" +
-          "<td>" + avs + "</td>" +
-          '<td><span class="stbadge ' + esc(st) + '">' + esc(st.charAt(0).toUpperCase() + st.slice(1)) + "</span></td>" +
-          '<td class="tupd">' + esc(ago(it.updatedAt)) + "</td>" +
-          '<td style="text-align:right"><button class="btn outline xs startbtn" data-start="' + it.id + '">Start ' + "\\u2192" + "</button></td>" +
-          "</tr>";
-      }).join("");
-
-      el.innerHTML = '<div class="tasksview">' + head +
-        '<div class="taskpanel">' +
-          '<div class="chiprow">' +
-            '<button class="fchip' + (tasks.scope === "open" ? " active" : "") + '" data-scope="open">Open</button>' +
-            '<button class="fchip' + (tasks.scope === "mine" ? " active" : "") + '" data-scope="mine">Assigned to me</button>' +
-          "</div>" +
-          '<div class="qrow">' +
-            '<div class="qbox">' + ICONS.search + '<input id="taskq" value="' + esc(tasks.q) +
-              '" spellcheck="false" autocomplete="off" aria-label="search query"></div>' +
-            '<button class="iconbtn" id="tasknew" title="new task from scratch" aria-label="new task">' + ICONS.plus + "</button>" +
-            '<button class="iconbtn' + (tasks.loading ? " spin" : "") + '" id="taskrefresh" title="refresh" aria-label="refresh">' + ICONS.refresh + "</button>" +
-          "</div>" +
-          (items.length
-            ? '<div class="ttwrap"><table class="tasktable">' +
-                "<colgroup><col style=\\"width:92px\\"><col><col style=\\"width:92px\\">" +
-                "<col style=\\"width:92px\\"><col style=\\"width:104px\\"><col style=\\"width:96px\\"></colgroup>" +
-                "<thead><tr>" +
-                "<th>ID</th><th>Title / context</th><th>Assignees</th><th>Status</th><th>Updated</th><th></th>" +
-              "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
-              (pages > 1
-                ? '<div class="pager">' +
-                  '<button class="pgbtn" id="pgprev"' + (tasks.page === 1 ? " disabled" : "") + ">" + ICONS.chevronLeft + "Previous</button>" +
-                  Array.from({ length: pages }, function(_, i){
-                    return '<button class="pgbtn' + (tasks.page === i + 1 ? " active" : "") + '" data-page="' + (i + 1) + '">' + (i + 1) + "</button>";
-                  }).join("") +
-                  '<button class="pgbtn" id="pgnext"' + (tasks.page === pages ? " disabled" : "") + ">Next" + ICONS.chevron + "</button>" +
-                  "</div>"
-                : "") +
-              // the fetch is capped, so the last page is not the last issue —
-              // say so instead of letting the pager imply completeness
-              (d.capped
-                ? '<div class="tcap">showing the first ' + items.length +
-                  " \\u00b7 narrow the query to reach the rest</div>"
-                : "")
-            : '<div class="tsetup"><div class="th">Nothing matches</div>' +
-              '<div class="td">No ' + (tasks.kind === "pr" ? "pull requests" : "issues") +
-              " for <code>" + esc(tasks.q) + "</code>.</div></div>") +
-        "</div></div>";
-      wireTasksHead(el);
-      wireTasksBody(el);
-    }
-    function wireTasksHead(el){
-      Array.prototype.forEach.call(el.querySelectorAll(".segbtn"), function(b){
-        b.onclick = function(){
-          tasks.kind = b.getAttribute("data-kind");
-          tasks.q = tasksQuery();
-          tasks.page = 1;
-          loadTasks();
-        };
-      });
-    }
-    function wireTasksBody(el){
-      Array.prototype.forEach.call(el.querySelectorAll(".fchip"), function(b){
-        b.onclick = function(){ setTasksScope(b.getAttribute("data-scope")); };
-      });
-      var q = document.getElementById("taskq");
-      if (q) q.onkeydown = function(e){
-        if (e.key !== "Enter") return;
-        e.preventDefault();
-        tasks.q = this.value;
-        tasks.page = 1;
-        loadTasks();
-      };
-      var rf = document.getElementById("taskrefresh");
-      if (rf) rf.onclick = loadTasks;
-      var nt = document.getElementById("tasknew");
-      if (nt) nt.onclick = function(){ openTaskModal(pid); };
-      var prev = document.getElementById("pgprev");
-      if (prev) prev.onclick = function(){ tasks.page--; drawTasksPane(); };
-      var next = document.getElementById("pgnext");
-      if (next) next.onclick = function(){ tasks.page++; drawTasksPane(); };
-      Array.prototype.forEach.call(el.querySelectorAll("[data-page]"), function(b){
-        b.onclick = function(){ tasks.page = Number(b.getAttribute("data-page")); drawTasksPane(); };
-      });
-      // Start → hand the issue to an agent as a task
-      Array.prototype.forEach.call(el.querySelectorAll("[data-start]"), function(b){
-        b.onclick = function(){
-          var id = Number(b.getAttribute("data-start"));
-          var it = ((tasks.data && tasks.data.items) || []).filter(function(x){ return x.id === id; })[0];
-          if (!it) return;
-          var noun = it.kind === "pr" ? "PR" : "issue";
-          openTaskModal(pid, null,
-            noun + " #" + it.id + ": " + it.title + "\\n" + it.url +
-            "\\n\\nRead the " + noun + ", then implement it.");
-        };
-      });
-    }
-
     // ---- brain pane ---------------------------------------------------------
     function refreshBrain(){
       var el = document.getElementById("pane-brain"); if (!el) return;
@@ -2256,16 +1975,20 @@ ${BRAND_SPRITE}
     // Cards are derived from live state (see board.ts): which agents are
     // running or blocked, and what GitHub says about each PR. Nothing here is
     // stored except your pins.
-    var board = { data: null, loading: false, pins: null };
+    var board = { data: null, loading: false, pins: null, q: "" };
     var BCOLS = [
       ["working", "Working", "var(--warn)"],
       ["needs-you", "Needs you", "var(--warn)"],
       ["in-review", "In review", "var(--muted-foreground)"],
       ["ready", "Ready to merge", "var(--ok)"],
     ];
+    // your card's badge follows the column you put it in — mirrors board.ts
+    var OWN_STATE = { "working": "working", "needs-you": "input-needed",
+                      "in-review": "review-pending", "ready": "ready" };
     var BSTATES = {
       "working": ["Working", "var(--warn)"],
       "input-needed": ["Input needed", "var(--warn)"],
+      "issue": ["Open issue", "var(--thread-ink)"],
       "ci-failed": ["CI failed", "var(--err)"],
       "changes-requested": ["Changes requested", "var(--warn)"],
       "review-pending": ["Review pending", "var(--muted-foreground)"],
@@ -2284,7 +2007,7 @@ ${BRAND_SPRITE}
     function loadBoard(){
       board.loading = true;
       drawBoardPane();
-      api("/api/projects/" + pid + "/board")
+      api("/api/projects/" + pid + "/board" + (board.q ? "?search=" + encodeURIComponent(board.q) : ""))
         .then(function(r){ board.data = r; board.loading = false; drawBoardPane(); })
         .catch(function(err){
           board.data = { available: false, reason: "error", detail: err.message };
@@ -2295,10 +2018,21 @@ ${BRAND_SPRITE}
       var el = document.getElementById("pane-board"); if (!el) return;
       var d = board.data;
       var head = '<div class="bhead"><span class="bt">Board</span>' +
-        '<span class="bs">Live work flowing from working \\u2192 review \\u2192 merge.</span>' +
+        '<span class="bs">Work flowing from working \\u2192 review \\u2192 merge.</span>' +
         '<span class="spacer"></span>' +
+        // gh's own query language, straight through — same box the Tasks tab had
+        '<div class="qbox bq">' + ICONS.search +
+          '<input id="bq" value="' + esc(board.q) + '" spellcheck="false" autocomplete="off"' +
+          ' placeholder="search issues and PRs \\u2014 is:pr is:open author:@me" aria-label="search issues and PRs"></div>' +
+        '<button class="btn outline xs" id="bnew" title="add a card of your own">+ Task</button>' +
         '<button class="iconbtn' + (board.loading ? " spin" : "") + '" id="brefresh" title="refresh" aria-label="refresh">' + ICONS.refresh + "</button></div>";
-      if (!d) { el.innerHTML = '<div class="boardview">' + head + LOADER + "</div>"; return; }
+      // Wire the head even while loading: the gh round-trip is slow enough that
+      // a dead search box is dead for exactly as long as anyone would use it.
+      if (!d) {
+        el.innerHTML = '<div class="boardview">' + head + LOADER + "</div>";
+        wireBoardHead();
+        return;
+      }
       if (!d.available) {
         el.innerHTML = '<div class="boardview">' + head +
           '<div class="tsetup"><div class="th">Couldn\\u2019t build the board</div>' +
@@ -2320,6 +2054,7 @@ ${BRAND_SPRITE}
             '<span class="bn">' + mine.length + "</span></div>" +
           '<div class="bcb" data-drop="' + key + '">' +
             (mine.length ? mine.map(boardCard).join("") : '<div class="bempty">nothing here</div>') +
+            '<button class="badd" data-add="' + key + '" title="add a card here">+</button>' +
           "</div></div>";
       }).join("");
 
@@ -2331,27 +2066,126 @@ ${BRAND_SPRITE}
         "</div>";
       wireBoardHead();
       wireBoardDnd();
+      wireBoardTasks(el);
     }
     function boardCard(c){
       var st = BSTATES[c.state] || [c.state, "var(--muted-foreground)"];
       var pinned = (board.pins || {})[c.id];
-      return '<div class="bcard" draggable="true" data-card="' + esc(c.id) + '" data-home="' + esc(c.column) + '">' +
+      return '<div class="bcard' + (c.own ? " own" : "") + '" draggable="true" data-card="' + esc(c.id) +
+        '" data-home="' + esc(c.column) + '"' + (c.own ? ' data-own="1"' : "") + ">" +
         '<div class="bcr1"><span class="bdot" style="background:' + st[1] + '"></span>' +
           '<span class="st" style="color:' + st[1] + '">' + esc(st[0]) + "</span>" +
           '<span class="who">' + brandMark(c.kind) + esc(c.agent || "\\u2014") + "</span></div>" +
-        '<div class="bct">' + esc(c.title) + "</div>" +
+        '<div class="bct"' + (c.own ? ' data-edit="' + esc(c.id) + '" title="click to edit"' : "") + ">" +
+          esc(c.title) + "</div>" +
         (c.branch ? '<div class="bcbr">' + esc(c.branch) + "</div>" : "") +
         '<div class="bcf">' +
-          (c.pr
-            ? '<a href="' + esc(c.pr.url) + '" target="_blank" rel="noreferrer">PR #' + c.pr.number + "</a> \\u00b7 " +
-              esc(c.pr.draft ? "draft" : c.pr.state)
-            : "no PR yet") +
-          (pinned ? '<span class="bpin" data-unpin="' + esc(c.id) + '" title="you moved this card \\u2014 click to let its real state place it">pinned</span>' : "") +
+          (c.own
+            ? "yours"
+            : c.pr
+              ? '<a href="' + esc(c.pr.url) + '" target="_blank" rel="noreferrer">PR #' + c.pr.number + "</a> \\u00b7 " +
+                esc(c.pr.draft ? "draft" : c.pr.state)
+              : c.issue
+                ? '<a href="' + esc(c.issue.url) + '" target="_blank" rel="noreferrer">#' + c.issue.number + "</a>" +
+                  '<button class="btn outline xs bstart" data-start="' + c.issue.number +
+                  '" title="hand this issue to an agent">Start \\u2192</button>'
+                : "no PR yet") +
+          (c.own
+            ? '<button class="bpin del" data-deltask="' + esc(c.id) + '" title="delete this card" aria-label="delete card">' + ICONS.x + "</button>"
+            : pinned
+              ? '<span class="bpin" data-unpin="' + esc(c.id) + '" title="you moved this card \\u2014 click to let its real state place it">pinned</span>'
+              : "") +
         "</div></div>";
     }
     function wireBoardHead(){
       var r = document.getElementById("brefresh");
       if (r) r.onclick = loadBoard;
+      var q = document.getElementById("bq");
+      if (q) q.onkeydown = function(e){
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        board.q = this.value.trim();
+        loadBoard();
+      };
+      var n = document.getElementById("bnew");
+      if (n) n.onclick = function(){ addTask("working"); };
+      // add straight into a column — including Ready, if that's where it is
+      Array.prototype.forEach.call(document.querySelectorAll("[data-add]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); addTask(b.getAttribute("data-add")); };
+      });
+    }
+    /** A card of your own. Starts in a column and is editable in place. */
+    function addTask(column){
+      api("/api/projects/" + pid + "/board/tasks",
+          { method: "POST", body: JSON.stringify({ title: "New task", column: column }) })
+        .then(function(j){
+          loadBoard();
+          // focus the new card's title so you can just type
+          var id = "task-" + j.task.id;
+          setTimeout(function(){
+            var t = document.querySelector('[data-edit="' + id + '"]');
+            if (t) t.click();
+          }, 350);
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+    function wireBoardTasks(el){
+      // retitle in place — it's your card
+      Array.prototype.forEach.call(el.querySelectorAll("[data-edit]"), function(t){
+        t.onclick = function(ev){
+          ev.stopPropagation();
+          if (t.querySelector("input")) return;
+          var id = t.getAttribute("data-edit");
+          var was = t.textContent;
+          var inp = document.createElement("input");
+          inp.className = "bcedit";
+          inp.value = was;
+          inp.maxLength = 200;
+          t.textContent = "";
+          t.appendChild(inp);
+          inp.focus(); inp.select();
+          var done = false;
+          function finish(save){
+            if (done) return; done = true;
+            var next = inp.value.trim();
+            if (!save || !next || next === was) { drawBoardPane(); return; }
+            api("/api/projects/" + pid + "/board/tasks/" + id.replace(/^task-/, ""),
+                { method: "POST", body: JSON.stringify({ title: next }) })
+              .then(function(){ loadBoard(); })
+              .catch(function(err){ toast(err.message); drawBoardPane(); });
+          }
+          inp.onkeydown = function(e){
+            if (e.key === "Enter") { e.preventDefault(); finish(true); }
+            else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+          };
+          inp.onblur = function(){ finish(true); };
+          // a card is draggable; don't let selecting text start a drag
+          inp.ondragstart = function(e){ e.preventDefault(); e.stopPropagation(); };
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-deltask]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var id = b.getAttribute("data-deltask");
+          api("/api/projects/" + pid + "/board/tasks/" + id.replace(/^task-/, ""), { method: "DELETE" })
+            .then(loadBoard)
+            .catch(function(err){ toast(err.message); });
+        };
+      });
+      // Start an issue — the same brief the Tasks tab used to draft, now here
+      Array.prototype.forEach.call(el.querySelectorAll("[data-start]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var n = Number(b.getAttribute("data-start"));
+          var card = (board.data.cards || []).filter(function(c){
+            return c.issue && c.issue.number === n;
+          })[0];
+          if (!card) return;
+          openTaskModal(pid, null,
+            "issue #" + n + ": " + card.title + "\\n" + card.issue.url +
+            "\\n\\nRead the issue, then implement it.");
+        };
+      });
     }
     /**
      * Drag to move a card. This pins it where you dropped it — it does not tell
@@ -2384,8 +2218,19 @@ ${BRAND_SPRITE}
           var target = body.getAttribute("data-drop");
           var card = (board.data.cards || []).filter(function(c){ return c.id === id; })[0];
           if (!card) return;
+          if (card.own) {
+            // your card: the column IS its state, so this is a real move —
+            // persisted, and it survives everyone else's refresh
+            card.column = target;
+            card.state = OWN_STATE[target] || "working";
+            drawBoardPane();
+            api("/api/projects/" + pid + "/board/tasks/" + id.replace(/^task-/, ""),
+                { method: "POST", body: JSON.stringify({ column: target }) })
+              .catch(function(err){ toast(err.message); loadBoard(); });
+            return;
+          }
+          // derived card: we can move where you SEE it, not what it is
           var pins = boardPins();
-          // dropping a card back where its state says it belongs clears the pin
           if (target === card.column) delete pins[id]; else pins[id] = target;
           savePins();
           drawBoardPane();

@@ -587,11 +587,60 @@ export class LoomDaemon {
         const rt = await this.runtime(info.id);
         const status = await rt.status();
         const blocked = status.blockedAgent ? [status.blockedAgent] : [];
-        res.json(await buildBoard(info.dir, status.agents, blocked));
+        const search = req.query.search ? String(req.query.search) : undefined;
+        res.json(
+          await buildBoard(info.dir, status.agents, blocked, {
+            tasks: rt.boardTasks(),
+            ...(search ? { search } : {}),
+          }),
+        );
       } catch (err) {
         res.status(500).json({ error: (err as Error).message });
       }
     });
+
+    // Cards you write yourself. Unlike an agent or a PR, these are ours, so a
+    // drag really moves them — the column IS the state.
+    app.post(
+      "/api/projects/:id/board/tasks",
+      withRuntime(async (rt, req, res) => {
+        const { title, column, agent } = (req.body ?? {}) as {
+          title?: string;
+          column?: string;
+          agent?: string;
+        };
+        if (!title?.trim()) return void res.status(400).json({ error: "missing title" });
+        res.json({ task: rt.createTask({ title, ...(column ? { column } : {}), ...(agent ? { agent } : {}) }) });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/board/tasks/:taskId",
+      withRuntime(async (rt, req, res) => {
+        const { title, column, agent } = (req.body ?? {}) as {
+          title?: string;
+          column?: string;
+          agent?: string;
+        };
+        const task = rt.updateTask(String(req.params.taskId), {
+          ...(title !== undefined ? { title } : {}),
+          ...(column !== undefined ? { column } : {}),
+          ...(agent !== undefined ? { agent } : {}),
+        });
+        if (!task) return void res.status(404).json({ error: "unknown task" });
+        res.json({ task });
+      }),
+    );
+
+    app.delete(
+      "/api/projects/:id/board/tasks/:taskId",
+      withRuntime(async (rt, req, res) => {
+        if (!rt.deleteTask(String(req.params.taskId))) {
+          return void res.status(404).json({ error: "unknown task" });
+        }
+        res.json({ deleted: true });
+      }),
+    );
 
     // Issues / PRs for the project's GitHub remote, read through the user's
     // own gh CLI (see tasks.ts) — Loom holds no token of its own.
