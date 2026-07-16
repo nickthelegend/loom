@@ -62,6 +62,33 @@ interface GhItem {
   isDraft?: boolean;
 }
 
+/** gh writes multi-line help after the cause; the first line is the cause. */
+function firstLine(msg: string): string {
+  return (msg.split("\n").find((l) => l.trim()) ?? msg).trim().slice(0, 300);
+}
+
+/**
+ * Sort a gh failure into something a setup panel can say honestly, matched
+ * against the messages gh actually prints (probed, not guessed).
+ *
+ * Order matters: gh's non-GitHub-remote message ("none of the git remotes …
+ * point to a known GitHub host. To tell gh about a new GitHub host, please use
+ * `gh auth login`") mentions auth login, so the remote checks must run first
+ * or a GitLab remote gets reported as "signed out".
+ *
+ * Anything unrecognised is `error` carrying gh's own words — a timeout or a
+ * 500 is not evidence that the project has no remote.
+ */
+export function classifyGhFailure(msg: string): TaskUnavailable {
+  if (/no git remotes found|not a git repository|point to a known GitHub host/i.test(msg)) {
+    return { available: false, reason: "no-remote", detail: firstLine(msg) };
+  }
+  if (/gh auth login|not logged in|authentication failed|requires authentication|bad credentials/i.test(msg)) {
+    return { available: false, reason: "no-auth", detail: firstLine(msg) };
+  }
+  return { available: false, reason: "error", detail: firstLine(msg) };
+}
+
 function run(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { cwd, timeout: 20_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -108,15 +135,7 @@ export async function listTasks(
   try {
     repo = (await run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], dir)).trim();
   } catch (err) {
-    const msg = String((err as Error).message);
-    if (/auth login|not logged|authentication/i.test(msg)) {
-      return { available: false, reason: "no-auth", detail: "Run `gh auth login`, then reload." };
-    }
-    return {
-      available: false,
-      reason: "no-remote",
-      detail: "This project has no GitHub remote that gh can see.",
-    };
+    return classifyGhFailure(String((err as Error).message));
   }
 
   const fields =
@@ -133,6 +152,6 @@ export async function listTasks(
     const items = normalize(JSON.parse(out) as GhItem[], kind);
     return { available: true, repo, items, capped: items.length >= limit };
   } catch (err) {
-    return { available: false, reason: "error", detail: String((err as Error).message).slice(0, 300) };
+    return classifyGhFailure(String((err as Error).message));
   }
 }

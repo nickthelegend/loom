@@ -19,11 +19,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      # Whichever terminal backend this runner ends up with (node-pty ships no
-      # Linux prebuild, so CI usually builds it or goes without).
+      # node-pty ships no Linux prebuild, so this runner compiles it — and
+      # because it's an optionalDependency, a failed build is silent. Without
+      # LOOM_EXPECT_PTY the pty tests would skip themselves and the whole
+      # backend would ship untested behind a green board, so assert it here.
       - run: npm test
         env:
           LOOM_NO_NOTIFY: "1"
+          LOOM_EXPECT_PTY: "1"
       # And again with the pty forced off. The pipe fallback is what a machine
       # without a toolchain runs, so it can't be allowed to rot untested.
       - run: npm test

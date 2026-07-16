@@ -274,6 +274,14 @@ describe("terminal", () => {
     expect(fs.realpathSync(body.cwd)).toBe(fs.realpathSync(projectDir));
   });
 
+  it("has the terminal backend this environment expects", () => {
+    // LOOM_EXPECT_PTY=1 asserts a real pty is present, so a broken node-pty
+    // build fails the run instead of quietly downgrading the whole pty suite
+    // to no-ops. Unset stays lenient — a dev box without a toolchain is fine.
+    if (process.env.LOOM_EXPECT_PTY === "1") expect(mode).toBe("pty");
+    if (process.env.LOOM_NO_PTY === "1") expect(mode).toBe("pipe");
+  });
+
   it("runs a command and streams its output", async () => {
     const out = await runTerm("t1", "echo hello-loom", /hello-loom/);
     expect(out).toMatch(/hello-loom/);
@@ -308,8 +316,14 @@ describe("terminal", () => {
     await new Promise((r) => setTimeout(r, 600));
     // the session must survive the interrupt in both modes
     expect(termFrames.slice(before).some((f) => f.term === "t2" && f.closed)).toBe(false);
-    const out = await runTerm("t2", "echo alive", /alive/);
-    expect(out).toMatch(/alive/);
+    // ...and the shell must be free again, which is the only proof the sleep
+    // actually died. The needle must be something the *echo* cannot contain:
+    // a pty echoes whatever you type, so matching /alive/ on `echo alive`
+    // passes while `sleep 30` is still holding the shell — we'd be reading our
+    // own keystrokes back. The quotes survive the echo but not the expansion,
+    // so ALIVE appears only in real output.
+    const out = await runTerm("t2", 'echo AL"IVE"', /ALIVE/);
+    expect(out).toMatch(/ALIVE/);
   });
 
   it("closes a session on request", async () => {
@@ -331,7 +345,12 @@ describe("terminal", () => {
 
 // A pty is the real thing: the shell is on a tty, so it echoes what you type
 // and drives its own prompt. None of this is true of the pipe fallback.
-describe.runIf(process.env.LOOM_EXPECT_PTY !== "0")("terminal · pty mode", () => {
+//
+// These skip themselves when node-pty isn't available, which means they can
+// only ever prove a pty works — never that one exists. That's what the
+// LOOM_EXPECT_PTY=1 assertion above is for; without it a failed node-pty build
+// turns this whole block into no-ops and the board stays green.
+describe.runIf(process.env.LOOM_NO_PTY !== "1")("terminal · pty mode", () => {
   it("gives the shell a real tty", async () => {
     if (mode !== "pty") return; // node-pty didn't build here — fallback covers it
     const out = await runTerm("t1", "tty", /dev\/(tty|pts)/);
