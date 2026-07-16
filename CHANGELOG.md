@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Desktop chrome tightened to Orca's: tabs live in the 40px top strip beside
   the project context; the sidebar gains a Search row (filters projects and
   agents), an add-project action, and a bottom utility rail.
+- Split workspace: the Changes pane docks beside the Thread (persisted
+  toggle, default on ≥1280px) under a project/branch breadcrumb; diff cards
+  gain old/new line-number gutters; `turn_diff` events render as expandable
+  terminal-style `Update(n files)` cards; the thread tops with an agent
+  header block (monogram, role, baton, project dir); sidebar projects wear
+  hash-hued repo glyphs and the status bar a real spend meter. `BUILD_REV`
+  now also hashes the served app so UI-only rebuilds bump the rev.
 - Fixed: the desktop web shell now renders the hash-addressed project on
   first load; live websocket frames buffer until history hydrates (an early
   event could previously wipe the rendered backlog).
