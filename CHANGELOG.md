@@ -40,6 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header block (monogram, role, baton, project dir); sidebar projects wear
   hash-hued repo glyphs and the status bar a real spend meter. `BUILD_REV`
   now also hashes the served app so UI-only rebuilds bump the rev.
+- Collapsible source-control rail: hidden by default, toggled from the tab
+  strip (PanelRight) or the rail's own close button, state persisted.
+- Real terminals: the daemon runs commands in the project directory
+  (`POST /exec`, streamed over the project WebSocket, 8-run / 2MB caps) and
+  the workspace gains a bottom terminal dock — multiple tabs, streamed
+  output with exit codes, `clear`, drag-resize, and a Ctrl+backtick toggle.
+- New Task flow (Orca's Create Worktree): a sidebar action + `n` shortcut
+  opens a modal to pick a project + agent + task (or a pipeline) and start
+  it, then open that workspace.
+- Phone home rebuilt to the Orca mobile layout: Welcome-back hero, stat
+  tiles (Projects / Agents / Spend), a Daemon card, a Resume card, hue-glyph
+  project cards, and quick-action pills.
 - Fixed: the desktop web shell now renders the hash-addressed project on
   first load; live websocket frames buffer until history hydrates (an early
   event could previously wipe the rendered backlog).

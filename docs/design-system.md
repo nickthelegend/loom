@@ -82,11 +82,25 @@ The Orca workspace layout, drawn from Loom's real model:
   under Thread only.
 - **Changes pane** — per-file diff cards on `--editor-surface` with
   add/delete washes and hunk headers; Loom's `.loom/` state files filtered.
-- **Right rail (304px, ≥1200px)** — Source control: branch, changed files
-  with colored status letters (click jumps to the file's diff), live route
-  and needs-input cards.
+- **Right rail (304px)** — Source control: branch, changed files with
+  colored status letters (click jumps to the file's diff), live route and
+  needs-input cards. **Collapsed by default** — toggled from the tab strip
+  (PanelRight) or its close button, state persisted (`loomRail`).
+- **Terminal dock** — a bottom, resizable command runner: multiple tabs,
+  a prompt showing the project dir, streamed stdout/stderr with exit codes,
+  a `clear` builtin, Ctrl+backtick toggle. Each line is a fresh shell in the
+  project directory (`POST /api/projects/:id/exec` → WS `term` frames).
+- **New Task modal** — Orca's Create Worktree, mapped to Loom: project +
+  agent + task (or pipeline) → hands the baton and starts the work. Scrim +
+  glass panel; `n` opens, Cmd/Ctrl+Enter submits, Esc closes.
 - **Status bar (25px)** — websocket liveness, daemon host, baton holder,
-  working-agent count, project count, total spend.
+  spend meter (project share of total), working-agent count, project count,
+  total spend.
+
+Mobile home mirrors the Orca companion: a Welcome-back hero, three stat
+tiles (Projects / Agents / Spend), a Daemon card (host + counts), a Resume
+card for the active project, hue-glyph project cards, and quick-action
+pills.
 
 Mobile (<900px) keeps the single-column thread: chips row, glass sheets, and
 the docked composer.
