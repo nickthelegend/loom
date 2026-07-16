@@ -9,6 +9,11 @@ OpenCode, Antigravity, Codex, … — keeps its own brain in its own files. Loom
 **one brain**: connect your ADEs, and their memory, decisions, and context become a
 single shared thread that flows from one agent to the next.
 
+Today that means **Claude Code and OpenCode**, both verified against real versions —
+see [Supported agents](#supported-agents) for exactly how far each one goes, and
+[How memory actually reaches a model](#how-memory-actually-reaches-a-model) for the
+part most tools gloss over.
+
 Loom is **not** another IDE. It's the thin layer *between* your agents — the continuity
 and memory they don't share on their own.
 
@@ -249,13 +254,40 @@ detects at least two roles.
 | Claude Code | adapter (full-duplex) | headless CLI, `stream-json`, `--resume`, briefing via `--append-system-prompt` | ✅ verified against 2.1.83 |
 | OpenCode | adapter (full-duplex) | `opencode serve` HTTP + SSE (`/prompt`, `/interrupt`, `/event`) | ✅ verified against 1.17.20 |
 | Echo | adapter (demo/tests) | in-process | ✅ |
-| Antigravity | **bridge** (read-mostly) | Chromium debug port — presence + memory projections only | 🔶 experimental |
+| Antigravity | **bridge** (read-mostly) | Chromium debug port — reads target titles only; it can't see a conversation, an edit, or a cost | 🔶 presence only, unverified |
+| Codex, Kiro | — | not implemented | ❌ the UI ships their logos for when they exist; there is no adapter, and `loom` will reject the kind |
 
 **Adapters** implement the full contract (send / stream / injectMemory / interrupt /
 diff) and may hold the baton. **Bridges** only observe and receive shared-memory
 projections — they never hold the write lock. That's a design decision, not a gap: GUI
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
+
+## How memory actually reaches a model
+
+Worth being precise about, because this is the whole premise and it has a soft edge.
+
+Loom **reliably builds** the shared brain (every ADE's imported memory + your decisions
++ the thread) and **reliably writes** it to `.loom/memory/<agent>.md` on every handoff.
+That part is solid and tested.
+
+Getting it into the model's context is a different problem, and it depends on the agent:
+
+| Agent | How the brain arrives | Strength |
+|---|---|---|
+| Claude Code | briefing via `--append-system-prompt` — the model *always* sees a summary (recent decisions + messages) plus a pointer to `.loom/memory/claude-code.md`, which it can Read | **strong** — the summary is guaranteed; the full file is one tool-call away |
+| OpenCode | no per-prompt system field on `/prompt`, so the same briefing is **prepended to your prompt as text** | **weaker** — the model sees Loom's handoff as something you typed |
+| Antigravity | nothing tells it the file exists | **none** — a human has to open it |
+
+So: the **summary always lands**; the **full brain is an invitation**. An agent that
+ignores the pointer works from the summary alone. If you need something remembered for
+certain, put it in a decision (`loom decide`) — decisions ride in the briefing itself.
+
+Memory also flows **one way**. Loom reads `CLAUDE.md` / `AGENTS.md` and never writes
+them, so your ADE's own memory files stay yours. And the import is a **merge, not a
+parse**: files are read, capped at 8000 chars, and concatenated under headers. Claude
+Code's `@path` imports are **not followed** — a `CLAUDE.md` that is mostly `@` pointers
+imports the pointers, not what they point at.
 
 ## How it works
 
@@ -331,7 +363,13 @@ buzzes once, not five times). Verify with `loom clients --ping`.
   encryption come from Tailscale.
 - Every request needs a bearer token (`~/.loom/daemon.json`, mode 0600).
 - Pairing: `loom pair` mints a **short-lived (10 min), single-use** token, rendered as a
-  QR. The device exchanges it for a long-lived client token. Secrets never ride in URLs.
+  QR. The device exchanges it for a long-lived client token.
+- **The pairing token** rides in a URL *fragment* (`…/app#pair=…`), which browsers never
+  put on the wire — and it's single-use and 10-minute anyway.
+- **The client token does ride in a URL**: browsers can't set headers on a WebSocket, so
+  it's a `?token=` query param on `/ws`. On a tailnet to localhost nothing logs it, but
+  it isn't the same protection as a header, and calling it one would be a lie. Anything
+  that proxies your tailnet would see it.
 - Paired clients are not admins: they can't mint new pairing tokens.
 
 ## Adapter SDK
