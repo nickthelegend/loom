@@ -76,12 +76,13 @@ The Orca workspace layout, drawn from Loom's real model. Every column is
 drag-resizable and persisted; double-click a handle to reset
 (`loomSbW` / `loomRailW` / `loomDockW` / `loomTermH`).
 
-- **Left sidebar (264px)** — New task + Search, then project groups with
-  nested agent rows: status dot (amber pulse = working), `baton` badge on the
-  holder, role labels. Clicking an agent targets it for the next send.
+- **Left sidebar (264px)** — New task / New project + Search, then project
+  groups with nested **chat** rows (a project holds many conversations; they
+  share one brain, one baton, one working tree). Hover a chat for its ×,
+  double-click to rename; `+ New chat` at the end. Agents are NOT here — they
+  work the whole project, so they live in the rail's roster.
 - **Tab strip (40px)** — *is* the window chrome: project context, then
-  Thread | Tasks | Brain | Board, then the terminal / right-panel / theme
-  toggles.
+  Thread | Board | Brain, then the terminal / right-panel / theme toggles.
   The active tab merges into the canvas; the composer docks under Thread only.
 - **Diff dock (right of the chat, closed by default)** — opens only when you
   click a change: an `Update(n files)` card in the thread, or a file in
@@ -95,7 +96,10 @@ drag-resizable and persisted; double-click a handle to reset
   - *Search* — filename find across the project.
   - *Source Control* — branch, changed files with colored status letters,
     live route and needs-input cards.
-  - *Tasks* — per-project New task + the agent roster.
+  - *Agents* — New task + the roster: status dot (amber pulse = working),
+    `baton` badge, brand mark, and a role you can click and retype (roles are
+    free text — planner/executor/reviewer are suggestions, not a menu).
+    Bridges appear here too, badged and unclickable.
 - **Terminal dock** — a bottom, resizable strip of real shells (`loomTerm`,
   Ctrl+backtick). See *Terminal* below.
 - **Tasks pane** — the project's GitHub issues/PRs, read through the user's own

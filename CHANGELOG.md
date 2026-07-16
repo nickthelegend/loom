@@ -221,7 +221,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that resolve. Every new test above was checked by breaking the code and
   watching it go red.
 - CI now typechecks `app/`, which nothing was compiling.
-- Suite: 96 → 173.
+- Suite: 96 → 179.
 
 ### Accessibility
 

@@ -94,26 +94,31 @@ the writing.
 
 ```
 ┌───────────┬────────────────────────────┬──────────────┐
-│ projects  │ Thread · Tasks · Brain ·   │  Explorer    │
-│  └ agents │                    Board   │  Search      │
+│ projects  │  Thread · Board · Brain    │  Explorer    │
+│  └ chats  │                            │  Search      │
 │           │  the conversation, with    │  Source ctl  │
 │ New task  │  Update(n files) cards ────┼─▶ diff opens │
-│ New proj  │                            │  Tasks       │
+│ New proj  │                            │  Agents      │
 │ Search    ├────────────────────────────┤              │
 │           │  terminal (a real shell)   │              │
 └───────────┴────────────────────────────┴──────────────┘
   live · host · baton · spend                    ← status bar
 ```
 
-- **Projects + agents** in the left rail; click an agent to aim your next message at it.
+- **Projects + chats** in the left rail: a project holds as many conversations as you
+  want, and they share one brain, one baton and one working tree. The **agents** live in
+  the right panel — click one to aim your next message at it, click its role to rename
+  the job (roles are free text: "architect", "the one that writes docs", anything).
 - **Thread** is the shared conversation; **Brain** is the unified memory; **Board**
   is everything in flight.
-- **Board** is four columns — working → needs you → in review → ready to merge —
-  built from real state: which agents are running or blocked (ours), and what
-  GitHub says about each PR (draft, CI failed, changes requested, approved),
-  read through your own `gh`. Drag a card and it stays where you put it, but the
-  badge keeps telling the truth: a drag can't approve a review or turn CI green.
-  Each card wears its agent's own logo.
+- **Board** is four columns — working → needs you → in review → ready to merge.
+  Cards come from three places: **yours** (`+ Task`), **Loom** (which agents are
+  running or blocked), and **GitHub** (draft, CI failed, changes requested,
+  approved — read through your own `gh`). Search issues and PRs right here in
+  GitHub's query language; **Start** hands an issue to an agent.
+  Dragging your own card really moves it. Dragging a PR card only moves where you
+  *see* it — the badge keeps telling the truth, because a drag can't approve a
+  review or turn CI green. Each card wears its agent's own logo.
 - **Click any change** — an `Update(n files)` card, or a file in Source Control — and the
   diff opens to the right of the chat. It stays closed until you ask for it.
 - **Explorer / Search / Source Control / Tasks** in the right panel; every column is
@@ -123,10 +128,6 @@ the writing.
   and `^Z` all behave. `node-pty` is optional: without it (Linux with no build
   toolchain) you get a pipe-backed shell instead, where `cd` and variables still
   persist and `^C` still works, driven a line at a time.
-- **Tasks** lists the repo's open issues and PRs — filters, GitHub's own search
-  syntax, real label colours — and **Start** on a row drafts a task from that
-  issue. It reads through your own `gh` CLI, so Loom never asks for a token; if
-  `gh` is missing, signed out, or the project has no GitHub remote, it says so.
 - **New task** (`n`) picks a project, a task, and **one agent — or several**, which run
   it as a pipeline, hop to hop. **New project** (`p`) adds a repo — a native folder
   picker in the desktop app — and reports which ADEs it found on the host.
@@ -388,7 +389,7 @@ sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running 
 ## Development
 
 ```bash
-npm test          # 173 tests: unit + full HTTP/WS end-to-end
+npm test          # 179 tests: unit + full HTTP/WS end-to-end
 npm run build     # tsc → dist/
 npm run dev       # run the CLI from source (tsx)
 ```
