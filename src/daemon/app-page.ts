@@ -41,6 +41,7 @@ export const APP_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="stylesheet" href="/app/vendor/xterm.css">
 <title>Loom</title>
 <script>
 /* Apply the saved theme before first paint so there is no flash. */
@@ -622,7 +623,18 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .termtab .tx svg{width:11px;height:11px}
   .termtabs .iconbtn{width:24px;height:24px}
   .termtabs .iconbtn svg{width:13px;height:13px}
-  .termbody{flex:1;min-height:0;overflow-y:auto;padding:8px 12px;font-family:var(--font-mono);font-size:12px;
+  /* one host per tab: xterm mounts into it in pty mode, the line-renderer
+     writes into it in pipe mode. Only the active one is displayed. */
+  .termpanes{flex:1;min-height:0;position:relative}
+  .termpane{position:absolute;inset:0;display:none}
+  .termpane.active{display:block}
+  .termpane .xterm{height:100%;padding:6px 8px 0 12px}
+  .termpane .xterm-viewport{background:transparent!important}
+  .termpane .xterm-viewport::-webkit-scrollbar{width:12px}
+  .termpane .xterm-viewport::-webkit-scrollbar-thumb{
+    background:color-mix(in srgb, var(--muted-foreground) 28%, transparent);
+    border:3px solid transparent;border-radius:7px;background-clip:padding-box}
+  .termbody{height:100%;overflow-y:auto;padding:8px 12px;font-family:var(--font-mono);font-size:12px;
     line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--foreground);cursor:text}
   .termbody .pl{color:var(--muted-foreground)}
   .termbody .pl b{color:var(--ok);font-weight:400}
@@ -731,6 +743,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
 <body id="loom-app">
 <div id="root"></div>
 <div id="toast"></div>
+<!-- xterm.js, served by the daemon from node_modules: the app has no build
+     step and must work offline on a tailnet, so no bundler and no CDN. Only
+     used when the daemon has a real pty; the fallback needs none of it. -->
+<script src="/app/vendor/xterm.js"></script>
+<script src="/app/vendor/addon-fit.js"></script>
+<script src="/app/vendor/addon-web-links.js"></script>
 <script>
 (function(){
   "use strict";
@@ -819,6 +837,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     tb.onclick = function(){
       localStorage.setItem(THEME_KEY, themeNow() === "light" ? "dark" : "light");
       applyTheme();
+      if (state.retheme) state.retheme(); // live terminals repaint too
     };
   }
   var THEME_BTN = '<button id="themebtn" class="iconbtn" title="toggle theme"></button>';
@@ -1088,8 +1107,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<button id="termadd" class="iconbtn" title="new terminal">' + ICONS.plus + "</button>" +
         '<span class="spacer"></span>' +
         '<button id="termhide" class="iconbtn" title="hide terminal">' + ICONS.x + "</button></div>" +
-        '<div class="termbody" id="termbody"></div>' +
-        '<form class="terminput" id="termform"><span class="pr">&#10095;</span>' +
+        '<div class="termpanes" id="termpanes"></div>' +
+        '<form class="terminput" id="termform" style="display:none"><span class="pr">&#10095;</span>' +
         '<input id="terminput" placeholder="run a command\\u2026" autocomplete="off" autocapitalize="off" spellcheck="false">' +
         '<span class="st"></span></form>' +
         "</div>" +
@@ -1231,9 +1250,18 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       drawRail();
     }
 
-    // ---- terminal dock (a real shell session per tab) ----------------------
+    // ---- terminal dock -----------------------------------------------------
+    // Two backends, chosen by the daemon (see terminals.ts). With a real pty
+    // we hand the bytes to xterm.js and get a true terminal; without one we
+    // drive a line at a time and render it ourselves.
     var TERM_KEY = "loomTerm";
-    var terms = [], activeTerm = null, termSeq = 0;
+    var terms = [], activeTerm = null, termSeq = 0, termMode = null;
+    function curTerm(){ for (var i = 0; i < terms.length; i++) if (terms[i].id === activeTerm) return terms[i]; return null; }
+    function termOpen(){ return desktop && localStorage.getItem(TERM_KEY) === "1"; }
+    function wsSend(msg){
+      var ws = state.ws;
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+    }
     function shortCwd(abs){
       var d = String(abs || "");
       var base = (state.project && state.project.dir) || "";
@@ -1245,22 +1273,79 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       var parts = d.split(/[\\\\/]/).filter(Boolean);
       return parts.length ? parts[parts.length - 1] : "~";
     }
-    function curTerm(){ for (var i = 0; i < terms.length; i++) if (terms[i].id === activeTerm) return terms[i]; return null; }
-    function termOpen(){ return desktop && localStorage.getItem(TERM_KEY) === "1"; }
+    /** Map the design tokens onto an xterm palette so it matches the theme. */
+    function xtermTheme(){
+      var cs = getComputedStyle(document.documentElement);
+      var v = function(n, fallback){ var x = cs.getPropertyValue(n).trim(); return x && x.charAt(0) === "#" ? x : fallback; };
+      var fg = v("--foreground", "#fafafa");
+      var dim = v("--muted-foreground", "#a1a1a1");
+      return {
+        background: v("--editor-surface", "#141414"),
+        foreground: fg,
+        cursor: fg,
+        cursorAccent: v("--editor-surface", "#141414"),
+        selectionBackground: "rgba(103,232,249,0.28)",
+        black: dim,
+        red: v("--git-del", "#c74e39"),
+        green: v("--git-add", "#81b88b"),
+        yellow: v("--warn", "#eab308"),
+        blue: v("--thread", "#67e8f9"),
+        magenta: v("--shuttle", "#e879f9"),
+        cyan: v("--thread", "#67e8f9"),
+        white: fg,
+        brightBlack: dim,
+        brightRed: v("--err", "#ff6568"),
+        brightGreen: v("--ok", "#10b981"),
+        brightYellow: v("--warn", "#eab308"),
+        brightBlue: v("--thread", "#67e8f9"),
+        brightMagenta: v("--shuttle", "#e879f9"),
+        brightCyan: v("--thread", "#67e8f9"),
+        brightWhite: fg
+      };
+    }
     function applyTerm(){
       var dock = document.getElementById("termdock"); if (!dock) return;
       var on = termOpen();
       dock.classList.toggle("open", on);
       var tb = document.getElementById("termbtn");
       if (tb) tb.classList.toggle("active", on);
-      if (on) { ensureTerm(); focusTermInput(); }
+      if (on) { ensureTerm(); fitActive(); focusTerm(); }
     }
     function toggleTerm(){
       localStorage.setItem(TERM_KEY, termOpen() ? "0" : "1");
       applyTerm();
     }
     function ensureTerm(){ if (!terms.length) addTerm(); }
-    function focusTermInput(){ var i = document.getElementById("terminput"); if (i && termOpen()) setTimeout(function(){ i.focus(); }, 0); }
+    function focusTerm(){
+      var t = curTerm(); if (!t || !termOpen()) return;
+      setTimeout(function(){
+        if (t.xterm) t.xterm.focus();
+        else { var i = document.getElementById("terminput"); if (i) i.focus(); }
+      }, 0);
+    }
+    /**
+     * Re-measure the active terminal. Refuses to fit a pane with no box —
+     * measuring a hidden element yields a 1x1 grid, and the pty gets resized
+     * to match, which mangles the shell's line editing.
+     */
+    function fitActive(){
+      var t = curTerm();
+      if (!t || !t.fit) return;
+      var host = document.querySelector('.termpane[data-t="' + t.id + '"]');
+      if (!host || host.clientWidth < 40 || host.clientHeight < 20) return;
+      try {
+        t.fit.fit();
+      } catch (e) {}
+    }
+    function paneFor(t){
+      var el = document.querySelector('.termpane[data-t="' + t.id + '"]');
+      if (el) return el;
+      el = document.createElement("div");
+      el.className = "termpane";
+      el.setAttribute("data-t", t.id);
+      document.getElementById("termpanes").appendChild(el);
+      return el;
+    }
     function addTerm(){
       termSeq++;
       var id = "t" + termSeq;
@@ -1268,29 +1353,101 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
                 cwd: (state.project && state.project.dir) || "", hist: [], hi: -1, draft: "" };
       terms.push(t);
       activeTerm = id;
+      // the pane must exist AND be visible before xterm opens into it —
+      // measuring a display:none element yields a 1x1 grid, and the pty would
+      // be sized to match.
+      var host = paneFor(t);
       drawTermTabs();
-      drawTermBody();
-      focusTermInput();
-      // open the shell for this tab; the daemon reports its starting cwd
-      api("/api/projects/" + pid + "/term/open", { method: "POST", body: JSON.stringify({ term: id }) })
+      showTermPane();
+      api("/api/projects/" + pid + "/term/open",
+          { method: "POST", body: JSON.stringify({ term: id, cols: 80, rows: 24 }) })
         .then(function(r){
           t.cwd = r.cwd || t.cwd;
-          termAppend(t, '<div class="hintl">shell in ' + esc(shortCwd(t.cwd)) +
-            " \\u00b7 \\u2303C interrupt \\u00b7 \\u2303L clear \\u00b7 \\u2191 history</div>");
-          drawPrompt();
+          termMode = r.mode || "pipe";
+          if (termMode === "pty" && window.Terminal) mountXterm(t, host, r.scrollback || "");
+          else mountLines(t, host, r.scrollback || "");
+          showTermPane();
+          fitActive();
+          focusTerm();
         })
-        .catch(function(err){ termAppend(t, '<div class="eo">loom: ' + esc(err.message) + "</div>"); });
+        .catch(function(err){
+          host.innerHTML = '<div class="termbody"><div class="eo">loom: ' + esc(err.message) + "</div></div>";
+        });
+    }
+    /** A real terminal: xterm.js speaking raw bytes to the pty over the WS. */
+    function mountXterm(t, host, scrollback){
+      var term = new window.Terminal({
+        fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "monospace",
+        fontSize: 12,
+        lineHeight: 1.2,
+        theme: xtermTheme(),
+        cursorBlink: true,
+        scrollback: 10000,
+        allowProposedApi: true,
+        macOptionIsMeta: true
+      });
+      var fit = new window.FitAddon.FitAddon();
+      term.loadAddon(fit);
+      try { term.loadAddon(new window.WebLinksAddon.WebLinksAddon()); } catch (e) {}
+      term.open(host);
+      t.xterm = term; t.fit = fit;
+      fitActive();
+      // one more after layout settles — the dock may still be sizing
+      requestAnimationFrame(function(){ fitActive(); });
+      // scrollback is authoritative up to the open response; only fall back to
+      // what we buffered when this is a fresh session with none.
+      if (scrollback) term.write(scrollback);
+      else if (t.pendingOut) term.write(t.pendingOut);
+      t.pendingOut = "";
+      term.onData(function(d){ wsSend({ type: "term-input", term: t.id, data: d }); });
+      term.onResize(function(size){ wsSend({ type: "term-resize", term: t.id, cols: size.cols, rows: size.rows }); });
+      if (term.onTitleChange) term.onTitleChange(function(title){
+        if (!title) return;
+        t.title = title.length > 22 ? title.slice(0, 21) + "…" : title;
+        drawTermTabs();
+      });
+      // the pty needs to know the real window, not the 80x24 we opened with
+      wsSend({ type: "term-resize", term: t.id, cols: term.cols, rows: term.rows });
+      if (!t.ro && window.ResizeObserver) {
+        t.ro = new ResizeObserver(function(){ if (t.id === activeTerm) { try { fit.fit(); } catch (e) {} } });
+        t.ro.observe(host);
+      }
+    }
+    /** No pty: render lines ourselves and drive the shell one command at a time. */
+    function mountLines(t, host, scrollback){
+      host.innerHTML = '<div class="termbody"></div>';
+      t.body = host.querySelector(".termbody");
+      t.html = '<div class="hintl">shell in ' + esc(shortCwd(t.cwd)) +
+        " · ⌃C interrupt · ⌃L clear · ↑ history</div>";
+      var replay = scrollback || t.pendingOut || "";
+      t.pendingOut = "";
+      if (replay) t.html += "<span>" + esc(replay) + "</span>";
+      t.body.innerHTML = t.html;
+      var form = document.getElementById("termform");
+      if (form) form.style.display = "";
+      t.body.addEventListener("mousedown", function(ev){
+        if (String(window.getSelection() || "")) return;
+        if (ev.target.closest && ev.target.closest("a")) return;
+        setTimeout(focusTerm, 0);
+      });
+      drawPrompt();
     }
     function closeTerm(id){
       var idx = -1;
       for (var i = 0; i < terms.length; i++) if (terms[i].id === id) idx = i;
       if (idx < 0) return;
+      var t = terms[idx];
+      if (t.ro) { try { t.ro.disconnect(); } catch (e) {} }
+      if (t.xterm) { try { t.xterm.dispose(); } catch (e) {} }
+      var pane = document.querySelector('.termpane[data-t="' + id + '"]');
+      if (pane) pane.remove();
       api("/api/projects/" + pid + "/term/close", { method: "POST", body: JSON.stringify({ term: id }) }).catch(function(){});
       terms.splice(idx, 1);
       if (activeTerm === id) activeTerm = terms.length ? terms[Math.max(0, idx - 1)].id : null;
       if (!terms.length) { localStorage.setItem(TERM_KEY, "0"); applyTerm(); return; }
       drawTermTabs();
-      drawTermBody();
+      showTermPane();
+      focusTerm();
     }
     function drawTermTabs(){
       var box = document.getElementById("termtabs"); if (!box) return;
@@ -1303,40 +1460,41 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         el.onclick = function(ev){
           var c = ev.target.closest ? ev.target.closest("[data-close]") : null;
           if (c) { closeTerm(c.getAttribute("data-close")); return; }
-          activeTerm = el.getAttribute("data-t"); drawTermTabs(); drawTermBody(); drawPrompt(); focusTermInput();
+          activeTerm = el.getAttribute("data-t");
+          drawTermTabs(); showTermPane(); drawPrompt(); fitActive(); focusTerm();
         };
       });
     }
-    function drawTermBody(){
-      var body = document.getElementById("termbody"); var t = curTerm();
-      if (!body || !t) return;
-      body.innerHTML = t.html;
-      body.scrollTop = body.scrollHeight;
+    function showTermPane(){
+      Array.prototype.forEach.call(document.querySelectorAll(".termpane"), function(p){
+        p.classList.toggle("active", p.getAttribute("data-t") === activeTerm);
+      });
+      var t = curTerm();
+      var form = document.getElementById("termform");
+      // the input line belongs to the fallback only — a pty takes keys directly
+      if (form) form.style.display = t && !t.xterm && termMode === "pipe" ? "" : "none";
+      if (t && t.fit) { try { t.fit.fit(); } catch (e) {} }
     }
     function drawPrompt(){
-      var t = curTerm(); if (!t) return;
+      var t = curTerm(); if (!t || t.xterm) return;
       var pr = document.querySelector(".terminput .pr");
-      if (pr) pr.innerHTML = esc(shortCwd(t.cwd)) + " <b>\\u276f</b>";
+      if (pr) pr.innerHTML = esc(shortCwd(t.cwd)) + " <b>❯</b>";
       var row = document.querySelector(".terminput");
       if (row) row.classList.toggle("busy", !!t.busy);
       var st = document.querySelector(".terminput .st");
-      if (st) st.textContent = t.busy ? "running \\u00b7 \\u2303C to stop" : "";
+      if (st) st.textContent = t.busy ? "running · ⌃C to stop" : "";
     }
     function termAppend(t, html){
       t.html += html;
-      if (t.id === activeTerm) {
-        var body = document.getElementById("termbody");
-        if (body) {
-          var atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
-          body.insertAdjacentHTML("beforeend", html);
-          if (atBottom) body.scrollTop = body.scrollHeight;
-        }
+      if (t.id === activeTerm && t.body) {
+        var atBottom = t.body.scrollHeight - t.body.scrollTop - t.body.clientHeight < 40;
+        t.body.insertAdjacentHTML("beforeend", html);
+        if (atBottom) t.body.scrollTop = t.body.scrollHeight;
       }
     }
     /**
-     * Minimal ANSI renderer: SGR colour/bold/underline become spans, other
-     * escape sequences are dropped, and \\r rewinds to the last newline the way
-     * a terminal overwrites a line (progress bars, spinners).
+     * Fallback renderer only: SGR colour/bold/underline become spans, other
+     * escapes are dropped. (In pty mode xterm does all of this properly.)
      */
     function ansiToHtml(text, openRef){
       var out = "";
@@ -1371,12 +1529,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
             i += m[0].length;
             continue;
           }
-          // any other escape sequence: drop it
           var other = /^\\u001b[\\[\\]][0-9;?]*[a-zA-Z]?/.exec(text.slice(i));
           i += other ? other[0].length : 1;
           continue;
         }
-        if (ch === "\\r") { i++; continue; } // \\r\\n handled by the \\n
+        if (ch === "\\r") { i++; continue; }
         out += esc(ch);
         i++;
       }
@@ -1386,7 +1543,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     }
     function runCmd(cmd){
       var t = curTerm(); if (!t) return;
-      termAppend(t, '<div><span class="pl">' + esc(shortCwd(t.cwd)) + " <b>\\u276f</b></span> " +
+      termAppend(t, '<div><span class="pl">' + esc(shortCwd(t.cwd)) + " <b>❯</b></span> " +
         '<span class="cmd">' + esc(cmd) + "</span></div>");
       t.busy = true; drawTermTabs(); drawPrompt();
       api("/api/projects/" + pid + "/term/input", { method: "POST", body: JSON.stringify({ term: t.id, data: cmd }) })
@@ -1406,31 +1563,33 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       for (var i = 0; i < terms.length; i++) if (terms[i].id === frame.term) t = terms[i];
       if (!t) return;
       if (frame.chunk !== undefined) {
+        // The shell prints its prompt the moment it spawns — before the open
+        // response lands and the renderer is mounted. Hold anything that
+        // arrives in that window instead of dropping it on the floor.
+        if (!t.xterm && !t.body) { t.pendingOut = (t.pendingOut || "") + frame.chunk; return; }
+        if (t.xterm) { t.xterm.write(frame.chunk); return; }
         if (!t.ansi) t.ansi = { cls: [] };
         termAppend(t, ansiToHtml(String(frame.chunk), t.ansi));
+        return;
       }
+      if (frame.title && t.xterm) return; // xterm reports its own title
       if (frame.exit !== undefined) {
         t.busy = false;
         if (frame.cwd) t.cwd = frame.cwd;
         var code = Number(frame.exit);
-        if (code !== 0) termAppend(t, '<div class="exbad">\\u2514 exit ' + code + "</div>");
+        if (code !== 0) termAppend(t, '<div class="exbad">└ exit ' + code + "</div>");
         drawTermTabs(); drawPrompt();
       }
       if (frame.closed) {
         t.busy = false;
-        termAppend(t, '<div class="ex">\\u2514 shell exited</div>');
+        if (t.xterm) t.xterm.write("\\r\\n\\u001b[2m└ shell exited\\u001b[0m\\r\\n");
+        else termAppend(t, '<div class="ex">└ shell exited</div>');
         drawTermTabs(); drawPrompt();
       }
     }
     if (desktop) {
       document.getElementById("termhide").onclick = function(){ localStorage.setItem(TERM_KEY, "0"); applyTerm(); };
       document.getElementById("termadd").onclick = function(){ addTerm(); };
-      // clicking anywhere in the output focuses the input, like a real terminal
-      document.getElementById("termbody").addEventListener("mousedown", function(ev){
-        if (String(window.getSelection() || "")) return; // don't steal a text selection
-        if (ev.target.closest && ev.target.closest("a")) return;
-        setTimeout(focusTermInput, 0);
-      });
       var tin = document.getElementById("terminput");
       tin.addEventListener("keydown", function(e){
         var t = curTerm(); if (!t) return;
@@ -1439,7 +1598,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
           return;
         }
         if (e.ctrlKey && (e.key === "l" || e.key === "L")) {
-          e.preventDefault(); t.html = ""; t.ansi = { cls: [] }; drawTermBody(); return;
+          e.preventDefault(); t.html = ""; t.ansi = { cls: [] }; if (t.body) t.body.innerHTML = ""; return;
         }
         if (e.key === "ArrowUp") {
           if (!t.hist.length) return;
@@ -1465,29 +1624,39 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         if (t) { t.hi = -1; t.draft = ""; }
         if (!cmd || !t) return;
         if (t.hist[t.hist.length - 1] !== cmd) t.hist.push(cmd);
-        if (cmd === "clear") { t.html = ""; t.ansi = { cls: [] }; drawTermBody(); return; }
+        if (cmd === "clear") { t.html = ""; t.ansi = { cls: [] }; if (t.body) t.body.innerHTML = ""; return; }
         runCmd(cmd);
       });
-      // drag the top edge to resize the dock
       var rz = document.getElementById("termresize");
       rz.addEventListener("mousedown", function(ev){
         ev.preventDefault();
         var dock = document.getElementById("termdock");
         var startY = ev.clientY, startH = dock.offsetHeight;
         document.body.classList.add("resizing-x");
-        function mv(e){ dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, startH + (startY - e.clientY))) + "px"; }
+        function mv(e){
+          dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, startH + (startY - e.clientY))) + "px";
+          fitActive();
+        }
         function up(){
           document.body.classList.remove("resizing-x");
           localStorage.setItem("loomTermH", String(dock.offsetHeight));
+          fitActive();
           document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up);
         }
         document.addEventListener("mousemove", mv); document.addEventListener("mouseup", up);
       });
       var savedH = Number(localStorage.getItem("loomTermH"));
       if (savedH) document.getElementById("termdock").style.height = savedH + "px";
+      window.addEventListener("resize", fitActive);
       state.toggleTerm = toggleTerm;
-      applyTerm();
+      state.retheme = function(){
+        terms.forEach(function(t){ if (t.xterm) t.xterm.options.theme = xtermTheme(); });
+      };
+      // NB: applyTerm() runs after connect() below — opening a shell before
+      // the socket is listening broadcasts its prompt to nobody.
+      state.startTerminals = applyTerm;
     }
+
     // click an Update(…) card in the thread → open its diff on the right
     // (desktop dock); on mobile, expand it inline.
     document.getElementById("feed").addEventListener("click", function(ev){
@@ -1939,7 +2108,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       var proto = location.protocol === "https:" ? "wss://" : "ws://";
       var ws = new WebSocket(proto + location.host + "/ws?token=" + encodeURIComponent(state.token) + "&project=" + encodeURIComponent(pid));
       state.ws = ws;
-      ws.onopen = function(){ state.wsLive = true; drawStatusbar(); };
+      ws.onopen = function(){
+        state.wsLive = true; drawStatusbar();
+        // Open shells only once the socket is truly listening, or the pty's
+        // first output (its prompt) is broadcast into the void. Runs once —
+        // a reconnect must not spawn another set of terminals.
+        var start = state.startTerminals;
+        if (start) { state.startTerminals = null; start(); }
+      };
       ws.onmessage = function(ev){
         try {
           var frame = JSON.parse(ev.data);
@@ -2366,6 +2542,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     state.toggleTerm = null;
     state.selectProject = null;
     state.drawRail = null;
+    state.startTerminals = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);

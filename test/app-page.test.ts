@@ -10,6 +10,17 @@ import { APP_HTML, APP_MANIFEST } from "../src/daemon/app-page.js";
 import type { EventKind } from "../src/types.js";
 
 describe("web app page", () => {
+  // The whole page is one TS template literal, so every backslash bound for
+  // the browser has to be doubled and control bytes written as escapes. Get
+  // that wrong and the app ships a script that dies on parse — silently, since
+  // nothing server-side ever evaluates it. Parse it here instead.
+  it("serves a script that actually parses", () => {
+    const block = APP_HTML.match(/<script>\n\(function\(\)\{[\s\S]*?\n\}\)\(\);\n<\/script>/);
+    expect(block, "main app script block not found").not.toBeNull();
+    const src = block![0].replace(/^<script>/, "").replace(/<\/script>$/, "");
+    expect(() => new Function(src)).not.toThrow();
+  });
+
   it("keeps the auth/pairing contract", () => {
     expect(APP_HTML).toContain('id="loom-app"');
     expect(APP_HTML).toContain("/api/pair/claim");
