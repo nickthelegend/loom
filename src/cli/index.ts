@@ -7,6 +7,8 @@
  */
 
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
@@ -20,9 +22,31 @@ import {
   ensureDaemon,
   stopDaemon,
 } from "../daemon/client.js";
+import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
+import { ensureLoomHome } from "../core/registry.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
 import { fmtUsd, formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
+
+const LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Where a background daemon's output goes: ~/.loom/daemon.log, appended.
+ *
+ * Rolled to .log.1 once it passes 5MB — one generation, because this is a
+ * breadcrumb trail for "why did it die", not an archive. Without this the
+ * daemon ran with stdio:"ignore" and a crash left nothing at all to read.
+ */
+function openDaemonLog(): number {
+  const home = ensureLoomHome();
+  const file = path.join(home, "daemon.log");
+  try {
+    if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, file + ".1");
+  } catch {
+    /* no log yet, or it vanished — either way, open a fresh one below */
+  }
+  return fs.openSync(file, "a");
+}
 
 const program = new Command();
 
@@ -101,6 +125,10 @@ program
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
+
+    // Survive the faults that would otherwise take every project down with
+    // them; they land in ~/.loom/daemon.log. See daemon/guards.ts.
+    installCrashGuards();
   });
 
 program
@@ -129,7 +157,12 @@ program
     }
     const self = fileURLToPath(import.meta.url);
     const args = [self, "daemon", ...(opts.tailnet ? ["--tailnet"] : [])];
-    const child = spawn(process.execPath, args, { detached: true, stdio: "ignore" });
+    // Keep the daemon's output. It used to be stdio:"ignore", which meant a
+    // background daemon threw away every byte it ever wrote — a crash left you
+    // with nothing to read. Appended, and rolled once it gets big, so it can't
+    // quietly eat the disk either.
+    const log = openDaemonLog();
+    const child = spawn(process.execPath, args, { detached: true, stdio: ["ignore", log, log] });
     child.unref();
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
