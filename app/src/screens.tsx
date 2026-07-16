@@ -191,6 +191,118 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
 // Board
 // ---------------------------------------------------------------------------
 
+/** hue-tinted letter tile — mirrors the web app's repo glyphs. */
+function glyph(seed: string): { bg: string; fg: string; ch: string } {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+  return {
+    bg: `hsla(${h}, 60%, 50%, 0.18)`,
+    fg: `hsl(${h}, 55%, 72%)`,
+    ch: (seed.trim()[0] ?? "?").toUpperCase(),
+  };
+}
+
+function SectionLabel(props: { text: string }) {
+  return (
+    <Text
+      style={{
+        color: T.faint,
+        fontSize: 11,
+        fontWeight: "600",
+        letterSpacing: 0.6,
+        textTransform: "uppercase",
+        marginBottom: 8,
+        marginTop: 4,
+      }}
+    >
+      {props.text}
+    </Text>
+  );
+}
+
+function StatTile(props: { value: string; label: string }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: "rgba(26,26,26,0.6)",
+        borderColor: T.line,
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+      }}
+    >
+      <Text style={{ color: T.text, fontSize: 18, fontWeight: "700", letterSpacing: -0.3 }}>
+        {props.value}
+      </Text>
+      <Text style={{ color: T.faint, fontSize: 11, fontWeight: "500", marginTop: 2 }}>
+        {props.label}
+      </Text>
+    </View>
+  );
+}
+
+/** A project row styled like Orca's Desktop/Resume cards: tile + name + meta. */
+function ProjectCard(props: { p: Project; onPress: () => void }) {
+  const { p } = props;
+  const g = glyph(`${p.id}${p.name}`);
+  const r = p.route;
+  const active = r && (r.status === "running" || r.status === "waiting_human");
+  const working = p.agents.some((a) => a.busy);
+  return (
+    <TouchableOpacity
+      onPress={props.onPress}
+      activeOpacity={0.7}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        backgroundColor: T.panel,
+        borderColor: T.line,
+        borderWidth: 1,
+        borderRadius: radii.card,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+      }}
+    >
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 11,
+          backgroundColor: g.bg,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text style={{ color: g.fg, fontFamily: T.mono, fontSize: 15, fontWeight: "700" }}>
+          {g.ch}
+        </Text>
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text numberOfLines={1} style={{ color: T.text, fontWeight: "600", fontSize: 15, flexShrink: 1 }}>
+            {p.name}
+          </Text>
+          {p.needsInput ? (
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.warn }} />
+          ) : working ? (
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.ok }} />
+          ) : null}
+        </View>
+        <Text numberOfLines={1} style={{ color: T.dim, fontSize: 12, fontFamily: T.mono, marginTop: 3 }}>
+          baton {p.holder ?? "—"}
+          {p.costUsd ? ` · ${usd(p.costUsd)}` : ""}
+          {active ? ` · ${r!.name ?? "route"} ${r!.current + 1}/${r!.steps.length}` : ""}
+          {p.needsInput ? " · needs input" : ""}
+        </Text>
+      </View>
+      <Text style={{ color: T.faint, fontSize: 18 }}>›</Text>
+    </TouchableOpacity>
+  );
+}
+
 export function BoardScreen(props: {
   creds: Creds;
   onOpen: (p: Project) => void;
@@ -215,8 +327,21 @@ export function BoardScreen(props: {
     return () => clearInterval(t);
   }, [refresh]);
 
+  const host = props.creds.url.replace(/^https?:\/\//, "");
+  const agentCount = projects.reduce(
+    (n, p) => n + p.agents.filter((a) => a.tier === "adapter").length,
+    0,
+  );
+  const working = projects.reduce((n, p) => n + p.agents.filter((a) => a.busy).length, 0);
+  const spend = projects.reduce((s, p) => s + (p.costUsd ?? 0), 0);
+  const active =
+    projects.find(
+      (p) => p.needsInput || (p.route && (p.route.status === "running" || p.route.status === "waiting_human")),
+    ) ?? null;
+
   return (
     <View style={{ flex: 1 }}>
+      {/* header */}
       <View
         style={{
           flexDirection: "row",
@@ -233,10 +358,10 @@ export function BoardScreen(props: {
         <View style={{ flex: 1 }} />
         <Btn small label="unpair" onPress={props.onUnpair} />
       </View>
-      {err && <Sys color={T.err} text={err} />}
-      <FlatList
-        data={projects}
-        keyExtractor={(p) => p.id}
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 40, gap: spacing.lg }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -248,80 +373,128 @@ export function BoardScreen(props: {
             tintColor={T.dim}
           />
         }
-        contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
-        ListHeaderComponent={
-          <Text
+      >
+        <Text style={{ color: T.text, fontSize: 24, fontWeight: "800", letterSpacing: -0.3 }}>
+          Welcome back
+        </Text>
+
+        {/* stat tiles — real Loom metrics */}
+        <View style={{ flexDirection: "row", gap: spacing.sm }}>
+          <StatTile value={String(projects.length)} label="Projects" />
+          <StatTile value={String(agentCount)} label="Agents" />
+          <StatTile value={spend > 0 ? usd(spend) : "$0"} label="Spend" />
+        </View>
+
+        {err && <Sys color={T.err} text={err} />}
+
+        {/* daemon (maps to Orca's Desktops) */}
+        <View>
+          <SectionLabel text="Daemon" />
+          <View
             style={{
-              color: T.faint,
-              fontSize: 11,
-              fontWeight: "600",
-              letterSpacing: 0.6,
-              textTransform: "uppercase",
-              marginBottom: 2,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 12,
+              backgroundColor: T.panel,
+              borderColor: T.line,
+              borderWidth: 1,
+              borderRadius: radii.card,
+              paddingVertical: 12,
+              paddingHorizontal: 14,
             }}
           >
-            Projects
-          </Text>
-        }
-        ListEmptyComponent={<Sys text="no projects yet — run loom init on your computer" />}
-        renderItem={({ item: p }) => {
-          const r = p.route;
-          const active = r && (r.status === "running" || r.status === "waiting_human");
-          return (
-            <TouchableOpacity
-              onPress={() => props.onOpen(p)}
-              activeOpacity={0.7}
+            <View
               style={{
+                width: 40,
+                height: 40,
+                borderRadius: 11,
+                backgroundColor: T.raised,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <View style={{ width: 18, height: 12, borderWidth: 1.5, borderColor: T.thread, borderRadius: 2 }} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: T.text, fontWeight: "600", fontSize: 15 }}>Loom daemon</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
+                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.ok }} />
+                <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>
+                  {host} · {projects.length} project{projects.length === 1 ? "" : "s"}
+                  {working ? ` · ${working} active` : ""}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* resume — the project currently needing you or running */}
+        {active && (
+          <View>
+            <SectionLabel text="Resume" />
+            <ProjectCard p={active} onPress={() => props.onOpen(active)} />
+          </View>
+        )}
+
+        {/* projects */}
+        <View>
+          <SectionLabel text="Projects" />
+          <View style={{ gap: spacing.sm }}>
+            {projects.length === 0 ? (
+              <Sys text="no projects yet — run loom init on your computer" />
+            ) : (
+              projects.map((p) => (
+                <ProjectCard key={p.id} p={p} onPress={() => props.onOpen(p)} />
+              ))
+            )}
+          </View>
+        </View>
+
+        {/* quick actions */}
+        <View>
+          <SectionLabel text="Quick actions" />
+          <View style={{ flexDirection: "row", gap: spacing.sm }}>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              disabled={!projects.length}
+              onPress={() => props.onOpen(active ?? projects[0]!)}
+              style={{
+                flex: 1,
                 backgroundColor: T.panel,
                 borderColor: T.line,
                 borderWidth: 1,
-                borderRadius: radii.card,
-                paddingVertical: spacing.md,
-                paddingHorizontal: spacing.lg,
-                gap: 5,
+                borderRadius: 12,
+                paddingVertical: 14,
+                alignItems: "center",
+                opacity: projects.length ? 1 : 0.45,
               }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <View
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 4,
-                    backgroundColor: p.needsInput ? T.warn : "rgba(115,115,115,0.4)",
-                  }}
-                />
-                <Text
-                  numberOfLines={1}
-                  style={{ color: T.text, fontWeight: "600", fontSize: 15, flexShrink: 1 }}
-                >
-                  {p.name}
-                </Text>
-                {active && (
-                  <View
-                    style={{
-                      marginLeft: "auto",
-                      backgroundColor: T.raised,
-                      borderRadius: 4,
-                      paddingHorizontal: 6,
-                      paddingVertical: 2,
-                    }}
-                  >
-                    <Text style={{ color: T.dim, fontSize: 10, fontFamily: T.mono }}>
-                      {r!.name ?? "route"} {r!.current + 1}/{r!.steps.length}
-                      {r!.status === "waiting_human" ? " ⏸" : ""}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }}>
-                baton: {p.holder ?? "—"}
-                {p.costUsd ? ` · ${usd(p.costUsd)}` : ""}
-                {p.needsInput ? " · needs input" : ""}
-              </Text>
+              <Text style={{ color: T.text, fontWeight: "600", fontSize: 14 }}>New task</Text>
+              <Text style={{ color: T.faint, fontSize: 11, marginTop: 2 }}>message an agent</Text>
             </TouchableOpacity>
-          );
-        }}
-      />
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                setRefreshing(true);
+                await refresh();
+                setRefreshing(false);
+              }}
+              style={{
+                flex: 1,
+                backgroundColor: T.panel,
+                borderColor: T.line,
+                borderWidth: 1,
+                borderRadius: 12,
+                paddingVertical: 14,
+                alignItems: "center",
+              }}
+            >
+              <Text style={{ color: T.text, fontWeight: "600", fontSize: 14 }}>Refresh</Text>
+              <Text style={{ color: T.faint, fontSize: 11, marginTop: 2 }}>reload the board</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
     </View>
   );
 }
