@@ -966,6 +966,8 @@ ${BRAND_SPRITE}
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
     tasks: svg('<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>'),
+    // the rail's roster: two figures, because it lists who works here
+    agents: svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
     files: svg('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><path d="M14 2v6h6"/>'),
     folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
     folderPlus: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6"/><path d="M9 14h6"/>'),
@@ -2325,7 +2327,7 @@ ${BRAND_SPRITE}
       el.className = "rbody" + (state.railView === "explorer" || state.railView === "search" ? "" : " pad");
       if (state.railView === "search") return drawSearch(el);
       if (state.railView === "scm") return drawScm(el);
-      if (state.railView === "tasks") return drawTasksView(el);
+      if (state.railView === "tasks") return drawAgentsView(el);
       return drawExplorer(el);
     }
     function renderTreeLevel(rel, depth){
@@ -2439,8 +2441,10 @@ ${BRAND_SPRITE}
         row.onclick = function(){ openChangesDock(row.getAttribute("data-file")); };
       });
     }
-    function drawTasksView(el){
-      railTitle('<span class="b">Tasks</span>');
+    // The agent roster. Keeps the internal "tasks" key so a persisted
+    // loomRailView from an older build still resolves to a real view.
+    function drawAgentsView(el){
+      railTitle('<span class="b">Agents</span>');
       var p = state.project;
       var adapters = p ? p.agents.filter(function(a){ return a.tier === "adapter"; }) : [];
       var r = p && p.route;
@@ -2982,7 +2986,7 @@ ${BRAND_SPRITE}
           '<button class="iconbtn rvbtn" data-view="explorer" title="Explorer">' + ICONS.files + "</button>" +
           '<button class="iconbtn rvbtn" data-view="search" title="Search">' + ICONS.search + "</button>" +
           '<button class="iconbtn rvbtn" data-view="scm" title="Source Control">' + ICONS.branch + "</button>" +
-          '<button class="iconbtn rvbtn" data-view="tasks" title="Tasks">' + ICONS.tasks + "</button>" +
+          '<button class="iconbtn rvbtn" data-view="tasks" title="Agents" aria-label="Agents">' + ICONS.agents + "</button>" +
           '<span class="spacer"></span>' +
           '<button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button>" +
           '<button id="railclose" class="iconbtn" title="hide panel">' + ICONS.panelRight + "</button>" +

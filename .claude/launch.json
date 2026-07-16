@@ -1,0 +1,32 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "loom-desktop",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "desktop",
+        "run",
+        "start",
+        "--",
+        "--remote-debugging-port=9222"
+      ],
+      "port": 7420,
+      "autoPort": false
+    },
+    {
+      "name": "loom-daemon",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "src/cli/index.ts", "daemon", "--port", "7420"],
+      "port": 7420,
+      "autoPort": false
+    },
+    {
+      "name": "expo-metro",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "app", "run", "start"],
+      "port": 8081
+    }
+  ]
+}
