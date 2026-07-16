@@ -25,8 +25,8 @@ async function createWindow() {
     title: "Loom",
     acceptFirstMouse: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    // Centered in the web app's 48px title strips (light center = 24, radius 6).
-    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 18 } } : {}),
+    // Centered in the web app's 40px title strips (light center = 20, radius 6).
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 14 } } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

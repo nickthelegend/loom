@@ -6,6 +6,7 @@
 // the desktop window is just another paired client, on the same machine.
 
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,22 +32,48 @@ async function health(cfg) {
     const res = await fetch(`http://${cfg.host}:${cfg.port}/api/health`, {
       signal: AbortSignal.timeout(1500),
     });
-    return res.ok;
+    if (!res.ok) return null;
+    return await res.json();
   } catch {
-    return false;
+    return null;
+  }
+}
+
+// Mirror of the daemon's BUILD_REV (content hash of the compiled server
+// module), so the shell can tell when a running daemon is serving
+// yesterday's UI. Content-based, not mtime — exFAT volumes report different
+// mtimes to different runtimes, which made mtime revs lie.
+function localBuildRev() {
+  try {
+    const server = path.resolve(here, "..", "dist", "daemon", "server.js");
+    return crypto.createHash("sha256").update(fs.readFileSync(server)).digest("hex").slice(0, 16);
+  } catch {
+    return null;
   }
 }
 
 async function ensureDaemon() {
   let cfg = readDaemonConfig();
-  if (cfg && (await health(cfg))) return cfg;
+  const alive = cfg ? await health(cfg) : null;
+  if (alive) {
+    const local = localBuildRev();
+    if (!local || alive.rev === local) return cfg;
+    // A healthy daemon from an older build would serve the old app — restart
+    // it (same auto-restart `loom up` performs on a stale rev).
+    if (cfg.pid) {
+      try {
+        process.kill(cfg.pid);
+      } catch {
+        /* already gone or not ours — fall through and race the port */
+      }
+      const gone = Date.now() + 5_000;
+      while (Date.now() < gone && (await health(cfg))) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+  }
   // Start the daemon from the built CLI (same entry the `loom` command uses).
-  const child = spawn(process.execPath, [CLI_ENTRY, "daemon"], {
-    detached: true,
-    stdio: "ignore",
-    env: process.env,
-  });
-  child.unref();
+  await spawnDaemon();
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 300));
@@ -54,6 +81,47 @@ async function ensureDaemon() {
     if (cfg && (await health(cfg))) return cfg;
   }
   throw new Error("loom daemon did not start");
+}
+
+/**
+ * Spawn the daemon under a real Node runtime. Electron's bundled Node is too
+ * old for node:sqlite (Loom needs >=22.5), so a daemon spawned with the
+ * Electron binary silently degrades to the JSONL event store and serves no
+ * history. Preference order: $LOOM_NODE, well-known install paths, `node`
+ * from PATH, and only then Electron-as-Node as a last resort.
+ */
+async function spawnDaemon() {
+  const attempts = [];
+  if (process.env.LOOM_NODE) attempts.push([process.env.LOOM_NODE, process.env]);
+  const known =
+    process.platform === "win32"
+      ? [path.join(process.env.ProgramFiles ?? "C:\\Program Files", "nodejs", "node.exe")]
+      : ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
+  for (const c of known) {
+    if (fs.existsSync(c)) {
+      attempts.push([c, process.env]);
+      break;
+    }
+  }
+  attempts.push(["node", process.env]);
+  attempts.push([process.execPath, { ...process.env, ELECTRON_RUN_AS_NODE: "1" }]);
+  for (const [cmd, env] of attempts) {
+    const ok = await new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(cmd, [CLI_ENTRY, "daemon"], { detached: true, stdio: "ignore", env });
+      } catch {
+        return resolve(false);
+      }
+      child.once("spawn", () => {
+        child.unref();
+        resolve(true);
+      });
+      child.once("error", () => resolve(false));
+    });
+    if (ok) return;
+  }
+  throw new Error("could not find a Node runtime to start the loom daemon");
 }
 
 /**

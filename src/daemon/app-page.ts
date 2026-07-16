@@ -351,11 +351,31 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .sidebar{grid-column:1;grid-row:1;border-right:1px solid var(--sidebar-border);
     display:flex;flex-direction:column;min-width:0;
     background:var(--sidebar);color:var(--sidebar-foreground)}
-  .sidebar .shead{display:flex;align-items:center;gap:10px;height:48px;flex:none;padding:0 12px 0 16px;
+  .sidebar .shead{display:flex;align-items:center;gap:10px;height:40px;flex:none;padding:0 12px 0 16px;
     box-shadow:inset 0 -1px 0 var(--sidebar-border)}
   .sidebar .slist{flex:1;overflow-y:auto;padding:8px}
-  .sidebar .stitle{display:flex;align-items:center;font-size:11px;font-weight:600;color:var(--muted-foreground);
+  .sidebar .stitle{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--muted-foreground);
     letter-spacing:.05em;text-transform:uppercase;padding:8px 8px 6px;font-family:var(--font-mono)}
+  .stitle .iconbtn{width:22px;height:22px;margin-left:auto}
+  .stitle .iconbtn svg{width:13px;height:13px}
+  /* quiet search row (Orca sidebar nav) */
+  .snav{display:flex;align-items:center;gap:8px;margin:8px 8px 0;padding:0 10px;height:30px;flex:none;
+    border-radius:var(--radius-md);border:1px solid transparent;color:var(--muted-foreground);
+    transition:background .12s,border-color .12s}
+  .snav:focus-within{background:var(--sidebar-accent);border-color:var(--border)}
+  .snav svg{width:14px;height:14px;flex:none}
+  .snav input{flex:1;min-width:0;background:none;border:none;outline:none;box-shadow:none!important;
+    color:var(--sidebar-foreground);font:inherit;font-size:12.5px}
+  .snav input::placeholder{color:color-mix(in srgb, var(--muted-foreground) 65%, transparent)}
+  .addform{display:flex;flex-direction:column;gap:6px;margin:2px 8px 8px;padding:10px;flex:none;
+    border:1px solid var(--border);border-radius:var(--radius-md);background:var(--sidebar-accent)}
+  .addform input{height:30px;background:var(--background);border:1px solid var(--input);
+    border-radius:var(--radius-sm);color:var(--foreground);padding:0 9px;font:inherit;font-size:12px;outline:none}
+  .addform .row{display:flex;gap:6px}
+  .addform .row .btn{flex:1}
+  .sfoot{display:flex;align-items:center;gap:4px;height:40px;flex:none;padding:0 10px;
+    border-top:1px solid var(--sidebar-border)}
+  .sfoot .iconbtn{width:28px;height:28px}
   .sgroup{margin-bottom:2px}
   .srow{padding:8px 10px;border-radius:var(--radius-md);border:1px solid transparent;cursor:pointer;
     transition:background .12s,border-color .12s}
@@ -386,9 +406,17 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dmain{grid-column:2;grid-row:1;min-width:0;display:flex;flex-direction:column;position:relative;background:var(--background)}
   .dmain .panel{height:100%}
   .dmain .composer .inner,.dmain .hint{max-width:none}
-  /* tab strip — the Orca workspace signature */
-  .tabstrip{display:flex;align-items:flex-end;gap:2px;height:37px;flex:none;padding:0 10px;
+  /* tab strip — the Orca workspace signature; it IS the window's top chrome:
+     project context on the left, document tabs at the seam, actions right */
+  .tabstrip{display:flex;align-items:flex-end;gap:2px;height:40px;flex:none;padding:0 10px;
     background:var(--sidebar);border-bottom:1px solid var(--border)}
+  .tabstrip .ptitle{align-self:center;display:flex;flex-direction:column;justify-content:center;
+    min-width:0;max-width:240px;padding:0 10px 0 6px;margin-right:6px}
+  .tabstrip .ptitle .nm{font-size:12.5px;font-weight:600;line-height:1.25;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tabstrip .ptitle .st{font-size:10.5px;color:var(--muted-foreground);font-family:var(--font-mono);line-height:1.25;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tabstrip .iconbtn{align-self:center;width:30px;height:30px}
   .tab{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 13px;
     border-radius:8px 8px 0 0;border:1px solid transparent;border-bottom:none;
     font-size:12.5px;font-weight:500;color:var(--muted-foreground);cursor:pointer;position:relative;
@@ -400,7 +428,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .tab .tbadge{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
     border:1px solid var(--border);border-radius:4px;padding:0 4px;line-height:13px}
   .tabstrip .spacer{margin-left:auto}
-  .tabstrip .iconbtn{width:28px;height:28px;margin-bottom:3px}
   .pane{flex:1;min-height:0;overflow-y:auto;padding:16px 16px 20px}
   .dmain .pane > #feed,.dmain .pane > #routebar{max-width:840px;margin-inline:auto}
   .dmain .msg .bubble{max-width:82%}
@@ -428,7 +455,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   /* right rail — source control (Orca) */
   .rail{display:none;grid-column:3;grid-row:1;flex-direction:column;min-width:0;
     background:var(--sidebar);color:var(--sidebar-foreground);border-left:1px solid var(--sidebar-border)}
-  .rail .rhead{display:flex;align-items:center;gap:8px;height:48px;flex:none;padding:0 14px;
+  .rail .rhead{display:flex;align-items:center;gap:8px;height:40px;flex:none;padding:0 14px;
     font-size:13px;font-weight:600;box-shadow:inset 0 -1px 0 var(--sidebar-border)}
   .rail .rbody{flex:1;overflow-y:auto;padding:12px}
   .rsec{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
@@ -466,13 +493,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     background:linear-gradient(90deg,transparent,var(--thread),transparent)}
   /* ── Native desktop chrome (Electron shell) ───────────── */
   html[data-electron] .sidebar .shead,
-  html[data-electron] .dmain > .panel > header,
+  html[data-electron] .tabstrip,
   html[data-electron] #root > .panel > header,
   html[data-electron] header.appbar,
   html[data-electron] .rail .rhead,
   html[data-electron] .dragstrip{-webkit-app-region:drag;user-select:none}
   html[data-electron] .sidebar .shead button,
-  html[data-electron] .dmain > .panel > header button,
+  html[data-electron] .tabstrip button,
   html[data-electron] #root > .panel > header button,
   html[data-electron] header.appbar button,
   html[data-electron] .rail .rhead button,
@@ -532,7 +559,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     refresh: svg('<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>'),
     sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/>'),
     moon: svg('<path d="M20 12.5A8.5 8.5 0 1 1 11.5 4a6.7 6.7 0 0 0 8.5 8.5Z"/>'),
-    unpair: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>')
+    unpair: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>'),
+    search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>'),
+    help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.8-2.6 2.2-2.6 3.6"/><path d="M12 17h.01"/>'),
+    plus: svg('<path d="M12 5v14"/><path d="M5 12h14"/>')
   };
 
   function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
@@ -757,14 +787,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     if (desktop) {
       mount.innerHTML =
         '<div class="panel">' +
-        "<header>" +
-        '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
-        '<span class="spacer"></span>' + headerActions + "</header>" +
+        // Orca chrome: the strip is the window top — context, tabs, actions.
         '<div class="tabstrip" id="tabstrip">' +
+        '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
         '<button class="tab active" data-tab="thread">' + ICONS.thread + "Thread</button>" +
         '<button class="tab" data-tab="changes">' + ICONS.tree + 'Changes<span class="tbadge" id="tb-changes" style="display:none"></span></button>' +
         '<button class="tab" data-tab="brain">' + ICONS.memory + "Brain</button>" +
         '<button class="tab" data-tab="routes">' + ICONS.route + "Routes</button>" +
+        '<span class="spacer"></span>' + headerActions +
         "</div>" +
         '<div class="pane scroll" id="pane-thread"><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
         '<div class="pane scroll" id="pane-changes" style="display:none">' + LOADER + "</div>" +
@@ -1194,10 +1224,15 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     root.innerHTML =
       '<div class="dshell">' +
       '<aside class="sidebar">' +
-        '<div class="shead"><span class="wordmark">lo<b>om</b></span><span class="spacer"></span>' +
-        '<button id="unpair" class="iconbtn" title="unpair this device">' + ICONS.unpair + "</button></div>" +
-        '<div class="stitle">projects</div>' +
+        '<div class="shead"><span class="wordmark">lo<b>om</b></span></div>' +
+        '<div class="snav">' + ICONS.search + '<input id="sfilter" placeholder="Search" autocomplete="off" spellcheck="false"></div>' +
+        '<div class="stitle">projects<button id="addproj" class="iconbtn" title="add a project by path">' + ICONS.plus + "</button></div>" +
+        '<div id="addwrap"></div>' +
         '<div class="slist" id="slist">' + LOADER + "</div>" +
+        '<div class="sfoot">' +
+        '<a class="iconbtn" title="Loom on GitHub" href="https://github.com/nickthelegend/loom" target="_blank" rel="noreferrer">' + ICONS.help + "</a>" +
+        '<span class="spacer"></span>' +
+        '<button id="unpair" class="iconbtn" title="unpair this device">' + ICONS.unpair + "</button></div>" +
       "</aside>" +
       '<section class="dmain" id="dmain"></section>' +
       '<aside class="rail"><div class="rhead">Source control' +
@@ -1206,6 +1241,28 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       '<div class="statusbar" id="statusbar"></div>' +
       "</div>";
     document.getElementById("unpair").onclick = logout;
+    var filter = "";
+    document.getElementById("sfilter").oninput = function(){
+      filter = (this.value || "").trim().toLowerCase();
+      drawList();
+    };
+    document.getElementById("addproj").onclick = function(){
+      var wrap = document.getElementById("addwrap");
+      if (wrap.firstChild) { wrap.innerHTML = ""; return; }
+      wrap.innerHTML = '<div class="addform">' +
+        '<input id="adddir" placeholder="/path/to/repo on the daemon host" autocomplete="off" spellcheck="false">' +
+        '<div class="row"><button class="btn primary xs" id="addgo">Add project</button>' +
+        '<button class="btn outline xs" id="addcancel">Cancel</button></div></div>';
+      document.getElementById("addcancel").onclick = function(){ wrap.innerHTML = ""; };
+      document.getElementById("addgo").onclick = function(){
+        var dir = (document.getElementById("adddir").value || "").trim();
+        if (!dir) return toast("enter a directory path");
+        api("/api/projects", { method: "POST", body: JSON.stringify({ dir: dir }) })
+          .then(function(j){ wrap.innerHTML = ""; toast("added " + (j.project && j.project.name ? j.project.name : "project")); refresh(); })
+          .catch(function(err){ toast(err.message); });
+      };
+      document.getElementById("adddir").focus();
+    };
     document.getElementById("railrefresh").onclick = function(){
       api("/api/projects/" + (cur || "") + "/tree").then(function(j){
         state.tree = j.tree || {}; toast("tree refreshed"); refresh();
@@ -1222,7 +1279,15 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span></div>';
         return;
       }
-      el.innerHTML = state.projects.map(function(p){
+      var shown = !filter ? state.projects : state.projects.filter(function(p){
+        if (String(p.name || "").toLowerCase().indexOf(filter) >= 0) return true;
+        return (p.agents || []).some(function(a){ return String(a.id).toLowerCase().indexOf(filter) >= 0; });
+      });
+      if (!shown.length) {
+        el.innerHTML = '<div class="sys" style="padding:24px 8px">no matches for \\u201c' + esc(filter) + '\\u201d</div>';
+        return;
+      }
+      el.innerHTML = shown.map(function(p){
         var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
         var adapters = (p.agents || []).filter(function(a){ return a.tier === "adapter"; });
         var sel = p.id === cur;

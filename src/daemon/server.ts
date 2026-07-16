@@ -5,6 +5,7 @@
  */
 
 import { execFile } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import type { Server } from "node:http";
 import path from "node:path";
@@ -43,14 +44,17 @@ export interface DaemonOptions {
 export const DEFAULT_PORT = 7420;
 
 /**
- * Build fingerprint — the mtime of this compiled module. A daemon started
- * from an older build reports an older rev than a freshly built CLI expects,
- * and the CLI restarts it automatically ("failed to fetch" after upgrades
- * usually meant a stale daemon serving yesterday's code).
+ * Build fingerprint — a content hash of this compiled module. A daemon
+ * started from an older build reports a different rev than a freshly built
+ * CLI or desktop shell expects, and they restart it automatically ("failed
+ * to fetch" after upgrades usually meant a stale daemon serving yesterday's
+ * code). Content-based on purpose: mtimes are unreliable across runtimes on
+ * some filesystems (exFAT drives skew them by the local timezone offset).
  */
 export const BUILD_REV = (() => {
   try {
-    return String(Math.floor(fs.statSync(fileURLToPath(import.meta.url)).mtimeMs));
+    const bytes = fs.readFileSync(fileURLToPath(import.meta.url));
+    return crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
   } catch {
     return "dev";
   }
@@ -86,10 +90,14 @@ export class LoomDaemon {
     // health, and the pairing claim (the pairing token IS the auth).
     app.get("/", (_req, res) => res.redirect("/app"));
     app.get("/app", (_req, res) => {
-      res.type("html").send(APP_HTML);
+      // Never cache the shell: a redeployed daemon must serve its own UI.
+      res.type("html").setHeader("Cache-Control", "no-store").send(APP_HTML);
     });
     app.get("/app/manifest.webmanifest", (_req, res) => {
-      res.type("application/manifest+json").send(JSON.stringify(APP_MANIFEST));
+      res
+        .type("application/manifest+json")
+        .setHeader("Cache-Control", "no-store")
+        .send(JSON.stringify(APP_MANIFEST));
     });
     // The UI sans (Geist, SIL OFL 1.1) — embedded so the app works offline
     // on the tailnet with no CDN. Immutable: cache hard.
