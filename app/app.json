@@ -6,9 +6,9 @@
     "scheme": "loom",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#0b0e14",
+    "backgroundColor": "#111111",
     "splash": {
-      "backgroundColor": "#0b0e14"
+      "backgroundColor": "#111111"
     },
     "ios": {
       "bundleIdentifier": "dev.loom.app",

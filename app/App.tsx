@@ -45,7 +45,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: T.bg }}>
-      <StatusBar style="light" />
+      <StatusBar style="light" backgroundColor={T.bg} />
       {!booted ? (
         <View style={{ flex: 1, backgroundColor: T.bg }} />
       ) : route.name === "pair" || !creds ? (

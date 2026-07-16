@@ -1,4 +1,4 @@
-/** The three screens: Pair, Board, Project (Thread | Changes). */
+/** The three screens: Pair, Board, Project (Thread | Changes) — quiet graphite. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -31,21 +31,73 @@ import {
 } from "./api";
 import { Btn, DiffView, EventLine, Sys } from "./components";
 import { useStt } from "./stt";
-import { T, usd } from "./theme";
+import { T, radii, spacing, usd } from "./theme";
 
 const field = {
-  backgroundColor: T.panel,
+  backgroundColor: T.raised,
   borderColor: T.line,
   borderWidth: 1,
-  borderRadius: 12,
+  borderRadius: radii.input,
   color: T.text,
-  padding: 12,
+  paddingHorizontal: 12,
+  paddingVertical: 12,
   fontSize: 15,
 } as const;
+
+/** Brand lockup: the wordmark over a short thread-cyan hairline. */
+function Wordmark(props: { size?: number }) {
+  const size = props.size ?? 17;
+  return (
+    <View style={{ alignSelf: "center", alignItems: "stretch" }}>
+      <Text
+        style={{
+          color: T.text,
+          fontSize: size,
+          fontWeight: "700",
+          letterSpacing: -0.3,
+        }}
+      >
+        loom
+      </Text>
+      <View
+        style={{
+          height: 2,
+          marginTop: 3,
+          borderRadius: 1,
+          backgroundColor: T.thread,
+          opacity: 0.55,
+        }}
+      />
+    </View>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Pair
 // ---------------------------------------------------------------------------
+
+function PairStep(props: { n: number; text: string }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+      <View
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: 11,
+          backgroundColor: T.raised,
+          borderWidth: 1,
+          borderColor: T.line,
+          alignItems: "center",
+          justifyContent: "center",
+          marginTop: 1,
+        }}
+      >
+        <Text style={{ color: T.dim, fontSize: 11, fontWeight: "700" }}>{props.n}</Text>
+      </View>
+      <Text style={{ color: T.dim, fontSize: 13, lineHeight: 20, flex: 1 }}>{props.text}</Text>
+    </View>
+  );
+}
 
 export function PairScreen(props: { onPaired: (c: Creds) => void }) {
   const [url, setUrl] = useState("http://");
@@ -71,27 +123,44 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
   };
 
   return (
-    <View style={{ flex: 1, justifyContent: "center", padding: 26, gap: 14 }}>
+    <View style={{ flex: 1, justifyContent: "center", padding: spacing.xl, gap: 14 }}>
       <Text
         style={{
           color: T.text,
-          fontSize: 42,
-          fontFamily: T.mono,
-          fontWeight: "700",
+          fontSize: 30,
+          fontWeight: "800",
           textAlign: "center",
-          letterSpacing: 2,
+          letterSpacing: -0.3,
         }}
       >
-        lo<Text style={{ color: T.thread }}>om</Text>
+        loom
       </Text>
-      <View style={{ height: 2, width: 64, alignSelf: "center", backgroundColor: T.thread, opacity: 0.85, borderRadius: 2 }} />
-      <Text style={{ color: T.dim, textAlign: "center", fontSize: 14, lineHeight: 21, marginBottom: 4 }}>
+      <View
+        style={{
+          height: 2,
+          width: 56,
+          alignSelf: "center",
+          backgroundColor: T.thread,
+          opacity: 0.85,
+          borderRadius: 1,
+        }}
+      />
+      <Text
+        style={{
+          color: T.dim,
+          textAlign: "center",
+          fontSize: 14,
+          lineHeight: 21,
+          marginBottom: spacing.sm,
+        }}
+      >
         the shared-memory layer for your AI dev environments
       </Text>
-      <Text style={{ color: T.faint, fontSize: 12.5, textAlign: "center", lineHeight: 19 }}>
-        On your computer: loom up --tailnet, then loom pair. Enter the daemon URL and the
-        pairing token — or paste the whole link into either box.
-      </Text>
+      <View style={{ gap: 10, marginBottom: spacing.sm }}>
+        <PairStep n={1} text="On your computer: loom up --tailnet" />
+        <PairStep n={2} text="Then: loom pair — it prints a QR and a link" />
+        <PairStep n={3} text="Paste the link (or URL + token) below" />
+      </View>
       <TextInput
         style={field}
         value={url}
@@ -99,7 +168,8 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="http://100.x.y.z:7420"
-        placeholderTextColor={T.dim}
+        placeholderTextColor={T.faint}
+        selectionColor={T.accentBlue}
       />
       <TextInput
         style={field}
@@ -107,8 +177,9 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         onChangeText={setToken}
         autoCapitalize="none"
         autoCorrect={false}
-        placeholder="pairing token"
-        placeholderTextColor={T.dim}
+        placeholder="pairing token or whole link"
+        placeholderTextColor={T.faint}
+        selectionColor={T.accentBlue}
       />
       {err && <Text style={{ color: T.err, fontSize: 13, textAlign: "center" }}>{err}</Text>}
       <Btn label="Pair this device" primary onPress={go} />
@@ -150,27 +221,15 @@ export function BoardScreen(props: {
         style={{
           flexDirection: "row",
           alignItems: "center",
-          paddingHorizontal: 16,
-          paddingTop: 14,
-          paddingBottom: 14,
-          gap: 11,
+          paddingHorizontal: spacing.lg,
+          paddingVertical: spacing.md,
+          gap: spacing.md,
           borderBottomWidth: 1,
           borderBottomColor: T.line,
+          backgroundColor: T.panel,
         }}
       >
-        <View>
-          <Text style={{ color: T.text, fontFamily: T.mono, fontWeight: "700", fontSize: 19, letterSpacing: 0.5 }}>
-            lo<Text style={{ color: T.thread }}>om</Text>
-          </Text>
-          <View
-            style={{ height: 2, marginTop: 2, borderRadius: 2, backgroundColor: T.threadDim, opacity: 0.7 }}
-          />
-        </View>
-        <Text
-          style={{ color: T.faint, fontSize: 11, fontFamily: T.mono, letterSpacing: 1, textTransform: "uppercase" }}
-        >
-          projects
-        </Text>
+        <Wordmark />
         <View style={{ flex: 1 }} />
         <Btn small label="unpair" onPress={props.onUnpair} />
       </View>
@@ -189,7 +248,21 @@ export function BoardScreen(props: {
             tintColor={T.dim}
           />
         }
-        contentContainerStyle={{ padding: 14, gap: 10 }}
+        contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
+        ListHeaderComponent={
+          <Text
+            style={{
+              color: T.faint,
+              fontSize: 11,
+              fontWeight: "600",
+              letterSpacing: 0.6,
+              textTransform: "uppercase",
+              marginBottom: 2,
+            }}
+          >
+            Projects
+          </Text>
+        }
         ListEmptyComponent={<Sys text="no projects yet — run loom init on your computer" />}
         renderItem={({ item: p }) => {
           const r = p.route;
@@ -197,57 +270,50 @@ export function BoardScreen(props: {
           return (
             <TouchableOpacity
               onPress={() => props.onOpen(p)}
-              activeOpacity={0.85}
+              activeOpacity={0.7}
               style={{
                 backgroundColor: T.panel,
                 borderColor: T.line,
                 borderWidth: 1,
-                borderRadius: 14,
-                paddingTop: 15,
-                paddingBottom: 14,
-                paddingHorizontal: 16,
-                overflow: "hidden",
+                borderRadius: radii.card,
+                paddingVertical: spacing.md,
+                paddingHorizontal: spacing.lg,
+                gap: 5,
               }}
             >
-              {/* top thread-line — the loom's warp edge */}
-              <View
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 16,
-                  right: 16,
-                  height: 1,
-                  backgroundColor: T.threadDim,
-                  opacity: 0.7,
-                }}
-              />
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <View
                   style={{
                     width: 8,
                     height: 8,
                     borderRadius: 4,
-                    backgroundColor: p.needsInput ? T.warn : "#3a4557",
+                    backgroundColor: p.needsInput ? T.warn : "rgba(115,115,115,0.4)",
                   }}
                 />
-                <Text style={{ color: T.text, fontWeight: "600", fontSize: 15.5 }}>{p.name}</Text>
+                <Text
+                  numberOfLines={1}
+                  style={{ color: T.text, fontWeight: "600", fontSize: 15, flexShrink: 1 }}
+                >
+                  {p.name}
+                </Text>
                 {active && (
-                  <Text
+                  <View
                     style={{
-                      color: T.thread,
-                      fontSize: 11,
-                      fontFamily: T.mono,
                       marginLeft: "auto",
+                      backgroundColor: T.raised,
+                      borderRadius: 4,
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
                     }}
                   >
-                    ➤ {r!.name ?? "route"} {r!.current + 1}
-                    {r!.status === "waiting_human" ? " ⏸" : ""}
-                  </Text>
+                    <Text style={{ color: T.dim, fontSize: 10, fontFamily: T.mono }}>
+                      {r!.name ?? "route"} {r!.current + 1}/{r!.steps.length}
+                      {r!.status === "waiting_human" ? " ⏸" : ""}
+                    </Text>
+                  </View>
                 )}
               </View>
-              <Text
-                style={{ color: T.dim, fontSize: 12.5, fontFamily: T.mono, marginTop: 5 }}
-              >
+              <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }}>
                 baton: {p.holder ?? "—"}
                 {p.costUsd ? ` · ${usd(p.costUsd)}` : ""}
                 {p.needsInput ? " · needs input" : ""}
@@ -360,35 +426,81 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
   const adapters = project.agents.filter((a) => a.tier === "adapter");
   const r = project.route;
   const routeActive = r && (r.status === "running" || r.status === "waiting_human");
+  const armed = text.trim().length > 0;
 
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
-        <Btn small label="←" onPress={props.onBack} />
-        <Text style={{ color: T.text, fontFamily: T.mono, fontWeight: "700", fontSize: 16 }}>
-          {project.name}
-        </Text>
-        <Text style={{ color: T.dim, fontSize: 11 }}>{usd(project.costUsd)}</Text>
-        <View style={{ flex: 1 }} />
-        <Btn
-          small
-          label="■"
-          onPress={() =>
-            void interrupt(creds, project.id).catch((e) => setErr(String(e.message ?? e)))
-          }
-        />
+      {/* session top bar */}
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          minHeight: 48,
+          paddingHorizontal: spacing.md,
+          gap: spacing.sm + 2,
+          backgroundColor: T.panel,
+          borderBottomWidth: 1,
+          borderBottomColor: T.line,
+        }}
+      >
+        <TouchableOpacity
+          onPress={props.onBack}
+          activeOpacity={0.7}
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: T.raised,
+          }}
+        >
+          <Text style={{ color: T.dim, fontSize: 17, lineHeight: 20 }}>←</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text numberOfLines={1} style={{ color: T.text, fontWeight: "600", fontSize: 14 }}>
+            {project.name}
+          </Text>
+          <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }}>
+            {project.needsInput ? "needs input" : usd(project.costUsd) || "idle"}
+          </Text>
+        </View>
+        <Btn small label="■ stop" onPress={() =>
+          void interrupt(creds, project.id).catch((e) => setErr(String(e.message ?? e)))
+        } />
       </View>
 
-      <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 12, marginBottom: 6 }}>
+      {/* tab strip — active tab carries a neutral 2px underline */}
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "stretch",
+          paddingHorizontal: spacing.md,
+          gap: spacing.lg,
+          backgroundColor: T.panel,
+          borderBottomWidth: 1,
+          borderBottomColor: T.line,
+        }}
+      >
         {(["thread", "changes"] as const).map((name) => (
-          <TouchableOpacity key={name} onPress={() => setTab(name)}>
+          <TouchableOpacity
+            key={name}
+            onPress={() => setTab(name)}
+            activeOpacity={0.7}
+            style={{
+              paddingVertical: 9,
+              borderBottomWidth: 2,
+              borderBottomColor: tab === name ? T.dim : "transparent",
+              marginBottom: -1,
+            }}
+          >
             <Text
               style={{
-                color: tab === name ? T.accent : T.dim,
-                fontWeight: tab === name ? "700" : "400",
+                color: tab === name ? T.text : T.dim,
+                fontWeight: "600",
                 fontSize: 13,
               }}
             >
@@ -397,10 +509,12 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
           </TouchableOpacity>
         ))}
         {routeActive && (
-          <Text style={{ color: T.accent, fontSize: 12, marginLeft: "auto" }}>
-            ➤ {r!.name ?? "route"} {r!.current + 1}
-            {r!.status === "waiting_human" ? " ⏸ reply below" : ""}
-          </Text>
+          <View style={{ marginLeft: "auto", justifyContent: "center" }}>
+            <Text style={{ color: T.thread, fontSize: 11, fontFamily: T.mono }}>
+              ▸ {r!.name ?? "route"} {r!.current + 1}/{r!.steps.length}
+              {r!.status === "waiting_human" ? " ⏸ reply below" : ""}
+            </Text>
+          </View>
         )}
       </View>
 
@@ -413,82 +527,143 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
             data={events}
             keyExtractor={(e) => String(e.id)}
             renderItem={({ item }) => <EventLine e={item} />}
-            contentContainerStyle={{ padding: 12, paddingBottom: 20 }}
+            contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
             style={{ flex: 1 }}
           />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ flexGrow: 0, borderTopWidth: 1, borderColor: T.line }}
-            contentContainerStyle={{ padding: 8, gap: 8 }}
-          >
-            {adapters.map((a) => {
-              const sel = a.id === selected;
-              return (
+          {/* command dock */}
+          <View style={{ backgroundColor: T.panel, borderTopWidth: 1, borderTopColor: T.line }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ flexGrow: 0 }}
+              contentContainerStyle={{
+                paddingHorizontal: spacing.sm,
+                paddingTop: spacing.sm,
+                gap: 6,
+              }}
+            >
+              {adapters.map((a) => {
+                const sel = a.id === selected;
+                return (
+                  <TouchableOpacity
+                    key={a.id}
+                    onPress={() => setSelected(a.id)}
+                    activeOpacity={0.7}
+                    style={{
+                      backgroundColor: sel ? T.bright : T.raised,
+                      borderColor: sel ? T.bright : T.line,
+                      borderWidth: 1,
+                      borderRadius: radii.key,
+                      paddingVertical: 5,
+                      paddingHorizontal: 10,
+                      minWidth: 36,
+                      alignItems: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: sel ? T.onBright : T.dim,
+                        fontSize: 12,
+                        fontFamily: T.mono,
+                        fontWeight: sel ? "700" : "400",
+                      }}
+                    >
+                      {a.id}
+                      {a.id === project.holder ? " ⟵" : ""}
+                      {a.busy ? " ·" : ""}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <View
+              style={{
+                flexDirection: "row",
+                gap: spacing.sm,
+                paddingHorizontal: spacing.sm + 2,
+                paddingVertical: spacing.sm + 2,
+                alignItems: "center",
+              }}
+            >
+              <TextInput
+                style={{ ...field, flex: 1, paddingVertical: 9, fontSize: 14 }}
+                value={text}
+                onChangeText={setText}
+                placeholder={
+                  stt.listening
+                    ? "listening…"
+                    : selected && selected !== project.holder
+                      ? `send shifts baton to ${selected}`
+                      : "Message…"
+                }
+                placeholderTextColor={stt.listening ? T.err : T.faint}
+                selectionColor={T.accentBlue}
+                onSubmitEditing={send}
+                returnKeyType="send"
+              />
+              {stt.available && (
                 <TouchableOpacity
-                  key={a.id}
-                  onPress={() => setSelected(a.id)}
+                  onPress={() => {
+                    sttBase.current = text.trim();
+                    void stt.toggle().then((ok) => {
+                      if (!ok) setErr("microphone permission needed for voice input");
+                    });
+                  }}
+                  activeOpacity={0.7}
                   style={{
-                    backgroundColor: sel ? T.accent : T.panel,
-                    borderColor: sel ? T.accent : T.line,
+                    backgroundColor: stt.listening ? T.err : T.raised,
+                    borderColor: stt.listening ? T.err : T.line,
                     borderWidth: 1,
-                    borderRadius: 999,
-                    paddingVertical: 5,
-                    paddingHorizontal: 12,
+                    borderRadius: radii.key,
+                    paddingVertical: 9,
+                    paddingHorizontal: 10,
+                    minHeight: 34,
+                    justifyContent: "center",
                   }}
                 >
-                  <Text style={{ color: sel ? T.accentDark : T.dim, fontSize: 13 }}>
-                    {a.id} {a.id === project.holder ? "⟵" : ""}
-                    {a.busy ? " ⚙" : ""}
+                  <Text
+                    style={{
+                      color: stt.listening ? "#ffffff" : T.dim,
+                      fontSize: 12,
+                      fontFamily: T.mono,
+                      fontWeight: "600",
+                    }}
+                  >
+                    {stt.listening ? "● rec" : "mic"}
                   </Text>
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <View style={{ flexDirection: "row", gap: 8, padding: 10, alignItems: "center" }}>
-            <TextInput
-              style={{ ...field, flex: 1, paddingVertical: 10 }}
-              value={text}
-              onChangeText={setText}
-              placeholder={
-                stt.listening
-                  ? "listening…"
-                  : selected && selected !== project.holder
-                    ? `send shifts baton to ${selected}`
-                    : "Message…"
-              }
-              placeholderTextColor={stt.listening ? T.err : T.dim}
-              onSubmitEditing={send}
-              returnKeyType="send"
-            />
-            {stt.available && (
+              )}
               <TouchableOpacity
-                onPress={() => {
-                  sttBase.current = text.trim();
-                  void stt.toggle().then((ok) => {
-                    if (!ok) setErr("microphone permission needed for voice input");
-                  });
-                }}
+                onPress={send}
+                activeOpacity={0.7}
                 style={{
-                  backgroundColor: stt.listening ? T.err : T.panel,
-                  borderColor: stt.listening ? T.err : T.line,
+                  width: 34,
+                  height: 34,
+                  borderRadius: 17,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: armed ? T.bright : T.raised,
                   borderWidth: 1,
-                  borderRadius: 10,
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
+                  borderColor: armed ? T.bright : T.line,
                 }}
               >
-                <Text style={{ color: stt.listening ? "#fff" : T.text, fontSize: 15 }}>
-                  {stt.listening ? "◉" : "🎙"}
+                <Text
+                  style={{
+                    color: armed ? T.onBright : T.dim,
+                    fontSize: 16,
+                    fontWeight: "700",
+                    lineHeight: 19,
+                  }}
+                >
+                  ↑
                 </Text>
               </TouchableOpacity>
-            )}
-            <Btn primary label="➤" onPress={send} />
+            </View>
           </View>
         </>
       ) : (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 12, gap: 10 }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md, gap: spacing.sm + 2 }}>
           {!tree ? (
             <Sys text="loading…" />
           ) : !tree.git ? (
@@ -496,18 +671,22 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
           ) : (
             <>
               <Text style={{ color: T.dim, fontSize: 13 }}>
-                {tree.branch} · {tree.files.length} changed file
-                {tree.files.length === 1 ? "" : "s"}
+                <Text style={{ fontFamily: T.mono, color: T.text }}>{tree.branch}</Text>
+                {"  ·  "}
+                {tree.files.length} changed file{tree.files.length === 1 ? "" : "s"}
               </Text>
               {tree.files.map((f) => (
                 <Text key={f.path} style={{ color: T.dim, fontFamily: T.mono, fontSize: 12 }}>
-                  {f.status} {f.path}
+                  <Text style={{ color: f.status.includes("D") ? T.gitDel : T.gitAdd }}>
+                    {f.status}
+                  </Text>{" "}
+                  {f.path}
                 </Text>
               ))}
               {tree.files.length ? (
                 <DiffView patch={tree.patch} maxHeight={520} />
               ) : (
-                <Sys text="working tree is clean ✨" />
+                <Sys text="working tree is clean" />
               )}
             </>
           )}

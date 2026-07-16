@@ -1,10 +1,14 @@
-/** Shared UI atoms: event lines, diff viewer, buttons. */
+/** Shared UI atoms: event lines, diff viewer, buttons — quiet graphite. */
 
 import { useState } from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import type { LoomEvent } from "./api";
-import { T, hue, selvage } from "./theme";
+import { T, hue, radii, selvage } from "./theme";
 
+/**
+ * Buttons follow Orca mobile: the one primary action per screen is a
+ * near-white fill with dark text; everything else is a raised neutral key.
+ */
 export function Btn(props: {
   label: string;
   onPress: () => void;
@@ -14,19 +18,20 @@ export function Btn(props: {
   return (
     <TouchableOpacity
       onPress={props.onPress}
+      activeOpacity={0.7}
       style={{
-        backgroundColor: props.primary ? T.accent : T.panel,
-        borderColor: props.primary ? T.accent : T.line,
+        backgroundColor: props.primary ? T.bright : T.raised,
+        borderColor: props.primary ? T.bright : T.line,
         borderWidth: 1,
-        borderRadius: 10,
-        paddingVertical: props.small ? 5 : 10,
-        paddingHorizontal: props.small ? 10 : 14,
+        borderRadius: props.small ? radii.key : 8,
+        paddingVertical: props.small ? 5 : 11,
+        paddingHorizontal: props.small ? 10 : 16,
       }}
     >
       <Text
         style={{
-          color: props.primary ? T.accentDark : T.text,
-          fontWeight: props.primary ? "700" : "400",
+          color: props.primary ? T.onBright : T.text,
+          fontWeight: props.primary ? "700" : "500",
           fontSize: props.small ? 12 : 15,
           textAlign: "center",
         }}
@@ -54,33 +59,37 @@ export function Sys(props: { text: string; color?: string }) {
   );
 }
 
-/** Unified diff with +/− coloring; used by turn cards and the Changes tab. */
+/** Unified diff with +/− washes; used by turn cards and the Changes tab. */
 export function DiffView(props: { patch: string; maxHeight?: number }) {
   const lines = props.patch.split("\n");
   return (
     <ScrollView
       style={{
         maxHeight: props.maxHeight ?? 320,
-        backgroundColor: "#0e1420",
-        borderRadius: 10,
+        backgroundColor: T.editor,
+        borderRadius: radii.row,
         borderWidth: 1,
         borderColor: T.line,
       }}
-      contentContainerStyle={{ padding: 8 }}
+      contentContainerStyle={{ paddingVertical: 6 }}
       nestedScrollEnabled
     >
       {lines.map((line, i) => {
-        const c = line.startsWith("+")
-          ? T.ok
-          : line.startsWith("-")
-            ? T.err
-            : line.startsWith("@@")
-              ? T.accent
-              : line.startsWith("??")
-                ? T.warn
-                : T.dim;
+        const add = line.startsWith("+");
+        const del = line.startsWith("-");
+        const meta = line.startsWith("@@") || line.startsWith("??");
         return (
-          <Text key={i} style={{ color: c, fontFamily: T.mono, fontSize: 11 }}>
+          <Text
+            key={i}
+            style={{
+              color: add ? T.gitAdd : del ? T.gitDel : meta ? T.dim : T.dim,
+              backgroundColor: add ? T.diffAddBg : del ? T.diffDelBg : "transparent",
+              fontFamily: T.mono,
+              fontSize: 11,
+              lineHeight: 17,
+              paddingHorizontal: 8,
+            }}
+          >
             {line || " "}
           </Text>
         );
@@ -98,7 +107,7 @@ export function EventLine(props: { e: LoomEvent }) {
   if (e.kind === "message") {
     const author = e.agentId ?? String(p.author ?? "user");
     if (!e.agentId && author === "loom") {
-      return <Sys text={`➤ ${String(p.text).split("\n")[0]}`} />;
+      return <Sys text={`▸ ${String(p.text).split("\n")[0]}`} />;
     }
     const mine = !e.agentId;
     return (
@@ -120,20 +129,20 @@ export function EventLine(props: { e: LoomEvent }) {
         <View
           style={{
             maxWidth: "88%",
-            backgroundColor: mine ? "#102430" : T.panel,
-            borderColor: mine ? T.threadDim : T.line,
+            backgroundColor: mine ? T.raised : T.panel,
+            borderColor: T.line,
             borderWidth: 1,
             // agent messages carry a selvage edge in their own thread color
             borderLeftWidth: mine ? 1 : 2,
-            borderLeftColor: mine ? T.threadDim : selvage(author),
-            borderRadius: 13,
-            borderBottomRightRadius: mine ? 4 : 13,
-            borderBottomLeftRadius: mine ? 13 : 4,
-            paddingVertical: 10,
+            borderLeftColor: mine ? T.line : selvage(author),
+            borderRadius: radii.card,
+            borderBottomRightRadius: mine ? 4 : radii.card,
+            borderBottomLeftRadius: mine ? radii.card : 4,
+            paddingVertical: 9,
             paddingHorizontal: 13,
           }}
         >
-          <Text style={{ color: mine ? "#eafaff" : T.text, fontSize: 14.5, lineHeight: 21 }}>
+          <Text style={{ color: T.text, fontSize: 14, lineHeight: 21 }}>
             {String(p.text ?? "")}
           </Text>
         </View>
@@ -146,20 +155,24 @@ export function EventLine(props: { e: LoomEvent }) {
     return (
       <TouchableOpacity
         onPress={() => setOpen(!open)}
+        activeOpacity={0.7}
         style={{
-          backgroundColor: "#122032",
-          borderColor: "#1d3a55",
+          backgroundColor: T.panel,
+          borderColor: T.line,
           borderWidth: 1,
-          borderRadius: 12,
-          padding: 10,
+          borderRadius: radii.card,
+          padding: 11,
           marginVertical: 6,
+          gap: 4,
         }}
       >
-        <Text style={{ color: T.accent, fontSize: 12 }}>
-          ✎ this prompt changed {files.length} file{files.length === 1 ? "" : "s"} (+
-          {Number(p.added ?? 0)} −{Number(p.removed ?? 0)}) {open ? "▾" : "▸"}
+        <Text style={{ color: T.text, fontSize: 12, fontWeight: "600" }}>
+          this prompt changed {files.length} file{files.length === 1 ? "" : "s"}{"  "}
+          <Text style={{ color: T.gitAdd }}>+{Number(p.added ?? 0)}</Text>{" "}
+          <Text style={{ color: T.gitDel }}>−{Number(p.removed ?? 0)}</Text>{" "}
+          <Text style={{ color: T.faint }}>{open ? "▾" : "▸"}</Text>
         </Text>
-        <Text style={{ color: T.dim, fontSize: 11, marginTop: 2 }}>
+        <Text style={{ color: T.dim, fontSize: 11, fontFamily: T.mono }}>
           {files.slice(0, 4).map((f) => f.path).join(", ")}
           {files.length > 4 ? " …" : ""}
         </Text>
@@ -168,23 +181,25 @@ export function EventLine(props: { e: LoomEvent }) {
     );
   }
 
-  if (e.kind === "tool_call") return <Sys text={`⚙ ${String(p.summary ?? p.tool ?? "tool")}`} />;
-  if (e.kind === "file_edit") return <Sys text={`✎ ${String(p.path ?? "")}`} />;
+  if (e.kind === "tool_call") return <Sys color={T.faint} text={`⚙ ${String(p.summary ?? p.tool ?? "tool")}`} />;
+  if (e.kind === "file_edit") return <Sys color={T.faint} text={`✎ ${String(p.path ?? "")}`} />;
   if (e.kind === "handoff")
     return <Sys color={T.shuttle} text={`${String(p.from ?? "—")}  ⟿  ${String(p.to ?? "—")}`} />;
   if (e.kind === "needs_input")
     return <Sys color={T.warn} text={`⏸ ${e.agentId} asks: ${String(p.question ?? "")}`} />;
-  if (e.kind === "suggestion") return <Sys color={T.warn} text={`💡 ${String(p.reason ?? "")}`} />;
+  if (e.kind === "suggestion") return <Sys color={T.warn} text={`✦ ${String(p.reason ?? "")}`} />;
   if (e.kind === "decision") return <Sys text={`★ ${String(p.text ?? "")}`} />;
+  if (e.kind === "memory_import")
+    return <Sys color={T.thread} text={`◈ imported ${String(p.file ?? "")} into the shared brain`} />;
   if (e.kind === "error") return <Sys color={T.err} text={`✗ ${String(p.message ?? "error")}`} />;
-  if (e.kind === "run_complete") return <Sys text={`✓ ${e.agentId} done`} />;
-  if (e.kind === "route_started") return <Sys text={`➤ route started`} />;
+  if (e.kind === "run_complete") return <Sys color={T.faint} text={`✓ ${e.agentId} done`} />;
+  if (e.kind === "route_started") return <Sys text={`▸ route started`} />;
   if (e.kind === "route_step")
-    return <Sys text={`➤ hop ${Number(p.step) + 1} → ${String(p.agent)}${p.reason ? ` (${String(p.reason)})` : ""}`} />;
+    return <Sys text={`▸ hop ${Number(p.step) + 1} → ${String(p.agent)}${p.reason ? ` (${String(p.reason)})` : ""}`} />;
   if (e.kind === "route_paused")
     return <Sys color={T.warn} text={`⏸ route paused — ${String(p.question ?? "")}`} />;
-  if (e.kind === "route_resumed") return <Sys text="➤ route resumed" />;
-  if (e.kind === "route_completed") return <Sys color={T.ok} text="✔ route completed" />;
+  if (e.kind === "route_resumed") return <Sys text="▸ route resumed" />;
+  if (e.kind === "route_completed") return <Sys color={T.ok} text="✓ route completed" />;
   if (e.kind === "route_failed")
     return <Sys color={p.aborted ? T.warn : T.err} text={`⊘ ${String(p.reason ?? "route ended")}`} />;
   return null;
