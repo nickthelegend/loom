@@ -314,6 +314,37 @@ describe("gui-chat · refusing to type into your source file", () => {
   });
 });
 
+/**
+ * The bug that only a real app could show, guarded where it can be.
+ *
+ * The submit step used to `await` two requestAnimationFrames inside the page,
+ * to let the framework commit the edit before clicking send. rAF does not fire
+ * in an occluded window — so against a real Antigravity IDE sitting behind
+ * other windows, the awaited evaluate never settled and every send hung until
+ * it timed out. That is the exact case this feature exists for: the app is in
+ * the background and you're on your phone.
+ *
+ * It can't be reproduced here — headless Chromium runs rAF perfectly well, and
+ * a test that claimed otherwise failed its own premise check when I tried. So
+ * the guard is on the source: no page expression may wait on the frame clock.
+ * A timer out in Node always fires; rAF is at the mercy of a window nobody is
+ * looking at.
+ */
+describe("gui-chat · nothing waits on a frame that may never come", () => {
+  it("has no requestAnimationFrame in any injected expression", () => {
+    const src = fs.readFileSync(
+      path.resolve(import.meta.dirname, "..", "src", "adapters", "bridges", "gui-chat.ts"),
+      "utf8",
+    );
+    // the comments explaining the ban are allowed to name it; the code isn't
+    const code = src
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//"))
+      .join("\n");
+    expect(code).not.toContain("requestAnimationFrame");
+  });
+});
+
 describe("gui-chat · reading the panel's growth", () => {
   it("returns what was appended", () => {
     expect(delta("a\nb", "a\nb\nc")).toBe("c");

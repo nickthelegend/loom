@@ -204,7 +204,16 @@ function submitExpr(p: AppProfile, text: string, sendSel: string | undefined): s
   // string being pasted into a program being pasted into a browser; nothing else
   // is safe enough.
   const safe = JSON.stringify(text);
-  return `(async () => {
+  // Deliberately NOT async, and with no requestAnimationFrame in it.
+  //
+  // This used to await two rAFs to let the framework commit the edit before
+  // clicking submit. rAF does not fire in a window that is occluded or
+  // backgrounded — so against a real Antigravity sitting behind other windows
+  // the promise never settled and Runtime.evaluate hung until it timed out.
+  // Which is the whole use case: the app is in the background and you're on
+  // your phone. The settle wait happens on the Node side now, where a timer is
+  // a timer.
+  return `(() => {
   const MARK = ${JSON.stringify(MARK)};
   const editor = document.querySelector('[' + MARK + ']');
   if (!editor) return { ok: false, reason: "the composer went away" };
@@ -224,10 +233,6 @@ function submitExpr(p: AppProfile, text: string, sendSel: string | undefined): s
     editor.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: text }));
     editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
   }
-
-  // Let the framework commit the edit before asking it to submit; without this
-  // the button is still disabled from when the box was empty.
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   const explicit = ${sendSel ? JSON.stringify(sendSel) : "null"};
   const candidates = explicit ? [explicit] : ${JSON.stringify(p.send)};
@@ -398,6 +403,13 @@ export class GuiChatDriver {
       // its model from. Typing with execCommand filled the box visually and
       // left the app believing it was empty, so the send button did nothing.
       await session.insertText(text);
+
+      // Let the framework commit the edit before asking it to submit; without
+      // this the send button is still disabled from when the box was empty.
+      // The wait lives here rather than inside the page because the page may be
+      // in a background window, where rAF never fires and an awaited evaluate
+      // hangs forever. A setTimeout out here always fires.
+      await new Promise((r) => setTimeout(r, 120));
 
       const sent = await session.evaluate<{ ok: boolean; reason?: string; how?: string }>(
         submitExpr(this.profile, text, this.options.selectors?.send),
