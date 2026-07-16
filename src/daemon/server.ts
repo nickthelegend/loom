@@ -480,12 +480,31 @@ export class LoomDaemon {
 
     // Explorer: list a directory, read a file, search filenames. All strictly
     // sandboxed to the project directory (no traversal outside it).
+    const contains = (base: string, target: string) =>
+      target === base || target.startsWith(base + path.sep);
+    /**
+     * Resolve a project-relative path, or null if it escapes the project.
+     * Two checks, because they catch different attacks: the lexical one stops
+     * `../` traversal (and works for paths that don't exist yet), and the
+     * realpath one stops a symlink *inside* the project from pointing out of
+     * it — path.resolve happily resolves through links.
+     */
     const projectPath = (id: string, rel: string | undefined): string | null => {
       const info = findProject(id);
       if (!info) return null;
-      const base = path.resolve(info.dir);
+      let base: string;
+      try {
+        base = fs.realpathSync(path.resolve(info.dir));
+      } catch {
+        return null;
+      }
       const target = path.resolve(base, rel ?? ".");
-      if (target !== base && !target.startsWith(base + path.sep)) return null;
+      if (!contains(base, target)) return null;
+      try {
+        if (!contains(base, fs.realpathSync(target))) return null;
+      } catch {
+        // doesn't exist — the lexical check above is the whole answer
+      }
       return target;
     };
     const HIDE_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".cache", "coverage"]);
