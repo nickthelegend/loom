@@ -87,6 +87,27 @@ describe("web app page", () => {
     }
   });
 
+  it("wires the Tasks view to the real gh-backed endpoint, never to fixtures", () => {
+    expect(APP_HTML).toContain("/tasks?kind=");
+    // both kinds, and the query box that gh gets verbatim
+    expect(APP_HTML).toContain('tasks.kind === "pr" ? "is:pr" : "is:issue"');
+    expect(APP_HTML).toContain('id="taskq"');
+    // every unavailable reason the backend can return needs a panel, or the
+    // view silently renders an empty table that reads as "no issues"
+    for (const reason of ["no-cli", "no-auth", "no-remote"]) {
+      expect(APP_HTML, `Tasks view has no state for "${reason}"`).toContain(`"${reason}"`);
+    }
+    // opening the tab must fetch — drawing alone would show a false empty state
+    expect(APP_HTML).toContain("if (tasks.data) drawTasksPane(); else loadTasks();");
+  });
+
+  it("keeps the New project flow (button, modal, native picker fallback)", () => {
+    expect(APP_HTML).toContain('id="newproj"');
+    expect(APP_HTML).toContain("function openProjectModal()");
+    // the Electron picker is optional: the browser build types a path instead
+    expect(APP_HTML).toContain("window.loomNative && window.loomNative.pickFolder");
+  });
+
   it("manifest is installable and matches the theme", () => {
     expect(APP_MANIFEST.name).toBe("Loom");
     expect(APP_MANIFEST.display).toBe("standalone");

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Tasks — start work from a real GitHub issue
+
+- New **Tasks** tab per project: the repo's open issues and pull requests in a
+  sortable table (id, title, author, labels, assignees, status, updated), with
+  an `Issues`/`PRs` switch, `Open` / `Assigned to me` filters, a query box that
+  accepts GitHub's own search syntax (`assignee:@me is:issue is:open`), and
+  pagination. Labels wear the colours GitHub reports for them.
+- **Start** on any row opens Create task with the issue number, title, and URL
+  already drafted, so a GitHub issue becomes an agent task in two clicks.
+- Data comes from **your own `gh` CLI**, which already holds your auth — Loom
+  needs no token, no OAuth app, no PAT of its own. It shells out the same way
+  the adapters shell out to the coding agents you have installed.
+- When it can't list, it says why (`gh` not installed, signed out, or no GitHub
+  remote) instead of showing an empty table that reads as "no issues".
+
+### New project
+
+- A **New project** button in the sidebar (shortcut <kbd>P</kbd>) with a proper
+  modal, replacing the inline path field. It reports which ADEs were detected
+  on the host after registering, and refuses a bad path out loud.
+- In the desktop app the folder comes from a **native macOS picker**; in a
+  browser the path is typed, since the daemon may be on another host. The
+  preload exposes only that one call — no `require`, no ipc passthrough.
+
 ### Terminal — real PTYs
 
 - Terminals now run on a real pseudo-terminal via **node-pty**, rendered with

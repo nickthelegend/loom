@@ -235,6 +235,34 @@ describe("explorer: sandbox", () => {
   });
 });
 
+/**
+ * Tasks read GitHub through the user's own `gh`, so what this can assert
+ * depends on the host: gh may be absent, signed out, or present. What must
+ * hold everywhere is that a project with no GitHub remote says so — an empty
+ * list would render as "this repo has no issues", which is a different claim.
+ */
+describe("tasks", () => {
+  it("reports why it can't list, rather than returning an empty list", async () => {
+    const res = await get(`/api/projects/${projectId}/tasks?kind=issue`);
+    expect(res.ok).toBe(true);
+    const body = (await res.json()) as { available: boolean; reason?: string; detail?: string };
+    // the fixture project is a bare git dir with no remote
+    expect(body.available).toBe(false);
+    expect(["no-cli", "no-auth", "no-remote", "error"]).toContain(body.reason);
+    expect(body.detail).toBeTruthy();
+  });
+
+  it("404s for an unknown project", async () => {
+    const res = await get(`/api/projects/does-not-exist/tasks`);
+    expect(res.status).toBe(404);
+  });
+
+  it("requires authentication", async () => {
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}/tasks`);
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("terminal", () => {
   it("opens a shell rooted in the project directory", async () => {
     const body = (await post(`/api/projects/${projectId}/term/open`, { term: "t1" }).then((r) =>

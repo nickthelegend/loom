@@ -93,12 +93,12 @@ the writing.
 
 ```
 ┌───────────┬────────────────────────────┬──────────────┐
-│ projects  │  Thread · Brain · Routes   │  Explorer    │
-│  └ agents │                            │  Search      │
+│ projects  │ Thread · Tasks · Brain ·   │  Explorer    │
+│  └ agents │                   Routes   │  Search      │
 │           │  the conversation, with    │  Source ctl  │
 │ New task  │  Update(n files) cards ────┼─▶ diff opens │
-│ Search    │                            │  Tasks       │
-│           ├────────────────────────────┤              │
+│ New proj  │                            │  Tasks       │
+│ Search    ├────────────────────────────┤              │
 │           │  terminal (a real shell)   │              │
 └───────────┴────────────────────────────┴──────────────┘
   live · host · baton · spend                    ← status bar
@@ -116,8 +116,13 @@ the writing.
   and `^Z` all behave. `node-pty` is optional: without it (Linux with no build
   toolchain) you get a pipe-backed shell instead, where `cd` and variables still
   persist and `^C` still works, driven a line at a time.
+- **Tasks** lists the repo's open issues and PRs — filters, GitHub's own search
+  syntax, real label colours — and **Start** on a row drafts a task from that
+  issue. It reads through your own `gh` CLI, so Loom never asks for a token; if
+  `gh` is missing, signed out, or the project has no GitHub remote, it says so.
 - **New task** (`n`) picks a project, a task, and **one agent — or several**, which run
-  it as a pipeline, hop to hop.
+  it as a pipeline, hop to hop. **New project** (`p`) adds a repo — a native folder
+  picker in the desktop app — and reports which ADEs it found on the host.
 
 ## Quickstart
 

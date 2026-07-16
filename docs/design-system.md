@@ -97,10 +97,24 @@ drag-resizable and persisted; double-click a handle to reset
   - *Tasks* — per-project New task + the agent roster.
 - **Terminal dock** — a bottom, resizable strip of real shells (`loomTerm`,
   Ctrl+backtick). See *Terminal* below.
+- **Tasks pane** — the project's GitHub issues/PRs, read through the user's own
+  `gh` CLI (never a token of ours). Provider mark, `Issues`/`PRs` segmented
+  control, repo pill, `Open` / `Assigned to me` chips, a mono query box taking
+  GitHub's search syntax verbatim, and a fixed-column table — id pill, title +
+  author + labels *in the colours GitHub reports*, assignee stack, status
+  badge, relative time, and a `Start →` that drafts a task from the issue.
+  Colour rule holds: the only colour is state (open/closed/merged/draft) and
+  GitHub's own label hues, which are data, not chrome. Every unavailable
+  reason (`no-cli` / `no-auth` / `no-remote`) gets a written panel — an empty
+  table would claim "no issues", which is a different fact.
 - **New Task modal** — Orca's Create Worktree, mapped to Loom: project + task
   + **one agent, or several** (several = a pipeline through them, in the order
   you picked). Scrim + glass panel; `n` opens, Cmd/Ctrl+Enter submits, Esc
   closes.
+- **New Project modal** — same chrome; `p` opens. Folder + optional name, and
+  a native picker (`window.loomNative.pickFolder`, exposed by the Electron
+  preload) when the shell can offer one — a browser types the path, since the
+  daemon may be on another host.
 - **Status bar (25px)** — websocket liveness, daemon host, baton holder,
   spend meter (project share of total), working-agent count, project count,
   total spend.

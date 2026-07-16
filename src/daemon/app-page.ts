@@ -145,6 +145,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     background:transparent;border:1px solid transparent;transition:background .15s,color .15s}
   .iconbtn:hover{background:var(--accent);color:var(--foreground)}
   .iconbtn svg{width:16px;height:16px}
+  .iconbtn.spin svg{animation:spin .9s linear infinite}
   .sendbtn{display:inline-flex;align-items:center;justify-content:center;flex:none;
     width:34px;height:34px;border-radius:17px;background:var(--primary);color:var(--primary-foreground);
     transition:opacity .15s,transform .1s}
@@ -382,12 +383,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .snav input{flex:1;min-width:0;background:none;border:none;outline:none;box-shadow:none!important;
     color:var(--sidebar-foreground);font:inherit;font-size:12.5px}
   .snav input::placeholder{color:color-mix(in srgb, var(--muted-foreground) 65%, transparent)}
-  .addform{display:flex;flex-direction:column;gap:6px;margin:2px 8px 8px;padding:10px;flex:none;
-    border:1px solid var(--border);border-radius:var(--radius-md);background:var(--sidebar-accent)}
-  .addform input{height:30px;background:var(--background);border:1px solid var(--input);
-    border-radius:var(--radius-sm);color:var(--foreground);padding:0 9px;font:inherit;font-size:12px;outline:none}
-  .addform .row{display:flex;gap:6px}
-  .addform .row .btn{flex:1}
   .sfoot{display:flex;align-items:center;gap:4px;height:40px;flex:none;padding:0 10px;
     border-top:1px solid var(--sidebar-border)}
   .sfoot .iconbtn{width:28px;height:28px}
@@ -658,6 +653,94 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     font-family:var(--font-mono);font-size:12px;letter-spacing:0;caret-color:var(--ok)}
   .terminput.busy input{opacity:.6}
   .terminput .st{flex:none;font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground)}
+  /* ── Tasks view (issues / PRs from the project's remote) ── */
+  .tasksview{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+  .provrow{display:flex;gap:8px}
+  .provbtn{width:34px;height:34px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:pointer;
+    transition:background .12s,border-color .12s}
+  .provbtn svg{width:17px;height:17px}
+  .provbtn:hover{background:var(--accent)}
+  .provbtn.active{border-color:color-mix(in srgb, var(--muted-foreground) 45%, transparent);background:var(--accent)}
+  .provbtn:disabled{opacity:.35;cursor:default}
+  .taskbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--muted)}
+  .segbtn{height:26px;padding:0 12px;border-radius:7px;font-size:12.5px;font-weight:500;
+    color:var(--muted-foreground);cursor:pointer;background:transparent;border:none;transition:background .12s,color .12s}
+  .segbtn:hover{color:var(--foreground)}
+  .segbtn.active{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgb(0 0 0 / .06)}
+  .repopill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 11px;border-radius:9px;
+    border:1px solid var(--border);background:var(--card);color:var(--foreground);font-size:12.5px;cursor:default}
+  .repopill .rdot{width:7px;height:7px;border-radius:50%;background:var(--warn);flex:none}
+  .taskpanel{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--card);
+    overflow:hidden;box-shadow:0 1px 2px rgb(0 0 0 / .05)}
+  .chiprow{display:flex;gap:8px;padding:14px 14px 0}
+  .fchip{height:28px;padding:0 12px;border-radius:8px;font-size:12.5px;font-weight:500;cursor:pointer;
+    border:1px solid transparent;background:transparent;color:var(--muted-foreground);transition:background .12s,color .12s}
+  .fchip:hover{background:var(--accent);color:var(--foreground)}
+  .fchip.active{background:var(--secondary);color:var(--foreground);border-color:var(--border)}
+  .qrow{display:flex;align-items:center;gap:8px;padding:12px 14px}
+  .qbox{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:32px;padding:0 11px;
+    border:1px solid var(--input);border-radius:9px;transition:border-color .15s,box-shadow .15s}
+  .dark .qbox{background:color-mix(in srgb, var(--input) 30%, transparent)}
+  .qbox:focus-within{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 40%, transparent)}
+  .qbox svg{width:14px;height:14px;flex:none;color:var(--muted-foreground)}
+  .qbox input{flex:1;min-width:0;background:none;border:none;outline:none;box-shadow:none!important;
+    color:var(--foreground);font-family:var(--font-mono);font-size:12.5px}
+  /* fixed columns + a scroller: the rail and the terminal dock can squeeze this
+     pane well below the table's natural width, and a clipped Start button is
+     worse than a scrollbar */
+  .ttwrap{overflow-x:auto}
+  .tasktable{width:100%;min-width:640px;border-collapse:collapse;table-layout:fixed}
+  .tasktable th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted-foreground);font-family:var(--font-mono);padding:8px 12px;
+    border-top:1px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap}
+  .tasktable td{padding:11px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+  .tasktable tr:last-child td{border-bottom:none}
+  .tasktable tbody tr{transition:background .1s}
+  .tasktable tbody tr:hover{background:color-mix(in srgb, var(--accent) 45%, transparent)}
+  .idpill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;
+    border:1px solid var(--border);font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);white-space:nowrap}
+  .idpill svg{width:12px;height:12px;flex:none}
+  .idpill.open{color:var(--ok)}
+  .idpill.merged{color:var(--shuttle-ink)}
+  .idpill.closed{color:var(--err)}
+  .ttitle{font-size:13.5px;font-weight:600;color:var(--foreground);line-height:1.35;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tmeta{display:flex;align-items:center;gap:7px;margin-top:4px;font-size:11.5px;color:var(--muted-foreground);
+    font-family:var(--font-mono);flex-wrap:nowrap;overflow:hidden}
+  .tmeta .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:18ch}
+  .lbl{height:17px;display:inline-flex;align-items:center;padding:0 7px;border-radius:999px;font-size:10.5px;
+    font-weight:500;font-family:var(--font-sans);white-space:nowrap;flex:none;
+    overflow:hidden;text-overflow:ellipsis;max-width:20ch}
+  .avs{display:flex}
+  .av{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:600;font-family:var(--font-mono);border:1px solid var(--border);
+    background:var(--muted);color:var(--muted-foreground);margin-left:-6px}
+  .av:first-child{margin-left:0}
+  .stbadge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;font-size:11px;font-weight:500}
+  .stbadge.open{color:var(--ok);background:color-mix(in srgb, var(--ok) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--ok) 35%, transparent)}
+  .stbadge.closed{color:var(--err);background:color-mix(in srgb, var(--err) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--err) 35%, transparent)}
+  .stbadge.merged{color:var(--shuttle-ink);background:color-mix(in srgb, var(--shuttle) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--shuttle) 35%, transparent)}
+  .stbadge.draft{color:var(--muted-foreground);background:var(--muted);border:1px solid var(--border)}
+  .tupd{font-size:12px;color:var(--muted-foreground);white-space:nowrap}
+  .startbtn{opacity:.55;transition:opacity .12s}
+  .tasktable tbody tr:hover .startbtn{opacity:1}
+  .pager{display:flex;align-items:center;justify-content:center;gap:6px;padding:12px;border-top:1px solid var(--border)}
+  .pgbtn{height:28px;min-width:28px;padding:0 9px;border-radius:8px;font-size:12.5px;cursor:pointer;
+    border:1px solid transparent;background:transparent;color:var(--muted-foreground);
+    display:inline-flex;align-items:center;gap:5px;transition:background .12s,color .12s}
+  .pgbtn:hover:not(:disabled){background:var(--accent);color:var(--foreground)}
+  .pgbtn:disabled{opacity:.4;cursor:default}
+  .pgbtn.active{background:var(--secondary);color:var(--foreground);border-color:var(--border);font-weight:600}
+  .tsetup{padding:36px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
+  .tsetup .th{font-size:14px;font-weight:600;color:var(--foreground)}
+  .tsetup .td{font-size:12.5px;color:var(--muted-foreground);max-width:44ch;line-height:1.6}
+  .tsetup code{font-family:var(--font-mono);font-size:11.5px;background:var(--muted);border:1px solid var(--border);
+    border-radius:5px;padding:1px 6px}
   /* ── Sidebar top nav (Orca: Tasks / Search) ───────────── */
   .topnav{display:flex;flex-direction:column;gap:1px;padding:8px 8px 4px}
   .navitem{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--radius-md);
@@ -693,6 +776,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .field select:focus-visible,.field input:focus-visible,.field textarea:focus-visible{border-color:var(--ring);
     box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 50%, transparent)}
   .field .hintx{font-size:11px;color:var(--muted-foreground)}
+  .field label .opt{font-weight:450;letter-spacing:.02em;text-transform:none;
+    color:color-mix(in srgb, var(--muted-foreground) 80%, transparent)}
+  .pickrow{display:flex;gap:8px}
+  .pickrow input{flex:1;min-width:0;font-family:var(--font-mono);font-size:12px}
+  .pickrow .btn{flex:none;height:38px}
   .disclose{font-size:12px;color:var(--muted-foreground);cursor:pointer;user-select:none;
     display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono)}
   .modalfoot{display:flex;gap:8px;justify-content:flex-end;align-items:center;
@@ -794,8 +882,16 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     tasks: svg('<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>'),
     files: svg('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><path d="M14 2v6h6"/>'),
     folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    folderPlus: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6"/><path d="M9 14h6"/>'),
     file: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/>'),
-    chevron: svg('<path d="m9 6 6 6-6 6"/>')
+    chevron: svg('<path d="m9 6 6 6-6 6"/>'),
+    chevronLeft: svg('<path d="m15 6-6 6 6 6"/>'),
+    external: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'),
+    issue: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>'),
+    pr: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7"/><circle cx="18" cy="18" r="2.5"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="m13 3-2 3 2 3"/>'),
+    // GitHub's mark, filled — the one place a brand asset is warranted
+    github:
+      '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>'
   };
 
   /**
@@ -1091,6 +1187,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-routes" style="display:none"></div>' +
+        '<div class="pane scroll" id="pane-tasks" style="display:none"></div>' +
         composerHtml +
         "</div>" +
         '<div class="dockpane" id="dockpane">' +
@@ -1136,9 +1233,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     // ---- desktop tabs (Thread / Brain / Routes) ----------------------------
     function drawTabs(){
       var box = document.getElementById("tabsbox"); if (!box) return;
-      var tabs = ["thread", "brain", "routes"];
+      var tabs = ["thread", "tasks", "brain", "routes"];
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
-      var LBL = { thread: [ICONS.thread, "Thread"], brain: [ICONS.memory, "Brain"], routes: [ICONS.route, "Routes"] };
+      var LBL = { thread: [ICONS.thread, "Thread"], tasks: [ICONS.tasks, "Tasks"],
+                  brain: [ICONS.memory, "Brain"], routes: [ICONS.route, "Routes"] };
       box.innerHTML = tabs.map(function(tb){
         return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
           LBL[tb][0] + LBL[tb][1] + "</button>";
@@ -1149,7 +1247,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     }
     function showTab(name){
       state.tab = name;
-      ["thread", "brain", "routes"].forEach(function(t){
+      ["thread", "tasks", "brain", "routes"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -1161,6 +1259,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       if (cw) cw.style.display = name === "thread" ? "" : "none";
       if (name === "brain") refreshBrain();
       if (name === "routes") drawRoutesPane();
+      // first open fetches; later opens keep whatever was listed (and its page)
+      if (name === "tasks") { if (tasks.data) drawTasksPane(); else loadTasks(); }
       if (name === "thread") {
         var sc = document.getElementById("pane-thread");
         if (sc) sc.scrollTop = sc.scrollHeight;
@@ -1703,6 +1803,201 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         state.tree = j.tree || {};
         if (state.railView === "scm") drawRail();
       }).catch(function(err){ if (force) toast(err.message); });
+    }
+
+    // ---- tasks pane (issues / PRs from the project's GitHub remote) --------
+    var tasks = { kind: "issue", scope: "open", q: "is:issue is:open", page: 1, data: null, loading: false };
+    var TASKS_PER_PAGE = 8;
+    function tasksQuery(){
+      // the box is the source of truth; the chips just rewrite it, so whatever
+      // you type wins and gh gets the same query language as github.com
+      var base = tasks.kind === "pr" ? "is:pr" : "is:issue";
+      return base + " is:open" + (tasks.scope === "mine" ? " assignee:@me" : "");
+    }
+    function setTasksScope(scope){
+      tasks.scope = scope;
+      tasks.q = tasksQuery();
+      tasks.page = 1;
+      loadTasks();
+    }
+    function ago(iso){
+      var s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+      if (s < 60) return "just now";
+      var m = s / 60; if (m < 60) return Math.floor(m) + (Math.floor(m) === 1 ? " minute ago" : " minutes ago");
+      var h = m / 60; if (h < 24) return Math.floor(h) + (Math.floor(h) === 1 ? " hour ago" : " hours ago");
+      var d = h / 24;
+      if (d < 2) return "yesterday";
+      if (d < 30) return Math.floor(d) + " days ago";
+      var mo = d / 30; if (mo < 12) return Math.floor(mo) + (Math.floor(mo) === 1 ? " month ago" : " months ago");
+      return Math.floor(mo / 12) + "y ago";
+    }
+    /**
+     * GitHub ships each label's own colour — use it rather than inventing one.
+     * Constrained to hex: this lands in a style attribute, and a label name is
+     * attacker-controlled on any repo you might be reading.
+     */
+    function labelStyle(hex){
+      var raw = String(hex == null ? "" : hex).replace(/^#/, "");
+      var c = "#" + (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(raw) ? raw : "8b949e");
+      return "color:" + c + ";background:color-mix(in srgb, " + c + " 16%, transparent);" +
+        "border:1px solid color-mix(in srgb, " + c + " 40%, transparent)";
+    }
+    function loadTasks(){
+      tasks.loading = true;
+      drawTasksPane();
+      api("/api/projects/" + pid + "/tasks?kind=" + tasks.kind + "&search=" + encodeURIComponent(tasks.q))
+        .then(function(r){ tasks.data = r; tasks.loading = false; drawTasksPane(); })
+        .catch(function(err){
+          tasks.data = { available: false, reason: "error", detail: err.message };
+          tasks.loading = false; drawTasksPane();
+        });
+    }
+    function drawTasksPane(){
+      var el = document.getElementById("pane-tasks"); if (!el) return;
+      var d = tasks.data;
+      var head =
+        '<div class="provrow">' +
+          '<button class="provbtn active" title="GitHub" aria-label="GitHub">' + ICONS.github + "</button>" +
+        "</div>" +
+        '<div class="taskbar">' +
+          '<div class="seg">' +
+            '<button class="segbtn' + (tasks.kind === "issue" ? " active" : "") + '" data-kind="issue">Issues</button>' +
+            '<button class="segbtn' + (tasks.kind === "pr" ? " active" : "") + '" data-kind="pr">PRs</button>' +
+          "</div>" +
+          (d && d.available
+            ? '<span class="repopill"><span class="rdot"></span>' + esc(d.repo) + "</span>" +
+              '<a class="iconbtn" title="open on GitHub" target="_blank" rel="noreferrer" href="https://github.com/' +
+                esc(d.repo) + '">' + ICONS.external + "</a>"
+            : "") +
+        "</div>";
+
+      // no data yet is a loading state, never an empty one — an empty table
+      // here would read as "this repo has no issues", which we don't know
+      if (!d) { el.innerHTML = '<div class="tasksview">' + head + LOADER + "</div>"; return; }
+      if (d && !d.available) {
+        var hint = d.reason === "no-cli"
+          ? "Loom reads issues through your own <code>gh</code> CLI, so it never needs a token of its own."
+          : d.reason === "no-auth"
+            ? "gh is installed but signed out."
+            : d.reason === "no-remote"
+              ? "Add a GitHub remote to this project and reload."
+              : "gh could not list tasks.";
+        el.innerHTML = '<div class="tasksview">' + head +
+          '<div class="taskpanel"><div class="tsetup">' +
+          '<div class="th">' + (d.reason === "no-remote" ? "No GitHub remote" : d.reason === "no-auth" ? "Sign in to GitHub" : d.reason === "no-cli" ? "GitHub CLI not found" : "Couldn\\u2019t load tasks") + "</div>" +
+          '<div class="td">' + esc(d.detail) + "</div>" +
+          '<div class="td">' + hint + "</div>" +
+          "</div></div></div>";
+        wireTasksHead(el);
+        return;
+      }
+
+      var items = (d && d.items) || [];
+      var pages = Math.max(1, Math.ceil(items.length / TASKS_PER_PAGE));
+      if (tasks.page > pages) tasks.page = pages;
+      var slice = items.slice((tasks.page - 1) * TASKS_PER_PAGE, tasks.page * TASKS_PER_PAGE);
+
+      var rows = slice.map(function(it){
+        var st = it.draft ? "draft" : it.state;
+        var avs = it.assignees.length
+          ? '<span class="avs">' + it.assignees.slice(0, 3).map(function(a){
+              return '<span class="av" title="' + esc(a) + '">' + esc(a.slice(0, 1).toUpperCase()) + "</span>";
+            }).join("") + "</span>"
+          : '<span class="tupd">\\u2014</span>';
+        return '<tr data-id="' + it.id + '">' +
+          '<td><span class="idpill ' + esc(st) + '">' + (it.kind === "pr" ? ICONS.pr : ICONS.issue) + "#" + it.id + "</span></td>" +
+          '<td><div class="ttitle" title="' + esc(it.title) + '">' + esc(it.title) + "</div>" +
+            '<div class="tmeta"><span class="who">' + esc(it.author) + "</span>" +
+            it.labels.slice(0, 3).map(function(l){
+              return '<span class="lbl" style="' + labelStyle(l.color) + '">' + esc(l.name) + "</span>";
+            }).join("") + "</div></td>" +
+          "<td>" + avs + "</td>" +
+          '<td><span class="stbadge ' + esc(st) + '">' + esc(st.charAt(0).toUpperCase() + st.slice(1)) + "</span></td>" +
+          '<td class="tupd">' + esc(ago(it.updatedAt)) + "</td>" +
+          '<td style="text-align:right"><button class="btn outline xs startbtn" data-start="' + it.id + '">Start ' + "\\u2192" + "</button></td>" +
+          "</tr>";
+      }).join("");
+
+      el.innerHTML = '<div class="tasksview">' + head +
+        '<div class="taskpanel">' +
+          '<div class="chiprow">' +
+            '<button class="fchip' + (tasks.scope === "open" ? " active" : "") + '" data-scope="open">Open</button>' +
+            '<button class="fchip' + (tasks.scope === "mine" ? " active" : "") + '" data-scope="mine">Assigned to me</button>' +
+          "</div>" +
+          '<div class="qrow">' +
+            '<div class="qbox">' + ICONS.search + '<input id="taskq" value="' + esc(tasks.q) +
+              '" spellcheck="false" autocomplete="off" aria-label="search query"></div>' +
+            '<button class="iconbtn" id="tasknew" title="new task from scratch" aria-label="new task">' + ICONS.plus + "</button>" +
+            '<button class="iconbtn' + (tasks.loading ? " spin" : "") + '" id="taskrefresh" title="refresh" aria-label="refresh">' + ICONS.refresh + "</button>" +
+          "</div>" +
+          (items.length
+            ? '<div class="ttwrap"><table class="tasktable">' +
+                "<colgroup><col style=\\"width:92px\\"><col><col style=\\"width:92px\\">" +
+                "<col style=\\"width:92px\\"><col style=\\"width:104px\\"><col style=\\"width:96px\\"></colgroup>" +
+                "<thead><tr>" +
+                "<th>ID</th><th>Title / context</th><th>Assignees</th><th>Status</th><th>Updated</th><th></th>" +
+              "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
+              (pages > 1
+                ? '<div class="pager">' +
+                  '<button class="pgbtn" id="pgprev"' + (tasks.page === 1 ? " disabled" : "") + ">" + ICONS.chevronLeft + "Previous</button>" +
+                  Array.from({ length: pages }, function(_, i){
+                    return '<button class="pgbtn' + (tasks.page === i + 1 ? " active" : "") + '" data-page="' + (i + 1) + '">' + (i + 1) + "</button>";
+                  }).join("") +
+                  '<button class="pgbtn" id="pgnext"' + (tasks.page === pages ? " disabled" : "") + ">Next" + ICONS.chevron + "</button>" +
+                  "</div>"
+                : "")
+            : '<div class="tsetup"><div class="th">Nothing matches</div>' +
+              '<div class="td">No ' + (tasks.kind === "pr" ? "pull requests" : "issues") +
+              " for <code>" + esc(tasks.q) + "</code>.</div></div>") +
+        "</div></div>";
+      wireTasksHead(el);
+      wireTasksBody(el);
+    }
+    function wireTasksHead(el){
+      Array.prototype.forEach.call(el.querySelectorAll(".segbtn"), function(b){
+        b.onclick = function(){
+          tasks.kind = b.getAttribute("data-kind");
+          tasks.q = tasksQuery();
+          tasks.page = 1;
+          loadTasks();
+        };
+      });
+    }
+    function wireTasksBody(el){
+      Array.prototype.forEach.call(el.querySelectorAll(".fchip"), function(b){
+        b.onclick = function(){ setTasksScope(b.getAttribute("data-scope")); };
+      });
+      var q = document.getElementById("taskq");
+      if (q) q.onkeydown = function(e){
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        tasks.q = this.value;
+        tasks.page = 1;
+        loadTasks();
+      };
+      var rf = document.getElementById("taskrefresh");
+      if (rf) rf.onclick = loadTasks;
+      var nt = document.getElementById("tasknew");
+      if (nt) nt.onclick = function(){ openTaskModal(pid); };
+      var prev = document.getElementById("pgprev");
+      if (prev) prev.onclick = function(){ tasks.page--; drawTasksPane(); };
+      var next = document.getElementById("pgnext");
+      if (next) next.onclick = function(){ tasks.page++; drawTasksPane(); };
+      Array.prototype.forEach.call(el.querySelectorAll("[data-page]"), function(b){
+        b.onclick = function(){ tasks.page = Number(b.getAttribute("data-page")); drawTasksPane(); };
+      });
+      // Start → hand the issue to an agent as a task
+      Array.prototype.forEach.call(el.querySelectorAll("[data-start]"), function(b){
+        b.onclick = function(){
+          var id = Number(b.getAttribute("data-start"));
+          var it = ((tasks.data && tasks.data.items) || []).filter(function(x){ return x.id === id; })[0];
+          if (!it) return;
+          var noun = it.kind === "pr" ? "PR" : "issue";
+          openTaskModal(pid, null,
+            noun + " #" + it.id + ": " + it.title + "\\n" + it.url +
+            "\\n\\nRead the " + noun + ", then implement it.");
+        };
+      });
     }
 
     // ---- brain pane ---------------------------------------------------------
@@ -2256,7 +2551,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
 
   // ---- New Task modal (Orca's Create Worktree, mapped to Loom) -------------
   // One ADE runs it directly; several run it as a pipeline, hop to hop.
-  function openTaskModal(prefillPid, prefillAgents){
+  function openTaskModal(prefillPid, prefillAgents, prefillText){
     var projects = state.projects || [];
     if (!projects.length) { toast("add a project first"); return; }
     if (document.querySelector(".scrim")) return;
@@ -2333,7 +2628,16 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       if (holder && agentsFor(pid).some(function(a){ return a.id === holder; })) picked = [holder];
     }
     drawChips();
-    setTimeout(function(){ var ta = document.getElementById("mtask"); if (ta) ta.focus(); }, 30);
+    setTimeout(function(){
+      var ta = document.getElementById("mtask"); if (!ta) return;
+      if (prefillText) {
+        ta.value = prefillText;
+        // land the caret at the end so a Start-ed issue reads as a draft to
+        // extend, not a field to overwrite
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      } else ta.focus();
+    }, 30);
     function create(){
       var mproj = document.getElementById("mproj").value;
       var task = (document.getElementById("mtask").value || "").trim();
@@ -2374,6 +2678,74 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     document.addEventListener("keydown", onKey);
   }
 
+  /**
+   * Add a project. The daemon does the real work (writes .loom/config.json,
+   * detects which ADEs are installed, registers it); this only collects a
+   * folder. Inside Electron that folder comes from the OS picker — in a
+   * browser the daemon may be on another host, so the path is typed.
+   */
+  function openProjectModal(){
+    if (document.querySelector(".scrim")) return;
+    var native = !!(window.loomNative && window.loomNative.pickFolder);
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal">' +
+      '<div class="modalhead">New project<button class="iconbtn" id="pclose" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="modalbody">' +
+        '<div class="field"><label>Project folder</label>' +
+          '<div class="pickrow"><input id="pdir" spellcheck="false" autocomplete="off" placeholder="' +
+            (native ? "choose a folder\\u2026" : "/path/to/repo on the daemon host") + '">' +
+            (native ? '<button class="btn outline" id="pbrowse">Choose\\u2026</button>' : "") + "</div>" +
+          '<span class="hintx">Loom writes a <code>.loom/</code> folder here and leaves the rest of the repo alone.</span></div>' +
+        '<div class="field"><label>Name <span class="opt">optional</span></label>' +
+          '<input id="pname" spellcheck="false" autocomplete="off" placeholder="defaults to the folder name"></div>' +
+      "</div>" +
+      '<div class="modalfoot"><button class="btn ghost" id="pcancel">Cancel</button>' +
+      '<button class="btn primary" id="pcreate">Create project<span class="kbd">\\u2318\\u21b5</span></button></div>' +
+    "</div>";
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("pclose").onclick = close;
+    document.getElementById("pcancel").onclick = close;
+    var dirEl = document.getElementById("pdir");
+    if (native) document.getElementById("pbrowse").onclick = function(){
+      window.loomNative.pickFolder().then(function(p){
+        if (!p) return;
+        dirEl.value = p;
+        var nm = document.getElementById("pname");
+        if (!nm.value) nm.placeholder = p.split(/[\\\\/]/).filter(Boolean).pop() || "";
+      }).catch(function(err){ toast(String(err.message || err)); });
+    };
+    setTimeout(function(){ dirEl.focus(); }, 30);
+    function create(){
+      var dir = (dirEl.value || "").trim();
+      if (!dir) return toast(native ? "choose a folder first" : "enter a directory path");
+      var name = (document.getElementById("pname").value || "").trim();
+      var btn = document.getElementById("pcreate"); btn.disabled = true;
+      api("/api/projects", {
+        method: "POST",
+        body: JSON.stringify(name ? { dir: dir, name: name } : { dir: dir }),
+      }).then(function(j){
+        close();
+        var p = j.project || {};
+        // say what was actually detected rather than a bare "added"
+        var found = ((j.config && j.config.agents) || []).filter(function(a){ return a.tier === "adapter"; });
+        toast(found.length
+          ? p.name + " \\u00b7 " + found.length + (found.length === 1 ? " ADE" : " ADEs") + ": " + found.map(function(a){ return a.id; }).join(", ")
+          : p.name + " added \\u00b7 no ADE CLIs detected on this host");
+        if (state.refreshProjects) state.refreshProjects();
+        if (p.id) { if (state.selectProject) state.selectProject(p.id); else location.hash = "#p/" + p.id; }
+      }).catch(function(err){ btn.disabled = false; toast(err.message); });
+    }
+    document.getElementById("pcreate").onclick = create;
+    function onKey(e){
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+      else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); create(); }
+    }
+    document.addEventListener("keydown", onKey);
+  }
+
   // ---- router ----------------------------------------------------------
   var mq = window.matchMedia("(min-width:900px)");
   function isDesktop(){ return mq.matches; }
@@ -2389,10 +2761,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       '<div class="dshell">' +
       '<aside class="sidebar">' +
         '<div class="shead"><span class="wordmark">lo<b>om</b></span></div>' +
-        '<div class="topnav"><button class="navitem" id="newtask">' + ICONS.tasks + "New task<span class=\\"kbd\\">N</span></button></div>" +
+        '<div class="topnav"><button class="navitem" id="newtask">' + ICONS.tasks + "New task<span class=\\"kbd\\">N</span></button>" +
+        '<button class="navitem" id="newproj">' + ICONS.folderPlus + "New project<span class=\\"kbd\\">P</span></button></div>" +
         '<div class="snav">' + ICONS.search + '<input id="sfilter" placeholder="Search" autocomplete="off" spellcheck="false"></div>' +
-        '<div class="stitle">projects<button id="addproj" class="iconbtn" title="add a project by path">' + ICONS.plus + "</button></div>" +
-        '<div id="addwrap"></div>' +
+        '<div class="stitle">projects<button id="addproj" class="iconbtn" title="new project" aria-label="new project">' + ICONS.plus + "</button></div>" +
         '<div class="slist" id="slist">' + LOADER + "</div>" +
         '<div class="sfoot">' +
         '<a class="iconbtn" title="Loom on GitHub" href="https://github.com/nickthelegend/loom" target="_blank" rel="noreferrer">' + ICONS.help + "</a>" +
@@ -2447,23 +2819,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       filter = (this.value || "").trim().toLowerCase();
       drawList();
     };
-    document.getElementById("addproj").onclick = function(){
-      var wrap = document.getElementById("addwrap");
-      if (wrap.firstChild) { wrap.innerHTML = ""; return; }
-      wrap.innerHTML = '<div class="addform">' +
-        '<input id="adddir" placeholder="/path/to/repo on the daemon host" autocomplete="off" spellcheck="false">' +
-        '<div class="row"><button class="btn primary xs" id="addgo">Add project</button>' +
-        '<button class="btn outline xs" id="addcancel">Cancel</button></div></div>';
-      document.getElementById("addcancel").onclick = function(){ wrap.innerHTML = ""; };
-      document.getElementById("addgo").onclick = function(){
-        var dir = (document.getElementById("adddir").value || "").trim();
-        if (!dir) return toast("enter a directory path");
-        api("/api/projects", { method: "POST", body: JSON.stringify({ dir: dir }) })
-          .then(function(j){ wrap.innerHTML = ""; toast("added " + (j.project && j.project.name ? j.project.name : "project")); refresh(); })
-          .catch(function(err){ toast(err.message); });
-      };
-      document.getElementById("adddir").focus();
-    };
+    document.getElementById("addproj").onclick = openProjectModal;
+    document.getElementById("newproj").onclick = openProjectModal;
+    state.refreshProjects = refresh;
     document.getElementById("railrefresh").onclick = function(){
       // refresh whichever view is showing: Explorer re-reads the file tree,
       // the others re-read the working tree / project state.
@@ -2568,7 +2926,15 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     if (m) return renderProject(m[1], root, false);
     renderBoard();
   }
-  window.addEventListener("hashchange", function(){ if (!isDesktop()) route(); });
+  window.addEventListener("hashchange", function(){
+    if (!isDesktop()) return route();
+    // The desktop shell navigates with replaceState, so this only fires for a
+    // hash someone typed or pasted — honour it instead of ignoring the URL.
+    var m = location.hash.match(/^#p\\/(.+)$/);
+    if (!m || !state.selectProject) return;
+    var known = (state.projects || []).some(function(p){ return p.id === m[1]; });
+    if (known) state.selectProject(m[1]);
+  });
   mq.addEventListener("change", function(){ clearShell(); route(); });
   // Global shortcuts: Ctrl+backtick toggles the terminal; "n" opens New task
   // (both only while a desktop workspace is mounted, never while typing).
@@ -2582,10 +2948,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       if (state.toggleTerm) { e.preventDefault(); state.toggleTerm(); }
       return;
     }
-    if (e.key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey &&
+    if ((e.key === "n" || e.key === "p") && !e.metaKey && !e.ctrlKey && !e.altKey &&
         isDesktop() && state.token && !typingInField(e.target) && !document.querySelector(".scrim")) {
       e.preventDefault();
-      openTaskModal(state.pid);
+      if (e.key === "n") openTaskModal(state.pid); else openProjectModal();
     }
   });
   pairFromHash().then(function(paired){

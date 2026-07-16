@@ -34,6 +34,7 @@ import { GEIST_WOFF2 } from "./geist-font.js";
 import { AuthManager, bearerToken } from "./auth.js";
 import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
 import { ProjectRuntime } from "./runtime.js";
+import { listTasks } from "./tasks.js";
 import { TerminalManager } from "./terminals.js";
 
 export interface DaemonOptions {
@@ -502,6 +503,20 @@ export class LoomDaemon {
       if (!info) return void res.status(404).json({ error: "unknown project" });
       this.terminals.close(info.id, String((req.body ?? {}).term ?? "t1"));
       res.json({ closed: true });
+    });
+
+    // Issues / PRs for the project's GitHub remote, read through the user's
+    // own gh CLI (see tasks.ts) — Loom holds no token of its own.
+    app.get("/api/projects/:id/tasks", async (req, res) => {
+      const info = findProject(String(req.params.id));
+      if (!info) return void res.status(404).json({ error: "unknown project" });
+      const kind = String(req.query.kind ?? "issue") === "pr" ? "pr" : "issue";
+      res.json(
+        await listTasks(info.dir, {
+          kind,
+          ...(req.query.search ? { search: String(req.query.search) } : {}),
+        }),
+      );
     });
 
     // Explorer: list a directory, read a file, search filenames. All strictly

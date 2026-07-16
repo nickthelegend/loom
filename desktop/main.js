@@ -3,7 +3,7 @@
 // phone and browser use. No IDE, no editor — the continuity layer, on desktop.
 
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, Menu, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
 import { prepareAppUrl } from "./loom-app.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -92,6 +92,17 @@ function buildMenu() {
     ]),
   );
 }
+
+// Native folder picker for "New project". The renderer only ever receives a
+// path the user chose in the OS dialog themselves.
+ipcMain.handle("loom:pick-folder", async () => {
+  const parent = BrowserWindow.getFocusedWindow() ?? win;
+  const opts = { title: "Choose a project folder", properties: ["openDirectory", "createDirectory"] };
+  const r = parent
+    ? await dialog.showOpenDialog(parent, opts)
+    : await dialog.showOpenDialog(opts);
+  return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+});
 
 app.whenReady().then(() => {
   buildMenu();
