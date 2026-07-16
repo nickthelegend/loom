@@ -111,9 +111,11 @@ the writing.
   diff opens to the right of the chat. It stays closed until you ask for it.
 - **Explorer / Search / Source Control / Tasks** in the right panel; every column is
   drag-resizable (double-click a handle to reset).
-- **Terminal** (`Ctrl` + `` ` ``) is a real shell in the project directory: `cd` and
-  variables persist, `Ctrl+C` interrupts the running job without killing the shell,
-  output keeps its colours, and `↑` walks your history.
+- **Terminal** (`Ctrl` + `` ` ``) is a real terminal in the project directory — a
+  proper pty, so the shell draws its own prompt and `vim`, `less`, `htop`, `^C`
+  and `^Z` all behave. `node-pty` is optional: without it (Linux with no build
+  toolchain) you get a pipe-backed shell instead, where `cd` and variables still
+  persist and `^C` still works, driven a line at a time.
 - **New task** (`n`) picks a project, a task, and **one agent — or several**, which run
   it as a pipeline, hop to hop.
 

@@ -107,22 +107,48 @@ drag-resizable and persisted; double-click a handle to reset
 
 ### Terminal
 
-Each tab owns a long-lived shell in the project directory, so it behaves like
-a terminal rather than a command runner:
+Each tab owns a long-lived shell in the project directory. There are two
+backends behind one interface (`src/daemon/terminals.ts`); the daemon reports
+which is live via `/api/health` and the WebSocket hello.
 
-- `cd` and exported variables **persist** between commands; tabs are isolated.
-- After each command the shell prints a sentinel carrying the exit code and
-  cwd. The daemon strips it from the stream (holding back partial matches
-  across chunk boundaries) and emits an exit/cwd frame — that's how the prompt
-  tracks the live directory and how failures surface.
+**`pty` — the real thing** (when `node-pty` is available). The shell is on a
+tty, so it draws its own prompt, echoes, and has job control: `^C`/`^Z`,
+`less`, `vim`, `htop`, and a real window size all work. The front end is
+xterm.js, served from `node_modules` at `/app/vendor/*` — no bundler, no CDN.
+
+- Keystrokes go up the WebSocket; a POST per keystroke can't carry a tty.
+- FitAddon + a ResizeObserver keep the pty's window matched to the pane.
+  Fitting is refused while the pane has no box: measuring a hidden element
+  yields a 1×1 grid, and the pty would be sized to match.
+- Terminals open only after the socket is listening, or the shell's first
+  output (its prompt) is broadcast to nobody.
+- The palette is mapped from the design tokens and repaints on theme toggle.
+- Cmd/Ctrl+C copies with a selection, interrupts without; Cmd/Ctrl+V pastes.
+
+**`pipe` — the fallback** (no node-pty). `node-pty` is a native module, so it
+is an *optionalDependency* and ships prebuilds only for macOS/Windows; Loom
+runs headless on Linux boxes that may have no toolchain, and `npm i -g
+threadloom` must never break. A long-lived shell on plain pipes:
+
+- `cd` and exported variables still persist; tabs are isolated.
+- No tty, so the daemon reports each command's exit code and cwd out of band:
+  the shell prints a sentinel, which the daemon strips from the stream
+  (holding back partial matches across chunk boundaries). That's how the
+  client draws the prompt and surfaces failures.
 - **Ctrl+C** signals the shell's process group. The shell survives because it
   is sent a no-op `INT` trap at open — handled signals reset to default in
   children, so the foreground job still dies. Real `^C → exit 130 → prompt`.
-- ANSI SGR renders against the theme tokens; other escapes are stripped.
-  `FORCE_COLOR` and a `cat` pager are set so tools still colourise and never
-  block without a tty.
-- It is **not a PTY** (that needs a native dep, which would break
-  `npm i -g threadloom`), so there's no echo or job control.
+- No echo or job control, so the client drives it a line at a time and renders
+  ANSI SGR itself against the theme tokens.
+
+`FORCE_COLOR` and a `cat` pager are set in both, so tools colourise and never
+block. `LOOM_NO_PTY=1` forces the fallback — CI runs the suite both ways so it
+can't rot.
+
+One packaging wrinkle worth knowing: node-pty's prebuilt `spawn-helper` ships
+without the executable bit, and node-pty then fails every spawn with a bare
+"posix_spawnp failed". The loader repairs the mode, and proves it can spawn
+before trusting it — a load isn't proof.
 
 ### The file sandbox
 

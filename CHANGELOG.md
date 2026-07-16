@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Terminal — real PTYs
+
+- Terminals now run on a real pseudo-terminal via **node-pty**, rendered with
+  **xterm.js**: the shell is on a tty, so it draws its own prompt, echoes, and
+  job control works — `^C`/`^Z`, `less`, `vim`, `htop`, window size. Verified
+  end to end in the desktop app: `$(tty)` resolves to a real device, `stty`
+  reports the fitted window, and `vi` repaints the alternate screen.
+- node-pty is an **optionalDependency** with a probing loader, so a machine
+  that can't build it still installs Loom and quietly gets the previous
+  pipe-backed shell (`cd`/vars persist, `^C` works). `npm i -g threadloom`
+  never breaks. `LOOM_NO_PTY=1` forces the fallback, and CI runs the suite
+  both ways so it can't rot.
+- Fixes a node-pty packaging bug: its prebuilt `spawn-helper` ships without the
+  executable bit, so every spawn died with a bare "posix_spawnp failed". The
+  loader repairs it, and proves it can spawn rather than trusting the require.
+- Terminal input now travels over the project WebSocket (a tty needs a
+  round-trip per keystroke); sessions keep scrollback and replay it, so a
+  reload rejoins the session it left. Adds `/term/resize`, tab titles from OSC,
+  clipboard keys, and reports the active mode from `/api/health`.
+- Terminal logic moved out of `server.ts` into `src/daemon/terminals.ts`.
+
 ### Security
 
 - **A symlink inside a project could read files anywhere on disk.** The
