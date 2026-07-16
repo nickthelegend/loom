@@ -9,7 +9,9 @@ OpenCode, Antigravity, Codex, … — keeps its own brain in its own files. Loom
 **one brain**: connect your ADEs, and their memory, decisions, and context become a
 single shared thread that flows from one agent to the next.
 
-Today that means **Claude Code and OpenCode**, both verified against real versions —
+Today that means **Claude Code, Codex, OpenCode and Grok Code** as full agents, each
+verified against a real version, plus **Antigravity and Kiro** driven through their
+own windows —
 see [Supported agents](#supported-agents) for exactly how far each one goes, and
 [How memory actually reaches a model](#how-memory-actually-reaches-a-model) for the
 part most tools gloss over.
@@ -252,10 +254,51 @@ detects at least two roles.
 | Agent | Tier | Transport | Status |
 |---|---|---|---|
 | Claude Code | adapter (full-duplex) | headless CLI, `stream-json`, `--resume`, briefing via `--append-system-prompt` | ✅ verified against 2.1.83 |
+| Codex | adapter (full-duplex) | `codex exec --json` (JSONL), `exec resume <thread>`; found on PATH **or inside Codex.app** | ✅ verified against codex-cli 0.142.4 |
 | OpenCode | adapter (full-duplex) | `opencode serve` HTTP + SSE (`/prompt`, `/interrupt`, `/event`) | ✅ verified against 1.17.20 |
+| Grok Code | adapter (full-duplex) | `grok -p --output-format json`, `-r <session>` | 🔶 verified against 0.2.54 — **answers only, no tool or edit events** (see below) |
 | Echo | adapter (demo/tests) | in-process | ✅ |
-| Antigravity | **bridge** (read-mostly) | Chromium debug port — reads target titles only; it can't see a conversation, an edit, or a cost | 🔶 presence only, unverified |
-| Codex, Kiro | — | not implemented | ❌ the UI ships their logos for when they exist; there is no adapter, and `loom` will reject the kind |
+| Antigravity | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
+| Kiro | **bridge** (driveable) | same, via the same driver | 🔶 mechanism verified; its selectors are not |
+
+Three of those need their asterisks spelled out, because the table row is
+shorter than the truth:
+
+**Codex reports tokens, never money.** Its `turn.completed` carries
+`input_tokens` / `output_tokens` and no dollar figure, so Loom shows tokens and
+no cost for Codex turns. A USD number derived from a price table we'd have to
+keep current is fiction with a decimal point in it.
+
+**Grok can't show you its steps.** `--output-format streaming-json` sounds like
+it would help and doesn't: it emits `thought` and `text` deltas and a final
+`end`, with no tool calls and no file edits — not even when the turn
+demonstrably ran a shell command and wrote a file. So a Grok turn in the thread
+is what it said, and `git status` is what it did. Inferring the edits by diffing
+the tree would put guesses in the event log dressed as facts. Its permission
+mode also defaults to `bypassPermissions`, because headless with no TTY to ask,
+every other mode ends the turn `Cancelled` having written nothing.
+
+**Antigravity and Kiro are driven, not routed.** Both are Electron apps with no
+API; Loom connects to the debugging port, finds the chat box, types through the
+input pipeline and reads back what the panel gained — the approach
+[antigravity_phone_chat](https://github.com/krishnakanthb13/antigravity_phone_chat)
+takes, and for the same reason: never touch the provider APIs, drive the app
+that's already signed in. Launch them with
+`--remote-debugging-port=9222` first.
+
+The driver refuses more than it accepts, on purpose. Both apps are VS Code
+family and Monaco — the editor holding your source file — is a
+`contenteditable`. Anything under `.monaco-editor` is never a candidate, a
+candidate must be labelled like a chat box, and zero-or-several matches is a
+refusal that names the fix (`options.selectors.composer`). Typing a prompt into
+your code and pressing Enter is not a mistake an error message repairs.
+
+What's verified is the mechanism, against a real Chromium. What is **not**
+verified is either app's actual chat DOM: Antigravity shows a sign-in screen and
+Kiro shows no chat panel until you open one, so there was no composer to read
+the selectors from. Reachable and driveable are separate questions, and Loom
+answers both — a signed-out Antigravity replies to CDP cheerfully and reports
+`driveable: false — no chat box on screen`.
 
 **Adapters** implement the full contract (send / stream / injectMemory / interrupt /
 diff) and may hold the baton. **Bridges** only observe and receive shared-memory
@@ -276,8 +319,10 @@ Getting it into the model's context is a different problem, and it depends on th
 | Agent | How the brain arrives | Strength |
 |---|---|---|
 | Claude Code | briefing via `--append-system-prompt` — the model *always* sees a summary (recent decisions + messages) plus a pointer to `.loom/memory/claude-code.md`, which it can Read | **strong** — the summary is guaranteed; the full file is one tool-call away |
+| Codex | no `--append-system-prompt` on `codex exec`, so the briefing rides **in front of your prompt** | **weaker** — one prompt either way, and the model may skim it |
 | OpenCode | no per-prompt system field on `/prompt`, so the same briefing is **prepended to your prompt as text** | **weaker** — the model sees Loom's handoff as something you typed |
-| Antigravity | nothing tells it the file exists | **none** — a human has to open it |
+| Grok Code | no system channel on `-p` either; the briefing is prepended the same way | **weaker** — and Grok reports no tool calls, so you can't even see whether it read the file |
+| Antigravity, Kiro | nothing tells them the file exists — Loom types into their chat box, which is not a system prompt | **none** — a human has to open it |
 
 So: the **summary always lands**; the **full brain is an invitation**. An agent that
 ignores the pointer works from the summary alone. If you need something remembered for
