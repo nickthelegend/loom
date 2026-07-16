@@ -439,18 +439,30 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dmain .msg .bubble{max-width:82%}
   .pane-inner{max-width:840px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
   .formcol{display:flex;flex-direction:column;gap:10px;max-width:520px}
-  /* split workspace: changes docked beside the thread (Orca two-group layout) */
+  /* diff/preview dock — opens to the RIGHT of the chat on click, closed by default */
   .paneswrap{flex:1;min-height:0;min-width:0;display:flex}
   .mainpane{flex:1;min-width:0;display:flex;flex-direction:column}
-  .dockpane{width:46%;min-width:360px;max-width:760px;flex:none;display:flex;flex-direction:column;min-height:0;
-    border-right:1px solid var(--border)}
+  .dockpane{width:48%;min-width:340px;max-width:820px;flex:none;display:none;flex-direction:column;min-height:0;
+    border-left:1px solid var(--border);background:var(--editor-surface)}
+  .dockpane.open{display:flex}
   .dockpane .pane{flex:1}
   .dockpane .diffwrap{max-width:none}
-  .dockhead{height:32px;flex:none;display:flex;align-items:center;gap:7px;padding:0 12px;min-width:0;
-    border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+  .dockhead{height:36px;flex:none;display:flex;align-items:center;gap:7px;padding:0 8px 0 12px;min-width:0;
+    border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);
+    background:var(--sidebar)}
   .dockhead .b{color:var(--foreground);font-weight:600}
+  .dockhead .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dockhead .sep{opacity:.6}
+  .dockhead .spacer{margin-left:auto}
+  .dockhead .iconbtn{width:26px;height:26px}
+  .dockhead .iconbtn svg{width:13px;height:13px}
   .iconbtn.active{background:var(--accent);color:var(--foreground)}
+  /* read-only file preview in the dock */
+  .filepreview{font-family:var(--font-mono);font-size:11.5px;line-height:1.6;padding:6px 0}
+  .filepreview .fl{display:grid;grid-template-columns:44px 1fr;white-space:pre;min-width:max-content}
+  .filepreview .fl .ln{color:color-mix(in srgb, var(--muted-foreground) 55%, transparent);text-align:right;
+    padding-right:10px;user-select:none;font-size:10px}
+  .filepreview .fl .lc{padding-right:14px}
   /* agent header block — who holds the pane (Orca terminal header) */
   .agenthead{display:flex;align-items:center;gap:10px;padding:10px 12px;margin:0 0 10px;
     border:1px solid var(--border);border-radius:var(--radius);background:var(--card);
@@ -498,12 +510,24 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dl.del{background:color-mix(in srgb, var(--git-del) 13%, transparent);color:var(--git-del)}
   .dl.hunk{color:var(--thread-ink);opacity:.85;padding-top:3px;padding-bottom:3px}
   .dl.meta{color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
-  /* right rail — source control (Orca) */
+  /* right rail — multi-view: Explorer / Search / Source Control / Tasks (Orca) */
   .rail{display:none;grid-column:3;grid-row:1;flex-direction:column;min-width:0;
     background:var(--sidebar);color:var(--sidebar-foreground);border-left:1px solid var(--sidebar-border)}
-  .rail .rhead{display:flex;align-items:center;gap:8px;height:40px;flex:none;padding:0 14px;
-    font-size:13px;font-weight:600;box-shadow:inset 0 -1px 0 var(--sidebar-border)}
-  .rail .rbody{flex:1;overflow-y:auto;padding:12px}
+  .railbar{display:flex;align-items:center;gap:2px;height:40px;flex:none;padding:0 6px;
+    box-shadow:inset 0 -1px 0 var(--sidebar-border)}
+  .railbar .iconbtn{width:30px;height:30px}
+  .railbar .iconbtn.active{background:var(--sidebar-accent);color:var(--foreground)}
+  .railbar .iconbtn.active::after{content:"";position:absolute}
+  .railbar .rvbtn{position:relative}
+  .railbar .rvbtn.active::before{content:"";position:absolute;left:6px;right:6px;bottom:-6px;height:2px;
+    border-radius:1px;background:var(--foreground)}
+  .railbar .spacer{margin-left:auto}
+  .rail .rhead{display:flex;align-items:center;gap:8px;height:30px;flex:none;padding:0 12px;
+    font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-family:var(--font-mono);
+    color:var(--muted-foreground);box-shadow:inset 0 -1px 0 var(--sidebar-border)}
+  .rail .rhead .b{color:var(--foreground);text-transform:none;letter-spacing:0}
+  .rail .rbody{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px}
+  .rail .rbody.pad{padding:12px}
   .rsec{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;
     color:var(--muted-foreground);font-family:var(--font-mono);margin:12px 2px 8px}
   .rsec:first-child{margin-top:0}
@@ -515,6 +539,26 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .fst.add{color:var(--git-add)}
   .fst.mod{color:var(--git-mod)}
   .fst.del{color:var(--git-del)}
+  /* explorer tree */
+  .trow{display:flex;align-items:center;gap:6px;height:24px;padding:0 6px;border-radius:var(--radius-sm);
+    font-size:12.5px;cursor:pointer;min-width:0;white-space:nowrap}
+  .trow:hover{background:var(--sidebar-accent)}
+  .trow .tw{width:12px;flex:none;color:var(--muted-foreground);display:inline-flex;justify-content:center}
+  .trow .tw svg{width:11px;height:11px;transition:transform .12s}
+  .trow.open .tw svg{transform:rotate(90deg)}
+  .trow .ti{width:14px;flex:none;color:var(--muted-foreground);display:inline-flex}
+  .trow .ti svg{width:13px;height:13px}
+  .trow .tn{overflow:hidden;text-overflow:ellipsis}
+  .trow.dir .tn{font-weight:500}
+  .tchild{overflow:hidden}
+  /* search */
+  .rsearch{padding:8px}
+  .rsearch input{width:100%;height:32px;background:transparent;border:1px solid var(--input);border-radius:var(--radius-md);
+    color:var(--foreground);padding:0 10px;font:inherit;font-size:12.5px;outline:none}
+  .dark .rsearch input{background:color-mix(in srgb, var(--input) 30%, transparent)}
+  .rsearch input:focus-visible{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 45%, transparent)}
+  .sres{display:flex;flex-direction:column;gap:1px;padding:6px 8px}
+  .sres .frow .fp .dim{color:var(--muted-foreground)}
   .railcard{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
     padding:10px 12px;margin-bottom:8px;box-shadow:0 1px 2px rgb(0 0 0 / .05)}
   .railcard .rt{font-weight:600;font-size:12px;margin-bottom:3px;display:flex;align-items:center;gap:7px}
@@ -524,6 +568,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .railcard.threadc{border-left:2px solid color-mix(in srgb, var(--thread) 60%, transparent)}
   .rempty{color:color-mix(in srgb, var(--muted-foreground) 80%, transparent);
     font-family:var(--font-mono);font-size:11.5px;padding:2px 2px 6px}
+  .taskbtn{width:100%;margin-bottom:10px}
   /* status bar (Orca, 25px) */
   .statusbar{grid-column:1 / -1;grid-row:2;display:flex;align-items:center;gap:14px;
     padding:0 12px;background:var(--sidebar);border-top:1px solid var(--sidebar-border);
@@ -612,6 +657,19 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     padding:12px 16px;border-top:1px solid var(--border)}
   .modalfoot .kbd{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
     border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:6px}
+  /* agent multi-select chips (one ADE, or several in sequence) */
+  .agsel{display:flex;flex-wrap:wrap;gap:6px}
+  .agchip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:999px;
+    border:1px solid var(--input);color:var(--foreground);background:transparent;cursor:pointer;font-size:12.5px;
+    transition:background .12s,border-color .12s}
+  .dark .agchip{background:color-mix(in srgb, var(--input) 22%, transparent)}
+  .agchip:hover{border-color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)}
+  .agchip.sel{background:var(--primary);color:var(--primary-foreground);border-color:transparent;font-weight:600}
+  .agchip .num{display:none;font-family:var(--font-mono);font-size:10px;width:16px;height:16px;border-radius:50%;
+    align-items:center;justify-content:center;background:color-mix(in srgb, var(--primary-foreground) 25%, transparent)}
+  .agchip.sel .num{display:inline-flex}
+  .agchip .role{opacity:.6;font-size:10.5px;font-family:var(--font-mono)}
+  .agchip.sel .role{opacity:.8}
   /* ── Native desktop chrome (Electron shell) ───────────── */
   html[data-electron] .sidebar .shead,
   html[data-electron] .tabstrip,
@@ -685,7 +743,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     panelRight: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>'),
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
-    tasks: svg('<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>')
+    tasks: svg('<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>'),
+    files: svg('<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><path d="M14 2v6h6"/>'),
+    folder: svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+    file: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/>'),
+    chevron: svg('<path d="m9 6 6 6-6 6"/>')
   };
 
   function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
@@ -817,12 +879,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
-      return '<div class="turncard"><div class="tch"><span>\\u270e Update(' + fl.length + " file" + (fl.length === 1 ? "" : "s") + ")</span>" +
+      var enc = p.patch ? encodeURIComponent(String(p.patch)) : "";
+      var lbl = "Update(" + fl.length + " file" + (fl.length === 1 ? "" : "s") + ")";
+      return '<div class="turncard" data-patch="' + enc + '" data-label="' + esc(lbl) + '">' +
+        '<div class="tch"><span>\\u270e ' + lbl + "</span>" +
         '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\\u2212' + Number(p.removed || 0) + "</span>" +
         '<span class="tchev">\\u25b8</span></div>' +
         '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \\u2026" : "") + "</div>" +
-        (p.patch ? '<div class="tcdiff" style="display:none"><div class="dcode">' + renderDiffLines(String(p.patch).split("\\n")) + "</div></div>" : "") +
-        "</div>";
+        '<div class="tcdiff" style="display:none"></div></div>';
     }
     if (e.kind === "handoff") return '<div class="handoff"><span class="a">' + esc(p.from || "\\u2014") + '</span><span class="shuttle">\\u27ff</span><span class="b">' + esc(p.to || "\\u2014") + "</span></div>";
     if (e.kind === "suggestion") return '<div class="sys warn">\\u2726 ' + esc(p.reason || "handoff suggested") + "</div>";
@@ -921,6 +985,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     clearTimers();
     state.pid = pid; state.lastId = 0; state.selected = null;
     state.tab = "thread"; state.tree = null; state.lastQuestion = null;
+    var expl = { kids: {}, open: {} }; // explorer tree cache — declared before any drawRail() call
 
     var headerActions =
       (desktop ? THEME_BTN : "") +
@@ -945,21 +1010,22 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<span id="tabsbox" style="display:contents"></span>' +
         '<span class="spacer"></span>' +
         '<button id="termbtn" class="iconbtn" title="toggle terminal (\\u2303\\u2018)">' + ICONS.terminal + "</button>" +
-        '<button id="splitbtn" class="iconbtn" title="dock changes beside the thread">' + ICONS.split + "</button>" +
-        '<button id="railbtn" class="iconbtn" title="toggle source control">' + ICONS.panelRight + "</button>" +
+        '<button id="railbtn" class="iconbtn" title="toggle right panel">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
         '<div class="paneswrap">' +
-        '<div class="dockpane" id="dockpane" style="display:none">' +
-        '<div class="dockhead" id="dockhead"></div>' +
-        '<div class="pane scroll" id="pane-changes" style="display:none">' + LOADER + "</div>" +
-        "</div>" +
         '<div class="mainpane" id="mainpane">' +
         '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-routes" style="display:none"></div>' +
         composerHtml +
-        "</div></div>" +
+        "</div>" +
+        '<div class="dockpane" id="dockpane">' +
+        '<div class="dockhead" id="dockhead"><span class="p">changes</span><span class="spacer"></span>' +
+        '<button id="dockclose" class="iconbtn" title="close">' + ICONS.x + "</button></div>" +
+        '<div class="pane scroll" id="pane-changes">' + LOADER + "</div>" +
+        "</div>" +
+        "</div>" +
         '<div class="termdock" id="termdock">' +
         '<div class="termresize" id="termresize"></div>' +
         '<div class="termtabs"><span id="termtabs" style="display:contents"></span>' +
@@ -991,57 +1057,23 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         .catch(function(err){ toast(err.message); });
     };
 
-    // ---- desktop tabs + dockable split -------------------------------------
-    var SPLIT_KEY = "loomSplit";
-    function splitOn(){
-      if (!desktop) return false;
-      var v = localStorage.getItem(SPLIT_KEY);
-      if (v === null) return window.innerWidth >= 1280;
-      return v === "1";
-    }
+    // ---- desktop tabs (Thread / Brain / Routes) ----------------------------
     function drawTabs(){
       var box = document.getElementById("tabsbox"); if (!box) return;
-      var tabs = splitOn() ? ["thread", "brain", "routes"] : ["thread", "changes", "brain", "routes"];
+      var tabs = ["thread", "brain", "routes"];
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
-      var files = state.tree && state.tree.git ? visibleFiles(state.tree).length : 0;
-      var LBL = { thread: [ICONS.thread, "Thread"], changes: [ICONS.tree, "Changes"],
-                  brain: [ICONS.memory, "Brain"], routes: [ICONS.route, "Routes"] };
+      var LBL = { thread: [ICONS.thread, "Thread"], brain: [ICONS.memory, "Brain"], routes: [ICONS.route, "Routes"] };
       box.innerHTML = tabs.map(function(tb){
         return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
-          LBL[tb][0] + LBL[tb][1] +
-          (tb === "changes" ? '<span class="tbadge" id="tb-changes"' + (files ? "" : ' style="display:none"') + ">" + files + "</span>" : "") +
-          "</button>";
+          LBL[tb][0] + LBL[tb][1] + "</button>";
       }).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".tab"), function(tb){
         tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
       });
     }
-    function applySplit(){
-      var dock = document.getElementById("dockpane");
-      var pc = document.getElementById("pane-changes");
-      if (!dock || !pc) return;
-      var on = splitOn();
-      dock.style.display = on ? "" : "none";
-      if (on) {
-        dock.appendChild(pc);
-        pc.style.display = "";
-        if (state.tab === "changes") state.tab = "thread";
-        refreshTree(false);
-      } else {
-        var mainp = document.getElementById("mainpane");
-        if (mainp) mainp.insertBefore(pc, document.getElementById("pane-brain"));
-        pc.style.display = state.tab === "changes" ? "" : "none";
-      }
-      var sb = document.getElementById("splitbtn");
-      if (sb) sb.classList.toggle("active", on);
-      drawTabs();
-      showTab(state.tab);
-    }
     function showTab(name){
-      if (splitOn() && name === "changes") name = "thread";
       state.tab = name;
-      ["thread", "changes", "brain", "routes"].forEach(function(t){
-        if (splitOn() && t === "changes") return; // docked — always visible
+      ["thread", "brain", "routes"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -1051,7 +1083,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       });
       var cw = document.getElementById("composerwrap");
       if (cw) cw.style.display = name === "thread" ? "" : "none";
-      if (name === "changes") refreshTree(true);
       if (name === "brain") refreshBrain();
       if (name === "routes") drawRoutesPane();
       if (name === "thread") {
@@ -1059,15 +1090,72 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         if (sc) sc.scrollTop = sc.scrollHeight;
       }
     }
-    if (desktop) {
-      document.getElementById("splitbtn").onclick = function(){
-        localStorage.setItem(SPLIT_KEY, splitOn() ? "0" : "1");
-        applySplit();
+
+    // ---- diff/preview dock (right of the chat, opens on click) --------------
+    function dockShowing(){ var d = document.getElementById("dockpane"); return d && d.classList.contains("open"); }
+    function openDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.add("open"); }
+    function closeDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.remove("open"); }
+    function dockTitle(html){ var h = document.querySelector("#dockhead .p"); if (h) h.innerHTML = html; }
+    // Show a working-tree file's diff (from the tree patch), or the whole tree.
+    function openChangesDock(focusPath){
+      openDock();
+      dockTitle(focusPath ? ICONS.tree + '<span class="p">' + esc(focusPath) + "</span>" : "Source control");
+      var render = function(){
+        var el = document.getElementById("pane-changes"); if (!el) return;
+        var t = state.tree;
+        if (!t) { el.innerHTML = LOADER; return; }
+        if (!t.git) { el.innerHTML = '<div class="diffwrap"><div class="sys">not a git repository</div></div>'; return; }
+        el.innerHTML = '<div class="diffwrap">' + renderDiffFiles(t) + "</div>";
+        if (focusPath) {
+          var files = splitPatch(t.patch).filter(function(f){ return !isLoomInternal(f.path); });
+          var idx = -1;
+          files.forEach(function(f, i){ if (f.path === focusPath) idx = i; });
+          if (idx >= 0) { var tgt = document.getElementById("df-" + idx); if (tgt) tgt.scrollIntoView({ block: "start" }); }
+        }
       };
+      if (state.tree) render();
+      else { document.getElementById("pane-changes").innerHTML = LOADER; api("/api/projects/" + pid + "/tree").then(function(j){ state.tree = j.tree || {}; render(); drawRail(); }).catch(function(){}); }
+    }
+    // Show a turn's combined patch (from a turn_diff card in the thread).
+    function openPatchDock(patch, label){
+      openDock();
+      dockTitle(ICONS.tree + '<span class="p">' + esc(label || "changes") + "</span>");
+      var el = document.getElementById("pane-changes");
+      var files = splitPatch(patch);
+      el.innerHTML = '<div class="diffwrap">' + (files.length
+        ? files.map(function(f, i){
+            return '<div class="dfile" id="df-' + i + '"><div class="dfh">' + ICONS.tree +
+              '<span class="p">' + esc(f.path || "patch") + "</span>" +
+              '<span class="cadd">+' + f.add + '</span><span class="cdel">\\u2212' + f.del + "</span></div>" +
+              '<div class="dcode">' + renderDiffLines(f.lines) + "</div></div>";
+          }).join("")
+        : '<div class="dcode">' + renderDiffLines(String(patch).split("\\n")) + "</div>") + "</div>";
+      var sc = el; if (sc) sc.scrollTop = 0;
+    }
+    // Show a read-only file preview (from Explorer clicks).
+    function openFileDock(relPath){
+      openDock();
+      dockTitle(ICONS.file + '<span class="p">' + esc(relPath) + "</span>");
+      var el = document.getElementById("pane-changes"); el.innerHTML = LOADER;
+      api("/api/projects/" + pid + "/file?path=" + encodeURIComponent(relPath)).then(function(j){
+        var lines = String(j.content || "").split("\\n");
+        el.innerHTML = '<div class="filepreview">' + lines.map(function(line, i){
+          return '<div class="fl"><span class="ln">' + (i + 1) + '</span><span class="lc">' + (esc(line) || " ") + "</span></div>";
+        }).join("") + (j.truncated ? '<div class="sys">\\u2026 file truncated at 400KB</div>' : "") + "</div>";
+        el.scrollTop = 0;
+      }).catch(function(err){ el.innerHTML = '<div class="sys err">' + esc(err.message) + "</div>"; });
+    }
+    if (desktop) {
+      document.getElementById("dockclose").onclick = closeDock;
       document.getElementById("railbtn").onclick = toggleRail;
       document.getElementById("termbtn").onclick = toggleTerm;
+      state.openChangesDock = openChangesDock;
+      state.openFileDock = openFileDock;
+      if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
-      applySplit();
+      drawTabs();
+      showTab("thread");
+      drawRail();
     }
 
     // ---- terminal dock (command runner in the project dir) -----------------
@@ -1192,48 +1280,33 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       state.toggleTerm = toggleTerm;
       applyTerm();
     }
-    // expandable Update(…) turn cards in the feed
+    // click an Update(…) card in the thread → open its diff on the right
+    // (desktop dock); on mobile, expand it inline.
     document.getElementById("feed").addEventListener("click", function(ev){
       var t = ev.target;
       while (t && t !== this && !(t.classList && t.classList.contains("turncard"))) t = t.parentNode;
       if (!t || t === this) return;
       if (ev.target.closest && ev.target.closest(".tcdiff")) return; // let diff text select/scroll
+      var enc = t.getAttribute("data-patch"); if (!enc) return;
+      var patch = decodeURIComponent(enc);
+      if (desktop) { openPatchDock(patch, t.getAttribute("data-label") || "changes"); return; }
       var d = t.querySelector(".tcdiff"); if (!d) return;
-      var open = d.style.display !== "none";
-      d.style.display = open ? "none" : "";
+      var open = d.style.display !== "none" && d.innerHTML;
+      if (open) { d.style.display = "none"; }
+      else {
+        if (!d.innerHTML) d.innerHTML = '<div class="dcode">' + renderDiffLines(patch.split("\\n")) + "</div>";
+        d.style.display = "";
+      }
       var ch = t.querySelector(".tchev");
       if (ch) ch.textContent = open ? "\\u25b8" : "\\u25be";
     });
 
-    // ---- working tree (changes pane + right rail) --------------------------
+    // ---- working tree (feeds the Source Control rail view) -----------------
     function refreshTree(force){
       api("/api/projects/" + pid + "/tree").then(function(j){
         state.tree = j.tree || {};
-        drawChanges();
-        drawRail();
+        if (state.railView === "scm") drawRail();
       }).catch(function(err){ if (force) toast(err.message); });
-    }
-    function drawChanges(){
-      var el = document.getElementById("pane-changes"); if (!el) return;
-      var t = state.tree;
-      var dh = document.getElementById("dockhead");
-      if (!t) { el.innerHTML = LOADER; return; }
-      if (!t.git) {
-        if (dh) dh.innerHTML = '<span class="b">' + esc(state.project ? state.project.name : "") + "</span><span>not a git repository</span>";
-        el.innerHTML = '<div class="diffwrap"><div class="sys">not a git repository</div></div>';
-        return;
-      }
-      var files = visibleFiles(t);
-      var tb = document.getElementById("tb-changes");
-      if (tb) { tb.textContent = String(files.length); tb.style.display = files.length ? "" : "none"; }
-      if (dh) dh.innerHTML =
-        '<span class="b">' + esc(state.project ? state.project.name : "") + "</span>" +
-        '<span class="sep">/</span><span>' + esc(t.branch || "") + "</span>" +
-        '<span class="sep">\\u2192</span><span>' + files.length + " changed</span>";
-      el.innerHTML = '<div class="diffwrap">' +
-        '<div class="dhead">' + ICONS.branch + '<span class="branch">' + esc(t.branch || "") + "</span>" +
-        "<span>" + files.length + " changed file" + (files.length === 1 ? "" : "s") + "</span></div>" +
-        renderDiffFiles(t) + "</div>";
     }
 
     // ---- brain pane ---------------------------------------------------------
@@ -1378,13 +1451,99 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     }
 
     // ---- right rail (source control) ----------------------------------------
+    // ---- right rail: Explorer / Search / Source Control / Tasks ------------
+    function railTitle(html){ var h = document.getElementById("railtitle"); if (h) h.innerHTML = html; }
+    function openFileFromTree(relPath){
+      var t = state.tree;
+      var changed = t && t.git && visibleFiles(t).some(function(f){ return f.path === relPath; });
+      if (changed) openChangesDock(relPath); else openFileDock(relPath);
+    }
     function drawRail(){
       var el = document.getElementById("railbody"); if (!el) return;
-      var p = state.project;
-      var t = state.tree;
-      var html = "";
-      var r = p && p.route;
+      var bar = document.querySelector(".railbar");
+      if (bar) Array.prototype.forEach.call(bar.querySelectorAll(".rvbtn"), function(b){
+        b.classList.toggle("active", b.getAttribute("data-view") === state.railView);
+      });
+      el.className = "rbody" + (state.railView === "explorer" || state.railView === "search" ? "" : " pad");
+      if (state.railView === "search") return drawSearch(el);
+      if (state.railView === "scm") return drawScm(el);
+      if (state.railView === "tasks") return drawTasksView(el);
+      return drawExplorer(el);
+    }
+    function renderTreeLevel(rel, depth){
+      var kids = expl.kids[rel]; if (!kids) return "";
+      return kids.map(function(e){
+        var pad = 6 + depth * 12;
+        if (e.dir) {
+          var isOpen = !!expl.open[e.path];
+          return '<div class="trow dir' + (isOpen ? " open" : "") + '" data-dir="' + esc(e.path) + '" style="padding-left:' + pad + 'px">' +
+            '<span class="tw">' + ICONS.chevron + '</span><span class="ti">' + ICONS.folder + '</span><span class="tn">' + esc(e.name) + "</span></div>" +
+            (isOpen ? '<div class="tchild">' + renderTreeLevel(e.path, depth + 1) + "</div>" : "");
+        }
+        return '<div class="trow file" data-file="' + esc(e.path) + '" style="padding-left:' + (pad + 12) + 'px">' +
+          '<span class="ti">' + ICONS.file + '</span><span class="tn">' + esc(e.name) + "</span></div>";
+      }).join("");
+    }
+    function loadDir(rel){
+      api("/api/projects/" + pid + "/files?dir=" + encodeURIComponent(rel)).then(function(j){
+        expl.kids[rel] = j.entries || [];
+        if (state.railView === "explorer") drawExplorer(document.getElementById("railbody"));
+      }).catch(function(err){ toast(err.message); });
+    }
+    function drawExplorer(el){
+      railTitle('<span class="b">' + esc(state.project ? state.project.name : "Explorer") + "</span>");
+      if (!expl.kids["."]) { el.innerHTML = LOADER; loadDir("."); return; }
+      el.innerHTML = renderTreeLevel(".", 0) || '<div class="rempty">empty</div>';
+      Array.prototype.forEach.call(el.querySelectorAll(".trow"), function(row){
+        row.onclick = function(){
+          var d = row.getAttribute("data-dir");
+          if (d) {
+            expl.open[d] = !expl.open[d];
+            if (expl.open[d] && !expl.kids[d]) loadDir(d);
+            else drawExplorer(el);
+            return;
+          }
+          var f = row.getAttribute("data-file");
+          if (f) openFileFromTree(f);
+        };
+      });
+    }
+    function drawSearch(el){
+      railTitle('<span class="b">Search</span>');
+      el.innerHTML = '<div class="rsearch"><input id="rsearchi" placeholder="find files by name\\u2026" autocomplete="off" spellcheck="false"></div><div class="sres" id="sres"></div>';
+      var inp = document.getElementById("rsearchi");
+      if (state.railSearchQ) inp.value = state.railSearchQ;
+      var to;
+      inp.oninput = function(){ state.railSearchQ = this.value; clearTimeout(to); to = setTimeout(runSearch, 220); };
+      inp.onkeydown = function(e){ if (e.key === "Enter") { clearTimeout(to); runSearch(); } };
+      setTimeout(function(){ inp.focus(); }, 20);
+      if (state.railSearchQ) runSearch();
+    }
+    function runSearch(){
+      var q = (state.railSearchQ || "").trim();
+      var res = document.getElementById("sres"); if (!res) return;
+      if (!q) { res.innerHTML = ""; return; }
+      res.innerHTML = '<div class="rempty">searching\\u2026</div>';
+      api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q)).then(function(j){
+        res = document.getElementById("sres"); if (!res) return;
+        var m = j.matches || [];
+        if (!m.length) { res.innerHTML = '<div class="rempty">no files match</div>'; return; }
+        res.innerHTML = m.map(function(pth){
+          var name = pth.split("/").pop();
+          var dir = pth.slice(0, pth.length - name.length);
+          return '<div class="frow" data-file="' + esc(pth) + '"><span style="color:var(--muted-foreground);display:inline-flex">' + ICONS.file + "</span>" +
+            '<span class="fp">' + esc(name) + ' <span class="dim">' + esc(dir) + "</span></span></div>";
+        }).join("");
+        Array.prototype.forEach.call(res.querySelectorAll(".frow[data-file]"), function(row){
+          row.onclick = function(){ openFileFromTree(row.getAttribute("data-file")); };
+        });
+      }).catch(function(err){ var r = document.getElementById("sres"); if (r) r.innerHTML = '<div class="rempty">' + esc(err.message) + "</div>"; });
+    }
+    function drawScm(el){
+      railTitle('<span class="b">Source control</span>');
+      var p = state.project, t = state.tree, r = p && p.route;
       var live = r && (r.status === "running" || r.status === "waiting_human");
+      var html = "";
       if (p && p.needsInput) {
         html += '<div class="railcard warnc"><div class="rt"><span class="dot hot"></span>needs input</div>' +
           '<div class="rm">' + esc(state.lastQuestion || (r && r.pendingQuestion) || "an agent is waiting for you \\u2014 reply in the thread") + "</div></div>";
@@ -1394,34 +1553,52 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
           (r.mode === "dynamic" ? "hop " + (r.current + 1) : "step " + (r.current + 1) + "/" + r.steps.length) +
           '</div><div class="rm">\\u25b8 ' + esc(r.steps[r.current] || "") + "</div></div>";
       }
-      html += '<div class="rsec">Working tree</div>';
-      if (!t) html += '<div class="rempty">loading\\u2026</div>';
-      else if (!t.git) html += '<div class="rempty">not a git repository</div>';
-      else {
-        html += '<div class="frow" style="cursor:default"><span style="display:inline-flex;color:var(--muted-foreground)">' + ICONS.branch + "</span>" +
-          '<span class="fp" style="color:var(--foreground);font-weight:600">' + esc(t.branch || "") + "</span></div>";
-        var files = visibleFiles(t);
-        var diffIdx = {};
-        splitPatch(t.patch).filter(function(f){ return !isLoomInternal(f.path); })
-          .forEach(function(f, i){ diffIdx[f.path] = i; });
-        if (!files.length) html += '<div class="rempty">clean \\u2014 nothing to stage</div>';
-        else files.forEach(function(f){
-          var st = String(f.status || "").trim();
-          var cls = st.indexOf("D") >= 0 ? "del" : (st.indexOf("M") >= 0 ? "mod" : "add");
-          var di = diffIdx[f.path];
-          html += '<div class="frow"' + (di !== undefined ? ' data-df="' + di + '"' : "") + '><span class="fst ' + cls + '">' + esc(st) + "</span>" +
-            '<span class="fp">' + esc(f.path) + "</span></div>";
-        });
-      }
+      html += '<div class="rsec">Changes</div>';
+      if (!t) { el.innerHTML = html + '<div class="rempty">loading\\u2026</div>'; refreshTree(false); return; }
+      if (!t.git) { el.innerHTML = html + '<div class="rempty">not a git repository</div>'; return; }
+      html += '<div class="frow" style="cursor:default"><span style="display:inline-flex;color:var(--muted-foreground)">' + ICONS.branch + "</span>" +
+        '<span class="fp" style="color:var(--foreground);font-weight:600">' + esc(t.branch || "") + "</span></div>";
+      var files = visibleFiles(t);
+      if (!files.length) html += '<div class="rempty">clean \\u2014 nothing to stage</div>';
+      else files.forEach(function(f){
+        var st = String(f.status || "").trim();
+        var cls = st.indexOf("D") >= 0 ? "del" : (st.indexOf("M") >= 0 ? "mod" : "add");
+        html += '<div class="frow" data-file="' + esc(f.path) + '"><span class="fst ' + cls + '">' + esc(st) + "</span>" +
+          '<span class="fp">' + esc(f.path) + "</span></div>";
+      });
       el.innerHTML = html;
-      Array.prototype.forEach.call(el.querySelectorAll(".frow[data-df]"), function(row){
-        row.onclick = function(){
-          if (!splitOn()) showTab("changes"); // docked pane is already visible
-          var target = document.getElementById("df-" + row.getAttribute("data-df"));
-          if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
-        };
+      Array.prototype.forEach.call(el.querySelectorAll(".frow[data-file]"), function(row){
+        row.onclick = function(){ openChangesDock(row.getAttribute("data-file")); };
       });
     }
+    function drawTasksView(el){
+      railTitle('<span class="b">Tasks</span>');
+      var p = state.project;
+      var adapters = p ? p.agents.filter(function(a){ return a.tier === "adapter"; }) : [];
+      var r = p && p.route;
+      var live = r && (r.status === "running" || r.status === "waiting_human");
+      var html = '<button class="btn primary sm taskbtn" id="railnewtask">+ New task</button>';
+      if (live) {
+        html += '<div class="railcard threadc"><div class="rt">' + esc(r.name || "route") + " \\u00b7 " +
+          (r.mode === "dynamic" ? "hop " + (r.current + 1) : "step " + (r.current + 1) + "/" + r.steps.length) +
+          '</div><div class="rm">\\u25b8 ' + esc(r.steps[r.current] || "") +
+          (r.status === "waiting_human" ? " \\u2014 \\u23f8 " + esc(r.pendingQuestion || "waiting") : "") + "</div></div>";
+      }
+      html += '<div class="rsec">Assign to</div>';
+      if (!adapters.length) html += '<div class="rempty">no agents configured</div>';
+      else adapters.forEach(function(a){
+        var hh = hue(a.id);
+        html += '<div class="frow" data-agent="' + esc(a.id) + '"><span class="adot' + (a.busy ? " busy" : "") + '"></span>' +
+          '<span class="fp" style="color:hsl(' + hh + ',55%,var(--agent-l))">' + esc(a.id) + "</span>" +
+          '<span style="margin-left:auto;color:var(--muted-foreground);font-size:10.5px">' + esc(a.role) + "</span></div>";
+      });
+      el.innerHTML = html;
+      document.getElementById("railnewtask").onclick = function(){ openTaskModal(pid); };
+      Array.prototype.forEach.call(el.querySelectorAll(".frow[data-agent]"), function(row){
+        row.onclick = function(){ openTaskModal(pid, [row.getAttribute("data-agent")]); };
+      });
+    }
+    state.drawRail = drawRail;
 
     // ---- status (title, chips, routebar, rail, statusbar) --------------------
     function drawChips(){
@@ -1490,7 +1667,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
           };
         } else { bar.innerHTML = ""; }
       }
-      if (desktop) { drawRail(); drawStatusbar(); }
+      // only the live views (Source Control, Tasks) redraw on status polls;
+      // Explorer/Search are user-driven so they aren't torn down mid-scroll.
+      if (desktop) {
+        if (state.railView === "scm" || state.railView === "tasks") drawRail();
+        drawStatusbar();
+      }
     }
 
     function refresh(){
@@ -1599,9 +1781,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       (total > 0 ? '<span class="sit">\\u03a3 ' + money(total) + "</span>" : "");
   }
 
-  // ---- rail (source control) toggle — collapsed by default -----------------
+  // ---- right rail toggle — open by default (shows the file tree) -----------
   var RAIL_KEY = "loomRail";
-  function railOpen(){ return localStorage.getItem(RAIL_KEY) === "1"; }
+  function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? true : v === "1"; }
   function applyRail(){
     var shell = document.querySelector(".dshell");
     if (shell) shell.classList.toggle("railopen", railOpen());
@@ -1614,17 +1796,18 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   }
 
   // ---- New Task modal (Orca's Create Worktree, mapped to Loom) -------------
-  function openTaskModal(prefillPid){
+  // One ADE runs it directly; several run it as a pipeline, hop to hop.
+  function openTaskModal(prefillPid, prefillAgents){
     var projects = state.projects || [];
     if (!projects.length) { toast("add a project first"); return; }
     if (document.querySelector(".scrim")) return;
     var pid = prefillPid || state.pid || projects[0].id;
+    var picked = (prefillAgents || []).slice();
     function proj(id){ for (var i = 0; i < projects.length; i++) if (projects[i].id === id) return projects[i]; return null; }
     function agentsFor(id){ var p = proj(id); return p ? p.agents.filter(function(a){ return a.tier === "adapter"; }) : []; }
     function routesFor(id){ var p = proj(id); return (p && p.routeNames) || ["auto"]; }
     function projOpts(){ return projects.map(function(p){ return '<option value="' + esc(p.id) + '"' + (p.id === pid ? " selected" : "") + ">" + esc(p.name) + "</option>"; }).join(""); }
-    function agentOpts(id){ return agentsFor(id).map(function(a){ return '<option value="' + esc(a.id) + '">' + esc(a.id) + " \\u2014 " + esc(a.role) + "</option>"; }).join(""); }
-    function routeOpts(id){ return '<option value="">\\u2014 single agent \\u2014</option>' + routesFor(id).map(function(n){ return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>"; }).join(""); }
+    function routeOpts(id){ return '<option value="">\\u2014 use the agents above \\u2014</option>' + routesFor(id).map(function(n){ return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>"; }).join(""); }
     var scrim = document.createElement("div");
     scrim.className = "scrim";
     scrim.innerHTML = '<div class="modal">' +
@@ -1632,11 +1815,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       '<div class="modalbody">' +
         '<div class="field"><label>Project</label><select id="mproj">' + projOpts() + "</select></div>" +
         '<div class="field"><label>Task</label><textarea id="mtask" placeholder="what should the agent do?"></textarea></div>' +
-        '<div class="field"><label>Agent</label><select id="magent">' + agentOpts(pid) + "</select></div>" +
+        '<div class="field"><label>Agents \\u00b7 one, or several in sequence</label>' +
+          '<div class="agsel" id="magsel"></div>' +
+          '<span class="hintx" id="maghint"></span></div>' +
         '<div class="disclose" id="madv">\\u25b8 Advanced</div>' +
-        '<div class="field" id="mroutewrap" style="display:none"><label>Run as pipeline</label>' +
+        '<div class="field" id="mroutewrap" style="display:none"><label>Named pipeline</label>' +
           '<select id="mroute">' + routeOpts(pid) + "</select>" +
-          '<span class="hintx">a pipeline hands the task hop to hop instead of one agent.</span></div>' +
+          '<span class="hintx">run one of the project\\u2019s saved pipelines instead of the agents above.</span></div>' +
       "</div>" +
       '<div class="modalfoot"><button class="btn ghost" id="mcancel">Cancel</button>' +
       '<button class="btn primary" id="mcreate">Create task<span class="kbd">\\u2318\\u21b5</span></button></div>' +
@@ -1646,6 +1831,31 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("mclose").onclick = close;
     document.getElementById("mcancel").onclick = close;
+    function drawChips(){
+      var box = document.getElementById("magsel"); if (!box) return;
+      var agents = agentsFor(pid);
+      picked = picked.filter(function(id){ return agents.some(function(a){ return a.id === id; }); });
+      box.innerHTML = agents.map(function(a){
+        var order = picked.indexOf(a.id);
+        return '<button type="button" class="agchip' + (order >= 0 ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
+          '<span class="num">' + (order >= 0 ? order + 1 : "") + "</span>" + esc(a.id) +
+          '<span class="role">' + esc(a.role) + "</span></button>";
+      }).join("") || '<span class="hintx">no agents configured for this project</span>';
+      Array.prototype.forEach.call(box.querySelectorAll(".agchip"), function(ch){
+        ch.onclick = function(){
+          var id = ch.getAttribute("data-id");
+          var i = picked.indexOf(id);
+          if (i >= 0) picked.splice(i, 1); else picked.push(id);
+          drawChips();
+        };
+      });
+      var hint = document.getElementById("maghint");
+      if (hint) hint.textContent = picked.length > 1
+        ? "runs as a pipeline: " + picked.join(" \\u2192 ")
+        : picked.length === 1
+          ? "one ADE runs the whole task"
+          : "pick one ADE \\u2014 or several to run them in order";
+    }
     var advOpen = false;
     document.getElementById("madv").onclick = function(){
       advOpen = !advOpen;
@@ -1654,32 +1864,45 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     };
     document.getElementById("mproj").onchange = function(){
       pid = this.value;
-      document.getElementById("magent").innerHTML = agentOpts(pid);
+      picked = [];
+      drawChips();
       document.getElementById("mroute").innerHTML = routeOpts(pid);
     };
+    // default-pick the current holder when nothing was prefilled
+    if (!picked.length) {
+      var holder = (proj(pid) || {}).holder;
+      if (holder && agentsFor(pid).some(function(a){ return a.id === holder; })) picked = [holder];
+    }
+    drawChips();
     setTimeout(function(){ var ta = document.getElementById("mtask"); if (ta) ta.focus(); }, 30);
     function create(){
       var mproj = document.getElementById("mproj").value;
       var task = (document.getElementById("mtask").value || "").trim();
-      var agent = document.getElementById("magent").value;
-      var spec = document.getElementById("mroute").value;
+      var pipeline = document.getElementById("mroute").value;
       if (!task) return toast("describe the task first");
+      if (!pipeline && !picked.length) return toast("pick at least one agent");
       var btn = document.getElementById("mcreate"); btn.disabled = true;
-      var work;
-      if (spec) {
-        work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: spec }) });
+      var work, note;
+      if (pipeline) {
+        work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: pipeline }) });
+        note = "pipeline " + pipeline + " started";
+      } else if (picked.length > 1) {
+        work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: picked.join(",") }) });
+        note = picked.length + " agents \\u00b7 " + picked.join(" \\u2192 ");
       } else {
+        var agent = picked[0];
         var holder = (proj(mproj) || {}).holder;
-        var chain = agent && agent !== holder
+        var chain = agent !== holder
           ? api("/api/projects/" + mproj + "/handoff", { method: "POST", body: JSON.stringify({ to: agent }) })
           : Promise.resolve();
         work = chain.then(function(){
-          return api("/api/projects/" + mproj + "/messages", { method: "POST", body: JSON.stringify({ text: task, agentId: agent || undefined }) });
+          return api("/api/projects/" + mproj + "/messages", { method: "POST", body: JSON.stringify({ text: task, agentId: agent }) });
         });
+        note = "task sent to " + agent;
       }
       work.then(function(){
         close();
-        toast(spec ? "route started" : "task sent to " + agent);
+        toast(note);
         if (state.selectProject) state.selectProject(mproj);
         else location.hash = "#p/" + mproj;
       }).catch(function(err){ btn.disabled = false; toast(err.message); });
@@ -1718,15 +1941,32 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         '<button id="unpair" class="iconbtn" title="unpair this device">' + ICONS.unpair + "</button></div>" +
       "</aside>" +
       '<section class="dmain" id="dmain"></section>' +
-      '<aside class="rail"><div class="rhead">Source control' +
-        '<span class="spacer"></span><button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button>" +
-        '<button id="railclose" class="iconbtn" title="hide">' + ICONS.x + "</button></div>" +
+      '<aside class="rail">' +
+        '<div class="railbar">' +
+          '<button class="iconbtn rvbtn" data-view="explorer" title="Explorer">' + ICONS.files + "</button>" +
+          '<button class="iconbtn rvbtn" data-view="search" title="Search">' + ICONS.search + "</button>" +
+          '<button class="iconbtn rvbtn" data-view="scm" title="Source Control">' + ICONS.branch + "</button>" +
+          '<button class="iconbtn rvbtn" data-view="tasks" title="Tasks">' + ICONS.tasks + "</button>" +
+          '<span class="spacer"></span>' +
+          '<button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button>" +
+          '<button id="railclose" class="iconbtn" title="hide panel">' + ICONS.panelRight + "</button>" +
+        "</div>" +
+        '<div class="rhead" id="railtitle"><span class="b">Explorer</span></div>' +
         '<div class="rbody" id="railbody"><div class="rempty">select a project</div></div></aside>' +
       '<div class="statusbar" id="statusbar"></div>' +
       "</div>";
     document.getElementById("unpair").onclick = logout;
     document.getElementById("railclose").onclick = toggleRail;
     document.getElementById("newtask").onclick = function(){ openTaskModal(cur); };
+    if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
+    Array.prototype.forEach.call(document.querySelectorAll(".railbar .rvbtn"), function(b){
+      b.onclick = function(){
+        state.railView = b.getAttribute("data-view");
+        localStorage.setItem("loomRailView", state.railView);
+        if (!railOpen()) toggleRail();
+        if (state.drawRail) state.drawRail();
+      };
+    });
     applyRail();
     var filter = "";
     document.getElementById("sfilter").oninput = function(){
@@ -1839,6 +2079,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     applyTheme();
     state.toggleTerm = null;
     state.selectProject = null;
+    state.drawRail = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);

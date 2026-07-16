@@ -443,6 +443,88 @@ export class LoomDaemon {
       child.kill("SIGINT");
       res.json({ killed: true });
     });
+
+    // Explorer: list a directory, read a file, search filenames. All strictly
+    // sandboxed to the project directory (no traversal outside it).
+    const projectPath = (id: string, rel: string | undefined): string | null => {
+      const info = findProject(id);
+      if (!info) return null;
+      const base = path.resolve(info.dir);
+      const target = path.resolve(base, rel ?? ".");
+      if (target !== base && !target.startsWith(base + path.sep)) return null;
+      return target;
+    };
+    const HIDE_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".cache", "coverage"]);
+
+    app.get("/api/projects/:id/files", (req, res) => {
+      const dir = projectPath(String(req.params.id), req.query.dir ? String(req.query.dir) : ".");
+      if (!dir) return void res.status(404).json({ error: "not found" });
+      const base = projectPath(String(req.params.id), ".")!;
+      fs.readdir(dir, { withFileTypes: true }, (err, ents) => {
+        if (err) return void res.status(400).json({ error: err.message });
+        const entries = ents
+          .filter((e) => e.name !== ".git")
+          .map((e) => ({
+            name: e.name,
+            path: path.relative(base, path.join(dir, e.name)),
+            dir: e.isDirectory(),
+          }))
+          .sort((a, b) =>
+            a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1,
+          )
+          .slice(0, 500);
+        res.json({ dir: path.relative(base, dir), entries });
+      });
+    });
+
+    app.get("/api/projects/:id/file", (req, res) => {
+      const file = projectPath(String(req.params.id), req.query.path ? String(req.query.path) : "");
+      if (!file) return void res.status(404).json({ error: "not found" });
+      fs.stat(file, (err, st) => {
+        if (err) return void res.status(400).json({ error: err.message });
+        if (st.isDirectory()) return void res.status(400).json({ error: "is a directory" });
+        const MAX = 400_000;
+        const truncated = st.size > MAX;
+        const stream = fs.createReadStream(file, { start: 0, end: Math.min(st.size, MAX) - 1, encoding: "utf8" });
+        let content = "";
+        stream.on("data", (c) => (content += c));
+        stream.on("error", (e) => res.status(400).json({ error: e.message }));
+        stream.on("end", () => {
+          const base = projectPath(String(req.params.id), ".")!;
+          res.json({ path: path.relative(base, file), content, truncated, size: st.size });
+        });
+      });
+    });
+
+    app.get("/api/projects/:id/find", (req, res) => {
+      const base = projectPath(String(req.params.id), ".");
+      if (!base) return void res.status(404).json({ error: "not found" });
+      const q = String(req.query.q ?? "").trim().toLowerCase();
+      if (!q) return void res.json({ matches: [] });
+      const matches: string[] = [];
+      let visited = 0;
+      const walk = (dir: string) => {
+        if (matches.length >= 200 || visited >= 20_000) return;
+        let ents: fs.Dirent[];
+        try {
+          ents = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const e of ents) {
+          if (matches.length >= 200 || visited >= 20_000) return;
+          visited++;
+          if (e.isDirectory()) {
+            if (HIDE_DIRS.has(e.name)) continue;
+            walk(path.join(dir, e.name));
+          } else if (e.name.toLowerCase().includes(q)) {
+            matches.push(path.relative(base, path.join(dir, e.name)));
+          }
+        }
+      };
+      walk(base);
+      res.json({ matches });
+    });
   }
 
   // -------------------------------------------------------------------------
