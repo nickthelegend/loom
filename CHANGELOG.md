@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A symlink inside a project could read files anywhere on disk.** The
+  Explorer endpoints resolved paths with `path.resolve`, which resolves
+  straight *through* symlinks, so the sandbox only stopped lexical `../`
+  traversal. Containment is now verified twice — lexically and again against
+  `fs.realpathSync`. Found by the new workspace tests.
+
+### Testing
+
+- `test/workspace.test.ts` (28 tests) covers the surfaces the desktop UI is
+  built on and previously had none: Explorer listing/reading/find, the sandbox
+  (traversal, absolute paths, symlink escape, unauthenticated access), and the
+  terminal end-to-end (streams output, exit codes, no sentinel leakage, `cd`
+  and variables persisting, terminal isolation, and Ctrl+C giving exit 130
+  while the shell survives). Suite: 96 → 124.
+
+### Accessibility
+
+- Every icon-only control now carries an `aria-label`, mirrored from its
+  tooltip by an observer so string-rendered UI can't miss one. Verified: 17
+  icon-only controls on desktop, 6 on mobile, none unnamed.
+
 ### Design — quiet graphite (2026-07-16)
 
 - Every surface redesigned on one system adapted from
