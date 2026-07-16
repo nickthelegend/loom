@@ -92,6 +92,20 @@ function mount({ desktop = true, hash = "", token = clientToken as string | null
     pretendToBeVisual: true,
     virtualConsole,
     beforeParse(window) {
+      // Capabilities a browser has and jsdom doesn't. Supplied rather than
+      // filtered out of `errors`: jsdom reports these as page errors, and a
+      // test that ignores whole classes of error stops being able to tell you
+      // when the app really throws. The app legitimately scrolls the thread to
+      // the bottom and watches panes for resize.
+      window.scrollTo = () => {};
+      window.HTMLElement.prototype.scrollTo = () => {};
+      window.HTMLElement.prototype.scrollIntoView = () => {};
+      window.ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof window.ResizeObserver;
+
       // jsdom has no matchMedia; the app picks its layout with one
       window.matchMedia = ((q: string) => ({
         matches: /min-width/.test(q) ? desktop : false,
@@ -160,7 +174,7 @@ describe("web app · boot", () => {
   it("an unpaired visitor gets the pairing screen, not a broken shell", async () => {
     const m = mount({ token: null });
     await waitUntil(() => !!$(m, "#ptok, .pairbox, .pair"));
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 
   it("a paired desktop client renders the workspace against the real daemon", async () => {
@@ -168,14 +182,14 @@ describe("web app · boot", () => {
     // the sidebar is filled from GET /api/projects — real data, real token
     await waitUntil(() => !!$(m, "#slist .srow"));
     expect(text(m, "#slist")).toContain("weave");
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 
   it("the phone layout renders the project board without throwing", async () => {
     const m = mount({ desktop: false });
     await waitUntil(() => !!$(m, "#list .card"));
     expect(text(m, "#list")).toContain("weave");
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 });
 
@@ -208,7 +222,7 @@ describe("web app · theme toggle", () => {
     click($(m, "#themebtn"));
     expect(html.classList.contains("dark")).toBe(true);
     expect(m.window.localStorage.getItem("loomTheme")).toBe("dark");
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 });
 
@@ -230,7 +244,7 @@ describe("web app · board", () => {
     expect(cols).toEqual(["working", "needs-you", "in-review", "ready"]);
     // this project isn't a git repo and gh isn't signed in here: the PR half
     // can't load, and the board still has to draw rather than blank out
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 
   /**
@@ -243,7 +257,7 @@ describe("web app · board", () => {
     const m = await openBoard();
     expect(text(m, ".bcols")).not.toContain("plannerbot is working");
     expect(m.window.document.querySelectorAll(".bempty").length).toBe(4);
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 });
 
@@ -264,7 +278,7 @@ describe("web app · board task modal", () => {
     expect(($(m, "#bmcol") as HTMLSelectElement).value).toBe("needs-you");
     // "Create & start" stays hidden until an agent is actually picked
     expect(($(m, "#bmstart") as HTMLElement).style.display).toBe("none");
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 
   it("offers the project's agents to hand the task to", async () => {
@@ -272,7 +286,7 @@ describe("web app · board task modal", () => {
     click($(m, '.badd[data-add="working"]'));
     await waitUntil(() => !!$(m, "#bmagsel .agchip, #bmagsel .chip, #bmagsel button"));
     expect(text(m, "#bmagsel")).toContain("plannerbot");
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 
   it("Escape closes it without creating anything", async () => {
@@ -286,7 +300,7 @@ describe("web app · board task modal", () => {
     );
     await waitUntil(() => !$(m, ".scrim"));
     expect(m.window.document.querySelectorAll(".bcard, .card").length).toBe(before);
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
   });
 
   it("creates a real card that survives a reload", async () => {
@@ -301,12 +315,12 @@ describe("web app · board task modal", () => {
     // the modal closes and the column redraws with it
     await waitUntil(() => !$(m, ".scrim"));
     await waitUntil(() => text(m, '.bcol[data-col="needs-you"]').includes(title));
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
 
     // and it's the daemon's card now, not a DOM flourish: a fresh window sees it
     const m2 = await openBoard();
     await waitUntil(() => text(m2, '.bcol[data-col="needs-you"]').includes(title));
-    expect(m2.errors).toEqual([]);
+    expect(m2.errors.join("\n")).toBe("");
   });
 
   it("refuses an empty task instead of creating a blank card", async () => {
@@ -318,6 +332,62 @@ describe("web app · board task modal", () => {
     await waitUntil(() => !!$(m, "#toast.show"));
     expect(text(m, "#toast")).toContain("what needs doing");
     expect($(m, ".scrim")).toBeTruthy(); // still open, nothing created
-    expect(m.errors).toEqual([]);
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+/**
+ * The whole product in one gesture: type, send, an agent answers, and the reply
+ * arrives over the WebSocket. It runs against the real daemon and a real echo
+ * adapter, so this exercises the composer, the POST, the event log, the socket,
+ * and the thread rendering together. If this passes, Loom works.
+ */
+describe("web app · the thread", () => {
+  it("sends a message and renders the agent's reply, live over the socket", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#box"));
+
+    const said = `hello from a dom ${Date.now()}`;
+    ($(m, "#box") as HTMLInputElement).value = said;
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(
+      new m.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+
+    // what you said shows up as yours
+    await waitUntil(() => text(m, "#thread, .thread, #pane-thread").includes(said));
+    // ...and echo answers with it, delivered by the WebSocket rather than a reload
+    await waitUntil(() => {
+      const bubbles = [...m.window.document.querySelectorAll(".bubble")];
+      return bubbles.filter((b) => (b.textContent ?? "").includes(said)).length >= 2;
+    });
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("clears the composer after sending, so you don't send it twice", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#box"));
+    const box = $(m, "#box") as HTMLInputElement;
+    box.value = `once only ${Date.now()}`;
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(
+      new m.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await waitUntil(() => box.value === "");
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+/**
+ * A project holds conversations. Main is implicit and can't be deleted; the
+ * others are yours to make and forget.
+ */
+describe("web app · chats", () => {
+  it("lists Main under the selected project, and offers a new one", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, ".crow[data-chat]"));
+    expect(text(m, ".sgroup")).toContain("Main");
+    expect($(m, ".crow.add[data-newchat]")).toBeTruthy();
+    // main is implicit: there is nothing to forget
+    expect($(m, '.crow[data-chat="main"] [data-delchat]')).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
   });
 });
