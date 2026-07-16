@@ -347,6 +347,18 @@ class PipeSession implements TerminalSession {
 // manager
 // ---------------------------------------------------------------------------
 
+/**
+ * The session cap, distinct from every other reason a shell won't start. A
+ * spawn failure and "you have too many tabs open" are different facts and the
+ * caller answers them with different status codes.
+ */
+export class TooManySessionsError extends Error {
+  constructor(max: number) {
+    super(`too many terminal sessions (max ${max})`);
+    this.name = "TooManySessionsError";
+  }
+}
+
 export class TerminalManager {
   private sessions = new Map<string, TerminalSession>();
   constructor(
@@ -375,7 +387,7 @@ export class TerminalManager {
   ): TerminalSession {
     const existing = this.get(projectId, termId);
     if (existing) return existing;
-    if (this.sessions.size >= this.maxSessions) throw new Error("too many terminal sessions");
+    if (this.sessions.size >= this.maxSessions) throw new TooManySessionsError(this.maxSessions);
     const mod = loadPty();
     const sess: TerminalSession = mod
       ? new PtySession(projectId, termId, dir, mod, this.events, cols, rows)

@@ -7,10 +7,10 @@
  * to a daemon that behaves like the real one and dies with the test.
  */
 
-import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error — plain ESM JS, no types; that's the point of the seam
 import { isStaleDaemon, localBuildRev, prepareAppUrl } from "../desktop/loom-app.js";
@@ -132,17 +132,23 @@ describe("desktop · prepareAppUrl", () => {
   });
 });
 
-/** Guard the mirror: the two revs are computed in different files and must agree. */
+/**
+ * The shell and the daemon compute the same fingerprint in two files, and the
+ * shell restarts any daemon whose rev differs from its own. If they ever
+ * disagree, the desktop app kills and respawns a perfectly current daemon on
+ * every launch, forever.
+ *
+ * This must compare against the daemon's REAL rev, not a third copy of the
+ * hashing rule — a duplicate would agree with itself while both drift from
+ * server.ts. Hence the dist import: BUILD_REV hashes its own `import.meta.url`,
+ * so only the built module fingerprints the bytes the shell actually reads.
+ */
 describe("desktop · rev mirrors the daemon", () => {
-  it("hashes the same bytes the daemon hashes for its own rev", async () => {
-    const daemonDir = path.resolve(import.meta.dirname, "..", "dist", "daemon");
-    if (!fs.existsSync(path.join(daemonDir, "server.js"))) return; // not built
-    const hash = crypto
-      .createHash("sha256")
-      .update(fs.readFileSync(path.join(daemonDir, "server.js")))
-      .update(fs.readFileSync(path.join(daemonDir, "app-page.js")))
-      .digest("hex")
-      .slice(0, 16);
-    expect(localBuildRev()).toBe(hash);
+  it("agrees with the rev the built daemon reports for itself", async () => {
+    const built = path.resolve(import.meta.dirname, "..", "dist", "daemon", "server.js");
+    expect(fs.existsSync(built), "run `npm run build` — this guards the built output").toBe(true);
+    const { BUILD_REV } = (await import(pathToFileURL(built).href)) as { BUILD_REV: string };
+    expect(BUILD_REV).toMatch(/^[0-9a-f]{16}$/);
+    expect(localBuildRev()).toBe(BUILD_REV);
   });
 });

@@ -382,7 +382,7 @@ sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running 
 ## Development
 
 ```bash
-npm test          # 150 tests: unit + full HTTP/WS end-to-end
+npm test          # 158 tests: unit + full HTTP/WS end-to-end
 npm run build     # tsc → dist/
 npm run dev       # run the CLI from source (tsx)
 ```

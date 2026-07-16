@@ -125,13 +125,33 @@ export function agentEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Is a CLI on PATH (exit 0 for `--version`)? */
-export function cliAvailable(cmd: string, args: string[] = ["--version"]): Promise<boolean> {
+/**
+ * Is a CLI on PATH (exit 0 for `--version`)?
+ *
+ * Bounded: this sits in front of HTTP handlers (Tasks probes `gh` on every
+ * request), and a version probe that wedges would otherwise hang that request
+ * forever with no response. A CLI that can't say its own version inside the
+ * timeout is unavailable as far as callers are concerned.
+ */
+export function cliAvailable(
+  cmd: string,
+  args: string[] = ["--version"],
+  timeoutMs = 5_000,
+): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const child = spawn(cmd, args, { stdio: "ignore" });
-      child.on("close", (code) => resolve(code === 0));
-      child.on("error", () => resolve(false));
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve(false);
+      }, timeoutMs);
+      timer.unref();
+      const done = (v: boolean): void => {
+        clearTimeout(timer);
+        resolve(v);
+      };
+      child.on("close", (code) => done(code === 0));
+      child.on("error", () => done(false));
     } catch {
       resolve(false);
     }

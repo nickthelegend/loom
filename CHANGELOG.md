@@ -60,6 +60,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no consumer ever read, and five rules for classes nothing renders. `route()`
   now also clears `state.retheme`, which alone survived a view teardown holding
   the previous render's terminals.
+- **Tasks blamed a missing remote for every failure it didn't recognise.** A
+  timeout, a 500, a rate limit, or a private repo you lack scope for all told
+  you to "add a GitHub remote and reload" — with the remote right there. gh's
+  failures are now sorted by what gh actually prints, and the panel shows gh's
+  own words. Fixes a live mis-read too: gh's message for a *non-GitHub* remote
+  mentions `gh auth login`, so a GitLab remote was reported as "signed out".
+- The terminal routes answered **429 "too many requests" for any failure to
+  start a shell**, and `/term/input` could hand a JSON client Express's HTML
+  error page. Only the session cap is a 429 now, and it says what the cap is.
+- `cliAvailable()` had no timeout. It runs in front of HTTP handlers (Tasks
+  probes `gh` on every request), so one wedged `gh --version` hung that request
+  forever with no reply. Bounded at 5s, and the child is reaped.
 
 ### Documentation
 
@@ -117,8 +129,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be unit-tested without being it: the build-rev fingerprint (including that a
   UI-only rebuild moves it), the stale-daemon decision (and that an
   un-fingerprintable daemon is never killed), and the pairing handshake —
-  against a fake daemon, so no test can spawn or kill a real one.
-- Suite: 96 → 150.
+  against a fake daemon, so no test can spawn or kill a real one. The
+  rev-mirrors-the-daemon check imports the built daemon's own `BUILD_REV`
+  rather than re-deriving it, so the two can't drift in agreement.
+- **Two tests couldn't fail**, which is worse than not having them. The
+  interrupt test passed in pty mode with `PtySession.interrupt()` gutted: a pty
+  echoes what you type, so it matched `/alive/` on the echo of `echo alive`
+  while `sleep 30` still held the shell. And `LOOM_EXPECT_PTY` was referenced
+  once, set nowhere, and inverted — no value of it could fail the pty suite
+  when node-pty was absent, so a failed build (it's optional, and has no Linux
+  prebuild) would have downgraded every pty test to a no-op with CI green.
+  `LOOM_EXPECT_PTY=1` now asserts the backend and CI sets it; that run confirms
+  the runner really does build node-pty.
+- `test/tasks.test.ts` locks gh's failure classification against the strings gh
+  actually prints, and `test/docs.test.ts` checks the docs only import things
+  that resolve. Every new test above was checked by breaking the code and
+  watching it go red.
+- CI now typechecks `app/`, which nothing was compiling.
+- Suite: 96 → 158.
 
 ### Accessibility
 

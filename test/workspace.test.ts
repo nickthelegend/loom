@@ -341,6 +341,37 @@ describe("terminal", () => {
     expect(body.reused).toBe(true);
     expect(body.scrollback).toContain("rejoin-marker");
   });
+
+  // Last in this block on purpose: it fills the session table, so anything
+  // opening a shell after it would hit the cap. It cleans up regardless.
+  it("answers the session cap with a JSON 429, on open and on input", async () => {
+    const opened: string[] = [];
+    try {
+      let capped: Response | null = null;
+      for (let i = 0; i < 40 && !capped; i++) {
+        const id = `cap${i}`;
+        const res = await post(`/api/projects/${projectId}/term/open`, { term: id });
+        if (res.ok) opened.push(id);
+        else capped = res;
+      }
+      expect(capped, "never hit the session cap").not.toBeNull();
+      expect(capped!.status).toBe(429);
+      expect((await capped!.json()) as { error: string }).toMatchObject({
+        error: expect.stringContaining("too many terminal sessions"),
+      });
+
+      // /term/input opens a session when none exists, so it can fail the same
+      // way — and used to hand a JSON client Express's HTML error page
+      const viaInput = await post(`/api/projects/${projectId}/term/input`, {
+        term: "cap-via-input",
+        data: "x",
+      });
+      expect(viaInput.status).toBe(429);
+      expect(viaInput.headers.get("content-type")).toMatch(/application\/json/);
+    } finally {
+      for (const id of opened) await post(`/api/projects/${projectId}/term/close`, { term: id });
+    }
+  });
 });
 
 // A pty is the real thing: the shell is on a tty, so it echoes what you type

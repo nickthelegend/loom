@@ -35,7 +35,7 @@ import { AuthManager, bearerToken } from "./auth.js";
 import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
 import { ProjectRuntime } from "./runtime.js";
 import { listTasks } from "./tasks.js";
-import { TerminalManager } from "./terminals.js";
+import { TerminalManager, TooManySessionsError } from "./terminals.js";
 
 export interface DaemonOptions {
   host?: string;
@@ -460,7 +460,11 @@ export class LoomDaemon {
         const sess = this.terminals.open(info.id, termId, info.dir, cols ?? 80, rows ?? 24);
         res.json({ term: termId, cwd: sess.cwd, mode: sess.mode, reused: false, scrollback: "" });
       } catch (err) {
-        res.status(429).json({ error: (err as Error).message });
+        // only the cap is a 429 — a shell that won't spawn is our problem, not
+        // the client's rate
+        res.status(err instanceof TooManySessionsError ? 429 : 500).json({
+          error: (err as Error).message,
+        });
       }
     });
 
@@ -469,10 +473,18 @@ export class LoomDaemon {
       if (!info) return void res.status(404).json({ error: "unknown project" });
       const { term, data } = (req.body ?? {}) as { term?: string; data?: string };
       const termId = String(term ?? "t1");
-      const sess =
-        this.terminals.get(info.id, termId) ?? this.terminals.open(info.id, termId, info.dir);
-      sess.write(String(data ?? ""));
-      res.json({ ok: true });
+      try {
+        // this opens a session when none exists, so it can fail the same ways
+        // /term/open can — uncaught, Express answers a JSON client with HTML
+        const sess =
+          this.terminals.get(info.id, termId) ?? this.terminals.open(info.id, termId, info.dir);
+        sess.write(String(data ?? ""));
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(err instanceof TooManySessionsError ? 429 : 500).json({
+          error: (err as Error).message,
+        });
+      }
     });
 
     app.post("/api/projects/:id/term/signal", (req, res) => {
