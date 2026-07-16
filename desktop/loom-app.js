@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI_ENTRY = path.resolve(here, "..", "dist", "cli", "index.js");
+const DIST_DAEMON = path.resolve(here, "..", "dist", "daemon");
 
 function loomHome() {
   return process.env.LOOM_HOME ?? path.join(os.homedir(), ".loom");
@@ -39,13 +40,15 @@ async function health(cfg) {
   }
 }
 
-// Mirror of the daemon's BUILD_REV (content hash of the compiled server
-// module + the served web app), so the shell can tell when a running daemon
-// is serving yesterday's UI. Content-based, not mtime — exFAT volumes report
-// different mtimes to different runtimes, which made mtime revs lie.
-function localBuildRev() {
+/**
+ * Mirror of the daemon's BUILD_REV (content hash of the compiled server
+ * module + the served web app), so the shell can tell when a running daemon
+ * is serving yesterday's UI. Content-based, not mtime — exFAT volumes report
+ * different mtimes to different runtimes, which made mtime revs lie.
+ * `daemonDir` is a parameter so tests can hash a fixture instead of dist.
+ */
+export function localBuildRev(daemonDir = DIST_DAEMON) {
   try {
-    const daemonDir = path.resolve(here, "..", "dist", "daemon");
     const hash = crypto
       .createHash("sha256")
       .update(fs.readFileSync(path.join(daemonDir, "server.js")));
@@ -60,12 +63,21 @@ function localBuildRev() {
   }
 }
 
+/**
+ * A live daemon from an older build serves yesterday's UI, so the shell has to
+ * restart it. Unknown on either side means "assume current": we'd rather load a
+ * possibly-stale app than kill a daemon we can't fingerprint.
+ */
+export function isStaleDaemon(aliveRev, localRev) {
+  if (!aliveRev || !localRev) return false;
+  return aliveRev !== localRev;
+}
+
 async function ensureDaemon() {
   let cfg = readDaemonConfig();
   const alive = cfg ? await health(cfg) : null;
   if (alive) {
-    const local = localBuildRev();
-    if (!local || alive.rev === local) return cfg;
+    if (!isStaleDaemon(alive.rev, localBuildRev())) return cfg;
     // A healthy daemon from an older build would serve the old app — restart
     // it (same auto-restart `loom up` performs on a stale rev).
     if (cfg.pid) {

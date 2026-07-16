@@ -1,9 +1,17 @@
 # Loom — Architecture & v1 Design
 
-> **Working name: Loom.** A loom weaves many threads into one fabric — the agents are
-> threads, shared memory is the weave, the tailnet is a literal mesh. Final name TBD;
-> alternatives on the table: **Baton** (the hand-off), **Choir** (many voices, one score),
-> **Switchboard** (the honest literal).
+> **The name stuck: Loom.** A loom weaves many threads into one fabric — the agents are
+> threads, shared memory is the weave, the tailnet is a literal mesh. It ships on npm as
+> [`threadloom`](https://www.npmjs.com/package/threadloom) (`loom` was taken).
+
+> **Status — read this as the design record, not the current map.** It's the reasoning the
+> project was built from, and the *decisions* below all held. Some of the plan didn't
+> survive contact: the surfaces grew from two to four (a web app and an Electron shell
+> arrived alongside the CLI and phone), the phone app is Android-first over Expo rather
+> than iOS-first over APNs, and the "pre-build spikes" have all been run — see
+> [docs/integration-notes.md](docs/integration-notes.md) for what the agents actually do.
+> Corrections are marked **[shipped]** inline. For what exists today, start at the
+> [README](README.md).
 
 ## What it is
 
@@ -31,7 +39,7 @@ interfaces, and session models, and Loom makes them behave like one organism.
 | **Baton** | The write lock. Exactly one agent per project holds it and may edit the tree. |
 | **Projection** | Rendering the log into a target agent's native memory format on handoff. |
 | **Role** | An agent instance's declared function: planner / executor / reviewer / general. |
-| **Surface** | Where you interact: CLI (v1), iOS app (v1.5). |
+| **Surface** | Where you interact. **[shipped]** four of them: TUI/CLI, web app, Electron desktop shell, phone app — every one a paired client of the same daemon. |
 
 ## Decisions (locked)
 
@@ -48,14 +56,22 @@ interfaces, and session models, and Loom makes them behave like one organism.
 | Concurrency | Many concurrent projects, **per-project** baton | Async agents across projects is half the value |
 | Async | **Core**: fire-and-notify | The "check from my phone" magic; justifies native push |
 | Product | OSS core + public adapter/bridge SDK | Community writes adapters (like MCP servers proliferated) |
-| Runtime | TypeScript / Node (daemon, CLI, web); React Native (iOS-first app) | One language end-to-end, biggest contributor pool |
+| Runtime | TypeScript / Node (daemon, CLI, web); React Native (phone app) | One language end-to-end, biggest contributor pool |
+
+**[shipped]** The phone app is **Android-first on Expo**, not iOS-first: push goes through
+Expo's service, so Loom manages no APNs/FCM credentials — the same "no accounts, no keys"
+bet the rest of the project makes. The v1 wedge row also under-sold itself: manual routing
+shipped *and* so did LLM auto-routing (`src/core/router.ts`).
 
 ## Architecture
 
+**[shipped]** — four surfaces, not two; every one a paired client of the same daemon:
+
 ```
-        iOS app  ── tailnet ──┐         (v1.5)
-        laptop CLI ───────────┤         (v1)
-                              ▼
+        phone app ── tailnet ──┐
+        web app  ──────────────┤        browser, or the Electron shell around it
+        laptop CLI/TUI ────────┤
+                               ▼
                         loom daemon
                          │
          ┌───────────────┼────────────────┐
@@ -132,19 +148,30 @@ A Bridge implements only a subset and is **explicitly second-class**:
 
 - Daemon runs **many projects at once**; each has an independent baton and log.
 - Agents are **long-running/background**. When one **needs input** or **finishes**, Loom
-  notifies you: CLI/desktop notification in v1, **APNs push** to the iOS app in v1.5.
+  notifies you: a local CLI/desktop notification, and **push to the phone** — **[shipped]**
+  through Expo's push service (`src/daemon/push.ts`), not APNs.
 - The primary surface is a **board of projects**, each opening into a shared thread.
 
 ## Surfaces
 
-- **v1 — CLI.** Full experience: create projects, add agents, chat, pass the baton, watch
+**[shipped]** All four exist; none is "later".
+
+- **TUI / CLI.** Full experience: create projects, add agents, chat, pass the baton, watch
   streams, get notified.
-- **v1.5 — iOS app (React Native).** Thin client over the tailnet to the daemon's
-  WebSocket API. Push notifications for "needs input" / "done". Android falls out later.
+- **Web app.** Served by the daemon itself at `/app` (`src/daemon/app-page.ts`) — no build
+  step, no CDN. On a wide screen it's the full workspace (thread, tasks, explorer, diffs,
+  a real pty terminal); on a phone-sized screen it's the board.
+- **Desktop shell.** A thin first-party Electron window around that same `/app`
+  ([`desktop/`](desktop/README.md)) — not an IDE, no editor.
+- **Phone app (React Native / Expo).** Thin client over the tailnet to the daemon's
+  WebSocket API. Push for "needs input" / "done". Android-first; iOS needs only a build.
 
 ## Open risks / pre-build spikes
 
-These are assumptions to **verify before building**, not settled facts:
+**[shipped]** These were assumptions to verify before building — all have since been run
+against real, pinned versions; the findings live in
+[docs/integration-notes.md](docs/integration-notes.md). Kept here as the record of what
+was uncertain at the start:
 
 1. **OpenCode `serve`** — confirm it exposes a live event/SSE stream and per-session
    control sufficient for eager capture + interrupt.
@@ -157,6 +184,10 @@ These are assumptions to **verify before building**, not settled facts:
    complete"); a model-based classifier is a later refinement.
 
 ## v1 build sequence (proposed)
+
+**[shipped]** Every step below is built, in roughly this order — with step 10 landing as
+an Expo/Android app rather than iOS/APNs, and a web app plus desktop shell arriving that
+this list never anticipated. See the [CHANGELOG](CHANGELOG.md) for what actually happened.
 
 1. Daemon skeleton + project model + SQLite event log.
 2. First Adapter (Claude Code headless) — send, stream→log, injectMemory, lock, interrupt.
@@ -175,3 +206,6 @@ These are assumptions to **verify before building**, not settled facts:
 Working name **Loom**. Decide once we see which of {routing, memory, surface} feels like
 the soul in practice — Baton if handoff dominates, Choir if it's the shared-context feel,
 Switchboard if it stays a router. Loom is the safe, brandable default.
+
+**[shipped]** Loom it is — the shared-context feel won, which is why the tagline settled on
+*the shared-memory layer*. The npm package is `threadloom`; the command stayed `loom`.

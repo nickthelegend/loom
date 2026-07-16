@@ -80,7 +80,8 @@ drag-resizable and persisted; double-click a handle to reset
   nested agent rows: status dot (amber pulse = working), `baton` badge on the
   holder, role labels. Clicking an agent targets it for the next send.
 - **Tab strip (40px)** — *is* the window chrome: project context, then
-  Thread | Brain | Routes, then the terminal / right-panel / theme toggles.
+  Thread | Tasks | Brain | Routes, then the terminal / right-panel / theme
+  toggles.
   The active tab merges into the canvas; the composer docks under Thread only.
 - **Diff dock (right of the chat, closed by default)** — opens only when you
   click a change: an `Update(n files)` card in the thread, or a file in

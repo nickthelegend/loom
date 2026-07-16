@@ -44,8 +44,9 @@ agents' **memory together** so work *continues* across them instead of forking.
 - **Routes** — let Loom drive the chain: `loom route ship "add dark mode"` runs
   plan → execute → review as one command, the brain flowing hop to hop; or `loom route
   auto` lets an LLM pick each next agent.
-- **Every surface, one daemon** — a full-screen TUI, a phone app (voice input, per-prompt
-  diffs, push), and a web app — all talking to the same local daemon over your tailnet.
+- **Every surface, one daemon** — a full-screen TUI, a web app, a desktop window, and a
+  phone app (voice input, per-prompt diffs, push) — each a paired client of the same
+  local daemon over your tailnet.
 - **Local-first & yours** — one `npm i -g`, no account, MIT, runs headless on a server.
 
 ## Install
@@ -331,7 +332,7 @@ buzzes once, not five times). Verify with `loom clients --ping`.
 Add an agent in ~40 lines — implement the contract, register the kind:
 
 ```ts
-import { AdapterBase, registerAgentKind, type SendInput } from "loom-agents/sdk";
+import { AdapterBase, registerAgentKind, type SendInput } from "threadloom/sdk";
 
 class MyAgentAdapter extends AdapterBase {
   async available() { return true; }
@@ -381,16 +382,30 @@ sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running 
 ## Development
 
 ```bash
-npm test          # 124 tests: unit + full HTTP/WS end-to-end
+npm test          # 150 tests: unit + full HTTP/WS end-to-end
 npm run build     # tsc → dist/
 npm run dev       # run the CLI from source (tsx)
 ```
 
+## Environment
+
+| Variable | What it does |
+|---|---|
+| `LOOM_HOME` | Where the registry, daemon config, and pair tokens live. Default `~/.loom`. Point it at a temp dir to try Loom without touching real state. |
+| `LOOM_STORE` | `jsonl` forces the portable event store instead of `node:sqlite`. Loom falls back on its own if sqlite is unavailable; this makes it explicit. |
+| `LOOM_NO_PTY` | `1` forces the pipe-backed shell instead of a real pty. CI runs the suite both ways. |
+| `LOOM_NODE` | Node binary the desktop shell spawns the daemon with (Electron's own Node predates `node:sqlite`). |
+| `LOOM_NO_NOTIFY` | `1` silences desktop notifications. |
+| `LOOM_NO_PUSH` | `1` silences phone push. |
+| `LOOM_ROUTE_STEP_TIMEOUT_MS` | Per-hop route timeout. Default 45 min. |
+
+Going the other way, Loom **sets `LOOM_TERMINAL=1`** inside every terminal it opens, so
+your shell profile can tell it's running in Loom's pane. (`LOOM_EXPO_PUSH_URL` and
+`LOOM_TUI_SMOKE` also exist, but they're test plumbing — not configuration.)
+
 ## Roadmap
 
-- Native mobile app (push notifications on *needs input / done*) on the same daemon
-  API the served app already uses.
-- LLM-synthesized projections behind the same interface.
+- Tasks beyond GitHub — GitLab and Linear sit disabled in the provider row today.
 - More adapters/bridges via the SDK — contributions welcome.
 
 ## Design

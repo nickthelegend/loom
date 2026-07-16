@@ -11,9 +11,9 @@
  * orca, MIT) — neutral monochrome chrome, hairline borders, Geist type, and
  * color reserved for state: thread cyan = live, shuttle magenta = the baton.
  * Desktop (>=900px) is the Orca workspace shell: projects/agents tree in the
- * left sidebar, a tabbed center pane (Thread | Changes | Brain | Routes), a
- * source-control right rail (>=1200px), and a status bar. Mobile keeps the
- * single-column thread. See docs/design-system.md.
+ * left sidebar, a tabbed center pane (Thread | Tasks | Brain | Routes), a diff
+ * dock right of the chat, a 4-view right rail, a terminal dock, and a status
+ * bar. Mobile keeps the single-column thread. See docs/design-system.md.
  */
 
 export const APP_MANIFEST = {
@@ -228,7 +228,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .sys.warn{color:var(--warn)}
   .sys.err{color:var(--err)}
   .sys.ok{color:var(--ok)}
-  .sys.mag{color:var(--shuttle-ink)}
   .tool{color:color-mix(in srgb, var(--muted-foreground) 75%, transparent);
     font-size:11.5px;font-family:var(--font-mono);margin:3px 0 3px 14px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -439,8 +438,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .tab.active{background:var(--background);color:var(--foreground);border-color:var(--border)}
   .tab.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--background)}
   .tab svg{width:13px;height:13px}
-  .tab .tbadge{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
-    border:1px solid var(--border);border-radius:4px;padding:0 4px;line-height:13px}
   .tabstrip .spacer{margin-left:auto}
   .pane{flex:1;min-height:0;overflow-y:auto;padding:16px 16px 20px}
   .dmain .pane > #feed,.dmain .pane > #routebar,.dmain .pane > .agenthead{max-width:840px;margin-inline:auto}
@@ -458,10 +455,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dockhead{height:36px;flex:none;display:flex;align-items:center;gap:7px;padding:0 8px 0 12px;min-width:0;
     border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);
     background:var(--sidebar)}
-  .dockhead .b{color:var(--foreground);font-weight:600}
   .dockhead .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dockhead .sep{opacity:.6}
   .dockhead .spacer{margin-left:auto}
+  /* the dock's icon slot — every other icon wrapper centres its glyph; without
+     this one the svg sits on the text baseline */
+  .dockhead .di{display:inline-flex;align-items:center;flex:none}
   .dockhead .iconbtn{width:26px;height:26px}
   .dockhead .iconbtn svg{width:13px;height:13px}
   .iconbtn.active{background:var(--accent);color:var(--foreground)}
@@ -500,12 +498,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}
   /* changes pane — per-file diff cards on the editor surface */
   .diffwrap{max-width:1000px;margin:0 auto}
-  .dhead{display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:12px;
-    color:var(--muted-foreground);margin:2px 2px 12px}
   /* every inline icon in a header/row is 14px — an unsized svg fills its
      container and reads as a stray glyph. */
-  .dhead svg,.dfh svg,.frow svg,.dockhead svg,.rhead svg{width:14px;height:14px;flex:none}
-  .dhead .branch{color:var(--foreground);font-weight:600}
+  .dfh svg,.frow svg,.dockhead svg,.rhead svg{width:14px;height:14px;flex:none}
   .dfile{border:1px solid var(--border);border-radius:var(--radius);margin-bottom:12px;overflow:hidden;
     background:var(--editor-surface);box-shadow:0 1px 2px rgb(0 0 0 / .05)}
   .dfh{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--card);
@@ -657,12 +652,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .tasksview{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
   .provrow{display:flex;gap:8px}
   .provbtn{width:34px;height:34px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
-    border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:pointer;
+    border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:default;
     transition:background .12s,border-color .12s}
   .provbtn svg{width:17px;height:17px}
-  .provbtn:hover{background:var(--accent)}
+  /* only a live provider gets a click affordance — today none do */
+  button.provbtn:not(:disabled){cursor:pointer}
+  button.provbtn:not(:disabled):hover{background:var(--accent)}
   .provbtn.active{border-color:color-mix(in srgb, var(--muted-foreground) 45%, transparent);background:var(--accent)}
-  .provbtn:disabled{opacity:.35;cursor:default}
+  .provbtn:disabled{opacity:.35}
   .taskbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--muted)}
   .segbtn{height:26px;padding:0 12px;border-radius:7px;font-size:12.5px;font-weight:500;
@@ -993,12 +990,17 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       '<button class="btn primary" id="pgo">Pair this device</button>' +
       '<div class="help">On your computer: <b>loom up --tailnet</b>, then <b>loom pair</b>.<br>Scan the QR, or paste the token or whole link above.</div>' +
       '</div>';
-    document.getElementById("pgo").onclick = function(){
+    function pair(){
       var v = (document.getElementById("ptok").value || "").trim();
       if (!v) return toast("paste the token from loom pair");
       try { var j = JSON.parse(v); if (j && j.token) v = j.token; } catch (e) {}
       var m = v.match(/pair=([A-Za-z0-9]+)/); if (m) v = m[1];
       claim(v).then(route).catch(function(err){ toast(err.message); });
+    }
+    document.getElementById("pgo").onclick = pair;
+    // paste-then-Enter is the whole gesture on this screen
+    document.getElementById("ptok").onkeydown = function(e){
+      if (e.key === "Enter") { e.preventDefault(); pair(); }
     };
   }
 
@@ -1242,7 +1244,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         .catch(function(err){ toast(err.message); });
     };
 
-    // ---- desktop tabs (Thread / Brain / Routes) ----------------------------
+    // ---- desktop tabs (Thread / Tasks / Brain / Routes) --------------------
+    // mobile has no #tabsbox, so this is a no-op there by construction
     function drawTabs(){
       var box = document.getElementById("tabsbox"); if (!box) return;
       var tabs = ["thread", "tasks", "brain", "routes"];
@@ -1280,7 +1283,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     }
 
     // ---- diff/preview dock (right of the chat, opens on click) --------------
-    function dockShowing(){ var d = document.getElementById("dockpane"); return d && d.classList.contains("open"); }
     function openDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.add("open"); }
     function closeDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.remove("open"); }
     function dockTitle(icon, label){
@@ -1340,8 +1342,6 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       document.getElementById("dockclose").onclick = closeDock;
       document.getElementById("railbtn").onclick = toggleRail;
       document.getElementById("termbtn").onclick = toggleTerm;
-      state.openChangesDock = openChangesDock;
-      state.openFileDock = openFileDock;
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
       var dockEl = document.getElementById("dockpane");
@@ -1868,8 +1868,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       var el = document.getElementById("pane-tasks"); if (!el) return;
       var d = tasks.data;
       var head =
+        // GitHub is a state marker, not a control: it's the only provider Loom
+        // reads, so there is nothing to switch to. A <span> can't imply a click
+        // the way an enabled <button> does.
         '<div class="provrow">' +
-          '<button class="provbtn active" title="GitHub" aria-label="GitHub">' + ICONS.github + "</button>" +
+          '<span class="provbtn active" title="GitHub \\u2014 the provider Loom reads" aria-current="true" role="img" aria-label="GitHub">' + ICONS.github + "</span>" +
           '<button class="provbtn" disabled title="GitLab \\u2014 Loom doesn\\u2019t read GitLab yet" aria-label="GitLab (not supported yet)">' + ICONS.gitlab + "</button>" +
           '<button class="provbtn" disabled title="Linear \\u2014 Loom doesn\\u2019t read Linear yet" aria-label="Linear (not supported yet)">' + ICONS.linear + "</button>" +
         "</div>" +
@@ -1886,8 +1889,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         "</div>";
 
       // no data yet is a loading state, never an empty one — an empty table
-      // here would read as "this repo has no issues", which we don't know
-      if (!d) { el.innerHTML = '<div class="tasksview">' + head + LOADER + "</div>"; return; }
+      // here would read as "this repo has no issues", which we don't know.
+      // Still wire the head: the gh round-trip is slow enough that an unwired
+      // Issues/PRs toggle is a dead control for as long as anyone would use it.
+      if (!d) {
+        el.innerHTML = '<div class="tasksview">' + head + LOADER + "</div>";
+        wireTasksHead(el);
+        return;
+      }
       if (d && !d.available) {
         var hint = d.reason === "no-cli"
           ? "Loom reads issues through your own <code>gh</code> CLI, so it never needs a token of its own."
@@ -2066,7 +2075,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       sel.onchange = function(){
         document.getElementById("rsteps").style.display = this.value === "__custom" ? "" : "none";
       };
-      document.getElementById("rgo").onclick = function(){
+      function start(){
         var task = (document.getElementById("rtask").value || "").trim();
         if (!task) return toast("describe the task first");
         var spec = sel.value === "__custom" ? (document.getElementById("rsteps").value || "").trim() : sel.value;
@@ -2074,7 +2083,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
         api("/api/projects/" + pid + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: spec }) })
           .then(function(){ refresh(); toast("route started"); if (after) after(); })
           .catch(function(err){ toast(err.message); });
-      };
+      }
+      document.getElementById("rgo").onclick = start;
+      // Enter submits from either field, like every other input in the app
+      ["rtask", "rsteps"].forEach(function(id){
+        var el = document.getElementById(id); if (!el) return;
+        el.onkeydown = function(e){ if (e.key === "Enter") { e.preventDefault(); start(); } };
+      });
     }
     function drawRoutesPane(){
       var el = document.getElementById("pane-routes"); if (!el) return;
@@ -2936,10 +2951,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
 
   function route(){
     applyTheme();
+    // drop every hook the old view installed — each closes over that render's
+    // DOM and state (retheme holds its terminals), and the next view reinstalls
+    // whichever ones it owns
     state.toggleTerm = null;
     state.selectProject = null;
     state.drawRail = null;
     state.startTerminals = null;
+    state.retheme = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);

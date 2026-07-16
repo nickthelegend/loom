@@ -108,6 +108,19 @@ describe("web app page", () => {
     expect(APP_HTML).toContain("window.loomNative && window.loomNative.pickFolder");
   });
 
+  it("submits on Enter from every text field that has a button beside it", () => {
+    // #ptok is the first thing anyone touches: paste a token, press Enter.
+    // These inputs sit outside any <form>, so nothing submits them for free.
+    expect(APP_HTML).toContain('document.getElementById("ptok").onkeydown');
+    expect(APP_HTML).toContain('["rtask", "rsteps"].forEach');
+  });
+
+  it("wires the Tasks head while the first gh fetch is still in flight", () => {
+    // the loading branch returns early; without its own wireTasksHead the
+    // Issues/PRs toggle is dead for the whole round-trip
+    expect(APP_HTML).toMatch(/head \+ LOADER \+ "<\/div>";\s*\n\s*wireTasksHead\(el\);/);
+  });
+
   it("points state.project at the new project before drawing it", () => {
     // refresh() fills state.project from a fetch that lands *after* the first
     // paint, so renderProject must seed it synchronously from the already

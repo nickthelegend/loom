@@ -39,6 +39,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The right rail showed the project you just navigated away from: it renders
   from `state.project`, which only a fetch filled in, so every switch left it
   one project behind until you touched it.
+- **Enter did nothing on the pairing screen.** Paste a token, press Enter — the
+  entire gesture that screen exists for — and nothing happened; only the button
+  worked. Same in the route form. Both now submit on Enter, like every other
+  field in the app.
+- The Tasks `Issues`/`PRs` toggle was dead while the first `gh` fetch was in
+  flight — the loading branch rendered the buttons but returned before wiring
+  them, so they were inert for exactly as long as anyone would be looking at
+  them.
+- The GitHub mark in the Tasks provider row was an enabled button with hover and
+  a pointer cursor, and no handler. It's the only provider Loom reads, so it's
+  now the indicator it always was, not a control that does nothing.
+- Dead code and CSS removed: an unused `dockShowing`, two write-only state hooks
+  no consumer ever read, and five rules for classes nothing renders. `route()`
+  now also clears `state.retheme`, which alone survived a view teardown holding
+  the previous render's terminals.
+
+### Documentation
+
+- **Every SDK example told you to import from `loom-agents/sdk` — a package that
+  has never existed.** It's `threadloom/sdk`. `test/docs.test.ts` now checks that
+  the docs only import packages that resolve, and only names the SDK exports.
+- `ARCHITECTURE.md` is the pre-build design record, and read as though it were
+  the current map: two surfaces instead of four, an iOS-first app over APNs
+  (it's Android-first over Expo), and settled questions still framed as risks.
+  It now says what it is, and the corrections are marked inline.
+- `desktop/README.md` claimed the bootstrap was unit-tested (it wasn't — now it
+  is) and that `main.js` "only creates the window" (it owns the menu and the
+  folder-picker IPC).
+- The `LOOM_*` environment variables are documented, and Loom's own
+  `LOOM_TERMINAL=1` marker is written down.
 
 ### Terminal — real PTYs
 
@@ -71,12 +101,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Testing
 
-- `test/workspace.test.ts` (28 tests) covers the surfaces the desktop UI is
+- `test/workspace.test.ts` (34 tests) covers the surfaces the desktop UI is
   built on and previously had none: Explorer listing/reading/find, the sandbox
   (traversal, absolute paths, symlink escape, unauthenticated access), and the
   terminal end-to-end (streams output, exit codes, no sentinel leakage, `cd`
   and variables persisting, terminal isolation, and Ctrl+C giving exit 130
-  while the shell survives). Suite: 96 → 124.
+  while the shell survives).
+- `test/desktop-app.test.ts` covers the Electron bootstrap, which had claimed to
+  be unit-tested without being it: the build-rev fingerprint (including that a
+  UI-only rebuild moves it), the stale-daemon decision (and that an
+  un-fingerprintable daemon is never killed), and the pairing handshake —
+  against a fake daemon, so no test can spawn or kill a real one.
+- Suite: 96 → 150.
 
 ### Accessibility
 
@@ -102,7 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file rows jump to their diff, and a status bar (websocket liveness, host,
   baton, working count, total spend).
 - Desktop shell: Orca window chrome — canvas-colored background, macOS
-  traffic lights at x16/y18 centered in 48px drag strips, 600×400 minimums,
+  traffic lights centered in the app's own top strip, 600×400 minimums,
   restyled failure page.
 - Phone app: graphite surfaces, near-white primary CTA, accessory-key agent
   chips, session top bar + neutral-underline tabs, command-dock composer with

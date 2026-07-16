@@ -1,7 +1,8 @@
 /**
  * Fire-and-notify — when a background agent needs input or finishes, tell
- * the human. v1: desktop notification (macOS osascript / linux notify-send);
- * v1.5: APNs push via the iOS app (same event feed).
+ * the human. This is the local half: a desktop notification (macOS osascript /
+ * linux notify-send). The phone half rides the same event feed through Expo
+ * push — see daemon/push.ts.
  */
 
 import { spawn } from "node:child_process";
