@@ -2675,6 +2675,25 @@ ${BRAND_SPRITE}
       if (!text) return;
       box.value = "";
       var p = state.project || {};
+
+      // A bridge is driven, not handed a turn: Loom types into Antigravity's or
+      // Kiro's own window and waits for the panel to settle. No handoff, because
+      // it never takes the baton — whichever adapter holds it keeps it.
+      var sel = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
+      if (sel && sel.tier === "bridge") {
+        toast("typing into " + sel.id + "\\u2026");
+        api("/api/projects/" + pid + "/bridge/" + encodeURIComponent(sel.id) + "/ask", {
+          method: "POST", body: JSON.stringify({ text: text, chat: chatId }),
+        }).then(function(){ refresh(); }).catch(function(err){
+          // The bridge's own words ("log in from its window", "launch it
+          // with…") are the actionable part; don't bury them.
+          toast(err.message);
+          refresh();
+        });
+        refresh();
+        return;
+      }
+
       var chain = Promise.resolve();
       if (state.selected && state.selected !== p.holder) {
         chain = api("/api/projects/" + pid + "/handoff", { method: "POST", body: JSON.stringify({ to: state.selected }) });

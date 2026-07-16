@@ -449,6 +449,54 @@ export class ProjectRuntime {
    *  - explicit agent that is NOT the holder → NotHolderError; surfaces
    *    prompt the user to confirm a handoff (explicit, never silent).
    */
+  /**
+   * Hand a prompt to a GUI agent by typing it into its own window.
+   *
+   * This is the road not taken by sendMessage. Antigravity and Kiro can't hold
+   * the baton — they edit the tree on their own schedule and know nothing about
+   * Loom's lock, so giving them the baton would be a promise Loom can't keep.
+   * But they can be *driven*: Loom types into the chat panel of the app you're
+   * already signed into, exactly as you would, and reads back what appeared.
+   * That's what makes them reachable from your phone.
+   *
+   * The exchange lands in the thread like any other, because the whole point of
+   * Loom is one place where you can see what was said to whom. It just never
+   * touches the baton on the way, so an adapter mid-turn is undisturbed.
+   *
+   * Awaited, unlike sendMessage's fire-and-notify: there's no event stream to
+   * follow here, only a panel that stops changing.
+   */
+  async askBridge(
+    agentId: string,
+    text: string,
+    opts: { chat?: string } = {},
+  ): Promise<{ agentId: string; reply: string }> {
+    const chat = opts.chat ?? MAIN_CHAT;
+    const agent = this.agent(agentId);
+    if (isAdapter(agent)) {
+      throw new Error(`agent "${agentId}" takes turns — send to it normally`);
+    }
+    const bridge = agent as unknown as { ask?: (t: string) => Promise<string> };
+    if (typeof bridge.ask !== "function") {
+      throw new Error(`agent "${agentId}" can be watched but not driven`);
+    }
+
+    await this.ensureStarted(agentId);
+    this.turnChat.set(agentId, chat);
+    this.log.append({ kind: "message", chat, agentId, payload: { text, author: "user" } });
+
+    try {
+      const reply = await bridge.ask(text);
+      return { agentId, reply };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // The bridge's own words: "signed out", "launch it with…". They're the
+      // actionable part, and burying them behind "bridge failed" helps nobody.
+      this.log.append({ kind: "error", chat, agentId, payload: { message } });
+      throw err;
+    }
+  }
+
   async sendMessage(
     text: string,
     agentId?: string,

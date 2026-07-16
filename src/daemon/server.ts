@@ -398,6 +398,36 @@ export class LoomDaemon {
       }),
     );
 
+    /**
+     * Drive a GUI agent: type into Antigravity's or Kiro's own chat and read
+     * back what appeared.
+     *
+     * Separate from /messages because it is a different act. /messages hands a
+     * turn to something that can hold the baton; this types into an app you're
+     * signed into and waits for its panel to settle. The bridge never takes the
+     * lock, so an adapter mid-turn is untouched.
+     *
+     * It blocks for as long as the app takes to answer — minutes, for a real
+     * task. That's why it's its own route: nothing else here is allowed to be
+     * this slow, and the client needs to know to wait.
+     */
+    app.post(
+      "/api/projects/:id/bridge/:agentId/ask",
+      withRuntime(async (rt, req, res) => {
+        const { text, chat } = (req.body ?? {}) as { text?: string; chat?: string };
+        const agentId = String(req.params.agentId);
+        if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
+        try {
+          const result = await rt.askBridge(agentId, text, chat ? { chat } : {});
+          res.json(result);
+        } catch (err) {
+          // 409, not 500: "log into Antigravity" is a state you can fix, not a
+          // bug in the daemon, and the message is the whole value of the reply.
+          res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     app.post(
       "/api/projects/:id/handoff",
       withRuntime(async (rt, req, res) => {
