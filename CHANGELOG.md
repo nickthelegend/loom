@@ -51,10 +51,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right of the chat that opens only when you click a change (an `Update(…)`
   card in the thread, or a file in Explorer / Search / Source Control) and
   closes with an X. The rail itself collapses from the tab strip (PanelRight).
-- Real terminals: the daemon runs commands in the project directory
-  (`POST /exec`, streamed over the project WebSocket, 8-run / 2MB caps) and
-  the workspace gains a bottom terminal dock — multiple tabs, streamed
-  output with exit codes, `clear`, drag-resize, and a Ctrl+backtick toggle.
+- Real terminals: each tab owns a long-lived shell in the project directory
+  (`POST /term/open|input|signal|close`, streamed over the project
+  WebSocket), so `cd` and exported vars persist between commands. A sentinel
+  printed after each command carries the exit code and cwd — the daemon
+  strips it from the stream, so the prompt tracks the live directory and
+  non-zero exits surface. Ctrl+C signals the shell's process group and the
+  shell survives via a no-op INT trap, giving real `^C → exit 130 → prompt`
+  behaviour. Includes ANSI colour rendering, ArrowUp/Down history, Ctrl+L,
+  click-to-focus, multiple tabs, drag-resize, and a Ctrl+backtick toggle.
+- Every column is drag-resizable with persisted widths and double-click to
+  reset — sidebar, diff dock, and right rail, each clamped so the chat can't
+  be squeezed out.
 - New Task flow (Orca's Create Worktree): a sidebar action, the Tasks rail
   view, and the `n` shortcut open a modal to pick a project, a task, and
   **one ADE or several** — one agent messages it directly; several run it as
