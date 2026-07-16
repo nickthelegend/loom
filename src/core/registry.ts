@@ -211,34 +211,6 @@ export function ensureDaemonConfig(defaults: { host: string; port: number }): Da
   return cfg;
 }
 
-/** Default "ship" pipeline over whichever of planner/executor/reviewer exist. */
-export function buildDefaultRoutes(
-  agents: AgentConfig[],
-): Record<string, string[]> | undefined {
-  const order: AgentRole[] = ["planner", "executor", "reviewer"];
-  const steps = order.filter((role) => agents.some((a) => a.role === role));
-  return steps.length >= 2 ? { ship: steps } : undefined;
-}
-
-/**
- * The agents a new project starts with: the ADEs actually installed here, and
- * nothing else.
- *
- * It used to fall back to an `echo` agent when it found none. echo is a test
- * double — it replies with your own message and reports a made-up $0.001 — so
- * a machine without claude or opencode got a project whose "agent" faked every
- * turn, presented as a detected ADE. Better to hand back an empty roster and
- * let the caller say "no ADEs found", which is true and actionable.
- * (echo is still a registered kind; you can ask for it by name in
- * .loom/config.json. It just isn't handed to anyone who didn't.)
- */
-export function defaultAgentConfigs(availability: Record<string, boolean>): AgentConfig[] {
-  const agents: AgentConfig[] = [];
-  if (availability["claude-code"]) {
-    agents.push({ id: "claude-code", kind: "claude-code", role: "planner" });
-  }
-  if (availability["opencode"]) {
-    agents.push({ id: "opencode", kind: "opencode", role: "executor" });
-  }
-  return agents;
-}
+// buildDefaultRoutes and defaultAgentConfigs live in core/ades.ts now: they are
+// answers about ADEs, and asking them here meant registry → ades → an adapter →
+// base → registry, a cycle whose module-init order is nobody's friend.

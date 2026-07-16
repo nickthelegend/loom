@@ -24,6 +24,7 @@ import AntigravityColor from "@lobehub/icons/es/Antigravity/components/Color.js"
 import OpenCodeMono from "@lobehub/icons/es/OpenCode/components/Mono.js";
 import KiroColor from "@lobehub/icons/es/Kiro/components/Color.js";
 import CodexColor from "@lobehub/icons/es/Codex/components/Color.js";
+import GrokMono from "@lobehub/icons/es/Grok/components/Mono.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -31,12 +32,14 @@ const OUT = path.resolve(process.cwd(), "src/daemon/brand-icons.ts");
 
 // opencode publishes no Color variant — its mono mark is the mark, which is why
 // upstream's own example is `<OpenCode size={56} />` with no `.Color`.
+// Grok, like opencode, publishes no Color variant — the mono mark is the mark.
 const brands = [
   ["claude-code", ClaudeCodeColor, "Claude Code"],
   ["antigravity", AntigravityColor, "Antigravity"],
   ["opencode", OpenCodeMono, "opencode"],
   ["kiro", KiroColor, "Kiro"],
   ["codex", CodexColor, "Codex"],
+  ["grok-code", GrokMono, "Grok Code"],
 ];
 
 let symbols = "";

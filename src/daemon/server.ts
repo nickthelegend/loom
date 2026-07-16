@@ -16,9 +16,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
 import { RouteActiveError } from "../core/routes.js";
+import { buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import {
-  buildDefaultRoutes,
-  defaultAgentConfigs,
   ensureDaemonConfig,
   findProject,
   listProjects,
@@ -302,10 +301,10 @@ export class LoomDaemon {
         }
         let config = readProjectConfig(resolved);
         if (!config) {
-          const availability = {
-            "claude-code": await cliAvailable("claude"),
-            opencode: await cliAvailable("opencode"),
-          };
+          // Every ADE Loom can drive, probed in parallel — see core/ades.ts.
+          // This used to name claude and opencode by hand, which is how the list
+          // of what Loom actually drives drifted from the list of logos it ships.
+          const availability = await detectAdes();
           const agents = defaultAgentConfigs(availability);
           const routes = buildDefaultRoutes(agents);
           config = {
