@@ -8,19 +8,23 @@ import { prepareAppUrl } from "./loom-app.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 
-const BG = "#0b0e14";
+// Orca-style chrome: the window background matches the app canvas so there is
+// no flash while the daemon spins up (#0a0a0a dark / #ffffff light).
+const BG = "#0a0a0a";
 let win = null;
 
 async function createWindow() {
   win = new BrowserWindow({
     width: 1100,
     height: 820,
-    minWidth: 720,
-    minHeight: 560,
+    minWidth: 600,
+    minHeight: 400,
     backgroundColor: BG,
     title: "Loom",
+    acceptFirstMouse: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 14, y: 18 } } : {}),
+    // Centered in the web app's 48px title strips (light center = 24, radius 6).
+    ...(process.platform === "darwin" ? { trafficLightPosition: { x: 16, y: 18 } } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -44,10 +48,12 @@ async function createWindow() {
     await win.loadURL(
       "data:text/html," +
         encodeURIComponent(
-          `<body style="background:${BG};color:#dbe2f0;font:15px -apple-system,sans-serif;padding:40px">` +
-            `<h2>lo<span style="color:#67e8f9">om</span></h2>` +
-            `<p>Could not start the loom daemon.</p><pre style="color:#f87171">${String(err)}</pre>` +
-            `<p style="color:#7c88a1">Make sure the project is built (<code>npm run build</code>) and try again.</p></body>`,
+          `<body style="background:${BG};color:#fafafa;font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.01em;padding:48px">` +
+            `<h2 style="font-weight:650;font-size:22px;margin:0 0 4px">loom</h2>` +
+            `<div style="width:48px;height:2px;border-radius:1px;background:linear-gradient(90deg,transparent,#67e8f9,transparent);margin:0 0 18px"></div>` +
+            `<p style="color:#a1a1a1">Could not start the loom daemon.</p>` +
+            `<pre style="color:#ff6568;background:#171717;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:12px 14px;white-space:pre-wrap">${String(err)}</pre>` +
+            `<p style="color:#a1a1a1">Make sure the project is built (<code style="background:#262626;border-radius:5px;padding:1px 6px">npm run build</code>) and try again.</p></body>`,
         ),
     );
   }

@@ -17,7 +17,7 @@ describe("web app page", () => {
     expect(APP_HTML).toContain("/ws?token=");
   });
 
-  it("carries the premium weave signatures", () => {
+  it("carries the design signatures (quiet graphite + the weave, kept as state)", () => {
     // warp-line ground
     expect(APP_HTML).toContain("repeating-linear-gradient");
     // woven loader, shuttle handoff, selvage edge
@@ -28,6 +28,13 @@ describe("web app page", () => {
     expect(APP_HTML).toContain("--thread:#67e8f9");
     expect(APP_HTML).toContain("--shuttle:#e879f9");
     expect(APP_HTML).toContain("shared-memory layer");
+    // the Orca-adapted system: Geist type, neutral tokens, both themes
+    expect(APP_HTML).toContain("/app/fonts/geist.woff2");
+    expect(APP_HTML).toContain("--background:#0a0a0a"); // dark canvas
+    expect(APP_HTML).toContain("--background:#fff"); // light canvas
+    expect(APP_HTML).toContain("loomTheme"); // persisted theme toggle
+    expect(APP_HTML).toContain("backdrop-filter"); // glass floating tier
+    expect(APP_HTML).toContain("-webkit-app-region:drag"); // Electron title strips
   });
 
   it("has a render branch for every event kind that reaches the thread", () => {
@@ -72,7 +79,7 @@ describe("web app page", () => {
   it("manifest is installable and matches the theme", () => {
     expect(APP_MANIFEST.name).toBe("Loom");
     expect(APP_MANIFEST.display).toBe("standalone");
-    expect(APP_MANIFEST.background_color).toBe("#0a0d13");
+    expect(APP_MANIFEST.background_color).toBe("#0a0a0a");
     expect(APP_MANIFEST.icons.length).toBeGreaterThan(0);
   });
 });

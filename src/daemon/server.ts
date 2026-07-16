@@ -28,6 +28,7 @@ import {
 } from "../core/registry.js";
 import { cliAvailable } from "../adapters/base.js";
 import { APP_HTML, APP_MANIFEST } from "./app-page.js";
+import { GEIST_WOFF2 } from "./geist-font.js";
 import { AuthManager, bearerToken } from "./auth.js";
 import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
 import { ProjectRuntime } from "./runtime.js";
@@ -89,6 +90,14 @@ export class LoomDaemon {
     });
     app.get("/app/manifest.webmanifest", (_req, res) => {
       res.type("application/manifest+json").send(JSON.stringify(APP_MANIFEST));
+    });
+    // The UI sans (Geist, SIL OFL 1.1) — embedded so the app works offline
+    // on the tailnet with no CDN. Immutable: cache hard.
+    app.get("/app/fonts/geist.woff2", (_req, res) => {
+      res
+        .type("font/woff2")
+        .setHeader("Cache-Control", "public, max-age=31536000, immutable")
+        .send(GEIST_WOFF2);
     });
     app.get("/api/health", (_req, res) => {
       res.json({ ok: true, name: "loom", version: "0.1.0", rev: BUILD_REV });
