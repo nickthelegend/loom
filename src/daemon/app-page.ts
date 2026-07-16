@@ -1266,7 +1266,9 @@ ${BRAND_SPRITE}
     var expl = { kids: {}, open: {} }; // explorer tree cache — declared before any drawRail() call
 
     var headerActions =
-      (desktop ? THEME_BTN : "") +
+      // No theme toggle here on desktop: it lived one pixel from Interrupt,
+      // which is a bad neighbour for a cosmetic switch. It's in the sidebar
+      // foot now, beside unpair. Mobile has no sidebar, so it keeps its own.
       (desktop ? "" :
         '<button id="brainbtn" class="iconbtn" title="unified memory">' + ICONS.memory + "</button>" +
         '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
@@ -2116,20 +2118,9 @@ ${BRAND_SPRITE}
         b.onclick = function(ev){ ev.stopPropagation(); addTask(b.getAttribute("data-add")); };
       });
     }
-    /** A card of your own. Starts in a column and is editable in place. */
+    /** A card of your own — same modal as Create task, minus the ceremony. */
     function addTask(column){
-      api("/api/projects/" + pid + "/board/tasks",
-          { method: "POST", body: JSON.stringify({ title: "New task", column: column }) })
-        .then(function(j){
-          loadBoard();
-          // focus the new card's title so you can just type
-          var id = "task-" + j.task.id;
-          setTimeout(function(){
-            var t = document.querySelector('[data-edit="' + id + '"]');
-            if (t) t.click();
-          }, 350);
-        })
-        .catch(function(err){ toast(err.message); });
+      openBoardTaskModal(pid, column, loadBoard);
     }
     function wireBoardTasks(el){
       // retitle in place — it's your card
@@ -2886,6 +2877,107 @@ ${BRAND_SPRITE}
   }
 
   /**
+   * A card of your own on the board. Same chrome as Create task, but this
+   * writes a card rather than starting a run — so it also offers to do both:
+   * "Create & start" hands the text to the agent and drops the card in
+   * Working, which is where that work actually is.
+   */
+  function openBoardTaskModal(pid, column, onDone){
+    if (document.querySelector(".scrim")) return;
+    var p = state.project;
+    var adapters = (p && p.agents ? p.agents : []).filter(function(a){ return a.tier === "adapter"; });
+    var picked = null;
+    var cols = [["working", "Working"], ["needs-you", "Needs you"],
+                ["in-review", "In review"], ["ready", "Ready to merge"]];
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal">' +
+      '<div class="modalhead">New card<button class="iconbtn" id="bmclose" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="modalbody">' +
+        '<div class="field"><label>Task</label>' +
+          '<textarea id="bmtitle" placeholder="what needs doing?"></textarea></div>' +
+        '<div class="field"><label>Column</label><select id="bmcol">' +
+          cols.map(function(c){
+            return '<option value="' + c[0] + '"' + (c[0] === column ? " selected" : "") + ">" + c[1] + "</option>";
+          }).join("") + "</select></div>" +
+        '<div class="field"><label>For <span class="opt">optional</span></label>' +
+          '<div class="agsel" id="bmagsel"></div>' +
+          '<span class="hintx" id="bmhint">just a note to yourself unless you pick someone</span></div>' +
+      "</div>" +
+      '<div class="modalfoot"><button class="btn ghost" id="bmcancel">Cancel</button>' +
+        '<button class="btn outline" id="bmstart" style="display:none">Create &amp; start</button>' +
+        '<button class="btn primary" id="bmcreate">Create card<span class="kbd">\\u2318\\u21b5</span></button></div>' +
+    "</div>";
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("bmclose").onclick = close;
+    document.getElementById("bmcancel").onclick = close;
+
+    function drawChips(){
+      var box = document.getElementById("bmagsel"); if (!box) return;
+      box.innerHTML = adapters.length
+        ? adapters.map(function(a){
+            return '<button type="button" class="agchip' + (picked === a.id ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
+              brandMark(a.kind) + esc(a.id) + '<span class="role">' + esc(a.role || "") + "</span></button>";
+          }).join("")
+        : '<span class="hintx">no agents configured for this project</span>';
+      Array.prototype.forEach.call(box.querySelectorAll(".agchip"), function(ch){
+        ch.onclick = function(){
+          var id = ch.getAttribute("data-id");
+          picked = picked === id ? null : id; // click again to unassign
+          drawChips();
+        };
+      });
+      var hint = document.getElementById("bmhint");
+      if (hint) hint.textContent = picked
+        ? "the card is for " + picked + " \\u2014 Create & start also sends it the task now"
+        : "just a note to yourself unless you pick someone";
+      var sb = document.getElementById("bmstart");
+      if (sb) sb.style.display = picked ? "" : "none";
+    }
+    drawChips();
+    setTimeout(function(){ var t = document.getElementById("bmtitle"); if (t) t.focus(); }, 30);
+
+    function create(alsoStart){
+      var title = (document.getElementById("bmtitle").value || "").trim();
+      if (!title) return toast("what needs doing?");
+      var col = document.getElementById("bmcol").value;
+      // starting it means an agent is on it now, so the card belongs in Working
+      var body = { title: title, column: alsoStart ? "working" : col };
+      if (picked) body.agent = picked;
+      document.getElementById("bmcreate").disabled = true;
+      api("/api/projects/" + pid + "/board/tasks", { method: "POST", body: JSON.stringify(body) })
+        .then(function(){
+          if (!alsoStart) { close(); toast("card added"); if (onDone) onDone(); return; }
+          var holder = (state.project || {}).holder;
+          var chain = picked !== holder
+            ? api("/api/projects/" + pid + "/handoff", { method: "POST", body: JSON.stringify({ to: picked }) })
+            : Promise.resolve();
+          return chain
+            .then(function(){
+              return api("/api/projects/" + pid + "/messages", {
+                method: "POST",
+                body: JSON.stringify({ text: title, agentId: picked, chat: "main" }),
+              });
+            })
+            .then(function(){ close(); toast("sent to " + picked); if (onDone) onDone(); });
+        })
+        .catch(function(err){
+          document.getElementById("bmcreate").disabled = false;
+          toast(err.message);
+        });
+    }
+    document.getElementById("bmcreate").onclick = function(){ create(false); };
+    document.getElementById("bmstart").onclick = function(){ create(true); };
+    function onKey(e){
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+      else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); create(false); }
+    }
+    document.addEventListener("keydown", onKey);
+  }
+
+  /**
    * Add a project. The daemon does the real work (writes .loom/config.json,
    * detects which ADEs are installed, registers it); this only collects a
    * folder. Inside Electron that folder comes from the OS picker — in a
@@ -2976,6 +3068,7 @@ ${BRAND_SPRITE}
         '<div class="sfoot">' +
         '<a class="iconbtn" title="Loom on GitHub" href="https://github.com/nickthelegend/loom" target="_blank" rel="noreferrer">' + ICONS.help + "</a>" +
         '<span class="spacer"></span>' +
+        THEME_BTN +
         '<button id="unpair" class="iconbtn" title="unpair this device">' + ICONS.unpair + "</button></div>" +
         '<div class="rz rz-sidebar" id="rz-sidebar" title="drag to resize"></div>' +
       "</aside>" +
@@ -2996,6 +3089,9 @@ ${BRAND_SPRITE}
       '<div class="statusbar" id="statusbar"></div>' +
       "</div>";
     document.getElementById("unpair").onclick = logout;
+    // The toggle lives in the shell's foot now, so bind it here — renderProject
+    // also calls bindTheme, but it never runs when no project is selected.
+    bindTheme();
     document.getElementById("railclose").onclick = toggleRail;
     document.getElementById("newtask").onclick = function(){ openTaskModal(cur); };
     if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
