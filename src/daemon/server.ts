@@ -48,25 +48,56 @@ export interface DaemonOptions {
 export const DEFAULT_PORT = 7420;
 
 /**
- * Build fingerprint — a content hash of this compiled module AND the served
- * web app. A daemon started from an older build reports a different rev than
- * a freshly built CLI or desktop shell expects, and they restart it
- * automatically ("failed to fetch" after upgrades usually meant a stale
- * daemon serving yesterday's code). Content-based on purpose: mtimes are
- * unreliable across runtimes on some filesystems (exFAT drives skew them by
- * the local timezone offset). app-page.js is included so UI-only rebuilds
- * change the rev too.
+ * Fingerprint every built file the daemon can load, as one hash.
+ *
+ * The walk is what makes it honest. This used to hash exactly two files —
+ * server.js and app-page.js — which meant a change anywhere else (an adapter,
+ * the router, core/registry.ts) left the rev identical. `loom up` said "daemon
+ * already running", the shell agreed it was current, and a daemon kept serving
+ * the old code from memory. A correct fix looked like it did nothing, which
+ * sends you debugging code that is already right.
+ *
+ * Content-based on purpose: mtimes are unreliable across runtimes on some
+ * filesystems (exFAT drives skew them by the local timezone offset). Names are
+ * hashed alongside contents so a rename or a deletion moves the rev too.
+ *
+ * Reading ~39 files (about half a megabyte) costs a couple of milliseconds at
+ * import, once. A stale daemon costs an afternoon.
+ *
+ * The desktop shell has a twin of this in desktop/loom-app.js — it can't import
+ * this module without pulling express into Electron's main process. They must
+ * agree byte for byte; test/desktop-app.test.ts compares them against the real
+ * built output so a drift fails there rather than in the field.
+ */
+export function fingerprintBuild(root: string): string | null {
+  const rels: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".js")) rels.push(path.relative(root, full));
+    }
+  };
+  walk(root);
+  if (rels.length === 0) return null;
+  rels.sort(); // readdir order is filesystem-dependent; the hash must not be
+  const hash = crypto.createHash("sha256");
+  for (const rel of rels) {
+    hash.update(rel);
+    hash.update(fs.readFileSync(path.join(root, rel)));
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
+/**
+ * This build's rev. "dev" when there's nothing compiled to hash — running from
+ * source under tsx, where the tree is .ts and the walk finds no .js at all.
  */
 export const BUILD_REV = (() => {
   try {
+    // dist/daemon/server.js → dist: everything this process can import.
     const me = fileURLToPath(import.meta.url);
-    const hash = crypto.createHash("sha256").update(fs.readFileSync(me));
-    try {
-      hash.update(fs.readFileSync(path.join(path.dirname(me), "app-page.js")));
-    } catch {
-      /* app page missing — the server hash alone still fingerprints */
-    }
-    return hash.digest("hex").slice(0, 16);
+    return fingerprintBuild(path.dirname(path.dirname(me))) ?? "dev";
   } catch {
     return "dev";
   }

@@ -16,11 +16,20 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isStaleDaemon, localBuildRev, openDaemonLog, prepareAppUrl } from "../desktop/loom-app.js";
 import { tmpDir } from "./helpers.js";
 
-/** A fixture dist/daemon dir, so the hash isn't tied to the real build. */
-function fakeDist(server: string, appPage?: string): string {
+/**
+ * A fixture dist tree, so the hash isn't tied to the real build. Laid out like
+ * the real one — the daemon's files live under daemon/, and `extra` drops a file
+ * elsewhere in the tree (core/, adapters/) the way tsc does.
+ */
+function fakeDist(server: string, appPage?: string, extra?: Record<string, string>): string {
   const dir = tmpDir("daemon-fixture");
-  fs.writeFileSync(path.join(dir, "server.js"), server);
-  if (appPage !== undefined) fs.writeFileSync(path.join(dir, "app-page.js"), appPage);
+  fs.mkdirSync(path.join(dir, "daemon"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "daemon", "server.js"), server);
+  if (appPage !== undefined) fs.writeFileSync(path.join(dir, "daemon", "app-page.js"), appPage);
+  for (const [rel, body] of Object.entries(extra ?? {})) {
+    fs.mkdirSync(path.join(dir, path.dirname(rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), body);
+  }
   return dir;
 }
 
@@ -45,8 +54,47 @@ describe("desktop · localBuildRev", () => {
     expect(rev).toMatch(/^[0-9a-f]{16}$/);
   });
 
+  /**
+   * The bug this whole fingerprint exists to prevent, and the one it had for
+   * most of its life: it hashed daemon/server.js and daemon/app-page.js only,
+   * so editing an adapter or core/registry.js left the rev identical. `loom up`
+   * reported "already running" and the daemon kept serving the old code — which
+   * is exactly what happened when the echo-agent fallback was removed and the
+   * running daemon kept it alive in memory.
+   */
+  it("moves when a file outside daemon/ changes — the whole tree is the build", () => {
+    const base = { "core/registry.js": "export const agents = [];\n" };
+    const a = localBuildRev(fakeDist("server\n", "app\n", base));
+    const same = localBuildRev(fakeDist("server\n", "app\n", base));
+    const changed = localBuildRev(
+      fakeDist("server\n", "app\n", { "core/registry.js": "export const agents = [1];\n" }),
+    );
+    expect(a).toBe(same);
+    expect(changed).not.toBe(a);
+  });
+
+  it("moves when a file is added or removed, not just edited", () => {
+    const bare = localBuildRev(fakeDist("server\n", "app\n"));
+    const extra = localBuildRev(fakeDist("server\n", "app\n", { "adapters/codex.js": "" }));
+    // an empty new file changes no byte of any existing one: only hashing names
+    // alongside contents catches this
+    expect(extra).not.toBe(bare);
+  });
+
+  it("ignores maps and declarations — only what the daemon actually runs", () => {
+    const plain = localBuildRev(fakeDist("server\n", "app\n"));
+    const noisy = localBuildRev(
+      fakeDist("server\n", "app\n", {
+        "daemon/server.js.map": '{"version":3}',
+        "types.d.ts": "export type A = 1;",
+      }),
+    );
+    expect(noisy).toBe(plain);
+  });
+
   it("returns null when there is no build to hash", () => {
     expect(localBuildRev(path.join(tmpDir("empty"), "nope"))).toBeNull();
+    expect(localBuildRev(tmpDir("empty-but-real"))).toBeNull();
   });
 });
 

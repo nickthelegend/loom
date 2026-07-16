@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI_ENTRY = path.resolve(here, "..", "dist", "cli", "index.js");
-const DIST_DAEMON = path.resolve(here, "..", "dist", "daemon");
+const DIST_ROOT = path.resolve(here, "..", "dist");
 
 function loomHome() {
   return process.env.LOOM_HOME ?? path.join(os.homedir(), ".loom");
@@ -41,21 +41,38 @@ async function health(cfg) {
 }
 
 /**
- * Mirror of the daemon's BUILD_REV (content hash of the compiled server
- * module + the served web app), so the shell can tell when a running daemon
- * is serving yesterday's UI. Content-based, not mtime — exFAT volumes report
- * different mtimes to different runtimes, which made mtime revs lie.
- * `daemonDir` is a parameter so tests can hash a fixture instead of dist.
+ * Mirror of the daemon's BUILD_REV: every built .js under dist, hashed by name
+ * and content, so the shell can tell when a running daemon is serving
+ * yesterday's code.
+ *
+ * It hashed only daemon/server.js + daemon/app-page.js until 2026-07-17, which
+ * meant a change to an adapter or to core/registry.js left the rev untouched
+ * and a stale daemon looked current. Whatever the daemon can import belongs in
+ * the fingerprint.
+ *
+ * Content-based, not mtime — exFAT volumes report different mtimes to different
+ * runtimes, which made mtime revs lie. Must stay byte-for-byte identical to
+ * fingerprintBuild() in src/daemon/server.ts; test/desktop-app.test.ts compares
+ * both against the real built output. `distRoot` is a parameter so tests can
+ * hash a fixture instead of dist.
  */
-export function localBuildRev(daemonDir = DIST_DAEMON) {
+export function localBuildRev(distRoot = DIST_ROOT) {
   try {
-    const hash = crypto
-      .createHash("sha256")
-      .update(fs.readFileSync(path.join(daemonDir, "server.js")));
-    try {
-      hash.update(fs.readFileSync(path.join(daemonDir, "app-page.js")));
-    } catch {
-      /* app page missing — the server hash alone still fingerprints */
+    const rels = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith(".js")) rels.push(path.relative(distRoot, full));
+      }
+    };
+    walk(distRoot);
+    if (rels.length === 0) return null;
+    rels.sort(); // readdir order is filesystem-dependent; the hash must not be
+    const hash = crypto.createHash("sha256");
+    for (const rel of rels) {
+      hash.update(rel);
+      hash.update(fs.readFileSync(path.join(distRoot, rel)));
     }
     return hash.digest("hex").slice(0, 16);
   } catch {
