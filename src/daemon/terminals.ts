@@ -113,6 +113,13 @@ function fixSpawnHelper(moduleDir: string): void {
 /** Load node-pty once, proving it can actually spawn before we rely on it. */
 export function loadPty(): PtyModule | null {
   if (ptyModule !== undefined) return ptyModule;
+  // An escape hatch: forces the pipe path on a machine that has node-pty, so
+  // the fallback stays exercisable (it is what Linux without a toolchain gets).
+  if (process.env.LOOM_NO_PTY === "1") {
+    ptyLoadError = "disabled by LOOM_NO_PTY=1";
+    ptyModule = null;
+    return null;
+  }
   try {
     const dir = path.dirname(require_.resolve("node-pty/package.json"));
     fixSpawnHelper(dir);

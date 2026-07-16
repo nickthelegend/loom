@@ -19,6 +19,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Whichever terminal backend this runner ends up with (node-pty ships no
+      # Linux prebuild, so CI usually builds it or goes without).
       - run: npm test
         env:
           LOOM_NO_NOTIFY: "1"
+      # And again with the pty forced off. The pipe fallback is what a machine
+      # without a toolchain runs, so it can't be allowed to rot untested.
+      - run: npm test
+        env:
+          LOOM_NO_NOTIFY: "1"
+          LOOM_NO_PTY: "1"

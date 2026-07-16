@@ -98,13 +98,25 @@ function outputSince(mark: number, term: string): string {
     .replace(/\[[0-9;?]*[ -/]*[@-~]|\][^]*(?:|\\)|./g, "");
 }
 
-/** Send a command the way this backend expects, and wait for output to match. */
+/**
+ * Run a command and wait for it to finish, however this backend says so.
+ * A pty only tells you by drawing (its prompt comes back), so we wait for the
+ * output to match; pipe mode says so explicitly with an exit frame — and a
+ * command like `cd` emits nothing at all there, so waiting on output would
+ * hang forever.
+ */
 async function runTerm(term: string, cmd: string, needle: RegExp): Promise<string> {
   const before = termFrames.length;
   // a pty is a keyboard: the newline is what submits. pipe mode takes a line.
   const data = mode === "pty" ? `${cmd}\r` : cmd;
   await post(`/api/projects/${projectId}/term/input`, { term, data });
-  await waitUntil(() => needle.test(outputSince(before, term)));
+  if (mode === "pipe") {
+    await waitUntil(() =>
+      termFrames.slice(before).some((f) => f.term === term && f.exit !== undefined),
+    );
+  } else {
+    await waitUntil(() => needle.test(outputSince(before, term)));
+  }
   return outputSince(before, term);
 }
 

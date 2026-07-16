@@ -1399,6 +1399,25 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
       if (scrollback) term.write(scrollback);
       else if (t.pendingOut) term.write(t.pendingOut);
       t.pendingOut = "";
+      // Cmd/Ctrl+C must copy when there's a selection and interrupt when there
+      // isn't — the shortcut a terminal user expects, and xterm won't guess.
+      // Cmd/Ctrl+V pastes; everything else falls through to the pty.
+      term.attachCustomKeyEventHandler(function(e){
+        if (e.type !== "keydown") return true;
+        var mod = e.metaKey || e.ctrlKey;
+        if (mod && e.key === "c" && term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection()).catch(function(){});
+          return false;
+        }
+        if (mod && e.key === "v") {
+          navigator.clipboard.readText().then(function(txt){
+            if (txt) wsSend({ type: "term-input", term: t.id, data: txt });
+          }).catch(function(){});
+          return false;
+        }
+        if (mod && e.shiftKey && e.key.toLowerCase() === "k") { term.clear(); return false; }
+        return true;
+      });
       term.onData(function(d){ wsSend({ type: "term-input", term: t.id, data: d }); });
       term.onResize(function(size){ wsSend({ type: "term-resize", term: t.id, cols: size.cols, rows: size.rows }); });
       if (term.onTitleChange) term.onTitleChange(function(title){
