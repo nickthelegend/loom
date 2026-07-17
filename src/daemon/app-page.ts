@@ -155,11 +155,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .brand.lg{width:18px;height:18px}
   .brand.xl{width:22px;height:22px}
   .sendbtn{display:inline-flex;align-items:center;justify-content:center;flex:none;
-    width:34px;height:34px;border-radius:17px;background:var(--primary);color:var(--primary-foreground);
+    width:30px;height:30px;border-radius:15px;background:var(--primary);color:var(--primary-foreground);
     transition:opacity .15s,transform .1s}
   .sendbtn:hover{opacity:.9}
   .sendbtn:active{transform:scale(.96)}
-  .sendbtn svg{width:16px;height:16px}
+  .sendbtn svg{width:15px;height:15px}
   /* Stop takes send's place mid-turn. Same shape and position — it's the same
      button answering a different question — but it must not read as "go", so
      it carries the warn colour and a slow pulse to say the turn is live. */
@@ -349,28 +349,30 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     color:var(--foreground);font:inherit;font-size:14px;line-height:1.55;padding:2px 4px;
     min-height:48px;max-height:200px;overflow-y:auto}
   .cinput::placeholder{color:color-mix(in srgb, var(--muted-foreground) 55%, transparent)}
-  .crow{display:flex;align-items:center;gap:8px;padding:8px 0 0}
-  .ctool{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;
+  /* the control row under the textarea: small, evenly-spaced pills, all the same
+     height and vertically centred with the send button */
+  .crow{display:flex;align-items:center;gap:6px;padding:8px 1px 0}
+  .ctool{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 8px;
     background:transparent;border:1px solid color-mix(in srgb, var(--border) 80%, transparent);border-radius:99px;
-    color:var(--muted-foreground);cursor:pointer;font:inherit;font-size:12px;transition:background .12s,color .12s,border-color .12s}
+    color:var(--muted-foreground);cursor:pointer;font:inherit;font-size:11.5px;transition:background .12s,color .12s,border-color .12s}
   .ctool:hover{background:var(--sidebar-accent);color:var(--foreground);border-color:var(--border)}
-  .ctool svg{width:15px;height:15px}
-  .ctool.iconly{width:30px;padding:0;justify-content:center;gap:0}
-  .ctool .cchev{width:12px;height:12px;opacity:.6;margin-right:-2px}
-  .cmodel{font-family:var(--font-mono);font-size:11px;letter-spacing:.01em;max-width:170px;
+  .ctool svg{width:13.5px;height:13.5px}
+  .ctool.iconly{width:26px;padding:0;justify-content:center;gap:0}
+  .ctool .cchev{width:11px;height:11px;opacity:.6;margin-right:-2px}
+  .cmodel{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.01em;max-width:140px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
   /* who the composer talks to — a real button that opens the agent picker, held
      visually apart from the model pill so the two never read as one control */
-  .cagent{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 9px;border-radius:99px;
+  .cagent{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 7px 0 8px;border-radius:99px;
     background:color-mix(in srgb, var(--primary) 13%, transparent);
     border:1px solid color-mix(in srgb, var(--primary) 24%, transparent);color:var(--foreground);
-    font:inherit;font-size:12px;font-weight:500;flex:none;max-width:190px;cursor:pointer;
+    font:inherit;font-size:11.5px;font-weight:500;flex:none;max-width:170px;cursor:pointer;
     transition:background .12s,border-color .12s}
   .cagent:hover{background:color-mix(in srgb, var(--primary) 20%, transparent);
     border-color:color-mix(in srgb, var(--primary) 42%, transparent)}
-  .cagent .brand{width:15px;height:15px;flex:none}
+  .cagent .brand{width:13.5px;height:13.5px;flex:none}
   .cagent .can{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .cagent .cchev{width:12px;height:12px;opacity:.55;flex:none;margin-right:-1px}
+  .cagent .cchev{width:11px;height:11px;opacity:.55;flex:none;margin-right:-1px}
   /* attachment chips */
   .cchips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 6px}
   .cchip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 6px 0 8px;
@@ -792,9 +794,10 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .gbranch .iconbtn.xs{margin-left:0}
   .ginit{padding:16px 12px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
   .ginit .rempty{padding:0}
-  /* commit history at the foot of the source-control panel */
-  .gcommits-h{margin-top:4px}
-  .gcommits{display:flex;flex-direction:column}
+  /* commit history at the foot of the source-control panel — a fixed-height,
+     self-scrolling region so a long history never buries the changes above it */
+  .gcommits-h{margin-top:4px;position:sticky;top:0}
+  .gcommits{display:flex;flex-direction:column;max-height:230px;overflow-y:auto}
   .gclog{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:8px;
     padding:6px 10px;border-bottom:1px solid color-mix(in srgb, var(--border) 60%, transparent)}
   .gclog:hover{background:var(--sidebar-accent)}
@@ -844,7 +847,9 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .scmsec .lnk{margin-left:auto;display:inline-flex;color:var(--muted-foreground);cursor:pointer;background:none;border:0;padding:2px;border-radius:4px}
   .scmsec .lnk:hover{color:var(--foreground);background:var(--sidebar-accent)}
   .scmsec .lnk svg{width:14px;height:14px}
-  .scmlist{display:flex;flex-direction:column}
+  /* the changed-files list: a fixed cap with its own scroll, so a big diff set
+     stays a bounded panel instead of pushing the commit box and history away */
+  .scmlist{display:flex;flex-direction:column;max-height:34vh;overflow-y:auto}
   .scmrow{display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:default}
   .scmrow:hover{background:var(--sidebar-accent)}
   .scmname{flex:1;min-width:0;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;
