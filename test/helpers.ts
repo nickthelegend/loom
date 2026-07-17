@@ -18,6 +18,11 @@ export function makeProjectDir(config?: Partial<ProjectConfig>): string {
     ],
     ...(config?.defaultAgent ? { defaultAgent: config.defaultAgent } : {}),
     ...(config?.routes ? { routes: config.routes } : {}),
+    ...(config?.projection ? { projection: config.projection } : {}),
+    // Default the phase-2 extractor OFF in tests: it would spawn a `claude`
+    // process per turn, which is nondeterministic and absent in CI. Tests that
+    // want it pass their own brain config.
+    brain: config?.brain ?? { extractor: "off" },
   };
   writeProjectConfig(dir, cfg);
   return dir;

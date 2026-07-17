@@ -106,7 +106,7 @@ describe("web app page", () => {
     // in the New task modal, live state and abort in the Source Control rail,
     // and mobile keeps its own route sheet.
     expect(APP_HTML).toContain('id="mroute"'); // named pipeline picker
-    expect(APP_HTML).toContain('picked.join(",")'); // several agents = a pipeline
+    expect(APP_HTML).toContain("specWithRoles"); // several agents = a pipeline, each with a role
     expect(APP_HTML).toContain('id="rabort"'); // abort, in the rail
     expect(APP_HTML).toContain("routeFormHtml()"); // mobile sheet
   });

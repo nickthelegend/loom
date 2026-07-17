@@ -327,3 +327,39 @@ function round(n: number): number {
 export function retrieve(brain: Brain, opts: RetrieveOpts): Hit[] {
   return retrieveFrom(brain.all(), opts);
 }
+
+const KIND_LABEL: Record<MemoryKind, string> = {
+  constraint: "Constraints reality imposes",
+  failure: "Known failures — do not repeat these",
+  decision: "Decisions and why",
+  convention: "How this project does things",
+  fact: "Facts about the project",
+  task: "Task notes",
+};
+
+/**
+ * Render retrieved memories into a brief for an agent taking the baton.
+ *
+ * Grouped by kind with constraints and failures first, because those are the
+ * ones that prevent damage — the reader should hit "don't do X, it breaks Y"
+ * before "the port is 7420". Returns "" for no memories, so a caller can append
+ * it unconditionally.
+ */
+export function compileBrief(memories: Memory[]): string {
+  if (!memories.length) return "";
+  const order: MemoryKind[] = ["constraint", "failure", "decision", "convention", "fact", "task"];
+  const byKind = new Map<MemoryKind, Memory[]>();
+  for (const m of memories) {
+    const arr = byKind.get(m.kind);
+    if (arr) arr.push(m);
+    else byKind.set(m.kind, [m]);
+  }
+  const lines: string[] = ["## What this project has learned (relevant to the work at hand)"];
+  for (const kind of order) {
+    const ms = byKind.get(kind);
+    if (!ms?.length) continue;
+    lines.push("", `### ${KIND_LABEL[kind]}`);
+    for (const m of ms) lines.push(`- ${m.text}`);
+  }
+  return lines.join("\n");
+}

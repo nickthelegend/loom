@@ -128,4 +128,33 @@ describe("memory end-to-end", () => {
     expect(projected).toContain("recursive descent");
     expect(projected).toContain("use pino for logs");
   });
+
+  /**
+   * Phase 3, end to end through a real handoff: a brain memory the incoming
+   * agent's work is relevant to gets retrieved, compiled into a brief, and
+   * written into the memory the agent inherits. This is the part the
+   * recency-window projection structurally can't do — it's retrieval, not
+   * the last N lines.
+   */
+  it("retrieves a relevant brain memory into the handoff brief", async () => {
+    // A memory with a distinctive entity, added straight to the brain.
+    await fetch(`${client.baseUrl}/api/projects/${id}/brain`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${readDaemonConfig()!.adminToken}` },
+      body: JSON.stringify({
+        kind: "constraint",
+        text: "The token bucket in src/core/ratelimit.ts must refill lazily — a timer leaks under load.",
+      }),
+    });
+    // Talk about that file, so retrieval fires on the entity.
+    await client.send(id, "check the refill logic in src/core/ratelimit.ts");
+    await waitUntil(async () => {
+      const { events } = await client.events(id, undefined, 80);
+      return events.filter((e) => e.kind === "run_complete").length >= 2;
+    });
+    await client.handoff(id, "executor");
+    const projected = fs.readFileSync(path.join(dir, ".loom", "memory", "executor.md"), "utf8");
+    expect(projected).toContain("What this project has learned"); // the compiled brief header
+    expect(projected).toContain("refill lazily"); // the retrieved memory itself
+  });
 });

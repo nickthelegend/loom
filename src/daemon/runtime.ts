@@ -23,7 +23,10 @@ import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
 import { isAdapter, MAIN_CHAT } from "../types.js";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
-import { Brain } from "../core/brain.js";
+import { Brain, CONFIDENCE_FLOOR } from "../core/brain.js";
+import { compileBrief, retrieve } from "../core/brain-index.js";
+import { extractFromTurn, type ExtractEngine } from "../core/brain-extract.js";
+import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
 import { renderProjection } from "../core/distill.js";
 import {
@@ -438,27 +441,106 @@ export class ProjectRuntime {
   /** Pre-turn porcelain snapshots, for per-prompt diff attribution. */
   private preTurnTree = new Map<string, string>();
 
-  /** After a turn: log which files that prompt changed (turn_diff). */
+  /** After a turn: log which files that prompt changed (turn_diff), then learn. */
   private captureTurnDiff(agentId: string): void {
     const before = this.preTurnTree.get(agentId);
-    if (before === undefined) return;
+    if (before === undefined) {
+      // No snapshot (e.g. a turn with no pre-tree) — still worth reading.
+      this.extractMemory(agentId, []);
+      return;
+    }
     this.preTurnTree.delete(agentId);
     void diffSinceSnapshot(this.info.dir, before)
       .then((diff) => {
-        if (!diff) return;
-        this.log.append({
-          kind: "turn_diff",
-          agentId,
-          payload: {
-            files: diff.files,
-            added: diff.added,
-            removed: diff.removed,
-            patch: diff.patch,
-            truncated: diff.truncated,
-          },
-        });
+        if (diff) {
+          this.log.append({
+            kind: "turn_diff",
+            agentId,
+            payload: {
+              files: diff.files,
+              added: diff.added,
+              removed: diff.removed,
+              patch: diff.patch,
+              truncated: diff.truncated,
+            },
+          });
+        }
+        // Learn from the turn once we know which files it touched — the files
+        // sharpen candidate retrieval. Runs after the diff so recentTurnFiles
+        // isn't needed; the files are right here.
+        this.extractMemory(agentId, (diff?.files ?? []).map((f) => f.path));
+      })
+      .catch(() => this.extractMemory(agentId, []));
+  }
+
+  /**
+   * Phase 2: read a finished turn for durable memory.
+   *
+   * Fire-and-forget on purpose. A slow or missing extractor must never delay
+   * anything — extractFromTurn already swallows engine failures, and this is
+   * void-ed so even an unexpected throw can't escape into the event pipeline.
+   * Off entirely when config says so; a no-op when Claude isn't available.
+   */
+  private extractMemory(agentId: string, files: string[]): void {
+    if (this.config.brain?.extractor === "off") return;
+    const chat = this.turnChat.get(agentId) ?? MAIN_CHAT;
+    const turn = this.gatherTurnText(chat);
+    if (turn.length < 40) return; // nothing substantial to learn from
+    const model = this.config.brain?.model ?? "haiku";
+    const engine: ExtractEngine = (p) =>
+      claudeText(`${p.system}\n\n${p.user}`, { model, timeoutMs: 60_000 });
+    void extractFromTurn(this.brain, turn, {
+      engine,
+      agentId,
+      chat,
+      ...(files.length ? { files } : {}),
+      eventId: this.log.lastId(),
+    })
+      .then((res) => {
+        const learned = res.added.length + res.updated.length + res.forgotten.length;
+        if (learned > 0) {
+          this.log.append({
+            kind: "status",
+            payload: {
+              state: "brain_extract",
+              agentId,
+              added: res.added.length,
+              updated: res.updated.length,
+              forgotten: res.forgotten.length,
+            },
+          });
+        }
       })
       .catch(() => {});
+  }
+
+  /**
+   * The transcript of the most recent turn in a chat: from the last human
+   * message to now — the user's ask and what the agent did in reply.
+   */
+  private gatherTurnText(chat: string): string {
+    const events = this.log.list({ chat, limit: 40 });
+    let start = 0;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]!.kind === "message" && !events[i]!.agentId) {
+        start = i;
+        break;
+      }
+    }
+    const lines: string[] = [];
+    for (const e of events.slice(start)) {
+      const p = e.payload;
+      if (e.kind === "message") {
+        lines.push(`${e.agentId ?? "user"}: ${String(p.text ?? "").slice(0, 2000)}`);
+      } else if (e.kind === "tool_call") {
+        lines.push(`[${e.agentId} used ${String(p.tool ?? "a tool")}] ${String(p.summary ?? "")}`.trim());
+      } else if (e.kind === "file_edit") {
+        lines.push(`[${e.agentId} edited ${String(p.path ?? "")}]`);
+      } else if (e.kind === "decision") {
+        lines.push(`decision: ${String(p.text ?? "")}`);
+      }
+    }
+    return lines.join("\n").trim();
   }
 
   workingTree(): Promise<WorkingTree> {
@@ -477,6 +559,42 @@ export class ProjectRuntime {
   /** The merged brain: decisions + imported ADE memories + shared context. */
   unifiedMemory(): UnifiedMemory {
     return buildUnifiedMemory(this.info.name, this.log.list(), this.importedMemory());
+  }
+
+  /**
+   * Phase 3: the brain brief for a handoff — the memories relevant to the work
+   * in flight, compiled. Query is the recent conversation plus the files recent
+   * turns touched; scoped to the incoming agent; low-confidence memories are
+   * held back from injection (they stay visible in the Brain tab). Empty string
+   * when there's nothing relevant, so callers append it unconditionally.
+   */
+  private retrieveBrief(events: LoomEvent[], agentId: string): string {
+    const query = events
+      .filter((e) => e.kind === "message")
+      .slice(-8)
+      .map((e) => String(e.payload.text ?? ""))
+      .join(" ");
+    const files = [
+      ...new Set(
+        events
+          .filter((e) => e.kind === "turn_diff")
+          .flatMap((e) => {
+            // turn_diff stores ChangedFile[] ({status, path}); older events or
+            // other shapes may carry bare strings. Normalise to paths.
+            const raw = (e.payload.files as Array<string | { path?: string }> | undefined) ?? [];
+            return raw.map((f) => (typeof f === "string" ? f : (f?.path ?? ""))).filter(Boolean);
+          }),
+      ),
+    ].slice(-20);
+    if (!query.trim() && !files.length) return "";
+    const hits = retrieve(this.brain, {
+      ...(query.trim() ? { query } : {}),
+      ...(files.length ? { files } : {}),
+      agent: agentId,
+      minConfidence: CONFIDENCE_FLOOR,
+      limit: 14,
+    });
+    return compileBrief(hits.map((h) => h.memory));
   }
 
   /**
@@ -730,13 +848,19 @@ export class ProjectRuntime {
     // falling back to the template so a broken Claude never blocks a handoff.
     const distillStart = Date.now();
     const rendered = await renderProjection(input, this.config.projection);
+    // Phase 3: the memories relevant to the work in flight, retrieved and
+    // compiled — this is the part the recency-window projection can't do. Query
+    // is the recent conversation plus the files recent turns touched; scoped to
+    // this chat and to the incoming agent; low-confidence memories are held back
+    // from injection (they're still visible in the Brain tab).
+    const brainBrief = this.retrieveBrief(events, to);
     // Append the unified cross-ADE memory so the incoming agent sees the
     // whole brain, not just this project's log.
     const unified = this.unifiedMemory();
-    const enriched =
-      unified.sources.length > 0
-        ? `${rendered.content}\n\n---\n${unified.document}`
-        : rendered.content;
+    const parts = [rendered.content];
+    if (brainBrief) parts.push(brainBrief);
+    if (unified.sources.length > 0) parts.push(unified.document);
+    const enriched = parts.join("\n\n---\n");
     await target.injectMemory(enriched);
     writeMemoryFile(this.info.dir, to, enriched); // idempotent with default impl
     this.pendingBriefings.set(to, buildBriefing(input));
@@ -753,7 +877,13 @@ export class ProjectRuntime {
     for (const cfg of this.config.agents) {
       const bystander = this.agents.get(cfg.id);
       if (!bystander || isAdapter(bystander) || cfg.id === to) continue;
-      const bridgeView = buildProjection({ ...input, targetAgentId: cfg.id });
+      // Bridges get the retrieved brain brief too — they can't take a system
+      // prompt, but their shared-context file is the only memory they have, so
+      // it shouldn't be the one view without the learned memories in it.
+      const bridgeBrief = this.retrieveBrief(events, cfg.id);
+      const bridgeView = bridgeBrief
+        ? `${buildProjection({ ...input, targetAgentId: cfg.id })}\n\n---\n${bridgeBrief}`
+        : buildProjection({ ...input, targetAgentId: cfg.id });
       await bystander.injectMemory(bridgeView).catch(() => {});
     }
 

@@ -139,6 +139,18 @@ export interface ProjectionConfig {
   timeoutMs?: number;
 }
 
+/** The brain's phase-2 extractor — learning from each turn. See core/brain-extract.ts. */
+export interface BrainConfig {
+  /**
+   * Who reads finished turns for memory:
+   *   "auto" (default) — a small Claude, when the CLI is available; a no-op when not.
+   *   "off"            — never extract; the brain only holds what you type.
+   */
+  extractor?: "auto" | "off";
+  /** Model for the extractor call; small+fast is right. */
+  model?: string;
+}
+
 export interface ProjectConfig {
   name: string;
   agents: AgentConfig[];
@@ -147,6 +159,7 @@ export interface ProjectConfig {
   /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */
   routes?: Record<string, RouteStepSpec[]>;
   projection?: ProjectionConfig;
+  brain?: BrainConfig;
 }
 
 // ---------------------------------------------------------------------------
