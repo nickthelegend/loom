@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### GitHub & Linear, native
+
+- **One board, three sources.** A segmented control switches the Board between
+  **GitHub** (the live kanban), **Projects** (browse the owner's GitHub Project v2
+  boards, items laid out by their Status column), and **Linear** (recent issues).
+- **Review and approve PRs in place.** Open a PR's diff in-app and post the three
+  reviewer verbs — comment, request changes, approve — through your own `gh`, signed
+  as you. Approve asks first, because it publishes.
+- **Open a worktree from any task.** One click cuts a checked-out branch in its own
+  sibling directory: a PR worktree checks the branch out (forks included, via
+  `gh pr checkout` into a detached worktree); an issue worktree cuts a fresh branch.
+- **File a Linear issue with a team selector.** Loom reads `LINEAR_API_KEY` from the
+  daemon's own environment and never stores it — the same bet it makes with `gh`. No
+  key → an honest "not connected", never a dead form.
+
+### Settings — one sectioned screen
+
+- The lone Setup modal is now **Settings**, with a nav rail: **Setup** (what the
+  machine still needs), **Diagnostics** (`loom doctor`, run live), **Updates** (build
+  rev + how far the checkout is behind its remote), **Preferences** (theme, brain
+  extractor, handoff brief style, default agent — read live, no restart), **Devices**
+  (paired clients, revoke, pair), and **About**.
+- `/api/setup`, `/api/doctor`, and `/api/updates` moved behind the auth wall — they
+  inventory the machine, which matters the moment the daemon binds past localhost.
+
+### The Brain learns on its own (mem0-style)
+
+- After each turn a small Claude reads what changed and files typed memory **units**
+  — constraint, decision, convention, fact, failure — reconciled on write
+  (add / update / forget, never a growing blob), the approach mem0 pioneered, adapted
+  to Loom's event log. Every unit's evidence is verified against the turn before it's
+  kept. Retrieval unions an entity index with BM25.
+- The **Brain tab** shows the learned units by kind; the extractor toggles off per
+  project in Settings.
+
+### Composer
+
+- The agent chip is a real **picker** now — click it to switch which agent the
+  composer talks to, instead of hunting the sidebar. Each control (attach, switch
+  agent, model, send) is its own labelled button, and the message box starts at two
+  lines, grows, then scrolls.
+
+### Real agent output
+
+- Agent **thinking** is shown in a collapsible block, kept apart from the reply, and
+  messages render as **rich markdown** (headings, lists, code, inline code) instead of
+  raw text.
+
 ### Board — everything in flight, and Tasks folded into it
 
 - **The Tasks tab is gone.** The Board covers it: search issues and pull

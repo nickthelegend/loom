@@ -33,6 +33,12 @@ and memory they don't share on their own.
      (plan)        (execute)      (review)
 ```
 
+<p align="center">
+  <img src="docs/img/workspace.png" alt="Loom workspace — one thread over every agent, with the Explorer, the composer, and the agent baton" width="100%">
+  <br>
+  <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
+</p>
+
 ## Why
 
 Every coding agent keeps its own brain. Claude Code's memory can't be read by
@@ -118,13 +124,14 @@ the writing.
   the job (roles are free text: "architect", "the one that writes docs", anything).
 - **Thread** is the shared conversation; **Brain** is the unified memory; **Board**
   is everything in flight.
-- **Board** is four columns — working → needs you → in review → ready to merge.
-  Cards come from three places: **yours** (`+ Task`), **Loom** (which agents are
-  running or blocked), and **GitHub** (draft, CI failed, changes requested,
-  approved — read through your own `gh`). Search issues and PRs right here in
-  GitHub's query language; **Start** hands an issue to an agent.
-  Dragging your own card really moves it. Dragging a PR card only moves where you
-  *see* it — the badge keeps telling the truth, because a drag can't approve a
+- **Board** is one board with three sources — **GitHub**, **Projects**, **Linear** —
+  switched from a segmented control (see [GitHub & Linear, native](#github--linear-native)).
+  GitHub is four live columns (working → needs you → in review → ready to merge); cards
+  come from **yours** (`+ Task`), **Loom** (which agents are running or blocked), and
+  your repo's **PRs** (draft, CI failed, changes requested, approved — read through your
+  own `gh`). Search issues and PRs in GitHub's own query language; **Start** hands an
+  issue to an agent. Dragging your own card really moves it; dragging a PR card only moves
+  where you *see* it — the badge keeps telling the truth, because a drag can't approve a
   review or turn CI green. Each card wears its agent's own logo.
 - **Click any change** — an `Update(n files)` card, or a file in Source Control — and the
   diff opens to the right of the chat. It stays closed until you ask for it.
@@ -138,6 +145,54 @@ the writing.
 - **New task** (`n`) picks a project, a task, and **one agent — or several**, which run
   it as a pipeline, hop to hop. **New project** (`p`) adds a repo — a native folder
   picker in the desktop app — and reports which ADEs it found on the host.
+
+### Settings, in one place
+
+Everything about a Loom lives behind the gear in the bottom-left: **Setup** (what the
+machine still needs to run agents), **Diagnostics** (`loom doctor`, run live on the
+daemon), **Updates** (build rev, and how far the checkout is behind its remote),
+**Preferences** (theme, the brain extractor, handoff brief style, default agent),
+**Devices** (paired clients — revoke one, or pair another), and **About**.
+
+<p align="center">
+  <img src="docs/img/settings.png" alt="Loom's Settings screen — Setup, Diagnostics, Updates, Preferences, Devices, About" width="100%">
+</p>
+
+## GitHub & Linear, native
+
+Browse pull requests, issues, and **GitHub Project boards** in-app; open a worktree from
+any task; review and approve PRs; and file **Linear** issues with a team selector — no
+context switch, no second browser tab.
+
+<p align="center">
+  <img src="docs/img/board-projects.png" alt="A GitHub Project board rendered in Loom, items grouped by their Status column" width="100%">
+  <br>
+  <em>A GitHub Project (v2) board, in-app — items grouped by their Status column, each linking back to its issue or PR.</em>
+</p>
+
+- **Browse PRs, issues, and Project boards.** The **GitHub** source is the live kanban;
+  the **Projects** source lists the owner's GitHub Project (v2) boards and lays a
+  project's items out by Status; search takes github.com's own query language.
+- **Review and approve PRs in place.** Open a PR's diff without leaving Loom and post the
+  three things a reviewer does — **comment**, **request changes**, **approve**. The review
+  is signed as you (through your `gh`); approve asks first, because it publishes.
+- **Open a worktree from any task.** One click cuts a checked-out branch in its own
+  directory, a sibling of the repo: a **PR** worktree checks the branch out — forks
+  included — and an **issue** worktree cuts a fresh branch to start it. An agent can work
+  a PR while your main tree stays exactly where you left it.
+- **Create Linear issues with a team selector.** Pick a team, write a title and
+  description, file it — the new issue's identifier comes straight back.
+
+<p align="center">
+  <img src="docs/img/board-linear.png" alt="Loom's Linear source, honest about being off until you connect it" width="100%">
+  <br>
+  <em>Linear is off until you connect it — and Loom tells you exactly how, because it holds no token of its own.</em>
+</p>
+
+**Loom holds no token of its own.** GitHub goes through your `gh` CLI; Linear reads
+`LINEAR_API_KEY` from the daemon's own environment (you `export` it) and never stores,
+logs, or transmits it anywhere else. No key → an honest "not connected", never a dead
+form — the same bet the agent adapters make by shelling out to the CLIs you already have.
 
 ## Quickstart
 
@@ -333,6 +388,20 @@ them, so your ADE's own memory files stay yours. And the import is a **merge, no
 parse**: files are read, capped at 8000 chars, and concatenated under headers. Claude
 Code's `@path` imports are **not followed** — a `CLAUDE.md` that is mostly `@` pointers
 imports the pointers, not what they point at.
+
+The brain also **learns on its own**. After each turn a small Claude reads what changed
+and files what's worth keeping as typed memory *units* — a constraint, a decision, a
+convention, a fact, a failure — reconciled on write (add / update / forget, never a
+growing blob), the approach [mem0](https://github.com/mem0ai/mem0) pioneered, adapted to
+Loom's event log. Every unit's evidence is verified against the turn before it's kept, so
+the brain doesn't remember things that were never said. The **Brain tab** shows exactly
+what it has learned; toggle the extractor off per project in Settings.
+
+<p align="center">
+  <img src="docs/img/brain.png" alt="Loom's Brain tab — the memory units it has learned, by kind" width="100%">
+  <br>
+  <em>The Brain tab — learned memory units, grouped by kind, each traceable to the turn it came from.</em>
+</p>
 
 ## How it works
 
