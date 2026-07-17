@@ -76,23 +76,12 @@ export class ProjectRuntime {
     this.log = log;
     this.baton = new BatonManager(info.dir, log);
 
-    for (const agentCfg of config.agents) {
-      const agent = createAgent(agentCfg, info.dir);
-      this.agents.set(agentCfg.id, agent);
-      agent.onEvent((e) => {
-        // An agent streams events long after the send returns, and it has no
-        // idea which conversation prompted it. Tag them with the chat that
-        // started this turn, so its reply lands where you asked the question.
-        const chat = this.turnChat.get(agent.id);
-        const event = this.log.append({
-          kind: e.kind,
-          agentId: agent.id,
-          ...(chat ? { chat } : {}),
-          payload: e.payload,
-        });
-        this.afterAgentEvent(event);
-      });
-    }
+    // Same path as addAgent: an agent added at runtime must behave exactly like
+    // one that was here at open, and two copies of this loop would drift.
+    // (An agent streams events long after send() returns and has no idea which
+    // conversation prompted it — spawnAgent tags them with the chat that started
+    // the turn, so a reply lands where the question was asked.)
+    for (const agentCfg of config.agents) this.spawnAgent(agentCfg);
 
     this.routes = new RouteEngine({
       projectName: info.name,
@@ -213,9 +202,38 @@ export class ProjectRuntime {
       throw new Error(`"${id}" is already in this project`);
     }
     const cfg: AgentConfig = { id, kind, role: (opts.role ?? kind).trim().slice(0, 40) || kind };
+    // Build it before saving. A config entry with no live agent behind it makes
+    // status() throw the moment anything asks — this.agent(id) doesn't find it —
+    // so the project 500s on every poll and the roster you just changed becomes
+    // unreachable. Writing the file is the easy half; the runtime has to learn
+    // too, and it can't wait for a restart to do it.
+    this.spawnAgent(cfg);
     this.config.agents.push(cfg);
     this.saveConfig();
     return cfg;
+  }
+
+  /**
+   * Create one agent and subscribe to it, exactly as the constructor does.
+   *
+   * Shared so a roster change can't drift from a cold start: an agent added at
+   * runtime must stream its events into the log the same way as one that was
+   * there when the project opened.
+   */
+  private spawnAgent(cfg: AgentConfig): AnyAgent {
+    const agent = createAgent(cfg, this.info.dir);
+    this.agents.set(cfg.id, agent);
+    agent.onEvent((e) => {
+      const chat = this.turnChat.get(agent.id);
+      const event = this.log.append({
+        kind: e.kind,
+        agentId: agent.id,
+        ...(chat ? { chat } : {}),
+        payload: e.payload,
+      });
+      this.afterAgentEvent(event);
+    });
+    return agent;
   }
 
   /**

@@ -611,6 +611,86 @@ describe("web app · the console", () => {
   });
 });
 
+/**
+ * The agent picker.
+ *
+ * A project's roster used to be frozen at creation: install a new ADE and your
+ * existing projects never heard of it, so a machine with six agents had a board
+ * offering two. That looked like a bug in the board. The board was telling the
+ * truth about a config that couldn't learn.
+ */
+describe("web app · the agent picker", () => {
+  const openAgents = async (): Promise<Mounted> => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '.rvbtn[data-view="tasks"]'));
+    click($(m, '.rvbtn[data-view="tasks"]'));
+    await waitUntil(() => !!$(m, "#addagents"));
+    return m;
+  };
+
+  it("offers the agents that aren't in this project yet", async () => {
+    const m = await openAgents();
+    // the fixture project has echo agents only, so every real ADE is on offer
+    await waitUntil(() => m.window.document.querySelectorAll("#addagents .addrow").length > 0);
+    expect(text(m, "#addagents")).toContain("Claude Code");
+    expect(text(m, "#addagents")).toContain("Codex");
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
+
+  it("greys out an ADE that isn't installed, with the reason", async () => {
+    const m = await openAgents();
+    await waitUntil(() => m.window.document.querySelectorAll("#addagents .addrow").length > 0);
+    // whichever are missing on this machine say so rather than vanishing —
+    // "not in the list" and "not installed" send you somewhere different
+    const off = m.window.document.querySelectorAll("#addagents .addrow.off");
+    for (const row of off) {
+      expect(row.textContent ?? "").toContain("not installed");
+    }
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
+
+  it("adds an agent to the project for real", async () => {
+    const m = await openAgents();
+    // wait for the row to be *wired*, not just drawn — drawAddAgents fetches,
+    // renders, then binds, and clicking between the last two is a silent no-op
+    await ready(m, "#addagents .addrow:not(.off)");
+    const row = $(m, "#addagents .addrow:not(.off)")!;
+    const kind = row.getAttribute("data-add")!;
+
+    click(row);
+    // it lands in the roster above, and the daemon agrees
+    // The daemon agrees, which is the only opinion that counts: the row could
+    // vanish from the DOM for any number of reasons that aren't "it worked".
+    await waitUntil(async () => {
+      const res = await fetch(`${baseUrl}/api/projects/${projectId}`, {
+        headers: { authorization: `Bearer ${clientToken}` },
+      });
+      const j = (await res.json()) as { project?: { agents?: { kind: string }[] } };
+      return Boolean(j.project?.agents?.some((a) => a.kind === kind));
+    });
+    expect(m.errors.join("\n")).toBe("");
+  }, 25_000);
+
+  it("gives a new agent its kind as its role, not an invented job", async () => {
+    // Self-contained: depending on a previous test having run is how a suite
+    // starts passing for reasons nobody can name.
+    const add = await fetch(`${baseUrl}/api/projects/${projectId}/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${clientToken}` },
+      body: JSON.stringify({ kind: "echo", id: `role-check-${Date.now()}` }),
+    });
+    const agent = (await add.json()) as { id: string; kind: string; role: string };
+    expect(agent.role, "a role is a job you name, not one Loom picks").toBe("echo");
+    for (const invented of ["planner", "executor", "reviewer"]) {
+      expect(agent.role).not.toBe(invented);
+    }
+    await fetch(`${baseUrl}/api/projects/${projectId}/agents/${agent.id}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${clientToken}` },
+    });
+  });
+});
+
 describe("web app · the rest of the shell", () => {
   it("switches tabs between the thread, the board and the brain", async () => {
     const m = mount({ hash: `#p/${projectId}` });

@@ -688,6 +688,15 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .gacts{margin-left:auto;display:none;gap:1px;flex:none}
   .frow.git:hover .gacts{display:flex}
   .iconbtn.xs{width:20px;height:20px;border-radius:5px}
+  /* Add-an-agent rows: an ADE you haven't installed is still listed, greyed,
+     with the reason — "Codex isn't in the list" and "Codex isn't installed"
+     send you to very different places. */
+  .addrow{cursor:pointer}
+  .addrow .fp{color:var(--foreground)}
+  .addrow:hover{background:var(--sidebar-accent)}
+  .addrow.off{cursor:default;opacity:.5}
+  .addrow.off:hover{background:none}
+  .frow.agentrow .gacts,.frow.bridge .gacts{margin-left:4px}
   .iconbtn.xs svg{width:11px;height:11px}
   .gcommit{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);align-items:center}
   .gcommit input{flex:1;min-width:0;background:var(--input,var(--card));border:1px solid var(--border);
@@ -2723,18 +2732,94 @@ ${BRAND_SPRITE}
           ' is a bridge \\u2014 Loom reads it, but it never holds the baton">' +
           '<span class="adot"></span>' + brandMark(a.kind) +
           '<span class="fp">' + esc(a.id) + '</span> <span class="abadge">bridge</span>' +
-          '<span class="role" style="margin-left:auto">' + esc(a.role) + "</span></div>";
+          '<span class="role" style="margin-left:auto">' + esc(a.role) + "</span>" +
+          '<span class="gacts"><button class="iconbtn xs" data-remove="' + esc(a.id) +
+          '" title="remove from this project">' + ICONS.x + "</button></span></div>";
       });
+      // Add an agent. A project's roster used to be frozen at creation: install
+      // a new ADE and your existing projects never heard of it, so a machine
+      // with six agents had a board offering two. That looked like a bug in the
+      // board; the board was telling the truth about a config that couldn't
+      // learn.
+      html += '<div class="rsec">Add<button class="lnk" id="agentrefresh">rescan</button></div>';
+      html += '<div id="addagents"><div class="rempty">looking\\u2026</div></div>';
+
       el.innerHTML = html;
       document.getElementById("railnewtask").onclick = function(){ openTaskModal(pid); };
       Array.prototype.forEach.call(el.querySelectorAll(".frow[data-agent]"), function(row){
-        row.onclick = function(){
+        row.onclick = function(ev){
+          if (ev.target.closest("[data-remove]") || ev.target.closest(".role")) return;
           state.selected = row.getAttribute("data-agent");
           drawRail();
           drawStatus();
         };
       });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-remove]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var id = b.getAttribute("data-remove");
+          api("/api/projects/" + pid + "/agents/" + encodeURIComponent(id), { method: "DELETE" })
+            .then(function(){
+              toast(id + " removed \\u00b7 its history stays in the thread");
+              state.avail = null;
+              refreshProject();
+            })
+            .catch(function(e){ toast(e.message); });
+        };
+      });
+      var rescan = document.getElementById("agentrefresh");
+      if (rescan) rescan.onclick = function(){ state.avail = null; drawAddAgents(); };
       wireRoleEditors(el, function(){ drawRail(); });
+      drawAddAgents();
+    }
+
+    /**
+     * What you could add: every ADE Loom can drive that isn't in this project.
+     *
+     * Installed and in-project are different questions and the daemon answers
+     * both — an ADE you haven't installed is offered greyed out with the reason,
+     * because "Codex isn't in the list" and "Codex isn't installed" send you to
+     * very different places.
+     */
+    function drawAddAgents(){
+      var box = document.getElementById("addagents");
+      if (!box) return;
+      function render(){
+        var list = (state.avail || []).filter(function(a){ return !a.inProject; });
+        if (!list.length) {
+          box.innerHTML = '<div class="rempty">every agent Loom can drive is already here</div>';
+          return;
+        }
+        box.innerHTML = list.map(function(a){
+          var can = a.installed !== false; // bridges report null: presence is live
+          return '<div class="frow addrow' + (can ? "" : " off") + '" data-add="' + esc(a.kind) + '"' +
+            ' title="' + (can ? "add " + esc(a.label) + " to this project" : esc(a.label) + " isn\\u2019t installed") + '">' +
+            brandMark(a.kind) +
+            '<span class="fp">' + esc(a.label) + "</span>" +
+            (a.tier === "bridge" ? '<span class="abadge">bridge</span>' : "") +
+            (can ? '<span class="gacts"><button class="iconbtn xs" title="add">' + ICONS.plus + "</button></span>"
+                 : '<span class="role" style="margin-left:auto">not installed</span>') +
+            "</div>";
+        }).join("");
+        Array.prototype.forEach.call(box.querySelectorAll(".addrow:not(.off)"), function(row){
+          row.onclick = function(){
+            var kind = row.getAttribute("data-add");
+            api("/api/projects/" + pid + "/agents", { method: "POST", body: JSON.stringify({ kind: kind }) })
+              .then(function(a){
+                // The role is the kind until you say otherwise — a description,
+                // not an opinion. Click it to name the job you actually have.
+                toast(a.id + " added \\u00b7 click its role to name the job");
+                state.avail = null;
+                refreshProject();
+              })
+              .catch(function(e){ toast(e.message); });
+          };
+        });
+      }
+      if (state.avail) return render();
+      api("/api/projects/" + pid + "/agents/available")
+        .then(function(j){ state.avail = j.ades || []; render(); })
+        .catch(function(){ box.innerHTML = '<div class="rempty">couldn\\u2019t ask the daemon what\\u2019s installed</div>'; });
     }
     state.drawRail = drawRail;
 
