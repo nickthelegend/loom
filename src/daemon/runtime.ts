@@ -269,6 +269,43 @@ export class ProjectRuntime {
     return { removed: agentId };
   }
 
+  /**
+   * Point an agent at a different model.
+   *
+   * The model is read once, when the adapter is constructed (createAgent hands
+   * it cfg.options), so changing it means building a fresh agent — which drops
+   * the CLI session the old one was resuming. That's the right behaviour for a
+   * model switch: continuing one model's conversation on another model is not a
+   * thing the underlying CLIs support anyway. Refused mid-turn, because swapping
+   * the process out from under a running turn would strand it.
+   *
+   * An empty model clears the override, so the CLI falls back to its own default
+   * — the honest "Default" the picker offers.
+   */
+  setAgentModel(agentId: string, model: string): AgentConfig {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live) && live.busy()) {
+      throw new Error(`"${agentId}" is mid-turn — wait for it to finish, then switch models`);
+    }
+    const next = model.trim().slice(0, 80);
+    const options = { ...(cfg.options ?? {}) } as Record<string, unknown>;
+    if (next) options.model = next;
+    else delete options.model;
+    cfg.options = options;
+
+    // Rebuild so the new model actually takes: stop the old process, spawn a
+    // replacement subscribed exactly as the constructor's loop does.
+    if (live) {
+      void Promise.resolve(live.stop()).catch(() => {});
+      this.agents.delete(agentId);
+    }
+    this.spawnAgent(cfg);
+    this.saveConfig();
+    return cfg;
+  }
+
   /** Write the roster, without tripping our own staleness check. */
   private saveConfig(): void {
     writeProjectConfig(this.info.dir, this.config);
@@ -815,6 +852,9 @@ export class ProjectRuntime {
           available: await agent.available().catch(() => false),
           busy: isAdapter(agent) ? agent.busy() : false,
           holdsBaton: holder === cfg.id,
+          // The picker shows a tick next to the active model; "" means the
+          // adapter's own default, which is the honest baseline.
+          model: (cfg.options?.model as string | undefined) ?? "",
         };
       }),
     );

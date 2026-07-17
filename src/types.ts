@@ -251,6 +251,8 @@ export interface AgentStatus {
   available: boolean;
   busy: boolean;
   holdsBaton: boolean;
+  /** The model override in effect, or "" for the CLI's own default. */
+  model: string;
 }
 
 export interface ProjectStatus {

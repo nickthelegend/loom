@@ -29,6 +29,15 @@ export interface AdeSpec {
   tier: "adapter" | "bridge";
   /** Is it usable on this machine right now? */
   probe: () => Promise<boolean>;
+  /**
+   * Common model values this ADE's CLI accepts, as the model picker's
+   * suggestions. Not exhaustive and not the truth about what's installed —
+   * the picker always offers "Default" (no --model, the CLI's own choice) and
+   * a custom field, so a stale entry here is a convenience that went out of
+   * date, never a wall. Empty for bridges: a GUI app picks its own model in its
+   * own window, and Loom doesn't get a flag.
+   */
+  models?: string[];
 }
 
 /**
@@ -40,12 +49,16 @@ export const ADES: AdeSpec[] = [
     kind: "claude-code",
     label: "Claude Code",
     tier: "adapter",
+    // The CLI takes short aliases as well as full ids; the aliases don't go
+    // stale when a new snapshot ships, which the full ids do.
+    models: ["opus", "sonnet", "haiku"],
     probe: () => cliAvailable("claude"),
   },
   {
     kind: "codex",
     label: "Codex",
     tier: "adapter",
+    models: ["gpt-5-codex", "gpt-5", "o4-mini"],
     // The CLI ships inside Codex.app as well as on PATH; a Mac with the app and
     // an empty PATH is the common case.
     probe: async () => {
@@ -57,12 +70,16 @@ export const ADES: AdeSpec[] = [
     kind: "opencode",
     label: "OpenCode",
     tier: "adapter",
+    // opencode wants provider/model, and which providers exist is that install's
+    // business — so these are examples, and the custom field is the real path.
+    models: ["anthropic/claude-sonnet-4", "openai/gpt-5", "google/gemini-2.5-pro"],
     probe: () => cliAvailable("opencode"),
   },
   {
     kind: "grok-code",
     label: "Grok Code",
     tier: "adapter",
+    models: ["grok-code-fast-1", "grok-4"],
     probe: async () => {
       const bin = grokBin();
       return bin ? cliAvailable(bin) : false;

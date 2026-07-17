@@ -299,13 +299,50 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     border-top:1px solid var(--border);
     padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
   .composer .inner{max-width:900px;margin:0 auto;display:flex;gap:9px;align-items:center}
-  .composer input{flex:1;height:40px;background:transparent;border:1px solid var(--input);
-    border-radius:var(--radius);color:var(--foreground);padding:0 14px;font:inherit;font-size:14px;outline:none;
-    transition:border-color .15s,box-shadow .15s}
-  .dark .composer input{background:color-mix(in srgb, var(--input) 30%, transparent)}
-  .composer input::placeholder{color:color-mix(in srgb, var(--muted-foreground) 60%, transparent)}
-  .composer input:focus{border-color:var(--ring);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 40%, transparent)}
+  /* the composer card: textarea on top, a control row beneath, chips above */
+  .cbox{position:relative;max-width:900px;margin:0 auto;
+    background:color-mix(in srgb, var(--input) 22%, var(--background));
+    border:1px solid var(--input);border-radius:calc(var(--radius) + 4px);
+    padding:8px 8px 6px;transition:border-color .15s,box-shadow .15s}
+  .cbox:focus-within{border-color:var(--ring);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent)}
+  .cinput{display:block;width:100%;box-sizing:border-box;background:transparent;border:0;outline:none;resize:none;
+    color:var(--foreground);font:inherit;font-size:14px;line-height:1.5;padding:5px 6px;
+    max-height:200px;overflow-y:auto}
+  .cinput::placeholder{color:color-mix(in srgb, var(--muted-foreground) 60%, transparent)}
+  .crow{display:flex;align-items:center;gap:6px;padding:4px 2px 0}
+  .ctool{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;
+    background:transparent;border:1px solid transparent;border-radius:8px;
+    color:var(--muted-foreground);cursor:pointer;font:inherit;font-size:12px;transition:background .12s,color .12s,border-color .12s}
+  .ctool:hover{background:var(--sidebar-accent);color:var(--foreground)}
+  .ctool svg{width:15px;height:15px}
+  .ctool.on{border-color:var(--input);color:var(--foreground)}
+  .cmodel{font-family:var(--font-mono);font-size:11px;letter-spacing:.01em;max-width:170px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* attachment chips */
+  .cchips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 6px}
+  .cchip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 6px 0 8px;
+    background:var(--sidebar-accent);border:1px solid var(--border);border-radius:8px;
+    font-size:11px;font-family:var(--font-mono);color:var(--foreground);max-width:220px}
+  .cchip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cchip img{width:20px;height:20px;object-fit:cover;border-radius:4px;flex:none}
+  .cchip .rm{display:inline-flex;cursor:pointer;color:var(--muted-foreground);border:0;background:none;padding:2px}
+  .cchip .rm:hover{color:var(--foreground)}
+  .cchip .rm svg{width:12px;height:12px}
+  .cchip.up{opacity:.55}
+  /* the @ / popover, mounted over the textarea */
+  .cmenu{position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);z-index:30;
+    background:var(--popover,var(--background));border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 12px 34px rgba(0,0,0,.28);max-height:280px;overflow-y:auto;padding:5px}
+  .cmi{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--foreground)}
+  .cmi .ic{display:inline-flex;color:var(--muted-foreground);flex:none}
+  .cmi .ic svg{width:15px;height:15px}
+  .cmi .sub{color:var(--muted-foreground);font-size:11px;font-family:var(--font-mono);margin-left:auto;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:52%}
+  .cmi.sel,.cmi:hover{background:var(--sidebar-accent)}
+  .cmi .tick{margin-left:auto;color:var(--ring)}
+  .cmenu .cmhead{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted-foreground);padding:6px 9px 4px}
   .hint{color:color-mix(in srgb, var(--muted-foreground) 80%, transparent);font-size:11px;
     font-family:var(--font-mono);letter-spacing:.02em;max-width:760px;margin:7px auto 0;text-align:center;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1486,12 +1523,25 @@ ${BRAND_SPRITE}
     // looking when you decide to stop it, not across the window next to a panel
     // toggle. Every chat app does this; so does Antigravity, whose own send
     // swaps to a cancel mid-turn.
+    // The composer is a card, not a bare input: a textarea that grows with what
+    // you type, a row of controls under it (attach, model), and a place for
+    // attachment chips. The @ and / menus mount into #cmenu, positioned over the
+    // textarea. #cfile is the hidden file input the paperclip drives.
     var composerHtml =
-      '<div class="composer" id="composerwrap"><form class="inner" id="cform">' +
-      '<input id="box" placeholder="Message&hellip;" autocomplete="off">' +
+      '<div class="composer" id="composerwrap"><form class="cbox" id="cform">' +
+      '<div class="cmenu" id="cmenu" style="display:none"></div>' +
+      '<div class="cchips" id="cchips" style="display:none"></div>' +
+      '<textarea id="box" class="cinput" rows="1" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
+      '<div class="crow">' +
+      '<button class="ctool" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.file + '</button>' +
+      '<button class="ctool" id="modelpick" type="button" title="pick a model">' + ICONS.gear + '<span class="cmodel" id="cmodellabel">model</span></button>' +
+      '<span style="flex:1"></span>' +
       '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
-      ICONS.stop + "</button></form>" +
+      ICONS.stop + "</button>" +
+      '</div>' +
+      '<input type="file" id="cfile" accept="image/*,.md,.txt,.markdown" multiple style="display:none">' +
+      "</form>" +
       '<div class="hint" id="hint"></div></div>';
 
     if (desktop) {
@@ -3073,6 +3123,7 @@ ${BRAND_SPRITE}
       if (hint) hint.textContent = state.selected && state.selected !== p.holder
         ? "send will shift the baton to " + state.selected
         : (desktop ? "select an agent in the sidebar \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
+      updateModelLabel(); // the picker button reflects whoever's selected now
       if (!desktop) drawChips();
       // agent header block — who the composer talks to, and where
       var ah = document.getElementById("agenthead");
@@ -3201,11 +3252,26 @@ ${BRAND_SPRITE}
     }
     connect();
 
+    // Attachments live here for the life of this project view. A pasted image
+    // or dropped file is uploaded to .loom/attachments/ and referenced by path
+    // in the outgoing message — the CLIs take text, not blobs, so the path IS
+    // the attachment. Cleared after each send.
+    var attach = [];
+
     function send(){
       var box = document.getElementById("box");
       var text = (box.value || "").trim();
-      if (!text) return;
-      box.value = "";
+      // A message can be pure attachments — "look at this" with an image.
+      if (!text && !attach.length) return;
+      if (attach.some(function(a){ return a.uploading; })) { toast("still uploading\\u2026"); return; }
+
+      // Path references go first, so an agent reads the file before the ask.
+      var refs = attach.map(function(a){
+        return (a.kind === "image" ? "[image] " : "[file] ") + a.path;
+      });
+      var full = refs.length ? refs.join("\\n") + (text ? "\\n\\n" + text : "") : text;
+
+      box.value = ""; autosizeBox(); attach = []; drawAttach();
       var p = state.project || {};
 
       // A bridge is driven, not handed a turn: Loom types into Antigravity's or
@@ -3215,7 +3281,7 @@ ${BRAND_SPRITE}
       if (sel && sel.tier === "bridge") {
         toast("typing into " + sel.id + "\\u2026");
         api("/api/projects/" + pid + "/bridge/" + encodeURIComponent(sel.id) + "/ask", {
-          method: "POST", body: JSON.stringify({ text: text, chat: chatId }),
+          method: "POST", body: JSON.stringify({ text: full, chat: chatId }),
         }).then(function(){ refresh(); }).catch(function(err){
           // The bridge's own words ("log in from its window", "launch it
           // with…") are the actionable part; don't bury them.
@@ -3233,12 +3299,272 @@ ${BRAND_SPRITE}
       chain.then(function(){
         // into the chat you're looking at — the agent's reply comes back here
         return api("/api/projects/" + pid + "/messages", { method: "POST",
-          body: JSON.stringify({ text: text, agentId: state.selected || undefined, chat: chatId }) });
+          body: JSON.stringify({ text: full, agentId: state.selected || undefined, chat: chatId }) });
       }).then(refresh).catch(function(err){ toast(err.message); });
     }
-    document.getElementById("cform").addEventListener("submit", function(ev){
-      ev.preventDefault(); send();
-    });
+
+    // ---- composer plumbing -------------------------------------------------
+
+    function autosizeBox(){
+      var box = document.getElementById("box"); if (!box) return;
+      box.style.height = "auto";
+      box.style.height = Math.min(200, box.scrollHeight) + "px";
+    }
+
+    function drawAttach(){
+      var wrap = document.getElementById("cchips"); if (!wrap) return;
+      if (!attach.length) { wrap.style.display = "none"; wrap.innerHTML = ""; return; }
+      wrap.style.display = "flex";
+      wrap.innerHTML = attach.map(function(a, i){
+        var thumb = a.thumb ? '<img src="' + a.thumb + '" alt="">' : ICONS.file;
+        return '<span class="cchip' + (a.uploading ? " up" : "") + '">' + thumb +
+          '<span class="nm">' + esc(a.uploading ? a.name + "\\u2026" : (a.path || a.name)) + "</span>" +
+          '<button class="rm" type="button" data-rm="' + i + '" aria-label="remove attachment">' + ICONS.x + "</button></span>";
+      }).join("");
+      Array.prototype.forEach.call(wrap.querySelectorAll("[data-rm]"), function(b){
+        b.onclick = function(){ attach.splice(Number(b.getAttribute("data-rm")), 1); drawAttach(); };
+      });
+    }
+
+    function uploadFile(file){
+      var isImg = /^image\\//.test(file.type);
+      var rec = { name: file.name || (isImg ? "pasted-image" : "file"), kind: isImg ? "image" : "file", uploading: true, thumb: null, path: null };
+      attach.push(rec); drawAttach();
+      var reader = new FileReader();
+      reader.onload = function(){
+        var dataUrl = reader.result;
+        if (isImg) rec.thumb = dataUrl;
+        api("/api/projects/" + pid + "/attachments", {
+          method: "POST", body: JSON.stringify({ name: rec.name, dataUrl: dataUrl }),
+        }).then(function(j){
+          rec.uploading = false; rec.path = j.path; drawAttach();
+        }).catch(function(err){
+          var i = attach.indexOf(rec); if (i >= 0) attach.splice(i, 1);
+          drawAttach(); toast("attach failed: " + err.message);
+        });
+      };
+      reader.onerror = function(){
+        var i = attach.indexOf(rec); if (i >= 0) attach.splice(i, 1);
+        drawAttach(); toast("could not read that file");
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // The @ / popover. menuState remembers what kind of menu is open and where
+    // in the text the trigger started, so accepting an item replaces exactly the
+    // token you were typing.
+    var menuState = null;
+
+    function closeMenu(){
+      menuState = null;
+      var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; }
+    }
+
+    function renderMenu(items, head){
+      var m = document.getElementById("cmenu"); if (!m) return;
+      if (!items.length) { closeMenu(); return; }
+      menuState.items = items; if (menuState.sel == null) menuState.sel = 0;
+      if (menuState.sel >= items.length) menuState.sel = items.length - 1;
+      m.style.display = "block";
+      m.innerHTML = (head ? '<div class="cmhead">' + esc(head) + "</div>" : "") +
+        items.map(function(it, i){
+          return '<div class="cmi' + (i === menuState.sel ? " sel" : "") + '" data-i="' + i + '">' +
+            '<span class="ic">' + (it.icon || ICONS.file) + "</span>" +
+            "<span>" + esc(it.label) + "</span>" +
+            (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "") + "</div>";
+        }).join("");
+      Array.prototype.forEach.call(m.querySelectorAll(".cmi"), function(row){
+        row.onmousedown = function(ev){ ev.preventDefault(); acceptMenu(Number(row.getAttribute("data-i"))); };
+      });
+    }
+
+    function acceptMenu(i){
+      if (!menuState || !menuState.items) return;
+      var it = menuState.items[i]; if (!it) return;
+      var act = menuState.kind;
+      if (act === "file") {
+        var box = document.getElementById("box");
+        var v = box.value, from = menuState.at, to = box.selectionStart;
+        box.value = v.slice(0, from) + it.value + " " + v.slice(to);
+        var caret = from + it.value.length + 1;
+        box.setSelectionRange(caret, caret); box.focus(); autosizeBox();
+        closeMenu();
+      } else if (act === "cmd") {
+        // A command consumes the whole "/word" it matched.
+        var box2 = document.getElementById("box");
+        box2.value = box2.value.slice(0, menuState.at) + box2.value.slice(box2.selectionStart);
+        box2.setSelectionRange(menuState.at, menuState.at); autosizeBox();
+        closeMenu();
+        it.run();
+      }
+    }
+
+    // Static, and every one runs something real — no decorative commands.
+    function slashCommands(){
+      return [
+        { label: "New task", sub: "hand work to one or more agents", icon: ICONS.tasks, run: function(){ openTaskModal(pid); } },
+        { label: "Record a decision", sub: "save it to the brain", icon: ICONS.memory, run: function(){
+            var box = document.getElementById("box");
+            var t = (box.value || "").trim();
+            if (!t) { toast("type the decision first, then /"); return; }
+            box.value = ""; autosizeBox();
+            api("/api/projects/" + pid + "/decisions", { method: "POST", body: JSON.stringify({ text: t }) })
+              .then(function(){ toast("decision saved to the brain"); if (typeof refreshBrain === "function") refreshBrain(); })
+              .catch(function(err){ toast(err.message); });
+          } },
+        { label: "Pick a model", sub: "for " + (state.selected || "this agent"), icon: ICONS.gear, run: openModelMenu },
+        { label: "Attach a file", sub: "image, .md, .txt", icon: ICONS.file, run: function(){ var f = document.getElementById("cfile"); if (f) f.click(); } },
+      ];
+    }
+
+    function openFileMenu(q, at){
+      menuState = { kind: "file", at: at, sel: 0, items: [] };
+      api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q))
+        .then(function(j){
+          if (!menuState || menuState.kind !== "file") return;
+          var items = (j.matches || []).slice(0, 40).map(function(pth){
+            var base = pth.split("/").pop();
+            return { label: base, sub: pth, value: "@" + pth, icon: ICONS.file };
+          });
+          renderMenu(items, "files");
+        })
+        .catch(function(){ closeMenu(); });
+    }
+
+    function openModelMenu(){
+      var agentId = state.selected;
+      var p = state.project || {};
+      var cur = (p.agents || []).filter(function(a){ return a.id === agentId; })[0];
+      if (!cur || cur.tier === "bridge") { toast("pick an adapter first — bridges choose their own model"); return; }
+      // The model list comes from agents/available, keyed by kind.
+      api("/api/projects/" + pid + "/agents/available").then(function(j){
+        var spec = (j.ades || []).filter(function(a){ return a.kind === cur.kind; })[0];
+        var models = (spec && spec.models) || [];
+        var active = cur.model || "";
+        menuState = { kind: "modelmenu", at: 0, sel: 0, items: [] };
+        var items = [{ label: "Default", sub: cur.kind + "'s own choice", value: "", icon: ICONS.gear }]
+          .concat(models.map(function(mm){ return { label: mm, value: mm, icon: ICONS.gear }; }))
+          .concat([{ label: "Custom\\u2026", value: "__custom__", icon: ICONS.plus }]);
+        items.forEach(function(it){ if (it.value === active) it.tick = true; });
+        var m = document.getElementById("cmenu"); if (!m) return;
+        m.style.display = "block";
+        m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + "</div>" +
+          items.map(function(it, i){
+            return '<div class="cmi" data-mi="' + i + '"><span class="ic">' + (it.icon || ICONS.gear) + "</span><span>" +
+              esc(it.label) + "</span>" + (it.tick ? '<span class="tick">' + ICONS.info + "</span>" : (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "")) + "</div>";
+          }).join("");
+        Array.prototype.forEach.call(m.querySelectorAll("[data-mi]"), function(row){
+          row.onmousedown = function(ev){
+            ev.preventDefault();
+            var it = items[Number(row.getAttribute("data-mi"))];
+            var val = it.value;
+            if (val === "__custom__") {
+              closeMenu();
+              var typed = window.prompt("Model for " + cur.id + " (blank = default):", active);
+              if (typed === null) return;
+              val = typed.trim();
+            } else { closeMenu(); }
+            setModel(agentId, val);
+          };
+        });
+      }).catch(function(err){ toast(err.message); });
+    }
+
+    function setModel(agentId, model){
+      api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agentId) + "/model", {
+        method: "POST", body: JSON.stringify({ model: model }),
+      }).then(function(){
+        toast(model ? (agentId + " \\u2192 " + model) : (agentId + " \\u2192 default model"));
+        refresh();
+      }).catch(function(err){ toast(err.message); });
+    }
+
+    // What's under the caret: an @file token, or a /command at a word start.
+    function scanTrigger(){
+      var box = document.getElementById("box");
+      if (!box || box.selectionStart !== box.selectionEnd) return closeMenu();
+      var upto = box.value.slice(0, box.selectionStart);
+      var at = upto.match(/(^|\\s)@([\\w./-]*)$/);
+      if (at) { openFileMenu(at[2], box.selectionStart - at[2].length - 1); return; }
+      var sl = upto.match(/(^|\\s)\\/(\\w*)$/);
+      if (sl) {
+        var start = box.selectionStart - sl[2].length - 1;
+        menuState = { kind: "cmd", at: start, sel: 0, items: [] };
+        var q = sl[2].toLowerCase();
+        renderMenu(slashCommands().filter(function(c){ return c.label.toLowerCase().indexOf(q) >= 0; }), "actions");
+        return;
+      }
+      if (menuState && (menuState.kind === "file" || menuState.kind === "cmd")) closeMenu();
+    }
+
+    function bindComposer(){
+      var box = document.getElementById("box");
+      var form = document.getElementById("cform");
+      if (!box || !form || box.getAttribute("data-bound")) return;
+      box.setAttribute("data-bound", "1");
+      autosizeBox();
+
+      box.addEventListener("input", function(){ autosizeBox(); scanTrigger(); });
+      box.addEventListener("keydown", function(e){
+        // Menu open: arrows move, Enter/Tab accept, Esc closes.
+        if (menuState && menuState.items && menuState.items.length && (menuState.kind === "file" || menuState.kind === "cmd")) {
+          if (e.key === "ArrowDown") { e.preventDefault(); menuState.sel = (menuState.sel + 1) % menuState.items.length; renderMenu(menuState.items, menuState.kind === "cmd" ? "actions" : "files"); return; }
+          if (e.key === "ArrowUp") { e.preventDefault(); menuState.sel = (menuState.sel - 1 + menuState.items.length) % menuState.items.length; renderMenu(menuState.items, menuState.kind === "cmd" ? "actions" : "files"); return; }
+          if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); acceptMenu(menuState.sel); return; }
+          if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
+        }
+        // Enter sends; Shift+Enter is a newline.
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+      });
+      box.addEventListener("paste", function(e){
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        var imgs = [];
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].kind === "file" && /^image\\//.test(items[i].type)) {
+            var f = items[i].getAsFile(); if (f) imgs.push(f);
+          }
+        }
+        if (imgs.length) { e.preventDefault(); imgs.forEach(uploadFile); }
+      });
+      box.addEventListener("blur", function(){ setTimeout(closeMenu, 120); });
+
+      form.addEventListener("submit", function(ev){ ev.preventDefault(); send(); });
+
+      var attachBtn = document.getElementById("attach");
+      var fileInput = document.getElementById("cfile");
+      if (attachBtn && fileInput) {
+        attachBtn.onclick = function(){ fileInput.click(); };
+        fileInput.onchange = function(){
+          Array.prototype.forEach.call(fileInput.files || [], uploadFile);
+          fileInput.value = "";
+        };
+      }
+      var mp = document.getElementById("modelpick");
+      if (mp) mp.onclick = function(){
+        if (menuState && menuState.kind === "modelmenu") { closeMenu(); return; }
+        openModelMenu();
+      };
+
+      // Drag a file straight onto the card.
+      var cbox = document.querySelector(".cbox");
+      if (cbox) {
+        cbox.addEventListener("dragover", function(e){ e.preventDefault(); });
+        cbox.addEventListener("drop", function(e){
+          e.preventDefault();
+          Array.prototype.forEach.call((e.dataTransfer && e.dataTransfer.files) || [], uploadFile);
+        });
+      }
+      updateModelLabel();
+    }
+
+    function updateModelLabel(){
+      var lbl = document.getElementById("cmodellabel"); if (!lbl) return;
+      var p = state.project || {};
+      var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
+      lbl.textContent = (cur && cur.model) ? cur.model : "model";
+    }
+
+    bindComposer();
   }
 
   // ---- status bar (desktop shell) ------------------------------------------

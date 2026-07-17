@@ -118,6 +118,20 @@ export const BUILD_REV = (() => {
 const TERM_MARK = "__LOOM_END__";
 
 /**
+ * Just enough to give a pasted attachment a sensible extension.
+ */
+const MIME_EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "text/markdown": "md",
+  "text/plain": "txt",
+  "application/pdf": "pdf",
+};
+
+/**
  * Paths from an HTTP body, as strings and nothing else.
  *
  * These reach `git checkout --` and `git clean -fd`, which delete things. A
@@ -631,6 +645,7 @@ export class LoomDaemon {
             // debug port, so presence is a live question, not a lookup.
             installed: a.tier === "adapter" ? Boolean(availability[a.kind]) : null,
             inProject: inProject.has(a.kind),
+            models: a.models ?? [],
           })),
         });
       }),
@@ -656,6 +671,20 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         try {
           res.json(rt.removeAgent(String(req.params.agentId)));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    // Point an agent at a different model. Empty string clears the override.
+    app.post(
+      "/api/projects/:id/agents/:agentId/model",
+      withRuntime(async (rt, req, res) => {
+        const { model } = (req.body ?? {}) as { model?: string };
+        try {
+          const cfg = rt.setAgentModel(String(req.params.agentId), model ?? "");
+          res.json({ agent: cfg });
         } catch (err) {
           res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
@@ -1107,6 +1136,47 @@ export class LoomDaemon {
       };
       walk(base);
       res.json({ matches });
+    });
+
+    /**
+     * Stash a pasted image or dropped file, and hand back its path.
+     *
+     * The CLIs Loom drives take text and nothing else — SendInput is { text,
+     * briefing }, no image channel. So the only honest way to "attach" an image
+     * is to write it somewhere the agent can read and reference the path in the
+     * message. Claude Code and Codex both read image files by path; for the
+     * others it's at least a real artifact on disk rather than a lie in the UI.
+     *
+     * Under .loom/attachments/ so it's inside the project (the agent's cwd) but
+     * out of the way. Name is derived from a content hash, never from the
+     * client's — a caller doesn't get to choose where in the tree this lands.
+     */
+    app.post("/api/projects/:id/attachments", (req, res) => {
+      const base = projectPath(String(req.params.id), ".");
+      if (!base) return void res.status(404).json({ error: "not found" });
+      const { name, dataUrl } = (req.body ?? {}) as { name?: string; dataUrl?: string };
+      const m = /^data:([\w/+.-]+);base64,(.+)$/s.exec(dataUrl ?? "");
+      if (!m) return void res.status(400).json({ error: "expected a base64 data URL" });
+      const mime = m[1] ?? "application/octet-stream";
+      const buf = Buffer.from(m[2] ?? "", "base64");
+      const MAX = 12 * 1024 * 1024;
+      if (buf.length > MAX) return void res.status(413).json({ error: "attachment over 12MB" });
+
+      // Extension from the declared type or the client's name, whichever we
+      // trust more — but only ever the extension, never the path.
+      const extFromName = typeof name === "string" ? path.extname(name).replace(/[^.\w]/g, "").slice(0, 8) : "";
+      const ext = extFromName || "." + (MIME_EXT[mime] ?? "bin");
+      const hash = crypto.createHash("sha1").update(buf).digest("hex").slice(0, 12);
+      const rel = path.join(".loom", "attachments", hash + ext);
+      const abs = projectPath(String(req.params.id), rel);
+      if (!abs) return void res.status(400).json({ error: "bad attachment path" });
+      try {
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, buf);
+      } catch (err) {
+        return void res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+      res.json({ path: rel, bytes: buf.length, mime });
     });
   }
 
