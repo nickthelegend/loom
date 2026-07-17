@@ -74,7 +74,12 @@ interface Mounted {
  * Boot the app in a DOM. `desktop` drives the same media query the app uses to
  * choose its layout, so both are reachable from a test.
  */
-function mount({ desktop = true, hash = "", token = clientToken as string | null } = {}): Mounted {
+function mount({
+  desktop = true,
+  hash = "",
+  token = clientToken as string | null,
+  bootstrap = true,
+} = {}): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", (e: Error) => errors.push(e.message));
@@ -122,6 +127,17 @@ function mount({ desktop = true, hash = "", token = clientToken as string | null
       // document that no longer exists — that noise isn't the app's fault.
       window.fetch = ((input: string, init?: RequestInit) => {
         if (closed) return never;
+        // `bootstrap: false` simulates a remote (non-loopback) visitor — a phone
+        // on the tailnet — for whom the local admin bootstrap is refused. The
+        // real daemon would 403 by socket address, which jsdom can't fake.
+        if (!bootstrap && new URL(String(input), baseUrl).pathname === "/api/bootstrap") {
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: "not a local request" }), {
+              status: 403,
+              headers: { "content-type": "application/json" },
+            }),
+          ) as unknown as Promise<Response>;
+        }
         return fetch(new URL(String(input), baseUrl), init).then((r) => (closed ? never : r));
       }) as typeof window.fetch;
       // jsdom has no WebSocket either. A real one, remembered so close() can
@@ -188,9 +204,19 @@ const click = (el: Element | null) => {
 };
 
 describe("web app · boot", () => {
-  it("an unpaired visitor gets the pairing screen, not a broken shell", async () => {
-    const m = mount({ token: null });
+  it("an unpaired remote visitor gets the pairing screen, not a broken shell", async () => {
+    // A phone on the tailnet: no stored token, and the local admin bootstrap 403s.
+    const m = mount({ token: null, bootstrap: false });
     await waitUntil(() => !!$(m, "#ptok, .pairbox, .pair"));
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("a same-machine visitor is the admin console — no pairing needed", async () => {
+    // No stored token, but the loopback bootstrap hands over the admin token, so
+    // the local window boots straight into the workspace.
+    const m = mount({ token: null, bootstrap: true });
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    expect(text(m, "#slist")).toContain("weave");
     expect(m.errors.join("\n")).toBe("");
   });
 

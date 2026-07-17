@@ -1291,6 +1291,29 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     padding:12px 16px;border-top:1px solid var(--border)}
   .modalfoot .kbd{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
     border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:6px}
+  /* Connect a phone: a QR (or copy link) to pair the app over the LAN or tailnet */
+  .phonemodal{max-width:400px}
+  .phonemodal .modalbody{gap:12px}
+  .phseg{display:flex;gap:4px;padding:4px;background:var(--muted);border-radius:9px}
+  .phseg .pho{flex:1;padding:7px 10px;border:0;border-radius:6px;background:transparent;
+    color:var(--muted-foreground);font-size:12.5px;font-weight:500;cursor:pointer;font-family:inherit}
+  .phseg .pho:hover{color:var(--foreground)}
+  .phseg .pho.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+  .phseg .pho.dim{opacity:.5}
+  .phstage{min-height:232px;display:flex;align-items:center;justify-content:center;padding:6px 2px}
+  .phqrcard{background:#fff;padding:12px;border-radius:12px;line-height:0;box-shadow:0 1px 3px rgba(0,0,0,.14)}
+  .phqrcard svg{width:208px;height:208px;display:block}
+  .phmsg{text-align:center;font-size:13px;color:var(--foreground);line-height:1.5;max-width:308px}
+  .phmsg .phdim{margin-top:7px;font-size:12px;color:var(--muted-foreground);line-height:1.5}
+  .phmsg code{font-family:var(--font-mono);font-size:11.5px;background:var(--muted);
+    padding:1px 5px;border-radius:4px;color:var(--foreground)}
+  .phmsg .btn{margin-top:14px}
+  .phlinkrow{display:flex;gap:6px;align-items:center}
+  .phlinkrow #phlink{flex:1;min-width:0;font-family:var(--font-mono);font-size:11.5px;
+    padding:7px 9px;border:1px solid var(--border);border-radius:7px;
+    background:var(--input,var(--muted));color:var(--foreground)}
+  .phhint{font-size:11.5px;color:var(--muted-foreground);line-height:1.5;text-align:center}
+  .phexp{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground)}
   /* Settings: a sectioned modal. A nav rail on the left, one pane on the right —
      Setup folded in as one section among Diagnostics, Preferences, Updates,
      Devices, About, instead of its own lonely modal. */
@@ -1656,6 +1679,8 @@ ${BRAND_SPRITE}
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     // lines of output with one flagged — the Console
     console: svg('<path d="M4 6h16"/><path d="M4 11h9"/><path d="M4 16h6"/><circle cx="18" cy="15.5" r="2.5"/>'),
+    // a phone — "connect a device"
+    phone: svg('<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18.5h2"/>'),
     x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
     tasks: svg('<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>'),
     // the rail's roster: two figures, because it lists who works here
@@ -2025,6 +2050,10 @@ ${BRAND_SPRITE}
         '<span class="spacer"></span>' +
         // &#96; is a backtick — a literal one would close this template literal
         '<button id="termbtn" class="iconbtn" title="toggle terminal (\\u2303&#96;)">' + ICONS.terminal + "</button>" +
+        // Connect a phone: a QR (or copy link) that pairs the native app over the
+        // LAN or the tailnet. Sits by the terminal because both are "reach this
+        // machine from somewhere else".
+        '<button id="phonebtn" class="iconbtn" title="connect a phone" aria-label="connect a phone">' + ICONS.phone + "</button>" +
         // The Console shares the terminal's dock — both are "the drawer at the
         // bottom where output goes", and giving errors their own panel would
         // mean two drawers fighting for the same edge. The dot appears when
@@ -2199,6 +2228,8 @@ ${BRAND_SPRITE}
         }
       };
       bindConsole();
+      var phb = document.getElementById("phonebtn");
+      if (phb) phb.onclick = openConnectPhone;
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
       var dockEl = document.getElementById("dockpane");
@@ -4766,6 +4797,157 @@ ${BRAND_SPRITE}
     }).catch(function(){ /* no logs endpoint on an old daemon — the tab just stays empty */ });
   }
 
+  // ---- client-side logging: the window's own errors, in the Console ---------
+  /**
+   * Report a client-side problem into the same Console tab as the daemon's.
+   * Raw fetch on purpose (not api()) so a stray error report can never trip the
+   * 401 -> logout path. The daemon streams the record straight back, and that
+   * is what puts it on screen; if the post cannot get out, show it locally so
+   * it is never lost.
+   */
+  function clog(level, scope, message, detail){
+    try {
+      var p = { level: level, scope: scope || "app", message: String(message == null ? "" : message).slice(0, 500) };
+      if (detail != null && String(detail)) p.detail = String(detail).slice(0, 4000);
+      if (state && state.token) {
+        fetch("/api/logs", { method: "POST", headers: { "Authorization": "Bearer " + state.token, "Content-Type": "application/json" }, body: JSON.stringify(p) })
+          .catch(function(){ localLog(p); });
+      } else {
+        localLog(p);
+      }
+    } catch (_e) { /* logging must never throw */ }
+  }
+  function localLog(p){
+    try { addLogRecord({ id: -Date.now(), at: Date.now(), level: p.level, scope: p.scope, message: p.message, detail: p.detail }); } catch (_e) {}
+    try { (console[p.level] || console.log).call(console, "[" + p.scope + "] " + p.message, p.detail || ""); } catch (_e) {}
+  }
+  // Catch what escapes user code: uncaught errors and rejected promises. Once.
+  if (!window.__loomErrHooked) {
+    window.__loomErrHooked = true;
+    window.addEventListener("error", function(e){
+      clog("error", "window", (e && e.message) || "script error", (e && e.error && e.error.stack) || (e && e.filename ? e.filename + ":" + e.lineno + ":" + e.colno : ""));
+    });
+    window.addEventListener("unhandledrejection", function(e){
+      var r = e && e.reason;
+      clog("error", "window", "unhandled rejection: " + ((r && r.message) || r), (r && r.stack) || "");
+    });
+  }
+
+  // ---- connect a phone ------------------------------------------------------
+  /**
+   * A QR (or copy link) that pairs the native app. Two networks to choose from —
+   * the LAN and the tailnet — and, when the daemon is bound to localhost, a
+   * one-click "enable phone access" that binds it to 0.0.0.0 so the phone can
+   * actually reach it. Every failure is reported into the Console.
+   */
+  function openConnectPhone(){
+    if (document.querySelector(".scrim")) return;
+    var scrim = document.createElement("div"); scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal phonemodal">' +
+      '<div class="modalhead">Connect a phone<button class="iconbtn" id="phx" aria-label="close">' + ICONS.x + '</button></div>' +
+      '<div class="modalbody">' +
+        '<div class="phseg" id="phseg" role="tablist">' +
+          '<button class="pho" data-net="localnet" role="tab">Local network</button>' +
+          '<button class="pho" data-net="tailnet" role="tab">Tailnet</button>' +
+        '</div>' +
+        '<div class="phstage" id="phstage">' + LOADER + '</div>' +
+        '<div class="phlinkrow" id="phlinkrow" style="display:none">' +
+          '<input id="phlink" readonly spellcheck="false" aria-label="pairing link">' +
+          '<button class="btn ghost" id="phcopy">Copy</button>' +
+        '</div>' +
+        '<div class="phhint" id="phhint"></div>' +
+      '</div>' +
+      '<div class="modalfoot"><span class="phexp" id="phexp"></span><span class="spacer"></span><button class="btn ghost" id="phregen">New code</button></div>' +
+    '</div>';
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    function onKey(e){ if (e.key === "Escape") { e.preventDefault(); close(); } }
+    document.addEventListener("keydown", onKey);
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("phx").onclick = close;
+
+    var nets = null, current = "localnet";
+    function q(id){ return document.getElementById(id); }
+    function stage(html){ q("phstage").innerHTML = html; q("phlinkrow").style.display = "none"; q("phhint").textContent = ""; q("phexp").textContent = ""; }
+    function loadNets(){ return api("/api/pair/networks").then(function(r){ nets = r; }); }
+    function setSeg(){
+      Array.prototype.forEach.call(scrim.querySelectorAll(".pho"), function(b){
+        var net = b.getAttribute("data-net");
+        var avail = net === "tailnet" ? !!(nets && nets.tailnet && nets.tailnet.available) : true;
+        b.classList.toggle("on", net === current);
+        b.classList.toggle("dim", !avail);
+      });
+    }
+    function pickDefault(){
+      if (nets.tailnet && nets.tailnet.reachable) return "tailnet";
+      if (nets.localnet && nets.localnet.reachable) return "localnet";
+      if (nets.tailnet && nets.tailnet.available) return "tailnet";
+      return "localnet";
+    }
+    function mint(){
+      var net = nets[current];
+      if (!net || !net.ip) return;
+      q("phstage").innerHTML = LOADER;
+      q("phlinkrow").style.display = "none";
+      api("/api/pair/new", { method: "POST", body: JSON.stringify({ host: net.ip }) }).then(function(r){
+        q("phstage").innerHTML = r.qrSvg
+          ? '<div class="phqrcard">' + r.qrSvg + '</div>'
+          : '<div class="phmsg">Scan is not available here &#8212; use the link below.</div>';
+        q("phlinkrow").style.display = "";
+        q("phlink").value = r.link;
+        q("phhint").innerHTML = 'Scan with your phone camera, or ' + (current === "tailnet" ? "on the same tailnet " : "on the same Wi-Fi ") + 'open the link. Single use.';
+        q("phexp").textContent = r.expiresAt ? "expires " + new Date(r.expiresAt).toLocaleTimeString() : "";
+      }).catch(function(e){
+        q("phstage").innerHTML = '<div class="phmsg">Could not create a pairing code.</div>';
+        clog("error", "phone", "mint failed: " + (e && e.message), e && e.stack); toast((e && e.message) || "error");
+      });
+    }
+    function render(){
+      setSeg();
+      var net = nets[current];
+      if (current === "tailnet" && (!nets.tailnet || !nets.tailnet.available)){
+        stage('<div class="phmsg">' + esc((nets.tailnet && nets.tailnet.reason) || "Tailscale is not set up on this machine.") + '<div class="phdim">Install Tailscale and sign in on this Mac and your phone, then reopen this.</div></div>');
+        return;
+      }
+      if (!net || !net.ip){
+        stage('<div class="phmsg">No ' + (current === "tailnet" ? "tailnet" : "local network") + ' address on this machine right now.</div>');
+        return;
+      }
+      if (!net.reachable){
+        stage('<div class="phmsg">Loom is bound to <code>' + esc(nets.boundHost) + '</code>, so a phone cannot reach it yet.' +
+          '<div class="phdim">Enable phone access to also listen on <code>' + esc(net.ip) + '</code> so a phone on the ' + (current === "tailnet" ? "tailnet" : "same Wi-Fi") + ' can reach it. It stays behind the single-use pairing code.</div>' +
+          '<button class="btn primary" id="phexpose">Enable phone access</button></div>');
+        q("phexpose").onclick = function(){
+          var b = this; b.disabled = true; b.textContent = "Enabling...";
+          api("/api/pair/expose", { method: "POST", body: JSON.stringify({ host: net.ip }) }).then(function(){
+            return loadNets();
+          }).then(function(){ render(); }).catch(function(e){
+            b.disabled = false; b.textContent = "Enable phone access";
+            clog("error", "phone", "expose failed: " + (e && e.message), e && e.stack); toast((e && e.message) || "could not enable phone access");
+          });
+        };
+        return;
+      }
+      mint();
+    }
+
+    Array.prototype.forEach.call(scrim.querySelectorAll(".pho"), function(b){
+      b.onclick = function(){ current = b.getAttribute("data-net"); render(); };
+    });
+    q("phcopy").onclick = function(){
+      var v = q("phlink").value; if (!v) return;
+      function fallbackCopy(){ var el = q("phlink"); el.focus(); el.select(); try { document.execCommand("copy"); toast("link copied"); } catch (_e){ toast("copy failed"); } }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(function(){ toast("link copied"); }).catch(fallbackCopy);
+      else fallbackCopy();
+    };
+    q("phregen").onclick = function(){ render(); };
+    stage(LOADER);
+    loadNets().then(function(){ current = pickDefault(); render(); }).catch(function(e){
+      stage('<div class="phmsg">Could not read the network options.</div>');
+      clog("error", "phone", "networks failed: " + (e && e.message), e && e.stack); toast((e && e.message) || "error");
+    });
+  }
+
   var RAIL_KEY = "loomRail";
   function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? true : v === "1"; }
   function applyRail(){
@@ -6131,7 +6313,22 @@ ${BRAND_SPRITE}
       if (e.key === "n") openTaskModal(state.pid); else openProjectModal();
     }
   });
-  pairFromHash().then(function(paired){
+  // Same-machine window? Ask the daemon for the admin token so this becomes the
+  // local admin console — pair phones, open phone access. Remote windows (a phone
+  // on the tailnet) get 403 here and pair like any other device. In-memory only:
+  // we never persist the admin token, so a stale one can't outlive a restart.
+  function bootstrapAdmin(){
+    return fetch("/api/bootstrap").then(function(r){
+      if (!r.ok) return false;
+      return r.json().then(function(j){
+        if (j && j.token) { state.token = j.token; state.admin = true; return true; }
+        return false;
+      });
+    }).catch(function(){ return false; });
+  }
+  bootstrapAdmin().then(function(){
+    return pairFromHash();
+  }).then(function(paired){
     if (paired) toast("paired \\u2713");
     route();
   }).catch(function(err){ toast(err.message); route(); });

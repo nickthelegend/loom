@@ -7,11 +7,13 @@
 import { execFile } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import type { Server } from "node:http";
+import http, { type Server } from "node:http";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express, { type Request, type Response, type NextFunction } from "express";
+import QRCode from "qrcode";
 import { WebSocketServer, WebSocket } from "ws";
 import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
@@ -19,7 +21,7 @@ import type { MemoryKind, MemoryPatch } from "../core/brain.js";
 import { retrieve } from "../core/brain-index.js";
 import { RouteActiveError } from "../core/routes.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
-import { logbook } from "../core/logbook.js";
+import { logbook, type LogLevel } from "../core/logbook.js";
 import { searchChats, searchCode } from "../core/search.js";
 import {
   addWorktree as gitAddWorktree,
@@ -212,6 +214,14 @@ export class LoomDaemon {
   private unstreamLogs: (() => void) | null = null;
   host: string;
   port: number;
+  /**
+   * Extra listeners, keyed by IP, added when a phone is connected. `host` stays
+   * what we advertise and write to the daemon config (so local CLIs keep
+   * reaching us over loopback); each entry here is a second socket on a specific
+   * LAN or tailnet IP and the same port, so the phone can reach us without the
+   * localhost listener ever being disturbed.
+   */
+  private extra = new Map<string, { server: Server; wss: WebSocketServer }>();
 
   constructor(opts: DaemonOptions = {}) {
     this.host = opts.host ?? "127.0.0.1";
@@ -290,6 +300,22 @@ export class LoomDaemon {
       const claimed = this.auth.claim(token, name ?? "device");
       if (!claimed) return void res.status(403).json({ error: "invalid or expired pairing token" });
       res.json(claimed);
+    });
+
+    /**
+     * The local admin console bootstraps here — before the bearer wall, gated by
+     * the socket being loopback. A same-machine caller gets the admin token (it
+     * lives in a config file they can already read), which is what lets the web
+     * app served on localhost mint pairing codes and open phone access. Everyone
+     * else — a phone on the tailnet, anything past localhost — is turned away and
+     * pairs like any other device. Admin-ness stays a property of the *token*,
+     * so a paired client is never an admin no matter where it connects from.
+     */
+    app.get("/api/bootstrap", (req, res) => {
+      if (!isLoopback(req.socket.remoteAddress)) {
+        return void res.status(403).json({ error: "not a local request" });
+      }
+      res.json({ token: this.auth.adminToken(), admin: true });
     });
 
     // Everything else requires a bearer token.
@@ -373,12 +399,114 @@ export class LoomDaemon {
         .catch((err) => res.status(500).json({ error: err instanceof Error ? err.message : String(err) }));
     });
 
+    /**
+     * The two networks a phone could use to reach this daemon — the LAN and the
+     * tailnet — with, for each, the address and whether the phone can actually
+     * get here on it *right now*. It can't when we're bound to localhost, which
+     * is the default; `reachable:false` is the modal's cue to offer "enable
+     * phone access" (expose) before showing a QR that wouldn't resolve.
+     */
+    app.get("/api/pair/networks", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void (async () => {
+        const exposed = this.exposedIps();
+        const reach = (ip: string | null) =>
+          Boolean(ip) && (this.host === "0.0.0.0" || this.host === ip || exposed.includes(ip!));
+        const lan = lanIp();
+        let ts: string | null = null;
+        try {
+          ts = await tailscaleIp();
+        } catch {
+          ts = null;
+        }
+        res.json({
+          port: this.port,
+          boundHost: this.host,
+          exposed,
+          localnet: { ip: lan, reachable: reach(lan) },
+          tailnet: ts
+            ? { ip: ts, available: true, reachable: reach(ts) }
+            : {
+                ip: null,
+                available: false,
+                reachable: false,
+                reason: "Tailscale isn't logged in on this machine (run `tailscale up`)",
+              },
+        });
+      })();
+    });
+
+    /**
+     * Make a phone-reachable address go live — a phone can't reach a
+     * localhost-only daemon. We add a second listener on the requested LAN or
+     * tailnet IP (never touching localhost), so this is safe to await and report
+     * on directly. Explicit and user-driven (you clicked "connect a phone"), and
+     * behind the token wall the whole time.
+     */
+    app.post("/api/pair/expose", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void (async () => {
+        const wanted = typeof req.body?.host === "string" ? (req.body.host as string).trim() : "";
+        let ts: string | null = null;
+        try {
+          ts = await tailscaleIp();
+        } catch {
+          ts = null;
+        }
+        // Only ever bind an address that is genuinely ours (LAN or tailnet).
+        const allowed = new Set([lanIp(), ts].filter(Boolean) as string[]);
+        if (!wanted || !allowed.has(wanted)) {
+          return void res.status(400).json({ error: "not a local or tailnet address of this machine" });
+        }
+        try {
+          await this.expose(wanted);
+          res.json({ ok: true, ip: wanted, port: this.port, exposed: this.exposedIps() });
+        } catch (err) {
+          logbook.error("daemon", `could not open phone access on ${wanted}`, err);
+          res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+    });
+
     app.post("/api/pair/new", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
         return void res.status(403).json({ error: "admin only" });
       }
-      const { token, expiresAt } = this.auth.newPairingToken();
-      res.json({ token, expiresAt, url: `http://${this.host}:${this.port}` });
+      void (async () => {
+        // The QR must point at the address the phone will actually use, so the
+        // caller may ask for the LAN or tailnet host — but only those. An
+        // arbitrary host from the client never reaches the link.
+        const wanted = typeof req.body?.host === "string" ? (req.body.host as string).trim() : "";
+        let ts: string | null = null;
+        try {
+          ts = await tailscaleIp();
+        } catch {
+          ts = null;
+        }
+        const allowed = new Set([this.host, lanIp(), ts].filter(Boolean) as string[]);
+        const host = wanted && allowed.has(wanted) ? wanted : this.host;
+        const { token, expiresAt } = this.auth.newPairingToken();
+        const url = `http://${host}:${this.port}`;
+        // Deep link: scanning it with any camera opens the app, which claims the
+        // single-use token from the URL fragment and pairs itself.
+        const link = `${url}/app#pair=${token}`;
+        let qrSvg: string | undefined;
+        try {
+          qrSvg = await QRCode.toString(link, {
+            type: "svg",
+            margin: 1,
+            errorCorrectionLevel: "M",
+          });
+        } catch (err) {
+          // The link still works even if the QR doesn't render — degrade, don't fail.
+          logbook.warn("pair", "QR render failed — the copy link still works", err);
+        }
+        res.json({ token, expiresAt, url, link, ...(qrSvg ? { qrSvg } : {}) });
+      })();
     });
 
     app.get("/api/pair/clients", (_req, res) => {
@@ -820,6 +948,28 @@ export class LoomDaemon {
     app.delete("/api/logs", (_req, res) => {
       logbook.clear();
       res.json({ ok: true });
+    });
+
+    /**
+     * The window reporting its own errors — a failed fetch, a thrown render, an
+     * unhandled rejection. Client-side failures used to die in the browser
+     * console where no one was looking; now they land in the same Console tab as
+     * the daemon's, streamed to every window and kept in the ring buffer.
+     */
+    app.post("/api/logs", (req, res) => {
+      const b = (req.body ?? {}) as {
+        level?: string;
+        scope?: string;
+        message?: string;
+        detail?: unknown;
+        project?: string;
+      };
+      const level: LogLevel = b.level === "error" || b.level === "warn" ? b.level : "info";
+      const message = String(b.message ?? "").slice(0, 500);
+      if (!message) return void res.status(400).json({ error: "missing message" });
+      const scope = (b.scope ? String(b.scope) : "app").slice(0, 40);
+      const rec = logbook.add(level, scope, message, b.detail, b.project ? String(b.project) : undefined);
+      res.json({ ok: true, id: rec.id });
     });
 
     // Which agents Loom can drive on this machine, and which are already in
@@ -1620,8 +1770,23 @@ export class LoomDaemon {
     const addr = this.server!.address();
     if (addr && typeof addr === "object") this.port = addr.port; // ephemeral port support
 
-    this.wss = new WebSocketServer({ server: this.server!, path: "/ws" });
-    this.wss.on("connection", (ws, req) => {
+    this.wss = this.attachWs(this.server!);
+
+    // Fan every log record out to connected clients (the Console tab).
+    this.unstreamLogs = this.streamLogs();
+    this.writeConfig();
+
+    return { host: this.host, port: this.port };
+  }
+
+  /**
+   * Attach a WebSocket server (path /ws) to an HTTP server and wire the
+   * connection handler. Returned so extra phone-access listeners can track and
+   * later close their own; all sockets land in the one shared `this.sockets`.
+   */
+  private attachWs(server: Server): WebSocketServer {
+    const wss = new WebSocketServer({ server, path: "/ws" });
+    wss.on("connection", (ws, req) => {
       const url = new URL(req.url ?? "/ws", `http://${this.host}:${this.port}`);
       const token = url.searchParams.get("token") ?? undefined;
       this.auth.reload(); // pick up freshly paired clients
@@ -1664,18 +1829,41 @@ export class LoomDaemon {
       });
       ws.on("close", () => this.sockets.delete(ws));
     });
+    return wss;
+  }
 
-    // Fan every log record out to connected clients (the Console tab).
-    this.unstreamLogs = this.streamLogs();
-
-    // Record where we actually bound so CLIs can find us.
+  /** Record where we actually bound so CLIs can find us. */
+  private writeConfig(): void {
     const cfg = ensureDaemonConfig({ host: this.host, port: this.port });
     cfg.host = this.host;
     cfg.port = this.port;
     cfg.pid = process.pid;
     writeDaemonConfig(cfg);
+  }
 
-    return { host: this.host, port: this.port };
+  /**
+   * Make this daemon reachable at a specific address — a LAN or tailnet IP — by
+   * adding a *second* listener on that IP and the same port. The localhost
+   * listener is never touched: no teardown, no dropped sockets, no window where
+   * the web app you are looking at goes away, and none of the EADDRINUSE races a
+   * single-socket rebind to 0.0.0.0 hit while the browser held the port open.
+   * Two distinct IPs on one port coexist fine. Idempotent.
+   */
+  async expose(ip: string): Promise<void> {
+    if (!ip || ip === this.host || this.extra.has(ip)) return;
+    const server = http.createServer(this.app);
+    await new Promise<void>((resolve, reject) => {
+      server.listen(this.port, ip, () => resolve());
+      server.on("error", reject);
+    });
+    const wss = this.attachWs(server);
+    this.extra.set(ip, { server, wss });
+    logbook.info("daemon", `also listening on ${ip}:${this.port} for phone access`);
+  }
+
+  /** Extra addresses (LAN/tailnet) a phone can reach us on right now. */
+  exposedIps(): string[] {
+    return [...this.extra.keys()];
   }
 
   async close(): Promise<void> {
@@ -1684,6 +1872,11 @@ export class LoomDaemon {
     this.terminals.closeAll();
     for (const rt of this.runtimes.values()) await rt.close();
     this.runtimes.clear();
+    for (const { server, wss } of this.extra.values()) {
+      wss.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    this.extra.clear();
     this.wss?.close();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
@@ -1714,4 +1907,39 @@ export function tailscaleIp(): Promise<string> {
       resolve(ip);
     });
   });
+}
+
+/**
+ * This machine's LAN IPv4 — the address a phone on the same Wi-Fi uses. We skip
+ * loopback, link-local (169.254), and Tailscale's own 100.64/10 CGNAT range so
+ * "local network" and "tailnet" stay distinct choices. Returns null when the
+ * only addresses are loopback (e.g. no network) — the caller says so honestly
+ * rather than minting an unreachable QR.
+ */
+export function lanIp(): string | null {
+  const ifaces = os.networkInterfaces();
+  const candidates: string[] = [];
+  for (const addrs of Object.values(ifaces)) {
+    for (const a of addrs ?? []) {
+      if (a.family !== "IPv4" || a.internal) continue;
+      if (a.address.startsWith("169.254.")) continue; // link-local, not routable
+      if (a.address.startsWith("100.")) continue; // Tailscale CGNAT — that's the tailnet
+      candidates.push(a.address);
+    }
+  }
+  // Prefer the common private ranges (a real LAN) over anything exotic.
+  const priv = candidates.find(
+    (ip) => ip.startsWith("192.168.") || ip.startsWith("10.") || /^172\.(1[6-9]|2\d|3[01])\./.test(ip),
+  );
+  return priv ?? candidates[0] ?? null;
+}
+
+/** Is this connection from the same machine? (127.0.0.1, ::1, or v4-mapped v6.) */
+export function isLoopback(remoteAddress: string | undefined): boolean {
+  if (!remoteAddress) return false;
+  return (
+    remoteAddress === "127.0.0.1" ||
+    remoteAddress === "::1" ||
+    remoteAddress === "::ffff:127.0.0.1"
+  );
 }

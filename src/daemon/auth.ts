@@ -41,6 +41,11 @@ export class AuthManager {
     return Boolean(token && timingSafeEqualStr(token, this.config.adminToken));
   }
 
+  /** The admin token, for handing to a same-machine (loopback) caller only. */
+  adminToken(): string {
+    return this.config.adminToken;
+  }
+
   /** Mint a short-lived, single-use pairing token (admin only). */
   newPairingToken(): { token: string; expiresAt: number } {
     this.gc();
