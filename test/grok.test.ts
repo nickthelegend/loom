@@ -109,15 +109,20 @@ describe("grok · a normal turn", () => {
     expect(argv[argv.indexOf("--output-format") + 1]).toBe("json");
   });
 
-  it("carries a briefing in front of the prompt", async () => {
+  it("puts the briefing in --rules (grok's system prompt), not the user turn", async () => {
     const bin = fakeGrok(reply({ text: "ok" }));
     await new GrokAdapter("grok-code", makeProjectDir({ name: "gk" }), { bin }).send({
       text: "fix it",
       briefing: "codex was here first",
     });
-    const prompt = argvOf(bin)[argvOf(bin).indexOf("-p") + 1]!;
-    expect(prompt).toContain("codex was here first");
-    expect(prompt.indexOf("codex was here")).toBeLessThan(prompt.indexOf("fix it"));
+    const argv = argvOf(bin);
+    // the handoff memory rides in --rules — a real system channel
+    const rules = argv[argv.indexOf("--rules") + 1]!;
+    expect(rules).toContain("codex was here first");
+    // and the user's turn (-p) stays clean, not polluted with the briefing
+    const prompt = argv[argv.indexOf("-p") + 1]!;
+    expect(prompt).toBe("fix it");
+    expect(prompt).not.toContain("codex was here first");
   });
 });
 

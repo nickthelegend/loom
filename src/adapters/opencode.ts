@@ -14,7 +14,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, agentEnv, cliAvailable, fetchJson, freePort, waitFor } from "./base.js";
+import { AdapterBase, agentEnv, cliAvailable, fetchJson, frameBriefing, freePort, waitFor } from "./base.js";
 
 interface OpenCodeOptions {
   /** Reuse an already-running server instead of spawning one. */
@@ -380,11 +380,10 @@ export class OpenCodeAdapter extends AdapterBase {
       const baseline = new Set(
         (await this.listMessages(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
       );
-      // No per-prompt system field in the API, so the handoff briefing is
-      // prepended to the first turn, clearly delimited.
-      const text = input.briefing
-        ? `${input.briefing}\n\n--- user message ---\n${input.text}`
-        : input.text;
+      // No per-prompt system field in the API, so the handoff briefing rides in
+      // the prompt — framed as an unmissable authoritative block (frameBriefing)
+      // rather than a loose preamble.
+      const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
       await fetchJson(`${this.baseUrl}/api/session/${sid}/prompt`, {
         method: "POST",
         headers: { "content-type": "application/json" },

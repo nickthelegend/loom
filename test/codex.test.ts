@@ -128,7 +128,7 @@ describe("codex · a normal turn", () => {
    * silently would make a handoff look like it worked while the next agent
    * knows nothing.
    */
-  it("carries a briefing in front of the prompt", async () => {
+  it("carries a briefing in front of the prompt, framed as authoritative", async () => {
     const bin = fakeCodex([THREAD("t"), MSG("ok"), TURN_DONE]);
     await new CodexAdapter("codex", makeProjectDir({ name: "cx" }), { bin }).send({
       text: "fix the bug",
@@ -137,6 +137,8 @@ describe("codex · a normal turn", () => {
     const prompt = argvOf(bin).at(-1)!;
     expect(prompt).toContain("claude was here first");
     expect(prompt).toContain("fix the bug");
+    // framed, not loosely prepended — an unmissable session-memory block
+    expect(prompt).toMatch(/LOOM SESSION MEMORY/);
     expect(prompt.indexOf("claude was here")).toBeLessThan(prompt.indexOf("fix the bug"));
   });
 });

@@ -123,13 +123,12 @@ export class GrokAdapter extends AdapterBase {
     this._busy = true;
     const started = Date.now();
 
-    // No --append-system-prompt on grok, so a handoff briefing rides in front
-    // of the text. One prompt either way, and the handoff stays readable.
-    const text = input.briefing ? `${input.briefing}\n\n---\n\n${input.text}` : input.text;
-
+    // grok's --rules appends to its system prompt — a real system channel — so
+    // the handoff briefing lands there, authoritative, instead of buried in the
+    // user turn where the model might skim it.
     const args = [
       "-p",
-      text,
+      input.text,
       "--output-format",
       "json",
       "--cwd",
@@ -137,6 +136,12 @@ export class GrokAdapter extends AdapterBase {
       "--permission-mode",
       this.options.permissionMode ?? "bypassPermissions",
     ];
+    if (input.briefing?.trim()) {
+      args.push(
+        "--rules",
+        `Carried-over session memory from Loom, authoritative for this project — honor it and read any .loom/memory file it points to:\n\n${input.briefing.trim()}`,
+      );
+    }
     if (this.sessionId) args.push("-r", this.sessionId);
     if (this.options.model) args.push("--model", this.options.model);
     if (this.options.extraArgs) args.push(...this.options.extraArgs);

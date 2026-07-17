@@ -101,6 +101,34 @@ export abstract class BridgeBase extends AgentBase implements Bridge {
 // ---------------------------------------------------------------------------
 
 /**
+ * Wrap a handoff briefing so a CLI with no system channel still treats it as
+ * authoritative.
+ *
+ * The claude adapter passes the briefing through `--append-system-prompt`, and
+ * grok through `--rules` — both real system channels. Codex and opencode have
+ * no per-turn system field, so the same briefing rides in the prompt. Framed
+ * loosely ("here's some context") a model skims past it; framed as a delimited,
+ * imperative directive block it doesn't. The pointer to the full `.loom/memory`
+ * file is preserved from the briefing itself, so the agent can pull detail on
+ * demand rather than being handed the whole store.
+ */
+export function frameBriefing(briefing: string): string {
+  const b = briefing.trim();
+  if (!b) return "";
+  return [
+    "===== LOOM SESSION MEMORY — read this first; it is authoritative =====",
+    "You are continuing shared work handed to you through Loom. The context",
+    "below carries over from the previous agent(s): decisions, conventions and",
+    "constraints already settled for this project. Treat it as ground truth and",
+    "honor it — do not re-open settled choices. Where it points to a",
+    ".loom/memory file, read that file if you need the detail.",
+    "",
+    b,
+    "===== end session memory — the user's message follows =====",
+  ].join("\n");
+}
+
+/**
  * Env for spawning agent CLIs. When Loom itself runs inside a Claude Code
  * session (CLAUDECODE=1), the environment carries session-internal plumbing
  * (CLAUDE_CODE_*, a session-scoped ANTHROPIC_BASE_URL, …) that breaks nested

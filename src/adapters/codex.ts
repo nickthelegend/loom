@@ -33,7 +33,7 @@ import fs from "node:fs";
 import readline from "node:readline";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, agentEnv, cliAvailable } from "./base.js";
+import { AdapterBase, agentEnv, cliAvailable, frameBriefing } from "./base.js";
 
 interface CodexOptions {
   /** Sandbox policy for model-run commands; default "workspace-write". */
@@ -106,10 +106,10 @@ export class CodexAdapter extends AdapterBase {
     this._busy = true;
     const started = Date.now();
 
-    // A briefing is a one-shot preamble. Codex exec has no
-    // --append-system-prompt, so it rides in front of the text: the model reads
-    // one prompt either way, and this keeps the handoff visible in the thread.
-    const text = input.briefing ? `${input.briefing}\n\n---\n\n${input.text}` : input.text;
+    // Codex exec has no --append-system-prompt, so the briefing rides in front
+    // of the text — but framed as an unmissable authoritative block (see
+    // frameBriefing), not a loose preamble the model skims past.
+    const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
 
     const args = this.threadId
       ? ["exec", "resume", this.threadId]

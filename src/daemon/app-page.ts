@@ -4084,9 +4084,13 @@ ${BRAND_SPRITE}
       // agent header block — who the composer talks to, and where
       var ah = document.getElementById("agenthead");
       if (ah) {
+        // Resolve over EVERY agent, bridges included — selecting Kiro or
+        // Antigravity must show Kiro or Antigravity, not fall through to the
+        // first adapter (which read as "the header says Claude").
+        var wanted = state.selected || p.holder;
         var focus = null;
-        adapters.forEach(function(a){ if (a.id === (state.selected || p.holder)) focus = a; });
-        if (!focus) focus = adapters[0] || null;
+        (p.agents || []).forEach(function(a){ if (a.id === wanted) focus = a; });
+        if (!focus) focus = adapters[0] || (p.agents || [])[0] || null;
         if (focus) {
           var hh = hue(focus.id);
           ah.innerHTML =
