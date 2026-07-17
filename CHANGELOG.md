@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Hardening (production-readiness pass)
+
+- **Closed a DNS-rebinding path to the admin token.** `GET /api/bootstrap` handed
+  the admin token to any loopback socket; it now also requires a loopback `Host`
+  header, so a malicious page (whose hostname rebinds to 127.0.0.1 but is still
+  sent as the `Host`) is refused — while the genuine local console still boots.
+- **WebSocket token out of the URL.** The durable bearer token rode in `/ws?token=`
+  (browser history, proxy logs); it now travels in a `loom.bearer.<token>`
+  subprotocol header, with `?token=` kept as a fallback for the CLI/native clients.
+- **git flag-injection guard.** A ref/branch beginning with `-` (e.g. `-f`, which
+  would force-discard the working tree) is rejected in `checkout` and worktree add.
+- **No phantom daemon on an occupied port.** `loom daemon` on a taken port now
+  reports "port already in use" and exits non-zero, instead of Express firing the
+  listen callback on EADDRINUSE and printing a false "listening".
+- The **security model** section of the README is rewritten to match: the local
+  admin bootstrap and its rebinding check, the shared-host caveat, and the honest
+  note that a paired client can open a real shell (arbitrary code as the daemon
+  user) — bearer + tailnet is the boundary, so pair only devices you control.
+
 ### `loom tui` — a tabbed workspace, not just a thread
 
 - The TUI is now four views: **Thread** (the streamed conversation), **Board**

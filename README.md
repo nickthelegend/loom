@@ -505,18 +505,35 @@ buzzes once, not five times). Verify with `loom clients --ping`.
 ## Security model
 
 - The daemon binds to `127.0.0.1` by default, or your **Tailscale interface** with
-  `--tailnet` — never `0.0.0.0`. The tailnet is the trust boundary: device auth and E2E
-  encryption come from Tailscale.
-- Every request needs a bearer token (`~/.loom/daemon.json`, mode 0600).
-- Pairing: `loom pair` mints a **short-lived (10 min), single-use** token, rendered as a
-  QR. The device exchanges it for a long-lived client token.
-- **The pairing token** rides in a URL *fragment* (`…/app#pair=…`), which browsers never
-  put on the wire — and it's single-use and 10-minute anyway.
-- **The client token does ride in a URL**: browsers can't set headers on a WebSocket, so
-  it's a `?token=` query param on `/ws`. On a tailnet to localhost nothing logs it, but
-  it isn't the same protection as a header, and calling it one would be a lie. Anything
-  that proxies your tailnet would see it.
-- Paired clients are not admins: they can't mint new pairing tokens.
+  `--tailnet` — never `0.0.0.0` on its own. **Connect-a-phone** can *add* a listener on a
+  specific LAN/tailnet IP (never `0.0.0.0`, never an arbitrary host — the target is
+  allow-listed to this machine's own addresses), and only when you ask. The tailnet is the
+  trust boundary: device auth and E2E encryption come from Tailscale.
+- Every request needs a bearer token (`~/.loom/daemon.json`, mode 0600). Tokens are
+  256-bit random and compared in constant time; nothing state-changing is served before
+  the auth wall.
+- **The local admin console.** A same-machine window bootstraps the admin token via
+  `GET /api/bootstrap` — gated by *both* a loopback TCP peer *and* a loopback `Host` header
+  (the second is the anti-DNS-rebinding check: a malicious page carries its own hostname,
+  so it's refused even though its socket rebound to 127.0.0.1). A remote window gets 403
+  and pairs like any device. Caveat: on a **shared multi-user host**, any local user can
+  reach loopback, so treat "same machine" as "trusted" — don't run the daemon on a box
+  where you don't trust the other logins.
+- Pairing: `loom pair` (or the in-app button) mints a **short-lived (10 min), single-use**
+  token as a QR. The device exchanges it for a long-lived client token. The pairing token
+  rides in a URL *fragment* (`…/app#pair=…`), which browsers never put on the wire; the
+  client/admin token rides in the `Authorization` header (HTTP) and the WebSocket
+  **subprotocol** (never a URL query — so it stays out of history and proxy logs).
+- **What a paired client can do:** everything in the project, *including a real shell*
+  (the terminal). Pairing a device therefore grants **arbitrary code execution as the
+  daemon's user** — the shell is not confined to the project directory. That is the
+  deliberate trade for a dev tool (bearer + tailnet is the boundary); pair only devices
+  you control. Paired clients are **not** admins, though: they can't mint pairing tokens
+  or open new network exposure — those need the admin token, which only the local console
+  or the CLI holds.
+- The daemon survives a bad turn: unhandled rejections and exceptions are caught and
+  logged (Console + `~/.loom/daemon.log`) rather than taking every project down, and
+  `SIGINT`/`SIGTERM` shut it down cleanly.
 
 ## Adapter SDK
 
