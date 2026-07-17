@@ -688,6 +688,46 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .gacts{margin-left:auto;display:none;gap:1px;flex:none}
   .frow.git:hover .gacts{display:flex}
   .iconbtn.xs{width:20px;height:20px;border-radius:5px}
+  /* ── Brain ────────────────────────────────────────────
+     The tab used to be the projection dumped as grey lines with one button.
+     It is the whole premise of the product, so it says what it holds, what it
+     read, and exactly what an agent receives — a claim next to its evidence. */
+  .pane-inner.brain{display:flex;flex-direction:column;gap:0;max-width:760px;padding-bottom:40px}
+  .bstats{display:flex;align-items:center;gap:22px;padding:4px 0 16px 0}
+  .bstat{display:flex;flex-direction:column;gap:1px}
+  .bstat .n{font-size:20px;font-weight:600;letter-spacing:-.02em;font-family:var(--font-mono)}
+  .bstat .l{font-size:10.5px;color:var(--muted-foreground);letter-spacing:.02em}
+  .bsec{display:flex;align-items:baseline;gap:8px;font-size:12px;font-weight:600;
+    padding:18px 0 8px 0;border-top:1px solid var(--border);margin-top:8px}
+  .bsec:first-of-type{border-top:0;margin-top:0}
+  .bhint{font-weight:400;font-size:10.5px;color:var(--muted-foreground)}
+  .bempty{font-size:11.5px;color:var(--muted-foreground);line-height:1.65;padding:6px 0 4px 0;max-width:60ch}
+  .badd{display:flex;gap:6px;padding:2px 0 8px 0}
+  .badd input{flex:1;min-width:0;background:var(--input,var(--card));border:1px solid var(--border);
+    border-radius:8px;padding:6px 10px;font-size:12px;color:var(--foreground);font-family:var(--font-sans)}
+  .badd input:focus{outline:none;border-color:var(--ring,var(--muted-foreground))}
+  .bdecs{display:flex;flex-direction:column;gap:1px}
+  .bdec{display:flex;gap:9px;padding:5px 8px;border-radius:7px;font-size:12px;line-height:1.55}
+  .bdec:hover{background:var(--sidebar-accent)}
+  .bdec .dm{color:var(--warn);flex:none}
+  .bdec .dt{white-space:pre-wrap;word-break:break-word}
+  .bsrcs{display:flex;flex-direction:column;gap:2px}
+  .bsrc{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:12px}
+  .bsrc:hover{background:var(--sidebar-accent)}
+  .bsrc svg{width:14px;height:14px;flex:none}
+  .bsrc .si{font-weight:600}
+  .bsrc .sf{color:var(--muted-foreground);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bsrc .sc{margin-left:auto;color:var(--muted-foreground);font-family:var(--font-mono);font-size:10.5px;flex:none}
+  .bdoc{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--card);
+    max-height:420px;overflow:auto}
+  .bl{font-size:11.5px;line-height:1.65;color:var(--muted-foreground);white-space:pre-wrap;word-break:break-word}
+  .bl.sp{height:7px}
+  .bl.h1,.bl.h2,.bl.h3{color:var(--foreground);font-weight:600;margin-top:8px}
+  .bl.h1{font-size:13px}
+  .bl.h2{font-size:12px}
+  .bl.h3{font-size:11.5px;opacity:.9}
+  .bl.li{padding-left:12px;position:relative}
+  .bl.li::before{content:"•";position:absolute;left:2px;opacity:.5}
   /* Add-an-agent rows: an ADE you haven't installed is still listed, greyed,
      with the reason — "Codex isn't in the list" and "Codex isn't installed"
      send you to very different places. */
@@ -2062,26 +2102,97 @@ ${BRAND_SPRITE}
       api("/api/projects/" + pid + "/memory").then(function(j){
         el = document.getElementById("pane-brain"); if (!el) return;
         var m = j.memory || {};
-        var src = (m.sources || []).map(function(s){
-          return '<div class="tool">' + esc(s.agentId) + " \\u2190 " + esc(s.file) + "</div>";
-        }).join("");
-        var body = esc(m.document || "").split("\\n").map(function(line){
-          var c = line.charAt(0) === "#" ? "var(--foreground)" : "var(--muted-foreground)";
-          var w = line.charAt(0) === "#" ? "600" : "400";
-          return '<div style="color:' + c + ";font-weight:" + w + ';white-space:pre-wrap;word-break:break-word;font-size:12px;font-family:var(--font-mono)">' + (line || " ") + "</div>";
-        }).join("");
-        el.innerHTML = '<div class="pane-inner">' +
-          '<span class="sub">one brain &middot; ' + (m.sources || []).length + " ADE source(s) &middot; " +
-          (m.decisions || []).length + " decision(s)</span>" + src +
-          '<div style="border-top:1px solid var(--border);padding-top:10px">' + body + "</div>" +
-          '<div><button class="btn primary sm" id="reimport">re-import ADE memory</button></div></div>';
+        var sources = m.sources || [], decisions = m.decisions || [], doc = m.document || "";
+
+        // What the brain is, in three numbers. "0 sources" is the single most
+        // useful thing this tab can tell you — it means every handoff carries
+        // the thread and nothing your agents wrote down.
+        var head = '<div class="bstats">' +
+          '<div class="bstat"><span class="n">' + sources.length + '</span><span class="l">ADE source' + (sources.length === 1 ? "" : "s") + "</span></div>" +
+          '<div class="bstat"><span class="n">' + decisions.length + '</span><span class="l">decision' + (decisions.length === 1 ? "" : "s") + "</span></div>" +
+          '<div class="bstat"><span class="n">' + Math.round(doc.length / 1024 * 10) / 10 + 'k</span><span class="l">projected</span></div>' +
+          '<span style="flex:1"></span>' +
+          '<button class="btn sm" id="reimport">Re-import</button>' +
+          "</div>";
+
+        // Decisions: the part of the brain you write. They ride in every
+        // briefing, so they're the one thing here that changes what an agent
+        // does rather than just what it could read.
+        var dec = '<div class="bsec">Decisions<span class="bhint">carried into every handoff</span></div>' +
+          '<form class="badd" id="decform">' +
+          '<input id="decbox" placeholder="A decision this project has made…" autocomplete="off">' +
+          '<button class="btn primary sm" type="submit">Add</button></form>';
+        dec += decisions.length
+          ? '<div class="bdecs">' + decisions.map(function(d){
+              return '<div class="bdec"><span class="dm">•</span><span class="dt">' + esc(d) + "</span></div>";
+            }).join("") + "</div>"
+          : '<div class="bempty">Nothing decided yet. Anything you write here is repeated to every agent on every handoff — the things you would otherwise say twice.</div>';
+
+        // Sources: what each ADE wrote down, and what Loom found.
+        var src = '<div class="bsec">Imported from your agents<span class="bhint">their own memory files</span></div>';
+        src += sources.length
+          ? '<div class="bsrcs">' + sources.map(function(s){
+              return '<div class="bsrc">' + brandMark(s.kind) +
+                '<span class="si">' + esc(s.agentId) + "</span>" +
+                '<span class="sf mono">' + esc(s.file) + "</span>" +
+                '<span class="sc">' + Math.round(s.chars / 1024 * 10) / 10 + "k</span></div>";
+            }).join("") + "</div>"
+          : '<div class="bempty">No agent memory found in this repo. Loom reads what your ADEs already keep — CLAUDE.md, AGENTS.md, .kiro/steering — and never writes to them. Nothing here means there is nothing to read yet, not that it failed.</div>';
+
+        // The projection: the actual text an agent receives. Shown because
+        // "shared memory" is a claim, and this is the evidence.
+        var body = '<div class="bsec">What every agent receives<span class="bhint">the projection, verbatim</span></div>' +
+          '<div class="bdoc">' + renderBrainDoc(doc) + "</div>";
+
+        el.innerHTML = '<div class="pane-inner brain">' + head + dec + src + body + "</div>";
+
         document.getElementById("reimport").onclick = function(){
           api("/api/projects/" + pid + "/memory/import", { method: "POST", body: "{}" })
-            .then(function(r){ toast(r.imported ? "imported " + r.imported + " source(s)" : "brain already current"); refreshBrain(); })
+            .then(function(r){
+              toast(r.imported ? "imported " + r.imported + " source(s)" : "brain already current — nothing new to read");
+              refreshBrain();
+            })
+            .catch(function(err){ toast(err.message); });
+        };
+        document.getElementById("decform").onsubmit = function(ev){
+          ev.preventDefault();
+          var box = document.getElementById("decbox");
+          var text = (box.value || "").trim();
+          if (!text) return;
+          api("/api/projects/" + pid + "/decisions", { method: "POST", body: JSON.stringify({ text: text }) })
+            .then(function(){ box.value = ""; refreshBrain(); })
             .catch(function(err){ toast(err.message); });
         };
       }).catch(function(err){ toast(err.message); });
     }
+
+    /**
+     * The brain document, with its shape kept.
+     *
+     * It used to be one grey line per line of text, headings included, which
+     * made a structured document look like a log dump. Headings are headings,
+     * bullets are bullets, and the rest is prose — the projection has structure
+     * and hiding it doesn't make it shorter.
+     */
+    function renderBrainDoc(doc){
+      if (!String(doc).trim()) return '<div class="bempty">nothing projected yet</div>';
+      // Every escape below is doubled. This file is one TS template literal, so
+      // a lone \\s or \\d isn't merely eaten — an unrecognised escape is a hard
+      // parse error in an untagged template, and the whole app fails to build.
+      return String(doc).split("\\n").map(function(line){
+        var t = line.trim();
+        if (!t) return '<div class="bl sp"></div>';
+        if (t.charAt(0) === "#") {
+          var depth = t.length - t.replace(/^#+/, "").length;
+          return '<div class="bl h' + Math.min(depth, 3) + '">' + esc(t.replace(/^#+\\s*/, "")) + "</div>";
+        }
+        if (t.charAt(0) === "-" || t.charAt(0) === "*" || /^\\d+\\./.test(t)) {
+          return '<div class="bl li">' + esc(t.replace(/^[-*]\\s*/, "")) + "</div>";
+        }
+        return '<div class="bl">' + esc(line) + "</div>";
+      }).join("");
+    }
+
 
     // ---- routes pane (desktop) / sheet (mobile) -----------------------------
     function routeFormHtml(){

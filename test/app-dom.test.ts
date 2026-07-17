@@ -174,7 +174,13 @@ const text = (m: Mounted, sel: string) => $(m, sel)?.textContent?.trim() ?? "";
  * yet. Clicking that is a no-op that looks exactly like a broken feature.
  */
 const ready = (m: Mounted, sel: string) =>
-  waitUntil(() => !!($(m, sel) as HTMLElement & { onclick?: unknown } | null)?.onclick);
+  waitUntil(() => {
+    // A form is wired by onsubmit, a button by onclick. Checking only onclick
+    // means waiting eight seconds for a handler a <form> never has, then
+    // blaming the feature.
+    const el = $(m, sel) as (HTMLElement & { onclick?: unknown; onsubmit?: unknown }) | null;
+    return !!(el?.onclick || el?.onsubmit);
+  });
 
 const click = (el: Element | null) => {
   if (!el) throw new Error("clicked an element that isn't there");
@@ -689,6 +695,74 @@ describe("web app · the agent picker", () => {
       headers: { authorization: `Bearer ${clientToken}` },
     });
   });
+});
+
+/**
+ * The Brain.
+ *
+ * The whole premise of the product, and the tab was the projection dumped as
+ * grey lines with one button on it. It now says what it holds, what it read
+ * from your agents, and exactly what an agent receives — the claim next to its
+ * evidence.
+ */
+describe("web app · the brain", () => {
+  const openBrain = async (): Promise<Mounted> => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '.tab[data-tab="brain"]'));
+    click($(m, '.tab[data-tab="brain"]'));
+    await waitUntil(() => !!$(m, ".pane-inner.brain"));
+    return m;
+  };
+
+  it("counts what it holds instead of just dumping it", async () => {
+    const m = await openBrain();
+    await waitUntil(() => !!$(m, ".bstats"));
+    expect(text(m, ".bstats")).toContain("decision");
+    expect(text(m, ".bstats")).toContain("source");
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
+
+  /**
+   * An empty brain is the most important thing this tab can say: it means every
+   * handoff carries the thread and nothing your agents wrote down. "0" in a
+   * corner doesn't communicate that; a sentence does.
+   */
+  it("explains an empty brain rather than showing a blank box", async () => {
+    const m = await openBrain();
+    await waitUntil(() => !!$(m, ".bempty"));
+    const body = text(m, ".pane-inner.brain");
+    expect(body).toContain("No agent memory found");
+    expect(body).toContain("never writes to them");
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
+
+  it("adds a decision, and it lands in the brain", async () => {
+    const m = await openBrain();
+    await ready(m, "#decform");
+    const said = `always double the backslashes ${Date.now()}`;
+    ($(m, "#decbox") as HTMLInputElement).value = said;
+    ($(m, "#decform") as HTMLFormElement).dispatchEvent(
+      new m.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+
+    await waitUntil(() => text(m, ".bdecs").includes(said));
+    // and the daemon agrees — the UI could show anything
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}/memory`, {
+      headers: { authorization: `Bearer ${clientToken}` },
+    });
+    const j = (await res.json()) as { memory: { decisions: string[] } };
+    expect(j.memory.decisions).toContain(said);
+    expect(m.errors.join("\n")).toBe("");
+  }, 25_000);
+
+  it("shows the projection with its shape, not as one grey wall", async () => {
+    const m = await openBrain();
+    await waitUntil(() => !!$(m, ".bdoc"));
+    // the projection has headings; they should be headings
+    expect(m.window.document.querySelectorAll(".bdoc .bl").length).toBeGreaterThan(0);
+    expect(text(m, ".pane-inner.brain")).toContain("What every agent receives");
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
 });
 
 describe("web app · the rest of the shell", () => {

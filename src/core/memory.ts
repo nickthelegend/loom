@@ -34,8 +34,15 @@ const RECENT_DECISIONS = 40;
  */
 const NATIVE_MEMORY: Record<string, string[]> = {
   "claude-code": ["CLAUDE.md", ".claude/CLAUDE.md", "AGENTS.md"],
+  // Codex reads AGENTS.md — that convention is OpenAI's, and it's the one most
+  // widely shared. `.codex/` is its own directory when a repo keeps them apart.
+  codex: ["AGENTS.md", ".codex/AGENTS.md", "codex.md"],
   opencode: ["AGENTS.md", ".opencode/AGENTS.md", "opencode.md"],
+  "grok-code": ["AGENTS.md", ".grok/AGENTS.md", "GROK.md"],
   antigravity: [".antigravity/memory.md", "AGENTS.md", ".windsurfrules"],
+  // Kiro keeps steering documents rather than one memory file; they're the
+  // closest thing it has to "what this agent knows about this repo".
+  kiro: [".kiro/steering/product.md", ".kiro/steering/tech.md", ".kiro/steering/structure.md", "AGENTS.md"],
   echo: [],
 };
 
