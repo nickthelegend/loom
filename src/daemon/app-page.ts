@@ -447,6 +447,25 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .srow .n{font-weight:500;font-size:13px;display:flex;align-items:center;gap:8px;min-width:0}
   .srow .n .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .srow .n .cnt{margin-left:auto;flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+  /* the collapse caret: right-pointing, rotates to down when the project is open */
+  .scaret{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;flex:none;
+    background:none;border:0;padding:0;margin:-2px 0;color:var(--muted-foreground);cursor:pointer;
+    transition:transform .14s,color .12s;border-radius:4px}
+  .scaret:hover{color:var(--foreground);background:color-mix(in srgb, var(--foreground) 8%, transparent)}
+  .scaret svg{width:13px;height:13px}
+  .scaret.open{transform:rotate(90deg)}
+  /* new-chat agent picker — a floating popover anchored to the New chat row */
+  .pickpop{position:fixed;z-index:60;min-width:190px;max-width:260px;
+    background:var(--popover,var(--background));border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 14px 40px rgba(0,0,0,.32);padding:5px}
+  .pickhead{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted-foreground);padding:6px 9px 5px}
+  .pickrow{display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;border:0;border-radius:7px;
+    background:none;cursor:pointer;font:inherit;font-size:13px;color:var(--foreground);text-align:left}
+  .pickrow:hover{background:var(--sidebar-accent)}
+  .pickrow .brand{width:16px;height:16px;flex:none}
+  .pickrow .pnm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pickrow .prole{margin-left:auto;flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
   .pglyph{width:18px;height:18px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;
     font-family:var(--font-mono);font-size:9.5px;font-weight:700;flex:none;position:relative}
   .pglyph.hot::after{content:"";position:absolute;inset:-3px;border-radius:8px;
@@ -1502,7 +1521,11 @@ ${BRAND_SPRITE}
     // everything drawn in the meantime (the Explorer's title above all) would
     // otherwise render the project we just navigated away from.
     state.project = (state.projects || []).filter(function(p){ return p.id === pid; })[0] || null;
-    state.pid = pid; state.lastId = 0; state.selected = null;
+    // A chat just created with a chosen agent leaves its pick here, so the
+    // composer opens aimed at that agent instead of snapping back to the holder.
+    state.pid = pid; state.lastId = 0;
+    state.selected = state.pendingSelect || null;
+    state.pendingSelect = null;
     state.tab = "thread"; state.tree = null; state.lastQuestion = null;
     var expl = { kids: {}, open: {} }; // explorer tree cache — declared before any drawRail() call
 
@@ -4349,6 +4372,23 @@ ${BRAND_SPRITE}
       });
     }
 
+    // Which projects are expanded, remembered across reloads. Absent from the
+    // map means "follow selection" — the current project opens on its own, so a
+    // fresh user needs no clicks, and only an explicit toggle is persisted.
+    function projOpenMap(){
+      try { return JSON.parse(localStorage.getItem("loomProjOpen") || "{}"); } catch (e) { return {}; }
+    }
+    function isProjOpen(id, sel){
+      var m = projOpenMap();
+      return Object.prototype.hasOwnProperty.call(m, id) ? !!m[id] : !!sel;
+    }
+    function toggleProj(id, sel){
+      var m = projOpenMap();
+      var now = Object.prototype.hasOwnProperty.call(m, id) ? !!m[id] : !!sel;
+      m[id] = !now;
+      localStorage.setItem("loomProjOpen", JSON.stringify(m));
+    }
+
     function drawList(){
       var el = document.getElementById("slist"); if (!el) return;
       if (!state.projects.length) {
@@ -4372,13 +4412,16 @@ ${BRAND_SPRITE}
         var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
         var adapters = (p.agents || []).filter(function(a){ return a.tier === "adapter"; });
         var sel = p.id === cur;
+        var open = isProjOpen(p.id, sel);
         var gh = hue(p.id + p.name);
         var rows = '<div class="srow' + (sel ? " sel" : "") + '" data-id="' + esc(p.id) + '">' +
-          '<div class="n"><span class="pglyph' + (p.needsInput ? " hot" : "") + '" style="background:color-mix(in srgb, hsl(' + gh + ',60%,50%) 20%, transparent);color:hsl(' + gh + ',60%,var(--agent-l))">' + esc((p.name || "?").slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(p.name) + "</span>" +
+          '<div class="n">' +
+          '<button class="scaret' + (open ? " open" : "") + '" data-caret="' + esc(p.id) + '" aria-label="' + (open ? "collapse " : "expand ") + esc(p.name) + '" aria-expanded="' + (open ? "true" : "false") + '">' + ICONS.chevron + "</button>" +
+          '<span class="pglyph' + (p.needsInput ? " hot" : "") + '" style="background:color-mix(in srgb, hsl(' + gh + ',60%,50%) 20%, transparent);color:hsl(' + gh + ',60%,var(--agent-l))">' + esc((p.name || "?").slice(0, 1).toUpperCase()) + '</span><span class="nm">' + esc(p.name) + "</span>" +
           (act ? '<span class="badge live" style="margin-left:auto">' + (r.current + 1) + "/" + r.steps.length + "</span>" : '<span class="cnt">' + adapters.length + "</span>") + "</div>" +
           '<div class="m">baton ' + esc(p.holder || "\\u2014") +
           (p.costUsd > 0 ? " \\u00b7 " + money(p.costUsd) : "") + "</div></div>";
-        if (sel) {
+        if (open) {
           // A project holds conversations. The agents that work them live in
           // the rail's roster — they belong to the project, not to one chat.
           var chats = p.chats || [{ id: "main", title: "Main", createdAt: 0 }];
@@ -4404,6 +4447,18 @@ ${BRAND_SPRITE}
 
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
+      });
+      // The caret opens/closes a project's chats without selecting it — so you
+      // can peek at another project's conversations while staying in this one.
+      // Selecting a project still auto-opens it (isProjOpen falls back to sel),
+      // so the common path needs no extra click.
+      Array.prototype.forEach.call(el.querySelectorAll("[data-caret]"), function(btn){
+        btn.onclick = function(ev){
+          ev.stopPropagation();
+          var id = btn.getAttribute("data-caret");
+          toggleProj(id, id === cur);
+          drawList();
+        };
       });
       // A hit takes you to the conversation it's in. It doesn't scroll to the
       // message yet — the thread loads its own tail — so this is honest about
@@ -4467,13 +4522,78 @@ ${BRAND_SPRITE}
           inp.onclick = function(e){ e.stopPropagation(); };
         };
       });
-      var addRow = el.querySelector("[data-newchat]");
-      if (addRow) addRow.onclick = function(){
-        var pidN = addRow.getAttribute("data-newchat");
-        api("/api/projects/" + pidN + "/chats", { method: "POST", body: "{}" })
-          .then(function(j){ refresh(); setChat(pidN, j.chat.id); })
-          .catch(function(err){ toast(err.message); });
-      };
+      // Every open project has a New chat row now, not just the selected one.
+      Array.prototype.forEach.call(el.querySelectorAll("[data-newchat]"), function(addRow){
+        addRow.onclick = function(ev){
+          ev.stopPropagation();
+          var pidN = addRow.getAttribute("data-newchat");
+          var proj = (state.projects || []).filter(function(p){ return p.id === pidN; })[0];
+          openChatAgentPick(addRow, proj, function(agentId){ createChatWith(pidN, agentId); });
+        };
+      });
+    }
+
+    /**
+     * Make a chat and start it on the agent you chose.
+     *
+     * The baton is per-project, so "which agent answers this chat" is "who holds
+     * the baton" — picking one hands it over. That's why a new chat used to
+     * always land on opencode: nobody was asked, so it stayed with whoever held
+     * it. A bridge can't hold the baton, so choosing one just aims the composer
+     * at it (pendingSelect), and its own ask-flow does the rest.
+     */
+    function createChatWith(pidN, agentId){
+      api("/api/projects/" + pidN + "/chats", { method: "POST", body: "{}" })
+        .then(function(j){
+          var chatId = j.chat.id;
+          var proj = (state.projects || []).filter(function(p){ return p.id === pidN; })[0];
+          var picked = proj && (proj.agents || []).filter(function(a){ return a.id === agentId; })[0];
+          state.pendingSelect = agentId || null;
+          var done = function(){ refresh(); setChat(pidN, chatId); };
+          if (picked && picked.tier === "adapter" && proj.holder !== agentId) {
+            api("/api/projects/" + pidN + "/handoff", { method: "POST", body: JSON.stringify({ to: agentId }) })
+              .then(done).catch(function(err){ toast(err.message); done(); });
+          } else { done(); }
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    /** A little popover of a project's agents, anchored to the New chat row. */
+    function openChatAgentPick(anchor, proj, onPick){
+      closeAgentPick();
+      var agents = (proj && proj.agents) || [];
+      if (!agents.length) { onPick(null); return; } // nothing to choose — just make it
+      var pop = document.createElement("div");
+      pop.className = "pickpop"; pop.id = "chatpick";
+      pop.innerHTML = '<div class="pickhead">start this chat with</div>' +
+        agents.map(function(a){
+          var bridge = a.tier === "bridge";
+          return '<button class="pickrow" data-pick="' + esc(a.id) + '">' +
+            brandMark(a.kind) + '<span class="pnm">' + esc(a.id) + "</span>" +
+            '<span class="prole">' + esc(bridge ? "bridge" : a.role) + "</span></button>";
+        }).join("");
+      document.body.appendChild(pop);
+      var r = anchor.getBoundingClientRect();
+      pop.style.left = Math.round(r.left) + "px";
+      pop.style.top = Math.round(r.bottom + 4) + "px";
+      // If it would fall off the bottom, flip above the row.
+      var ph = pop.getBoundingClientRect().height;
+      if (r.bottom + 4 + ph > window.innerHeight) pop.style.top = Math.max(8, Math.round(r.top - ph - 4)) + "px";
+      Array.prototype.forEach.call(pop.querySelectorAll("[data-pick]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); var id = b.getAttribute("data-pick"); closeAgentPick(); onPick(id); };
+      });
+      setTimeout(function(){
+        document.addEventListener("mousedown", agentPickAway);
+      }, 0);
+    }
+    function agentPickAway(ev){
+      var pop = document.getElementById("chatpick");
+      if (pop && !pop.contains(ev.target)) closeAgentPick();
+    }
+    function closeAgentPick(){
+      document.removeEventListener("mousedown", agentPickAway);
+      var pop = document.getElementById("chatpick");
+      if (pop) pop.remove();
     }
     function select(pid){
       cur = pid;

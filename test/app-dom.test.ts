@@ -407,6 +407,67 @@ describe("web app · chats", () => {
     expect($(m, '.crow[data-chat="main"] [data-delchat]')).toBeNull();
     expect(m.errors.join("\n")).toBe("");
   });
+
+  it("New chat asks which agent, instead of silently picking one", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, ".crow.add[data-newchat]");
+    click($(m, ".crow.add[data-newchat]"));
+    await waitUntil(() => !!$(m, "#chatpick"));
+    // every agent on the project is offered — the default weave has two
+    const picks = [...m.window.document.querySelectorAll("#chatpick [data-pick]")];
+    expect(picks.length).toBeGreaterThanOrEqual(2);
+    expect(text(m, "#chatpick .pickhead").toLowerCase()).toContain("start this chat with");
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+describe("web app · the sidebar collapses", () => {
+  it("gives each project a caret that hides and shows its chats, and remembers", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, ".crow[data-chat]")); // open by default (it's selected)
+    const caret = $(m, ".scaret[data-caret]");
+    expect(caret, "a project row has a collapse caret").toBeTruthy();
+    expect(caret?.classList.contains("open"), "the selected project starts open").toBe(true);
+
+    click(caret);
+    await waitUntil(() => !$(m, ".crow[data-chat]")); // chats gone
+    expect($(m, ".scaret.open")).toBeNull();
+    // the choice is persisted, not just visual
+    const stored = JSON.parse(m.window.localStorage.getItem("loomProjOpen") || "{}");
+    expect(stored[projectId]).toBe(false);
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+describe("web app · the composer", () => {
+  it("is a real card — a growing textarea with an attach and a model control", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    // bindComposer stamps data-bound once it has wired the textarea; the form's
+    // handler is an addEventListener, so ready()'s onsubmit check never fires.
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    const box = $(m, "#box");
+    expect(box?.tagName).toBe("TEXTAREA"); // not a bare <input> any more
+    expect((box as HTMLTextAreaElement).placeholder).toMatch(/@ for files, \/ for actions/);
+    expect($(m, "#attach"), "the attach button").toBeTruthy();
+    expect($(m, "#modelpick"), "the model picker button").toBeTruthy();
+    expect($(m, "#cfile"), "a hidden file input backs the paperclip").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("opens a file menu on @ and an actions menu on /", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    const box = $(m, "#box") as HTMLTextAreaElement;
+
+    box.value = "/";
+    box.setSelectionRange(1, 1);
+    box.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+    await waitUntil(() => !!$(m, "#cmenu .cmi"));
+    // the slash menu is real actions, not decoration
+    expect(text(m, "#cmenu")).toMatch(/New task/i);
+    expect(text(m, "#cmenu")).toMatch(/decision/i);
+    expect(m.errors.join("\n")).toBe("");
+  });
 });
 
 /**
