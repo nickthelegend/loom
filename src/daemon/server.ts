@@ -16,7 +16,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
 import { RouteActiveError } from "../core/routes.js";
-import { buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
+import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { setupReport } from "../core/setup.js";
 import {
   ensureDaemonConfig,
@@ -488,6 +488,53 @@ export class LoomDaemon {
         const updated = rt.setAgentRole(String(req.params.agentId), clean);
         if (!updated) return void res.status(404).json({ error: "unknown agent" });
         res.json(updated);
+      }),
+    );
+
+    // Which agents Loom can drive on this machine, and which are already in
+    // this project. The UI needs both to offer you the difference.
+    app.get(
+      "/api/projects/:id/agents/available",
+      withRuntime(async (rt, _req, res) => {
+        const availability = await detectAdes();
+        const inProject = new Set(rt.config.agents.map((a) => a.kind));
+        res.json({
+          ades: ADES.map((a) => ({
+            kind: a.kind,
+            label: a.label,
+            tier: a.tier,
+            // Bridges are never "installed" — they're an app you launch with a
+            // debug port, so presence is a live question, not a lookup.
+            installed: a.tier === "adapter" ? Boolean(availability[a.kind]) : null,
+            inProject: inProject.has(a.kind),
+          })),
+        });
+      }),
+    );
+
+    // Add an agent to a project. A roster used to be frozen at creation: install
+    // a new ADE and your existing projects never heard of it.
+    app.post(
+      "/api/projects/:id/agents",
+      withRuntime(async (rt, req, res) => {
+        const { kind, id, role } = (req.body ?? {}) as { kind?: string; id?: string; role?: string };
+        if (!kind?.trim()) return void res.status(400).json({ error: "missing kind" });
+        try {
+          res.json(rt.addAgent(kind.trim(), { id, role }));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    app.delete(
+      "/api/projects/:id/agents/:agentId",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(rt.removeAgent(String(req.params.agentId)));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 

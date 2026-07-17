@@ -122,20 +122,22 @@ export function buildDefaultRoutes(agents: AgentConfig[]): Record<string, string
  * ADEs found". (echo is still a registered kind; you can ask for it by name in
  * .loom/config.json. It just isn't handed to anyone who didn't.)
  *
- * Roles are assigned by position, not by opinion. The first three ADEs found
- * take planner, executor and reviewer, because those are the names
- * buildDefaultRoutes wires the "ship" route from. Anything past the third gets
- * its own kind as its role: roles are free text, two agents sharing one would
- * make the route ambiguous, and deciding that Grok is "the reviewer" is an
- * opinion Loom hasn't earned. Rename them to whatever you actually think.
+ * **Every agent's role is its own kind, and that isn't a placeholder.**
+ *
+ * This used to hand out planner / executor / reviewer by detection order, so
+ * Claude Code became "the planner" and OpenCode became "the executor" because
+ * of where they sat in a list in this file. Nobody decided that. It read like a
+ * recommendation Loom had earned, it was an accident of iteration order, and it
+ * quietly shaped how people used their own agents.
+ *
+ * A role is a job you define. Loom doesn't know which of your agents should
+ * plan, and pretending it does is worse than saying nothing — so the default
+ * describes rather than assigns ("codex" is codex), and you rename it to the
+ * job you actually have. The rail's agent picker does that; so does
+ * POST /api/projects/:id/agents/:agentId/role.
  */
-const CANONICAL_ROLES = ["planner", "executor", "reviewer"];
-
 export function defaultAgentConfigs(availability: Record<string, boolean>): AgentConfig[] {
-  const found = adapterKinds().filter((kind) => availability[kind]);
-  return found.map((kind, i) => ({
-    id: kind,
-    kind,
-    role: CANONICAL_ROLES[i] ?? kind,
-  }));
+  return adapterKinds()
+    .filter((kind) => availability[kind])
+    .map((kind) => ({ id: kind, kind, role: kind }));
 }

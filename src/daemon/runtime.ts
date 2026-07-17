@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  AgentConfig,
   AgentCost,
   AnyAgent,
   ChatInfo,
@@ -20,7 +21,7 @@ import type {
 } from "../types.js";
 import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
 import { isAdapter, MAIN_CHAT } from "../types.js";
-import { createAgent } from "../adapters/index.js";
+import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { EventLog } from "../core/eventlog.js";
 import { renderProjection } from "../core/distill.js";
@@ -187,11 +188,71 @@ export class ProjectRuntime {
     const cfg = this.config.agents.find((a) => a.id === agentId);
     if (!cfg) return null;
     cfg.role = role;
+    this.saveConfig();
+    return { id: agentId, role };
+  }
+
+  /**
+   * Put an agent in this project.
+   *
+   * Until this existed a project's roster was whatever was detected the moment
+   * it was created, forever. Install a new ADE and your existing projects never
+   * heard about it — which is why a machine with six agents had boards offering
+   * two, and looked like a bug in the board.
+   *
+   * The role defaults to the kind, which is a description rather than an
+   * opinion: Loom has no basis for deciding Codex is "the reviewer".
+   */
+  addAgent(kind: string, opts: { id?: string; role?: string } = {}): AgentConfig {
+    if (!knownAgentKinds().includes(kind)) {
+      throw new Error(`unknown agent kind "${kind}" (known: ${knownAgentKinds().join(", ")})`);
+    }
+    const id = (opts.id ?? kind).trim().slice(0, 40);
+    if (!id) throw new Error("an agent needs an id");
+    if (this.config.agents.some((a) => a.id === id)) {
+      throw new Error(`"${id}" is already in this project`);
+    }
+    const cfg: AgentConfig = { id, kind, role: (opts.role ?? kind).trim().slice(0, 40) || kind };
+    this.config.agents.push(cfg);
+    this.saveConfig();
+    return cfg;
+  }
+
+  /**
+   * Take an agent out.
+   *
+   * Refused while it holds the baton or is mid-turn: removing it there would
+   * strand the lock on an agent that no longer exists, and the thread would
+   * show a turn that nothing is running.
+   */
+  removeAgent(agentId: string): { removed: string } {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    const holder = this.validHolder();
+    if (holder === agentId) {
+      throw new Error(`"${agentId}" holds the baton — hand it to someone else first`);
+    }
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live) && live.busy()) {
+      throw new Error(`"${agentId}" is mid-turn — interrupt it first`);
+    }
+    // Its events stay in the log: the history happened, and a roster change
+    // doesn't unhappen it. Only the roster forgets.
+    this.config.agents = this.config.agents.filter((a) => a.id !== agentId);
+    this.saveConfig();
+    if (live) {
+      void Promise.resolve(live.stop()).catch(() => {});
+      this.agents.delete(agentId);
+    }
+    return { removed: agentId };
+  }
+
+  /** Write the roster, without tripping our own staleness check. */
+  private saveConfig(): void {
     writeProjectConfig(this.info.dir, this.config);
     // we just wrote the file, so don't let configStale() see our own write and
     // schedule a pointless reload
     this.configMtime = configMtimeOf(this.info.dir);
-    return { id: agentId, role };
   }
 
   // -------------------------------------------------------------------------

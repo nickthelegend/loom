@@ -56,27 +56,24 @@ describe("ades · the roster a new project gets", () => {
     expect(defaultAgentConfigs({ "claude-code": false, codex: false })).toEqual([]);
   });
 
-  it("hands the canonical roles out in order, so the ship route wires up", () => {
-    const agents = defaultAgentConfigs({ "claude-code": true, codex: true, opencode: true });
-    expect(agents.map((a) => a.role)).toEqual(["planner", "executor", "reviewer"]);
-    expect(buildDefaultRoutes(agents)).toEqual({ ship: ["planner", "executor", "reviewer"] });
-  });
-
   /**
-   * Four ADEs, three canonical roles. The fourth gets its kind as its role
-   * rather than doubling up: two agents sharing "reviewer" would make the route
-   * ambiguous, and Loom has no basis for deciding Grok is the reviewer.
+   * These two used to assert the opposite — that the first three ADEs got
+   * planner/executor/reviewer and that a "ship" route was built from them. They
+   * passed the whole time, which is the point worth remembering: a test only
+   * proves the code does what it does, never that it should. The behaviour was
+   * an accident of list order that read like Loom's advice, and it was wrong
+   * from the first day it worked.
    */
-  it("doesn't duplicate a role when there are more agents than roles", () => {
+  it("gives every agent its own kind as its role, in order", () => {
     const agents = defaultAgentConfigs({
       "claude-code": true,
       codex: true,
       opencode: true,
       "grok-code": true,
     });
-    const roles = agents.map((a) => a.role);
-    expect(roles).toEqual(["planner", "executor", "reviewer", "grok-code"]);
-    expect(new Set(roles).size).toBe(roles.length);
+    expect(agents.map((a) => a.role)).toEqual(["claude-code", "codex", "opencode", "grok-code"]);
+    // and every role is distinct, so nothing a route targets is ambiguous
+    expect(new Set(agents.map((a) => a.role)).size).toBe(agents.length);
   });
 
   it("never seeds a bridge — it needs a GUI running with a debug port", () => {
@@ -132,5 +129,44 @@ describe("grok · reading its answer", () => {
     expect(parseGrokJson("")).toBeNull();
     expect(parseGrokJson("not json at all")).toBeNull();
     expect(parseGrokJson("{ truncated")).toBeNull();
+  });
+});
+
+/**
+ * Roles are yours, not Loom's.
+ *
+ * This used to hand out planner / executor / reviewer by detection order, so
+ * Claude Code was "the planner" and OpenCode "the executor" because of where
+ * they sat in a list. Nobody decided that; it read like advice Loom had earned.
+ */
+describe("ades · nobody is the planner by default", () => {
+  it("gives every agent its own kind as its role", () => {
+    const agents = defaultAgentConfigs({
+      "claude-code": true,
+      codex: true,
+      opencode: true,
+      "grok-code": true,
+    });
+    expect(agents.map((a) => a.role)).toEqual(["claude-code", "codex", "opencode", "grok-code"]);
+  });
+
+  it("never invents planner/executor/reviewer", () => {
+    const roles = defaultAgentConfigs({ "claude-code": true, codex: true, opencode: true }).map(
+      (a) => a.role,
+    );
+    for (const invented of ["planner", "executor", "reviewer"]) {
+      expect(roles, `"${invented}" is an opinion Loom hasn't earned`).not.toContain(invented);
+    }
+  });
+
+  /**
+   * And so no route is conjured either: buildDefaultRoutes wires "ship" from
+   * planner→executor→reviewer, and with none of those names in play there is
+   * nothing to build. A pipeline you didn't ask for isn't a default, it's a
+   * guess about your workflow.
+   */
+  it("doesn't conjure a ship route out of names nobody chose", () => {
+    const agents = defaultAgentConfigs({ "claude-code": true, codex: true, opencode: true });
+    expect(buildDefaultRoutes(agents)).toBeUndefined();
   });
 });

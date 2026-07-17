@@ -899,6 +899,8 @@ ${BRAND_SPRITE}
   "use strict";
   var TOKEN_KEY = "loomClientToken";
   var THEME_KEY = "loomTheme";
+  // Shown once, unprompted, on a client that has never seen it.
+  var SETUP_SEEN_KEY = "loomSetupSeen";
   var state = { token: localStorage.getItem(TOKEN_KEY) || "", projects: [], pid: null,
                 project: null, selected: null, lastId: 0, ws: null, timers: [],
                 tab: "thread", tree: null, wsLive: false, lastQuestion: null };
@@ -1334,7 +1336,11 @@ ${BRAND_SPRITE}
         '<div class="panel">' +
         // Orca chrome: the strip is the window top — context, tabs, actions.
         '<div class="tabstrip" id="tabstrip">' +
-        '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
+        // No project title here. The sidebar already names every project and
+        // highlights the open one, so this printed it a second time three
+        // inches away — and for a project called "loom" that's the word "loom"
+        // twice in one bar, under a window called Loom. Cost and needs-input
+        // live on the sidebar row too, so nothing is lost with it.
         '<span id="tabsbox" style="display:contents"></span>' +
         '<span class="spacer"></span>' +
         // &#96; is a backtick — a literal one would close this template literal
@@ -3275,6 +3281,18 @@ ${BRAND_SPRITE}
       "</div>";
     document.getElementById("unpair").onclick = logout;
     document.getElementById("setupbtn").onclick = openSetupModal;
+    // First run: show it rather than wait to be found. Someone who has just
+    // paired has no agents set up and no reason to guess that the small icon in
+    // the sidebar foot is where that happens — and Loom with nothing to drive
+    // is a window with nothing in it. Once only; the button is always there.
+    try {
+      if (!localStorage.getItem(SETUP_SEEN_KEY)) {
+        localStorage.setItem(SETUP_SEEN_KEY, "1");
+        setTimeout(openSetupModal, 400);
+      }
+    } catch (e) {
+      // private mode, no storage — the button still works
+    }
     // The toggle lives in the shell's foot now, so bind it here — renderProject
     // also calls bindTheme, but it never runs when no project is selected.
     bindTheme();
