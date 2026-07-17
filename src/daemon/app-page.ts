@@ -837,8 +837,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     background:var(--danger,#e5484d);display:none;box-shadow:0 0 0 1.5px var(--card)}
   .errdot.on{display:block}
   #consolebtn{position:relative}
-  .conwrap{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden}
-  .conwrap.on{display:flex}
+  .conwrap{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden;
+    background:var(--background)}
+  /* When open, the console overlays the terminal panes — it shares their dock,
+     and both are absolutely-positioned siblings, so without this the terminal
+     (appended later) paints on top and clicking Console just shows a shell. */
+  .conwrap.on{display:flex;z-index:5}
   .conbar{display:flex;align-items:center;gap:6px;flex:none;height:28px;padding:0 8px;
     border-bottom:1px solid var(--border);font-size:11px;color:var(--muted-foreground)}
   .conbar .lvl{padding:2px 7px;border-radius:11px;cursor:pointer;border:1px solid transparent;
@@ -1744,7 +1748,13 @@ ${BRAND_SPRITE}
     if (desktop) {
       document.getElementById("dockclose").onclick = closeDock;
       document.getElementById("railbtn").onclick = toggleRail;
-      document.getElementById("termbtn").onclick = toggleTerm;
+      // The terminal button wants the terminal. If the console is overlaying the
+      // dock, the first click should reveal the terminal underneath rather than
+      // close the whole dock out from under it.
+      document.getElementById("termbtn").onclick = function(){
+        if (con.open) { closeConsole(); if (!termOpen()) toggleTerm(); else { ensureTerm(); focusTerm(); } return; }
+        toggleTerm();
+      };
       bindConsole();
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
@@ -1995,6 +2005,9 @@ ${BRAND_SPRITE}
         el.onclick = function(ev){
           var c = ev.target.closest ? ev.target.closest("[data-close]") : null;
           if (c) { closeTerm(c.getAttribute("data-close")); return; }
+          // Picking a terminal tab means you want the terminal, not the console
+          // overlay sitting on top of it — step it aside.
+          closeConsole();
           activeTerm = el.getAttribute("data-t");
           drawTermTabs(); showTermPane(); drawPrompt(); fitActive(); focusTerm();
         };
