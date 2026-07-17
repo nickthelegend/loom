@@ -173,3 +173,218 @@ export async function listTasks(
     return classifyGhFailure(String((err as Error).message));
   }
 }
+
+// ---------------------------------------------------------------------------
+// GitHub Projects (v2) — the owner's project boards, browsed in-app.
+// ---------------------------------------------------------------------------
+
+export interface GhProject {
+  number: number;
+  title: string;
+  url: string;
+  closed: boolean;
+  items: number;
+}
+
+/** gh needs the `project` scope for these; say so plainly when it's missing. */
+function classifyProjectFailure(msg: string): TaskUnavailable {
+  if (/project.*scope|scope.*project|not been granted/i.test(msg)) {
+    return {
+      available: false,
+      reason: "no-auth",
+      detail: "gh needs the project scope: run `gh auth refresh -s project`.",
+    };
+  }
+  return classifyGhFailure(msg);
+}
+
+/** The owner of this repo's remote — a Project board lives on the owner, not the repo. */
+async function repoOwner(dir: string): Promise<string> {
+  const repo = await ghRepo(dir);
+  if (!repo.ok) throw new Error(repo.err.detail);
+  return repo.repo.split("/")[0] ?? "";
+}
+
+export async function ghProjects(
+  dir: string,
+): Promise<{ available: true; owner: string; projects: GhProject[] } | TaskUnavailable> {
+  if (!(await cliAvailable("gh"))) {
+    return { available: false, reason: "no-cli", detail: "GitHub CLI not found. Install gh, then reload." };
+  }
+  try {
+    const owner = await repoOwner(dir);
+    const out = await runGh(["project", "list", "--owner", owner, "--format", "json", "--limit", "50"], dir);
+    const parsed = JSON.parse(out) as {
+      projects?: { number: number; title: string; url: string; closed?: boolean; items?: { totalCount?: number } }[];
+    };
+    const projects = (parsed.projects ?? []).map((p) => ({
+      number: p.number,
+      title: p.title,
+      url: p.url,
+      closed: !!p.closed,
+      items: p.items?.totalCount ?? 0,
+    }));
+    return { available: true, owner, projects };
+  } catch (err) {
+    return classifyProjectFailure(String((err as Error).message));
+  }
+}
+
+export interface GhProjectItem {
+  id: string;
+  title: string;
+  type: string; // Issue | PullRequest | DraftIssue
+  number: number | null;
+  url: string | null;
+  status: string;
+}
+
+export async function ghProjectItems(
+  dir: string,
+  number: number,
+): Promise<{ available: true; items: GhProjectItem[] } | TaskUnavailable> {
+  try {
+    const owner = await repoOwner(dir);
+    const out = await runGh(
+      ["project", "item-list", String(number), "--owner", owner, "--format", "json", "--limit", "100"],
+      dir,
+    );
+    const parsed = JSON.parse(out) as {
+      items?: {
+        id: string;
+        title?: string;
+        status?: string;
+        content?: { type?: string; title?: string; number?: number; url?: string };
+      }[];
+    };
+    const items = (parsed.items ?? []).map((it) => ({
+      id: it.id,
+      title: it.content?.title ?? it.title ?? "(untitled)",
+      type: it.content?.type ?? "DraftIssue",
+      number: it.content?.number ?? null,
+      url: it.content?.url ?? null,
+      status: (it.status ?? "").trim() || "No status",
+    }));
+    return { available: true, items };
+  } catch (err) {
+    return classifyProjectFailure(String((err as Error).message));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pull-request review — read the diff, then approve / request changes / comment,
+// all through the user's own gh (their identity signs the review, never ours).
+// ---------------------------------------------------------------------------
+
+export interface PrDetail {
+  number: number;
+  title: string;
+  author: string;
+  headRefName: string;
+  baseRefName: string;
+  body: string;
+  state: string;
+  isDraft: boolean;
+  reviewDecision: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  url: string;
+}
+
+export async function prView(
+  dir: string,
+  number: number,
+): Promise<{ available: true; pr: PrDetail; diff: string; diffCapped: boolean } | TaskUnavailable> {
+  const repo = await ghRepo(dir);
+  if (!repo.ok) return repo.err;
+  try {
+    const out = await runGh(
+      [
+        "pr",
+        "view",
+        String(number),
+        "--json",
+        "number,title,author,headRefName,baseRefName,body,state,isDraft,reviewDecision,additions,deletions,changedFiles,url",
+      ],
+      dir,
+    );
+    const p = JSON.parse(out) as {
+      number: number;
+      title: string;
+      author?: { login?: string };
+      headRefName?: string;
+      baseRefName?: string;
+      body?: string;
+      state?: string;
+      isDraft?: boolean;
+      reviewDecision?: string;
+      additions?: number;
+      deletions?: number;
+      changedFiles?: number;
+      url: string;
+    };
+    // The patch, bounded — a 40k-line diff is not something to stream to a phone.
+    const MAX = 60_000;
+    let diff = "";
+    let diffCapped = false;
+    try {
+      diff = await runGh(["pr", "diff", String(number)], dir);
+      if (diff.length > MAX) {
+        diff = diff.slice(0, MAX);
+        diffCapped = true;
+      }
+    } catch {
+      diff = ""; // a missing diff (e.g. huge PR) shouldn't hide the review buttons
+    }
+    return {
+      available: true,
+      pr: {
+        number: p.number,
+        title: p.title,
+        author: p.author?.login ?? "",
+        headRefName: p.headRefName ?? "",
+        baseRefName: p.baseRefName ?? "",
+        body: p.body ?? "",
+        state: String(p.state ?? "").toLowerCase(),
+        isDraft: !!p.isDraft,
+        reviewDecision: p.reviewDecision ?? "",
+        additions: p.additions ?? 0,
+        deletions: p.deletions ?? 0,
+        changedFiles: p.changedFiles ?? 0,
+        url: p.url,
+      },
+      diff,
+      diffCapped,
+    };
+  } catch (err) {
+    return classifyGhFailure(String((err as Error).message));
+  }
+}
+
+export type PrReviewAction = "approve" | "request-changes" | "comment";
+
+/**
+ * Post a review as the user. Approve needs no body; the other two do (GitHub
+ * rejects an empty request-changes, and a blank comment is noise). The review is
+ * signed by whoever gh is logged in as — the honest thing.
+ */
+export async function prReview(
+  dir: string,
+  number: number,
+  action: PrReviewAction,
+  body: string,
+): Promise<{ ok: true } | TaskUnavailable> {
+  if (action !== "approve" && !body.trim()) {
+    return { available: false, reason: "error", detail: "that review needs a comment" };
+  }
+  const flag = action === "approve" ? "--approve" : action === "request-changes" ? "--request-changes" : "--comment";
+  const args = ["pr", "review", String(number), flag];
+  if (body.trim()) args.push("--body", body.trim());
+  try {
+    await runGh(args, dir);
+    return { ok: true };
+  } catch (err) {
+    return classifyGhFailure(String((err as Error).message));
+  }
+}

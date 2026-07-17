@@ -380,3 +380,57 @@ describe("settings endpoints", () => {
     expect(cfg.defaultAgent).toBe("");
   });
 });
+
+/**
+ * The native GitHub/Linear/worktree board endpoints. These lean on `gh` and a
+ * Linear key that CI may not have, so the assertions are about the shape and
+ * the auth wall — every route degrades to a typed `available:false` rather than
+ * throwing, and none is reachable without a token.
+ */
+describe("board sources — worktrees, GitHub Projects, Linear", () => {
+  const auth = () => ({ authorization: `Bearer ${readDaemonConfig()!.adminToken}` });
+
+  it("all sit behind the auth wall", async () => {
+    for (const p of [
+      `/api/projects/${projectId}/worktrees`,
+      `/api/projects/${projectId}/gh/projects`,
+      `/api/projects/${projectId}/linear/teams`,
+      `/api/projects/${projectId}/prs/1`,
+    ]) {
+      expect((await fetch(`${baseUrl}${p}`)).status, `${p} must be authed`).toBe(401);
+    }
+  });
+
+  it("lists worktrees as an array (empty for a plain project dir)", async () => {
+    const r = (await (
+      await fetch(`${baseUrl}/api/projects/${projectId}/worktrees`, { headers: auth() })
+    ).json()) as { worktrees: unknown[] };
+    expect(Array.isArray(r.worktrees)).toBe(true);
+  });
+
+  it("Linear reports no-key when the environment has none", async () => {
+    delete process.env.LINEAR_API_KEY;
+    const r = (await (
+      await fetch(`${baseUrl}/api/projects/${projectId}/linear/teams`, { headers: auth() })
+    ).json()) as { available: boolean; reason?: string };
+    expect(r.available).toBe(false);
+    expect(r.reason).toBe("no-key");
+  });
+
+  it("GitHub Projects always answers with a typed result, never a 500", async () => {
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}/gh/projects`, { headers: auth() });
+    expect(res.status).toBe(200);
+    const r = (await res.json()) as { available: boolean };
+    // true (gh authed) or false with a reason (no gh / no remote) — both valid
+    expect(typeof r.available).toBe("boolean");
+  });
+
+  it("a review needs a valid action", async () => {
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}/prs/1/review`, {
+      method: "POST",
+      headers: { ...auth(), "content-type": "application/json" },
+      body: JSON.stringify({ action: "nonsense" }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

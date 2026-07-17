@@ -423,3 +423,90 @@ export async function push(dir: string): Promise<{ branch: string; detail: strin
   logbook.info("git", `pushed ${branch}`, detail.trim());
   return { branch, detail: detail.trim() };
 }
+
+// ---------------------------------------------------------------------------
+// Worktrees — a checked-out branch in its own directory, so an agent (or you)
+// can work a PR without disturbing whatever is open in the main tree. Placed as
+// a sibling of the repo, never nested inside it, so its files never show up as
+// untracked noise in the parent.
+// ---------------------------------------------------------------------------
+
+export interface Worktree {
+  path: string;
+  /** null when the worktree is detached (e.g. mid-review of a fork PR). */
+  branch: string | null;
+  head: string;
+  /** The repo's own main working tree — you can't remove this one. */
+  main?: boolean;
+}
+
+/** A directory-safe slug for a branch or task name. */
+function wtSlug(s: string): string {
+  return (
+    s.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "wt"
+  );
+}
+
+/** Where a new worktree for this repo goes: `<repo>--<slug>`, a sibling. */
+export function worktreePath(dir: string, slug: string): string {
+  const root = path.resolve(dir);
+  return path.join(path.dirname(root), path.basename(root) + "--" + wtSlug(slug));
+}
+
+export async function listWorktrees(dir: string): Promise<Worktree[]> {
+  if (!(await isRepo(dir))) return [];
+  const out = await git(["worktree", "list", "--porcelain"], dir).catch(() => "");
+  const trees: Worktree[] = [];
+  let cur: { path?: string; branch?: string | null; head?: string } | null = null;
+  const flush = () => {
+    if (cur?.path) trees.push({ path: cur.path, branch: cur.branch ?? null, head: cur.head ?? "" });
+  };
+  for (const line of out.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      flush();
+      cur = { path: line.slice("worktree ".length).trim() };
+    } else if (line.startsWith("HEAD ")) {
+      if (cur) cur.head = line.slice("HEAD ".length).trim();
+    } else if (line.startsWith("branch ")) {
+      if (cur) cur.branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
+    } else if (line.trim() === "detached") {
+      if (cur) cur.branch = null;
+    }
+  }
+  flush();
+  const root = path.resolve(dir);
+  return trees.map((t, i) => ({ ...t, main: path.resolve(t.path) === root || i === 0 }));
+}
+
+/**
+ * Open a worktree. Three shapes:
+ *  - `newBranch`: cut a fresh branch off `base` (default HEAD) — used for an
+ *    issue or a card you want to start.
+ *  - `branch`: check out an existing (or DWIM-remote) branch.
+ *  - `detached`: park at HEAD, for the caller to `gh pr checkout` into (handles
+ *    fork PRs, which have no local branch).
+ * Returns the created path; `git worktree add` refuses to clobber, so an
+ * existing path surfaces git's own error rather than overwriting work.
+ */
+export async function addWorktree(
+  dir: string,
+  opts: { slug: string; branch?: string; newBranch?: string; base?: string; detached?: boolean },
+): Promise<{ path: string; branch: string | null }> {
+  if (!(await isRepo(dir))) throw new GitError("not a git repository", "");
+  if (!(await hasCommits(dir))) throw new GitError("make a commit before opening a worktree", "");
+  const wt = worktreePath(dir, opts.slug);
+  if (opts.newBranch) {
+    await git(["worktree", "add", "-b", opts.newBranch, wt, opts.base || "HEAD"], dir);
+    return { path: wt, branch: opts.newBranch };
+  }
+  if (opts.branch && !opts.detached) {
+    await git(["worktree", "add", wt, opts.branch], dir);
+    return { path: wt, branch: opts.branch };
+  }
+  await git(["worktree", "add", "--detach", wt], dir);
+  return { path: wt, branch: null };
+}
+
+export async function removeWorktree(dir: string, wtPath: string, force = false): Promise<void> {
+  await git(["worktree", "remove", ...(force ? ["--force"] : []), wtPath], dir);
+}

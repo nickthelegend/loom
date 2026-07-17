@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  addWorktree,
   branches,
   checkout,
   commit,
@@ -22,12 +23,15 @@ import {
   fileDiff,
   GitError,
   init,
+  listWorktrees,
   log,
   push,
+  removeWorktree,
   safeRelPath,
   stage,
   status,
   unstage,
+  worktreePath,
 } from "../src/core/git.js";
 import { tmpDir } from "./helpers.js";
 
@@ -372,5 +376,50 @@ describe("config · unreadable is loud, missing is quiet", () => {
     const state = readProjectState(dir); // no .loom at all
     expect(state.holder).toBeNull();
     expect(logbook.list().length, "a missing file is not an event").toBe(0);
+  });
+});
+
+/**
+ * Worktrees — the "open a worktree from any task" half of the board, against a
+ * real repo. Each test removes what it created so it never strands a sibling
+ * directory outside the temp repo.
+ */
+describe("git · worktrees", () => {
+  it("cuts a fresh branch in its own sibling directory, lists it, removes it", async () => {
+    const dir = repo();
+    const made = await addWorktree(dir, { slug: "issue-7", newBranch: "issue-7" });
+    try {
+      expect(made.branch).toBe("issue-7");
+      // a sibling of the repo, never nested inside it
+      expect(path.dirname(made.path)).toBe(path.dirname(path.resolve(dir)));
+      expect(fs.existsSync(made.path)).toBe(true);
+
+      const trees = await listWorktrees(dir);
+      const main = trees.find((t) => t.main);
+      const wt = trees.find((t) => t.branch === "issue-7");
+      expect(main, "the main tree is flagged").toBeTruthy();
+      expect(wt, "the new worktree is listed with its branch").toBeTruthy();
+    } finally {
+      await removeWorktree(dir, made.path, true).catch(() => {});
+    }
+    const after = await listWorktrees(dir);
+    expect(after.some((t) => t.branch === "issue-7"), "removed cleanly").toBe(false);
+    expect(fs.existsSync(made.path)).toBe(false);
+  });
+
+  it("won't clobber an existing path", async () => {
+    const dir = repo();
+    const a = await addWorktree(dir, { slug: "dup", newBranch: "dup" });
+    try {
+      // same slug → same path; git refuses rather than overwrite work
+      await expect(addWorktree(dir, { slug: "dup", newBranch: "dup2" })).rejects.toThrow();
+    } finally {
+      await removeWorktree(dir, a.path, true).catch(() => {});
+    }
+  });
+
+  it("puts the worktree path beside the repo, slugified", () => {
+    const p = worktreePath("/tmp/my repo", "PR #42/fix");
+    expect(p).toBe(path.join("/tmp", "my repo--pr-42-fix"));
   });
 });

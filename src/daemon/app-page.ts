@@ -1124,6 +1124,60 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .qbox svg{width:14px;height:14px;flex:none;color:var(--muted-foreground)}
   .qbox input{flex:1;min-width:0;background:none;border:none;outline:none;box-shadow:none!important;
     color:var(--foreground);font-family:var(--font-mono);font-size:12.5px}
+  /* board sources: GitHub / Projects / Linear — one board, three feeds */
+  .bsrc{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:10px;
+    background:color-mix(in srgb, var(--muted-foreground) 6%, transparent)}
+  .bsrcb{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 11px;border:0;border-radius:8px;
+    background:transparent;color:var(--muted-foreground);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;
+    transition:background .12s,color .12s}
+  .bsrcb svg{width:14px;height:14px}
+  .bsrcb:hover{color:var(--foreground)}
+  .bsrcb.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .dark .bsrcb.on{background:color-mix(in srgb, var(--foreground) 12%, transparent)}
+  /* per-card actions: Review / Worktree */
+  .bca{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+  .bca .btn svg{width:12px;height:12px;margin-right:-1px}
+  .bempty2{color:var(--muted-foreground);font-size:13px;text-align:center;padding:44px 20px}
+  /* GitHub Projects: a list, then one project's items grouped by Status */
+  .prjlist{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+  .prjrow{display:flex;align-items:center;gap:10px;height:46px;padding:0 12px;border:1px solid var(--border);
+    border-radius:var(--radius-md);background:var(--background);color:var(--foreground);font:inherit;font-size:13px;
+    cursor:pointer;text-align:left;transition:border-color .12s,background .12s}
+  .prjrow:hover{border-color:color-mix(in srgb, var(--muted-foreground) 40%, transparent);background:var(--muted)}
+  .prjrow > svg{width:16px;height:16px;color:var(--muted-foreground);flex:none}
+  .prjrow .prjt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+  .prjrow .prjn{font-size:11px;color:var(--muted-foreground);flex:none}
+  .prjrow .prja{display:inline-flex;color:var(--muted-foreground);padding:5px;border-radius:6px;flex:none}
+  .prjrow .prja:hover{color:var(--foreground);background:var(--accent)}
+  .prjrow .prja svg{width:14px;height:14px}
+  .prjhead{display:flex;align-items:center;gap:10px;margin:2px 0 12px}
+  .prjhead .prjtitle{font-size:14px;font-weight:600}
+  .pcols{grid-auto-flow:column;grid-auto-columns:minmax(200px,1fr);grid-template-columns:none;overflow-x:auto}
+  /* Linear: recent issues, and the New-issue form's home */
+  .lnlist{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+  .lnrow{display:flex;align-items:center;gap:11px;height:40px;padding:0 12px;border:1px solid var(--border);
+    border-radius:var(--radius-md);color:var(--foreground);text-decoration:none;transition:background .12s}
+  .lnrow:hover{background:var(--muted)}
+  .lnrow .lnid{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);flex:none;min-width:66px}
+  .lnrow .lnt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .lnrow .lnst{font-size:10.5px;color:var(--muted-foreground);flex:none;border:1px solid var(--border);border-radius:999px;padding:1px 8px}
+  /* PR review modal: metadata, the diff, a comment box, three verbs */
+  .modal.prmodal{max-width:780px}
+  .prbody{gap:0;max-height:72vh}
+  .prmeta{margin-bottom:10px}
+  .prmeta .prttl{font-size:15px;font-weight:600;line-height:1.35}
+  .prmeta .prsub{font-size:12px;color:var(--muted-foreground);margin-top:4px}
+  .prmeta .prbr{font-family:var(--font-mono)}
+  .prdiff{border:1px solid var(--border);border-radius:8px;max-height:46vh;overflow:auto;
+    background:color-mix(in srgb, var(--muted-foreground) 5%, transparent);padding:6px 4px}
+  .prcap{font-size:11.5px;color:var(--muted-foreground);text-align:center;padding:8px}
+  .prcomment{width:100%;box-sizing:border-box;margin-top:12px;min-height:64px;border:1px solid var(--input);
+    border-radius:8px;background:transparent;color:var(--foreground);font:inherit;font-size:13px;padding:9px 11px;resize:vertical;outline:none}
+  .dark .prcomment{background:color-mix(in srgb, var(--input) 30%, transparent)}
+  .prcomment:focus-visible{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 40%, transparent)}
+  .prfoot{flex-wrap:wrap}
+  .btn.prdanger{color:var(--err);border-color:color-mix(in srgb, var(--err) 40%, transparent)}
+  .btn.prdanger:hover{background:color-mix(in srgb, var(--err) 12%, transparent)}
   /* ── Sidebar top nav (Orca: Tasks / Search) ───────────── */
   .topnav{display:flex;flex-direction:column;gap:1px;padding:8px 8px 4px}
   .navitem{display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:var(--radius-md);
@@ -2770,7 +2824,11 @@ ${BRAND_SPRITE}
     // Cards are derived from live state (see board.ts): which agents are
     // running or blocked, and what GitHub says about each PR. Nothing here is
     // stored except your pins.
-    var board = { data: null, loading: false, pins: null, q: "" };
+    var board = { data: null, loading: false, pins: null, q: "",
+                  // GitHub | Projects (GH Projects v2) | Linear — one board, three sources
+                  source: "github",
+                  ghProjects: null, ghProject: null, ghItems: null, ghItemsLoading: false,
+                  linear: null, linearTeams: null, linearLoading: false };
     var BCOLS = [
       ["working", "Working", "var(--warn)"],
       ["needs-you", "Needs you", "var(--warn)"],
@@ -2809,11 +2867,37 @@ ${BRAND_SPRITE}
           board.loading = false; drawBoardPane();
         });
     }
+    // One board, three sources. GitHub is the live kanban; Projects browses the
+    // owner's GitHub Project boards; Linear lists and files issues.
+    function boardSourceBar(){
+      var srcs = [["github", "GitHub", ICONS.github], ["projects", "Projects", ICONS.board], ["linear", "Linear", ICONS.linear]];
+      return '<div class="bsrc" role="tablist">' + srcs.map(function(s){
+        return '<button class="bsrcb' + (board.source === s[0] ? " on" : "") + '" data-src="' + s[0] +
+          '" type="button" role="tab" aria-selected="' + (board.source === s[0]) + '">' + s[2] + "<span>" + s[1] + "</span></button>";
+      }).join("") + "</div>";
+    }
+    function wireSourceBar(){
+      Array.prototype.forEach.call(document.querySelectorAll("#pane-board [data-src]"), function(b){
+        b.onclick = function(){
+          var s = b.getAttribute("data-src");
+          if (s === board.source) return;
+          board.source = s; board.ghProject = null;
+          drawBoardPane();
+          if (s === "github" && !board.data) loadBoard();
+          else if (s === "projects" && !board.ghProjects) loadGhProjects();
+          else if (s === "linear" && (!board.linear || !board.linearTeams)) loadLinear();
+        };
+      });
+    }
     function drawBoardPane(){
+      if (board.source === "projects") return drawProjectsView();
+      if (board.source === "linear") return drawLinearView();
+      drawGithubBoard();
+    }
+    function drawGithubBoard(){
       var el = document.getElementById("pane-board"); if (!el) return;
       var d = board.data;
-      var head = '<div class="bhead"><span class="bt">Board</span>' +
-        '<span class="bs">Work flowing from working \\u2192 review \\u2192 merge.</span>' +
+      var head = '<div class="bhead">' + boardSourceBar() +
         '<span class="spacer"></span>' +
         // gh's own query language, straight through — same box the Tasks tab had
         '<div class="qbox bq">' + ICONS.search +
@@ -2866,6 +2950,18 @@ ${BRAND_SPRITE}
     function boardCard(c){
       var st = BSTATES[c.state] || [c.state, "var(--muted-foreground)"];
       var pinned = (board.pins || {})[c.id];
+      // Review a PR, or open a worktree from any task — the "no context switch"
+      // half of the board. A PR worktree checks the branch out for you (forks
+      // included); an issue worktree cuts a fresh branch to start it.
+      var acts = "";
+      if (c.pr) {
+        acts = '<div class="bca">' +
+          '<button class="btn outline xs" data-review="' + c.pr.number + '" data-rtitle="' + esc(c.title) + '">Review</button>' +
+          '<button class="btn ghost xs" data-wtpr="' + c.pr.number + '" title="open a worktree on this PR\\u2019s branch">' + ICONS.branch + " Worktree</button></div>";
+      } else if (c.issue) {
+        acts = '<div class="bca"><button class="btn ghost xs" data-wtissue="' + c.issue.number +
+          '" title="cut a fresh branch for this issue in its own worktree">' + ICONS.branch + " Worktree</button></div>";
+      }
       return '<div class="bcard' + (c.own ? " own" : "") + '" draggable="true" data-card="' + esc(c.id) +
         '" data-home="' + esc(c.column) + '"' + (c.own ? ' data-own="1"' : "") + ">" +
         '<div class="bcr1"><span class="bdot" style="background:' + st[1] + '"></span>' +
@@ -2890,9 +2986,10 @@ ${BRAND_SPRITE}
             : pinned
               ? '<span class="bpin" data-unpin="' + esc(c.id) + '" title="you moved this card \\u2014 click to let its real state place it">pinned</span>'
               : "") +
-        "</div></div>";
+        "</div>" + acts + "</div>";
     }
     function wireBoardHead(){
+      wireSourceBar();
       var r = document.getElementById("brefresh");
       if (r) r.onclick = loadBoard;
       var q = document.getElementById("bq");
@@ -2970,7 +3067,230 @@ ${BRAND_SPRITE}
             "\\n\\nRead the issue, then implement it.");
         };
       });
+      // Review a PR in-app
+      Array.prototype.forEach.call(el.querySelectorAll("[data-review]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          openPrReview(Number(b.getAttribute("data-review")), b.getAttribute("data-rtitle") || "");
+        };
+      });
+      // Open a worktree from a PR (checks the branch out) or an issue (fresh branch)
+      Array.prototype.forEach.call(el.querySelectorAll("[data-wtpr]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); openWorktree(b, { pr: Number(b.getAttribute("data-wtpr")) }); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-wtissue]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); openWorktree(b, { issue: Number(b.getAttribute("data-wtissue")) }); };
+      });
     }
+
+    /**
+     * Open a worktree from a task and say where it landed. A worktree is a real
+     * directory on the daemon host, so the honest confirmation is its path — you
+     * cd there, or point a fresh Loom project at it.
+     */
+    function openWorktree(btn, body){
+      if (btn) { btn.disabled = true; btn.textContent = "Opening\\u2026"; }
+      api("/api/projects/" + pid + "/worktrees", { method: "POST", body: JSON.stringify(body) })
+        .then(function(r){
+          toast("worktree ready \\u00b7 " + (r.branch || r.source || "") + " \\u2192 " + r.path);
+          loadBoard();
+        })
+        .catch(function(err){ toast(err.message); if (btn) { btn.disabled = false; btn.textContent = "Worktree"; } });
+    }
+    // ---- Projects (GitHub Projects v2), browsed in-app ----------------------
+    function loadGhProjects(){
+      board.ghProjects = null; drawProjectsView();
+      api("/api/projects/" + pid + "/gh/projects")
+        .then(function(r){ board.ghProjects = r; drawProjectsView(); })
+        .catch(function(err){ board.ghProjects = { available: false, detail: err.message }; drawProjectsView(); });
+    }
+    function loadGhProjectItems(num){
+      board.ghItems = null; board.ghItemsLoading = true; drawProjectsView();
+      api("/api/projects/" + pid + "/gh/projects/" + num + "/items")
+        .then(function(r){ board.ghItems = r; board.ghItemsLoading = false; drawProjectsView(); })
+        .catch(function(err){ board.ghItems = { available: false, detail: err.message }; board.ghItemsLoading = false; drawProjectsView(); });
+    }
+    function drawProjectsView(){
+      var el = document.getElementById("pane-board"); if (!el) return;
+      var head = '<div class="bhead">' + boardSourceBar() + '<span class="spacer"></span>' +
+        '<button class="iconbtn" id="brefresh" title="refresh" aria-label="refresh">' + ICONS.refresh + "</button></div>";
+      var d = board.ghProjects, body;
+      if (board.ghProject) body = drawProjectItems();
+      else if (!d) body = LOADER;
+      else if (!d.available) body = '<div class="tsetup"><div class="th">Couldn\\u2019t list projects</div><div class="td">' + esc(d.detail) + "</div></div>";
+      else if (!d.projects.length) body = '<div class="bempty2">No GitHub Projects for ' + esc(d.owner) + " yet.</div>";
+      else body = '<div class="prjlist">' + d.projects.map(function(p){
+        return '<button class="prjrow" data-prj="' + p.number + '" data-prjt="' + esc(p.title) + '">' +
+          ICONS.board + '<span class="prjt">' + esc(p.title) + "</span>" +
+          '<span class="prjn">' + p.items + " item" + (p.items === 1 ? "" : "s") + "</span>" +
+          '<a class="prja" href="' + esc(p.url) + '" target="_blank" rel="noreferrer" title="open on GitHub">' + ICONS.external + "</a></button>";
+      }).join("") + "</div>";
+      el.innerHTML = '<div class="boardview">' + head + body + "</div>";
+      wireBoardHead();
+      Array.prototype.forEach.call(el.querySelectorAll("[data-prj]"), function(b){
+        b.onclick = function(ev){
+          if (ev.target.closest(".prja")) return; // the GitHub link is its own action
+          board.ghProject = { number: Number(b.getAttribute("data-prj")), title: b.getAttribute("data-prjt") };
+          loadGhProjectItems(board.ghProject.number);
+        };
+      });
+      var back = document.getElementById("prjback");
+      if (back) back.onclick = function(){ board.ghProject = null; board.ghItems = null; drawProjectsView(); };
+    }
+    function drawProjectItems(){
+      var pr = board.ghProject;
+      var head2 = '<div class="prjhead"><button class="btn ghost xs" id="prjback">' + ICONS.chevronLeft + " Projects</button>" +
+        '<span class="prjtitle">' + esc(pr.title) + "</span></div>";
+      var d = board.ghItems;
+      if (board.ghItemsLoading || !d) return head2 + LOADER;
+      if (!d.available) return head2 + '<div class="tsetup"><div class="td">' + esc(d.detail) + "</div></div>";
+      var items = d.items || [];
+      if (!items.length) return head2 + '<div class="bempty2">This project has no items.</div>';
+      var groups = {}, order = [];
+      items.forEach(function(it){ if (!groups[it.status]) { groups[it.status] = []; order.push(it.status); } groups[it.status].push(it); });
+      var cols = order.map(function(s){
+        return '<div class="bcol"><div class="bch">' + esc(s) + '<span class="bn">' + groups[s].length + "</span></div>" +
+          '<div class="bcb">' + groups[s].map(function(it){
+            var tag = it.type === "PullRequest" ? "PR #" + (it.number || "") : it.type === "Issue" ? "#" + (it.number || "") : "note";
+            return '<div class="bcard"><div class="bct">' + esc(it.title) + "</div><div class=\\"bcf\\">" +
+              (it.url ? '<a href="' + esc(it.url) + '" target="_blank" rel="noreferrer">' + esc(tag) + "</a>" : '<span class="who">' + esc(tag) + "</span>") + "</div></div>";
+          }).join("") + "</div></div>";
+      }).join("");
+      return head2 + '<div class="bcols pcols">' + cols + "</div>";
+    }
+
+    // ---- Linear — list issues, and file a new one with a team selector ------
+    function loadLinear(){
+      board.linearLoading = true; drawLinearView();
+      Promise.all([
+        api("/api/projects/" + pid + "/linear/teams").catch(function(e){ return { available: false, detail: e.message }; }),
+        api("/api/projects/" + pid + "/linear/issues").catch(function(e){ return { available: false, detail: e.message }; }),
+      ]).then(function(res){
+        board.linearTeams = res[0]; board.linear = res[1]; board.linearLoading = false; drawLinearView();
+      });
+    }
+    function drawLinearView(){
+      var el = document.getElementById("pane-board"); if (!el) return;
+      var configured = board.linearTeams && board.linearTeams.available;
+      var head = '<div class="bhead">' + boardSourceBar() + '<span class="spacer"></span>' +
+        (configured ? '<button class="btn primary xs" id="lnew">+ New issue</button>' : "") +
+        '<button class="iconbtn" id="brefresh" title="refresh" aria-label="refresh">' + ICONS.refresh + "</button></div>";
+      var body;
+      if (board.linearLoading || (!board.linearTeams && !board.linear)) body = LOADER;
+      else if (!configured) {
+        var det = (board.linearTeams && board.linearTeams.detail) || "Set LINEAR_API_KEY to enable Linear.";
+        body = '<div class="tsetup"><div class="th">Linear isn\\u2019t connected</div>' +
+          '<div class="td">' + esc(det) + "</div>" +
+          '<code class="scmd">export LINEAR_API_KEY=lin_api_\\u2026\\nloom up --restart</code>' +
+          '<div class="td" style="margin-top:8px">Loom reads the key from its own environment and never stores it \\u2014 the same bet it makes with the GitHub CLI.</div></div>';
+      } else {
+        var issues = (board.linear && board.linear.available) ? board.linear.issues : [];
+        body = issues.length
+          ? '<div class="lnlist">' + issues.map(function(it){
+              return '<a class="lnrow" href="' + esc(it.url) + '" target="_blank" rel="noreferrer">' +
+                '<span class="lnid">' + esc(it.identifier) + "</span>" +
+                '<span class="lnt">' + esc(it.title) + "</span>" +
+                (it.state ? '<span class="lnst">' + esc(it.state) + "</span>" : "") + "</a>";
+            }).join("") + "</div>"
+          : '<div class="bempty2">No recent issues \\u2014 file one with + New issue.</div>';
+      }
+      el.innerHTML = '<div class="boardview">' + head + body + "</div>";
+      wireBoardHead();
+      var nb = document.getElementById("lnew");
+      if (nb) nb.onclick = openLinearForm;
+    }
+    function openLinearForm(){
+      if (document.querySelector(".scrim")) return;
+      var teams = (board.linearTeams && board.linearTeams.teams) || [];
+      var scrim = document.createElement("div"); scrim.className = "scrim";
+      scrim.innerHTML = '<div class="modal"><div class="modalhead">New Linear issue<button class="iconbtn" id="lx" aria-label="close">' + ICONS.x + "</button></div>" +
+        '<div class="modalbody">' +
+          '<div class="field"><label>Team</label><select id="lteam">' +
+            teams.map(function(t){ return '<option value="' + esc(t.id) + '">' + esc(t.key) + " \\u00b7 " + esc(t.name) + "</option>"; }).join("") + "</select></div>" +
+          '<div class="field"><label>Title</label><input id="ltitle" spellcheck="false" autocomplete="off" placeholder="what needs doing"></div>' +
+          '<div class="field"><label>Description <span class="opt">optional</span></label><textarea id="ldesc" spellcheck="false" placeholder="details, acceptance criteria\\u2026"></textarea></div>' +
+        "</div>" +
+        '<div class="modalfoot"><button class="btn ghost" id="lcancel">Cancel</button><button class="btn primary" id="lcreate">Create issue</button></div></div>';
+      document.body.appendChild(scrim);
+      function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+      function onKey(e){ if (e.key === "Escape") { e.preventDefault(); close(); } }
+      document.addEventListener("keydown", onKey);
+      scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+      document.getElementById("lx").onclick = close;
+      document.getElementById("lcancel").onclick = close;
+      setTimeout(function(){ var t = document.getElementById("ltitle"); if (t) t.focus(); }, 30);
+      document.getElementById("lcreate").onclick = function(){
+        var teamId = document.getElementById("lteam").value;
+        var title = (document.getElementById("ltitle").value || "").trim();
+        var desc = (document.getElementById("ldesc").value || "").trim();
+        if (!title) return toast("give the issue a title");
+        var btn = this; btn.disabled = true;
+        api("/api/projects/" + pid + "/linear/issues", { method: "POST", body: JSON.stringify({ teamId: teamId, title: title, description: desc }) })
+          .then(function(r){ close(); toast("created " + (r.issue ? r.issue.identifier : "issue")); loadLinear(); })
+          .catch(function(err){ btn.disabled = false; toast(err.message); });
+      };
+    }
+
+    /**
+     * Review a PR without leaving the board: its diff, and the three things a
+     * reviewer does — comment, request changes, approve. The review is posted
+     * through the user's own gh, signed as them; approve asks first, because it
+     * publishes to GitHub.
+     */
+    function openPrReview(num, title){
+      if (document.querySelector(".scrim")) return;
+      var scrim = document.createElement("div"); scrim.className = "scrim";
+      scrim.innerHTML = '<div class="modal prmodal"><div class="modalhead">Review PR #' + num +
+        '<button class="iconbtn" id="prx" aria-label="close">' + ICONS.x + "</button></div>" +
+        '<div class="modalbody prbody" id="prbody">' + LOADER + "</div>" +
+        '<div class="modalfoot prfoot" id="prfoot"></div></div>';
+      document.body.appendChild(scrim);
+      function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+      function onKey(e){ if (e.key === "Escape") { e.preventDefault(); close(); } }
+      document.addEventListener("keydown", onKey);
+      scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+      document.getElementById("prx").onclick = close;
+      api("/api/projects/" + pid + "/prs/" + num).then(function(r){
+        var bodyEl = document.getElementById("prbody");
+        if (!r.available) { bodyEl.innerHTML = '<div class="snote">' + esc(r.detail) + "</div>"; return; }
+        var p = r.pr;
+        var dec = p.reviewDecision ? " \\u00b7 " + esc(p.reviewDecision.toLowerCase().replace(/_/g, " ")) : "";
+        var meta = '<div class="prmeta"><div class="prttl">' + esc(p.title) + "</div>" +
+          '<div class="prsub"><span class="prbr">' + esc(p.headRefName) + " \\u2192 " + esc(p.baseRefName) + "</span>" +
+          " \\u00b7 " + esc(p.author) +
+          ' \\u00b7 <span style="color:var(--git-add)">+' + p.additions + '</span> <span style="color:var(--git-del)">\\u2212' + p.deletions + "</span>" +
+          " \\u00b7 " + p.changedFiles + " file" + (p.changedFiles === 1 ? "" : "s") + dec + "</div></div>";
+        var diff = r.diff
+          ? '<div class="dcode prdiff">' + renderDiffLines(r.diff.split("\\n")) + "</div>" +
+            (r.diffCapped ? '<div class="prcap">\\u2026 diff truncated \\u2014 open on GitHub for the rest.</div>' : "")
+          : '<div class="snote">No diff to show.</div>';
+        bodyEl.innerHTML = meta + diff +
+          '<textarea class="prcomment" id="prcomment" spellcheck="false" placeholder="Comment (required to request changes or comment)"></textarea>';
+        var foot = document.getElementById("prfoot");
+        foot.innerHTML = '<a class="btn ghost" href="' + esc(p.url) + '" target="_blank" rel="noreferrer">Open on GitHub</a><span class="spacer"></span>' +
+          '<button class="btn outline" id="prcmt">Comment</button>' +
+          '<button class="btn outline prdanger" id="prreq">Request changes</button>' +
+          '<button class="btn primary" id="prapp">Approve</button>';
+        function review(action){
+          var body = (document.getElementById("prcomment").value || "").trim();
+          if ((action === "request-changes" || action === "comment") && !body) return toast("add a comment first");
+          if (action === "approve" && !window.confirm("Approve PR #" + num + "? This posts an approval to GitHub under your gh identity.")) return;
+          Array.prototype.forEach.call(foot.querySelectorAll("button"), function(x){ x.disabled = true; });
+          api("/api/projects/" + pid + "/prs/" + num + "/review", { method: "POST", body: JSON.stringify({ action: action, body: body }) })
+            .then(function(){
+              toast(action === "approve" ? "approved PR #" + num : action === "request-changes" ? "requested changes on #" + num : "commented on #" + num);
+              close(); loadBoard();
+            })
+            .catch(function(err){ toast(err.message); Array.prototype.forEach.call(foot.querySelectorAll("button"), function(x){ x.disabled = false; }); });
+        }
+        document.getElementById("prapp").onclick = function(){ review("approve"); };
+        document.getElementById("prreq").onclick = function(){ review("request-changes"); };
+        document.getElementById("prcmt").onclick = function(){ review("comment"); };
+      }).catch(function(err){
+        var bodyEl = document.getElementById("prbody"); if (bodyEl) bodyEl.innerHTML = '<div class="snote">' + esc(err.message) + "</div>";
+      });
+    }
+
     /**
      * Drag to move a card. This pins it where you dropped it — it does not tell
      * GitHub anything. A PR is "ready" when a human approved it and CI passed,
