@@ -23,6 +23,7 @@ import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
 import { isAdapter, MAIN_CHAT } from "../types.js";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
+import { Brain } from "../core/brain.js";
 import { EventLog } from "../core/eventlog.js";
 import { renderProjection } from "../core/distill.js";
 import {
@@ -60,6 +61,8 @@ export class ProjectRuntime {
   readonly log: EventLog;
   readonly baton: BatonManager;
   readonly routes: RouteEngine;
+  /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
+  readonly brain: Brain;
   private agents = new Map<string, AnyAgent>();
   private startedAgents = new Set<string>();
   private configMtime = 0;
@@ -75,6 +78,7 @@ export class ProjectRuntime {
     this.config = config;
     this.log = log;
     this.baton = new BatonManager(info.dir, log);
+    this.brain = new Brain(log);
 
     // Same path as addAgent: an agent added at runtime must behave exactly like
     // one that was here at open, and two copies of this loop would drift.
@@ -846,6 +850,7 @@ export class ProjectRuntime {
       await this.agent(id).stop().catch(() => {});
     }
     this.startedAgents.clear();
+    this.brain.close(); // unsubscribes before the log drops its listeners
     this.log.close();
   }
 }

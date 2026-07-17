@@ -30,6 +30,12 @@ export type EventKind =
   | "route_failed"
   | "turn_diff" // working-tree changes attributed to one agent turn
   | "memory_import" // an ADE's native memory pulled into the shared brain
+  // The brain. A memory is not a row in a table somewhere — it is these three
+  // events, folded. State is a fold, history is a filter, and the two can't
+  // drift apart because they're the same bytes. See core/brain.ts.
+  | "memory_add"
+  | "memory_update"
+  | "memory_forget"
   | "status" // adapter/bridge lifecycle info
   | "error";
 

@@ -15,6 +15,8 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { WebSocketServer, WebSocket } from "ws";
 import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
+import type { MemoryKind, MemoryPatch } from "../core/brain.js";
+import { retrieve } from "../core/brain-index.js";
 import { RouteActiveError } from "../core/routes.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { logbook } from "../core/logbook.js";
@@ -673,7 +675,110 @@ export class LoomDaemon {
         const { text } = (req.body ?? {}) as { text?: string };
         if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
         const event = rt.log.append({ kind: "decision", payload: { text } });
+        // Also a memory. The decision event stays because the projection and
+        // forty other things read it; the memory is the addressable copy — the
+        // one that can be retrieved by what it's about, corrected, and
+        // forgotten. Seeding the brain from the surface people already use
+        // beats asking them to fill a second box.
+        rt.brain.add({
+          kind: "decision",
+          text,
+          provenance: { agentId: "user", eventId: event.id, ts: event.ts },
+        });
         res.json({ event });
+      }),
+    );
+
+    // --- the brain ---------------------------------------------------------
+
+    app.get(
+      "/api/projects/:id/brain",
+      withRuntime(async (rt, req, res) => {
+        const q = req.query as Record<string, string | undefined>;
+        const memories = rt.brain.list({
+          ...(q.kind ? { kind: q.kind as MemoryKind } : {}),
+          ...(q.chat ? { chat: q.chat } : {}),
+          ...(q.includeExpired === "1" ? { includeExpired: true } : {}),
+          ...(q.limit ? { limit: Math.min(500, Number(q.limit) || 100) } : {}),
+        });
+        res.json({ memories, stats: rt.brain.stats() });
+      }),
+    );
+
+    app.get(
+      "/api/projects/:id/brain/search",
+      withRuntime(async (rt, req, res) => {
+        const q = req.query as Record<string, string | undefined>;
+        const files = q.files ? q.files.split(",").filter(Boolean) : [];
+        if (!q.q?.trim() && !files.length) {
+          return void res.status(400).json({ error: "missing q or files" });
+        }
+        const hits = retrieve(rt.brain, {
+          ...(q.q ? { query: q.q } : {}),
+          ...(files.length ? { files } : {}),
+          ...(q.chat ? { chat: q.chat } : {}),
+          ...(q.agent ? { agent: q.agent } : {}),
+          limit: Math.min(50, Number(q.limit) || 12),
+          explain: q.explain === "1",
+        });
+        res.json({ hits });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/brain",
+      withRuntime(async (rt, req, res) => {
+        const body = (req.body ?? {}) as {
+          text?: string;
+          kind?: MemoryKind;
+          entities?: string[];
+          confidence?: number;
+          chat?: string;
+        };
+        if (!body.text?.trim()) return void res.status(400).json({ error: "missing text" });
+        try {
+          const { memory, created } = rt.brain.add({
+            kind: body.kind ?? "fact",
+            text: body.text,
+            ...(body.entities ? { entities: body.entities } : {}),
+            ...(body.chat ? { scope: { chat: body.chat } } : {}),
+            ...(body.confidence !== undefined ? { confidence: body.confidence } : {}),
+            provenance: { agentId: "user", eventId: rt.log.lastId(), ts: Date.now() },
+          });
+          res.json({ memory, created });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    app.patch(
+      "/api/projects/:id/brain/:mid",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json({ memory: rt.brain.update(String(req.params.mid), (req.body ?? {}) as MemoryPatch, "user") });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          res.status(/no such memory/.test(msg) ? 404 : 400).json({ error: msg });
+        }
+      }),
+    );
+
+    app.delete(
+      "/api/projects/:id/brain/:mid",
+      withRuntime(async (rt, req, res) => {
+        const reason = String((req.query as Record<string, string>).reason ?? "").trim();
+        if (!reason) return void res.status(400).json({ error: "forgetting needs a reason" });
+        const forgot = rt.brain.forget(String(req.params.mid), reason, "user");
+        if (!forgot) return void res.status(404).json({ error: "no such memory" });
+        res.json({ forgot: true });
+      }),
+    );
+
+    app.get(
+      "/api/projects/:id/brain/:mid/history",
+      withRuntime(async (rt, req, res) => {
+        res.json({ history: rt.brain.history(String(req.params.mid)) });
       }),
     );
 

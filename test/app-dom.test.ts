@@ -869,6 +869,12 @@ describe("web app · the rest of the shell", () => {
    */
   it("opens the agent task modal from the sidebar", async () => {
     const m = mount({ hash: `#p/${projectId}` });
+    // Wait for the PROJECT, not just the shell — the same race the N-key test
+    // below documents, and it was latent here too. #newtask is renderShell's and
+    // shows up early, but its handler calls openTaskModal(state.pid) and
+    // state.pid is renderProject's. Clicking in the gap builds no modal, which
+    // only ever bites under load.
+    await waitUntil(() => !!$(m, "#box"));
     // wired, not merely present — clicking a button whose handler hasn't been
     // attached yet is a no-op that looks exactly like a broken feature.
     await ready(m, "#newtask");
