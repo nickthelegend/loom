@@ -805,6 +805,49 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .bsec:first-of-type{border-top:0;margin-top:0}
   .bhint{font-weight:400;font-size:10.5px;color:var(--muted-foreground)}
   .bempty{font-size:11.5px;color:var(--muted-foreground);line-height:1.65;padding:6px 0 4px 0;max-width:60ch}
+  .bempty.sm{font-size:11px;padding:4px 0}
+  /* --- the learned-memory list --- */
+  .bhead{position:sticky;top:0;background:var(--background);padding:2px 0 10px;z-index:2}
+  .bkinds{display:flex;flex-wrap:wrap;gap:6px}
+  .bkind{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:99px;
+    border:1px solid var(--border);background:transparent;color:var(--muted-foreground);cursor:pointer;
+    font:inherit;font-size:11.5px;text-transform:capitalize;transition:background .12s,color .12s,border-color .12s}
+  .bkind:hover{background:var(--sidebar-accent);color:var(--foreground)}
+  .bkind.on{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
+  .bkind .kn{font-family:var(--font-mono);font-size:10px;opacity:.7}
+  .bseed{display:flex;gap:6px;padding:0 0 12px}
+  .bseed input{flex:1;min-width:0;height:34px;background:color-mix(in srgb, var(--input) 30%, var(--background));
+    border:1px solid var(--input);border-radius:9px;padding:0 12px;font:inherit;font-size:12.5px;color:var(--foreground)}
+  .bseed input::placeholder{color:color-mix(in srgb, var(--muted-foreground) 65%, transparent)}
+  .bseed input:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 26%, transparent)}
+  .bmems{display:flex;flex-direction:column;gap:8px;padding-bottom:14px}
+  .bmem{border:1px solid var(--border);border-radius:11px;padding:10px 11px;background:var(--card);
+    transition:border-color .12s,box-shadow .12s}
+  .bmem:hover{border-color:color-mix(in srgb, var(--muted-foreground) 32%, transparent)}
+  .bmem.low{opacity:.72}
+  .bmrow{display:flex;align-items:flex-start;gap:8px}
+  .bmtext{flex:1;min-width:0;font-size:12.5px;line-height:1.5;color:var(--foreground);word-break:break-word}
+  .bforget{flex:none;opacity:0;transition:opacity .12s;color:var(--muted-foreground)}
+  .bmem:hover .bforget{opacity:.75}
+  .bforget:hover{opacity:1;color:var(--danger,#e5484d)}
+  .bents{display:flex;flex-wrap:wrap;gap:4px;margin:7px 0 2px 0}
+  .bent{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
+    background:var(--sidebar-accent);border-radius:5px;padding:1px 6px;max-width:100%;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bmmeta{display:flex;align-items:center;gap:5px;margin-top:7px;font-size:10.5px;color:var(--muted-foreground);font-family:var(--font-mono)}
+  .bmmeta svg{width:12px;height:12px;flex:none}
+  .bmmeta .dim{opacity:.75}
+  /* kind badges — each carries a word AND a colour (never colour alone) */
+  .bbadge{flex:none;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    padding:2px 6px;border-radius:5px;line-height:1.4;height:fit-content}
+  .bk-constraint{color:#e8a13a;background:color-mix(in srgb,#e8a13a 16%,transparent)}
+  .bk-failure{color:#e5674d;background:color-mix(in srgb,#e5674d 16%,transparent)}
+  .bk-decision{color:#5b8cff;background:color-mix(in srgb,#5b8cff 16%,transparent)}
+  .bk-convention{color:#3aa88b;background:color-mix(in srgb,#3aa88b 16%,transparent)}
+  .bk-fact{color:var(--muted-foreground);background:var(--sidebar-accent)}
+  .bk-task{color:#a07ad6;background:color-mix(in srgb,#a07ad6 16%,transparent)}
+  .bkind.bk-failure.on{background:#e5674d;color:#fff}
+  .bkind.bk-constraint.on{background:#e8a13a;color:#1a1200}
   .badd{display:flex;gap:6px;padding:2px 0 8px 0}
   .badd input{flex:1;min-width:0;background:var(--input,var(--card));border:1px solid var(--border);
     border-radius:8px;padding:6px 10px;font-size:12px;color:var(--foreground);font-family:var(--font-sans)}
@@ -1159,6 +1202,14 @@ ${BRAND_SPRITE}
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   function hue(id){ var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
   function money(n){ return "$" + (n >= 0.01 ? n.toFixed(2) : n.toFixed(4)); }
+  /** Compact "3m ago" / "2h ago" / "5d ago" from an epoch-ms timestamp. */
+  function rel(ts){
+    var s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (s < 45) return "just now";
+    if (s < 3600) return Math.round(s / 60) + "m ago";
+    if (s < 86400) return Math.round(s / 3600) + "h ago";
+    return Math.round(s / 86400) + "d ago";
+  }
 
   // ---- ADE brand marks -----------------------------------------------------
   var BRAND_TITLES = ${JSON.stringify(BRAND_TITLES)};
@@ -2262,40 +2313,69 @@ ${BRAND_SPRITE}
     }
 
     // ---- brain pane ---------------------------------------------------------
+    // Which kind of memory the Brain tab is filtered to ("" = all).
+    var brainKind = "";
+    var BRAIN_KINDS = ["constraint", "failure", "decision", "convention", "fact", "task"];
+
     function refreshBrain(){
       var el = document.getElementById("pane-brain"); if (!el) return;
-      el.innerHTML = '<div class="pane-inner">' + LOADER + "</div>";
-      api("/api/projects/" + pid + "/memory").then(function(j){
+      if (!el.querySelector(".brain")) el.innerHTML = '<div class="pane-inner">' + LOADER + "</div>";
+      // Two reads: the learned memory units (the star), and the imported ADE
+      // sources (context — what Loom pulled in from CLAUDE.md and friends).
+      Promise.all([
+        api("/api/projects/" + pid + "/brain?limit=200"),
+        api("/api/projects/" + pid + "/memory").catch(function(){ return { memory: {} }; }),
+      ]).then(function(r){
         el = document.getElementById("pane-brain"); if (!el) return;
-        var m = j.memory || {};
-        var sources = m.sources || [], decisions = m.decisions || [], doc = m.document || "";
+        var memories = (r[0] && r[0].memories) || [];
+        var stats = (r[0] && r[0].stats) || { total: 0, byKind: {} };
+        var m = (r[1] && r[1].memory) || {};
+        var sources = m.sources || [];
 
-        // What the brain is, in three numbers. "0 sources" is the single most
-        // useful thing this tab can tell you — it means every handoff carries
-        // the thread and nothing your agents wrote down.
-        var head = '<div class="bstats">' +
-          '<div class="bstat"><span class="n">' + sources.length + '</span><span class="l">ADE source' + (sources.length === 1 ? "" : "s") + "</span></div>" +
-          '<div class="bstat"><span class="n">' + decisions.length + '</span><span class="l">decision' + (decisions.length === 1 ? "" : "s") + "</span></div>" +
-          '<div class="bstat"><span class="n">' + Math.round(doc.length / 1024 * 10) / 10 + 'k</span><span class="l">projected</span></div>' +
-          '<span style="flex:1"></span>' +
-          '<button class="btn sm" id="reimport">Re-import</button>' +
-          "</div>";
+        // Filter chips — All, then each kind that has memories, with its count.
+        var chips = '<button class="bkind' + (brainKind === "" ? " on" : "") + '" data-kind="">All <span class="kn">' + (stats.total || 0) + "</span></button>";
+        BRAIN_KINDS.forEach(function(k){
+          var n = (stats.byKind && stats.byKind[k]) || 0;
+          if (!n && brainKind !== k) return; // hide empty kinds unless selected
+          chips += '<button class="bkind bk-' + k + (brainKind === k ? " on" : "") + '" data-kind="' + k + '">' + k + ' <span class="kn">' + n + "</span></button>";
+        });
+        var head = '<div class="bhead"><div class="bkinds">' + chips + "</div></div>";
 
-        // Decisions: the part of the brain you write. They ride in every
-        // briefing, so they're the one thing here that changes what an agent
-        // does rather than just what it could read.
-        var dec = '<div class="bsec">Decisions<span class="bhint">carried into every handoff</span></div>' +
-          '<form class="badd" id="decform">' +
-          '<input id="decbox" placeholder="A decision this project has made…" autocomplete="off">' +
+        // The memory list — the learned units. This is what phase 2 fills.
+        var shown = brainKind ? memories.filter(function(x){ return x.kind === brainKind; }) : memories;
+        var list;
+        if (!shown.length) {
+          list = '<div class="bempty">' + (memories.length
+            ? "No " + esc(brainKind) + " memories yet."
+            : "Nothing learned yet. As agents finish turns, Loom reads each one and records what's worth keeping — constraints, decisions, and the failures worth not repeating. Add a decision below to seed it, or let an agent take a turn.") + "</div>";
+        } else {
+          list = '<div class="bmems">' + shown.map(function(x){
+            var ents = (x.entities || []).slice(0, 6).map(function(e){ return '<span class="bent">' + esc(e) + "</span>"; }).join("");
+            var conf = Math.round((x.confidence == null ? 1 : x.confidence) * 100);
+            var who = (x.provenance && x.provenance.agentId) || "user";
+            var when = x.updatedAt ? rel(x.updatedAt) : "";
+            var low = conf < 60;
+            return '<div class="bmem' + (low ? " low" : "") + '" data-mid="' + esc(x.id) + '">' +
+              '<div class="bmrow"><span class="bbadge bk-' + esc(x.kind) + '">' + esc(x.kind) + "</span>" +
+              '<span class="bmtext">' + esc(x.text) + "</span>" +
+              '<button class="bforget iconbtn xs" data-forget="' + esc(x.id) + '" title="forget this" aria-label="forget this memory">' + ICONS.x + "</button></div>" +
+              (ents ? '<div class="bents">' + ents + "</div>" : "") +
+              '<div class="bmmeta">' + brandMark(kindOf(who)) + esc(who) +
+              (when ? ' <span class="dim">\\u00b7 ' + esc(when) + "</span>" : "") +
+              (low ? ' <span class="dim">\\u00b7 ' + conf + '% \\u2014 shown, not injected</span>' : "") +
+              "</div></div>";
+          }).join("") + "</div>";
+        }
+
+        // Seed box — a decision you type. It dual-writes into the brain, so it's
+        // the manual counterpart to what the extractor does automatically.
+        var seed = '<form class="bseed" id="decform">' +
+          '<input id="decbox" placeholder="Record a decision or fact this project has made\\u2026" autocomplete="off">' +
           '<button class="btn primary sm" type="submit">Add</button></form>';
-        dec += decisions.length
-          ? '<div class="bdecs">' + decisions.map(function(d){
-              return '<div class="bdec"><span class="dm">•</span><span class="dt">' + esc(d) + "</span></div>";
-            }).join("") + "</div>"
-          : '<div class="bempty">Nothing decided yet. Anything you write here is repeated to every agent on every handoff — the things you would otherwise say twice.</div>';
 
-        // Sources: what each ADE wrote down, and what Loom found.
-        var src = '<div class="bsec">Imported from your agents<span class="bhint">their own memory files</span></div>';
+        // Imported ADE memory — secondary, folded under a quiet header.
+        var src = '<div class="bsec">Imported from your agents<span class="bhint">their own memory files</span>' +
+          '<button class="lnk" id="reimport" style="margin-left:auto">re-import</button></div>';
         src += sources.length
           ? '<div class="bsrcs">' + sources.map(function(s){
               return '<div class="bsrc">' + brandMark(s.kind) +
@@ -2303,21 +2383,28 @@ ${BRAND_SPRITE}
                 '<span class="sf mono">' + esc(s.file) + "</span>" +
                 '<span class="sc">' + Math.round(s.chars / 1024 * 10) / 10 + "k</span></div>";
             }).join("") + "</div>"
-          : '<div class="bempty">No agent memory found in this repo. Loom reads what your ADEs already keep — CLAUDE.md, AGENTS.md, .kiro/steering — and never writes to them. Nothing here means there is nothing to read yet, not that it failed.</div>';
+          : '<div class="bempty sm">No native ADE memory found (CLAUDE.md, AGENTS.md, .kiro/steering). Loom reads these but never writes to them.</div>';
 
-        // The projection: the actual text an agent receives. Shown because
-        // "shared memory" is a claim, and this is the evidence.
-        var body = '<div class="bsec">What every agent receives<span class="bhint">the projection, verbatim</span></div>' +
-          '<div class="bdoc">' + renderBrainDoc(doc) + "</div>";
+        el.innerHTML = '<div class="pane-inner brain">' + head + seed + list + src + "</div>";
 
-        el.innerHTML = '<div class="pane-inner brain">' + head + dec + src + body + "</div>";
-
-        document.getElementById("reimport").onclick = function(){
+        Array.prototype.forEach.call(el.querySelectorAll(".bkind"), function(b){
+          b.onclick = function(){ brainKind = b.getAttribute("data-kind"); refreshBrain(); };
+        });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-forget]"), function(b){
+          b.onclick = function(ev){
+            ev.stopPropagation();
+            var id = b.getAttribute("data-forget");
+            var reason = window.prompt("Forget this memory — why? (kept in history)", "no longer true");
+            if (reason === null) return;
+            api("/api/projects/" + pid + "/brain/" + id + "?reason=" + encodeURIComponent(reason.trim() || "forgotten"), { method: "DELETE" })
+              .then(function(){ toast("forgotten \\u00b7 its history stays"); refreshBrain(); })
+              .catch(function(err){ toast(err.message); });
+          };
+        });
+        var reimp = document.getElementById("reimport");
+        if (reimp) reimp.onclick = function(){
           api("/api/projects/" + pid + "/memory/import", { method: "POST", body: "{}" })
-            .then(function(r){
-              toast(r.imported ? "imported " + r.imported + " source(s)" : "brain already current — nothing new to read");
-              refreshBrain();
-            })
+            .then(function(rr){ toast(rr.imported ? "imported " + rr.imported + " source(s)" : "already current"); refreshBrain(); })
             .catch(function(err){ toast(err.message); });
         };
         document.getElementById("decform").onsubmit = function(ev){
@@ -2331,34 +2418,6 @@ ${BRAND_SPRITE}
         };
       }).catch(function(err){ toast(err.message); });
     }
-
-    /**
-     * The brain document, with its shape kept.
-     *
-     * It used to be one grey line per line of text, headings included, which
-     * made a structured document look like a log dump. Headings are headings,
-     * bullets are bullets, and the rest is prose — the projection has structure
-     * and hiding it doesn't make it shorter.
-     */
-    function renderBrainDoc(doc){
-      if (!String(doc).trim()) return '<div class="bempty">nothing projected yet</div>';
-      // Every escape below is doubled. This file is one TS template literal, so
-      // a lone \\s or \\d isn't merely eaten — an unrecognised escape is a hard
-      // parse error in an untagged template, and the whole app fails to build.
-      return String(doc).split("\\n").map(function(line){
-        var t = line.trim();
-        if (!t) return '<div class="bl sp"></div>';
-        if (t.charAt(0) === "#") {
-          var depth = t.length - t.replace(/^#+/, "").length;
-          return '<div class="bl h' + Math.min(depth, 3) + '">' + esc(t.replace(/^#+\\s*/, "")) + "</div>";
-        }
-        if (t.charAt(0) === "-" || t.charAt(0) === "*" || /^\\d+\\./.test(t)) {
-          return '<div class="bl li">' + esc(t.replace(/^[-*]\\s*/, "")) + "</div>";
-        }
-        return '<div class="bl">' + esc(line) + "</div>";
-      }).join("");
-    }
-
 
     // ---- routes pane (desktop) / sheet (mobile) -----------------------------
     function routeFormHtml(){

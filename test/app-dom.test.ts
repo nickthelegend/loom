@@ -775,29 +775,27 @@ describe("web app · the brain", () => {
     return m;
   };
 
-  it("counts what it holds instead of just dumping it", async () => {
+  it("offers a kind filter across the learned memories", async () => {
     const m = await openBrain();
-    await waitUntil(() => !!$(m, ".bstats"));
-    expect(text(m, ".bstats")).toContain("decision");
-    expect(text(m, ".bstats")).toContain("source");
+    await waitUntil(() => !!$(m, ".bkinds .bkind"));
+    // "All" is always there; the rest appear as kinds get learned.
+    expect(text(m, ".bkinds")).toContain("All");
     expect(m.errors.join("\n")).toBe("");
   }, 20_000);
 
   /**
-   * An empty brain is the most important thing this tab can say: it means every
-   * handoff carries the thread and nothing your agents wrote down. "0" in a
-   * corner doesn't communicate that; a sentence does.
+   * An empty brain should explain itself — it means nothing has been learned or
+   * written down yet, not that the tab is broken.
    */
   it("explains an empty brain rather than showing a blank box", async () => {
     const m = await openBrain();
     await waitUntil(() => !!$(m, ".bempty"));
     const body = text(m, ".pane-inner.brain");
-    expect(body).toContain("No agent memory found");
-    expect(body).toContain("never writes to them");
+    expect(body).toContain("Nothing learned yet");
     expect(m.errors.join("\n")).toBe("");
   }, 20_000);
 
-  it("adds a decision, and it lands in the brain", async () => {
+  it("adds a decision, and it lands in the brain as a memory", async () => {
     const m = await openBrain();
     await ready(m, "#decform");
     const said = `always double the backslashes ${Date.now()}`;
@@ -806,22 +804,30 @@ describe("web app · the brain", () => {
       new m.window.Event("submit", { bubbles: true, cancelable: true }),
     );
 
-    await waitUntil(() => text(m, ".bdecs").includes(said));
-    // and the daemon agrees — the UI could show anything
-    const res = await fetch(`${baseUrl}/api/projects/${projectId}/memory`, {
+    // the decision shows up as a memory card
+    await waitUntil(() => text(m, ".bmems").includes(said));
+    // and the brain agrees — the decision dual-wrote a memory unit
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}/brain`, {
       headers: { authorization: `Bearer ${clientToken}` },
     });
-    const j = (await res.json()) as { memory: { decisions: string[] } };
-    expect(j.memory.decisions).toContain(said);
+    const j = (await res.json()) as { memories: Array<{ text: string; kind: string }> };
+    expect(j.memories.some((x) => x.text === said && x.kind === "decision")).toBe(true);
     expect(m.errors.join("\n")).toBe("");
   }, 25_000);
 
-  it("shows the projection with its shape, not as one grey wall", async () => {
+  it("shows a learned memory as a card with its kind and provenance", async () => {
+    // seed one straight into the brain, then open the tab
+    await fetch(`${baseUrl}/api/projects/${projectId}/brain`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${clientToken}` },
+      body: JSON.stringify({ kind: "constraint", text: "The daemon serves from one template literal in app-page.ts." }),
+    });
     const m = await openBrain();
-    await waitUntil(() => !!$(m, ".bdoc"));
-    // the projection has headings; they should be headings
-    expect(m.window.document.querySelectorAll(".bdoc .bl").length).toBeGreaterThan(0);
-    expect(text(m, ".pane-inner.brain")).toContain("What every agent receives");
+    await waitUntil(() => !!$(m, ".bmem"));
+    const card = text(m, ".bmem");
+    expect(card).toContain("template literal");
+    expect($(m, ".bmem .bbadge")?.textContent?.toLowerCase()).toContain("constraint");
+    expect($(m, ".bmem [data-forget]"), "each memory can be forgotten").toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
   }, 20_000);
 });
