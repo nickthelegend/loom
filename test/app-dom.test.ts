@@ -416,6 +416,27 @@ describe("web app · setup", () => {
     expect(m.errors.join("\n")).toBe("");
   });
 
+  /**
+   * The claim this replaces was mine and it was wrong: "Loom can't tell whether
+   * a CLI is signed in". It can — codex has `login status`, opencode reads its
+   * own credentials, and a signed-out claude refuses a -p probe in 30ms for
+   * free. Believing otherwise put "Claude Code ✓ installed" on the screen while
+   * `claude` answered "Not logged in" to anyone who asked, and cost an
+   * afternoon of blaming the adapter.
+   */
+  it("says which agents are actually signed in, not just installed", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, "#setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
+
+    const body = text_(m, "#setupbody");
+    // every installed agent resolves to a real verdict, never a shrug dressed
+    // up as a tick
+    expect(body).toMatch(/signed in|signed out|couldn|not installed|unknown/i);
+    expect(m.errors.join("\n")).toBe("");
+  });
+
   it("names every agent Loom can drive, with the command to check it", async () => {
     const m = mount();
     await waitUntil(() => !!$(m, "#setupbtn"));

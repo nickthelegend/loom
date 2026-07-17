@@ -11,8 +11,10 @@
  * item worded differently.
  */
 
+import { execFile } from "node:child_process";
 import os from "node:os";
 import { GuiChatDriver } from "../adapters/bridges/gui-chat.js";
+import { codexBin } from "../adapters/codex.js";
 import { profileFor } from "../adapters/bridges/profiles.js";
 import { ADES, detectAdes } from "./ades.js";
 
@@ -29,12 +31,15 @@ export interface AgentStatus {
   /** How to get it, when it's missing. */
   install: string;
   /**
-   * How to check it's logged in.
+   * Is it actually signed in?
    *
-   * Loom can't answer that itself: a signed-out CLI answers `--version`
-   * cheerfully and only fails once it's holding your turn. So it hands over the
-   * command that will actually tell you.
+   * `null` when we couldn't tell in the time we were willing to wait — an
+   * honest "don't know", not a cheerful yes.
    */
+  authed: boolean | null;
+  /** What the tool said, when it said no. */
+  authDetail?: string;
+  /** The command that fixes it. */
   auth: string;
 }
 
@@ -78,11 +83,88 @@ const INSTALL: Record<string, string> = {
 };
 
 const AUTH: Record<string, string> = {
-  "claude-code": "run `claude` once",
-  codex: "codex login status",
-  opencode: "opencode auth list",
-  "grok-code": "run `grok` once",
+  "claude-code": "run `claude`, then /login",
+  codex: "codex login",
+  opencode: "opencode auth login",
+  "grok-code": "run `grok` once and sign in",
 };
+
+/**
+ * Ask each tool whether it's actually signed in.
+ *
+ * I claimed this was impossible earlier in the day — that installed and
+ * authenticated look identical from out here — and then watched a whole
+ * afternoon go into "claude is installed" while `claude` answered "Not logged
+ * in · Please run /login" to anyone who asked. It isn't impossible. It just
+ * needs asking the right question.
+ *
+ * Every probe here is free and offline-ish:
+ *   codex     — `login status` reports without touching a model
+ *   opencode  — `auth list` reads its own credentials file
+ *   claude    — a `-p` probe; when signed out it refuses in ~30ms having called
+ *               nothing. When signed IN it would cost a token or two, so it is
+ *               capped hard and a slow answer counts as "signed in": only the
+ *               instant refusal is diagnostic.
+ *   grok      — has no status command; unknown rather than guessed.
+ */
+async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail?: string }> {
+  const run = (cmd: string, args: string[], ms: number): Promise<{ code: number | null; out: string }> =>
+    new Promise((resolve) => {
+      let done = false;
+      const child = execFile(cmd, args, { timeout: ms }, (_err, stdout, stderr) => {
+        if (done) return;
+        done = true;
+        resolve({ code: 0, out: `${stdout}${stderr}` });
+      });
+      child.stdin?.end();
+      child.on("error", () => {
+        if (!done) {
+          done = true;
+          resolve({ code: null, out: "" });
+        }
+      });
+      setTimeout(() => {
+        if (!done) {
+          done = true;
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            /* gone */
+          }
+          resolve({ code: null, out: "" });
+        }
+      }, ms + 200).unref?.();
+    });
+
+  try {
+    if (kind === "codex") {
+      const bin = codexBin();
+      if (!bin) return { authed: null };
+      const { out } = await run(bin, ["login", "status"], 6000);
+      if (/logged in/i.test(out)) return { authed: true };
+      if (/not logged in|no auth/i.test(out)) return { authed: false, detail: out.trim().slice(0, 60) };
+      return { authed: null };
+    }
+    if (kind === "opencode") {
+      const { out } = await run("opencode", ["auth", "list"], 8000);
+      // its list marks each stored credential with a bullet
+      return /●/.test(out) ? { authed: true } : { authed: null };
+    }
+    if (kind === "claude-code") {
+      // Signed out, this refuses instantly and for free. Signed in, it would
+      // start a real turn — so the timeout is the budget, and hitting it is a
+      // yes, not a maybe.
+      const { out } = await run("claude", ["-p", "hi", "--output-format", "json"], 6000);
+      if (/not logged in|please run \/login|invalid api key/i.test(out)) {
+        return { authed: false, detail: "the CLI says: Not logged in" };
+      }
+      return { authed: true };
+    }
+  } catch {
+    /* fall through to unknown */
+  }
+  return { authed: null };
+}
 
 /**
  * The permissions Loom actually needs, and the ones it pointedly doesn't.
@@ -177,13 +259,21 @@ export async function setupReport(): Promise<SetupReport> {
   const p = platform();
   const available = await detectAdes();
 
-  const agents: AgentStatus[] = ADES.filter((a) => a.tier === "adapter").map((a) => ({
-    kind: a.kind,
-    label: a.label,
-    found: Boolean(available[a.kind]),
-    install: INSTALL[a.kind] ?? "",
-    auth: AUTH[a.kind] ?? "",
-  }));
+  const agents: AgentStatus[] = await Promise.all(
+    ADES.filter((a) => a.tier === "adapter").map(async (a) => {
+      const found = Boolean(available[a.kind]);
+      const auth = found ? await probeAuth(a.kind) : { authed: null as boolean | null };
+      return {
+        kind: a.kind,
+        label: a.label,
+        found,
+        install: INSTALL[a.kind] ?? "",
+        authed: auth.authed,
+        ...(auth.detail ? { authDetail: auth.detail } : {}),
+        auth: AUTH[a.kind] ?? "",
+      };
+    }),
+  );
 
   // Bridges are probed live: "installed" says nothing useful about an app whose
   // debugger has to be asked for at launch.
@@ -211,9 +301,11 @@ export async function setupReport(): Promise<SetupReport> {
     agents,
     bridges,
     permissions: permissionsFor(p),
-    // Bridges can't hold the baton, so they don't count towards being able to
-    // do anything: an install with only Antigravity has nothing to route to.
-    ready: agents.some((a) => a.found),
+    // Ready means a turn can actually happen. An installed-but-signed-out
+    // roster is not ready, and saying it is was the exact shape of today's
+    // wasted afternoon. Unknown counts as ready — don't cry wolf over a probe
+    // that timed out.
+    ready: agents.some((a) => a.found && a.authed !== false),
   };
 }
 

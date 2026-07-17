@@ -3089,10 +3089,16 @@ ${BRAND_SPRITE}
           html += '<div class="snote">Nothing here can hold the baton yet \\u2014 install one and Loom has something to drive.</div>';
         }
         s.agents.forEach(function(a){
-          html += row(a.found ? "ok" : "warn",
-            brandMark(a.kind) + " " + esc(a.label),
-            a.found ? "installed \\u2014 which isn\\u2019t the same as signed in:" : "not installed",
-            a.found ? a.auth : a.install);
+          // Three states, not two. "Installed" was the lie that cost an
+          // afternoon: claude answered --version happily while refusing every
+          // turn with "Not logged in".
+          var state = !a.found ? "warn" : a.authed === false ? "bad" : a.authed === true ? "ok" : "warn";
+          var detail = !a.found ? "not installed"
+            : a.authed === true ? "signed in \\u00b7 ready to take a turn"
+            : a.authed === false ? (a.authDetail || "signed out") + " \\u2014 it will refuse every turn until you:"
+            : "installed \\u2014 couldn\\u2019t confirm it\\u2019s signed in:";
+          html += row(state, brandMark(a.kind) + " " + esc(a.label), esc(detail),
+            !a.found ? a.install : a.authed === true ? "" : a.auth);
         });
 
         html += '<div class="sgrouph">Agents you drive in their own window</div>';
