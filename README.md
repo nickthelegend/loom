@@ -199,7 +199,7 @@ form — the same bet the agent adapters make by shelling out to the CLIs you al
 ```bash
 cd your-project
 loom init          # detects installed agents (claude, opencode), assigns roles
-loom               # opens the TUI — one full-screen thread over every agent
+loom               # opens the TUI — a tabbed workspace (Thread · Board · Brain · Diff)
 ```
 
 ```
@@ -209,6 +209,7 @@ loom               # opens the TUI — one full-screen thread over every agent
   ██████  ▀████▀  ▀████▀  ██  ██
         one thread · every agent
 
+  1 Thread   2 Board   3 Brain   4 Diff                          ↑12  pgup/pgdn
   10:44 claude-code  here's the plan: …
    ⟶ baton: claude-code → opencode
   10:45 opencode     implementing step 1 …
@@ -217,15 +218,25 @@ loom               # opens the TUI — one full-screen thread over every agent
  │ › Ask anything… "/route ship: add dark mode" │
  │ opencode · executor ⟵ baton                  │
  ╰──────────────────────────────────────────────╯
-   tab shift agent · /help · esc interrupt        loom 0.1.0
+   shift+tab view · tab agent · ctrl+p palette · esc back/interrupt
    ~ my-project · baton opencode  ➤ ship 2/3
 ```
 
-**`tab` shifts the active agent/IDE** — claude-code → opencode → back. The handoff
-(interrupt-safe, memory projected, briefing armed) happens when you hit enter, so
-switching is one keystroke, not a ceremony. **`ctrl+p` opens the command palette**
-(fuzzy-filtered: shift to any agent, launch a named route, decision, interrupt, pair…).
-`esc` interrupts, `/help` lists the slash commands.
+The TUI is a **tabbed workspace**, not just a thread:
+
+- **Thread** — the conversation, streamed. **`tab` shifts the active agent/IDE**
+  (claude-code → opencode → back); the handoff (interrupt-safe, memory projected, briefing
+  armed) happens when you hit enter, so switching is one keystroke, not a ceremony.
+- **Board** — agents, your cards, issues and PRs in the four flow columns.
+- **Brain** — the memory the project has learned, grouped by kind (failures first), each
+  tagged with who learned it.
+- **Diff** — the working tree: changed files and a colourised patch.
+
+**`shift+tab` cycles the tabs** (or `/board`, `/brain`, `/diff`, `/thread`, or the
+palette); `pgup/pgdn` scrolls the view. **`ctrl+p` opens the command palette**
+(fuzzy-filtered: jump to a view, shift to any agent, launch a named route, decision,
+interrupt, pair…). `esc` steps back to the thread or interrupts the running turn; `/help`
+lists the slash commands.
 
 Prefer plain line-mode (SSH, scripts)? `loom chat` is the same thread as a classic REPL,
 and every action also exists as a one-shot command (`loom send`, `loom handoff`, …).
@@ -286,7 +297,7 @@ detects at least two roles.
 
 | Command | What it does |
 |---|---|
-| `loom` | **The TUI** — full-screen thread, `tab` shifts agents, `/`-commands inline |
+| `loom` | **The TUI** — tabbed workspace (Thread · Board · Brain · Diff), `shift+tab` switches view, `tab` shifts agents, `/`-commands + `ctrl+p` palette inline |
 | `loom init` | Make the current directory a Loom project (auto-detects agents) |
 | `loom chat` | Same thread as a plain line REPL (`/handoff`, `/interrupt`, `@agent`) |
 | `loom send <text>` | One-shot message (`-a <agent>` to address someone specific) |
@@ -374,14 +385,16 @@ Getting it into the model's context is a different problem, and it depends on th
 | Agent | How the brain arrives | Strength |
 |---|---|---|
 | Claude Code | briefing via `--append-system-prompt` — the model *always* sees a summary (recent decisions + messages) plus a pointer to `.loom/memory/claude-code.md`, which it can Read | **strong** — the summary is guaranteed; the full file is one tool-call away |
-| Codex | no `--append-system-prompt` on `codex exec`, so the briefing rides **in front of your prompt** | **weaker** — one prompt either way, and the model may skim it |
-| OpenCode | no per-prompt system field on `/prompt`, so the same briefing is **prepended to your prompt as text** | **weaker** — the model sees Loom's handoff as something you typed |
-| Grok Code | no system channel on `-p` either; the briefing is prepended the same way | **weaker** — and Grok reports no tool calls, so you can't even see whether it read the file |
+| Grok Code | the briefing rides in `--rules`, Grok's real system-prompt channel, so `-p` stays your clean prompt | **strong** — `--rules` is a genuine system channel, not text in the turn |
+| Codex | no `--append-system-prompt` on `codex exec`, so the briefing rides in front of your prompt — **framed** as an unmissable `LOOM SESSION MEMORY — authoritative, read first` block | **reliable** — one prompt either way, but framed so it can't be mistaken for chatter |
+| OpenCode | no per-prompt system field on `/prompt`, so the same **framed** block is prepended to your prompt | **reliable** — delivered as an authoritative block, not loose text |
 | Antigravity, Kiro | nothing tells them the file exists — Loom types into their chat box, which is not a system prompt | **none** — a human has to open it |
 
 So: the **summary always lands**; the **full brain is an invitation**. An agent that
 ignores the pointer works from the summary alone. If you need something remembered for
 certain, put it in a decision (`loom decide`) — decisions ride in the briefing itself.
+There's an opt-in eval (`LOOM_TEST_REAL=1`) that checks a real model actually *uses* an
+injected brief, and declines rather than invents when the brief is silent.
 
 Memory also flows **one way**. Loom reads `CLAUDE.md` / `AGENTS.md` and never writes
 them, so your ADE's own memory files stay yours. And the import is a **merge, not a
@@ -394,8 +407,17 @@ and files what's worth keeping as typed memory *units* — a constraint, a decis
 convention, a fact, a failure — reconciled on write (add / update / forget, never a
 growing blob), the approach [mem0](https://github.com/mem0ai/mem0) pioneered, adapted to
 Loom's event log. Every unit's evidence is verified against the turn before it's kept, so
-the brain doesn't remember things that were never said. The **Brain tab** shows exactly
-what it has learned; toggle the extractor off per project in Settings.
+the brain doesn't remember things that were never said. Retrieval is hybrid too — exact
+entity matches (file paths, symbols, error codes) unioned with BM25 over the text, no
+embedding model to ship — with failures and constraints biased to the top of the brief,
+because getting burned twice is worse than missing a detail.
+
+The brain is the **project's**, not each agent's: a fact one agent learns is scoped to the
+chat, not walled off to whoever happened to learn it, so it reaches whichever agent takes
+the baton next. (The [`brain-shared` test](test/brain-shared.test.ts) makes this concrete —
+five agents each learn one fact, and every other agent's brief then carries all five.) The
+**Brain tab** — and `loom tui`'s **Brain** view — show exactly what it has learned; toggle
+the extractor off per project in Settings.
 
 <p align="center">
   <img src="docs/img/brain.png" alt="Loom's Brain tab — the memory units it has learned, by kind" width="100%">
@@ -444,15 +466,25 @@ what it has learned; toggle the extractor off per project in Settings.
 The daemon serves a full phone app at `/app` — board, live thread, agent chips, routes.
 No app store, no build step; it ships inside Loom.
 
+**Pair from the app.** The web/desktop window has a **Connect a phone** button next to the
+terminal: it opens a modal with a QR (and a copy link) and a **Local network / Tailnet**
+toggle. Pick one and, if the daemon is still localhost-only, hit **Enable phone access** —
+Loom adds a *second listener* on that LAN or tailnet IP (localhost is never disturbed, so
+the window you're in doesn't blink) and shows a QR your phone can actually reach. Same
+single-use token, no terminal needed.
+
+**Or pair from the terminal:**
+
 ```bash
 loom up --tailnet     # daemon binds to your Tailscale IP (never 0.0.0.0)
-loom pair             # QR appears in the terminal
+loom pair             # QR appears in the terminal (also `/pair` inside `loom tui`)
 ```
 
-Scan the QR with your phone camera (phone must be on your tailnet — install the
-Tailscale app and sign in). The link opens `…/app#pair=<token>`; the app claims the
-**single-use, 10-minute** pairing token from the URL fragment (fragments never hit the
-network log) and exchanges it for its own client token. Then:
+Scan the QR with your phone camera (for the tailnet path, the phone must be on your
+tailnet — install the Tailscale app and sign in; the local-network path just needs the
+same Wi-Fi). The link opens `…/app#pair=<token>`; the app claims the **single-use,
+10-minute** pairing token from the URL fragment (fragments never hit the network log) and
+exchanges it for its own client token. Then:
 
 - **Board** — every project, needs-input dots, baton holder, live route progress.
 - **Thread** — the same shared conversation, streaming over WebSocket.

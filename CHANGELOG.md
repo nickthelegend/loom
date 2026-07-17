@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `loom tui` — a tabbed workspace, not just a thread
+
+- The TUI is now four views: **Thread** (the streamed conversation), **Board**
+  (agents, your cards, issues and PRs in the four flow columns), **Brain** (the
+  memory the project has learned, grouped by kind with failures first and who
+  learned each), and **Diff** (the working tree — changed files and a colourised
+  patch). **`shift+tab`** cycles them, `/board /brain /diff /thread` and the
+  `ctrl+p` palette jump straight to one, `pgup/pgdn` scrolls, and the viewport
+  tracks a terminal resize. Everything the single pane did — routes, handoff,
+  `/pair` QR, interrupt, the palette — stays. Backed by real data (new
+  `brain`/`board` daemon-client methods) with pure, unit-tested formatters.
+
+### Connect a phone — a QR from inside the app
+
+- A **Connect a phone** button beside the terminal opens a modal with a QR (or a
+  copy link) and a **Local network / Tailnet** toggle. When the daemon is still
+  localhost-only, **Enable phone access** adds a *second listener* on the chosen
+  LAN/tailnet IP — localhost is never torn down, so there's no dropped-socket
+  window and none of the EADDRINUSE races a live rebind to `0.0.0.0` hits. The
+  local (loopback) window bootstraps the admin token, so it can pair phones with
+  no pairing dance of its own; a paired phone is never admin.
+- **Client errors reach the Console.** `window.onerror` and unhandled rejections
+  now stream into the same Console tab as the daemon's own logs, with the error
+  dot — nothing dies silently in the browser.
+
+### Brain — stronger injection, and it's genuinely shared
+
+- The learned memory reaches every agent, not just Claude: the brief rides in
+  Grok's `--rules` (a real system channel), and for Codex/OpenCode it's framed as
+  an unmissable `LOOM SESSION MEMORY — authoritative, read first` block instead of
+  loose preamble. The brain is the **project's** — a fact one agent learns reaches
+  whoever takes the baton next ([`brain-shared` test](test/brain-shared.test.ts):
+  five agents, five prompts, one shared memory). An opt-in eval
+  (`LOOM_TEST_REAL=1`) checks a real model actually *uses* an injected brief.
+
 ### Native search — one palette over everything (⌘K)
 
 - **⌘K / Ctrl+K** opens a command palette from anywhere, even mid-type. One box
