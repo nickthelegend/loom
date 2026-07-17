@@ -254,3 +254,63 @@ describe("desktop · daemon log", () => {
     expect(withHome(blocked, openDaemonLog)).toBe("ignore");
   });
 });
+
+/**
+ * The folder picker.
+ *
+ * The one native affordance the browser can't offer, and the only IPC channel
+ * the app has. Three files have to agree — preload exposes it, main handles it,
+ * the page calls it — and nothing checks that they do; a rename in any one of
+ * them leaves a button that opens nothing, which is invisible until someone
+ * clicks it in a packaged build.
+ *
+ * Electron can't be booted here, so this asserts the contract those three share
+ * rather than the dialog itself.
+ */
+describe("desktop · the folder picker", () => {
+  const root = path.resolve(import.meta.dirname, "..");
+  const read = (p: string): string => fs.readFileSync(path.join(root, p), "utf8");
+
+  it("is exposed to the page, and is the whole native surface", () => {
+    const preload = read("desktop/preload.cjs");
+    expect(preload).toContain("loomNative");
+    expect(preload).toContain("pickFolder");
+    expect(preload).toContain("loom:pick-folder");
+    // The point of a preload is what it does NOT hand over. A page on your
+    // tailnet gets a folder picker, not a filesystem.
+    for (const escape of ["require(", "ipcRenderer.send", "exposeInMainWorld(\"fs\"", "shell."]) {
+      expect(preload.split("exposeInMainWorld")[1] ?? "", `preload leaks ${escape}`).not.toContain(escape);
+    }
+  });
+
+  it("the main process answers the exact channel the preload invokes", () => {
+    const preload = read("desktop/preload.cjs");
+    const main = read("desktop/main.js");
+    const channel = /invoke\(\s*["']([^"']+)["']/.exec(preload)?.[1];
+    expect(channel, "preload invokes no channel").toBeTruthy();
+    // The two halves must name the same string. A rename on one side is a
+    // button that opens nothing.
+    expect(main, `main.js handles no "${channel}"`).toContain(`ipcMain.handle("${channel}"`);
+  });
+
+  it("loads the preload into the window, or none of it exists", () => {
+    const main = read("desktop/main.js");
+    expect(main).toMatch(/preload:\s*PRELOAD/);
+    expect(fs.existsSync(path.join(path.resolve(import.meta.dirname, ".."), "desktop/preload.cjs"))).toBe(true);
+  });
+
+  it("returns null when you cancel, rather than a broken path", () => {
+    const main = read("desktop/main.js");
+    // canceled → null is what the page checks for; anything else and an empty
+    // dialog would write "" into the field and try to create a project there.
+    expect(main).toMatch(/canceled[\s\S]{0,80}null/);
+  });
+
+  it("asks for a directory, and lets you make a new one", () => {
+    const main = read("desktop/main.js");
+    expect(main).toContain("openDirectory");
+    expect(main, "you should be able to start a project in a folder that doesn't exist yet").toContain(
+      "createDirectory",
+    );
+  });
+});

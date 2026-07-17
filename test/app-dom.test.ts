@@ -862,28 +862,38 @@ describe("web app · the rest of the shell", () => {
     expect(m.errors.join("\n")).toBe("");
   });
 
-  it("opens the agent task modal from the sidebar, and from the N key", async () => {
+  /**
+   * Split from the N-key test below rather than sharing a window. One test that
+   * opened, closed and reopened a modal was flaky under a loaded parallel run,
+   * and a flake in a three-step test tells you nothing about which step.
+   */
+  it("opens the agent task modal from the sidebar", async () => {
     const m = mount({ hash: `#p/${projectId}` });
     // wired, not merely present — clicking a button whose handler hasn't been
-    // attached is a no-op, and under a loaded parallel run that window is wide
-    // enough to hit. This test was flaky for exactly that reason.
+    // attached yet is a no-op that looks exactly like a broken feature.
     await ready(m, "#newtask");
 
     click($(m, "#newtask"));
     await waitUntil(() => !!$(m, "#mtask"));
     expect($(m, "#magsel")).toBeTruthy(); // which agents to hand it to
-    m.window.document.dispatchEvent(
-      new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-    );
-    await waitUntil(() => !$(m, ".scrim"));
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
 
-    // the same modal, from the keyboard
+  it("opens it from the N key too", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    // Wait for the PROJECT, not the shell. The shortcut calls
+    // openTaskModal(state.pid), and state.pid is set by renderProject while
+    // #newtask belongs to renderShell — so a wait on the sidebar can fire the
+    // key into a null project, which builds no modal. That was the flake.
+    await waitUntil(() => !!$(m, "#box"));
+    await ready(m, "#newtask");
+
     m.window.document.dispatchEvent(
       new m.window.KeyboardEvent("keydown", { key: "n", bubbles: true }),
     );
     await waitUntil(() => !!$(m, "#mtask"));
     expect(m.errors.join("\n")).toBe("");
-  });
+  }, 20_000);
 
   it("doesn't fire the N shortcut while you're typing a message", async () => {
     const m = mount({ hash: `#p/${projectId}` });
