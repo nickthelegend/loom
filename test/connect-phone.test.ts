@@ -5,9 +5,10 @@
  * client-side errors reported up into the Console.
  */
 
+import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readDaemonConfig } from "../src/core/registry.js";
-import { LoomDaemon, lanIp } from "../src/daemon/server.js";
+import { LoomDaemon, isLoopbackHost, lanIp } from "../src/daemon/server.js";
 import { tmpDir } from "./helpers.js";
 
 let daemon: LoomDaemon;
@@ -121,6 +122,47 @@ describe("local admin bootstrap", () => {
     };
     expect(j.admin).toBe(true);
     expect(j.token).toBe(adminToken);
+  });
+});
+
+describe("bootstrap — DNS-rebinding defense", () => {
+  it("isLoopbackHost accepts loopback literals and rejects everything else", () => {
+    for (const h of ["127.0.0.1", "127.0.0.1:7420", "localhost", "localhost:7420", "[::1]:7420", "::1"]) {
+      expect(isLoopbackHost(h)).toBe(true);
+    }
+    for (const h of ["evil.com", "evil.com:7420", "192.168.1.9:7420", "100.64.0.1:7420", "", undefined]) {
+      expect(isLoopbackHost(h)).toBe(false);
+    }
+  });
+
+  it("refuses /api/bootstrap when the Host header is not loopback (rebinding)", async () => {
+    const port = Number(new URL(baseUrl).port);
+    const status = (host: string) =>
+      new Promise<number>((resolve, reject) => {
+        const req = http.request(
+          { host: "127.0.0.1", port, path: "/api/bootstrap", headers: { host } },
+          (res) => {
+            res.resume();
+            resolve(res.statusCode ?? 0);
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+    // A genuine local request (loopback Host) still gets the admin token…
+    expect(await status(`127.0.0.1:${port}`)).toBe(200);
+    // …but a rebinding attacker's page sends its own hostname, and is refused.
+    expect(await status("evil.example")).toBe(403);
+    expect(await status(`evil.example:${port}`)).toBe(403);
+  });
+});
+
+describe("daemon start — no phantom success on an occupied port", () => {
+  it("a second listen() on the same port rejects with EADDRINUSE, not a false success", async () => {
+    const port = Number(new URL(baseUrl).port);
+    const second = new LoomDaemon({ host: "127.0.0.1", port });
+    await expect(second.listen()).rejects.toMatchObject({ code: "EADDRINUSE" });
+    await second.close().catch(() => {});
   });
 });
 

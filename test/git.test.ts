@@ -423,3 +423,28 @@ describe("git · worktrees", () => {
     expect(p).toBe(path.join("/tmp", "my repo--pr-42-fix"));
   });
 });
+
+describe("ref safety — a leading dash is a flag, not a ref", () => {
+  it("checkout rejects a ref that begins with a dash (no `git checkout -f`)", async () => {
+    const dir = repo();
+    // `-f` would run `git checkout -f` and force-discard the working tree.
+    await expect(checkout(dir, "-f")).rejects.toThrow(/valid ref/);
+    await expect(checkout(dir, "--force")).rejects.toThrow(/valid ref/);
+    await expect(checkout(dir, "  ")).rejects.toThrow(/no ref/);
+  });
+
+  it("checkout still allows a normal branch name", async () => {
+    const dir = repo();
+    execFileSync("git", ["branch", "feature/x"], { cwd: dir });
+    await expect(checkout(dir, "feature/x")).resolves.toMatchObject({ ref: "feature/x" });
+  });
+
+  it("worktree rejects a branch or base that begins with a dash", async () => {
+    const dir = repo();
+    await expect(addWorktree(dir, { slug: "a", newBranch: "-f" })).rejects.toThrow(/valid branch/);
+    await expect(addWorktree(dir, { slug: "b", newBranch: "ok", base: "--force" })).rejects.toThrow(
+      /valid base/,
+    );
+    await expect(addWorktree(dir, { slug: "c", branch: "-x" })).rejects.toThrow(/valid branch/);
+  });
+});

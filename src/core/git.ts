@@ -58,6 +58,24 @@ function firstLine(s: string): string {
 }
 
 /**
+ * Validate a ref/branch name before it becomes a positional git argument.
+ *
+ * These names arrive over HTTP. Everything runs via `execFile` (no shell), so
+ * there's no command injection — but a name beginning with `-` is read by git
+ * as a *flag*, and `git checkout -f` force-discards the working tree. Reject the
+ * leading dash (and keep the char set tight); callers pass the label for the
+ * error. Returns the trimmed name.
+ */
+function assertRef(name: string, label = "ref"): string {
+  const clean = name.trim();
+  if (!clean) throw new GitError(`no ${label} given`, "");
+  if (!/^[A-Za-z0-9_.+/][\w./+-]*$/.test(clean)) {
+    throw new GitError(`"${clean}" is not a valid ${label} name`, "");
+  }
+  return clean;
+}
+
+/**
  * Keep a path inside the project.
  *
  * `git checkout -- <path>` is destructive and these paths arrive over HTTP from
@@ -369,9 +387,7 @@ export async function branches(dir: string): Promise<Branches> {
  * already stops it being read as a flag.
  */
 export async function checkout(dir: string, ref: string): Promise<{ ref: string; branch: string }> {
-  const clean = ref.trim();
-  if (!clean) throw new GitError("no ref given", "");
-  if (!/^[\w./+-]+$/.test(clean)) throw new GitError(`"${clean}" is not a valid ref name`, "");
+  const clean = assertRef(ref);
   await git(["checkout", clean], dir);
   const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim();
   logbook.info("git", `checked out ${clean}`, dir);
@@ -496,12 +512,15 @@ export async function addWorktree(
   if (!(await hasCommits(dir))) throw new GitError("make a commit before opening a worktree", "");
   const wt = worktreePath(dir, opts.slug);
   if (opts.newBranch) {
-    await git(["worktree", "add", "-b", opts.newBranch, wt, opts.base || "HEAD"], dir);
-    return { path: wt, branch: opts.newBranch };
+    const nb = assertRef(opts.newBranch, "branch");
+    const base = assertRef(opts.base || "HEAD", "base");
+    await git(["worktree", "add", "-b", nb, wt, base], dir);
+    return { path: wt, branch: nb };
   }
   if (opts.branch && !opts.detached) {
-    await git(["worktree", "add", wt, opts.branch], dir);
-    return { path: wt, branch: opts.branch };
+    const b = assertRef(opts.branch, "branch");
+    await git(["worktree", "add", wt, b], dir);
+    return { path: wt, branch: b };
   }
   await git(["worktree", "add", "--detach", wt], dir);
   return { path: wt, branch: null };

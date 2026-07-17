@@ -114,9 +114,28 @@ program
   .option("--host <host>", "host to bind", "127.0.0.1")
   .option("--tailnet", "bind to this machine's Tailscale IP (phone access)", false)
   .action(async (opts: { port: string; host: string; tailnet: boolean }) => {
-    const daemon = new LoomDaemon({ host: opts.host, port: Number(opts.port) });
-    const { host, port } = await daemon.listen({ tailnet: opts.tailnet });
-    console.log(pc.green(`loom daemon listening on http://${host}:${port}`));
+    const port = Number(opts.port);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) {
+      console.error(pc.red(`✗ invalid --port "${opts.port}"`));
+      process.exit(1);
+    }
+    const daemon = new LoomDaemon({ host: opts.host, port });
+    let bound: { host: string; port: number };
+    try {
+      bound = await daemon.listen({ tailnet: opts.tailnet });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "EADDRINUSE") {
+        console.error(
+          pc.red(`✗ port ${port} is already in use`) +
+            pc.dim(` — a daemon may already be running. Try \`loom up\`, or \`loom daemon --port <other>\`.`),
+        );
+      } else {
+        console.error(pc.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
+      }
+      process.exit(1);
+    }
+    console.log(pc.green(`loom daemon listening on http://${bound.host}:${bound.port}`));
     if (opts.tailnet) {
       console.log(pc.dim("bound to the tailnet — pair your phone with `loom pair`"));
     }

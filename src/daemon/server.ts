@@ -312,7 +312,10 @@ export class LoomDaemon {
      * so a paired client is never an admin no matter where it connects from.
      */
     app.get("/api/bootstrap", (req, res) => {
-      if (!isLoopback(req.socket.remoteAddress)) {
+      // Both must hold: the TCP peer is loopback (can't be spoofed by a header),
+      // AND the Host is a loopback literal (defeats DNS rebinding, where the
+      // socket is loopback but the browser sends the attacker's hostname).
+      if (!isLoopback(req.socket.remoteAddress) || !isLoopbackHost(req.headers.host)) {
         return void res.status(403).json({ error: "not a local request" });
       }
       res.json({ token: this.auth.adminToken(), admin: true });
@@ -1764,8 +1767,25 @@ export class LoomDaemon {
       this.host = await tailscaleIp();
     }
     await new Promise<void>((resolve, reject) => {
-      this.server = this.app.listen(this.port, this.host, () => resolve());
-      this.server.on("error", reject);
+      // Use the `listening` *event*, not the listen() callback: Express fires the
+      // callback even when the bind fails with EADDRINUSE, which would otherwise
+      // resolve this as a phantom success — a daemon that prints "listening" and
+      // exits 0 while another process actually holds the port.
+      const server = this.app.listen(this.port, this.host);
+      this.server = server;
+      let settled = false;
+      server.once("error", (err) => {
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      });
+      server.once("listening", () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      });
     });
     const addr = this.server!.address();
     if (addr && typeof addr === "object") this.port = addr.port; // ephemeral port support
@@ -1942,4 +1962,24 @@ export function isLoopback(remoteAddress: string | undefined): boolean {
     remoteAddress === "::1" ||
     remoteAddress === "::ffff:127.0.0.1"
   );
+}
+
+/**
+ * Is the request's `Host` header a loopback literal? The anti-DNS-rebinding
+ * check: a rebinding attacker loads a page from their own domain, so the browser
+ * sends `Host: attacker.example` even after the name rebinds to 127.0.0.1 — while
+ * the genuine local console is always reached at `127.0.0.1`/`localhost`. Pairing
+ * the socket check with this closes the "any website → localhost token oracle"
+ * path. The port is ignored; only the host is checked.
+ */
+export function isLoopbackHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return false;
+  let host = hostHeader.trim().toLowerCase();
+  if (host.startsWith("[")) {
+    const end = host.indexOf("]");
+    host = end > 0 ? host.slice(1, end) : host.slice(1);
+  } else if ((host.match(/:/g) || []).length === 1) {
+    host = host.slice(0, host.indexOf(":")); // strip the port off host:port
+  }
+  return host === "127.0.0.1" || host === "localhost" || host === "::1";
 }
