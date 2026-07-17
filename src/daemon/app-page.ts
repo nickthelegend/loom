@@ -4210,7 +4210,9 @@ ${BRAND_SPRITE}
 
     function connect(){
       var proto = location.protocol === "https:" ? "wss://" : "ws://";
-      var ws = new WebSocket(proto + location.host + "/ws?token=" + encodeURIComponent(state.token) + "&project=" + encodeURIComponent(pid));
+      // Carry the bearer token in the subprotocol, not the URL — a query token
+      // lands in browser history and proxy logs; a header does not.
+      var ws = new WebSocket(proto + location.host + "/ws?project=" + encodeURIComponent(pid), ["loom.bearer." + state.token]);
       state.ws = ws;
       ws.onopen = function(){
         state.wsLive = true; drawStatusbar();

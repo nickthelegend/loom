@@ -25,7 +25,10 @@ describe("web app page", () => {
     expect(APP_HTML).toContain('id="loom-app"');
     expect(APP_HTML).toContain("/api/pair/claim");
     expect(APP_HTML).toContain("loomClientToken");
-    expect(APP_HTML).toContain("/ws?token=");
+    // The WS token rides in the subprotocol, never the URL — a query token would
+    // land in browser history and proxy logs. Lock both halves of that.
+    expect(APP_HTML).not.toContain("/ws?token=");
+    expect(APP_HTML).toContain('"loom.bearer." + state.token');
   });
 
   it("carries the design signatures (quiet graphite + the weave, kept as state)", () => {

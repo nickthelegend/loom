@@ -1808,7 +1808,14 @@ export class LoomDaemon {
     const wss = new WebSocketServer({ server, path: "/ws" });
     wss.on("connection", (ws, req) => {
       const url = new URL(req.url ?? "/ws", `http://${this.host}:${this.port}`);
-      const token = url.searchParams.get("token") ?? undefined;
+      // Prefer the token in the `Sec-WebSocket-Protocol` header (a header isn't
+      // written to browser history or a proxy's request-line log the way a
+      // `?token=` query is); fall back to the query for the CLI/native clients.
+      const sub = req.headers["sec-websocket-protocol"];
+      const fromHeader = sub
+        ? sub.split(",").map((s) => s.trim()).find((s) => s.startsWith("loom.bearer."))?.slice("loom.bearer.".length)
+        : undefined;
+      const token = fromHeader ?? url.searchParams.get("token") ?? undefined;
       this.auth.reload(); // pick up freshly paired clients
       if (!this.auth.isAuthorized(token)) {
         ws.close(4401, "unauthorized");
