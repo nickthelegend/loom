@@ -899,10 +899,12 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   #consolebtn{position:relative}
   .conwrap{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden;
     background:var(--background)}
-  /* When open, the console overlays the terminal panes — it shares their dock,
-     and both are absolutely-positioned siblings, so without this the terminal
-     (appended later) paints on top and clicking Console just shows a shell. */
+  /* The console is a pseudo-pane: shown when its tab is active, and the terminal
+     panes are deactivated at the same time, so no overlap and no z-index race. */
   .conwrap.on{display:flex;z-index:5}
+  /* the Console tab in the terminal bar */
+  .termtab.console svg{width:13px;height:13px;flex:none;opacity:.8}
+  .termtab.console .ctt{margin:0 1px}
   .conbar{display:flex;align-items:center;gap:6px;flex:none;height:28px;padding:0 8px;
     border-bottom:1px solid var(--border);font-size:11px;color:var(--muted-foreground)}
   .conbar .lvl{padding:2px 7px;border-radius:11px;cursor:pointer;border:1px solid transparent;
@@ -1826,12 +1828,15 @@ ${BRAND_SPRITE}
     if (desktop) {
       document.getElementById("dockclose").onclick = closeDock;
       document.getElementById("railbtn").onclick = toggleRail;
-      // The terminal button wants the terminal. If the console is overlaying the
-      // dock, the first click should reveal the terminal underneath rather than
-      // close the whole dock out from under it.
+      // The terminal button wants the terminal. If the console tab is the active
+      // pane, switch to a terminal rather than closing the dock out from under it.
       document.getElementById("termbtn").onclick = function(){
-        if (con.open) { closeConsole(); if (!termOpen()) toggleTerm(); else { ensureTerm(); focusTerm(); } return; }
-        toggleTerm();
+        var opening = !termOpen();
+        toggleTerm(); // flips the dock; applyTerm ensures a terminal when opening
+        if (opening && activeTerm === CONSOLE_TAB) {
+          activeTerm = terms.length ? terms[terms.length - 1].id : null;
+          drawTermTabs(); showTermPane(); focusTerm();
+        }
       };
       bindConsole();
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
@@ -1860,6 +1865,10 @@ ${BRAND_SPRITE}
     // drive a line at a time and render it ourselves.
     var TERM_KEY = "loomTerm";
     var terms = [], activeTerm = null, termSeq = 0, termMode = null;
+    // The console is a pseudo-tab in the terminal dock's tab bar: it shares the
+    // dock and the pane area, and is switched to like any terminal. This
+    // sentinel is its "id" for activeTerm.
+    var CONSOLE_TAB = "__console__";
     function curTerm(){ for (var i = 0; i < terms.length; i++) if (terms[i].id === activeTerm) return terms[i]; return null; }
     function termOpen(){ return desktop && localStorage.getItem(TERM_KEY) === "1"; }
     function wsSend(msg){
@@ -2074,33 +2083,73 @@ ${BRAND_SPRITE}
     }
     function drawTermTabs(){
       var box = document.getElementById("termtabs"); if (!box) return;
-      box.innerHTML = terms.map(function(t){
+      var html = terms.map(function(t){
         return '<span class="termtab' + (t.id === activeTerm ? " active" : "") + '" data-t="' + t.id + '">' +
           (t.busy ? '<span class="busy" style="width:8px;height:8px;color:var(--live)"></span>' : "") +
           esc(t.title) + '<span class="tx" data-close="' + t.id + '">' + ICONS.x + "</span></span>";
       }).join("");
-      Array.prototype.forEach.call(box.querySelectorAll(".termtab"), function(el){
+      // The console rides in the same bar as a closeable tab.
+      if (con.present) {
+        var unseen = con.logs.filter(function(r){ return r.level === "error" && r.id > con.seen; }).length;
+        html += '<span class="termtab console' + (activeTerm === CONSOLE_TAB ? " active" : "") + '" data-console="1">' +
+          (unseen ? '<span class="busy" style="width:7px;height:7px;color:var(--err)"></span>' : ICONS.console) +
+          '<span class="ctt">Console</span>' +
+          '<span class="tx" data-conclose="1" title="close console" aria-label="close console">' + ICONS.x + "</span></span>";
+      }
+      box.innerHTML = html;
+      Array.prototype.forEach.call(box.querySelectorAll(".termtab[data-t]"), function(el){
         el.onclick = function(ev){
           var c = ev.target.closest ? ev.target.closest("[data-close]") : null;
           if (c) { closeTerm(c.getAttribute("data-close")); return; }
-          // Picking a terminal tab means you want the terminal, not the console
-          // overlay sitting on top of it — step it aside.
-          closeConsole();
+          // Switching to a terminal just changes which pane shows; the console
+          // tab stays in the bar.
           activeTerm = el.getAttribute("data-t");
           drawTermTabs(); showTermPane(); drawPrompt(); fitActive(); focusTerm();
         };
       });
+      var ct = box.querySelector(".termtab.console");
+      if (ct) ct.onclick = function(ev){
+        var c = ev.target.closest ? ev.target.closest("[data-conclose]") : null;
+        if (c) { closeConsole(); return; }
+        activeTerm = CONSOLE_TAB;
+        // seeing the console clears the "unread errors" dot
+        con.logs.forEach(function(r){ if (r.id > con.seen) con.seen = r.id; });
+        drawTermTabs(); showTermPane(); drawConsole(); drawErrDot();
+      };
     }
     function showTermPane(){
+      var conActive = activeTerm === CONSOLE_TAB;
+      var wrap = document.getElementById("conwrap");
+      if (wrap) wrap.classList.toggle("on", conActive);
       Array.prototype.forEach.call(document.querySelectorAll(".termpane"), function(p){
-        p.classList.toggle("active", p.getAttribute("data-t") === activeTerm);
+        p.classList.toggle("active", !conActive && p.getAttribute("data-t") === activeTerm);
       });
-      var t = curTerm();
+      var t = conActive ? null : curTerm();
       var form = document.getElementById("termform");
       // the input line belongs to the fallback only — a pty takes keys directly
       if (form) form.style.display = t && !t.xterm && termMode === "pipe" ? "" : "none";
       if (t && t.fit) { try { t.fit.fit(); } catch (e) {} }
     }
+    // Show the console as the active tab in the dock (called from the console
+    // button, which lives at module scope and reaches this via state.showConsole).
+    function showConsolePane(){
+      con.present = true; con.open = true;
+      if (!termOpen()) toggleTerm(); // opens the dock (and ensures a terminal)
+      activeTerm = CONSOLE_TAB;
+      drawTermTabs(); showTermPane();
+    }
+    // Close the console tab; fall back to a terminal, or shut the dock if the
+    // console was the only thing in it.
+    function hideConsolePane(){
+      con.present = false; con.open = false;
+      if (activeTerm === CONSOLE_TAB) activeTerm = terms.length ? terms[terms.length - 1].id : null;
+      if (!terms.length) { localStorage.setItem(TERM_KEY, "0"); applyTerm(); return; }
+      drawTermTabs(); showTermPane(); focusTerm();
+    }
+    state.showConsole = showConsolePane;
+    state.hideConsole = hideConsolePane;
+    state.consoleActive = function(){ return activeTerm === CONSOLE_TAB; };
+    state.redrawTermTabs = drawTermTabs; // so a new error can refresh the tab's dot
     function drawPrompt(){
       var t = curTerm(); if (!t || t.xterm) return;
       var pr = document.querySelector(".terminput .pr");
@@ -3789,7 +3838,7 @@ ${BRAND_SPRITE}
   // exists and tail, or one of the many empty catch blocks, where they stopped
   // existing. Neither reaches the person looking at the window wondering why
   // nothing happened. Records arrive live over the same socket as events.
-  var con = { logs: [], level: "all", open: false, seen: 0, expanded: {} };
+  var con = { logs: [], level: "all", open: false, present: false, seen: 0, expanded: {} };
 
   function conLevelOk(r){ return con.level === "all" || r.level === con.level; }
 
@@ -3844,22 +3893,17 @@ ${BRAND_SPRITE}
   function addLogRecord(r){
     con.logs.push(r);
     if (con.logs.length > 500) con.logs.splice(0, con.logs.length - 500);
-    if (con.open) { drawConsole(); con.seen = r.id; }
+    if (state.consoleActive && state.consoleActive()) { drawConsole(); con.seen = r.id; }
+    if (con.present && state.redrawTermTabs) state.redrawTermTabs(); // refresh the tab's error dot
     drawErrDot();
   }
 
   function openConsole(){
-    con.open = true;
-    var wrap = document.getElementById("conwrap");
-    if (wrap) wrap.classList.add("on");
-    // The dock has to be open for the Console to be visible in it. termOpen()
-    // and toggleTerm() belong to renderProject's scope, not this one — calling
-    // them from here throws a ReferenceError inside the click handler and the
-    // button does nothing at all. state.toggleTerm is the hook renderProject
-    // publishes for exactly this; the ctrl-backtick shortcut uses it too.
-    // (And no, that shortcut cannot be written with the actual character here:
-    // one raw backtick ends this whole template literal.)
-    if (localStorage.getItem("loomTerm") !== "1" && state.toggleTerm) state.toggleTerm();
+    // The console is a tab in the terminal dock now; renderProject owns the tab
+    // machinery and publishes state.showConsole for exactly this cross-scope
+    // call. (These functions live at module scope; terms/activeTerm/drawTermTabs
+    // do not.)
+    if (state.showConsole) state.showConsole();
     // Mark what's on screen as seen — the dot is about news, not history.
     con.logs.forEach(function(r){ if (r.id > con.seen) con.seen = r.id; });
     drawConsole();
@@ -3867,15 +3911,15 @@ ${BRAND_SPRITE}
   }
 
   function closeConsole(){
-    con.open = false;
-    var wrap = document.getElementById("conwrap");
-    if (wrap) wrap.classList.remove("on");
+    if (state.hideConsole) state.hideConsole();
+    else { con.open = false; con.present = false; }
     drawErrDot();
   }
 
   function bindConsole(){
     var btn = document.getElementById("consolebtn");
-    if (btn) btn.onclick = function(){ con.open ? closeConsole() : openConsole(); };
+    // Toggle: if the console is the pane you're looking at, close it; else show it.
+    if (btn) btn.onclick = function(){ (state.consoleActive && state.consoleActive()) ? closeConsole() : openConsole(); };
     var clear = document.getElementById("conclear");
     if (clear) clear.onclick = function(){
       api("/api/logs", { method: "DELETE" }).then(function(){
