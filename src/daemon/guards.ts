@@ -12,11 +12,18 @@
  * caught fault is written where `loom up` is pointing (~/.loom/daemon.log).
  */
 
-/** Write a fault the same way whichever kind it is. */
+import { logbook } from "../core/logbook.js";
+
+/**
+ * Write a fault the same way whichever kind it is.
+ *
+ * Through the logbook, so it reaches the Console tab as well as the log file.
+ * A daemon that survives a fault silently is only half the fix — you'd never
+ * know the turn you're waiting on already died.
+ */
 function report(kind: string, detail: unknown): void {
-  const at = new Date().toISOString();
-  const body = detail instanceof Error ? (detail.stack ?? detail.message) : String(detail);
-  console.error(`[${at}] ${kind}: ${body}`);
+  const message = detail instanceof Error ? detail.message : String(detail);
+  logbook.error("daemon", `${kind}: ${message}`, detail);
 }
 
 /**

@@ -17,6 +17,7 @@ import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
 import { RouteActiveError } from "../core/routes.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
+import { logbook } from "../core/logbook.js";
 import { setupReport } from "../core/setup.js";
 import {
   ensureDaemonConfig,
@@ -125,6 +126,7 @@ export class LoomDaemon {
     onTitle: (projectId, term, title) =>
       this.broadcastTerm(projectId, { type: "term", term, title }),
   });
+  private unstreamLogs: (() => void) | null = null;
   host: string;
   port: number;
 
@@ -359,6 +361,15 @@ export class LoomDaemon {
               res.status(409).json({ error: "route_active", message: err.message });
               return;
             }
+            // A 500 used to be a sentence for one caller and nothing else: no
+            // stack, no record, gone the moment the fetch resolved. Now the
+            // Console gets it with the stack and the route that produced it.
+            logbook.error(
+              "api",
+              `${req.method} ${req.path} failed: ${err instanceof Error ? err.message : String(err)}`,
+              err,
+              String(req.params.id ?? ""),
+            );
             res.status(500).json({ error: String(err instanceof Error ? err.message : err) });
           }
         })();
@@ -490,6 +501,27 @@ export class LoomDaemon {
         res.json(updated);
       }),
     );
+
+    // ---- the Console ------------------------------------------------------
+    // Everything that went wrong, for the tab next to the terminal. Until this
+    // existed an error's only home was ~/.loom/daemon.log, which you have to
+    // know about, find, and tail — so in practice errors reached nobody.
+    app.get("/api/logs", (req, res) => {
+      const since = req.query.since === undefined ? undefined : Number(req.query.since);
+      const level = req.query.level as "error" | "warn" | "info" | undefined;
+      res.json({
+        logs: logbook.list({
+          ...(Number.isFinite(since) ? { since } : {}),
+          ...(level ? { level } : {}),
+          ...(req.query.project ? { project: String(req.query.project) } : {}),
+        }),
+      });
+    });
+
+    app.delete("/api/logs", (_req, res) => {
+      logbook.clear();
+      res.json({ ok: true });
+    });
 
     // Which agents Loom can drive on this machine, and which are already in
     // this project. The UI needs both to offer you the difference.
@@ -913,7 +945,35 @@ export class LoomDaemon {
       if (sub.project && sub.project !== projectId) continue;
       ws.send(frame);
     }
+    // An agent's error is a thread event AND a log line. The thread shows it to
+    // whoever is reading that conversation; the Console shows it to whoever is
+    // wondering why nothing happened. Those are often the same person and never
+    // the same moment.
+    if (event.kind === "error") {
+      logbook.error(
+        event.agentId ? `agent:${event.agentId}` : "project",
+        String(event.payload.message ?? "agent error"),
+        event.payload.stderr ?? event.payload.detail,
+        projectId,
+      );
+    }
     this.maybePush(projectId, event);
+  }
+
+  /**
+   * Push every log record to every connected client.
+   *
+   * Not per-project: a daemon-level fault (a crash guard firing, a bad route)
+   * has no project, and it's exactly the one you most need to see. The Console
+   * filters; the wire doesn't.
+   */
+  private streamLogs(): () => void {
+    return logbook.subscribe((record) => {
+      const frame = JSON.stringify({ type: "log", record });
+      for (const [ws] of this.sockets) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+      }
+    });
   }
 
   /** Fan a terminal frame out to every socket watching this project. */
@@ -1008,6 +1068,9 @@ export class LoomDaemon {
       ws.on("close", () => this.sockets.delete(ws));
     });
 
+    // Fan every log record out to connected clients (the Console tab).
+    this.unstreamLogs = this.streamLogs();
+
     // Record where we actually bound so CLIs can find us.
     const cfg = ensureDaemonConfig({ host: this.host, port: this.port });
     cfg.host = this.host;
@@ -1019,6 +1082,8 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    this.unstreamLogs?.();
+    this.unstreamLogs = null;
     this.terminals.closeAll();
     for (const rt of this.runtimes.values()) await rt.close();
     this.runtimes.clear();

@@ -164,7 +164,18 @@ function mount({ desktop = true, hash = "", token = clientToken as string | null
 }
 
 const $ = (m: Mounted, sel: string) => m.window.document.querySelector(sel);
-const text_ = (m: Mounted, sel: string) => $(m, sel)?.textContent?.trim() ?? "";
+const text = (m: Mounted, sel: string) => $(m, sel)?.textContent?.trim() ?? "";
+/**
+ * Wait for a control to be *wired*, not merely present.
+ *
+ * renderProject writes its markup and binds handlers in the same pass, but it
+ * can run more than once — a hashchange, a refresh — and the node you grabbed a
+ * tick ago may have been replaced by one whose onclick hasn't been attached
+ * yet. Clicking that is a no-op that looks exactly like a broken feature.
+ */
+const ready = (m: Mounted, sel: string) =>
+  waitUntil(() => !!($(m, sel) as HTMLElement & { onclick?: unknown } | null)?.onclick);
+
 const click = (el: Element | null) => {
   if (!el) throw new Error("clicked an element that isn't there");
   (el as HTMLElement).dispatchEvent(new (el.ownerDocument.defaultView as Window & typeof globalThis).MouseEvent("click", { bubbles: true }));
@@ -181,14 +192,14 @@ describe("web app · boot", () => {
     const m = mount();
     // the sidebar is filled from GET /api/projects — real data, real token
     await waitUntil(() => !!$(m, "#slist .srow"));
-    expect(text_(m, "#slist")).toContain("weave");
+    expect(text(m, "#slist")).toContain("weave");
     expect(m.errors.join("\n")).toBe("");
   });
 
   it("the phone layout renders the project board without throwing", async () => {
     const m = mount({ desktop: false });
     await waitUntil(() => !!$(m, "#list .card"));
-    expect(text_(m, "#list")).toContain("weave");
+    expect(text(m, "#list")).toContain("weave");
     expect(m.errors.join("\n")).toBe("");
   });
 });
@@ -255,7 +266,7 @@ describe("web app · board", () => {
    */
   it("doesn't invent cards for idle agents", async () => {
     const m = await openBoard();
-    expect(text_(m, ".bcols")).not.toContain("plannerbot is working");
+    expect(text(m, ".bcols")).not.toContain("plannerbot is working");
     expect(m.window.document.querySelectorAll(".bempty").length).toBe(4);
     expect(m.errors.join("\n")).toBe("");
   });
@@ -285,7 +296,7 @@ describe("web app · board task modal", () => {
     const m = await openBoard();
     click($(m, '.badd[data-add="working"]'));
     await waitUntil(() => !!$(m, "#bmagsel .agchip, #bmagsel .chip, #bmagsel button"));
-    expect(text_(m, "#bmagsel")).toContain("plannerbot");
+    expect(text(m, "#bmagsel")).toContain("plannerbot");
     expect(m.errors.join("\n")).toBe("");
   });
 
@@ -314,12 +325,12 @@ describe("web app · board task modal", () => {
 
     // the modal closes and the column redraws with it
     await waitUntil(() => !$(m, ".scrim"));
-    await waitUntil(() => text_(m, '.bcol[data-col="needs-you"]').includes(title));
+    await waitUntil(() => text(m, '.bcol[data-col="needs-you"]').includes(title));
     expect(m.errors.join("\n")).toBe("");
 
     // and it's the daemon's card now, not a DOM flourish: a fresh window sees it
     const m2 = await openBoard();
-    await waitUntil(() => text_(m2, '.bcol[data-col="needs-you"]').includes(title));
+    await waitUntil(() => text(m2, '.bcol[data-col="needs-you"]').includes(title));
     expect(m2.errors.join("\n")).toBe("");
   });
 
@@ -330,7 +341,7 @@ describe("web app · board task modal", () => {
 
     click($(m, "#bmcreate"));
     await waitUntil(() => !!$(m, "#toast.show"));
-    expect(text_(m, "#toast")).toContain("what needs doing");
+    expect(text(m, "#toast")).toContain("what needs doing");
     expect($(m, ".scrim")).toBeTruthy(); // still open, nothing created
     expect(m.errors.join("\n")).toBe("");
   });
@@ -354,7 +365,7 @@ describe("web app · the thread", () => {
     );
 
     // what you said shows up as yours
-    await waitUntil(() => text_(m, "#thread, .thread, #pane-thread").includes(said));
+    await waitUntil(() => text(m, "#thread, .thread, #pane-thread").includes(said));
     // ...and echo answers with it, delivered by the WebSocket rather than a reload
     await waitUntil(() => {
       const bubbles = [...m.window.document.querySelectorAll(".bubble")];
@@ -384,7 +395,7 @@ describe("web app · chats", () => {
   it("lists Main under the selected project, and offers a new one", async () => {
     const m = mount({ hash: `#p/${projectId}` });
     await waitUntil(() => !!$(m, ".crow[data-chat]"));
-    expect(text_(m, ".sgroup")).toContain("Main");
+    expect(text(m, ".sgroup")).toContain("Main");
     expect($(m, ".crow.add[data-newchat]")).toBeTruthy();
     // main is implicit: there is nothing to forget
     expect($(m, '.crow[data-chat="main"] [data-delchat]')).toBeNull();
@@ -430,7 +441,7 @@ describe("web app · setup", () => {
     click($(m, "#setupbtn"));
     await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
 
-    const body = text_(m, "#setupbody");
+    const body = text(m, "#setupbody");
     // every installed agent resolves to a real verdict, never a shrug dressed
     // up as a tick
     expect(body).toMatch(/signed in|signed out|couldn|not installed|unknown/i);
@@ -443,12 +454,12 @@ describe("web app · setup", () => {
     click($(m, "#setupbtn"));
     await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
 
-    const text = text_(m, "#setupbody");
+    const body = text(m, "#setupbody");
     for (const label of ["Claude Code", "Codex", "OpenCode", "Grok Code", "Antigravity IDE", "Kiro"]) {
-      expect(text, `${label} missing from setup`).toContain(label);
+      expect(body, `${label} missing from setup`).toContain(label);
     }
     // and the phone, which is the part people never find on their own
-    expect(text).toContain("loom up --restart --tailnet");
+    expect(body).toContain("loom up --restart --tailnet");
     expect(m.errors.join("\n")).toBe("");
   });
 
@@ -463,8 +474,8 @@ describe("web app · setup", () => {
     click($(m, "#setupbtn"));
     await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
 
-    expect(text_(m, "#setupbody")).toContain("Accessibility");
-    expect(text_(m, "#setupbody")).toMatch(/not needed/i);
+    expect(text(m, "#setupbody")).toContain("Accessibility");
+    expect(text(m, "#setupbody")).toMatch(/not needed/i);
     expect($(m, "#setupbody .sdot.no"), "the refused row should be marked as such").toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
   });
@@ -537,6 +548,69 @@ describe("web app · one button per job", () => {
   });
 });
 
+/**
+ * The Console.
+ *
+ * Errors used to have two fates: ~/.loom/daemon.log, which you must know about
+ * and tail, or one of the codebase's many empty catch blocks, where they simply
+ * stopped existing. Neither reaches the person looking at the window wondering
+ * why nothing happened.
+ */
+describe("web app · the console", () => {
+  it("has a console button beside the terminal button", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#consolebtn"));
+    const strip = $(m, ".tabstrip")!;
+    expect(strip.querySelector("#termbtn"), "the terminal button is its neighbour").toBeTruthy();
+    expect(strip.querySelector("#consolebtn")).toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("opens the dock and shows the log, not a blank drawer", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#consolebtn");
+    expect(($(m, "#conwrap") as HTMLElement).classList.contains("on")).toBe(false);
+
+    click($(m, "#consolebtn"));
+    await waitUntil(() => ($(m, "#conwrap") as HTMLElement).classList.contains("on"));
+    // it says what it's for rather than showing an empty box
+    await waitUntil(() => text(m, "#conlist").length > 0);
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("shows a real daemon error, with its scope", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#consolebtn");
+
+    // Provoke one the way a person would: send to an agent that isn't in this
+    // project. The API throws, the logbook records it. A real failure, not an
+    // injected fixture.
+    await fetch(`${baseUrl}/api/projects/${projectId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${clientToken}` },
+      body: JSON.stringify({ text: "hi", agentId: "no-such-agent" }),
+    }).catch(() => {});
+
+    click($(m, "#consolebtn"));
+    // the scope says which part of Loom spoke, and the message names the route
+    await waitUntil(() => text(m, "#conlist").includes("api"));
+    expect(text(m, "#conlist")).toContain("/messages");
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
+
+  it("filters to errors only", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#consolebtn");
+    click($(m, "#consolebtn"));
+    await waitUntil(() => !!$(m, '.conbar .lvl[data-lvl="error"]'));
+
+    click($(m, '.conbar .lvl[data-lvl="error"]'));
+    expect(($(m, '.conbar .lvl[data-lvl="error"]') as HTMLElement).classList.contains("on")).toBe(true);
+    expect(($(m, '.conbar .lvl[data-lvl="all"]') as HTMLElement).classList.contains("on")).toBe(false);
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · the rest of the shell", () => {
   it("switches tabs between the thread, the board and the brain", async () => {
     const m = mount({ hash: `#p/${projectId}` });
@@ -560,12 +634,12 @@ describe("web app · the rest of the shell", () => {
     filter.value = "weave";
     filter.dispatchEvent(new m.window.Event("input", { bubbles: true }));
     await waitUntil(() => !!$(m, "#slist .srow"));
-    expect(text_(m, "#slist")).toContain("weave");
+    expect(text(m, "#slist")).toContain("weave");
 
     filter.value = "definitely-not-a-project";
     filter.dispatchEvent(new m.window.Event("input", { bubbles: true }));
     await waitUntil(() => !$(m, "#slist .srow"));
-    expect(text_(m, "#slist")).toContain("no matches");
+    expect(text(m, "#slist")).toContain("no matches");
     expect(m.errors.join("\n")).toBe("");
   });
 

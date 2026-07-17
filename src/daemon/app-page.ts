@@ -667,6 +667,37 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   /* one host per tab: xterm mounts into it in pty mode, the line-renderer
      writes into it in pipe mode. Only the active one is displayed. */
   .termpanes{flex:1;min-height:0;position:relative}
+  /* ── Console ──────────────────────────────────────────
+     Errors live in the terminal's dock: same drawer, same edge. The dot on the
+     toolbar button is the only thing that ever asks for attention, and only
+     for an error you haven't looked at. */
+  .errdot{position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;
+    background:var(--danger,#e5484d);display:none;box-shadow:0 0 0 1.5px var(--card)}
+  .errdot.on{display:block}
+  #consolebtn{position:relative}
+  .conwrap{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden}
+  .conwrap.on{display:flex}
+  .conbar{display:flex;align-items:center;gap:6px;flex:none;height:28px;padding:0 8px;
+    border-bottom:1px solid var(--border);font-size:11px;color:var(--muted-foreground)}
+  .conbar .lvl{padding:2px 7px;border-radius:11px;cursor:pointer;border:1px solid transparent;
+    font-family:var(--font-mono);font-size:10px;letter-spacing:.02em}
+  .conbar .lvl:hover{background:var(--sidebar-accent)}
+  .conbar .lvl.on{background:var(--sidebar-accent);border-color:var(--border);color:var(--foreground)}
+  .conlist{flex:1;min-height:0;overflow:auto;font-family:var(--font-mono);font-size:11px;line-height:1.55}
+  .conrow{display:flex;gap:8px;padding:3px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent);
+    align-items:baseline}
+  .conrow:hover{background:color-mix(in srgb,var(--sidebar-accent) 55%,transparent)}
+  .conrow .t{flex:none;color:var(--muted-foreground);opacity:.75}
+  .conrow .sc{flex:none;color:var(--muted-foreground);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .conrow .ms{flex:1;min-width:0;white-space:pre-wrap;word-break:break-word}
+  .conrow.error .ms{color:var(--danger,#e5484d)}
+  .conrow.warn .ms{color:var(--warn)}
+  .conrow .det{cursor:pointer;color:var(--muted-foreground);flex:none;opacity:.7}
+  .conrow .det:hover{opacity:1}
+  .condetail{padding:6px 10px 8px 10px;white-space:pre-wrap;word-break:break-word;
+    color:var(--muted-foreground);background:color-mix(in srgb,var(--sidebar-accent) 40%,transparent);
+    border-bottom:1px solid var(--border);font-size:10.5px}
+  .conempty{padding:20px 12px;color:var(--muted-foreground);font-family:var(--font-sans);font-size:12px}
   .termpane{position:absolute;inset:0;display:none}
   .termpane.active{display:block}
   .termpane .xterm{height:100%;padding:6px 8px 0 12px}
@@ -1005,6 +1036,8 @@ ${BRAND_SPRITE}
     plus: svg('<path d="M12 5v14"/><path d="M5 12h14"/>'),
     panelRight: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>'),
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
+    // lines of output with one flagged — the Console
+    console: svg('<path d="M4 6h16"/><path d="M4 11h9"/><path d="M4 16h6"/><circle cx="18" cy="15.5" r="2.5"/>'),
     x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
     tasks: svg('<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>'),
     // the rail's roster: two figures, because it lists who works here
@@ -1345,6 +1378,12 @@ ${BRAND_SPRITE}
         '<span class="spacer"></span>' +
         // &#96; is a backtick — a literal one would close this template literal
         '<button id="termbtn" class="iconbtn" title="toggle terminal (\\u2303&#96;)">' + ICONS.terminal + "</button>" +
+        // The Console shares the terminal's dock — both are "the drawer at the
+        // bottom where output goes", and giving errors their own panel would
+        // mean two drawers fighting for the same edge. The dot appears when
+        // something has gone wrong since you last looked.
+        '<button id="consolebtn" class="iconbtn" title="console \\u00b7 errors and logs">' +
+        ICONS.console + '<span class="errdot" id="errdot"></span></button>' +
         '<button id="railbtn" class="iconbtn" title="toggle right panel">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
@@ -1369,7 +1408,18 @@ ${BRAND_SPRITE}
         '<button id="termadd" class="iconbtn" title="new terminal">' + ICONS.plus + "</button>" +
         '<span class="spacer"></span>' +
         '<button id="termhide" class="iconbtn" title="hide terminal">' + ICONS.x + "</button></div>" +
-        '<div class="termpanes" id="termpanes"></div>' +
+        '<div class="termpanes" id="termpanes">' +
+        '<div class="conwrap" id="conwrap">' +
+        '<div class="conbar">' +
+        '<span class="lvl on" data-lvl="all">all</span>' +
+        '<span class="lvl" data-lvl="error">errors</span>' +
+        '<span class="lvl" data-lvl="warn">warnings</span>' +
+        '<span class="spacer" style="flex:1"></span>' +
+        '<span id="concount"></span>' +
+        '<button id="conclear" class="iconbtn" title="clear">' + ICONS.x + "</button>" +
+        "</div>" +
+        '<div class="conlist" id="conlist"></div>' +
+        "</div></div>" +
         '<form class="terminput" id="termform" style="display:none"><span class="pr">&#10095;</span>' +
         '<input id="terminput" placeholder="run a command\\u2026" autocomplete="off" autocapitalize="off" spellcheck="false">' +
         '<span class="st"></span></form>' +
@@ -1492,6 +1542,7 @@ ${BRAND_SPRITE}
       document.getElementById("dockclose").onclick = closeDock;
       document.getElementById("railbtn").onclick = toggleRail;
       document.getElementById("termbtn").onclick = toggleTerm;
+      bindConsole();
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
       var dockEl = document.getElementById("dockpane");
@@ -2690,6 +2741,9 @@ ${BRAND_SPRITE}
         try {
           var frame = JSON.parse(ev.data);
           if (frame.type === "term") { onTermFrame(frame); return; }
+          // A log record belongs to no chat — a daemon fault has no
+          // conversation, and it's the one you most need to see.
+          if (frame.type === "log" && frame.record) { addLogRecord(frame.record); return; }
           if (frame.type === "event" && frame.event) {
             // one socket carries the whole project; this thread is one chat.
             // An event with no chat predates chats and belongs to main.
@@ -2770,6 +2824,128 @@ ${BRAND_SPRITE}
   }
 
   // ---- right rail toggle — open by default (shows the file tree) -----------
+  // ---- Console ------------------------------------------------------------
+  // Everything that went wrong, in the drawer with the terminals.
+  //
+  // Errors used to have two fates: ~/.loom/daemon.log, which you have to know
+  // exists and tail, or one of the many empty catch blocks, where they stopped
+  // existing. Neither reaches the person looking at the window wondering why
+  // nothing happened. Records arrive live over the same socket as events.
+  var con = { logs: [], level: "all", open: false, seen: 0, expanded: {} };
+
+  function conLevelOk(r){ return con.level === "all" || r.level === con.level; }
+
+  function drawConsole(){
+    var list = document.getElementById("conlist"); if (!list) return;
+    var rows = con.logs.filter(conLevelOk);
+    var cnt = document.getElementById("concount");
+    if (cnt) {
+      var errs = con.logs.filter(function(r){ return r.level === "error"; }).length;
+      cnt.textContent = con.logs.length
+        ? con.logs.length + " record" + (con.logs.length === 1 ? "" : "s") + (errs ? " \\u00b7 " + errs + " error" + (errs === 1 ? "" : "s") : "")
+        : "";
+    }
+    if (!rows.length) {
+      list.innerHTML = '<div class="conempty">' +
+        (con.logs.length ? "nothing at this level" : "nothing has gone wrong \\u2014 errors from the daemon, the API and your agents land here") +
+        "</div>";
+      return;
+    }
+    // Pinned to the bottom unless you've scrolled up to read something: yanking
+    // the view away mid-read is how a log becomes unusable.
+    var atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 24;
+    list.innerHTML = rows.map(function(r){
+      var t = new Date(r.at);
+      var hh = String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0") + ":" + String(t.getSeconds()).padStart(2, "0");
+      var open = !!con.expanded[r.id];
+      return '<div class="conrow ' + esc(r.level) + '" data-id="' + r.id + '">' +
+        '<span class="t">' + hh + "</span>" +
+        '<span class="sc">' + esc(r.scope) + "</span>" +
+        '<span class="ms">' + esc(r.message) + "</span>" +
+        (r.detail ? '<span class="det" data-det="' + r.id + '">' + (open ? "\\u2212" : "+") + "</span>" : "") +
+        "</div>" +
+        (open && r.detail ? '<div class="condetail">' + esc(r.detail) + "</div>" : "");
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll("[data-det]"), function(b){
+      b.onclick = function(){
+        var id = b.getAttribute("data-det");
+        con.expanded[id] = !con.expanded[id];
+        drawConsole();
+      };
+    });
+    if (atBottom) list.scrollTop = list.scrollHeight;
+  }
+
+  /** The dot: something went wrong that you haven't looked at. */
+  function drawErrDot(){
+    var dot = document.getElementById("errdot"); if (!dot) return;
+    var unseen = con.logs.filter(function(r){ return r.level === "error" && r.id > con.seen; }).length;
+    dot.classList.toggle("on", unseen > 0 && !con.open);
+  }
+
+  function addLogRecord(r){
+    con.logs.push(r);
+    if (con.logs.length > 500) con.logs.splice(0, con.logs.length - 500);
+    if (con.open) { drawConsole(); con.seen = r.id; }
+    drawErrDot();
+  }
+
+  function openConsole(){
+    con.open = true;
+    var wrap = document.getElementById("conwrap");
+    if (wrap) wrap.classList.add("on");
+    // The dock has to be open for the Console to be visible in it. termOpen()
+    // and toggleTerm() belong to renderProject's scope, not this one — calling
+    // them from here throws a ReferenceError inside the click handler and the
+    // button does nothing at all. state.toggleTerm is the hook renderProject
+    // publishes for exactly this; the ctrl-backtick shortcut uses it too.
+    // (And no, that shortcut cannot be written with the actual character here:
+    // one raw backtick ends this whole template literal.)
+    if (localStorage.getItem("loomTerm") !== "1" && state.toggleTerm) state.toggleTerm();
+    // Mark what's on screen as seen — the dot is about news, not history.
+    con.logs.forEach(function(r){ if (r.id > con.seen) con.seen = r.id; });
+    drawConsole();
+    drawErrDot();
+  }
+
+  function closeConsole(){
+    con.open = false;
+    var wrap = document.getElementById("conwrap");
+    if (wrap) wrap.classList.remove("on");
+    drawErrDot();
+  }
+
+  function bindConsole(){
+    var btn = document.getElementById("consolebtn");
+    if (btn) btn.onclick = function(){ con.open ? closeConsole() : openConsole(); };
+    var clear = document.getElementById("conclear");
+    if (clear) clear.onclick = function(){
+      api("/api/logs", { method: "DELETE" }).then(function(){
+        con.logs = []; con.seen = 0; con.expanded = {};
+        drawConsole(); drawErrDot();
+      }).catch(function(e){ toast(e.message); });
+    };
+    Array.prototype.forEach.call(document.querySelectorAll(".conbar .lvl"), function(el){
+      el.onclick = function(){
+        con.level = el.getAttribute("data-lvl");
+        Array.prototype.forEach.call(document.querySelectorAll(".conbar .lvl"), function(o){
+          o.classList.toggle("on", o === el);
+        });
+        drawConsole();
+      };
+    });
+    // Backfill: the daemon has been running longer than this window has been
+    // open, and its errors are exactly the ones you want on a fresh load.
+    api("/api/logs").then(function(j){
+      con.logs = j.logs || [];
+      // Everything from before this window opened counts as already seen —
+      // a dot for yesterday's error is noise, not news.
+      con.logs.forEach(function(r){ if (r.id > con.seen) con.seen = r.id; });
+      drawConsole();
+      drawErrDot();
+    }).catch(function(){ /* no logs endpoint on an old daemon — the tab just stays empty */ });
+  }
+
   var RAIL_KEY = "loomRail";
   function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? true : v === "1"; }
   function applyRail(){
