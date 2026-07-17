@@ -234,3 +234,154 @@ export async function status(dir: string): Promise<GitStatus> {
   }
   return { branch, ahead, behind, upstream, staged, unstaged, untracked };
 }
+
+/**
+ * git that might touch the network (push/fetch), bounded by a timeout.
+ *
+ * The plain git() above has none, which is fine for local commands — they
+ * finish or fail fast. A push against an unreachable or auth-prompting remote
+ * hangs forever, and a hung request is a worse failure than a slow one. Auth is
+ * delegated entirely to the user's own git credential helper; Loom stores no
+ * tokens, the same posture as its gh usage.
+ */
+function gitNet(args: string[], cwd: string, timeoutMs = 45_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "git",
+      args,
+      { cwd, maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs },
+      (err, stdout, stderr) => {
+        if (err) {
+          const detail = String(stderr || (err as Error).message).trim();
+          const killed = (err as { killed?: boolean }).killed;
+          reject(
+            new GitError(
+              killed ? "push timed out — is the remote reachable?" : firstLine(detail) || `git ${args[0]} failed`,
+              detail,
+            ),
+          );
+          return;
+        }
+        // push writes its progress to stderr even on success, so include it.
+        resolve(String(stdout) + String(stderr));
+      },
+    );
+  });
+}
+
+/**
+ * Start version control here.
+ *
+ * Refuses if the directory is already inside a repo, so an accidental click
+ * can't nest one repo inside another. Renames the initial branch to `main` when
+ * git left it on `master` — safe because a just-init'd repo has no commits, and
+ * it matches what remotes expect.
+ */
+export async function init(dir: string): Promise<{ branch: string }> {
+  if (await isRepo(dir)) throw new GitError("this is already a git repository", "");
+  await git(["init"], dir);
+  const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim();
+  if (branch === "master") await git(["branch", "-m", "main"], dir).catch(() => {});
+  logbook.info("git", "initialised a git repository", dir);
+  return { branch: branch === "master" || !branch ? "main" : branch };
+}
+
+export interface Commit {
+  sha: string;
+  short: string;
+  subject: string;
+  author: string;
+  /** "2 hours ago" — git's own relative time. */
+  relative: string;
+  ts: number;
+}
+
+/** Recent commits, newest first. Empty in a repo whose first commit hasn't landed. */
+export async function log(dir: string, limit = 30): Promise<Commit[]> {
+  if (!(await hasCommits(dir))) return [];
+  // Unit and record separators keep subjects with commas/newlines intact.
+  const US = "\x1f";
+  const RS = "\x1e";
+  const fmt = ["%H", "%h", "%s", "%an", "%ar", "%at"].join(US) + RS;
+  const n = String(Math.min(200, Math.max(1, Math.floor(limit) || 30)));
+  const out = await git(["log", `--pretty=format:${fmt}`, "-n", n], dir).catch(() => "");
+  return out
+    .split(RS)
+    .map((r) => r.replace(/^\n/, "").trim())
+    .filter(Boolean)
+    .map((r) => {
+      const [sha, short, subject, author, relative, at] = r.split(US);
+      return {
+        sha: sha ?? "",
+        short: short ?? "",
+        subject: subject ?? "",
+        author: author ?? "",
+        relative: relative ?? "",
+        ts: Number(at ?? 0) * 1000,
+      };
+    });
+}
+
+/**
+ * The unified diff for one file, HEAD → working tree (both staged and unstaged
+ * changes). Before the first commit there's no HEAD, so it diffs against the
+ * index instead. Empty string when nothing differs.
+ */
+export async function fileDiff(dir: string, rel: string): Promise<string> {
+  const safe = safeRelPath(dir, rel);
+  if (await hasCommits(dir)) return git(["diff", "HEAD", "--", safe], dir).catch(() => "");
+  return git(["diff", "--", safe], dir).catch(() => "");
+}
+
+export interface Branches {
+  current: string;
+  all: string[];
+}
+
+/** Local branches and which one is checked out — for the checkout picker. */
+export async function branches(dir: string): Promise<Branches> {
+  if (!(await hasCommits(dir))) return { current: "", all: [] };
+  const out = await git(["branch", "--format=%(refname:short)"], dir).catch(() => "");
+  const all = out.split("\n").map((s) => s.trim()).filter(Boolean);
+  const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim();
+  return { current, all };
+}
+
+/**
+ * Switch to a branch or commit.
+ *
+ * git refuses on its own when the switch would overwrite uncommitted changes,
+ * and that refusal (with its list of the files at risk) is exactly the message
+ * to surface — so we don't second-guess it, we just pass its stderr back. The
+ * ref is character-validated because it reaches a git command, though `--`
+ * already stops it being read as a flag.
+ */
+export async function checkout(dir: string, ref: string): Promise<{ ref: string; branch: string }> {
+  const clean = ref.trim();
+  if (!clean) throw new GitError("no ref given", "");
+  if (!/^[\w./+-]+$/.test(clean)) throw new GitError(`"${clean}" is not a valid ref name`, "");
+  await git(["checkout", clean], dir);
+  const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim();
+  logbook.info("git", `checked out ${clean}`, dir);
+  return { ref: clean, branch };
+}
+
+/**
+ * Push to the upstream, setting it on the first push.
+ *
+ * A branch with no upstream needs `-u origin <branch>` once; after that a bare
+ * `git push` is enough. Either way the network is bounded (gitNet) and auth is
+ * the user's own credential helper. A repo with no remote at all fails with
+ * git's "No configured push destination", which is the honest answer.
+ */
+export async function push(dir: string): Promise<{ branch: string; detail: string }> {
+  if (!(await isRepo(dir))) throw new GitError("not a git repository", "");
+  if (!(await hasCommits(dir))) throw new GitError("nothing to push — make a commit first", "");
+  const st = await status(dir);
+  const branch = st.branch || "HEAD";
+  const detail = st.upstream
+    ? await gitNet(["push"], dir)
+    : await gitNet(["push", "-u", "origin", branch], dir);
+  logbook.info("git", `pushed ${branch}`, detail.trim());
+  return { branch, detail: detail.trim() };
+}

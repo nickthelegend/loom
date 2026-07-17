@@ -14,7 +14,21 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { commit, discard, GitError, safeRelPath, stage, status, unstage } from "../src/core/git.js";
+import {
+  branches,
+  checkout,
+  commit,
+  discard,
+  fileDiff,
+  GitError,
+  init,
+  log,
+  push,
+  safeRelPath,
+  stage,
+  status,
+  unstage,
+} from "../src/core/git.js";
 import { tmpDir } from "./helpers.js";
 
 function repo(): string {
@@ -217,6 +231,107 @@ describe("git · errors", () => {
     await commit(dir, "one");
     // committing again with nothing staged: our message, because we check first
     await expect(commit(dir, "two")).rejects.toBeInstanceOf(GitError);
+  });
+});
+
+describe("git · init", () => {
+  it("makes a repo where there was none, on branch main", async () => {
+    const dir = tmpDir("fresh-init");
+    expect((await status(dir)).branch, "not a repo yet").toBe("");
+    const res = await init(dir);
+    expect(res.branch).toBe("main");
+    expect(fs.existsSync(path.join(dir, ".git"))).toBe(true);
+  });
+
+  it("refuses to nest a repo inside an existing one", async () => {
+    await expect(init(repo())).rejects.toThrow(/already a git repository/);
+  });
+});
+
+describe("git · log", () => {
+  it("returns commits newest first, with subject and author", async () => {
+    const dir = repo(); // has the "root" commit
+    write(dir, "a.txt", "one");
+    await stage(dir, ["a.txt"]);
+    await commit(dir, "add a");
+    write(dir, "b.txt", "two");
+    await stage(dir, ["b.txt"]);
+    await commit(dir, "add b");
+
+    const commits = await log(dir, 10);
+    expect(commits.map((c) => c.subject)).toEqual(["add b", "add a", "root"]);
+    expect(commits[0].short).toMatch(/^[0-9a-f]{7,}$/);
+    expect(commits[0].author).toBe("Loom Test");
+    expect(commits[0].ts).toBeGreaterThan(0);
+  });
+
+  it("is empty in a repo with no commits, rather than throwing", async () => {
+    const dir = tmpDir("nocommits");
+    execFileSync("git", ["init", "-q", "."], { cwd: dir });
+    expect(await log(dir)).toEqual([]);
+  });
+});
+
+describe("git · fileDiff", () => {
+  it("shows one file's changes as a unified patch", async () => {
+    const dir = repo();
+    write(dir, "t.txt", "before\n");
+    await stage(dir, ["t.txt"]);
+    await commit(dir, "add t");
+    write(dir, "t.txt", "after\n");
+    const patch = await fileDiff(dir, "t.txt");
+    expect(patch).toContain("-before");
+    expect(patch).toContain("+after");
+  });
+
+  it("refuses a path that climbs out of the project", async () => {
+    await expect(fileDiff(repo(), "../../etc/passwd")).rejects.toThrow(/outside the project/);
+  });
+});
+
+describe("git · branches and checkout", () => {
+  it("lists branches and switches between them", async () => {
+    const dir = repo();
+    execFileSync("git", ["branch", "feature"], { cwd: dir });
+    const b = await branches(dir);
+    expect(b.all.sort()).toEqual(["feature", b.current].sort());
+    expect(b.all).toContain("feature");
+
+    const res = await checkout(dir, "feature");
+    expect(res.branch).toBe("feature");
+    expect((await branches(dir)).current).toBe("feature");
+  });
+
+  it("rejects a ref name with shell-ish characters", async () => {
+    await expect(checkout(repo(), "foo; rm -rf /")).rejects.toThrow(/not a valid ref/);
+  });
+
+  it("surfaces git's own refusal when a checkout would lose work", async () => {
+    const dir = repo();
+    // A file that differs between main and `other`, then dirtied uncommitted on
+    // main — switching would overwrite the local edit, so git refuses.
+    write(dir, "shared.txt", "main version\n");
+    await stage(dir, ["shared.txt"]);
+    await commit(dir, "main adds shared");
+    execFileSync("git", ["checkout", "-q", "-b", "other"], { cwd: dir });
+    write(dir, "shared.txt", "other version\n");
+    await stage(dir, ["shared.txt"]);
+    await commit(dir, "other changes shared");
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: dir });
+    write(dir, "shared.txt", "uncommitted local edit\n"); // dirty, uncommitted
+    await expect(checkout(dir, "other")).rejects.toBeInstanceOf(GitError);
+  });
+});
+
+describe("git · push guards", () => {
+  it("refuses to push a non-repo", async () => {
+    await expect(push(tmpDir("notrepo"))).rejects.toThrow(/not a git repository/);
+  });
+
+  it("refuses to push before the first commit", async () => {
+    const dir = tmpDir("nocommit-push");
+    execFileSync("git", ["init", "-q", "."], { cwd: dir });
+    await expect(push(dir)).rejects.toThrow(/nothing to push/);
   });
 });
 

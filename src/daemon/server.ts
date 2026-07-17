@@ -22,9 +22,15 @@ import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../co
 import { logbook } from "../core/logbook.js";
 import { searchChats, searchCode } from "../core/search.js";
 import {
+  branches as gitBranches,
+  checkout as gitCheckout,
   commit as gitCommit,
   discard as gitDiscard,
+  fileDiff as gitFileDiff,
   GitError,
+  init as gitInit,
+  log as gitLog,
+  push as gitPush,
   stage as gitStage,
   status as gitStatus,
   unstage as gitUnstage,
@@ -606,6 +612,45 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/git/commit",
       gitWrite((dir, b) => gitCommit(dir, String(b.message ?? ""))),
+    );
+    // init / push / checkout — all write, all through the same error surface.
+    app.post(
+      "/api/projects/:id/git/init",
+      gitWrite((dir) => gitInit(dir)),
+    );
+    app.post(
+      "/api/projects/:id/git/push",
+      gitWrite((dir) => gitPush(dir)),
+    );
+    app.post(
+      "/api/projects/:id/git/checkout",
+      gitWrite((dir, b) => gitCheckout(dir, String(b.ref ?? ""))),
+    );
+    // read-only: the commit log, one file's diff, and the branch list
+    app.get(
+      "/api/projects/:id/git/log",
+      withRuntime(async (rt, req, res) => {
+        const limit = Number((req.query as Record<string, string>).limit) || 30;
+        res.json({ commits: await gitLog(rt.info.dir, limit) });
+      }),
+    );
+    app.get(
+      "/api/projects/:id/git/diff",
+      withRuntime(async (rt, req, res) => {
+        const p = String((req.query as Record<string, string>).path ?? "");
+        if (!p) return void res.status(400).json({ error: "missing path" });
+        try {
+          res.json({ path: p, patch: await gitFileDiff(rt.info.dir, p) });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    app.get(
+      "/api/projects/:id/git/branches",
+      withRuntime(async (rt, _req, res) => {
+        res.json(await gitBranches(rt.info.dir));
+      }),
     );
 
     // ---- the Console ------------------------------------------------------

@@ -734,6 +734,23 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .gcount{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border-radius:8px;
     background:var(--sidebar-accent);flex:none}
   .gcount.dim{opacity:.6}
+  .gbranch .gbranchsel{background:transparent;border:1px solid var(--input);border-radius:6px;color:var(--foreground);
+    font-family:var(--font-mono);font-size:11px;font-weight:600;padding:2px 4px;cursor:pointer;max-width:130px}
+  .gbranch .gbranchsel:focus{outline:none;border-color:var(--ring)}
+  .gbranch .iconbtn.xs{margin-left:0}
+  .ginit{padding:16px 12px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+  .ginit .rempty{padding:0}
+  /* commit history at the foot of the source-control panel */
+  .gcommits-h{margin-top:4px}
+  .gcommits{display:flex;flex-direction:column}
+  .gclog{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:8px;
+    padding:6px 10px;border-bottom:1px solid color-mix(in srgb, var(--border) 60%, transparent)}
+  .gclog:hover{background:var(--sidebar-accent)}
+  .gcsha{grid-row:1/3;align-self:center;font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
+    background:var(--sidebar-accent);border-radius:5px;padding:2px 5px;height:fit-content}
+  .gcsub{font-size:12px;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gcmeta{font-size:10px;color:var(--muted-foreground);font-family:var(--font-mono);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rsec .gn{font-family:var(--font-mono);opacity:.65;margin-left:5px;font-weight:400}
   .rsec .lnk{margin-left:auto;font-size:10.5px;color:var(--muted-foreground);cursor:pointer;
     background:none;border:0;padding:0 2px}
@@ -2873,18 +2890,46 @@ ${BRAND_SPRITE}
           '</div><div class="rm">▸ ' + esc(r.steps[r.current] || "") + "</div></div>";
       }
       if (!g) { el.innerHTML = html + '<div class="rempty">loading…</div>'; refreshGit(); return; }
-      if (!g.branch) { el.innerHTML = html + '<div class="rempty">not a git repository</div>'; return; }
+      if (!g.branch) {
+        // Not a repo yet — offer to make one, rather than a dead end.
+        el.innerHTML = html +
+          '<div class="ginit"><div class="rempty">not a git repository</div>' +
+          '<button class="btn primary sm" id="gitinit">' + ICONS.branch + " Initialise repository</button></div>";
+        var ib = document.getElementById("gitinit");
+        if (ib) ib.onclick = function(){
+          ib.disabled = true;
+          api("/api/projects/" + pid + "/git/init", { method: "POST", body: "{}" })
+            .then(function(r){ toast("initialised on " + r.branch); refreshGit(); refreshTree(false); })
+            .catch(function(e){ toast(e.message); ib.disabled = false; });
+        };
+        return;
+      }
 
       // Branch and distance from upstream: "3 ahead" is the difference between
-      // "I pushed" and "I thought I pushed".
-      html += '<div class="gbranch">' + ICONS.branch + '<span class="bn">' + esc(g.branch) + "</span>" +
+      // "I pushed" and "I thought I pushed". The branch name is a picker when
+      // there's more than one; Push sets the upstream on the first push.
+      var brs = state.gitBranches;
+      var branchEl;
+      if (brs && brs.all && brs.all.length > 1) {
+        branchEl = '<select class="gbranchsel" id="gcheckout">' +
+          brs.all.map(function(b){ return '<option value="' + esc(b) + '"' + (b === g.branch ? " selected" : "") + ">" + esc(b) + "</option>"; }).join("") +
+          "</select>";
+      } else {
+        branchEl = '<span class="bn">' + esc(g.branch) + "</span>";
+      }
+      html += '<div class="gbranch">' + ICONS.branch + branchEl +
         (g.ahead ? '<span class="gcount">↑' + g.ahead + "</span>" : "") +
         (g.behind ? '<span class="gcount">↓' + g.behind + "</span>" : "") +
-        (g.upstream ? "" : '<span class="gcount dim">no upstream</span>') + "</div>";
+        (g.upstream ? "" : '<span class="gcount dim">no upstream</span>') +
+        '<span style="flex:1"></span>' +
+        '<button class="iconbtn xs" id="gitpush" title="push to the remote" aria-label="push">' + ICONS.up + "</button>" +
+        "</div>";
 
       var staged = g.staged || [], unstaged = g.unstaged || [], untracked = g.untracked || [];
       if (!staged.length && !unstaged.length && !untracked.length) {
-        el.innerHTML = html + '<div class="rempty">clean — nothing to commit</div>';
+        html += '<div class="rempty">clean — nothing to commit</div>';
+        el.innerHTML = html + gitLogHtml();
+        wireGitRows(el);
         return;
       }
 
@@ -2921,8 +2966,21 @@ ${BRAND_SPRITE}
         html += '<div class="rsec">Untracked <span class="gn">' + untracked.length + "</span></div>";
         html += untracked.map(function(f){ return fileRow({ path: f, status: "?" }, "untracked"); }).join("");
       }
-      el.innerHTML = html;
+      el.innerHTML = html + gitLogHtml();
       wireGitRows(el);
+    }
+
+    /** The commit history, newest first — shown at the foot of the SCM panel. */
+    function gitLogHtml(){
+      var log = state.gitLog || [];
+      if (!log.length) return "";
+      return '<div class="rsec gcommits-h">Commits</div>' +
+        '<div class="gcommits">' + log.map(function(c){
+          return '<div class="gclog" title="' + esc(c.sha) + '">' +
+            '<span class="gcsha">' + esc(c.short) + "</span>" +
+            '<span class="gcsub">' + esc(c.subject) + "</span>" +
+            '<span class="gcmeta">' + esc(c.author) + " \\u00b7 " + esc(c.relative) + "</span></div>";
+        }).join("") + "</div>";
     }
 
     /** Every control in the Source control view. */
@@ -2987,6 +3045,24 @@ ${BRAND_SPRITE}
           .catch(function(e){ toast(e.message); })
           .then(function(){ if (btn) btn.disabled = false; });
       };
+      // Push — network-bound, so show it working and surface git's own words.
+      var pushBtn = document.getElementById("gitpush");
+      if (pushBtn) pushBtn.onclick = function(){
+        pushBtn.disabled = true;
+        toast("pushing\\u2026");
+        api("/api/projects/" + pid + "/git/push", { method: "POST", body: "{}" })
+          .then(function(r){ toast("pushed " + r.branch); refreshGit(); })
+          .catch(function(e){ toast(e.message); })
+          .then(function(){ pushBtn.disabled = false; });
+      };
+      // Checkout — git refuses on its own if it would lose work; we relay that.
+      var co = document.getElementById("gcheckout");
+      if (co) co.onchange = function(){
+        var ref = co.value;
+        api("/api/projects/" + pid + "/git/checkout", { method: "POST", body: JSON.stringify({ ref: ref }) })
+          .then(function(r){ toast("on " + r.branch); refreshGit(); refreshTree(false); })
+          .catch(function(e){ toast(e.message); refreshGit(); });
+      };
     }
 
     /** What git thinks, then redraw if that's what you're looking at. */
@@ -2994,6 +3070,16 @@ ${BRAND_SPRITE}
       return api("/api/projects/" + pid + "/git/status").then(function(g){
         state.git = g;
         if (state.railView === "scm") drawRail();
+        // The log and branch list come alongside — cheap, and the panel shows
+        // both. Failures are non-fatal: a repo with no commits has neither.
+        if (g && g.branch) {
+          api("/api/projects/" + pid + "/git/log?limit=30")
+            .then(function(j){ state.gitLog = j.commits || []; if (state.railView === "scm") drawRail(); })
+            .catch(function(){ state.gitLog = []; });
+          api("/api/projects/" + pid + "/git/branches")
+            .then(function(j){ state.gitBranches = j; if (state.railView === "scm") drawRail(); })
+            .catch(function(){ state.gitBranches = null; });
+        } else { state.gitLog = []; state.gitBranches = null; }
       }).catch(function(){ /* not a repo, or the daemon went away — drawScm says so */ });
     }
 
