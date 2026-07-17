@@ -759,6 +759,52 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .frow.git .fp{cursor:pointer}
   .frow.git .fp:hover{text-decoration:underline}
   .gacts{margin-left:auto;display:none;gap:1px;flex:none}
+  /* --- VS Code-style source control --- */
+  .scmcommit{padding:10px 10px 6px;display:flex;flex-direction:column;gap:8px}
+  .scmmsgwrap{position:relative}
+  .scmmsg{width:100%;box-sizing:border-box;min-height:60px;max-height:160px;resize:none;
+    background:color-mix(in srgb, var(--input) 30%, var(--background));border:1px solid var(--input);
+    border-radius:8px;padding:8px 10px;font:inherit;font-size:12.5px;line-height:1.5;color:var(--foreground);overflow-y:auto}
+  .scmmsg::placeholder{color:color-mix(in srgb, var(--muted-foreground) 60%, transparent)}
+  .scmmsg:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 24%, transparent)}
+  .scmgen{position:absolute;right:6px;bottom:6px;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;
+    background:color-mix(in srgb, var(--primary) 14%, transparent);color:var(--primary);border:1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+    border-radius:6px;font:inherit;font-size:10.5px;font-weight:600;cursor:pointer;transition:background .12s}
+  .scmgen:hover{background:color-mix(in srgb, var(--primary) 22%, transparent)}
+  .scmgen svg{width:12px;height:12px}
+  .scmgen.busy svg{animation:spin 1s linear infinite}
+  .scmgen:disabled{opacity:.6;cursor:default}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .scmcommitrow{display:flex;gap:1px}
+  .scmcommitbtn{flex:1;border-top-right-radius:0;border-bottom-right-radius:0;height:32px}
+  .scmsplit{width:30px;flex:none;padding:0;border-top-left-radius:0;border-bottom-left-radius:0;
+    border-left:1px solid color-mix(in srgb, var(--primary-foreground) 25%, transparent);height:32px}
+  .scmsplit svg{width:14px;height:14px;transform:rotate(90deg)}
+  .btn.primary:disabled{opacity:.5;cursor:default}
+  .scmmenu{position:fixed;z-index:70;min-width:180px;background:var(--popover,var(--background));
+    border:1px solid var(--border);border-radius:9px;box-shadow:0 12px 34px rgba(0,0,0,.3);padding:4px}
+  .scmmi{display:block;width:100%;text-align:left;padding:7px 10px;border:0;border-radius:6px;background:none;
+    color:var(--foreground);font:inherit;font-size:12.5px;cursor:pointer}
+  .scmmi:hover{background:var(--sidebar-accent)}
+  .scmsec{display:flex;align-items:center;gap:6px;padding:8px 10px 4px;font-size:11px;font-weight:600;
+    letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground)}
+  .scmsec .scmn{font-family:var(--font-mono);font-weight:400;opacity:.7}
+  .scmsec .lnk{margin-left:auto;display:inline-flex;color:var(--muted-foreground);cursor:pointer;background:none;border:0;padding:2px;border-radius:4px}
+  .scmsec .lnk:hover{color:var(--foreground);background:var(--sidebar-accent)}
+  .scmsec .lnk svg{width:14px;height:14px}
+  .scmlist{display:flex;flex-direction:column}
+  .scmrow{display:flex;align-items:center;gap:6px;padding:4px 10px;cursor:default}
+  .scmrow:hover{background:var(--sidebar-accent)}
+  .scmname{flex:1;min-width:0;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;
+    color:var(--foreground)}
+  .scmname:hover{text-decoration:underline}
+  .scmname .scmdir{color:var(--muted-foreground);opacity:.7}
+  .scmacts{display:none;gap:1px;flex:none}
+  .scmrow:hover .scmacts{display:flex}
+  .scmbadge{flex:none;width:16px;text-align:center;font-family:var(--font-mono);font-size:11px;font-weight:700}
+  .scmbadge.mod{color:#e2b341}
+  .scmbadge.add{color:#4aa564}
+  .scmbadge.del{color:#e5674d}
   .frow.git:hover .gacts{display:flex}
   .iconbtn.xs{width:20px;height:20px;border-radius:5px}
   /* A message that matches, in the sidebar under the projects. */
@@ -1204,6 +1250,23 @@ ${BRAND_SPRITE}
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   function hue(id){ var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
   function money(n){ return "$" + (n >= 0.01 ? n.toFixed(2) : n.toFixed(4)); }
+  /** A tiny action menu anchored under a button (the SCM commit split, etc.). */
+  function openScmMenu(anchor, items){
+    var ex = document.getElementById("scmmenu"); if (ex) ex.remove();
+    var m = document.createElement("div"); m.id = "scmmenu"; m.className = "scmmenu";
+    m.innerHTML = items.map(function(it, i){ return '<button class="scmmi" data-i="' + i + '">' + esc(it.label) + "</button>"; }).join("");
+    document.body.appendChild(m);
+    var r = anchor.getBoundingClientRect();
+    m.style.left = Math.max(8, Math.round(r.right - m.offsetWidth)) + "px";
+    m.style.top = Math.round(r.bottom + 4) + "px";
+    if (r.bottom + 4 + m.offsetHeight > window.innerHeight) m.style.top = Math.max(8, Math.round(r.top - m.offsetHeight - 4)) + "px";
+    Array.prototype.forEach.call(m.querySelectorAll(".scmmi"), function(b){
+      b.onclick = function(ev){ ev.stopPropagation(); closeScmMenu(); items[Number(b.getAttribute("data-i"))].run(); };
+    });
+    setTimeout(function(){ document.addEventListener("mousedown", scmMenuAway); }, 0);
+  }
+  function scmMenuAway(ev){ var m = document.getElementById("scmmenu"); if (m && !m.contains(ev.target)) closeScmMenu(); }
+  function closeScmMenu(){ document.removeEventListener("mousedown", scmMenuAway); var m = document.getElementById("scmmenu"); if (m) m.remove(); }
   /** Compact "3m ago" / "2h ago" / "5d ago" from an epoch-ms timestamp. */
   function rel(ts){
     var s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
@@ -1318,6 +1381,7 @@ ${BRAND_SPRITE}
     file: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/>'),
     chevron: svg('<path d="m9 6 6 6-6 6"/>'),
     chevronLeft: svg('<path d="m15 6-6 6 6 6"/>'),
+    spark: svg('<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>'),
     external: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'),
     issue: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>'),
     pr: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7"/><circle cx="18" cy="18" r="2.5"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="m13 3-2 3 2 3"/>'),
@@ -3034,45 +3098,61 @@ ${BRAND_SPRITE}
         "</div>";
 
       var staged = g.staged || [], unstaged = g.unstaged || [], untracked = g.untracked || [];
-      if (!staged.length && !unstaged.length && !untracked.length) {
-        html += '<div class="rempty">clean — nothing to commit</div>';
+      var changeCount = staged.length + unstaged.length + untracked.length;
+
+      // The commit box — always at the top, VS Code style: a message field with
+      // a Generate button, then a full-width Commit with a split menu. Kept even
+      // when the tree is clean, so the panel's shape doesn't jump around.
+      html += '<div class="scmcommit">' +
+        '<div class="scmmsgwrap">' +
+        '<textarea id="gmsg" class="scmmsg" rows="1" placeholder="Message (\\u2318\\u21b5 to commit)"></textarea>' +
+        '<button class="scmgen" id="gitgen" type="button" title="Draft a message from the staged diff">' + ICONS.spark + " Generate</button>" +
+        "</div>" +
+        '<div class="scmcommitrow">' +
+        '<button class="btn primary scmcommitbtn" id="gcommitbtn"' + (staged.length ? "" : " disabled") + '>Commit' + (staged.length ? " " + staged.length : "") + "</button>" +
+        '<button class="btn primary scmsplit" id="gcommitmore" type="button" aria-label="more commit actions">' + ICONS.chevron + "</button>" +
+        "</div></div>";
+
+      if (!changeCount) {
+        html += '<div class="rempty">No changes — the working tree is clean.</div>';
         el.innerHTML = html + gitLogHtml();
         wireGitRows(el);
         return;
       }
 
+      // One file row, VS Code style: name (with dimmed directory), hover actions,
+      // and the porcelain status letter as a coloured badge on the right.
       function fileRow(f, kind){
         var st = String(f.status || "?").trim() || "?";
-        var pth = f.path;
-        var cls = st.indexOf("D") >= 0 ? "del" : (st === "?" || st === "A" ? "add" : "mod");
-        return '<div class="frow git" data-file="' + esc(pth) + '">' +
-          '<span class="fst ' + cls + '">' + esc(st) + "</span>" +
-          '<span class="fp" data-open="' + esc(pth) + '">' + esc(pth) + "</span>" +
-          '<span class="gacts">' +
+        var pth = f.path, base = pth.split("/").pop(), dir = pth.slice(0, pth.length - base.length);
+        var letter = st === "?" ? "U" : st.charAt(0);
+        var bc = letter === "D" ? "del" : (letter === "U" || letter === "A" ? "add" : "mod");
+        return '<div class="scmrow" data-file="' + esc(pth) + '" title="' + esc(pth) + '">' +
+          '<span class="scmname" data-open="' + esc(pth) + '">' + (dir ? '<span class="scmdir">' + esc(dir) + "</span>" : "") + esc(base) + "</span>" +
+          '<span class="scmacts">' +
           (kind === "staged"
-            ? '<button class="iconbtn xs" data-unstage="' + esc(pth) + '" title="unstage">' + ICONS.minus + "</button>"
-            : '<button class="iconbtn xs" data-discard="' + esc(pth) + '" data-untracked="' + (kind === "untracked" ? "1" : "") + '" title="discard changes">' + ICONS.x + "</button>" +
-              '<button class="iconbtn xs" data-stage="' + esc(pth) + '" title="stage">' + ICONS.plus + "</button>") +
-          "</span></div>";
+            ? '<button class="iconbtn xs" data-unstage="' + esc(pth) + '" title="unstage" aria-label="unstage">' + ICONS.minus + "</button>"
+            : '<button class="iconbtn xs" data-discard="' + esc(pth) + '" data-untracked="' + (kind === "untracked" ? "1" : "") + '" title="discard changes" aria-label="discard changes">' + ICONS.refresh + "</button>" +
+              '<button class="iconbtn xs" data-stage="' + esc(pth) + '" title="stage" aria-label="stage">' + ICONS.plus + "</button>") +
+          "</span>" +
+          '<span class="scmbadge ' + bc + '" title="' + esc(st) + '">' + esc(letter) + "</span>" +
+          "</div>";
       }
 
       if (staged.length) {
-        html += '<div class="rsec">Staged <span class="gn">' + staged.length + "</span>" +
-          '<button class="lnk" id="unstageall">unstage all</button></div>';
-        html += staged.map(function(f){ return fileRow(f, "staged"); }).join("");
-        html += '<form class="gcommit" id="gcommitform">' +
-          '<input id="gmsg" placeholder="Message · what changed and why" autocomplete="off">' +
-          '<button class="btn primary sm" type="submit" id="gcommitbtn">Commit ' + staged.length + " file" + (staged.length === 1 ? "" : "s") + "</button>" +
-          "</form>";
+        html += '<div class="scmsec">Staged Changes<span class="scmn">' + staged.length + "</span>" +
+          '<button class="lnk" id="unstageall">' + ICONS.minus + "</button></div>";
+        html += '<div class="scmlist">' + staged.map(function(f){ return fileRow(f, "staged"); }).join("") + "</div>";
       }
       if (unstaged.length) {
-        html += '<div class="rsec">Changes <span class="gn">' + unstaged.length + "</span>" +
-          '<button class="lnk" id="stageall">stage all</button></div>';
-        html += unstaged.map(function(f){ return fileRow(f, "unstaged"); }).join("");
+        html += '<div class="scmsec">Changes<span class="scmn">' + unstaged.length + "</span>" +
+          '<button class="lnk" id="stageall">' + ICONS.plus + "</button></div>";
+        html += '<div class="scmlist">' + unstaged.map(function(f){ return fileRow(f, "unstaged"); }).join("") + "</div>";
       }
       if (untracked.length) {
-        html += '<div class="rsec">Untracked <span class="gn">' + untracked.length + "</span></div>";
-        html += untracked.map(function(f){ return fileRow({ path: f, status: "?" }, "untracked"); }).join("");
+        html += '<div class="scmsec">Untracked<span class="scmn">' + untracked.length + "</span>" +
+          '<button class="lnk" id="stageuntracked">' + ICONS.plus + "</button></div>";
+        html += '<div class="scmlist">' + untracked.map(function(f){ return fileRow({ path: f, status: "?" }, "untracked"); }).join("") + "</div>";
       }
       el.innerHTML = html + gitLogHtml();
       wireGitRows(el);
@@ -3126,7 +3206,12 @@ ${BRAND_SPRITE}
       var sa = document.getElementById("stageall");
       if (sa) sa.onclick = function(){
         var g = state.git || {};
-        var all = (g.unstaged || []).map(function(f){ return f.path; }).concat(g.untracked || []);
+        var all = (g.unstaged || []).map(function(f){ return f.path; });
+        if (all.length) act("stage", { paths: all });
+      };
+      var su = document.getElementById("stageuntracked");
+      if (su) su.onclick = function(){
+        var all = (state.git && state.git.untracked) || [];
         if (all.length) act("stage", { paths: all });
       };
       var ua = document.getElementById("unstageall");
@@ -3135,23 +3220,59 @@ ${BRAND_SPRITE}
         var all = (g.staged || []).map(function(f){ return f.path; });
         if (all.length) act("unstage", { paths: all });
       };
-      var form = document.getElementById("gcommitform");
-      if (form) form.onsubmit = function(ev){
-        ev.preventDefault();
-        var box = document.getElementById("gmsg");
-        var msg = (box.value || "").trim();
-        if (!msg) return toast("a commit needs a message");
+
+      // Commit box. The message is a textarea now; ⌘/Ctrl+Enter commits, and the
+      // split button opens a small menu of the fuller actions.
+      var msgbox = document.getElementById("gmsg");
+      function autosizeMsg(){ if (!msgbox) return; msgbox.style.height = "auto"; msgbox.style.height = Math.min(160, msgbox.scrollHeight) + "px"; }
+      if (msgbox) { msgbox.addEventListener("input", autosizeMsg); autosizeMsg(); }
+      function doCommit(alsoStageAll, alsoPush){
+        var msg = ((msgbox && msgbox.value) || "").trim();
+        if (!msg) { toast("a commit needs a message"); if (msgbox) msgbox.focus(); return; }
         var btn = document.getElementById("gcommitbtn");
         if (btn) btn.disabled = true;
-        api("/api/projects/" + pid + "/git/commit", { method: "POST", body: JSON.stringify({ message: msg }) })
-          .then(function(r){
-            box.value = "";
-            toast("committed " + r.sha + " · " + r.files + " file" + (r.files === 1 ? "" : "s"));
-            refreshGit();
-            refreshTree(false);
-          })
+        var pre = Promise.resolve();
+        if (alsoStageAll) {
+          var g = state.git || {};
+          var all = (g.unstaged || []).map(function(f){ return f.path; }).concat(g.untracked || []);
+          if (all.length) pre = api("/api/projects/" + pid + "/git/stage", { method: "POST", body: JSON.stringify({ paths: all }) });
+        }
+        pre.then(function(){
+          return api("/api/projects/" + pid + "/git/commit", { method: "POST", body: JSON.stringify({ message: msg }) });
+        }).then(function(r){
+          if (msgbox) { msgbox.value = ""; autosizeMsg(); }
+          toast("committed " + r.sha + " · " + r.files + " file" + (r.files === 1 ? "" : "s"));
+          if (alsoPush) {
+            toast("pushing\\u2026");
+            return api("/api/projects/" + pid + "/git/push", { method: "POST", body: "{}" })
+              .then(function(pr){ toast("pushed " + pr.branch); });
+          }
+        }).then(function(){ refreshGit(); refreshTree(false); })
           .catch(function(e){ toast(e.message); })
           .then(function(){ if (btn) btn.disabled = false; });
+      }
+      var cbtn = document.getElementById("gcommitbtn");
+      if (cbtn) cbtn.onclick = function(){ doCommit(false, false); };
+      if (msgbox) msgbox.addEventListener("keydown", function(e){
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); doCommit((state.git && !state.git.staged.length) || false, false); }
+      });
+      var more = document.getElementById("gcommitmore");
+      if (more) more.onclick = function(ev){
+        ev.stopPropagation();
+        openScmMenu(more, [
+          { label: "Commit & Push", run: function(){ doCommit(false, true); } },
+          { label: "Stage all & Commit", run: function(){ doCommit(true, false); } },
+          { label: "Stage all, Commit & Push", run: function(){ doCommit(true, true); } },
+        ]);
+      };
+      // Generate a commit message from the diff (the ✨ button).
+      var gen = document.getElementById("gitgen");
+      if (gen) gen.onclick = function(){
+        gen.disabled = true; gen.classList.add("busy");
+        api("/api/projects/" + pid + "/git/suggest-message", { method: "POST", body: "{}" })
+          .then(function(r){ if (msgbox) { msgbox.value = r.message; autosizeMsg(); msgbox.focus(); } })
+          .catch(function(e){ toast(e.message); })
+          .then(function(){ gen.disabled = false; gen.classList.remove("busy"); });
       };
       // Push — network-bound, so show it working and surface git's own words.
       var pushBtn = document.getElementById("gitpush");

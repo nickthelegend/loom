@@ -333,6 +333,18 @@ export async function fileDiff(dir: string, rel: string): Promise<string> {
   return git(["diff", "--", safe], dir).catch(() => "");
 }
 
+/**
+ * The diff a commit would capture — staged changes, or the whole working tree
+ * when nothing is staged yet. Used to write a commit message from. Bounded so a
+ * giant refactor doesn't blow the LLM's context (the summary only needs the
+ * shape of the change, not every line).
+ */
+export async function stagedDiff(dir: string, maxChars = 12_000): Promise<string> {
+  let out = await git(["diff", "--cached"], dir).catch(() => "");
+  if (!out.trim()) out = await git(["diff"], dir).catch(() => "");
+  return out.length > maxChars ? out.slice(0, maxChars) + "\n… (truncated)" : out;
+}
+
 export interface Branches {
   current: string;
   all: string[];

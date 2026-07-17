@@ -32,9 +32,11 @@ import {
   log as gitLog,
   push as gitPush,
   stage as gitStage,
+  stagedDiff as gitStagedDiff,
   status as gitStatus,
   unstage as gitUnstage,
 } from "../core/git.js";
+import { claudeText } from "../core/claude-cli.js";
 import { setupReport } from "../core/setup.js";
 import {
   ensureDaemonConfig,
@@ -650,6 +652,29 @@ export class LoomDaemon {
       "/api/projects/:id/git/branches",
       withRuntime(async (rt, _req, res) => {
         res.json(await gitBranches(rt.info.dir));
+      }),
+    );
+    // Draft a commit message from the staged diff, via the logged-in Claude CLI
+    // — the "Generate" affordance. No key; a no-op-ish 400 when Claude isn't
+    // there, so the field just stays empty and the user types their own.
+    app.post(
+      "/api/projects/:id/git/suggest-message",
+      withRuntime(async (rt, _req, res) => {
+        const diff = await gitStagedDiff(rt.info.dir).catch(() => "");
+        if (!diff.trim()) return void res.status(400).json({ error: "nothing to describe — stage or edit some files first" });
+        try {
+          const prompt =
+            "Write a single-line Conventional Commit subject (type(scope): summary, imperative mood, <72 chars) " +
+            "for this diff. Reply with ONLY the subject line, no quotes, no body.\n\n" +
+            diff;
+          const out = (await claudeText(prompt, { model: "haiku", timeoutMs: 30_000 })).trim();
+          const message = out.split("\n")[0]?.replace(/^["'`]|["'`]$/g, "").trim().slice(0, 120) ?? "";
+          if (!message) return void res.status(502).json({ error: "Claude returned nothing — type a message instead" });
+          res.json({ message });
+        } catch {
+          // claudeText's raw "claude exited N" helps no one at the commit box.
+          res.status(502).json({ error: "couldn't reach Claude to draft a message — type one instead" });
+        }
       }),
     );
 
