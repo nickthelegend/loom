@@ -391,6 +391,35 @@ describe("web app · the thread", () => {
     await waitUntil(() => box.value === "");
     expect(m.errors.join("\n")).toBe("");
   });
+
+  it("renders an agent reply as markdown, not literal characters", async () => {
+    // The echo agent replies with your text, so a markdown message round-trips
+    // into an agent bubble we can inspect for real rendering.
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#box"));
+    const stamp = Date.now();
+    // (echo prepends "echo(id): " to the first line, so the marker + the list
+    // and inline markup live on later lines where line-start rules still hold.)
+    const md = `marker ${stamp}\n\n- one\n- two\n\n**bold ${stamp}** and \`code\``;
+    ($(m, "#box") as HTMLInputElement).value = md;
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(
+      new m.window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+    await waitUntil(() => {
+      const bubbles = [...m.window.document.querySelectorAll(".msg.agent .bubble.md")];
+      return bubbles.some((b) => (b.textContent ?? "").includes(`marker ${stamp}`));
+    });
+    const bubble = [...m.window.document.querySelectorAll(".msg.agent .bubble.md")].find((b) =>
+      (b.textContent ?? "").includes(`marker ${stamp}`),
+    ) as HTMLElement;
+    // the - became a real list, the ** became bold, the ` became inline code
+    expect(bubble.querySelectorAll(".mdlist li").length, "list items").toBeGreaterThanOrEqual(2);
+    expect(bubble.querySelector("strong")?.textContent).toContain(`bold ${stamp}`);
+    expect(bubble.querySelector("code.mdi"), "inline code").toBeTruthy();
+    // the literal markdown syntax is gone from the output
+    expect(bubble.innerHTML).not.toContain("**bold");
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
 });
 
 /**

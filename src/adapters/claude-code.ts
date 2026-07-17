@@ -170,6 +170,11 @@ export class ClaudeCodeAdapter extends AdapterBase {
         if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
           setLastText(block.text);
           this.emit({ kind: "message", payload: { text: block.text } });
+        } else if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim()) {
+          // Extended thinking. Emitted as a reasoning-tagged message so the UI
+          // can fold it into its "thinking" block, the same shape codex and
+          // grok use. It never becomes lastAssistantText (that's the reply).
+          this.emit({ kind: "message", payload: { text: block.thinking, reasoning: true } });
         } else if (block.type === "tool_use") {
           const name = String(block.name ?? "tool");
           const input = (block.input ?? {}) as Record<string, unknown>;

@@ -54,6 +54,8 @@ const TEXT = (text: string) =>
   JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text }] } });
 const TOOL = (name: string, input: Record<string, unknown>) =>
   JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name, input }] } });
+const THINK = (thinking: string) =>
+  JSON.stringify({ type: "assistant", message: { content: [{ type: "thinking", thinking }] } });
 const RESULT = (extra: Record<string, unknown> = {}) =>
   JSON.stringify({ type: "result", total_cost_usd: 0.0421, ...extra });
 
@@ -155,6 +157,32 @@ describe("claude-code · what it did, not just what it said", () => {
     const edits = of(events, "file_edit").map((p) => p.path);
     expect(edits).toEqual(["/repo/changed.ts", "/repo/new.ts"]);
     expect(edits).not.toContain("/repo/read-only.ts");
+  });
+
+  /**
+   * Extended thinking used to be dropped on the floor: the content loop only
+   * matched text and tool_use. Now it surfaces as a reasoning-tagged message so
+   * the thread can fold it into a "thinking" block — distinct from the reply.
+   */
+  it("surfaces extended-thinking blocks as reasoning, kept apart from the reply", async () => {
+    const { events } = await run([
+      INIT("s"),
+      THINK("Let me weigh the two approaches before I answer."),
+      TEXT("Use the second approach."),
+      RESULT(),
+    ]);
+    const msgs = of(events, "message");
+    const reasoning = msgs.filter((p) => p.reasoning);
+    const replies = msgs.filter((p) => !p.reasoning);
+    expect(reasoning).toHaveLength(1);
+    expect(String(reasoning[0]!.text)).toContain("weigh the two approaches");
+    // the reply is the reply — thinking never becomes the assistant's answer
+    expect(replies.map((p) => p.text)).toEqual(["Use the second approach."]);
+  });
+
+  it("ignores an empty thinking block", async () => {
+    const { events } = await run([INIT("s"), THINK("   "), TEXT("done"), RESULT()]);
+    expect(of(events, "message").filter((p) => p.reasoning)).toHaveLength(0);
   });
 
   it("follows a notebook edit to its notebook", async () => {

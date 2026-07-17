@@ -240,6 +240,42 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .msg.agent .bubble{background:var(--card);border:1px solid var(--border);
     border-left:2px solid var(--border);border-bottom-left-radius:4px;
     box-shadow:0 1px 2px rgb(0 0 0 / .04)}
+  /* --- rendered markdown inside a bubble --- */
+  .bubble.md{white-space:normal}
+  .md>*:first-child{margin-top:0}
+  .md>*:last-child{margin-bottom:0}
+  .md .mdp{margin:0 0 8px;line-height:1.6}
+  .md .mdh{font-weight:600;line-height:1.3;margin:14px 0 6px}
+  .md .mdh1{font-size:18px}
+  .md .mdh2{font-size:16px}
+  .md .mdh3{font-size:14.5px}
+  .md .mdh4,.md .mdh5,.md .mdh6{font-size:13.5px;color:var(--muted-foreground)}
+  .md .mdlist{margin:0 0 8px;padding-left:20px}
+  .md .mdlist li{margin:2px 0;line-height:1.55}
+  .md .mdq{margin:0 0 8px;padding:2px 0 2px 12px;border-left:3px solid var(--border);
+    color:var(--muted-foreground)}
+  .md .mdhr{border:0;border-top:1px solid var(--border);margin:12px 0}
+  .md .mdi{font-family:var(--font-mono);font-size:.88em;background:color-mix(in srgb, var(--muted-foreground) 16%, transparent);
+    padding:1px 5px;border-radius:5px;word-break:break-word}
+  .md a{color:var(--thread,#67e8f9);text-decoration:underline;text-underline-offset:2px}
+  .md .mdcode{margin:0 0 8px;background:var(--editor-surface,color-mix(in srgb, var(--foreground) 6%, var(--background)));
+    border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto}
+  .md .mdcode code{font-family:var(--font-mono);font-size:12.5px;line-height:1.5;white-space:pre;color:var(--foreground)}
+  .md strong{font-weight:650}
+  /* --- reasoning / thinking block --- */
+  .msg.agent.thinking{align-items:flex-start;margin-bottom:2px}
+  .thinktag{font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted-foreground);background:var(--sidebar-accent);border-radius:5px;padding:1px 6px;margin-left:2px}
+  .thinkbox{max-width:88%;background:color-mix(in srgb, var(--muted-foreground) 8%, transparent);
+    border:1px dashed color-mix(in srgb, var(--muted-foreground) 30%, transparent);border-radius:10px;
+    padding:6px 12px;font-size:12.5px;color:var(--muted-foreground)}
+  .thinkbox summary{cursor:pointer;font-family:var(--font-mono);font-size:11px;letter-spacing:.03em;
+    list-style:none;user-select:none;opacity:.85}
+  .thinkbox summary::-webkit-details-marker{display:none}
+  .thinkbox summary::before{content:"\\25b8 ";font-size:9px}
+  .thinkbox[open] summary::before{content:"\\25be "}
+  .thinkbox .md{margin-top:6px;line-height:1.55}
+  .thinkbox .md .mdp{margin-bottom:5px}
   .sys{color:var(--muted-foreground);font-size:12px;text-align:center;margin:10px auto;
     font-family:var(--font-mono);letter-spacing:.02em;max-width:92%}
   .sys.warn{color:var(--warn)}
@@ -1231,6 +1267,70 @@ ${BRAND_SPRITE}
 
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
+
+  /**
+   * A small, safe markdown renderer for agent output.
+   *
+   * No dependency, no build step — the app has neither. The whole input is
+   * HTML-escaped FIRST, so every transform below only ever adds tags around
+   * already-safe text; nothing an agent prints can inject markup. Backticks are
+   * written as \\x60 throughout because a literal backtick would close this
+   * template literal and take the app down.
+   *
+   * Handles: fenced code, inline code, bold/italic/strike, headings, lists,
+   * blockquotes, rules, links (http/https only), and paragraphs with soft
+   * line breaks — the subset agents actually emit.
+   */
+  function mdInline(s){
+    // s is already HTML-escaped.
+    s = s.replace(/\\x60([^\\x60]+?)\\x60/g, '<code class="mdi">$1</code>');
+    s = s.replace(/\\*\\*([^*]+?)\\*\\*/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^\\w*])\\*([^*\\n]+?)\\*(?!\\w)/g, "$1<em>$2</em>");
+    s = s.replace(/~~([^~]+?)~~/g, "<del>$1</del>");
+    // [text](url) — only http(s); the url is already entity-escaped, so &amp; etc. are safe in the attribute.
+    s = s.replace(/\\[([^\\]]+?)\\]\\((https?:\\/\\/[^)\\s]+?)\\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return s;
+  }
+  function mdToHtml(src){
+    var lines = esc(String(src == null ? "" : src)).split("\\n");
+    var out = [], i = 0;
+    var FENCE = /^\\s*\\x60\\x60\\x60(.*)$/, FENCE_END = /^\\s*\\x60\\x60\\x60\\s*$/;
+    var HEAD = /^(#{1,6})\\s+(.*)$/, QUOTE = /^\\s*&gt;\\s?/, RULE = /^\\s*(?:---|\\*\\*\\*|___)\\s*$/;
+    var ULI = /^\\s*[-*+]\\s+/, OLI = /^\\s*\\d+\\.\\s+/;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (FENCE.test(line)) {
+        var code = [], j = i + 1;
+        while (j < lines.length && !FENCE_END.test(lines[j])) { code.push(lines[j]); j++; }
+        out.push('<pre class="mdcode"><code>' + code.join("\\n") + "</code></pre>");
+        i = j + 1; continue;
+      }
+      var h = line.match(HEAD);
+      if (h) { out.push('<div class="mdh mdh' + Math.min(6, h[1].length) + '">' + mdInline(h[2]) + "</div>"); i++; continue; }
+      if (QUOTE.test(line)) {
+        var q = [];
+        while (i < lines.length && QUOTE.test(lines[i])) { q.push(lines[i].replace(QUOTE, "")); i++; }
+        out.push('<blockquote class="mdq">' + mdInline(q.join(" ")) + "</blockquote>"); continue;
+      }
+      if (RULE.test(line)) { out.push('<hr class="mdhr">'); i++; continue; }
+      if (ULI.test(line) || OLI.test(line)) {
+        var ordered = OLI.test(line), items = [];
+        while (i < lines.length && (ULI.test(lines[i]) || OLI.test(lines[i]))) {
+          items.push("<li>" + mdInline(lines[i].replace(/^\\s*(?:[-*+]|\\d+\\.)\\s+/, "")) + "</li>"); i++;
+        }
+        out.push("<" + (ordered ? "ol" : "ul") + ' class="mdlist">' + items.join("") + "</" + (ordered ? "ol" : "ul") + ">"); continue;
+      }
+      if (!line.trim()) { i++; continue; }
+      var para = [];
+      while (i < lines.length && lines[i].trim() && !FENCE.test(lines[i]) && !HEAD.test(lines[i]) &&
+             !QUOTE.test(lines[i]) && !RULE.test(lines[i]) && !ULI.test(lines[i]) && !OLI.test(lines[i])) {
+        para.push(lines[i]); i++;
+      }
+      out.push('<div class="mdp">' + mdInline(para.join("<br>")) + "</div>");
+    }
+    return out.join("");
+  }
   /**
    * Mark the match inside a line.
    *
@@ -1553,12 +1653,21 @@ ${BRAND_SPRITE}
     if (e.kind === "message") {
       if (!e.agentId) {
         if (p.author === "loom") return '<div class="sys">\\u25b8 ' + esc(String(p.text).split("\\n")[0]) + "</div>";
-        return '<div class="msg user"><div class="bubble">' + esc(p.text) + "</div></div>";
+        // Your own messages: markdown too, so a pasted snippet or list reads right.
+        return '<div class="msg user"><div class="bubble md">' + mdToHtml(p.text) + "</div></div>";
       }
       var h = hue(e.agentId);
+      // Reasoning / thinking (codex, grok, and now claude) renders as a distinct
+      // collapsible block above the reply — dimmed, folded by default, so it's
+      // there when you want it and out of the way when you don't.
+      if (p.reasoning) {
+        return '<div class="msg agent thinking"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
+          brandMark(kindOf(e.agentId)) + esc(e.agentId) + '<span class="thinktag">thinking</span></div>' +
+          '<details class="thinkbox"><summary>reasoning</summary><div class="md">' + mdToHtml(p.text) + "</div></details></div>";
+      }
       return '<div class="msg agent"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
         brandMark(kindOf(e.agentId)) + esc(e.agentId) +
-        '</div><div class="bubble" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + esc(p.text) + "</div></div>";
+        '</div><div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div></div>";
     }
     if (e.kind === "tool_call") return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool) + "</div>";
     if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";

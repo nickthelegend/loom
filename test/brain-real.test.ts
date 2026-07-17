@@ -6,9 +6,11 @@
  * through the actual logged-in Claude CLI, so the prompt, the JSON contract,
  * and the evidence guard are all exercised end to end for real.
  *
- * It's gated on Claude being present and reachable (dev machines, not CI). When
- * it isn't, the whole suite skips rather than failing — the same posture the
- * runtime takes: a missing extractor is a no-op, never an error.
+ * Double-gated, because a real LLM costs tokens and ~15s a call: it runs only
+ * when LOOM_TEST_REAL=1 is set AND Claude is reachable. A plain `npm test`
+ * skips it; `LOOM_TEST_REAL=1 npm test` exercises it. When skipped it passes
+ * quietly rather than failing — the same posture the runtime takes: a missing
+ * extractor is a no-op, never an error.
  *
  * A real model is nondeterministic, so the assertions are about invariants that
  * must hold for ANY sensible extraction, not exact text:
@@ -28,9 +30,10 @@ import { claudeText } from "../src/core/claude-cli.js";
 import { cliAvailable } from "../src/adapters/base.js";
 import { tmpDir } from "./helpers.js";
 
+const OPTED_IN = process.env.LOOM_TEST_REAL === "1";
 let claudeReady = false;
 beforeAll(async () => {
-  claudeReady = await cliAvailable("claude");
+  claudeReady = OPTED_IN && (await cliAvailable("claude"));
 });
 
 async function freshBrain(): Promise<Brain> {
@@ -44,10 +47,14 @@ const realEngine: ExtractEngine = (p) =>
   claudeText(`${p.system}\n\n${p.user}`, { model: "haiku", timeoutMs: 60_000 });
 
 describe("brain · real Claude extraction", () => {
-  it.runIf(true)("only runs the real cases when Claude is reachable", () => {
+  it("announces whether the real-model cases will run", () => {
     // A visible marker so a skipped run is obvious rather than silent.
     if (!claudeReady) {
-      console.warn("[brain-real] claude CLI not reachable — real-model cases skipped");
+      console.warn(
+        OPTED_IN
+          ? "[brain-real] claude CLI not reachable — real-model cases skipped"
+          : "[brain-real] set LOOM_TEST_REAL=1 to run the real-model cases",
+      );
     }
     expect(true).toBe(true);
   });
