@@ -18,6 +18,8 @@ import {
   readDaemonConfig,
   type DaemonConfig,
 } from "../core/registry.js";
+import type { Memory } from "../core/brain.js";
+import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
 
 export class DaemonError extends Error {
@@ -147,6 +149,23 @@ export class DaemonClient {
 
   importMemory(id: string): Promise<{ imported: number; sources: string[] }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/memory/import`, {});
+  }
+
+  /** The learned memory units (the brain), newest first, with a kind breakdown. */
+  brain(
+    id: string,
+    opts: { kind?: string; limit?: number } = {},
+  ): Promise<{ memories: Memory[]; stats: { total: number; byKind: Record<string, number>; expired: number } }> {
+    const qs = new URLSearchParams();
+    if (opts.kind) qs.set("kind", opts.kind);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    const q = qs.toString();
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain${q ? `?${q}` : ""}`);
+  }
+
+  /** The board: cards (yours, agents, issues, PRs) each in one of four columns. */
+  board(id: string): Promise<BoardData> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/board`);
   }
 
   tree(id: string): Promise<{

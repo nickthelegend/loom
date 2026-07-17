@@ -1,14 +1,25 @@
 /**
- * The Loom TUI — the default face of `loom`. One full-screen thread over
- * every agent in the project; tab shifts the active agent (the handoff
- * happens when you send), routes and pairing without leaving the screen.
+ * The Loom TUI — the default face of `loom`. A tabbed, full-screen workspace
+ * over every agent in the project:
+ *
+ *   Thread — the conversation, streamed; tab shifts the active agent, the
+ *            handoff happens when you send.
+ *   Board  — agents, your cards, issues and PRs, in four columns.
+ *   Brain  — the memory the project has learned, grouped by kind.
+ *   Diff   — the working tree: changed files and a colourised patch.
+ *
+ * shift+tab cycles the views; ctrl+p is the command palette; /route runs a
+ * pipeline across agents; /pair drops a QR to pair your phone — all without
+ * leaving the screen.
  */
 
-import { useApp, useInput, useStdout, render, Box, Static, Text } from "ink";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useApp, useInput, useStdout, render, Box, Text } from "ink";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import pc from "picocolors";
 import qrcode from "qrcode-terminal";
 import type { ProjectStatus } from "../types.js";
+import type { BoardData } from "../daemon/board.js";
+import type { Memory } from "../core/brain.js";
 import { readProjectConfig } from "../core/registry.js";
 import { DaemonClient, DaemonError, ensureDaemon } from "../daemon/client.js";
 import { resolveCurrentProject, NoProjectError, currentProjectDir } from "./common.js";
@@ -16,17 +27,32 @@ import {
   HELP_LINES,
   SPINNER_FRAMES,
   cycleAgent,
+  cycleView,
   filterPalette,
+  formatBoard,
+  formatBrain,
+  formatDiff,
   logoLines,
   paletteItems,
   parseSlash,
   renderInput,
+  renderTabs,
   switchableAgents,
+  VIEWS,
   type PaletteItem,
+  type ViewName,
 } from "./tui-model.js";
 import { formatAgentRow, formatEvent } from "./ui.js";
 
 const PLACEHOLDER = 'Ask anything… "/route ship: add dark mode"';
+
+interface TreeShape {
+  git: boolean;
+  branch?: string;
+  files: Array<{ status: string; path: string }>;
+  patch: string;
+  truncated: boolean;
+}
 
 interface AppProps {
   client: DaemonClient;
@@ -36,10 +62,25 @@ interface AppProps {
 function App({ client, initial }: AppProps) {
   const { exit } = useApp();
   const { stdout } = useStdout();
-  const [lines, setLines] = useState<string[]>(() => [
-    ...logoLines(stdout?.columns ?? 80),
-    "",
-  ]);
+
+  // Terminal size, kept live so the viewport tracks a resize.
+  const [dims, setDims] = useState({ cols: stdout?.columns ?? 80, rows: stdout?.rows ?? 24 });
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = () => setDims({ cols: stdout.columns ?? 80, rows: stdout.rows ?? 24 });
+    stdout.on("resize", onResize);
+    return () => void stdout.off("resize", onResize);
+  }, [stdout]);
+  const { cols, rows } = dims;
+
+  const [view, setView] = useState<ViewName>("thread");
+  const [thread, setThread] = useState<string[]>(() => [...logoLines(cols), ""]);
+  const [board, setBoard] = useState<BoardData | null>(null);
+  const [brain, setBrain] = useState<{ memories: Memory[]; stats: { total: number; byKind: Record<string, number> } } | null>(null);
+  const [diff, setDiff] = useState<TreeShape | null>(null);
+  const [viewErr, setViewErr] = useState<string | null>(null);
+  const [scroll, setScroll] = useState(0);
+
   const [project, setProject] = useState(initial);
   const [selected, setSelected] = useState<string | null>(
     initial.holder ?? switchableAgents(initial.agents)[0]?.id ?? null,
@@ -65,14 +106,14 @@ function App({ client, initial }: AppProps) {
 
   const push = useCallback((...added: Array<string | null>) => {
     const real = added.filter((l): l is string => l !== null && l !== undefined);
-    if (real.length) setLines((prev) => [...prev, ...real]);
+    if (real.length) setThread((prev) => [...prev, ...real]);
   }, []);
 
   // Recent history, then live events over the websocket.
   useEffect(() => {
     let closed = false;
     void client
-      .events(project.id, undefined, 15)
+      .events(project.id, undefined, 30)
       .then(({ events }) => {
         if (closed) return;
         lastId.current = events[events.length - 1]?.id ?? 0;
@@ -103,6 +144,28 @@ function App({ client, initial }: AppProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Load the active view's data (and keep it fresh) — the thread streams itself.
+  useEffect(() => {
+    if (view === "thread") return;
+    let alive = true;
+    const load = () => {
+      const done = () => alive && setViewErr(null);
+      const fail = (e: unknown) => alive && setViewErr(e instanceof Error ? e.message : String(e));
+      if (view === "board") client.board(project.id).then((b) => { if (alive) { setBoard(b); done(); } }).catch(fail);
+      else if (view === "brain") client.brain(project.id, { limit: 200 }).then((r) => { if (alive) { setBrain(r); done(); } }).catch(fail);
+      else client.tree(project.id).then((r) => { if (alive) { setDiff(r.tree); done(); } }).catch(fail);
+    };
+    load();
+    const timer = setInterval(load, 2500);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [view, project.id, client]);
+
+  // A fresh view starts at its natural edge (thread at the newest, others at the top).
+  useEffect(() => setScroll(0), [view]);
+
   const busyAgent = project.agents.find((a) => a.busy);
 
   // Spinner while anyone is working.
@@ -125,6 +188,13 @@ function App({ client, initial }: AppProps) {
       const slash = parseSlash(text);
       if (!slash) return;
       const { cmd, args, rest } = slash;
+      // Local view jumps never touch the daemon.
+      if ((VIEWS as string[]).includes(cmd)) {
+        setView(cmd as ViewName);
+        return;
+      }
+      // Everything else produces thread output or a thread effect — show it.
+      setView("thread");
       try {
         switch (cmd) {
           case "help":
@@ -171,6 +241,7 @@ function App({ client, initial }: AppProps) {
           case "decision": {
             if (!rest) return setNotice("usage: /decision <text>");
             await client.decision(project.id, rest);
+            setNotice("pinned to shared memory");
             break;
           }
           case "interrupt": {
@@ -212,6 +283,7 @@ function App({ client, initial }: AppProps) {
     history.current.push(text);
     histIdx.current = history.current.length;
     if (text.startsWith("/")) return runCommand(text);
+    setView("thread"); // a reply is coming — watch it land
     try {
       if (selected && selected !== project.holder) {
         push(pc.dim(`  ⟶ shifting baton to ${selected}`));
@@ -237,6 +309,8 @@ function App({ client, initial }: AppProps) {
       } else if (action.type === "insert") {
         setValue(action.text);
         setCursor(action.text.length);
+      } else if (action.type === "view") {
+        setView(action.view);
       } else {
         void runCommand(`/${action.cmd}`);
       }
@@ -244,10 +318,33 @@ function App({ client, initial }: AppProps) {
     [runCommand],
   );
 
+  // Viewport geometry: chrome is the tab bar + input box + hints + status.
+  const CHROME = 9;
+  const vh = Math.max(6, rows - CHROME);
+
+  const viewLines: string[] = useMemo(() => {
+    if (view === "thread") return thread;
+    if (viewErr) return ["", pc.red(`  ${viewErr}`)];
+    if (view === "board") return board ? formatBoard(board, cols) : [pc.dim("  loading board…")];
+    if (view === "brain") return brain ? formatBrain(brain.memories, brain.stats, cols) : [pc.dim("  loading brain…")];
+    return diff ? formatDiff(diff, cols) : [pc.dim("  loading diff…")];
+  }, [view, thread, board, brain, diff, viewErr, cols]);
+
+  const total = viewLines.length;
+  const maxScroll = Math.max(0, total - vh);
+  const clamped = Math.min(Math.max(0, scroll), maxScroll);
+  // Thread hangs off the bottom (newest visible); the others read from the top.
+  const visible =
+    view === "thread"
+      ? viewLines.slice(Math.max(0, total - vh - clamped), total - clamped)
+      : viewLines.slice(clamped, clamped + vh);
+  const hiddenAbove = view === "thread" ? Math.max(0, total - vh - clamped) : clamped;
+  const hiddenBelow = view === "thread" ? clamped : Math.max(0, total - vh - clamped);
+
   useInput((input, key) => {
     if (key.ctrl && input === "c") return exit();
 
-    // ctrl+p — command palette (opencode style)
+    // ctrl+p — command palette
     if (key.ctrl && input === "p") {
       setPalette((p) => ({ open: !p.open, query: "", index: 0 }));
       return;
@@ -259,14 +356,10 @@ function App({ client, initial }: AppProps) {
       );
       if (key.escape) return setPalette({ open: false, query: "", index: 0 });
       if (key.return) return runPaletteItem(matches[Math.min(palette.index, matches.length - 1)]);
-      if (key.upArrow)
-        return setPalette((p) => ({ ...p, index: Math.max(0, p.index - 1) }));
+      if (key.upArrow) return setPalette((p) => ({ ...p, index: Math.max(0, p.index - 1) }));
       if (key.downArrow)
-        return setPalette((p) => ({
-          ...p,
-          index: Math.min(Math.max(matches.length - 1, 0), p.index + 1),
-        }));
-      if (key.tab) return; // tab is reserved outside the palette
+        return setPalette((p) => ({ ...p, index: Math.min(Math.max(matches.length - 1, 0), p.index + 1) }));
+      if (key.tab) return;
       if (key.backspace || key.delete) {
         setPalette((p) => ({ ...p, query: p.query.slice(0, -1), index: 0 }));
         return;
@@ -277,19 +370,27 @@ function App({ client, initial }: AppProps) {
       return;
     }
 
+    // shift+tab cycles views; tab cycles the active agent.
+    if (key.tab && key.shift) return setView((v) => cycleView(v, 1));
+    if (key.tab) {
+      setSelected((s) => cycleAgent(project.agents, s, 1) ?? s);
+      return;
+    }
+
+    // Scroll the viewport.
+    if (key.pageUp) return setScroll((s) => Math.min(maxScroll, s + Math.max(1, vh - 2)));
+    if (key.pageDown) return setScroll((s) => Math.max(0, s - Math.max(1, vh - 2)));
+
+    // esc — leave a side view first, otherwise interrupt the running turn.
     if (key.escape) {
+      if (view !== "thread") return setView("thread");
       void client
         .interrupt(project.id)
-        .then(({ interrupted }) =>
-          setNotice(interrupted ? `interrupted ${interrupted}` : "nothing running"),
-        )
+        .then(({ interrupted }) => setNotice(interrupted ? `interrupted ${interrupted}` : "nothing running"))
         .catch(() => {});
       return;
     }
-    if (key.tab) {
-      setSelected((s) => cycleAgent(project.agents, s, key.shift ? -1 : 1) ?? s);
-      return;
-    }
+
     if (key.return) return void onSubmit();
     if (key.upArrow) {
       if (!history.current.length) return;
@@ -343,12 +444,24 @@ function App({ client, initial }: AppProps) {
     ? filterPalette(paletteItems(project.agents, routeNames.current, selected), palette.query)
     : [];
 
+  const scrollHint =
+    hiddenAbove > 0 || hiddenBelow > 0
+      ? pc.dim(`${hiddenAbove > 0 ? `↑${hiddenAbove}` : "  "} ${hiddenBelow > 0 ? `↓${hiddenBelow}` : ""}  pgup/pgdn`)
+      : "";
+
   return (
     <Box flexDirection="column">
-      <Static items={lines}>
-        {(line, i) => <Text key={i}>{line}</Text>}
-      </Static>
-      <Box height={1} />
+      <Box justifyContent="space-between">
+        <Text>{renderTabs(view)}</Text>
+        <Text>{scrollHint || pc.dim("loom 0.1.0 ")}</Text>
+      </Box>
+      <Box height={vh} flexDirection="column">
+        {visible.map((line, i) => (
+          <Text key={i} wrap="truncate-end">
+            {line || " "}
+          </Text>
+        ))}
+      </Box>
       {notice ? <Text color="yellow">{`  ${notice}`}</Text> : null}
       {palette.open ? (
         <Box borderStyle="round" borderColor="cyan" paddingX={1} flexDirection="column">
@@ -359,11 +472,7 @@ function App({ client, initial }: AppProps) {
           {paletteMatches.slice(0, 8).map((item, i) => {
             const active = i === Math.min(palette.index, paletteMatches.length - 1);
             const label = `${item.label}${item.hint ? pc.dim(`  ${item.hint}`) : ""}`;
-            return (
-              <Text key={item.id}>
-                {active ? pc.cyan(`› ${label}`) : `  ${label}`}
-              </Text>
-            );
+            return <Text key={item.id}>{active ? pc.cyan(`› ${label}`) : `  ${label}`}</Text>;
           })}
           {!paletteMatches.length ? <Text dimColor>{"  no matches"}</Text> : null}
         </Box>
@@ -381,8 +490,7 @@ function App({ client, initial }: AppProps) {
         </Text>
       </Box>
       <Box justifyContent="space-between">
-        <Text dimColor>{"  tab shift agent · ctrl+p palette · esc interrupt · ctrl+c quit"}</Text>
-        <Text dimColor>{"loom 0.1.0 "}</Text>
+        <Text dimColor>{"  shift+tab view · tab agent · ctrl+p palette · esc back/interrupt · ctrl+c quit"}</Text>
       </Box>
       <Box justifyContent="space-between">
         <Text>

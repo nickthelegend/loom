@@ -2,15 +2,41 @@ import { describe, expect, it } from "vitest";
 import {
   centerPad,
   cycleAgent,
+  cycleView,
   filterPalette,
+  formatBoard,
+  formatBrain,
+  formatDiff,
   logoLines,
   paletteItems,
   parseSlash,
   renderInput,
+  renderTabs,
   stripAnsi,
   switchableAgents,
+  VIEWS,
 } from "../src/cli/tui-model.js";
 import type { AgentStatus } from "../src/types.js";
+import type { Memory } from "../src/core/brain.js";
+import type { BoardData } from "../src/daemon/board.js";
+
+function mem(over: Partial<Memory> = {}): Memory {
+  const now = Date.now();
+  return {
+    id: "m",
+    kind: "fact",
+    text: "t",
+    entities: [],
+    scope: {},
+    provenance: { agentId: "claude-code", eventId: 1, ts: now },
+    confidence: 1,
+    lemmas: "",
+    hash: "",
+    createdAt: now,
+    updatedAt: now,
+    ...over,
+  };
+}
 
 function agent(id: string, over: Partial<AgentStatus> = {}): AgentStatus {
   return {
@@ -101,5 +127,84 @@ describe("command palette", () => {
     expect(byQuery("zzzz")).toEqual([]);
     // subsequence still matches: "abr" → "abort route"
     expect(byQuery("abr")).toContain("cmd:abort");
+  });
+
+  it("offers the four views as palette entries", () => {
+    const ids = paletteItems(AGENTS, [], null).map((i) => i.id);
+    expect(ids).toEqual(expect.arrayContaining(["view:thread", "view:board", "view:brain", "view:diff"]));
+    const board = paletteItems(AGENTS, [], null).find((i) => i.id === "view:board")!;
+    expect(board.action).toEqual({ type: "view", view: "board" });
+  });
+});
+
+describe("tui views", () => {
+  it("cycleView wraps through the four tabs", () => {
+    expect(VIEWS).toEqual(["thread", "board", "brain", "diff"]);
+    expect(cycleView("thread")).toBe("board");
+    expect(cycleView("diff")).toBe("thread"); // wraps
+    expect(cycleView("thread", -1)).toBe("diff");
+  });
+
+  it("renderTabs shows all four labels", () => {
+    const tabs = stripAnsi(renderTabs("brain"));
+    for (const label of ["1 Thread", "2 Board", "3 Brain", "4 Diff"]) expect(tabs).toContain(label);
+  });
+
+  it("formatBrain groups by kind — failures before facts — and dims low confidence", () => {
+    const lines = formatBrain(
+      [
+        mem({ kind: "fact", text: "the daemon port is 7420" }),
+        mem({ kind: "failure", text: "never rebind to 0.0.0.0" }),
+        mem({ kind: "fact", text: "a shaky guess", confidence: 0.4 }),
+      ],
+      { total: 3, byKind: { fact: 2, failure: 1 } },
+      80,
+    ).map(stripAnsi);
+    const text = lines.join("\n");
+    expect(text).toContain("3 memories learned");
+    const failIdx = lines.findIndex((l) => l.includes("Failures"));
+    const factIdx = lines.findIndex((l) => l.includes("Facts"));
+    expect(failIdx).toBeGreaterThanOrEqual(0);
+    expect(failIdx).toBeLessThan(factIdx); // damage-preventers first
+    expect(text).toContain("never rebind to 0.0.0.0");
+    expect(text).toContain("~0.40"); // the low-confidence badge
+  });
+
+  it("formatBrain is honest when the brain is empty", () => {
+    expect(formatBrain([], { total: 0, byKind: {} }, 80).join("\n")).toContain("nothing learned yet");
+  });
+
+  it("formatBoard lays out four columns and notes an empty board", () => {
+    const board: BoardData = { available: true, repo: "me/repo", cards: [] };
+    const text = formatBoard(board, 80).map(stripAnsi).join("\n");
+    for (const col of ["Working", "Needs you", "In review", "Ready"]) expect(text).toContain(col);
+    expect(text).toContain("nothing on the board yet");
+  });
+
+  it("formatBoard places a card under its column", () => {
+    const board: BoardData = {
+      available: true,
+      repo: null,
+      cards: [{ id: "task-1", title: "fix the flaky test", agent: "you", state: "working", column: "working", own: true }],
+    };
+    expect(formatBoard(board, 80).map(stripAnsi).join("\n")).toContain("fix the flaky test");
+  });
+
+  it("formatDiff lists changed files and a patch, and reads a clean/non-repo tree", () => {
+    const text = formatDiff(
+      { git: true, branch: "main", files: [{ status: "M", path: "a.ts" }], patch: "@@ -1 +1 @@\n-old\n+new", truncated: false },
+      80,
+    )
+      .map(stripAnsi)
+      .join("\n");
+    expect(text).toContain("on main");
+    expect(text).toContain("a.ts");
+    expect(text).toContain("+new");
+    expect(formatDiff({ git: true, files: [], patch: "", truncated: false }, 80).join("\n")).toContain(
+      "working tree clean",
+    );
+    expect(formatDiff({ git: false, files: [], patch: "", truncated: false }, 80).join("\n")).toContain(
+      "not a git repository",
+    );
   });
 });
