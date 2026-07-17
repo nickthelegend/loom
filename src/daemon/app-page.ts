@@ -343,11 +343,13 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .dark .cbox{background:color-mix(in srgb, var(--input) 32%, var(--background))}
   .cbox:focus-within{border-color:var(--ring);
     box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 26%, transparent)}
+  /* two lines to start (a chat message is rarely one), grows to a cap, then
+     scrolls — never a single cramped line you can't see what you typed in */
   .cinput{display:block;width:100%;box-sizing:border-box;background:transparent;border:0;outline:none;resize:none;
     color:var(--foreground);font:inherit;font-size:14px;line-height:1.55;padding:2px 4px;
-    max-height:220px;overflow-y:auto}
+    min-height:48px;max-height:200px;overflow-y:auto}
   .cinput::placeholder{color:color-mix(in srgb, var(--muted-foreground) 55%, transparent)}
-  .crow{display:flex;align-items:center;gap:6px;padding:8px 0 0}
+  .crow{display:flex;align-items:center;gap:8px;padding:8px 0 0}
   .ctool{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;
     background:transparent;border:1px solid color-mix(in srgb, var(--border) 80%, transparent);border-radius:99px;
     color:var(--muted-foreground);cursor:pointer;font:inherit;font-size:12px;transition:background .12s,color .12s,border-color .12s}
@@ -357,12 +359,18 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .ctool .cchev{width:12px;height:12px;opacity:.6;margin-right:-2px}
   .cmodel{font-family:var(--font-mono);font-size:11px;letter-spacing:.01em;max-width:170px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-  /* who the composer talks to */
-  .cagent{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px 0 8px;border-radius:99px;
-    background:color-mix(in srgb, var(--primary) 12%, transparent);color:var(--foreground);
-    font-size:12px;font-weight:500;flex:none;max-width:180px}
+  /* who the composer talks to — a real button that opens the agent picker, held
+     visually apart from the model pill so the two never read as one control */
+  .cagent{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 8px 0 9px;border-radius:99px;
+    background:color-mix(in srgb, var(--primary) 13%, transparent);
+    border:1px solid color-mix(in srgb, var(--primary) 24%, transparent);color:var(--foreground);
+    font:inherit;font-size:12px;font-weight:500;flex:none;max-width:190px;cursor:pointer;
+    transition:background .12s,border-color .12s}
+  .cagent:hover{background:color-mix(in srgb, var(--primary) 20%, transparent);
+    border-color:color-mix(in srgb, var(--primary) 42%, transparent)}
   .cagent .brand{width:15px;height:15px;flex:none}
   .cagent .can{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cagent .cchev{width:12px;height:12px;opacity:.55;flex:none;margin-right:-1px}
   /* attachment chips */
   .cchips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 6px}
   .cchip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 6px 0 8px;
@@ -1893,11 +1901,11 @@ ${BRAND_SPRITE}
       '<div class="composer" id="composerwrap"><form class="cbox" id="cform">' +
       '<div class="cmenu" id="cmenu" style="display:none"></div>' +
       '<div class="cchips" id="cchips" style="display:none"></div>' +
-      '<textarea id="box" class="cinput" rows="1" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
+      '<textarea id="box" class="cinput" rows="2" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
       '<div class="crow">' +
       '<button class="ctool iconly" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.plus + '</button>' +
-      '<span class="cagent" id="cagent" style="display:none"><span class="can">agent</span></span>' +
-      '<button class="ctool" id="modelpick" type="button" title="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.chevron + "</span></button>" +
+      '<button class="cagent" id="cagent" type="button" title="switch the agent this chat talks to" aria-label="switch agent" style="display:none"><span class="can">agent</span><span class="cchev">' + ICONS.chevron + "</span></button>" +
+      '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.chevron + "</span></button>" +
       '<span style="flex:1"></span>' +
       '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
@@ -3675,7 +3683,7 @@ ${BRAND_SPRITE}
       var hint = document.getElementById("hint");
       if (hint) hint.textContent = state.selected && state.selected !== p.holder
         ? "send will shift the baton to " + state.selected
-        : (desktop ? "select an agent in the sidebar \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
+        : (desktop ? "click the agent to switch \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
       updateModelLabel(); // the picker button reflects whoever's selected now
       if (!desktop) drawChips();
       // agent header block — who the composer talks to, and where
@@ -3861,7 +3869,8 @@ ${BRAND_SPRITE}
     function autosizeBox(){
       var box = document.getElementById("box"); if (!box) return;
       box.style.height = "auto";
-      box.style.height = Math.min(200, box.scrollHeight) + "px";
+      // floor at two lines (48px), grow to a cap, then let it scroll
+      box.style.height = Math.max(48, Math.min(200, box.scrollHeight)) + "px";
     }
 
     function drawAttach(){
@@ -3910,7 +3919,14 @@ ${BRAND_SPRITE}
 
     function closeMenu(){
       menuState = null;
+      document.removeEventListener("mousedown", menuAway);
       var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; }
+    }
+    // The model/agent pickers open from a button, not the textarea, so a blur
+    // won't close them — a click anywhere outside the card does.
+    function menuAway(e){
+      var cb = document.querySelector(".cbox");
+      if (cb && !cb.contains(e.target)) closeMenu();
     }
 
     function renderMenu(items, head){
@@ -4020,7 +4036,43 @@ ${BRAND_SPRITE}
             setModel(agentId, val);
           };
         });
+        setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
       }).catch(function(err){ toast(err.message); });
+    }
+
+    /**
+     * Who this chat talks to. The agent chip in the composer was a dead label —
+     * you could see "opencode" but not change it without hunting the sidebar.
+     * Now it's a real picker: every agent in the project, brand mark and role,
+     * the current one ticked. Selecting one aims the composer (state.selected);
+     * send then hands it the baton.
+     */
+    function openAgentMenu(){
+      var p = state.project || {};
+      var agents = p.agents || [];
+      if (!agents.length) { toast("no agents in this project yet"); return; }
+      menuState = { kind: "agentmenu", at: 0, sel: 0, items: [] };
+      var m = document.getElementById("cmenu"); if (!m) return;
+      m.style.display = "block";
+      m.innerHTML = '<div class="cmhead">talk to</div>' +
+        agents.map(function(a, i){
+          var tick = a.id === state.selected;
+          var sub = a.tier === "bridge" ? "bridge" : (a.role || "");
+          return '<div class="cmi" data-ai="' + i + '"><span class="ic">' + brandMark(a.kind) + "</span><span>" + esc(a.id) + "</span>" +
+            (tick ? '<span class="tick">' + ICONS.info + "</span>" : (sub ? '<span class="sub">' + esc(sub) + "</span>" : "")) + "</div>";
+        }).join("");
+      Array.prototype.forEach.call(m.querySelectorAll("[data-ai]"), function(row){
+        row.onmousedown = function(ev){
+          ev.preventDefault();
+          var a = agents[Number(row.getAttribute("data-ai"))];
+          closeMenu();
+          if (!a || a.id === state.selected) return;
+          state.selected = a.id;
+          drawStatus(); // repaints the chip, the model label, and the hint
+          var box = document.getElementById("box"); if (box) box.focus();
+        };
+      });
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
     }
 
     function setModel(agentId, model){
@@ -4097,6 +4149,11 @@ ${BRAND_SPRITE}
         if (menuState && menuState.kind === "modelmenu") { closeMenu(); return; }
         openModelMenu();
       };
+      var ap = document.getElementById("cagent");
+      if (ap) ap.onclick = function(){
+        if (menuState && menuState.kind === "agentmenu") { closeMenu(); return; }
+        openAgentMenu();
+      };
 
       // Drag a file straight onto the card.
       var cbox = document.querySelector(".cbox");
@@ -4120,7 +4177,8 @@ ${BRAND_SPRITE}
       if (chip) {
         if (cur) {
           chip.style.display = "";
-          chip.innerHTML = brandMark(cur.kind) + '<span class="can">' + esc(cur.id) + "</span>";
+          chip.innerHTML = brandMark(cur.kind) + '<span class="can">' + esc(cur.id) + "</span>" +
+            '<span class="cchev">' + ICONS.chevron + "</span>";
         } else { chip.style.display = "none"; }
       }
     }

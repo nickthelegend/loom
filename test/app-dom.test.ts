@@ -497,6 +497,52 @@ describe("web app · the composer", () => {
     expect(text(m, "#cmenu")).toMatch(/decision/i);
     expect(m.errors.join("\n")).toBe("");
   });
+
+  /**
+   * The agent chip was a dead label — you could read "opencode" but not change
+   * it without hunting the sidebar. It's a real button now: click it, pick
+   * another agent, and the composer is aimed there.
+   */
+  it("switches the agent from its own chip, not just the sidebar", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    // the chip shows who the composer talks to, once an agent is resolved
+    await waitUntil(() => {
+      const c = $(m, "#cagent") as HTMLElement | null;
+      return !!c && c.style.display !== "none";
+    });
+    const chip = $(m, "#cagent") as HTMLButtonElement;
+    expect(chip.tagName, "the agent chip is a real button, not a span").toBe("BUTTON");
+    const before = (chip.textContent || "").trim();
+
+    click(chip);
+    await waitUntil(() => m.window.document.querySelectorAll("#cmenu [data-ai]").length > 0);
+    // every agent in the project is offered
+    expect(text(m, "#cmenu")).toMatch(/plannerbot/);
+    expect(text(m, "#cmenu")).toMatch(/execbot/);
+
+    // pick the one that isn't current (rows commit on mousedown)
+    const rows = [...m.window.document.querySelectorAll("#cmenu [data-ai]")] as HTMLElement[];
+    const other = rows.find((r) => !(r.textContent || "").includes(before)) ?? rows[rows.length - 1];
+    other.dispatchEvent(new m.window.MouseEvent("mousedown", { bubbles: true }));
+
+    // the chip now names the newly-selected agent, and the menu is gone
+    await waitUntil(() => (($(m, "#cagent") as HTMLElement).textContent || "").trim() !== before);
+    expect($(m, "#cmenu")?.getAttribute("style")).toMatch(/display:\s*none/);
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("gives the message box two lines to start, not one cramped line", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    expect(box.rows, "two rows, not the old single line").toBe(2);
+    // autosize floors the height at two lines (~48px) even when empty
+    box.value = "";
+    box.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+    expect(parseInt(box.style.height || "0", 10)).toBeGreaterThanOrEqual(48);
+    expect(m.errors.join("\n")).toBe("");
+  });
 });
 
 /**
