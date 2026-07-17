@@ -1196,6 +1196,43 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     border:1px solid var(--glass-border);border-radius:var(--radius);overflow:hidden;
     box-shadow:0 24px 72px rgba(0,0,0,.42), inset 0 1px 0 var(--glass-highlight);animation:pop .16s ease}
   @keyframes pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+  /* the command palette (⌘K): a top-anchored search over everything */
+  .pscrim{align-items:flex-start;padding-top:12vh}
+  .palette{width:100%;max-width:640px;background:var(--popover);color:var(--popover-foreground);
+    border:1px solid var(--glass-border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;
+    box-shadow:0 28px 80px rgba(0,0,0,.5), inset 0 1px 0 var(--glass-highlight);animation:pop .16s ease;max-height:70vh}
+  .phead{display:flex;align-items:center;gap:10px;padding:0 14px;height:52px;flex:none;border-bottom:1px solid var(--border)}
+  .phead > svg{width:18px;height:18px;color:var(--muted-foreground);flex:none}
+  .phead input{flex:1;min-width:0;background:none;border:0;outline:none;color:var(--foreground);font:inherit;font-size:16px}
+  .phead input::placeholder{color:color-mix(in srgb, var(--muted-foreground) 60%, transparent)}
+  .pkbd{font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground);border:1px solid var(--border);
+    border-radius:5px;padding:2px 6px;flex:none}
+  .pbody{flex:1;min-height:0;overflow-y:auto;padding:6px}
+  .psec{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);
+    padding:10px 10px 4px}
+  .prow{display:flex;align-items:center;gap:10px;height:38px;padding:0 10px;border-radius:9px;cursor:pointer}
+  .prow .pic{width:18px;height:18px;flex:none;display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
+  .prow .pic svg{width:15px;height:15px}
+  .prow .plabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+  .prow .plabel .ppath{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+  .prow .psub{flex:none;font-size:11px;color:var(--muted-foreground);font-family:var(--font-mono);
+    max-width:44%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prow.on{background:color-mix(in srgb, var(--primary) 15%, transparent)}
+  .prow.on .pic{color:var(--foreground)}
+  .pmore{font-size:12px;color:var(--muted-foreground);padding:10px 12px}
+  .pfoot{flex:none;display:flex;gap:16px;padding:8px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--muted-foreground)}
+  .pfoot b{font-family:var(--font-mono);font-weight:500;border:1px solid var(--border);border-radius:4px;padding:0 4px;margin-right:4px}
+  /* ⌘K affordance in the sidebar search, and the status-bar GitHub badge */
+  .snkbd{flex:none;font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground);
+    border:1px solid var(--border);border-radius:5px;padding:1px 5px;background:transparent;cursor:pointer;transition:color .12s,border-color .12s}
+  .snkbd:hover{color:var(--foreground);border-color:color-mix(in srgb, var(--muted-foreground) 45%, transparent)}
+  .statusbar .ghok{display:inline-flex;align-items:center;gap:5px;color:var(--muted-foreground)}
+  .statusbar .ghok svg{width:12px;height:12px}
+  .statusbar .ghconnect{display:inline-flex;align-items:center;gap:5px;border:1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+    border-radius:6px;padding:1px 8px;color:var(--primary);background:color-mix(in srgb, var(--primary) 12%, transparent);
+    cursor:pointer;font:inherit;font-size:11px;transition:background .12s}
+  .statusbar .ghconnect:hover{background:color-mix(in srgb, var(--primary) 22%, transparent)}
+  .statusbar .ghconnect svg{width:12px;height:12px}
   .modalhead{display:flex;align-items:center;height:48px;padding:0 12px 0 16px;
     border-bottom:1px solid var(--border);font-size:15px;font-weight:600}
   .modalhead .iconbtn{margin-left:auto}
@@ -2645,6 +2682,27 @@ ${BRAND_SPRITE}
       state.retheme = function(){
         terms.forEach(function(t){ if (t.xterm) t.xterm.options.theme = xtermTheme(); });
       };
+      // Run a command in the terminal, opening the dock (and a shell) first if
+      // need be — the palette's "cd into a worktree" and the status bar's
+      // "Connect GitHub" both drive gh/git through the real terminal you already
+      // have, rather than reimplementing an interactive login.
+      state.termRun = function(cmd){
+        var live = termOpen() && curTerm();
+        if (!termOpen()) toggleTerm(); else ensureTerm();
+        var fire = function(){
+          var t = curTerm(); if (!t) return;
+          if (t.xterm) {
+            // pty: type the line and press Enter (\\r); the shell runs it
+            api("/api/projects/" + pid + "/term/input",
+                { method: "POST", body: JSON.stringify({ term: t.id, data: cmd + "\\r" }) }).catch(function(){});
+          } else {
+            runCmd(cmd); // pipe-backed shell: one command per line
+          }
+          focusTerm();
+        };
+        // a shell we just spawned needs a beat before it will accept input
+        if (live) fire(); else setTimeout(fire, 650);
+      };
       // NB: applyTerm() runs after connect() below — opening a shell before
       // the socket is listening broadcasts its prompt to nobody.
       state.startTerminals = applyTerm;
@@ -3457,6 +3515,18 @@ ${BRAND_SPRITE}
       var open = Object.keys(expl.open).filter(function(k){ return expl.open[k]; });
       drawExplorer(document.getElementById("railbody"));
       open.forEach(function(d){ loadDir(d); });
+    };
+    // Actions the module-level command palette (and status bar) drive back in.
+    state.openFile = openFileFromTree;
+    state.showTab = showTab;
+    state.reloadBoard = loadBoard;
+    state.showRail = function(view){ state.railView = view; drawRail(); };
+    state.selectAgent = function(id){
+      if (!id) return;
+      state.selected = id;
+      drawStatus();
+      showTab("thread");
+      var b = document.getElementById("box"); if (b) b.focus();
     };
     function drawExplorer(el){
       railTitle('<span class="b">' + esc(state.project ? state.project.name : "Explorer") + "</span>");
@@ -4516,6 +4586,12 @@ ${BRAND_SPRITE}
       (pr.agents || []).forEach(function(a){ if (a.busy) busy++; });
     });
     var share = p && p.costUsd > 0 && total > 0 ? Math.min(100, Math.round((p.costUsd / total) * 100)) : 0;
+    // GitHub connection — the whole PR/Projects/review half rides on gh being
+    // logged in, so it lives in the corner you glance at, with a one-click
+    // Connect when it isn't.
+    var gh = state.github, ghSeg = "";
+    if (gh && gh.connected) ghSeg = '<span class="sit ghok" title="GitHub connected as ' + esc(gh.user || "") + '">' + ICONS.github + " " + esc(gh.user || "connected") + "</span>";
+    else if (gh && gh.installed) ghSeg = '<button class="sit ghconnect" id="ghconnect" title="sign in to GitHub in a terminal">' + ICONS.github + " Connect GitHub</button>";
     el.innerHTML =
       '<span class="sit"><span class="sdot' + (state.wsLive ? "" : " off") + '"></span>' + (state.wsLive ? "live" : "offline") + "</span>" +
       '<span class="sit">' + esc(location.host) + "</span>" +
@@ -4524,9 +4600,43 @@ ${BRAND_SPRITE}
         ? '<span class="sit"><span class="meter"><i style="width:' + share + '%"></i></span>' + money(p.costUsd) + " \\u00b7 " + share + "% of \\u03a3</span>"
         : "") +
       '<span class="spacer"></span>' +
+      ghSeg +
       (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
       '<span class="sit">' + (state.projects || []).length + " project" + ((state.projects || []).length === 1 ? "" : "s") + "</span>" +
       (total > 0 ? '<span class="sit">\\u03a3 ' + money(total) + "</span>" : "");
+    var gc = document.getElementById("ghconnect");
+    if (gc) gc.onclick = connectGithub;
+  }
+
+  // GitHub connection, fetched once and after a connect. Machine-wide (gh auth
+  // is per-host), so it's cached on state and shown in the status bar.
+  function loadGithub(){
+    if (!state.token) return;
+    api("/api/github/status").then(function(s){ state.github = s; drawStatusbar(); }).catch(function(){});
+  }
+  /**
+   * Sign in to GitHub. gh's login is an interactive device flow, so the honest
+   * place to run it is the real terminal you already have — Loom never touches
+   * the token; gh stores it. We run it there, then poll until gh reports in and
+   * light the board up.
+   */
+  function connectGithub(){
+    if (!state.termRun) { toast("open a project first \\u2014 sign-in runs in its terminal"); return; }
+    toast("opening a terminal to sign in to GitHub\\u2026");
+    state.termRun("gh auth login --web --git-protocol https");
+    var tries = 0;
+    var poll = setInterval(function(){
+      tries++;
+      api("/api/github/status").then(function(s){
+        state.github = s; drawStatusbar();
+        if (s.connected) {
+          clearInterval(poll);
+          toast("GitHub connected \\u00b7 " + (s.user || ""));
+          if (state.reloadBoard) try { state.reloadBoard(); } catch (e) {}
+        }
+      }).catch(function(){});
+      if (tries > 80) clearInterval(poll); // ~4 min ceiling; then stop polling
+    }, 3000);
   }
 
   // ---- right rail toggle — open by default (shows the file tree) -----------
@@ -5363,6 +5473,164 @@ ${BRAND_SPRITE}
     document.addEventListener("keydown", onKey);
   }
 
+  /**
+   * The command palette — one search across the whole workspace, opened with
+   * \\u2318K / Ctrl+K. Commands, agents and worktrees filter instantly; files,
+   * code and conversations are asked of the daemon as you type. \\u2191\\u2193
+   * move, \\u21b5 acts, esc closes. A flat item list drives the keyboard, so a
+   * command and a code hit navigate the same way.
+   */
+  function openPalette(){
+    if (document.querySelector(".scrim")) return; // one overlay at a time
+    var pid = state.pid;
+    var scrim = document.createElement("div");
+    scrim.className = "scrim pscrim";
+    scrim.innerHTML = '<div class="palette" role="dialog" aria-label="Search everything">' +
+      '<div class="phead">' + ICONS.search +
+        '<input id="pq" placeholder="Search files, code, agents, worktrees, commands\\u2026" autocomplete="off" spellcheck="false" aria-label="search everything">' +
+        '<span class="pkbd">esc</span></div>' +
+      '<div class="pbody" id="pbody"></div>' +
+      '<div class="pfoot"><span><b>\\u2191\\u2193</b> navigate</span><span><b>\\u21b5</b> open</span><span><b>esc</b> close</span></div>' +
+    "</div>";
+    document.body.appendChild(scrim);
+    var inp = document.getElementById("pq");
+    var body = document.getElementById("pbody");
+    var items = [], sel = 0, reqId = 0, curQ = "", acc = {}, wt = null, to = null;
+
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey, true); }
+    function onKey(e){
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key === "ArrowDown") { e.preventDefault(); move(1); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); move(-1); return; }
+      if (e.key === "Enter") { e.preventDefault(); activate(sel); return; }
+    }
+    document.addEventListener("keydown", onKey, true);
+    scrim.addEventListener("mousedown", function(ev){ if (ev.target === scrim) close(); });
+
+    function move(d){ if (!items.length) return; sel = (sel + d + items.length) % items.length; paint(); }
+    function activate(i){ var it = items[i]; if (!it || !it.run) return; close(); try { it.run(); } catch (e) { toast(String((e && e.message) || e)); } }
+
+    // subsequence match, so "brd" finds "Board" and "apst" finds "app-page.ts"
+    function fuzzy(hay, q){
+      hay = String(hay).toLowerCase(); q = q.toLowerCase();
+      if (!q) return true;
+      var i = 0;
+      for (var c = 0; c < q.length; c++){ i = hay.indexOf(q.charAt(c), i); if (i < 0) return false; i++; }
+      return true;
+    }
+    function shq(s){ return "'" + String(s).replace(/'/g, "'\\\\''") + "'"; } // POSIX single-quote
+
+    var CMDS = buildCommands();
+    function buildCommands(){
+      var C = [];
+      if (pid && state.showTab) {
+        C.push({ icon: ICONS.thread, label: "Go to Thread", run: function(){ state.showTab("thread"); } });
+        C.push({ icon: ICONS.board, label: "Go to Board", run: function(){ state.showTab("board"); } });
+        C.push({ icon: ICONS.memory, label: "Go to Brain", run: function(){ state.showTab("brain"); } });
+      }
+      if (pid && state.showRail) {
+        C.push({ icon: ICONS.files, label: "Explorer", sub: "panel", run: function(){ state.showRail("explorer"); } });
+        C.push({ icon: ICONS.search, label: "Search in files", sub: "panel", run: function(){ state.showRail("search"); } });
+        C.push({ icon: ICONS.branch, label: "Source Control", sub: "panel", run: function(){ state.showRail("scm"); } });
+        C.push({ icon: ICONS.agents, label: "Agents", sub: "panel", run: function(){ state.showRail("tasks"); } });
+      }
+      C.push({ icon: ICONS.tasks, label: "New task", run: function(){ openTaskModal(pid); } });
+      C.push({ icon: ICONS.folderPlus, label: "New project", run: function(){ openProjectModal(); } });
+      C.push({ icon: ICONS.gear, label: "Settings", run: function(){ openSettingsModal("setup"); } });
+      C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
+      if (pid && state.toggleTerm) C.push({ icon: ICONS.terminal, label: "Toggle terminal", run: function(){ state.toggleTerm(); } });
+      C.push({ icon: ICONS.sun, label: "Toggle theme", run: function(){ localStorage.setItem(THEME_KEY, themeNow() === "light" ? "dark" : "light"); applyTheme(); if (state.retheme) state.retheme(); } });
+      return C;
+    }
+
+    function section(title, rows){
+      if (!rows.length) return "";
+      var h = '<div class="psec">' + esc(title) + "</div>";
+      rows.forEach(function(r){
+        r._i = items.length; items.push(r);
+        h += '<div class="prow" data-i="' + r._i + '"><span class="pic">' +
+          (r.markKind ? brandMark(r.markKind) : (r.icon || ICONS.file)) + "</span>" +
+          '<span class="plabel">' + (r.html || esc(r.label)) + "</span>" +
+          (r.sub ? '<span class="psub">' + esc(r.sub) + "</span>" : "") + "</div>";
+      });
+      return h;
+    }
+
+    function draw(){
+      var q = curQ;
+      items = [];
+      var h = "";
+      h += section("Commands", CMDS.filter(function(c){ return fuzzy(c.label + " " + (c.sub || ""), q); }).slice(0, q ? 8 : 24));
+      var ags = (state.project && state.project.agents) || [];
+      if (state.selectAgent) h += section("Agents", ags.filter(function(a){ return fuzzy(a.id + " " + (a.role || ""), q); }).map(function(a){
+        return { markKind: a.kind, label: a.id, sub: (a.tier === "bridge" ? "bridge" : (a.role || "agent")) + " \\u00b7 talk to", run: function(){ state.selectAgent(a.id); } };
+      }));
+      if (state.termRun && wt) {
+        var wts = wt.filter(function(w){ return !w.main && fuzzy((w.branch || "") + " " + w.path, q); });
+        h += section("Worktrees", wts.map(function(w){
+          return { icon: ICONS.branch, label: w.branch || "(detached)", sub: w.path,
+                   run: function(){ state.termRun("cd " + shq(w.path)); toast("cd \\u2192 " + (w.branch || w.path)); } };
+        }));
+      }
+      if (q && pid) {
+        if (state.openFile && acc.files && acc.files.length) h += section("Files", acc.files.map(function(f){
+          return { icon: ICONS.file, label: f, run: function(){ state.openFile(f); } };
+        }));
+        if (state.openFile && acc.code && acc.code.length) h += section("Code", acc.code.map(function(hit){
+          return { icon: ICONS.search, label: hit.path,
+                   html: '<span class="ppath">' + esc(hit.path) + ":" + hit.line + "</span> " + esc((hit.text || "").trim().slice(0, 90)),
+                   run: function(){ state.openFile(hit.path); } };
+        }));
+        if (state.setChat && acc.chats && acc.chats.length) h += section("Conversations", acc.chats.map(function(c){
+          return { icon: ICONS.chat, label: (c.snippet || "").trim().slice(0, 72) || c.chat, sub: c.chat,
+                   run: function(){ state.setChat(pid, c.chat); } };
+        }));
+        var pending = acc.files === undefined || acc.code === undefined || acc.chats === undefined;
+        if (pending) h += '<div class="pmore">searching the project\\u2026</div>';
+      }
+      if (!items.length && !q) h += '<div class="pmore">type to search \\u2014 files, code, agents, worktrees, commands</div>';
+      body.innerHTML = h;
+      if (sel >= items.length) sel = items.length ? items.length - 1 : 0;
+      paint(); wireRows();
+    }
+
+    function paint(){
+      Array.prototype.forEach.call(body.querySelectorAll(".prow"), function(el){
+        el.classList.toggle("on", Number(el.getAttribute("data-i")) === sel);
+      });
+      var on = body.querySelector(".prow.on"); if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
+    }
+    function wireRows(){
+      Array.prototype.forEach.call(body.querySelectorAll(".prow"), function(el){
+        var i = Number(el.getAttribute("data-i"));
+        el.onmousemove = function(){ if (sel !== i) { sel = i; paint(); } };
+        el.onclick = function(){ activate(i); };
+      });
+    }
+    function runAsync(){
+      var my = reqId, q = curQ;
+      var land = function(key, val){ if (my === reqId) { acc[key] = val; draw(); } };
+      api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q))
+        .then(function(j){ land("files", (j.matches || []).slice(0, 6)); }).catch(function(){ land("files", []); });
+      api("/api/projects/" + pid + "/grep?q=" + encodeURIComponent(q))
+        .then(function(j){ land("code", (j.hits || []).slice(0, 6)); }).catch(function(){ land("code", []); });
+      api("/api/projects/" + pid + "/chats/search?q=" + encodeURIComponent(q))
+        .then(function(j){ land("chats", (j.hits || []).slice(0, 5)); }).catch(function(){ land("chats", []); });
+    }
+
+    inp.oninput = function(){
+      curQ = this.value.trim();
+      acc = {}; reqId++;            // invalidate any in-flight async for the old query
+      clearTimeout(to);
+      draw();                       // instant: commands + agents + worktrees, filtered
+      if (curQ && pid) to = setTimeout(runAsync, 170);
+    };
+    // worktrees once, up front — few, and useful in the default (empty) menu
+    if (pid) api("/api/projects/" + pid + "/worktrees").then(function(j){ wt = j.worktrees || []; draw(); }).catch(function(){});
+    draw();
+    setTimeout(function(){ inp.focus(); }, 20);
+  }
+
   // ---- router ----------------------------------------------------------
   var mq = window.matchMedia("(min-width:900px)");
   function isDesktop(){ return mq.matches; }
@@ -5380,7 +5648,8 @@ ${BRAND_SPRITE}
         '<div class="shead"><span class="wordmark">lo<b>om</b></span></div>' +
         '<div class="topnav"><button class="navitem" id="newtask">' + ICONS.tasks + "New task<span class=\\"kbd\\">N</span></button>" +
         '<button class="navitem" id="newproj">' + ICONS.folderPlus + "New project<span class=\\"kbd\\">P</span></button></div>" +
-        '<div class="snav">' + ICONS.search + '<input id="sfilter" placeholder="Search" autocomplete="off" spellcheck="false"></div>' +
+        '<div class="snav">' + ICONS.search + '<input id="sfilter" placeholder="Search" autocomplete="off" spellcheck="false">' +
+          '<button class="snkbd" id="palettebtn" type="button" title="Search everything (\\u2318K)" aria-label="open command palette">\\u2318K</button></div>' +
         '<div class="stitle">projects<button id="addproj" class="iconbtn" title="new project" aria-label="new project">' + ICONS.plus + "</button></div>" +
         '<div class="slist" id="slist">' + LOADER + "</div>" +
         '<div class="sfoot">' +
@@ -5470,6 +5739,8 @@ ${BRAND_SPRITE}
     };
     document.getElementById("addproj").onclick = openProjectModal;
     document.getElementById("newproj").onclick = openProjectModal;
+    var pbtn = document.getElementById("palettebtn");
+    if (pbtn) pbtn.onclick = function(ev){ ev.preventDefault(); openPalette(); };
     state.refreshProjects = refresh;
     document.getElementById("railrefresh").onclick = function(){
       // refresh whichever view is showing: Explorer re-reads the file tree,
@@ -5767,6 +6038,7 @@ ${BRAND_SPRITE}
       drawList();
     }
     state.selectProject = select;
+    state.setChat = setChat; // the palette jumps to a conversation by id
     /** The conversation you're in, per project, remembered across reloads. */
     function currentChat(){
       if (!cur) return "main";
@@ -5793,6 +6065,7 @@ ${BRAND_SPRITE}
     if (!cur) drawEmpty();
     drawStatusbar();
     refresh();
+    loadGithub(); // fills the status-bar GitHub badge
     state.shellTimer = setInterval(refresh, 5000);
   }
 
@@ -5806,6 +6079,10 @@ ${BRAND_SPRITE}
     state.drawRail = null;
     state.startTerminals = null;
     state.retheme = null;
+    // palette hooks close over the old render's DOM — drop them too
+    state.openFile = null; state.showTab = null; state.showRail = null;
+    state.selectAgent = null; state.termRun = null; state.setChat = null;
+    state.reloadBoard = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
@@ -5830,6 +6107,11 @@ ${BRAND_SPRITE}
     return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable;
   }
   document.addEventListener("keydown", function(e){
+    // ⌘K / Ctrl+K — the command palette, from anywhere (even mid-type)
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "k" || e.key === "K")) {
+      if (state.token && !document.querySelector(".scrim")) { e.preventDefault(); openPalette(); }
+      return;
+    }
     if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "\`" || e.key === "~")) {
       if (state.toggleTerm) { e.preventDefault(); state.toggleTerm(); }
       return;

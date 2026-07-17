@@ -59,6 +59,7 @@ import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
 import { ProjectRuntime } from "./runtime.js";
 import { buildBoard } from "./board.js";
 import {
+  ghAuthStatus,
   ghProjectItems,
   ghProjects,
   listTasks,
@@ -359,6 +360,17 @@ export class LoomDaemon {
         }
         res.json({ version: "0.1.0", rev: BUILD_REV, root, git });
       })();
+    });
+
+    /**
+     * Is `gh` logged in, and as whom — machine-wide, so no project needed. The
+     * whole GitHub half of Loom (board PRs, Projects, review) rides on this; the
+     * status bar shows it and offers Connect when it's false.
+     */
+    app.get("/api/github/status", (_req, res) => {
+      void ghAuthStatus()
+        .then((s) => res.json(s))
+        .catch((err) => res.status(500).json({ error: err instanceof Error ? err.message : String(err) }));
     });
 
     app.post("/api/pair/new", (req, res) => {

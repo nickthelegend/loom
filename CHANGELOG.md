@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Native search — one palette over everything (⌘K)
+
+- **⌘K / Ctrl+K** opens a command palette from anywhere, even mid-type. One box
+  searches across **commands** (go to Thread/Board/Brain, open a panel, New task,
+  Settings, toggle terminal/theme…), **agents** (talk to one), **files** and
+  **code** (the project's own `/find` + `/grep`), **conversations**, and
+  **worktrees** (jump to one — it `cd`s there in the terminal). Commands, agents
+  and worktrees filter instantly; the daemon-backed sections stream in as you
+  type. ↑↓ navigate a flat list, ↵ acts, esc closes. A ⌘K affordance sits in the
+  sidebar search.
+
+### Connect GitHub from the status bar
+
+- The bottom bar shows whether `gh` is signed in and as whom. When it isn't, a
+  **Connect GitHub** button runs the interactive `gh auth login --web` in the
+  real terminal (Loom never touches the token — gh stores it) and polls until
+  you're in, then lights the board up. The whole GitHub half (PRs, Projects,
+  review) depends on this being true, so it lives where you can see it.
+
 ### GitHub & Linear, native
 
 - **One board, three sources.** A segmented control switches the Board between

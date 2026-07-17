@@ -546,6 +546,51 @@ describe("web app · the composer", () => {
 });
 
 /**
+ * The command palette — one search over the whole workspace, opened from
+ * anywhere with ⌘K. Against the real daemon, so the file/code sections are the
+ * project's actual contents.
+ */
+describe("web app · command palette", () => {
+  it("⌘K opens it, lists commands and agents, and esc closes", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    // from anywhere — a global capture handler, not tied to any field
+    m.window.document.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }),
+    );
+    await waitUntil(() => !!$(m, ".palette #pq"));
+    await waitUntil(() => m.window.document.querySelectorAll(".palette .prow").length > 0);
+    // commands are there instantly, and the agents this project has
+    expect(text(m, ".palette")).toMatch(/New task|Settings|Board/i);
+    expect(text(m, ".palette")).toMatch(/plannerbot|execbot/);
+
+    m.window.document.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    await waitUntil(() => !$(m, ".palette"));
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("filters as you type, and navigates with the keyboard", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    m.window.document.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+    );
+    await waitUntil(() => !!$(m, ".palette #pq"));
+    const q = $(m, "#pq") as HTMLInputElement;
+    q.value = "settings";
+    q.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+    // instant: the Settings command survives, unrelated ones drop out
+    await waitUntil(() => /Settings/i.test(text(m, ".palette")));
+    expect(text(m, ".palette")).not.toMatch(/New project/i);
+    // the first result is selected, ready for Enter
+    await waitUntil(() => !!$(m, ".palette .prow.on"));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+/**
  * Setup — the onboarding screen.
  *
  * It reads /api/setup from the daemon rather than hardcoding a checklist, and

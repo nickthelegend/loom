@@ -433,4 +433,16 @@ describe("board sources — worktrees, GitHub Projects, Linear", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("GitHub connection status is authed and typed", async () => {
+    expect((await fetch(`${baseUrl}/api/github/status`)).status, "needs a token").toBe(401);
+    const s = (await (
+      await fetch(`${baseUrl}/api/github/status`, { headers: auth() })
+    ).json()) as { installed: boolean; connected: boolean; user: string | null };
+    expect(typeof s.installed).toBe("boolean");
+    expect(typeof s.connected).toBe("boolean");
+    // when it says connected, it must name who; when not, user is null
+    if (s.connected) expect(typeof s.user).toBe("string");
+    else expect(s.user).toBeNull();
+  });
 });

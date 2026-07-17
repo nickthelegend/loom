@@ -388,3 +388,38 @@ export async function prReview(
     return classifyGhFailure(String((err as Error).message));
   }
 }
+
+// ---------------------------------------------------------------------------
+// GitHub connection — is the user's gh logged in, and as whom. Machine-wide (gh
+// auth is per-host, not per-repo), so no project directory needed. The whole
+// GitHub half of Loom rides on this being true.
+// ---------------------------------------------------------------------------
+
+export interface GhAuth {
+  installed: boolean;
+  connected: boolean;
+  user: string | null;
+  host: string;
+  scopes: string[];
+}
+
+export async function ghAuthStatus(): Promise<GhAuth> {
+  if (!(await cliAvailable("gh"))) {
+    return { installed: false, connected: false, user: null, host: "github.com", scopes: [] };
+  }
+  // `gh auth status` writes to stderr and exits non-zero when logged out, so
+  // capture both streams and read the text rather than trusting the exit code.
+  const out = await new Promise<string>((resolve) => {
+    execFile("gh", ["auth", "status"], { timeout: 10_000 }, (_err, stdout, stderr) =>
+      resolve(`${stdout ?? ""}\n${stderr ?? ""}`),
+    );
+  });
+  // "Logged in to github.com account nickthelegend" (new gh) or "… as nickthelegend" (old)
+  const m = out.match(/Logged in to (\S+) (?:account|as) (\S+)/i);
+  const scopeLine = out.match(/Token scopes:\s*(.+)/i);
+  const scopes = scopeLine?.[1]
+    ? scopeLine[1].split(",").map((s) => s.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean)
+    : [];
+  if (m?.[2]) return { installed: true, connected: true, host: m[1] ?? "github.com", user: m[2], scopes };
+  return { installed: true, connected: false, user: null, host: "github.com", scopes: [] };
+}
