@@ -72,6 +72,18 @@ describe("resolveSteps", () => {
     expect(resolved.instructions).toEqual([null, "only touch src/api", null]);
   });
 
+  it("carries a per-step role, and leaves it null to inherit the agent's own", () => {
+    // The whole point of task-time roles: the same agent (cc, whose own role is
+    // planner) can be handed the reviewer job for this one task.
+    const resolved = resolveSteps(
+      [{ step: "cc", role: "reviewer" }, { step: "oc" }],
+      config,
+      isAdapter,
+    );
+    expect(resolved.ids).toEqual(["cc", "oc"]);
+    expect(resolved.roles).toEqual(["reviewer", null]);
+  });
+
   it("rejects unknown steps and bridge steps", () => {
     expect(() => resolveSteps(["ghost"], config, isAdapter)).toThrow(/matches no agent/);
     expect(() => resolveSteps(["ag"], config, isAdapter)).toThrow(/bridge/);

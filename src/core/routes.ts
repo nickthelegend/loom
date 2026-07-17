@@ -59,6 +59,12 @@ export interface ResolvedSteps {
   ids: string[];
   /** Parallel to ids; null when the step carries no custom instruction. */
   instructions: Array<string | null>;
+  /**
+   * Parallel to ids; the job the step assigns, or null to inherit the agent's
+   * own role. This is what lets a task say "claude-code plans, opencode
+   * executes" without permanently changing either agent's default role.
+   */
+  roles: Array<string | null>;
 }
 
 export function stepName(spec: RouteStepSpec): string {
@@ -74,6 +80,7 @@ export function resolveSteps(
   if (!spec.length) throw new Error("a route needs at least one step");
   const ids: string[] = [];
   const instructions: Array<string | null> = [];
+  const roles: Array<string | null> = [];
   for (const entry of spec) {
     const step = stepName(entry);
     const byId = config.agents.find((a) => a.id === step);
@@ -91,8 +98,11 @@ export function resolveSteps(
     instructions.push(
       typeof entry === "object" && entry.instruction?.trim() ? entry.instruction.trim() : null,
     );
+    roles.push(
+      typeof entry === "object" && entry.role?.trim() ? entry.role.trim().slice(0, 40) : null,
+    );
   }
-  return { ids, instructions };
+  return { ids, instructions, roles };
 }
 
 const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
@@ -160,8 +170,10 @@ export class RouteEngine {
   async start(spec: RouteStepSpec[], task: string, name?: string): Promise<RouteState> {
     if (this.isActive()) throw new RouteActiveError();
     const resolved = resolveSteps(spec, this.host.config, this.host.isAdapterId);
+    // The step's assigned role wins; fall back to the agent's own default role
+    // when the task didn't say. This is the seam that makes roles per-task.
     const stepRoles = resolved.ids.map(
-      (id) => this.host.config.agents.find((a) => a.id === id)!.role,
+      (id, i) => resolved.roles[i] ?? this.host.config.agents.find((a) => a.id === id)!.role,
     );
     const route: RouteState = {
       id: newId(4),

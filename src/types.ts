@@ -121,8 +121,15 @@ export interface UnifiedMemory {
   document: string;
 }
 
-/** A route step: an agent id/role, optionally with step-specific focus. */
-export type RouteStepSpec = string | { step: string; instruction?: string };
+/**
+ * A route step: which agent (by id or role), and what job it does.
+ *
+ * `role` is the job for THIS step — planner/executor/reviewer/… — chosen when
+ * the task is created, independent of the agent's own default role. So the same
+ * agent can plan in one task and review in another. `instruction` is optional
+ * free-text focus on top of the role.
+ */
+export type RouteStepSpec = string | { step: string; role?: string; instruction?: string };
 
 /** How shared memory is rendered on handoff. */
 export interface ProjectionConfig {

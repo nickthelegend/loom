@@ -1051,6 +1051,16 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .agchip.sel .num{display:inline-flex}
   .agchip .role{opacity:.6;font-size:10.5px;font-family:var(--font-mono)}
   .agchip.sel .role{opacity:.8}
+  /* per-agent role assignment for a task — one row per picked agent, in order */
+  .rolelist{display:none;flex-direction:column;gap:6px;margin-top:8px}
+  .rolerow{display:flex;align-items:center;gap:8px;font-size:12.5px}
+  .rolerow .rn{font-family:var(--font-mono);font-size:10px;width:16px;height:16px;border-radius:50%;flex:none;
+    display:inline-flex;align-items:center;justify-content:center;background:var(--sidebar-accent);color:var(--muted-foreground)}
+  .rolerow .brand{width:16px;height:16px;flex:none}
+  .rolerow .rid{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);font-size:11.5px}
+  .rolerow .roleselect{height:28px;border:1px solid var(--input);border-radius:7px;background:var(--background);
+    color:var(--foreground);font:inherit;font-size:12px;padding:0 8px;cursor:pointer;max-width:150px}
+  .rolerow .roleselect:focus{outline:none;border-color:var(--ring)}
   /* ── Native desktop chrome (Electron shell) ───────────── */
   html[data-electron] .sidebar .shead,
   html[data-electron] .tabstrip,
@@ -3830,6 +3840,7 @@ ${BRAND_SPRITE}
         '<div class="field"><label>Task</label><textarea id="mtask" placeholder="what should the agent do?"></textarea></div>' +
         '<div class="field"><label>Agents \\u00b7 one, or several in sequence</label>' +
           '<div class="agsel" id="magsel"></div>' +
+          '<div class="rolelist" id="magroles"></div>' +
           '<span class="hintx" id="maghint"></span></div>' +
         '<div class="disclose" id="madv">\\u25b8 Advanced</div>' +
         '<div class="field" id="mroutewrap" style="display:none"><label>Named pipeline</label>' +
@@ -3844,6 +3855,9 @@ ${BRAND_SPRITE}
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("mclose").onclick = close;
     document.getElementById("mcancel").onclick = close;
+    // The job each picked agent does THIS task — keyed by agent id, seeded from
+    // the agent's own role but freely overridable here without changing it.
+    var taskRoles = {};
     function drawChips(){
       var box = document.getElementById("magsel"); if (!box) return;
       var agents = agentsFor(pid);
@@ -3863,12 +3877,39 @@ ${BRAND_SPRITE}
           drawChips();
         };
       });
+      drawRoles();
       var hint = document.getElementById("maghint");
       if (hint) hint.textContent = picked.length > 1
         ? "runs as a pipeline: " + picked.join(" \\u2192 ")
         : picked.length === 1
           ? "one ADE runs the whole task"
           : "pick one ADE \\u2014 or several to run them in order";
+    }
+    // The roles you can hand out. Only the first three carry distinct prompt
+    // behaviour today (plan / execute / review); the rest are honest labels the
+    // agent still gets told to act on.
+    var TASK_ROLES = ["planner","executor","reviewer","general","researcher","tester","architect","documenter"];
+    function drawRoles(){
+      var wrap = document.getElementById("magroles"); if (!wrap) return;
+      if (!picked.length) { wrap.innerHTML = ""; wrap.style.display = "none"; return; }
+      wrap.style.display = "flex";
+      var agents = agentsFor(pid);
+      wrap.innerHTML = picked.map(function(id, i){
+        var a = agents.filter(function(x){ return x.id === id; })[0] || {};
+        var role = taskRoles[id] || a.role || "general";
+        // ensure whatever the agent's own role is can still be selected
+        var opts = TASK_ROLES.slice();
+        if (opts.indexOf(role) < 0) opts.unshift(role);
+        return '<div class="rolerow">' +
+          '<span class="rn">' + (i + 1) + "</span>" + brandMark(a.kind) +
+          '<span class="rid">' + esc(id) + "</span>" +
+          '<select class="roleselect" data-roleid="' + esc(id) + '">' +
+          opts.map(function(r){ return '<option value="' + esc(r) + '"' + (r === role ? " selected" : "") + ">" + esc(r) + "</option>"; }).join("") +
+          "</select></div>";
+      }).join("");
+      Array.prototype.forEach.call(wrap.querySelectorAll(".roleselect"), function(sel){
+        sel.onchange = function(){ taskRoles[sel.getAttribute("data-roleid")] = sel.value; };
+      });
     }
     var advOpen = false;
     document.getElementById("madv").onclick = function(){
@@ -3906,12 +3947,24 @@ ${BRAND_SPRITE}
       if (!pipeline && !picked.length) return toast("pick at least one agent");
       var btn = document.getElementById("mcreate"); btn.disabled = true;
       var work, note;
+      // The spec carries each step's assigned role, so a route can say "this one
+      // plans, that one executes" without touching either agent's own role.
+      var specWithRoles = picked.map(function(id){
+        var r = taskRoles[id];
+        return r ? { step: id, role: r } : { step: id };
+      });
+      var rolesNote = picked.map(function(id){ return id + (taskRoles[id] ? " (" + taskRoles[id] + ")" : ""); });
       if (pipeline) {
         work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: pipeline }) });
         note = "pipeline " + pipeline + " started";
       } else if (picked.length > 1) {
-        work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: picked.join(",") }) });
-        note = picked.length + " agents \\u00b7 " + picked.join(" \\u2192 ");
+        work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: specWithRoles }) });
+        note = picked.length + " agents \\u00b7 " + rolesNote.join(" \\u2192 ");
+      } else if (taskRoles[picked[0]]) {
+        // A single agent with an explicit role runs as a one-step route, so the
+        // role's instruction is actually injected into its turn.
+        work = api("/api/projects/" + mproj + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: specWithRoles }) });
+        note = "task sent to " + picked[0] + " as " + taskRoles[picked[0]];
       } else {
         var agent = picked[0];
         var holder = (proj(mproj) || {}).holder;
