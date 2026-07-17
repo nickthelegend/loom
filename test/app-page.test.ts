@@ -175,3 +175,29 @@ describe("web app page", () => {
     expect(APP_MANIFEST.icons.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * The served JavaScript must actually parse.
+ *
+ * This whole page is one TS template literal, which means every backslash bound
+ * for the browser has to be doubled and a raw backtick ends the file. Both
+ * mistakes produce a page that serves with HTTP 200, contains all the right
+ * markup, and dies on the first line of script — so every string-contains test
+ * in this file still passes while the app is completely dead.
+ *
+ * It has happened three times in one day: a backtick in a comment about a
+ * keyboard shortcut, and twice a `\n` in a comment about escaping `\n`. Parsing
+ * the thing is the only check that would have caught any of them.
+ */
+describe("web app · the script parses", () => {
+  it("every inline script is valid JavaScript", () => {
+    const scripts = [...APP_HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? "");
+    expect(scripts.length, "the app should have inline scripts").toBeGreaterThan(0);
+    for (const [i, src] of scripts.entries()) {
+      // new Function is a parser here, not an execution: it compiles and throws
+      // on a syntax error without running a line.
+      expect(() => new Function(src), `inline script ${i} does not parse`).not.toThrow();
+    }
+  });
+
+});

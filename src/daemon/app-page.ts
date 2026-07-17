@@ -667,6 +667,33 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   /* one host per tab: xterm mounts into it in pty mode, the line-renderer
      writes into it in pipe mode. Only the active one is displayed. */
   .termpanes{flex:1;min-height:0;position:relative}
+  /* ── Source control ───────────────────────────────────
+     Staged and unstaged are separate sections on purpose: a file can be in both
+     at once, and one list would show a checkbox that lies about the commit. */
+  .gbranch{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--border);
+    font-size:11.5px;color:var(--muted-foreground)}
+  .gbranch svg{width:13px;height:13px;flex:none}
+  .gbranch .bn{color:var(--foreground);font-weight:600;font-family:var(--font-mono);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .gcount{font-family:var(--font-mono);font-size:10px;padding:1px 5px;border-radius:8px;
+    background:var(--sidebar-accent);flex:none}
+  .gcount.dim{opacity:.6}
+  .rsec .gn{font-family:var(--font-mono);opacity:.65;margin-left:5px;font-weight:400}
+  .rsec .lnk{margin-left:auto;font-size:10.5px;color:var(--muted-foreground);cursor:pointer;
+    background:none;border:0;padding:0 2px}
+  .rsec .lnk:hover{color:var(--foreground);text-decoration:underline}
+  .frow.git{align-items:center}
+  .frow.git .fp{cursor:pointer}
+  .frow.git .fp:hover{text-decoration:underline}
+  .gacts{margin-left:auto;display:none;gap:1px;flex:none}
+  .frow.git:hover .gacts{display:flex}
+  .iconbtn.xs{width:20px;height:20px;border-radius:5px}
+  .iconbtn.xs svg{width:11px;height:11px}
+  .gcommit{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);align-items:center}
+  .gcommit input{flex:1;min-width:0;background:var(--input,var(--card));border:1px solid var(--border);
+    border-radius:7px;padding:5px 8px;font-size:11.5px;color:var(--foreground);font-family:var(--font-sans)}
+  .gcommit input:focus{outline:none;border-color:var(--ring,var(--muted-foreground))}
+  .gcommit .btn{flex:none;white-space:nowrap}
   /* ── Console ──────────────────────────────────────────
      Errors live in the terminal's dock: same drawer, same edge. The dot on the
      toolbar button is the only thing that ever asks for attention, and only
@@ -1034,6 +1061,7 @@ ${BRAND_SPRITE}
     search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>'),
     help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.9 2.9 0 0 1 5.6 1c0 1.8-2.6 2.2-2.6 3.6"/><path d="M12 17h.01"/>'),
     plus: svg('<path d="M12 5v14"/><path d="M5 12h14"/>'),
+    minus: svg('<path d="M5 12h14"/>'),
     panelRight: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>'),
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     // lines of output with one flagged — the Console
@@ -2505,38 +2533,157 @@ ${BRAND_SPRITE}
         });
       }).catch(function(err){ var r = document.getElementById("sres"); if (r) r.innerHTML = '<div class="rempty">' + esc(err.message) + "</div>"; });
     }
+    /**
+     * Source control that does something.
+     *
+     * This used to list files and say "clean — nothing to stage", which was a
+     * viewer wearing source control's name: no stage, no commit, no discard.
+     *
+     * Staged and unstaged are separate sections because porcelain has two
+     * columns for a reason — a file can be in both at once (staged, then edited
+     * again). Flatten that and you get one checkbox that lies about what your
+     * commit will contain.
+     */
     function drawScm(el){
       railTitle('<span class="b">Source control</span>');
-      var p = state.project, t = state.tree, r = p && p.route;
-      var live = r && (r.status === "running" || r.status === "waiting_human");
+      var p = state.project, r = p && p.route;
+      var g = state.git;
       var html = "";
       if (p && p.needsInput) {
         html += '<div class="railcard warnc"><div class="rt"><span class="dot hot"></span>needs input</div>' +
-          '<div class="rm">' + esc(state.lastQuestion || (r && r.pendingQuestion) || "an agent is waiting for you \\u2014 reply in the thread") + "</div></div>";
+          '<div class="rm">' + esc(state.lastQuestion || (r && r.pendingQuestion) || "an agent is waiting for you") + "</div></div>";
       }
-      if (live) {
-        html += '<div class="railcard threadc"><div class="rt">' + esc(r.name || "route") + " \\u00b7 " +
+      if (r && (r.status === "running" || r.status === "waiting_human")) {
+        html += '<div class="railcard threadc"><div class="rt">' + esc(r.name || "route") + " · " +
           (r.mode === "dynamic" ? "hop " + (r.current + 1) : "step " + (r.current + 1) + "/" + r.steps.length) +
-          '</div><div class="rm">\\u25b8 ' + esc(r.steps[r.current] || "") + "</div></div>";
+          '</div><div class="rm">▸ ' + esc(r.steps[r.current] || "") + "</div></div>";
       }
-      html += '<div class="rsec">Changes</div>';
-      if (!t) { el.innerHTML = html + '<div class="rempty">loading\\u2026</div>'; refreshTree(false); return; }
-      if (!t.git) { el.innerHTML = html + '<div class="rempty">not a git repository</div>'; return; }
-      html += '<div class="frow" style="cursor:default"><span style="display:inline-flex;color:var(--muted-foreground)">' + ICONS.branch + "</span>" +
-        '<span class="fp" style="color:var(--foreground);font-weight:600">' + esc(t.branch || "") + "</span></div>";
-      var files = visibleFiles(t);
-      if (!files.length) html += '<div class="rempty">clean \\u2014 nothing to stage</div>';
-      else files.forEach(function(f){
-        var st = String(f.status || "").trim();
-        var cls = st.indexOf("D") >= 0 ? "del" : (st.indexOf("M") >= 0 ? "mod" : "add");
-        html += '<div class="frow" data-file="' + esc(f.path) + '"><span class="fst ' + cls + '">' + esc(st) + "</span>" +
-          '<span class="fp">' + esc(f.path) + "</span></div>";
-      });
+      if (!g) { el.innerHTML = html + '<div class="rempty">loading…</div>'; refreshGit(); return; }
+      if (!g.branch) { el.innerHTML = html + '<div class="rempty">not a git repository</div>'; return; }
+
+      // Branch and distance from upstream: "3 ahead" is the difference between
+      // "I pushed" and "I thought I pushed".
+      html += '<div class="gbranch">' + ICONS.branch + '<span class="bn">' + esc(g.branch) + "</span>" +
+        (g.ahead ? '<span class="gcount">↑' + g.ahead + "</span>" : "") +
+        (g.behind ? '<span class="gcount">↓' + g.behind + "</span>" : "") +
+        (g.upstream ? "" : '<span class="gcount dim">no upstream</span>') + "</div>";
+
+      var staged = g.staged || [], unstaged = g.unstaged || [], untracked = g.untracked || [];
+      if (!staged.length && !unstaged.length && !untracked.length) {
+        el.innerHTML = html + '<div class="rempty">clean — nothing to commit</div>';
+        return;
+      }
+
+      function fileRow(f, kind){
+        var st = String(f.status || "?").trim() || "?";
+        var pth = f.path;
+        var cls = st.indexOf("D") >= 0 ? "del" : (st === "?" || st === "A" ? "add" : "mod");
+        return '<div class="frow git" data-file="' + esc(pth) + '">' +
+          '<span class="fst ' + cls + '">' + esc(st) + "</span>" +
+          '<span class="fp" data-open="' + esc(pth) + '">' + esc(pth) + "</span>" +
+          '<span class="gacts">' +
+          (kind === "staged"
+            ? '<button class="iconbtn xs" data-unstage="' + esc(pth) + '" title="unstage">' + ICONS.minus + "</button>"
+            : '<button class="iconbtn xs" data-discard="' + esc(pth) + '" data-untracked="' + (kind === "untracked" ? "1" : "") + '" title="discard changes">' + ICONS.x + "</button>" +
+              '<button class="iconbtn xs" data-stage="' + esc(pth) + '" title="stage">' + ICONS.plus + "</button>") +
+          "</span></div>";
+      }
+
+      if (staged.length) {
+        html += '<div class="rsec">Staged <span class="gn">' + staged.length + "</span>" +
+          '<button class="lnk" id="unstageall">unstage all</button></div>';
+        html += staged.map(function(f){ return fileRow(f, "staged"); }).join("");
+        html += '<form class="gcommit" id="gcommitform">' +
+          '<input id="gmsg" placeholder="Message · what changed and why" autocomplete="off">' +
+          '<button class="btn primary sm" type="submit" id="gcommitbtn">Commit ' + staged.length + " file" + (staged.length === 1 ? "" : "s") + "</button>" +
+          "</form>";
+      }
+      if (unstaged.length) {
+        html += '<div class="rsec">Changes <span class="gn">' + unstaged.length + "</span>" +
+          '<button class="lnk" id="stageall">stage all</button></div>';
+        html += unstaged.map(function(f){ return fileRow(f, "unstaged"); }).join("");
+      }
+      if (untracked.length) {
+        html += '<div class="rsec">Untracked <span class="gn">' + untracked.length + "</span></div>";
+        html += untracked.map(function(f){ return fileRow({ path: f, status: "?" }, "untracked"); }).join("");
+      }
       el.innerHTML = html;
-      Array.prototype.forEach.call(el.querySelectorAll(".frow[data-file]"), function(row){
-        row.onclick = function(){ openChangesDock(row.getAttribute("data-file")); };
-      });
+      wireGitRows(el);
     }
+
+    /** Every control in the Source control view. */
+    function wireGitRows(el){
+      function act(path, body, said){
+        return api("/api/projects/" + pid + "/git/" + path, { method: "POST", body: JSON.stringify(body) })
+          .then(function(){ refreshGit(); if (said) toast(said); })
+          .catch(function(e){ toast(e.message); });
+      }
+      Array.prototype.forEach.call(el.querySelectorAll("[data-stage]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); act("stage", { paths: [b.getAttribute("data-stage")] }); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-unstage]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); act("unstage", { paths: [b.getAttribute("data-unstage")] }); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-discard]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var f = b.getAttribute("data-discard");
+          // The only control in Loom that destroys work, so it's the only one
+          // that asks first.
+          // The newline escape below is doubled. This whole file is one TS
+          // template literal: a single backslash is eaten here and the browser
+          // receives a real newline inside a string literal, which is a syntax
+          // error that takes the entire app down — not just this button.
+          // (Writing the un-doubled form even in THIS comment broke it once.)
+          if (!confirm("Discard your changes to " + f + "?\\n\\nThis cannot be undone.")) return;
+          var un = b.getAttribute("data-untracked") === "1";
+          act("discard", un ? { untracked: [f] } : { paths: [f] }, "discarded " + f);
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-open]"), function(f){
+        f.onclick = function(){ openChangesDock(f.getAttribute("data-open")); };
+      });
+      var sa = document.getElementById("stageall");
+      if (sa) sa.onclick = function(){
+        var g = state.git || {};
+        var all = (g.unstaged || []).map(function(f){ return f.path; }).concat(g.untracked || []);
+        if (all.length) act("stage", { paths: all });
+      };
+      var ua = document.getElementById("unstageall");
+      if (ua) ua.onclick = function(){
+        var g = state.git || {};
+        var all = (g.staged || []).map(function(f){ return f.path; });
+        if (all.length) act("unstage", { paths: all });
+      };
+      var form = document.getElementById("gcommitform");
+      if (form) form.onsubmit = function(ev){
+        ev.preventDefault();
+        var box = document.getElementById("gmsg");
+        var msg = (box.value || "").trim();
+        if (!msg) return toast("a commit needs a message");
+        var btn = document.getElementById("gcommitbtn");
+        if (btn) btn.disabled = true;
+        api("/api/projects/" + pid + "/git/commit", { method: "POST", body: JSON.stringify({ message: msg }) })
+          .then(function(r){
+            box.value = "";
+            toast("committed " + r.sha + " · " + r.files + " file" + (r.files === 1 ? "" : "s"));
+            refreshGit();
+            refreshTree(false);
+          })
+          .catch(function(e){ toast(e.message); })
+          .then(function(){ if (btn) btn.disabled = false; });
+      };
+    }
+
+    /** What git thinks, then redraw if that's what you're looking at. */
+    function refreshGit(){
+      return api("/api/projects/" + pid + "/git/status").then(function(g){
+        state.git = g;
+        if (state.railView === "scm") drawRail();
+      }).catch(function(){ /* not a repo, or the daemon went away — drawScm says so */ });
+    }
+
+
     // The agent roster. Keeps the internal "tasks" key so a persisted
     // loomRailView from an older build still resolves to a real view.
     function drawAgentsView(el){

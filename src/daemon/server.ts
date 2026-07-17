@@ -18,6 +18,14 @@ import { NotHolderError } from "../core/baton.js";
 import { RouteActiveError } from "../core/routes.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { logbook } from "../core/logbook.js";
+import {
+  commit as gitCommit,
+  discard as gitDiscard,
+  GitError,
+  stage as gitStage,
+  status as gitStatus,
+  unstage as gitUnstage,
+} from "../core/git.js";
 import { setupReport } from "../core/setup.js";
 import {
   ensureDaemonConfig,
@@ -105,6 +113,21 @@ export const BUILD_REV = (() => {
 })();
 
 const TERM_MARK = "__LOOM_END__";
+
+/**
+ * Paths from an HTTP body, as strings and nothing else.
+ *
+ * These reach `git checkout --` and `git clean -fd`, which delete things. A
+ * body is whatever the caller felt like sending, so anything that isn't a
+ * string is dropped here rather than stringified into a path somewhere deeper.
+ * This is the shape check; core/git.ts does the safety check, resolving every
+ * one of them against the project root.
+ */
+function asPaths(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === "string" && x.length > 0).slice(0, 500);
+}
+
 
 export class LoomDaemon {
   private app = express();
@@ -500,6 +523,50 @@ export class LoomDaemon {
         if (!updated) return void res.status(404).json({ error: "unknown agent" });
         res.json(updated);
       }),
+    );
+
+    // ---- source control ---------------------------------------------------
+    // Reading the working tree has been possible since the Explorer landed;
+    // doing anything about it has not. These are the writes, and they're the
+    // only endpoints in Loom that can destroy work — hence the path checks in
+    // core/git.ts and the noise in the log when you discard.
+    app.get(
+      "/api/projects/:id/git/status",
+      withRuntime(async (rt, _req, res) => {
+        res.json(await gitStatus(rt.info.dir));
+      }),
+    );
+
+    const gitWrite = (
+      fn: (dir: string, body: Record<string, unknown>) => Promise<unknown>,
+    ) =>
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(await fn(rt.info.dir, (req.body ?? {}) as Record<string, unknown>));
+        } catch (err) {
+          // git's own words, not ours: "nothing to commit, working tree clean"
+          // beats anything we'd invent about an exit code.
+          const message = err instanceof Error ? err.message : String(err);
+          logbook.warn("git", message, err instanceof GitError ? err.stderr : err, rt.info.id);
+          res.status(400).json({ error: message });
+        }
+      });
+
+    app.post(
+      "/api/projects/:id/git/stage",
+      gitWrite((dir, b) => gitStage(dir, asPaths(b.paths))),
+    );
+    app.post(
+      "/api/projects/:id/git/unstage",
+      gitWrite((dir, b) => gitUnstage(dir, asPaths(b.paths))),
+    );
+    app.post(
+      "/api/projects/:id/git/discard",
+      gitWrite((dir, b) => gitDiscard(dir, asPaths(b.paths), asPaths(b.untracked))),
+    );
+    app.post(
+      "/api/projects/:id/git/commit",
+      gitWrite((dir, b) => gitCommit(dir, String(b.message ?? ""))),
     );
 
     // ---- the Console ------------------------------------------------------
