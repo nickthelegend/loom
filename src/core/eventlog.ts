@@ -23,7 +23,10 @@ export interface ListOpts {
   chat?: string;
 }
 
-interface EventStore {
+/** The store behind a project's log. Exported so search can take a narrow
+ * slice of it (list) rather than the whole EventLog — a searcher has no
+ * business being able to append. */
+export interface EventStore {
   append(
     e: Required<Omit<NewEvent, "agentId" | "chat">> & { agentId?: string; chat?: string },
   ): LoomEvent;

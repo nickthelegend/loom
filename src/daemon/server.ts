@@ -18,6 +18,7 @@ import { NotHolderError } from "../core/baton.js";
 import { RouteActiveError } from "../core/routes.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { logbook } from "../core/logbook.js";
+import { searchChats, searchCode } from "../core/search.js";
 import {
   commit as gitCommit,
   discard as gitDiscard,
@@ -522,6 +523,28 @@ export class LoomDaemon {
         const updated = rt.setAgentRole(String(req.params.agentId), clean);
         if (!updated) return void res.status(404).json({ error: "unknown agent" });
         res.json(updated);
+      }),
+    );
+
+    // ---- search -----------------------------------------------------------
+    // Finding a file by name was the whole of search, which is its least useful
+    // half: you remember a line, not a filename. And the thread — where a
+    // project's actual reasoning lives — wasn't searchable at all.
+    app.get(
+      "/api/projects/:id/grep",
+      withRuntime(async (rt, req, res) => {
+        res.json(await searchCode(rt.info.dir, String(req.query.q ?? "")));
+      }),
+    );
+
+    app.get(
+      "/api/projects/:id/chats/search",
+      withRuntime(async (rt, req, res) => {
+        res.json(
+          searchChats(rt.log, String(req.query.q ?? ""), {
+            ...(req.query.chat ? { chat: String(req.query.chat) } : {}),
+          }),
+        );
       }),
     );
 

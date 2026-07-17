@@ -688,6 +688,28 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .gacts{margin-left:auto;display:none;gap:1px;flex:none}
   .frow.git:hover .gacts{display:flex}
   .iconbtn.xs{width:20px;height:20px;border-radius:5px}
+  /* ── Search ───────────────────────────────────────────
+     Two modes, one box. Code hits group by file, because twenty hits in one
+     file is one answer rather than twenty. */
+  .smodes{display:flex;align-items:center;gap:4px;padding:0 8px 6px 8px}
+  .smodes .lvl{padding:2px 8px;border-radius:11px;cursor:pointer;font-size:10.5px;
+    color:var(--muted-foreground);border:1px solid transparent}
+  .smodes .lvl:hover{background:var(--sidebar-accent)}
+  .smodes .lvl.on{background:var(--sidebar-accent);border-color:var(--border);color:var(--foreground)}
+  .scount{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground)}
+  .hitfile{display:flex;align-items:center;gap:6px;padding:6px 10px 2px 10px;
+    font-size:11px;font-weight:600;color:var(--foreground);position:sticky;top:0;
+    background:var(--card);border-top:1px solid var(--border)}
+  .hitfile .fp{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+  .hitfile .hc{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);flex:none}
+  .hitrow{display:flex;gap:8px;padding:2px 10px 2px 14px;cursor:pointer;align-items:baseline}
+  .hitrow:hover{background:var(--sidebar-accent)}
+  .hitrow .hn{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
+    flex:none;min-width:26px;text-align:right}
+  .hitrow .ht{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+  .hitrow mark,.chit mark{background:color-mix(in srgb,var(--warn) 35%,transparent);
+    color:var(--foreground);border-radius:2px;padding:0 1px}
   /* ── Brain ────────────────────────────────────────────
      The tab used to be the projection dumped as grey lines with one button.
      It is the whole premise of the product, so it says what it holds, what it
@@ -2618,52 +2640,112 @@ ${BRAND_SPRITE}
         };
       });
     }
+    /**
+     * Search this project: its files, and its code.
+     *
+     * Finding a file by name was all of it, which is the half you need least —
+     * you remember a line, not a filename. Two modes, one box; the mode you
+     * chose persists, because whichever one you use, you use it repeatedly.
+     */
     function drawSearch(el){
       railTitle('<span class="b">Search</span>');
-      el.innerHTML = '<div class="rsearch"><input id="rsearchi" placeholder="find files by name\\u2026" autocomplete="off" spellcheck="false"></div>' +
+      var mode = state.railSearchMode || "code";
+      el.innerHTML = '<div class="rsearch">' +
+        '<input id="rsearchi" placeholder="' + (mode === "code" ? "search the code…" : "find files by name…") + '" autocomplete="off" spellcheck="false"></div>' +
+        '<div class="smodes">' +
+        '<span class="lvl' + (mode === "code" ? " on" : "") + '" data-mode="code">Code</span>' +
+        '<span class="lvl' + (mode === "files" ? " on" : "") + '" data-mode="files">Files</span>' +
+        '<span style="flex:1"></span><span class="scount" id="scount"></span>' +
+        "</div>" +
         '<div class="sres" id="sres"></div>' +
-        '<div class="rempty" id="shint">type to find files by name in this project</div>';
+        '<div class="rempty" id="shint">' +
+        (mode === "code" ? "type to search inside every file in this project" : "type to find files by name") +
+        "</div>";
       var inp = document.getElementById("rsearchi");
       if (state.railSearchQ) inp.value = state.railSearchQ;
       var to;
       inp.oninput = function(){ state.railSearchQ = this.value; clearTimeout(to); to = setTimeout(runSearch, 220); };
       inp.onkeydown = function(e){ if (e.key === "Enter") { clearTimeout(to); runSearch(); } };
+      Array.prototype.forEach.call(el.querySelectorAll("[data-mode]"), function(b){
+        b.onclick = function(){
+          state.railSearchMode = b.getAttribute("data-mode");
+          drawRail();
+        };
+      });
       setTimeout(function(){ inp.focus(); }, 20);
       if (state.railSearchQ) runSearch();
     }
+
     function runSearch(){
       var q = (state.railSearchQ || "").trim();
       var res = document.getElementById("sres"); if (!res) return;
       var hint = document.getElementById("shint");
+      var cnt = document.getElementById("scount");
       if (hint) hint.style.display = q ? "none" : "";
+      if (cnt) cnt.textContent = "";
       if (!q) { res.innerHTML = ""; return; }
-      res.innerHTML = '<div class="rempty">searching\\u2026</div>';
-      api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q)).then(function(j){
+      res.innerHTML = '<div class="rempty">searching…</div>';
+
+      if ((state.railSearchMode || "code") === "files") {
+        api("/api/projects/" + pid + "/find?q=" + encodeURIComponent(q)).then(function(j){
+          res = document.getElementById("sres"); if (!res) return;
+          var m = j.matches || [];
+          if (cnt) cnt.textContent = m.length ? m.length + (m.length === 200 ? "+" : "") + " files" : "";
+          if (!m.length) { res.innerHTML = '<div class="rempty">no file names match “' + esc(q) + '”</div>'; return; }
+          res.innerHTML = m.map(function(f){
+            return '<div class="frow" data-open="' + esc(f) + '"><span class="fp">' + esc(f) + "</span></div>";
+          }).join("");
+          wireSearchRows(res);
+        }).catch(function(e){ res.innerHTML = '<div class="rempty">' + esc(e.message) + "</div>"; });
+        return;
+      }
+
+      api("/api/projects/" + pid + "/grep?q=" + encodeURIComponent(q)).then(function(j){
         res = document.getElementById("sres"); if (!res) return;
-        var m = j.matches || [];
-        if (!m.length) { res.innerHTML = '<div class="rempty">no files match</div>'; return; }
-        res.innerHTML = m.map(function(pth){
-          var name = pth.split("/").pop();
-          var dir = pth.slice(0, pth.length - name.length);
-          return '<div class="frow" data-file="' + esc(pth) + '"><span style="color:var(--muted-foreground);display:inline-flex">' + ICONS.file + "</span>" +
-            '<span class="fp">' + esc(name) + ' <span class="dim">' + esc(dir) + "</span></span></div>";
-        }).join("");
-        Array.prototype.forEach.call(res.querySelectorAll(".frow[data-file]"), function(row){
-          row.onclick = function(){ openFileFromTree(row.getAttribute("data-file")); };
+        var hits = j.hits || [];
+        if (cnt) cnt.textContent = hits.length ? hits.length + (j.truncated ? "+" : "") + " hits" : "";
+        if (!hits.length) { res.innerHTML = '<div class="rempty">nothing in this project contains “' + esc(q) + '”</div>'; return; }
+        // Grouped by file: twenty hits in one file is one answer, not twenty.
+        var byFile = {};
+        var order = [];
+        hits.forEach(function(h){
+          if (!byFile[h.path]) { byFile[h.path] = []; order.push(h.path); }
+          byFile[h.path].push(h);
         });
-      }).catch(function(err){ var r = document.getElementById("sres"); if (r) r.innerHTML = '<div class="rempty">' + esc(err.message) + "</div>"; });
+        res.innerHTML = order.map(function(f){
+          var rows = byFile[f].map(function(h){
+            return '<div class="hitrow" data-open="' + esc(f) + '" data-line="' + h.line + '">' +
+              '<span class="hn">' + h.line + "</span>" +
+              '<span class="ht">' + highlight(h.text, q) + "</span></div>";
+          }).join("");
+          return '<div class="hitfile"><span class="fp">' + esc(f) + '</span><span class="hc">' + byFile[f].length + "</span></div>" + rows;
+        }).join("");
+        wireSearchRows(res);
+      }).catch(function(e){ res.innerHTML = '<div class="rempty">' + esc(e.message) + "</div>"; });
     }
+
+    function wireSearchRows(res){
+      Array.prototype.forEach.call(res.querySelectorAll("[data-open]"), function(row){
+        row.onclick = function(){ openFileFromTree(row.getAttribute("data-open")); };
+      });
+    }
+
     /**
-     * Source control that does something.
+     * Mark the match inside a line.
      *
-     * This used to list files and say "clean — nothing to stage", which was a
-     * viewer wearing source control's name: no stage, no commit, no discard.
-     *
-     * Staged and unstaged are separate sections because porcelain has two
-     * columns for a reason — a file can be in both at once (staged, then edited
-     * again). Flatten that and you get one checkbox that lies about what your
-     * commit will contain.
+     * esc() first, always: this is a line of someone's source code, and it will
+     * contain angle brackets. Escaping after inserting the mark would eat the
+     * mark; escaping the query too means a search for "<div" highlights rather
+     * than injects.
      */
+    function highlight(text, q){
+      var safe = esc(String(text));
+      var needle = esc(String(q));
+      var at = safe.toLowerCase().indexOf(needle.toLowerCase());
+      if (at < 0) return safe;
+      return safe.slice(0, at) + '<mark>' + safe.slice(at, at + needle.length) + "</mark>" + safe.slice(at + needle.length);
+    }
+
     function drawScm(el){
       railTitle('<span class="b">Source control</span>');
       var p = state.project, r = p && p.route;
