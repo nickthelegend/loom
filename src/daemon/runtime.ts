@@ -189,6 +189,74 @@ export class ProjectRuntime {
   }
 
   /**
+   * Edit the project's settings the Settings screen owns — the brain extractor,
+   * the projection mode, the default agent. These were config-file-only until
+   * now; everything is read live from this.config (brain?.extractor at turn end,
+   * projection at handoff), so a merge here takes effect on the next turn/hop
+   * with no restart. Only the known keys are honoured; unknown ones are ignored.
+   */
+  patchConfig(patch: {
+    brain?: { extractor?: "auto" | "off"; model?: string };
+    projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
+    defaultAgent?: string;
+  }): ProjectConfig {
+    // Validate everything that can be rejected BEFORE touching this.config, so a
+    // bad field can't leave a half-applied change in memory that the next save
+    // would then persist.
+    const wantsDefault = typeof patch.defaultAgent === "string";
+    const defaultId = wantsDefault ? patch.defaultAgent!.trim() : "";
+    if (wantsDefault && defaultId && !this.config.agents.some((a) => a.id === defaultId)) {
+      throw new Error(`no agent "${defaultId}" in this project`);
+    }
+    if (patch.brain) {
+      const b = { ...(this.config.brain ?? {}) };
+      if (patch.brain.extractor === "auto" || patch.brain.extractor === "off") b.extractor = patch.brain.extractor;
+      if (typeof patch.brain.model === "string") b.model = patch.brain.model.trim() || undefined;
+      this.config.brain = b;
+    }
+    if (patch.projection) {
+      const pr = { ...(this.config.projection ?? {}) };
+      if (patch.projection.mode === "template" || patch.projection.mode === "llm") pr.mode = patch.projection.mode;
+      if (typeof patch.projection.model === "string") pr.model = patch.projection.model.trim() || undefined;
+      this.config.projection = pr;
+    }
+    if (wantsDefault) {
+      // empty clears it; a real value was checked against the roster above
+      if (!defaultId) delete this.config.defaultAgent;
+      else this.config.defaultAgent = defaultId;
+    }
+    this.saveConfig();
+    return this.config;
+  }
+
+  /**
+   * The slice of config the Settings screen edits, read back for display: the
+   * brain extractor, the projection mode, the default agent, and the roster the
+   * default-agent picker chooses from. Defaults are spelled out here (extractor
+   * "auto", projection "template") so the screen shows the effective value, not
+   * a blank that hides what's actually running.
+   */
+  settings(): {
+    brain: { extractor: "auto" | "off"; model: string };
+    projection: { mode: "template" | "llm"; model: string };
+    defaultAgent: string;
+    agents: Array<{ id: string; kind: string; role?: string }>;
+  } {
+    return {
+      brain: {
+        extractor: this.config.brain?.extractor === "off" ? "off" : "auto",
+        model: this.config.brain?.model ?? "",
+      },
+      projection: {
+        mode: this.config.projection?.mode === "llm" ? "llm" : "template",
+        model: this.config.projection?.model ?? "",
+      },
+      defaultAgent: this.config.defaultAgent ?? "",
+      agents: this.config.agents.map((a) => ({ id: a.id, kind: a.kind, role: a.role })),
+    };
+  }
+
+  /**
    * Put an agent in this project.
    *
    * Until this existed a project's roster was whatever was detected the moment

@@ -1139,11 +1139,8 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .modalhead .iconbtn{margin-left:auto}
   .modalbody{padding:16px;display:flex;flex-direction:column;gap:14px;max-height:70vh;overflow-y:auto}
   .field{display:flex;flex-direction:column;gap:6px}
-  /* Setup: a status list, not a form. Wider than the other modals because every
-     row carries a command you're meant to copy, and wrapping a shell command
-     mid-flag makes it useless. */
-  .modal.wide{max-width:620px}
-  .setupbody{gap:0;padding:8px 16px 16px}
+  /* Setup lives inside Settings now (a status list, not a form). Its rows carry
+     shell commands you copy, so the pane is wide enough that a flag never wraps. */
   .sgrouph{font-size:11px;font-weight:560;letter-spacing:.04em;text-transform:uppercase;
     color:var(--muted-foreground);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
   .sgrouph:first-child{margin-top:8px}
@@ -1190,6 +1187,79 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     padding:12px 16px;border-top:1px solid var(--border)}
   .modalfoot .kbd{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);
     border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:6px}
+  /* Settings: a sectioned modal. A nav rail on the left, one pane on the right —
+     Setup folded in as one section among Diagnostics, Preferences, Updates,
+     Devices, About, instead of its own lonely modal. */
+  .modal.settings{max-width:780px}
+  .setwrap{display:flex;min-height:60vh;max-height:74vh}
+  .setnav{flex:none;width:186px;border-right:1px solid var(--border);padding:12px 10px;
+    display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+  .setnav .navh{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted-foreground);padding:6px 10px 4px}
+  .setnav button{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;width:100%;
+    border-radius:var(--radius-md);border:0;background:transparent;color:var(--muted-foreground);
+    font:inherit;font-size:13px;cursor:pointer;text-align:left;transition:background .12s,color .12s}
+  .setnav button svg{width:15px;height:15px;flex:none;opacity:.9}
+  .setnav button:hover{background:var(--muted);color:var(--foreground)}
+  .setnav button.on{background:color-mix(in srgb, var(--primary) 15%, transparent);color:var(--foreground);font-weight:500}
+  .setpane{flex:1;min-width:0;overflow-y:auto;padding:6px 22px 20px}
+  .setpane .sgrouph:first-child{margin-top:12px}
+  .setpane .snote{margin-top:10px}
+  .setphead{font-size:15px;font-weight:600;margin:14px 0 2px}
+  .setpsub{font-size:12.5px;color:var(--muted-foreground);line-height:1.5;margin-bottom:6px}
+  /* a preference row: label+description on the left, control on the right */
+  .prow{display:flex;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid var(--border)}
+  .prow:last-child{border-bottom:0}
+  .prow .pl{flex:1;min-width:0}
+  .prow .pt{font-size:13px;font-weight:500}
+  .prow .pd{font-size:12px;color:var(--muted-foreground);line-height:1.5;margin-top:2px}
+  .prow .pc{flex:none;display:flex;align-items:center;gap:8px}
+  .prow.col{flex-direction:column;align-items:stretch;gap:8px}
+  /* segmented toggle, e.g. Auto | Off */
+  .seg{display:inline-flex;border:1px solid var(--input);border-radius:var(--radius-md);overflow:hidden;flex:none}
+  .seg button{border:0;background:transparent;color:var(--muted-foreground);font:inherit;font-size:12px;
+    height:30px;padding:0 13px;cursor:pointer;transition:background .12s,color .12s}
+  .seg button+button{border-left:1px solid var(--input)}
+  .seg button.on{background:var(--primary);color:var(--primary-foreground);font-weight:500}
+  .prow select{height:32px;min-width:150px;background:transparent;border:1px solid var(--input);
+    border-radius:var(--radius-md);color:var(--foreground);font:inherit;font-size:13px;padding:0 9px;outline:none}
+  .dark .prow select{background:color-mix(in srgb, var(--input) 30%, transparent)}
+  .dark .prow select option{background:var(--popover);color:var(--popover-foreground)}
+  /* a paired device row */
+  .dev{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--border)}
+  .dev:last-child{border-bottom:0}
+  .dev .di{width:32px;height:32px;border-radius:9px;background:var(--muted);flex:none;
+    display:flex;align-items:center;justify-content:center;color:var(--muted-foreground)}
+  .dev .di svg{width:15px;height:15px}
+  .dev .dn{flex:1;min-width:0}
+  .dev .dnt{font-size:13px;font-weight:500;display:flex;align-items:center;gap:7px}
+  .dev .dnd{font-size:11.5px;color:var(--muted-foreground);margin-top:1px}
+  .devme{font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+    color:var(--primary);border:1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+    border-radius:4px;padding:0 5px;line-height:15px}
+  /* the About block: a big version, a grid of facts, link buttons */
+  .abhead{display:flex;align-items:center;gap:12px;margin:16px 0 6px}
+  .abmark{font-size:24px;font-weight:700;letter-spacing:-.02em}
+  .abmark b{color:var(--primary)}
+  .abver{font-size:12px;color:var(--muted-foreground);font-family:var(--font-mono)}
+  .abgrid{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12.5px;margin:12px 0}
+  .abgrid dt{color:var(--muted-foreground)}
+  .abgrid dd{font-family:var(--font-mono);word-break:break-all}
+  .ablinks{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .ablinks a{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;
+    border:1px solid var(--input);border-radius:var(--radius-md);color:var(--foreground);
+    font-size:12.5px;text-decoration:none;transition:background .12s}
+  .ablinks a:hover{background:var(--muted)}
+  .ablinks a svg{width:14px;height:14px}
+  /* one loom-doctor check line */
+  .dchk{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border)}
+  .dchk:last-child{border-bottom:0}
+  .dchk .dct{font-size:13px;font-weight:500}
+  .dchk .dcd{font-size:12px;color:var(--muted-foreground);line-height:1.5;margin-top:1px;white-space:pre-wrap}
+  .setpane .pillrow{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
+  .updpill{font-size:11px;font-weight:600;border-radius:999px;padding:2px 10px;line-height:18px}
+  .updpill.ok{color:var(--ok);background:color-mix(in srgb, var(--ok) 14%, transparent)}
+  .updpill.warn{color:var(--warn);background:color-mix(in srgb, var(--warn) 16%, transparent)}
   /* agent multi-select chips (one ADE, or several in sequence) */
   .agsel{display:flex;flex-wrap:wrap;gap:6px}
   .agchip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:999px;
@@ -1257,10 +1327,13 @@ ${BRAND_SPRITE}
 (function(){
   "use strict";
   var TOKEN_KEY = "loomClientToken";
+  // The id (not the token) of this paired client, so Settings > Devices can mark
+  // "this device" and warn before you revoke the seat you're sitting in.
+  var CLIENT_ID_KEY = "loomClientId";
   var THEME_KEY = "loomTheme";
   // Shown once, unprompted, on a client that has never seen it.
   var SETUP_SEEN_KEY = "loomSetupSeen";
-  var state = { token: localStorage.getItem(TOKEN_KEY) || "", projects: [], pid: null,
+  var state = { token: localStorage.getItem(TOKEN_KEY) || "", clientId: localStorage.getItem(CLIENT_ID_KEY) || "", projects: [], pid: null,
                 project: null, selected: null, lastId: 0, ws: null, timers: [],
                 tab: "thread", tree: null, wsLive: false, lastQuestion: null };
   var root = document.getElementById("root");
@@ -1565,7 +1638,7 @@ ${BRAND_SPRITE}
       });
     });
   }
-  function logout(){ state.token = ""; localStorage.removeItem(TOKEN_KEY); route(); }
+  function logout(){ state.token = ""; state.clientId = ""; localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CLIENT_ID_KEY); route(); }
 
   // ---- pairing -------------------------------------------------------------
   function pairFromHash(){
@@ -1581,6 +1654,7 @@ ${BRAND_SPRITE}
     .then(function(r){ return r.json().then(function(j){
       if (!r.ok) throw new Error(j.error || "pairing failed");
       state.token = j.clientToken; localStorage.setItem(TOKEN_KEY, state.token);
+      if (j.clientId) { state.clientId = j.clientId; localStorage.setItem(CLIENT_ID_KEY, j.clientId); }
       return true; }); });
   }
   function renderPair(){
@@ -4538,24 +4612,36 @@ ${BRAND_SPRITE}
    * browser the daemon may be on another host, so the path is typed.
    */
   /**
-   * Setup — what this machine still needs, answered by the daemon that can see
-   * it.
+   * Settings — one sectioned modal for everything about this Loom. A nav rail on
+   * the left; one pane on the right. Setup is folded in as the first section
+   * rather than living in its own lonely modal, joined by Diagnostics (loom
+   * doctor), Preferences (how the brain and handoffs behave), Updates, Devices,
+   * and About.
    *
-   * Everything is read from /api/setup rather than baked into the page: the
-   * page cannot know whether you have codex installed, and the daemon can. A
-   * checklist that says the same thing on every machine is a brochure, not a
-   * setup screen.
+   * Setup and Diagnostics read from the daemon that can actually see the machine
+   * (/api/setup, /api/doctor) rather than anything baked into the page: a
+   * checklist that says the same thing everywhere is a brochure. Preferences are
+   * per-project and land live on the next turn/handoff \\u2014 no restart.
    */
-  function openSetupModal(){
+  function openSettingsModal(section){
     if (document.querySelector(".scrim")) return;
+    // The project whose brain/handoff prefs we edit \\u2014 the open one, if any.
+    var pid = (location.hash.match(/^#p\\/(.+)$/) || [])[1] || state.pid || null;
+    var SECTIONS = [
+      { id: "setup", label: "Setup", icon: ICONS.tasks },
+      { id: "diagnostics", label: "Diagnostics", icon: ICONS.console },
+      { id: "preferences", label: "Preferences", icon: ICONS.gear },
+      { id: "updates", label: "Updates", icon: ICONS.up },
+      { id: "devices", label: "Devices", icon: ICONS.agents },
+      { id: "about", label: "About", icon: ICONS.info }
+    ];
+    var cur = section || "setup";
     var scrim = document.createElement("div");
     scrim.className = "scrim";
-    scrim.innerHTML = '<div class="modal wide">' +
-      '<div class="modalhead">Setup<button class="iconbtn" id="sclose" aria-label="close">' + ICONS.x + "</button></div>" +
-      '<div class="modalbody setupbody" id="setupbody">' + LOADER + "</div>" +
-      '<div class="modalfoot"><span class="hintx" id="setupfoot"></span><span class="spacer"></span>' +
-      '<button class="btn ghost" id="srefresh">Re-check</button>' +
-      '<button class="btn primary" id="sdone">Done</button></div>' +
+    scrim.innerHTML = '<div class="modal settings">' +
+      '<div class="modalhead">Settings<button class="iconbtn" id="sclose" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="setwrap"><nav class="setnav" id="setnav"></nav>' +
+      '<div class="setpane" id="setpane">' + LOADER + "</div></div>" +
     "</div>";
     document.body.appendChild(scrim);
     function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
@@ -4563,80 +4649,279 @@ ${BRAND_SPRITE}
     document.addEventListener("keydown", onKey);
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("sclose").onclick = close;
-    document.getElementById("sdone").onclick = close;
-    document.getElementById("srefresh").onclick = function(){ load(); };
 
-    function row(state, title, detail, cmd){
-      return '<div class="srow2">' +
-        '<span class="sdot ' + state + '"></span>' +
-        '<div class="sbody"><div class="st">' + title + "</div>" +
-        (detail ? '<div class="sd">' + detail + "</div>" : "") +
-        (cmd ? '<code class="scmd">' + esc(cmd) + "</code>" : "") +
-        "</div></div>";
+    var nav = document.getElementById("setnav");
+    var pane = document.getElementById("setpane");
+    function drawNav(){
+      nav.innerHTML = '<div class="navh">Settings</div>' + SECTIONS.map(function(s){
+        return '<button data-sec="' + s.id + '" class="' + (s.id === cur ? "on" : "") + '">' + s.icon + "<span>" + esc(s.label) + "</span></button>";
+      }).join("");
+      Array.prototype.forEach.call(nav.querySelectorAll("button"), function(b){
+        b.onclick = function(){ cur = b.getAttribute("data-sec"); drawNav(); render(); };
+      });
+    }
+    function busy(){ pane.innerHTML = LOADER; }
+    function fail(err){ pane.innerHTML = '<div class="snote">' + esc(err && err.message ? err.message : String(err)) + "</div>"; }
+
+    // A segmented control (Auto | Off), and the wiring that makes exactly one
+    // button live and calls back with the chosen value.
+    function seg(name, opts, val){
+      return '<div class="seg" data-seg="' + name + '">' + opts.map(function(o){
+        return '<button data-val="' + o.v + '" class="' + (o.v === val ? "on" : "") + '">' + esc(o.l) + "</button>";
+      }).join("") + "</div>";
+    }
+    function bindSeg(name, fn){
+      var box = pane.querySelector('[data-seg="' + name + '"]');
+      if (!box) return;
+      Array.prototype.forEach.call(box.querySelectorAll("button"), function(b){
+        b.onclick = function(){
+          if (b.classList.contains("on")) return;
+          Array.prototype.forEach.call(box.querySelectorAll("button"), function(x){ x.classList.remove("on"); });
+          b.classList.add("on");
+          fn(b.getAttribute("data-val"));
+        };
+      });
     }
 
-    function load(){
-      var body = document.getElementById("setupbody");
-      body.innerHTML = LOADER;
+    // ---- Setup: what this machine still needs (from the daemon) --------------
+    function srow(st, title, detail, cmd){
+      return '<div class="srow2"><span class="sdot ' + st + '"></span>' +
+        '<div class="sbody"><div class="st">' + title + "</div>" +
+        (detail ? '<div class="sd">' + detail + "</div>" : "") +
+        (cmd ? '<code class="scmd">' + esc(cmd) + "</code>" : "") + "</div></div>";
+    }
+    function renderSetup(){
+      busy();
       api("/api/setup").then(function(s){
         var osname = s.platform === "darwin" ? "macOS" : s.platform === "win32" ? "Windows" : "Linux";
-        var html = "";
-
-        html += '<div class="sgrouph">Runtime</div>';
-        html += row(s.node.ok ? "ok" : "bad", "Node " + esc(s.node.version),
+        var h = '<div class="setphead">Setup</div><div class="setpsub">What this machine still needs to run agents.</div>';
+        h += '<div class="sgrouph">Runtime</div>';
+        h += srow(s.node.ok ? "ok" : "bad", "Node " + esc(s.node.version),
           s.node.ok ? "new enough for the event log"
             : "Loom needs \\u2265" + esc(s.node.needed) + " \\u2014 on anything older your history is silently dropped",
           s.node.ok ? "" : (s.platform === "darwin" ? "brew install node"
             : s.platform === "win32" ? "winget install OpenJS.NodeJS" : "install node 22.5 or newer"));
-
-        html += '<div class="sgrouph">Agents that can take a turn</div>';
-        if (!s.ready) {
-          html += '<div class="snote">Nothing here can hold the baton yet \\u2014 install one and Loom has something to drive.</div>';
-        }
+        h += '<div class="sgrouph">Agents that can take a turn</div>';
+        if (!s.ready) h += '<div class="snote">Nothing here can hold the baton yet \\u2014 install one and Loom has something to drive.</div>';
         s.agents.forEach(function(a){
           // Three states, not two. "Installed" was the lie that cost an
           // afternoon: claude answered --version happily while refusing every
           // turn with "Not logged in".
-          var state = !a.found ? "warn" : a.authed === false ? "bad" : a.authed === true ? "ok" : "warn";
+          var st = !a.found ? "warn" : a.authed === false ? "bad" : a.authed === true ? "ok" : "warn";
           var detail = !a.found ? "not installed"
             : a.authed === true ? "signed in \\u00b7 ready to take a turn"
             : a.authed === false ? (a.authDetail || "signed out") + " \\u2014 it will refuse every turn until you:"
             : "installed \\u2014 couldn\\u2019t confirm it\\u2019s signed in:";
-          html += row(state, brandMark(a.kind) + " " + esc(a.label), esc(detail),
-            !a.found ? a.install : a.authed === true ? "" : a.auth);
+          h += srow(st, brandMark(a.kind) + " " + esc(a.label), esc(detail), !a.found ? a.install : a.authed === true ? "" : a.auth);
         });
-
-        html += '<div class="sgrouph">Agents you drive in their own window</div>';
+        h += '<div class="sgrouph">Agents you drive in their own window</div>';
         s.bridges.forEach(function(b){
-          html += row(b.driveable ? "ok" : b.reachable ? "warn" : "off",
+          h += srow(b.driveable ? "ok" : b.reachable ? "warn" : "off",
             brandMark(b.kind) + " " + esc(b.label) + ' <span class="sport">:' + b.port + "</span>",
-            b.driveable ? "ready to drive" : esc(b.reason || "not running"),
-            b.driveable ? "" : b.launch);
+            b.driveable ? "ready to drive" : esc(b.reason || "not running"), b.driveable ? "" : b.launch);
         });
-
-        html += '<div class="sgrouph">Permissions on ' + osname + "</div>";
+        h += '<div class="sgrouph">Permissions on ' + osname + "</div>";
         s.permissions.forEach(function(p){
-          html += '<div class="srow2">' +
-            '<span class="sdot ' + (p.refused ? "no" : "info") + '"></span>' +
+          h += '<div class="srow2"><span class="sdot ' + (p.refused ? "no" : "info") + '"></span>' +
             '<div class="sbody"><div class="st">' + esc(p.title) + (p.refused ? ' <span class="sport">not needed</span>' : "") + "</div>" +
-            '<div class="sd">' + esc(p.why) + "</div>" +
-            '<div class="sd how">' + esc(p.how) + "</div></div></div>";
+            '<div class="sd">' + esc(p.why) + '</div><div class="sd how">' + esc(p.how) + "</div></div></div>";
         });
+        h += '<div class="sgrouph">Your phone</div>';
+        h += srow("info", "Let it reach this machine", "Loom listens on localhost by default, which your phone can\\u2019t see.", "loom up --restart --tailnet");
+        h += srow("info", "Pair the device", "Single use \\u2014 or add one under Devices.", "loom pair");
+        h += '<div class="pillrow"><button class="btn ghost sm" id="setuprecheck">Re-check</button>' +
+          '<span class="hintx">' + (s.ready ? "This machine can run agents." : "No agents installed yet.") + "</span></div>";
+        pane.innerHTML = h;
+        document.getElementById("setuprecheck").onclick = renderSetup;
+      }).catch(fail);
+    }
 
-        html += '<div class="sgrouph">Your phone</div>';
-        html += row("info", "Let it reach this machine",
-          "Loom listens on localhost by default, which your phone can\\u2019t see.", "loom up --restart --tailnet");
-        html += row("info", "Pair the device", "Prints a QR code. Single use.", "loom pair");
+    // ---- Diagnostics: loom doctor, live -------------------------------------
+    function renderDiag(){
+      busy();
+      api("/api/doctor" + (pid ? "?project=" + encodeURIComponent(pid) : "")).then(function(d){
+        var checks = d.checks || [];
+        var bad = checks.filter(function(c){ return c.status === "fail"; }).length;
+        var warn = checks.filter(function(c){ return c.status === "warn"; }).length;
+        var h = '<div class="setphead">Diagnostics</div>' +
+          '<div class="setpsub">loom doctor, run live on this daemon' + (pid ? " \\u00b7 including the open project" : "") + ".</div>";
+        h += '<div class="pillrow">';
+        if (!bad && !warn) h += '<span class="updpill ok">All ' + checks.length + " checks pass</span>";
+        else h += '<span class="updpill warn">' + (bad ? bad + " failing" : "") + (bad && warn ? " \\u00b7 " : "") + (warn ? warn + " warning" + (warn > 1 ? "s" : "") : "") + "</span>";
+        h += '<button class="btn ghost sm" id="diagrerun">Re-run</button></div>';
+        checks.forEach(function(c){
+          var st = c.status === "ok" ? "ok" : c.status === "warn" ? "warn" : "bad";
+          h += '<div class="dchk"><span class="sdot ' + st + '" style="margin-top:5px"></span>' +
+            '<div class="sbody"><div class="dct">' + esc(c.name) + "</div>" +
+            (c.detail ? '<div class="dcd">' + esc(c.detail) + "</div>" : "") + "</div></div>";
+        });
+        pane.innerHTML = h;
+        document.getElementById("diagrerun").onclick = renderDiag;
+      }).catch(fail);
+    }
 
-        body.innerHTML = html;
-        document.getElementById("setupfoot").textContent =
-          s.ready ? "This machine can run agents." : "No agents installed yet.";
-      }).catch(function(err){
-        body.innerHTML = '<div class="snote">Couldn\\u2019t read setup: ' + esc(err.message) + "</div>";
+    // ---- Preferences: theme, and per-project brain/handoff knobs -------------
+    function patchCfg(body, okMsg){
+      api("/api/projects/" + pid + "/config", { method: "PATCH", body: JSON.stringify(body) })
+        .then(function(){ if (okMsg) toast(okMsg); })
+        .catch(function(e){ toast(e.message); renderPrefs(); });
+    }
+    function renderPrefs(){
+      var h = '<div class="setphead">Preferences</div>';
+      h += '<div class="sgrouph">Appearance</div>';
+      h += '<div class="prow"><div class="pl"><div class="pt">Theme</div>' +
+        '<div class="pd">Light or dark. Open terminals repaint to match.</div></div>' +
+        '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }], themeNow()) + "</div></div>";
+      h += '<div id="projprefs"></div>';
+      pane.innerHTML = h;
+      bindSeg("theme", function(v){
+        localStorage.setItem(THEME_KEY, v === "light" ? "light" : "dark");
+        applyTheme();
+        if (state.retheme) state.retheme();
+      });
+      var pp = document.getElementById("projprefs");
+      if (!pid) { pp.innerHTML = '<div class="snote">Open a project to change how its brain learns and how handoff briefs are written.</div>'; return; }
+      pp.innerHTML = LOADER;
+      api("/api/projects/" + pid + "/config").then(function(cfg){
+        var pname = state.project && state.project.name ? state.project.name : "this project";
+        var hh = '<div class="sgrouph">Brain \\u00b7 ' + esc(pname) + "</div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">Memory extractor</div>' +
+          '<div class="pd">After each turn a small Claude reads what changed and files what\\u2019s worth keeping. Off means the brain holds only what you write by hand.</div></div>' +
+          '<div class="pc">' + seg("extractor", [{ v: "auto", l: "Auto" }, { v: "off", l: "Off" }], cfg.brain.extractor) + "</div></div>";
+        hh += '<div class="sgrouph">Handoffs</div>';
+        hh += '<div class="prow"><div class="pl"><div class="pt">Brief style</div>' +
+          '<div class="pd">How the baton note is written when one agent hands to the next. Template is instant and free; LLM distills it with a small Claude.</div></div>' +
+          '<div class="pc">' + seg("projection", [{ v: "template", l: "Template" }, { v: "llm", l: "LLM" }], cfg.projection.mode) + "</div></div>";
+        var agents = cfg.agents || [];
+        hh += '<div class="prow"><div class="pl"><div class="pt">Default agent</div>' +
+          '<div class="pd">Who receives a message when nobody holds the baton.</div></div>' +
+          '<div class="pc"><select id="defagent"><option value="">First available</option>' +
+          agents.map(function(a){ return '<option value="' + esc(a.id) + '"' + (a.id === cfg.defaultAgent ? " selected" : "") + ">" + esc(a.id) + "</option>"; }).join("") +
+          "</select></div></div>";
+        pp.innerHTML = hh;
+        bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
+        bindSeg("projection", function(v){ patchCfg({ projection: { mode: v } }, "Briefs: " + v); });
+        document.getElementById("defagent").onchange = function(){ patchCfg({ defaultAgent: this.value }, "Default agent saved"); };
+      }).catch(function(e){ pp.innerHTML = '<div class="snote">' + esc(e.message) + "</div>"; });
+    }
+
+    // ---- Updates: is this build current -------------------------------------
+    function renderUpdates(){
+      busy();
+      api("/api/updates").then(function(u){
+        var g = u.git;
+        var behind = g && g.behind ? g.behind : 0;
+        var shortRev = (u.rev || "").slice(0, 7);
+        var h = '<div class="setphead">Updates</div>' +
+          '<div class="setpsub">Whether this Loom is current \\u2014 the running build, and the code on disk.</div>';
+        h += '<div class="pillrow">';
+        if (u.root && behind > 0) h += '<span class="updpill warn">' + behind + " commit" + (behind > 1 ? "s" : "") + " behind</span>";
+        else if (u.root && g && g.hasUpstream) h += '<span class="updpill ok">Up to date</span>';
+        else h += '<span class="updpill ok">Build ' + esc(shortRev || "unknown") + "</span>";
+        h += '<button class="btn ghost sm" id="updcheck">Check again</button></div>';
+        h += '<dl class="abgrid"><dt>Version</dt><dd>' + esc(u.version) + "</dd>" +
+          "<dt>Build</dt><dd>" + esc(shortRev || "\\u2014") + "</dd>";
+        if (u.root) h += "<dt>Source</dt><dd>" + esc(u.root) + "</dd>";
+        if (g && g.branch) h += "<dt>Branch</dt><dd>" + esc(g.branch) + (g.ahead ? " (+" + g.ahead + " local)" : "") + "</dd>";
+        h += "</dl>";
+        if (u.root && behind > 0) {
+          h += '<div class="snote">A newer version is on your remote. Update in place, then restart the daemon:</div>';
+          h += '<code class="scmd">cd ' + esc(u.root) + " && git pull --ff-only && npm install && npm run build\\nloom up --restart</code>";
+        } else if (u.root && g && g.hasUpstream) {
+          h += '<div class="snote">Your checkout matches its remote. If you just rebuilt, restart to pick it up:</div><code class="scmd">loom up --restart</code>';
+        } else if (!u.root) {
+          h += '<div class="snote">This Loom isn\\u2019t a git checkout, so there\\u2019s nothing to pull \\u2014 update it the way you installed it (npm, or the desktop app\\u2019s own updater).</div>';
+        }
+        pane.innerHTML = h;
+        document.getElementById("updcheck").onclick = renderUpdates;
+      }).catch(fail);
+    }
+
+    // ---- Devices: paired clients, revoke, add -------------------------------
+    function pairNewDevice(){
+      var out = document.getElementById("devpairout");
+      out.innerHTML = LOADER;
+      api("/api/pair/new", { method: "POST", body: "{}" }).then(function(p){
+        var mins = p.expiresAt ? Math.max(1, Math.round((p.expiresAt - Date.now()) / 60000)) : 10;
+        out.innerHTML = '<div class="snote">On the other device, open <b>' + esc(p.url) +
+          "</b> and it will pair automatically from this link. It works once and expires in about " + mins + " minutes.</div>" +
+          '<code class="scmd">' + esc(p.url) + "/#pair=" + esc(p.token) + "</code>";
+      }).catch(function(e){
+        // Only an admin client (the one holding the daemon's own token, i.e. the
+        // desktop shell) may mint pairing tokens. A paired phone can't — say so,
+        // and point at the CLI path that always works from this machine.
+        var adminOnly = /admin/i.test(e.message || "");
+        out.innerHTML = adminOnly
+          ? '<div class="snote">Only an admin client can add a device from here. From a terminal on this machine:</div><code class="scmd">loom pair</code>'
+          : '<div class="snote">' + esc(e.message) + "</div>";
       });
     }
-    load();
+    function revokeDevice(id){
+      var me = id === state.clientId;
+      if (!window.confirm(me ? "Revoke THIS device? You\\u2019ll be signed out and have to pair again."
+        : "Revoke this device? Its token stops working immediately.")) return;
+      api("/api/pair/clients/" + encodeURIComponent(id), { method: "DELETE" }).then(function(){
+        if (me) { close(); logout(); return; }
+        toast("device revoked");
+        renderDevices();
+      }).catch(function(e){ toast(e.message); });
+    }
+    function renderDevices(){
+      busy();
+      api("/api/pair/clients").then(function(d){
+        var clients = d.clients || [];
+        var h = '<div class="setphead">Devices</div>' +
+          '<div class="setpsub">Every client paired to this Loom. Revoke one and its token stops working at once.</div>';
+        h += '<div class="pillrow"><button class="btn primary sm" id="devpair">Pair a new device</button></div><div id="devpairout"></div>';
+        if (!clients.length) h += '<div class="snote">No devices paired yet.</div>';
+        clients.forEach(function(c){
+          var me = c.id === state.clientId;
+          h += '<div class="dev"><div class="di">' + ICONS.agents + "</div>" +
+            '<div class="dn"><div class="dnt">' + esc(c.name || "device") + (me ? ' <span class="devme">this device</span>' : "") + "</div>" +
+            '<div class="dnd">paired ' + rel(c.createdAt) + (c.push ? " \\u00b7 push on" : "") + "</div></div>" +
+            '<button class="btn ghost sm" data-revoke="' + esc(c.id) + '">Revoke</button></div>';
+        });
+        pane.innerHTML = h;
+        document.getElementById("devpair").onclick = pairNewDevice;
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-revoke]"), function(b){
+          b.onclick = function(){ revokeDevice(b.getAttribute("data-revoke")); };
+        });
+      }).catch(fail);
+    }
+
+    // ---- About --------------------------------------------------------------
+    function renderAbout(){
+      busy();
+      api("/api/health").then(function(hh){
+        var shortRev = (hh.rev || "").slice(0, 7);
+        var h = '<div class="abhead"><div class="abmark">lo<b>om</b></div>' +
+          '<div><div style="font-size:13px;font-weight:600">Agent orchestration</div>' +
+          '<div class="abver">v' + esc(hh.version) + " \\u00b7 " + esc(shortRev) + "</div></div></div>";
+        h += '<div class="setpsub">One thread, many agents \\u2014 they share a working tree, a baton, and a brain.</div>';
+        h += '<dl class="abgrid"><dt>Version</dt><dd>' + esc(hh.version) + "</dd>" +
+          "<dt>Build</dt><dd>" + esc(hh.rev || "\\u2014") + "</dd>" +
+          "<dt>Terminal</dt><dd>" + esc(hh.terminal || "\\u2014") + "</dd></dl>";
+        h += '<div class="ablinks">' +
+          '<a href="https://github.com/nickthelegend/loom" target="_blank" rel="noreferrer">' + ICONS.github + "GitHub</a>" +
+          '<a href="https://github.com/nickthelegend/loom/blob/main/README.md" target="_blank" rel="noreferrer">' + ICONS.info + "Docs</a></div>";
+        h += '<div class="setpsub" style="margin-top:16px">Brand marks by @lobehub/icons. The memory layer follows mem0.</div>';
+        pane.innerHTML = h;
+      }).catch(fail);
+    }
+
+    function render(){
+      if (cur === "diagnostics") renderDiag();
+      else if (cur === "preferences") renderPrefs();
+      else if (cur === "updates") renderUpdates();
+      else if (cur === "devices") renderDevices();
+      else if (cur === "about") renderAbout();
+      else renderSetup();
+    }
+    drawNav();
+    render();
   }
+  // The sidebar foot and the first-run nudge open Settings on its Setup section.
+  function openSetupModal(){ openSettingsModal("setup"); }
 
   function openProjectModal(){
     if (document.querySelector(".scrim")) return;
@@ -4722,7 +5007,7 @@ ${BRAND_SPRITE}
         '<div class="slist" id="slist">' + LOADER + "</div>" +
         '<div class="sfoot">' +
         '<a class="iconbtn" title="Loom on GitHub" href="https://github.com/nickthelegend/loom" target="_blank" rel="noreferrer">' + ICONS.help + "</a>" +
-        '<button id="setupbtn" class="iconbtn" title="Setup and permissions" aria-label="setup and permissions">' + ICONS.gear + "</button>" +
+        '<button id="setupbtn" class="iconbtn" title="Settings" aria-label="settings">' + ICONS.gear + "</button>" +
         '<span class="spacer"></span>' +
         THEME_BTN +
         '<button id="unpair" class="iconbtn" title="unpair this device">' + ICONS.unpair + "</button></div>" +

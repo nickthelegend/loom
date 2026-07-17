@@ -507,14 +507,14 @@ describe("web app · the composer", () => {
  * every machine is a brochure. These run against the real daemon, so the agent
  * list is whatever this machine actually has.
  */
-describe("web app · setup", () => {
+describe("web app · settings", () => {
   it("opens from the sidebar foot and reads this machine, not a script", async () => {
     const m = mount();
     await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
     click($(m, "#setupbtn"));
-    await waitUntil(() => !!$(m, "#setupbody .sgrouph"));
+    await waitUntil(() => !!$(m, "#setpane .sgrouph"));
     // wait for the fetch, not just the shell
-    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 0);
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .srow2").length > 0);
 
     const groups = [...m.window.document.querySelectorAll(".sgrouph")].map((g) => g.textContent);
     expect(groups.join("|")).toContain("Runtime");
@@ -535,9 +535,9 @@ describe("web app · setup", () => {
     const m = mount();
     await waitUntil(() => !!$(m, "#setupbtn"));
     click($(m, "#setupbtn"));
-    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .srow2").length > 5);
 
-    const body = text(m, "#setupbody");
+    const body = text(m, "#setpane");
     // every installed agent resolves to a real verdict, never a shrug dressed
     // up as a tick
     expect(body).toMatch(/signed in|signed out|couldn|not installed|unknown/i);
@@ -548,9 +548,9 @@ describe("web app · setup", () => {
     const m = mount();
     await waitUntil(() => !!$(m, "#setupbtn"));
     click($(m, "#setupbtn"));
-    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .srow2").length > 5);
 
-    const body = text(m, "#setupbody");
+    const body = text(m, "#setpane");
     for (const label of ["Claude Code", "Codex", "OpenCode", "Grok Code", "Antigravity IDE", "Kiro"]) {
       expect(body, `${label} missing from setup`).toContain(label);
     }
@@ -568,11 +568,11 @@ describe("web app · setup", () => {
     const m = mount();
     await waitUntil(() => !!$(m, "#setupbtn"));
     click($(m, "#setupbtn"));
-    await waitUntil(() => m.window.document.querySelectorAll("#setupbody .srow2").length > 5);
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .srow2").length > 5);
 
-    expect(text(m, "#setupbody")).toContain("Accessibility");
-    expect(text(m, "#setupbody")).toMatch(/not needed/i);
-    expect($(m, "#setupbody .sdot.no"), "the refused row should be marked as such").toBeTruthy();
+    expect(text(m, "#setpane")).toContain("Accessibility");
+    expect(text(m, "#setpane")).toMatch(/not needed/i);
+    expect($(m, "#setpane .sdot.no"), "the refused row should be marked as such").toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
   });
 
@@ -580,12 +580,114 @@ describe("web app · setup", () => {
     const m = mount();
     await waitUntil(() => !!$(m, "#setupbtn"));
     click($(m, "#setupbtn"));
-    await waitUntil(() => !!$(m, "#setupbody"));
+    await waitUntil(() => !!$(m, "#setpane"));
     m.window.document.dispatchEvent(
       new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
     );
     await waitUntil(() => !$(m, ".scrim"));
     expect(m.errors.join("\n")).toBe("");
+  });
+
+  /** Open Settings, then switch to one of its sections. */
+  async function openSection(m: Mounted, section?: string) {
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, ".setnav button"));
+    if (section) {
+      click($(m, `.setnav [data-sec="${section}"]`));
+    }
+  }
+
+  it("offers every section, not just Setup", async () => {
+    const m = mount();
+    await openSection(m);
+    const labels = [...m.window.document.querySelectorAll(".setnav button")].map((b) =>
+      b.textContent?.trim(),
+    );
+    for (const s of ["Setup", "Diagnostics", "Preferences", "Updates", "Devices", "About"]) {
+      expect(labels.join("|"), `${s} missing from the settings nav`).toContain(s);
+    }
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("Diagnostics runs loom doctor live, not a canned list", async () => {
+    const m = mount();
+    await openSection(m, "diagnostics");
+    // a real /api/doctor round trip, one line per check
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .dchk").length > 0);
+    expect($(m, "#setpane .updpill"), "a pass/fail summary pill").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("Updates reports the build and version from the daemon", async () => {
+    const m = mount();
+    await openSection(m, "updates");
+    await waitUntil(() => !!$(m, "#setpane .abgrid"));
+    // the version the daemon actually reports, not a hardcoded page string
+    expect(text(m, "#setpane .abgrid")).toMatch(/0\.1\.0/);
+    expect($(m, "#setpane .updpill"), "an up-to-date / behind pill").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("Devices lists the paired client with a way to revoke it", async () => {
+    const m = mount();
+    await openSection(m, "devices");
+    await waitUntil(() => m.window.document.querySelectorAll("#setpane .dev").length > 0);
+    // this jsdom client paired under the name "jsdom" in beforeAll
+    expect(text(m, "#setpane")).toContain("jsdom");
+    expect($(m, "#setpane [data-revoke]"), "a revoke control").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("About shows the version and links to the repo", async () => {
+    const m = mount();
+    await openSection(m, "about");
+    await waitUntil(() => !!$(m, "#setpane .abmark"));
+    expect(text(m, "#setpane")).toMatch(/0\.1\.0/);
+    const repo = $(m, '#setpane a[href*="github.com"]');
+    expect(repo, "a GitHub link").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("Preferences' theme toggle flips the whole app, not just a swatch", async () => {
+    const m = mount();
+    await openSection(m, "preferences");
+    await waitUntil(() => !!$(m, '#setpane [data-seg="theme"]'));
+    const root = m.window.document.documentElement;
+    const wasDark = root.classList.contains("dark");
+    // click the theme that isn't the current one; the class on <html> must follow
+    click($(m, `#setpane [data-seg="theme"] [data-val="${wasDark ? "light" : "dark"}"]`));
+    await waitUntil(() => root.classList.contains("dark") !== wasDark);
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  /**
+   * The whole point of Preferences is that a click here changes what the daemon
+   * does. Flip the brain extractor off and prove the config actually moved —
+   * read it straight back from the API the page also writes to.
+   */
+  it("Preferences writes a project's brain setting through to the daemon", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await openSection(m, "preferences");
+    // the per-project knobs load after a second fetch
+    await waitUntil(() => !!$(m, '#setpane [data-seg="extractor"] [data-val="off"]'));
+    click($(m, '#setpane [data-seg="extractor"] [data-val="off"]'));
+
+    await waitUntil(async () => {
+      const r = await fetch(`${baseUrl}/api/projects/${projectId}/config`, {
+        headers: { authorization: `Bearer ${clientToken}` },
+      });
+      const cfg = (await r.json()) as { brain: { extractor: string } };
+      return cfg.brain.extractor === "off";
+    });
+    expect(m.errors.join("\n")).toBe("");
+
+    // put it back so the next test starts from the default
+    await fetch(`${baseUrl}/api/projects/${projectId}/config`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ brain: { extractor: "auto" } }),
+    });
   });
 });
 

@@ -379,6 +379,32 @@ export async function checkout(dir: string, ref: string): Promise<{ ref: string;
 }
 
 /**
+ * How far behind (and ahead of) the upstream this checkout is — for "check for
+ * updates". Fetches first (bounded), so it reflects the remote, not a stale
+ * local ref. null when the dir isn't a git checkout; behind 0 with no upstream
+ * means "nothing to compare against", not "up to date".
+ */
+export async function remoteBehind(
+  dir: string,
+): Promise<{ behind: number; ahead: number; branch: string; hasUpstream: boolean } | null> {
+  if (!(await isRepo(dir))) return null;
+  const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim();
+  const up = (
+    await git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], dir).catch(() => "")
+  ).trim();
+  if (!up) return { behind: 0, ahead: 0, branch, hasUpstream: false };
+  await gitNet(["fetch", "--quiet"], dir).catch(() => {}); // best-effort; offline is fine
+  const count = async (range: string) =>
+    Number((await git(["rev-list", "--count", range], dir).catch(() => "0")).trim()) || 0;
+  return {
+    behind: await count("HEAD..@{u}"),
+    ahead: await count("@{u}..HEAD"),
+    branch,
+    hasUpstream: true,
+  };
+}
+
+/**
  * Push to the upstream, setting it on the first push.
  *
  * A branch with no upstream needs `-u origin <branch>` once; after that a bare

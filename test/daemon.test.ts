@@ -282,3 +282,101 @@ describe("loom daemon end-to-end", () => {
     );
   });
 });
+
+/**
+ * The Settings screen's backend: diagnostics, updates, and the editable slice of
+ * project config. These land live (config is read per-turn/handoff) so the tests
+ * prove a PATCH is visible on the very next GET, and that the machine-inventory
+ * endpoints sit behind the auth wall rather than in front of it.
+ */
+describe("settings endpoints", () => {
+  const auth = () => ({ authorization: `Bearer ${readDaemonConfig()!.adminToken}` });
+
+  it("doctor, updates, and setup require a token (they inventory the machine)", async () => {
+    for (const path of ["/api/doctor", "/api/updates", "/api/setup"]) {
+      expect((await fetch(`${baseUrl}${path}`)).status, `${path} must be authed`).toBe(401);
+    }
+  });
+
+  it("GET /api/doctor runs the checks, plus the project's when asked", async () => {
+    const env = (await (await fetch(`${baseUrl}/api/doctor`, { headers: auth() })).json()) as {
+      checks: Array<{ name: string; status: string }>;
+    };
+    expect(env.checks.length).toBeGreaterThan(0);
+    expect(env.checks.every((c) => ["ok", "warn", "fail"].includes(c.status))).toBe(true);
+    // node is always checked; a bare env run never carries project rows
+    expect(env.checks.some((c) => c.name === "node")).toBe(true);
+
+    const withProj = (await (
+      await fetch(`${baseUrl}/api/doctor?project=${projectId}`, { headers: auth() })
+    ).json()) as { checks: Array<{ name: string }> };
+    expect(withProj.checks.length).toBeGreaterThan(env.checks.length);
+  });
+
+  it("GET /api/updates reports version and build rev", async () => {
+    const u = (await (await fetch(`${baseUrl}/api/updates`, { headers: auth() })).json()) as {
+      version: string;
+      rev: string;
+    };
+    expect(u.version).toBe("0.1.0");
+    expect(typeof u.rev).toBe("string");
+    expect(u.rev.length).toBeGreaterThan(0);
+  });
+
+  it("GET /api/projects/:id/config echoes the real config, and defaults the unset", async () => {
+    const cfg = (await (
+      await fetch(`${baseUrl}/api/projects/${projectId}/config`, { headers: auth() })
+    ).json()) as {
+      brain: { extractor: string };
+      projection: { mode: string };
+      defaultAgent: string;
+      agents: Array<{ id: string }>;
+    };
+    // the test harness configures the extractor off; settings() echoes that
+    expect(cfg.brain.extractor).toBe("off");
+    // projection is unset for this project, so the effective default shows
+    expect(cfg.projection.mode).toBe("template");
+    expect(cfg.agents.map((a) => a.id)).toContain("execbot");
+  });
+
+  it("PATCH /api/projects/:id/config merges and is visible on the next GET", async () => {
+    const patched = await fetch(`${baseUrl}/api/projects/${projectId}/config`, {
+      method: "PATCH",
+      headers: { ...auth(), "content-type": "application/json" },
+      body: JSON.stringify({ brain: { extractor: "auto" }, projection: { mode: "llm" } }),
+    });
+    expect(patched.status).toBe(200);
+    const cfg = (await (
+      await fetch(`${baseUrl}/api/projects/${projectId}/config`, { headers: auth() })
+    ).json()) as { brain: { extractor: string }; projection: { mode: string } };
+    expect(cfg.brain.extractor).toBe("auto");
+    expect(cfg.projection.mode).toBe("llm");
+
+    // and it survives to the config file, not just memory
+    const onDisk = JSON.parse(
+      fs.readFileSync(path.join(projectDir, ".loom", "config.json"), "utf8"),
+    ) as { brain?: { extractor?: string } };
+    expect(onDisk.brain?.extractor).toBe("auto");
+
+    // reset to the harness baseline so a later turn doesn't spawn claude
+    await fetch(`${baseUrl}/api/projects/${projectId}/config`, {
+      method: "PATCH",
+      headers: { ...auth(), "content-type": "application/json" },
+      body: JSON.stringify({ brain: { extractor: "off" }, projection: { mode: "template" } }),
+    });
+  });
+
+  it("PATCH rejects a default agent that isn't on the roster", async () => {
+    const res = await fetch(`${baseUrl}/api/projects/${projectId}/config`, {
+      method: "PATCH",
+      headers: { ...auth(), "content-type": "application/json" },
+      body: JSON.stringify({ defaultAgent: "ghostbot" }),
+    });
+    expect(res.status).toBe(400);
+    // and nothing changed
+    const cfg = (await (
+      await fetch(`${baseUrl}/api/projects/${projectId}/config`, { headers: auth() })
+    ).json()) as { defaultAgent: string };
+    expect(cfg.defaultAgent).toBe("");
+  });
+});

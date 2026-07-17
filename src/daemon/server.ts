@@ -123,6 +123,28 @@ export const BUILD_REV = (() => {
   }
 })();
 
+/**
+ * Loom's own install root — the directory to ask "am I behind my remote?".
+ *
+ * Walks up from this module looking for a .git directory (a source checkout or
+ * a cloned install). null when Loom was installed some other way (a package),
+ * in which case "check for updates" honestly says there's no git tree to check.
+ */
+function loomRoot(): string | null {
+  try {
+    let dir = path.dirname(fileURLToPath(import.meta.url));
+    for (let i = 0; i < 6; i++) {
+      if (fs.existsSync(path.join(dir, ".git"))) return dir;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
 const TERM_MARK = "__LOOM_END__";
 
 /**
@@ -249,22 +271,6 @@ export class LoomDaemon {
       });
     });
 
-    /**
-     * What this machine still needs — the same answer `loom doctor` gives.
-     *
-     * Authed like everything else: it enumerates which agents you have
-     * installed and which GUI apps are open, which is a small inventory of your
-     * machine and none of a stranger's business.
-     *
-     * Probing GUI bridges means a couple of HTTP round trips to their debug
-     * ports, so this is a request you make when you open Setup, not something
-     * the app polls.
-     */
-    app.get("/api/setup", (_req, res) => {
-      void setupReport()
-        .then((report) => res.json(report))
-        .catch((err) => res.status(500).json({ error: String(err?.message ?? err) }));
-    });
     app.post("/api/pair/claim", (req, res) => {
       const { token, name } = (req.body ?? {}) as { token?: string; name?: string };
       if (!token) return void res.status(400).json({ error: "missing token" });
@@ -282,6 +288,65 @@ export class LoomDaemon {
       }
       (req as Request & { isAdmin?: boolean }).isAdmin = this.auth.isAdmin(token);
       next();
+    });
+
+    /**
+     * What this machine still needs — the same answer `loom doctor` gives.
+     *
+     * Behind the auth wall on purpose: it enumerates which agents you have
+     * installed and which GUI apps are open, a small inventory of your machine
+     * and none of a stranger's business — which matters the moment the daemon
+     * binds past localhost (--host, Tailscale).
+     *
+     * Probing GUI bridges means a couple of HTTP round trips to their debug
+     * ports, so this is a request you make when you open Settings, not something
+     * the app polls.
+     */
+    app.get("/api/setup", (_req, res) => {
+      void setupReport()
+        .then((report) => res.json(report))
+        .catch((err) => res.status(500).json({ error: String(err?.message ?? err) }));
+    });
+
+    /**
+     * `loom doctor`, over HTTP — the env checks always, plus one project's
+     * checks when a ?project is given. Dynamically imported so doctor.js (which
+     * pulls BUILD_REV back out of this file) doesn't create an import cycle at
+     * module-init time.
+     */
+    app.get("/api/doctor", (req, res) => {
+      void (async () => {
+        try {
+          const { envChecks, projectChecks } = await import("../cli/doctor.js");
+          const checks = await envChecks();
+          const projId = (req.query as Record<string, string>).project;
+          if (projId) {
+            const info = findProject(projId);
+            if (info) checks.push(...projectChecks(info.dir));
+          }
+          res.json({ checks });
+        } catch (err) {
+          res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+    });
+
+    /**
+     * Is this Loom current? Version + build rev, and — when Loom itself is a git
+     * checkout — how many commits its own tree is behind its remote. Honest about
+     * the two different "updates" that matter: a newer daemon build waiting to be
+     * restarted (rev), and newer code waiting to be pulled (behind).
+     */
+    app.get("/api/updates", (_req, res) => {
+      void (async () => {
+        const root = loomRoot();
+        let git = null;
+        if (root) {
+          const { remoteBehind } = await import("../core/git.js");
+          git = await remoteBehind(root).catch(() => null);
+        }
+        res.json({ version: "0.1.0", rev: BUILD_REV, root, git });
+      })();
     });
 
     app.post("/api/pair/new", (req, res) => {
@@ -547,6 +612,40 @@ export class LoomDaemon {
         const updated = rt.setAgentRole(String(req.params.agentId), clean);
         if (!updated) return void res.status(404).json({ error: "unknown agent" });
         res.json(updated);
+      }),
+    );
+
+    // The Settings screen reads its editable knobs here — brain extractor,
+    // projection mode, default agent — with the roster the picker chooses from.
+    app.get(
+      "/api/projects/:id/config",
+      withRuntime(async (rt, _req, res) => {
+        res.json(rt.settings());
+      }),
+    );
+
+    // The Settings screen's editable knobs: the brain extractor, the projection
+    // mode, the default agent. Everything is read live from config, so a merge
+    // here lands on the next turn/handoff with no restart. Partial — send only
+    // what changed. Returns the full config so the screen can re-render.
+    app.patch(
+      "/api/projects/:id/config",
+      withRuntime(async (rt, req, res) => {
+        const body = (req.body ?? {}) as Parameters<typeof rt.patchConfig>[0];
+        try {
+          const cfg = rt.patchConfig({
+            brain: body.brain,
+            projection: body.projection,
+            defaultAgent: body.defaultAgent,
+          });
+          res.json({
+            brain: cfg.brain ?? {},
+            projection: cfg.projection ?? {},
+            defaultAgent: cfg.defaultAgent ?? "",
+          });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 
