@@ -765,6 +765,71 @@ describe("web app · the brain", () => {
   }, 20_000);
 });
 
+/**
+ * Chat search, from the sidebar box.
+ *
+ * The box filtered project names, which is the easy half. The thread — where a
+ * project's reasoning actually lives — wasn't searchable from anywhere.
+ */
+describe("web app · searching your conversations", () => {
+  it("finds a message you sent, and says who said it", async () => {
+    const said = `the sqlite decision ${Date.now()}`;
+    // A real message through the real API, so there is something real to find.
+    await fetch(`${baseUrl}/api/projects/${projectId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${clientToken}` },
+      body: JSON.stringify({ text: said }),
+    }).catch(() => {});
+
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#sfilter"));
+    const box = $(m, "#sfilter") as HTMLInputElement;
+    box.value = "sqlite decision";
+    box.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+
+    await waitUntil(() => !!$(m, ".chit"));
+    expect(text(m, ".chit")).toContain("sqlite decision");
+    expect(m.errors.join("\n")).toBe("");
+  }, 25_000);
+
+  it("highlights the match rather than making you find it again", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#sfilter"));
+    const box = $(m, "#sfilter") as HTMLInputElement;
+    box.value = "sqlite";
+    box.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+
+    await waitUntil(() => !!$(m, ".chit mark"));
+    expect(($(m, ".chit mark") as HTMLElement).textContent?.toLowerCase()).toBe("sqlite");
+    expect(m.errors.join("\n")).toBe("");
+  }, 25_000);
+
+  it("doesn't search on one letter — that answers nothing", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#sfilter"));
+    const box = $(m, "#sfilter") as HTMLInputElement;
+    box.value = "s";
+    box.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 500));
+    expect($(m, ".chit")).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
+
+  it("Escape clears it", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#sfilter"));
+    const box = $(m, "#sfilter") as HTMLInputElement;
+    box.value = "sqlite";
+    box.dispatchEvent(new m.window.Event("input", { bubbles: true }));
+    await waitUntil(() => !!$(m, ".chit"));
+
+    box.dispatchEvent(new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitUntil(() => !$(m, ".chit"));
+    expect(box.value).toBe("");
+    expect(m.errors.join("\n")).toBe("");
+  }, 25_000);
+});
+
 describe("web app · the rest of the shell", () => {
   it("switches tabs between the thread, the board and the brain", async () => {
     const m = mount({ hash: `#p/${projectId}` });
@@ -793,13 +858,16 @@ describe("web app · the rest of the shell", () => {
     filter.value = "definitely-not-a-project";
     filter.dispatchEvent(new m.window.Event("input", { bubbles: true }));
     await waitUntil(() => !$(m, "#slist .srow"));
-    expect(text(m, "#slist")).toContain("no matches");
+    expect(text(m, "#slist")).toContain("no project called");
     expect(m.errors.join("\n")).toBe("");
   });
 
   it("opens the agent task modal from the sidebar, and from the N key", async () => {
     const m = mount({ hash: `#p/${projectId}` });
-    await waitUntil(() => !!$(m, "#newtask"));
+    // wired, not merely present — clicking a button whose handler hasn't been
+    // attached is a no-op, and under a loaded parallel run that window is wide
+    // enough to hit. This test was flaky for exactly that reason.
+    await ready(m, "#newtask");
 
     click($(m, "#newtask"));
     await waitUntil(() => !!$(m, "#mtask"));

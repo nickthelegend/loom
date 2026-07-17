@@ -688,6 +688,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .gacts{margin-left:auto;display:none;gap:1px;flex:none}
   .frow.git:hover .gacts{display:flex}
   .iconbtn.xs{width:20px;height:20px;border-radius:5px}
+  /* A message that matches, in the sidebar under the projects. */
+  .chit{display:flex;gap:7px;padding:5px 10px;cursor:pointer;align-items:baseline;font-size:11px}
+  .chit:hover{background:var(--sidebar-accent)}
+  .chit .cw{flex:none;color:var(--muted-foreground);font-size:10px;max-width:60px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chit .cs{flex:1;min-width:0;color:var(--foreground);overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;opacity:.85}
+  .stitle .cnt{margin-left:auto;font-family:var(--font-mono);font-size:10px;opacity:.7}
   /* ── Search ───────────────────────────────────────────
      Two modes, one box. Code hits group by file, because twenty hits in one
      file is one answer rather than twenty. */
@@ -1037,6 +1045,29 @@ ${BRAND_SPRITE}
 
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
+  /**
+   * Mark the match inside a line.
+   *
+   * Module scope, not inside a render function: the code search (renderProject)
+   * and the chat search (renderShell) both call it, and when it lived in the
+   * first of those the second threw a ReferenceError inside a .then() — the
+   * header rendered, the rows silently didn't, and nothing reached the console.
+   * That is the fourth time today a function has been called from the wrong
+   * scope in this file.
+   *
+   * esc() first, always: this is a line of someone's source code and it will
+   * contain angle brackets. Escaping after inserting the mark would eat the
+   * mark; escaping the query too means a search for "<div" highlights rather
+   * than injects.
+   */
+  function highlight(text, q){
+    var safe = esc(String(text));
+    var needle = esc(String(q));
+    var at = safe.toLowerCase().indexOf(needle.toLowerCase());
+    if (at < 0) return safe;
+    return safe.slice(0, at) + "<mark>" + safe.slice(at, at + needle.length) + "</mark>" + safe.slice(at + needle.length);
+  }
+
   function toast(msg){ var t = document.getElementById("toast"); t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   function hue(id){ var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
@@ -2730,21 +2761,6 @@ ${BRAND_SPRITE}
       });
     }
 
-    /**
-     * Mark the match inside a line.
-     *
-     * esc() first, always: this is a line of someone's source code, and it will
-     * contain angle brackets. Escaping after inserting the mark would eat the
-     * mark; escaping the query too means a search for "<div" highlights rather
-     * than injects.
-     */
-    function highlight(text, q){
-      var safe = esc(String(text));
-      var needle = esc(String(q));
-      var at = safe.toLowerCase().indexOf(needle.toLowerCase());
-      if (at < 0) return safe;
-      return safe.slice(0, at) + '<mark>' + safe.slice(at, at + needle.length) + "</mark>" + safe.slice(at + needle.length);
-    }
 
     function drawScm(el){
       railTitle('<span class="b">Source control</span>');
@@ -3922,9 +3938,21 @@ ${BRAND_SPRITE}
     });
     applyRail();
     var filter = "";
+    // The box narrows the project list instantly — that's a local filter over
+    // names you already have — and a beat later searches inside the open
+    // project's conversations. Two speeds on purpose: the list must not lag
+    // your typing, and the search must not fire a request per keystroke.
+    var chatTo;
     document.getElementById("sfilter").oninput = function(){
       filter = (this.value || "").trim().toLowerCase();
       drawList();
+      clearTimeout(chatTo);
+      chatTo = setTimeout(runChatSearch, 260);
+    };
+    document.getElementById("sfilter").onkeydown = function(e){
+      if (e.key === "Escape") {
+        this.value = ""; filter = ""; state.chatHits = null; drawList();
+      }
     };
     document.getElementById("addproj").onclick = openProjectModal;
     document.getElementById("newproj").onclick = openProjectModal;
@@ -3946,6 +3974,55 @@ ${BRAND_SPRITE}
       dmain.innerHTML = '<div class="dempty"><div class="biglogo">loom</div><div class="hair"></div>' +
         "<div>select a project to open its workspace</div></div>";
     }
+    /**
+     * Search the open project's conversations.
+     *
+     * Scoped to the open project: that's the thread you remember, and searching
+     * every project's log on every keystroke is a different feature with a
+     * different cost. Two characters minimum — one letter matches everything
+     * and answers nothing.
+     */
+    function runChatSearch(){
+      var q = (filter || "").trim();
+      if (!cur || q.length < 2) {
+        if (state.chatHits) { state.chatHits = null; drawList(); }
+        return;
+      }
+      api("/api/projects/" + cur + "/chats/search?q=" + encodeURIComponent(q))
+        .then(function(j){
+          state.chatHits = { q: q, hits: j.hits || [], truncated: !!j.truncated };
+          drawList();
+        })
+        .catch(function(){ /* the list still filters; a failed search shouldn't blank it */ });
+    }
+
+    /**
+     * Matching messages, appended under whatever the list showed.
+     *
+     * Both paths call this — the one with projects and the one without —
+     * because "no project called that" is usually the start of a search, not
+     * the end of one.
+     */
+    function drawChatHits(el){
+      var ch = state.chatHits;
+      if (!ch || !ch.q || (filter || "").trim() !== ch.q) return;
+      el.innerHTML += '<div class="stitle">in this conversation' +
+        (ch.hits.length ? '<span class="cnt">' + ch.hits.length + (ch.truncated ? "+" : "") + "</span>" : "") +
+        "</div>";
+      el.innerHTML += ch.hits.length
+        ? ch.hits.map(function(h){
+            var who = h.agentId || "you";
+            return '<div class="chit" data-hit-chat="' + esc(h.chat) + '" data-hit-id="' + h.eventId + '"' +
+              ' title="open this message in ' + esc(h.chat) + '">' +
+              '<span class="cw">' + esc(who) + "</span>" +
+              '<span class="cs">' + highlight(h.snippet, ch.q) + "</span></div>";
+          }).join("")
+        : '<div class="rempty" style="padding:8px 10px">nothing in this project\u2019s messages either</div>';
+      Array.prototype.forEach.call(el.querySelectorAll("[data-hit-chat]"), function(row){
+        row.onclick = function(){ setChat(cur, row.getAttribute("data-hit-chat")); };
+      });
+    }
+
     function drawList(){
       var el = document.getElementById("slist"); if (!el) return;
       if (!state.projects.length) {
@@ -3957,7 +4034,12 @@ ${BRAND_SPRITE}
         return (p.agents || []).some(function(a){ return String(a.id).toLowerCase().indexOf(filter) >= 0; });
       });
       if (!shown.length) {
-        el.innerHTML = '<div class="sys" style="padding:24px 8px">no matches for \\u201c' + esc(filter) + '\\u201d</div>';
+        // No project by that name is not the end of the search — it is usually the
+        // start of one. The early return here meant the chat hits below never
+        // rendered in the exact case you were searching for a message rather than
+        // a project, which is the common case.
+        el.innerHTML = '<div class="sys" style="padding:16px 8px">no project called \u201c' + esc(filter) + '\u201d</div>';
+        drawChatHits(el);
         return;
       }
       el.innerHTML = shown.map(function(p){
@@ -3991,8 +4073,17 @@ ${BRAND_SPRITE}
         }
         return '<div class="sgroup">' + rows + "</div>";
       }).join("");
+
+      drawChatHits(el);
+
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
+      });
+      // A hit takes you to the conversation it's in. It doesn't scroll to the
+      // message yet — the thread loads its own tail — so this is honest about
+      // being "open the chat", not "jump to line".
+      Array.prototype.forEach.call(el.querySelectorAll("[data-hit-chat]"), function(row){
+        row.onclick = function(){ setChat(cur, row.getAttribute("data-hit-chat")); };
       });
       // Switch conversation. Same project, same brain, same baton — a
       // different thread of talking.
