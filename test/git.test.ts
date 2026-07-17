@@ -219,3 +219,43 @@ describe("git · errors", () => {
     await expect(commit(dir, "two")).rejects.toBeInstanceOf(GitError);
   });
 });
+
+/**
+ * Silence that hides a real failure.
+ *
+ * A corrupt .loom/config.json used to become an empty roster with no sound at
+ * all — which looks exactly like "my agents disappeared" and leaves you nothing
+ * to search for. It still falls back (refusing to start over one damaged file
+ * helps nobody), but now it says so where you can see it.
+ */
+describe("config · unreadable is loud, missing is quiet", () => {
+  it("says so when a config is corrupt, instead of quietly using defaults", async () => {
+    const { logbook } = await import("../src/core/logbook.js");
+    const { readProjectConfig } = await import("../src/core/registry.js");
+    logbook.clear();
+
+    const dir = tmpDir("corrupt");
+    fs.mkdirSync(path.join(dir, ".loom"), { recursive: true });
+    // a trailing comma: the most ordinary way a config gets broken
+    fs.writeFileSync(path.join(dir, ".loom", "config.json"), '{"name":"x","agents":[],}');
+
+    const cfg = readProjectConfig(dir);
+    expect(cfg, "it still returns something — one bad file shouldn't stop the app").toBeTruthy();
+
+    const said = logbook.list({ level: "warn" });
+    expect(said.length, "a corrupt config must not be silent").toBeGreaterThan(0);
+    expect(said.at(-1)?.message).toContain("config.json");
+    expect(said.at(-1)?.message).toContain("look like data went missing");
+  });
+
+  it("stays quiet when the file simply isn't there — that's a fact, not a fault", async () => {
+    const { logbook } = await import("../src/core/logbook.js");
+    const { readProjectState } = await import("../src/core/registry.js");
+    logbook.clear();
+
+    const dir = tmpDir("nostate");
+    const state = readProjectState(dir); // no .loom at all
+    expect(state.holder).toBeNull();
+    expect(logbook.list().length, "a missing file is not an event").toBe(0);
+  });
+});

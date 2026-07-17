@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { logbook } from "./logbook.js";
 import type {
   AgentConfig,
   AgentRole,
@@ -28,10 +29,34 @@ export function ensureLoomHome(): string {
   return home;
 }
 
+/**
+ * Read a JSON file, or fall back.
+ *
+ * The fallback is right for a file that isn't there — a project with no
+ * state.json has no state, which is a fact rather than a fault. It is very
+ * wrong for a file that IS there and is corrupt: `.loom/config.json` with a
+ * trailing comma silently became an empty roster, which looks exactly like
+ * "my agents disappeared" and gives you nothing to search for.
+ *
+ * So: missing is quiet, unreadable is loud. Both still return the fallback —
+ * refusing to start because one file is damaged helps nobody — but the second
+ * one says so in the Console.
+ */
 function readJson<T>(file: string, fallback: T): T {
+  let raw: string;
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8")) as T;
+    raw = fs.readFileSync(file, "utf8");
   } catch {
+    return fallback; // not there: nothing to report
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch (err) {
+    logbook.warn(
+      "config",
+      `${path.basename(file)} is unreadable — using defaults, so this will look like data went missing`,
+      `${file}\n${err instanceof Error ? err.message : String(err)}`,
+    );
     return fallback;
   }
 }
