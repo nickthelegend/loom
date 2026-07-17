@@ -301,24 +301,32 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .composer .inner{max-width:900px;margin:0 auto;display:flex;gap:9px;align-items:center}
   /* the composer card: textarea on top, a control row beneath, chips above */
   .cbox{position:relative;max-width:900px;margin:0 auto;
-    background:color-mix(in srgb, var(--input) 22%, var(--background));
-    border:1px solid var(--input);border-radius:calc(var(--radius) + 4px);
-    padding:8px 8px 6px;transition:border-color .15s,box-shadow .15s}
+    background:color-mix(in srgb, var(--input) 18%, var(--background));
+    border:1px solid var(--input);border-radius:16px;
+    padding:10px 12px 8px;transition:border-color .15s,box-shadow .15s}
+  .dark .cbox{background:color-mix(in srgb, var(--input) 32%, var(--background))}
   .cbox:focus-within{border-color:var(--ring);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent)}
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 26%, transparent)}
   .cinput{display:block;width:100%;box-sizing:border-box;background:transparent;border:0;outline:none;resize:none;
-    color:var(--foreground);font:inherit;font-size:14px;line-height:1.5;padding:5px 6px;
-    max-height:200px;overflow-y:auto}
-  .cinput::placeholder{color:color-mix(in srgb, var(--muted-foreground) 60%, transparent)}
-  .crow{display:flex;align-items:center;gap:6px;padding:4px 2px 0}
-  .ctool{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;
-    background:transparent;border:1px solid transparent;border-radius:8px;
+    color:var(--foreground);font:inherit;font-size:14px;line-height:1.55;padding:2px 4px;
+    max-height:220px;overflow-y:auto}
+  .cinput::placeholder{color:color-mix(in srgb, var(--muted-foreground) 55%, transparent)}
+  .crow{display:flex;align-items:center;gap:6px;padding:8px 0 0}
+  .ctool{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;
+    background:transparent;border:1px solid color-mix(in srgb, var(--border) 80%, transparent);border-radius:99px;
     color:var(--muted-foreground);cursor:pointer;font:inherit;font-size:12px;transition:background .12s,color .12s,border-color .12s}
-  .ctool:hover{background:var(--sidebar-accent);color:var(--foreground)}
+  .ctool:hover{background:var(--sidebar-accent);color:var(--foreground);border-color:var(--border)}
   .ctool svg{width:15px;height:15px}
-  .ctool.on{border-color:var(--input);color:var(--foreground)}
+  .ctool.iconly{width:30px;padding:0;justify-content:center;gap:0}
+  .ctool .cchev{width:12px;height:12px;opacity:.6;margin-right:-2px}
   .cmodel{font-family:var(--font-mono);font-size:11px;letter-spacing:.01em;max-width:170px;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+  /* who the composer talks to */
+  .cagent{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px 0 8px;border-radius:99px;
+    background:color-mix(in srgb, var(--primary) 12%, transparent);color:var(--foreground);
+    font-size:12px;font-weight:500;flex:none;max-width:180px}
+  .cagent .brand{width:15px;height:15px;flex:none}
+  .cagent .can{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* attachment chips */
   .cchips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 2px 6px}
   .cchip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 6px 0 8px;
@@ -1704,8 +1712,9 @@ ${BRAND_SPRITE}
       '<div class="cchips" id="cchips" style="display:none"></div>' +
       '<textarea id="box" class="cinput" rows="1" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
       '<div class="crow">' +
-      '<button class="ctool" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.file + '</button>' +
-      '<button class="ctool" id="modelpick" type="button" title="pick a model">' + ICONS.gear + '<span class="cmodel" id="cmodellabel">model</span></button>' +
+      '<button class="ctool iconly" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.plus + '</button>' +
+      '<span class="cagent" id="cagent" style="display:none"><span class="can">agent</span></span>' +
+      '<button class="ctool" id="modelpick" type="button" title="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.chevron + "</span></button>" +
       '<span style="flex:1"></span>' +
       '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
@@ -3919,10 +3928,18 @@ ${BRAND_SPRITE}
     }
 
     function updateModelLabel(){
-      var lbl = document.getElementById("cmodellabel"); if (!lbl) return;
+      var lbl = document.getElementById("cmodellabel");
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
-      lbl.textContent = (cur && cur.model) ? cur.model : "model";
+      if (lbl) lbl.textContent = (cur && cur.model) ? cur.model : "model";
+      // The agent chip shows who the composer talks to — brand mark + id.
+      var chip = document.getElementById("cagent");
+      if (chip) {
+        if (cur) {
+          chip.style.display = "";
+          chip.innerHTML = brandMark(cur.kind) + '<span class="can">' + esc(cur.id) + "</span>";
+        } else { chip.style.display = "none"; }
+      }
     }
 
     bindComposer();
