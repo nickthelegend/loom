@@ -160,6 +160,15 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .sendbtn:hover{opacity:.9}
   .sendbtn:active{transform:scale(.96)}
   .sendbtn svg{width:16px;height:16px}
+  /* Stop takes send's place mid-turn. Same shape and position — it's the same
+     button answering a different question — but it must not read as "go", so
+     it carries the warn colour and a slow pulse to say the turn is live. */
+  .stopbtn{background:var(--warn);color:var(--background)}
+  .stopbtn::after{content:"";position:absolute;inset:-4px;border-radius:21px;
+    border:1px solid var(--warn);opacity:.35;animation:stoppulse 1.8s ease-in-out infinite}
+  .stopbtn{position:relative}
+  @keyframes stoppulse{0%,100%{opacity:.15;transform:scale(.94)}50%{opacity:.4;transform:scale(1)}}
+  @media (prefers-reduced-motion:reduce){.stopbtn::after{animation:none}}
   /* ── Type helpers ─────────────────────────────────────── */
   .wordmark{font-weight:650;font-size:15px;letter-spacing:0;color:var(--foreground);position:relative}
   .wordmark b{font-weight:650;color:inherit}
@@ -1296,19 +1305,28 @@ ${BRAND_SPRITE}
     var expl = { kids: {}, open: {} }; // explorer tree cache — declared before any drawRail() call
 
     var headerActions =
-      // No theme toggle here on desktop: it lived one pixel from Interrupt,
-      // which is a bad neighbour for a cosmetic switch. It's in the sidebar
-      // foot now, beside unpair. Mobile has no sidebar, so it keeps its own.
+      // Nothing of the agent's lives up here on desktop any more.
+      //
+      // The theme toggle went to the sidebar foot (a cosmetic switch has no
+      // business one pixel from Interrupt) and Interrupt went into the
+      // composer. What's left beside the panel toggle is the panel toggle:
+      // this strip is about the window, not about the turn.
       (desktop ? "" :
         '<button id="brainbtn" class="iconbtn" title="unified memory">' + ICONS.memory + "</button>" +
         '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
-        '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>") +
-      '<button id="stop" class="iconbtn" title="interrupt">' + ICONS.stop + "</button>";
+        '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>");
 
+    // Send and stop are one button, because they answer the same question — is
+    // this turn running? — and it's never both. It belongs where you're already
+    // looking when you decide to stop it, not across the window next to a panel
+    // toggle. Every chat app does this; so does Antigravity, whose own send
+    // swaps to a cancel mid-turn.
     var composerHtml =
       '<div class="composer" id="composerwrap"><form class="inner" id="cform">' +
       '<input id="box" placeholder="Message&hellip;" autocomplete="off">' +
-      '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button></form>" +
+      '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
+      '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
+      ICONS.stop + "</button></form>" +
       '<div class="hint" id="hint"></div></div>';
 
     if (desktop) {
@@ -2540,6 +2558,19 @@ ${BRAND_SPRITE}
       var nm = document.getElementById("pname"); if (nm) nm.textContent = p.name;
       var stat = document.getElementById("pstat");
       if (stat) stat.textContent = p.needsInput ? "needs input" : p.costUsd > 0 ? money(p.costUsd) : "";
+
+      // Send ⇄ stop. While an adapter is mid-turn the composer offers the
+      // interrupt, in the one place you're already looking. Driven by the
+      // agents' own busy flag rather than a local guess, so a turn you started
+      // from your phone shows a stop here too.
+      var anyBusy = adapters.some(function(a){ return a.busy; });
+      var sendBtn = document.getElementById("send");
+      var stopBtn = document.getElementById("stop");
+      if (sendBtn && stopBtn) {
+        sendBtn.style.display = anyBusy ? "none" : "";
+        stopBtn.style.display = anyBusy ? "" : "none";
+      }
+
       var hint = document.getElementById("hint");
       if (hint) hint.textContent = state.selected && state.selected !== p.holder
         ? "send will shift the baton to " + state.selected
@@ -3233,7 +3264,10 @@ ${BRAND_SPRITE}
           '<button class="iconbtn rvbtn" data-view="tasks" title="Agents" aria-label="Agents">' + ICONS.agents + "</button>" +
           '<span class="spacer"></span>' +
           '<button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button>" +
-          '<button id="railclose" class="iconbtn" title="hide panel">' + ICONS.panelRight + "</button>" +
+          // No second panel toggle. #railbtn in the tab strip is the one control
+          // and it works both ways; this one wore the same icon a few inches
+          // away and could only ever close — two buttons for one job, and you
+          // had to learn which was which.
         "</div>" +
         '<div class="rhead" id="railtitle"><span class="b">Explorer</span></div>' +
         '<div class="rbody" id="railbody"><div class="rempty">select a project</div></div></aside>' +
@@ -3244,7 +3278,6 @@ ${BRAND_SPRITE}
     // The toggle lives in the shell's foot now, so bind it here — renderProject
     // also calls bindTheme, but it never runs when no project is selected.
     bindTheme();
-    document.getElementById("railclose").onclick = toggleRail;
     document.getElementById("newtask").onclick = function(){ openTaskModal(cur); };
     if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
     applyWidths();

@@ -482,6 +482,61 @@ describe("web app · setup", () => {
   });
 });
 
+/**
+ * One control per job.
+ *
+ * The right panel had two toggles wearing the same icon a few inches apart —
+ * one in the tab strip that worked both ways, one in the panel that could only
+ * close. And Interrupt sat up in the window chrome beside them, so the button
+ * that stops an agent mid-turn lived next to the button that hides a file tree.
+ */
+describe("web app · one button per job", () => {
+  it("has exactly one toggle for the right panel", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#railbtn"));
+    // the tab strip's toggle is the one; the panel's own close button is gone
+    expect($(m, "#railclose")).toBeNull();
+    expect(m.window.document.querySelectorAll("#railbtn").length).toBe(1);
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("that one toggle still opens and closes the panel", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#railbtn"));
+    const shell = $(m, ".dshell")!;
+    const openAtFirst = shell.classList.contains("railopen");
+
+    click($(m, "#railbtn"));
+    await waitUntil(() => shell.classList.contains("railopen") !== openAtFirst);
+    click($(m, "#railbtn"));
+    await waitUntil(() => shell.classList.contains("railopen") === openAtFirst);
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("keeps Interrupt out of the window chrome, and in the composer", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#stop"));
+    // not beside the panel toggle any more
+    expect($(m, ".tabstrip #stop")).toBeNull();
+    // it lives with the send button, because they're the same question
+    expect($(m, "#cform #stop")).toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("shows send while idle, and never both at once", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, "#send"));
+    const send = $(m, "#send") as HTMLElement;
+    const stop = $(m, "#stop") as HTMLElement;
+    // echo agents are idle here: send is offered, stop is not
+    await waitUntil(() => stop.style.display === "none");
+    expect(send.style.display).not.toBe("none");
+    const bothVisible = send.style.display !== "none" && stop.style.display !== "none";
+    expect(bothVisible, "send and stop must never be on screen together").toBe(false);
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · the rest of the shell", () => {
   it("switches tabs between the thread, the board and the brain", async () => {
     const m = mount({ hash: `#p/${projectId}` });
