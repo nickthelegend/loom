@@ -5,14 +5,17 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import {
   claim,
   clearCreds,
@@ -109,14 +112,16 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
   const [url, setUrl] = useState("http://");
   const [token, setToken] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [perm, requestPerm] = useCameraPermissions();
 
-  const go = async () => {
+  // Pair from any raw string — a pasted deep link or a scanned QR both carry the
+  // same `…/app#pair=…`, so the parse is identical.
+  const pairFrom = async (raw: string) => {
     try {
       setErr(null);
-      // Accept a pasted deep link (…/app#pair=…) in either field.
-      const merged = `${url} ${token}`;
-      const linkMatch = merged.match(/(https?:\/\/[^\s#]+)/);
-      const tokenMatch = merged.match(/pair=([A-Za-z0-9]+)/);
+      const linkMatch = raw.match(/(https?:\/\/[^\s#]+)/);
+      const tokenMatch = raw.match(/pair=([A-Za-z0-9]+)/);
       const creds = await claim(
         linkMatch ? linkMatch[1]! : url.trim(),
         tokenMatch ? tokenMatch[1]! : token.trim(),
@@ -126,6 +131,24 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  const go = () => void pairFrom(`${url} ${token}`);
+
+  const startScan = async () => {
+    setErr(null);
+    if (!perm?.granted) {
+      const r = await requestPerm();
+      if (!r.granted) return setErr("Camera permission is needed to scan the QR.");
+    }
+    setScanning(true);
+  };
+
+  // The camera fires this repeatedly while a QR is in view — guard so we claim once.
+  const onScan = (e: { data: string }) => {
+    if (!scanning) return;
+    setScanning(false);
+    void pairFrom(e.data);
   };
 
   return (
@@ -165,7 +188,7 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
       <View style={{ gap: 10, marginBottom: spacing.sm }}>
         <PairStep n={1} text="On your computer: loom up --tailnet" />
         <PairStep n={2} text="Then: loom pair — it prints a QR and a link" />
-        <PairStep n={3} text="Paste the link (or URL + token) below" />
+        <PairStep n={3} text="Scan the QR below — or paste the link" />
       </View>
       <TextInput
         style={field}
@@ -188,7 +211,42 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         selectionColor={T.accentBlue}
       />
       {err && <Text style={{ color: T.err, fontSize: 13, textAlign: "center" }}>{err}</Text>}
-      <Btn label="Pair this device" primary onPress={go} />
+      <Btn label="⚌  Scan QR code" primary onPress={startScan} />
+      <Btn label="Paste link instead" onPress={go} />
+
+      <Modal visible={scanning} animationType="slide" onRequestClose={() => setScanning(false)}>
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
+          <CameraView
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            onBarcodeScanned={onScan}
+          />
+          <View style={{ position: "absolute", top: 72, left: 24, right: 24, alignItems: "center" }}>
+            <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700", textAlign: "center" }}>
+              Point at the QR on your computer
+            </Text>
+            <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 13, marginTop: 6, textAlign: "center" }}>
+              Desktop → Connect a phone
+            </Text>
+          </View>
+          <View
+            style={{
+              position: "absolute",
+              top: "32%",
+              left: "18%",
+              width: "64%",
+              aspectRatio: 1,
+              borderWidth: 2,
+              borderColor: "rgba(255,255,255,0.9)",
+              borderRadius: 20,
+            }}
+          />
+          <View style={{ position: "absolute", bottom: 48, left: 24, right: 24 }}>
+            <Btn label="Cancel" onPress={() => setScanning(false)} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

@@ -7,6 +7,10 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electr
 import { prepareAppUrl } from "./loom-app.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
+// The Loom mark. The packaged app gets its icon from electron-builder, but in
+// dev (`electron .`) macOS shows the default Electron icon unless we set it, so
+// the dock + window carry the same logo as the phone and the web app.
+const ICON = fileURLToPath(new URL("./build/icon.png", import.meta.url));
 
 // Orca-style chrome: the window background matches the app canvas so there is
 // no flash while the daemon spins up (#0a0a0a dark / #ffffff light).
@@ -23,6 +27,7 @@ async function createWindow() {
     minHeight: 400,
     backgroundColor: BG,
     title: "Loom",
+    icon: ICON,
     acceptFirstMouse: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     // Centered in the web app's 40px title strips (light center = 20, radius 6).
@@ -105,6 +110,13 @@ ipcMain.handle("loom:pick-folder", async () => {
 });
 
 app.whenReady().then(() => {
+  if (process.platform === "darwin" && app.dock) {
+    try {
+      app.dock.setIcon(ICON);
+    } catch {
+      /* a missing/bad icon shouldn't stop the app launching */
+    }
+  }
   buildMenu();
   void createWindow();
   app.on("activate", () => {

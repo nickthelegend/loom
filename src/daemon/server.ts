@@ -447,10 +447,10 @@ export class LoomDaemon {
      * and the two ways the pad can reach it — the LAN (same Wi-Fi) and, once
      * Tailscale is signed in, a public Funnel URL (the pad from anywhere).
      */
-    app.get("/api/loompad/connect", (req, res) => {
-      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
-        return void res.status(403).json({ error: "admin only" });
-      }
+    app.get("/api/loompad/connect", (_req, res) => {
+      // Any paired client (the desktop shell, a phone) may read this — it's local
+      // backend status + LAN/tailnet addresses, not a privileged mutation. The
+      // desktop runs as a client, not admin, so gating this locked it out.
       void (async () => {
         const base = (process.env.LOOMPAD_BACKEND_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
         let port = 8080;
@@ -490,10 +490,8 @@ export class LoomDaemon {
       })();
     });
 
-    app.post("/api/loompad/funnel", (req, res) => {
-      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
-        return void res.status(403).json({ error: "admin only" });
-      }
+    app.post("/api/loompad/funnel", (_req, res) => {
+      // Same as connect: the local desktop shell drives this, and it's a client.
       void (async () => {
         const base = (process.env.LOOMPAD_BACKEND_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
         let port = 8080;
