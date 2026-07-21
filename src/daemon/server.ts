@@ -4,7 +4,7 @@
  * event stream.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http, { type Server } from "node:http";
@@ -458,27 +458,51 @@ export class LoomDaemon {
         const reach = (ip: string | null) =>
           Boolean(ip) && (this.host === "0.0.0.0" || this.host === ip || exposed.includes(ip!));
         const lan = lanIp();
-        let ts: string | null = null;
-        try {
-          ts = await tailscaleIp();
-        } catch {
-          ts = null;
-        }
+        const tstate = await tailscaleState();
+        const ts = tstate.loggedIn ? tstate.ip : null;
         res.json({
           port: this.port,
           boundHost: this.host,
           exposed,
           localnet: { ip: lan, reachable: reach(lan) },
           tailnet: ts
-            ? { ip: ts, available: true, reachable: reach(ts) }
+            ? { ip: ts, available: true, reachable: reach(ts), installed: true }
             : {
                 ip: null,
                 available: false,
                 reachable: false,
-                reason: "Tailscale isn't logged in on this machine (run `tailscale up`)",
+                installed: tstate.installed,
+                reason: tstate.installed
+                  ? "Tailscale is installed but signed out."
+                  : "Tailscale isn't installed on this machine.",
               },
         });
       })();
+    });
+
+    /**
+     * Tailscale, from inside the app. `status` powers the connect-a-phone modal's
+     * "Start Tailscale" affordance; `up` runs `tailscale up` and hands back the
+     * one-time sign-in URL so the user finishes in a browser tab — no terminal.
+     */
+    app.get("/api/tailscale/status", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void tailscaleState().then((s) => res.json(s));
+    });
+
+    app.post("/api/tailscale/up", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void tailscaleUp().then(
+        (r) => res.json(r),
+        (err) => {
+          logbook.error("tailscale", "could not bring Tailscale up", err);
+          res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        },
+      );
     });
 
     /**
@@ -1973,6 +1997,79 @@ export function tailscaleIp(): Promise<string> {
       if (!ip) return void reject(new Error("tailscale returned no IPv4"));
       resolve(ip);
     });
+  });
+}
+
+/**
+ * One `tailscale status --json`, folded into the three facts the connect-a-phone
+ * flow needs: is the CLI installed, is it signed in, and the tailnet IPv4. Lets
+ * the UI tell "install Tailscale" apart from "sign in" — and offer to do the
+ * latter from inside the app. Never rejects; a missing binary is `installed:false`.
+ */
+export function tailscaleState(): Promise<{
+  installed: boolean;
+  loggedIn: boolean;
+  ip: string | null;
+  state: string | null;
+}> {
+  return new Promise((resolve) => {
+    execFile("tailscale", ["status", "--json"], (err, stdout) => {
+      if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        return void resolve({ installed: false, loggedIn: false, ip: null, state: null });
+      }
+      // `status --json` still prints the JSON on stdout even when it exits non-zero
+      // (logged out), so parse regardless of the exit code; only ENOENT means "no CLI".
+      try {
+        const j = JSON.parse(stdout) as { BackendState?: string; TailscaleIPs?: string[] | null };
+        const ip = (j.TailscaleIPs ?? []).find((a) => !a.includes(":")) ?? null;
+        resolve({ installed: true, loggedIn: j.BackendState === "Running", ip, state: j.BackendState ?? null });
+      } catch {
+        resolve({ installed: true, loggedIn: false, ip: null, state: null });
+      }
+    });
+  });
+}
+
+/**
+ * Bring Tailscale up from inside the app. Runs `tailscale up`; if the machine
+ * needs to sign in, that prints a one-time login URL and then blocks until the
+ * user authorizes — so we resolve with the URL as soon as we see it and leave
+ * the process running (unref'd) to finish the handshake in the background. If it
+ * was already signed in, `up` returns fast and we resolve with the tailnet IP.
+ */
+export function tailscaleUp(): Promise<{ loginUrl?: string; ip?: string }> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("tailscale", ["up"], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (err) {
+      return void reject(err instanceof Error ? err : new Error(String(err)));
+    }
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+    const scan = (buf: Buffer) => {
+      const m = buf.toString().match(/https:\/\/login\.tailscale\.com\/\S+/);
+      if (m) settle(() => {
+        child.unref(); // keep it running in the background to finish the login
+        resolve({ loginUrl: m[0] });
+      });
+    };
+    child.stdout?.on("data", scan);
+    child.stderr?.on("data", scan);
+    child.on("error", (err) => settle(() => reject(err)));
+    child.on("exit", () => {
+      // Exited before printing a URL: either it was already up, or it failed.
+      if (settled) return;
+      tailscaleIp().then(
+        (ip) => settle(() => resolve({ ip })),
+        () => settle(() => reject(new Error("tailscale up exited without a login URL"))),
+      );
+    });
+    setTimeout(() => settle(() => reject(new Error("timed out waiting for Tailscale to start"))), 25_000);
   });
 }
 

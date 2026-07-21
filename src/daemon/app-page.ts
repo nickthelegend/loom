@@ -4893,7 +4893,7 @@ ${BRAND_SPRITE}
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("phx").onclick = close;
 
-    var nets = null, current = "localnet";
+    var nets = null, current = "localnet", pollIv = null;
     function q(id){ return document.getElementById(id); }
     function stage(html){ q("phstage").innerHTML = html; q("phlinkrow").style.display = "none"; q("phhint").textContent = ""; q("phexp").textContent = ""; }
     function loadNets(){ return api("/api/pair/networks").then(function(r){ nets = r; }); }
@@ -4929,11 +4929,47 @@ ${BRAND_SPRITE}
         clog("error", "phone", "mint failed: " + (e && e.message), e && e.stack); toast((e && e.message) || "error");
       });
     }
+    function pollTailscale(){
+      pollIv = setInterval(function(){
+        if (!document.body.contains(scrim)){ clearInterval(pollIv); return; } // modal closed
+        api("/api/tailscale/status").then(function(s){
+          if (s && s.loggedIn && s.ip){
+            clearInterval(pollIv);
+            loadNets().then(function(){ current = "tailnet"; render(); });
+          }
+        }).catch(function(){});
+      }, 2500);
+    }
+    function startTailscale(){
+      q("phstage").innerHTML = LOADER; q("phhint").textContent = "";
+      api("/api/tailscale/up", { method: "POST", body: "{}" }).then(function(r){
+        if (r && r.ip){ return loadNets().then(function(){ current = "tailnet"; render(); }); } // already up
+        if (r && r.loginUrl){
+          stage('<div class="phmsg">Almost there. Sign in to Tailscale to finish.' +
+            '<div class="phdim">Open the link, approve this Mac, and this continues on its own.</div>' +
+            '<a class="btn primary" href="' + esc(r.loginUrl) + '" target="_blank" rel="noreferrer">Open Tailscale sign-in</a>' +
+            '<div class="phdim" id="phtswait">Waiting for you to authorize...</div></div>');
+          pollTailscale();
+        } else {
+          stage('<div class="phmsg">Could not start Tailscale.</div>');
+        }
+      }).catch(function(e){
+        stage('<div class="phmsg">Could not start Tailscale.</div>');
+        clog("error", "phone", "tailscale up failed: " + (e && e.message), e && e.stack); toast((e && e.message) || "could not start Tailscale");
+      });
+    }
     function render(){
       setSeg();
       var net = nets[current];
       if (current === "tailnet" && (!nets.tailnet || !nets.tailnet.available)){
-        stage('<div class="phmsg">' + esc((nets.tailnet && nets.tailnet.reason) || "Tailscale is not set up on this machine.") + '<div class="phdim">Install Tailscale and sign in on this Mac and your phone, then reopen this.</div></div>');
+        if (nets.tailnet && nets.tailnet.installed){
+          stage('<div class="phmsg">Tailscale is installed but signed out.' +
+            '<div class="phdim">Start it here so a phone on your tailnet can reach Loom from anywhere. No shared Wi-Fi, no terminal.</div>' +
+            '<button class="btn primary" id="phtsup">Start Tailscale</button></div>');
+          q("phtsup").onclick = startTailscale;
+        } else {
+          stage('<div class="phmsg">' + esc((nets.tailnet && nets.tailnet.reason) || "Tailscale is not installed on this machine.") + '<div class="phdim">Install Tailscale on this Mac and your phone, then reopen this.</div></div>');
+        }
         return;
       }
       if (!net || !net.ip){
