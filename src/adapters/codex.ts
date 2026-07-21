@@ -111,17 +111,22 @@ export class CodexAdapter extends AdapterBase {
     // frameBriefing), not a loose preamble the model skims past.
     const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
 
+    // `codex exec` takes -C (working root) and -s (sandbox); `codex exec resume`
+    // takes NEITHER — a resumed session keeps the original turn's root + sandbox,
+    // and passing them is a hard "unexpected argument" error that fails every
+    // follow-up turn. So only the fresh turn sets them; resume inherits (and the
+    // spawn's cwd is projectDir regardless).
     const args = this.threadId
-      ? ["exec", "resume", this.threadId]
-      : ["exec"];
-    args.push(
-      "--json",
-      "--skip-git-repo-check",
-      "-C",
-      this.projectDir,
-      "-s",
-      this.options.sandbox ?? "workspace-write",
-    );
+      ? ["exec", "resume", this.threadId, "--json", "--skip-git-repo-check"]
+      : [
+          "exec",
+          "--json",
+          "--skip-git-repo-check",
+          "-C",
+          this.projectDir,
+          "-s",
+          this.options.sandbox ?? "workspace-write",
+        ];
     if (this.options.model) args.push("-m", this.options.model);
     if (this.options.extraArgs) args.push(...this.options.extraArgs);
     args.push(text);
