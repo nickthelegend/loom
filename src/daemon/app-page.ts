@@ -1243,6 +1243,22 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .statusbar .lppill:hover{color:var(--foreground)}
   .statusbar .lppill.on{color:var(--foreground)}
   .statusbar .lppill.on .sdot{background:var(--ok)}
+  .statusbar .usagepill{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer}
+  .statusbar .usagepill:hover{color:var(--foreground)}
+  .usagemodal{max-width:400px}
+  .usagerows{display:flex;flex-direction:column;gap:13px}
+  .usagerow{display:flex;flex-direction:column;gap:5px}
+  .usagetop{display:flex;align-items:center;justify-content:space-between;font-size:13px}
+  .usagename{color:var(--muted-foreground);display:inline-flex;align-items:center}
+  .usagerow.cur .usagename{color:var(--foreground)}
+  .usagecur{font-size:10.5px;color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 40%,transparent);border-radius:999px;padding:1px 6px;margin-left:6px}
+  .usageval{color:var(--foreground);font-variant-numeric:tabular-nums}
+  .usagebar{height:6px;border-radius:3px;background:color-mix(in srgb,var(--foreground) 10%,transparent);overflow:hidden}
+  .usagebar i{display:block;height:100%;background:var(--primary)}
+  .usagepct{font-size:11px;color:var(--muted-foreground)}
+  .lpmodal .lpstatus{min-height:22px}
+  .lpstat{display:flex;align-items:center;gap:7px;font-size:14px;flex-wrap:wrap}
+  .lpstat b{font-weight:600}
   .modalhead{display:flex;align-items:center;height:48px;padding:0 12px 0 16px;
     border-bottom:1px solid var(--border);font-size:15px;font-weight:600}
   .modalhead .iconbtn{margin-left:auto}
@@ -4652,7 +4668,7 @@ ${BRAND_SPRITE}
       '<span class="sit">' + esc(location.host) + "</span>" +
       (p ? '<span class="sit">baton ' + esc(p.holder || "\\u2014") + "</span>" : "") +
       (p && p.costUsd > 0
-        ? '<span class="sit"><span class="meter"><i style="width:' + share + '%"></i></span>' + money(p.costUsd) + " \\u00b7 " + share + "% of \\u03a3</span>"
+        ? '<button class="sit usagepill" id="usagepill" title="usage breakdown"><span class="meter"><i style="width:' + share + '%"></i></span>' + money(p.costUsd) + " \\u00b7 " + share + "% of \\u03a3</button>"
         : "") +
       '<span class="spacer"></span>' +
       lpSeg +
@@ -4663,7 +4679,9 @@ ${BRAND_SPRITE}
     var gc = document.getElementById("ghconnect");
     if (gc) gc.onclick = connectGithub;
     var lpp = document.getElementById("lppill");
-    if (lpp) lpp.onclick = loadLoomPad;
+    if (lpp) lpp.onclick = openLoomPad;
+    var upill = document.getElementById("usagepill");
+    if (upill) upill.onclick = openUsage;
   }
 
   // GitHub connection, fetched once and after a connect. Machine-wide (gh auth
@@ -4681,6 +4699,124 @@ ${BRAND_SPRITE}
       .catch(function(){ state.loompad = { up:false }; drawStatusbar(); });
   }
   if (!window.__loompadPoll){ window.__loompadPoll = setInterval(function(){ loadLoomPad(); }, 5000); }
+  // Click the $ pill: a usage breakdown — this project's share and every
+  // project's spend against the running total.
+  function openUsage(){
+    if (document.querySelector(".scrim")) return;
+    var projs = (state.projects || []);
+    var total = 0; projs.forEach(function(pr){ total += pr.costUsd > 0 ? pr.costUsd : 0; });
+    var cur = state.project;
+    var rows = projs.slice().sort(function(a,b){ return (b.costUsd||0)-(a.costUsd||0); });
+    var body;
+    if (!total){ body = '<div class="phmsg">No spend yet on this daemon.</div>'; }
+    else {
+      body = '<div class="usagerows">';
+      rows.forEach(function(pr){
+        var pct = total > 0 ? Math.round(((pr.costUsd||0)/total)*100) : 0;
+        var isCur = cur && pr.id === cur.id;
+        body += '<div class="usagerow' + (isCur ? " cur" : "") + '">' +
+          '<div class="usagetop"><span class="usagename">' + esc(pr.name || pr.id) + (isCur ? ' <span class="usagecur">this project</span>' : "") + '</span><span class="usageval">' + money(pr.costUsd||0) + '</span></div>' +
+          '<div class="usagebar"><i style="width:' + pct + '%"></i></div>' +
+          '<div class="usagepct">' + pct + '% of total</div></div>';
+      });
+      body += '</div>';
+    }
+    var scrim = document.createElement("div"); scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal usagemodal">' +
+      '<div class="modalhead">Usage<button class="iconbtn" id="ux" aria-label="close">' + ICONS.x + '</button></div>' +
+      '<div class="modalbody">' + body + '</div>' +
+      '<div class="modalfoot"><span class="phdim">' + rows.length + ' project' + (rows.length===1?"":"s") + '</span><span class="spacer"></span><span class="sit">\\u03a3 ' + money(total) + '</span></div>' +
+    '</div>';
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    function onKey(e){ if (e.key === "Escape"){ e.preventDefault(); close(); } }
+    document.addEventListener("keydown", onKey);
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("ux").onclick = close;
+  }
+
+  // Click the LoomPad pill: is the voice backend up, and how the physical pad
+  // reaches it — on your Wi-Fi (LAN) or from anywhere (Tailscale Funnel).
+  function openLoomPad(){
+    if (document.querySelector(".scrim")) return;
+    var scrim = document.createElement("div"); scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal phonemodal lpmodal">' +
+      '<div class="modalhead">LoomPad<button class="iconbtn" id="lpx" aria-label="close">' + ICONS.x + '</button></div>' +
+      '<div class="modalbody">' +
+        '<div class="lpstatus" id="lpstatus">' + LOADER + '</div>' +
+        '<div class="phseg" id="lpseg" role="tablist" style="display:none">' +
+          '<button class="pho on" data-net="local" role="tab">Local network</button>' +
+          '<button class="pho" data-net="tailnet" role="tab">Tailnet</button>' +
+        '</div>' +
+        '<div class="phstage" id="lpstage"></div>' +
+        '<div class="phlinkrow" id="lplinkrow" style="display:none">' +
+          '<input id="lplink" readonly spellcheck="false" aria-label="backend URL">' +
+          '<button class="btn ghost" id="lpcopy">Copy</button>' +
+        '</div>' +
+        '<div class="phhint" id="lphint"></div>' +
+      '</div>' +
+      '<div class="modalfoot"><span class="phdim" id="lpfoot"></span><span class="spacer"></span><button class="btn ghost" id="lprecheck">Re-check</button></div>' +
+    '</div>';
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    function onKey(e){ if (e.key === "Escape"){ e.preventDefault(); close(); } }
+    document.addEventListener("keydown", onKey);
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("lpx").onclick = close;
+    function q(id){ return document.getElementById(id); }
+    var data = null, current = "local";
+    function setSeg(){ Array.prototype.forEach.call(scrim.querySelectorAll("#lpseg .pho"), function(b){ b.classList.toggle("on", b.getAttribute("data-net") === current); }); }
+    function showLink(url){ q("lplinkrow").style.display = ""; q("lplink").value = url; }
+    function render(){
+      setSeg(); q("lplinkrow").style.display = "none"; q("lphint").innerHTML = "";
+      if (current === "local"){
+        if (data.local && data.local.url){
+          q("lpstage").innerHTML = '<div class="phmsg">Point the pad here on your Wi-Fi.<div class="phdim">Enter this as the backend URL in the pad\\u2019s setup portal. A blank token is fine on your own network.</div></div>';
+          showLink(data.local.url);
+          q("lphint").innerHTML = "The pad and this Mac must share the same Wi-Fi.";
+        } else { q("lpstage").innerHTML = '<div class="phmsg">No local network address right now.</div>'; }
+        return;
+      }
+      if (!data.tailnet.installed){
+        q("lpstage").innerHTML = '<div class="phmsg">Tailscale isn\\u2019t installed.<div class="phdim">Install it to reach the pad from anywhere.</div></div>';
+      } else if (!data.tailnet.loggedIn){
+        q("lpstage").innerHTML = '<div class="phmsg">Sign in to Tailscale to reach the pad from anywhere.<div class="phdim">Opens the same Start Tailscale flow as Connect a phone.</div><button class="btn primary" id="lptsstart">Start Tailscale</button></div>';
+        q("lptsstart").onclick = function(){ close(); openConnectPhone(); };
+      } else {
+        q("lpstage").innerHTML = '<div class="phmsg">Expose the backend to the internet for the pad.<div class="phdim">Tailscale Funnel serves it over HTTPS at the address below. Set the same <code>PAD_TOKEN</code> on the pad and the backend.</div><button class="btn primary" id="lpfunnel">Enable tailnet access</button></div>';
+        if (data.tailnet.url) showLink(data.tailnet.url);
+        q("lpfunnel").onclick = function(){
+          var b = this; b.disabled = true; b.textContent = "Enabling\\u2026";
+          api("/api/loompad/funnel", { method: "POST", body: "{}" }).then(function(r){
+            q("lpstage").innerHTML = '<div class="phmsg">Live on the internet \\u2014 enter this in the pad.</div>';
+            showLink((r && r.url) || data.tailnet.url || "");
+            q("lphint").innerHTML = "Public HTTPS via Funnel. The pad needs your PAD_TOKEN.";
+          }).catch(function(e){
+            b.disabled = false; b.textContent = "Enable tailnet access";
+            clog("error", "loompad", "funnel failed: " + (e && e.message), e && e.stack); toast((e && e.message) || "could not enable Funnel");
+          });
+        };
+      }
+    }
+    function load(){
+      q("lpstatus").innerHTML = LOADER; q("lpseg").style.display = "none"; q("lpstage").innerHTML = ""; q("lplinkrow").style.display = "none"; q("lphint").textContent = ""; q("lpfoot").textContent = "";
+      api("/api/loompad/connect").then(function(r){
+        data = r;
+        var dot = '<span class="sdot' + (r.up ? "" : " off") + '"></span>';
+        q("lpstatus").innerHTML = '<div class="lpstat">' + dot + '<b>' + (r.up ? "Backend running" : "Backend offline") + '</b>' + (r.up && r.brain ? ' <span class="phdim">brain ' + esc(String(r.brain)) + '</span>' : "") + ' <span class="phdim">:' + (r.port||8080) + '</span></div>' + (r.up ? "" : '<div class="phdim" style="margin-top:6px">Start it: <code>cd orchestrator-pad/backend &amp;&amp; npm start</code></div>');
+        q("lpseg").style.display = "";
+        q("lpfoot").textContent = r.backend || "";
+        render();
+      }).catch(function(e){
+        q("lpstatus").innerHTML = '<div class="phmsg">Could not read LoomPad status.</div>';
+        clog("error", "loompad", "connect failed: " + (e && e.message), e && e.stack);
+      });
+    }
+    Array.prototype.forEach.call(scrim.querySelectorAll("#lpseg .pho"), function(b){ b.onclick = function(){ current = b.getAttribute("data-net"); render(); }; });
+    q("lpcopy").onclick = function(){ var v = q("lplink").value; if (!v) return; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(v).then(function(){ toast("copied"); }).catch(function(){ toast("copy failed"); }); else toast("copy not available"); };
+    q("lprecheck").onclick = load;
+    load();
+  }
   /**
    * Sign in to GitHub. gh's login is an interactive device flow, so the honest
    * place to run it is the real terminal you already have — Loom never touches

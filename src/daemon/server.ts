@@ -443,6 +443,76 @@ export class LoomDaemon {
     });
 
     /**
+     * Everything the LoomPad modal needs in one call: is the voice backend up,
+     * and the two ways the pad can reach it — the LAN (same Wi-Fi) and, once
+     * Tailscale is signed in, a public Funnel URL (the pad from anywhere).
+     */
+    app.get("/api/loompad/connect", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void (async () => {
+        const base = (process.env.LOOMPAD_BACKEND_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
+        let port = 8080;
+        try {
+          port = Number(new URL(base).port) || 8080;
+        } catch {
+          /* keep the default */
+        }
+        let up = false;
+        let brain: unknown;
+        try {
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), 2000);
+          const r = await fetch(base + "/health", { signal: ctl.signal });
+          clearTimeout(timer);
+          if (r.ok) {
+            up = true;
+            brain = ((await r.json().catch(() => ({}))) as { brain?: unknown }).brain;
+          }
+        } catch {
+          /* backend is down — up stays false */
+        }
+        const lan = lanIp();
+        const ts = await tailscaleState();
+        res.json({
+          up,
+          brain,
+          port,
+          backend: base,
+          local: lan ? { ip: lan, url: `http://${lan}:${port}` } : null,
+          tailnet: {
+            installed: ts.installed,
+            loggedIn: ts.loggedIn,
+            url: ts.loggedIn && ts.dnsName ? `https://${ts.dnsName}` : null,
+          },
+        });
+      })();
+    });
+
+    app.post("/api/loompad/funnel", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void (async () => {
+        const base = (process.env.LOOMPAD_BACKEND_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
+        let port = 8080;
+        try {
+          port = Number(new URL(base).port) || 8080;
+        } catch {
+          /* keep the default */
+        }
+        try {
+          const { url } = await tailscaleFunnel(port);
+          res.json({ url });
+        } catch (err) {
+          logbook.error("loompad", "could not enable Tailscale Funnel", err);
+          res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+    });
+
+    /**
      * The two networks a phone could use to reach this daemon — the LAN and the
      * tailnet — with, for each, the address and whether the phone can actually
      * get here on it *right now*. It can't when we're bound to localhost, which
@@ -2010,22 +2080,52 @@ export function tailscaleState(): Promise<{
   installed: boolean;
   loggedIn: boolean;
   ip: string | null;
+  dnsName: string | null;
   state: string | null;
 }> {
   return new Promise((resolve) => {
     execFile("tailscale", ["status", "--json"], (err, stdout) => {
       if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
-        return void resolve({ installed: false, loggedIn: false, ip: null, state: null });
+        return void resolve({ installed: false, loggedIn: false, ip: null, dnsName: null, state: null });
       }
       // `status --json` still prints the JSON on stdout even when it exits non-zero
       // (logged out), so parse regardless of the exit code; only ENOENT means "no CLI".
       try {
-        const j = JSON.parse(stdout) as { BackendState?: string; TailscaleIPs?: string[] | null };
+        const j = JSON.parse(stdout) as {
+          BackendState?: string;
+          TailscaleIPs?: string[] | null;
+          Self?: { DNSName?: string };
+        };
         const ip = (j.TailscaleIPs ?? []).find((a) => !a.includes(":")) ?? null;
-        resolve({ installed: true, loggedIn: j.BackendState === "Running", ip, state: j.BackendState ?? null });
+        const dnsName = (j.Self?.DNSName ?? "").replace(/\.$/, "") || null;
+        resolve({
+          installed: true,
+          loggedIn: j.BackendState === "Running",
+          ip,
+          dnsName,
+          state: j.BackendState ?? null,
+        });
       } catch {
-        resolve({ installed: true, loggedIn: false, ip: null, state: null });
+        resolve({ installed: true, loggedIn: false, ip: null, dnsName: null, state: null });
       }
+    });
+  });
+}
+
+/**
+ * Expose a local port to the public internet over Tailscale Funnel — how the
+ * physical LoomPad reaches the voice backend from anywhere (a bare ESP32 can't
+ * route to a 100.x tailnet address, but it can reach a Funnel's HTTPS URL).
+ * `--bg` returns as soon as it's serving and prints the public URL.
+ */
+export function tailscaleFunnel(port: number): Promise<{ url: string }> {
+  return new Promise((resolve, reject) => {
+    execFile("tailscale", ["funnel", "--bg", String(port)], (err, stdout, stderr) => {
+      const out = `${stdout}\n${stderr}`;
+      const m = out.match(/https:\/\/[^\s/]+\.ts\.net\S*/);
+      if (m) return void resolve({ url: m[0].replace(/\/+$/, "") });
+      const msg = out.trim().split("\n").slice(0, 3).join(" ").trim();
+      reject(new Error(msg || (err ? String(err) : "Funnel did not return a URL")));
     });
   });
 }
