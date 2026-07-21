@@ -66,7 +66,15 @@ export interface LoomEvent {
   ts: number;
   kind: string;
   agentId?: string;
+  chat?: string;
   payload: Record<string, unknown>;
+}
+
+/** A named conversation within a project — the desktop's sidebar chats. */
+export interface Chat {
+  id: string;
+  title: string;
+  createdAt: number;
 }
 
 export interface WorkingTree {
@@ -160,16 +168,21 @@ export async function api<T>(creds: Creds, path: string, init?: RequestInit): Pr
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
 export const getProject = (c: Creds, id: string) =>
   api<{ project: Project }>(c, `/api/projects/${id}`);
-export const getEvents = (c: Creds, id: string, limit = 60) =>
-  api<{ events: LoomEvent[] }>(c, `/api/projects/${id}/events?limit=${limit}`);
+export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
+  api<{ events: LoomEvent[] }>(
+    c,
+    `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}`,
+  );
+export const getChats = (c: Creds, id: string) =>
+  api<{ chats: Chat[] }>(c, `/api/projects/${id}/chats`);
 export const getTree = (c: Creds, id: string) =>
   api<{ tree: WorkingTree }>(c, `/api/projects/${id}/tree`);
 export const getTasks = (c: Creds, id: string, kind: "issue" | "pr", search: string) =>
   api<TaskResult>(c, `/api/projects/${id}/tasks?kind=${kind}&search=${encodeURIComponent(search)}`);
-export const sendMessage = (c: Creds, id: string, text: string, agentId?: string) =>
+export const sendMessage = (c: Creds, id: string, text: string, agentId?: string, chat?: string) =>
   api(c, `/api/projects/${id}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text, ...(agentId ? { agentId } : {}) }),
+    body: JSON.stringify({ text, ...(agentId ? { agentId } : {}), ...(chat ? { chat } : {}) }),
   });
 export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });

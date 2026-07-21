@@ -16,6 +16,7 @@ import {
 import {
   claim,
   clearCreds,
+  getChats,
   getEvents,
   getProject,
   getProjects,
@@ -26,6 +27,7 @@ import {
   saveCreds,
   sendMessage,
   wsUrl,
+  type Chat,
   type Creds,
   type LoomEvent,
   type Project,
@@ -565,6 +567,8 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
   const { creds } = props;
   const [project, setProject] = useState(props.project);
   const [tab, setTab] = useState<"thread" | "tasks" | "changes">("thread");
+  const [chatId, setChatId] = useState("main");
+  const [chats, setChats] = useState<Chat[]>([]);
   const [events, setEvents] = useState<LoomEvent[]>([]);
   const [tree, setTree] = useState<WorkingTree | null>(null);
   const [tasks, setTasks] = useState<TaskResult | null>(null);
@@ -584,11 +588,21 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
     setText(sttBase.current ? `${sttBase.current} ${transcript}` : transcript);
   });
 
-  // History + live WS.
+  // The project's chats — the desktop's sidebar list, so the phone can switch.
+  useEffect(() => {
+    void getChats(creds, project.id)
+      .then(({ chats }) => setChats(chats))
+      .catch(() => {});
+  }, [creds, project.id]);
+
+  // History + live WS, scoped to the selected chat. One socket carries the whole
+  // project, so we filter live frames to this chat (events carry a `chat` id).
   useEffect(() => {
     let ws: WebSocket | null = null;
     let closed = false;
-    void getEvents(creds, project.id).then(({ events }) => {
+    setEvents([]); // clear the old chat's thread while the new one loads
+    lastId.current = 0;
+    void getEvents(creds, project.id, chatId).then(({ events }) => {
       lastId.current = events[events.length - 1]?.id ?? 0;
       setEvents(events);
     });
@@ -598,6 +612,7 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
         try {
           const frame = JSON.parse(String(msg.data)) as { type: string; event?: LoomEvent };
           if (frame.type === "event" && frame.event && frame.event.id > lastId.current) {
+            if (frame.event.chat && frame.event.chat !== chatId) return; // a different chat
             lastId.current = frame.event.id;
             setEvents((prev) => [...prev, frame.event!]);
           }
@@ -615,7 +630,7 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
       ws?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id]);
+  }, [project.id, chatId]);
 
   // Status poll + changes tab refresh.
   useEffect(() => {
@@ -705,6 +720,7 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
         project.id,
         `${noun} #${item.id}: ${item.title}\n${item.url}\n\nRead the ${noun}, then implement it.`,
         agent,
+        chatId,
       );
       setTab("thread");
     } catch (e) {
@@ -723,7 +739,7 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
     setErr(null);
     try {
       if (selected && selected !== project.holder) await handoff(creds, project.id, selected);
-      await sendMessage(creds, project.id, message, selected ?? undefined);
+      await sendMessage(creds, project.id, message, selected ?? undefined, chatId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -830,6 +846,40 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
 
       {tab === "thread" ? (
         <>
+          {/* chats — the desktop's sidebar list, so you can read previous chats */}
+          {chats.length > 1 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ maxHeight: 46, flexGrow: 0, backgroundColor: T.panel, borderBottomWidth: 1, borderBottomColor: T.line }}
+              contentContainerStyle={{ paddingHorizontal: spacing.md, paddingVertical: 8, gap: spacing.sm, alignItems: "center" }}
+            >
+              {chats.map((c) => {
+                const on = c.id === chatId;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    onPress={() => setChatId(c.id)}
+                    activeOpacity={0.7}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: on }}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                      borderRadius: 999,
+                      backgroundColor: on ? T.raised : "transparent",
+                      borderWidth: 1,
+                      borderColor: on ? T.line : "transparent",
+                    }}
+                  >
+                    <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600" }}>
+                      {c.title}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
           <FlatList
             ref={listRef}
             data={events}
