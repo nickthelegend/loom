@@ -11,6 +11,9 @@ const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 // dev (`electron .`) macOS shows the default Electron icon unless we set it, so
 // the dock + window carry the same logo as the phone and the web app.
 const ICON = fileURLToPath(new URL("./build/icon.png", import.meta.url));
+// Name the app — dock, menu bar, About. Matches the packaged productName so the
+// dev shell (`electron .`) and the built app read the same "Loom Desktop".
+app.setName("Loom Desktop");
 
 // Orca-style chrome: the window background matches the app canvas so there is
 // no flash while the daemon spins up (#0a0a0a dark / #ffffff light).

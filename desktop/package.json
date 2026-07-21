@@ -21,7 +21,7 @@
   },
   "build": {
     "appId": "dev.loom.desktop",
-    "productName": "Loom",
+    "productName": "Loom Desktop",
     "directories": {
       "buildResources": "build"
     },
@@ -59,7 +59,7 @@
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "dmg": {
-      "artifactName": "Loom-${version}-${arch}.${ext}"
+      "artifactName": "Loom-Desktop-${version}-${arch}.${ext}"
     },
     "win": {
       "target": "nsis",
