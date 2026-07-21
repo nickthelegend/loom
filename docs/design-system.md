@@ -164,7 +164,7 @@ xterm.js, served from `node_modules` at `/app/vendor/*` — no bundler, no CDN.
 **`pipe` — the fallback** (no node-pty). `node-pty` is a native module, so it
 is an *optionalDependency* and ships prebuilds only for macOS/Windows; Loom
 runs headless on Linux boxes that may have no toolchain, and `npm i -g
-threadloom` must never break. A long-lived shell on plain pipes:
+@loompad/cli` must never break. A long-lived shell on plain pipes:
 
 - `cd` and exported variables still persist; tabs are isolated.
 - No tty, so the daemon reports each command's exit code and cwd out of band:

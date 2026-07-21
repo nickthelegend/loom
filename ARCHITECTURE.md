@@ -2,7 +2,7 @@
 
 > **The name stuck: Loom.** A loom weaves many threads into one fabric — the agents are
 > threads, shared memory is the weave, the tailnet is a literal mesh. It ships on npm as
-> [`threadloom`](https://www.npmjs.com/package/threadloom) (`loom` was taken).
+> [`@loompad/cli`](https://www.npmjs.com/package/@loompad/cli) (`loom` was taken).
 
 > **Status — read this as the design record, not the current map.** It's the reasoning the
 > project was built from, and the *decisions* below all held. Some of the plan didn't
@@ -208,4 +208,4 @@ the soul in practice — Baton if handoff dominates, Choir if it's the shared-co
 Switchboard if it stays a router. Loom is the safe, brandable default.
 
 **[shipped]** Loom it is — the shared-context feel won, which is why the tagline settled on
-*the shared-memory layer*. The npm package is `threadloom`; the command stayed `loom`.
+*the shared-memory layer*. The npm package is `@loompad/cli`; the command stayed `loom`.

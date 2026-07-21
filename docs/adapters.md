@@ -18,7 +18,7 @@ bridge can graduate later.
 
 ## The contract
 
-Everything lives in `threadloom/sdk`:
+Everything lives in `@loompad/cli/sdk`:
 
 ```ts
 import {
@@ -27,7 +27,7 @@ import {
   registerAgentKind,
   type SendInput,   // { text, briefing? }
   type AdapterEvent // { kind, payload }
-} from "threadloom/sdk";
+} from "@loompad/cli/sdk";
 ```
 
 ### Events you can emit
@@ -49,7 +49,7 @@ becomes context for everyone else.
 ### A complete adapter
 
 ```ts
-import { AdapterBase, registerAgentKind, type SendInput } from "threadloom/sdk";
+import { AdapterBase, registerAgentKind, type SendInput } from "@loompad/cli/sdk";
 
 export class MyAgentAdapter extends AdapterBase {
   // available(): is the underlying tool installed/reachable?
@@ -105,7 +105,7 @@ including session persistence via project state.
 ### A bridge
 
 ```ts
-import { BridgeBase, registerAgentKind } from "threadloom/sdk";
+import { BridgeBase, registerAgentKind } from "@loompad/cli/sdk";
 
 export class MyGuiBridge extends BridgeBase {
   async available() { return true; }

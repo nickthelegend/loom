@@ -1,7 +1,7 @@
 # Loom
 
 [![ci](https://github.com/nickthelegend/loom/actions/workflows/ci.yml/badge.svg)](https://github.com/nickthelegend/loom/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/threadloom)](https://www.npmjs.com/package/threadloom)
+[![npm](https://img.shields.io/npm/v/@loompad/cli)](https://www.npmjs.com/package/@loompad/cli)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **The shared-memory layer for AI dev environments.** Every coding agent — Claude Code,
@@ -67,7 +67,7 @@ agents' **memory together** so work *continues* across them instead of forking.
 Requires **Node ≥ 22.5** (Loom's event log uses the built-in `node:sqlite`).
 
 ```bash
-npm install -g threadloom          # → `loom` on your PATH
+npm install -g @loompad/cli          # → `loom` on your PATH
 ```
 
 Other paths:
@@ -540,7 +540,7 @@ buzzes once, not five times). Verify with `loom clients --ping`.
 Add an agent in ~40 lines — implement the contract, register the kind:
 
 ```ts
-import { AdapterBase, registerAgentKind, type SendInput } from "threadloom/sdk";
+import { AdapterBase, registerAgentKind, type SendInput } from "@loompad/cli/sdk";
 
 class MyAgentAdapter extends AdapterBase {
   async available() { return true; }

@@ -1,9 +1,12 @@
 {
-  "name": "threadloom",
+  "name": "@loompad/cli",
   "version": "0.1.0",
   "description": "Loom — local-first control plane for coding agents: one CLI, shared memory, baton handoffs and routes across Claude Code, OpenCode, and friends.",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "author": "Nivesh Gajengi <niveshgajengi@gmail.com>",
   "repository": {
     "type": "git",
@@ -32,7 +35,8 @@
     "node": ">=22.5.0"
   },
   "bin": {
-    "loom": "./dist/cli/index.js"
+    "loom": "./dist/cli/index.js",
+    "loompad": "./dist/cli/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

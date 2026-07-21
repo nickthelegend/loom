@@ -72,7 +72,7 @@ describe("docs · the SDK surface the guide promises", () => {
     const md = read("docs/adapters.md") + read("README.md");
     // names imported from our own sdk entry point, minus `type` imports
     const wanted = new Set<string>();
-    const re = /import\s*\{([^}]+)\}\s*from\s+"threadloom\/sdk"/g;
+    const re = /import\s*\{([^}]+)\}\s*from\s+"@loompad\/cli\/sdk"/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(md))) {
       for (const raw of m[1]!.split(",")) {
@@ -83,7 +83,7 @@ describe("docs · the SDK surface the guide promises", () => {
     expect(wanted.size).toBeGreaterThan(0);
     const sdk = (await import("../src/sdk.js")) as Record<string, unknown>;
     for (const name of wanted) {
-      expect(sdk[name], `docs import { ${name} } from "threadloom/sdk", which doesn't export it`).toBeDefined();
+      expect(sdk[name], `docs import { ${name} } from "@loompad/cli/sdk", which doesn't export it`).toBeDefined();
     }
   });
 });
