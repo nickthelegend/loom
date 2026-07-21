@@ -8,15 +8,19 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { api, type Creds } from "./api";
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Native only — expo-notifications has no push on web (this is the browser demo).
+if (Platform.OS !== "web") {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 export async function enablePush(creds: Creds): Promise<boolean> {
+  if (Platform.OS === "web") return false;
   try {
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync("default", {

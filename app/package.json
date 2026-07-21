@@ -9,6 +9,7 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~4.0.1",
     "expo": "~52.0.0",
     "expo-build-properties": "~0.13.3",
     "expo-notifications": "~0.29.0",
@@ -16,7 +17,9 @@
     "expo-speech-recognition": "^56.0.1",
     "expo-status-bar": "~2.0.0",
     "react": "18.3.1",
-    "react-native": "0.76.9"
+    "react-dom": "18.3.1",
+    "react-native": "0.76.9",
+    "react-native-web": "~0.19.13"
   },
   "devDependencies": {
     "@types/react": "~18.3.12",

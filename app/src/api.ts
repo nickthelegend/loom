@@ -4,6 +4,24 @@
  */
 
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
+
+// Credentials live in the device keychain on native; on web (Expo web, used for
+// the browser demo) SecureStore isn't available, so fall back to localStorage.
+const kv = {
+  get: (k: string): Promise<string | null> =>
+    Platform.OS === "web"
+      ? Promise.resolve(globalThis.localStorage?.getItem(k) ?? null)
+      : SecureStore.getItemAsync(k),
+  set: (k: string, v: string): Promise<void> =>
+    Platform.OS === "web"
+      ? (globalThis.localStorage?.setItem(k, v), Promise.resolve())
+      : SecureStore.setItemAsync(k, v),
+  del: (k: string): Promise<void> =>
+    Platform.OS === "web"
+      ? (globalThis.localStorage?.removeItem(k), Promise.resolve())
+      : SecureStore.deleteItemAsync(k),
+};
 
 export interface Creds {
   url: string; // e.g. http://100.x.y.z:7420
@@ -85,25 +103,16 @@ const URL_KEY = "loomUrl";
 const TOKEN_KEY = "loomToken";
 
 export async function loadCreds(): Promise<Creds | null> {
-  const [url, token] = await Promise.all([
-    SecureStore.getItemAsync(URL_KEY),
-    SecureStore.getItemAsync(TOKEN_KEY),
-  ]);
+  const [url, token] = await Promise.all([kv.get(URL_KEY), kv.get(TOKEN_KEY)]);
   return url && token ? { url, token } : null;
 }
 
 export async function saveCreds(creds: Creds): Promise<void> {
-  await Promise.all([
-    SecureStore.setItemAsync(URL_KEY, creds.url),
-    SecureStore.setItemAsync(TOKEN_KEY, creds.token),
-  ]);
+  await Promise.all([kv.set(URL_KEY, creds.url), kv.set(TOKEN_KEY, creds.token)]);
 }
 
 export async function clearCreds(): Promise<void> {
-  await Promise.all([
-    SecureStore.deleteItemAsync(URL_KEY),
-    SecureStore.deleteItemAsync(TOKEN_KEY),
-  ]);
+  await Promise.all([kv.del(URL_KEY), kv.del(TOKEN_KEY)]);
 }
 
 /** Exchange a single-use pairing token (from `loom pair`) for a client token. */

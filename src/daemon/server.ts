@@ -239,6 +239,22 @@ export class LoomDaemon {
     const app = this.app;
     app.use(express.json({ limit: "2mb" }));
 
+    // CORS for same-machine browser origins only (the Expo web dev server running
+    // on another localhost port, etc.). Scoped to loopback so it can't be abused
+    // cross-site; the bearer wall below still guards every data route. Preflight
+    // is answered here, ahead of auth.
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      const origin = req.headers.origin;
+      if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        res.setHeader("Vary", "Origin");
+        if (req.method === "OPTIONS") return void res.sendStatus(204);
+      }
+      next();
+    });
+
     // Public: the phone app shell (its API calls are bearer-authed),
     // health, and the pairing claim (the pairing token IS the auth).
     app.get("/", (_req, res) => res.redirect("/app"));
