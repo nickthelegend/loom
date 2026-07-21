@@ -397,6 +397,14 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
   .cmi .tick{margin-left:auto;color:var(--ring)}
   .cmenu .cmhead{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
     color:var(--muted-foreground);padding:6px 9px 4px}
+  .cmenu .cmsearch{position:sticky;top:-5px;z-index:2;display:block;width:100%;box-sizing:border-box;margin:0 0 6px;
+    background:var(--popover,var(--background));border:1px solid var(--border);border-radius:7px;padding:6px 9px;
+    font-family:var(--font-mono);font-size:12px;color:var(--foreground);outline:none}
+  .cmenu .cmsearch:focus{border-color:var(--ring)}
+  .cmlist{display:flex;flex-direction:column;gap:1px}
+  .cmlist .cmi span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-family:var(--font-mono);font-size:12px}
+  .cmmore{padding:7px 9px 3px;color:var(--muted-foreground);font-size:11px;font-family:var(--font-mono)}
   .hint{color:color-mix(in srgb, var(--muted-foreground) 80%, transparent);font-size:11px;
     font-family:var(--font-mono);letter-spacing:.02em;max-width:760px;margin:7px auto 0;text-align:center;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -4457,40 +4465,56 @@ ${BRAND_SPRITE}
       var agentId = state.selected;
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === agentId; })[0];
-      if (!cur || cur.tier === "bridge") { toast("pick an adapter first — bridges choose their own model"); return; }
-      // The model list comes from agents/available, keyed by kind.
-      api("/api/projects/" + pid + "/agents/available").then(function(j){
-        var spec = (j.ades || []).filter(function(a){ return a.kind === cur.kind; })[0];
-        var models = (spec && spec.models) || [];
-        var active = cur.model || "";
-        menuState = { kind: "modelmenu", at: 0, sel: 0, items: [] };
-        var items = [{ label: "Default", sub: cur.kind + "'s own choice", value: "", icon: ICONS.gear }]
-          .concat(models.map(function(mm){ return { label: mm, value: mm, icon: ICONS.gear }; }))
-          .concat([{ label: "Custom\\u2026", value: "__custom__", icon: ICONS.plus }]);
-        items.forEach(function(it){ if (it.value === active) it.tick = true; });
-        var m = document.getElementById("cmenu"); if (!m) return;
-        m.style.display = "block";
-        m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + "</div>" +
-          items.map(function(it, i){
-            return '<div class="cmi" data-mi="' + i + '"><span class="ic">' + (it.icon || ICONS.gear) + "</span><span>" +
-              esc(it.label) + "</span>" + (it.tick ? '<span class="tick">' + ICONS.info + "</span>" : (it.sub ? '<span class="sub">' + esc(it.sub) + "</span>" : "")) + "</div>";
-          }).join("");
-        Array.prototype.forEach.call(m.querySelectorAll("[data-mi]"), function(row){
-          row.onmousedown = function(ev){
-            ev.preventDefault();
-            var it = items[Number(row.getAttribute("data-mi"))];
-            var val = it.value;
-            if (val === "__custom__") {
-              closeMenu();
-              var typed = window.prompt("Model for " + cur.id + " (blank = default):", active);
-              if (typed === null) return;
-              val = typed.trim();
-            } else { closeMenu(); }
-            setModel(agentId, val);
-          };
+      if (!cur || cur.tier === "bridge") { toast("pick an adapter first \\u2014 bridges choose their own model"); return; }
+      var m = document.getElementById("cmenu"); if (!m) return;
+      menuState = { kind: "modelmenu", at: 0, sel: 0, items: [] };
+      m.style.display = "block";
+      m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + '</div>' +
+        '<input class="cmsearch" id="cmsearch" placeholder="search real models\\u2026" spellcheck="false" autocomplete="off">' +
+        '<div class="cmlist" id="cmlist">' + LOADER + '</div>';
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      var active = cur.model || "";
+      var allModels = [];
+      function choose(val){
+        if (val === "__custom__"){ closeMenu(); var typed = window.prompt("Model for " + cur.id + " (blank = default):", active); if (typed === null) return; val = typed.trim(); }
+        else closeMenu();
+        setModel(agentId, val);
+      }
+      // The real models the tool itself reports (opencode ~500 across providers,
+      // grok its own); codex/claude are their shipped sets.
+      function render(filter){
+        var f = (filter || "").trim().toLowerCase();
+        var shown = f ? allModels.filter(function(mm){ return mm.toLowerCase().indexOf(f) >= 0; }) : allModels;
+        var cap = 200; // don't paint 500 rows — the search narrows it
+        var head = [{ label: "Default", sub: cur.kind + "'s own choice", value: "" }];
+        if (!f) head.push({ label: "Custom\\u2026", value: "__custom__", plus: true });
+        var rows = head.concat(shown.slice(0, cap).map(function(mm){ return { label: mm, value: mm }; }));
+        var list = document.getElementById("cmlist"); if (!list) return;
+        list.innerHTML = rows.map(function(it){
+          var tick = it.value === active;
+          return '<div class="cmi" data-mv="' + esc(String(it.value)) + '"><span class="ic">' + (it.plus ? ICONS.plus : ICONS.gear) + '</span><span>' +
+            esc(it.label) + '</span>' + (tick ? '<span class="tick">' + ICONS.info + '</span>' : (it.sub ? '<span class="sub">' + esc(it.sub) + '</span>' : '')) + '</div>';
+        }).join("") +
+          (shown.length > cap ? '<div class="cmmore">' + (shown.length - cap) + ' more \\u2014 keep typing to narrow</div>' : "") +
+          (f && !shown.length ? '<div class="cmmore">no match \\u00b7 Enter to use \\u201c' + esc(filter) + '\\u201d</div>' : "");
+        Array.prototype.forEach.call(list.querySelectorAll("[data-mv]"), function(row){
+          row.onmousedown = function(ev){ ev.preventDefault(); choose(row.getAttribute("data-mv")); };
         });
-        setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
-      }).catch(function(err){ toast(err.message); });
+      }
+      api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agentId) + "/models").then(function(j){
+        allModels = (j && j.models) || [];
+        var sb = document.getElementById("cmsearch");
+        if (sb){
+          var head0 = document.getElementById("cmlist");
+          sb.oninput = function(){ render(sb.value); };
+          sb.onkeydown = function(e){ if (e.key === "Enter"){ var v = sb.value.trim(); if (v) choose(v); } if (e.key === "Escape"){ closeMenu(); } };
+          sb.focus();
+        }
+        render("");
+      }).catch(function(err){
+        var list = document.getElementById("cmlist"); if (list) list.innerHTML = '<div class="cmmore">could not list models</div>';
+        clog("error", "models", "list failed: " + (err && err.message), err && err.stack);
+      });
     }
 
     /**

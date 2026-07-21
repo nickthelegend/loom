@@ -1171,6 +1171,18 @@ export class LoomDaemon {
       }),
     );
 
+    // Every real model this agent can run, asked of the underlying tool — not a
+    // hardcoded list. opencode alone reports ~500 across every provider it has.
+    app.get(
+      "/api/projects/:id/agents/:agentId/models",
+      withRuntime(async (rt, req, res) => {
+        const agent = rt.config.agents.find((a) => a.id === String(req.params.agentId));
+        if (!agent) return void res.status(404).json({ error: "unknown agent" });
+        const models = await listModelsForKind(agent.kind);
+        res.json({ kind: agent.kind, count: models.length, models });
+      }),
+    );
+
     app.post(
       "/api/projects/:id/interrupt",
       withRuntime(async (rt, _req, res) => {
@@ -2128,6 +2140,58 @@ export function tailscaleFunnel(port: number): Promise<{ url: string }> {
       reject(new Error(msg || (err ? String(err) : "Funnel did not return a URL")));
     });
   });
+}
+
+// codex/claude don't list models over the CLI, so these are the current shipped
+// sets (aliases first — they never go stale when a new snapshot ships).
+const CODEX_MODELS = [
+  "gpt-5.5", "gpt-5.5-codex", "gpt-5.2-codex", "gpt-5.1-codex-max",
+  "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "o4-mini",
+];
+const CLAUDE_MODELS = [
+  "opus", "sonnet", "haiku", "claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5",
+];
+const MODEL_LIST_CACHE = new Map<string, { models: string[]; ts: number }>();
+
+/** Model ids a CLI prints (one per line), ANSI stripped. Never throws. */
+function runModelList(cmd: string, args: string[]): Promise<string[]> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { maxBuffer: 8 * 1024 * 1024, timeout: 20_000 }, (_err, stdout) => {
+      const models: string[] = [];
+      for (const raw of String(stdout ?? "").split("\n")) {
+        // strip ANSI + leading bullets, take the first token: grok prints
+        // "  * grok-4.5 (default)", opencode a bare "provider/id" per line.
+        // eslint-disable-next-line no-control-regex
+        const cleaned = raw.replace(/\u001b?\[[0-9;]*m/g, "").replace(/^[\s>*+-]+/, "").trim();
+        const tok = cleaned.split(/\s+/)[0] ?? "";
+        if (
+          /^[A-Za-z0-9][\w./:@+-]*$/.test(tok) &&
+          tok.length < 120 &&
+          !/^(you|default|available|logged|models?|none|error)$/i.test(tok)
+        ) {
+          models.push(tok);
+        }
+      }
+      resolve([...new Set(models)]);
+    });
+  });
+}
+
+/**
+ * The real models an agent kind can run — asked of the tool itself where it can
+ * answer (`opencode models` reports ~500 across every provider it has; `grok
+ * models` lists its own), and the shipped set otherwise. Cached 60s.
+ */
+export async function listModelsForKind(kind: string): Promise<string[]> {
+  const hit = MODEL_LIST_CACHE.get(kind);
+  if (hit && Date.now() - hit.ts < 60_000) return hit.models;
+  let models: string[] = [];
+  if (kind === "opencode") models = await runModelList("opencode", ["models"]);
+  else if (kind === "grok-code") models = await runModelList("grok", ["models"]);
+  else if (kind === "codex") models = CODEX_MODELS;
+  else if (kind === "claude-code") models = CLAUDE_MODELS;
+  MODEL_LIST_CACHE.set(kind, { models, ts: Date.now() });
+  return models;
 }
 
 /**
