@@ -1238,6 +1238,11 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
     cursor:pointer;font:inherit;font-size:11px;transition:background .12s}
   .statusbar .ghconnect:hover{background:color-mix(in srgb, var(--primary) 22%, transparent)}
   .statusbar .ghconnect svg{width:12px;height:12px}
+  .statusbar .lppill{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:0;
+    font:inherit;letter-spacing:inherit;color:var(--muted-foreground);cursor:pointer;transition:color .12s}
+  .statusbar .lppill:hover{color:var(--foreground)}
+  .statusbar .lppill.on{color:var(--foreground)}
+  .statusbar .lppill.on .sdot{background:var(--ok)}
   .modalhead{display:flex;align-items:center;height:48px;padding:0 12px 0 16px;
     border-bottom:1px solid var(--border);font-size:15px;font-weight:600}
   .modalhead .iconbtn{margin-left:auto}
@@ -4634,6 +4639,14 @@ ${BRAND_SPRITE}
     var gh = state.github, ghSeg = "";
     if (gh && gh.connected) ghSeg = '<span class="sit ghok" title="GitHub connected as ' + esc(gh.user || "") + '">' + ICONS.github + " " + esc(gh.user || "connected") + "</span>";
     else if (gh && gh.installed) ghSeg = '<button class="sit ghconnect" id="ghconnect" title="sign in to GitHub in a terminal">' + ICONS.github + " Connect GitHub</button>";
+    // LoomPad voice backend — when it's up, the physical pad gets its spoken
+    // replies. Green pill = connected; grey = offline. Click to re-check.
+    var lp = state.loompad, lpUp = !!(lp && lp.up);
+    var lpSeg = '<button class="sit lppill' + (lpUp ? " on" : "") + '" id="lppill" title="' +
+      (lpUp
+        ? "LoomPad voice backend connected" + (lp && lp.brain ? " \\u00b7 brain " + esc(String(lp.brain)) : "") + " \\u2014 the pad can speak"
+        : "LoomPad voice backend offline \\u2014 start it so the pad can speak") +
+      '"><span class="sdot' + (lpUp ? "" : " off") + '"></span>LoomPad' + (lpUp ? "" : " offline") + "</button>";
     el.innerHTML =
       '<span class="sit"><span class="sdot' + (state.wsLive ? "" : " off") + '"></span>' + (state.wsLive ? "live" : "offline") + "</span>" +
       '<span class="sit">' + esc(location.host) + "</span>" +
@@ -4642,12 +4655,15 @@ ${BRAND_SPRITE}
         ? '<span class="sit"><span class="meter"><i style="width:' + share + '%"></i></span>' + money(p.costUsd) + " \\u00b7 " + share + "% of \\u03a3</span>"
         : "") +
       '<span class="spacer"></span>' +
+      lpSeg +
       ghSeg +
       (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
       '<span class="sit">' + (state.projects || []).length + " project" + ((state.projects || []).length === 1 ? "" : "s") + "</span>" +
       (total > 0 ? '<span class="sit">\\u03a3 ' + money(total) + "</span>" : "");
     var gc = document.getElementById("ghconnect");
     if (gc) gc.onclick = connectGithub;
+    var lpp = document.getElementById("lppill");
+    if (lpp) lpp.onclick = loadLoomPad;
   }
 
   // GitHub connection, fetched once and after a connect. Machine-wide (gh auth
@@ -4656,6 +4672,15 @@ ${BRAND_SPRITE}
     if (!state.token) return;
     api("/api/github/status").then(function(s){ state.github = s; drawStatusbar(); }).catch(function(){});
   }
+  // LoomPad voice-backend health, shown as a pill in the status bar and polled so
+  // the demo can see the pad go live the moment the backend starts.
+  function loadLoomPad(){
+    if (!state.token) return;
+    api("/api/loompad/health")
+      .then(function(s){ state.loompad = s; drawStatusbar(); })
+      .catch(function(){ state.loompad = { up:false }; drawStatusbar(); });
+  }
+  if (!window.__loompadPoll){ window.__loompadPoll = setInterval(function(){ loadLoomPad(); }, 5000); }
   /**
    * Sign in to GitHub. gh's login is an interactive device flow, so the honest
    * place to run it is the real terminal you already have — Loom never touches
@@ -6259,6 +6284,7 @@ ${BRAND_SPRITE}
     drawStatusbar();
     refresh();
     loadGithub(); // fills the status-bar GitHub badge
+    loadLoomPad(); // fills the status-bar LoomPad connectivity pill
     state.shellTimer = setInterval(refresh, 5000);
   }
 

@@ -403,6 +403,30 @@ export class LoomDaemon {
     });
 
     /**
+     * LoomPad connectivity — proxies the voice backend's /health so the web app
+     * can show a live "LoomPad connected" pill without a cross-origin fetch. The
+     * backend (orchestrator-pad) does STT -> agent -> TTS for the physical pad;
+     * when it's up, the pad gets its spoken replies. Best-effort: an unreachable
+     * backend just returns { up:false } (the pill goes grey), never an error.
+     */
+    app.get("/api/loompad/health", (_req, res) => {
+      const base = (process.env.LOOMPAD_BACKEND_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 2500);
+      void fetch(base + "/health", { signal: ctl.signal })
+        .then(async (r) => {
+          clearTimeout(timer);
+          if (!r.ok) return void res.json({ up: false, backend: base, status: r.status });
+          const body = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+          res.json({ up: true, backend: base, ...body });
+        })
+        .catch(() => {
+          clearTimeout(timer);
+          res.json({ up: false, backend: base });
+        });
+    });
+
+    /**
      * The two networks a phone could use to reach this daemon — the LAN and the
      * tailnet — with, for each, the address and whether the phone can actually
      * get here on it *right now*. It can't when we're bound to localhost, which
