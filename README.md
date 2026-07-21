@@ -39,6 +39,34 @@ and memory they don't share on their own.
   <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
 </p>
 
+## Codex & GPT‑5.6
+
+Loom is built around orchestrating **OpenAI Codex** as a first‑class agent — and in this
+build every Codex turn runs **GPT‑5.6**: Codex's model, pinned in Loom's per‑project agent
+config (`.loom/config.json` → `codex → model: "gpt-5.6"`) at high reasoning effort.
+
+- **Codex holds the baton like any other agent.** The adapter
+  ([`src/adapters/codex.ts`](src/adapters/codex.ts)) drives `codex exec --json` headless:
+  it opens a thread, streams Codex's JSONL event log (`thread.started`, `item.completed`
+  → `agent_message` / `command_execution` / `file_change`, `run_complete`), and **resumes
+  the same thread across turns** so Codex keeps its own context between handoffs.
+- **Codex reads and writes the shared brain.** Before a Codex turn, Loom projects the
+  unified memory (imported ADE memory + decisions + the thread) into its briefing; its
+  replies and memory writes land back in the one shared store. So a handoff
+  *Claude Code → Codex* carries the full context, and the next agent inherits what Codex
+  learned. *(Verified end‑to‑end: Codex recalled a value another agent set one turn
+  earlier, and its turns emit `run_complete` + `memory_add`.)*
+- **Voice, on real hardware.** On the physical **LoomPad** (an ESP32‑S3 macropad),
+  pressing the **Codex** key hands Codex the baton; hold the mic and speak → your words are
+  transcribed → sent to Codex (GPT‑5.6) → the reply is spoken back through the pad.
+- **Codex as a dev agent, too.** Because Codex is a full agent, you can hand it real work
+  inside Loom — `loom route ship "…"` routes *plan → Codex executes → review*, the brain
+  flowing hop to hop.
+
+In short: **GPT‑5.6, via Codex, is one of the interchangeable minds Loom keeps in sync** —
+start a thread in Claude Code, hand it to Codex mid‑task, and it picks up with the whole
+shared context intact.
+
 ## Why
 
 Every coding agent keeps its own brain. Claude Code's memory can't be read by
@@ -95,8 +123,11 @@ Surfaces, all talking to the same daemon:
 - **Desktop app** — [`desktop/`](desktop/README.md): `cd desktop && npm install && npm
   start` opens a native Electron window (starts the daemon and pairs itself) on the
   workspace below.
-- **Phone app** — [`app/`](app/README.md): `cd app && npx expo install && npx expo start`,
-  scan with Expo Go (voice input, per-prompt diffs, push).
+- **Phone app (LoomPad)** — install the prebuilt
+  [`loompad.apk`](https://github.com/nickthelegend/loom/releases/latest) (allow unknown
+  sources), open **Loom**, and **Scan QR code** from the desktop's *Connect a phone*.
+  Voice input, per-prompt diffs, push. Or build from source
+  ([`app/`](app/README.md)): `cd app && npx expo install && npx expo start`.
 - **Web app** — no install; `loom pair` → open the link. Same workspace in the browser.
 
 ## The workspace
