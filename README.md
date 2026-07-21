@@ -120,11 +120,12 @@ loom doctor        # checks node, agents, tailscale, daemon, and your project
 
 Surfaces, all talking to the same daemon:
 - **TUI / CLI** — `loom` (default), `loom chat`, `loom send`, …
-- **Desktop app (Loom Desktop)** — download the prebuilt
-  [`Loom-Desktop-…-arm64.dmg`](https://github.com/nickthelegend/loom/releases/latest)
-  (Apple Silicon; it's ad-hoc signed, so right-click → **Open** the first time), or build
-  from [`desktop/`](desktop/README.md): `cd desktop && npm install && npm start`. Either
-  way it opens a native window that starts the daemon and pairs itself.
+- **Desktop app (Loom Desktop)** — prebuilt for
+  [**macOS**, **Linux**, and **Windows**](https://github.com/nickthelegend/loom/releases/latest)
+  (`.dmg` · `.AppImage` · `.exe`; the macOS dmg is ad-hoc signed, so right-click → **Open**
+  the first time), or build from [`desktop/`](desktop/README.md): `cd desktop && npm
+  install && npm start`. Either way it opens a native window that starts the daemon and
+  pairs itself.
 - **Phone app (LoomPad)** — install the prebuilt
   [`loompad.apk`](https://github.com/nickthelegend/loom/releases/latest) (allow unknown
   sources), open **Loom**, and **Scan QR code** from the desktop's *Connect a phone*.
@@ -342,11 +343,11 @@ detects at least two roles.
 | `loom memory [import]` | The unified brain — one memory across every connected ADE |
 | `loom log [-f]` | Show (or follow) the project event log |
 | `loom costs` | Project spend: total + per-agent turns, $ and agent time |
-| `loom agents` / `loom projects` / `loom status` | Who's who, board of projects, daemon health |
+| `loom agents` / `loom models <agentId>` / `loom projects` / `loom status` | Agent roster, real agent models, project board, daemon health |
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
 | `loom clients [--revoke <id>] [--ping]` | Paired devices: list, revoke, or send a test push |
-| `loom doctor` | Diagnose env, daemon, binding, and project config — with fixes |
+| `loom doctor [--json]` | Diagnose env, daemon, binding, and project config — with fixes or machine-readable JSON |
 
 ## Supported agents
 
