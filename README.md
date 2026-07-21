@@ -120,9 +120,11 @@ loom doctor        # checks node, agents, tailscale, daemon, and your project
 
 Surfaces, all talking to the same daemon:
 - **TUI / CLI** — `loom` (default), `loom chat`, `loom send`, …
-- **Desktop app** — [`desktop/`](desktop/README.md): `cd desktop && npm install && npm
-  start` opens a native Electron window (starts the daemon and pairs itself) on the
-  workspace below.
+- **Desktop app (Loom Desktop)** — download the prebuilt
+  [`Loom-Desktop-…-arm64.dmg`](https://github.com/nickthelegend/loom/releases/latest)
+  (Apple Silicon; it's ad-hoc signed, so right-click → **Open** the first time), or build
+  from [`desktop/`](desktop/README.md): `cd desktop && npm install && npm start`. Either
+  way it opens a native window that starts the daemon and pairs itself.
 - **Phone app (LoomPad)** — install the prebuilt
   [`loompad.apk`](https://github.com/nickthelegend/loom/releases/latest) (allow unknown
   sources), open **Loom**, and **Scan QR code** from the desktop's *Connect a phone*.
