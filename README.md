@@ -47,7 +47,13 @@ and memory they don't share on their own.
 
 Loom is built around orchestrating **OpenAI Codex** as a first‑class agent — and in this
 build every Codex turn runs **GPT‑5.6**: Codex's model, pinned in Loom's per‑project agent
-config (`.loom/config.json` → `codex → model: "gpt-5.6"`) at high reasoning effort.
+config (`.loom/config.json` → `codex → model: "gpt-5.6-terra"`) at high reasoning effort.
+
+> The slug is `gpt-5.6-terra`, not a bare `gpt-5.6` — that is the id Codex actually
+> accepts, and asking for `gpt-5.6` is a 400 (`not supported when using Codex with a
+> ChatGPT account`). Loom's model picker asks the CLI what it supports
+> (`codex debug models`) rather than shipping a list that goes stale, which is exactly
+> how this got caught.
 
 - **Codex holds the baton like any other agent.** The adapter
   ([`src/adapters/codex.ts`](src/adapters/codex.ts)) drives `codex exec --json` headless:
