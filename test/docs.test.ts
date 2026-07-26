@@ -31,7 +31,7 @@ function importedPackages(md: string): string[] {
   return out;
 }
 
-const DOCS = ["README.md", "docs/adapters.md"];
+const DOCS = ["CONTRIBUTING.md", "README.md", "docs/adapters.md", "docs/loompad.md", "src/adapters/README.md"];
 
 describe("docs · import paths resolve", () => {
   it.each(DOCS)("%s only tells readers to import packages that exist", (doc) => {
@@ -69,7 +69,8 @@ describe("docs · import paths resolve", () => {
 
 describe("docs · the SDK surface the guide promises", () => {
   it("exports every name docs/adapters.md tells authors to import", async () => {
-    const md = read("docs/adapters.md") + read("README.md");
+    const md =
+      read("CONTRIBUTING.md") + read("docs/adapters.md") + read("README.md") + read("src/adapters/README.md");
     // names imported from our own sdk entry point, minus `type` imports
     const wanted = new Set<string>();
     const re = /import\s*\{([^}]+)\}\s*from\s+"@loompad\/cli\/sdk"/g;
