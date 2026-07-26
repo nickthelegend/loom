@@ -306,11 +306,15 @@ export interface AgentCost {
   usd: number;
   turns: number;
   ms: number;
+  tokensIn: number;
+  tokensOut: number;
 }
 
 export interface CostSummary {
   totalUsd: number;
   turns: number;
   totalMs: number;
+  tokensIn: number;
+  tokensOut: number;
   byAgent: AgentCost[];
 }

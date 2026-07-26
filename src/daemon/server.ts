@@ -72,6 +72,7 @@ import {
 } from "./tasks.js";
 import { linearCreateIssue, linearTeams, listLinearIssues } from "./linear.js";
 import { TerminalManager, TooManySessionsError } from "./terminals.js";
+import { recordAgentEvent } from "../observability/index.js";
 
 export interface DaemonOptions {
   host?: string;
@@ -787,6 +788,16 @@ export class LoomDaemon {
       "/api/projects/:id",
       withRuntime(async (rt, _req, res) => {
         res.json({ project: await rt.status() });
+      }),
+    );
+
+    // Per-agent cost / turns / tokens for the fleet — the same numbers the
+    // observability layer ships as gen_ai spans, served locally so the UI can
+    // render them without a telemetry backend being up at all.
+    app.get(
+      "/api/projects/:id/metrics",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ metrics: rt.costSummary() });
       }),
     );
 
@@ -1836,7 +1847,13 @@ export class LoomDaemon {
       }
     }
     const rt = await ProjectRuntime.open(info);
-    rt.log.onEvent((e) => this.broadcast(info.id, e));
+    rt.log.onEvent((e) => {
+      this.broadcast(info.id, e);
+      // The single central hook for live events — agent turns as well as
+      // API-driven handoffs, routes and memory folds. Rehydration reads through
+      // log.list(), not append(), so replaying history never re-exports it.
+      recordAgentEvent(e, { project: info.name });
+    });
     this.runtimes.set(info.id, rt);
     return rt;
   }

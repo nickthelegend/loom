@@ -152,8 +152,15 @@ export class ProjectRuntime {
   // Cost telemetry — O(1) incremental, rehydrated from the log on open
   // -------------------------------------------------------------------------
 
-  private costs = { totalUsd: 0, turns: 0, totalMs: 0 };
-  private costsByAgent = new Map<string, { usd: number; turns: number; ms: number }>();
+  private costs = { totalUsd: 0, turns: 0, totalMs: 0, tokensIn: 0, tokensOut: 0 };
+  private costsByAgent = new Map<
+    string,
+    { usd: number; turns: number; ms: number; tokensIn: number; tokensOut: number }
+  >();
+  // A turn's cost lands on a `turn_cost` status just before its `run_complete`
+  // (the CLI reports it mid-stream). We hold it here so the completed turn — and
+  // therefore its exported gen_ai span — carries the real cost, not just tokens.
+  private pendingCost = new Map<string, number>();
 
   private rehydrateCosts(): void {
     for (const event of this.log.list({ kinds: ["status", "run_complete"] })) {
@@ -164,7 +171,7 @@ export class ProjectRuntime {
   private trackCost(event: LoomEvent): void {
     const agentId = event.agentId ?? "unknown";
     const entry =
-      this.costsByAgent.get(agentId) ?? { usd: 0, turns: 0, ms: 0 };
+      this.costsByAgent.get(agentId) ?? { usd: 0, turns: 0, ms: 0, tokensIn: 0, tokensOut: 0 };
     if (event.kind === "status" && event.payload.state === "turn_cost") {
       const usd = Number(event.payload.costUsd ?? 0);
       if (usd > 0) {
@@ -174,10 +181,19 @@ export class ProjectRuntime {
       }
     } else if (event.kind === "run_complete") {
       const ms = Number(event.payload.durationMs ?? 0);
+      // Adapters that report token usage (codex, claude-code, …) carry it on
+      // run_complete; cost-only adapters leave these 0. Either way the totals
+      // stay honest — an absent number is never invented here.
+      const tin = Number(event.payload.inputTokens ?? event.payload.tokensIn ?? 0) || 0;
+      const tout = Number(event.payload.outputTokens ?? event.payload.tokensOut ?? 0) || 0;
       this.costs.turns += 1;
       this.costs.totalMs += ms;
+      this.costs.tokensIn += tin;
+      this.costs.tokensOut += tout;
       entry.turns += 1;
       entry.ms += ms;
+      entry.tokensIn += tin;
+      entry.tokensOut += tout;
       this.costsByAgent.set(agentId, entry);
     }
   }
@@ -190,6 +206,8 @@ export class ProjectRuntime {
       totalUsd: this.costs.totalUsd,
       turns: this.costs.turns,
       totalMs: this.costs.totalMs,
+      tokensIn: this.costs.tokensIn,
+      tokensOut: this.costs.tokensOut,
       byAgent,
     };
   }
@@ -326,11 +344,33 @@ export class ProjectRuntime {
     this.agents.set(cfg.id, agent);
     agent.onEvent((e) => {
       const chat = this.turnChat.get(agent.id);
+      let payload = e.payload;
+      // Enrich the completed turn so its gen_ai span carries system + model +
+      // cost (adapters only put tokens on run_complete). The kind is known
+      // here; the model prefers what the adapter actually used, else the
+      // configured override; the cost is the turn_cost stashed a moment ago.
+      const p = e.payload as Record<string, unknown>;
+      if (e.kind === "status" && p.state === "turn_cost") {
+        const usd = Number(p.costUsd ?? 0);
+        if (usd > 0) this.pendingCost.set(agent.id, usd);
+      } else if (e.kind === "run_complete") {
+        const model =
+          (typeof p.model === "string" && p.model) ||
+          (typeof cfg.options?.model === "string" ? cfg.options.model : undefined);
+        const cost = this.pendingCost.get(agent.id);
+        this.pendingCost.delete(agent.id);
+        payload = {
+          ...p,
+          adapter: cfg.kind,
+          ...(model ? { model } : {}),
+          ...(cost !== undefined ? { costUsd: cost } : {}),
+        };
+      }
       const event = this.log.append({
         kind: e.kind,
         agentId: agent.id,
         ...(chat ? { chat } : {}),
-        payload: e.payload,
+        payload,
       });
       this.afterAgentEvent(event);
     });

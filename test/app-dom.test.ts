@@ -55,9 +55,41 @@ beforeAll(async () => {
  * forever — a failing assertion turns into an unrelated hook timeout.
  */
 const live: Mounted[] = [];
-afterEach(() => {
+afterEach(async () => {
   while (live.length) live.pop()!.close();
+  await settleTurns();
 });
+
+/**
+ * Wait until no agent is mid-turn, between tests.
+ *
+ * These tests share one daemon, one project and one agent, and echo refuses a
+ * send while it is running ('echo agent "..." is busy', src/adapters/echo.ts).
+ * So a test that returns with a turn still in flight doesn't fail itself — it
+ * fails whichever test sends next, which then waits for a reply that is never
+ * coming. That is what made the markdown and settings tests flaky: each passed
+ * alone every time and failed in the full suite, because the suite is where the
+ * previous turn was still running when it started.
+ *
+ * Waiting on the reply *text* is not enough, and that is the subtle part: echo
+ * emits its message, then turn_cost, then run_complete, and only clears its busy
+ * flag in a `finally` after all three. The bubble a test asserts on is on screen
+ * while the agent is still occupied. The only honest signal is the daemon's own
+ * per-agent `busy`, so that is what this reads.
+ */
+async function settleTurns(): Promise<void> {
+  await waitUntil(
+    async () => {
+      const r = await fetch(`${baseUrl}/api/projects/${projectId}`, {
+        headers: { Authorization: `Bearer ${clientToken}` },
+      });
+      if (!r.ok) return true; // daemon already torn down; nothing left to settle
+      const body = (await r.json()) as { project?: { agents?: Array<{ busy?: boolean }> } };
+      return (body.project?.agents ?? []).every((a) => !a.busy);
+    },
+    { timeoutMs: 15_000 },
+  );
+}
 
 afterAll(async () => {
   await daemon.close();

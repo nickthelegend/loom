@@ -49,8 +49,9 @@
     "prepare": "tsc",
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude 'test/app-dom.test.ts' && vitest run test/app-dom.test.ts",
     "test:watch": "vitest",
+    "test:all-parallel": "vitest run",
     "verify:adapters": "node scripts/verify-adapters.mjs"
   },
   "dependencies": {
