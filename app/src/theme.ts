@@ -23,6 +23,9 @@ export const T = {
   // the single loudest thing on any screen: near-white primary action
   bright: "#f5f5f5",
   onBright: "#111111",
+  // violet — the accent for the Observatory + self-heal moments
+  primary: "#a78bfa",
+  primaryDim: "#2e2545",
   // state — the only places color is allowed
   thread: "#67e8f9",
   threadDim: "#164e63",

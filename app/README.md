@@ -2,8 +2,10 @@
 
 The native carrier of the loom daemon API: board, live thread, agent chips, the
 **Tasks** view — the repo's open issues/PRs, where one tap hands an issue to an agent —
-and the **Changes** view: per-prompt diffs (`turn_diff` events) and the live working
-tree (`GET /api/projects/:id/tree`).
+the **Changes** view: per-prompt diffs (`turn_diff` events) and the live working
+tree (`GET /api/projects/:id/tree`) — and the **Observatory**, **Ask** and **Tools**
+tabs, which put the fleet's telemetry, a question box over it, and the project's
+skills/MCP/agent config on the phone.
 
 ## Run it
 
@@ -49,13 +51,25 @@ Credentials are stored in the device keychain (expo-secure-store).
 
 - `App.tsx` — hand-rolled 3-screen router (Pair → Board → Project), no nav deps.
 - `src/api.ts` — daemon client (REST + WS URL builder), typed to the loom API.
-- `src/screens.tsx` — Board (needs-input dots, route badges, $), Project with
-  **Thread** (live WS events, chips that shift the baton on send, route banner),
-  **Tasks** (issues/PRs from `GET /api/projects/:id/tasks`, read through the daemon
-  host's own `gh`), and **Changes** (working tree: branch, changed files, colored
-  patch).
+- `src/screens.tsx` — Board (needs-input dots, route badges, $), and the Project
+  tab host: **Thread** (live WS events, chips that shift the baton on send, route
+  banner), **Tasks** (issues/PRs from `GET /api/projects/:id/tasks`, read through
+  the daemon host's own `gh`), and **Changes** (working tree: branch, changed
+  files, colored patch). The three heavier tabs live in their own files.
+- `src/observatory.tsx` — the Observatory's eight views on a phone (metrics,
+  fleet, handoffs, self-heal, timeline, decisions, logs, replay), each drawn from
+  a daemon endpoint and each showing the provenance of what it drew.
+- `src/ask.tsx` — **Ask**: a question about this fleet, answered from the fleet's
+  own telemetry by a headless CLI the daemon runs with the project's MCP servers
+  attached. Slow by construction, so every answer carries its provenance.
+- `src/tools.tsx` — **Tools**: the skills discoverable from this project, the MCP
+  servers it is wired to (plus the registry to install from), and which agents
+  are on and in what role.
+- `src/charts.tsx` — charts drawn from plain Views. The app ships no
+  `react-native-svg` and six numbers do not justify a charting dependency.
 - `src/components.tsx` — event renderer (`turn_diff` events are expandable cards
-  showing exactly what a prompt changed) and `TaskRow`.
+  showing exactly what a prompt changed), `TaskRow`, and the shared panel /
+  badge / empty-state vocabulary the newer tabs are built out of.
 
 **Tasks is the "check from my phone" story finished**: see an issue on the train, tap
 it, confirm, and an agent is working before you look up. It confirms first because the

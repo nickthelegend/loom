@@ -1,4 +1,11 @@
-/** The three screens: Pair, Board, Project (Thread | Changes) — quiet graphite. */
+/**
+ * The three screens: Pair, Board, Project — quiet graphite.
+ *
+ * The Project screen is a tab host. Its heavier tabs live in their own files —
+ * Observatory in observatory.tsx, Ask in ask.tsx, Skills/MCP/Agents in
+ * tools.tsx — so this file stays the navigation and the thread, which is what
+ * it is actually about.
+ */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -41,20 +48,12 @@ import {
   type TaskResult,
   type WorkingTree,
 } from "./api";
-import { Btn, DiffView, EventLine, Sys, TaskRow } from "./components";
+import { Btn, DiffView, EventLine, Sys, TaskRow, field } from "./components";
+import { AskView } from "./ask";
+import { ObservatoryView } from "./observatory";
+import { ToolsView } from "./tools";
 import { useStt } from "./stt";
 import { T, radii, spacing, usd } from "./theme";
-
-const field = {
-  backgroundColor: T.raised,
-  borderColor: T.line,
-  borderWidth: 1,
-  borderRadius: radii.input,
-  color: T.text,
-  paddingHorizontal: 12,
-  paddingVertical: 12,
-  fontSize: 15,
-} as const;
 
 /** Brand lockup: the wordmark over a short thread-cyan hairline. */
 function Wordmark(props: { size?: number }) {
@@ -644,13 +643,29 @@ export function BoardScreen(props: {
 }
 
 // ---------------------------------------------------------------------------
-// Project: Thread | Changes
+// Project: Thread | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
+
+type Tab = "thread" | "observatory" | "ask" | "tasks" | "changes" | "tools";
+
+/**
+ * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
+ * short for the same reason — "Observatory" is already the longest thing that
+ * can sit here without pushing everything else off the edge.
+ */
+const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
+  { key: "thread", label: "Thread" },
+  { key: "observatory", label: "Observatory", accent: T.primary },
+  { key: "ask", label: "Ask", accent: T.primary },
+  { key: "tasks", label: "Tasks" },
+  { key: "changes", label: "Changes" },
+  { key: "tools", label: "Tools" },
+];
 
 export function ProjectScreen(props: { creds: Creds; project: Project; onBack: () => void }) {
   const { creds } = props;
   const [project, setProject] = useState(props.project);
-  const [tab, setTab] = useState<"thread" | "tasks" | "changes">("thread");
+  const [tab, setTab] = useState<Tab>("thread");
   const [chatId, setChatId] = useState("main");
   const [chats, setChats] = useState<Chat[]>([]);
   const [events, setEvents] = useState<LoomEvent[]>([]);
@@ -879,46 +894,44 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
         } />
       </View>
 
-      {/* tab strip — active tab carries a neutral 2px underline */}
+      {/* tab strip — active tab carries a 2px underline; scrolls, six don't fit */}
       <View
         style={{
-          flexDirection: "row",
-          alignItems: "stretch",
-          paddingHorizontal: spacing.md,
-          gap: spacing.lg,
           backgroundColor: T.panel,
           borderBottomWidth: 1,
           borderBottomColor: T.line,
         }}
       >
-        {(["thread", "tasks", "changes"] as const).map((name) => (
-          <TouchableOpacity
-            key={name}
-            onPress={() => setTab(name)}
-            activeOpacity={0.7}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: tab === name }}
-            style={{
-              paddingVertical: 9,
-              borderBottomWidth: 2,
-              borderBottomColor: tab === name ? T.dim : "transparent",
-              marginBottom: -1,
-            }}
-          >
-            <Text
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }}
+          contentContainerStyle={{ paddingHorizontal: spacing.md, gap: spacing.lg, alignItems: "stretch" }}
+        >
+          {TABS.map((t) => (
+            <TouchableOpacity
+              key={t.key}
+              onPress={() => setTab(t.key)}
+              activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === t.key }}
               style={{
-                color: tab === name ? T.text : T.dim,
-                fontWeight: "600",
-                fontSize: 13,
+                justifyContent: "center",
+                minHeight: 44,
+                borderBottomWidth: 2,
+                borderBottomColor: tab === t.key ? (t.accent ?? T.dim) : "transparent",
+                marginBottom: -1,
               }}
             >
-              {name === "thread" ? "Thread" : name === "tasks" ? "Tasks" : "Changes"}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text style={{ color: tab === t.key ? T.text : T.dim, fontWeight: "600", fontSize: 13 }}>
+                {t.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
         {routeActive && (
-          <View style={{ marginLeft: "auto", justifyContent: "center" }}>
-            <Text style={{ color: T.thread, fontSize: 11, fontFamily: T.mono }}>
+          <View style={{ paddingHorizontal: spacing.md, paddingBottom: 6 }}>
+            <Text style={{ color: T.thread, fontSize: 11, fontFamily: T.mono }} numberOfLines={1}>
               ▸ {r!.name ?? "route"} {r!.current + 1}/{r!.steps.length}
               {r!.status === "waiting_human" ? " ⏸ reply below" : ""}
             </Text>
@@ -1104,6 +1117,23 @@ export function ProjectScreen(props: { creds: Creds; project: Project; onBack: (
             </View>
           </View>
         </>
+      ) : tab === "observatory" ? (
+        <ObservatoryView creds={creds} project={project} />
+      ) : tab === "ask" ? (
+        <AskView creds={creds} project={project} />
+      ) : tab === "tools" ? (
+        <ToolsView
+          creds={creds}
+          project={project}
+          // Enabling/disabling an agent or changing its role rewrites the roster
+          // the whole screen renders from, so pull it back immediately instead of
+          // waiting out the 4s poll and letting the switch look like it snapped back.
+          onAgentsChanged={() =>
+            void getProject(creds, project.id)
+              .then(({ project: p }) => setProject(p))
+              .catch(() => {})
+          }
+        />
       ) : tab === "tasks" ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md }}>
           {/* Issues / PRs */}
