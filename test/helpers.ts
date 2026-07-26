@@ -28,9 +28,25 @@ export function makeProjectDir(config?: Partial<ProjectConfig>): string {
   return dir;
 }
 
+/**
+ * Poll until a condition holds.
+ *
+ * The default was 8s, chosen for "wait for the DOM to settle". Most callers are
+ * that. But app-dom.test.ts drives a real daemon inside jsdom while the other
+ * test files run in parallel, and its waits are on real work: an agent turn, a
+ * `/api/setup` that spawns a CLI probe per agent (4.8-6.0s on an *idle*
+ * machine), a `/api/doctor` that shells out. Against 8s that is barely more
+ * than 1x of headroom, so the suite produced a rotating cast of one-test
+ * failures — markdown rendering, then settings, then the command palette —
+ * that all looked like separate bugs and were one budget.
+ *
+ * 20s, because a wait that is genuinely never going to succeed still fails; it
+ * just takes longer to say so. Trading a slower red for a trustworthy green is
+ * the right way round when the alternative is a suite people learn to re-run.
+ */
 export async function waitUntil(
   predicate: () => Promise<boolean> | boolean,
-  { timeoutMs = 8000, intervalMs = 40 } = {},
+  { timeoutMs = 20_000, intervalMs = 40 } = {},
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

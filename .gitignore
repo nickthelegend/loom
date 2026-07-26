@@ -20,3 +20,7 @@ desktop/build/daemon/
 # are other people's repos with their own licences and histories — 54MB of mem0
 # alone. Cloned on demand; never ours to commit.
 references/
+
+# Scratch Next.js app used as a throwaway target project when driving the
+# daemon by hand (`loom init` against something real). Generated, not source.
+test-loom/
