@@ -91,6 +91,16 @@ describe("claude-code · a normal turn", () => {
     expect(of(events, "status")[1]).toMatchObject({ state: "turn_cost", costUsd: 0.0421 });
   });
 
+  it("captures token usage from the result and rides it on run_complete", async () => {
+    const { events } = await run([
+      INIT("sess-t"),
+      TEXT("ok"),
+      RESULT({ usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 20, cache_creation_input_tokens: 5 } }),
+    ]);
+    // cache reads + creations count as input tokens (100 + 20 + 5), output = 50
+    expect(of(events, "run_complete")[0]).toMatchObject({ inputTokens: 125, outputTokens: 50 });
+  });
+
   it("remembers the session so the next turn resumes it", async () => {
     const dir = makeProjectDir({ name: "cc" });
     await run([INIT("sess-abc"), TEXT("hi"), RESULT()], {}, dir);

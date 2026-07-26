@@ -35,6 +35,12 @@ interface ClaudeOptions {
 export class ClaudeCodeAdapter extends AdapterBase {
   private child: ChildProcess | null = null;
   private options: ClaudeOptions;
+  // Token usage from the CLI's `result` message, stashed so it can ride the
+  // run_complete event (which fires on close, after result). Cleared each turn.
+  private lastUsage: { input: number; output: number } | null = null;
+  // The model the CLI actually ran (from the assistant message), so the turn's
+  // gen_ai span carries a real gen_ai.request.model even with no override set.
+  private lastModel: string | null = null;
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "claude-code", projectDir);
@@ -142,8 +148,16 @@ export class ClaudeCodeAdapter extends AdapterBase {
           }
           this.emit({
             kind: "run_complete",
-            payload: { durationMs: Date.now() - started },
+            payload: {
+              durationMs: Date.now() - started,
+              ...(this.lastModel ? { model: this.lastModel } : {}),
+              ...(this.lastUsage
+                ? { inputTokens: this.lastUsage.input, outputTokens: this.lastUsage.output }
+                : {}),
+            },
           });
+          this.lastUsage = null;
+          this.lastModel = null;
           resolve();
         });
       });
@@ -165,7 +179,8 @@ export class ClaudeCodeAdapter extends AdapterBase {
       return;
     }
     if (type === "assistant") {
-      const message = evt.message as { content?: Array<Record<string, unknown>> } | undefined;
+      const message = evt.message as { content?: Array<Record<string, unknown>>; model?: string } | undefined;
+      if (typeof message?.model === "string" && message.model) this.lastModel = message.model;
       for (const block of message?.content ?? []) {
         if (block.type === "text" && typeof block.text === "string" && block.text.trim()) {
           setLastText(block.text);
@@ -192,6 +207,13 @@ export class ClaudeCodeAdapter extends AdapterBase {
     }
     if (type === "result") {
       const cost = evt.total_cost_usd as number | undefined;
+      // The Claude Code CLI reports token usage on the result message; capture
+      // it (cache reads/creations count as input) so tokens aren't lost.
+      const usage = (evt.usage ?? {}) as Record<string, number>;
+      this.lastUsage = {
+        input: (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0),
+        output: usage.output_tokens ?? 0,
+      };
       const isError = Boolean(evt.is_error);
       if (isError) {
         this.emit({

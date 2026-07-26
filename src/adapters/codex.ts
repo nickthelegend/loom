@@ -74,6 +74,13 @@ export function codexBin(override?: string): string | null {
 export class CodexAdapter extends AdapterBase {
   private child: ChildProcess | null = null;
   private options: CodexOptions;
+  // Token usage from turn.completed, stashed so it also rides run_complete
+  // (which fires on close). Cleared each turn.
+  private lastUsage: { input: number; output: number } | null = null;
+  // The model codex actually ran, captured from whichever event carries it, so
+  // the turn's gen_ai span reports a real model even with no override set.
+  // Cleared each turn.
+  private lastModel: string | null = null;
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "codex", projectDir);
@@ -192,7 +199,18 @@ export class CodexAdapter extends AdapterBase {
           if (/\?\s*$/.test(lastMessage.trim())) {
             this.emit({ kind: "needs_input", payload: { question: lastMessage.slice(-500) } });
           }
-          this.emit({ kind: "run_complete", payload: { durationMs: Date.now() - started } });
+          this.emit({
+            kind: "run_complete",
+            payload: {
+              durationMs: Date.now() - started,
+              ...(this.lastModel ? { model: this.lastModel } : {}),
+              ...(this.lastUsage
+                ? { inputTokens: this.lastUsage.input, outputTokens: this.lastUsage.output }
+                : {}),
+            },
+          });
+          this.lastUsage = null;
+          this.lastModel = null;
           resolve();
         });
       });
@@ -204,6 +222,12 @@ export class CodexAdapter extends AdapterBase {
 
   private handleEvent(evt: Record<string, unknown>, setLast: (t: string) => void): void {
     const type = evt.type as string;
+
+    // Codex reports the model on different events across CLI versions (the
+    // thread config, the turn, or the assistant item). Capture it wherever it
+    // shows up so a real gen_ai.request.model lands on the turn span.
+    const m = evt.model ?? (evt.thread as Record<string, unknown> | undefined)?.model;
+    if (typeof m === "string" && m) this.lastModel = m;
 
     if (type === "thread.started") {
       const id = evt.thread_id as string | undefined;
@@ -223,6 +247,10 @@ export class CodexAdapter extends AdapterBase {
 
     if (type === "turn.completed") {
       const usage = (evt.usage ?? {}) as Record<string, number>;
+      this.lastUsage = {
+        input: (usage.input_tokens ?? 0) + (usage.cached_input_tokens ?? 0),
+        output: (usage.output_tokens ?? 0) + (usage.reasoning_output_tokens ?? 0),
+      };
       this.emit({
         kind: "status",
         payload: {
@@ -295,7 +323,14 @@ export class CodexAdapter extends AdapterBase {
         return;
       }
       case "error": {
-        this.emit({ kind: "error", payload: { message: String(item.message ?? "codex error") } });
+        // Codex emits item-level `error` for non-fatal NOTICES too — a model
+        // falling back to default metadata, "skill descriptions were shortened
+        // to fit the context budget", and the like — not only real failures. A
+        // genuinely failed turn ALSO arrives as `turn.failed` (and a crash as a
+        // non-zero exit), which is what should fail a route. So surface an
+        // item-level error as a visible notice, not a fatal error event, or a
+        // benign warning would sink an otherwise-successful turn mid-route.
+        this.emit({ kind: "status", payload: { state: "notice", message: String(item.message ?? "codex notice") } });
         return;
       }
       default:

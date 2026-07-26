@@ -76,6 +76,24 @@ describe("grok · a normal turn", () => {
     expect(kinds(events)).toContain("run_complete");
   });
 
+  it("carries model + tokens onto run_complete when the CLI reports them", async () => {
+    const { events } = await run(
+      reply({ text: "ok", model: "grok-code-fast-1", usage: { input_tokens: 320, output_tokens: 48 } }),
+    );
+    expect(of(events, "run_complete")[0]).toMatchObject({
+      model: "grok-code-fast-1",
+      inputTokens: 320,
+      outputTokens: 48,
+    });
+  });
+
+  it("stays honest — no token keys on run_complete when the CLI omits usage", async () => {
+    const { events } = await run(reply({ text: "ok" }));
+    const done = of(events, "run_complete")[0]!;
+    expect("inputTokens" in done).toBe(false);
+    expect("model" in done).toBe(false);
+  });
+
   it("remembers the session so the next turn resumes it", async () => {
     const dir = makeProjectDir({ name: "gk" });
     await run(reply({ text: "one", sessionId: "019f-keep" }), {}, dir);

@@ -47,6 +47,10 @@ export class OpenCodeAdapter extends AdapterBase {
   private sseAbort: AbortController | null = null;
   private options: OpenCodeOptions;
   private started = false;
+  // Token usage from the assistant message, stashed to ride run_complete.
+  private lastUsage: { input: number; output: number } | null = null;
+  // The provider/model the assistant message actually ran, for the gen_ai span.
+  private lastModel: string | null = null;
 
   /** text parts per in-flight assistant message */
   private textParts = new Map<string, Map<string, string>>();
@@ -424,8 +428,28 @@ export class OpenCodeAdapter extends AdapterBase {
         if (cost > 0) {
           this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
         }
+        // OpenCode assistant messages carry token usage; capture it (cache
+        // reads/writes count as input) so it isn't dropped.
+        const tk = (info.tokens ?? {}) as Record<string, number>;
+        const cache = (tk.cache ?? {}) as unknown as Record<string, number>;
+        this.lastUsage = {
+          input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
+          output: (tk.output ?? 0) + (tk.reasoning ?? 0),
+        };
+        const mid = (info as Record<string, unknown>).modelID;
+        const pid = (info as Record<string, unknown>).providerID;
+        if (typeof mid === "string" && mid) this.lastModel = typeof pid === "string" && pid ? `${pid}/${mid}` : mid;
       }
-      this.emit({ kind: "run_complete", payload: { durationMs: Date.now() - started } });
+      this.emit({
+        kind: "run_complete",
+        payload: {
+          durationMs: Date.now() - started,
+          ...(this.lastModel ? { model: this.lastModel } : {}),
+          ...(this.lastUsage ? { inputTokens: this.lastUsage.input, outputTokens: this.lastUsage.output } : {}),
+        },
+      });
+      this.lastUsage = null;
+      this.lastModel = null;
     } finally {
       this._busy = false;
     }

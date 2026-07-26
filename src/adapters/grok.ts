@@ -80,6 +80,10 @@ interface GrokResult {
   sessionId?: string;
   error?: string;
   message?: string;
+  // Some grok CLI builds include usage/model on the JSON result; captured when
+  // present so the turn span carries real tokens + model, honestly omitted when not.
+  model?: string;
+  usage?: { input_tokens?: number; output_tokens?: number; prompt_tokens?: number; completion_tokens?: number };
 }
 
 export class GrokAdapter extends AdapterBase {
@@ -204,7 +208,17 @@ export class GrokAdapter extends AdapterBase {
           if (/\?\s*$/.test(answer)) {
             this.emit({ kind: "needs_input", payload: { question: answer.slice(-500) } });
           }
-          this.emit({ kind: "run_complete", payload: { durationMs: Date.now() - started } });
+          const u = result.usage;
+          const tin = Number(u?.input_tokens ?? u?.prompt_tokens ?? 0) || 0;
+          const tout = Number(u?.output_tokens ?? u?.completion_tokens ?? 0) || 0;
+          this.emit({
+            kind: "run_complete",
+            payload: {
+              durationMs: Date.now() - started,
+              ...(result.model ? { model: result.model } : {}),
+              ...(tin || tout ? { inputTokens: tin, outputTokens: tout } : {}),
+            },
+          });
           resolve();
         });
       });

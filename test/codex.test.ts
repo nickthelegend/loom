@@ -98,6 +98,17 @@ describe("codex · a normal turn", () => {
     expect(of(events, "status").some((p) => "costUsd" in p)).toBe(false);
   });
 
+  it("carries the model it ran + summed tokens onto run_complete (for the gen_ai span)", async () => {
+    const THREAD_M = JSON.stringify({ type: "thread.started", thread_id: "t", model: "gpt-5.6" });
+    const { events } = await run([THREAD_M, MSG("hi"), TURN_DONE]);
+    // run_complete tokens are input+cached / output+reasoning, so they can ride the span.
+    expect(of(events, "run_complete")[0]).toMatchObject({
+      model: "gpt-5.6",
+      inputTokens: 52831 + 44672,
+      outputTokens: 120,
+    });
+  });
+
   it("builds exec resume args without the fresh-turn root or sandbox flags", async () => {
     const dir = makeProjectDir({ name: "cx" });
     await run([THREAD("019f-keep"), MSG("one"), TURN_DONE], {}, dir);
@@ -206,15 +217,34 @@ describe("codex · what it did", () => {
 });
 
 describe("codex · when it goes wrong", () => {
-  it("passes an error item through", async () => {
+  it("surfaces an error item as a notice, so a benign one can't sink the turn", async () => {
+    // "reported, not fatal" has to hold downstream too, not just here: a
+    // kind:error event fails the step a route is on. Codex uses item-level
+    // `error` for notices as well as failures — a shortened skill list, a model
+    // falling back to default metadata — and a real failure arrives separately
+    // as turn.failed (or a non-zero exit). So this stays visible without being
+    // fatal.
     const { events } = await run([
       THREAD("t"),
       JSON.stringify({ type: "item.completed", item: { type: "error", message: "skills budget exceeded" } }),
       MSG("carrying on"),
       TURN_DONE,
     ]);
-    expect(of(events, "error")[0]).toMatchObject({ message: "skills budget exceeded" });
-    expect(kinds(events)).toContain("run_complete"); // reported, not fatal
+    expect(of(events, "error")).toHaveLength(0);
+    expect(of(events, "status").find((p) => p.state === "notice")).toMatchObject({
+      message: "skills budget exceeded",
+    });
+    expect(kinds(events)).toContain("run_complete"); // the turn still completes
+  });
+
+  it("still fails the turn when codex reports the turn itself failed", async () => {
+    // The other half of the rule above: downgrading item errors must not have
+    // made codex incapable of reporting a genuine failure.
+    const { events } = await run([
+      THREAD("t"),
+      JSON.stringify({ type: "turn.failed", error: { message: "model unavailable" } }),
+    ]);
+    expect(of(events, "error")[0]).toMatchObject({ message: "model unavailable" });
   });
 
   it("explains when Codex is not signed in", async () => {
