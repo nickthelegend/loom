@@ -98,28 +98,44 @@ describe("codex · a normal turn", () => {
     expect(of(events, "status").some((p) => "costUsd" in p)).toBe(false);
   });
 
-  it("resumes the thread on the next turn", async () => {
+  it("builds exec resume args without the fresh-turn root or sandbox flags", async () => {
     const dir = makeProjectDir({ name: "cx" });
     await run([THREAD("019f-keep"), MSG("one"), TURN_DONE], {}, dir);
 
     const second = fakeCodex([THREAD("019f-keep"), MSG("two"), TURN_DONE]);
-    await new CodexAdapter("codex", dir, { bin: second }).send({ text: "more" });
-    const argv = argvOf(second);
-    expect(argv.slice(0, 3)).toEqual(["exec", "resume", "019f-keep"]);
+    await new CodexAdapter("codex", dir, { bin: second, sandbox: "read-only", model: "o3" }).send({
+      text: "more",
+    });
+
+    expect(argvOf(second)).toEqual([
+      "exec",
+      "resume",
+      "019f-keep",
+      "--json",
+      "--skip-git-repo-check",
+      "-m",
+      "o3",
+      "more",
+    ]);
   });
 
-  it("runs in the project, out of git's way, with the sandbox it was given", async () => {
+  it("builds fresh exec args with the project root and sandbox", async () => {
     const dir = makeProjectDir({ name: "cx" });
     const bin = fakeCodex([THREAD("t"), MSG("ok"), TURN_DONE]);
     await new CodexAdapter("codex", dir, { bin, sandbox: "read-only", model: "o3" }).send({ text: "go" });
-    const argv = argvOf(bin);
-    expect(argv[argv.indexOf("-C") + 1]).toBe(dir);
-    expect(argv[argv.indexOf("-s") + 1]).toBe("read-only");
-    expect(argv[argv.indexOf("-m") + 1]).toBe("o3");
-    // codex refuses to run outside a repo without this, and Loom's projects
-    // aren't always repos
-    expect(argv).toContain("--skip-git-repo-check");
-    expect(argv).toContain("--json");
+
+    expect(argvOf(bin)).toEqual([
+      "exec",
+      "--json",
+      "--skip-git-repo-check",
+      "-C",
+      dir,
+      "-s",
+      "read-only",
+      "-m",
+      "o3",
+      "go",
+    ]);
   });
 
   /**
@@ -201,9 +217,11 @@ describe("codex · when it goes wrong", () => {
     expect(kinds(events)).toContain("run_complete"); // reported, not fatal
   });
 
-  it("throws when it dies without completing a turn", async () => {
+  it("explains when Codex is not signed in", async () => {
     const { events, error } = await run([], { code: 1, stderr: "not logged in" });
     expect(error).toBeDefined();
+    expect(error?.message).toMatch(/codex not signed in.*codex login/i);
+    expect(of(events, "error")[0]).toMatchObject({ message: expect.stringMatching(/codex not signed in/i) });
     expect(of(events, "error")[0]?.stderr).toContain("not logged in");
   });
 

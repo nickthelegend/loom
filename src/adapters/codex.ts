@@ -52,6 +52,13 @@ const BUNDLED = [
   `${process.env.HOME ?? ""}/Applications/Codex.app/Contents/Resources/codex`,
 ];
 
+function codexExitMessage(code: number | null, stderr: string): string {
+  if (/\b(?:not\s+(?:logged|signed)\s+in|not\s+authenticated|authentication\s+required|login\s+required|please\s+log\s+in)\b/i.test(stderr)) {
+    return "codex not signed in — run `codex login` and try again";
+  }
+  return `codex exited ${code}`;
+}
+
 /**
  * Where the codex CLI is on this machine: an explicit override, then PATH,
  * then inside the app bundle.
@@ -172,11 +179,12 @@ export class CodexAdapter extends AdapterBase {
             return;
           }
           if (code !== 0 && !sawTurn) {
+            const message = codexExitMessage(code, stderrTail);
             this.emit({
               kind: "error",
-              payload: { message: `codex exited ${code}`, stderr: stderrTail },
+              payload: { message, stderr: stderrTail },
             });
-            reject(new Error(`codex exited ${code}: ${stderrTail.slice(0, 200)}`));
+            reject(new Error(`${message}: ${stderrTail.slice(0, 200)}`));
             return;
           }
           // Same blocked-on-human heuristic the other adapters use: the turn
