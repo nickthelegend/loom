@@ -91,8 +91,10 @@ describe("web app page", () => {
   });
 
   it("folds Tasks into the Board: one place, and it can search", () => {
-    // the Tasks tab is gone; the Board covers it
-    expect(APP_HTML).toContain('var tabs = ["thread", "board", "brain"];');
+    // the Tasks tab is gone; the Board covers it. Observatory is a real fourth
+    // tab, not a resurrected Tasks — the point of this assertion is that the
+    // work-tracking surfaces stayed folded into one.
+    expect(APP_HTML).toContain('var tabs = ["thread", "board", "brain", "observatory"];');
     expect(APP_HTML).not.toContain('id="pane-tasks"');
     expect(APP_HTML).not.toContain('id="pane-routes"');
     // issues and PRs are searchable from the board, in GitHub's own language
