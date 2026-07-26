@@ -5122,7 +5122,7 @@ ${BRAND_SPRITE}
       setSeg();
       var net = nets[current];
       if (current === "tailnet" && (!nets.tailnet || !nets.tailnet.available)){
-        if (nets.tailnet && nets.tailnet.installed){
+        if (nets.tailnet && nets.tailnet.signedOut){
           stage('<div class="phmsg">Tailscale is installed but signed out.' +
             '<div class="phdim">Start it here so a phone on your tailnet can reach Loom from anywhere. No shared Wi-Fi, no terminal.</div>' +
             '<button class="btn primary" id="phtsup">Start Tailscale</button></div>');

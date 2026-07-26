@@ -50,6 +50,21 @@ describe("loom daemon end-to-end", () => {
     expect(projects.map((p) => p.id)).toContain(projectId);
   });
 
+  it("lists an agent's real models through the daemon", async () => {
+    const modelProject = await client.addProject(
+      makeProjectDir({
+        name: "models",
+        agents: [{ id: "codex", kind: "codex", role: "executor" }],
+      }),
+    );
+
+    await expect(client.models(modelProject.project.id, "codex")).resolves.toMatchObject({
+      kind: "codex",
+      count: expect.any(Number),
+      models: expect.arrayContaining(["gpt-5.5"]),
+    });
+  });
+
   it("rejects unauthenticated requests", async () => {
     const res = await fetch(`${baseUrl}/api/projects`);
     expect(res.status).toBe(401);

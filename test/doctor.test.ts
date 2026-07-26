@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { projectChecks } from "../src/cli/doctor.js";
+import { doctorReport, projectChecks, type Check } from "../src/cli/doctor.js";
 import { writeProjectConfig, writeProjectState } from "../src/core/registry.js";
 import type { ProjectConfig } from "../src/types.js";
 import { makeProjectDir, tmpDir } from "./helpers.js";
@@ -9,6 +9,21 @@ import { makeProjectDir, tmpDir } from "./helpers.js";
 function statusOf(checks: ReturnType<typeof projectChecks>, name: string) {
   return checks.filter((c) => c.name === name).map((c) => c.status);
 }
+
+describe("loom doctor — JSON report", () => {
+  it("keeps checks intact and summarizes warnings and failures", () => {
+    const checks: Check[] = [
+      { name: "node", status: "ok", detail: "v22.5.0" },
+      { name: "daemon", status: "warn", detail: "not running" },
+      { name: "project", status: "fail", detail: "missing config" },
+    ];
+
+    expect(doctorReport(checks)).toEqual({
+      checks,
+      summary: { ok: false, warnings: 1, failures: 1 },
+    });
+  });
+});
 
 describe("loom doctor — project checks", () => {
   it("healthy project: everything ok", () => {

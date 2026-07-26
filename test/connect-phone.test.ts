@@ -5,7 +5,9 @@
  * client-side errors reported up into the Console.
  */
 
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { LoomDaemon, isLoopbackHost, lanIp } from "../src/daemon/server.js";
@@ -56,6 +58,30 @@ describe("connect a phone — network options", () => {
 
   it("is admin-only", async () => {
     expect((await fetch(`${baseUrl}/api/pair/networks`)).status).toBe(401);
+  });
+
+  it("reports signed-out Tailscale as unavailable with a reason", async () => {
+    const binDir = tmpDir("tailscale-signed-out");
+    const bin = path.join(binDir, "tailscale");
+    fs.writeFileSync(
+      bin,
+      '#!/bin/sh\nprintf \'{"BackendState":"NeedsLogin","TailscaleIPs":[]}\'\nexit 1\n',
+      { mode: 0o755 },
+    );
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ""}`;
+
+    try {
+      const j = (await (await get("/api/pair/networks")).json()) as {
+        tailnet: { installed: boolean; signedOut: boolean; reason?: string };
+      };
+      expect(j.tailnet.installed).toBe(false);
+      expect(j.tailnet.signedOut).toBe(true);
+      expect(j.tailnet.reason).toMatch(/signed out/i);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 });
 

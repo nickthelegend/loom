@@ -151,3 +151,12 @@ export function formatAgentRow(a: ProjectStatus["agents"][number]): string {
   const tier = a.tier === "bridge" ? pc.dim(" [bridge]") : "";
   return ` ${avail} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)} — ${a.role}${tier}${busy}${baton}`;
 }
+
+/** A complete agent roster entry for `loom agents`. */
+export function formatAgentRosterRow(a: ProjectStatus["agents"][number]): string {
+  const paint = agentColor(a.id);
+  const avail = a.available ? pc.green("●") : pc.red("○");
+  const model = a.model || "default";
+  const baton = a.tier === "adapter" ? pc.green("can hold") : pc.dim("cannot hold");
+  return ` ${avail} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}`;
+}

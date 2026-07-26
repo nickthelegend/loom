@@ -57,6 +57,32 @@ import {
 } from "../core/worktree.js";
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
+export const LOOM_ASK_TIMEOUT_MS = 15_000;
+export const LOOM_ASK_TIMEOUT_MESSAGE =
+  "The agent didn't reply within 15 seconds. Make sure its app is open and signed in, then try again.";
+
+export class LoomAskTimeoutError extends Error {
+  constructor() {
+    super(LOOM_ASK_TIMEOUT_MESSAGE);
+    this.name = "LoomAskTimeoutError";
+  }
+}
+
+export function withLoomAskTimeout<T>(reply: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new LoomAskTimeoutError()), LOOM_ASK_TIMEOUT_MS);
+    reply.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      },
+    );
+  });
+}
 
 export class ProjectRuntime {
   readonly info: ProjectInfo;
@@ -792,7 +818,7 @@ export class ProjectRuntime {
     this.log.append({ kind: "message", chat, agentId, payload: { text, author: "user" } });
 
     try {
-      const reply = await bridge.ask(text);
+      const reply = await withLoomAskTimeout(bridge.ask(text));
       return { agentId, reply };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

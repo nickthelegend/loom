@@ -20,6 +20,21 @@ export interface Check {
   detail: string;
 }
 
+export interface DoctorReport {
+  checks: Check[];
+  summary: {
+    ok: boolean;
+    warnings: number;
+    failures: number;
+  };
+}
+
+export function doctorReport(checks: Check[]): DoctorReport {
+  const warnings = checks.filter((check) => check.status === "warn").length;
+  const failures = checks.filter((check) => check.status === "fail").length;
+  return { checks, summary: { ok: failures === 0, warnings, failures } };
+}
+
 function ok(name: string, detail: string): Check {
   return { name, status: "ok", detail };
 }

@@ -58,7 +58,7 @@ import { APP_HTML, APP_MANIFEST } from "./app-page.js";
 import { GEIST_WOFF2 } from "./geist-font.js";
 import { AuthManager, bearerToken } from "./auth.js";
 import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
-import { ProjectRuntime } from "./runtime.js";
+import { LoomAskTimeoutError, ProjectRuntime } from "./runtime.js";
 import { buildBoard } from "./board.js";
 import {
   ghAuthStatus,
@@ -344,6 +344,12 @@ export class LoomDaemon {
         res.status(401).json({ error: "unauthorized" });
         return;
       }
+      // Admin is the admin token, and only the admin token. A same-machine
+      // caller becomes admin by *fetching* that token from /api/bootstrap
+      // (above) — which is what the local console does — never by virtue of
+      // the socket it arrived on. Trusting loopback here would silently
+      // promote every paired client that happens to connect over it, and a
+      // revoked phone would keep working for as long as it stayed local.
       (req as Request & { isAdmin?: boolean }).isAdmin = this.auth.isAdmin(token);
       next();
     });
@@ -539,7 +545,8 @@ export class LoomDaemon {
                 ip: null,
                 available: false,
                 reachable: false,
-                installed: tstate.installed,
+                installed: false,
+                signedOut: tstate.installed,
                 reason: tstate.installed
                   ? "Tailscale is installed but signed out."
                   : "Tailscale isn't installed on this machine.",
@@ -818,9 +825,9 @@ export class LoomDaemon {
      * signed into and waits for its panel to settle. The bridge never takes the
      * lock, so an adapter mid-turn is untouched.
      *
-     * It blocks for as long as the app takes to answer — minutes, for a real
-     * task. That's why it's its own route: nothing else here is allowed to be
-     * this slow, and the client needs to know to wait.
+     * It waits up to 15 seconds for the app to answer. A GUI agent can disappear
+     * without closing its socket, so the deadline keeps the caller from waiting
+     * forever and gives it a useful recovery message instead.
      */
     app.post(
       "/api/projects/:id/bridge/:agentId/ask",
@@ -834,7 +841,9 @@ export class LoomDaemon {
         } catch (err) {
           // 409, not 500: "log into Antigravity" is a state you can fix, not a
           // bug in the daemon, and the message is the whole value of the reply.
-          res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+          res.status(err instanceof LoomAskTimeoutError ? 504 : 409).json({
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }),
     );

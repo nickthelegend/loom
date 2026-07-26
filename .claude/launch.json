@@ -27,6 +27,17 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "app", "run", "start"],
       "port": 8081
+    },
+    {
+      "name": "loompad-landing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "/Volumes/Extreme SSD/Projects/loompad-landing",
+        "run",
+        "dev"
+      ],
+      "port": 3000
     }
   ]
 }

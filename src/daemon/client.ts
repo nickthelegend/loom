@@ -90,6 +90,13 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}`);
   }
 
+  models(id: string, agentId: string): Promise<{ kind: string; count: number; models: string[] }> {
+    return this.request(
+      "GET",
+      `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/models`,
+    );
+  }
+
   events(id: string, since?: number, limit?: number): Promise<{ events: LoomEvent[] }> {
     const params = new URLSearchParams();
     if (since !== undefined) params.set("since", String(since));

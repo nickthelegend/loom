@@ -26,7 +26,7 @@ import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
 import { ensureLoomHome } from "../core/registry.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
-import { fmtUsd, formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
+import { fmtUsd, formatAgentRosterRow, formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -250,11 +250,30 @@ program
 
 program
   .command("agents")
-  .description("agents in the current project")
+  .description("list agent ids, kinds, roles, models, and baton eligibility")
   .action(async () => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
-    for (const a of project.agents) console.log(formatAgentRow(a));
+    if (!project.agents.length) {
+      console.log(pc.dim("no agents configured — edit .loom/config.json or run loom init"));
+      return;
+    }
+    for (const a of project.agents) console.log(formatAgentRosterRow(a));
+  });
+
+program
+  .command("models <agentId>")
+  .description("list the real models reported by an agent")
+  .action(async (agentId: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { kind, models } = await client.models(project.id, agentId);
+    if (!models.length) {
+      console.log(pc.dim(`${agentId} (${kind}) reports no selectable models`));
+      return;
+    }
+    console.log(pc.bold(`${agentId} (${kind}) · ${models.length} model${models.length === 1 ? "" : "s"}`));
+    for (const model of models) console.log(model);
   });
 
 // ---------------------------------------------------------------------------
@@ -605,32 +624,38 @@ program
 program
   .command("doctor")
   .description("diagnose the environment, daemon, and current project")
-  .action(async () => {
-    const { envChecks, projectChecks } = await import("./doctor.js");
+  .option("--json", "print machine-readable diagnostic results")
+  .action(async (opts: { json: boolean }) => {
+    const { doctorReport, envChecks, projectChecks } = await import("./doctor.js");
     const checks = await envChecks();
     const dir = currentProjectDir();
     if (dir) checks.push(...projectChecks(dir));
     else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
 
-    let failures = 0;
-    let warnings = 0;
+    const report = doctorReport(checks);
+    if (opts.json) {
+      console.log(JSON.stringify(report));
+      if (report.summary.failures) process.exitCode = 1;
+      return;
+    }
+
     for (const c of checks) {
       const icon =
         c.status === "ok" ? pc.green("✓") : c.status === "warn" ? pc.yellow("⚠") : pc.red("✗");
-      if (c.status === "fail") failures++;
-      if (c.status === "warn") warnings++;
       console.log(` ${icon} ${pc.bold(c.name.padEnd(11))} ${c.status === "ok" ? pc.dim(c.detail) : c.detail}`);
     }
-    if (failures) {
-      console.log(pc.red(`\n${failures} problem${failures > 1 ? "s" : ""} found`));
+    if (report.summary.failures) {
+      console.log(pc.red(`\n${report.summary.failures} problem${report.summary.failures > 1 ? "s" : ""} found`));
       process.exit(1);
     }
     // "all clear" over a screen of warnings is a lie, and it's the lie that
     // teaches people to stop reading this command. Nothing is broken; several
     // things aren't set up. Those are different sentences.
-    if (warnings) {
+    if (report.summary.warnings) {
       console.log(
-        pc.yellow(`\nnothing broken · ${warnings} thing${warnings > 1 ? "s" : ""} not set up (see above)`),
+        pc.yellow(
+          `\nnothing broken · ${report.summary.warnings} thing${report.summary.warnings > 1 ? "s" : ""} not set up (see above)`,
+        ),
       );
       return;
     }
