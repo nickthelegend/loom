@@ -9,12 +9,16 @@ OpenCode, Antigravity, Codex, … — keeps its own brain in its own files. Loom
 **one brain**: connect your ADEs, and their memory, decisions, and context become a
 single shared thread that flows from one agent to the next.
 
-Today that means **Claude Code, Codex, OpenCode and Grok Code** as full agents, each
-verified against a real version, plus **Antigravity and Kiro** driven through their
-own windows —
+Today that means **Claude Code, Codex, OpenCode, Grok Code and Antigravity** as full
+agents, each verified against a real version, plus **Kiro** driven through its own
+window —
 see [Supported agents](#supported-agents) for exactly how far each one goes, and
 [How memory actually reaches a model](#how-memory-actually-reaches-a-model) for the
 part most tools gloss over.
+
+And because a fleet you can't see is a fleet you can't trust, every turn, handoff and
+route step is exported as **OpenTelemetry** — traces, metrics and logs — and read back
+into an in-app **[Observatory](#observability)**.
 
 Loom is **not** another IDE. It's the thin layer *between* your agents — the continuity
 and memory they don't share on their own.
@@ -66,6 +70,43 @@ config (`.loom/config.json` → `codex → model: "gpt-5.6"`) at high reasoning 
 In short: **GPT‑5.6, via Codex, is one of the interchangeable minds Loom keeps in sync** —
 start a thread in Claude Code, hand it to Codex mid‑task, and it picks up with the whole
 shared context intact.
+
+## Observability
+
+Loom exports its agent activity as **all three OpenTelemetry signals**, and then reads
+them back into an in-app **Observatory** so you never have to leave to answer "what is
+the fleet doing, and what did it cost".
+
+**Backend-agnostic.** Loom speaks OTLP/HTTP and nothing else — no vendor SDK, no
+vendor-specific code path. Point `OTEL_EXPORTER_OTLP_ENDPOINT` at a Collector, Grafana,
+Jaeger, SigNoz, Honeycomb, anything with a `/v1/traces` endpoint. An ingestion key
+rides in through the standard `OTEL_EXPORTER_OTLP_HEADERS`, so a new destination is a
+config change and never a code change.
+
+| Signal | What Loom puts in it |
+|---|---|
+| **Traces** | every turn as `gen_ai.agent.turn` (model, tokens, cost, duration), tool calls, baton handoffs, route steps, memory folds — one trace per turn |
+| **Metrics** | tokens, turn duration, turns, cost, active agents, handoffs — GenAI semantic conventions |
+| **Logs** | every message, tool call, edit, decision and error, correlated to the span it happened inside |
+
+The Observatory tab renders it back: a live fleet canvas, per-agent **burn rate** and
+budgets, **Span Replay** with a trace waterfall, a **Decisions** explorer, a **Logs**
+view, **Time-Travel Replay** that refolds the whole run from the event log, and
+**Ask** — a question about your fleet, answered from its own telemetry.
+
+**Self-heal** closes the loop: point your monitoring's webhook at
+`POST /api/webhooks/alerts` (the Alertmanager shape SigNoz, Prometheus and Grafana all
+send) and a firing alert takes the named agent out of rotation until it resolves. That
+is the part a dashboard can't show you — it knows the alert fired, only Loom knows the
+fleet reacted.
+
+Two rules run through all of it: **nothing is estimated**, and **absent beats invented**.
+Tokens and cost are what each agent's own CLI reported; an adapter that reports tokens
+but no dollar figure (codex) produces no cost datapoint rather than a zero, because
+zeros are indistinguishable from real cheap turns once summed.
+
+Off with `DO_NOT_TRACK=1`. Full details, every variable, and how to verify it's flowing:
+**[docs/observability.md](docs/observability.md)**.
 
 ## Why
 
@@ -357,9 +398,9 @@ detects at least two roles.
 | Codex | adapter (full-duplex) | `codex exec --json` (JSONL), `exec resume <thread>`; found on PATH **or inside Codex.app** | ✅ verified against codex-cli 0.142.4 |
 | OpenCode | adapter (full-duplex) | `opencode serve` HTTP + SSE (`/prompt`, `/interrupt`, `/event`) | ✅ verified against 1.17.20 |
 | Grok Code | adapter (full-duplex) | `grok -p --output-format json`, `-r <session>` | 🔶 verified against 0.2.54 — **answers only, no tool or edit events** (see below) |
+| Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6 |
 | Echo | adapter (demo/tests) | in-process | ✅ |
-| Antigravity | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
-| Kiro | **bridge** (driveable) | same, via the same driver | 🔶 mechanism verified; its selectors are not |
+| Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
 Three of those need their asterisks spelled out, because the table row is
 shorter than the truth:
@@ -378,15 +419,24 @@ the tree would put guesses in the event log dressed as facts. Its permission
 mode also defaults to `bypassPermissions`, because headless with no TTY to ask,
 every other mode ends the turn `Cancelled` having written nothing.
 
-**Antigravity and Kiro are driven, not routed.** Both are Electron apps with no
+**Antigravity used to be a bridge, and isn't any more.** Loom drove the IDE's
+chat panel over the DevTools protocol: it needed the app open with a debugging
+port, it could only watch, and it could never hold the baton. `agy` does the
+whole turn headless, so Antigravity is a full agent and the GUI stopped being a
+dependency. It reports no dollar cost — the CLI hands us none — so its turns
+show a model and a duration and honestly nothing else. The CDP bridge is still
+in the tree and still builds, so projects that name it still open; it just isn't
+offered any more.
+
+**Kiro is driven, not routed.** It's an Electron app with no
 API; Loom connects to the debugging port, finds the chat box, types through the
 input pipeline and reads back what the panel gained — the approach
 [antigravity_phone_chat](https://github.com/krishnakanthb13/antigravity_phone_chat)
 takes, and for the same reason: never touch the provider APIs, drive the app
-that's already signed in. Launch them with
+that's already signed in. Launch it with
 `--remote-debugging-port=9222` first.
 
-The driver refuses more than it accepts, on purpose. Both apps are VS Code
+The driver refuses more than it accepts, on purpose. Kiro is VS Code
 family and Monaco — the editor holding your source file — is a
 `contenteditable`. Anything under `.monaco-editor` is never a candidate, a
 candidate must be labelled like a chat box, and zero-or-several matches is a
@@ -394,14 +444,13 @@ refusal that names the fix (`options.selectors.composer`). Typing a prompt into
 your code and pressing Enter is not a mistake an error message repairs.
 
 What's verified is the mechanism, against a real Chromium. What is **not**
-verified is either app's actual chat DOM: Antigravity shows a sign-in screen and
-Kiro shows no chat panel until you open one, so there was no composer to read
-the selectors from. Reachable and driveable are separate questions, and Loom
-answers both — a signed-out Antigravity replies to CDP cheerfully and reports
+verified is Kiro's actual chat DOM: it shows no chat panel until you open one,
+so there was no composer to read the selectors from. Reachable and driveable are
+separate questions, and Loom answers both — an app with no chat panel open
+replies to CDP cheerfully and reports
 `driveable: false — no chat box on screen`.
 
-**Adapters** implement the full contract (send / stream / injectMemory / interrupt /
-diff) and may hold the baton. **Bridges** only observe and receive shared-memory
+**Adapters** run a turn to completion headless and may hold the baton. **Bridges** only observe and receive shared-memory
 projections — they never hold the write lock. That's a design decision, not a gap: GUI
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
@@ -640,6 +689,7 @@ npm run dev       # run the CLI from source (tsx)
 | `LOOM_NO_NOTIFY` | `1` silences desktop notifications. |
 | `LOOM_NO_PUSH` | `1` silences phone push. |
 | `LOOM_ROUTE_STEP_TIMEOUT_MS` | Per-hop route timeout. Default 45 min. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Where telemetry goes. Default `http://localhost:4318`. `DO_NOT_TRACK=1` turns it all off. The rest of the observability variables — the store to read back from, self-heal, trace deep links — are in [docs/observability.md](docs/observability.md). |
 
 Going the other way, Loom **sets `LOOM_TERMINAL=1`** inside every terminal it opens, so
 your shell profile can tell it's running in Loom's pane. (`LOOM_EXPO_PUSH_URL` and

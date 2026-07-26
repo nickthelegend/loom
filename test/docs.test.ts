@@ -31,7 +31,14 @@ function importedPackages(md: string): string[] {
   return out;
 }
 
-const DOCS = ["CONTRIBUTING.md", "README.md", "docs/adapters.md", "docs/loompad.md", "src/adapters/README.md"];
+const DOCS = [
+  "CONTRIBUTING.md",
+  "README.md",
+  "docs/adapters.md",
+  "docs/loompad.md",
+  "docs/observability.md",
+  "src/adapters/README.md",
+];
 
 describe("docs · import paths resolve", () => {
   it.each(DOCS)("%s only tells readers to import packages that exist", (doc) => {
