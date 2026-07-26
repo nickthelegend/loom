@@ -28,6 +28,12 @@ export interface Creds {
   token: string;
 }
 
+export interface DaemonReachability {
+  reachable: boolean;
+  latencyMs?: number;
+  name?: string;
+}
+
 export interface AgentStatus {
   id: string;
   kind: string;
@@ -166,6 +172,28 @@ export async function api<T>(creds: Creds, path: string, init?: RequestInit): Pr
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+
+export async function pingDaemon(c: Creds): Promise<DaemonReachability> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  const startedAt = Date.now();
+
+  try {
+    const health = await api<{ ok: boolean; name?: string }>(c, "/api/health", {
+      signal: controller.signal,
+    });
+    return {
+      reachable: health.ok,
+      latencyMs: Date.now() - startedAt,
+      ...(health.name ? { name: health.name } : {}),
+    };
+  } catch {
+    return { reachable: false };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export const getProject = (c: Creds, id: string) =>
   api<{ project: Project }>(c, `/api/projects/${id}`);
 export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>

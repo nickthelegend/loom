@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Clipboard from "expo-clipboard";
 import {
   claim,
   clearCreds,
@@ -27,11 +28,13 @@ import {
   getTree,
   handoff,
   interrupt,
+  pingDaemon,
   saveCreds,
   sendMessage,
   wsUrl,
   type Chat,
   type Creds,
+  type DaemonReachability,
   type LoomEvent,
   type Project,
   type TaskItem,
@@ -151,6 +154,20 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
     void pairFrom(e.data);
   };
 
+  const pairFromClipboard = async () => {
+    try {
+      const pairingLink = await Clipboard.getStringAsync();
+      if (!pairingLink.trim()) {
+        setErr("Copy the pairing link on your computer, then try again.");
+        return;
+      }
+      setScanning(false);
+      await pairFrom(pairingLink);
+    } catch {
+      setErr("Couldn't read the clipboard. Paste the pairing link instead.");
+    }
+  };
+
   return (
     <View style={{ flex: 1, justifyContent: "center", padding: spacing.xl, gap: 14 }}>
       <Text
@@ -242,7 +259,8 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
               borderRadius: 20,
             }}
           />
-          <View style={{ position: "absolute", bottom: 48, left: 24, right: 24 }}>
+          <View style={{ position: "absolute", bottom: 48, left: 24, right: 24, gap: 10 }}>
+            <Btn label="Copy pairing link" onPress={() => void pairFromClipboard()} />
             <Btn label="Cancel" onPress={() => setScanning(false)} />
           </View>
         </View>
@@ -375,13 +393,18 @@ export function BoardScreen(props: {
   const [projects, setProjects] = useState<Project[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [daemon, setDaemon] = useState<DaemonReachability | null>(null);
 
   const refresh = useCallback(async () => {
+    const probe = pingDaemon(props.creds);
     try {
       setErr(null);
       setProjects((await getProjects(props.creds)).projects);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      const next = await probe;
+      setDaemon((current) => ({ ...next, name: next.name ?? current?.name }));
     }
   }, [props.creds]);
 
@@ -402,6 +425,9 @@ export function BoardScreen(props: {
     projects.find(
       (p) => p.needsInput || (p.route && (p.route.status === "running" || p.route.status === "waiting_human")),
     ) ?? null;
+  const daemonName = daemon?.name ?? "Loom daemon";
+  const daemonReachability = daemon?.reachable ? `${daemon.latencyMs ?? 0} ms` : daemon ? "unreachable" : "checking…";
+  const daemonDot = daemon?.reachable ? T.ok : daemon ? T.err : T.faint;
 
   return (
     <View style={{ flex: 1 }}>
@@ -480,11 +506,11 @@ export function BoardScreen(props: {
               <View style={{ width: 18, height: 12, borderWidth: 1.5, borderColor: T.thread, borderRadius: 2 }} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: T.text, fontWeight: "600", fontSize: 15 }}>Loom daemon</Text>
+              <Text style={{ color: T.text, fontWeight: "600", fontSize: 15 }}>{daemonName}</Text>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
-                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.ok }} />
+                <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: daemonDot }} />
                 <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>
-                  {host} · {projects.length} project{projects.length === 1 ? "" : "s"}
+                  {daemonReachability} · {host} · {projects.length} project{projects.length === 1 ? "" : "s"}
                   {working ? ` · ${working} active` : ""}
                 </Text>
               </View>
