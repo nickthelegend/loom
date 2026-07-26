@@ -100,6 +100,12 @@ interface Mounted {
   /** Uncaught exceptions thrown by the page's own JavaScript. */
   errors: string[];
   close: () => void;
+  /**
+   * Simulate the daemon restarting with a new token under a live window: every
+   * API call 401s until the page bootstraps a fresh one. Exactly what happens
+   * when `loom up --restart` runs with the app already open.
+   */
+  expireToken: () => void;
 }
 
 /**
@@ -121,6 +127,7 @@ function mount({
   // outlive the assertion unless someone takes them away.
   const sockets: WebSocket[] = [];
   let closed = false;
+  let stale = false;
   const never = new Promise<never>(() => {}); // settles never, so nothing runs post-teardown
 
   const dom = new JSDOM(APP_HTML, {
@@ -170,6 +177,19 @@ function mount({
             }),
           ) as unknown as Promise<Response>;
         }
+        const p = new URL(String(input), baseUrl).pathname;
+        // A rotated daemon token: everything 401s until the page re-bootstraps,
+        // at which point it is holding the new one and calls succeed again.
+        if (stale && p.startsWith("/api/")) {
+          if (p === "/api/bootstrap") stale = false;
+          else
+            return Promise.resolve(
+              new Response(JSON.stringify({ error: "unauthorized" }), {
+                status: 401,
+                headers: { "content-type": "application/json" },
+              }),
+            ) as unknown as Promise<Response>;
+        }
         return fetch(new URL(String(input), baseUrl), init).then((r) => (closed ? never : r));
       }) as typeof window.fetch;
       // jsdom has no WebSocket either. A real one, remembered so close() can
@@ -187,6 +207,9 @@ function mount({
   const m: Mounted = {
     window: dom.window,
     errors,
+    expireToken: () => {
+      stale = true;
+    },
     close: () => {
       closed = true;
       for (const s of sockets) {
@@ -257,6 +280,51 @@ describe("web app · boot", () => {
     // the sidebar is filled from GET /api/projects — real data, real token
     await waitUntil(() => !!$(m, "#slist .srow"));
     expect(text(m, "#slist")).toContain("weave");
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  /**
+   * A same-machine window must survive the daemon restarting under it.
+   *
+   * The daemon mints a new admin token when its home is fresh, and the open
+   * window is still holding the old one. Every request then 401s — including
+   * the LoomPad health pill, which polls every 5s and so is usually the first
+   * to notice. That 401 went through the shared handler, which logged the
+   * session out and rendered the pairing screen: a background status pill
+   * ended the session, and it asked the person sitting at the machine to
+   * re-authorise the machine they were sitting at.
+   *
+   * Loopback can always re-mint from /api/bootstrap, so a 401 re-bootstraps
+   * once and replays the request instead.
+   */
+  it("survives the daemon restarting under it, instead of demanding a re-pair", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, "#slist .srow"));
+
+    // The daemon comes back with a different token while this window is open.
+    m.expireToken();
+    // Anything at all now 401s. Clicking a tab is the cheapest way to make the
+    // app talk to it, and is what a person would be doing at the time.
+    click($(m, '.tab[data-tab="board"]'));
+
+    // It re-bootstraps and carries on. Before this, the first 401 — usually the
+    // 5s LoomPad health poll rather than anything the human did — logged the
+    // session out and dropped a pairing screen over the workspace.
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    expect($(m, "#ptok, .pairbox, .pair")).toBeFalsy();
+    expect(text(m, "#slist")).toContain("weave");
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("still logs out a remote client whose token really was revoked", async () => {
+    // The other half of the rule, so the retry can't paper over a real
+    // revocation: when bootstrap refuses — i.e. this isn't the local machine —
+    // a 401 means the token is genuinely gone and pairing IS the right answer.
+    const m = mount({ bootstrap: false });
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    m.expireToken();
+    click($(m, '.tab[data-tab="board"]'));
+    await waitUntil(() => !!$(m, "#ptok, .pairbox, .pair"));
     expect(m.errors.join("\n")).toBe("");
   });
 

@@ -1497,7 +1497,12 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
   .ttlm{font-size:11px;background:var(--secondary);padding:8px 10px;border-radius:8px;line-height:1.4}
   .ttlma{color:var(--primary);font-weight:600;margin-right:4px}
   .ttevcard{border:1px solid var(--border);border-radius:var(--radius);background:var(--card);padding:16px;margin-bottom:16px}
-  .ttevtype{font-size:9.5px;letter-spacing:.1em;font-weight:700;margin-bottom:6px}
+  /* The accent is tuned to sit on the dark canvas as a border or a dot. As TEXT
+     on a light card it is nearly invisible — #67e8f9 on white is 1.45:1 — so the
+     label blends it toward the current foreground: still hued, still colour-coded
+     by event type, readable in both themes. The border keeps the pure accent. */
+  .ttevtype{font-size:9.5px;letter-spacing:.1em;font-weight:700;margin-bottom:6px;
+    color:color-mix(in srgb, var(--ttev, var(--thread)) 45%, var(--foreground))}
   .ttevdesc{font-size:15px;font-weight:600;margin-bottom:8px}
   .ttevmeta{font-size:11.5px;color:var(--muted-foreground);font-family:var(--font-mono)}
   .ttprogbar{height:6px;background:var(--secondary);border-radius:99px;overflow:hidden;margin-bottom:4px}
@@ -2255,12 +2260,42 @@ ${BRAND_SPRITE}
   function clearTimers(){ state.timers.forEach(clearInterval); state.timers = [];
     if (state.ws) { try { state.ws.close(); } catch (e) {} state.ws = null; } }
 
-  function api(path, opts){
+  // A 401 means one of two opposite things. A remote client's token really was
+  // revoked, and that is a logout. A same-machine window's token merely went
+  // stale — the daemon restarted and minted a new one — and that window can get
+  // a fresh token from /api/bootstrap without the human doing anything. Telling
+  // that person to "pair again" is telling them to re-authorise the machine
+  // they are sitting at, and it threw away the session over a *background poll*:
+  // the LoomPad health pill polls every 5s, and the first tick after a restart
+  // logged you out and dropped you on the pairing screen mid-demo.
+  //
+  // So a 401 re-bootstraps once and replays the request. Only a bootstrap that
+  // refuses us — i.e. we are not on loopback — is a real logout. One in-flight
+  // bootstrap is shared, so a burst of concurrent 401s re-auths once, not once
+  // per request.
+  var reauthing = null;
+  function reauth(){
+    if (!reauthing) {
+      reauthing = bootstrapAdmin().then(
+        function(ok){ reauthing = null; return ok; },
+        function(){ reauthing = null; return false; },
+      );
+    }
+    return reauthing;
+  }
+
+  function api(path, opts, retried){
     opts = opts || {};
     opts.headers = opts.headers || {};
     opts.headers["Authorization"] = "Bearer " + state.token;
     if (opts.body) opts.headers["Content-Type"] = "application/json";
     return fetch(path, opts).then(function(r){
+      if (r.status === 401 && !retried) {
+        return reauth().then(function(ok){
+          if (!ok) { logout(); throw new Error("session revoked — pair again"); }
+          return api(path, { method: opts.method, body: opts.body }, true);
+        });
+      }
       if (r.status === 401) { logout(); throw new Error("session revoked — pair again"); }
       return r.json().then(function(j){
         if (!r.ok) throw new Error(j.message || j.error || ("HTTP " + r.status));
@@ -3701,7 +3736,7 @@ ${BRAND_SPRITE}
       if (evEl){
         var col = s.triggerEvent.type === "error" ? "var(--err)" : s.triggerEvent.type === "decision" ? "var(--primary)" : "var(--thread)";
         var pct = t.snaps.length > 1 ? Math.round((t.i / (t.snaps.length - 1)) * 100) : 100;
-        evEl.innerHTML = '<div class="ttevcard" style="border-color:' + col + '"><div class="ttevtype" style="color:' + col + '">' + esc(String(s.triggerEvent.type).toUpperCase().replace(/_/g, " ")) + '</div><div class="ttevdesc">' + esc(s.triggerEvent.description) + '</div><div class="ttevmeta">Agent: ' + esc(s.triggerEvent.agentId) + " \\u00b7 " + new Date(s.timestampMs).toLocaleTimeString() + "</div></div>" +
+        evEl.innerHTML = '<div class="ttevcard" style="border-color:' + col + '"><div class="ttevtype" style="--ttev:' + col + '">' + esc(String(s.triggerEvent.type).toUpperCase().replace(/_/g, " ")) + '</div><div class="ttevdesc">' + esc(s.triggerEvent.description) + '</div><div class="ttevmeta">Agent: ' + esc(s.triggerEvent.agentId) + " \\u00b7 " + new Date(s.timestampMs).toLocaleTimeString() + "</div></div>" +
           ttTurnCard(t, s) +
           '<div class="ttprog"><div class="ttsl">RUN PROGRESS</div><div class="ttprogbar"><div class="ttprogfill" style="transform:scaleX(' + (pct / 100) + ')"></div></div><div class="ttdc">' + pct + "% complete</div></div>";
         var wf = evEl.querySelector(".rpwf");
