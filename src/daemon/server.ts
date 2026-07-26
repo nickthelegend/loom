@@ -1143,7 +1143,6 @@ export class LoomDaemon {
             // debug port, so presence is a live question, not a lookup.
             installed: a.tier === "adapter" ? Boolean(availability[a.kind]) : null,
             inProject: inProject.has(a.kind),
-            models: a.models ?? [],
           })),
         });
       }),

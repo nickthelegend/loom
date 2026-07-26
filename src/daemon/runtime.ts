@@ -21,7 +21,7 @@ import type {
 } from "../types.js";
 import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
 import { isAdapter, MAIN_CHAT } from "../types.js";
-import { createAgent, knownAgentKinds } from "../adapters/index.js";
+import { createAgent, isWithdrawnKind, knownAgentKinds } from "../adapters/index.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { Brain, CONFIDENCE_FLOOR } from "../core/brain.js";
 import { compileBrief, retrieve } from "../core/brain-index.js";
@@ -314,6 +314,15 @@ export class ProjectRuntime {
   addAgent(kind: string, opts: { id?: string; role?: string } = {}): AgentConfig {
     if (!knownAgentKinds().includes(kind)) {
       throw new Error(`unknown agent kind "${kind}" (known: ${knownAgentKinds().join(", ")})`);
+    }
+    // Known is not the same as offered. This is the endpoint the "add agent"
+    // rail drives, and the rail only ever lists ADES. Accepting a kind that no
+    // view offers meant a withdrawn agent could be put in a roster by guessing
+    // its name, and then sat there unadvertised and unexplained. Refuse it
+    // here, and name what replaced it.
+    if (isWithdrawnKind(kind)) {
+      const replacement = kind === "antigravity" ? ' — use "antigravity-cli"' : "";
+      throw new Error(`"${kind}" is no longer offered${replacement}`);
     }
     const id = (opts.id ?? kind).trim().slice(0, 40);
     if (!id) throw new Error("an agent needs an id");

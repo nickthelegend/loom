@@ -14,7 +14,7 @@ import { ADES, adapterKinds, buildDefaultRoutes, defaultAgentConfigs } from "../
 import { codexBin } from "../src/adapters/codex.js";
 import { grokBin } from "../src/adapters/grok.js";
 import { parseGrokJson } from "../src/adapters/grok.js";
-import { createAgent, knownAgentKinds } from "../src/adapters/index.js";
+import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../src/adapters/index.js";
 import { isAdapter } from "../src/types.js";
 import { tmpDir } from "./helpers.js";
 
@@ -38,6 +38,40 @@ describe("ades · the list is the truth", () => {
       expect(agent.kind).toBe(ade.kind);
       // tier is what decides who may hold the baton; a bridge never may
       expect(isAdapter(agent)).toBe(ade.tier === "adapter");
+    }
+  });
+
+  /**
+   * Kiro used to carry `probe: async () => false` because the type demanded a
+   * probe from every entry. Nothing could ever call it — `detectAdes` filters to
+   * adapters first, and a bridge's real availability is whether GuiChatDriver
+   * can reach its debug port, which no probe here can answer. The spec type is
+   * now a union, so a bridge has nowhere to put one; this asserts the shape at
+   * runtime too, since a union is only as good as the next person's `as`.
+   */
+  it("gives bridges no probe — there is no question it could answer", () => {
+    for (const ade of ADES) {
+      if (ade.tier === "bridge") {
+        expect("probe" in ade, `${ade.label} carries a probe nothing can call`).toBe(false);
+      }
+    }
+  });
+
+  /**
+   * Registered and offered are different things, and the difference is the
+   * whole fix: the CDP bridge still *builds*, so a project whose config already
+   * names it still opens, but nothing advertises it and `addAgent` refuses to
+   * create one (see the daemon suite).
+   */
+  it("still builds the withdrawn Antigravity bridge, and offers it to nobody", () => {
+    const offered = ADES.map((a) => a.kind);
+    expect(knownAgentKinds()).toContain("antigravity");
+    expect(isWithdrawnKind("antigravity")).toBe(true);
+    expect(offered).not.toContain("antigravity");
+    expect(offered).toContain("antigravity-cli");
+    // and every kind Loom does offer is one it will build
+    for (const kind of offered) {
+      expect(isWithdrawnKind(kind), `${kind} is advertised and withdrawn at once`).toBe(false);
     }
   });
 
@@ -168,5 +202,28 @@ describe("ades · nobody is the planner by default", () => {
   it("doesn't conjure a ship route out of names nobody chose", () => {
     const agents = defaultAgentConfigs({ "claude-code": true, codex: true, opencode: true });
     expect(buildDefaultRoutes(agents)).toBeUndefined();
+  });
+});
+
+describe("tier for kinds the ADES catalog omits", () => {
+  // The roster has to answer "adapter or bridge?" for an agent that is switched
+  // off, which is exactly when there is no instance to ask. It used to default
+  // to "adapter", which is wrong for precisely the kinds ADES leaves out — the
+  // withdrawn `antigravity` bridge and `echo` — so a disabled bridge advertised
+  // itself as an adapter and the composer, which filters chips on that field,
+  // offered it a model picker for a GUI app that takes no model flag.
+  it("reports a bridge as a bridge even when it is not in ADES", () => {
+    expect(tierForKind("antigravity")).toBe("bridge"); // withdrawn, still registered
+    expect(tierForKind("kiro")).toBe("bridge");
+  });
+
+  it("reports adapters as adapters", () => {
+    for (const kind of ["echo", "claude-code", "codex", "opencode", "grok-code", "antigravity-cli"]) {
+      expect(tierForKind(kind)).toBe("adapter");
+    }
+  });
+
+  it("returns null for a kind nothing registers, rather than guessing", () => {
+    expect(tierForKind("not-a-real-kind")).toBeNull();
   });
 });
