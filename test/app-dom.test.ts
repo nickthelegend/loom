@@ -700,7 +700,10 @@ describe("web app · settings", () => {
     await waitUntil(() => m.window.document.querySelectorAll("#setpane .srow2").length > 5);
 
     const body = text(m, "#setpane");
-    for (const label of ["Claude Code", "Codex", "OpenCode", "Grok Code", "Antigravity IDE", "Kiro"]) {
+    // Antigravity is listed among the agents that take a turn, not among the
+    // ones you drive in their own window: `agy` runs it headless, so the IDE
+    // is no longer part of the answer. Kiro is still the GUI case.
+    for (const label of ["Claude Code", "Codex", "OpenCode", "Grok Code", "Antigravity", "Kiro"]) {
       expect(body, `${label} missing from setup`).toContain(label);
     }
     // and the phone, which is the part people never find on their own

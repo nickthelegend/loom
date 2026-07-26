@@ -26,20 +26,16 @@ import { GuiChatDriver, type GuiChatOptions } from "./gui-chat.js";
 import { BridgeBase } from "../base.js";
 import { cdpTargets } from "./cdp.js";
 
+/**
+ * This bridge can put text into the IDE's chat box, which a plain bridge can't —
+ * but that never changed what it *is*. It inherits BridgeBase's capabilities
+ * unchanged: tier "bridge", so the baton stays out of reach, and mcp false,
+ * because the IDE owns whatever MCP servers it has and there is no command line
+ * here for Loom to put a config on. (It used to restate the whole capability
+ * set to flip a `send: true` that nothing read — `ask()` is the method, and
+ * having it is the capability.)
+ */
 export class AntigravityBridge extends BridgeBase {
-  /**
-   * Sending is real here, unlike a plain bridge. The baton stays out of reach:
-   * tier is what decides that, and it's still "bridge".
-   */
-  override readonly capabilities = {
-    tier: "bridge" as const,
-    send: true,
-    stream: true,
-    injectMemory: true,
-    interrupt: false,
-    diff: false,
-  };
-
   protected driver: GuiChatDriver;
   private pollTimer: NodeJS.Timeout | null = null;
 

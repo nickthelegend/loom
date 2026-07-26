@@ -13,6 +13,7 @@ import type {
   ChatInfo,
   CostSummary,
   LoomEvent,
+  McpServerConfig,
   ProjectConfig,
   ProjectInfo,
   ProjectStatus,
@@ -35,7 +36,22 @@ import {
   readNativeMemory,
   type ImportedBlock,
 } from "../core/memory.js";
+import { probeMcpServers, writeMcpSession } from "../core/mcp.js";
 import { notify } from "../core/notify.js";
+import {
+  buildSkillsBlock,
+  discoverSkillRoots,
+  loadSkills,
+  type SkillCatalogEntry,
+  type SkillManifest,
+  type SkillRoot,
+} from "../core/skills.js";
+import {
+  SkillInstallError,
+  installSkillFromDir,
+  installSkillFromGit,
+  type SkillInstallResult,
+} from "../core/skill-install.js";
 import { RouteEngine } from "../core/routes.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
 import {
@@ -458,6 +474,185 @@ export class ProjectRuntime {
     // we just wrote the file, so don't let configStale() see our own write and
     // schedule a pointless reload
     this.configMtime = configMtimeOf(this.info.dir);
+  }
+
+  // ── Skills (SKILL.md context blocks injected into the briefing) ──
+
+  /**
+   * Where skills live — every layout, not just ours.
+   *
+   * See core/skills.ts#discoverSkillRoots for the list and the precedence. This
+   * used to be two hardcoded directories, which meant a machine with sixty
+   * skills in `~/.claude` reported the one that shipped in this repo.
+   */
+  private skillRoots(): SkillRoot[] {
+    return discoverSkillRoots(this.info.dir, path.join(process.cwd(), "skills"));
+  }
+
+  /** The directory this project's own skills are installed into. */
+  private ownSkillsDir(): string {
+    return path.join(this.info.dir, "skills");
+  }
+
+  /** All available skills with this project's enabled state. */
+  getSkills(): SkillManifest[] {
+    return loadSkills(this.skillRoots(), this.config.skills ?? {});
+  }
+
+  /**
+   * The catalog the picker renders: every discoverable skill, without the body.
+   *
+   * The bodies are the entire point of a skill and also the reason this exists
+   * separately from `getSkills()` — a machine with sixty installed skills has
+   * megabytes of markdown, and a list screen needs none of it.
+   *
+   * `installed` means "this file is inside the project directory", which is the
+   * same question `removeSkill` asks: those are the only ones Loom put there
+   * and the only ones it may delete.
+   */
+  skillsCatalog(): SkillCatalogEntry[] {
+    const own = this.ownSkillsDir();
+    return this.getSkills().map((s) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      enabled: s.enabled,
+      origin: s.origin,
+      source: s.source,
+      installed: path.resolve(s.source) === path.resolve(own),
+    }));
+  }
+
+  /**
+   * Install a skill from a local directory or a git remote, into this project.
+   *
+   * Throws SkillInstallError for anything the user can fix (bad URL, unsafe id,
+   * a name that already exists) — the route turns those into a 400 with the
+   * message, because "invalid input" tells you nothing when the real answer is
+   * "that repo has no SKILL.md in it".
+   */
+  async installSkill(input: { gitUrl?: string; dir?: string; force?: boolean }): Promise<SkillInstallResult> {
+    const gitUrl = String(input.gitUrl ?? "").trim();
+    const dir = String(input.dir ?? "").trim();
+    if (gitUrl && dir) throw new SkillInstallError("give either gitUrl or dir, not both");
+    if (gitUrl) return installSkillFromGit(gitUrl, this.info.dir, { force: input.force === true });
+    if (dir) return installSkillFromDir(dir, this.info.dir, { force: input.force === true });
+    throw new SkillInstallError("nothing to install — pass gitUrl or dir");
+  }
+
+  /**
+   * Delete a project-installed skill from disk.
+   *
+   * Refused for anything outside the project. A skill in `~/.claude/skills` is
+   * the user's, shared with every other tool they run, and a project-scoped
+   * "remove" button that reached out and deleted it would be a data-loss bug
+   * dressed as a feature. The refusal says where the skill actually lives so
+   * the answer ("go delete it yourself, here") is in the message.
+   *
+   * The enabled flag goes with it: leaving `skills[id] = true` in config for a
+   * directory that no longer exists means the next turn's briefing silently
+   * loses a block the config still claims is on.
+   */
+  removeSkill(id: string): { removed: true; id: string; path: string } {
+    const skill = this.getSkills().find((s) => s.id === id);
+    if (!skill) throw new SkillInstallError(`no skill "${id}"`);
+    const own = this.ownSkillsDir();
+    if (path.resolve(skill.source) !== path.resolve(own)) {
+      throw new SkillInstallError(
+        `"${id}" lives in ${skill.source}, outside this project — Loom didn't install it and won't delete it`,
+      );
+    }
+    const dir = path.join(own, skill.id);
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (this.config.skills?.[skill.id]) this.setSkillEnabled(skill.id, false);
+    return { removed: true, id: skill.id, path: dir };
+  }
+
+  /** Enable/disable one skill for this project; returns the new enabled map. */
+  setSkillEnabled(id: string, on: boolean): Record<string, boolean> {
+    const skills = { ...(this.config.skills ?? {}) };
+    if (on) skills[id] = true;
+    else delete skills[id];
+    this.config.skills = skills;
+    this.saveConfig();
+    return skills;
+  }
+
+  /** The ACTIVE SKILLS block to prepend to a briefing, or "" when none are on. */
+  activeSkillsBlock(): string {
+    return buildSkillsBlock(this.getSkills());
+  }
+
+  // ── MCP servers ──
+
+  private static DEFAULT_MCPS: McpServerConfig[] = [
+    { name: "GitHub", url: "", description: "issues, PRs, code search", icon: "github" },
+    { name: "Supabase", url: "", description: "query, schema, migrations", icon: "database" },
+    { name: "SigNoz", url: "", description: "traces, metrics, alerts", icon: "chart" },
+    { name: "Linear", url: "", description: "issues, projects, cycles", icon: "linear" },
+    { name: "Slack", url: "", description: "messages, channels, users", icon: "slack" },
+    { name: "Filesystem", url: "", description: "read/write local files", icon: "folder" },
+  ];
+
+  /** Configured MCP servers, merged over the built-in suggestions (deduped by name). */
+  getMcps(): McpServerConfig[] {
+    const saved = this.config.mcps ?? [];
+    const byName = new Map(ProjectRuntime.DEFAULT_MCPS.map((m) => [m.name, { ...m }]));
+    for (const m of saved) byName.set(m.name, { ...(byName.get(m.name) ?? {}), ...m });
+    return [...byName.values()];
+  }
+
+  /**
+   * The same list, with `connected` MEASURED rather than assumed.
+   *
+   * The old reading of that field was "a url is typed into this row", which the
+   * UI rendered as a green "connected" badge — a claim about a live connection
+   * made without ever opening one. Here every configured URL gets a bounded
+   * probe (see core/mcp.ts) and the answer is whatever came back. Rows with no
+   * URL aren't probed and report false, because "not configured" is not
+   * "connected".
+   */
+  async getMcpsProbed(timeoutMs = 2_000): Promise<McpServerConfig[]> {
+    const mcps = this.getMcps();
+    const reachable = await probeMcpServers(mcps, timeoutMs).catch(() => ({}) as Record<string, boolean>);
+    const probedAt = Date.now();
+    return mcps.map((m) => ({
+      ...m,
+      connected: reachable[m.name] ?? false,
+      ...(m.name in reachable ? { probedAt } : {}),
+    }));
+  }
+
+  /** Add or update one MCP (by name); persists only the real (non-default) fields. */
+  upsertMcp(mcp: McpServerConfig): McpServerConfig[] {
+    const saved = (this.config.mcps ?? []).filter((m) => m.name !== mcp.name);
+    saved.push(mcp);
+    this.config.mcps = saved;
+    this.saveConfig();
+    return this.getMcps();
+  }
+
+  /**
+   * Remove a configured MCP server by name.
+   *
+   * `removed` is false when nothing was configured under that name, which the
+   * route answers with a 404 rather than a cheerful 200 — "deleted a thing that
+   * wasn't there" is the kind of success that hides a typo in a server name.
+   *
+   * Note what this does to a name that is also one of the built-in suggestion
+   * rows (GitHub, Slack, …): the *configuration* goes, and the suggestion comes
+   * back with an empty url, because those rows aren't installed servers, they're
+   * placeholders getMcps() merges in. That is the honest outcome — the server is
+   * gone, and what's left is an offer to add one — but a caller diffing the list
+   * for the name will still find it, so it should compare `url`/`command`.
+   */
+  removeMcp(name: string): { removed: boolean; mcps: McpServerConfig[] } {
+    const saved = this.config.mcps ?? [];
+    const kept = saved.filter((m) => m.name !== name);
+    if (kept.length === saved.length) return { removed: false, mcps: this.getMcps() };
+    this.config.mcps = kept;
+    this.saveConfig();
+    return { removed: true, mcps: this.getMcps() };
   }
 
   // -------------------------------------------------------------------------
@@ -911,18 +1106,43 @@ export class ProjectRuntime {
     await this.ensureStarted(target);
 
     const pendingBriefing = this.consumePendingBriefing(target);
-    const input: SendInput = pendingBriefing ? { text, briefing: pendingBriefing } : { text };
+    // Prepend the enabled skills so every turn carries them, alongside any
+    // one-shot handoff briefing. Empty when no skills are on.
+    const briefing = [this.activeSkillsBlock(), pendingBriefing].filter(Boolean).join("\n").trim() || undefined;
+    // The project's configured MCP servers, rendered to a temp config file the
+    // adapter hands to its CLI. Null when nothing is configured — or when this
+    // adapter's CLI has no flag for it, because an "MCP attached" note on a
+    // turn that dropped the config would be the same lie in a new place.
+    const mcp = agent.capabilities.mcp ? writeMcpSession(this.config.mcps) : null;
+    const input: SendInput = {
+      text,
+      ...(briefing ? { briefing } : {}),
+      ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),
+    };
+    if (mcp) {
+      this.log.append({
+        kind: "status",
+        agentId: target,
+        payload: { state: "mcp_attached", servers: mcp.servers.map((s) => s.name) },
+      });
+    }
     // Snapshot the tree so this prompt's changes can be attributed to it.
     this.preTurnTree.set(target, await porcelainStatus(this.info.dir));
     // Fire-and-notify: the turn runs in the background; progress streams
     // into the log and completion lands as run_complete.
-    void agent.send(input).catch((err) => {
-      this.log.append({
-        kind: "error",
-        agentId: target,
-        payload: { message: String(err instanceof Error ? err.message : err) },
-      });
-    });
+    void agent
+      .send(input)
+      .catch((err) => {
+        this.log.append({
+          kind: "error",
+          agentId: target,
+          payload: { message: String(err instanceof Error ? err.message : err) },
+        });
+      })
+      // The config file exists for exactly this turn. Cleaned up whether the
+      // turn succeeded, failed or was interrupted — a temp file per turn that
+      // nothing removes is a slow leak of the project's server URLs.
+      .finally(() => mcp?.cleanup());
     return { agentId: target };
   }
 

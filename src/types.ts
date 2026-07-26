@@ -160,6 +160,49 @@ export interface ProjectConfig {
   routes?: Record<string, RouteStepSpec[]>;
   projection?: ProjectionConfig;
   brain?: BrainConfig;
+  /** Which SKILL.md skills are injected into the briefing, by skill id. */
+  skills?: Record<string, boolean>;
+  /** MCP servers this project can offer agents (mirrors the Anthropic API shape). */
+  mcps?: McpServerConfig[];
+}
+
+/** One MCP server, in the shape the Anthropic API's `mcp_servers` accepts. */
+export interface McpServerConfig {
+  name: string;
+  url: string;
+  description?: string;
+  icon?: string;
+  /**
+   * Did the server answer a bounded probe just now? Measured by
+   * core/mcp.ts#probeMcpServer when the list is served — NOT "has a url typed
+   * into it", which is what this used to mean and was never a connection.
+   * Absent when nothing has probed it (e.g. straight off disk).
+   */
+  connected?: boolean;
+  /** When `connected` was last measured (epoch ms), so a stale badge is spottable. */
+  probedAt?: number;
+  enabledForSession?: boolean;
+  /**
+   * Remote transport. Defaults to http; /sse endpoints are detected. Only
+   * meaningful alongside `url`.
+   */
+  transport?: "http" | "sse";
+  /**
+   * Extra HTTP headers for a remote server — an `Authorization: Bearer …` for a
+   * hosted endpoint that needs one. Only meaningful alongside `url`; see
+   * core/mcp.ts for which CLIs are known to honour them.
+   */
+  headers?: Record<string, string>;
+  /** A local (stdio) server instead of a remote one: the process to run. */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /**
+   * The catalog provider this row was installed from ("github", "linear", …),
+   * when it came from one. A stable key for a bundled logo — NOT a claim about
+   * the server, and absent for anything typed in by hand.
+   */
+  slug?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +254,40 @@ export interface SendInput {
   text: string;
   /** One-shot handoff briefing injected alongside this turn. */
   briefing?: string;
+  /**
+   * The project's MCP servers, rendered for this turn (see core/mcp.ts). The
+   * runtime builds it, the adapters that have a real flag for it pass it to
+   * their CLI, and the ones that don't ignore it — an adapter with no MCP
+   * surface must not pretend otherwise. The file is deleted when the turn ends,
+   * so an adapter may only use it during `send`.
+   */
+  mcp?: McpTurnConfig;
+}
+
+/** What an adapter needs to put this project's MCP servers in front of its CLI. */
+export interface McpTurnConfig {
+  /** Path to a `{"mcpServers": {…}}` document, alive for this turn only. */
+  configPath: string;
+  /** The same servers, for a CLI that takes config values rather than a file. */
+  servers: ResolvedMcpServer[];
+}
+
+/**
+ * One server as an MCP config document wants it: a remote endpoint, or a local
+ * process. `type` is spelled out even for stdio (where the CLIs infer it from
+ * `command`) so a generated file reads unambiguously.
+ */
+export type McpServerEntry =
+  | { type: "http" | "sse"; url: string; headers?: Record<string, string> }
+  | { type: "stdio"; command: string; args?: string[]; env?: Record<string, string> };
+
+/** A configured server that survived selection, keyed for the config document. */
+export interface ResolvedMcpServer {
+  /** The key under `mcpServers` — a sanitised form of the display name. */
+  key: string;
+  /** The name as configured, for events and API responses. */
+  name: string;
+  entry: McpServerEntry;
 }
 
 export interface AdapterEvent {
@@ -220,11 +297,15 @@ export interface AdapterEvent {
 
 export interface AgentCapabilities {
   tier: AgentTier;
-  send: boolean;
-  stream: boolean;
-  injectMemory: boolean;
-  interrupt: boolean;
-  diff: boolean;
+  /**
+   * Does this agent's CLI really accept MCP server config for a turn?
+   *
+   * Off unless verified against the actual command line, because the runtime
+   * only bothers resolving and writing a config for agents that can be handed
+   * one. Claiming it for an agent that ignores the flag would show MCP servers
+   * as "in use" by something that never saw them.
+   */
+  mcp: boolean;
 }
 
 export interface BaseAgent {

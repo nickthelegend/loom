@@ -48,15 +48,19 @@ export abstract class AgentBase {
   }
 }
 
+/**
+ * What an adapter can do before it says otherwise. Exported so an adapter that
+ * differs in one respect can spread this and change that one thing, instead of
+ * restating the whole set and drifting from it.
+ */
+export const ADAPTER_CAPABILITIES: AgentCapabilities = {
+  tier: "adapter",
+  // Off unless an adapter's CLI really takes MCP config — see AgentCapabilities.
+  mcp: false,
+};
+
 export abstract class AdapterBase extends AgentBase implements Adapter {
-  readonly capabilities: AgentCapabilities = {
-    tier: "adapter",
-    send: true,
-    stream: true,
-    injectMemory: true,
-    interrupt: true,
-    diff: true,
-  };
+  readonly capabilities: AgentCapabilities = { ...ADAPTER_CAPABILITIES };
   protected _busy = false;
 
   busy(): boolean {
@@ -84,11 +88,9 @@ export abstract class AdapterBase extends AgentBase implements Adapter {
 export abstract class BridgeBase extends AgentBase implements Bridge {
   readonly capabilities: AgentCapabilities = {
     tier: "bridge",
-    send: false,
-    stream: true,
-    injectMemory: true,
-    interrupt: false,
-    diff: false,
+    // A bridge drives someone else's GUI; there is no command line to put a
+    // config on, and whatever MCP servers that app has are its own.
+    mcp: false,
   };
 
   abstract available(): Promise<boolean>;

@@ -4,16 +4,19 @@
  *
  *   claude -p "<text>" --output-format stream-json --verbose
  *          [--resume <sessionId>] [--append-system-prompt <briefing>]
- *          --permission-mode <mode>
+ *          [--mcp-config <file>] --permission-mode <mode>
  *
- * Surface verified against claude 2.1.83 — see docs/integration-notes.md.
+ * Surface verified against claude 2.1.83 — see docs/integration-notes.md. The
+ * MCP flag was re-verified against 2.1.193 (`claude --help`: "--mcp-config
+ * <configs...>  Load MCP servers from JSON files or strings") by running a real
+ * turn with a generated config file.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
 import readline from "node:readline";
-import type { SendInput } from "../types.js";
+import type { AgentCapabilities, SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, agentEnv, cliAvailable } from "./base.js";
+import { AdapterBase, ADAPTER_CAPABILITIES, agentEnv, cliAvailable } from "./base.js";
 
 interface ClaudeOptions {
   /** claude permission mode for baton turns; default "acceptEdits". */
@@ -33,6 +36,8 @@ interface ClaudeOptions {
 }
 
 export class ClaudeCodeAdapter extends AdapterBase {
+  /** `claude --mcp-config <file>` is real, so this adapter accepts SendInput.mcp. */
+  override readonly capabilities: AgentCapabilities = { ...ADAPTER_CAPABILITIES, mcp: true };
   private child: ChildProcess | null = null;
   private options: ClaudeOptions;
   // Token usage from the CLI's `result` message, stashed so it can ride the
@@ -90,6 +95,11 @@ export class ClaudeCodeAdapter extends AdapterBase {
     ];
     if (this.sessionId) args.push("--resume", this.sessionId);
     if (input.briefing) args.push("--append-system-prompt", input.briefing);
+    // The project's MCP servers, for this turn only. The flag is passed ONLY
+    // when the runtime actually produced servers — an empty config file is not
+    // the same as no config file, and handing one over would be a claim that
+    // this project has MCP configured when it hasn't.
+    if (input.mcp?.servers.length) args.push("--mcp-config", input.mcp.configPath);
     if (this.options.model) args.push("--model", this.options.model);
     if (this.options.extraArgs) args.push(...this.options.extraArgs);
 

@@ -2,7 +2,8 @@
  * Codex adapter — drives the `codex` CLI headless, one process per turn,
  * resuming the same thread across turns.
  *
- *   codex exec --json --skip-git-repo-check -C <dir> -s <sandbox> "<text>"
+ *   codex exec --json --skip-git-repo-check -C <dir> -s <sandbox> \
+ *              [-c mcp_servers.<name>=<toml>] "<text>"
  *   codex exec resume <threadId> --json … "<text>"
  *
  * The CLI ships inside the desktop app as well as on PATH, so `available()`
@@ -31,9 +32,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import readline from "node:readline";
-import type { SendInput } from "../types.js";
+import type { AgentCapabilities, SendInput } from "../types.js";
+import { codexMcpArgs } from "../core/mcp.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, agentEnv, cliAvailable, frameBriefing } from "./base.js";
+import { AdapterBase, ADAPTER_CAPABILITIES, agentEnv, cliAvailable, frameBriefing } from "./base.js";
 
 interface CodexOptions {
   /** Sandbox policy for model-run commands; default "workspace-write". */
@@ -72,6 +74,8 @@ export function codexBin(override?: string): string | null {
 }
 
 export class CodexAdapter extends AdapterBase {
+  /** `codex -c mcp_servers.…` is real, so this adapter accepts SendInput.mcp. */
+  override readonly capabilities: AgentCapabilities = { ...ADAPTER_CAPABILITIES, mcp: true };
   private child: ChildProcess | null = null;
   private options: CodexOptions;
   // Token usage from turn.completed, stashed so it also rides run_complete
@@ -142,6 +146,13 @@ export class CodexAdapter extends AdapterBase {
           this.options.sandbox ?? "workspace-write",
         ];
     if (this.options.model) args.push("-m", this.options.model);
+    // The project's MCP servers, for this turn only. Codex has no
+    // `--mcp-config <file>` flag — its servers live in the `mcp_servers` table
+    // of config.toml, and `-c <dotted.path>=<toml>` is its documented
+    // per-invocation override for exactly that, so that's what we use rather
+    // than inventing a flag or writing to the user's config file. See
+    // core/mcp.ts#codexMcpArgs for how it was verified.
+    if (input.mcp?.servers.length) args.push(...codexMcpArgs(input.mcp.servers));
     if (this.options.extraArgs) args.push(...this.options.extraArgs);
     args.push(text);
 
