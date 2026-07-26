@@ -4,6 +4,7 @@
  * the single source of truth.
  */
 
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -22,7 +23,8 @@ import type {
 } from "../types.js";
 import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
 import { isAdapter, MAIN_CHAT } from "../types.js";
-import { createAgent, isWithdrawnKind, knownAgentKinds } from "../adapters/index.js";
+import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../adapters/index.js";
+import { ADES } from "../core/ades.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { Brain, CONFIDENCE_FLOOR } from "../core/brain.js";
 import { compileBrief, retrieve } from "../core/brain-index.js";
@@ -38,6 +40,14 @@ import {
 } from "../core/memory.js";
 import { probeMcpServers, writeMcpSession } from "../core/mcp.js";
 import { notify } from "../core/notify.js";
+import {
+  decisionStats,
+  extractDecisions,
+  normalizeStoredDecision,
+  type AgentDecision,
+  type DecisionStats,
+} from "../observability/decisions.js";
+import { turnTraceId } from "../observability/index.js";
 import {
   buildSkillsBlock,
   discoverSkillRoots,
@@ -73,6 +83,60 @@ import {
 } from "../core/worktree.js";
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
+
+/**
+ * How a budget pause is labelled in the shared quarantine map, so this guard
+ * can tell its own pauses from the ones a firing alert put there.
+ */
+const BUDGET_PAUSE_REASON = "budget ";
+
+/** Local midnight — the day a "USD/day" budget is measured against. */
+function startOfDay(now: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * A turn refused because the agent is at or over its daily spend budget.
+ *
+ * Typed (like NotHolderError) because the callers need to tell it apart: the
+ * API answers it with a 409 and the numbers, and a route reports which step
+ * couldn't start and why, rather than a generic failure.
+ */
+export class BudgetExceededError extends Error {
+  constructor(
+    public readonly agentId: string,
+    public readonly budgetUsd: number,
+    public readonly spentUsd: number,
+  ) {
+    super(
+      `agent "${agentId}" has spent $${spentUsd.toFixed(4)} today, at or over its $${budgetUsd.toFixed(2)}/day budget — raise the budget or wait for the day to roll over`,
+    );
+    this.name = "BudgetExceededError";
+  }
+}
+
+/**
+ * Thrown when a dispatch targets an agent a firing alert has paused.
+ *
+ * Separate from BudgetExceededError because the recovery is different and the
+ * UI should say so: a budget pause lifts itself when the day rolls over or you
+ * raise the cap, while this one lifts when the alert reports itself resolved.
+ */
+export class QuarantinedError extends Error {
+  constructor(
+    public readonly agentId: string,
+    public readonly reason: string,
+    public readonly since: number,
+  ) {
+    super(
+      `agent "${agentId}" is paused by a firing alert — ${reason}. It resumes when that alert resolves, or hand the baton to another agent.`,
+    );
+    this.name = "QuarantinedError";
+  }
+}
+
 export const LOOM_ASK_TIMEOUT_MS = 15_000;
 export const LOOM_ASK_TIMEOUT_MESSAGE =
   "The agent didn't reply within 15 seconds. Make sure its app is open and signed in, then try again.";
@@ -130,7 +194,7 @@ export class ProjectRuntime {
     // (An agent streams events long after send() returns and has no idea which
     // conversation prompted it — spawnAgent tags them with the chat that started
     // the turn, so a reply lands where the question was asked.)
-    for (const agentCfg of config.agents) this.spawnAgent(agentCfg);
+    for (const agentCfg of config.agents) if (agentCfg.enabled !== false) this.spawnAgent(agentCfg);
 
     this.routes = new RouteEngine({
       projectName: info.name,
@@ -177,6 +241,9 @@ export class ProjectRuntime {
   // (the CLI reports it mid-stream). We hold it here so the completed turn — and
   // therefore its exported gen_ai span — carries the real cost, not just tokens.
   private pendingCost = new Map<string, number>();
+  // Turn text accumulated per agent (from its message events) so we can extract
+  // structured decisions once the turn completes. Reset after each run_complete.
+  private turnText = new Map<string, string>();
 
   private rehydrateCosts(): void {
     for (const event of this.log.list({ kinds: ["status", "run_complete"] })) {
@@ -226,6 +293,151 @@ export class ProjectRuntime {
       tokensOut: this.costs.tokensOut,
       byAgent,
     };
+  }
+
+  /** Per-agent spend budgets (USD/day), set from the Observatory burn-rate panel. */
+  budgets(): Record<string, number> {
+    return readProjectState(this.info.dir).budgets ?? {};
+  }
+
+  /** Set (usd > 0) or clear (usd ≤ 0) one agent's daily budget; returns the new map. */
+  setBudget(agentId: string, usdPerDay: number): Record<string, number> {
+    const state = readProjectState(this.info.dir);
+    const budgets = { ...(state.budgets ?? {}) };
+    if (Number.isFinite(usdPerDay) && usdPerDay > 0) budgets[agentId] = usdPerDay;
+    else delete budgets[agentId];
+    writeProjectState(this.info.dir, { ...state, budgets });
+    return budgets;
+  }
+
+  /**
+   * What one agent has really spent since local midnight.
+   *
+   * Read from the log, using the same rule the running cost totals use: a
+   * turn's money arrives on a `turn_cost` status and nowhere else. (The same
+   * figure is copied onto `run_complete` for the exported span; counting both
+   * would double every turn.) Adapters that report tokens but no dollars —
+   * codex, agy — contribute 0, honestly, because they hand us no price.
+   */
+  spendTodayFor(agentId: string, now = Date.now()): number {
+    const since = startOfDay(now);
+    let usd = 0;
+    for (const e of this.log.list({ kinds: ["status"] })) {
+      if (e.agentId !== agentId || e.ts < since) continue;
+      if (e.payload.state !== "turn_cost") continue;
+      usd += Number(e.payload.costUsd ?? 0) || 0;
+    }
+    return usd;
+  }
+
+  /** Every budgeted agent: its cap, what it has spent today, and whether it's out. */
+  budgetStatus(now = Date.now()): Record<string, { budgetUsd: number; spentTodayUsd: number; over: boolean }> {
+    const out: Record<string, { budgetUsd: number; spentTodayUsd: number; over: boolean }> = {};
+    for (const [agentId, budgetUsd] of Object.entries(this.budgets())) {
+      const spentTodayUsd = this.spendTodayFor(agentId, now);
+      out[agentId] = { budgetUsd, spentTodayUsd, over: spentTodayUsd >= budgetUsd };
+    }
+    return out;
+  }
+
+  /**
+   * Refuse to dispatch to an agent a firing alert has paused.
+   *
+   * The self-heal loop wrote quarantines into state and *nothing read them
+   * back*: the webhook paused an agent, and the very next handoff or message
+   * went straight to it. So the headline feature — the telemetry backend says
+   * an agent is unhealthy, Loom takes it out of rotation — paused nothing at
+   * all. It sat beside `enforceBudget`, which had exactly the same bug and was
+   * fixed; this is the other half.
+   *
+   * Budget pauses are skipped here because `enforceBudget` owns them and can
+   * lift them on its own (a new day, a raised cap). An alert pause only lifts
+   * when the alert says resolved, so there is nothing to re-check.
+   */
+  private enforceQuarantine(agentId: string): void {
+    const q = this.quarantined()[agentId];
+    if (!q || q.reason.startsWith(BUDGET_PAUSE_REASON)) return;
+    throw new QuarantinedError(agentId, q.reason, q.since);
+  }
+
+  /**
+   * Refuse a turn an agent can't afford.
+   *
+   * A budget that nothing checks is a text field, and that is all this was: the
+   * burn panel wrote USD/day into state and no code path ever read it back, so
+   * an agent with a $1 cap would happily spend $40. Now every dispatch — a
+   * message you send, a baton hop, a route step — passes through here first.
+   *
+   * At or over the cap the agent is quarantined and the turn throws, taking the
+   * same route through the UI as the self-heal alert pause (same state map,
+   * same shape) so a paused agent looks paused however it got there. The pause
+   * lifts itself: the spend is measured against the current day, so when the
+   * day rolls over — or you raise the cap — the next attempt clears it and logs
+   * the recovery. A budget of 0/unset means no budget, and nothing is enforced.
+   */
+  private enforceBudget(agentId: string, now = Date.now()): void {
+    const budgetUsd = this.budgets()[agentId];
+    if (!Number.isFinite(budgetUsd) || !budgetUsd || budgetUsd <= 0) {
+      this.liftBudgetPause(agentId, now);
+      return;
+    }
+    const spentUsd = this.spendTodayFor(agentId, now);
+    if (spentUsd < budgetUsd) {
+      this.liftBudgetPause(agentId, now);
+      return;
+    }
+    if (!this.quarantined()[agentId]) {
+      this.quarantine(agentId, `${BUDGET_PAUSE_REASON}$${budgetUsd.toFixed(2)}/day`, false, now);
+    }
+    // One event per refusal, not one per pause: the thread should show every
+    // turn that didn't happen, not just the first.
+    this.log.append({
+      kind: "status",
+      agentId,
+      payload: { state: "budget_exceeded", budgetUsd, spentTodayUsd: spentUsd },
+    });
+    throw new BudgetExceededError(agentId, budgetUsd, spentUsd);
+  }
+
+  /**
+   * Lift a pause this guard put there, and only that one — a quarantine from a
+   * firing alert is somebody else's to lift, and clearing it here would
+   * un-pause an agent that is still broken.
+   */
+  private liftBudgetPause(agentId: string, now = Date.now()): void {
+    const q = this.quarantined()[agentId];
+    if (!q?.reason.startsWith(BUDGET_PAUSE_REASON)) return;
+    this.unquarantine(agentId);
+    this.log.append({
+      kind: "status",
+      agentId,
+      payload: { state: "budget_recovered", reason: q.reason, pausedMs: Math.max(0, now - q.since) },
+    });
+  }
+
+  /** Agents currently paused by a firing alert (self-heal quarantine). */
+  quarantined(): Record<string, { reason: string; since: number; displaced: boolean }> {
+    return readProjectState(this.info.dir).quarantine ?? {};
+  }
+
+  /** Pause an agent (a firing alert). `displaced` marks that it lost the baton to a fallback. */
+  quarantine(agentId: string, reason: string, displaced: boolean, now = Date.now()): void {
+    const state = readProjectState(this.info.dir);
+    const quarantine = { ...(state.quarantine ?? {}) };
+    quarantine[agentId] = { reason, since: now, displaced };
+    writeProjectState(this.info.dir, { ...state, quarantine });
+  }
+
+  /** Lift an agent's quarantine (its alert resolved); returns what it was, or null. */
+  unquarantine(agentId: string): { reason: string; since: number; displaced: boolean } | null {
+    const state = readProjectState(this.info.dir);
+    const quarantine = { ...(state.quarantine ?? {}) };
+    const prev = quarantine[agentId] ?? null;
+    if (prev) {
+      delete quarantine[agentId];
+      writeProjectState(this.info.dir, { ...state, quarantine });
+    }
+    return prev;
   }
 
   /** Has .loom/config.json changed since this runtime was opened? */
@@ -566,6 +778,45 @@ export class ProjectRuntime {
     fs.rmSync(dir, { recursive: true, force: true });
     if (this.config.skills?.[skill.id]) this.setSkillEnabled(skill.id, false);
     return { removed: true, id: skill.id, path: dir };
+  }
+
+  /**
+   * Switch one agent off (or back on) without taking it out of the roster.
+   *
+   * Refused while it holds the baton or is mid-turn, for the same reason
+   * `removeAgent` is: stopping it there would strand the lock on something that
+   * no longer exists, and the thread would show a turn nothing is running. The
+   * refusal names the fix rather than just saying no.
+   *
+   * Off really means off — the agent is stopped and dropped from the live map,
+   * not merely hidden. A roster entry that still answers is the kind of "off"
+   * that costs money.
+   */
+  setAgentEnabled(agentId: string, enabled: boolean): { id: string; enabled: boolean } {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    const on = enabled !== false;
+    if (!on) {
+      if (this.validHolder() === agentId) {
+        throw new Error(`"${agentId}" holds the baton — hand it off before switching it off`);
+      }
+      const live = this.agents.get(agentId);
+      if (live && isAdapter(live) && live.busy()) {
+        throw new Error(`"${agentId}" is mid-turn — interrupt it first`);
+      }
+    }
+    cfg.enabled = on;
+    this.saveConfig();
+    const live = this.agents.get(agentId);
+    if (on && !live) {
+      this.spawnAgent(cfg); // bring it back to life
+    } else if (!on && live) {
+      void Promise.resolve(live.stop()).catch(() => {});
+      this.agents.delete(agentId);
+      this.startedAgents.delete(agentId);
+    }
+    this.log.append({ kind: on ? "agent_join" : "agent_leave", agentId, payload: { enabled: on } });
+    return { id: agentId, enabled: on };
   }
 
   /** Enable/disable one skill for this project; returns the new enabled map. */
@@ -965,8 +1216,14 @@ export class ProjectRuntime {
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
     this.routes.handleAgentEvent(event);
+    // Accumulate the turn's prose so decisions can be mined when it completes.
+    if (event.kind === "message" && event.agentId && !event.payload.reasoning) {
+      const prev = this.turnText.get(event.agentId) ?? "";
+      this.turnText.set(event.agentId, `${prev}\n${String(event.payload.text ?? "")}`.slice(-8000));
+    }
     if (event.kind === "run_complete" && event.agentId) {
       this.captureTurnDiff(event.agentId);
+      void this.captureAgentDecisions(event.agentId).catch(() => {});
     }
     if (event.kind === "needs_input") {
       notify({
@@ -1001,6 +1258,120 @@ export class ProjectRuntime {
       this.log.append({
         kind: "decision",
         payload: { text: m[1]!.trim(), author: event.agentId, auto: true },
+      });
+    }
+  }
+
+  // ── Structured agent decisions (Observatory Decision Explorer + Replay) ──
+
+  private decisionsFile(): string {
+    return path.join(projectLoomDir(this.info.dir), "decisions.json");
+  }
+
+  /** An agent's declared role from config (planner/builder/reviewer/…), else its kind. */
+  agentRole(agentId: string): string {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    return cfg?.role ?? cfg?.kind ?? "agent";
+  }
+
+  /** How many turns this agent has completed (for the decision's turnIndex). */
+  private turnCountFor(agentId: string): number {
+    return this.log.list({ kinds: ["run_complete"] }).filter((e) => e.agentId === agentId).length;
+  }
+
+  /**
+   * All captured decisions for this project, newest first, in today's shape —
+   * see normalizeStoredDecision for what that does to records written before
+   * a decision had to say where its confidence came from.
+   */
+  getDecisions(): AgentDecision[] {
+    try {
+      const raw = fs.readFileSync(this.decisionsFile(), "utf8");
+      const arr = JSON.parse(raw) as AgentDecision[];
+      if (!Array.isArray(arr)) return [];
+      return arr.map(normalizeStoredDecision).sort((a, b) => b.timestamp - a.timestamp);
+    } catch {
+      return [];
+    }
+  }
+
+  decisionStats(): DecisionStats {
+    return decisionStats(this.getDecisions());
+  }
+
+  /** Append decisions to the persisted store (kept oldest→newest on disk). */
+  storeDecisions(decisions: AgentDecision[]): void {
+    if (!decisions.length) return;
+    const existing = this.getDecisions().sort((a, b) => a.timestamp - b.timestamp);
+    const all = [...existing, ...decisions].slice(-1000); // bound the file
+    try {
+      fs.mkdirSync(projectLoomDir(this.info.dir), { recursive: true });
+      fs.writeFileSync(this.decisionsFile(), JSON.stringify(all, null, 2));
+    } catch {
+      /* best-effort: decisions are an enrichment, never break the loop */
+    }
+  }
+
+  /** Mine decisions from a completed turn, persist them, surface on the Timeline. */
+  private async captureAgentDecisions(agentId: string): Promise<void> {
+    const turnText = this.turnText.get(agentId) ?? "";
+    this.turnText.delete(agentId);
+    if (turnText.trim().length < 100) return;
+    const lastTurn = this.log.list({ kinds: ["run_complete"] }).filter((e) => e.agentId === agentId).slice(-1)[0];
+    const p = (lastTurn?.payload ?? {}) as Record<string, unknown>;
+    let filesChanged: string[] = [];
+    try {
+      // stderr is dropped, not inherited: a project that isn't a repo yet, or
+      // one with no commits, makes git print a usage wall on every completed
+      // turn. The failure is already handled — it must not also be shouted
+      // into the daemon's console.
+      filesChanged = execSync("git diff --name-only HEAD", {
+        cwd: this.info.dir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .trim().split("\n").filter(Boolean);
+    } catch { /* not a git repo, or nothing changed */ }
+    // The trace this turn's spans went out under, when telemetry is on.
+    // Undefined otherwise — see observability/index.ts#turnTraceId; a decision
+    // that can't link to a trace must carry no trace id rather than "".
+    const traceId = turnTraceId(agentId);
+    const decisions = await extractDecisions({
+      agentId,
+      agentRole: this.agentRole(agentId),
+      projectId: this.info.id,
+      chatId: this.turnChat.get(agentId) ?? MAIN_CHAT,
+      turnIndex: this.turnCountFor(agentId),
+      ...(traceId ? { traceId } : {}),
+      ...(lastTurn ? { turnId: String(lastTurn.id) } : {}),
+      turnText,
+      // The turn's totals, carried as the TURN's — not divided between the
+      // decisions mined from it, and not stamped on each as if each cost this.
+      turnTokensUsed: Number(p.inputTokens ?? 0) + Number(p.outputTokens ?? 0),
+      turnCostUsd: Number(p.costUsd ?? 0),
+      durationMs: Number(p.durationMs ?? 0),
+      anthropicApiKey: process.env.ANTHROPIC_API_KEY,
+      filesChanged,
+    });
+    if (!decisions.length) return;
+    this.storeDecisions(decisions);
+    // Surface each on the Timeline / snapshots via a status event (no new EventKind,
+    // and no collision with the brain's memory `decision` events). `source` rides
+    // along so a renderer can say where the confidence came from — or that there
+    // isn't one, which is what a heuristic decision carries.
+    for (const d of decisions) {
+      this.log.append({
+        kind: "status",
+        agentId: d.agentId,
+        ...(d.chatId && d.chatId !== MAIN_CHAT ? { chat: d.chatId } : {}),
+        payload: {
+          state: "agent_decision",
+          decisionId: d.id,
+          title: d.title,
+          category: d.category,
+          source: d.source,
+          ...(d.confidence !== undefined ? { confidence: d.confidence } : {}),
+        },
       });
     }
   }
@@ -1085,6 +1456,11 @@ export class ProjectRuntime {
     if (!isAdapter(agent)) {
       throw new Error(`agent "${target}" is a bridge (read-only) — it cannot take turns`);
     }
+    // Before anything is committed — the baton, the message in the thread, the
+    // process — check the agent can afford the turn. Refusing after the message
+    // is logged would leave a prompt in the conversation that nothing answers.
+    this.enforceQuarantine(target);
+    this.enforceBudget(target);
 
     const holder = this.validHolder();
     if (holder === null) {
@@ -1181,6 +1557,12 @@ export class ProjectRuntime {
     if (!isAdapter(target)) {
       throw new Error(`cannot hand the baton to "${to}" — bridges are read-only by design`);
     }
+    // Handing the baton to an agent that can't afford a turn is the same
+    // refusal as sending it one — and it has to be caught HERE, before the
+    // current holder is interrupted, or a route would strand the baton on an
+    // agent that will refuse every prompt it gets.
+    this.enforceQuarantine(to);
+    this.enforceBudget(to);
     if ((opts.source ?? "user") === "user") this.routes.onManualHandoff();
 
     // Audit trail: snapshot the outgoing holder's working-tree state into the
@@ -1336,18 +1718,42 @@ export class ProjectRuntime {
     const holder = this.validHolder();
     const agents = await Promise.all(
       this.config.agents.map(async (cfg) => {
-        const agent = this.agent(cfg.id);
+        // The picker shows a tick next to the active model; "" means the
+        // adapter's own default, which is the honest baseline.
+        const model = (cfg.options?.model as string | undefined) ?? "";
+        const live = this.agents.get(cfg.id);
+        if (!live) {
+          // Switched off: still in the roster, just not spawned. Its tier has
+          // to come from somewhere other than the instance, and switching an
+          // agent off must not change what it *is*. ADES first (the catalog
+          // people pick from), then the factory registry for the kinds ADES
+          // deliberately omits. Defaulting to "adapter" would be wrong for
+          // exactly those: a disabled bridge would advertise itself as an
+          // adapter to every surface that filters on this field.
+          const spec = ADES.find((a) => a.kind === cfg.kind);
+          const tier = spec?.tier ?? tierForKind(cfg.kind) ?? "adapter";
+          return {
+            id: cfg.id,
+            kind: cfg.kind,
+            role: cfg.role,
+            tier,
+            available: false,
+            busy: false,
+            holdsBaton: false,
+            model,
+            enabled: false,
+          };
+        }
         return {
           id: cfg.id,
           kind: cfg.kind,
           role: cfg.role,
-          tier: agent.capabilities.tier,
-          available: await agent.available().catch(() => false),
-          busy: isAdapter(agent) ? agent.busy() : false,
+          tier: live.capabilities.tier,
+          available: await live.available().catch(() => false),
+          busy: isAdapter(live) ? live.busy() : false,
           holdsBaton: holder === cfg.id,
-          // The picker shows a tick next to the active model; "" means the
-          // adapter's own default, which is the honest baseline.
-          model: (cfg.options?.model as string | undefined) ?? "",
+          model,
+          enabled: true,
         };
       }),
     );
@@ -1375,6 +1781,11 @@ export class ProjectRuntime {
       route: this.routes.state(),
       routeNames: ["auto", ...Object.keys(this.config.routes ?? {})],
       costUsd: this.costs.totalUsd,
+      // Paused agents belong in the status payload, not only in state on disk.
+      // Without this the UI cannot show that an alert has taken an agent out of
+      // rotation — the pause was real and completely invisible, which reads as
+      // "the self-heal did nothing".
+      quarantine: this.quarantined(),
     };
   }
 

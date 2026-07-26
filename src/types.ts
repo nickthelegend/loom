@@ -103,6 +103,8 @@ export interface AgentConfig {
   options?: Record<string, unknown>;
   /** Override the ADE's native memory files to import into the shared brain. */
   memoryFiles?: string[];
+  /** Off agents stay in the roster but aren't spawned and can't hold the baton. Default on. */
+  enabled?: boolean;
 }
 
 /** One ADE's native memory pulled into the unified brain. */
@@ -354,6 +356,8 @@ export interface AgentStatus {
   holdsBaton: boolean;
   /** The model override in effect, or "" for the CLI's own default. */
   model: string;
+  /** Switched on? An off agent stays in the roster but isn't spawned. */
+  enabled?: boolean;
 }
 
 export interface ProjectStatus {
@@ -376,6 +380,12 @@ export interface ProjectStatus {
   routeNames?: string[];
   /** Lifetime spend across all agents in this project (USD). */
   costUsd?: number;
+  /**
+   * Agents a firing alert has paused (self-heal), keyed by agent id. Carried in
+   * the status payload and not only in state on disk, so a client can render
+   * "paused" rather than showing an agent that will refuse every prompt.
+   */
+  quarantine?: Record<string, { reason: string; since: number; displaced: boolean }>;
 }
 
 // ---------------------------------------------------------------------------

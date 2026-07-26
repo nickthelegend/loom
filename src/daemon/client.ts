@@ -86,6 +86,11 @@ export class DaemonClient {
     return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
   }
 
+  /** Stop tracking a project. Registry-only — its .loom/ stays on disk. */
+  forgetProject(id: string): Promise<{ removed: boolean; keptOnDisk: string }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}`);
+  }
+
   project(id: string): Promise<{ project: ProjectStatus }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}`);
   }

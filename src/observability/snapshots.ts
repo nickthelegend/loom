@@ -35,7 +35,7 @@ export interface TimeSnapshot {
 const SNAPSHOT_KINDS = new Set(["run_complete", "handoff", "error", "route_completed", "route_failed", "route_started"]);
 const isDecisionStatus = (e: LoomEvent): boolean => e.kind === "status" && (e.payload as Record<string, unknown>).state === "agent_decision";
 const isHealStatus = (e: LoomEvent): boolean =>
-  e.kind === "status" && ["signoz_intervention", "signoz_recovery"].includes(String((e.payload as Record<string, unknown>).state));
+  e.kind === "status" && ["alert_intervention", "alert_recovery"].includes(String((e.payload as Record<string, unknown>).state));
 
 function describeEvent(e: LoomEvent): string {
   const p = e.payload as Record<string, unknown>;
@@ -49,8 +49,8 @@ function describeEvent(e: LoomEvent): string {
     case "route_failed": return `route failed: ${String(p.error ?? p.reason ?? "")}`;
     case "status":
       if (isDecisionStatus(e)) return `${agent} decided: ${String(p.title ?? "")}`;
-      if (p.state === "signoz_intervention") return `⚡ Alert → baton off ${agent}`;
-      if (p.state === "signoz_recovery") return `✓ Recovery → ${agent}`;
+      if (p.state === "alert_intervention") return `⚡ Alert → baton off ${agent}`;
+      if (p.state === "alert_recovery") return `✓ Recovery → ${agent}`;
       return String(p.state ?? "status");
     default: return e.kind;
   }

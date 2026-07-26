@@ -20,6 +20,26 @@ import { NotHolderError } from "../core/baton.js";
 import type { MemoryKind, MemoryPatch } from "../core/brain.js";
 import { retrieve } from "../core/brain-index.js";
 import { RouteActiveError } from "../core/routes.js";
+import { triageAgent } from "../observability/triage.js";
+import {
+  burnSeries,
+  fetchMetricSeries,
+  fetchSpans,
+  healthScore,
+  insightSpansFromLog,
+  recentAgentErrors,
+  traceSpans,
+  LOOM_METRIC_NAMES,
+  type InsightSpan,
+  type MetricSeries,
+} from "../observability/insights.js";
+import { fetchLogs, type InsightLog } from "../observability/logs-query.js";
+import { ask, type AskContext } from "../observability/ask.js";
+import { probeMcpServer, writeMcpSession } from "../core/mcp.js";
+import { searchCatalog } from "../core/mcp-catalog.js";
+import { buildSnapshots } from "../observability/snapshots.js";
+import { SkillInstallError } from "../core/skill-install.js";
+import { suggestSkill } from "../core/skills.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
 import { searchChats, searchCode } from "../core/search.js";
@@ -48,8 +68,10 @@ import {
   findProject,
   listProjects,
   readDaemonConfig,
+  projectLoomDir,
   readProjectConfig,
   registerProject,
+  unregisterProject,
   writeDaemonConfig,
   writeProjectConfig,
 } from "../core/registry.js";
@@ -58,7 +80,12 @@ import { APP_HTML, APP_MANIFEST } from "./app-page.js";
 import { GEIST_WOFF2 } from "./geist-font.js";
 import { AuthManager, bearerToken } from "./auth.js";
 import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
-import { LoomAskTimeoutError, ProjectRuntime } from "./runtime.js";
+import {
+  BudgetExceededError,
+  LoomAskTimeoutError,
+  ProjectRuntime,
+  QuarantinedError,
+} from "./runtime.js";
 import { buildBoard } from "./board.js";
 import {
   ghAuthStatus,
@@ -191,6 +218,63 @@ function asPaths(v: unknown): string[] {
   return v.filter((x): x is string => typeof x === "string" && x.length > 0).slice(0, 500);
 }
 
+/** KAIRO-style dense fleet metrics for the Observatory Metrics tab. */
+function kairoMetrics(rt: ProjectRuntime): Record<string, unknown> {
+  const cs = rt.costSummary();
+  const decisions = rt.getDecisions();
+  const stats = rt.decisionStats();
+  const events = rt.log.list({ limit: 2000 });
+  const runs = events.filter((e) => e.kind === "run_complete");
+  const recent = runs.slice(-10);
+  const num = (v: unknown): number => Number(v) || 0;
+  // Distinct paths any turn touched, and how many touches there were. The set
+  // used to be reported as `filesCreated`, which it never was — a file edited
+  // in five turns is one path here, and creating it was not what put it there.
+  const filePaths = new Set<string>();
+  let fileChanges = 0;
+  let filesCreated = 0;
+  for (const e of events) {
+    if (e.kind !== "turn_diff") continue;
+    const files = Array.isArray(e.payload.files)
+      ? (e.payload.files as Array<{ path?: string; status?: string }>)
+      : [];
+    fileChanges += files.length;
+    for (const f of files) {
+      if (f.path) filePaths.add(f.path);
+      // "??" is git porcelain for untracked — the turn is where the file
+      // started existing, which is the only "created" this log can support.
+      if (String(f.status ?? "").trim() === "??") filesCreated += 1;
+    }
+  }
+  const tokensByAgent: Record<string, number> = {};
+  const costByAgent: Record<string, number> = {};
+  for (const a of cs.byAgent) {
+    tokensByAgent[a.agentId] = a.tokensIn + a.tokensOut;
+    costByAgent[a.agentId] = a.usd;
+  }
+  return {
+    agentsSpawned: new Set(runs.map((e) => e.agentId).filter(Boolean)).size,
+    turnsCompleted: cs.turns,
+    avgReasoningTimeMs: cs.turns ? Math.round(cs.totalMs / cs.turns) : 0,
+    filesTouched: filePaths.size,
+    filesCreated,
+    filesModified: fileChanges,
+    decisionsRecorded: decisions.length,
+    // null when no decision carries a measured confidence — see decisionStats.
+    avgConfidence: stats.avgConfidence,
+    confidenceSamples: stats.confidenceSamples,
+    decisionsBySource: stats.bySource,
+    totalCostUsd: cs.totalUsd,
+    totalTokensIn: cs.tokensIn,
+    totalTokensOut: cs.tokensOut,
+    costByAgent,
+    tokensByAgent,
+    criticalPath: stats.criticalPath,
+    retriesTotal: events.filter((e) => e.kind === "error" || e.kind === "route_failed").length,
+    tokenSparkline: recent.map((e) => num(e.payload.inputTokens) + num(e.payload.outputTokens)),
+    costSparkline: recent.map((e) => num(e.payload.costUsd)),
+  };
+}
 
 export class LoomDaemon {
   private app = express();
@@ -199,6 +283,8 @@ export class LoomDaemon {
   private auth: AuthManager;
   private runtimes = new Map<string, ProjectRuntime>();
   private sockets = new Map<WebSocket, { project?: string }>();
+  /** In-flight self-heal recheck timers, cleared on close. */
+  private healTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Terminal shells — a real pty when node-pty loaded, else plain pipes. */
   private terminals = new TerminalManager({
     onData: (projectId, term, chunk) =>
@@ -249,7 +335,13 @@ export class LoomDaemon {
       if (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
         res.setHeader("Access-Control-Allow-Origin", origin);
         res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-        res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        // PUT and PATCH belong here: toggling a skill, switching an agent on or
+        // off, and updating an MCP server all use them, and a cross-origin
+        // client (the Expo web build, a paired browser on another port) had
+        // those requests refused at the preflight while the same-origin console
+        // worked — which makes it look like the feature is broken only on
+        // mobile.
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
         res.setHeader("Vary", "Origin");
         if (req.method === "OPTIONS") return void res.sendStatus(204);
       }
@@ -260,8 +352,16 @@ export class LoomDaemon {
     // health, and the pairing claim (the pairing token IS the auth).
     app.get("/", (_req, res) => res.redirect("/app"));
     app.get("/app", (_req, res) => {
+      // The telemetry backend's own UI, for the Observatory's trace deep links.
+      // Stripped of quote/angle characters because it lands inside a JS string
+      // literal in the shell. Empty when unset, and the page hides the links
+      // rather than pointing them at a guessed port.
+      const traceUi = (process.env.LOOM_TRACE_UI_URL || "").replace(/["'<>]/g, "");
       // Never cache the shell: a redeployed daemon must serve its own UI.
-      res.type("html").setHeader("Cache-Control", "no-store").send(APP_HTML);
+      res
+        .type("html")
+        .setHeader("Cache-Control", "no-store")
+        .send(APP_HTML.replace("%%TRACE_UI_URL%%", traceUi));
     });
     app.get("/app/manifest.webmanifest", (_req, res) => {
       res
@@ -340,6 +440,14 @@ export class LoomDaemon {
 
     // Everything else requires a bearer token.
     app.use((req: Request, res: Response, next: NextFunction) => {
+      // Inbound alert webhooks can't carry the admin bearer token — an
+      // Alertmanager-style sender has no Loom token to present — so they
+      // authenticate with their own LOOM_WEBHOOK_SECRET instead. Set that
+      // secret whenever the daemon binds past localhost.
+      if (req.path.startsWith("/api/webhooks/")) {
+        next();
+        return;
+      }
       const token = bearerToken(req.headers.authorization);
       if (!this.auth.isAuthorized(token)) {
         res.status(401).json({ error: "unauthorized" });
@@ -747,6 +855,38 @@ export class LoomDaemon {
       })();
     });
 
+    /**
+     * Stop tracking a project. The opposite of POST /api/projects, which did
+     * not exist until now: you could point Loom at a directory and had no
+     * supported way to un-point it short of hand-editing ~/.loom/registry.json
+     * and restarting the daemon. `unregisterProject` was already sitting in
+     * core/registry.ts with no caller.
+     *
+     * Registry-only, deliberately. The project's `.loom/` — its config, its
+     * event log, its memory — stays exactly where it is, so re-adding the same
+     * directory later restores the whole history rather than starting a blank
+     * one. Deleting a run's record because someone tidied a list is not a
+     * trade this should make on the user's behalf; `rm -rf .loom` is theirs.
+     *
+     * The live runtime is closed first. Left open it keeps polling, holds its
+     * agents, and would happily write more events into a project the API has
+     * just said it no longer tracks.
+     */
+    app.delete("/api/projects/:id", (req, res) => {
+      void (async () => {
+        const id = String(req.params.id);
+        const info = listProjects().find((p) => p.id === id);
+        if (!info) return void res.status(404).json({ error: "no such project" });
+        const rt = this.runtimes.get(id);
+        if (rt) {
+          await rt.close();
+          this.runtimes.delete(id);
+        }
+        unregisterProject(id);
+        res.json({ removed: true, project: info, keptOnDisk: projectLoomDir(info.dir) });
+      })();
+    });
+
     const withRuntime = (
       handler: (rt: ProjectRuntime, req: Request, res: Response) => Promise<void>,
     ) => {
@@ -767,6 +907,31 @@ export class LoomDaemon {
             }
             if (err instanceof RouteActiveError) {
               res.status(409).json({ error: "route_active", message: err.message });
+              return;
+            }
+            // Same 409 family: a firing alert has this agent out of rotation,
+            // and the client should say so rather than "500".
+            if (err instanceof QuarantinedError) {
+              res.status(409).json({
+                error: "agent_quarantined",
+                agentId: err.agentId,
+                reason: err.reason,
+                since: err.since,
+                message: err.message,
+              });
+              return;
+            }
+            // 409, like the other "the fleet is in a state that forbids this"
+            // refusals. The numbers ride along so a client can say what the cap
+            // was and what has been spent against it, without guessing.
+            if (err instanceof BudgetExceededError) {
+              res.status(409).json({
+                error: "budget_exceeded",
+                agentId: err.agentId,
+                budgetUsd: err.budgetUsd,
+                spentTodayUsd: err.spentUsd,
+                message: err.message,
+              });
               return;
             }
             // A 500 used to be a sentence for one caller and nothing else: no
@@ -797,9 +962,353 @@ export class LoomDaemon {
     app.get(
       "/api/projects/:id/metrics",
       withRuntime(async (rt, _req, res) => {
-        res.json({ metrics: rt.costSummary() });
+        res.json({ metrics: rt.costSummary(), kairo: kairoMetrics(rt) });
       }),
     );
+
+    // Decision explorer: structured decisions mined from agent turns.
+    app.get(
+      "/api/projects/:id/decisions",
+      withRuntime(async (rt, req, res) => {
+        const agent = req.query.agent ? String(req.query.agent) : undefined;
+        const category = req.query.category ? String(req.query.category) : undefined;
+        const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+        let decisions = rt.getDecisions();
+        if (agent) decisions = decisions.filter((d) => d.agentId === agent);
+        if (category) decisions = decisions.filter((d) => d.category === category);
+        res.json({ decisions: decisions.slice(0, limit), stats: rt.decisionStats() });
+      }),
+    );
+
+    // Time-Travel Replay: snapshots folded from the event log, on demand.
+    app.get(
+      "/api/projects/:id/snapshots",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ snapshots: buildSnapshots(rt.log.list({ limit: 2000 })) });
+      }),
+    );
+
+    // Agent self-triage: read one agent's own traces back out of the telemetry
+    // store (falling back to the local event log) and root-cause its last
+    // failure.
+    app.get(
+      "/api/projects/:id/triage/:agentId",
+      withRuntime(async (rt, req, res) => {
+        const agent = String(req.params.agentId ?? "");
+        const events = rt.log.list({ limit: 300 });
+        res.json({ triage: await triageAgent(agent, events) });
+      }),
+    );
+
+    // Observatory insights, read back from the backend's ClickHouse (with a
+    // local-log fallback so the panels still work when it is empty/down):
+    //   spans  → Span Replay (scrub a turn's spans frame by frame)
+    //   trace  → Trace Waterfall (one trace's span tree + a backend deep link)
+    //   burn   → per-agent cost over time + a linear 24h projection
+    //   health → the 0–100 Agent Health Score with its penalty breakdown
+    app.get(
+      "/api/projects/:id/insights/spans",
+      withRuntime(async (rt, req, res) => {
+        const agent = req.query.agent ? String(req.query.agent) : undefined;
+        const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+        let spans = await fetchSpans(rt.info.name, { agent, limit }).catch(() => [] as InsightSpan[]);
+        let from: "backend" | "local-log" = "backend";
+        if (!spans.length) {
+          spans = insightSpansFromLog(rt.log.list({ limit: 400 }), agent).slice(0, limit);
+          from = "local-log";
+        }
+        res.json({ from, spans });
+      }),
+    );
+    app.get(
+      "/api/projects/:id/insights/trace/:traceId",
+      withRuntime(async (_rt, req, res) => {
+        const spans = await traceSpans(String(req.params.traceId ?? "")).catch(() => [] as InsightSpan[]);
+        res.json({ traceId: String(req.params.traceId ?? ""), spans });
+      }),
+    );
+
+    /**
+     * The other two OTel signals, read back.
+     *
+     * Both differ from /insights/spans in one important way: there is no
+     * local-log fallback. A span can be reconstructed from the event log because
+     * it summarises an event Loom already stored; a log body or a metric sample
+     * cannot be, and faking one would put a number on screen the telemetry
+     * backend never saw. So when ClickHouse is unreachable these return
+     * `from: "unavailable"` with an empty payload and the UI is expected to say
+     * the backend is unreachable rather than render a plausible-looking empty
+     * chart.
+     *
+     * `rt.info.name` — not the project id — is the filter value, because that is
+     * what Loom stamps onto loom.project when it exports (same as the span
+     * routes above).
+     */
+    app.get(
+      "/api/projects/:id/insights/logs",
+      withRuntime(async (rt, req, res) => {
+        const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 200));
+        let from: "backend" | "unavailable" = "backend";
+        const logs = await fetchLogs({
+          project: rt.info.name,
+          agent: req.query.agent ? String(req.query.agent) : undefined,
+          severity: req.query.severity ? String(req.query.severity) : undefined,
+          traceId: req.query.traceId ? String(req.query.traceId) : undefined,
+          search: req.query.q ? String(req.query.q) : undefined,
+          limit,
+        }).catch(() => {
+          from = "unavailable";
+          return [] as InsightLog[];
+        });
+        res.json({ from, logs });
+      }),
+    );
+
+    app.get(
+      "/api/projects/:id/insights/metrics",
+      withRuntime(async (rt, req, res) => {
+        // `names` is a comma list; omitting it means "everything Loom emits".
+        const names = String(req.query.names ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        // `since` accepts either an absolute epoch-ms or a lookback in ms; a
+        // value small enough to be a duration cannot be a real 2020s timestamp.
+        const raw = Number(req.query.since) || 0;
+        const now = Date.now();
+        const sinceMs = raw <= 0 ? now - 6 * 3600_000 : raw < 1e12 ? now - raw : raw;
+        const stepMs = Math.max(1000, Number(req.query.step) || 60_000);
+        let from: "backend" | "unavailable" = "backend";
+        const series = await fetchMetricSeries(names.length ? names : LOOM_METRIC_NAMES, {
+          project: rt.info.name,
+          sinceMs,
+          stepMs,
+        }).catch(() => {
+          from = "unavailable";
+          return [] as MetricSeries[];
+        });
+        res.json({ from, sinceMs, stepMs, series });
+      }),
+    );
+
+    /**
+     * Ask the Observatory a question about this fleet.
+     *
+     * The evidence is assembled from the same sources the Observatory renders —
+     * status, metrics, health, spans, decisions — so an answer can never cite a
+     * number the screen doesn't also show. Any MCP servers the project has
+     * configured are handed to the model for the turn, which is the point: when
+     * one of them fronts the telemetry store, let the model query it directly
+     * rather than trusting a summary.
+     */
+    app.post(
+      "/api/projects/:id/observatory/ask",
+      withRuntime(async (rt, req, res) => {
+        const question = String((req.body ?? {}).question ?? "").trim();
+        if (!question) return void res.status(400).json({ error: "missing question" });
+
+        const status = await rt.status();
+        const metrics = rt.costSummary();
+        const byAgent = new Map(metrics.byAgent.map((a) => [a.agentId, a]));
+
+        let spans = await fetchSpans(rt.info.name, { limit: 120 }).catch(() => [] as InsightSpan[]);
+        let spanSource = "backend";
+        if (!spans.length) {
+          spans = insightSpansFromLog(rt.log.list({ limit: 300 })).slice(0, 120);
+          spanSource = "local-log";
+        }
+
+        const ctx: AskContext = {
+          projectName: rt.info.name,
+          spendUsd: metrics.totalUsd ?? 0,
+          turns: metrics.turns ?? 0,
+          tokensIn: metrics.tokensIn ?? 0,
+          tokensOut: metrics.tokensOut ?? 0,
+          holder: status.holder ?? null,
+          agents: status.agents.map((a) => {
+            const mine = spans.filter((s) => s.agent === a.id);
+            return {
+              id: a.id, kind: a.kind, role: a.role, busy: a.busy,
+              turns: byAgent.get(a.id)?.turns, usd: byAgent.get(a.id)?.usd,
+              // Scored the same way the Metrics tab scores it: this agent's own
+              // spans, so the answer and the screen can never disagree.
+              health: mine.length ? healthScore(mine).score : null,
+            };
+          }),
+          recentSpans: spans.slice(-40).map((s) => ({ ts: s.ts, agent: s.agent, name: s.name, ms: s.ms, code: s.code, model: s.model, msg: s.msg })),
+          decisions: rt.getDecisions().map((d) => ({ agentId: d.agentId, title: d.title, category: d.category, confidence: d.confidence, source: d.source })),
+          spanSource,
+        };
+
+        // Hand over the project's real MCP servers for this question, exactly
+        // as a turn would get them.
+        const session = writeMcpSession(rt.config.mcps);
+        try {
+          const result = await ask(question, ctx, {
+            cwd: rt.info.dir,
+            ...(session?.configPath ? { mcpConfigPath: session.configPath } : {}),
+            mcpServers: (session?.servers ?? []).map((s) => s.name),
+          });
+          res.json({ ...result, spanSource, evidenceAgents: ctx.agents.length, evidenceSpans: ctx.recentSpans.length });
+        } finally {
+          session?.cleanup?.();
+        }
+      }),
+    );
+    app.get(
+      "/api/projects/:id/insights/burn",
+      withRuntime(async (rt, req, res) => {
+        const hours = Math.min(720, Math.max(1, Number(req.query.hours) || 24));
+        const buckets = Math.min(60, Math.max(2, Number(req.query.buckets) || 12));
+        const series = await burnSeries(rt.info.name, { hours, buckets }).catch(() => null);
+        // `budgetStatus` is what the caps are actually measured against — the
+        // day's real spend per agent and whether it has run out. The bare
+        // `budgets` map stays for the inputs that edit it.
+        res.json({ burn: series, budgets: rt.budgets(), budgetStatus: rt.budgetStatus() });
+      }),
+    );
+    app.get(
+      "/api/projects/:id/insights/health",
+      withRuntime(async (rt, req, res) => {
+        const agent = req.query.agent ? String(req.query.agent) : undefined;
+        let spans = await fetchSpans(rt.info.name, { agent, limit: 300 }).catch(() => [] as InsightSpan[]);
+        let from: "backend" | "local-log" = "backend";
+        if (!spans.length) {
+          spans = insightSpansFromLog(rt.log.list({ limit: 500 }), agent);
+          from = "local-log";
+        }
+        if (agent) return void res.json({ from, health: healthScore(spans) });
+        // Fleet: one score per agent (its own turns/errors), plus the overall.
+        const byAgent: Record<string, ReturnType<typeof healthScore>> = {};
+        for (const a of [...new Set(spans.map((s) => s.agent).filter(Boolean))]) {
+          byAgent[a] = healthScore(spans.filter((s) => s.agent === a));
+        }
+        res.json({ from, overall: healthScore(spans), byAgent });
+      }),
+    );
+
+    // Budget CRUD for the burn-rate panel — per-agent USD/day, persisted in
+    // state and enforced on every dispatch (see ProjectRuntime#enforceBudget).
+    // `status` carries today's real spend against each cap, so the panel can
+    // show how close an agent is instead of only what was typed in.
+    app.get(
+      "/api/projects/:id/budgets",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ budgets: rt.budgets(), status: rt.budgetStatus() });
+      }),
+    );
+    app.put(
+      "/api/projects/:id/budgets/:agentId",
+      withRuntime(async (rt, req, res) => {
+        const usd = Number((req.body as Record<string, unknown>)?.usdPerDay ?? 0);
+        const budgets = rt.setBudget(String(req.params.agentId ?? ""), usd);
+        res.json({ budgets, status: rt.budgetStatus() });
+      }),
+    );
+
+    /**
+     * Self-healing loop: an alert posts here.
+     *   firing   → quarantine the failing agent and fail the baton over to a
+     *              fallback (Loom keeps working while the agent is degraded).
+     *   resolved → lift the quarantine and hand the baton BACK to the original
+     *              agent — a real pause-then-retry, not a one-way failover.
+     * Closing the loop from metric breach → intervention → recovery → retry.
+     *
+     * The body is an Alertmanager-style payload, which is what every backend
+     * Loom is pointed at already sends — SigNoz, Prometheus/Alertmanager and
+     * Grafana all POST the same `{status, alerts: [{status, labels}]}` shape.
+     * So the route is named for the payload it accepts rather than for one
+     * vendor, and a single webhook channel configured anywhere reaches it.
+     */
+    app.post("/api/webhooks/alerts", (req, res) => {
+      void (async () => {
+        const secret = process.env.LOOM_WEBHOOK_SECRET;
+        if (secret && req.query.token !== secret && req.headers["x-loom-secret"] !== secret) {
+          return void res.status(401).json({ error: "unauthorized" });
+        }
+        // No secret set is fine on loopback and nowhere else.
+        //
+        // This route sits in front of the bearer wall on purpose — an alert
+        // sender posts here and has no Loom token — and its own secret was
+        // optional, which together meant a daemon started with --host or
+        // --tailnet served an unauthenticated endpoint that can quarantine an
+        // agent, move the baton, and append status events the shared brain then
+        // reads. On 127.0.0.1 that is a local-user-only capability and an
+        // acceptable default; reachable from a network it is a stranger
+        // steering the fleet. The comment on the auth bypass already said "set
+        // that secret whenever the daemon binds past localhost" — this makes it
+        // true rather than advisory, and says which variable to set instead of
+        // just refusing.
+        if (!secret && !isLoopbackHost(this.host)) {
+          return void res.status(401).json({
+            error:
+              "this daemon is not bound to localhost, so the webhook needs LOOM_WEBHOOK_SECRET set",
+          });
+        }
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const rawAlerts = Array.isArray(body.alerts) ? (body.alerts as Record<string, unknown>[]) : [body];
+        const q = req.query as Record<string, string>;
+        const common = (body.commonLabels ?? {}) as Record<string, string>;
+        const actions: Array<Record<string, unknown>> = [];
+        for (const raw of rawAlerts) {
+          const al = (raw ?? {}) as Record<string, unknown>;
+          const labels = { ...common, ...((al.labels ?? {}) as Record<string, string>) };
+          const status = String(al.status ?? body.status ?? "firing");
+          const projectRef = labels["loom.project"] ?? labels.loom_project ?? q.project;
+          const agent = labels["gen_ai.agent.id"] ?? labels.gen_ai_agent_id ?? labels.agent ?? q.agent;
+          const alertName = String(labels.alertname ?? body.title ?? "alert");
+          if (status !== "firing" && status !== "resolved") { actions.push({ skipped: `status "${status}"` }); continue; }
+          if (!agent) { actions.push({ skipped: "no agent label on alert" }); continue; }
+          const infos = listProjects();
+          // A project ref must actually match — never silently act on an arbitrary
+          // project. Only auto-pick when there's exactly one project and no ref.
+          const info = projectRef
+            ? infos.find((p) => p.name === projectRef || p.id === projectRef)
+            : infos.length === 1 ? infos[0] : undefined;
+          if (!info) {
+            actions.push({ skipped: projectRef ? `no project matching "${projectRef}"` : "project label required (multiple projects)" });
+            continue;
+          }
+          try {
+            const rt = await this.runtime(info.id);
+            if (status === "resolved") {
+              // Recovery: retry the original agent if we had quarantined it.
+              const q0 = rt.unquarantine(String(agent));
+              if (!q0) { actions.push({ project: info.name, agent, alert: alertName, action: "resolved (was not quarantined)" }); continue; }
+              const holder = rt.baton.holder();
+              const retried = q0.displaced && holder !== agent;
+              if (retried) await rt.handoff(String(agent));
+              rt.log.append({ kind: "status", agentId: String(agent),
+                payload: { state: "alert_recovery", alert: alertName, retried, pausedMs: Date.now() - q0.since } });
+              actions.push({ project: info.name, agent, alert: alertName,
+                action: retried ? `recovered — baton handed back to ${agent}` : "recovered — quarantine lifted" });
+              continue;
+            }
+            // Firing: pause the agent and fail the baton over.
+            const holder = rt.baton.holder();
+            const agents = (await rt.status()).agents;
+            const fallback = agents.find((a) => a.id !== agent)?.id;
+            const displaced = holder === agent && !!fallback;
+            rt.quarantine(String(agent), alertName, displaced);
+            rt.log.append({ kind: "status", agentId: String(agent),
+              payload: { state: "alert_intervention", alert: alertName, holder, fallback: fallback ?? null } });
+            // Start the recheck loop: pause → recheck → return the baton if the
+            // agent stops erroring, retrying a few times before giving up.
+            this.startHealLoop(rt, String(agent), alertName, Date.now());
+            if (displaced) {
+              await rt.handoff(fallback!);
+              actions.push({ project: info.name, agent, alert: alertName, action: `quarantined; baton handed to ${fallback}` });
+            } else {
+              actions.push({ project: info.name, agent, alert: alertName,
+                action: fallback ? "quarantined (agent wasn't holding the baton)" : "quarantined (no fallback agent)" });
+            }
+          } catch (e) {
+            actions.push({ agent, error: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        res.json({ ok: true, actions });
+      })();
+    });
 
     app.get(
       "/api/projects/:id/events",
@@ -919,6 +1428,223 @@ export class LoomDaemon {
         const updated = rt.setAgentRole(String(req.params.agentId), clean);
         if (!updated) return void res.status(404).json({ error: "unknown agent" });
         res.json(updated);
+      }),
+    );
+
+    // Switch an agent off (or back on) without removing it from the roster.
+    // 409 rather than 400 for the refusals — holding the baton and being
+    // mid-turn are both states that pass on their own, so the message names
+    // what to do rather than calling the request malformed.
+    app.put(
+      "/api/projects/:id/agents/:agentId/enabled",
+      withRuntime(async (rt, req, res) => {
+        const { enabled } = (req.body ?? {}) as { enabled?: boolean };
+        try {
+          res.json(rt.setAgentEnabled(String(req.params.agentId), enabled !== false));
+        } catch (e) {
+          res.status(409).json({ error: e instanceof Error ? e.message : String(e) });
+        }
+      }),
+    );
+
+    /**
+     * Lift an alert pause by hand.
+     *
+     * The loop lifts itself when the alert resolves or the recheck sees the
+     * agent healthy again, and that is the normal path. This is the override
+     * for when you know better than the alert — a flapping rule, a threshold
+     * set too tight — because otherwise the only way out is editing state on
+     * disk, and an operator with no button will go and do exactly that.
+     */
+    app.delete(
+      "/api/projects/:id/quarantine/:agentId",
+      withRuntime(async (rt, req, res) => {
+        const agentId = String(req.params.agentId);
+        const lifted = rt.unquarantine(agentId);
+        if (!lifted) return void res.status(404).json({ error: `"${agentId}" is not paused` });
+        rt.log.append({
+          kind: "status",
+          agentId,
+          payload: { state: "alert_recovery", alert: lifted.reason, retried: false, via: "manual" },
+        });
+        res.json({ lifted: true, agentId, was: lifted, quarantine: rt.quarantined() });
+      }),
+    );
+
+    // Skills: the SKILL.md context blocks; per-project enable state; a keyword
+    // suggestion for the current message (?suggest=<text>).
+    app.get(
+      "/api/projects/:id/skills",
+      withRuntime(async (rt, req, res) => {
+        const skills = rt.getSkills();
+        const suggest = req.query.suggest ? suggestSkill(String(req.query.suggest), skills) : null;
+        res.json({ skills, suggestion: suggest });
+      }),
+    );
+    app.put(
+      "/api/projects/:id/skills/:skillId",
+      withRuntime(async (rt, req, res) => {
+        const { enabled } = (req.body ?? {}) as { enabled?: boolean };
+        res.json({ skills: rt.setSkillEnabled(String(req.params.skillId), enabled !== false) });
+      }),
+    );
+
+    // The skill picker's list: every skill discoverable from this project, from
+    // all four roots (project, ~/.claude, plugin caches, bundled), without the
+    // bodies. `origin` and `source` say where each one lives, and `installed`
+    // marks the ones in the project's own skills/ dir — the only ones DELETE
+    // will touch.
+    app.get(
+      "/api/projects/:id/skills/catalog",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ skills: rt.skillsCatalog() });
+      }),
+    );
+
+    // Install a skill: from a git remote, or from a directory on this machine.
+    // Everything the user can fix — a URL that isn't git, a repo with no
+    // SKILL.md, a name already taken — comes back as a 400 with the reason,
+    // because "invalid input" is useless when the real answer is "that repo has
+    // no SKILL.md in it".
+    app.post(
+      "/api/projects/:id/skills/install",
+      withRuntime(async (rt, req, res) => {
+        const body = (req.body ?? {}) as { gitUrl?: string; dir?: string; force?: boolean };
+        try {
+          const skill = await rt.installSkill(body);
+          res.json({ skill, skills: rt.skillsCatalog() });
+        } catch (err) {
+          if (err instanceof SkillInstallError) {
+            return void res.status(400).json({ error: err.message });
+          }
+          throw err;
+        }
+      }),
+    );
+
+    // Remove a project-installed skill from disk. Refused (400) for a skill
+    // that lives in ~/.claude or a plugin cache: those are shared with every
+    // other tool on the machine and are not ours to delete.
+    app.delete(
+      "/api/projects/:id/skills/:skillId",
+      withRuntime(async (rt, req, res) => {
+        try {
+          const removed = rt.removeSkill(String(req.params.skillId));
+          res.json({ ...removed, skills: rt.skillsCatalog() });
+        } catch (err) {
+          if (err instanceof SkillInstallError) {
+            return void res.status(400).json({ error: err.message });
+          }
+          throw err;
+        }
+      }),
+    );
+
+    // The MCP catalog: the official registry, searchable, plus a hand-verified
+    // shortlist for the empty state. Not project-scoped — it is the same
+    // catalog for everyone, and caching it per-project would multiply the
+    // requests against somebody else's public service by the project count.
+    //
+    // `degraded: true` means the registry did not answer and `servers` is
+    // therefore empty; `featured` needs no network and is always there.
+    app.get("/api/mcp/catalog", (req, res) => {
+      void (async () => {
+        const q = String(req.query.q ?? "").trim();
+        const limit = req.query.limit ? Number(req.query.limit) : undefined;
+        res.json(await searchCatalog(q, limit));
+      })();
+    });
+
+    // MCP servers: the connect/toggle list. PATCH upserts one by name.
+    //
+    // `connected` on each row is measured here, not inferred from the presence
+    // of a url — every configured endpoint gets a bounded probe (2s, in
+    // parallel) and reports what actually answered. `?probe=0` skips it for a
+    // caller that only wants the configured list back fast.
+    app.get(
+      "/api/projects/:id/mcps",
+      withRuntime(async (rt, req, res) => {
+        const probe = String(req.query.probe ?? "1") !== "0";
+        res.json({ mcps: probe ? await rt.getMcpsProbed() : rt.getMcps(), probed: probe });
+      }),
+    );
+    app.patch(
+      "/api/projects/:id/mcps",
+      withRuntime(async (rt, req, res) => {
+        const body = (req.body ?? {}) as { mcp?: { name?: string } };
+        if (!body.mcp?.name) return void res.status(400).json({ error: "mcp.name required" });
+        res.json({ mcps: rt.upsertMcp(body.mcp as Parameters<typeof rt.upsertMcp>[0]) });
+      }),
+    );
+
+    // Install a server picked out of the catalog.
+    //
+    // Two things separate this from the PATCH above. It refuses a server with
+    // neither a url nor a command — that is the exact shape of the old
+    // placeholder rows, and the whole point of the catalog is that a row means
+    // something now. And it probes what it just wrote, so the response carries a
+    // measured `connected` rather than leaving the UI to render a green badge
+    // off the presence of a string.
+    app.post(
+      "/api/projects/:id/mcps/install",
+      withRuntime(async (rt, req, res) => {
+        const body = (req.body ?? {}) as {
+          name?: string;
+          url?: string;
+          command?: string;
+          args?: unknown;
+          transport?: string;
+          headers?: Record<string, string>;
+          env?: Record<string, string>;
+          description?: string;
+          slug?: string;
+        };
+        const name = String(body.name ?? "").trim();
+        if (!name) return void res.status(400).json({ error: "name required" });
+        const url = String(body.url ?? "").trim();
+        const command = String(body.command ?? "").trim();
+        if (!url && !command) {
+          return void res.status(400).json({
+            error: `"${name}" has neither a url nor a command — an MCP server needs somewhere to connect to or something to run`,
+          });
+        }
+        if (url && !/^https?:\/\//i.test(url)) {
+          return void res.status(400).json({ error: `"${url}" is not an http(s) URL` });
+        }
+        const transport = body.transport === "sse" || body.transport === "http" ? body.transport : undefined;
+        const args = Array.isArray(body.args) ? body.args.map((a) => String(a)) : undefined;
+        const mcps = rt.upsertMcp({
+          name,
+          url,
+          ...(command ? { command } : {}),
+          ...(args?.length ? { args } : {}),
+          ...(url && transport ? { transport } : {}),
+          ...(body.headers && Object.keys(body.headers).length ? { headers: body.headers } : {}),
+          ...(body.env && Object.keys(body.env).length ? { env: body.env } : {}),
+          ...(body.description ? { description: String(body.description) } : {}),
+          ...(body.slug ? { slug: String(body.slug) } : {}),
+          enabledForSession: true,
+        });
+        // Probe after persisting: the answer describes what is now configured,
+        // and a server that fails its probe is still installed — unreachable is
+        // a state to show, not a reason to refuse to save.
+        const installed = mcps.find((m) => m.name === name);
+        const connected = url ? await probeMcpServer(url).catch(() => false) : false;
+        res.json({
+          installed: installed ? { ...installed, connected, probedAt: Date.now() } : null,
+          mcps: await rt.getMcpsProbed(),
+        });
+      }),
+    );
+
+    // Uninstall a server. 404 when nothing was configured under that name —
+    // "deleted a thing that wasn't there" hides a typo in a server name.
+    app.delete(
+      "/api/projects/:id/mcps/:name",
+      withRuntime(async (rt, req, res) => {
+        const { removed, mcps } = rt.removeMcp(String(req.params.name));
+        if (!removed) return void res.status(404).json({ error: `no configured MCP server "${req.params.name}"` });
+        res.json({ removed: true, mcps });
       }),
     );
 
@@ -2062,7 +2788,59 @@ export class LoomDaemon {
     return [...this.extra.keys()];
   }
 
+  /**
+   * The self-heal recheck loop: after a firing alert fails the baton over, wait
+   * LOOM_HEAL_RECHECK_MS, ask the telemetry store (or the local log) whether the
+   * agent has errored since it was quarantined, and if not, hand the baton back
+   * — retrying up to LOOM_HEAL_MAX_RETRIES times before giving up. Best-effort
+   * and unref'd: a daemon restart simply forgets the loop.
+   */
+  private startHealLoop(rt: ProjectRuntime, agent: string, alert: string, since: number): void {
+    if (process.env.LOOM_HEAL_DISABLED === "1") return;
+    const recheckMs = Math.max(1, Number(process.env.LOOM_HEAL_RECHECK_MS) || 60_000);
+    const maxRetries = Math.max(1, Number(process.env.LOOM_HEAL_MAX_RETRIES) || 3);
+    let attempt = 0;
+    const tick = async (): Promise<void> => {
+      attempt += 1;
+      if (!rt.quarantined()[agent]) return; // lifted already (a resolved alert, say)
+      const recovered = await this.agentRecovered(rt, agent, since).catch(() => false);
+      if (recovered) {
+        rt.unquarantine(agent);
+        const retried = rt.baton.holder() !== agent;
+        if (retried) await rt.handoff(agent).catch(() => {});
+        rt.log.append({ kind: "status", agentId: agent, payload: { state: "alert_recovery", alert, retried, attempt, via: "recheck" } });
+        return;
+      }
+      if (attempt >= maxRetries) {
+        rt.log.append({ kind: "status", agentId: agent, payload: { state: "alert_heal_exhausted", alert, attempts: attempt } });
+        return; // stays quarantined for a human
+      }
+      schedule();
+    };
+    const schedule = (): void => {
+      const t = setTimeout(() => { this.healTimers.delete(t); void tick(); }, recheckMs);
+      if (typeof t.unref === "function") t.unref();
+      this.healTimers.add(t);
+    };
+    schedule();
+  }
+
+  /** Recovered = no error spans since it was quarantined (backend first, local log fallback). */
+  private async agentRecovered(rt: ProjectRuntime, agent: string, sinceMs: number): Promise<boolean> {
+    try {
+      return (await recentAgentErrors(rt.info.name, agent, sinceMs)) === 0;
+    } catch {
+      const errs = rt.log.list({ limit: 400 }).filter(
+        (e) => e.ts > sinceMs && e.agentId === agent &&
+          (e.kind === "error" || (e.kind === "run_complete" && (e.payload as Record<string, unknown>).error)),
+      );
+      return errs.length === 0;
+    }
+  }
+
   async close(): Promise<void> {
+    for (const t of this.healTimers) clearTimeout(t);
+    this.healTimers.clear();
     this.unstreamLogs?.();
     this.unstreamLogs = null;
     this.terminals.closeAll();
