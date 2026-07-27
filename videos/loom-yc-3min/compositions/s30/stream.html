@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#t-stream{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#t-stream .clip{position:absolute}
+#t-stream .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#t-stream .sh{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#t-stream .m{font-family:"LoomMono",monospace}
+#t-stream .lg{width:120px;height:120px;object-fit:contain}
+#t-stream .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#t-stream .call{border:2.5px solid #FF6B2B;border-radius:9px;box-shadow:0 0 0 9999px rgba(10,10,11,.5)}
+#t-stream .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
+#t-stream .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
+#t-stream .sub span{background:rgba(10,10,11,.9);padding:10px 25px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
+#t-stream .ttl{font-size:185px;font-weight:700;letter-spacing:-.05em;text-align:center;left:0;right:0}
+</style></head><body>
+<div id="t-stream" data-composition-id="t-stream" data-width="1920" data-height="1080" data-start="0" data-duration="6.4">
+<div class="clip bg" id="t-stream-bg" data-start="0" data-duration="6.4" data-track-index="0"></div>
+<img class="clip sh" id="f0" src="assets/shots/003-generating-00.png" data-start="0" data-duration="6.4" data-track-index="1">
+<img class="clip sh" id="f1" src="assets/shots/004-generating-01.png" data-start="0" data-duration="6.4" data-track-index="2">
+<img class="clip sh" id="f2" src="assets/shots/005-generating-02.png" data-start="0" data-duration="6.4" data-track-index="3">
+<img class="clip sh" id="f3" src="assets/shots/006-generating-03.png" data-start="0" data-duration="6.4" data-track-index="4">
+<img class="clip sh" id="f4" src="assets/shots/007-generating-04.png" data-start="0" data-duration="6.4" data-track-index="5">
+<img class="clip sh" id="f5" src="assets/shots/008-generating-05.png" data-start="0" data-duration="6.4" data-track-index="6">
+<img class="clip sh" id="f6" src="assets/shots/009-generating-06.png" data-start="0" data-duration="6.4" data-track-index="7">
+<img class="clip sh" id="f7" src="assets/shots/010-generating-07.png" data-start="0" data-duration="6.4" data-track-index="8">
+<img class="clip sh" id="f8" src="assets/shots/011-generating-08.png" data-start="0" data-duration="6.4" data-track-index="9">
+<img class="clip sh" id="f9" src="assets/shots/012-generating-09.png" data-start="0" data-duration="6.4" data-track-index="10">
+<img class="clip sh" id="f10" src="assets/shots/013-generating-10.png" data-start="0" data-duration="6.4" data-track-index="11">
+<img class="clip sh" id="f11" src="assets/shots/014-generating-11.png" data-start="0" data-duration="6.4" data-track-index="12">
+<img class="clip sh" id="f12" src="assets/shots/015-generating-12.png" data-start="0" data-duration="6.4" data-track-index="13">
+<img class="clip sh" id="f13" src="assets/shots/016-generating-13.png" data-start="0" data-duration="6.4" data-track-index="14"><div class="clip tag" id="tg" style="left:5%;top:6.5%" data-start="0" data-duration="6.4" data-track-index="30">CODEX &mdash; WORKING, LIVE</div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="6.4" data-track-index="40"><span>Pass the baton — the context goes with it.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="6.4" data-track-index="41"><span>The next agent picks up mid-task.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};
+var tl=gsap.timeline({paused:true});window.__timelines["t-stream"]=tl;
+gsap.set('#f0',{opacity:1,scale:1.3,xPercent:2,yPercent:5});
+gsap.set('#f1',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f1',{opacity:1},0.46);
+gsap.set('#f2',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f2',{opacity:1},0.91);
+gsap.set('#f3',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f3',{opacity:1},1.37);
+gsap.set('#f4',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f4',{opacity:1},1.83);
+gsap.set('#f5',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f5',{opacity:1},2.29);
+gsap.set('#f6',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f6',{opacity:1},2.74);
+gsap.set('#f7',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f7',{opacity:1},3.20);
+gsap.set('#f8',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f8',{opacity:1},3.66);
+gsap.set('#f9',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f9',{opacity:1},4.11);
+gsap.set('#f10',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f10',{opacity:1},4.57);
+gsap.set('#f11',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f11',{opacity:1},5.03);
+gsap.set('#f12',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f12',{opacity:1},5.49);
+gsap.set('#f13',{opacity:0,scale:1.3,xPercent:2,yPercent:5});tl.set('#f13',{opacity:1},5.94);tl.to('#f0',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f1',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f2',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f3',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f4',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f5',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f6',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f7',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f8',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f9',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f10',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f11',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f12',{scale:1.16,duration:6.4,ease:"none"},0);tl.to('#f13',{scale:1.16,duration:6.4,ease:"none"},0);gsap.set('#tg',{opacity:0,scale:.94});tl.to('#tg',{opacity:1,scale:1,duration:.26,ease:"back.out(3)"},.2);
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},3.15);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},3.3);tl.to('#sb1',{opacity:0,duration:.13},6.35);})();</script></body></html>

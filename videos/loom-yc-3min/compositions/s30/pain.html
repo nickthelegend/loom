@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#t-pain{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#t-pain .clip{position:absolute}
+#t-pain .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#t-pain .sh{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#t-pain .m{font-family:"LoomMono",monospace}
+#t-pain .lg{width:120px;height:120px;object-fit:contain}
+#t-pain .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#t-pain .call{border:2.5px solid #FF6B2B;border-radius:9px;box-shadow:0 0 0 9999px rgba(10,10,11,.5)}
+#t-pain .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
+#t-pain .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
+#t-pain .sub span{background:rgba(10,10,11,.9);padding:10px 25px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
+#t-pain .ttl{font-size:185px;font-weight:700;letter-spacing:-.05em;text-align:center;left:0;right:0}
+</style></head><body>
+<div id="t-pain" data-composition-id="t-pain" data-width="1920" data-height="1080" data-start="0" data-duration="4.2">
+<div class="clip bg" id="t-pain-bg" data-start="0" data-duration="4.2" data-track-index="0"></div>
+<div class="clip" id="pw" data-start="0" data-duration="4.2" data-track-index="1" style="inset:0">
+    <div class="card" style="position:absolute;left:150px;top:230px;width:640px;height:420px"></div>
+    <img class="lg" id="l1" src="assets/logos/logo-claude-code.png" style="position:absolute;left:410px;top:282px">
+    <div class="m" id="n1" style="position:absolute;left:150px;top:432px;width:640px;text-align:center;font-size:23px;color:#A1A1AA">claude-code</div>
+    <div class="m" id="w1" style="position:absolute;left:194px;top:478px;width:552px;font-size:13.5px;color:#4d4d55;line-height:1.85;overflow:hidden;height:0">&gt; pnpm monorepo, node 20 — four packages, one app.<br>packages/daemon owns every websocket, binds 7420.<br>apps/web is next 15 on the app router.<br>packages/core holds the domain types.<br>tests live beside the file they cover.</div>
+    <div class="card" style="position:absolute;left:1130px;top:230px;width:640px;height:420px"></div>
+    <img class="lg" id="l2" src="assets/logos/logo-codex.png" style="position:absolute;left:1390px;top:282px">
+    <div class="m" id="n2" style="position:absolute;left:1130px;top:432px;width:640px;text-align:center;font-size:23px;color:#A1A1AA">codex</div>
+    <div class="m" id="w2" style="position:absolute;left:1174px;top:478px;width:552px;font-size:13.5px;color:#4d4d55;line-height:1.85;overflow:hidden;height:0">&gt; pnpm monorepo, node 20 — four packages, one app.<br>packages/daemon owns every websocket, binds 7420.<br>apps/web is next 15 on the app router.<br>packages/core holds the domain types.<br>tests live beside the file they cover.</div>
+    <div id="wl" style="position:absolute;left:958px;top:230px;width:4px;height:420px;background:#FF6B2B;opacity:0"></div>
+    <div class="m" id="xx" style="position:absolute;left:810px;top:672px;width:300px;text-align:center;font-size:18px;color:#FF6B2B;letter-spacing:.16em;opacity:0">NO SHARED MEMORY</div>
+  </div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="4.2" data-track-index="40"><span>Every coding agent keeps its own memory.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};
+var tl=gsap.timeline({paused:true});window.__timelines["t-pain"]=tl;
+gsap.set(['#l1','#n1'],{opacity:0,y:18});gsap.set(['#l2','#n2'],{opacity:0,y:18});gsap.set('#pw',{scale:1.06});
+tl.to('#pw',{scale:1,duration:4.2,ease:"power1.out"},0)
+ .to(['#l1','#n1'],{opacity:1,y:0,duration:.32,ease:"back.out(2.4)"},.2)
+ .to('#w1',{height:132,duration:1.5,ease:"none"},.55)
+ .to(['#l2','#n2'],{opacity:1,y:0,duration:.32,ease:"back.out(2.4)"},3.2)
+ .to('#w2',{height:132,duration:1.5,ease:"none"},3.5)
+ .to('#wl',{opacity:1,duration:.2},6.1).to('#xx',{opacity:1,duration:.24},6.25);
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},4.15);})();</script></body></html>
