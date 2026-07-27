@@ -1,0 +1,55 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#pt-board{position:absolute;inset:0;overflow:hidden;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#pt-board .clip{position:absolute}
+#pt-board .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#pt-board .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#pt-board .mono{font-family:"LoomMono",monospace}
+#pt-board .call{border:2px solid #FF6B2B;border-radius:8px;box-shadow:0 0 0 9999px rgba(10,10,11,.55)}
+#pt-board .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:20px;letter-spacing:.06em;
+  padding:7px 13px;border-radius:6px;white-space:nowrap}
+#pt-board .band{left:0;right:0;bottom:0;height:104px;background:linear-gradient(0deg,rgba(10,10,11,.97),rgba(10,10,11,.86) 62%,transparent);
+  display:flex;align-items:center;justify-content:center;gap:26px}
+#pt-board .bandttl{font-size:27px;font-weight:700;letter-spacing:.03em;color:#FF6B2B}
+#pt-board .bandsub{font-size:21px;color:#A1A1AA}
+</style>
+</head><body>
+<div id="pt-board" data-composition-id="pt-board" data-width="1920" data-height="1080" data-start="0" data-duration="3.6">
+<div class="clip bg" id="pt-board-bg" data-start="0" data-duration="3.6" data-track-index="0"></div>
+<img class="clip shot" id="a" src="assets/shots/017-board-kanban.png" data-start="0" data-duration="3.6" data-track-index="1">
+      <div class="clip call" id="c1" style="left:14.6%;top:15%;width:17%;height:23%" data-start="0" data-duration="3.6" data-track-index="4"></div>
+      <div class="clip tag" id="t1" style="left:14.6%;top:10%" data-start="0" data-duration="3.6" data-track-index="5">CODEX IS BUILDING</div>
+      <div class="clip call" id="c2" style="left:49.8%;top:15%;width:17%;height:17%" data-start="0" data-duration="3.6" data-track-index="6"></div>
+      <div class="clip tag" id="t2" style="left:49.8%;top:10%" data-start="0" data-duration="3.6" data-track-index="7">OPENCODE REVIEWING</div>
+      <div class="clip band" id="band" data-start="0" data-duration="99" data-track-index="8">
+   <div class="bandttl">THE FLEET'S WORK</div><div class="bandsub mono">every task carries its agent</div></div>
+</div>
+<script>
+(function(){
+  window.__timelines = window.__timelines || {};
+  var tl = gsap.timeline({paused:true});
+  window.__timelines["pt-board"] = tl;
+  gsap.set('#a',{scale:1});
+  tl.to('#a',{scale:1.09,duration:3.6,ease:"none"},0);
+  gsap.set('#c1',{opacity:0,scale:0.94});
+  tl.to('#c1',{opacity:1,scale:1,duration:0.20,ease:"back.out(3)"},0.29);
+  tl.to('#c1',{opacity:0,duration:0.16,ease:"power2.in"},1.51);
+  gsap.set('#t1',{opacity:0,scale:0.94});
+  tl.to('#t1',{opacity:1,scale:1,duration:0.20,ease:"back.out(3)"},0.36);
+  tl.to('#t1',{opacity:0,duration:0.16,ease:"power2.in"},1.51);
+  gsap.set('#c2',{opacity:0,scale:0.94});
+  tl.to('#c2',{opacity:1,scale:1,duration:0.20,ease:"back.out(3)"},1.8);
+  tl.to('#c2',{opacity:0,duration:0.16,ease:"power2.in"},3.24);
+  gsap.set('#t2',{opacity:0,scale:0.94});
+  tl.to('#t2',{opacity:1,scale:1,duration:0.20,ease:"back.out(3)"},1.87);
+  tl.to('#t2',{opacity:0,duration:0.16,ease:"power2.in"},3.24);
+  gsap.set('.band',{opacity:0,y:26});
+  tl.to('.band',{opacity:1,y:0,duration:0.26,ease:"back.out(2.4)"},0.22);
+
+})();
+</script>
+</body></html>

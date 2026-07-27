@@ -30,7 +30,7 @@ for (const l of lines) {
   if (!text) { console.log(`  line ${l.n}: EMPTY, skipped`); continue; }
   const file = path.join(OUT, `${String(l.n).padStart(2, "0")}.wav`);
   console.log(`  line ${l.n} (${text.split(" ").length}w): ${text.slice(0, 62)}…`);
-  execFileSync("npx", ["hyperframes", "tts", text, "--voice", "am_michael", "--speed", "1.2", "-o", file],
+  execFileSync("npx", ["hyperframes", "tts", text, "--voice", process.env.HF_VOICE||"am_michael", "--speed", process.env.HF_SPEED||"1.2", "-o", file],
     { stdio: ["ignore", "pipe", "pipe"], cwd: process.argv[4] || process.cwd() });
 }
 console.log("done ->", OUT);
