@@ -268,9 +268,14 @@ program
 program
   .command("agents")
   .description("list agent ids, kinds, roles, models, and baton eligibility")
-  .action(async () => {
+  .option("--json", "print the agent roster as JSON")
+  .action(async (opts: { json: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
+    if (opts.json) {
+      console.log(JSON.stringify(project.agents));
+      return;
+    }
     if (!project.agents.length) {
       console.log(pc.dim("no agents configured — edit .loom/config.json or run loom init"));
       return;
