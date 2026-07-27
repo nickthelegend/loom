@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#k-circuits{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#k-circuits .clip{position:absolute}
+#k-circuits .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
+#k-circuits .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
+#k-circuits .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
+</style></head><body>
+<div id="k-circuits" data-composition-id="k-circuits" data-width="1920" data-height="1080" data-start="0" data-duration="15.1">
+<div class="clip sub" id="sb0" data-start="0" data-duration="15.1" data-track-index="40"><span>The whole project is open source.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="15.1" data-track-index="41"><span>Enclosure, wiring, the full schematic.</span></div>
+<div class="clip sub" id="sb2" data-start="0" data-duration="15.1" data-track-index="42"><span>Print one, wire it, and it is yours.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["k-circuits"]=tl;
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},4.98);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},5.13);tl.to('#sb1',{opacity:0,duration:.13},10.02);
+gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.2,ease:"power2.out"},10.17);tl.to('#sb2',{opacity:0,duration:.13},15.05);})();</script></body></html>

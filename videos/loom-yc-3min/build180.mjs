@@ -33,9 +33,8 @@ const SC = [
   ["mobile", 15.0, "08", ["The same brain is on your phone.", "The brain, the routes, the whole thread.", "Start a route from your pocket."]],
   ["buildpad", 18.1, "09", ["And we built it a body.", "Printed, wired, assembled.", "One key per agent."]],
   ["pad", 52.0, null, []],
-  ["circuits", 15.1, "10", ["The whole project is open source.", "Enclosure, wiring, the full schematic.", "Anyone can build one themselves."]],
-  ["micro", 4.6, "11", ["A Codex Micro — for every agent, in one device."]],
-  ["landing", 9.0, "12", ["Buy one soon, or build one yourself."]],
+  ["circuits", 15.1, "13", ["The whole project is open source.", "Enclosure, wiring, the full schematic.", "Print one, wire it, and it is yours."]],
+  ["landing", 9.0, "14", ["One device that speaks to every agent you use.", "Buy one soon, or build one yourself."]],
   ["close", 6.2, null, ["Loom. One brain, every agent.", "Open source, MIT. Build one yourself."]],
 ];
 
@@ -252,6 +251,43 @@ ${M.map((m) => `  <div class="clip" id="mt-${m.id}" data-composition-id="d-${m.i
    data-start="${m.at.toFixed(2)}" data-duration="${m.secs}" data-track-index="1" style="inset:0;width:100%;height:100%"></div>`).join("\n")}
 ${M.filter((m) => m.vo).map((m) => `  <audio class="clip" id="vo-${m.vo}" src="assets/vo180/${m.vo}.wav"
    data-start="${(m.at + .15).toFixed(2)}" data-duration="${(m.secs - .15).toFixed(2)}" data-track-index="20"></audio>`).join("\n")}
+</div>
+<script>window.__timelines=window.__timelines||{};window.__timelines["root"]=gsap.timeline({paused:true});<\/script>
+</body></html>`);
+
+
+const SD = path.join(D, "compositions", "subs");
+fs.mkdirSync(SD, { recursive: true });
+for (const m of M) {
+  const scene = SC.find((x) => x[0] === m.id);
+  const sb = subs(scene[3] || [], m.secs, 40);
+  fs.writeFileSync(path.join(SD, m.id + ".html"), `<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"><\/script>
+<style>
+@font-face{font-family:"SG";src:url("assets/${FONT}") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#k-${m.id}{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#k-${m.id} .clip{position:absolute}
+#k-${m.id} .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
+#k-${m.id} .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
+#k-${m.id} .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
+</style></head><body>
+<div id="k-${m.id}" data-composition-id="k-${m.id}" data-width="1920" data-height="1080" data-start="0" data-duration="${m.secs}">
+${sb.h}
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["k-${m.id}"]=tl;
+${sb.j}})();<\/script></body></html>`);
+}
+fs.writeFileSync(path.join(D, "index-subs.html"), `<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"><\/script>
+<style>html,body{margin:0;background:#00FF00}
+#root{position:relative;width:1920px;height:1080px;overflow:hidden;background:#00FF00}
+#root .clip{position:absolute}</style></head><body>
+<div id="root" data-composition-id="root" data-width="1920" data-height="1080" data-start="0" data-duration="${T.toFixed(2)}">
+${M.map((m) => `  <div class="clip" id="ks-${m.id}" data-composition-id="k-${m.id}" data-composition-src="compositions/subs/${m.id}.html"
+   data-start="${m.at.toFixed(2)}" data-duration="${m.secs}" data-track-index="1" style="inset:0;width:100%;height:100%"></div>`).join("\n")}
 </div>
 <script>window.__timelines=window.__timelines||{};window.__timelines["root"]=gsap.timeline({paused:true});<\/script>
 </body></html>`);
