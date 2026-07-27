@@ -14,6 +14,7 @@
 import { execFile } from "node:child_process";
 import os from "node:os";
 import { GuiChatDriver } from "../adapters/bridges/gui-chat.js";
+import { agyBin } from "../adapters/antigravity-cli.js";
 import { codexBin } from "../adapters/codex.js";
 import { profileFor } from "../adapters/bridges/profiles.js";
 import { ADES, detectAdes } from "./ades.js";
@@ -80,6 +81,7 @@ const INSTALL: Record<string, string> = {
   codex: "install Codex.app, or npm i -g @openai/codex",
   opencode: "curl -fsSL https://opencode.ai/install | bash",
   "grok-code": "install the grok CLI from docs.x.ai",
+  "antigravity-cli": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
 };
 
 const AUTH: Record<string, string> = {
@@ -87,6 +89,7 @@ const AUTH: Record<string, string> = {
   codex: "codex login",
   opencode: "opencode auth login",
   "grok-code": "run `grok` once and sign in",
+  "antigravity-cli": "run `agy` once and sign in with Google",
 };
 
 /**
@@ -159,6 +162,18 @@ async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail
         return { authed: false, detail: "the CLI says: Not logged in" };
       }
       return { authed: true };
+    }
+    if (kind === "antigravity-cli") {
+      // agy has no status command. Listing models needs the account, so a signed-
+      // out CLI can't and says so; a signed-in one prints the catalog cheaply.
+      const bin = agyBin();
+      if (!bin) return { authed: null };
+      const { out } = await run(bin, ["models"], 6000);
+      if (/sign in|log ?in|not authenticated|unauthenticated|please authenticate/i.test(out)) {
+        return { authed: false, detail: "the CLI says: not signed in" };
+      }
+      if (/gemini-|claude-|gpt-/i.test(out)) return { authed: true };
+      return { authed: null };
     }
   } catch {
     /* fall through to unknown */

@@ -1741,7 +1741,11 @@ export class ProjectRuntime {
             busy: false,
             holdsBaton: false,
             model,
-            enabled: false,
+            // "not spawned" is not "switched off". An agent whose CLI is missing
+            // is still enabled in config, and reporting it as disabled made the
+            // project-settings toggle render off — clicking it then wrote the
+            // value it already had, so the agent could never be turned back on.
+            enabled: cfg.enabled !== false,
           };
         }
         return {

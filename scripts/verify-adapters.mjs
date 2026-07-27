@@ -23,7 +23,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { createAgent } = await import(`${ROOT}/dist/adapters/index.js`);
-const { isAdapter } = await import(`${ROOT}/dist/types.js`);
+const { ADES } = await import(`${ROOT}/dist/core/ades.js`);
 
 function scratchRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-verify-"));
@@ -32,19 +32,25 @@ function scratchRepo() {
   return dir;
 }
 
-const ADAPTERS = [
-  { id: "claude-code", kind: "claude-code" },
-  { id: "codex", kind: "codex" },
-  { id: "opencode", kind: "opencode", options: { model: process.env.LOOM_OC_MODEL || "opencode/north-mini-code-free" } },
-  { id: "grok-code", kind: "grok-code" },
-  // Antigravity is an adapter now, driven headless through `agy` — the CDP
-  // bridge it replaced is withdrawn, so probing that would test a thing Loom
-  // no longer offers.
-  { id: "antigravity", kind: "antigravity-cli" },
-];
-const BRIDGES = [
-  { id: "kiro", kind: "kiro" },
-];
+/**
+ * The list comes from ADES, not from here.
+ *
+ * It used to be two hand-written arrays, and they drifted the moment the roster
+ * changed: `antigravity-cli` shipped as a real adapter and was never verified by
+ * the script whose whole job is verifying adapters, while the withdrawn
+ * Antigravity CDP bridge — gone from ADES, gone from every view — was still
+ * being launched, asked a question, and reported on as if Loom offered it.
+ * Deriving from ADES means "what Loom claims" and "what gets checked" are the
+ * same sentence, which is the point of the file.
+ */
+const KIND_OPTIONS = {
+  // opencode needs a provider/model pin, and which providers exist is that
+  // install's business — LOOM_OC_MODEL overrides when this one goes away.
+  opencode: { model: process.env.LOOM_OC_MODEL || "opencode/north-mini-code-free" },
+};
+const specs = ADES.map((a) => ({ id: a.kind, kind: a.kind, tier: a.tier, options: KIND_OPTIONS[a.kind] }));
+const ADAPTERS = specs.filter((s) => s.tier === "adapter");
+const BRIDGES = specs.filter((s) => s.tier === "bridge");
 
 const results = [];
 
@@ -118,7 +124,7 @@ const FIX = {
   codex: "codex login",
   opencode: "its model pin is stale — `opencode models` then set options.model in .loom/config.json",
   "grok-code": "run `grok` in a terminal and log in",
-  antigravity: "install the Antigravity CLI (`agy`) and sign in — it goes in ~/.local/bin",
+  "antigravity-cli": "run `agy` once and sign in with Google",
   kiro: 'open -a "Kiro" --args --remote-debugging-port=9334, then open its chat panel',
 };
 const broken = results.filter((r) => r.status !== "WORKS");

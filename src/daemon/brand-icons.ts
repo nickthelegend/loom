@@ -19,11 +19,20 @@ export const BRAND_KINDS = ["claude-code","antigravity","opencode","kiro","codex
 /** Human-readable name per kind, for tooltips and accessible names. */
 export const BRAND_TITLES: Record<string, string> = {
   "claude-code": "Claude Code",
-  "antigravity": "Antigravity",
+  "antigravity": "Antigravity IDE",
+  "antigravity-cli": "Antigravity",
   "opencode": "opencode",
   "kiro": "Kiro",
   "codex": "Codex",
   "grok-code": "Grok Code"
+};
+
+/**
+ * Kinds that reuse another kind's mark. The headless CLI and the GUI bridge are
+ * the same product, so both draw the Antigravity logo; only one <symbol> exists.
+ */
+export const BRAND_ICON_ALIAS: Record<string, string> = {
+  "antigravity-cli": "antigravity",
 };
 
 /**
