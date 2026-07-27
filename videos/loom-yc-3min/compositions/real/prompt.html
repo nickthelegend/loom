@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#r-prompt{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#r-prompt .clip{position:absolute}
+#r-prompt .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#r-prompt .sh{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#r-prompt .m{font-family:"LoomMono",monospace}
+/* subtitle: one line, centred low, on a plate so it survives any footage */
+#r-prompt .sub{left:0;right:0;bottom:66px;text-align:center;font-size:37px;font-weight:600;letter-spacing:-.01em}
+#r-prompt .sub span{background:rgba(10,10,11,.9);padding:11px 26px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.75}
+#r-prompt .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:22px;letter-spacing:.05em;
+  padding:8px 15px;border-radius:6px}
+#r-prompt .ttl{font-size:180px;font-weight:700;letter-spacing:-.05em;text-align:center;left:0;right:0}
+</style></head><body>
+<div id="r-prompt" data-composition-id="r-prompt" data-width="1920" data-height="1080" data-start="0" data-duration="4">
+<div class="clip bg" id="r-prompt-bg" data-start="0" data-duration="4" data-track-index="0"></div>
+<img class="clip sh" id="im" src="assets/shots/001-prompt-typed.png" data-start="0" data-duration="4" data-track-index="1"><div class="clip tag" id="tg" style="left:5.5%;top:7%" data-start="0" data-duration="4" data-track-index="3">A REAL PROMPT</div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="4" data-track-index="40"><span>One prompt. One shared thread.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};
+var tl=gsap.timeline({paused:true});window.__timelines["r-prompt"]=tl;
+gsap.set('#im',{scale:1.9,xPercent:3,yPercent:22});
+tl.to('#im',{scale:1.62,xPercent:2,yPercent:20,duration:4,ease:"power1.inOut"},0);
+gsap.set('#tg',{opacity:0,scale:.94});tl.to('#tg',{opacity:1,scale:1,duration:.24,ease:"back.out(3)"},.25);
+
+gsap.set('#sb0',{opacity:0,y:14});
+tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.12);
+tl.to('#sb0',{opacity:0,duration:.14},3.96);})();</script></body></html>

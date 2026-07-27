@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#r-brain{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#r-brain .clip{position:absolute}
+#r-brain .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#r-brain .sh{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#r-brain .m{font-family:"LoomMono",monospace}
+/* subtitle: one line, centred low, on a plate so it survives any footage */
+#r-brain .sub{left:0;right:0;bottom:66px;text-align:center;font-size:37px;font-weight:600;letter-spacing:-.01em}
+#r-brain .sub span{background:rgba(10,10,11,.9);padding:11px 26px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.75}
+#r-brain .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:22px;letter-spacing:.05em;
+  padding:8px 15px;border-radius:6px}
+#r-brain .ttl{font-size:180px;font-weight:700;letter-spacing:-.05em;text-align:center;left:0;right:0}
+</style></head><body>
+<div id="r-brain" data-composition-id="r-brain" data-width="1920" data-height="1080" data-start="0" data-duration="8.4">
+<div class="clip bg" id="r-brain-bg" data-start="0" data-duration="8.4" data-track-index="0"></div>
+<img class="clip sh" id="im" src="assets/shots/019-brain.png" data-start="0" data-duration="8.4" data-track-index="1"><div class="clip tag" id="tg" style="left:5.5%;top:7%" data-start="0" data-duration="8.4" data-track-index="3">THE BRAIN</div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="8.4" data-track-index="40"><span>Four different agents wrote this memory.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="8.4" data-track-index="41"><span>Every one of them can read all of it.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};
+var tl=gsap.timeline({paused:true});window.__timelines["r-brain"]=tl;
+gsap.set('#im',{scale:1.4,xPercent:1,yPercent:-13});
+tl.to('#im',{scale:1.26,xPercent:0,yPercent:10,duration:8.4,ease:"power1.inOut"},0);
+gsap.set('#tg',{opacity:0,scale:.94});tl.to('#tg',{opacity:1,scale:1,duration:.24,ease:"back.out(3)"},.25);
+
+gsap.set('#sb0',{opacity:0,y:14});
+tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.12);
+tl.to('#sb0',{opacity:0,duration:.14},4.16);
+gsap.set('#sb1',{opacity:0,y:14});
+tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},4.32);
+tl.to('#sb1',{opacity:0,duration:.14},8.36);})();</script></body></html>
