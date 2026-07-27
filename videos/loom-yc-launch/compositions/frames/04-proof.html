@@ -1,0 +1,556 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Space Grotesk";
+      src: url("capture/assets/fonts/0c89a48fa5027cee-s.p.0rd3rjvnnhw7n.woff2") format("woff2");
+      font-weight: 100 900;
+      font-style: normal;
+      font-display: block;
+    }
+
+    #root {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      container-type: size;
+      font-family: "Space Grotesk", sans-serif;
+      color: #fafafa;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ---------- ground ---------- */
+    #p4-bg {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+      background: #0a0a0b;
+    }
+
+    /* ---------- shared chrome ---------- */
+    .p4-mono {
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .p4-slash {
+      color: #ff6b2b;
+    }
+
+    /* ---------- beat A : the agent row ---------- */
+    #p4-railLayer {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+    }
+    #p4-railInner {
+      position: absolute;
+      left: 0;
+      top: 400px;
+      width: 1920px;
+      height: 220px;
+    }
+    #p4-railRule {
+      position: absolute;
+      left: 106px;
+      top: 0;
+      width: 1708px;
+      height: 1px;
+      background: rgba(250, 250, 250, 0.16);
+    }
+    #p4-chips {
+      position: absolute;
+      left: 106px;
+      top: 40px;
+      width: 1708px;
+      height: 86px;
+      display: flex;
+      align-items: stretch;
+      justify-content: space-between;
+    }
+    .p4-chip {
+      display: flex;
+      align-items: center;
+      padding: 0 30px;
+      border: 1px solid rgba(250, 250, 250, 0.22);
+      font-size: 2.35cqw;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
+    }
+    #p4-railNote {
+      position: absolute;
+      left: 106px;
+      top: 166px;
+      font-size: 1.15cqw;
+      line-height: 1.4;
+      color: #b7b1af;
+    }
+
+    /* ---------- beat B : the route ---------- */
+    #p4-pipeLayer {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 1920px;
+      height: 1080px;
+    }
+
+    .p4-card {
+      position: absolute;
+      top: 396px;
+      width: 440px;
+      height: 200px;
+      border: 1px solid rgba(250, 250, 250, 0.11);
+    }
+    .p4-idx {
+      position: absolute;
+      left: 26px;
+      top: 26px;
+      font-size: 0.85cqw;
+      line-height: 1;
+      color: rgba(250, 250, 250, 0.46);
+    }
+    .p4-done {
+      position: absolute;
+      right: 26px;
+      top: 26px;
+      font-size: 0.85cqw;
+      line-height: 1;
+      color: rgba(250, 250, 250, 0.55);
+    }
+    .p4-stage {
+      position: absolute;
+      left: 26px;
+      bottom: 52px;
+      font-size: 2.9cqw;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.03em;
+      color: rgba(250, 250, 250, 0.56);
+    }
+    .p4-track {
+      position: absolute;
+      left: 26px;
+      bottom: 26px;
+      width: 388px;
+      height: 3px;
+      background: rgba(250, 250, 250, 0.12);
+    }
+    .p4-bar {
+      position: absolute;
+      left: 26px;
+      bottom: 26px;
+      width: 388px;
+      height: 3px;
+      background: #ff6b2b;
+    }
+
+    .p4-conn {
+      position: absolute;
+      top: 490px;
+      width: 194px;
+      height: 12px;
+    }
+    .p4-conn-base {
+      position: absolute;
+      left: 0;
+      top: 5px;
+      width: 194px;
+      height: 1px;
+      background: rgba(250, 250, 250, 0.11);
+    }
+    .p4-conn-fill {
+      position: absolute;
+      left: 0;
+      top: 5px;
+      width: 194px;
+      height: 1px;
+      background: #ff6b2b;
+    }
+    .p4-chev {
+      position: absolute;
+      left: 184px;
+      top: 0.5px;
+      width: 0;
+      height: 0;
+      border-left: 10px solid rgba(250, 250, 250, 0.11);
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+    }
+
+    .p4-agent {
+      position: absolute;
+      top: 626px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 500;
+      font-size: 0.95cqw;
+      line-height: 1;
+      letter-spacing: 0.06em;
+      color: #b7b1af;
+    }
+    .p4-dot {
+      width: 9px;
+      height: 9px;
+      border: 1px solid rgba(250, 250, 250, 0.34);
+      background: rgba(250, 250, 250, 0);
+    }
+
+    #p4-cmdRule {
+      position: absolute;
+      left: 106px;
+      top: 726px;
+      width: 1708px;
+      height: 1px;
+      background: rgba(250, 250, 250, 0.16);
+    }
+    #p4-cmd {
+      position: absolute;
+      left: 106px;
+      top: 754px;
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 500;
+      font-size: 1.6cqw;
+      line-height: 1.3;
+      letter-spacing: 0.02em;
+      color: #fafafa;
+      white-space: nowrap;
+    }
+    #p4-cmd .p4-prompt {
+      color: #ff6b2b;
+      margin-right: 16px;
+    }
+  </style>
+
+  <div
+    id="root"
+    data-composition-id="04-proof"
+    data-start="0"
+    data-duration="5.888"
+    data-width="1920"
+    data-height="1080"
+  >
+    <!-- full-bleed ground -->
+    <div
+      id="p4-bg"
+      class="clip"
+      data-start="0"
+      data-duration="5.888"
+      data-track-index="0"
+    ></div>
+
+    <!-- BEAT A — five named agents -->
+    <div
+      id="p4-railLayer"
+      class="clip"
+      data-start="0"
+      data-duration="5.888"
+      data-track-index="1"
+    >
+      <div id="p4-railInner">
+        <div id="p4-railRule"></div>
+        <div id="p4-chips">
+          <div class="p4-chip" id="p4-chip1">Claude Code</div>
+          <div class="p4-chip" id="p4-chip2">Codex</div>
+          <div class="p4-chip" id="p4-chip3">OpenCode</div>
+          <div class="p4-chip" id="p4-chip4">Grok</div>
+          <div class="p4-chip" id="p4-chip5">Antigravity</div>
+        </div>
+        <div id="p4-railNote" class="p4-mono">
+          <span class="p4-slash">/</span>&nbsp; verified against a real version
+        </div>
+      </div>
+    </div>
+
+    <!-- BEAT B — the route resolving -->
+    <div
+      id="p4-pipeLayer"
+      class="clip"
+      data-start="0"
+      data-duration="5.888"
+      data-track-index="2"
+    >
+      <div class="p4-card" id="p4-card1" style="left: 106px">
+        <div class="p4-idx p4-mono">01</div>
+        <div class="p4-done p4-mono" id="p4-done1">done</div>
+        <div class="p4-stage" id="p4-stage1">plan</div>
+        <div class="p4-track"></div>
+        <div class="p4-bar" id="p4-bar1"></div>
+      </div>
+
+      <div class="p4-conn" style="left: 546px">
+        <div class="p4-conn-base"></div>
+        <div class="p4-conn-fill" id="p4-conn1"></div>
+        <div class="p4-chev" id="p4-chev1"></div>
+      </div>
+
+      <div class="p4-card" id="p4-card2" style="left: 740px">
+        <div class="p4-idx p4-mono">02</div>
+        <div class="p4-done p4-mono" id="p4-done2">done</div>
+        <div class="p4-stage" id="p4-stage2">execute</div>
+        <div class="p4-track"></div>
+        <div class="p4-bar" id="p4-bar2"></div>
+      </div>
+
+      <div class="p4-conn" style="left: 1180px">
+        <div class="p4-conn-base"></div>
+        <div class="p4-conn-fill" id="p4-conn2"></div>
+        <div class="p4-chev" id="p4-chev2"></div>
+      </div>
+
+      <div class="p4-card" id="p4-card3" style="left: 1374px">
+        <div class="p4-idx p4-mono">03</div>
+        <div class="p4-done p4-mono" id="p4-done3">done</div>
+        <div class="p4-stage" id="p4-stage3">review</div>
+        <div class="p4-track"></div>
+        <div class="p4-bar" id="p4-bar3"></div>
+      </div>
+
+      <div class="p4-agent" id="p4-agent1" style="left: 106px">
+        <span class="p4-dot" id="p4-dot1"></span>claude-code
+      </div>
+      <div class="p4-agent" id="p4-agent2" style="left: 740px">
+        <span class="p4-dot" id="p4-dot2"></span>codex
+      </div>
+      <div class="p4-agent" id="p4-agent3" style="left: 1374px">
+        <span class="p4-dot" id="p4-dot3"></span>opencode
+      </div>
+
+      <div id="p4-cmdRule"></div>
+      <div id="p4-cmd">
+        <span class="p4-prompt">$</span>loom route ship "add dark mode"
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      var DONE_BORDER = "rgba(250,250,250,0.26)";
+      var ACCENT = "#ff6b2b";
+
+      gsap.set("#p4-railInner", { transformOrigin: "106px 0px" });
+      gsap.set(".p4-bar", { transformOrigin: "0px 50%" });
+      gsap.set(".p4-conn-fill", { transformOrigin: "0px 50%" });
+      gsap.set("#p4-cmdRule", { transformOrigin: "0px 50%" });
+
+      /* ---------------- BEAT A : 0.00 – 2.00 ---------------- */
+
+      // the baseline the names land on
+      tl.fromTo(
+        "#p4-railRule",
+        { scaleX: 0, transformOrigin: "0px 50%" },
+        { scaleX: 1, duration: 0.5, ease: "power3.out" },
+        0.02
+      );
+
+      // five agent names, one per beat, 120ms apart
+      tl.fromTo(
+        ".p4-chip",
+        { opacity: 0, y: 26 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.36,
+          ease: "power3.out",
+          stagger: 0.12,
+        },
+        0.1
+      );
+
+      // the specificity line
+      tl.fromTo(
+        "#p4-railNote",
+        { opacity: 0, y: 12 },
+        { opacity: 1, y: 0, duration: 0.38, ease: "power2.out" },
+        0.86
+      );
+
+      /* -------- SEAM : the row demotes to a rail -------- */
+
+      tl.to(
+        "#p4-railInner",
+        { y: -250, scale: 0.8, duration: 0.62, ease: "power3.inOut" },
+        1.98
+      );
+      tl.to(
+        "#p4-railInner",
+        { opacity: 0.55, duration: 0.5, ease: "power2.inOut" },
+        2.04
+      );
+
+      /* ---------------- BEAT B : 2.00 – 5.888 ---------------- */
+
+      // the pipeline scaffold: three stages, two hairlines
+      tl.fromTo(
+        ".p4-card",
+        { opacity: 0, y: 22 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.42,
+          ease: "power3.out",
+          stagger: 0.07,
+        },
+        2.16
+      );
+      tl.fromTo(
+        ".p4-conn-base",
+        { scaleX: 0, transformOrigin: "0px 50%" },
+        { scaleX: 1, duration: 0.3, ease: "power2.out", stagger: 0.07 },
+        2.3
+      );
+      tl.fromTo(
+        ".p4-chev",
+        { opacity: 0 },
+        { opacity: 1, duration: 0.24, stagger: 0.07 },
+        2.42
+      );
+
+      // everything that only exists once it has run
+      tl.fromTo(".p4-bar", { scaleX: 0 }, { scaleX: 0, duration: 0.01 }, 0);
+      tl.fromTo(
+        ".p4-conn-fill",
+        { scaleX: 0 },
+        { scaleX: 0, duration: 0.01 },
+        0
+      );
+      tl.fromTo(".p4-done", { opacity: 0 }, { opacity: 0, duration: 0.01 }, 0);
+
+      // stage schedule — exactly one accent alive at a time
+      var stages = [
+        { n: 1, enter: 2.42, active: 2.5, complete: 3.12 },
+        { n: 2, enter: 3.3, active: 3.42, complete: 4.05 },
+        { n: 3, enter: 4.24, active: 4.36, complete: 4.99 },
+      ];
+
+      stages.forEach(function (s) {
+        var run = s.complete - s.active;
+
+        // the agent that runs this hop
+        tl.fromTo(
+          "#p4-agent" + s.n,
+          { opacity: 0, y: 10 },
+          { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" },
+          s.enter
+        );
+
+        // RUNNING — accent moves onto this stage only
+        tl.to(
+          "#p4-card" + s.n,
+          { borderColor: ACCENT, duration: 0.22, ease: "none" },
+          s.active
+        );
+        tl.to(
+          "#p4-stage" + s.n,
+          { color: "#fafafa", duration: 0.22, ease: "none" },
+          s.active
+        );
+        tl.to(
+          "#p4-bar" + s.n,
+          { scaleX: 1, duration: run, ease: "power1.inOut" },
+          s.active
+        );
+
+        // COMPLETE — accent hands off, the stage settles to done
+        tl.to(
+          "#p4-card" + s.n,
+          { borderColor: DONE_BORDER, duration: 0.26, ease: "none" },
+          s.complete
+        );
+        tl.to(
+          "#p4-bar" + s.n,
+          {
+            backgroundColor: "rgba(250,250,250,0.45)",
+            duration: 0.26,
+            ease: "none",
+          },
+          s.complete
+        );
+        tl.to(
+          "#p4-dot" + s.n,
+          {
+            backgroundColor: "rgba(250,250,250,1)",
+            borderColor: "rgba(250,250,250,1)",
+            duration: 0.2,
+            ease: "none",
+          },
+          s.complete
+        );
+        tl.fromTo(
+          "#p4-done" + s.n,
+          { opacity: 0 },
+          { opacity: 1, duration: 0.24, ease: "power2.out" },
+          s.complete + 0.02
+        );
+      });
+
+      // the hops between stages — the accent travelling the wire
+      [
+        { n: 1, at: 3.14 },
+        { n: 2, at: 4.07 },
+      ].forEach(function (c) {
+        tl.to(
+          "#p4-conn" + c.n,
+          { scaleX: 1, duration: 0.24, ease: "power2.inOut" },
+          c.at
+        );
+        tl.to(
+          "#p4-chev" + c.n,
+          { borderLeftColor: ACCENT, duration: 0.18, ease: "none" },
+          c.at + 0.1
+        );
+        tl.to(
+          "#p4-conn" + c.n,
+          {
+            backgroundColor: "rgba(250,250,250,0.34)",
+            duration: 0.24,
+            ease: "none",
+          },
+          c.at + 0.34
+        );
+        tl.to(
+          "#p4-chev" + c.n,
+          {
+            borderLeftColor: "rgba(250,250,250,0.34)",
+            duration: 0.24,
+            ease: "none",
+          },
+          c.at + 0.34
+        );
+      });
+
+      // the route resolved — the command that produced it
+      tl.fromTo(
+        "#p4-cmdRule",
+        { scaleX: 0 },
+        { scaleX: 1, duration: 0.42, ease: "power3.out" },
+        5.14
+      );
+      tl.fromTo(
+        "#p4-cmd",
+        { opacity: 0, y: 14 },
+        { opacity: 1, y: 0, duration: 0.42, ease: "power3.out" },
+        5.26
+      );
+
+      // hold to the full frame length
+      tl.to({}, { duration: 0.2 }, 5.688);
+
+      window.__timelines["04-proof"] = tl;
+    })();
+  </script>
+</template>

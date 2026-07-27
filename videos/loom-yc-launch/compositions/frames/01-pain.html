@@ -1,0 +1,286 @@
+<template>
+  <style>
+    /* Space Grotesk — the only file-backed display face shipped with this project.
+       Variable wght axis, so 400/500/700 all render from the one subset. */
+    @font-face {
+      font-family: "Space Grotesk";
+      src: url("capture/assets/fonts/0c89a48fa5027cee-s.p.0rd3rjvnnhw7n.woff2") format("woff2");
+      font-weight: 300 700;
+      font-style: normal;
+      font-display: block;
+    }
+
+    #root {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      font-family: "Space Grotesk", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* box-sizing only — a universal margin reset here would out-specify the
+       header's own margin rules (#root * beats a single class) */
+    #root * { box-sizing: border-box; }
+
+    /* full-bleed ground rides on its own clip layer, never on #root */
+    .f01-pain-ground {
+      position: absolute;
+      left: 0; top: 0;
+      width: 1920px;
+      height: 1080px;
+      background: #0a0a0b;
+    }
+
+    .f01-pain-layer { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+
+    /* ---- the agent pane ---- */
+    .f01-pain-pane {
+      position: absolute;
+      background: #0e0e10;
+      border: 1px solid rgba(250, 250, 250, 0.09);
+      overflow: hidden;
+    }
+
+    .f01-pain-hd {
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid rgba(250, 250, 250, 0.09);
+      font-family: monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      white-space: nowrap;
+    }
+    .f01-pain-no { color: rgba(250, 250, 250, 0.3); }
+    .f01-pain-ag { color: #b7b1af; }
+    .f01-pain-rt { margin-left: auto; color: rgba(250, 250, 250, 0.26); }
+
+    .f01-pain-body { font-family: monospace; white-space: nowrap; }
+    .f01-pain-ln {
+      position: relative;
+      overflow: hidden;
+      color: rgba(250, 250, 250, 0.37);
+    }
+    .f01-pain-ln b { font-weight: 400; color: rgba(250, 250, 250, 0.68); }
+    /* mask sits over the line in the pane's own colour; sliding it right "types" the line,
+       and its left border is the caret riding at the insertion point */
+    .f01-pain-msk {
+      position: absolute;
+      left: -4px; top: 0;
+      width: calc(100% + 4px);
+      height: 100%;
+      background: #0e0e10;
+      border-left: 2px solid rgba(250, 250, 250, 0.55);
+    }
+
+    /* ---- 0.0-2.0s / 2.0-3.5s : one pane, filling the frame ---- */
+    .f01-pain-full { left: 100px; top: 96px; width: 1720px; height: 794px; }
+    .f01-pain-full .f01-pain-hd { height: 68px; padding: 0 44px; font-size: 16px; }
+    .f01-pain-full .f01-pain-no { margin-right: 22px; }
+    .f01-pain-full .f01-pain-body { padding: 30px 44px 0; font-size: 27px; line-height: 48px; }
+
+    /* ---- 3.5-4.8s : both panes, side by side ---- */
+    .f01-pain-half { top: 190px; width: 810px; height: 610px; }
+    .f01-pain-half.f01-pain-l { left: 110px; }
+    .f01-pain-half.f01-pain-r { left: 1000px; }
+    .f01-pain-half .f01-pain-hd { height: 52px; padding: 0 28px; font-size: 13px; }
+    .f01-pain-half .f01-pain-no { margin-right: 16px; }
+    .f01-pain-half .f01-pain-body { padding: 22px 28px 0; font-size: 15px; line-height: 33px; }
+
+    .f01-pain-rule {
+      position: absolute;
+      left: 960px; top: 158px;
+      width: 1px; height: 664px;
+      background: rgba(250, 250, 250, 0.22);
+      transform-origin: 50% 0%;
+    }
+
+    /* the one orange moment — a knockout band cutting through both panes */
+    .f01-pain-verdict {
+      position: absolute;
+      left: 610px; top: 429px;
+      width: 700px; height: 132px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0b;
+    }
+    .f01-pain-verdict span {
+      font-size: 66px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.03em;
+      text-transform: lowercase;
+      color: #ff6b2b;
+    }
+  </style>
+
+  <div
+    id="root"
+    data-composition-id="01-pain"
+    data-start="0"
+    data-duration="4.8"
+    data-width="1920"
+    data-height="1080"
+  >
+    <div class="f01-pain-ground clip" id="f01-pain-ground" data-start="0" data-duration="4.8" data-track-index="0"></div>
+
+    <!-- Scene 1 (0.0-2.0s) — one agent, the whole project pasted in -->
+    <div class="f01-pain-layer clip" id="f01-pain-A" data-start="0" data-duration="2" data-track-index="1">
+      <div class="f01-pain-pane f01-pain-full">
+        <div class="f01-pain-hd">
+          <span class="f01-pain-no">01</span><span class="f01-pain-ag" id="f01-pain-ag-a">CLAUDE CODE</span>
+          <span class="f01-pain-rt">NEW SESSION</span>
+        </div>
+        <div class="f01-pain-body" id="f01-pain-body-a">
+          <div class="f01-pain-ln">&gt; context dump, part 1 of 3. this is a pnpm monorepo on node 20 — four packages, one app.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  <b>packages/daemon</b> owns every websocket. it is the only process allowed to bind port 7420.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  apps/web is next 15 on the app router and only ever talks to the daemon over that socket.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  packages/core holds the domain types. if a type is shared it lives there, never in the app.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  packages/cli is the published entry point. it re-exports core and stays dependency-light.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  <b>no barrel files</b>. import from the exact path — eslint fails the build on a folder import.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  all db access goes through the repositories in core/src/store. no raw sql inside handlers.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  migrations are <b>additive only</b>. we never drop a column in the release that stops reading it.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  tests: vitest for units, playwright for the app. a pr needs both green plus a typecheck.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  the daemon writes an append-only event log — treat it as the truth for all session state.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  auth is a local token in ~/.config, sent as a websocket subprotocol, <b>never in the query</b>.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  design tokens live in design.md. do not invent colors: <b>one accent</b>, everything else grey.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  the session list is virtualised, so anything rendered per row must be cheap and memoised.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  new command? register it in cli/src/commands and add the row to the docs table as well.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  never start the dev server yourself — it squats the port and the app then reads stale code.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  branches are type/short-slug. commit subjects lowercase, imperative, under 72 characters.<i class="f01-pain-msk"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scene 2 (2.0-3.5s) — hard cut. different tool, identical wall of text -->
+    <div class="f01-pain-layer clip" id="f01-pain-B" data-start="2" data-duration="1.5" data-track-index="2">
+      <div class="f01-pain-pane f01-pain-full">
+        <div class="f01-pain-hd">
+          <span class="f01-pain-no">02</span><span class="f01-pain-ag" id="f01-pain-ag-b">CODEX</span>
+          <span class="f01-pain-rt">NEW SESSION</span>
+        </div>
+        <div class="f01-pain-body" id="f01-pain-body-b">
+          <div class="f01-pain-ln">&gt; context dump, part 1 of 3. this is a pnpm monorepo on node 20 — four packages, one app.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  <b>packages/daemon</b> owns every websocket. it is the only process allowed to bind port 7420.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  apps/web is next 15 on the app router and only ever talks to the daemon over that socket.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  packages/core holds the domain types. if a type is shared it lives there, never in the app.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  packages/cli is the published entry point. it re-exports core and stays dependency-light.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  <b>no barrel files</b>. import from the exact path — eslint fails the build on a folder import.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  all db access goes through the repositories in core/src/store. no raw sql inside handlers.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  migrations are <b>additive only</b>. we never drop a column in the release that stops reading it.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  tests: vitest for units, playwright for the app. a pr needs both green plus a typecheck.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  the daemon writes an append-only event log — treat it as the truth for all session state.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  auth is a local token in ~/.config, sent as a websocket subprotocol, <b>never in the query</b>.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  design tokens live in design.md. do not invent colors: <b>one accent</b>, everything else grey.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  the session list is virtualised, so anything rendered per row must be cheap and memoised.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  new command? register it in cli/src/commands and add the row to the docs table as well.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  never start the dev server yourself — it squats the port and the app then reads stale code.<i class="f01-pain-msk"></i></div>
+          <div class="f01-pain-ln">  branches are type/short-slug. commit subjects lowercase, imperative, under 72 characters.<i class="f01-pain-msk"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scene 3 (3.5-4.8s) — pull back: both panes, a hairline, and the verdict -->
+    <div class="f01-pain-layer clip" id="f01-pain-C" data-start="3.5" data-duration="1.3" data-track-index="3">
+      <div class="f01-pain-pane f01-pain-half f01-pain-l">
+        <div class="f01-pain-hd">
+          <span class="f01-pain-no">01</span><span class="f01-pain-ag" id="f01-pain-ag-c1">CLAUDE CODE</span>
+          <span class="f01-pain-rt">NEW SESSION</span>
+        </div>
+        <div class="f01-pain-body">
+          <div class="f01-pain-ln">&gt; context dump, part 1 of 3. this is a pnpm monorepo on node 20 — four packages, one app.</div>
+          <div class="f01-pain-ln">  <b>packages/daemon</b> owns every websocket. it is the only process allowed to bind port 7420.</div>
+          <div class="f01-pain-ln">  apps/web is next 15 on the app router and only ever talks to the daemon over that socket.</div>
+          <div class="f01-pain-ln">  packages/core holds the domain types. if a type is shared it lives there, never in the app.</div>
+          <div class="f01-pain-ln">  packages/cli is the published entry point. it re-exports core and stays dependency-light.</div>
+          <div class="f01-pain-ln">  <b>no barrel files</b>. import from the exact path — eslint fails the build on a folder import.</div>
+          <div class="f01-pain-ln">  all db access goes through the repositories in core/src/store. no raw sql inside handlers.</div>
+          <div class="f01-pain-ln">  migrations are <b>additive only</b>. we never drop a column in the release that stops reading it.</div>
+          <div class="f01-pain-ln">  tests: vitest for units, playwright for the app. a pr needs both green plus a typecheck.</div>
+          <div class="f01-pain-ln">  the daemon writes an append-only event log — treat it as the truth for all session state.</div>
+          <div class="f01-pain-ln">  auth is a local token in ~/.config, sent as a websocket subprotocol, <b>never in the query</b>.</div>
+          <div class="f01-pain-ln">  design tokens live in design.md. do not invent colors: <b>one accent</b>, everything else grey.</div>
+          <div class="f01-pain-ln">  the session list is virtualised, so anything rendered per row must be cheap and memoised.</div>
+          <div class="f01-pain-ln">  new command? register it in cli/src/commands and add the row to the docs table as well.</div>
+          <div class="f01-pain-ln">  never start the dev server yourself — it squats the port and the app then reads stale code.</div>
+          <div class="f01-pain-ln">  branches are type/short-slug. commit subjects lowercase, imperative, under 72 characters.</div>
+        </div>
+      </div>
+      <div class="f01-pain-pane f01-pain-half f01-pain-r">
+        <div class="f01-pain-hd">
+          <span class="f01-pain-no">02</span><span class="f01-pain-ag" id="f01-pain-ag-c2">CODEX</span>
+          <span class="f01-pain-rt">NEW SESSION</span>
+        </div>
+        <div class="f01-pain-body">
+          <div class="f01-pain-ln">&gt; context dump, part 1 of 3. this is a pnpm monorepo on node 20 — four packages, one app.</div>
+          <div class="f01-pain-ln">  <b>packages/daemon</b> owns every websocket. it is the only process allowed to bind port 7420.</div>
+          <div class="f01-pain-ln">  apps/web is next 15 on the app router and only ever talks to the daemon over that socket.</div>
+          <div class="f01-pain-ln">  packages/core holds the domain types. if a type is shared it lives there, never in the app.</div>
+          <div class="f01-pain-ln">  packages/cli is the published entry point. it re-exports core and stays dependency-light.</div>
+          <div class="f01-pain-ln">  <b>no barrel files</b>. import from the exact path — eslint fails the build on a folder import.</div>
+          <div class="f01-pain-ln">  all db access goes through the repositories in core/src/store. no raw sql inside handlers.</div>
+          <div class="f01-pain-ln">  migrations are <b>additive only</b>. we never drop a column in the release that stops reading it.</div>
+          <div class="f01-pain-ln">  tests: vitest for units, playwright for the app. a pr needs both green plus a typecheck.</div>
+          <div class="f01-pain-ln">  the daemon writes an append-only event log — treat it as the truth for all session state.</div>
+          <div class="f01-pain-ln">  auth is a local token in ~/.config, sent as a websocket subprotocol, <b>never in the query</b>.</div>
+          <div class="f01-pain-ln">  design tokens live in design.md. do not invent colors: <b>one accent</b>, everything else grey.</div>
+          <div class="f01-pain-ln">  the session list is virtualised, so anything rendered per row must be cheap and memoised.</div>
+          <div class="f01-pain-ln">  new command? register it in cli/src/commands and add the row to the docs table as well.</div>
+          <div class="f01-pain-ln">  never start the dev server yourself — it squats the port and the app then reads stale code.</div>
+          <div class="f01-pain-ln">  branches are type/short-slug. commit subjects lowercase, imperative, under 72 characters.</div>
+        </div>
+      </div>
+      <div class="f01-pain-rule"></div>
+      <div class="f01-pain-verdict"><span>no shared memory</span></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      // --- Scene 1 (0.0-2.0s): the context types into the first agent ---
+      tl.fromTo("#f01-pain-ag-a", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, 0);
+      tl.fromTo(
+        "#f01-pain-body-a .f01-pain-msk",
+        { xPercent: 0 },
+        { xPercent: 100, duration: 0.16, ease: "none", stagger: 0.112 },
+        0.12
+      );
+
+      // --- Scene 2 (2.0-3.5s): hard cut. nothing changed but the tool name ---
+      tl.fromTo("#f01-pain-ag-b", { opacity: 0.18 }, { opacity: 1, duration: 0.24, ease: "power2.out" }, 2.02);
+      tl.fromTo(
+        "#f01-pain-body-b .f01-pain-msk",
+        { xPercent: 0 },
+        { xPercent: 100, duration: 0.14, ease: "none", stagger: 0.086 },
+        2.06
+      );
+
+      // --- Scene 3 (3.5-4.8s): pull back to both panes, then the verdict ---
+      tl.fromTo(
+        "#f01-pain-C .f01-pain-pane",
+        { scale: 1.045, opacity: 0.55 },
+        { scale: 1, opacity: 1, duration: 0.42, ease: "power3.out", stagger: 0.06 },
+        3.5
+      );
+      tl.fromTo(
+        "#f01-pain-C .f01-pain-rule",
+        { scaleY: 0 },
+        { scaleY: 1, duration: 0.44, ease: "power3.inOut" },
+        3.66
+      );
+      tl.fromTo(
+        "#f01-pain-C .f01-pain-verdict",
+        { opacity: 0, yPercent: 22 },
+        { opacity: 1, yPercent: 0, duration: 0.4, ease: "power3.out" },
+        3.98
+      );
+
+      window.__timelines["01-pain"] = tl;
+    })();
+  </script>
+</template>

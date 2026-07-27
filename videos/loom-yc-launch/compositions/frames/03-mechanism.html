@@ -1,0 +1,367 @@
+<template>
+  <style>
+    /* ── 03-mechanism ─────────────────────────────────────────────────────────
+       Dark register (frame.md): ground #0a0a0a · text #FAFAFA · one accent #FF6B2B.
+       Mono chrome only — IBM Plex Mono, uppercase, 0.14em. No display type on this
+       frame: the product is the statement.
+
+       Coordinate systems
+       ------------------
+       #m3-cam is a 1920x1080 camera group, transform-origin 50% 50%. Inside it the
+       workspace still is laid out at width 2000px, so CAM-LOCAL px == "shot px".
+       A shot point d maps to canvas: c = 960|540 + (d - 960|540) * s + (x|y).
+
+       Framings (derived, not eyeballed):
+         BEAT 1  s 0.960 x  -38.4 y  -31.7   full-bleed workspace (shot x 0..2000)
+         BEAT 1' s 1.018 x  -40.7 y  -33.6   +6% push, same anchor
+         BEAT 2  s 1.600 x   35.2 y -679.2   composer top-left -> canvas (80, 560)
+         BEAT 3  s 1.400 x   76.0 y -794.8   shot (220,722) -> canvas (0,0)
+       ──────────────────────────────────────────────────────────────────────── */
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      font-family: "IBM Plex Mono", monospace;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* full-bleed ground — never on the frame root */
+    .m3-ground {
+      position: absolute;
+      inset: 0;
+      background: #0a0a0a;
+    }
+
+    .m3-stage {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    #m3-cam {
+      position: absolute;
+      inset: 0;
+      transform-origin: 50% 50%;
+      will-change: transform;
+    }
+
+    /* the real workspace — laid out at 2000px wide so cam-local px == shot px */
+    #m3-shot {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2000px;
+      height: auto;
+      display: block;
+    }
+
+    /* overlay layer, same coordinate space as the still */
+    .m3-ui {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2000px;
+      height: 1223px;
+    }
+
+    /* dissolves the captured status bar / hint row into the ground */
+    .m3-footfade {
+      position: absolute;
+      left: 0;
+      top: 1141px;
+      width: 2000px;
+      height: 82px;
+      background: linear-gradient(to bottom, rgba(10, 10, 10, 0) 0px, #0a0a0a 9px, #0a0a0a 100%);
+    }
+
+    /* the two side panels are a lighter grey than the thread — feather them out
+       so the still has no hard bottom edge once the camera pulls back */
+    .m3-colfade {
+      position: absolute;
+      top: 1080px;
+      height: 143px;
+      background: linear-gradient(to bottom, rgba(10, 10, 10, 0) 0px, #0a0a0a 80px, #0a0a0a 100%);
+    }
+    .m3-colfade.l {
+      left: 0;
+      width: 388px;
+    }
+    .m3-colfade.r {
+      left: 1556px;
+      width: 444px;
+    }
+
+    /* flat plate over the captured chip row — exact composer interior colour */
+    .m3-plate {
+      position: absolute;
+      left: 488px;
+      top: 1056px;
+      width: 982px;
+      height: 81px;
+      background: #151515;
+    }
+
+    .m3-chip {
+      position: absolute;
+      top: 1070px;
+      height: 54px;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(250, 250, 250, 0.16);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 21px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-indent: 0.14em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      color: rgba(250, 250, 250, 0.38);
+    }
+    #m3-chip-1 {
+      left: 500px;
+      width: 228px;
+    }
+    #m3-chip-2 {
+      left: 750px;
+      width: 140px;
+    }
+    #m3-chip-3 {
+      left: 912px;
+      width: 184px;
+    }
+
+    /* the baton — the active-agent indicator that slides */
+    #m3-baton {
+      position: absolute;
+      left: 500px;
+      top: 1070px;
+      width: 228px;
+      height: 54px;
+      z-index: 1;
+      border: 1px solid #ff6b2b;
+      background: rgba(255, 107, 43, 0.12);
+    }
+
+    /* attention hairline — no arrow, no label */
+    #m3-mark {
+      position: absolute;
+      left: 739px;
+      top: 1059px;
+      width: 162px;
+      height: 76px;
+      z-index: 3;
+      border: 1px solid #ff6b2b;
+    }
+
+    /* seats the three words; also feathers the still's bottom edge */
+    .m3-scrim {
+      position: absolute;
+      left: 0;
+      top: 600px;
+      width: 1920px;
+      height: 480px;
+      background: linear-gradient(
+        to bottom,
+        rgba(10, 10, 10, 0) 0%,
+        rgba(10, 10, 10, 0.9) 27%,
+        #0a0a0a 46%,
+        #0a0a0a 100%
+      );
+    }
+
+    .m3-line {
+      position: absolute;
+      left: 106px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 26px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 40px;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      color: #fafafa;
+    }
+    .m3-line .m3-slash {
+      color: #ff6b2b;
+    }
+    #m3-line-1 {
+      top: 700px;
+    }
+    #m3-line-2 {
+      top: 768px;
+    }
+    #m3-line-3 {
+      top: 836px;
+    }
+  </style>
+
+  <div
+    id="root"
+    data-composition-id="03-mechanism"
+    data-start="0"
+    data-duration="8.405"
+    data-width="1920"
+    data-height="1080"
+  >
+    <div
+      class="clip m3-ground"
+      id="m3-ground"
+      data-start="0"
+      data-duration="8.405"
+      data-track-index="0"
+    ></div>
+
+    <div class="clip m3-stage" id="m3-stage" data-start="0" data-duration="8.405" data-track-index="1">
+      <div id="m3-cam">
+        <img id="m3-shot" src="assets/workspace.png" alt="" />
+        <div class="m3-ui">
+          <div class="m3-colfade l"></div>
+          <div class="m3-colfade r"></div>
+          <div class="m3-footfade"></div>
+          <div class="m3-plate"></div>
+          <div id="m3-baton"></div>
+          <div class="m3-chip" id="m3-chip-1">claude-code</div>
+          <div class="m3-chip" id="m3-chip-2">codex</div>
+          <div class="m3-chip" id="m3-chip-3">opencode</div>
+          <div id="m3-mark"></div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="clip m3-scrim"
+      id="m3-scrim"
+      data-start="5.7"
+      data-duration="2.705"
+      data-track-index="2"
+    ></div>
+
+    <div class="clip m3-line" id="m3-line-1" data-start="6.25" data-duration="2.155" data-track-index="3">
+      <span class="m3-slash">/</span><span>decisions</span>
+    </div>
+    <div class="clip m3-line" id="m3-line-2" data-start="6.95" data-duration="1.455" data-track-index="4">
+      <span class="m3-slash">/</span><span>memory</span>
+    </div>
+    <div class="clip m3-line" id="m3-line-3" data-start="7.65" data-duration="0.755" data-track-index="5">
+      <span class="m3-slash">/</span><span>the whole conversation</span>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      window.__timelines = window.__timelines || {};
+      var tl = gsap.timeline({ paused: true });
+
+      var MUTED = "rgba(250,250,250,0.38)";
+      var ACCENT = "#ff6b2b";
+
+      // the four camera framings, in cam-local units (see the header comment)
+      var F1 = { scale: 0.96, x: -38.4, y: -31.68 };
+      var F1B = { scale: 1.018, x: -40.72, y: -33.59 };
+      var F2 = { scale: 1.6, x: 35.2, y: -679.2 };
+      var F3 = { scale: 1.4, x: 76, y: -794.8 };
+
+      /* ── initial state — immediate, so frame 0 is already correct ─────────── */
+      gsap.set("#m3-cam", F1);
+      gsap.set(["#m3-chip-1", "#m3-chip-2", "#m3-chip-3"], { opacity: 0, y: 10, color: MUTED });
+      gsap.set("#m3-baton", { opacity: 0, y: 10, x: 0, width: 228 });
+      gsap.set("#m3-mark", { opacity: 0, scale: 1.14 });
+      gsap.set("#m3-scrim", { opacity: 0 });
+      gsap.set(".m3-line", { opacity: 0, x: -26 });
+
+      /* ── BEAT 1 · 0.0–2.5 — hold, then a very slow push on the whole desk ─── */
+      // one full second of stillness so an unfamiliar UI can be parsed
+      tl.fromTo(
+        "#m3-cam",
+        { scale: F1.scale, x: F1.x, y: F1.y },
+        { scale: F1B.scale, x: F1B.x, y: F1B.y, immediateRender: false, duration: 1.5, ease: "none" },
+        1.0
+      );
+
+      /* ── BEAT 2 · 2.5–6.0 — push down into the composer, pass the baton ───── */
+      tl.fromTo(
+        "#m3-cam",
+        { scale: F1B.scale, x: F1B.x, y: F1B.y },
+        { scale: F2.scale, x: F2.x, y: F2.y, immediateRender: false, duration: 1.05, ease: "power2.inOut" },
+        2.5
+      );
+
+      // the agent selector resolves as the camera lands
+      tl.fromTo(
+        ["#m3-chip-1", "#m3-chip-2", "#m3-chip-3"],
+        { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, immediateRender: false, duration: 0.42, ease: "power2.out", stagger: 0.07 },
+        2.65
+      );
+      tl.fromTo(
+        "#m3-baton",
+        { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, immediateRender: false, duration: 0.42, ease: "power2.out" },
+        2.72
+      );
+      tl.fromTo("#m3-chip-1", { color: MUTED }, { color: ACCENT, immediateRender: false, duration: 0.3 }, 2.72);
+
+      // THE MOVE — the baton leaves claude-code and lands on codex
+      tl.fromTo(
+        "#m3-baton",
+        { x: 0, width: 228 },
+        { x: 250, width: 140, immediateRender: false, duration: 0.44, ease: "power3.inOut" },
+        4.05
+      );
+      tl.fromTo("#m3-chip-1", { color: ACCENT }, { color: MUTED, immediateRender: false, duration: 0.34 }, 4.09);
+      tl.fromTo("#m3-chip-2", { color: MUTED }, { color: ACCENT, immediateRender: false, duration: 0.34 }, 4.17);
+
+      // hairline draws the eye to the change, holds ~800ms, releases
+      tl.fromTo(
+        "#m3-mark",
+        { opacity: 0, scale: 1.14 },
+        { opacity: 1, scale: 1, immediateRender: false, duration: 0.26, ease: "power3.out" },
+        4.35
+      );
+      tl.fromTo(
+        "#m3-mark",
+        { opacity: 1, scale: 1 },
+        { opacity: 0, immediateRender: false, duration: 0.22, ease: "power1.in" },
+        5.24
+      );
+
+      /* ── BEAT 3 · 6.0–8.405 — settle back, the thread holds, three words ──── */
+      tl.fromTo(
+        "#m3-cam",
+        { scale: F2.scale, x: F2.x, y: F2.y },
+        { scale: F3.scale, x: F3.x, y: F3.y, immediateRender: false, duration: 0.65, ease: "power2.inOut" },
+        5.7
+      );
+      tl.fromTo("#m3-scrim", { opacity: 0 }, { opacity: 1, immediateRender: false, duration: 0.55, ease: "power2.out" }, 5.8);
+
+      tl.fromTo(
+        "#m3-line-1",
+        { opacity: 0, x: -26 },
+        { opacity: 1, x: 0, immediateRender: false, duration: 0.5, ease: "power3.out" },
+        6.25
+      );
+      tl.fromTo(
+        "#m3-line-2",
+        { opacity: 0, x: -26 },
+        { opacity: 1, x: 0, immediateRender: false, duration: 0.5, ease: "power3.out" },
+        6.95
+      );
+      tl.fromTo(
+        "#m3-line-3",
+        { opacity: 0, x: -26 },
+        { opacity: 1, x: 0, immediateRender: false, duration: 0.5, ease: "power3.out" },
+        7.65
+      );
+
+      window.__timelines["03-mechanism"] = tl;
+    })();
+  </script>
+</template>

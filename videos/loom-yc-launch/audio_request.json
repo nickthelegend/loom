@@ -1,0 +1,37 @@
+{
+  "provider": "kokoro",
+  "speed": 1,
+  "lines": [
+    {
+      "id": "01",
+      "text": "Every coding agent keeps its own memory. Switch tools, and you start over."
+    },
+    {
+      "id": "02",
+      "text": "Loom makes them one brain."
+    },
+    {
+      "id": "03",
+      "text": "One thread over every agent. Pass the baton, and the context goes with it — decisions, memory, the whole conversation."
+    },
+    {
+      "id": "04",
+      "text": "Five agents, working today. Or let Loom route the whole job — plan, execute, review."
+    },
+    {
+      "id": "05",
+      "text": "Same thread on your desk, and in your pocket."
+    },
+    {
+      "id": "06",
+      "text": "Loom. One brain, every agent."
+    }
+  ],
+  "bgm": {
+    "mode": "retrieve",
+    "query": "focused-technical-build",
+    "blob": "Every coding agent keeps its own memory — Loom makes them one brain",
+    "arc": "Pain → Claim → Mechanism → Proof → Reach → Close"
+  },
+  "voice": "am_michael"
+}

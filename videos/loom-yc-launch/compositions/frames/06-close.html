@@ -1,0 +1,315 @@
+<template>
+  <style>
+    @font-face {
+      font-family: "Space Grotesk";
+      src: url("capture/assets/fonts/0c89a48fa5027cee-s.p.0rd3rjvnnhw7n.woff2") format("woff2");
+      font-weight: 300 700;
+      font-style: normal;
+      font-display: block;
+    }
+
+    #root {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      container-type: size;
+      font-family: "Space Grotesk", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* --- ground --- */
+    .f06-ground {
+      position: absolute;
+      inset: 0;
+      background: #0a0a0b;
+    }
+
+    /* --- shared centring layer --- */
+    .f06-stage {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: 90px;
+    }
+
+    /* --- phase A : terminal --- */
+    .f06-term {
+      width: 830px;
+      border: 1px solid #1e1e21;
+      background: #0d0d0f;
+      opacity: 0;
+    }
+
+    .f06-term-bar {
+      height: 48px;
+      border-bottom: 1px solid #1a1a1d;
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      font-family: ui-monospace, monospace;
+      font-size: 1.05cqw;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #4a4a50;
+    }
+
+    .f06-term-body {
+      padding: 30px 32px 34px;
+      font-family: ui-monospace, monospace;
+      font-size: 1.72cqw;
+      line-height: 1.64;
+      color: #e7e6e5;
+    }
+
+    .f06-line {
+      white-space: pre;
+    }
+
+    .f06-prompt {
+      color: #55555c;
+      opacity: 0;
+    }
+
+    .f06-ch {
+      opacity: 0;
+    }
+
+    .f06-caret {
+      display: inline-block;
+      width: 0.55em;
+      height: 1.02em;
+      background: #6f6f78;
+      vertical-align: -0.16em;
+      opacity: 0;
+    }
+
+    /* --- phase B : held card --- */
+    .f06-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .f06-mark {
+      font-size: 12cqw;
+      font-weight: 700;
+      line-height: 0.9;
+      letter-spacing: 0.02em;
+      color: #fafafa;
+      opacity: 0;
+    }
+
+    .f06-tag {
+      margin-top: 34px;
+      font-size: 2.5cqw;
+      font-weight: 400;
+      line-height: 1.2;
+      letter-spacing: -0.005em;
+      color: #b7b1af;
+      opacity: 0;
+    }
+
+    .f06-rule {
+      margin-top: 54px;
+      width: 150px;
+      height: 1px;
+      background: #2a2a2e;
+      opacity: 0;
+    }
+
+    .f06-install {
+      margin-top: 52px;
+      font-family: ui-monospace, monospace;
+      font-size: 2cqw;
+      line-height: 1.2;
+      letter-spacing: 0.01em;
+      color: #ff6b2b;
+      opacity: 0;
+    }
+
+    .f06-repo {
+      margin-top: 24px;
+      font-family: ui-monospace, monospace;
+      font-size: 1.45cqw;
+      line-height: 1.2;
+      letter-spacing: 0.06em;
+      color: #6e6e74;
+      opacity: 0;
+    }
+  </style>
+
+  <div id="root" data-composition-id="06-close" data-width="1920" data-height="1080">
+    <div
+      id="f06-ground"
+      class="clip f06-ground"
+      data-start="0"
+      data-duration="4.2"
+      data-track-index="0"
+    ></div>
+
+    <div
+      id="f06-term-layer"
+      class="clip f06-stage"
+      data-start="0"
+      data-duration="1.7"
+      data-track-index="1"
+    >
+      <div id="f06-term" class="f06-term">
+        <div class="f06-term-bar">zsh</div>
+        <div class="f06-term-body">
+          <div class="f06-line"><span
+              id="f06-p1"
+              class="f06-prompt"
+            >$ </span><span id="f06-cmd1"><span class="f06-ch">n</span><span
+                class="f06-ch"
+              >p</span><span class="f06-ch">m</span><span class="f06-ch"> </span><span
+                class="f06-ch"
+              >i</span><span class="f06-ch"> </span><span class="f06-ch">-</span><span
+                class="f06-ch"
+              >g</span><span class="f06-ch"> </span><span class="f06-ch">@</span><span
+                class="f06-ch"
+              >l</span><span class="f06-ch">o</span><span class="f06-ch">o</span><span
+                class="f06-ch"
+              >m</span><span class="f06-ch">p</span><span class="f06-ch">a</span><span
+                class="f06-ch"
+              >d</span><span class="f06-ch">/</span><span class="f06-ch">c</span><span
+                class="f06-ch"
+              >l</span><span class="f06-ch">i</span></span><span
+              id="f06-caret1"
+              class="f06-caret"
+            ></span></div>
+          <div class="f06-line"><span
+              id="f06-p2"
+              class="f06-prompt"
+            >$ </span><span id="f06-cmd2"><span class="f06-ch">l</span><span
+                class="f06-ch"
+              >o</span><span class="f06-ch">o</span><span class="f06-ch">m</span><span
+                class="f06-ch"
+              > </span><span class="f06-ch">u</span><span class="f06-ch">p</span></span><span
+              id="f06-caret2"
+              class="f06-caret"
+            ></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="f06-card-layer"
+      class="clip f06-stage"
+      data-start="1.4"
+      data-duration="2.8"
+      data-track-index="2"
+    >
+      <div class="f06-card">
+        <div id="f06-mark" class="f06-mark">LOOM</div>
+        <div id="f06-tag" class="f06-tag">one brain, every agent</div>
+        <div id="f06-rule" class="f06-rule"></div>
+        <div id="f06-install" class="f06-install">npm i -g @loompad/cli</div>
+        <div id="f06-repo" class="f06-repo">github.com/nickthelegend/loom</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    (function () {
+      var tl = gsap.timeline({ paused: true });
+
+      /* ---- Scene 1 (0.0-1.4s): the terminal, typing two real commands ---- */
+      tl.fromTo(
+        "#f06-term",
+        { opacity: 0, scale: 0.99 },
+        { opacity: 1, scale: 1, duration: 0.24, ease: "power2.out" },
+        0
+      );
+
+      tl.fromTo("#f06-p1", { opacity: 0 }, { opacity: 1, duration: 0.01 }, 0.14);
+      tl.fromTo(
+        "#f06-cmd1 .f06-ch",
+        { opacity: 0 },
+        {
+          opacity: 1,
+          duration: 0.01,
+          ease: "none",
+          stagger: { each: 0.0245, ease: "none" }
+        },
+        0.18
+      );
+      tl.fromTo(
+        "#f06-caret1",
+        { opacity: 0 },
+        { opacity: 1, duration: 0.01 },
+        0.71
+      );
+      tl.to("#f06-caret1", { opacity: 0, duration: 0.01 }, 0.86);
+
+      tl.fromTo("#f06-p2", { opacity: 0 }, { opacity: 1, duration: 0.01 }, 0.86);
+      tl.fromTo(
+        "#f06-cmd2 .f06-ch",
+        { opacity: 0 },
+        {
+          opacity: 1,
+          duration: 0.01,
+          ease: "none",
+          stagger: { each: 0.028, ease: "none" }
+        },
+        0.9
+      );
+      tl.fromTo(
+        "#f06-caret2",
+        { opacity: 0 },
+        { opacity: 1, duration: 0.01 },
+        1.1
+      );
+
+      /* ---- Scene 2 (1.4-2.2s): terminal recedes, the card resolves ---- */
+      tl.to(
+        "#f06-term",
+        { opacity: 0, scale: 0.962, duration: 0.28, ease: "power2.in" },
+        1.32
+      );
+
+      tl.fromTo(
+        "#f06-mark",
+        { opacity: 0, y: 26 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" },
+        1.56
+      );
+      tl.fromTo(
+        "#f06-tag",
+        { opacity: 0, y: 16 },
+        { opacity: 1, y: 0, duration: 0.34, ease: "power2.out" },
+        1.76
+      );
+      tl.fromTo(
+        "#f06-rule",
+        { opacity: 0, scaleX: 0 },
+        { opacity: 1, scaleX: 1, duration: 0.24, ease: "power2.out" },
+        1.88
+      );
+      tl.fromTo(
+        "#f06-install",
+        { opacity: 0, y: 12 },
+        { opacity: 1, y: 0, duration: 0.24, ease: "power2.out" },
+        1.94
+      );
+      tl.fromTo(
+        "#f06-repo",
+        { opacity: 0, y: 10 },
+        { opacity: 1, y: 0, duration: 0.18, ease: "power2.out" },
+        2.02
+      );
+
+      /* ---- Scene 3 (2.2-4.2s): the held card. Nothing moves. ---- */
+      tl.to("#f06-card-layer", { opacity: 1, duration: 2.0 }, 2.2);
+
+      window.__timelines["06-close"] = tl;
+    })();
+  </script>
+</template>

@@ -1,0 +1,287 @@
+<template>
+      <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+
+      <style>
+        /* --- shipped brand faces (Space Grotesk variable, captured from loompad.tech) ---
+           Three subset files ship; they are declared as a per-glyph fallback chain so ASCII
+           always resolves to Space Grotesk regardless of which file carries the latin subset. */
+        @font-face {
+          font-family: "f02-claim-sg-a";
+          src: url("capture/assets/fonts/0c89a48fa5027cee-s.p.0rd3rjvnnhw7n.woff2") format("woff2");
+          font-weight: 100 900;
+          font-style: normal;
+          font-display: block;
+        }
+        @font-face {
+          font-family: "f02-claim-sg-b";
+          src: url("capture/assets/fonts/28868e710e86be81-s.0rx81dn62y51_.woff2") format("woff2");
+          font-weight: 100 900;
+          font-style: normal;
+          font-display: block;
+        }
+        @font-face {
+          font-family: "f02-claim-sg-c";
+          src: url("capture/assets/fonts/32687112bd2dd8db-s.0gspg~~t9nou8.woff2") format("woff2");
+          font-weight: 100 900;
+          font-style: normal;
+          font-display: block;
+        }
+
+        /* self-contained: never depend on a host reset */
+        #root,
+        #root * {
+          box-sizing: border-box;
+        }
+
+        #root {
+          position: absolute;
+          inset: 0;
+          width: 1920px;
+          height: 1080px;
+          overflow: hidden;
+          font-family: "f02-claim-sg-a", "f02-claim-sg-b", "f02-claim-sg-c", sans-serif;
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- ground (full-bleed, on its own clip layer, never on #root) --- */
+        .f02-claim-ground {
+          position: absolute;
+          inset: 0;
+          background: #0a0a0b;
+        }
+
+        /* --- beat 1: the two panes --- */
+        .f02-claim-panes {
+          position: absolute;
+          left: 104px;
+          top: 260px;
+          width: 1712px;
+          height: 560px;
+        }
+        .f02-claim-pane {
+          position: absolute;
+          top: 0;
+          width: 828px;
+          height: 560px;
+          background: #101012;
+          border: 1px solid #1f1f22;
+          padding: 58px 56px;
+        }
+        .f02-claim-pane-l {
+          left: 0;
+        }
+        .f02-claim-pane-r {
+          left: 884px;
+        }
+        .f02-claim-lines {
+          display: block;
+        }
+        .f02-claim-line {
+          height: 12px;
+          background: #6b6b74;
+          opacity: 0.16;
+          margin-bottom: 26px;
+        }
+        .f02-claim-divider {
+          position: absolute;
+          left: 828px;
+          top: 0;
+          width: 56px;
+          height: 560px;
+        }
+        .f02-claim-seam {
+          position: absolute;
+          left: 27px;
+          top: 0;
+          width: 2px;
+          height: 560px;
+          background: #ff6b2b;
+          opacity: 0.55;
+        }
+
+        /* --- beat 2: the wordmark, the rule, the claim --- */
+        .f02-claim-type {
+          position: absolute;
+          left: 112px;
+          top: 300px;
+        }
+        .f02-claim-markwrap {
+          display: inline-block;
+        }
+        .f02-claim-mark {
+          overflow: hidden;
+          font-size: 320px;
+          line-height: 1;
+          font-weight: 700;
+          letter-spacing: -0.01em;
+          color: #fafafa;
+          white-space: nowrap;
+        }
+        .f02-claim-mark span {
+          display: inline-block;
+        }
+        .f02-claim-rule {
+          width: 100%;
+          height: 5px;
+          margin-top: 30px;
+          background: #ff6b2b;
+          transform-origin: left center;
+        }
+        .f02-claim-tag {
+          margin-top: 44px;
+          font-size: 62px;
+          line-height: 1.4;
+          font-weight: 500;
+          letter-spacing: 0.03em;
+          color: #b7b1af;
+          white-space: nowrap;
+        }
+      </style>
+
+      <div
+        id="root"
+        data-composition-id="02-claim"
+        data-width="1920"
+        data-height="1080"
+      >
+        <div
+          id="f02-claim-ground"
+          class="f02-claim-ground clip"
+          data-start="0"
+          data-duration="1.835"
+          data-track-index="0"
+        ></div>
+
+        <div
+          id="f02-claim-panes"
+          class="f02-claim-panes clip"
+          data-start="0"
+          data-duration="1.835"
+          data-track-index="1"
+        >
+          <div id="f02-claim-pane-l" class="f02-claim-pane f02-claim-pane-l">
+            <div class="f02-claim-lines">
+              <div class="f02-claim-line" style="width: 78%"></div>
+              <div class="f02-claim-line" style="width: 92%"></div>
+              <div class="f02-claim-line" style="width: 64%"></div>
+              <div class="f02-claim-line" style="width: 88%"></div>
+              <div class="f02-claim-line" style="width: 41%"></div>
+              <div class="f02-claim-line" style="width: 85%"></div>
+              <div class="f02-claim-line" style="width: 70%"></div>
+              <div class="f02-claim-line" style="width: 93%"></div>
+              <div class="f02-claim-line" style="width: 56%"></div>
+              <div class="f02-claim-line" style="width: 81%"></div>
+            </div>
+          </div>
+          <div id="f02-claim-pane-r" class="f02-claim-pane f02-claim-pane-r">
+            <div class="f02-claim-lines">
+              <div class="f02-claim-line" style="width: 84%"></div>
+              <div class="f02-claim-line" style="width: 59%"></div>
+              <div class="f02-claim-line" style="width: 90%"></div>
+              <div class="f02-claim-line" style="width: 72%"></div>
+              <div class="f02-claim-line" style="width: 36%"></div>
+              <div class="f02-claim-line" style="width: 88%"></div>
+              <div class="f02-claim-line" style="width: 63%"></div>
+              <div class="f02-claim-line" style="width: 91%"></div>
+              <div class="f02-claim-line" style="width: 74%"></div>
+              <div class="f02-claim-line" style="width: 48%"></div>
+            </div>
+          </div>
+          <div id="f02-claim-divider" class="f02-claim-divider">
+            <div class="f02-claim-seam"></div>
+          </div>
+        </div>
+
+        <div
+          id="f02-claim-type"
+          class="f02-claim-type clip"
+          data-start="0"
+          data-duration="1.835"
+          data-track-index="2"
+        >
+          <div class="f02-claim-markwrap">
+            <div id="f02-claim-mark" class="f02-claim-mark"><span>L</span><span>O</span><span>O</span><span>M</span></div>
+            <div id="f02-claim-rule" class="f02-claim-rule"></div>
+          </div>
+          <div id="f02-claim-tag" class="f02-claim-tag">the shared-memory layer for AI coding agents</div>
+        </div>
+      </div>
+
+      <script>
+        (function () {
+          window.__timelines = window.__timelines || {};
+          var tl = gsap.timeline({ paused: true });
+
+          var panes = document.querySelectorAll("#f02-claim-panes");
+          var paneL = document.querySelectorAll("#f02-claim-pane-l");
+          var paneR = document.querySelectorAll("#f02-claim-pane-r");
+          var divider = document.querySelectorAll("#f02-claim-divider");
+          var lines = document.querySelectorAll(".f02-claim-lines");
+          var letters = document.querySelectorAll("#f02-claim-mark span");
+          var rule = document.querySelectorAll("#f02-claim-rule");
+          var tag = document.querySelectorAll("#f02-claim-tag");
+          var ground = document.querySelectorAll("#f02-claim-ground");
+
+          /* Beat 1 (0.03-0.49s) — the two panes physically join: the gap closes
+             and the divider shrinks to zero width. Not a crossfade. */
+          tl.to(paneL, { x: 28, duration: 0.46, ease: "power3.inOut" }, 0.03);
+          tl.to(paneR, { x: -28, duration: 0.46, ease: "power3.inOut" }, 0.03);
+          tl.fromTo(
+            divider,
+            { scaleX: 1, transformOrigin: "50% 50%" },
+            { scaleX: 0, duration: 0.46, ease: "power3.inOut" },
+            0.03
+          );
+          tl.to(lines, { opacity: 0, duration: 0.24, ease: "power1.out" }, 0.1);
+
+          /* The one joined form becomes the field (0.44-0.84s). */
+          tl.to(
+            [paneL, paneR],
+            {
+              backgroundColor: "#0a0a0b",
+              borderColor: "rgba(31,31,34,0)",
+              duration: 0.3,
+              ease: "power1.out",
+            },
+            0.44
+          );
+          tl.fromTo(
+            panes,
+            { scaleX: 1, scaleY: 1, transformOrigin: "50% 50%" },
+            { scaleX: 1.18, scaleY: 1.96, duration: 0.4, ease: "power2.inOut" },
+            0.44
+          );
+
+          /* Beat 2 (0.62-1.40s) — LOOM rises out of the joined form, the orange
+             rule draws left to right, the claim settles beneath. */
+          tl.fromTo(
+            letters,
+            { yPercent: 112 },
+            {
+              yPercent: 0,
+              duration: 0.4,
+              ease: "power3.out",
+              stagger: 0.045,
+            },
+            0.62
+          );
+          tl.fromTo(
+            rule,
+            { scaleX: 0 },
+            { scaleX: 1, duration: 0.3, ease: "power2.out" },
+            0.94
+          );
+          tl.fromTo(
+            tag,
+            { opacity: 0, y: 14 },
+            { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" },
+            1.1
+          );
+
+          /* 1.40-1.835s — dead still. */
+          tl.set(ground, { opacity: 1 }, 1.834);
+
+          window.__timelines["02-claim"] = tl;
+        })();
+      </script>
+</template>
