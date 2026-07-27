@@ -27,12 +27,9 @@ const LG = (k) => `assets/logos/logo-${k}.png`;
 const SC = [
   ["pain", 7.8, "01", ["Every coding agent keeps its own memory.", "Claude Code can't read what Codex knows.", "Switch tools, and you start over."]],
   ["claim", 3.2, "02", ["Loom makes them one brain."]],
-  ["models", 9.0, "03", ["Every agent, in one composer.", "Loom asks each CLI what it can actually run.", "These are the real models Codex reported."]],
-  ["uichat", 10.0, "04", ["One prompt into one shared thread.", "Claude Code plans it, the baton passes to Codex.", "It picks up mid-task and ships the code."]],
-  ["uiboard", 8.2, "05", ["Work moves on a board.", "Create a task, hand it to an agent.", "Every card carries the agent that owns it."]],
-  ["roles", 6.4, "06", ["You decide who does what.", "Except the one holding the baton."]],
-  ["uibrain", 9.2, null, ["Twenty-one things this project has learned.", "Facts, decisions, failures, conventions."]],
-  ["brain", 11.0, "07", ["Codex wrote that. Antigravity wrote that.", "Four agents, one memory —", "and all of them can read all of it."]],
+  ["uichat", 18.4, "03", ["Every agent in one composer.", "Loom asks each CLI what it can actually run.", "Skills and MCP servers, per project."]],
+  ["uiboard", 10.4, "05", ["Work moves on a board.", "Create a task, hand it to an agent."]],
+  ["uibrain", 12.3, "07", ["Twenty-one things this project has learned.", "Codex wrote that. Antigravity wrote that.", "Four agents, one memory."]],
   ["mobile", 15.0, "08", ["The same brain is on your phone.", "The brain, the routes, the whole thread.", "Start a route from your pocket."]],
   ["buildpad", 18.1, "09", ["And we built it a body.", "Printed, wired, assembled.", "One key per agent."]],
   ["pad", 52.0, null, []],
@@ -78,8 +75,8 @@ function subs(lines, s, t0) {
 
 /** Enter every real frame on a move — the anti-slideshow rule. */
 const cam = (sel, s, a, b) =>
-  `gsap.set(${sel},{scale:${a.k},xPercent:${a.x},yPercent:${a.y}});` +
-  `tl.to(${sel},{scale:${b.k},xPercent:${b.x},yPercent:${b.y},duration:${s},ease:"power1.inOut"},0);`;
+  // held, not travelled — the zooming-around-a-screenshot look is gone
+  `gsap.set(${sel},{scale:${a.k},xPercent:${a.x},yPercent:${a.y}});`;
 const pop = (sel, at, hold) =>
   `gsap.set(${sel},{opacity:0,scale:.93});tl.to(${sel},{opacity:1,scale:1,duration:.3,ease:"back.out(2.6)"},${at});` +
   `tl.to(${sel},{opacity:0,duration:.24},${at + hold});`;
