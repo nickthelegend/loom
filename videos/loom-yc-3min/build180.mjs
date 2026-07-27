@@ -12,11 +12,57 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const D = path.dirname(fileURLToPath(import.meta.url));
 const FR = path.join(D, "compositions", "d3");
 fs.mkdirSync(FR, { recursive: true });
+
+// ---------------------------------------------------------------------------
+// Caption timing is derived from the audio, never from the scene length.
+//
+// The old build split each scene's captions evenly across the *visual*
+// duration. uichat ran 18.4s of picture over 8.1s of voice, so the third
+// caption appeared ten seconds after it was spoken. Two sources of truth now:
+// scenes listed in lines/durations.json have one wav per caption and each
+// caption is pinned to its own wav; the rest keep their single wav and get
+// split across its measured length, weighted by how much text each line is.
+// ---------------------------------------------------------------------------
+const LINEDUR = (() => {
+  const f = path.join(D, "assets", "vo180", "lines", "durations.json");
+  return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : {};
+})();
+const secsOf = (p) => {
+  try {
+    return Number(execFileSync("ffprobe",
+      ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", p],
+      { encoding: "utf8" }).trim());
+  } catch { return 0; }
+};
+
+const LEAD = 0.35, TAIL = 0.5, VO_OFFSET = 0.15;
+
+/** [start, end] on the scene's own clock for every caption. */
+function windows(id, secs, lines, vo) {
+  if (!lines.length) return [];
+  const per = LINEDUR[id];
+  if (per) {
+    const speech = per.reduce((a, b) => a + b, 0);
+    const gap = lines.length > 1
+      ? Math.max(0.12, (secs - LEAD - TAIL - speech) / (lines.length - 1)) : 0;
+    let t = LEAD;
+    return per.map((d) => { const w = [t, t + d]; t += d + gap; return w; });
+  }
+  // one wav for the whole scene — split it by character count, which tracks
+  // speaking time far better than an equal split does
+  const wav = vo ? secsOf(path.join(D, "assets", "vo180", `${vo}.wav`)) : 0;
+  const span = wav > 0.2 ? wav : secs - VO_OFFSET;
+  const chars = lines.map((l) => l.length);
+  const total = chars.reduce((a, b) => a + b, 0);
+  let t = VO_OFFSET;
+  return chars.map((c) => { const d = span * c / total; const w = [t, t + d]; t += d; return w; });
+}
 
 const O = "#FF6B2B", DIM = "#A1A1AA", G = "#0A0A0B", LINE = "#26262B";
 const FONT = "Space_Grotesk_Variable.woff2";
@@ -27,10 +73,25 @@ const LG = (k) => `assets/logos/logo-${k}.png`;
 const SC = [
   ["pain", 7.8, "01", ["Every coding agent keeps its own memory.", "Claude Code can't read what Codex knows.", "Switch tools, and you start over."]],
   ["claim", 3.2, "02", ["Loom makes them one brain."]],
-  ["uichat", 18.4, "03", ["Every agent in one composer.", "Loom asks each CLI what it can actually run.", "Skills and MCP servers, per project."]],
-  ["uiboard", 10.4, "05", ["Work moves on a board.", "Create a task, hand it to an agent."]],
-  ["uibrain", 12.3, "07", ["Twenty-one things this project has learned.", "Codex wrote that. Antigravity wrote that.", "Four agents, one memory."]],
-  ["mobile", 15.0, "08", ["The same brain is on your phone.", "The brain, the routes, the whole thread.", "Start a route from your pocket."]],
+  // these four are voiced line-by-line — the captions below must stay word for
+  // word identical to tts-lines.mjs, or the text drifts from the audio again
+  ["uichat", 18.4, null, ["One thread, and every agent you own is in it.",
+    "The switcher lists all of them. Claude Code, Codex, OpenCode, Grok, Antigravity.",
+    "Loom asks each CLI what models it can actually run, so the list is never stale.",
+    "Skills and MCP servers sit right there in the composer.",
+    "Pick an agent, send the task, and it goes."]],
+  ["uiboard", 10.4, null, ["Work lives on a board.",
+    "Every card carries the agent that owns it.",
+    "Create a task, hand it to an agent, and watch it move across."]],
+  ["uibrain", 12.3, null, ["This is the brain. Everything the project has learned.",
+    "Decisions, conventions, constraints, failures.",
+    "Codex wrote that one. Antigravity wrote that one.",
+    "Four agents, one memory, all of them reading it."]],
+  ["mobile", 15.0, null, ["The same brain is on your phone.",
+    "The full thread, live, wherever you are.",
+    "The board and the brain, in your pocket.",
+    "Approve a plan, or start a route, from anywhere.",
+    "Your fleet does not stop when you leave the desk."]],
   ["buildpad", 18.1, "09", ["And we built it a body.", "Printed, wired, assembled.", "One key per agent."]],
   ["pad", 52.0, null, []],
   ["circuits", 15.1, "13", ["The whole project is open source.", "Enclosure, wiring, the full schematic.", "Print one, wire it, and it is yours."]],
@@ -60,14 +121,19 @@ const W = (id, js) => `<script>(function(){window.__timelines=window.__timelines
 var tl=gsap.timeline({paused:true});window.__timelines[${JSON.stringify(id)}]=tl;
 ${js}})();</script>`;
 
-function subs(lines, s, t0) {
+function subs(lines, s, t0, wins) {
   if (!lines.length) return { h: "", j: "" };
-  const sp = s / lines.length;
   return {
     h: lines.map((t, i) => `<div class="clip sub" id="sb${i}" data-start="0" data-duration="${s}" data-track-index="${t0 + i}"><span>${t}</span></div>`).join("\n"),
     j: lines.map((t, i) => {
-      const a = +(i * sp + .1).toFixed(2), b = +((i + 1) * sp - .05).toFixed(2);
-      return `gsap.set('#sb${i}',{opacity:0,y:14});tl.to('#sb${i}',{opacity:1,y:0,duration:.2,ease:"power2.out"},${a});tl.to('#sb${i}',{opacity:0,duration:.13},${b});`;
+      // Up a hair early, and held until the next line rather than dropped the
+      // instant the words stop — a caption blinking off during a pause reads as
+      // a glitch. Capped at three seconds so a long silent tail (the build
+      // montage, the schematic) doesn't leave one line parked on screen.
+      const a = +Math.max(0, wins[i][0] - .12).toFixed(2);
+      const next = i + 1 < wins.length ? wins[i + 1][0] - .1 : s - .15;
+      const b = +Math.min(next, wins[i][1] + 3.0, s - .1).toFixed(2);
+      return `gsap.set('#sb${i}',{opacity:0,y:14});tl.to('#sb${i}',{opacity:1,y:0,duration:.18,ease:"power2.out"},${a});tl.to('#sb${i}',{opacity:0,duration:.14},${b});`;
     }).join("\n"),
   };
 }
@@ -226,10 +292,12 @@ tl.to('#zw',{opacity:1,scale:1,duration:.42,ease:"back.out(2.2)"},0).to(['#zs','
 });
 
 let T = 0; const M = [];
+const WIN = {};
 for (const [id, secs, vo, lines] of SC) {
   const cid = "d-" + id;
   const { b, j } = S[id](secs);
-  const sb = subs(lines, secs, 40);
+  WIN[id] = windows(id, secs, lines, vo);
+  const sb = subs(lines, secs, 40, WIN[id]);
   fs.writeFileSync(path.join(FR, `${id}.html`), `<!doctype html><html><head><meta charset="utf-8">
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"><\/script>
 ${head(cid)}</head><body>
@@ -242,6 +310,18 @@ ${W(cid, j + "\n" + sb.j)}</body></html>`);
   M.push({ id, secs, vo, at: T }); T += secs;
 }
 
+/** Every audio tag on the root timeline: one per scene, or one per caption. */
+const audioTags = M.flatMap((m) => {
+  const per = LINEDUR[m.id];
+  if (per) {
+    return per.map((d, i) => `  <audio class="clip" id="vl-${m.id}-${i}" src="assets/vo180/lines/${m.id}-${i}.wav"
+   data-start="${(m.at + WIN[m.id][i][0]).toFixed(2)}" data-duration="${(d + .05).toFixed(2)}" data-track-index="${20 + i}"></audio>`);
+  }
+  if (!m.vo) return [];
+  return [`  <audio class="clip" id="vo-${m.vo}" src="assets/vo180/${m.vo}.wav"
+   data-start="${(m.at + VO_OFFSET).toFixed(2)}" data-duration="${(m.secs - VO_OFFSET).toFixed(2)}" data-track-index="20"></audio>`];
+}).join("\n");
+
 fs.writeFileSync(path.join(D, "index-d3.html"), `<!doctype html><html><head><meta charset="utf-8"><title>Loom</title>
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"><\/script>
 <style>html,body{margin:0;background:#0A0A0B}#root{position:relative;width:1920px;height:1080px;overflow:hidden;background:#0A0A0B}
@@ -249,8 +329,7 @@ fs.writeFileSync(path.join(D, "index-d3.html"), `<!doctype html><html><head><met
 <div id="root" data-composition-id="root" data-width="1920" data-height="1080" data-start="0" data-duration="${T.toFixed(2)}">
 ${M.map((m) => `  <div class="clip" id="mt-${m.id}" data-composition-id="d-${m.id}" data-composition-src="compositions/d3/${m.id}.html"
    data-start="${m.at.toFixed(2)}" data-duration="${m.secs}" data-track-index="1" style="inset:0;width:100%;height:100%"></div>`).join("\n")}
-${M.filter((m) => m.vo).map((m) => `  <audio class="clip" id="vo-${m.vo}" src="assets/vo180/${m.vo}.wav"
-   data-start="${(m.at + .15).toFixed(2)}" data-duration="${(m.secs - .15).toFixed(2)}" data-track-index="20"></audio>`).join("\n")}
+${audioTags}
 </div>
 <script>window.__timelines=window.__timelines||{};window.__timelines["root"]=gsap.timeline({paused:true});<\/script>
 </body></html>`);
@@ -260,7 +339,7 @@ const SD = path.join(D, "compositions", "subs");
 fs.mkdirSync(SD, { recursive: true });
 for (const m of M) {
   const scene = SC.find((x) => x[0] === m.id);
-  const sb = subs(scene[3] || [], m.secs, 40);
+  const sb = subs(scene[3] || [], m.secs, 40, WIN[m.id]);
   fs.writeFileSync(path.join(SD, m.id + ".html"), `<!doctype html><html><head><meta charset="utf-8">
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"><\/script>
 <style>
@@ -269,7 +348,9 @@ for (const m of M) {
 #k-${m.id}{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
 #k-${m.id} .clip{position:absolute}
 #k-${m.id} .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
-#k-${m.id} .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+/* Opaque, unlike the base pass. A translucent plate lets the key colour through
+   it, and 8% of pure green over near-black is a visibly green caption box. */
+#k-${m.id} .sub span{background:#0A0A0B;padding:10px 25px;border-radius:9px;
   box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
 #k-${m.id} .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
 </style></head><body>

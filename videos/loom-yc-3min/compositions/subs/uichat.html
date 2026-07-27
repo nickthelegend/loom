@@ -6,17 +6,23 @@
 #k-uichat{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
 #k-uichat .clip{position:absolute}
 #k-uichat .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
-#k-uichat .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+/* Opaque, unlike the base pass. A translucent plate lets the key colour through
+   it, and 8% of pure green over near-black is a visibly green caption box. */
+#k-uichat .sub span{background:#0A0A0B;padding:10px 25px;border-radius:9px;
   box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
 #k-uichat .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
 </style></head><body>
 <div id="k-uichat" data-composition-id="k-uichat" data-width="1920" data-height="1080" data-start="0" data-duration="18.4">
-<div class="clip sub" id="sb0" data-start="0" data-duration="18.4" data-track-index="40"><span>Every agent in one composer.</span></div>
-<div class="clip sub" id="sb1" data-start="0" data-duration="18.4" data-track-index="41"><span>Loom asks each CLI what it can actually run.</span></div>
-<div class="clip sub" id="sb2" data-start="0" data-duration="18.4" data-track-index="42"><span>Skills and MCP servers, per project.</span></div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="18.4" data-track-index="40"><span>One thread, and every agent you own is in it.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="18.4" data-track-index="41"><span>The switcher lists all of them. Claude Code, Codex, OpenCode, Grok, Antigravity.</span></div>
+<div class="clip sub" id="sb2" data-start="0" data-duration="18.4" data-track-index="42"><span>Loom asks each CLI what models it can actually run, so the list is never stale.</span></div>
+<div class="clip sub" id="sb3" data-start="0" data-duration="18.4" data-track-index="43"><span>Skills and MCP servers sit right there in the composer.</span></div>
+<div class="clip sub" id="sb4" data-start="0" data-duration="18.4" data-track-index="44"><span>Pick an agent, send the task, and it goes.</span></div>
 </div>
 <script>(function(){window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
 window.__timelines["k-uichat"]=tl;
-gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},6.08);
-gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},6.23);tl.to('#sb1',{opacity:0,duration:.13},12.22);
-gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.2,ease:"power2.out"},12.37);tl.to('#sb2',{opacity:0,duration:.13},18.35);})();</script></body></html>
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.18,ease:"power2.out"},0.23);tl.to('#sb0',{opacity:0,duration:.14},2.81);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.18,ease:"power2.out"},2.79);tl.to('#sb1',{opacity:0,duration:.14},7.68);
+gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.18,ease:"power2.out"},7.66);tl.to('#sb2',{opacity:0,duration:.14},12.42);
+gsap.set('#sb3',{opacity:0,y:14});tl.to('#sb3',{opacity:1,y:0,duration:.18,ease:"power2.out"},12.4);tl.to('#sb3',{opacity:0,duration:.14},15.77);
+gsap.set('#sb4',{opacity:0,y:14});tl.to('#sb4',{opacity:1,y:0,duration:.18,ease:"power2.out"},15.75);tl.to('#sb4',{opacity:0,duration:.14},18.25);})();</script></body></html>

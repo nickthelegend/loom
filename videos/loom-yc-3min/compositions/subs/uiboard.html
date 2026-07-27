@@ -6,15 +6,19 @@
 #k-uiboard{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
 #k-uiboard .clip{position:absolute}
 #k-uiboard .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
-#k-uiboard .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+/* Opaque, unlike the base pass. A translucent plate lets the key colour through
+   it, and 8% of pure green over near-black is a visibly green caption box. */
+#k-uiboard .sub span{background:#0A0A0B;padding:10px 25px;border-radius:9px;
   box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
 #k-uiboard .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
 </style></head><body>
 <div id="k-uiboard" data-composition-id="k-uiboard" data-width="1920" data-height="1080" data-start="0" data-duration="10.4">
-<div class="clip sub" id="sb0" data-start="0" data-duration="10.4" data-track-index="40"><span>Work moves on a board.</span></div>
-<div class="clip sub" id="sb1" data-start="0" data-duration="10.4" data-track-index="41"><span>Create a task, hand it to an agent.</span></div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="10.4" data-track-index="40"><span>Work lives on a board.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="10.4" data-track-index="41"><span>Every card carries the agent that owns it.</span></div>
+<div class="clip sub" id="sb2" data-start="0" data-duration="10.4" data-track-index="42"><span>Create a task, hand it to an agent, and watch it move across.</span></div>
 </div>
 <script>(function(){window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
 window.__timelines["k-uiboard"]=tl;
-gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},5.15);
-gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},5.3);tl.to('#sb1',{opacity:0,duration:.13},10.35);})();</script></body></html>
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.18,ease:"power2.out"},0.23);tl.to('#sb0',{opacity:0,duration:.14},3.12);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.18,ease:"power2.out"},3.1);tl.to('#sb1',{opacity:0,duration:.14},6.77);
+gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.18,ease:"power2.out"},6.75);tl.to('#sb2',{opacity:0,duration:.14},10.25);})();</script></body></html>

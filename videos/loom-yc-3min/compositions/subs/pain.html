@@ -6,7 +6,9 @@
 #k-pain{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
 #k-pain .clip{position:absolute}
 #k-pain .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
-#k-pain .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+/* Opaque, unlike the base pass. A translucent plate lets the key colour through
+   it, and 8% of pure green over near-black is a visibly green caption box. */
+#k-pain .sub span{background:#0A0A0B;padding:10px 25px;border-radius:9px;
   box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
 #k-pain .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
 </style></head><body>
@@ -17,6 +19,6 @@
 </div>
 <script>(function(){window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
 window.__timelines["k-pain"]=tl;
-gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},2.55);
-gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},2.7);tl.to('#sb1',{opacity:0,duration:.13},5.15);
-gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.2,ease:"power2.out"},5.3);tl.to('#sb2',{opacity:0,duration:.13},7.75);})();</script></body></html>
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.18,ease:"power2.out"},0.03);tl.to('#sb0',{opacity:0,duration:.14},2.59);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.18,ease:"power2.out"},2.57);tl.to('#sb1',{opacity:0,duration:.14},5.12);
+gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.18,ease:"power2.out"},5.1);tl.to('#sb2',{opacity:0,duration:.14},7.65);})();</script></body></html>

@@ -6,7 +6,9 @@
 #k-pad{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
 #k-pad .clip{position:absolute}
 #k-pad .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
-#k-pad .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+/* Opaque, unlike the base pass. A translucent plate lets the key colour through
+   it, and 8% of pure green over near-black is a visibly green caption box. */
+#k-pad .sub span{background:#0A0A0B;padding:10px 25px;border-radius:9px;
   box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
 #k-pad .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
 </style></head><body>

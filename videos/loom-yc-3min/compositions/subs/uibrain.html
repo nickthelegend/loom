@@ -6,17 +6,21 @@
 #k-uibrain{position:absolute;inset:0;overflow:hidden;background:#00FF00;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
 #k-uibrain .clip{position:absolute}
 #k-uibrain .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
-#k-uibrain .sub span{background:rgba(10,10,11,.92);padding:10px 25px;border-radius:9px;
+/* Opaque, unlike the base pass. A translucent plate lets the key colour through
+   it, and 8% of pure green over near-black is a visibly green caption box. */
+#k-uibrain .sub span{background:#0A0A0B;padding:10px 25px;border-radius:9px;
   box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
 #k-uibrain .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
 </style></head><body>
 <div id="k-uibrain" data-composition-id="k-uibrain" data-width="1920" data-height="1080" data-start="0" data-duration="12.3">
-<div class="clip sub" id="sb0" data-start="0" data-duration="12.3" data-track-index="40"><span>Twenty-one things this project has learned.</span></div>
-<div class="clip sub" id="sb1" data-start="0" data-duration="12.3" data-track-index="41"><span>Codex wrote that. Antigravity wrote that.</span></div>
-<div class="clip sub" id="sb2" data-start="0" data-duration="12.3" data-track-index="42"><span>Four agents, one memory.</span></div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="12.3" data-track-index="40"><span>This is the brain. Everything the project has learned.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="12.3" data-track-index="41"><span>Decisions, conventions, constraints, failures.</span></div>
+<div class="clip sub" id="sb2" data-start="0" data-duration="12.3" data-track-index="42"><span>Codex wrote that one. Antigravity wrote that one.</span></div>
+<div class="clip sub" id="sb3" data-start="0" data-duration="12.3" data-track-index="43"><span>Four agents, one memory, all of them reading it.</span></div>
 </div>
 <script>(function(){window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
 window.__timelines["k-uibrain"]=tl;
-gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},4.05);
-gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},4.2);tl.to('#sb1',{opacity:0,duration:.13},8.15);
-gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.2,ease:"power2.out"},8.3);tl.to('#sb2',{opacity:0,duration:.13},12.25);})();</script></body></html>
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.18,ease:"power2.out"},0.23);tl.to('#sb0',{opacity:0,duration:.14},3.3);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.18,ease:"power2.out"},3.28);tl.to('#sb1',{opacity:0,duration:.14},6.11);
+gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.18,ease:"power2.out"},6.09);tl.to('#sb2',{opacity:0,duration:.14},9.38);
+gsap.set('#sb3',{opacity:0,y:14});tl.to('#sb3',{opacity:1,y:0,duration:.18,ease:"power2.out"},9.36);tl.to('#sb3',{opacity:0,duration:.14},12.15);})();</script></body></html>
