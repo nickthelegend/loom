@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#s06-roles{position:absolute;inset:0;overflow:hidden;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#s06-roles .clip{position:absolute}
+#s06-roles .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#s06-roles .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#s06-roles .mono{font-family:"LoomMono",monospace}
+/* the callout: a hairline orange box that draws itself around a real UI region */
+#s06-roles .call{border:2px solid #FF6B2B;border-radius:8px;box-shadow:0 0 0 9999px rgba(10,10,11,.55)}
+#s06-roles .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:20px;letter-spacing:.06em;
+  padding:7px 13px;border-radius:6px;white-space:nowrap}
+/* the lower band: one line of chrome that never fights the UI above it */
+#s06-roles .band{left:0;right:0;bottom:0;height:104px;background:linear-gradient(0deg,rgba(10,10,11,.97),rgba(10,10,11,.86) 62%,transparent);
+  display:flex;align-items:center;justify-content:center;gap:26px}
+#s06-roles .bandttl{font-size:27px;font-weight:700;letter-spacing:.03em}
+#s06-roles .bandsub{font-size:21px;color:#A1A1AA}
+#s06-roles .rule{background:#FF6B2B;height:3px}
+</style>
+</head>
+<body>
+<div id="s06-roles" data-composition-id="s06-roles" data-width="1920" data-height="1080"
+  data-start="0" data-duration="10.9">
+<div class="clip bg" id="s06-roles-bg" data-start="0" data-duration="10.9" data-track-index="0"></div>
+<img class="clip shot" id="r-img" src="assets/shots/018-roles-per-ade.png" data-start="0" data-duration="10.9" data-track-index="1">
+    <div class="clip call" id="r-c1" style="left:59.5%;top:30%;width:12%;height:44%" data-start="0" data-duration="10.9" data-track-index="4"></div>
+    <div class="clip tag" id="r-t1" style="left:56%;top:24.5%" data-start="0" data-duration="10.9" data-track-index="5">A ROLE EACH</div>
+    <div class="clip call" id="r-c2" style="left:37.5%;top:38.5%;width:9%;height:7%" data-start="0" data-duration="10.9" data-track-index="6"></div>
+    <div class="clip tag" id="r-t2" style="left:31%;top:33%" data-start="0" data-duration="10.9" data-track-index="7">HOLDS THE BATON — CAN'T BE SWITCHED OFF</div>
+    <div class="clip band" id="band" data-start="0" data-duration="99" data-track-index="8">
+     <div class="bandttl" style="color:#FF6B2B">YOU DECIDE WHO DOES WHAT</div>
+     
+   </div>
+</div>
+<script>
+(function(){
+  window.__timelines = window.__timelines || {};
+  var tl = gsap.timeline({paused:true});
+  window.__timelines["s06-roles"] = tl;
+  var R = function(s){ return document.querySelector('#s06-roles ' + s); };
+  var RA = function(s){ return Array.prototype.slice.call(document.querySelectorAll('#s06-roles ' + s)); };
+  gsap.set('#r-img', {scale:1});
+  tl.to('#r-img', {scale:1.05, duration:10.9, ease:"none"}, 0);
+  gsap.set('#r-c1', {opacity:0, scale:0.94});
+  tl.to('#r-c1', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 1.3);
+  tl.to('#r-c1', {opacity:0, duration:0.28, ease:"power2.in"}, 5.1);
+  gsap.set('#r-t1', {opacity:0, scale:0.94});
+  tl.to('#r-t1', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 1.4);
+  tl.to('#r-t1', {opacity:0, duration:0.28, ease:"power2.in"}, 5.1);
+  gsap.set('#r-c2', {opacity:0, scale:0.94});
+  tl.to('#r-c2', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 6);
+  tl.to('#r-c2', {opacity:0, duration:0.28, ease:"power2.in"}, 9.6);
+  gsap.set('#r-t2', {opacity:0, scale:0.94});
+  tl.to('#r-t2', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 6.1);
+  tl.to('#r-t2', {opacity:0, duration:0.28, ease:"power2.in"}, 9.6);
+  gsap.set('.band', {opacity:0, y:26});
+  tl.to('.band', {opacity:1, y:0, duration:0.42, ease:"back.out(1.7)"}, 0.4);
+
+})();
+</script>
+</body></html>

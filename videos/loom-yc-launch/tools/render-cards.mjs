@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { BRAND_SPRITE } from "./dist/daemon/brand-icons.js";
+import { BRAND_SPRITE } from "../../../dist/daemon/brand-icons.js";
 
 const CHROME = "/Users/jaibajrang/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 const OUT = process.argv[2];
@@ -25,8 +25,12 @@ html,body{width:1920px;height:1080px;background:#0A0A0B;color:#FAFAFA;
   font-family:"SG",system-ui,sans-serif;overflow:hidden}
 .wrap{width:1920px;height:1080px;position:relative;display:flex;flex-direction:column;
   align-items:center;justify-content:center}
-.mark{width:150px;height:150px}
-.mark.sm{width:104px;height:104px}
+/* opencode and grok-code are monochrome currentColor glyphs with no fill of
+   their own — without an explicit colour they inherit black and vanish on a
+   near-black ground. claude-code and codex embed their own fills and ignore
+   this, so setting it is safe for all of them. */
+.mark{width:150px;height:150px;color:#FAFAFA;fill:#FAFAFA}
+.mark.sm{width:104px;height:104px;color:#FAFAFA;fill:#FAFAFA}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .kicker{font-size:15px;letter-spacing:.22em;text-transform:uppercase;color:#6B6B74}
 .orange{color:#FF6B2B}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#s05-board{position:absolute;inset:0;overflow:hidden;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#s05-board .clip{position:absolute}
+#s05-board .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#s05-board .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#s05-board .mono{font-family:"LoomMono",monospace}
+/* the callout: a hairline orange box that draws itself around a real UI region */
+#s05-board .call{border:2px solid #FF6B2B;border-radius:8px;box-shadow:0 0 0 9999px rgba(10,10,11,.55)}
+#s05-board .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:20px;letter-spacing:.06em;
+  padding:7px 13px;border-radius:6px;white-space:nowrap}
+/* the lower band: one line of chrome that never fights the UI above it */
+#s05-board .band{left:0;right:0;bottom:0;height:104px;background:linear-gradient(0deg,rgba(10,10,11,.97),rgba(10,10,11,.86) 62%,transparent);
+  display:flex;align-items:center;justify-content:center;gap:26px}
+#s05-board .bandttl{font-size:27px;font-weight:700;letter-spacing:.03em}
+#s05-board .bandsub{font-size:21px;color:#A1A1AA}
+#s05-board .rule{background:#FF6B2B;height:3px}
+</style>
+</head>
+<body>
+<div id="s05-board" data-composition-id="s05-board" data-width="1920" data-height="1080"
+  data-start="0" data-duration="12.4">
+<div class="clip bg" id="s05-board-bg" data-start="0" data-duration="12.4" data-track-index="0"></div>
+<img class="clip shot" id="b-img" src="assets/shots/017-board-kanban.png" data-start="0" data-duration="12.4" data-track-index="1">
+    <div class="clip call" id="b-c1" style="left:14.6%;top:15%;width:17%;height:23%" data-start="0" data-duration="12.4" data-track-index="4"></div>
+    <div class="clip tag" id="b-t1" style="left:14.6%;top:10%" data-start="0" data-duration="12.4" data-track-index="5">CODEX IS BUILDING</div>
+    <div class="clip call" id="b-c2" style="left:32.3%;top:15%;width:17%;height:19%" data-start="0" data-duration="12.4" data-track-index="6"></div>
+    <div class="clip tag" id="b-t2" style="left:32.3%;top:10%" data-start="0" data-duration="12.4" data-track-index="7">NEEDS A HUMAN</div>
+    <div class="clip call" id="b-c3" style="left:49.8%;top:15%;width:17%;height:17%" data-start="0" data-duration="12.4" data-track-index="8"></div>
+    <div class="clip tag" id="b-t3" style="left:49.8%;top:10%" data-start="0" data-duration="12.4" data-track-index="9">OPENCODE REVIEWING</div>
+    <div class="clip band" id="band" data-start="0" data-duration="99" data-track-index="10">
+     <div class="bandttl" style="color:#FF6B2B">THE FLEET'S WORK</div>
+     <div class="bandsub mono">every task carries the agent that owns it</div>
+   </div>
+</div>
+<script>
+(function(){
+  window.__timelines = window.__timelines || {};
+  var tl = gsap.timeline({paused:true});
+  window.__timelines["s05-board"] = tl;
+  var R = function(s){ return document.querySelector('#s05-board ' + s); };
+  var RA = function(s){ return Array.prototype.slice.call(document.querySelectorAll('#s05-board ' + s)); };
+  gsap.set('#b-img', {scale:1});
+  tl.to('#b-img', {scale:1.06, duration:12.4, ease:"none"}, 0);
+  gsap.set('#b-c1', {opacity:0, scale:0.94});
+  tl.to('#b-c1', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 1.6);
+  tl.to('#b-c1', {opacity:0, duration:0.28, ease:"power2.in"}, 4.2);
+  gsap.set('#b-t1', {opacity:0, scale:0.94});
+  tl.to('#b-t1', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 1.7);
+  tl.to('#b-t1', {opacity:0, duration:0.28, ease:"power2.in"}, 4.2);
+  gsap.set('#b-c2', {opacity:0, scale:0.94});
+  tl.to('#b-c2', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 5);
+  tl.to('#b-c2', {opacity:0, duration:0.28, ease:"power2.in"}, 7.4);
+  gsap.set('#b-t2', {opacity:0, scale:0.94});
+  tl.to('#b-t2', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 5.1);
+  tl.to('#b-t2', {opacity:0, duration:0.28, ease:"power2.in"}, 7.3999999999999995);
+  gsap.set('#b-c3', {opacity:0, scale:0.94});
+  tl.to('#b-c3', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 8);
+  tl.to('#b-c3', {opacity:0, duration:0.28, ease:"power2.in"}, 10.8);
+  gsap.set('#b-t3', {opacity:0, scale:0.94});
+  tl.to('#b-t3', {opacity:1, scale:1, duration:0.34, ease:"back.out(2)"}, 8.1);
+  tl.to('#b-t3', {opacity:0, duration:0.28, ease:"power2.in"}, 10.8);
+  gsap.set('.band', {opacity:0, y:26});
+  tl.to('.band', {opacity:1, y:0, duration:0.42, ease:"back.out(1.7)"}, 0.4);
+
+})();
+</script>
+</body></html>

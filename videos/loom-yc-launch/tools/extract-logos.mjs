@@ -7,7 +7,7 @@ import { WebSocket } from "ws";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { BRAND_SPRITE, BRAND_TITLES } from "./dist/daemon/brand-icons.js";
+import { BRAND_SPRITE, BRAND_TITLES } from "../../../dist/daemon/brand-icons.js";
 
 const CHROME = "/Users/jaibajrang/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
 const OUT = process.argv[2];
@@ -21,7 +21,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;background:transparent}
   #stage{width:${SIZE}px;height:${SIZE}px;display:flex;align-items:center;justify-content:center}
-  svg.mark{width:${SIZE * 0.82}px;height:${SIZE * 0.82}px}
+  svg.mark{width:${SIZE * 0.82}px;height:${SIZE * 0.82}px;color:#FAFAFA;fill:#FAFAFA}
 </style></head><body>
 ${BRAND_SPRITE}
 <div id="stage"><svg class="mark" id="m" aria-hidden="true"><use id="u" href=""></use></svg></div>

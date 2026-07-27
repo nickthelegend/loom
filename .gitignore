@@ -35,3 +35,6 @@ videos/*/footage/*.mp4
 videos/*/footage/*.mov
 videos/*/footage/*.webm
 loom-video.mp4
+videos/*/assets/video/
+videos/*/assets/shots/
+videos/*/assets/vo/
