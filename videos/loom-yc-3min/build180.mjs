@@ -27,14 +27,16 @@ const LG = (k) => `assets/logos/logo-${k}.png`;
 const SC = [
   ["pain", 7.8, "01", ["Every coding agent keeps its own memory.", "Claude Code can't read what Codex knows.", "Switch tools, and you start over."]],
   ["claim", 3.2, "02", ["Loom makes them one brain."]],
-  ["models", 9.0, "03", ["Every agent, in one composer.", "And Loom asks each CLI what it can actually run.", "These are the real models Codex reported."]],
-  ["stream", 11.0, "04", ["Claude Code plans it. The baton passes to Codex.", "The context goes with it.", "Codex picks up mid-task — and ships the code."]],
-  ["taskmove", 6.8, "05", ["Every task carries the agent that owns it.", "When an agent finishes, the task moves itself."]],
+  ["models", 9.0, "03", ["Every agent, in one composer.", "Loom asks each CLI what it can actually run.", "These are the real models Codex reported."]],
+  ["uichat", 10.0, "04", ["One prompt into one shared thread.", "Claude Code plans it, the baton passes to Codex.", "It picks up mid-task and ships the code."]],
+  ["uiboard", 8.2, "05", ["Work moves on a board.", "Create a task, hand it to an agent.", "Every card carries the agent that owns it."]],
   ["roles", 6.4, "06", ["You decide who does what.", "Except the one holding the baton."]],
-  ["brain", 13.5, "07", ["Twenty-one things this project has learned.", "Codex wrote that. Antigravity wrote that.", "Four agents, one memory —", "and all of them can read all of it."]],
+  ["uibrain", 4.1, null, ["Twenty-one things this project has learned."]],
+  ["brain", 11.0, "07", ["Codex wrote that. Antigravity wrote that.", "Four agents, one memory —", "and all of them can read all of it."]],
   ["mobile", 15.0, "08", ["The same brain is on your phone.", "The brain, the routes, the whole thread.", "Start a route from your pocket."]],
-  ["pad", 52.0, null, ["And we built it a body.", "One key per agent. Press, hold, speak.", "The fleet answers."]],
-  ["circuits", 20.0, "10", ["It's fully open source.", "The enclosure, the wiring, the schematic.", "Print one, wire it, and it's yours."]],
+  ["buildpad", 22.2, "09", ["And we built it a body.", "Printed, wired, assembled.", "One key per agent."]],
+  ["pad", 52.0, null, []],
+  ["circuits", 20.0, "10", ["The whole project is open source.", "Enclosure, wiring, the full schematic.", "Anyone can build one themselves."]],
   ["micro", 4.6, "11", ["A Codex Micro — for every agent, in one device."]],
   ["landing", 9.0, "12", ["Buy one soon, or build one yourself."]],
   ["close", 5.0, null, ["Loom. One brain, every agent."]],
@@ -150,6 +152,30 @@ S.mobile = (s) => {
     }).join("\n"),
   };
 };
+S.uichat = (s) => ({
+  b: '<div class="clip bg" id="ucb" data-start="0" data-duration="' + s + '" data-track-index="1"></div>' +
+     '<div class="clip tag" id="uct" style="left:5%;top:6.5%" data-start="0" data-duration="' + s + '" data-track-index="3">THE CHAT &mdash; ONE THREAD, EVERY AGENT</div>',
+  j: "gsap.set('#uct',{opacity:0,scale:.94});tl.to('#uct',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},.3);" +
+     "tl.to('#uct',{opacity:0,duration:.3}," + (s - 1.0).toFixed(2) + ");",
+});
+S.uiboard = (s) => ({
+  b: '<div class="clip bg" id="ubb" data-start="0" data-duration="' + s + '" data-track-index="1"></div>' +
+     '<div class="clip tag" id="ubt" style="left:5%;top:6.5%" data-start="0" data-duration="' + s + '" data-track-index="3">THE BOARD &mdash; CREATING A TASK</div>',
+  j: "gsap.set('#ubt',{opacity:0,scale:.94});tl.to('#ubt',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},.3);" +
+     "tl.to('#ubt',{opacity:0,duration:.3}," + (s - 1.0).toFixed(2) + ");",
+});
+S.uibrain = (s) => ({
+  b: '<div class="clip bg" id="unb" data-start="0" data-duration="' + s + '" data-track-index="1"></div>' +
+     '<div class="clip tag" id="unt" style="left:5%;top:6.5%" data-start="0" data-duration="' + s + '" data-track-index="3">THE BRAIN &mdash; SHARED MEMORY</div>',
+  j: "gsap.set('#unt',{opacity:0,scale:.94});tl.to('#unt',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},.3);" +
+     "tl.to('#unt',{opacity:0,duration:.3}," + (s - 1.0).toFixed(2) + ");",
+});
+S.buildpad = (s) => ({
+  b: '<div class="clip bg" id="bpb" data-start="0" data-duration="' + s + '" data-track-index="1"></div>' +
+     '<div class="clip tag" id="bpt" style="left:5%;top:6.5%" data-start="0" data-duration="' + s + '" data-track-index="3">BUILDING THE LOOMPAD</div>',
+  j: "gsap.set('#bpt',{opacity:0,scale:.94});tl.to('#bpt',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},.3);" +
+     "tl.to('#bpt',{opacity:0,duration:.3}," + (s - 1.0).toFixed(2) + ");",
+});
 S.circuits = (s) => ({
   b: `<div class="clip bg" id="cb" data-start="0" data-duration="${s}" data-track-index="1"></div>
    <div class="clip tag" id="tg" style="left:5%;top:6.5%" data-start="0" data-duration="${s}" data-track-index="3">OPEN SOURCE &mdash; SCHEMATIC, WIRING, CAD</div>`,
