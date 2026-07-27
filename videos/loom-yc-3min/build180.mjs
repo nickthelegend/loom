@@ -31,15 +31,15 @@ const SC = [
   ["uichat", 10.0, "04", ["One prompt into one shared thread.", "Claude Code plans it, the baton passes to Codex.", "It picks up mid-task and ships the code."]],
   ["uiboard", 8.2, "05", ["Work moves on a board.", "Create a task, hand it to an agent.", "Every card carries the agent that owns it."]],
   ["roles", 6.4, "06", ["You decide who does what.", "Except the one holding the baton."]],
-  ["uibrain", 4.1, null, ["Twenty-one things this project has learned."]],
+  ["uibrain", 9.2, null, ["Twenty-one things this project has learned.", "Facts, decisions, failures, conventions."]],
   ["brain", 11.0, "07", ["Codex wrote that. Antigravity wrote that.", "Four agents, one memory —", "and all of them can read all of it."]],
   ["mobile", 15.0, "08", ["The same brain is on your phone.", "The brain, the routes, the whole thread.", "Start a route from your pocket."]],
-  ["buildpad", 22.2, "09", ["And we built it a body.", "Printed, wired, assembled.", "One key per agent."]],
+  ["buildpad", 18.1, "09", ["And we built it a body.", "Printed, wired, assembled.", "One key per agent."]],
   ["pad", 52.0, null, []],
-  ["circuits", 20.0, "10", ["The whole project is open source.", "Enclosure, wiring, the full schematic.", "Anyone can build one themselves."]],
+  ["circuits", 15.1, "10", ["The whole project is open source.", "Enclosure, wiring, the full schematic.", "Anyone can build one themselves."]],
   ["micro", 4.6, "11", ["A Codex Micro — for every agent, in one device."]],
   ["landing", 9.0, "12", ["Buy one soon, or build one yourself."]],
-  ["close", 5.0, null, ["Loom. One brain, every agent."]],
+  ["close", 6.2, null, ["Loom. One brain, every agent.", "Open source, MIT. Build one yourself."]],
 ];
 
 const head = (id) => `<style>
@@ -225,7 +225,8 @@ S.close = (s) => ({
    <div class="clip m" id="zi" data-start="0" data-duration="${s}" data-track-index="3" style="left:0;right:0;top:612px;text-align:center;font-size:30px;color:${O}">npm i -g @loompad/cli</div>
    <div class="clip m" id="zg" data-start="0" data-duration="${s}" data-track-index="4" style="left:0;right:0;top:668px;text-align:center;font-size:20px;color:#5a5a63">github.com/nickthelegend/loom</div>`,
   j: `gsap.set('#zw',{opacity:0,scale:.9});gsap.set(['#zs','#zi','#zg'],{opacity:0,y:14});
-tl.to('#zw',{opacity:1,scale:1,duration:.42,ease:"back.out(2.2)"},0).to(['#zs','#zi','#zg'],{opacity:1,y:0,duration:.3,stagger:.11},.36);`,
+tl.to('#zw',{opacity:1,scale:1,duration:.42,ease:"back.out(2.2)"},0).to(['#zs','#zi','#zg'],{opacity:1,y:0,duration:.3,stagger:.11},.36)
+.fromTo('#zo',{opacity:0,y:16},{opacity:1,y:0,duration:.4,ease:"back.out(2)"},1.1);`,
 });
 
 let T = 0; const M = [];
