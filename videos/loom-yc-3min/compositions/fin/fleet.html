@@ -1,0 +1,42 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#f-fleet{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#f-fleet .clip{position:absolute}
+#f-fleet .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#f-fleet .sh{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#f-fleet .m{font-family:"LoomMono",monospace}
+#f-fleet .lg{width:120px;height:120px;object-fit:contain}
+#f-fleet .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#f-fleet .call{border:2.5px solid #FF6B2B;border-radius:9px;box-shadow:0 0 0 9999px rgba(10,10,11,.5)}
+#f-fleet .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
+#f-fleet .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
+#f-fleet .sub span{background:rgba(10,10,11,.9);padding:10px 25px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
+#f-fleet .ttl{font-size:185px;font-weight:700;letter-spacing:-.05em;text-align:center;left:0;right:0}
+</style></head><body>
+<div id="f-fleet" data-composition-id="f-fleet" data-width="1920" data-height="1080" data-start="0" data-duration="11">
+<div class="clip bg" id="f-fleet-bg" data-start="0" data-duration="11" data-track-index="0"></div>
+<div class="clip m" id="fk" data-start="0" data-duration="11" data-track-index="1" style="left:0;right:0;top:300px;text-align:center;font-size:17px;letter-spacing:.2em;color:#A1A1AA;text-transform:uppercase">agents that can take a turn</div><img class="clip lg" id="fl0" src="assets/logos/logo-claude-code.png" data-start="0" data-duration="11" data-track-index="2" style="left:300px;top:430px">
+      <div class="clip" id="fn0" data-start="0" data-duration="11" data-track-index="9" style="left:240px;top:580px;width:240px;text-align:center;font-size:21px;font-weight:500">Claude Code</div>
+<img class="clip lg" id="fl1" src="assets/logos/logo-codex.png" data-start="0" data-duration="11" data-track-index="3" style="left:580px;top:430px">
+      <div class="clip" id="fn1" data-start="0" data-duration="11" data-track-index="10" style="left:520px;top:580px;width:240px;text-align:center;font-size:21px;font-weight:500">Codex</div>
+<img class="clip lg" id="fl2" src="assets/logos/logo-opencode.png" data-start="0" data-duration="11" data-track-index="4" style="left:860px;top:430px">
+      <div class="clip" id="fn2" data-start="0" data-duration="11" data-track-index="11" style="left:800px;top:580px;width:240px;text-align:center;font-size:21px;font-weight:500">OpenCode</div>
+<img class="clip lg" id="fl3" src="assets/logos/logo-grok-code.png" data-start="0" data-duration="11" data-track-index="5" style="left:1140px;top:430px">
+      <div class="clip" id="fn3" data-start="0" data-duration="11" data-track-index="12" style="left:1080px;top:580px;width:240px;text-align:center;font-size:21px;font-weight:500">Grok</div>
+<img class="clip lg" id="fl4" src="assets/logos/logo-antigravity.png" data-start="0" data-duration="11" data-track-index="6" style="left:1420px;top:430px">
+      <div class="clip" id="fn4" data-start="0" data-duration="11" data-track-index="13" style="left:1360px;top:580px;width:240px;text-align:center;font-size:21px;font-weight:500">Antigravity</div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="11" data-track-index="40"><span>Five agents work today.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="11" data-track-index="41"><span>Each verified against a real version.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};
+var tl=gsap.timeline({paused:true});window.__timelines["f-fleet"]=tl;
+gsap.set('[id^=fl]',{opacity:0,y:26,scale:.8});gsap.set('[id^=fn]',{opacity:0,y:14});gsap.set('#fk',{opacity:0});
+tl.to('#fk',{opacity:1,duration:.3},.1)
+ .to('[id^=fl]',{opacity:1,y:0,scale:1,duration:.4,stagger:.16,ease:"back.out(2.8)"},.5)
+ .to('[id^=fn]',{opacity:1,y:0,duration:.28,stagger:.16},.72);
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},5.45);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},5.6);tl.to('#sb1',{opacity:0,duration:.13},10.95);})();</script></body></html>

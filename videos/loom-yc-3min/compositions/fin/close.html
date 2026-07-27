@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#f-close{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#f-close .clip{position:absolute}
+#f-close .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#f-close .sh{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#f-close .m{font-family:"LoomMono",monospace}
+#f-close .lg{width:120px;height:120px;object-fit:contain}
+#f-close .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#f-close .call{border:2.5px solid #FF6B2B;border-radius:9px;box-shadow:0 0 0 9999px rgba(10,10,11,.5)}
+#f-close .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
+#f-close .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
+#f-close .sub span{background:rgba(10,10,11,.9);padding:10px 25px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
+#f-close .ttl{font-size:185px;font-weight:700;letter-spacing:-.05em;text-align:center;left:0;right:0}
+</style></head><body>
+<div id="f-close" data-composition-id="f-close" data-width="1920" data-height="1080" data-start="0" data-duration="5.6">
+<div class="clip bg" id="f-close-bg" data-start="0" data-duration="5.6" data-track-index="0"></div>
+<div class="clip ttl" id="zw" data-start="0" data-duration="5.6" data-track-index="1" style="top:322px;font-size:160px">LOOM</div>
+   <div class="clip" id="zs" data-start="0" data-duration="5.6" data-track-index="2" style="left:0;right:0;top:512px;text-align:center;font-size:35px;color:#A1A1AA">one brain, every agent</div>
+   <div class="clip m" id="zi" data-start="0" data-duration="5.6" data-track-index="3" style="left:0;right:0;top:612px;text-align:center;font-size:30px;color:#FF6B2B">npm i -g @loompad/cli</div>
+   <div class="clip m" id="zg" data-start="0" data-duration="5.6" data-track-index="4" style="left:0;right:0;top:668px;text-align:center;font-size:20px;color:#5a5a63">github.com/nickthelegend/loom</div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="5.6" data-track-index="40"><span>Loom. One brain, every agent.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};
+var tl=gsap.timeline({paused:true});window.__timelines["f-close"]=tl;
+gsap.set('#zw',{opacity:0,scale:.9});gsap.set(['#zs','#zi','#zg'],{opacity:0,y:14});
+tl.to('#zw',{opacity:1,scale:1,duration:.42,ease:"back.out(2.2)"},0).to(['#zs','#zi','#zg'],{opacity:1,y:0,duration:.3,stagger:.11},.36);
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},5.55);})();</script></body></html>

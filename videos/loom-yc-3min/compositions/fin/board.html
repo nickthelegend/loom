@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#f-board{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#f-board .clip{position:absolute}
+#f-board .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#f-board .sh{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#f-board .m{font-family:"LoomMono",monospace}
+#f-board .lg{width:120px;height:120px;object-fit:contain}
+#f-board .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#f-board .call{border:2.5px solid #FF6B2B;border-radius:9px;box-shadow:0 0 0 9999px rgba(10,10,11,.5)}
+#f-board .tag{background:#FF6B2B;color:#0A0A0B;font-weight:700;font-size:21px;letter-spacing:.05em;padding:8px 14px;border-radius:6px;white-space:nowrap}
+#f-board .sub{left:0;right:0;bottom:58px;text-align:center;font-size:36px;font-weight:600}
+#f-board .sub span{background:rgba(10,10,11,.9);padding:10px 25px;border-radius:9px;
+  box-decoration-break:clone;-webkit-box-decoration-break:clone;line-height:1.8}
+#f-board .ttl{font-size:185px;font-weight:700;letter-spacing:-.05em;text-align:center;left:0;right:0}
+</style></head><body>
+<div id="f-board" data-composition-id="f-board" data-width="1920" data-height="1080" data-start="0" data-duration="12.2">
+<div class="clip bg" id="f-board-bg" data-start="0" data-duration="12.2" data-track-index="0"></div>
+<img class="clip sh" id="im" src="assets/shots/017-board-kanban.png" data-start="0" data-duration="12.2" data-track-index="1">
+   <div class="clip tag" id="tg" style="left:5%;top:6.5%" data-start="0" data-duration="12.2" data-track-index="3">THE BOARD</div>
+   <div class="clip call" id="cl0" style="left:13%;top:16%;width:20%;height:26%" data-start="0" data-duration="12.2" data-track-index="10"></div>
+<div class="clip call" id="cl1" style="left:35%;top:16%;width:20%;height:20%" data-start="0" data-duration="12.2" data-track-index="11"></div>
+<div class="clip call" id="cl2" style="left:57%;top:16%;width:20%;height:18%" data-start="0" data-duration="12.2" data-track-index="12"></div>
+<div class="clip sub" id="sb0" data-start="0" data-duration="12.2" data-track-index="40"><span>The board is the fleet's work.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="12.2" data-track-index="41"><span>Codex is building. OpenCode is reviewing.</span></div>
+<div class="clip sub" id="sb2" data-start="0" data-duration="12.2" data-track-index="42"><span>This one needs a human.</span></div>
+</div>
+<script>(function(){window.__timelines=window.__timelines||{};
+var tl=gsap.timeline({paused:true});window.__timelines["f-board"]=tl;
+gsap.set('#im',{scale:1.34,xPercent:8,yPercent:2});tl.to('#im',{scale:1.24,xPercent:-6,yPercent:2,duration:12.2,ease:"power1.inOut"},0);gsap.set('#tg',{opacity:0,scale:.94});tl.to('#tg',{opacity:1,scale:1,duration:.26,ease:"back.out(3)"},.2);gsap.set('#cl0',{opacity:0,scale:.93});tl.to('#cl0',{opacity:1,scale:1,duration:.3,ease:"back.out(2.6)"},1.5);tl.to('#cl0',{opacity:0,duration:.24},4.5);gsap.set('#cl1',{opacity:0,scale:.93});tl.to('#cl1',{opacity:1,scale:1,duration:.3,ease:"back.out(2.6)"},5.2);tl.to('#cl1',{opacity:0,duration:.24},8);gsap.set('#cl2',{opacity:0,scale:.93});tl.to('#cl2',{opacity:1,scale:1,duration:.3,ease:"back.out(2.6)"},8.4);tl.to('#cl2',{opacity:0,duration:.24},11.2);
+gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},4.02);
+gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},4.17);tl.to('#sb1',{opacity:0,duration:.13},8.08);
+gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.2,ease:"power2.out"},8.23);tl.to('#sb2',{opacity:0,duration:.13},12.15);})();</script></body></html>
