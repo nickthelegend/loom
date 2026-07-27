@@ -241,8 +241,25 @@ program
 program
   .command("projects")
   .description("board of all projects")
-  .action(async () => {
+  .option("--forget <idOrName>", "stop tracking a project (its .loom/ stays on disk)")
+  .action(async (opts: { forget?: string }) => {
     const client = await ensureDaemon();
+    if (opts.forget) {
+      const { projects } = await client.listProjects();
+      const hit = projects.find((p) => p.id === opts.forget || p.name === opts.forget);
+      if (!hit) {
+        console.error(pc.red(`no project "${opts.forget}"`));
+        process.exitCode = 1;
+        return;
+      }
+      const r = await client.forgetProject(hit.id);
+      console.log(`forgot ${pc.bold(hit.name)} — ${pc.dim(hit.dir)}`);
+      // Say what was kept. "Removed" against a tool that also owns your event
+      // log reads as "deleted", and someone who believes that will not go
+      // looking for the history that is still sitting there.
+      console.log(pc.dim(`its ${r.keptOnDisk} is untouched — add the directory again to restore it`));
+      return;
+    }
     const { projects } = await client.listProjects();
     if (!projects.length) console.log(pc.dim("no projects yet — loom init"));
     for (const p of projects) console.log(formatProjectRow(p));

@@ -246,7 +246,7 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
     border:1.5px solid currentColor;border-top-color:transparent;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   /* ── Thread feed ──────────────────────────────────────── */
-  .msg{margin:10px 0;display:flex;flex-direction:column}
+  .msg{margin:16px 0;display:flex;flex-direction:column}
   .msg .who{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);
     margin:0 2px 4px;letter-spacing:.04em;display:flex;align-items:center;gap:5px}
   .msg .bubble{max-width:88%;padding:9px 13px;border-radius:var(--radius-xl);
@@ -294,7 +294,7 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
   .thinkbox[open] summary::before{content:"\\25be "}
   .thinkbox .md{margin-top:6px;line-height:1.55}
   .thinkbox .md .mdp{margin-bottom:5px}
-  .sys{color:var(--muted-foreground);font-size:12px;text-align:center;margin:10px auto;
+  .sys{color:var(--muted-foreground);font-size:12px;text-align:center;margin:8px auto;
     font-family:var(--font-mono);letter-spacing:.02em;max-width:92%}
   .sys.warn{color:var(--warn)}
   .sys.err{color:var(--err)}
@@ -302,8 +302,14 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
   .tool{color:color-mix(in srgb, var(--muted-foreground) 75%, transparent);
     font-size:11.5px;font-family:var(--font-mono);margin:3px 0 3px 14px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .handoff{display:flex;align-items:center;justify-content:center;gap:10px;margin:14px 0;
+  /* The baton passing is the product's signature beat, not another status line:
+     give it room and flank it with shuttle-tinted hairlines so it reads as a
+     chapter break in the thread. */
+  .handoff{display:flex;align-items:center;justify-content:center;gap:10px;margin:22px 0;
     font-family:var(--font-mono);font-size:12px}
+  .handoff::before,.handoff::after{content:"";height:1px;flex:0 1 56px;
+    background:linear-gradient(90deg,transparent,color-mix(in srgb, var(--shuttle) 42%, transparent))}
+  .handoff::after{background:linear-gradient(90deg,color-mix(in srgb, var(--shuttle) 42%, transparent),transparent)}
   .handoff .a{color:var(--muted-foreground)}
   .handoff .shuttle{color:var(--shuttle-ink);font-size:15px;animation:glide .5s ease}
   .handoff .b{color:var(--shuttle-ink)}
@@ -471,6 +477,8 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
     font-family:var(--font-mono);letter-spacing:.02em;max-width:760px;margin:7px auto 0;text-align:center;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* ── Toast (floating tier) ────────────────────────────── */
+  .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
+    overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
   #toast{position:fixed;left:50%;transform:translateX(-50%) translateY(6px);bottom:94px;z-index:20;
     background:var(--glass);color:var(--popover-foreground);
     border:1px solid var(--glass-border);border-radius:var(--radius);
@@ -1787,6 +1795,17 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
   .statusbar .lppill.on .sdot{background:var(--ok)}
   .statusbar .usagepill{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer}
   .statusbar .usagepill:hover{color:var(--foreground)}
+  .statusbar .usagepill.warn{color:var(--warn)}
+  .statusbar .usagepill.warn .meter i{background:var(--warn)}
+  .statusbar .usagepill.over{color:var(--err);font-weight:600}
+  .statusbar .usagepill.over .meter i{background:var(--err)}
+  .budgetset{padding:0 0 12px;margin:0 0 12px;border-bottom:1px solid var(--border)}
+  .budgetset label{display:block;font-size:12px;color:var(--muted-foreground);margin-bottom:6px}
+  .budgetrow{display:flex;align-items:center;gap:8px}
+  .budgetrow .bpfx{color:var(--muted-foreground)}
+  .budgetrow input{flex:1;min-width:0;background:var(--secondary);border:1px solid var(--input);
+    border-radius:var(--radius-sm);color:var(--foreground);padding:6px 9px;font:inherit}
+  .budgetset .phdim{margin-top:6px}
   .usagemodal{max-width:400px}
   .usagerows{display:flex;flex-direction:column;gap:13px}
   .usagerow{display:flex;flex-direction:column;gap:5px}
@@ -2050,7 +2069,8 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
      the page is a <use> of one of these symbols. -->
 ${BRAND_SPRITE}
 <div id="root"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="a11y-alert" role="alert" aria-live="assertive" class="visually-hidden"></div>
 <!-- xterm.js, served by the daemon from node_modules: the app has no build
      step and must work offline on a tailnet, so no bundler and no CDN. Only
      used when the daemon has a real pty; the fallback needs none of it. -->
@@ -2166,8 +2186,68 @@ ${BRAND_SPRITE}
 
   function toast(msg){ var t = document.getElementById("toast"); t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
+  /** Assertive screen-reader announcement for high-stakes moments (an agent
+   *  needs you). Cleared then re-set so repeats are re-announced. */
+  function announce(msg){ var a = document.getElementById("a11y-alert"); if (!a) return;
+    a.textContent = ""; setTimeout(function(){ a.textContent = msg; }, 60); }
+  /** The core alert. An agent is blocked on the human — the one moment Loom is
+   *  built to surface. Reach the user through every channel that isn't already
+   *  looking: assertive SR announce, a title flash while the tab is hidden, and
+   *  an OS notification when permitted. Restored on the next focus. */
+  var _titleFlash = null, _baseTitle = "Loom";
+  function stopTitleFlash(){ if (_titleFlash){ clearInterval(_titleFlash); _titleFlash = null; document.title = _baseTitle; } }
+  function notifyNeedsInput(ev){
+    var who = (ev && ev.agentId) || "an agent";
+    var q = ev && ev.payload && ev.payload.question ? ev.payload.question : "";
+    announce(who + " needs input" + (q ? ": " + q : ""));
+    toast("\\u23f8 " + who + " needs you");
+    if (document.hidden){
+      if (!_titleFlash){ var on = false; _titleFlash = setInterval(function(){
+        document.title = (on = !on) ? "\\u23f8 " + who + " needs you" : _baseTitle; }, 1100); }
+      try {
+        if (window.Notification && Notification.permission === "granted"){
+          new Notification(who + " needs input", { body: q || "Loom \\u00b7 an agent is waiting on you", tag: "loom-needs-input" });
+        } else if (window.Notification && Notification.permission === "default"){
+          Notification.requestPermission();
+        }
+      } catch (e) {}
+    }
+  }
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden) stopTitleFlash(); });
+  /** Keyboard access for the row/card controls that are <div>s driven by event
+   *  delegation: make them focusable (so the :focus-visible ring shows) and let
+   *  Enter/Space activate them, without touching every render site. */
+  (function installRowA11y(){
+    var SEL = ".card[data-id],.agentrow[data-agent],.trow[data-file],.trow[data-dir]," +
+      ".hitrow[data-open],.scmrow[data-file],.srow[data-id],.crow[data-p],.crow[data-newchat]";
+    function tag(el){
+      if (el.getAttribute("tabindex") !== null) return;
+      el.setAttribute("tabindex", "0");
+      // role="button" only on leaf rows: a row that nests its own control (a
+      // chat/project row with a menu button) must not claim to be a button.
+      if (!el.querySelector("button,a[href],input,select,textarea,[role='button']")) el.setAttribute("role", "button");
+    }
+    function enhance(root){ if (root.querySelectorAll) { var n = root.querySelectorAll(SEL); for (var i = 0; i < n.length; i++) tag(n[i]); } }
+    try {
+      var mo = new MutationObserver(function(muts){
+        for (var i = 0; i < muts.length; i++){ var an = muts[i].addedNodes;
+          for (var j = 0; j < an.length; j++){ var nd = an[j]; if (nd.nodeType !== 1) continue;
+            if (nd.matches && nd.matches(SEL)) tag(nd); enhance(nd); } }
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+    } catch (e) { /* MutationObserver always present in target browsers */ }
+    enhance(document);
+    document.addEventListener("keydown", function(e){
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var el = document.activeElement;
+      if (el && el.matches && el.matches(SEL)) { e.preventDefault(); el.click(); }
+    });
+  })();
   function hue(id){ var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360; return h; }
-  function money(n){ return "$" + (n >= 0.01 ? n.toFixed(2) : n.toFixed(4)); }
+  // Zero is "$0", not "$0.0000" — four decimals of nothing reads as fake
+  // precision (and free-model turns genuinely cost nothing). Sub-cent but real
+  // costs still show four places; anything that would round to $0.0000 is $0.
+  function money(n){ n = Number(n) || 0; if (n < 0.00005) return "$0"; return "$" + (n >= 0.01 ? n.toFixed(2) : n.toFixed(4)); }
   /** A tiny action menu anchored under a button (the SCM commit split, etc.). */
   function openScmMenu(anchor, items){
     var ex = document.getElementById("scmmenu"); if (ex) ex.remove();
@@ -6227,6 +6307,12 @@ ${BRAND_SPRITE}
           // conversation, and it's the one you most need to see.
           if (frame.type === "log" && frame.record) { addLogRecord(frame.record); return; }
           if (frame.type === "event" && frame.event) {
+            // "an agent needs you" is the whole reason Loom exists, so it must
+            // reach you even when this isn't the chat you're looking at, or the
+            // tab is in the background: announce it, flash the title, and (if
+            // permitted) raise an OS notification. Deliberately above the
+            // per-chat filter below, which would otherwise swallow it.
+            if (frame.event.kind === "needs_input") notifyNeedsInput(frame.event);
             // one socket carries the whole project; this thread is one chat.
             // An event with no chat predates chats and belongs to main.
             if ((frame.event.chat || "main") !== chatId) return;
@@ -6966,9 +7052,27 @@ ${BRAND_SPRITE}
   }
 
   // ---- status bar (desktop shell) ------------------------------------------
+  /** Per-project spend budget (USD), kept in this browser. A control plane
+   *  should be able to cap, not just watch. 0 / unset = no budget. */
+  function budgetFor(pid){ try { var v = parseFloat(localStorage.getItem("loomBudget:" + pid) || ""); return isFinite(v) && v > 0 ? v : 0; } catch (e) { return 0; } }
+  function setBudgetFor(pid, v){ try { if (v > 0) localStorage.setItem("loomBudget:" + pid, String(v)); else localStorage.removeItem("loomBudget:" + pid); } catch (e) {} }
+  var _budgetWarned = {};
+  /** Toast once when a project crosses 80% and again at 100% of its budget. */
+  function checkBudget(p){
+    if (!p || !(p.costUsd > 0)) return;
+    var b = budgetFor(p.id); if (!b) return;
+    var pct = p.costUsd / b, seen = _budgetWarned[p.id] || 0;
+    if (pct >= 1 && seen < 2){ _budgetWarned[p.id] = 2;
+      toast("\\u26a0 " + (p.name || p.id) + " is over its $" + b.toFixed(2) + " budget (" + money(p.costUsd) + ")");
+      announce((p.name || p.id) + " is over its spend budget"); }
+    else if (pct >= 0.8 && seen < 1){ _budgetWarned[p.id] = 1;
+      toast("\\u26a0 " + (p.name || p.id) + " at " + Math.round(pct * 100) + "% of its $" + b.toFixed(2) + " budget"); }
+    else if (pct < 0.8){ _budgetWarned[p.id] = 0; }
+  }
   function drawStatusbar(){
     var el = document.getElementById("statusbar"); if (!el) return;
     var p = state.project;
+    checkBudget(p);
     var busy = 0, total = 0;
     (state.projects || []).forEach(function(pr){
       total += pr.costUsd > 0 ? pr.costUsd : 0;
@@ -6994,7 +7098,17 @@ ${BRAND_SPRITE}
       '<span class="sit">' + esc(location.host) + "</span>" +
       (p ? '<span class="sit">baton ' + esc(p.holder || "\\u2014") + "</span>" : "") +
       (p && p.costUsd > 0
-        ? '<button class="sit usagepill" id="usagepill" title="usage breakdown"><span class="meter"><i style="width:' + share + '%"></i></span>' + money(p.costUsd) + " \\u00b7 " + share + "% of \\u03a3</button>"
+        ? (function(){
+            // With a budget set the meter measures spend against the cap, not
+            // this project's share of the fleet — a share of Σ tells you nothing
+            // about whether you're about to blow through what you meant to spend.
+            var b = budgetFor(p.id);
+            var cls = b ? (p.costUsd >= b ? " over" : (p.costUsd >= b * 0.8 ? " warn" : "")) : "";
+            var w = b ? Math.min(100, Math.round((p.costUsd / b) * 100)) : share;
+            var label = b ? money(p.costUsd) + " / $" + b.toFixed(2) : money(p.costUsd) + " \\u00b7 " + share + "% of \\u03a3";
+            var tip = b ? "spend vs budget \\u2014 click to adjust" : "usage breakdown \\u2014 click to set a budget";
+            return '<button class="sit usagepill' + cls + '" id="usagepill" title="' + tip + '"><span class="meter"><i style="width:' + w + '%"></i></span>' + label + "</button>";
+          })()
         : "") +
       '<span class="spacer"></span>' +
       lpSeg +
@@ -7047,10 +7161,15 @@ ${BRAND_SPRITE}
       });
       body += '</div>';
     }
+    var curBudget = cur ? budgetFor(cur.id) : 0;
+    var budgetUI = cur ? '<div class="budgetset"><label for="budgetinp">Budget for ' + esc(cur.name || cur.id) + '</label>' +
+      '<div class="budgetrow"><span class="bpfx">$</span><input id="budgetinp" type="number" min="0" step="0.5" placeholder="none" value="' + (curBudget || "") + '">' +
+      '<button class="btn sm" id="budgetsave">Save</button>' + (curBudget ? '<button class="btn ghost sm" id="budgetclear">Clear</button>' : "") + "</div>" +
+      '<div class="phdim">Warns at 80% and 100% of budget. Stored in this browser.</div></div>' : "";
     var scrim = document.createElement("div"); scrim.className = "scrim";
     scrim.innerHTML = '<div class="modal usagemodal">' +
       '<div class="modalhead">Usage<button class="iconbtn" id="ux" aria-label="close">' + ICONS.x + '</button></div>' +
-      '<div class="modalbody">' + body + '</div>' +
+      '<div class="modalbody">' + budgetUI + body + '</div>' +
       '<div class="modalfoot"><span class="phdim">' + rows.length + ' project' + (rows.length===1?"":"s") + '</span><span class="spacer"></span><span class="sit">\\u03a3 ' + money(total) + '</span></div>' +
     '</div>';
     document.body.appendChild(scrim);
@@ -7059,6 +7178,11 @@ ${BRAND_SPRITE}
     document.addEventListener("keydown", onKey);
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("ux").onclick = close;
+    var bsave = document.getElementById("budgetsave");
+    if (bsave) bsave.onclick = function(){ var v = parseFloat((document.getElementById("budgetinp").value || "").trim());
+      setBudgetFor(cur.id, isFinite(v) ? v : 0); _budgetWarned[cur.id] = 0; toast(isFinite(v) && v > 0 ? "budget set to $" + v.toFixed(2) : "budget cleared"); drawStatusbar(); close(); };
+    var bclear = document.getElementById("budgetclear");
+    if (bclear) bclear.onclick = function(){ setBudgetFor(cur.id, 0); _budgetWarned[cur.id] = 0; toast("budget cleared"); drawStatusbar(); close(); };
   }
 
   // Click the LoomPad pill: is the voice backend up, and how the physical pad
@@ -8414,6 +8538,10 @@ ${BRAND_SPRITE}
     clearShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
     var cur = m ? m[1] : null;
+    // The project the URL asked for, kept separately from the one on screen so
+    // a deep link that loses the race with the first /api/projects can still be
+    // honoured when it arrives. select() clears it — see refresh().
+    var wanted = cur;
     root.innerHTML =
       '<div class="dshell">' +
       '<aside class="sidebar">' +
@@ -8812,6 +8940,7 @@ ${BRAND_SPRITE}
     }
     function select(pid){
       cur = pid;
+      wanted = null; // whatever the URL wanted, this is a real choice now
       history.replaceState(null, "", "#p/" + pid);
       renderProject(pid, dmain, true);
       drawList();
@@ -8837,6 +8966,17 @@ ${BRAND_SPRITE}
         if (!state.projects.length) { drawList(); drawEmpty(); drawStatusbar(); return; }
         var exists = state.projects.some(function(p){ return p.id === cur; });
         if (!document.getElementById("feed")) select(cur && exists ? cur : state.projects[0].id);
+        // A link to a project this client has never listed — one just created,
+        // or a URL from another device — loses a race: the first /api/projects
+        // reply doesn't contain it, the exists check is false, and it quietly
+        // opens projects[0] instead. The project then turns up in the sidebar a
+        // poll later while the address bar still reads #p/<the other one>, and
+        // you are looking at a project you did not ask for with no sign that
+        // anything went wrong.
+        //
+        // wanted is cleared by select(), so this fires at most once and never
+        // yanks the view back after you have clicked somewhere yourself.
+        else if (wanted && wanted !== cur && state.projects.some(function(p){ return p.id === wanted; })) select(wanted);
         else drawList();
         drawStatusbar();
       }).catch(function(err){ toast(err.message); });
