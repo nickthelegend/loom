@@ -1,0 +1,52 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#x-board{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#x-board .clip{position:absolute}
+#x-board .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#x-board .m{font-family:"LoomMono",monospace}
+#x-board .lg{width:118px;height:118px;object-fit:contain}
+#x-board .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#x-board .ttl{font-size:52px;font-weight:700;letter-spacing:-.02em}
+#x-board .sub{font-size:24px;color:#A1A1AA}
+#x-board .chip{border:1px solid #26262B;border-radius:99px;padding:9px 20px;font-size:20px;color:#A1A1AA;background:#111116}
+#x-board .baton{width:22px;height:22px;border-radius:50%;background:#FF6B2B;box-shadow:0 0 26px 8px rgba(255,107,43,.55)}
+#x-board .wire{height:2px;background:linear-gradient(90deg,#26262B,#FF6B2B,#26262B)}
+#x-board .tcard{border:1px solid #26262B;border-left:3px solid #FF6B2B;border-radius:10px;background:#101014;
+  padding:14px 16px;font-size:19px;display:flex;align-items:center;gap:11px}
+#x-board .tcard img{width:24px;height:24px;object-fit:contain}
+#x-board .col{font-size:16px;letter-spacing:.13em;color:#A1A1AA;text-transform:uppercase}
+#x-board .unit{border:1px solid #26262B;border-radius:10px;background:#101014;padding:12px 15px;font-size:18px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap}
+#x-board .unit img{width:21px;height:21px;object-fit:contain}
+#x-board .kind{font-size:12px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#1c1c22;color:#A1A1AA}
+#x-board .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#x-board .band{left:0;right:0;bottom:0;height:96px;background:linear-gradient(0deg,rgba(10,10,11,.97),transparent);
+  display:flex;align-items:center;justify-content:center;gap:22px}
+#x-board .bt{font-size:26px;font-weight:700;color:#FF6B2B} #x-board .bs{font-size:20px;color:#A1A1AA}
+</style></head><body>
+<div id="x-board" data-composition-id="x-board" data-width="1920" data-height="1080" data-start="0" data-duration="7">
+<div class="clip bg" id="x-board-bg" data-start="0" data-duration="7" data-track-index="0"></div>
+<div class="clip" data-start="0" data-duration="7" data-track-index="1" style="inset:0">
+      <div class="col" style="position:absolute;left:0;top:130px;width:1920px;text-align:center">the fleet's work</div>
+      <div class="col" id="bd-h0" style="position:absolute;left:150px;top:250px;width:380px">working</div>
+        <div style="position:absolute;left:150px;top:284px;width:380px;height:1px;background:#26262B"></div><div class="col" id="bd-h1" style="position:absolute;left:570px;top:250px;width:380px">needs you</div>
+        <div style="position:absolute;left:570px;top:284px;width:380px;height:1px;background:#26262B"></div><div class="col" id="bd-h2" style="position:absolute;left:990px;top:250px;width:380px">in review</div>
+        <div style="position:absolute;left:990px;top:284px;width:380px;height:1px;background:#26262B"></div><div class="col" id="bd-h3" style="position:absolute;left:1410px;top:250px;width:380px">ready</div>
+        <div style="position:absolute;left:1410px;top:284px;width:380px;height:1px;background:#26262B"></div>
+      <div class="tcard" id="bd-c0" style="position:absolute;left:150px;top:318px;width:380px">
+          <img src="assets/logos/logo-codex.png"><span>Add --json to `loom agents`</span></div><div class="tcard" id="bd-c1" style="position:absolute;left:150px;top:410px;width:380px">
+          <img src="assets/logos/logo-opencode.png"><span>Port MCP to the phone app</span></div><div class="tcard" id="bd-c2" style="position:absolute;left:570px;top:318px;width:380px">
+          <img src="assets/logos/logo-claude-code.png"><span>Cap spend per project?</span></div><div class="tcard" id="bd-c3" style="position:absolute;left:990px;top:318px;width:380px">
+          <img src="assets/logos/logo-opencode.png"><span>Review the agy spawn fix</span></div><div class="tcard" id="bd-c4" style="position:absolute;left:1410px;top:318px;width:380px">
+          <img src="assets/logos/logo-codex.png"><span>Wire agy models in</span></div>
+    </div>
+</div>
+<script>(function(){
+window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["x-board"]=tl;
+gsap.set('[id^=bd-h]',{opacity:0,y:-14});gsap.set('[id^=bd-c]',{opacity:0,y:34,scale:.94});
+tl.to('[id^=bd-h]',{opacity:1,y:0,duration:.28,stagger:.08,ease:"back.out(2)"},.15)
+  .to('[id^=bd-c]',{opacity:1,y:0,scale:1,duration:.34,stagger:.26,ease:"back.out(2.2)"},.6);})();</script></body></html>

@@ -1,0 +1,44 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#x-claim{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#x-claim .clip{position:absolute}
+#x-claim .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#x-claim .m{font-family:"LoomMono",monospace}
+#x-claim .lg{width:118px;height:118px;object-fit:contain}
+#x-claim .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#x-claim .ttl{font-size:52px;font-weight:700;letter-spacing:-.02em}
+#x-claim .sub{font-size:24px;color:#A1A1AA}
+#x-claim .chip{border:1px solid #26262B;border-radius:99px;padding:9px 20px;font-size:20px;color:#A1A1AA;background:#111116}
+#x-claim .baton{width:22px;height:22px;border-radius:50%;background:#FF6B2B;box-shadow:0 0 26px 8px rgba(255,107,43,.55)}
+#x-claim .wire{height:2px;background:linear-gradient(90deg,#26262B,#FF6B2B,#26262B)}
+#x-claim .tcard{border:1px solid #26262B;border-left:3px solid #FF6B2B;border-radius:10px;background:#101014;
+  padding:14px 16px;font-size:19px;display:flex;align-items:center;gap:11px}
+#x-claim .tcard img{width:24px;height:24px;object-fit:contain}
+#x-claim .col{font-size:16px;letter-spacing:.13em;color:#A1A1AA;text-transform:uppercase}
+#x-claim .unit{border:1px solid #26262B;border-radius:10px;background:#101014;padding:12px 15px;font-size:18px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap}
+#x-claim .unit img{width:21px;height:21px;object-fit:contain}
+#x-claim .kind{font-size:12px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#1c1c22;color:#A1A1AA}
+#x-claim .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#x-claim .band{left:0;right:0;bottom:0;height:96px;background:linear-gradient(0deg,rgba(10,10,11,.97),transparent);
+  display:flex;align-items:center;justify-content:center;gap:22px}
+#x-claim .bt{font-size:26px;font-weight:700;color:#FF6B2B} #x-claim .bs{font-size:20px;color:#A1A1AA}
+</style></head><body>
+<div id="x-claim" data-composition-id="x-claim" data-width="1920" data-height="1080" data-start="0" data-duration="1.8">
+<div class="clip bg" id="x-claim-bg" data-start="0" data-duration="1.8" data-track-index="0"></div>
+<div class="clip" data-start="0" data-duration="1.8" data-track-index="1" style="inset:0">
+    <div id="c-w" class="ttl" style="position:absolute;left:0;top:400px;width:1920px;text-align:center;font-size:190px;letter-spacing:-.05em">LOOM</div>
+    <div id="c-r" style="position:absolute;left:860px;top:620px;width:0;height:4px;background:#FF6B2B"></div>
+    <div id="c-s" class="m" style="position:absolute;left:0;top:660px;width:1920px;text-align:center;font-size:27px;color:#A1A1AA">the shared-memory layer for AI coding agents</div>
+  </div>
+</div>
+<script>(function(){
+window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["x-claim"]=tl;
+gsap.set('#c-w',{opacity:0,scale:.9});gsap.set('#c-s',{opacity:0});
+tl.to('#c-w',{opacity:1,scale:1,duration:.42,ease:"back.out(2)"},0)
+  .to('#c-r',{width:200,duration:.3,ease:"power2.out"},.4)
+  .to('#c-s',{opacity:1,duration:.3},.6);})();</script></body></html>

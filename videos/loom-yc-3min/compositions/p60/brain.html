@@ -1,0 +1,53 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#x-brain{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#x-brain .clip{position:absolute}
+#x-brain .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#x-brain .m{font-family:"LoomMono",monospace}
+#x-brain .lg{width:118px;height:118px;object-fit:contain}
+#x-brain .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#x-brain .ttl{font-size:52px;font-weight:700;letter-spacing:-.02em}
+#x-brain .sub{font-size:24px;color:#A1A1AA}
+#x-brain .chip{border:1px solid #26262B;border-radius:99px;padding:9px 20px;font-size:20px;color:#A1A1AA;background:#111116}
+#x-brain .baton{width:22px;height:22px;border-radius:50%;background:#FF6B2B;box-shadow:0 0 26px 8px rgba(255,107,43,.55)}
+#x-brain .wire{height:2px;background:linear-gradient(90deg,#26262B,#FF6B2B,#26262B)}
+#x-brain .tcard{border:1px solid #26262B;border-left:3px solid #FF6B2B;border-radius:10px;background:#101014;
+  padding:14px 16px;font-size:19px;display:flex;align-items:center;gap:11px}
+#x-brain .tcard img{width:24px;height:24px;object-fit:contain}
+#x-brain .col{font-size:16px;letter-spacing:.13em;color:#A1A1AA;text-transform:uppercase}
+#x-brain .unit{border:1px solid #26262B;border-radius:10px;background:#101014;padding:12px 15px;font-size:18px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap}
+#x-brain .unit img{width:21px;height:21px;object-fit:contain}
+#x-brain .kind{font-size:12px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#1c1c22;color:#A1A1AA}
+#x-brain .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#x-brain .band{left:0;right:0;bottom:0;height:96px;background:linear-gradient(0deg,rgba(10,10,11,.97),transparent);
+  display:flex;align-items:center;justify-content:center;gap:22px}
+#x-brain .bt{font-size:26px;font-weight:700;color:#FF6B2B} #x-brain .bs{font-size:20px;color:#A1A1AA}
+</style></head><body>
+<div id="x-brain" data-composition-id="x-brain" data-width="1920" data-height="1080" data-start="0" data-duration="12.8">
+<div class="clip bg" id="x-brain-bg" data-start="0" data-duration="12.8" data-track-index="0"></div>
+<div class="clip" data-start="0" data-duration="12.8" data-track-index="1" style="inset:0">
+      <div class="col" style="position:absolute;left:0;top:110px;width:1920px;text-align:center">one shared brain</div>
+      <div class="card" id="br-box" style="position:absolute;left:560px;top:200px;width:800px;height:660px"></div>
+      <div class="unit" id="br-u0" style="position:absolute;left:600px;top:250px;max-width:720px">
+        <img src="assets/logos/logo-codex.png"><span class="kind">FACT</span><span>the baton guarantees one writer at a time</span></div><div class="unit" id="br-u1" style="position:absolute;left:600px;top:420px;max-width:720px">
+        <img src="assets/logos/logo-antigravity.png"><span class="kind">DECISION</span><span>/healthz returns a JSON status object</span></div><div class="unit" id="br-u2" style="position:absolute;left:600px;top:590px;max-width:720px">
+        <img src="assets/logos/logo-opencode.png"><span class="kind">DECISION</span><span>config lives in JSON, not env vars</span></div><div class="unit" id="br-u3" style="position:absolute;left:600px;top:760px;max-width:720px">
+        <img src="assets/logos/logo-claude-code.png"><span class="kind">FAILURE</span><span>daemons go stale — detect via BUILD_REV</span></div>
+      <div class="m" id="br-n" style="position:absolute;left:0;top:890px;width:1920px;text-align:center;font-size:30px;color:#FF6B2B;opacity:0">
+        four agents wrote it &middot; all of them can read it</div>
+    </div>
+</div>
+<script>(function(){
+window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["x-brain"]=tl;
+gsap.set('#br-box',{opacity:0,scale:.96});gsap.set('[id^=br-u]',{opacity:0,x:-420,scale:.9});
+tl.to('#br-box',{opacity:1,scale:1,duration:.4,ease:"back.out(1.8)"},.1)
+  .to('#br-u0',{opacity:1,x:0,scale:1,duration:.5,ease:"back.out(1.9)"},0.70)
+  .to('#br-u1',{opacity:1,x:0,scale:1,duration:.5,ease:"back.out(1.9)"},2.20)
+  .to('#br-u2',{opacity:1,x:0,scale:1,duration:.5,ease:"back.out(1.9)"},3.70)
+  .to('#br-u3',{opacity:1,x:0,scale:1,duration:.5,ease:"back.out(1.9)"},5.20)
+  .to('#br-n',{opacity:1,duration:.4,ease:"back.out(1.6)"},7.10);})();</script></body></html>

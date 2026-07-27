@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#x-roles{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#x-roles .clip{position:absolute}
+#x-roles .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#x-roles .m{font-family:"LoomMono",monospace}
+#x-roles .lg{width:118px;height:118px;object-fit:contain}
+#x-roles .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#x-roles .ttl{font-size:52px;font-weight:700;letter-spacing:-.02em}
+#x-roles .sub{font-size:24px;color:#A1A1AA}
+#x-roles .chip{border:1px solid #26262B;border-radius:99px;padding:9px 20px;font-size:20px;color:#A1A1AA;background:#111116}
+#x-roles .baton{width:22px;height:22px;border-radius:50%;background:#FF6B2B;box-shadow:0 0 26px 8px rgba(255,107,43,.55)}
+#x-roles .wire{height:2px;background:linear-gradient(90deg,#26262B,#FF6B2B,#26262B)}
+#x-roles .tcard{border:1px solid #26262B;border-left:3px solid #FF6B2B;border-radius:10px;background:#101014;
+  padding:14px 16px;font-size:19px;display:flex;align-items:center;gap:11px}
+#x-roles .tcard img{width:24px;height:24px;object-fit:contain}
+#x-roles .col{font-size:16px;letter-spacing:.13em;color:#A1A1AA;text-transform:uppercase}
+#x-roles .unit{border:1px solid #26262B;border-radius:10px;background:#101014;padding:12px 15px;font-size:18px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap}
+#x-roles .unit img{width:21px;height:21px;object-fit:contain}
+#x-roles .kind{font-size:12px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#1c1c22;color:#A1A1AA}
+#x-roles .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#x-roles .band{left:0;right:0;bottom:0;height:96px;background:linear-gradient(0deg,rgba(10,10,11,.97),transparent);
+  display:flex;align-items:center;justify-content:center;gap:22px}
+#x-roles .bt{font-size:26px;font-weight:700;color:#FF6B2B} #x-roles .bs{font-size:20px;color:#A1A1AA}
+</style></head><body>
+<div id="x-roles" data-composition-id="x-roles" data-width="1920" data-height="1080" data-start="0" data-duration="4.2">
+<div class="clip bg" id="x-roles-bg" data-start="0" data-duration="4.2" data-track-index="0"></div>
+<div class="clip" data-start="0" data-duration="4.2" data-track-index="1" style="inset:0">
+      <div class="col" style="position:absolute;left:0;top:210px;width:1920px;text-align:center">you decide who does what</div>
+      <img class="lg" id="rl-l0" src="assets/logos/logo-claude-code.png" style="position:absolute;left:400px;top:360px">
+        <div class="m" style="position:absolute;left:330px;top:500px;width:260px;text-align:center;font-size:21px;color:#A1A1AA">claude-code</div>
+<img class="lg" id="rl-l1" src="assets/logos/logo-codex.png" style="position:absolute;left:800px;top:360px">
+        <div class="m" style="position:absolute;left:730px;top:500px;width:260px;text-align:center;font-size:21px;color:#A1A1AA">codex</div>
+<img class="lg" id="rl-l2" src="assets/logos/logo-opencode.png" style="position:absolute;left:1200px;top:360px">
+        <div class="m" style="position:absolute;left:1130px;top:500px;width:260px;text-align:center;font-size:21px;color:#A1A1AA">opencode</div>
+
+      <div class="chip" id="rl-c0" style="position:absolute;left:390px;top:566px;color:#FF6B2B;border-color:#FF6B2B">planner</div><div class="chip" id="rl-c1" style="position:absolute;left:790px;top:566px;color:#FF6B2B;border-color:#FF6B2B">builder</div><div class="chip" id="rl-c2" style="position:absolute;left:1190px;top:566px;color:#FF6B2B;border-color:#FF6B2B">reviewer</div>
+    </div>
+</div>
+<script>(function(){
+window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["x-roles"]=tl;
+gsap.set('[id^=rl-l]',{opacity:0,scale:.86});gsap.set('[id^=rl-c]',{opacity:0,y:18});
+tl.to('[id^=rl-l]',{opacity:1,scale:1,duration:.3,stagger:.14,ease:"back.out(2.4)"},.15)
+  .to('[id^=rl-c]',{opacity:1,y:0,duration:.3,stagger:.22,ease:"back.out(2.4)"},.8);})();</script></body></html>

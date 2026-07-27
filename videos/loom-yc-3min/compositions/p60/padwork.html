@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#x-padwork{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#x-padwork .clip{position:absolute}
+#x-padwork .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#x-padwork .m{font-family:"LoomMono",monospace}
+#x-padwork .lg{width:118px;height:118px;object-fit:contain}
+#x-padwork .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#x-padwork .ttl{font-size:52px;font-weight:700;letter-spacing:-.02em}
+#x-padwork .sub{font-size:24px;color:#A1A1AA}
+#x-padwork .chip{border:1px solid #26262B;border-radius:99px;padding:9px 20px;font-size:20px;color:#A1A1AA;background:#111116}
+#x-padwork .baton{width:22px;height:22px;border-radius:50%;background:#FF6B2B;box-shadow:0 0 26px 8px rgba(255,107,43,.55)}
+#x-padwork .wire{height:2px;background:linear-gradient(90deg,#26262B,#FF6B2B,#26262B)}
+#x-padwork .tcard{border:1px solid #26262B;border-left:3px solid #FF6B2B;border-radius:10px;background:#101014;
+  padding:14px 16px;font-size:19px;display:flex;align-items:center;gap:11px}
+#x-padwork .tcard img{width:24px;height:24px;object-fit:contain}
+#x-padwork .col{font-size:16px;letter-spacing:.13em;color:#A1A1AA;text-transform:uppercase}
+#x-padwork .unit{border:1px solid #26262B;border-radius:10px;background:#101014;padding:12px 15px;font-size:18px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap}
+#x-padwork .unit img{width:21px;height:21px;object-fit:contain}
+#x-padwork .kind{font-size:12px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#1c1c22;color:#A1A1AA}
+#x-padwork .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#x-padwork .band{left:0;right:0;bottom:0;height:96px;background:linear-gradient(0deg,rgba(10,10,11,.97),transparent);
+  display:flex;align-items:center;justify-content:center;gap:22px}
+#x-padwork .bt{font-size:26px;font-weight:700;color:#FF6B2B} #x-padwork .bs{font-size:20px;color:#A1A1AA}
+</style></head><body>
+<div id="x-padwork" data-composition-id="x-padwork" data-width="1920" data-height="1080" data-start="0" data-duration="8">
+<div class="clip bg" id="x-padwork-bg" data-start="0" data-duration="8" data-track-index="0"></div>
+<div class="clip" data-start="0" data-duration="8" data-track-index="1" class="bg"></div>
+    <div class="clip" data-start="0" data-duration="8" data-track-index="8" class="band"><div class="bt">THE LOOMPAD</div><div class="bs m">it speaks the agent's reply back</div></div>
+</div>
+<script>(function(){
+window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["x-padwork"]=tl;
+gsap.set('.band',{opacity:0,y:22});tl.to('.band',{opacity:1,y:0,duration:.3,ease:"back.out(2)"},.2);})();</script></body></html>

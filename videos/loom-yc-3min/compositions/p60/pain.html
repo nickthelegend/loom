@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#x-pain{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#x-pain .clip{position:absolute}
+#x-pain .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#x-pain .m{font-family:"LoomMono",monospace}
+#x-pain .lg{width:118px;height:118px;object-fit:contain}
+#x-pain .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#x-pain .ttl{font-size:52px;font-weight:700;letter-spacing:-.02em}
+#x-pain .sub{font-size:24px;color:#A1A1AA}
+#x-pain .chip{border:1px solid #26262B;border-radius:99px;padding:9px 20px;font-size:20px;color:#A1A1AA;background:#111116}
+#x-pain .baton{width:22px;height:22px;border-radius:50%;background:#FF6B2B;box-shadow:0 0 26px 8px rgba(255,107,43,.55)}
+#x-pain .wire{height:2px;background:linear-gradient(90deg,#26262B,#FF6B2B,#26262B)}
+#x-pain .tcard{border:1px solid #26262B;border-left:3px solid #FF6B2B;border-radius:10px;background:#101014;
+  padding:14px 16px;font-size:19px;display:flex;align-items:center;gap:11px}
+#x-pain .tcard img{width:24px;height:24px;object-fit:contain}
+#x-pain .col{font-size:16px;letter-spacing:.13em;color:#A1A1AA;text-transform:uppercase}
+#x-pain .unit{border:1px solid #26262B;border-radius:10px;background:#101014;padding:12px 15px;font-size:18px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap}
+#x-pain .unit img{width:21px;height:21px;object-fit:contain}
+#x-pain .kind{font-size:12px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#1c1c22;color:#A1A1AA}
+#x-pain .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#x-pain .band{left:0;right:0;bottom:0;height:96px;background:linear-gradient(0deg,rgba(10,10,11,.97),transparent);
+  display:flex;align-items:center;justify-content:center;gap:22px}
+#x-pain .bt{font-size:26px;font-weight:700;color:#FF6B2B} #x-pain .bs{font-size:20px;color:#A1A1AA}
+</style></head><body>
+<div id="x-pain" data-composition-id="x-pain" data-width="1920" data-height="1080" data-start="0" data-duration="5">
+<div class="clip bg" id="x-pain-bg" data-start="0" data-duration="5" data-track-index="0"></div>
+<div class="clip" data-start="0" data-duration="5" data-track-index="1" style="inset:0">
+    <div class="card" style="position:absolute;left:150px;top:250px;width:640px;height:430px"></div>
+    <img class="lg" id="p-l1" src="assets/logos/logo-claude-code.png" style="position:absolute;left:410px;top:300px">
+    <div class="m" id="p-n1" style="position:absolute;left:150px;top:452px;width:640px;text-align:center;font-size:24px;color:#A1A1AA">claude-code</div>
+    <div class="m" id="p-w1" style="position:absolute;left:196px;top:500px;width:548px;font-size:14px;color:#4d4d55;line-height:1.85;overflow:hidden;height:0">
+      &gt; this is a pnpm monorepo on node 20 — four packages, one app.<br>packages/daemon owns every websocket and binds 7420.<br>apps/web is next 15 on the app router.<br>packages/core holds the domain types.<br>tests live beside the file they cover.</div>
+    <div class="card" style="position:absolute;left:1130px;top:250px;width:640px;height:430px"></div>
+    <img class="lg" id="p-l2" src="assets/logos/logo-codex.png" style="position:absolute;left:1390px;top:300px">
+    <div class="m" id="p-n2" style="position:absolute;left:1130px;top:452px;width:640px;text-align:center;font-size:24px;color:#A1A1AA">codex</div>
+    <div class="m" id="p-w2" style="position:absolute;left:1176px;top:500px;width:548px;font-size:14px;color:#4d4d55;line-height:1.85;overflow:hidden;height:0">
+      &gt; this is a pnpm monorepo on node 20 — four packages, one app.<br>packages/daemon owns every websocket and binds 7420.<br>apps/web is next 15 on the app router.<br>packages/core holds the domain types.<br>tests live beside the file they cover.</div>
+    <div id="p-wall" style="position:absolute;left:958px;top:250px;width:4px;height:430px;background:#FF6B2B;opacity:0"></div>
+    <div class="m" id="p-x" style="position:absolute;left:820px;top:700px;width:280px;text-align:center;font-size:19px;color:#FF6B2B;letter-spacing:.16em;opacity:0">NO SHARED MEMORY</div>
+    <div class="ttl" id="p-t" style="position:absolute;left:0;top:840px;width:1920px;text-align:center;font-size:40px;color:#A1A1AA">Two agents. Two brains. Neither can read the other.</div>
+  </div>
+</div>
+<script>(function(){
+window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["x-pain"]=tl;
+gsap.set(['#p-l1','#p-n1'],{opacity:0,y:18});gsap.set(['#p-l2','#p-n2'],{opacity:0,y:18});
+gsap.set('#p-t',{opacity:0,y:20});
+tl.to(['#p-l1','#p-n1'],{opacity:1,y:0,duration:.34,ease:"back.out(2)"},.15)
+  .to('#p-w1',{height:140,duration:1.1,ease:"none"},.5)
+  .to(['#p-l2','#p-n2'],{opacity:1,y:0,duration:.34,ease:"back.out(2)"},1.8)
+  .to('#p-w2',{height:140,duration:1.1,ease:"none"},2.1)
+  .to('#p-wall',{opacity:1,duration:.22},3.3)
+  .to('#p-x',{opacity:1,duration:.26},3.45)
+  .to('#p-t',{opacity:1,y:0,duration:.4,ease:"back.out(1.6)"},3.7);})();</script></body></html>

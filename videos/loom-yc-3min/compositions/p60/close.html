@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<style>
+@font-face{font-family:"SG";src:url("assets/Space_Grotesk_Variable.woff2") format("woff2");font-weight:100 900;font-display:block}
+@font-face{font-family:"LoomMono";src:local("Menlo"),local("SF Mono"),local("Monaco");font-display:block}
+#x-close{position:absolute;inset:0;overflow:hidden;background:#0A0A0B;font-family:"SG",system-ui,sans-serif;color:#FAFAFA}
+#x-close .clip{position:absolute}
+#x-close .bg{inset:0;width:100%;height:100%;background:#0A0A0B}
+#x-close .m{font-family:"LoomMono",monospace}
+#x-close .lg{width:118px;height:118px;object-fit:contain}
+#x-close .card{border:1px solid #26262B;border-radius:14px;background:#0e0e11}
+#x-close .ttl{font-size:52px;font-weight:700;letter-spacing:-.02em}
+#x-close .sub{font-size:24px;color:#A1A1AA}
+#x-close .chip{border:1px solid #26262B;border-radius:99px;padding:9px 20px;font-size:20px;color:#A1A1AA;background:#111116}
+#x-close .baton{width:22px;height:22px;border-radius:50%;background:#FF6B2B;box-shadow:0 0 26px 8px rgba(255,107,43,.55)}
+#x-close .wire{height:2px;background:linear-gradient(90deg,#26262B,#FF6B2B,#26262B)}
+#x-close .tcard{border:1px solid #26262B;border-left:3px solid #FF6B2B;border-radius:10px;background:#101014;
+  padding:14px 16px;font-size:19px;display:flex;align-items:center;gap:11px}
+#x-close .tcard img{width:24px;height:24px;object-fit:contain}
+#x-close .col{font-size:16px;letter-spacing:.13em;color:#A1A1AA;text-transform:uppercase}
+#x-close .unit{border:1px solid #26262B;border-radius:10px;background:#101014;padding:12px 15px;font-size:18px;
+  display:flex;align-items:center;gap:10px;white-space:nowrap}
+#x-close .unit img{width:21px;height:21px;object-fit:contain}
+#x-close .kind{font-size:12px;letter-spacing:.1em;padding:3px 8px;border-radius:5px;background:#1c1c22;color:#A1A1AA}
+#x-close .shot{inset:0;width:100%;height:100%;object-fit:cover;transform-origin:50% 50%}
+#x-close .band{left:0;right:0;bottom:0;height:96px;background:linear-gradient(0deg,rgba(10,10,11,.97),transparent);
+  display:flex;align-items:center;justify-content:center;gap:22px}
+#x-close .bt{font-size:26px;font-weight:700;color:#FF6B2B} #x-close .bs{font-size:20px;color:#A1A1AA}
+</style></head><body>
+<div id="x-close" data-composition-id="x-close" data-width="1920" data-height="1080" data-start="0" data-duration="4.4">
+<div class="clip bg" id="x-close-bg" data-start="0" data-duration="4.4" data-track-index="0"></div>
+<div class="clip" data-start="0" data-duration="4.4" data-track-index="1" style="inset:0">
+    <div class="ttl" id="z-w" style="position:absolute;left:0;top:330px;width:1920px;text-align:center;font-size:165px;letter-spacing:-.05em">LOOM</div>
+    <div id="z-s" style="position:absolute;left:0;top:520px;width:1920px;text-align:center;font-size:35px;color:#A1A1AA">one brain, every agent</div>
+    <div id="z-r" style="position:absolute;left:865px;top:600px;width:0;height:2px;background:#26262B"></div>
+    <div class="m" id="z-i" style="position:absolute;left:0;top:650px;width:1920px;text-align:center;font-size:30px;color:#FF6B2B">npm i -g @loompad/cli</div>
+    <div class="m" id="z-g" style="position:absolute;left:0;top:706px;width:1920px;text-align:center;font-size:20px;color:#5a5a63">github.com/nickthelegend/loom</div>
+  </div>
+</div>
+<script>(function(){
+window.__timelines=window.__timelines||{};var tl=gsap.timeline({paused:true});
+window.__timelines["x-close"]=tl;
+gsap.set('#z-w',{opacity:0,scale:.93});gsap.set(['#z-s','#z-i','#z-g'],{opacity:0,y:14});
+tl.to('#z-w',{opacity:1,scale:1,duration:.42,ease:"back.out(2)"},0)
+  .to('#z-s',{opacity:1,y:0,duration:.3},.35)
+  .to('#z-r',{width:190,duration:.3},.5)
+  .to(['#z-i','#z-g'],{opacity:1,y:0,duration:.32,stagger:.12},.65);})();</script></body></html>
