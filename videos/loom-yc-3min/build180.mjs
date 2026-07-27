@@ -32,7 +32,7 @@ const SC = [
   ["taskmove", 6.8, "05", ["Every task carries the agent that owns it.", "When an agent finishes, the task moves itself."]],
   ["roles", 6.4, "06", ["You decide who does what.", "Except the one holding the baton."]],
   ["brain", 13.5, "07", ["Twenty-one things this project has learned.", "Codex wrote that. Antigravity wrote that.", "Four agents, one memory —", "and all of them can read all of it."]],
-  ["mobile", 15.0, "08", ["The same brain is on your phone.", "Same thread, same agents, same baton.", "Tap a chip and the work shifts while you are away."]],
+  ["mobile", 15.0, "08", ["The same brain is on your phone.", "The brain, the routes, the whole thread.", "Start a route from your pocket."]],
   ["pad", 52.0, null, ["And we built it a body.", "One key per agent. Press, hold, speak.", "The fleet answers."]],
   ["circuits", 20.0, "10", ["It's fully open source.", "The enclosure, the wiring, the schematic.", "Print one, wire it, and it's yours."]],
   ["micro", 4.6, "11", ["A Codex Micro — for every agent, in one device."]],
@@ -132,13 +132,24 @@ S.micro = (s) => ({
   b: `<div class="clip" id="mw" data-start="0" data-duration="${s}" data-track-index="1" style="left:0;right:0;top:400px;text-align:center;font-size:86px;font-weight:700;letter-spacing:-.03em">a Codex Micro<br><span style="color:${O}">for every agent</span></div>`,
   j: `gsap.set('#mw',{opacity:0,scale:.9});tl.to('#mw',{opacity:1,scale:1,duration:.45,ease:"back.out(2.2)"},0);`,
 });
-S.mobile = (s) => ({
-  b: '<img class="clip sh" id="mo" src="' + SH("05-mobile-thread") + '" data-start="0" data-duration="' + s + '" data-track-index="1">' +
-     '<div class="clip tag" id="mtg" style="left:5%;top:6.5%" data-start="0" data-duration="' + s + '" data-track-index="3">ON YOUR PHONE</div>',
-  j: "gsap.set('#mo',{scale:1.12});tl.to('#mo',{scale:1.0,duration:" + s + ",ease:'power1.out'},0);" +
-     "gsap.set('#mtg',{opacity:0,scale:.94});tl.to('#mtg',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},.3);" +
-     "tl.to('#mtg',{opacity:0,duration:.25}," + (s - 1.2).toFixed(2) + ");",
-});
+S.mobile = (s) => {
+  const f = ["mob-thread", "mob-brain", "mob-routes"];
+  const lb = ["the thread", "the brain", "routes"];
+  const per = s / f.length;
+  return {
+    b: f.map((n, i) => '<img class="clip" id="mo' + i + '" src="' + SH(n) + '" style="left:50%;top:50%;width:432px;height:936px;margin:-468px 0 0 -216px;object-fit:contain;border-radius:22px;transform-origin:50% 50%" data-start="0" data-duration="' + s + '" data-track-index="' + (1 + i) + '">').join("\n") +
+       f.map((_, i) => '<div class="clip tag" id="mt' + i + '" style="left:5%;top:6.5%" data-start="0" data-duration="' + s + '" data-track-index="' + (8 + i) + '">ON YOUR PHONE &middot; ' + lb[i] + '</div>').join("\n"),
+    j: f.map((_, i) => {
+      const a = (i * per).toFixed(2), bb = ((i + 1) * per - 0.3).toFixed(2);
+      return "gsap.set('#mo" + i + "',{opacity:" + (i ? 0 : 1) + ",scale:1.05});" +
+        (i ? "tl.to('#mo" + i + "',{opacity:1,duration:.3}," + a + ");" : "") +
+        "tl.to('#mo" + i + "',{scale:1.12,duration:" + per.toFixed(2) + ",ease:'power1.inOut'}," + a + ");" +
+        "gsap.set('#mt" + i + "',{opacity:0,scale:.94});" +
+        "tl.to('#mt" + i + "',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'}," + (+a + 0.25).toFixed(2) + ");" +
+        "tl.to('#mt" + i + "',{opacity:0,duration:.22}," + bb + ");";
+    }).join("\n"),
+  };
+};
 S.circuits = (s) => ({
   b: `<div class="clip bg" id="cb" data-start="0" data-duration="${s}" data-track-index="1"></div>
    <div class="clip tag" id="tg" style="left:5%;top:6.5%" data-start="0" data-duration="${s}" data-track-index="3">OPEN SOURCE &mdash; SCHEMATIC, WIRING, CAD</div>`,

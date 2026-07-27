@@ -19,14 +19,20 @@
 </style></head><body>
 <div id="d-mobile" data-composition-id="d-mobile" data-width="1920" data-height="1080" data-start="0" data-duration="15">
 <div class="clip bg" id="d-mobile-bg" data-start="0" data-duration="15" data-track-index="0"></div>
-<img class="clip sh" id="mo" src="assets/shots/05-mobile-thread.png" data-start="0" data-duration="15" data-track-index="1"><div class="clip tag" id="mtg" style="left:5%;top:6.5%" data-start="0" data-duration="15" data-track-index="3">ON YOUR PHONE</div>
+<img class="clip" id="mo0" src="assets/shots/mob-thread.png" style="left:50%;top:50%;width:432px;height:936px;margin:-468px 0 0 -216px;object-fit:contain;border-radius:22px;transform-origin:50% 50%" data-start="0" data-duration="15" data-track-index="1">
+<img class="clip" id="mo1" src="assets/shots/mob-brain.png" style="left:50%;top:50%;width:432px;height:936px;margin:-468px 0 0 -216px;object-fit:contain;border-radius:22px;transform-origin:50% 50%" data-start="0" data-duration="15" data-track-index="2">
+<img class="clip" id="mo2" src="assets/shots/mob-routes.png" style="left:50%;top:50%;width:432px;height:936px;margin:-468px 0 0 -216px;object-fit:contain;border-radius:22px;transform-origin:50% 50%" data-start="0" data-duration="15" data-track-index="3"><div class="clip tag" id="mt0" style="left:5%;top:6.5%" data-start="0" data-duration="15" data-track-index="8">ON YOUR PHONE &middot; the thread</div>
+<div class="clip tag" id="mt1" style="left:5%;top:6.5%" data-start="0" data-duration="15" data-track-index="9">ON YOUR PHONE &middot; the brain</div>
+<div class="clip tag" id="mt2" style="left:5%;top:6.5%" data-start="0" data-duration="15" data-track-index="10">ON YOUR PHONE &middot; routes</div>
 <div class="clip sub" id="sb0" data-start="0" data-duration="15" data-track-index="40"><span>The same brain is on your phone.</span></div>
-<div class="clip sub" id="sb1" data-start="0" data-duration="15" data-track-index="41"><span>Same thread, same agents, same baton.</span></div>
-<div class="clip sub" id="sb2" data-start="0" data-duration="15" data-track-index="42"><span>Tap a chip and the work shifts while you are away.</span></div>
+<div class="clip sub" id="sb1" data-start="0" data-duration="15" data-track-index="41"><span>The brain, the routes, the whole thread.</span></div>
+<div class="clip sub" id="sb2" data-start="0" data-duration="15" data-track-index="42"><span>Start a route from your pocket.</span></div>
 </div>
 <script>(function(){window.__timelines=window.__timelines||{};
 var tl=gsap.timeline({paused:true});window.__timelines["d-mobile"]=tl;
-gsap.set('#mo',{scale:1.12});tl.to('#mo',{scale:1.0,duration:15,ease:'power1.out'},0);gsap.set('#mtg',{opacity:0,scale:.94});tl.to('#mtg',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},.3);tl.to('#mtg',{opacity:0,duration:.25},13.80);
+gsap.set('#mo0',{opacity:1,scale:1.05});tl.to('#mo0',{scale:1.12,duration:5.00,ease:'power1.inOut'},0.00);gsap.set('#mt0',{opacity:0,scale:.94});tl.to('#mt0',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},0.25);tl.to('#mt0',{opacity:0,duration:.22},4.70);
+gsap.set('#mo1',{opacity:0,scale:1.05});tl.to('#mo1',{opacity:1,duration:.3},5.00);tl.to('#mo1',{scale:1.12,duration:5.00,ease:'power1.inOut'},5.00);gsap.set('#mt1',{opacity:0,scale:.94});tl.to('#mt1',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},5.25);tl.to('#mt1',{opacity:0,duration:.22},9.70);
+gsap.set('#mo2',{opacity:0,scale:1.05});tl.to('#mo2',{opacity:1,duration:.3},10.00);tl.to('#mo2',{scale:1.12,duration:5.00,ease:'power1.inOut'},10.00);gsap.set('#mt2',{opacity:0,scale:.94});tl.to('#mt2',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},10.25);tl.to('#mt2',{opacity:0,duration:.22},14.70);
 gsap.set('#sb0',{opacity:0,y:14});tl.to('#sb0',{opacity:1,y:0,duration:.2,ease:"power2.out"},0.1);tl.to('#sb0',{opacity:0,duration:.13},4.95);
 gsap.set('#sb1',{opacity:0,y:14});tl.to('#sb1',{opacity:1,y:0,duration:.2,ease:"power2.out"},5.1);tl.to('#sb1',{opacity:0,duration:.13},9.95);
 gsap.set('#sb2',{opacity:0,y:14});tl.to('#sb2',{opacity:1,y:0,duration:.2,ease:"power2.out"},10.1);tl.to('#sb2',{opacity:0,duration:.13},14.95);})();</script></body></html>
