@@ -8,13 +8,19 @@ decision:
 | Can hold the baton (write lock) | ✅ | ❌ never |
 | Must implement | `send`, live events, `injectMemory`, `interrupt`, `diff` | events (best-effort), `injectMemory` |
 | For | agents with a real API / headless mode | GUI agents without a stable control surface |
-| Examples | Claude Code, OpenCode | Antigravity |
+| Examples | Claude Code, OpenCode, Codex, Grok Code, Antigravity CLI | Kiro |
 
 This split is deliberate (see [ARCHITECTURE.md](../ARCHITECTURE.md)): the baton
 authorizes *edits to the user's working tree*, so it can only be held by an agent Loom
 can reliably start, stream, interrupt, and account for. If your target tool only exposes
 a debug port and pixels, build a bridge; if it exposes an API, build an adapter. A
 bridge can graduate later.
+
+Kiro is the only bridge Loom ships. Antigravity was one too — a CDP bridge that drove
+the IDE's chat panel over DevTools and could only watch — and that is the graduation
+path working: it was withdrawn once `antigravity-cli` could drive the same tool headless
+as a real adapter. The registration survives so projects that still name `antigravity`
+open, but nothing offers it (`src/adapters/index.ts`, `WITHDRAWN_KINDS`).
 
 ## The contract
 
@@ -117,7 +123,12 @@ export class MyGuiBridge extends BridgeBase {
   // driving the GUI agent points it at that file.
 }
 
-registerAgentKind("my-gui", (cfg, dir) => new MyGuiBridge(cfg.id, "my-gui", dir));
+// The third argument is the tier, and it defaults to "adapter". Omit it and your
+// bridge is registered as an adapter: the roster answers "adapter or bridge?" from
+// this map — it has to, for kinds that are switched off and have no instance to ask
+// — so a disabled bridge would advertise itself as an adapter and the composer,
+// which filters its chips on that field, would offer it the baton.
+registerAgentKind("my-gui", (cfg, dir) => new MyGuiBridge(cfg.id, "my-gui", dir), "bridge");
 ```
 
 ## Ground rules

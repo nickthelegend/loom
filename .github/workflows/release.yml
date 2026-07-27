@@ -1,0 +1,174 @@
+# Build every native artifact on its own native runner, then publish them all to
+# a real GitHub Release.
+#
+# The previous version built the installers and left them as workflow artifacts,
+# which expire and are only reachable from the Actions tab by someone signed in.
+# That is not a release: a person who wants to run Loom should land on the
+# Releases page and find a file they can double-click. The `publish` job below
+# is the part that was missing.
+#
+# Cross-compiling was tried and abandoned — electron-builder's app-builder
+# segfaults under QEMU when targeting amd64 from an Apple-Silicon host — so each
+# platform builds on its own runner. Slower, and the only path that reliably
+# produces all of them.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # needed to create the release and upload its assets
+
+jobs:
+  desktop:
+    name: desktop · ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both Mac architectures come off the Apple Silicon runner in one
+          # pass. electron-builder downloads the x64 Electron and packages it
+          # natively — verified locally, producing a 115 MB arm64 dmg and a
+          # 120 MB x64 dmg side by side. The dedicated Intel runner (macos-13)
+          # was dropped because it sat queued for scarce capacity, and `publish`
+          # waits on every desktop job: one starved runner meant no release at
+          # all. (This is not the QEMU problem noted above — that is about
+          # building *Linux/Windows* from macOS, which still needs its own host.)
+          - os: macos-14
+            label: macOS (arm64 + x64)
+            args: --mac dmg --arm64 --x64
+          - os: windows-latest
+            label: Windows x64
+            args: --win nsis --x64
+          - os: ubuntu-latest
+            label: Linux x64
+            args: --linux AppImage deb --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the daemon
+        run: |
+          npm ci
+          npm run build
+      # `npm install`, not `npm ci`, and deliberately so: electron-builder pulls
+      # platform-gated optional dependencies (squirrel-windows on Windows,
+      # dmg-license on macOS), and npm only records the ones resolvable on the
+      # machine that wrote the lockfile. One committed lock therefore cannot
+      # satisfy `npm ci` on four different runners — it fails with "Missing:
+      # electron-builder-squirrel-windows from lock file" on Linux and Windows.
+      # The daemon above still uses `npm ci`, where the lock is honest.
+      - name: Build the installer
+        working-directory: desktop
+        run: |
+          npm install --no-audit --no-fund
+          npm run stage
+          npx electron-builder ${{ matrix.args }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-desktop-${{ matrix.os }}
+          # A silent empty artifact is how a release ships with nothing in it.
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.exe
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+
+  android:
+    name: android · apk
+    runs-on: ubuntu-latest
+    env:
+      # `secrets` can't be read from a step-level `if`, so the decision is made
+      # once here and compared as a plain string below.
+      HAS_EXPO: ${{ secrets.EXPO_TOKEN != '' && 'yes' || 'no' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+
+      # Signed cloud build when the repo has an Expo token. `--wait` on purpose:
+      # --no-wait returns before the binary exists, so there would be nothing to
+      # attach to the release.
+      - name: EAS build (signed)
+        if: env.HAS_EXPO == 'yes'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        working-directory: app
+        run: |
+          npm ci
+          npx eas-cli build -p android --profile preview --non-interactive --wait
+          npx eas-cli build:download --platform android --latest --output "$GITHUB_WORKSPACE/loompad.apk"
+
+      # Otherwise a local debug-signed apk. Debug signing is deliberate: an
+      # unsigned release apk cannot be installed at all, so it would be a file
+      # that looks like a deliverable and isn't.
+      - name: Local gradle build (debug-signed)
+        if: env.HAS_EXPO == 'no'
+        working-directory: app
+        run: |
+          npm install --no-audit --no-fund
+          npx expo prebuild -p android --no-install
+          cd android && ./gradlew assembleDebug --no-daemon
+          find app/build/outputs/apk -name "*.apk" -print -exec cp {} "$GITHUB_WORKSPACE/loompad.apk" \;
+
+      - name: Name it after the release
+        run: |
+          test -f loompad.apk || { echo "no apk was produced"; exit 1; }
+          V="${GITHUB_REF_NAME#v}"
+          mv loompad.apk "loompad-${V}-android.apk"
+          ls -la *.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-android-apk
+          if-no-files-found: error
+          path: "*.apk"
+
+  publish:
+    name: publish the release
+    needs: [desktop, android]
+    # A manual run without a tag is a dry run that proves the artifacts still
+    # build; only a tag actually publishes.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect and checksum
+        run: |
+          mkdir -p out
+          find artifacts -type f \
+            \( -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.apk" \) \
+            -exec cp {} out/ \;
+          cd out
+          ls -la
+          test -n "$(ls -A)" || { echo "nothing to publish"; exit 1; }
+          # The release is unsigned; saying so with numbers a person can verify
+          # beats saying nothing.
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="--generate-notes"
+          if [ -f "docs/release-notes/${TAG}.md" ]; then NOTES="--notes-file docs/release-notes/${TAG}.md"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/* --title "Loom $TAG" $NOTES
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'

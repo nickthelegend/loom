@@ -66,9 +66,13 @@ config (`.loom/config.json` → `codex → model: "gpt-5.6-terra"`) at high reas
   *Claude Code → Codex* carries the full context, and the next agent inherits what Codex
   learned. *(Verified end‑to‑end: Codex recalled a value another agent set one turn
   earlier, and its turns emit `run_complete` + `memory_add`.)*
-- **Voice, on real hardware.** On the physical **LoomPad** (an ESP32‑S3 macropad),
-  pressing the **Codex** key hands Codex the baton; hold the mic and speak → your words are
-  transcribed → sent to Codex (GPT‑5.6) → the reply is spoken back through the pad.
+- **Voice, on real hardware — designed, not shipped.** The **LoomPad** is a physical
+  ESP32‑S3 macropad whose intended loop is: press the **Codex** key to hand Codex the
+  baton, hold the mic and speak, hear the reply spoken back through the pad. What exists
+  in this repo is the enclosure — [`hardware/orchestrator-pad/`](hardware/orchestrator-pad/README.md)
+  ships parametric CAD, printable STLs and the wiring spec — plus the daemon-side proxy
+  endpoints (`/api/loompad/health`, `/api/loompad/connect`) and the status pill that reads
+  them. The firmware is not written yet, so nothing speaks through the pad today.
 - **Codex as a dev agent, too.** Because Codex is a full agent, you can hand it real work
   inside Loom — `loom route ship "…"` routes *plan → Codex executes → review*, the brain
   flowing hop to hop.
@@ -703,7 +707,8 @@ your shell profile can tell it's running in Loom's pane. (`LOOM_EXPO_PUSH_URL` a
 
 ## Roadmap
 
-- Tasks beyond GitHub — GitLab and Linear sit disabled in the provider row today.
+- Tasks beyond GitHub and Linear — the board's source row is GitHub / Projects / Linear
+  today. GitLab is not in it at all; only its brand mark is in the icon set.
 - More adapters/bridges via the SDK — contributions welcome.
 
 ## Design

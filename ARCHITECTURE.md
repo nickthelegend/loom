@@ -35,7 +35,7 @@ interfaces, and session models, and Loom makes them behave like one organism.
 | **Project** | A working directory + `.loom/` config + its own event log, baton, and agent fleet. |
 | **Event log** | Per-project append-only source of truth (messages, tool calls, edits, decisions). |
 | **Adapter** | Full-duplex integration with a controllable agent (OpenCode, Claude Code). |
-| **Bridge** | Read-mostly integration with a GUI agent (Antigravity). Never holds the baton. |
+| **Bridge** | Read-mostly integration with a GUI agent (Kiro). Never holds the baton. |
 | **Baton** | The write lock. Exactly one agent per project holds it and may edit the tree. |
 | **Projection** | Rendering the log into a target agent's native memory format on handoff. |
 | **Role** | An agent instance's declared function: planner / executor / reviewer / general. |
@@ -82,7 +82,7 @@ shipped *and* so did LLM auto-routing (`src/core/router.ts`).
      projections (on handoff)
    ┌─────┴──────┬─────────────┐
 [adapter]   [adapter]      [bridge]
-OpenCode    Claude Code    Antigravity
+OpenCode    Claude Code    Kiro
 serve/HTTP  headless/SDK   debug port (read-mostly)
      └── all edit ONE working tree; baton = write lock ──┘
 ```
@@ -123,8 +123,15 @@ A Bridge implements only a subset and is **explicitly second-class**:
 
 - `stream()` (best-effort capture) and `injectMemory()` / briefing receipt.
 - **Never** acquires the baton; **never** edits the shared tree under Loom's lock.
-- Antigravity (VS Code/Windsurf-class fork) attaches here via its debug port until/unless
-  it exposes a real API — then it can graduate to an Adapter.
+- A GUI agent attaches here via its debug port until/unless it exposes a real API — then it
+  can graduate to an Adapter.
+
+**[shipped]** **Kiro** is the only bridge Loom ships. Antigravity (VS Code/Windsurf-class
+fork) was the original one, attached over its DevTools port, and it took the graduation
+path: Google shipped a headless `agy` CLI, `antigravity-cli` was written against it as a
+real adapter that holds the baton, and the CDP bridge was **withdrawn** — still buildable
+so existing projects that name it still open, but offered nowhere
+(`src/adapters/index.ts`, `WITHDRAWN_KINDS`).
 
 ## Handoff & projection
 
@@ -137,8 +144,12 @@ A Bridge implements only a subset and is **explicitly second-class**:
 
 ## Networking & security
 
-- Daemon binds **only** to the Tailscale interface. Tailscale provides device auth + E2E
-  encryption — that is the trust boundary.
+- **[shipped]** The daemon binds **127.0.0.1 by default**, not the Tailscale interface.
+  Reaching it from a phone is opt-in: `loom daemon --tailnet` (or `loom up --tailnet`)
+  rebinds to this machine's Tailscale IP, and `--host` overrides it outright. The plan
+  below assumed tailnet-only; loopback-by-default is the tighter default, and it means
+  nothing leaves the machine until you ask it to. When you do ask, Tailscale provides
+  device auth + E2E encryption and is the trust boundary.
 - **QR pairing**: encodes a short-lived, one-time pairing **token** bound to the node's
   identity — not raw secrets, never in a URL query string. Enrolls the phone as a known
   client.

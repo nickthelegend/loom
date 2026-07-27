@@ -43,6 +43,7 @@ useful.
 | **Codex** | [Codex.app](https://openai.com/codex/), or `npm i -g @openai/codex` | `codex login` | `codex login status` |
 | **OpenCode** | `curl -fsSL https://opencode.ai/install \| bash` | `opencode auth login` | `opencode --version` |
 | **Grok Code** | [docs.x.ai](https://docs.x.ai) | `grok` (once, interactively) | `grok --version` |
+| **Antigravity CLI** | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | `agy` (once, sign in with Google) | `agy --version` |
 
 Two things worth knowing:
 
@@ -55,6 +56,15 @@ coming up empty doesn't mean it's missing.
 **Being logged in is not optional and not detectable in advance.** Loom probes
 whether a CLI *exists*, not whether it's authenticated. An unauthenticated agent
 looks installed, takes your turn, and fails. Run each one once by hand first.
+(The Antigravity CLI is the one exception Loom *can* check — `agy models` only
+answers when you're signed in — but running it once yourself is still the move.)
+
+**Antigravity comes in two shapes, and only one is on offer.** The **Antigravity
+CLI** (`agy`) above is a real headless agent: it holds the baton and runs a turn
+to completion on Gemini (or hosted Claude/GPT — `agy models` lists them), which
+is how you offload work off your orchestrator's token budget. The Antigravity
+**IDE** is a different thing — a GUI Loom could only watch — and the bridge that
+drove it has been **withdrawn** in favour of the CLI.
 
 Then ask Loom what it can see:
 
