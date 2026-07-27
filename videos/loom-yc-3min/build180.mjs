@@ -32,8 +32,8 @@ const SC = [
   ["taskmove", 6.8, "05", ["Every task carries the agent that owns it.", "When an agent finishes, the task moves itself."]],
   ["roles", 6.4, "06", ["You decide who does what.", "Except the one holding the baton."]],
   ["brain", 13.5, "07", ["Twenty-one things this project has learned.", "Codex wrote that. Antigravity wrote that.", "Four agents, one memory —", "and all of them can read all of it."]],
-  ["mobile", 7.6, "08", ["The same brain is on your phone.", "Tap a chip and the work shifts."]],
-  ["pad", 52.0, "09", ["And we built it a body.", "One key per agent. Press, hold, speak.", "The fleet answers."]],
+  ["mobile", 15.0, "08", ["The same brain is on your phone.", "Same thread, same agents, same baton.", "Tap a chip and the work shifts while you are away."]],
+  ["pad", 52.0, null, ["And we built it a body.", "One key per agent. Press, hold, speak.", "The fleet answers."]],
   ["circuits", 20.0, "10", ["It's fully open source.", "The enclosure, the wiring, the schematic.", "Print one, wire it, and it's yours."]],
   ["micro", 4.6, "11", ["A Codex Micro — for every agent, in one device."]],
   ["landing", 9.0, "12", ["Buy one soon, or build one yourself."]],
@@ -124,33 +124,30 @@ const real = (file, s, a, b, tag, calls = []) => (sec) => ({
     calls.map((c, i) => pop(`'#cl${i}'`, c.at, c.hold)).join(""),
 });
 
-S.models = real("00-model-picker", 0, { k: 1.5, x: -8, y: 6 }, { k: 1.36, x: -6, y: 8 }, "REAL MODELS, ASKED OF THE CLI",
-  [{ l: "50%", t: "18%", w: "32%", h: "56%", at: 2.2, hold: 5.0 }]);
-S.taskmove = real("03-board-after", 0, { k: 1.34, x: 4, y: 2 }, { k: 1.24, x: -4, y: 2 }, "THE TASK MOVED ITSELF",
-  [{ l: "50%", t: "16%", w: "21%", h: "22%", at: 1.8, hold: 3.6 }]);
-S.mobile = real("05-mobile-thread", 0, { k: 1.06, x: 0, y: 0 }, { k: 1.0, x: 0, y: 0 }, "THE SAME THREAD, ON YOUR PHONE", []);
-S.landing = real("08-landing-top", 0, { k: 1.16, x: 0, y: -4 }, { k: 1.06, x: 0, y: 2 }, "loompad.tech", []);
+S.models = real("00-model-picker", 0, { k: 1.5, x: -8, y: 6 }, { k: 1.36, x: -6, y: 8 }, "REAL MODELS, ASKED OF THE CLI");
+S.taskmove = real("03-board-after", 0, { k: 1.34, x: 4, y: 2 }, { k: 1.24, x: -4, y: 2 }, "THE TASK MOVED ITSELF");
+;
+S.landing = real("08-landing-top", 0, { k: 1.16, x: 0, y: -4 }, { k: 1.06, x: 0, y: 2 }, "loompad.tech");
 S.micro = (s) => ({
   b: `<div class="clip" id="mw" data-start="0" data-duration="${s}" data-track-index="1" style="left:0;right:0;top:400px;text-align:center;font-size:86px;font-weight:700;letter-spacing:-.03em">a Codex Micro<br><span style="color:${O}">for every agent</span></div>`,
   j: `gsap.set('#mw',{opacity:0,scale:.9});tl.to('#mw',{opacity:1,scale:1,duration:.45,ease:"back.out(2.2)"},0);`,
+});
+S.mobile = (s) => ({
+  b: '<img class="clip sh" id="mo" src="' + SH("05-mobile-thread") + '" data-start="0" data-duration="' + s + '" data-track-index="1">' +
+     '<div class="clip tag" id="mtg" style="left:5%;top:6.5%" data-start="0" data-duration="' + s + '" data-track-index="3">ON YOUR PHONE</div>',
+  j: "gsap.set('#mo',{scale:1.12});tl.to('#mo',{scale:1.0,duration:" + s + ",ease:'power1.out'},0);" +
+     "gsap.set('#mtg',{opacity:0,scale:.94});tl.to('#mtg',{opacity:1,scale:1,duration:.26,ease:'back.out(3)'},.3);" +
+     "tl.to('#mtg',{opacity:0,duration:.25}," + (s - 1.2).toFixed(2) + ");",
 });
 S.circuits = (s) => ({
   b: `<div class="clip bg" id="cb" data-start="0" data-duration="${s}" data-track-index="1"></div>
    <div class="clip tag" id="tg" style="left:5%;top:6.5%" data-start="0" data-duration="${s}" data-track-index="3">OPEN SOURCE &mdash; SCHEMATIC, WIRING, CAD</div>`,
   j: `gsap.set('#tg',{opacity:0,scale:.94});tl.to('#tg',{opacity:1,scale:1,duration:.26,ease:"back.out(3)"},.3);tl.to('#tg',{opacity:0,duration:.3},7.5);`,
 });
-S.prompt = real("001-prompt-typed", 0, { k: 1.72, x: 3, y: 20 }, { k: 1.5, x: 2, y: 19 }, "THE REAL APP",
-  [{ l: "22%", t: "70%", w: "56%", h: "13%", at: 2.0, hold: 6.0 }]);
-S.board = real("017-board-kanban", 0, { k: 1.34, x: 8, y: 2 }, { k: 1.24, x: -6, y: 2 }, "THE BOARD",
-  [{ l: "13%", t: "16%", w: "20%", h: "26%", at: 1.5, hold: 3.0 },
-   { l: "35%", t: "16%", w: "20%", h: "20%", at: 5.2, hold: 2.8 },
-   { l: "57%", t: "16%", w: "20%", h: "18%", at: 8.4, hold: 2.8 }]);
-S.roles = real("018-roles-per-ade", 0, { k: 1.46, x: 0, y: -3 }, { k: 1.36, x: -1, y: 5 }, "ROLES PER AGENT",
-  [{ l: "60%", t: "28%", w: "16%", h: "46%", at: 1.6, hold: 4.2 }]);
-S.brain = real("019-brain", 0, { k: 1.32, x: 1, y: -14 }, { k: 1.2, x: 0, y: 11 }, "THE BRAIN",
-  [{ l: "27%", t: "22%", w: "46%", h: "7%", at: 3.6, hold: 2.2 },
-   { l: "27%", t: "40%", w: "46%", h: "7%", at: 6.6, hold: 2.2 },
-   { l: "27%", t: "58%", w: "46%", h: "7%", at: 9.6, hold: 2.2 }]);
+S.prompt = real("001-prompt-typed", 0, { k: 1.72, x: 3, y: 20 }, { k: 1.5, x: 2, y: 19 }, "THE REAL APP");
+S.board = real("017-board-kanban", 0, { k: 1.34, x: 8, y: 2 }, { k: 1.24, x: -6, y: 2 }, "THE BOARD");
+S.roles = real("018-roles-per-ade", 0, { k: 1.46, x: 0, y: -3 }, { k: 1.36, x: -1, y: 5 }, "ROLES PER AGENT");
+S.brain = real("019-brain", 0, { k: 1.32, x: 1, y: -14 }, { k: 1.2, x: 0, y: 11 }, "THE BRAIN");
 
 // the real streaming turn, played as the captures it was
 S.stream = (s) => {

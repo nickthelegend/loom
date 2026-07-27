@@ -1,65 +1,56 @@
-<!doctype html>
-<html><head><meta charset="utf-8"><title>Loom — YC</title>
+<!doctype html><html><head><meta charset="utf-8"><title>Loom</title>
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-<style>html,body{margin:0;background:#0A0A0B}
-#root{position:relative;width:1920px;height:1080px;overflow:hidden;background:#0A0A0B}
-#root .clip{position:absolute}</style></head>
-<body>
-<div id="root" data-composition-id="root" data-width="1920" data-height="1080"
-     data-start="0" data-duration="135.30">
-  <div class="clip" id="mount-01" data-composition-id="s01-pain" data-composition-src="compositions/frames/01-pain.html"
-       data-start="0.00" data-duration="11" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-02" data-composition-id="s02-claim" data-composition-src="compositions/frames/02-claim.html"
-       data-start="11.00" data-duration="5.6" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-03" data-composition-id="s03-prompt" data-composition-src="compositions/frames/03-prompt.html"
-       data-start="16.60" data-duration="11.2" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-04" data-composition-id="s04-handoff" data-composition-src="compositions/frames/04-handoff.html"
-       data-start="27.80" data-duration="14" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-05" data-composition-id="s05-board" data-composition-src="compositions/frames/05-board.html"
-       data-start="41.80" data-duration="12.4" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-06" data-composition-id="s06-roles" data-composition-src="compositions/frames/06-roles.html"
-       data-start="54.20" data-duration="10.9" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-07" data-composition-id="s07-fleet" data-composition-src="compositions/frames/07-fleet.html"
-       data-start="65.10" data-duration="11.2" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-08" data-composition-id="s08-pad" data-composition-src="compositions/frames/08-pad.html"
-       data-start="76.30" data-duration="35" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-09" data-composition-id="s09-brain" data-composition-src="compositions/frames/09-brain.html"
-       data-start="111.30" data-duration="16.6" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <div class="clip" id="mount-10" data-composition-id="s10-close" data-composition-src="compositions/frames/10-close.html"
-       data-start="127.90" data-duration="7.4" data-track-index="1"
-       style="inset:0;width:100%;height:100%"></div>
-  <audio class="clip" id="vo-01" src="assets/vo/01.wav"
-       data-start="0.25" data-duration="10.75" data-track-index="20"></audio>
-  <audio class="clip" id="vo-02" src="assets/vo/02.wav"
-       data-start="11.25" data-duration="5.35" data-track-index="20"></audio>
-  <audio class="clip" id="vo-03" src="assets/vo/03.wav"
-       data-start="16.85" data-duration="10.95" data-track-index="20"></audio>
-  <audio class="clip" id="vo-04" src="assets/vo/04.wav"
-       data-start="28.05" data-duration="13.75" data-track-index="20"></audio>
-  <audio class="clip" id="vo-05" src="assets/vo/05.wav"
-       data-start="42.05" data-duration="12.15" data-track-index="20"></audio>
-  <audio class="clip" id="vo-06" src="assets/vo/06.wav"
-       data-start="54.45" data-duration="10.65" data-track-index="20"></audio>
-  <audio class="clip" id="vo-07" src="assets/vo/07.wav"
-       data-start="65.35" data-duration="10.95" data-track-index="20"></audio>
-  <audio class="clip" id="vo-08" src="assets/vo/08.wav"
-       data-start="76.55" data-duration="34.75" data-track-index="20"></audio>
-  <audio class="clip" id="vo-09" src="assets/vo/09.wav"
-       data-start="111.55" data-duration="16.35" data-track-index="20"></audio>
-  <audio class="clip" id="vo-10" src="assets/vo/10.wav"
-       data-start="128.15" data-duration="7.15" data-track-index="20"></audio>
+<style>html,body{margin:0;background:#0A0A0B}#root{position:relative;width:1920px;height:1080px;overflow:hidden;background:#0A0A0B}
+#root .clip{position:absolute}</style></head><body>
+<div id="root" data-composition-id="root" data-width="1920" data-height="1080" data-start="0" data-duration="163.30">
+  <div class="clip" id="mt-pain" data-composition-id="d-pain" data-composition-src="compositions/d3/pain.html"
+   data-start="0.00" data-duration="7.8" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-claim" data-composition-id="d-claim" data-composition-src="compositions/d3/claim.html"
+   data-start="7.80" data-duration="3.2" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-models" data-composition-id="d-models" data-composition-src="compositions/d3/models.html"
+   data-start="11.00" data-duration="9" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-stream" data-composition-id="d-stream" data-composition-src="compositions/d3/stream.html"
+   data-start="20.00" data-duration="11" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-taskmove" data-composition-id="d-taskmove" data-composition-src="compositions/d3/taskmove.html"
+   data-start="31.00" data-duration="6.8" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-roles" data-composition-id="d-roles" data-composition-src="compositions/d3/roles.html"
+   data-start="37.80" data-duration="6.4" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-brain" data-composition-id="d-brain" data-composition-src="compositions/d3/brain.html"
+   data-start="44.20" data-duration="13.5" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-mobile" data-composition-id="d-mobile" data-composition-src="compositions/d3/mobile.html"
+   data-start="57.70" data-duration="15" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-pad" data-composition-id="d-pad" data-composition-src="compositions/d3/pad.html"
+   data-start="72.70" data-duration="52" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-circuits" data-composition-id="d-circuits" data-composition-src="compositions/d3/circuits.html"
+   data-start="124.70" data-duration="20" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-micro" data-composition-id="d-micro" data-composition-src="compositions/d3/micro.html"
+   data-start="144.70" data-duration="4.6" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-landing" data-composition-id="d-landing" data-composition-src="compositions/d3/landing.html"
+   data-start="149.30" data-duration="9" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <div class="clip" id="mt-close" data-composition-id="d-close" data-composition-src="compositions/d3/close.html"
+   data-start="158.30" data-duration="5" data-track-index="1" style="inset:0;width:100%;height:100%"></div>
+  <audio class="clip" id="vo-01" src="assets/vo180/01.wav"
+   data-start="0.15" data-duration="7.65" data-track-index="20"></audio>
+  <audio class="clip" id="vo-02" src="assets/vo180/02.wav"
+   data-start="7.95" data-duration="3.05" data-track-index="20"></audio>
+  <audio class="clip" id="vo-03" src="assets/vo180/03.wav"
+   data-start="11.15" data-duration="8.85" data-track-index="20"></audio>
+  <audio class="clip" id="vo-04" src="assets/vo180/04.wav"
+   data-start="20.15" data-duration="10.85" data-track-index="20"></audio>
+  <audio class="clip" id="vo-05" src="assets/vo180/05.wav"
+   data-start="31.15" data-duration="6.65" data-track-index="20"></audio>
+  <audio class="clip" id="vo-06" src="assets/vo180/06.wav"
+   data-start="37.95" data-duration="6.25" data-track-index="20"></audio>
+  <audio class="clip" id="vo-07" src="assets/vo180/07.wav"
+   data-start="44.35" data-duration="13.35" data-track-index="20"></audio>
+  <audio class="clip" id="vo-08" src="assets/vo180/08.wav"
+   data-start="57.85" data-duration="14.85" data-track-index="20"></audio>
+  <audio class="clip" id="vo-10" src="assets/vo180/10.wav"
+   data-start="124.85" data-duration="19.85" data-track-index="20"></audio>
+  <audio class="clip" id="vo-11" src="assets/vo180/11.wav"
+   data-start="144.85" data-duration="4.45" data-track-index="20"></audio>
+  <audio class="clip" id="vo-12" src="assets/vo180/12.wav"
+   data-start="149.45" data-duration="8.85" data-track-index="20"></audio>
 </div>
-<script>
-window.__timelines = window.__timelines || {};
-window.__timelines["root"] = gsap.timeline({paused:true});
-</script>
+<script>window.__timelines=window.__timelines||{};window.__timelines["root"]=gsap.timeline({paused:true});</script>
 </body></html>
