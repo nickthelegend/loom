@@ -93,3 +93,70 @@ describe("loom doctor — project checks", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * doctor --fix.
+ *
+ * The line it must not cross: repair only what has exactly one safe repair.
+ * Ambiguous findings (duplicate ids, unknown kinds) stay reports — a fixer
+ * that guesses turns a visible problem into an invisible wrong answer.
+ */
+describe("loom doctor — fixes", () => {
+  const brokenProject = (name: string): string => {
+    const dir = tmpDir(name);
+    writeProjectConfig(dir, {
+      name,
+      defaultAgent: "vanished",
+      agents: [
+        { id: "planner", kind: "echo", role: "" }, // empty role → fixable
+        { id: "twin", kind: "echo", role: "a" },
+        { id: "twin", kind: "echo", role: "b" }, // duplicate → not fixable
+      ],
+    } as ProjectConfig);
+    writeProjectState(dir, { holder: "vanished", agents: {} });
+    return dir;
+  };
+
+  it("repairs the unambiguous and reports the rest", async () => {
+    const { fixProject } = await import("../src/cli/doctor.js");
+    const dir = brokenProject("fixme");
+    const { fixed, unfixable } = fixProject(dir);
+
+    expect(fixed.some((f) => f.includes('"planner" had no role'))).toBe(true);
+    expect(fixed.some((f) => f.includes('defaultAgent "vanished"'))).toBe(true);
+    expect(fixed.some((f) => f.includes('stale baton holder "vanished"'))).toBe(true);
+    expect(unfixable.some((u) => u.includes('duplicate agent id "twin"'))).toBe(true);
+  });
+
+  it("actually persists the repairs — doctor afterwards is quieter", async () => {
+    const { fixProject } = await import("../src/cli/doctor.js");
+    const dir = brokenProject("fixme2");
+    const before = projectChecks(dir);
+    expect(before.some((c) => c.status === "fail" && c.detail.includes("no role"))).toBe(true);
+
+    fixProject(dir);
+    const after = projectChecks(dir);
+    expect(after.some((c) => c.detail.includes("no role"))).toBe(false);
+    expect(after.some((c) => c.name === "config" && c.status === "fail")).toBe(false);
+    expect(after.find((c) => c.name === "baton")!.status).toBe("ok");
+    // The duplicate survives — deliberately.
+    expect(after.some((c) => c.detail.includes("duplicate"))).toBe(true);
+  });
+
+  it("is idempotent — a second pass finds nothing to do", async () => {
+    const { fixProject } = await import("../src/cli/doctor.js");
+    const dir = brokenProject("fixme3");
+    fixProject(dir);
+    const second = fixProject(dir);
+    expect(second.fixed).toHaveLength(0);
+    expect(second.unfixable.length).toBeGreaterThan(0); // still reporting the duplicate
+  });
+
+  it("does not invent a project where there is none", async () => {
+    const { fixProject } = await import("../src/cli/doctor.js");
+    const dir = tmpDir("no-project");
+    const { fixed, unfixable } = fixProject(dir);
+    expect(fixed).toHaveLength(0);
+    expect(unfixable[0]).toContain("loom init creates one, doctor won't");
+  });
+});

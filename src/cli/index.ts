@@ -872,10 +872,23 @@ program
   .command("doctor")
   .description("diagnose the environment, daemon, and current project")
   .option("--json", "print machine-readable diagnostic results")
-  .action(async (opts: { json: boolean }) => {
-    const { doctorReport, envChecks, projectChecks } = await import("./doctor.js");
-    const checks = await envChecks();
+  .option("--fix", "repair what has exactly one safe repair; report the rest")
+  .action(async (opts: { json: boolean; fix?: boolean }) => {
+    const { doctorReport, envChecks, projectChecks, fixProject } = await import("./doctor.js");
     const dir = currentProjectDir();
+    if (opts.fix) {
+      if (!dir) {
+        console.error(pc.red("not inside a Loom project — nothing to fix"));
+        process.exitCode = 1;
+        return;
+      }
+      const { fixed, unfixable } = fixProject(dir);
+      for (const f of fixed) console.log(` ${pc.green("✓")} ${f}`);
+      for (const u of unfixable) console.log(` ${pc.yellow("⚠")} ${u}`);
+      if (!fixed.length && !unfixable.length) console.log(pc.dim("nothing needed fixing"));
+      // fall through to a fresh diagnosis, so the report reflects the repairs
+    }
+    const checks = await envChecks();
     if (dir) checks.push(...projectChecks(dir));
     else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
 

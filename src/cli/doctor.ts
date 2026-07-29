@@ -9,7 +9,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { setupReport } from "../core/setup.js";
-import { readDaemonConfig, readProjectConfig, readProjectState } from "../core/registry.js";
+import {
+  readDaemonConfig,
+  readProjectConfig,
+  readProjectState,
+  writeProjectConfig,
+  writeProjectState,
+} from "../core/registry.js";
 import { resolveSteps, stepName } from "../core/routes.js";
 import { isAdapter } from "../types.js";
 import { BUILD_REV } from "../daemon/server.js";
@@ -124,6 +130,80 @@ export function projectChecks(dir: string): Check[] {
   }
 
   return checks;
+}
+
+// ---------------------------------------------------------------------------
+// Fixes — the repairs doctor can make without guessing
+// ---------------------------------------------------------------------------
+
+/**
+ * Repair what has exactly one safe repair; report what doesn't.
+ *
+ * doctor used to diagnose accurately and then leave you to fix it by hand,
+ * which for half the findings meant retyping a value it had just printed. The
+ * line: a fix is offered only when the correct end state is unambiguous —
+ *
+ *  - a persisted baton holder that no longer exists → cleared (it auto-clears
+ *    on the next send anyway; this just stops the warning outliving the bug)
+ *  - defaultAgent naming an agent that isn't configured → dropped, falling
+ *    back to the first adapter, which is what the runtime does regardless
+ *  - an agent with an empty role → role becomes its kind, the same default
+ *    addAgent gives a fresh agent
+ *  - a missing .loom/memory directory → created
+ *
+ * Duplicate ids and unknown kinds stay reports: choosing which duplicate dies,
+ * or what a typo meant, is the human's call. A fixer that guesses there turns
+ * a visible problem into an invisible wrong answer.
+ */
+export function fixProject(dir: string): { fixed: string[]; unfixable: string[] } {
+  const fixed: string[] = [];
+  const unfixable: string[] = [];
+  const config = readProjectConfig(dir);
+  if (!config) {
+    return { fixed, unfixable: ["no .loom/config.json — loom init creates one, doctor won't"] };
+  }
+
+  const ids = new Set(config.agents.map((a) => a.id));
+  let dirty = false;
+
+  for (const agent of config.agents) {
+    if (!agent.role || !String(agent.role).trim()) {
+      agent.role = agent.kind;
+      dirty = true;
+      fixed.push(`"${agent.id}" had no role — set to "${agent.kind}"`);
+    }
+  }
+
+  if (config.defaultAgent && !ids.has(config.defaultAgent)) {
+    fixed.push(`defaultAgent "${config.defaultAgent}" doesn't exist — cleared`);
+    delete config.defaultAgent;
+    dirty = true;
+  }
+
+  const seen = new Set<string>();
+  for (const agent of config.agents) {
+    if (seen.has(agent.id)) unfixable.push(`duplicate agent id "${agent.id}" — pick which one to keep`);
+    seen.add(agent.id);
+    if (!knownAgentKinds().includes(agent.kind)) {
+      unfixable.push(`"${agent.id}" has unknown kind "${agent.kind}" — fix the typo or remove it`);
+    }
+  }
+
+  if (dirty) writeProjectConfig(dir, config);
+
+  const state = readProjectState(dir);
+  if (state.holder && !ids.has(state.holder)) {
+    fixed.push(`stale baton holder "${state.holder}" — cleared`);
+    writeProjectState(dir, { ...state, holder: null });
+  }
+
+  const memDir = path.join(dir, ".loom", "memory");
+  if (!fs.existsSync(memDir)) {
+    fs.mkdirSync(memDir, { recursive: true });
+    fixed.push(".loom/memory was missing — created");
+  }
+
+  return { fixed, unfixable };
 }
 
 // ---------------------------------------------------------------------------
