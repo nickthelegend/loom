@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { DaemonClient } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
+import { ProjectRuntime } from "../src/daemon/runtime.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
 
 let daemon: LoomDaemon;
@@ -91,5 +92,56 @@ describe("cost telemetry", () => {
     expect(after.totalUsd).toBeCloseTo(before.totalUsd, 6);
     expect(after.turns).toBe(before.turns);
     expect(after.byAgent.length).toBe(before.byAgent.length);
+  });
+});
+
+/**
+ * The daily series (#16, #17): one walk answers both "what did this project
+ * cost last week" and "which agent is eating the tokens".
+ */
+describe("the daily series", () => {
+  it("buckets spend and tokens by day and by agent, from real turns", async () => {
+    const dir = makeProjectDir({ name: "series" });
+    const rt = await ProjectRuntime.open({ id: "series", name: "series", dir });
+    try {
+      await rt.sendMessage("one", "plannerbot");
+      await waitUntil(() => rt.log.list({ kinds: ["run_complete"] }).length >= 1);
+      await rt.handoff("execbot");
+      await rt.sendMessage("two", "execbot");
+      await waitUntil(() => rt.log.list({ kinds: ["run_complete"] }).length >= 2);
+
+      const series = rt.costSeries(7);
+      expect(series.length).toBe(1); // both turns landed today
+      const today = series[0]!;
+      expect(today.turns).toBe(2);
+      expect(today.usd).toBeCloseTo(0.002, 6); // echo charges 0.001/turn
+      expect(today.tokensIn).toBeGreaterThan(0);
+      // The per-agent split is the #17 answer: who is eating the tokens.
+      expect(Object.keys(today.byAgent).sort()).toEqual(["execbot", "plannerbot"]);
+      expect(today.byAgent.plannerbot!.usd).toBeCloseTo(0.001, 6);
+      expect(today.byAgent.execbot!.turns).toBe(1);
+    } finally {
+      await rt.close();
+    }
+  });
+
+  it("keeps old days out of a short window", async () => {
+    const dir = makeProjectDir({ name: "series-window" });
+    const rt = await ProjectRuntime.open({ id: "serwin", name: "serwin", dir });
+    try {
+      // A turn eight days ago, planted at the ledger's own source of truth.
+      rt.log.append({
+        kind: "status",
+        agentId: "plannerbot",
+        payload: { state: "turn_cost", costUsd: 5 },
+        ts: Date.now() - 8 * 24 * 60 * 60 * 1000,
+      });
+      expect(rt.costSeries(7)).toHaveLength(0);
+      const wide = rt.costSeries(30);
+      expect(wide).toHaveLength(1);
+      expect(wide[0]!.usd).toBe(5);
+    } finally {
+      await rt.close();
+    }
   });
 });

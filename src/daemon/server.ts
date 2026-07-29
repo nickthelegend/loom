@@ -2254,6 +2254,17 @@ export class LoomDaemon {
       }),
     );
 
+    // The spend ledger as a daily series, per agent per day — "what did this
+    // project cost me last week" and "which agent is eating the tokens" are
+    // the same walk over the same events.
+    app.get(
+      "/api/projects/:id/costs/series",
+      withRuntime(async (rt, req, res) => {
+        const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+        res.json({ days, series: rt.costSeries(days) });
+      }),
+    );
+
     app.get(
       "/api/projects/:id/tree",
       withRuntime(async (rt, _req, res) => {

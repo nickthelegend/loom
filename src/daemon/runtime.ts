@@ -349,6 +349,86 @@ export class ProjectRuntime {
     return usd;
   }
 
+  /**
+   * The spend ledger as a daily series, per agent per day.
+   *
+   * "What did this project cost me last week" had no answer short of reading
+   * turn by turn. Same source of truth as spendTodayFor — turn_cost statuses
+   * and nowhere else — bucketed by local day. Tokens ride along from
+   * run_complete, keyed the same way, so 'which agent is eating the tokens'
+   * (#17) is the same walk as 'what did this cost' (#16). Days with no spend
+   * simply don't appear; a chart can zero-fill, the API doesn't lie.
+   */
+  costSeries(days = 30, now = Date.now()): Array<{
+    day: string;
+    usd: number;
+    turns: number;
+    tokensIn: number;
+    tokensOut: number;
+    byAgent: Record<string, { usd: number; turns: number; tokensIn: number; tokensOut: number }>;
+  }> {
+    const since = startOfDay(now) - (days - 1) * 24 * 60 * 60 * 1000;
+    const buckets = new Map<
+      string,
+      {
+        usd: number;
+        turns: number;
+        tokensIn: number;
+        tokensOut: number;
+        byAgent: Record<string, { usd: number; turns: number; tokensIn: number; tokensOut: number }>;
+      }
+    >();
+    const dayOf = (ts: number): string => {
+      const d = new Date(ts);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+    const bucket = (ts: number) => {
+      const key = dayOf(ts);
+      let b = buckets.get(key);
+      if (!b) {
+        b = { usd: 0, turns: 0, tokensIn: 0, tokensOut: 0, byAgent: {} };
+        buckets.set(key, b);
+      }
+      return b;
+    };
+    const agentSlot = (
+      b: ReturnType<typeof bucket>,
+      agentId: string,
+    ): { usd: number; turns: number; tokensIn: number; tokensOut: number } => {
+      let s = b.byAgent[agentId];
+      if (!s) {
+        s = { usd: 0, turns: 0, tokensIn: 0, tokensOut: 0 };
+        b.byAgent[agentId] = s;
+      }
+      return s;
+    };
+    for (const e of this.log.list({ kinds: ["status", "run_complete"] })) {
+      if (e.ts < since) continue;
+      const agentId = e.agentId ?? "unknown";
+      if (e.kind === "status" && e.payload.state === "turn_cost") {
+        const usd = Number(e.payload.costUsd ?? 0) || 0;
+        if (usd <= 0) continue;
+        const b = bucket(e.ts);
+        b.usd += usd;
+        agentSlot(b, agentId).usd += usd;
+      } else if (e.kind === "run_complete") {
+        const tin = Number(e.payload.inputTokens ?? e.payload.tokensIn ?? 0) || 0;
+        const tout = Number(e.payload.outputTokens ?? e.payload.tokensOut ?? 0) || 0;
+        const b = bucket(e.ts);
+        b.turns += 1;
+        b.tokensIn += tin;
+        b.tokensOut += tout;
+        const s = agentSlot(b, agentId);
+        s.turns += 1;
+        s.tokensIn += tin;
+        s.tokensOut += tout;
+      }
+    }
+    return [...buckets.entries()]
+      .map(([day, b]) => ({ day, ...b }))
+      .sort((a, b) => a.day.localeCompare(b.day));
+  }
+
   /** Every budgeted agent: its cap, what it has spent today, and whether it's out. */
   budgetStatus(now = Date.now()): Record<string, { budgetUsd: number; spentTodayUsd: number; over: boolean }> {
     const out: Record<string, { budgetUsd: number; spentTodayUsd: number; over: boolean }> = {};
