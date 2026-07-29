@@ -1974,6 +1974,26 @@ export class LoomDaemon {
       }),
     );
 
+    // Checkpoint and restore: brain + board + config, NOT the working tree
+    // (git owns files) and NOT the event log (history is what happened).
+    app.get(
+      "/api/projects/:id/snapshot",
+      withRuntime(async (rt, _req, res) => {
+        res.json(rt.snapshot());
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/restore",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(rt.restore(req.body as Parameters<typeof rt.restore>[0]));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     // Hung sessions: busy far longer than any plausible turn. GET lists them;
     // POST reaps one — interrupt, stop, respawn from config, baton released if
     // the corpse held it.

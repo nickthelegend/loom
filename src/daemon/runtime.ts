@@ -1722,6 +1722,84 @@ export class ProjectRuntime {
   }
 
   // -------------------------------------------------------------------------
+  // Snapshots
+  // -------------------------------------------------------------------------
+  /**
+   * Checkpoint the project's Loom-owned state: brain, board, config.
+   *
+   * For the moment before letting a fleet loose on something — a restorable
+   * "before". Deliberately NOT the working tree (git owns files and does it
+   * better) and NOT the event log (history is what happened; a restore that
+   * rewrote history would be a lie with a timestamp). Restoring brings back
+   * what the project knew, what was on the board, and how it was configured.
+   */
+  snapshot(): {
+    format: "loom-snapshot";
+    version: 1;
+    project: string;
+    takenAt: number;
+    brain: ReturnType<Brain["export"]>;
+    tasks: BoardTask[];
+    config: ProjectConfig;
+  } {
+    return {
+      format: "loom-snapshot",
+      version: 1,
+      project: this.info.name,
+      takenAt: Date.now(),
+      brain: this.brain.export(this.info.name),
+      tasks: readProjectState(this.info.dir).tasks ?? [],
+      config: this.config,
+    };
+  }
+
+  /**
+   * Restore a snapshot. Config and board are replaced (that is what "restore"
+   * means for state you own); the brain is MERGED through the same dedupe as
+   * import, because memory is an append-only fold — a restore that silently
+   * forgot what was learned since the snapshot would be data loss wearing a
+   * seatbelt. What it knew then comes back; what it learned since stays.
+   */
+  restore(snap: ReturnType<ProjectRuntime["snapshot"]>): {
+    brain: { added: number; known: number };
+    tasks: number;
+  } {
+    if (snap?.format !== "loom-snapshot") throw new Error("not a loom snapshot");
+    const brain = this.brain.import(snap.brain, {
+      agentId: "restore",
+      eventId: this.log.lastId(),
+      ts: Date.now(),
+    });
+    const state = readProjectState(this.info.dir);
+    writeProjectState(this.info.dir, { ...state, tasks: snap.tasks });
+    // `config` is readonly by reference and shared with every live subsystem,
+    // so restore mutates its contents rather than swapping the object.
+    for (const k of Object.keys(this.config)) {
+      if (!(k in snap.config)) delete (this.config as unknown as Record<string, unknown>)[k];
+    }
+    Object.assign(this.config, snap.config);
+    this.saveConfig();
+    // Reconcile the live agents with the restored roster, the same way
+    // addAgent/removeAgent would have: drop what's gone, spawn what's missing.
+    const wanted = new Map(this.config.agents.map((a) => [a.id, a]));
+    for (const [id, live] of [...this.agents]) {
+      if (!wanted.has(id)) {
+        void Promise.resolve(live.stop()).catch(() => {});
+        this.agents.delete(id);
+        this.startedAgents.delete(id);
+      }
+    }
+    for (const cfg of this.config.agents) {
+      if (!this.agents.has(cfg.id) && cfg.enabled !== false) this.spawnAgent(cfg);
+    }
+    this.log.append({
+      kind: "status",
+      payload: { state: "restored", takenAt: snap.takenAt, tasks: snap.tasks.length },
+    });
+    return { brain, tasks: snap.tasks.length };
+  }
+
+  // -------------------------------------------------------------------------
   // Stale sessions
   // -------------------------------------------------------------------------
   /**
