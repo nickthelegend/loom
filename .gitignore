@@ -38,3 +38,6 @@ loom-video.mp4
 videos/*/assets/video/
 videos/*/assets/shots/
 videos/*/assets/vo/
+
+# trailer build scratch
+videos/loompad-trailer/.work/
