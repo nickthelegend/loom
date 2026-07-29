@@ -7360,16 +7360,45 @@ ${BRAND_SPRITE}
     drawErrDot();
   }
 
+  /**
+   * Reconcile with the daemon's logbook, then redraw.
+   *
+   * The live socket is the fast path, not the only one. There is a window
+   * between the one-shot backfill at mount and the socket actually being open,
+   * and anything logged inside it reached neither: the backfill had already run,
+   * and there was no subscriber yet to stream it. Those records were lost from
+   * the Console for the life of the window — and a dropped error is the one kind
+   * you cannot afford to drop. Merging by id makes this safe to call any time.
+   */
+  function refreshConsole(done){
+    api("/api/logs").then(function(j){
+      var fresh = j.logs || [];
+      var known = {};
+      con.logs.forEach(function(r){ known[r.id] = true; });
+      var added = 0;
+      fresh.forEach(function(r){ if (!known[r.id]) { con.logs.push(r); added++; } });
+      if (added) {
+        con.logs.sort(function(a, b){ return a.id - b.id; });
+        if (con.logs.length > 500) con.logs.splice(0, con.logs.length - 500);
+      }
+    }).catch(function(){ /* old daemon with no logs route — keep what we have */ })
+      .then(function(){ if (done) done(); });
+  }
+
   function openConsole(){
     // The console is a tab in the terminal dock now; renderProject owns the tab
     // machinery and publishes state.showConsole for exactly this cross-scope
     // call. (These functions live at module scope; terms/activeTerm/drawTermTabs
     // do not.)
     if (state.showConsole) state.showConsole();
-    // Mark what's on screen as seen — the dot is about news, not history.
-    con.logs.forEach(function(r){ if (r.id > con.seen) con.seen = r.id; });
-    drawConsole();
-    drawErrDot();
+    var settle = function(){
+      // Mark what's on screen as seen — the dot is about news, not history.
+      con.logs.forEach(function(r){ if (r.id > con.seen) con.seen = r.id; });
+      drawConsole();
+      drawErrDot();
+    };
+    settle();                    // paint what we already have, immediately
+    refreshConsole(settle);      // then fill in anything the socket missed
   }
 
   function closeConsole(){
