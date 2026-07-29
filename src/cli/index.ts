@@ -284,6 +284,50 @@ program
   });
 
 program
+  .command("brain:export [file]")
+  .description("write this project's brain to a file (or stdout) so it can travel")
+  .action(async (file: string | undefined) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const doc = await client.exportBrain(project.id);
+    const json = JSON.stringify(doc, null, 2);
+    if (file) {
+      const fs = await import("node:fs");
+      fs.writeFileSync(file, json + "\n");
+      const n = (doc as { memories?: unknown[] }).memories?.length ?? 0;
+      console.log(`${pc.green("✓")} ${n} memor${n === 1 ? "y" : "ies"} → ${file}`);
+    } else {
+      console.log(json);
+    }
+  });
+
+program
+  .command("brain:import <file>")
+  .description("bring an exported brain into this project (dedupes what's already known)")
+  .action(async (file: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const fs = await import("node:fs");
+    let doc: unknown;
+    try {
+      doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (err) {
+      console.error(pc.red(`could not read ${file}: ${err instanceof Error ? err.message : err}`));
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const { added, known } = await client.importBrain(project.id, doc);
+      console.log(
+        `${pc.green("✓")} ${added} learned${known ? pc.dim(` · ${known} already known`) : ""}`,
+      );
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("spawn <task>")
   .description("fan a subtask out to a child agent — the parent keeps the baton")
   .option("--agent <id>", "which agent runs the subtask")

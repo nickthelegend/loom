@@ -131,6 +131,22 @@ export interface MemoryHistoryEntry {
   reason?: string;
 }
 
+/** The portable brain: what a project knows, as a file that can travel. */
+export interface BrainExport {
+  format: "loom-brain";
+  version: 1;
+  project: string;
+  exportedAt: number;
+  memories: Array<{
+    kind: MemoryKind;
+    text: string;
+    entities?: string[];
+    confidence?: number;
+    chat?: string;
+    agent?: string;
+  }>;
+}
+
 export interface ListOpts {
   kind?: MemoryKind;
   chat?: string;
@@ -370,6 +386,63 @@ export class Brain {
       out = out.filter((m) => m.confidence >= (opts.minConfidence as number));
     }
     return opts.limit ? out.slice(0, opts.limit) : out;
+  }
+
+  /**
+   * The brain as a portable document.
+   *
+   * A project's memory was trapped in one machine's sqlite: no way to move it
+   * to a laptop, commit a snapshot to the repo, or seed a teammate's clone. The
+   * export is the live memories, not the event log — history stays where it
+   * happened; what travels is what the project currently knows.
+   */
+  export(projectName: string): BrainExport {
+    return {
+      format: "loom-brain",
+      version: 1,
+      project: projectName,
+      exportedAt: Date.now(),
+      memories: this.all().map((m) => ({
+        kind: m.kind,
+        text: m.text,
+        entities: m.entities,
+        confidence: m.confidence,
+        ...(m.scope.chat ? { chat: m.scope.chat } : {}),
+        ...(m.scope.agent ? { agent: m.scope.agent } : {}),
+      })),
+    };
+  }
+
+  /**
+   * Bring an exported brain in. Deduplicates by hash the same way add() does,
+   * so importing twice — or importing into a project that already learned half
+   * of it — is safe and reports what was actually new.
+   */
+  import(
+    doc: BrainExport,
+    provenance: MemoryProvenance,
+  ): { added: number; known: number } {
+    if (doc?.format !== "loom-brain" || !Array.isArray(doc.memories)) {
+      throw new Error("not a loom brain export");
+    }
+    let added = 0;
+    let known = 0;
+    for (const m of doc.memories) {
+      if (!m?.text?.trim() || !MEMORY_KINDS_SET.has(m.kind)) continue;
+      const { created } = this.add({
+        kind: m.kind,
+        text: m.text,
+        ...(m.entities?.length ? { entities: m.entities } : {}),
+        ...(m.confidence !== undefined ? { confidence: m.confidence } : {}),
+        ...(m.chat || m.agent
+          ? { scope: { ...(m.chat ? { chat: m.chat } : {}), ...(m.agent ? { agent: m.agent } : {}) } }
+          : {}),
+        provenance,
+      });
+      if (created) added++;
+      else known++;
+    }
+    return { added, known };
   }
 
   /**

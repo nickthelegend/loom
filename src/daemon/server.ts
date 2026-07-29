@@ -2128,6 +2128,32 @@ export class LoomDaemon {
       }),
     );
 
+    // The brain as a file. Export is the live memories — history stays where it
+    // happened; what travels is what the project knows. Import dedupes by hash,
+    // so bringing the same file in twice reports "known", not duplicates.
+    app.get(
+      "/api/projects/:id/brain/export",
+      withRuntime(async (rt, _req, res) => {
+        res.json(rt.brain.export(rt.info.name));
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/brain/import",
+      withRuntime(async (rt, req, res) => {
+        try {
+          const out = rt.brain.import(req.body as Parameters<typeof rt.brain.import>[0], {
+            agentId: "import",
+            eventId: rt.log.lastId(),
+            ts: Date.now(),
+          });
+          res.json(out);
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     app.patch(
       "/api/projects/:id/brain/:mid",
       withRuntime(async (rt, req, res) => {

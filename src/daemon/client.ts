@@ -163,6 +163,19 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/subtasks`);
   }
 
+  /** The brain as a portable document — see Brain.export. */
+  exportBrain(id: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export`);
+  }
+
+  importBrain(id: string, doc: unknown): Promise<{ added: number; known: number }> {
+    return this.request(
+      "POST",
+      `/api/projects/${encodeURIComponent(id)}/brain/import`,
+      doc as Record<string, unknown>,
+    );
+  }
+
   removeAgent(id: string, agentId: string): Promise<{ removed: boolean }> {
     return this.request(
       "DELETE",
