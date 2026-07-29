@@ -242,4 +242,40 @@ describe("over the API", () => {
     const { route } = await client.routeState(projectId);
     expect(route!.reason).toContain("budget");
   });
+
+  it("hard stop: quarantines at turn end, not at the next ask", async () => {
+      // Before: an agent that crossed its cap kept showing as healthy until
+      // something next tried to dispatch to it. The burn panel said "over" while
+      // the roster said "fine" — two surfaces disagreeing about one fact. Now the
+      // turn_cost that crosses the line quarantines on the spot.
+      const dir = makeProjectDir({ name: "hardstop" });
+      const addRes = await fetch(`${baseUrl}/api/projects`, {
+        method: "POST",
+        headers: H(),
+        body: JSON.stringify({ dir }),
+      });
+      const pid = ((await addRes.json()) as { project: { id: string } }).project.id;
+
+      // Cap below one turn's cost: the very first turn must trip it.
+      await fetch(`${baseUrl}/api/projects/${pid}/budgets/plannerbot`, {
+        method: "PUT",
+        headers: H(),
+        body: JSON.stringify({ usdPerDay: TURN / 2 }),
+      });
+      const r = await fetch(`${baseUrl}/api/projects/${pid}/messages`, {
+        method: "POST",
+        headers: H(),
+        body: JSON.stringify({ text: "one costly turn" }),
+      });
+      expect(r.status).toBe(200); // under the cap when it started
+
+      // Without any further dispatch, the agent is paused once its cost lands.
+      await waitUntil(async () => {
+        const res = await fetch(`${baseUrl}/api/projects/${pid}`, { headers: H() });
+        const { project } = (await res.json()) as {
+          project: { quarantine?: Record<string, { reason: string }> };
+        };
+        return Boolean(project.quarantine?.plannerbot?.reason?.includes("budget"));
+      });
+  });
 });

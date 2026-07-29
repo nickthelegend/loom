@@ -284,6 +284,46 @@ program
   });
 
 program
+  .command("budgets")
+  .description("each agent's daily USD cap and today's real spend against it")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { status } = await client.budgets(project.id);
+    const rows = Object.entries(status);
+    if (!rows.length) {
+      console.log(pc.dim("no caps set — loom budget <agentId> <usd> to add one"));
+      return;
+    }
+    for (const [agentId, s] of rows) {
+      const bar = s.over ? pc.red("OVER — paused") : pc.dim(`${Math.round((s.spentTodayUsd / s.budgetUsd) * 100)}%`);
+      console.log(
+        `${agentId.padEnd(18)} $${s.spentTodayUsd.toFixed(2)} / $${s.budgetUsd.toFixed(2)}  ${bar}`,
+      );
+    }
+  });
+
+program
+  .command("budget <agentId> [usd]")
+  .description("cap an agent's daily spend in USD (omit usd or pass 0 to clear)")
+  .action(async (agentId: string, usd: string | undefined) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const value = usd === undefined ? 0 : Number(usd);
+    if (Number.isNaN(value) || value < 0) {
+      console.error(pc.red(`"${usd}" is not a dollar amount`));
+      process.exitCode = 1;
+      return;
+    }
+    await client.setBudget(project.id, agentId, value);
+    console.log(
+      value > 0
+        ? `${pc.green("✓")} ${agentId} capped at $${value.toFixed(2)}/day — over the cap it pauses, hard`
+        : `${pc.green("✓")} ${agentId} uncapped`,
+    );
+  });
+
+program
   .command("watch")
   .description("tail this project's events live — turns, handoffs, memory, subtasks")
   .option("--all", "watch every project, prefixed with the project id")

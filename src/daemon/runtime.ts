@@ -261,6 +261,25 @@ export class ProjectRuntime {
         this.costs.totalUsd += usd;
         entry.usd += usd;
         this.costsByAgent.set(agentId, entry);
+        // The moment the money crosses the cap, pause — don't wait for the next
+        // dispatch to notice. enforceBudget still guards every dispatch (that's
+        // the hard stop); this makes the pause visible when the spend happens,
+        // so a looping agent shows as paused NOW rather than at its next ask,
+        // and the burn panel's "over" and the roster's "paused" agree in time.
+        const cap = this.budgets()[agentId];
+        if (
+          Number.isFinite(cap) &&
+          cap! > 0 &&
+          this.spendTodayFor(agentId) >= cap! &&
+          !this.quarantined()[agentId]
+        ) {
+          this.quarantine(agentId, `${BUDGET_PAUSE_REASON}$${cap!.toFixed(2)}/day`, false);
+          this.appendIfOpen({
+            kind: "status",
+            agentId,
+            payload: { state: "budget_exceeded", budgetUsd: cap, spentTodayUsd: this.spendTodayFor(agentId) },
+          });
+        }
       }
     } else if (event.kind === "run_complete") {
       const ms = Number(event.payload.durationMs ?? 0);

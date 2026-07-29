@@ -163,6 +163,21 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/subtasks`);
   }
 
+  budgets(id: string): Promise<{
+    budgets: Record<string, number>;
+    status: Record<string, { budgetUsd: number; spentTodayUsd: number; over: boolean }>;
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/budgets`);
+  }
+
+  setBudget(id: string, agentId: string, usdPerDay: number): Promise<{ budgets: Record<string, number> }> {
+    return this.request(
+      "PUT",
+      `/api/projects/${encodeURIComponent(id)}/budgets/${encodeURIComponent(agentId)}`,
+      { usdPerDay },
+    );
+  }
+
   /** The brain as a portable document — see Brain.export. */
   exportBrain(id: string): Promise<Record<string, unknown>> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export`);
