@@ -284,6 +284,82 @@ program
   });
 
 program
+  .command("watch")
+  .description("tail this project's events live — turns, handoffs, memory, subtasks")
+  .option("--all", "watch every project, prefixed with the project id")
+  .option("--json", "one JSON event per line, for piping")
+  .action(async (opts: { all?: boolean; json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = opts.all ? null : await currentProject(client);
+
+    /**
+     * One line per event, shaped for a human at a terminal. Everything else in
+     * the log still flows — this names the kinds worth a glance and lets the
+     * rest pass as a dim one-liner rather than pretending they don't exist.
+     */
+    const line = (e: import("../types.js").LoomEvent): string => {
+      const t = new Date(e.ts).toTimeString().slice(0, 8);
+      const who = e.agentId ? pc.cyan(e.agentId) : pc.dim("you");
+      const p = e.payload as Record<string, unknown>;
+      switch (e.kind) {
+        case "message":
+          return `${t} ${who} ${String(p.text ?? "").slice(0, 100)}`;
+        case "handoff":
+          return `${t} ${pc.yellow("baton")} ${String(p.from ?? "—")} → ${String(p.to ?? "—")}`;
+        case "run_complete":
+          return `${t} ${who} ${pc.green("turn done")}`;
+        case "needs_input":
+          return `${t} ${who} ${pc.red("needs you")}: ${String(p.question ?? "").slice(0, 80)}`;
+        case "decision":
+          return `${t} ${who} ${pc.magenta("decision")} ${String(p.text ?? "").slice(0, 90)}`;
+        case "memory_add":
+          return `${t} ${who} ${pc.magenta("learned")} ${String((p.memory as Record<string, unknown> | undefined)?.text ?? "").slice(0, 90)}`;
+        case "subtask_started":
+          return `${t} ${who} ${pc.cyan("subtask")} for ${String(p.parent)}: ${String(p.task ?? "").slice(0, 70)}`;
+        case "subtask_done":
+          return `${t} ${who} ${pc.green("subtask done")}`;
+        case "subtask_failed":
+          return `${t} ${who} ${pc.red("subtask failed")}: ${String(p.message ?? "").slice(0, 80)}`;
+        case "error":
+          return `${t} ${who} ${pc.red("error")} ${String(p.message ?? "").slice(0, 90)}`;
+        case "route_started":
+        case "route_step":
+        case "route_completed":
+        case "route_failed":
+          return `${t} ${pc.yellow(e.kind.replace("route_", "route "))} ${String(p.route ?? p.name ?? "")}`;
+        default:
+          return pc.dim(`${t} ${e.kind}`);
+      }
+    };
+
+    console.log(
+      pc.dim(
+        project
+          ? `watching ${project.name} — ^C to stop`
+          : "watching every project — ^C to stop",
+      ),
+    );
+    const close = client.subscribe((pid, e) => {
+      if (opts.json) {
+        console.log(JSON.stringify(opts.all ? { project: pid, ...e } : e));
+        return;
+      }
+      const prefix = opts.all ? pc.dim(`[${pid.slice(0, 8)}] `) : "";
+      console.log(prefix + line(e));
+    }, project?.id);
+
+    // Keep the process alive until ^C; close the socket on the way out so the
+    // daemon isn't left holding a dead subscriber.
+    await new Promise<void>((resolve) => {
+      process.on("SIGINT", () => {
+        close();
+        console.log();
+        resolve();
+      });
+    });
+  });
+
+program
   .command("brain:export [file]")
   .description("write this project's brain to a file (or stdout) so it can travel")
   .action(async (file: string | undefined) => {
