@@ -43,6 +43,23 @@ const B = 0.75;
 
 /** How much a matched entity can contribute, before IDF weighting. */
 const ENTITY_WEIGHT = 0.5;
+/**
+ * Recency half-life. A unit's score decays toward a floor as it ages, so an
+ * equally-matching fresh unit outranks a stale one — but never to zero: the
+ * floor keeps a strongly-matching old constraint above a weakly-matching new
+ * fact. Age should tip ties, not erase history; a decay that can reach zero
+ * would silently delete week-one constraints from every briefing, which is the
+ * exact class of memory you least want to lose.
+ */
+const HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000;
+const DECAY_FLOOR = 0.55;
+
+/** 1.0 for a fresh unit, exponentially down to DECAY_FLOOR with age. */
+export function recencyFactor(updatedAt: number, now = Date.now()): number {
+  const age = Math.max(0, now - updatedAt);
+  return DECAY_FLOOR + (1 - DECAY_FLOOR) * Math.pow(0.5, age / HALF_LIFE_MS);
+}
+
 /** Fixed, so scores mean the same thing across queries. */
 const MAX_SCORE = 1 + ENTITY_WEIGHT;
 
@@ -80,6 +97,8 @@ export interface ScoreDetail {
   bm25: number;
   entity: number;
   kindBias: number;
+  /** 1.0 fresh → 0.55 floor with age; multiplies the match, not the bias. */
+  recency: number;
   matchedEntities: string[];
   final: number;
 }
@@ -297,7 +316,10 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
     const ent = eh.get(id);
     const bias = KIND_BIAS[memory.kind] ?? 0;
     const raw = bmNorm + (ent?.score ?? 0);
-    const final = Math.min(1, raw / MAX_SCORE + bias);
+    // Decay multiplies the match, not the bias: how well it matches fades with
+    // age; what KIND of thing it is doesn't.
+    const recency = recencyFactor(memory.updatedAt, now);
+    const final = Math.min(1, (raw / MAX_SCORE) * recency + bias);
     hits.push({
       memory,
       score: final,
@@ -307,6 +329,7 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
               bm25: round(bmNorm),
               entity: round(ent?.score ?? 0),
               kindBias: bias,
+              recency: round(recency),
               matchedEntities: ent?.matched ?? [],
               final: round(final),
             },

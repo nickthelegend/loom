@@ -18,6 +18,7 @@ import {
   foldMemories,
   lemmatize,
   memoryHash,
+  type Memory,
   type MemoryProvenance,
 } from "../src/core/brain.js";
 import { queryEntities, retrieve, retrieveFrom } from "../src/core/brain-index.js";
@@ -431,5 +432,68 @@ describe("brain · retrieval", () => {
 
   it("is pure over a plain array — no Brain required", () => {
     expect(retrieveFrom([], { query: "anything" })).toEqual([]);
+  });
+});
+
+/**
+ * Recency decay (#5): age tips ties, but never erases history.
+ *
+ * Every unit used to be equally loud forever, so a decision from three weeks
+ * ago that had since been walked back still crowded the briefing. The decay is
+ * a multiplier on the MATCH (not the kind bias) with a hard floor — old and
+ * strongly relevant must still beat new and barely relevant, or the brain
+ * forgets exactly the week-one constraints it exists to keep.
+ */
+describe("recency decay", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const mem = (id: string, text: string, agedDays: number): Memory => ({
+    id,
+    kind: "fact",
+    text,
+    entities: [],
+    scope: {},
+    confidence: 0.9,
+    provenance: { agentId: "t", eventId: 1, ts: Date.now() },
+    createdAt: Date.now() - agedDays * DAY,
+    updatedAt: Date.now() - agedDays * DAY,
+    hash: id,
+    version: 1,
+  });
+
+  it("an equal match, fresher, wins", () => {
+    const hits = retrieveFrom(
+      [mem("old", "the deploy pipeline uses bun", 30), mem("new", "the deploy pipeline uses bun", 0)],
+      { query: "deploy pipeline bun" },
+    );
+    expect(hits[0]!.memory.id).toBe("new");
+    expect(hits[1]!.memory.id).toBe("old");
+    expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score);
+  });
+
+  it("a strong old match still beats a weak fresh one — the floor holds", () => {
+    const hits = retrieveFrom(
+      [
+        mem("old-strong", "the daemon binds loopback only, never 0.0.0.0", 60),
+        mem("new-weak", "the daemon exists", 0),
+      ],
+      { query: "daemon binds loopback 0.0.0.0" },
+    );
+    expect(hits[0]!.memory.id).toBe("old-strong");
+  });
+
+  it("shows its arithmetic in explain mode", () => {
+    const hits = retrieveFrom([mem("aged", "the cache lives in redis", 14)], {
+      query: "redis cache",
+      explain: true,
+    });
+    const d = hits[0]!.detail!;
+    expect(d.recency).toBeLessThan(1);
+    expect(d.recency).toBeGreaterThanOrEqual(0.55);
+  });
+
+  it("never decays below the floor, no matter the age", async () => {
+    const { recencyFactor } = await import("../src/core/brain-index.js");
+    expect(recencyFactor(Date.now() - 365 * DAY)).toBeGreaterThanOrEqual(0.55);
+    expect(recencyFactor(Date.now())).toBeCloseTo(1, 5);
   });
 });
