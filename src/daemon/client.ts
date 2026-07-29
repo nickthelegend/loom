@@ -163,6 +163,11 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/subtasks`);
   }
 
+  /** Re-run the last failed turn on a different agent, failure attached. */
+  retryTurn(id: string, agentId: string): Promise<{ agentId: string; retried: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/retry`, { agentId });
+  }
+
   budgets(id: string): Promise<{
     budgets: Record<string, number>;
     status: Record<string, { budgetUsd: number; spentTodayUsd: number; over: boolean }>;

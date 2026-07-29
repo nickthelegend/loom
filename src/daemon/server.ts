@@ -1972,6 +1972,21 @@ export class LoomDaemon {
       }),
     );
 
+    // Re-run the last failed turn on a different agent, with the failure
+    // attached as context so the second agent knows what was tried.
+    app.post(
+      "/api/projects/:id/retry",
+      withRuntime(async (rt, req, res) => {
+        const to = String((req.body as { agentId?: string } | undefined)?.agentId ?? "").trim();
+        if (!to) return void res.status(400).json({ error: "missing agentId" });
+        try {
+          res.json(await rt.retryTurn(to));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     app.get(
       "/api/projects/:id/subtasks",
       withRuntime(async (rt, _req, res) => {

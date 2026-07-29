@@ -1756,6 +1756,58 @@ export class ProjectRuntime {
    * the log into the target's namespaced memory, arm the one-shot briefing.
    * A *manual* handoff cancels any active route — the human outranks it.
    */
+  /**
+   * Re-run a failed turn on a different agent.
+   *
+   * When a turn failed, the only recovery was retyping the prompt at someone
+   * else — and the someone else started cold, not knowing an attempt had been
+   * made. This finds the failed turn's prompt, hands the baton to the chosen
+   * agent, and re-sends the same text with the failure attached as context, so
+   * the second agent knows what was tried and what it died of.
+   *
+   * The failure context rides the one-shot handoff briefing rather than the
+   * message text, so the thread shows the same clean prompt twice rather than
+   * a prompt wearing a stack trace.
+   */
+  async retryTurn(toAgentId: string): Promise<{ agentId: string; retried: string }> {
+    const events = this.log.list({ limit: 200 });
+    // The last error, and the last user message before it: that pairing is the
+    // failed turn. Route-authored messages count too — a route step that died
+    // is exactly what you retry somewhere else.
+    let errorAt = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i]!.kind === "error") { errorAt = i; break; }
+    }
+    if (errorAt === -1) throw new Error("no failed turn to retry");
+    const err = events[errorAt]!;
+    let prompt: string | undefined;
+    for (let i = errorAt - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.kind === "message" && !e.agentId) {
+        prompt = String(e.payload.text ?? "");
+        break;
+      }
+    }
+    if (!prompt?.trim()) throw new Error("could not find the prompt that failed");
+
+    await this.handoff(toAgentId, { source: "user" });
+    const failedAgent = err.agentId ?? "the previous agent";
+    const failure = String(err.payload.message ?? "unknown error").slice(0, 500);
+    const prior = this.pendingBriefings.get(toAgentId);
+    this.pendingBriefings.set(
+      toAgentId,
+      [
+        prior,
+        `[Loom retry] "${failedAgent}" attempted this and failed with: ${failure}`,
+        "Do not repeat the failing approach without addressing the failure.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    await this.sendMessage(prompt, toAgentId, { chat: err.chat ?? MAIN_CHAT });
+    return { agentId: toAgentId, retried: prompt };
+  }
+
   async handoff(
     to: string,
     opts: { source?: "user" | "route" } = {},

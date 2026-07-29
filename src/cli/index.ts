@@ -284,6 +284,21 @@ program
   });
 
 program
+  .command("retry <agentId>")
+  .description("re-run the last failed turn on a different agent, failure attached as context")
+  .action(async (agentId: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      const { retried } = await client.retryTurn(project.id, agentId);
+      console.log(`${pc.green("↻")} ${pc.bold(agentId)} retrying: ${pc.dim(retried.slice(0, 80))}`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("budgets")
   .description("each agent's daily USD cap and today's real spend against it")
   .action(async () => {

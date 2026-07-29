@@ -49,6 +49,18 @@ export class EchoAdapter extends AdapterBase {
         this.emit({ kind: "status", payload: { state: "interrupted" } });
         return;
       }
+      // fail:<reason> — the turn errors instead of completing, the way a dead
+      // CLI or a refused model call would. Tests of every recovery path (retry,
+      // failover, the Console) need an agent that can fail on request; without
+      // one they end up reaching into the runtime to forge error events.
+      const failMatch = input.text.match(/fail:([^\n]*)/);
+      if (failMatch) {
+        this.emit({
+          kind: "error",
+          payload: { message: failMatch[1]!.trim() || "echo asked to fail" },
+        });
+        return;
+      }
       const writeMatch = input.text.match(/write:([\w./-]+)/);
       if (writeMatch && !writeMatch[1]!.includes("..")) {
         const target = path.join(this.projectDir, writeMatch[1]!);
