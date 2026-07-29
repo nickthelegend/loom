@@ -1972,6 +1972,27 @@ export class LoomDaemon {
       }),
     );
 
+    // Hung sessions: busy far longer than any plausible turn. GET lists them;
+    // POST reaps one — interrupt, stop, respawn from config, baton released if
+    // the corpse held it.
+    app.get(
+      "/api/projects/:id/stale",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ stale: rt.staleSessions() });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/agents/:agentId/reap",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(await rt.reapSession(String(req.params.agentId ?? "")));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     // Re-run the last failed turn on a different agent, with the failure
     // attached as context so the second agent knows what was tried.
     app.post(

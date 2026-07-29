@@ -655,6 +655,12 @@ export class ProjectRuntime {
           ...(cost !== undefined ? { costUsd: cost } : {}),
         };
       }
+      // Any terminal event stops the stale-session clock — a turn that ended in
+      // an error is over, not hung.
+      if (e.kind === "run_complete" || e.kind === "error" ||
+          (e.kind === "status" && p.state === "interrupted")) {
+        this.busySince.delete(agent.id);
+      }
       const event = this.log.append({
         kind: e.kind,
         agentId: agent.id,
@@ -1526,6 +1532,7 @@ export class ProjectRuntime {
 
     // everything this turn produces belongs to the chat you sent from
     this.turnChat.set(target, chat);
+    this.busySince.set(target, Date.now()); // the stale-session clock starts
     this.log.append({
       kind: "message",
       chat,
@@ -1572,6 +1579,62 @@ export class ProjectRuntime {
       // nothing removes is a slow leak of the project's server URLs.
       .finally(() => mcp?.cleanup());
     return { agentId: target };
+  }
+
+  // -------------------------------------------------------------------------
+  // Stale sessions
+  // -------------------------------------------------------------------------
+  /**
+   * When each adapter's current turn started. Set at dispatch, cleared when its
+   * run_complete / error / interrupted lands. An entry much older than any
+   * plausible turn is a hung session: the process is alive enough to hold
+   * `busy` and dead enough to never finish, which blocks every dispatch with
+   * "is busy" until someone notices.
+   */
+  private busySince = new Map<string, number>();
+
+  /** Turns older than this are presumed hung. Generous: real turns run long. */
+  static readonly STALE_TURN_MS = 10 * 60 * 1000;
+
+  /** Adapters that look hung: busy far longer than any plausible turn. */
+  staleSessions(now = Date.now()): Array<{ agentId: string; busyMs: number }> {
+    const out: Array<{ agentId: string; busyMs: number }> = [];
+    for (const [agentId, since] of this.busySince) {
+      const live = this.agents.get(agentId);
+      if (!live || !isAdapter(live) || !live.busy()) continue;
+      const busyMs = now - since;
+      if (busyMs >= ProjectRuntime.STALE_TURN_MS) out.push({ agentId, busyMs });
+    }
+    return out;
+  }
+
+  /**
+   * Put a hung session out of its misery and bring up a fresh one.
+   *
+   * Interrupt first — a process that responds to that wasn't hung, and gets to
+   * finish dying cleanly — then stop, drop, and respawn from config, exactly as
+   * a cold start would. The baton is released if the corpse held it, because a
+   * lock owned by a session that no longer exists refuses everyone forever.
+   */
+  async reapSession(agentId: string): Promise<{ respawned: boolean }> {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}" in project "${this.info.name}"`);
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live)) {
+      await live.interrupt().catch(() => {});
+      await live.stop().catch(() => {});
+    }
+    this.agents.delete(agentId);
+    this.startedAgents.delete(agentId);
+    this.busySince.delete(agentId);
+    if (this.validHolder() === agentId) this.baton.release(agentId);
+    this.spawnAgent(cfg);
+    this.log.append({
+      kind: "status",
+      agentId,
+      payload: { state: "session_reaped", reason: "stale or hung session respawned" },
+    });
+    return { respawned: true };
   }
 
   // -------------------------------------------------------------------------
