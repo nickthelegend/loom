@@ -6108,19 +6108,30 @@ ${BRAND_SPRITE}
       var box = document.getElementById("addagents");
       if (!box) return;
       function render(){
-        var list = (state.avail || []).filter(function(a){ return !a.inProject; });
+        // Adapters stay listed once they're here, because a second session of
+        // the same kind is a thing you can want: two Claude Code sessions on one
+        // repo, both reading the one brain. Bridges drop off — they're
+        // read-mostly and never hold the baton, so a second one buys nothing.
+        var list = (state.avail || []).filter(function(a){
+          return !a.inProject || a.canAddAnother;
+        });
         if (!list.length) {
           box.innerHTML = '<div class="rempty">every agent Loom can drive is already here</div>';
           return;
         }
         box.innerHTML = list.map(function(a){
           var can = a.installed !== false; // bridges report null: presence is live
+          var n = a.instances || 0;
+          var tip = !can ? esc(a.label) + " isn\\u2019t installed"
+            : n ? "add another " + esc(a.label) + " session \\u2014 same brain, its own context"
+                : "add " + esc(a.label) + " to this project";
           return '<div class="frow addrow' + (can ? "" : " off") + '" data-add="' + esc(a.kind) + '"' +
-            ' title="' + (can ? "add " + esc(a.label) + " to this project" : esc(a.label) + " isn\\u2019t installed") + '">' +
+            ' title="' + tip + '">' +
             brandMark(a.kind) +
             '<span class="fp">' + esc(a.label) + "</span>" +
             (a.tier === "bridge" ? '<span class="abadge">bridge</span>' : "") +
-            (can ? '<span class="gacts"><button class="iconbtn xs" title="add">' + ICONS.plus + "</button></span>"
+            (n ? '<span class="abadge" title="sessions already in this project">' + n + "\\u00d7</span>" : "") +
+            (can ? '<span class="gacts"><button class="iconbtn xs" title="' + (n ? "add another" : "add") + '">' + ICONS.plus + "</button></span>"
                  : '<span class="role" style="margin-left:auto">not installed</span>') +
             "</div>";
         }).join("");

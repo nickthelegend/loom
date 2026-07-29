@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import type {
+  AgentConfig,
   CostSummary,
   LoomEvent,
   ProjectStatus,
@@ -99,6 +100,46 @@ export class DaemonClient {
     return this.request(
       "GET",
       `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/models`,
+    );
+  }
+
+  /**
+   * Add an agent to a project's roster.
+   *
+   * `as` names the instance. Leave it off and the daemon picks the next free id
+   * for the kind, so asking twice gives you two sessions rather than an error.
+   */
+  addAgent(
+    id: string,
+    kind: string,
+    opts: { as?: string; role?: string } = {},
+  ): Promise<AgentConfig> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents`, {
+      kind,
+      ...(opts.as ? { id: opts.as } : {}),
+      ...(opts.role ? { role: opts.role } : {}),
+    });
+  }
+
+  /** Which agents this machine can drive, and how many of each are here. */
+  availableAgents(id: string): Promise<{
+    ades: Array<{
+      kind: string;
+      label: string;
+      tier: string;
+      installed: boolean | null;
+      inProject: boolean;
+      instances: number;
+      canAddAnother: boolean;
+    }>;
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/agents/available`);
+  }
+
+  removeAgent(id: string, agentId: string): Promise<{ removed: boolean }> {
+    return this.request(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}`,
     );
   }
 

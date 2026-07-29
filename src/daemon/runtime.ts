@@ -552,11 +552,21 @@ export class ProjectRuntime {
       const replacement = kind === "antigravity" ? ' — use "antigravity-cli"' : "";
       throw new Error(`"${kind}" is no longer offered${replacement}`);
     }
-    const id = (opts.id ?? kind).trim().slice(0, 40);
-    if (!id) throw new Error("an agent needs an id");
-    if (this.config.agents.some((a) => a.id === id)) {
-      throw new Error(`"${id}" is already in this project`);
+    // A second session of the same kind is a feature, not a mistake.
+    //
+    // The roster has always been keyed by instance id with kind alongside it, so
+    // two Claude Code sessions in one project were representable — but adding
+    // one threw, because the id defaulted to the kind and the kind was taken. A
+    // caller who names the instance gets that name; a caller who doesn't gets
+    // the next free suffix, so "add another" needs no ceremony. Both sessions
+    // read and write the one project brain: memory import dedupes by file path,
+    // and units are project-scoped, so nothing has to change for them to share.
+    const explicit = opts.id?.trim().slice(0, 40);
+    if (explicit && this.config.agents.some((a) => a.id === explicit)) {
+      throw new Error(`"${explicit}" is already in this project`);
     }
+    const id = explicit || this.nextInstanceId(kind);
+    if (!id) throw new Error("an agent needs an id");
     const cfg: AgentConfig = { id, kind, role: (opts.role ?? kind).trim().slice(0, 40) || kind };
     // Build it before saving. A config entry with no live agent behind it makes
     // status() throw the moment anything asks — this.agent(id) doesn't find it —
@@ -567,6 +577,29 @@ export class ProjectRuntime {
     this.config.agents.push(cfg);
     this.saveConfig();
     return cfg;
+  }
+
+  /**
+   * The next free instance id for a kind: `codex`, then `codex-2`, `codex-3`.
+   *
+   * The bare kind stays the first instance's id so existing projects, configs
+   * and route specs that name `codex` keep meaning what they meant.
+   */
+  private nextInstanceId(kind: string): string {
+    const taken = new Set(this.config.agents.map((a) => a.id));
+    if (!taken.has(kind)) return kind;
+    for (let n = 2; n < 100; n++) {
+      const candidate = `${kind}-${n}`;
+      if (!taken.has(candidate)) return candidate;
+    }
+    throw new Error(`too many ${kind} sessions in this project`);
+  }
+
+  /** How many instances of each kind the roster holds. */
+  instanceCounts(): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const a of this.config.agents) counts[a.kind] = (counts[a.kind] ?? 0) + 1;
+    return counts;
   }
 
   /**

@@ -284,6 +284,62 @@ program
   });
 
 program
+  .command("agents:add <kind>")
+  .description("add an agent session to this project (repeat for a second session of the same kind)")
+  .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
+  .option("--role <role>", "what this instance is for, e.g. planner or reviewer")
+  .action(async (kind: string, opts: { as?: string; role?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      const added = await client.addAgent(project.id, kind, opts);
+      const siblings = project.agents.filter((a) => a.kind === kind).length;
+      console.log(
+        `${pc.green("+")} ${pc.bold(added.id)} ${pc.dim(`(${added.kind} · ${added.role})`)}` +
+          (siblings ? pc.dim(`  — session ${siblings + 1} of ${kind}, sharing this project's brain`) : ""),
+      );
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("agents:rm <agentId>")
+  .description("remove an agent session from this project")
+  .action(async (agentId: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      await client.removeAgent(project.id, agentId);
+      console.log(`${pc.red("-")} ${agentId} removed`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("agents:available")
+  .description("which agents this machine can drive, and how many sessions are here")
+  .option("--json", "print as JSON")
+  .action(async (opts: { json: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { ades } = await client.availableAgents(project.id);
+    if (opts.json) return void console.log(JSON.stringify(ades, null, 2));
+    for (const a of ades) {
+      const state =
+        a.installed === false
+          ? pc.dim("not installed")
+          : a.instances
+            ? pc.green(`${a.instances} session${a.instances === 1 ? "" : "s"} here`)
+            : pc.dim("available");
+      console.log(`${a.kind.padEnd(18)} ${a.label.padEnd(20)} ${state}`);
+    }
+  });
+
+program
   .command("models <agentId>")
   .description("list the real models reported by an agent")
   .action(async (agentId: string) => {

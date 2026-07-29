@@ -1862,7 +1862,7 @@ export class LoomDaemon {
       "/api/projects/:id/agents/available",
       withRuntime(async (rt, _req, res) => {
         const availability = await detectAdes();
-        const inProject = new Set(rt.config.agents.map((a) => a.kind));
+        const counts = rt.instanceCounts();
         res.json({
           ades: ADES.map((a) => ({
             kind: a.kind,
@@ -1871,7 +1871,14 @@ export class LoomDaemon {
             // Bridges are never "installed" — they're an app you launch with a
             // debug port, so presence is a live question, not a lookup.
             installed: a.tier === "adapter" ? Boolean(availability[a.kind]) : null,
-            inProject: inProject.has(a.kind),
+            inProject: (counts[a.kind] ?? 0) > 0,
+            // How many sessions of this kind are already here. `inProject` used
+            // to be the whole answer and the rail hid anything already present,
+            // which made a second Claude Code session unreachable from the UI
+            // even though the roster could hold one. Adapters can be added
+            // again; bridges are read-mostly and one is enough.
+            instances: counts[a.kind] ?? 0,
+            canAddAnother: a.tier === "adapter",
           })),
         });
       }),
