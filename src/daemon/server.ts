@@ -1884,6 +1884,40 @@ export class LoomDaemon {
       }),
     );
 
+    // Fan a subtask out to a child agent. The parent keeps the baton, so this is
+    // not "send to someone else" — it's one turn borrowing another pair of hands.
+    app.post(
+      "/api/projects/:id/subtasks",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as {
+          parent?: string;
+          agentId?: string;
+          task?: string;
+          chat?: string;
+        };
+        if (!b.parent?.trim()) return void res.status(400).json({ error: "missing parent" });
+        if (!b.agentId?.trim()) return void res.status(400).json({ error: "missing agentId" });
+        if (!b.task?.trim()) return void res.status(400).json({ error: "missing task" });
+        try {
+          const out = await rt.spawnSubAgent(b.parent.trim(), {
+            agentId: b.agentId.trim(),
+            task: b.task,
+            ...(b.chat ? { chat: b.chat } : {}),
+          });
+          res.json(out);
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    app.get(
+      "/api/projects/:id/subtasks",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ subtasks: rt.liveSubtasks() });
+      }),
+    );
+
     // Add an agent to a project. A roster used to be frozen at creation: install
     // a new ADE and your existing projects never heard of it.
     app.post(

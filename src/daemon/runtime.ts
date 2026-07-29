@@ -1542,7 +1542,7 @@ export class ProjectRuntime {
     void agent
       .send(input)
       .catch((err) => {
-        this.log.append({
+        this.appendIfOpen({
           kind: "error",
           agentId: target,
           payload: { message: String(err instanceof Error ? err.message : err) },
@@ -1553,6 +1553,161 @@ export class ProjectRuntime {
       // nothing removes is a slow leak of the project's server URLs.
       .finally(() => mcp?.cleanup());
     return { agentId: target };
+  }
+
+  // -------------------------------------------------------------------------
+  // Sub-agents
+  // -------------------------------------------------------------------------
+  /**
+   * How many subtasks may run at once in this project.
+   *
+   * A fan-out is the point of the feature and also the way to melt the machine:
+   * each child is a real CLI process with its own model calls. The cap is per
+   * project rather than global so one busy project can't starve the others.
+   */
+  private static readonly MAX_CONCURRENT_SUBTASKS = 4;
+
+  /** In-flight subtasks, by the id minted when they started. */
+  private subtasks = new Map<
+    string,
+    { parent: string; agentId: string; task: string; startedAt: number }
+  >();
+
+  /** Subtasks currently running, for the status payload and the cap. */
+  liveSubtasks(): Array<{ id: string; parent: string; agentId: string; task: string }> {
+    return [...this.subtasks.entries()].map(([id, s]) => ({
+      id,
+      parent: s.parent,
+      agentId: s.agentId,
+      task: s.task,
+    }));
+  }
+
+  /**
+   * Run a subtask on a child agent, alongside the parent's turn.
+   *
+   * A turn used to be all-or-nothing: one agent, one prompt, one result. "Audit
+   * these twelve files" wanted twelve cheap readers, and the only way to get
+   * them was twelve sequential turns, each one taking the baton off the last.
+   *
+   * What makes a child a child rather than another turn:
+   *
+   *  - **It never touches the baton.** The parent still holds it, so a fan-out
+   *    cannot steal the conversation from the agent that started it, and the
+   *    human's next message still lands where they expect.
+   *  - **Its briefing is narrowed.** It gets the task and the project's shape,
+   *    not the parent's whole thread. Handing a child the full history is how
+   *    you pay twice for context the parent already read.
+   *  - **Its result is attributed and parented**, so the thread can indent it
+   *    under the turn that asked rather than interleaving it as a peer.
+   *
+   * Everything it learns still lands in the one project brain — a child that
+   * discovered something and took it to the grave would be worse than no child.
+   */
+  async spawnSubAgent(
+    parentAgentId: string,
+    opts: { agentId: string; task: string; chat?: string },
+  ): Promise<{ id: string; agentId: string }> {
+    const task = opts.task?.trim();
+    if (!task) throw new Error("a subtask needs a task");
+
+    // The parent has to be a real agent in this project, so the thread can
+    // indent under something that exists.
+    this.agent(parentAgentId);
+
+    const child = this.agent(opts.agentId);
+    if (!isAdapter(child)) {
+      throw new Error(
+        `agent "${opts.agentId}" is a bridge (read-only) — it cannot run a subtask`,
+      );
+    }
+    if (this.subtasks.size >= ProjectRuntime.MAX_CONCURRENT_SUBTASKS) {
+      throw new Error(
+        `${ProjectRuntime.MAX_CONCURRENT_SUBTASKS} subtasks are already running in this project`,
+      );
+    }
+    // Same gates as a turn. A child that ignored the budget would be a hole in
+    // the ceiling the parent is standing under.
+    this.enforceQuarantine(opts.agentId);
+    this.enforceBudget(opts.agentId);
+
+    const id = newId(5);
+    const chat = opts.chat ?? MAIN_CHAT;
+    this.subtasks.set(id, {
+      parent: parentAgentId,
+      agentId: opts.agentId,
+      task,
+      startedAt: Date.now(),
+    });
+    this.log.append({
+      kind: "subtask_started",
+      agentId: opts.agentId,
+      chat,
+      payload: { subtaskId: id, parent: parentAgentId, task },
+    });
+
+    await this.ensureStarted(opts.agentId);
+    const mcp = child.capabilities.mcp ? writeMcpSession(this.config.mcps) : null;
+    const input: SendInput = {
+      text: task,
+      briefing: this.subtaskBriefing(parentAgentId, opts.agentId, task),
+      ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),
+    };
+
+    void child
+      .send(input)
+      .then(() => {
+        this.subtasks.delete(id);
+        this.appendIfOpen({
+          kind: "subtask_done",
+          agentId: opts.agentId,
+          chat,
+          payload: { subtaskId: id, parent: parentAgentId, task },
+        });
+      })
+      .catch((err) => {
+        this.subtasks.delete(id);
+        this.appendIfOpen({
+          kind: "subtask_failed",
+          agentId: opts.agentId,
+          chat,
+          payload: {
+            subtaskId: id,
+            parent: parentAgentId,
+            task,
+            message: String(err instanceof Error ? err.message : err),
+          },
+        });
+      })
+      .finally(() => mcp?.cleanup());
+
+    return { id, agentId: opts.agentId };
+  }
+
+  /**
+   * The narrow briefing a child gets.
+   *
+   * Deliberately not the parent's thread. A child exists to answer one question
+   * and hand back an answer; giving it the whole conversation costs tokens for
+   * context it was not asked to reason about, and invites it to wander into the
+   * parent's job. It gets what it is for, who asked, the rules of the project,
+   * and the memories that match its own task — not the parent's.
+   */
+  private subtaskBriefing(parent: string, childId: string, task: string): string {
+    const parts = [
+      `[Loom subtask] You are "${childId}", running one scoped subtask for "${parent}" ` +
+        `in project "${this.info.name}".`,
+      `The subtask: ${task}`,
+      "Do this one thing and report the result. Do not take over the wider task — " +
+        `"${parent}" still owns the conversation and holds the baton.`,
+    ];
+    const skills = this.activeSkillsBlock();
+    if (skills) parts.push(skills);
+    // Retrieval scoped to the child's own task rather than the parent's thread.
+    const hits = retrieve(this.brain, { query: task, agent: childId, limit: 6 });
+    const brief = compileBrief(hits.map((h) => h.memory));
+    if (brief) parts.push(brief);
+    return parts.filter(Boolean).join("\n\n");
   }
 
   private defaultAdapterId(): string {
@@ -1827,12 +1982,29 @@ export class ProjectRuntime {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     for (const id of this.startedAgents) {
       await this.agent(id).stop().catch(() => {});
     }
     this.startedAgents.clear();
     this.brain.close(); // unsubscribes before the log drops its listeners
     this.log.close();
+  }
+
+  private closed = false;
+
+  /**
+   * Append unless the runtime has been closed.
+   *
+   * The async tails need this: a subtask completion or a turn error can resolve
+   * after close() — stopping an agent does not cancel a promise already in
+   * flight — and appending then throws into an unhandled rejection against a
+   * sqlite handle that no longer exists. The record is not lost so much as
+   * meaningless: the project this event belonged to is gone from memory.
+   */
+  private appendIfOpen(event: Parameters<EventLog["append"]>[0]): void {
+    if (this.closed) return;
+    this.log.append(event);
   }
 }
 

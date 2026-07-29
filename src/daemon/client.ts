@@ -136,6 +136,33 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/agents/available`);
   }
 
+  /**
+   * Fan a subtask out to a child agent alongside the parent's turn.
+   *
+   * The parent keeps the baton — this is one turn borrowing another pair of
+   * hands, not a handoff.
+   */
+  spawnSubtask(
+    id: string,
+    parent: string,
+    agentId: string,
+    task: string,
+    chat?: string,
+  ): Promise<{ id: string; agentId: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/subtasks`, {
+      parent,
+      agentId,
+      task,
+      ...(chat ? { chat } : {}),
+    });
+  }
+
+  subtasks(id: string): Promise<{
+    subtasks: Array<{ id: string; parent: string; agentId: string; task: string }>;
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/subtasks`);
+  }
+
   removeAgent(id: string, agentId: string): Promise<{ removed: boolean }> {
     return this.request(
       "DELETE",

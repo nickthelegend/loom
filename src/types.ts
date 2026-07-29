@@ -29,6 +29,13 @@ export type EventKind =
   | "route_completed"
   | "route_failed"
   | "turn_diff" // working-tree changes attributed to one agent turn
+  // Sub-agents. A turn can fan a subtask out to a child that runs alongside it
+  // and never holds the baton — the parent keeps the lock, so a fan-out cannot
+  // steal the conversation from the agent that started it. See
+  // ProjectRuntime.spawnSubAgent.
+  | "subtask_started"
+  | "subtask_done"
+  | "subtask_failed"
   | "memory_import" // an ADE's native memory pulled into the shared brain
   // The brain. A memory is not a row in a table somewhere — it is these three
   // events, folded. State is a fold, history is a filter, and the two can't

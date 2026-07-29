@@ -284,6 +284,55 @@ program
   });
 
 program
+  .command("spawn <task>")
+  .description("fan a subtask out to a child agent — the parent keeps the baton")
+  .option("--agent <id>", "which agent runs the subtask")
+  .option("--parent <id>", "the agent asking (default: whoever holds the baton)")
+  .action(async (task: string, opts: { agent?: string; parent?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const parent = opts.parent ?? project.holder ?? project.agents[0]?.id;
+    if (!parent) {
+      console.error(pc.red("this project has no agents to parent a subtask"));
+      process.exitCode = 1;
+      return;
+    }
+    // Default the child to an agent that isn't the parent — the whole point is
+    // another pair of hands, so borrowing the parent's own would just be a turn.
+    const child =
+      opts.agent ??
+      project.agents.find((a) => a.id !== parent && a.tier === "adapter" && a.enabled !== false)?.id;
+    if (!child) {
+      console.error(pc.red("no other adapter available to run the subtask — add one, or pass --agent"));
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const out = await client.spawnSubtask(project.id, parent, child, task);
+      console.log(
+        `${pc.cyan("↳")} ${pc.bold(out.agentId)} ${pc.dim(`subtask ${out.id}`)}\n` +
+          pc.dim(`  ${parent} keeps the baton; the result lands in the thread under its turn`),
+      );
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("subtasks")
+  .description("subtasks running right now")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { subtasks } = await client.subtasks(project.id);
+    if (!subtasks.length) return void console.log(pc.dim("nothing running"));
+    for (const s of subtasks) {
+      console.log(`${pc.cyan(s.agentId)} ${pc.dim("for " + s.parent)}  ${s.task.slice(0, 60)}`);
+    }
+  });
+
+program
   .command("agents:add <kind>")
   .description("add an agent session to this project (repeat for a second session of the same kind)")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
