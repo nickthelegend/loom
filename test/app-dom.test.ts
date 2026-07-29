@@ -1030,6 +1030,59 @@ describe("web app · the console", () => {
 });
 
 /**
+ * The Browser tab.
+ *
+ * A live page beside the project's Playwright specs, in the dock with the
+ * terminals. What these prove: the tab opens and closes like its console peer,
+ * the spec list is the daemon's answer rather than a hardcoded fixture, and a
+ * project with no specs says what to do about it instead of showing an empty
+ * box.
+ */
+describe("web app · the browser tab", () => {
+  it("opens from the header and shows the specs pane", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#browserbtn");
+    expect(($(m, "#browwrap") as HTMLElement).classList.contains("on")).toBe(false);
+
+    click($(m, "#browserbtn"));
+    await waitUntil(() => ($(m, "#browwrap") as HTMLElement).classList.contains("on"));
+    // The empty state teaches, not just informs: it names the ask that fills it.
+    await waitUntil(() => text(m, "#speclist").length > 0);
+    expect(text(m, "#speclist")).toContain("Playwright");
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("lists a real spec once one exists on disk", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    // The daemon walks the real tree, so put a real file in it.
+    const client = new DaemonClient(readDaemonConfig()!);
+    const { projects } = await client.listProjects();
+    const projDir = projects.find((p) => p.id === projectId)!.dir;
+    fs.mkdirSync(path.join(projDir, "e2e"), { recursive: true });
+    fs.writeFileSync(path.join(projDir, "e2e", "smoke.spec.ts"), "// spec\n");
+
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#browserbtn");
+    click($(m, "#browserbtn"));
+    await waitUntil(() => text(m, "#speclist").includes("smoke.spec.ts"));
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  it("closes from its tab and gives the pane back to the terminal", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#browserbtn");
+    click($(m, "#browserbtn"));
+    await waitUntil(() => ($(m, "#browwrap") as HTMLElement).classList.contains("on"));
+
+    await waitUntil(() => !!$(m, ".termtab[data-browser]"));
+    click($(m, '[data-browclose]'));
+    await waitUntil(() => !($(m, "#browwrap") as HTMLElement).classList.contains("on"));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+/**
  * The agent picker.
  *
  * A project's roster used to be frozen at creation: install a new ADE and your

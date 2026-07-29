@@ -36,6 +36,7 @@ import {
 import { fetchLogs, type InsightLog } from "../observability/logs-query.js";
 import { ask, type AskContext } from "../observability/ask.js";
 import { probeMcpServer, writeMcpSession } from "../core/mcp.js";
+import { findSpecs, SpecRunner, type SpecRun } from "./specs.js";
 import { searchCatalog } from "../core/mcp-catalog.js";
 import { buildSnapshots } from "../observability/snapshots.js";
 import { SkillInstallError } from "../core/skill-install.js";
@@ -302,6 +303,8 @@ export class LoomDaemon {
       this.broadcastTerm(projectId, { type: "term", term, title }),
   });
   private unstreamLogs: (() => void) | null = null;
+  /** Playwright runs, one per project at a time. See specs.ts. */
+  private specRunner = new SpecRunner();
   host: string;
   port: number;
   /**
@@ -1884,6 +1887,64 @@ export class LoomDaemon {
       }),
     );
 
+    // ---- the Browser tab: Playwright specs -------------------------------
+    // Agents write browser tests constantly and Loom had nowhere to watch them
+    // run. List the project's specs, run one, stream the reporter over the
+    // same socket the thread uses, and let a failure be handed back to an
+    // agent. Playwright stays the project's dependency, not Loom's.
+    app.get(
+      "/api/projects/:id/specs",
+      withRuntime(async (rt, _req, res) => {
+        res.json({
+          specs: findSpecs(rt.info.dir),
+          running: this.specRunner.running(rt.info.id),
+        });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/specs/run",
+      withRuntime(async (rt, req, res) => {
+        const file = String((req.body as { file?: string } | undefined)?.file ?? "").trim();
+        if (!file) return void res.status(400).json({ error: "missing file" });
+        try {
+          const run = this.specRunner.start(rt.info.id, rt.info.dir, file, {
+            onLine: (r: SpecRun, line: string) =>
+              this.broadcastTerm(rt.info.id, { type: "spec", runId: r.id, file: r.file, line }),
+            onDone: (r: SpecRun) => {
+              this.broadcastTerm(rt.info.id, {
+                type: "spec_done",
+                runId: r.id,
+                file: r.file,
+                exitCode: r.exitCode,
+              });
+              // The Console keeps the record; the stream is for watching live.
+              if (r.exitCode === 0) {
+                logbook.info("specs", `${r.file} passed`, undefined, rt.info.id);
+              } else {
+                logbook.error(
+                  "specs",
+                  `${r.file} failed (exit ${r.exitCode})`,
+                  r.lines.slice(-40).join("\n"),
+                  rt.info.id,
+                );
+              }
+            },
+          });
+          res.json({ run: { id: run.id, file: run.file, startedAt: run.startedAt } });
+        } catch (err) {
+          res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/specs/stop",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ stopped: this.specRunner.stop(rt.info.id) });
+      }),
+    );
+
     // Fan a subtask out to a child agent. The parent keeps the baton, so this is
     // not "send to someone else" — it's one turn borrowing another pair of hands.
     app.post(
@@ -2894,6 +2955,7 @@ export class LoomDaemon {
     this.healTimers.clear();
     this.unstreamLogs?.();
     this.unstreamLogs = null;
+    this.specRunner.closeAll();
     this.terminals.closeAll();
     for (const rt of this.runtimes.values()) await rt.close();
     this.runtimes.clear();

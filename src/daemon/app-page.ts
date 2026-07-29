@@ -1078,6 +1078,33 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
     background:var(--danger,#e5484d);display:none;box-shadow:0 0 0 1.5px var(--card)}
   .errdot.on{display:block}
   #consolebtn{position:relative}
+  /* the Browser tab — live page + the project's Playwright specs */
+  .browwrap{position:absolute;inset:0;display:none;overflow:hidden;
+    background:var(--editor-background);border-top:1px solid var(--border)}
+  .browwrap.on{display:flex;z-index:5}
+  .browrail{width:290px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border)}
+  .browbar{height:34px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid var(--border)}
+  .browbar .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-foreground)}
+  .speclist{flex:1;min-height:0;overflow:auto;padding:4px}
+  .specrow{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;font-family:var(--font-mono);font-size:11.5px;cursor:pointer;color:var(--muted-foreground)}
+  .specrow:hover{background:color-mix(in srgb, var(--accent) 55%, transparent);color:var(--foreground)}
+  .specrow .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+  .specrow.running .nm{color:var(--live)}
+  .specrow .go{opacity:.6;flex:none}
+  .specrow:hover .go{opacity:1}
+  .specempty{padding:14px 12px;font-size:12px;color:var(--muted-foreground);line-height:1.6}
+  .specout{flex:1;min-height:0;overflow:auto;font-family:var(--font-mono);font-size:11px;line-height:1.55;padding:8px 10px;white-space:pre-wrap;border-top:1px solid var(--border)}
+  .specout .fail{color:var(--err)}
+  .specout .pass{color:var(--live)}
+  .browmain{flex:1;display:flex;flex-direction:column;min-height:0}
+  .browurl{height:34px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid var(--border)}
+  .browurl input{flex:1;height:24px;background:var(--editor-surface);border:1px solid var(--border);border-radius:6px;
+    color:var(--foreground);font-family:var(--font-mono);font-size:11.5px;padding:0 9px;outline:none}
+  .browurl input:focus{border-color:var(--ring)}
+  .browframe{flex:1;min-height:0;background:#fff}
+  .browframe iframe{width:100%;height:100%;border:0;display:block}
+  .browhint{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;
+    color:var(--muted-foreground);font-size:12.5px;line-height:1.7;padding:24px}
   .conwrap{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden;
     background:var(--background)}
   /* The console is a pseudo-pane: shown when its tab is active, and the terminal
@@ -2372,6 +2399,9 @@ ${BRAND_SPRITE}
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     // lines of output with one flagged — the Console
     console: svg('<path d="M4 6h16"/><path d="M4 11h9"/><path d="M4 16h6"/><circle cx="18" cy="15.5" r="2.5"/>'),
+    // lucide globe — the Browser tab: a live page and the project's specs
+    globe: svg('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>'),
+    play: svg('<polygon points="6 3 20 12 6 21 6 3"/>'),
     // a phone — "connect a device"
     phone: svg('<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18.5h2"/>'),
     x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
@@ -2447,7 +2477,15 @@ ${BRAND_SPRITE}
   function isElectron(){ return document.documentElement.hasAttribute("data-electron"); }
 
   function clearTimers(){ state.timers.forEach(clearInterval); state.timers = [];
-    if (state.ws) { try { state.ws.close(); } catch (e) {} state.ws = null; } }
+    if (state.ws) {
+      // Closing a socket that is still CONNECTING doesn't throw — it emits an
+      // async error event ("closed before the connection was established"), so
+      // the try/catch around close() never sees it and it surfaces as an
+      // unhandled error. Happens on every logout that races the socket's own
+      // connect. Swallow it by handler, not by catch.
+      try { state.ws.onerror = function(){}; state.ws.onclose = function(){}; state.ws.close(); } catch (e) {}
+      state.ws = null;
+    } }
 
   // A 401 means one of two opposite things. A remote client's token really was
   // revoked, and that is a logout. A same-machine window's token merely went
@@ -2790,6 +2828,7 @@ ${BRAND_SPRITE}
         // something has gone wrong since you last looked.
         '<button id="consolebtn" class="iconbtn" title="console \\u00b7 errors and logs">' +
         ICONS.console + '<span class="errdot" id="errdot"></span></button>' +
+        '<button id="browserbtn" class="iconbtn" title="browser \\u00b7 live page and Playwright specs">' + ICONS.globe + "</button>" +
         '<button id="railbtn" class="iconbtn" title="toggle right panel">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
@@ -2826,6 +2865,23 @@ ${BRAND_SPRITE}
         '<button id="conclear" class="iconbtn" title="clear">' + ICONS.x + "</button>" +
         "</div>" +
         '<div class="conlist" id="conlist"></div>' +
+        "</div>" +
+        '<div class="browwrap" id="browwrap">' +
+        '<div class="browrail">' +
+        '<div class="browbar"><span class="lbl">Playwright specs</span><span class="spacer" style="flex:1"></span>' +
+        '<button id="specreload" class="iconbtn xs" title="rescan">' + ICONS.refresh + "</button></div>" +
+        '<div class="speclist" id="speclist">' + LOADER + "</div>" +
+        '<div class="specout" id="specout" style="display:none"></div>' +
+        "</div>" +
+        '<div class="browmain">' +
+        '<div class="browurl">' +
+        '<input id="browurl" placeholder="http://localhost:3000 \\u2014 preview a dev server" autocomplete="off" spellcheck="false">' +
+        '<button id="browgo" class="iconbtn" title="open">' + ICONS.play + "</button>" +
+        "</div>" +
+        '<div class="browframe" id="browframe">' +
+        '<div class="browhint">Point this at a running dev server to see the page beside its tests.<br>' +
+        "Sites that forbid embedding (X-Frame-Options) won\\u2019t render here \\u2014 local ones do.</div>" +
+        "</div></div>" +
         "</div></div>" +
         '<form class="terminput" id="termform" style="display:none"><span class="pr">&#10095;</span>' +
         '<input id="terminput" placeholder="run a command\\u2026" autocomplete="off" autocapitalize="off" spellcheck="false">' +
@@ -4305,6 +4361,10 @@ ${BRAND_SPRITE}
         }
       };
       bindConsole();
+      var bwb = document.getElementById("browserbtn");
+      if (bwb) bwb.onclick = function(){
+        (state.browserActive && state.browserActive()) ? closeBrowser() : openBrowser();
+      };
       var phb = document.getElementById("phonebtn");
       if (phb) phb.onclick = openConnectPhone;
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
@@ -4337,6 +4397,7 @@ ${BRAND_SPRITE}
     // dock and the pane area, and is switched to like any terminal. This
     // sentinel is its "id" for activeTerm.
     var CONSOLE_TAB = "__console__";
+    var BROWSER_TAB = "__browser__";
     function curTerm(){ for (var i = 0; i < terms.length; i++) if (terms[i].id === activeTerm) return terms[i]; return null; }
     function termOpen(){ return desktop && localStorage.getItem(TERM_KEY) === "1"; }
     function wsSend(msg){
@@ -4564,6 +4625,13 @@ ${BRAND_SPRITE}
           '<span class="ctt">Console</span>' +
           '<span class="tx" data-conclose="1" title="close console" aria-label="close console">' + ICONS.x + "</span></span>";
       }
+      // And the browser, the same way — a peer tab, not a second drawer.
+      if (brow.present) {
+        html += '<span class="termtab console' + (activeTerm === BROWSER_TAB ? " active" : "") + '" data-browser="1">' +
+          (brow.running ? '<span class="busy" style="width:7px;height:7px;color:var(--live)"></span>' : ICONS.globe) +
+          '<span class="ctt">Browser</span>' +
+          '<span class="tx" data-browclose="1" title="close browser" aria-label="close browser">' + ICONS.x + "</span></span>";
+      }
       box.innerHTML = html;
       Array.prototype.forEach.call(box.querySelectorAll(".termtab[data-t]"), function(el){
         el.onclick = function(ev){
@@ -4575,7 +4643,7 @@ ${BRAND_SPRITE}
           drawTermTabs(); showTermPane(); drawPrompt(); fitActive(); focusTerm();
         };
       });
-      var ct = box.querySelector(".termtab.console");
+      var ct = box.querySelector(".termtab[data-console]");
       if (ct) ct.onclick = function(ev){
         var c = ev.target.closest ? ev.target.closest("[data-conclose]") : null;
         if (c) { closeConsole(); return; }
@@ -4584,15 +4652,25 @@ ${BRAND_SPRITE}
         con.logs.forEach(function(r){ if (r.id > con.seen) con.seen = r.id; });
         drawTermTabs(); showTermPane(); drawConsole(); drawErrDot();
       };
+      var bt = box.querySelector(".termtab[data-browser]");
+      if (bt) bt.onclick = function(ev){
+        var c = ev.target.closest ? ev.target.closest("[data-browclose]") : null;
+        if (c) { closeBrowser(); return; }
+        activeTerm = BROWSER_TAB;
+        drawTermTabs(); showTermPane(); drawBrowser();
+      };
     }
     function showTermPane(){
       var conActive = activeTerm === CONSOLE_TAB;
+      var browActive = activeTerm === BROWSER_TAB;
       var wrap = document.getElementById("conwrap");
       if (wrap) wrap.classList.toggle("on", conActive);
+      var bwrap = document.getElementById("browwrap");
+      if (bwrap) bwrap.classList.toggle("on", browActive);
       Array.prototype.forEach.call(document.querySelectorAll(".termpane"), function(p){
-        p.classList.toggle("active", !conActive && p.getAttribute("data-t") === activeTerm);
+        p.classList.toggle("active", !conActive && !browActive && p.getAttribute("data-t") === activeTerm);
       });
-      var t = conActive ? null : curTerm();
+      var t = conActive || browActive ? null : curTerm();
       var form = document.getElementById("termform");
       // the input line belongs to the fallback only — a pty takes keys directly
       if (form) form.style.display = t && !t.xterm && termMode === "pipe" ? "" : "none";
@@ -4618,6 +4696,22 @@ ${BRAND_SPRITE}
     state.hideConsole = hideConsolePane;
     state.consoleActive = function(){ return activeTerm === CONSOLE_TAB; };
     state.redrawTermTabs = drawTermTabs; // so a new error can refresh the tab's dot
+    // The browser pane, same shape as the console pair above.
+    function showBrowserPane(){
+      brow.present = true;
+      if (!termOpen()) toggleTerm();
+      activeTerm = BROWSER_TAB;
+      drawTermTabs(); showTermPane();
+    }
+    function hideBrowserPane(){
+      brow.present = false;
+      if (activeTerm === BROWSER_TAB) activeTerm = terms.length ? terms[terms.length - 1].id : null;
+      if (!terms.length && !con.present) { localStorage.setItem(TERM_KEY, "0"); applyTerm(); return; }
+      drawTermTabs(); showTermPane(); focusTerm();
+    }
+    state.showBrowser = showBrowserPane;
+    state.hideBrowser = hideBrowserPane;
+    state.browserActive = function(){ return activeTerm === BROWSER_TAB; };
     function drawPrompt(){
       var t = curTerm(); if (!t || t.xterm) return;
       var pr = document.querySelector(".terminput .pr");
@@ -6314,6 +6408,7 @@ ${BRAND_SPRITE}
         try {
           var frame = JSON.parse(ev.data);
           if (frame.type === "term") { onTermFrame(frame); return; }
+          if (frame.type === "spec" || frame.type === "spec_done") { onSpecFrame(frame); return; }
           // A log record belongs to no chat — a daemon fault has no
           // conversation, and it's the one you most need to see.
           if (frame.type === "log" && frame.record) { addLogRecord(frame.record); return; }
@@ -7301,6 +7396,142 @@ ${BRAND_SPRITE}
       }).catch(function(){});
       if (tries > 80) clearInterval(poll); // ~4 min ceiling; then stop polling
     }, 3000);
+  }
+
+  // ---- Browser -------------------------------------------------------------
+  // A live page and the project's Playwright specs, in the dock beside the
+  // terminals. An agent writes a browser test; this is where you watch it run
+  // and — when it fails — hand the failure straight back to whoever wrote it.
+  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "" };
+
+  function drawBrowser(){
+    var list = document.getElementById("speclist"); if (!list) return;
+    if (brow.specs === null) { return; } // still loading — the loader is in place
+    if (!brow.specs.length) {
+      list.innerHTML = '<div class="specempty">No Playwright specs here yet.<br>' +
+        "Ask an agent for one \\u2014 <i>\\u201cwrite a Playwright spec for the login page\\u201d</i> \\u2014 " +
+        "and it appears in this list.</div>";
+      return;
+    }
+    list.innerHTML = brow.specs.map(function(s){
+      var running = brow.running && brow.running.file === s.path;
+      return '<div class="specrow' + (running ? " running" : "") + '" data-spec="' + esc(s.path) + '" title="' +
+        (running ? "running\\u2026" : "run " + esc(s.path)) + '">' +
+        '<span class="nm">' + esc(s.path) + "</span>" +
+        (running ? '<span class="busy" style="width:8px;height:8px;color:var(--live)"></span>'
+                 : '<span class="go">' + ICONS.play + "</span>") +
+        "</div>";
+    }).join("");
+    Array.prototype.forEach.call(list.querySelectorAll("[data-spec]"), function(row){
+      row.onclick = function(){ runSpec(row.getAttribute("data-spec")); };
+    });
+  }
+
+  function specPrint(line, cls){
+    var out = document.getElementById("specout"); if (!out) return;
+    out.style.display = "";
+    brow.out.push({ t: line, c: cls || "" });
+    if (brow.out.length > 400) brow.out.shift();
+    var atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 30;
+    out.innerHTML = brow.out.map(function(l){
+      return '<div class="' + l.c + '">' + esc(l.t) + "</div>";
+    }).join("");
+    if (atBottom) out.scrollTop = out.scrollHeight;
+  }
+
+  function refreshSpecs(){
+    if (!state.pid) return;
+    api("/api/projects/" + state.pid + "/specs").then(function(j){
+      brow.specs = j.specs || [];
+      brow.running = j.running || null;
+      drawBrowser();
+    }).catch(function(){
+      brow.specs = [];
+      drawBrowser();
+    });
+  }
+
+  function runSpec(file){
+    if (brow.running) { toast("a spec is already running"); return; }
+    brow.out = [];
+    var out = document.getElementById("specout");
+    if (out) { out.innerHTML = ""; out.style.display = ""; }
+    specPrint("\\u25b6 " + file, "");
+    api("/api/projects/" + state.pid + "/specs/run", {
+      method: "POST", body: JSON.stringify({ file: file }),
+    }).then(function(j){
+      brow.running = { id: j.run.id, file: j.run.file };
+      drawBrowser();
+      if (state.redrawTermTabs) state.redrawTermTabs();
+    }).catch(function(e){
+      // The most common refusal is Playwright not being installed in the
+      // project; the reporter line from npx lands in the stream either way.
+      specPrint(e.message, "fail");
+    });
+  }
+
+  /** A spec frame from the daemon — reporter output, or the run ending. */
+  function onSpecFrame(frame){
+    if (frame.type === "spec") {
+      specPrint(frame.line, "");
+      return;
+    }
+    // spec_done
+    var failed = frame.exitCode !== 0;
+    brow.running = null;
+    drawBrowser();
+    if (state.redrawTermTabs) state.redrawTermTabs();
+    if (!failed) {
+      specPrint("\\u2713 " + frame.file + " passed", "pass");
+      brow.lastFail = null;
+      return;
+    }
+    specPrint("\\u2717 " + frame.file + " failed (exit " + frame.exitCode + ")", "fail");
+    brow.lastFail = { file: frame.file, tail: brow.out.slice(-25).map(function(l){ return l.t; }) };
+    // The button that closes the loop: the failure goes back to an agent as a
+    // normal message, so whoever wrote the test gets the reporter's own words.
+    var out = document.getElementById("specout");
+    if (out) {
+      var b = document.createElement("button");
+      b.className = "btn";
+      b.style.cssText = "margin:8px 0 4px";
+      b.textContent = "send failure to agent";
+      b.onclick = function(){
+        var box = document.getElementById("box");
+        if (!box) return;
+        box.value = "The Playwright spec " + brow.lastFail.file + " is failing:\\n\\n\`\`\`\\n" +
+          brow.lastFail.tail.join("\\n") + "\\n\`\`\`\\n\\nFix the app or the spec, whichever is wrong.";
+        box.focus();
+        toast("failure staged in the composer \\u2014 pick the agent and send");
+      };
+      out.appendChild(b);
+      out.scrollTop = out.scrollHeight;
+    }
+  }
+
+  function openBrowser(){
+    if (state.showBrowser) state.showBrowser();
+    if (brow.specs === null) refreshSpecs();
+    var re = document.getElementById("specreload");
+    if (re) re.onclick = function(){ brow.specs = null; refreshSpecs(); };
+    var go = document.getElementById("browgo");
+    var url = document.getElementById("browurl");
+    var nav = function(){
+      var u = (url && url.value || "").trim();
+      if (!u) return;
+      if (!/^https?:\\/\\//.test(u)) u = "http://" + u;
+      brow.url = u;
+      var host = document.getElementById("browframe");
+      if (host) host.innerHTML = '<iframe src="' + esc(u) + '" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>';
+    };
+    if (go) go.onclick = nav;
+    if (url) url.onkeydown = function(ev){ if (ev.key === "Enter") { ev.preventDefault(); nav(); } };
+    drawBrowser();
+  }
+
+  function closeBrowser(){
+    if (state.hideBrowser) state.hideBrowser();
+    else brow.present = false;
   }
 
   // ---- right rail toggle — open by default (shows the file tree) -----------
