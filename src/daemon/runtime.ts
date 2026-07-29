@@ -1110,13 +1110,20 @@ export class ProjectRuntime {
     return readProjectState(this.info.dir).tasks ?? [];
   }
 
-  createTask(input: { title: string; column?: string; agent?: string }): BoardTask {
+  createTask(input: {
+    title: string;
+    column?: string;
+    agent?: string;
+    blockedBy?: string[];
+  }): BoardTask {
     const state = readProjectState(this.info.dir);
+    const blockedBy = this.validBlockers(state.tasks ?? [], input.blockedBy);
     const task: BoardTask = {
       id: newId(4),
       title: input.title.trim().slice(0, 200),
       column: input.column ?? "working",
       ...(input.agent ? { agent: input.agent } : {}),
+      ...(blockedBy.length ? { blockedBy } : {}),
       createdAt: Date.now(),
     };
     state.tasks = [...(state.tasks ?? []), task];
@@ -1124,16 +1131,69 @@ export class ProjectRuntime {
     return task;
   }
 
+  /** Only blockers that exist. A link to a deleted card blocks nothing forever. */
+  private validBlockers(tasks: BoardTask[], ids?: string[]): string[] {
+    if (!ids?.length) return [];
+    const known = new Set(tasks.map((t) => t.id));
+    return [...new Set(ids)].filter((id) => known.has(id));
+  }
+
+  /**
+   * A card is blocked while any of its blockers is not yet `ready`.
+   *
+   * `ready` is the board's own definition of done — the last column. Deleted
+   * blockers don't count (validBlockers keeps them out, and a stale link that
+   * survived a race reads as done rather than blocking forever).
+   */
+  taskBlockers(id: string): Array<{ id: string; title: string; column: string }> {
+    const tasks = readProjectState(this.info.dir).tasks ?? [];
+    const task = tasks.find((t) => t.id === id);
+    if (!task?.blockedBy?.length) return [];
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    return task.blockedBy
+      .map((bid) => byId.get(bid))
+      .filter((b): b is BoardTask => Boolean(b) && b!.column !== "ready")
+      .map((b) => ({ id: b.id, title: b.title, column: b.column }));
+  }
+
   /** Move or retitle a card. Yours, so this is the real state — not a hint. */
-  updateTask(id: string, patch: { title?: string; column?: string; agent?: string }): BoardTask | null {
+  updateTask(
+    id: string,
+    patch: { title?: string; column?: string; agent?: string; blockedBy?: string[] },
+  ): BoardTask | null {
     const state = readProjectState(this.info.dir);
     const task = (state.tasks ?? []).find((t) => t.id === id);
     if (!task) return null;
     if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 200) || task.title;
     if (patch.column !== undefined) task.column = patch.column;
     if (patch.agent !== undefined) task.agent = patch.agent;
+    if (patch.blockedBy !== undefined) {
+      // Cycles refused at write: A→B→A makes both unbecomable forever, and the
+      // person who typed it is the one who can pick which link was wrong.
+      const next = this.validBlockers(state.tasks ?? [], patch.blockedBy).filter((b) => b !== id);
+      if (this.wouldCycle(state.tasks ?? [], id, next)) {
+        throw new Error("that dependency would make a cycle — nothing in it could ever start");
+      }
+      if (next.length) task.blockedBy = next;
+      else delete task.blockedBy;
+    }
     writeProjectState(this.info.dir, state);
     return task;
+  }
+
+  /** Would `id` depending on `blockers` create a loop back to `id`? */
+  private wouldCycle(tasks: BoardTask[], id: string, blockers: string[]): boolean {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const stack = [...blockers];
+    const seen = new Set<string>();
+    while (stack.length) {
+      const cur = stack.pop()!;
+      if (cur === id) return true;
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      for (const b of byId.get(cur)?.blockedBy ?? []) stack.push(b);
+    }
+    return false;
   }
 
   deleteTask(id: string): boolean {

@@ -168,6 +168,12 @@ export interface BoardTask {
   column: string;
   /** Optional agent this is meant for. */
   agent?: string;
+  /**
+   * Tasks this one cannot start before. A card with an unfinished blocker is
+   * refused dispatch — an agent picking up work whose prerequisite isn't done
+   * produces work that has to be thrown away, which is worse than waiting.
+   */
+  blockedBy?: string[];
   createdAt: number;
 }
 

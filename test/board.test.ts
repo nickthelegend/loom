@@ -4,8 +4,9 @@
  * "Ready to merge" when CI is red is worse than no board at all.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { columnFor, prState, type BoardState } from "../src/daemon/board.js";
+import { makeProjectDir, tmpDir } from "./helpers.js";
 
 /** gh's real shape, trimmed to what prState reads. */
 const pr = (over: Record<string, unknown> = {}) =>
@@ -91,3 +92,92 @@ describe("columnFor", () => {
     expect(columnFor("approved")).toBe("ready");
   });
 });
+
+/**
+ * Dependencies (#13): a card with an unfinished blocker cannot become a turn.
+ *
+ * The refusal happens at dispatch — the moment a card would turn into agent
+ * work — because that is where a premature start costs something: an agent
+ * building on a prerequisite that isn't done produces work that gets thrown
+ * away. Cycles are refused at write instead, because A→B→A makes both
+ * unbecomable forever and the person typing the link is the one who can say
+ * which half was wrong.
+ */
+describe("task dependencies", () => {
+  let apiBase: string;
+  let apiToken: string;
+  let pid: string;
+  const HH = () => ({ authorization: `Bearer ${apiToken}`, "content-type": "application/json" });
+  const mk = async (title: string, extra: Record<string, unknown> = {}) => {
+    const r = await fetch(`${apiBase}/api/projects/${pid}/board/tasks`, {
+      method: "POST", headers: HH(), body: JSON.stringify({ title, ...extra }),
+    });
+    return ((await r.json()) as { task: { id: string } }).task;
+  };
+
+  beforeAll(async () => {
+    process.env.LOOM_HOME = process.env.LOOM_HOME ?? tmpDir("home-board");
+    process.env.LOOM_NO_NOTIFY = "1";
+    const { LoomDaemon } = await import("../src/daemon/server.js");
+    const { DaemonClient } = await import("../src/daemon/client.js");
+    const { readDaemonConfig } = await import("../src/core/registry.js");
+    const d = new LoomDaemon({ host: "127.0.0.1", port: 0 });
+    const { host, port } = await d.listen();
+    apiBase = `http://${host}:${port}`;
+    apiToken = readDaemonConfig()!.adminToken;
+    const c = new DaemonClient(readDaemonConfig()!);
+    pid = (await c.addProject(makeProjectDir({ name: "deps" }))).project.id;
+    depsDaemon = d;
+  });
+
+  afterAll(async () => {
+    await depsDaemon?.close();
+  });
+
+  it("refuses to dispatch a blocked card, naming what's in the way", async () => {
+    const base = await mk("build the schema");
+    const dependent = await mk("write the queries", { blockedBy: [base.id], agent: "plannerbot" });
+
+    const r = await fetch(`${apiBase}/api/projects/${pid}/board/tasks/${dependent.id}/dispatch`, {
+      method: "POST", headers: HH(),
+    });
+    expect(r.status).toBe(409);
+    const body = (await r.json()) as { error: string; blockers: Array<{ title: string }> };
+    expect(body.error).toBe("blocked");
+    expect(body.blockers[0]!.title).toBe("build the schema");
+  });
+
+  it("dispatches once the blocker reaches ready", async () => {
+    const base = await mk("design the api");
+    const dependent = await mk("implement the api", { blockedBy: [base.id], agent: "plannerbot" });
+
+    await fetch(`${apiBase}/api/projects/${pid}/board/tasks/${base.id}`, {
+      method: "POST", headers: HH(), body: JSON.stringify({ column: "ready" }),
+    });
+    const r = await fetch(`${apiBase}/api/projects/${pid}/board/tasks/${dependent.id}/dispatch`, {
+      method: "POST", headers: HH(),
+    });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { dispatched: boolean; agentId: string };
+    expect(body.dispatched).toBe(true);
+    expect(body.agentId).toBe("plannerbot");
+  });
+
+  it("refuses a dependency cycle at write time", async () => {
+    const a = await mk("a");
+    const b = await mk("b", { blockedBy: [a.id] });
+    const r = await fetch(`${apiBase}/api/projects/${pid}/board/tasks/${a.id}`, {
+      method: "POST", headers: HH(), body: JSON.stringify({ blockedBy: [b.id] }),
+    });
+    expect(r.status).toBe(400);
+    expect(((await r.json()) as { error: string }).error).toContain("cycle");
+  });
+
+  it("drops links to cards that don't exist instead of blocking forever", async () => {
+    const t = await mk("solo", { blockedBy: ["nope"] });
+    const r = await fetch(`${apiBase}/api/projects/${pid}/board/tasks/${t.id}/blockers`, { headers: HH() });
+    expect(((await r.json()) as { blockers: unknown[] }).blockers).toHaveLength(0);
+  });
+});
+
+let depsDaemon: import("../src/daemon/server.js").LoomDaemon | null = null;

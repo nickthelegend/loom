@@ -71,10 +71,12 @@ import {
   readDaemonConfig,
   projectLoomDir,
   readProjectConfig,
+  readProjectState,
   registerProject,
   unregisterProject,
   writeDaemonConfig,
   writeProjectConfig,
+  type BoardTask,
 } from "../core/registry.js";
 import { agyBin } from "../adapters/antigravity-cli.js";
 import { cliAvailable } from "../adapters/base.js";
@@ -2405,31 +2407,85 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/board/tasks",
       withRuntime(async (rt, req, res) => {
-        const { title, column, agent } = (req.body ?? {}) as {
+        const { title, column, agent, blockedBy } = (req.body ?? {}) as {
           title?: string;
           column?: string;
           agent?: string;
+          blockedBy?: string[];
         };
         if (!title?.trim()) return void res.status(400).json({ error: "missing title" });
-        res.json({ task: rt.createTask({ title, ...(column ? { column } : {}), ...(agent ? { agent } : {}) }) });
+        res.json({
+          task: rt.createTask({
+            title,
+            ...(column ? { column } : {}),
+            ...(agent ? { agent } : {}),
+            ...(Array.isArray(blockedBy) ? { blockedBy } : {}),
+          }),
+        });
       }),
     );
 
     app.post(
       "/api/projects/:id/board/tasks/:taskId",
       withRuntime(async (rt, req, res) => {
-        const { title, column, agent } = (req.body ?? {}) as {
+        const { title, column, agent, blockedBy } = (req.body ?? {}) as {
           title?: string;
           column?: string;
           agent?: string;
+          blockedBy?: string[];
         };
-        const task = rt.updateTask(String(req.params.taskId), {
-          ...(title !== undefined ? { title } : {}),
-          ...(column !== undefined ? { column } : {}),
-          ...(agent !== undefined ? { agent } : {}),
-        });
+        try {
+          const task = rt.updateTask(String(req.params.taskId), {
+            ...(title !== undefined ? { title } : {}),
+            ...(column !== undefined ? { column } : {}),
+            ...(agent !== undefined ? { agent } : {}),
+            ...(blockedBy !== undefined ? { blockedBy } : {}),
+          });
+          if (!task) return void res.status(404).json({ error: "unknown task" });
+          res.json({ task });
+        } catch (err) {
+          // The cycle refusal: A→B→A makes both unbecomable forever.
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    // What's still in the way of a card. Empty means dispatchable.
+    app.get(
+      "/api/projects/:id/board/tasks/:taskId/blockers",
+      withRuntime(async (rt, req, res) => {
+        res.json({ blockers: rt.taskBlockers(String(req.params.taskId)) });
+      }),
+    );
+
+    // A card becomes a turn: its title goes to its agent as a prompt. This is
+    // where blocked-by has teeth — an agent picking up work whose prerequisite
+    // isn't done produces work that gets thrown away, so a blocked card is
+    // refused here with the blockers named.
+    app.post(
+      "/api/projects/:id/board/tasks/:taskId/dispatch",
+      withRuntime(async (rt, req, res) => {
+        const id = String(req.params.taskId);
+        const state = readProjectState(rt.info.dir);
+        const task = (state.tasks ?? []).find((t: BoardTask) => t.id === id);
         if (!task) return void res.status(404).json({ error: "unknown task" });
-        res.json({ task });
+        const blockers = rt.taskBlockers(id);
+        if (blockers.length) {
+          return void res.status(409).json({
+            error: "blocked",
+            blockers,
+            message: `blocked by ${blockers.map((b) => `"${b.title}"`).join(", ")}`,
+          });
+        }
+        const agentId =
+          task.agent ?? (req.body as { agentId?: string } | undefined)?.agentId;
+        try {
+          const out = await rt.sendMessage(task.title, agentId);
+          rt.updateTask(id, { column: "working", agent: out.agentId });
+          res.json({ dispatched: true, agentId: out.agentId });
+        } catch (err) {
+          res.status(409).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 
