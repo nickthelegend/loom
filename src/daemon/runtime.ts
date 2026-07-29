@@ -31,6 +31,7 @@ import { compileBrief, retrieve } from "../core/brain-index.js";
 import { extractFromTurn, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
+import { logbook } from "../core/logbook.js";
 import { renderProjection } from "../core/distill.js";
 import {
   buildUnifiedMemory,
@@ -38,7 +39,7 @@ import {
   readNativeMemory,
   type ImportedBlock,
 } from "../core/memory.js";
-import { probeMcpServers, writeMcpSession } from "../core/mcp.js";
+import { probeMcpServer, probeMcpServers, writeMcpSession } from "../core/mcp.js";
 import { notify } from "../core/notify.js";
 import {
   decisionStats,
@@ -225,6 +226,8 @@ export class ProjectRuntime {
     } catch {
       // Memory import is best-effort; never block opening a project.
     }
+    // Watch the project's MCP servers, if it has any — see mcpHealth.
+    rt.startMcpHealthLoop();
     return rt;
   }
 
@@ -1001,6 +1004,70 @@ export class ProjectRuntime {
    * URL aren't probed and report false, because "not configured" is not
    * "connected".
    */
+  // -------------------------------------------------------------------------
+  // MCP health
+  // -------------------------------------------------------------------------
+  /**
+   * Live health per configured MCP server, from the background poll.
+   *
+   * A server that died used to stay listed as connected, and its tools failed
+   * silently mid-turn — the agent just found them gone. The poll notices the
+   * transition, says so in the Console, and while a server is down it is left
+   * out of turn injection entirely: an absent tool the agent never saw beats a
+   * present tool that throws. When the server answers again it is included
+   * again automatically — that is the whole reconnect story for per-turn
+   * config files; there is no persistent connection to rebuild.
+   */
+  private mcpHealth = new Map<string, { up: boolean; failures: number; probedAt: number }>();
+  private mcpTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Poll every configured server once; log the transitions. */
+  async pollMcpHealth(timeoutMs = 2_000): Promise<void> {
+    const mcps = this.getMcps().filter((m) => m.enabledForSession !== false);
+    for (const m of mcps) {
+      const url = String(m.url ?? "").trim();
+      if (!url) continue; // stdio servers have no probe-able endpoint
+      const up = await probeMcpServer(url, timeoutMs).catch(() => false);
+      const prev = this.mcpHealth.get(m.name);
+      const failures = up ? 0 : (prev?.failures ?? 0) + 1;
+      this.mcpHealth.set(m.name, { up, failures, probedAt: Date.now() });
+      if (prev && prev.up && !up) {
+        logbook.error("mcp", `"${m.name}" stopped answering — its tools are withheld from turns until it returns`, url, this.info.id);
+      } else if (prev && !prev.up && up) {
+        logbook.info("mcp", `"${m.name}" is back — its tools rejoin the next turn`, undefined, this.info.id);
+      }
+    }
+    // Forget servers that were removed from config.
+    const names = new Set(mcps.map((m) => m.name));
+    for (const k of [...this.mcpHealth.keys()]) if (!names.has(k)) this.mcpHealth.delete(k);
+  }
+
+  mcpHealthReport(): Record<string, { up: boolean; failures: number; probedAt: number }> {
+    return Object.fromEntries(this.mcpHealth);
+  }
+
+  /**
+   * The servers a turn should carry: everything not known-down.
+   *
+   * Unknown (never probed — a fresh daemon, a just-added server) passes
+   * through; refusing a server nobody has measured would block first use on a
+   * poll that hasn't run yet. Only a measured, repeated failure withholds.
+   */
+  healthyMcps(): McpServerConfig[] {
+    return (this.config.mcps ?? []).filter((m) => {
+      const h = this.mcpHealth.get(m.name);
+      return !h || h.up || h.failures < 2;
+    });
+  }
+
+  startMcpHealthLoop(intervalMs = Number(process.env.LOOM_MCP_POLL_MS) || 60_000): void {
+    if (this.mcpTimer || !(this.config.mcps ?? []).length) return;
+    this.mcpTimer = setInterval(() => {
+      void this.pollMcpHealth().catch(() => {});
+    }, intervalMs);
+    this.mcpTimer.unref?.();
+  }
+
   async getMcpsProbed(timeoutMs = 2_000): Promise<McpServerConfig[]> {
     const mcps = this.getMcps();
     const reachable = await probeMcpServers(mcps, timeoutMs).catch(() => ({}) as Record<string, boolean>);
@@ -1688,7 +1755,7 @@ export class ProjectRuntime {
     // adapter hands to its CLI. Null when nothing is configured — or when this
     // adapter's CLI has no flag for it, because an "MCP attached" note on a
     // turn that dropped the config would be the same lie in a new place.
-    const mcp = agent.capabilities.mcp ? writeMcpSession(this.config.mcps) : null;
+    const mcp = agent.capabilities.mcp ? writeMcpSession(this.healthyMcps()) : null;
     const input: SendInput = {
       text,
       ...(briefing ? { briefing } : {}),
@@ -1947,7 +2014,7 @@ export class ProjectRuntime {
     });
 
     await this.ensureStarted(opts.agentId);
-    const mcp = child.capabilities.mcp ? writeMcpSession(this.config.mcps) : null;
+    const mcp = child.capabilities.mcp ? writeMcpSession(this.healthyMcps()) : null;
     const input: SendInput = {
       text: task,
       briefing: this.subtaskBriefing(parentAgentId, opts.agentId, task),
@@ -2335,6 +2402,7 @@ export class ProjectRuntime {
 
   async close(): Promise<void> {
     this.closed = true;
+    if (this.mcpTimer) { clearInterval(this.mcpTimer); this.mcpTimer = null; }
     for (const id of this.startedAgents) {
       await this.agent(id).stop().catch(() => {});
     }

@@ -293,3 +293,69 @@ describe("reachability", () => {
     expect(await probeMcpServer("not a url")).toBe(false);
   });
 });
+
+/**
+ * Health (#21): a dead server's tools are withheld from turns, and its death
+ * and recovery are said out loud instead of discovered mid-turn.
+ */
+describe("mcp health", () => {
+  it("marks a dead server down after repeated failures and withholds it from turns", async () => {
+    const dir = makeProjectDir({
+      name: "mcp-health",
+      mcps: [
+        // A port nothing listens on: the probe fails honestly and fast.
+        { name: "dead", url: "http://127.0.0.1:9", enabledForSession: true },
+      ],
+    });
+    const rt = await ProjectRuntime.open({ id: "mcph", name: "mcph", dir });
+    try {
+      // Unknown before any poll: passes through — first use must not block on
+      // a poll that hasn't run.
+      expect(rt.healthyMcps().map((m) => m.name)).toContain("dead");
+
+      await rt.pollMcpHealth(300);
+      expect(rt.mcpHealthReport().dead!.up).toBe(false);
+      expect(rt.healthyMcps().map((m) => m.name)).toContain("dead"); // one failure: benefit of the doubt
+
+      await rt.pollMcpHealth(300);
+      // Two consecutive failures: measured, repeated — now withheld.
+      expect(rt.mcpHealthReport().dead!.failures).toBeGreaterThanOrEqual(2);
+      expect(rt.healthyMcps().map((m) => m.name)).not.toContain("dead");
+    } finally {
+      await rt.close();
+    }
+  });
+
+  it("lets a recovered server rejoin automatically", async () => {
+    // A real server that answers, then dies, then answers again.
+    const http = await import("node:http");
+    const srv = http.createServer((_req, res) => { res.writeHead(200); res.end("ok"); });
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    const port = (srv.address() as { port: number }).port;
+
+    const dir = makeProjectDir({
+      name: "mcp-recover",
+      mcps: [{ name: "flappy", url: `http://127.0.0.1:${port}`, enabledForSession: true }],
+    });
+    const rt = await ProjectRuntime.open({ id: "mcpr", name: "mcpr", dir });
+    try {
+      await rt.pollMcpHealth(500);
+      expect(rt.mcpHealthReport().flappy!.up).toBe(true);
+
+      await new Promise<void>((r) => srv.close(() => r()));
+      await rt.pollMcpHealth(300);
+      await rt.pollMcpHealth(300);
+      expect(rt.healthyMcps().map((m) => m.name)).not.toContain("flappy");
+
+      // Back up — same port so the configured URL is valid again.
+      const srv2 = http.createServer((_req, res) => { res.writeHead(200); res.end("ok"); });
+      await new Promise<void>((r) => srv2.listen(port, "127.0.0.1", () => r()));
+      await rt.pollMcpHealth(500);
+      expect(rt.mcpHealthReport().flappy!.up).toBe(true);
+      expect(rt.healthyMcps().map((m) => m.name)).toContain("flappy");
+      await new Promise<void>((r) => srv2.close(() => r()));
+    } finally {
+      await rt.close();
+    }
+  });
+});

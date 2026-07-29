@@ -1645,6 +1645,22 @@ export class LoomDaemon {
       }),
     );
 
+    // The background poll's live view: up/down, consecutive failures, last
+    // probe. POST forces a poll now instead of waiting for the next tick.
+    app.get(
+      "/api/projects/:id/mcps/health",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ health: rt.mcpHealthReport() });
+      }),
+    );
+    app.post(
+      "/api/projects/:id/mcps/health",
+      withRuntime(async (rt, _req, res) => {
+        await rt.pollMcpHealth();
+        res.json({ health: rt.mcpHealthReport() });
+      }),
+    );
+
     // Uninstall a server. 404 when nothing was configured under that name —
     // "deleted a thing that wasn't there" hides a typo in a server name.
     app.delete(
