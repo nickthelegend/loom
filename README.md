@@ -66,13 +66,13 @@ config (`.loom/config.json` → `codex → model: "gpt-5.6-terra"`) at high reas
   *Claude Code → Codex* carries the full context, and the next agent inherits what Codex
   learned. *(Verified end‑to‑end: Codex recalled a value another agent set one turn
   earlier, and its turns emit `run_complete` + `memory_add`.)*
-- **Voice, on real hardware — designed, not shipped.** The **LoomPad** is a physical
-  ESP32‑S3 macropad whose intended loop is: press the **Codex** key to hand Codex the
-  baton, hold the mic and speak, hear the reply spoken back through the pad. What exists
-  in this repo is the enclosure — [`hardware/orchestrator-pad/`](hardware/orchestrator-pad/README.md)
-  ships parametric CAD, printable STLs and the wiring spec — plus the daemon-side proxy
-  endpoints (`/api/loompad/health`, `/api/loompad/connect`) and the status pill that reads
-  them. The firmware is not written yet, so nothing speaks through the pad today.
+- **Voice, on real hardware.** The **LoomPad** is a physical ESP32‑S3 macropad, and the
+  loop is: press the **Codex** key to hand Codex the baton, hold the mic and speak, hear
+  the reply spoken back through the pad. It lives in this repo under
+  [`hardware/orchestrator-pad/`](hardware/orchestrator-pad/README.md) — parametric CAD,
+  printable STLs, the wiring diagram, the Arduino firmware and the voice backend — with
+  the daemon-side proxy endpoints (`/api/loompad/health`, `/api/loompad/connect`) and the
+  status pill that reads them. See [Hardware](#hardware) to print and wire one.
 - **Codex as a dev agent, too.** Because Codex is a full agent, you can hand it real work
   inside Loom — `loom route ship "…"` routes *plan → Codex executes → review*, the brain
   flowing hop to hop.
@@ -594,6 +594,86 @@ after pairing and it registers its Expo push token with the daemon. From then on
 phone buzzes when an agent **needs input**, when a **route completes or fails**, and
 when a solo turn finishes — route hops are deliberately silent (a 5-step pipeline
 buzzes once, not five times). Verify with `loom clients --ping`.
+
+## Hardware
+
+<div align="center">
+<img src="hardware/orchestrator-pad/docs/images/hero.png" alt="The LoomPad — a 3D-printed macropad with one key per agent and a voice bar" width="720">
+</div>
+
+The **LoomPad** is the pad on your desk: one key per agent, a bar you hold to
+talk, and the answer spoken back through its own speaker. Press a key and it
+locks that agent in Loom — a real baton handoff, visible in the thread like any
+other. It talks to the daemon over Wi‑Fi, with USB‑HID as a fallback.
+
+It is all here, MIT, in [`hardware/orchestrator-pad/`](hardware/orchestrator-pad/README.md):
+parametric CAD, printable STLs, the wiring diagram, the Arduino firmware and the
+voice backend. Nothing to buy a licence for and nothing to reverse‑engineer.
+
+### Print it
+
+Six parts, all watertight, none needing supports. 0.4 mm nozzle, 0.2 mm layers,
+PETG or PLA — it prints on a bed‑slinger in an evening.
+
+| Part | Download | Orientation |
+|---|---|---|
+| Tray | [`tray.stl`](hardware/orchestrator-pad/exports/tray.stl) | flat on the bed |
+| Switch deck | [`switch-deck.stl`](hardware/orchestrator-pad/exports/switch-deck.stl) | flat, sits between tray and plate |
+| Plate | [`plate.stl`](hardware/orchestrator-pad/exports/plate.stl) | top face down |
+| Keycaps (all 14) | [`caps-all.stl`](hardware/orchestrator-pad/exports/caps-all.stl) | as oriented — slow the outer walls for crisp glyphs |
+| Legends | [`legends-all.stl`](hardware/orchestrator-pad/exports/legends-all.stl) | print in the contrast colour |
+| Knob | [`knob.stl`](hardware/orchestrator-pad/exports/knob.stl) | upright |
+
+Look before you print: [`orchestrator-pad-assembled.glb`](hardware/orchestrator-pad/exports/orchestrator-pad-assembled.glb)
+and [`orchestrator-pad-exploded.glb`](hardware/orchestrator-pad/exports/orchestrator-pad-exploded.glb)
+open in any GLB viewer. Sizes, triangle counts and watertightness are recorded in
+[`MANIFEST.json`](hardware/orchestrator-pad/exports/MANIFEST.json).
+
+The enclosure is code, not a binary — `numpy` and `shapely`, no CSG kernel — so
+you can change the layout and regenerate every STL:
+
+```bash
+cd hardware/orchestrator-pad
+python -m venv .venv && .venv/bin/pip install numpy shapely
+cd cad && ../.venv/bin/python assembly.py
+```
+
+The agents printed on the keycaps are just a table in `cad/partlib.py`. Add your
+own and reprint the caps.
+
+### Wire it
+
+<div align="center">
+<img src="hardware/orchestrator-pad/docs/images/circuit.png" alt="Wiring diagram — 4x4 key matrix, INMP441 microphone and MAX98357A amplifier on an ESP32-S3" width="920">
+</div>
+
+An **ESP32‑S3‑DevKitC‑1** (N16R8), a 4×4 key matrix on pull‑ups with no diodes,
+an **INMP441** microphone and a **MAX98357A** amplifier on I2S, and the onboard
+WS2812 as a status light in the locked agent's colour. Every pin is in
+[`config.h`](hardware/orchestrator-pad/firmware/orchestrator_pad/config.h), and
+the full table is in the
+[hardware README](hardware/orchestrator-pad/README.md#wire-it).
+
+### Flash it
+
+The sketch is
+[`orchestrator_pad.ino`](hardware/orchestrator-pad/firmware/orchestrator_pad/orchestrator_pad.ino).
+You never reflash to change networks — on first boot the pad raises its own
+access point, **`LoomPad-Setup`**, and a captive page asks for your Wi‑Fi, the
+backend URL and a pad token, then keeps them in NVS. It checks the daemon's
+`/health` and speaks "connected" through the amp so you know it is up without
+opening a terminal.
+
+```
+hold 🎤 ──► the pad streams mic audio ──► the daemon does speech-to-text
+release ──► { agent: "claude-code", prompt: "..." }
+press ➤ ──► the daemon routes the job to that agent's session
+  ✓ / ✕ ──► answer the agent's next approval prompt from the pad
+```
+
+The pad stays deliberately dumb: a small JSON protocol over WebSocket, and the
+daemon owns speech‑to‑text, session routing and CLI orchestration. Point it at
+your own stack by implementing one message handler.
 
 ## Security model
 

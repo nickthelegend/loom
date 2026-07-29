@@ -1,76 +1,109 @@
 {
-  "generated": "2026-07-16T07:42:39+00:00",
+  "generated": "2026-07-21T13:05:41+00:00",
   "files": [
     {
       "path": "exports/orchestrator-pad-assembled.glb",
-      "bytes": 3121108,
-      "triangles": 36996,
+      "bytes": 6146020,
+      "triangles": 72860,
       "watertight": true
     },
     {
       "path": "exports/orchestrator-pad-exploded.glb",
-      "bytes": 3121112,
-      "triangles": 36996,
+      "bytes": 6145992,
+      "triangles": 72860,
       "watertight": true
     },
     {
       "path": "exports/tray.stl",
-      "bytes": 337284,
-      "triangles": 6744,
+      "bytes": 534484,
+      "triangles": 10688,
       "watertight": true
     },
     {
       "path": "exports/plate.stl",
-      "bytes": 515884,
-      "triangles": 10316,
+      "bytes": 765284,
+      "triangles": 15304,
+      "watertight": true
+    },
+    {
+      "path": "exports/switch-deck.stl",
+      "bytes": 934684,
+      "triangles": 18692,
       "watertight": true
     },
     {
       "path": "exports/caps-all.stl",
-      "bytes": 844284,
-      "triangles": 16884,
+      "bytes": 907084,
+      "triangles": 18140,
+      "watertight": true
+    },
+    {
+      "path": "exports/legends-all.stl",
+      "bytes": 326284,
+      "triangles": 6524,
       "watertight": true
     },
     {
       "path": "exports/knob.stl",
-      "bytes": 152684,
-      "triangles": 3052,
+      "bytes": 175684,
+      "triangles": 3512,
       "watertight": true
     }
   ],
   "totals": {
-    "files": 6,
-    "bytes": 8092356,
-    "triangles": 110988,
+    "files": 8,
+    "bytes": 15935516,
+    "triangles": 218580,
     "watertight": true
   },
   "items": [
     {
       "name": "tray",
-      "triangles": 6744,
-      "shells": 28,
-      "volume_mm3": 30504.82,
+      "triangles": 10688,
+      "shells": 48,
+      "volume_mm3": 56019.37,
       "watertight": true
     },
     {
       "name": "plate",
-      "triangles": 10316,
-      "shells": 11,
-      "volume_mm3": 11275.07,
+      "triangles": 15304,
+      "shells": 24,
+      "volume_mm3": 16485.93,
       "watertight": true
     },
     {
-      "name": "preset1",
-      "triangles": 1020,
-      "shells": 3,
-      "volume_mm3": 1052.98,
+      "name": "switch-deck",
+      "triangles": 18692,
+      "shells": 1,
+      "volume_mm3": 6501.28,
       "watertight": true
     },
     {
-      "name": "preset2",
-      "triangles": 1536,
+      "name": "cursor",
+      "triangles": 908,
       "shells": 4,
-      "volume_mm3": 1033.54,
+      "volume_mm3": 1028.11,
+      "watertight": true
+    },
+    {
+      "name": "cursor-legend",
+      "triangles": 84,
+      "shells": 1,
+      "volume_mm3": 19.86,
+      "watertight": true
+    },
+    {
+      "name": "codex",
+      "triangles": 2020,
+      "shells": 5,
+      "volume_mm3": 998.37,
+      "watertight": true
+    },
+    {
+      "name": "codex-legend",
+      "triangles": 1204,
+      "shells": 1,
+      "volume_mm3": 37.7,
       "watertight": true
     },
     {
@@ -81,38 +114,80 @@
       "watertight": true
     },
     {
-      "name": "codex",
-      "triangles": 1052,
+      "name": "preset3-legend",
+      "triangles": 900,
+      "shells": 2,
+      "volume_mm3": 18.1,
+      "watertight": true
+    },
+    {
+      "name": "grok",
+      "triangles": 1768,
       "shells": 3,
-      "volume_mm3": 1027.31,
+      "volume_mm3": 1034.4,
+      "watertight": true
+    },
+    {
+      "name": "grok-legend",
+      "triangles": 920,
+      "shells": 3,
+      "volume_mm3": 16.08,
       "watertight": true
     },
     {
       "name": "claude",
-      "triangles": 1388,
-      "shells": 3,
-      "volume_mm3": 1029.63,
+      "triangles": 932,
+      "shells": 5,
+      "volume_mm3": 1004.15,
+      "watertight": true
+    },
+    {
+      "name": "claude-legend",
+      "triangles": 116,
+      "shells": 1,
+      "volume_mm3": 34.23,
       "watertight": true
     },
     {
       "name": "antigravity",
-      "triangles": 1088,
-      "shells": 4,
-      "volume_mm3": 1027.73,
+      "triangles": 1656,
+      "shells": 3,
+      "volume_mm3": 1010.86,
+      "watertight": true
+    },
+    {
+      "name": "antigravity-legend",
+      "triangles": 824,
+      "shells": 1,
+      "volume_mm3": 30.21,
       "watertight": true
     },
     {
       "name": "opencode",
-      "triangles": 1680,
+      "triangles": 856,
       "shells": 4,
-      "volume_mm3": 1023.51,
+      "volume_mm3": 1026.27,
+      "watertight": true
+    },
+    {
+      "name": "opencode-legend",
+      "triangles": 32,
+      "shells": 1,
+      "volume_mm3": 20.96,
       "watertight": true
     },
     {
       "name": "kiro",
-      "triangles": 1068,
-      "shells": 3,
-      "volume_mm3": 1024.45,
+      "triangles": 1948,
+      "shells": 5,
+      "volume_mm3": 1026.03,
+      "watertight": true
+    },
+    {
+      "name": "kiro-legend",
+      "triangles": 1132,
+      "shells": 1,
+      "volume_mm3": 21.1,
       "watertight": true
     },
     {
@@ -123,10 +198,24 @@
       "watertight": true
     },
     {
+      "name": "run-legend",
+      "triangles": 20,
+      "shells": 1,
+      "volume_mm3": 8.86,
+      "watertight": true
+    },
+    {
       "name": "approve",
       "triangles": 968,
       "shells": 3,
       "volume_mm3": 1040.97,
+      "watertight": true
+    },
+    {
+      "name": "approve-legend",
+      "triangles": 136,
+      "shells": 1,
+      "volume_mm3": 12.14,
       "watertight": true
     },
     {
@@ -137,10 +226,24 @@
       "watertight": true
     },
     {
+      "name": "reject-legend",
+      "triangles": 220,
+      "shells": 1,
+      "volume_mm3": 17.57,
+      "watertight": true
+    },
+    {
       "name": "prompt",
       "triangles": 984,
       "shells": 3,
       "volume_mm3": 1042.28,
+      "watertight": true
+    },
+    {
+      "name": "prompt-legend",
+      "triangles": 144,
+      "shells": 2,
+      "volume_mm3": 11.36,
       "watertight": true
     },
     {
@@ -151,6 +254,13 @@
       "watertight": true
     },
     {
+      "name": "voice-legend",
+      "triangles": 780,
+      "shells": 2,
+      "volume_mm3": 16.44,
+      "watertight": true
+    },
+    {
       "name": "send",
       "triangles": 844,
       "shells": 3,
@@ -158,10 +268,17 @@
       "watertight": true
     },
     {
+      "name": "send-legend",
+      "triangles": 12,
+      "shells": 1,
+      "volume_mm3": 9.58,
+      "watertight": true
+    },
+    {
       "name": "knob",
-      "triangles": 3052,
-      "shells": 4,
-      "volume_mm3": 3097.16,
+      "triangles": 3512,
+      "shells": 20,
+      "volume_mm3": 3416.06,
       "watertight": true
     }
   ],
@@ -173,20 +290,20 @@
     },
     "keys": [
       {
-        "id": "preset1",
-        "glyph": "dot",
+        "id": "cursor",
+        "glyph": "cursor",
         "units": 1,
         "x": -9.525,
         "y": 28.575000000000003,
-        "color": "#D8DCE2"
+        "color": "#26282E"
       },
       {
-        "id": "preset2",
-        "glyph": "ring",
+        "id": "codex",
+        "glyph": "codex",
         "units": 1,
         "x": 9.525,
         "y": 28.575000000000003,
-        "color": "#D8DCE2"
+        "color": "#6366F1"
       },
       {
         "id": "preset3",
@@ -197,16 +314,16 @@
         "color": "#D8DCE2"
       },
       {
-        "id": "codex",
-        "glyph": "X",
+        "id": "grok",
+        "glyph": "grok",
         "units": 1,
         "x": -28.575000000000003,
         "y": 9.525,
-        "color": "#1A1A1A"
+        "color": "#141414"
       },
       {
         "id": "claude",
-        "glyph": "C",
+        "glyph": "claude",
         "units": 1,
         "x": -9.525,
         "y": 9.525,
@@ -214,7 +331,7 @@
       },
       {
         "id": "antigravity",
-        "glyph": "A",
+        "glyph": "antigravity",
         "units": 1,
         "x": 9.525,
         "y": 9.525,
@@ -222,15 +339,15 @@
       },
       {
         "id": "opencode",
-        "glyph": "O",
+        "glyph": "opencode",
         "units": 1,
         "x": 28.575000000000003,
         "y": 9.525,
-        "color": "#19B36B"
+        "color": "#FAFAF8"
       },
       {
         "id": "kiro",
-        "glyph": "K",
+        "glyph": "kiro",
         "units": 1,
         "x": -28.575000000000003,
         "y": -9.525,

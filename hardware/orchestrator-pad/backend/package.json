@@ -1,0 +1,17 @@
+{
+  "name": "orchestrator-pad-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Voice backend for the ESP32-S3 macropad: mic PCM in, STT → LLM → TTS, PCM out. Groq + Deepgram.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test:voice": "node test-voice.mjs",
+    "test": "node --test test/unit.test.mjs test/auth.test.mjs test/integration.test.mjs test/loom.test.mjs",
+    "test:unit": "node --test test/unit.test.mjs"
+  },
+  "license": "MIT"
+}

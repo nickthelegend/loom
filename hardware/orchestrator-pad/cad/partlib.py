@@ -38,44 +38,65 @@ ROW_Y = [1.5 * PITCH, 0.5 * PITCH, -0.5 * PITCH, -1.5 * PITCH]
 
 CASE_W = 90.0
 CASE_R = 8.0
-TRAY_H = 14.0
+TRAY_H = 40.0          # v7: taller/fatter case (+12 over v6's 28) — lots of
+#                        open headroom above the board (~24 mm now)
 WALL = 2.4
 FLOOR = 2.4
-LEDGE_Z = 7.5          # above this the tray wall thins to 1.2 (skirt seat)
+LEDGE_Z = 33.5         # above this the tray wall thins to 1.2 (skirt seat)
 BOSS_XY = 39.0         # corner boss / screw centers at (+-39, +-39)
-PLATE_Z0, PLATE_Z1 = 14.0, 15.5
+PLATE_Z0, PLATE_Z1 = 40.0, 41.5
 MX_CUT = 14.1
 KNOB_HOLE_D = 7.4
-CAP_Z0 = 21.0          # assembled: keycap bottom face height
-KNOB_Z0 = 16.5
+CAP_Z0 = 47.0          # assembled: keycap bottom face height
+KNOB_Z0 = 41.5         # v7.1: mock knob rests ON the plate top (snap-fit peg,
+#                        no potentiometer) instead of floating over an EC11 nut
+
+# v4 fat-base component bay (SPEC.md "Tray"): dual-USB-C ESP32-S3 clone board
+# with factory pin headers (pins DOWN, components + USB-C on TOP), down-firing
+# cavity speaker under the board, MAX98357A amp, round I2S mic.
+BOARD_Z = 16.0         # board underside height (shelf/bridge top faces)
+BOARD_W = 30.0         # board width in Y (|y|<=15; caged by the flat cage)
+BOARD_L = 64.0         # board max length (Y, back edge at Y=+42.0)
+USB_WIN = (26.0, 17.0, 23.5)   # back-wall USB window: (width, z0, z1), X=0
+SPK_CENTER = (0.0, -21.0)      # speaker center (flange ON the floor)
+SPK_FLANGE = (72.0, 42.0)      # max flange footprint (X x Y)
+SPK_BUMP_MAX = 11.0            # max driver-bump height above the 1.5 flange
 
 COLORS = {
     "tray": "#AEB4BC", "plate": "#F4F5F7", "knob": "#E8E9EB",
-    "preset": "#D8DCE2", "codex": "#1A1A1A", "claude": "#D97757",
-    "antigravity": "#2D6BFF", "opencode": "#19B36B", "kiro": "#7A3FF2",
-    "util": "#FFFFFF", "voice": "#FFFFFF",
+    "preset": "#D8DCE2", "codex": "#6366F1", "claude": "#D97757",
+    "antigravity": "#2D6BFF", "opencode": "#FAFAF8", "kiro": "#7A3FF2",
+    "cursor": "#26282E", "grok": "#141414", "util": "#FFFFFF", "voice": "#FFFFFF",
 }
+
+# glyph legend infills (printed/painted contrast fill in the deboss):
+# white on colored caps, dark on white/light caps so every legend is legible
+LEGEND_LIGHT = "#FFFFFF"
+LEGEND_DARK = "#3F444D"
+LEGEND_MID = "#8A919E"
 
 
 def key_layout():
-    """All 14 switch positions: id, glyph, grid center, width in units, color."""
-    K = lambda i, g, c, r, u, col: dict(
-        id=i, glyph=g, x=COL_X[c] if u == 1 else 0.0, y=ROW_Y[r], units=u, color=col)
+    """All 14 switch positions: id, glyph, grid center, width in units,
+    cap color, legend (infill) color."""
+    K = lambda i, g, c, r, u, col, leg: dict(
+        id=i, glyph=g, x=COL_X[c] if u == 1 else 0.0, y=ROW_Y[r], units=u,
+        color=col, legend=leg)
     return [
-        K("preset1", "dot",    1, 0, 1, COLORS["preset"]),
-        K("preset2", "ring",   2, 0, 1, COLORS["preset"]),
-        K("preset3", "target", 3, 0, 1, COLORS["preset"]),
-        K("codex",   "X",      0, 1, 1, COLORS["codex"]),
-        K("claude",  "C",      1, 1, 1, COLORS["claude"]),
-        K("antigravity", "A",  2, 1, 1, COLORS["antigravity"]),
-        K("opencode", "O",     3, 1, 1, COLORS["opencode"]),
-        K("kiro",    "K",      0, 2, 1, COLORS["kiro"]),
-        K("run",     "bolt",   1, 2, 1, COLORS["util"]),
-        K("approve", "check",  2, 2, 1, COLORS["util"]),
-        K("reject",  "cross",  3, 2, 1, COLORS["util"]),
-        K("prompt",  "prompt", 0, 3, 1, COLORS["util"]),
-        K("voice",   "mic",    0, 3, 2, COLORS["voice"]),   # x forced to 0 below
-        K("send",    "send",   3, 3, 1, COLORS["util"]),
+        K("cursor",  "cursor", 1, 0, 1, COLORS["cursor"], LEGEND_LIGHT),
+        K("codex",   "codex",  2, 0, 1, COLORS["codex"], LEGEND_LIGHT),
+        K("preset3", "target", 3, 0, 1, COLORS["preset"], LEGEND_MID),
+        K("grok",    "grok",   0, 1, 1, COLORS["grok"], LEGEND_LIGHT),
+        K("claude",  "claude", 1, 1, 1, COLORS["claude"], LEGEND_LIGHT),
+        K("antigravity", "antigravity", 2, 1, 1, COLORS["antigravity"], LEGEND_LIGHT),
+        K("opencode", "opencode", 3, 1, 1, COLORS["opencode"], LEGEND_DARK),
+        K("kiro",    "kiro",   0, 2, 1, COLORS["kiro"], LEGEND_LIGHT),
+        K("run",     "bolt",   1, 2, 1, COLORS["util"], LEGEND_DARK),
+        K("approve", "check",  2, 2, 1, COLORS["util"], LEGEND_DARK),
+        K("reject",  "cross",  3, 2, 1, COLORS["util"], LEGEND_DARK),
+        K("prompt",  "prompt", 0, 3, 1, COLORS["util"], LEGEND_DARK),
+        K("voice",   "mic",    0, 3, 2, COLORS["voice"], LEGEND_DARK),  # x forced to 0
+        K("send",    "send",   3, 3, 1, COLORS["util"], LEGEND_DARK),
     ]
 
 
@@ -138,6 +159,84 @@ def _arc(cx, cy, r, a0, a1, n=40):
     return list(np.column_stack([cx + r * np.cos(t), cy + r * np.sin(t)]))
 
 
+def _smooth(g, r):
+    return g.buffer(r, quad_segs=8).buffer(-r, quad_segs=8)
+
+
+# Logo silhouettes (v2 caps). Deboss semantics: the geometry is cut into the
+# cap top; interior holes (eyes, cube facet, frame window) stay RAISED and
+# read as the logo's negative space. Simplified geometric homages — the
+# original marks belong to their respective projects.
+
+def _logo_claude():
+    """Claude Code pixel-pal: blocky body, ear tabs, square eyes, leg slots."""
+    body = unary_union([
+        box(-3.5, -3.9, 3.5, 3.7),
+        box(-4.65, 0.4, -3.5, 2.2),
+        box(3.5, 0.4, 4.65, 2.2),
+    ])
+    for hole in (box(-2.5, 1.1, -1.35, 2.3), box(1.35, 1.1, 2.5, 2.3),
+                 box(-2.35, -4.2, -1.35, -2.0), box(1.35, -4.2, 2.35, -2.0)):
+        body = body.difference(hole)
+    return body
+
+
+def _logo_antigravity():
+    """Antigravity arch: gaussian bell stroked with round feet."""
+    xs = np.linspace(-4.15, 4.15, 61)
+    ys = -3.15 + 6.9 * np.exp(-((xs / 2.15) ** 2))
+    return LineString(np.column_stack([xs, ys])).buffer(1.28, quad_segs=10)
+
+
+def _logo_opencode():
+    """opencode terminal frame: heavy block with an offset window (raised)."""
+    return box(-3.0, -4.0, 3.0, 4.0).difference(box(-1.25, -1.55, 1.85, 2.2))
+
+
+def _logo_kiro():
+    """Kiro ghost: dome, scalloped feet, two round eyes (raised)."""
+    body = unary_union([
+        Point(0, 0.9).buffer(2.95, quad_segs=16),
+        box(-2.95, -3.1, 2.95, 0.9),
+        Point(-2.4, -3.1).buffer(0.9, quad_segs=10),
+    ])
+    body = body.difference(Point(-0.65, -3.35).buffer(1.05, quad_segs=10))
+    body = body.difference(Point(1.85, -3.35).buffer(1.05, quad_segs=10))
+    body = _smooth(body, 0.35)
+    body = body.difference(Point(-0.85, 1.15).buffer(0.62, quad_segs=10))
+    body = body.difference(Point(1.05, 1.15).buffer(0.62, quad_segs=10))
+    return body
+
+
+def _logo_cursor():
+    """Cursor cube: pointy-top hexagon with a folded facet (raised wedge)."""
+    hexpts = [(4.05 * math.cos(math.radians(a)), 4.05 * math.sin(math.radians(a)))
+              for a in range(90, 451, 60)]
+    hexagon = _smooth(Polygon(hexpts), 0.35)
+    return hexagon.difference(Polygon([(-1.15, 0.55), (3.42, 1.62), (0.12, -3.88)]))
+
+
+def _logo_codex():
+    """Codex cloud: 7-lobe puff with a raised >_ prompt inside."""
+    lobes = [Point(2.55 * math.cos(math.radians(a)),
+                   2.55 * math.sin(math.radians(a))).buffer(rr, quad_segs=14)
+             for a, rr in [(95, 2.25), (40, 2.0), (-5, 2.05), (-55, 2.0),
+                           (-115, 2.1), (-170, 2.0), (145, 2.05)]]
+    cloud = _smooth(unary_union(lobes + [Point(0, 0).buffer(3.3, quad_segs=16)]), 0.45)
+    chev = _stroke([(-2.05, 1.45), (-0.55, 0.1), (-2.05, -1.25)], 1.2)
+    bar = box(0.15, -1.45, 2.05, -0.5)
+    return cloud.difference(chev.union(bar))
+
+
+def _logo_grok():
+    """Grok: circle broken by a long diagonal slash with pointed ends."""
+    ring = _stroke(_arc(0, 0, 2.95, 0, 360, 90), 1.15)
+    blade = affinity.rotate(
+        Polygon([(-6.1, 0), (0, 0.6), (6.1, 0), (0, -0.6)]), 45, origin=(0, 0))
+    blade = blade.intersection(box(-4.6, -4.6, 4.6, 4.6))
+    return ring.difference(blade.buffer(0.5)).union(blade)
+
+
 def glyph(name, size=10.0):
     """Deboss glyph as shapely geometry in a size x size box centered at 0."""
     g = {
@@ -166,8 +265,23 @@ def glyph(name, size=10.0):
         "ring": lambda: _stroke(_arc(0, 0, 3.2, 0, 360, 60), 1.7),
         "target": lambda: _stroke(_arc(0, 0, 3.7, 0, 360, 60), 1.3)
                           .union(Point(0, 0).buffer(1.5, quad_segs=12)),
+        "claude": _logo_claude,
+        "antigravity": _logo_antigravity,
+        "opencode": _logo_opencode,
+        "kiro": _logo_kiro,
+        "cursor": _logo_cursor,
+        "codex": _logo_codex,
+        "grok": _logo_grok,
     }[name]()
     return affinity.scale(g, size / 10.0, size / 10.0, origin=(0, 0))
+
+
+# Per-glyph deboss sizes (design box units on the cap top); logos run larger
+# than the letter/symbol set. part_caps falls back to its default otherwise.
+GLYPH_SIZES = {
+    "claude": 10.6, "antigravity": 10.4, "opencode": 9.8,
+    "kiro": 10.2, "cursor": 10.2, "codex": 10.8, "grok": 10.4,
+}
 
 # ----------------------------------------------------------------- mesh ----
 

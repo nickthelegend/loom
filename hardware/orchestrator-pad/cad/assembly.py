@@ -102,16 +102,33 @@ def main():
     by_group = dict(groups)
 
     tray = _merge(m for _n, m, _c in by_group["tray"])          # already Z=0
-    plate = _merge(m for _n, m, _c in by_group["plate"])
+    # the switch deck is its own flat print — keep it out of plate.stl
+    plate = _merge(m for n, m, _c in by_group["plate"] if n != "switch-deck")
     plate.translate(dz=-_min_z(plate))                          # min Z -> 0
-    caps = _merge(m for _n, m, _c in by_group["caps"])
-    caps.translate(dz=-_min_z(caps))                            # bottoms -> 0, XY kept
+    deck = _merge(m for n, m, _c in by_group["plate"] if n == "switch-deck")
+    deck.translate(dz=-_min_z(deck))                            # prints flat
+    # caps and their legend infills export as separate STLs (same drop so they
+    # stay aligned for two-color printing: import both, flip together 180)
+    cap_items = [(n, m) for n, m, _c in by_group["caps"] if not n.endswith("-legend")]
+    leg_items = [(n, m) for n, m, _c in by_group["caps"] if n.endswith("-legend")]
+    caps = _merge(m for _n, m in cap_items)
+    caps_drop = -_min_z(caps)
+    caps.translate(dz=caps_drop)                                # bottoms -> 0, XY kept
+    legends = _merge(m for _n, m in leg_items)
+    legends.translate(dz=caps_drop)
     knob = _merge(m for _n, m, _c in by_group["knob"])
-    knob.translate(-pl.KNOB_POS[0], -pl.KNOB_POS[1], -_min_z(knob))  # origin, upright
+    # print CROWN-DOWN (snap peg pointing up) so nothing overhangs: to local
+    # frame, flip 180° about X (proper rotation y,z -> -y,-z; winding kept),
+    # then drop the crown to the bed.
+    knob.translate(-pl.KNOB_POS[0], -pl.KNOB_POS[1], -pl.KNOB_Z0)
+    knob.V = [(x, -y, -z) for x, y, z in knob.V]
+    knob.translate(dz=-_min_z(knob))
 
     print("validating print meshes:")
     for fname, mesh in [("tray.stl", tray), ("plate.stl", plate),
-                        ("caps-all.stl", caps), ("knob.stl", knob)]:
+                        ("switch-deck.stl", deck),
+                        ("caps-all.stl", caps), ("legends-all.stl", legends),
+                        ("knob.stl", knob)]:
         rep = pl.validate(mesh)
         all_ok &= rep["watertight"]
         print(f"  {fname:14s} shells={rep['shells']:3d} tris={rep['triangles']:6d} "

@@ -1,0 +1,11 @@
+# secrets — never commit
+.env
+
+# node
+node_modules/
+npm-debug.log*
+
+# test / scratch audio
+*.wav
+*.pcm
+/tmp-audio/
