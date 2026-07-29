@@ -1027,6 +1027,38 @@ describe("web app · the console", () => {
     expect(($(m, '.conbar .lvl[data-lvl="all"]') as HTMLElement).classList.contains("on")).toBe(false);
     expect(m.errors.join("\n")).toBe("");
   });
+
+  it("searches the text and filters by scope", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#consolebtn");
+    // Two records in different scopes, planted through the same API the app
+    // itself uses for client-side reports.
+    for (const [scope, message] of [["alpha", "needle in alpha"], ["beta", "hay in beta"]]) {
+      await fetch(`${baseUrl}/api/logs`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${clientToken}` },
+        body: JSON.stringify({ level: "info", scope, message }),
+      });
+    }
+    click($(m, "#consolebtn"));
+    await waitUntil(() => text(m, "#conlist").includes("needle"));
+
+    // The scope menu is built from the records themselves.
+    await waitUntil(() => text(m, "#conscope").includes("alpha"));
+
+    // Search narrows to matching text…
+    const search = $(m, "#consearch") as HTMLInputElement;
+    search.value = "needle";
+    search.dispatchEvent(new m.window.Event("input"));
+    await waitUntil(() => !text(m, "#conlist").includes("beta"));
+    expect(text(m, "#conlist")).toContain("needle in alpha");
+
+    // …and an impossible query says so instead of showing an empty box.
+    search.value = "zzz-no-such-line";
+    search.dispatchEvent(new m.window.Event("input"));
+    await waitUntil(() => text(m, "#conlist").includes("nothing matches"));
+    expect(m.errors.join("\n")).toBe("");
+  });
 });
 
 /**

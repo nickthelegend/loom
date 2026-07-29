@@ -1117,6 +1117,11 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
     border-bottom:1px solid var(--border);font-size:11px;color:var(--muted-foreground)}
   .conbar .lvl{padding:2px 7px;border-radius:11px;cursor:pointer;border:1px solid transparent;
     font-family:var(--font-mono);font-size:10px;letter-spacing:.02em}
+  .consel{height:20px;max-width:130px;background:var(--editor-surface);border:1px solid var(--border);
+    border-radius:6px;color:var(--muted-foreground);font-family:var(--font-mono);font-size:10px;outline:none}
+  .consearch{height:20px;width:150px;background:var(--editor-surface);border:1px solid var(--border);
+    border-radius:6px;color:var(--foreground);font-family:var(--font-mono);font-size:10.5px;padding:0 7px;outline:none}
+  .consearch:focus{border-color:var(--ring)}
   .conbar .lvl:hover{background:var(--sidebar-accent)}
   .conbar .lvl.on{background:var(--sidebar-accent);border-color:var(--border);color:var(--foreground)}
   .conlist{flex:1;min-height:0;overflow:auto;font-family:var(--font-mono);font-size:11px;line-height:1.55}
@@ -2860,6 +2865,8 @@ ${BRAND_SPRITE}
         '<span class="lvl on" data-lvl="all">all</span>' +
         '<span class="lvl" data-lvl="error">errors</span>' +
         '<span class="lvl" data-lvl="warn">warnings</span>' +
+        '<select id="conscope" class="consel" title="filter by scope"><option value="">all scopes</option></select>' +
+        '<input id="consearch" class="consearch" placeholder="search\\u2026" autocomplete="off" spellcheck="false">' +
         '<span class="spacer" style="flex:1"></span>' +
         '<span id="concount"></span>' +
         '<button id="conclear" class="iconbtn" title="clear">' + ICONS.x + "</button>" +
@@ -7542,12 +7549,38 @@ ${BRAND_SPRITE}
   // exists and tail, or one of the many empty catch blocks, where they stopped
   // existing. Neither reaches the person looking at the window wondering why
   // nothing happened. Records arrive live over the same socket as events.
-  var con = { logs: [], level: "all", open: false, present: false, seen: 0, expanded: {} };
+  var con = { logs: [], level: "all", open: false, present: false, seen: 0, expanded: {}, q: "", scope: "" };
 
-  function conLevelOk(r){ return con.level === "all" || r.level === con.level; }
+  /**
+   * Level, scope and text together. With a busy fleet "errors only" stopped
+   * being enough — six agents and the api all log errors, and finding the one
+   * from grok meant reading. The scope menu is built from the records
+   * themselves, so it always offers exactly the scopes that have spoken.
+   */
+  function conLevelOk(r){
+    if (con.level !== "all" && r.level !== con.level) return false;
+    if (con.scope && r.scope !== con.scope) return false;
+    if (con.q) {
+      var hay = (r.scope + " " + r.message + " " + (r.detail || "")).toLowerCase();
+      if (hay.indexOf(con.q.toLowerCase()) === -1) return false;
+    }
+    return true;
+  }
+
+  function drawConScopes(){
+    var sel = document.getElementById("conscope"); if (!sel) return;
+    var scopes = {};
+    con.logs.forEach(function(r){ scopes[r.scope] = true; });
+    var names = Object.keys(scopes).sort();
+    var cur = con.scope;
+    sel.innerHTML = '<option value="">all scopes</option>' + names.map(function(s){
+      return '<option value="' + esc(s) + '"' + (s === cur ? " selected" : "") + ">" + esc(s) + "</option>";
+    }).join("");
+  }
 
   function drawConsole(){
     var list = document.getElementById("conlist"); if (!list) return;
+    drawConScopes();
     var rows = con.logs.filter(conLevelOk);
     var cnt = document.getElementById("concount");
     if (cnt) {
@@ -7558,7 +7591,9 @@ ${BRAND_SPRITE}
     }
     if (!rows.length) {
       list.innerHTML = '<div class="conempty">' +
-        (con.logs.length ? "nothing at this level" : "nothing has gone wrong \\u2014 errors from the daemon, the API and your agents land here") +
+        (con.logs.length
+          ? (con.q || con.scope ? "nothing matches this filter" : "nothing at this level")
+          : "nothing has gone wrong \\u2014 errors from the daemon, the API and your agents land here") +
         "</div>";
       return;
     }
@@ -7669,6 +7704,10 @@ ${BRAND_SPRITE}
         drawConsole();
       };
     });
+    var scopeSel = document.getElementById("conscope");
+    if (scopeSel) scopeSel.onchange = function(){ con.scope = scopeSel.value; drawConsole(); };
+    var search = document.getElementById("consearch");
+    if (search) search.oninput = function(){ con.q = search.value; drawConsole(); };
     // Backfill: the daemon has been running longer than this window has been
     // open, and its errors are exactly the ones you want on a fresh load.
     api("/api/logs").then(function(j){
