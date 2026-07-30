@@ -4138,21 +4138,32 @@ ${BRAND_SPRITE}
       // which is the only visible proof that half of this feature is real.
       var isBudget = function(e){ return e.kind === "status" && /^budget_/.test((e.payload || {}).state || ""); };
       var isMcp = function(e){ return e.kind === "status" && (e.payload || {}).state === "mcp_attached"; };
+      // The newer lifecycle facts, same rule as budgets: a reaped session, a
+      // per-turn commit, a card's branch and a restore are things you must be
+      // able to see happened.
+      var isLifecycle = function(e){
+        return e.kind === "status" && /^(session_reaped|turn_committed|task_branch|restored)$/.test((e.payload || {}).state || "");
+      };
       var isDecision = function(e){ return e.kind === "status" && (e.payload || {}).state === "agent_decision"; };
-      var evs = (events || []).filter(function(e){ return KINDS[e.kind] || isHeal(e) || isRecover(e) || isDecision(e) || isBudget(e) || isMcp(e); }).sort(function(a, b){ return a.ts - b.ts; });
+      var evs = (events || []).filter(function(e){ return KINDS[e.kind] || isHeal(e) || isRecover(e) || isDecision(e) || isBudget(e) || isMcp(e) || isLifecycle(e); }).sort(function(a, b){ return a.ts - b.ts; });
       if (!evs.length) return '<div class="obnote">No fleet events yet. Run a turn and the trace fills in.</div>';
       var base = evs[0].ts;
       var rows = evs.map(function(e){
         var p = e.payload || {};
         var cls = isHeal(e) ? "heal" : isRecover(e) ? "ok" : isDecision(e) ? "decision"
           : isBudget(e) ? (p.state === "budget_exceeded" ? "warn" : "ok")
-          : isMcp(e) ? "info" : KINDS[e.kind][0];
+          : isMcp(e) ? "info" : isLifecycle(e) ? (p.state === "session_reaped" ? "warn" : "info") : KINDS[e.kind][0];
         var label, extra = "";
         if (isBudget(e)) label = p.state === "budget_exceeded"
           ? "\\ud83d\\udcb8 " + esc(e.agentId || "agent") + " paused \\u2014 over its daily budget" +
             (p.budgetUsd != null ? " (" + money(p.spentTodayUsd || 0) + " of " + money(p.budgetUsd) + ")" : "")
           : "\\u2713 " + esc(e.agentId || "agent") + " back under budget \\u2014 pause lifted";
         else if (isMcp(e)) label = "\\ud83d\\udd0c " + esc(e.agentId || "agent") + " got MCP: " + esc(((p.servers || []).join(", ")) || "no servers");
+        else if (isLifecycle(e)) label =
+          p.state === "session_reaped" ? "\\u267b " + esc(e.agentId || "agent") + " reaped and respawned"
+          : p.state === "turn_committed" ? "\\u2713 " + esc(e.agentId || "agent") + " committed its turn \\u00b7 " + esc(String(p.subject || "")).slice(0, 48)
+          : p.state === "task_branch" ? "\\u2387 card branch " + esc(p.branch || "") + (p.created ? " created" : "")
+          : "\\u21ba snapshot restored \\u00b7 " + (p.tasks != null ? p.tasks + " cards" : "");
         else if (isHeal(e)) label = "\\u26a1 Alert \\u00b7 " + esc(p.alert || "alert") + " \\u2192 baton forced off " + esc(e.agentId || "agent") + (p.fallback ? " to " + esc(p.fallback) : "");
         else if (isRecover(e)) label = "\\u2713 Recovery \\u00b7 " + esc(p.alert || "alert") + " resolved \\u2192 " + (p.retried ? "baton retried on " + esc(e.agentId || "agent") : "quarantine lifted on " + esc(e.agentId || "agent"));
         else if (isDecision(e)){ label = "\\ud83d\\udca1 " + esc(e.agentId || "agent") + " decided: <strong>" + esc(p.title || "decision") + "</strong>" +
