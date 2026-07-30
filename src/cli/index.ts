@@ -625,7 +625,7 @@ program
 
 program
   .command("budget <agentId> [usd]")
-  .description("cap an agent's daily spend in USD (omit usd or pass 0 to clear)")
+  .description("cap an agent's daily spend in USD — agentId 'all' caps every adapter (0 clears)")
   .action(async (agentId: string, usd: string | undefined) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
@@ -633,6 +633,16 @@ program
     if (Number.isNaN(value) || value < 0) {
       console.error(pc.red(`"${usd}" is not a dollar amount`));
       process.exitCode = 1;
+      return;
+    }
+    if (agentId === "all") {
+      const adapters = project.agents.filter((a) => a.tier === "adapter");
+      for (const a of adapters) await client.setBudget(project.id, a.id, value);
+      console.log(
+        value > 0
+          ? `${pc.green("✓")} ${adapters.length} adapters capped at $${value.toFixed(2)}/day each`
+          : `${pc.green("✓")} ${adapters.length} adapters uncapped`,
+      );
       return;
     }
     await client.setBudget(project.id, agentId, value);
