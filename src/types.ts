@@ -173,6 +173,11 @@ export interface ProjectConfig {
   skills?: Record<string, boolean>;
   /** MCP servers this project can offer agents (mirrors the Anthropic API shape). */
   mcps?: McpServerConfig[];
+  /** Git policies. Off by default — committing is a policy, not a mechanic. */
+  git?: {
+    /** Commit each turn's changes as they land, agent as co-author. */
+    commitPerTurn?: boolean;
+  };
 }
 
 /** One MCP server, in the shape the Anthropic API's `mcp_servers` accepts. */

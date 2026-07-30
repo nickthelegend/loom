@@ -210,6 +210,23 @@ export interface GitStatus {
  * that into one list and you get a checkbox that lies about what a commit will
  * contain.
  */
+/**
+ * Stage exactly these paths and commit them — the per-turn commit's primitive.
+ *
+ * Scoped staging on purpose: `git add -A` here would swallow another agent's
+ * uncommitted work into this agent's commit, which is precisely the
+ * misattribution the feature exists to end.
+ */
+export async function stageAndCommitFiles(
+  dir: string,
+  paths: string[],
+  message: string,
+): Promise<CommitResult> {
+  if (!paths.length) throw new GitError("no files to commit", "");
+  await stage(dir, paths);
+  return commit(dir, message);
+}
+
 export async function status(dir: string): Promise<GitStatus> {
   if (!(await isRepo(dir))) {
     return { branch: "", ahead: 0, behind: 0, upstream: null, staged: [], unstaged: [], untracked: [] };

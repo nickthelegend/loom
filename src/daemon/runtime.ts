@@ -31,6 +31,7 @@ import { compileBrief, retrieve } from "../core/brain-index.js";
 import { extractFromTurn, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
+import { stageAndCommitFiles } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
 import { renderProjection } from "../core/distill.js";
 import {
@@ -1318,6 +1319,7 @@ export class ProjectRuntime {
               truncated: diff.truncated,
             },
           });
+          void this.commitTurn(agentId, diff.files.map((f) => f.path));
         }
         // Learn from the turn once we know which files it touched — the files
         // sharpen candidate retrieval. Runs after the diff so recentTurnFiles
@@ -1325,6 +1327,49 @@ export class ProjectRuntime {
         this.extractMemory(agentId, (diff?.files ?? []).map((f) => f.path));
       })
       .catch(() => this.extractMemory(agentId, []));
+  }
+
+  /**
+   * Opt-in: commit a turn's changes as they land, with the agent as co-author.
+   *
+   * git blame on a fleet's work answered "who wrote this" with whoever ran the
+   * daemon. With `git.commitPerTurn` on, each turn's changes become one commit —
+   * subject from the prompt that caused them, `Co-Authored-By: <agent> via
+   * Loom` so both git log and GitHub attribute the work.
+   *
+   * Off by default and per-project on purpose: committing is a policy, not a
+   * mechanic, and half-done turns land too. Only the files THIS turn touched
+   * are staged, so two agents finishing close together each commit their own
+   * work rather than whoever finishes second swallowing both.
+   */
+  private async commitTurn(agentId: string, files: string[]): Promise<void> {
+    if (!this.config.git?.commitPerTurn || !files.length) return;
+    try {
+      const events = this.log.list({ limit: 60 });
+      const prompt =
+        [...events].reverse().find((e) => e.kind === "message" && !e.agentId)?.payload.text ?? "";
+      const subject = String(prompt).split("\n")[0]!.slice(0, 68) || `work by ${agentId}`;
+      const cfg = this.config.agents.find((a) => a.id === agentId);
+      const message =
+        `${subject}\n\n` +
+        `Turn by ${agentId}${cfg ? ` (${cfg.kind})` : ""} in Loom.\n` +
+        `Co-Authored-By: ${agentId} <${agentId}@loom.local>`;
+      await stageAndCommitFiles(this.info.dir, files, message);
+      this.log.append({
+        kind: "status",
+        agentId,
+        payload: { state: "turn_committed", files: files.length, subject },
+      });
+    } catch (err) {
+      // A commit that can't happen (not a repo, hooks failed, nothing staged
+      // after filters) is a Console line, never a failed turn.
+      logbook.warn(
+        "git",
+        `turn commit skipped for ${agentId}`,
+        err instanceof Error ? err.message : String(err),
+        this.info.id,
+      );
+    }
   }
 
   /**
