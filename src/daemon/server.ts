@@ -371,7 +371,7 @@ export class LoomDaemon {
       res
         .type("html")
         .setHeader("Cache-Control", "no-store")
-        .send(APP_HTML.replace("%%TRACE_UI_URL%%", traceUi));
+        .send(APP_HTML.replace("%%TRACE_UI_URL%%", traceUi).replace("%%BUILD_REV%%", BUILD_REV));
     });
     app.get("/app/manifest.webmanifest", (_req, res) => {
       res

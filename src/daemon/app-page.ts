@@ -52,6 +52,7 @@ try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.clas
    daemon from LOOM_TRACE_UI_URL. Empty unless one is configured — the links
    hide themselves rather than pointing at a guessed port. */
 window.__loomTraceUrl="%%TRACE_UI_URL%%";
+window.__loomPageRev="%%BUILD_REV%%";
 </script>
 <style>
   @font-face{
@@ -2493,6 +2494,25 @@ ${BRAND_SPRITE}
   }
   var THEME_BTN = '<button id="themebtn" class="iconbtn" title="toggle theme"></button>';
   function isElectron(){ return document.documentElement.hasAttribute("data-electron"); }
+
+  /**
+   * This page is baked at one build; the daemon under it can restart onto a
+   * newer one while the window stays open. Every socket (re)connect compares —
+   * a mismatch gets a one-line banner with a Reload button rather than the
+   * slow weirdness of an old client talking to a new API.
+   */
+  function checkBuild(){
+    fetch("/api/health").then(function(r){ return r.json(); }).then(function(h){
+      if (!h.rev || h.rev === window.__loomPageRev) return;
+      if (document.getElementById("revbanner")) return;
+      var b = document.createElement("div");
+      b.id = "revbanner";
+      b.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;display:flex;align-items:center;justify-content:center;gap:12px;padding:7px;background:var(--warn, #7a5b00);color:#fff;font-size:12.5px";
+      b.innerHTML = 'the daemon restarted on a newer build \u2014 this window is stale <button style="border:1px solid #fff5;background:transparent;color:#fff;border-radius:6px;padding:2px 10px;cursor:pointer">Reload</button>';
+      b.querySelector("button").onclick = function(){ location.reload(); };
+      document.body.appendChild(b);
+    }).catch(function(){});
+  }
 
   function clearTimers(){ state.timers.forEach(clearInterval); state.timers = [];
     if (state.ws) {
@@ -6526,6 +6546,7 @@ ${BRAND_SPRITE}
       ws.onmessage = function(ev){
         try {
           var frame = JSON.parse(ev.data);
+          if (frame.type === "hello") { checkBuild(); return; }
           if (frame.type === "term") { onTermFrame(frame); return; }
           if (frame.type === "spec" || frame.type === "spec_done") { onSpecFrame(frame); return; }
           // A log record belongs to no chat — a daemon fault has no
