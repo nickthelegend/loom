@@ -215,6 +215,17 @@ export class DaemonClient {
     );
   }
 
+  renameProject(id: string, name: string): Promise<{ project: { id: string; name: string } }> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}`, { name });
+  }
+
+  searchEvents(id: string, q: string, limit = 20): Promise<{ hits: LoomEvent[] }> {
+    return this.request(
+      "GET",
+      `/api/projects/${encodeURIComponent(id)}/events/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    );
+  }
+
   snapshot(id: string): Promise<Record<string, unknown>> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/snapshot`);
   }

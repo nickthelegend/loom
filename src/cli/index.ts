@@ -329,6 +329,32 @@ program
   });
 
 program
+  .command("rename <name...>")
+  .description("rename this project (the id never moves, so nothing orphans)")
+  .action(async (words: string[]) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const name = words.join(" ");
+    await client.renameProject(project.id, name);
+    console.log(`${pc.green("✓")} ${project.name} → ${pc.bold(name)}`);
+  });
+
+program
+  .command("find <query...>")
+  .description("search this project's thread — messages, decisions, questions")
+  .action(async (words: string[]) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { hits } = await client.searchEvents(project.id, words.join(" "));
+    if (!hits.length) return void console.log(pc.dim("nothing matches"));
+    for (const e of hits) {
+      const t = new Date(e.ts).toISOString().slice(0, 16).replace("T", " ");
+      const who = e.agentId ? pc.cyan(e.agentId) : pc.dim("you");
+      console.log(`${pc.dim(t)} ${who}  ${String(e.payload.text ?? e.payload.question ?? "").slice(0, 110)}`);
+    }
+  });
+
+program
   .command("specs")
   .description("the project's Playwright specs, and whether one is running")
   .action(async () => {
