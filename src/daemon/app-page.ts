@@ -2418,6 +2418,7 @@ ${BRAND_SPRITE}
     // lucide globe — the Browser tab: a live page and the project's specs
     globe: svg('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>'),
     play: svg('<polygon points="6 3 20 12 6 21 6 3"/>'),
+    mic: svg('<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>'),
     // a phone — "connect a device"
     phone: svg('<rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18.5h2"/>'),
     x: svg('<path d="M18 6 6 18"/><path d="M6 6l12 12"/>'),
@@ -2814,6 +2815,7 @@ ${BRAND_SPRITE}
       '<span class="cdiv"></span>' +
       '<button class="cslot" id="mcpbtn" type="button" title="connect MCP servers"><span class="cslotico">' + ICONS.plug + '</span>MCPs</button>' +
       '<button class="cslot" id="skillbtn" type="button" title="enable skills">' + ICONS.spark + 'Skills<span class="skcount" id="skcount" style="display:none">0</span></button>' +
+      '<button class="cslot" id="micbtn" type="button" title="hold to talk \u2014 needs LOOM_STT_CMD on the daemon"><span class="cslotico">' + ICONS.mic + "</span></button>" +
       '<span style="flex:1"></span>' +
       '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
@@ -6965,6 +6967,57 @@ ${BRAND_SPRITE}
       if (skB) skB.onclick = function(){ toggleComposerPanel("skills"); };
       setAuto(state.auto);
       refreshSkillCount();
+
+      // ---- hold-to-talk -----------------------------------------------------
+      // Press and hold records; release sends the audio to the daemon, whose
+      // CONFIGURED transcriber (LOOM_STT_CMD — no cloud, no keys) turns it into
+      // text appended to the composer. You still read it and press send: voice
+      // fills the box, it does not fire the prompt, because a misheard word in
+      // a dispatched turn costs a whole turn to walk back.
+      var micB = document.getElementById("micbtn");
+      if (micB && navigator.mediaDevices && window.MediaRecorder) {
+        var rec = null, chunks = [];
+        var stopRec = function(){
+          if (rec && rec.state !== "inactive") rec.stop();
+          micB.classList.remove("active");
+        };
+        var startRec = function(ev){
+          ev.preventDefault();
+          if (rec && rec.state === "recording") return;
+          navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
+            chunks = [];
+            rec = new MediaRecorder(stream);
+            rec.ondataavailable = function(e){ if (e.data && e.data.size) chunks.push(e.data); };
+            rec.onstop = function(){
+              stream.getTracks().forEach(function(t){ t.stop(); });
+              var blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+              if (blob.size < 1000) return; // a tap, not speech
+              fetch("/api/projects/" + pid + "/voice", {
+                method: "POST",
+                headers: { "Authorization": "Bearer " + state.token, "Content-Type": "application/octet-stream" },
+                body: blob,
+              }).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+                .then(function(x){
+                  if (!x.ok) { toast(x.j.error || "transcription failed"); return; }
+                  var box = document.getElementById("box");
+                  if (box) {
+                    box.value = (box.value ? box.value + " " : "") + x.j.text;
+                    box.focus();
+                  }
+                }).catch(function(e){ toast(e.message); });
+            };
+            rec.start();
+            micB.classList.add("active");
+          }).catch(function(){ toast("microphone permission refused"); });
+        };
+        micB.onmousedown = startRec;
+        micB.ontouchstart = startRec;
+        micB.onmouseup = stopRec;
+        micB.onmouseleave = stopRec;
+        micB.ontouchend = stopRec;
+      } else if (micB) {
+        micB.style.display = "none"; // no recorder in this browser — no dead button
+      }
 
       // Drag a file straight onto the card.
       var cbox = document.querySelector(".cbox");

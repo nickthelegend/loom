@@ -160,3 +160,45 @@ describe("running one", () => {
     await waitUntil(async () => (await specs()).running === null);
   });
 });
+
+/**
+ * Voice (#23): audio in, text out, through a CONFIGURED local transcriber.
+ * LOOM_STT_CMD is the same seam LOOM_SPEC_CMD uses — the whole path runs in
+ * tests with a shell one-liner standing in for whisper.cpp.
+ */
+describe("voice", () => {
+  it("501s honestly when no transcriber is configured", async () => {
+    delete process.env.LOOM_STT_CMD;
+    const r = await fetch(`${baseUrl}/api/projects/${projectId}/voice`, {
+      method: "POST",
+      headers: { ...H(), "content-type": "application/octet-stream" },
+      body: Buffer.from("fake-audio-bytes"),
+    });
+    expect(r.status).toBe(501);
+    const { error } = (await r.json()) as { error: string };
+    expect(error).toContain("LOOM_STT_CMD");
+  });
+
+  it("runs the configured command on the audio and returns its text", async () => {
+    process.env.LOOM_STT_CMD = "printf 'ship the login page'; cat {file} > /dev/null";
+    const r = await fetch(`${baseUrl}/api/projects/${projectId}/voice`, {
+      method: "POST",
+      headers: { ...H(), "content-type": "application/octet-stream" },
+      body: Buffer.from("fake-audio-bytes"),
+    });
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { text: string }).text).toBe("ship the login page");
+    delete process.env.LOOM_STT_CMD;
+  });
+
+  it("422s when the transcriber hears nothing, rather than sending ''", async () => {
+    process.env.LOOM_STT_CMD = "true";
+    const r = await fetch(`${baseUrl}/api/projects/${projectId}/voice`, {
+      method: "POST",
+      headers: { ...H(), "content-type": "application/octet-stream" },
+      body: Buffer.from("fake-audio-bytes"),
+    });
+    expect(r.status).toBe(422);
+    delete process.env.LOOM_STT_CMD;
+  });
+});
