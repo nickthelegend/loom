@@ -997,6 +997,9 @@ window.__loomPageRev="%%BUILD_REV%%";
   .bkind:hover{background:var(--sidebar-accent);color:var(--foreground)}
   .bkind.on{background:var(--foreground);color:var(--background);border-color:transparent;font-weight:600}
   .bkind .kn{font-family:var(--font-mono);font-size:10px;opacity:.7}
+  .bconf{border:1px solid color-mix(in srgb, var(--err) 35%, var(--border));border-radius:10px;padding:8px 12px;margin:6px 0;font-size:12px}
+  .bconfsig{font-family:var(--font-mono);font-size:10px;color:var(--err);letter-spacing:.06em;text-transform:uppercase}
+  .bconfpair{margin-top:4px;line-height:1.6;color:var(--muted-foreground)}
   .bseed{display:flex;gap:6px;padding:0 0 12px}
   .bseed input{flex:1;min-width:0;height:34px;background:color-mix(in srgb, var(--input) 30%, var(--background));
     border:1px solid var(--input);border-radius:9px;padding:0 12px;font:inherit;font-size:12.5px;color:var(--foreground)}
@@ -5156,7 +5159,22 @@ ${BRAND_SPRITE}
             }).join("") + "</div>"
           : '<div class="bempty sm">No native ADE memory found (CLAUDE.md, AGENTS.md, .kiro/steering). Loom reads these but never writes to them.</div>';
 
-        el.innerHTML = '<div class="pane-inner brain">' + head + seed + list + src + "</div>";
+        el.innerHTML = '<div class="pane-inner brain">' + head + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
+
+        // Contradictions, above the units: two memories that likely disagree
+        // are worth more attention than either alone. Quiet when clean.
+        api("/api/projects/" + pid + "/brain/conflicts").then(function(j){
+          var host = document.getElementById("bconflicts");
+          if (!host || !j.conflicts || !j.conflicts.length) return;
+          host.innerHTML = '<div class="bsec" style="color:var(--err)">\\u26a0 ' + j.conflicts.length +
+            " likely contradiction" + (j.conflicts.length === 1 ? "" : "s") +
+            '<span class="bhint">resolve by forgetting or editing one side</span></div>' +
+            j.conflicts.slice(0, 5).map(function(c){
+              return '<div class="bconf"><span class="bconfsig">' + esc(c.signal) + "</span>" +
+                '<div class="bconfpair"><div>A \\u00b7 ' + esc(c.a.text.slice(0, 110)) + "</div>" +
+                "<div>B \\u00b7 " + esc(c.b.text.slice(0, 110)) + "</div></div></div>";
+            }).join("");
+        }).catch(function(){});
 
         Array.prototype.forEach.call(el.querySelectorAll(".bkind"), function(b){
           b.onclick = function(){ brainKind = b.getAttribute("data-kind"); refreshBrain(); };
