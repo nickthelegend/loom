@@ -951,9 +951,22 @@ memoryCmd
 program
   .command("costs")
   .description("what this project has spent, per agent")
-  .action(async () => {
+  .option("--series [days]", "daily breakdown instead of totals (default 14 days)")
+  .action(async (opts: { series?: string | boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
+    if (opts.series) {
+      const days = typeof opts.series === "string" ? Number(opts.series) || 14 : 14;
+      const { series } = await client.costSeries(project.id, days);
+      if (!series.length) return void console.log(pc.dim("no spend in this window"));
+      for (const d of series) {
+        const agents = Object.entries(d.byAgent)
+          .map(([id, a]) => `${id} ${fmtUsd(a.usd)}`)
+          .join("  ");
+        console.log(`${d.day}  ${fmtUsd(d.usd).padStart(9)}  ${String(d.turns).padStart(4)} turns  ${pc.dim(agents)}`);
+      }
+      return;
+    }
     const { costs } = await client.costs(project.id);
     console.log(
       pc.bold(`${project.name}`) +
