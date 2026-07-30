@@ -2452,12 +2452,43 @@ export class ProjectRuntime {
    * list of agent ids/roles. Undefined → the "ship" route if defined, else
    * every adapter in config order.
    */
+  /**
+   * Opt-in: checkpoint before a route starts.
+   *
+   * A route is exactly the moment you let a fleet loose — several agents,
+   * several turns, no human between hops. With safety.snapshotBeforeRoutes on,
+   * the brain+board+config land in .loom/snapshots/pre-route-<ts>.json first,
+   * so `loom restore` has a "before" without anyone having remembered to take
+   * one. Bounded: the newest five are kept, older ones pruned — a safety net,
+   * not an archive.
+   */
+  private snapshotBeforeRoute(): void {
+    if (!this.config.safety?.snapshotBeforeRoutes) return;
+    try {
+      const dir = path.join(projectLoomDir(this.info.dir), "snapshots");
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `pre-route-${Date.now()}.json`);
+      fs.writeFileSync(file, JSON.stringify(this.snapshot(), null, 2) + "\n");
+      const old = fs
+        .readdirSync(dir)
+        .filter((f) => f.startsWith("pre-route-"))
+        .sort()
+        .slice(0, -5);
+      for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
+      logbook.info("routes", `snapshot taken before the route — ${path.basename(file)}`, undefined, this.info.id);
+    } catch (err) {
+      // A safety net that blocks the route it protects is worse than none.
+      logbook.warn("routes", "pre-route snapshot failed", String(err), this.info.id);
+    }
+  }
+
   async startRoute(opts: {
     task: string;
     spec?: string | RouteStepSpec[];
     router?: RouterKind;
     maxHops?: number;
   }): Promise<RouteState> {
+    this.snapshotBeforeRoute();
     if (typeof opts.spec === "string" && opts.spec.trim() === "auto") {
       return this.routes.startDynamic(opts.task, {
         ...(opts.router ? { router: opts.router } : {}),

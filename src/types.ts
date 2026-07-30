@@ -185,6 +185,11 @@ export interface ProjectConfig {
   skills?: Record<string, boolean>;
   /** MCP servers this project can offer agents (mirrors the Anthropic API shape). */
   mcps?: McpServerConfig[];
+  /** Safety nets. Off by default. */
+  safety?: {
+    /** Checkpoint brain+board+config to .loom/snapshots before every route. */
+    snapshotBeforeRoutes?: boolean;
+  };
   /** Git policies. Off by default — committing is a policy, not a mechanic. */
   git?: {
     /** Commit each turn's changes as they land, agent as co-author. */

@@ -120,3 +120,43 @@ describe("snapshot and restore", () => {
     expect(r.status).toBe(400);
   });
 });
+
+/**
+ * safety.snapshotBeforeRoutes: the "before" nobody remembered to take.
+ */
+describe("snapshot before routes", () => {
+  it("writes a bounded pre-route checkpoint when opted in", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { ProjectRuntime } = await import("../src/daemon/runtime.js");
+    const { writeProjectConfig } = await import("../src/core/registry.js");
+    const dir = (await import("./helpers.js")).makeProjectDir({ name: "preroute" });
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".loom", "config.json"), "utf8"));
+    writeProjectConfig(dir, { ...cfg, safety: { snapshotBeforeRoutes: true } });
+    const rt = await ProjectRuntime.open({ id: "preroute", name: "preroute", dir });
+    try {
+      await rt.startRoute({ task: "quick", spec: ["plannerbot"] });
+      const snapDir = path.join(dir, ".loom", "snapshots");
+      const files = fs.readdirSync(snapDir).filter((f) => f.startsWith("pre-route-"));
+      expect(files.length).toBe(1);
+      const doc = JSON.parse(fs.readFileSync(path.join(snapDir, files[0]!), "utf8"));
+      expect(doc.format).toBe("loom-snapshot");
+    } finally {
+      await rt.close();
+    }
+  });
+
+  it("takes none without the flag", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { ProjectRuntime } = await import("../src/daemon/runtime.js");
+    const dir = (await import("./helpers.js")).makeProjectDir({ name: "noroute-snap" });
+    const rt = await ProjectRuntime.open({ id: "nrs", name: "nrs", dir });
+    try {
+      await rt.startRoute({ task: "quick", spec: ["plannerbot"] });
+      expect(fs.existsSync(path.join(dir, ".loom", "snapshots"))).toBe(false);
+    } finally {
+      await rt.close();
+    }
+  });
+});
