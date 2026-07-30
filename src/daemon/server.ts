@@ -925,6 +925,20 @@ export class LoomDaemon {
           await rt.close();
           this.runtimes.delete(id);
         }
+        // A spec run mid-flight would keep streaming into a project the API
+        // just said it no longer tracks; its daemon-side scrollback files are
+        // daemon state (not the project's .loom/), so tidying them here is not
+        // deleting the user's data — re-adding the project starts terminals
+        // fresh, exactly as expected.
+        this.specRunner.stop(id);
+        try {
+          const dir = path.join(ensureLoomHome(), "scrollback");
+          for (const f of fs.readdirSync(dir)) {
+            if (f.startsWith(`${id}-`)) fs.rmSync(path.join(dir, f), { force: true });
+          }
+        } catch {
+          /* no scrollback dir yet */
+        }
         unregisterProject(id);
         res.json({ removed: true, project: info, keptOnDisk: projectLoomDir(info.dir) });
       })();
