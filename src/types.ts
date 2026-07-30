@@ -191,6 +191,12 @@ export interface ProjectConfig {
     commitPerTurn?: boolean;
     /** Dragging a card to Working checks out task/<id>-<slug>. */
     branchPerTask?: boolean;
+    /**
+     * Each adapter works in its own worktree on branch agent/<id>, so parallel
+     * edits can't collide in the filesystem. Merging is manual in this
+     * version: `git merge agent/<id>` is the handoff of record.
+     */
+    worktreePerAgent?: boolean;
   };
 }
 

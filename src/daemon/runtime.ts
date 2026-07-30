@@ -31,7 +31,7 @@ import { compileBrief, retrieve } from "../core/brain-index.js";
 import { extractFromTurn, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
-import { ensureBranch, stageAndCommitFiles } from "../core/git.js";
+import { addWorktree as gitAddWorktree, ensureBranch, stageAndCommitFiles, worktreePath } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
 import { renderProjection } from "../core/distill.js";
 import {
@@ -229,6 +229,19 @@ export class ProjectRuntime {
     }
     // Watch the project's MCP servers, if it has any — see mcpHealth.
     rt.startMcpHealthLoop();
+    // Worktree-per-agent: prepare each adapter's checkout and respawn it there.
+    // Safe pre-start — agents are constructed lazily-started, so replacing the
+    // instance before its first turn loses nothing.
+    if (config.git?.worktreePerAgent) {
+      for (const cfg of config.agents) {
+        if (cfg.enabled === false) continue;
+        const live = rt.agents.get(cfg.id);
+        if (!live || live.capabilities.tier !== "adapter") continue;
+        await rt.ensureAgentWorktree(cfg.id);
+        rt.agents.delete(cfg.id);
+        rt.spawnAgent(cfg);
+      }
+    }
     return rt;
   }
 
@@ -706,6 +719,54 @@ export class ProjectRuntime {
   }
 
   /**
+   * Where this agent works: its own worktree when the project opted in, the
+   * shared tree otherwise.
+   *
+   * With git.worktreePerAgent on, each adapter gets a sibling checkout on its
+   * own branch (agent/<id>), so two agents editing at once cannot collide in
+   * the filesystem. The trade is stated where it's decided: merging is
+   * MANUAL in this version — the branches are ordinary git branches and
+   * `git merge agent/<id>` is the handoff of record. Auto-merge on baton
+   * handoff is a different feature with different failure modes (conflicts
+   * mid-handoff), deliberately not smuggled in here.
+   */
+  private agentDirs = new Map<string, string>();
+
+  agentDir(agentId: string): string {
+    return this.agentDirs.get(agentId) ?? this.info.dir;
+  }
+
+  private async ensureAgentWorktree(agentId: string): Promise<string> {
+    const existing = this.agentDirs.get(agentId);
+    if (existing) return existing;
+    const wt = worktreePath(this.info.dir, `agent-${agentId}`);
+    if (!fs.existsSync(wt)) {
+      try {
+        await gitAddWorktree(this.info.dir, {
+          slug: `agent-${agentId}`,
+          newBranch: `agent/${agentId}`,
+        });
+      } catch (err) {
+        // Branch already exists from a previous run — attach to it instead.
+        try {
+          await gitAddWorktree(this.info.dir, { slug: `agent-${agentId}`, branch: `agent/${agentId}` });
+        } catch {
+          logbook.warn(
+            "git",
+            `worktree for ${agentId} could not be created — falling back to the shared tree`,
+            String(err),
+            this.info.id,
+          );
+          this.agentDirs.set(agentId, this.info.dir);
+          return this.info.dir;
+        }
+      }
+    }
+    this.agentDirs.set(agentId, wt);
+    return wt;
+  }
+
+  /**
    * Create one agent and subscribe to it, exactly as the constructor does.
    *
    * Shared so a roster change can't drift from a cold start: an agent added at
@@ -713,7 +774,7 @@ export class ProjectRuntime {
    * there when the project opened.
    */
   private spawnAgent(cfg: AgentConfig): AnyAgent {
-    const agent = createAgent(cfg, this.info.dir);
+    const agent = createAgent(cfg, this.agentDir(cfg.id));
     this.agents.set(cfg.id, agent);
     agent.onEvent((e) => {
       const chat = this.turnChat.get(agent.id);
@@ -1344,7 +1405,7 @@ export class ProjectRuntime {
       return;
     }
     this.preTurnTree.delete(agentId);
-    void diffSinceSnapshot(this.info.dir, before)
+    void diffSinceSnapshot(this.agentDir(agentId), before)
       .then((diff) => {
         if (diff) {
           this.log.append({
@@ -1393,7 +1454,7 @@ export class ProjectRuntime {
         `${subject}\n\n` +
         `Turn by ${agentId}${cfg ? ` (${cfg.kind})` : ""} in Loom.\n` +
         `Co-Authored-By: ${agentId} <${agentId}@loom.local>`;
-      await stageAndCommitFiles(this.info.dir, files, message);
+      await stageAndCommitFiles(this.agentDir(agentId), files, message);
       this.log.append({
         kind: "status",
         agentId,
@@ -1853,7 +1914,7 @@ export class ProjectRuntime {
       });
     }
     // Snapshot the tree so this prompt's changes can be attributed to it.
-    this.preTurnTree.set(target, await porcelainStatus(this.info.dir));
+    this.preTurnTree.set(target, await porcelainStatus(this.agentDir(target)));
     // Fire-and-notify: the turn runs in the background; progress streams
     // into the log and completion lands as run_complete.
     void agent
