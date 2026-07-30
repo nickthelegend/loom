@@ -329,6 +329,66 @@ program
   });
 
 program
+  .command("stale")
+  .description("sessions that look hung — busy far longer than any plausible turn")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { stale } = await client.staleSessions(project.id);
+    if (!stale.length) return void console.log(pc.dim("nothing looks hung"));
+    for (const s of stale) {
+      console.log(`${pc.red(s.agentId)}  busy ${Math.round(s.busyMs / 60000)}m  ${pc.dim(`— loom reap ${s.agentId}`)}`);
+    }
+  });
+
+program
+  .command("reap <agentId>")
+  .description("put a hung session out of its misery and respawn it fresh")
+  .action(async (agentId: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      await client.reapSession(project.id, agentId);
+      console.log(`${pc.green("✓")} ${agentId} respawned — baton released if it held it`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("brain:conflicts")
+  .description("units that likely contradict each other, for you to resolve")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { conflicts } = await client.brainConflicts(project.id);
+    if (!conflicts.length) return void console.log(pc.dim("no likely contradictions"));
+    for (const c of conflicts) {
+      console.log(`${pc.yellow(c.signal)} ${pc.dim(`(${Math.round(c.similarity * 100)}% same topic)`)}`);
+      console.log(`  A: ${c.a.text.slice(0, 90)}`);
+      console.log(`  B: ${c.b.text.slice(0, 90)}`);
+    }
+  });
+
+program
+  .command("mcp:health")
+  .description("each MCP server's live state, from the background poll")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { health } = await client.mcpHealth(project.id);
+    const rows = Object.entries(health);
+    if (!rows.length) return void console.log(pc.dim("no MCP servers configured (or none probed yet)"));
+    for (const [name, h] of rows) {
+      const age = Math.round((Date.now() - h.probedAt) / 1000);
+      console.log(
+        `${name.padEnd(20)} ${h.up ? pc.green("up") : pc.red(`down ×${h.failures}`)}  ${pc.dim(`${age}s ago`)}`,
+      );
+    }
+  });
+
+program
   .command("snapshot [file]")
   .description("checkpoint this project's brain + board + config to a file")
   .action(async (file: string | undefined) => {
