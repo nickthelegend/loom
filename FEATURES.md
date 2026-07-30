@@ -197,11 +197,23 @@ counted separately — a test proves a feature, it isn't one.
 164. feat — Brain tab surfaces likely contradictions, quiet when clean
 165. content — 6 follow-on issues (#31–#36) capturing the honest next steps
 
+## The build-verification pass (166–168)
+166. fix — a project registered from a `.loom/config.json` with no `name` got `name: null`:
+     `--name` silently ignored, nameless rows in every list, and `snapshot()`'s declared
+     `project: string` absent from the JSON. Fixed at the route (fill in and persist) and
+     at `registerProject` (never store a blank label)
+167. chore — `docs/img` out of the npm tarball: 1.9 MB → 783 kB packed, 4.1 MB → 2.9 MB
+     unpacked, for 5 screenshots nothing in the package referenced
+168. verify — the published artifact proven, not assumed: real `tsc` emit, all four
+     package.json entrypoints, `npm pack` → clean-dir install → both bins linked →
+     daemon boots → `/app` serves 627 kB → project created, brain written, retrieval
+     scored, a real turn completed
+
 ## Test suites written or extended (proof, counted apart)
 agent-instances (12) · subagents (10) · specs+voice (10) · brain-portable (7) ·
 cli-watch (3) · budgets (+1) · retry (3) · stale-sessions (4) · costs (+2) ·
 board (+4) · snapshot (3) · scoped-tokens+small-surfaces (13) · routes-crud (5) ·
 routes-onfail (4) · commit-per-turn+branch (4) · worktree-per-agent (4) ·
-scrollback (3) · mcp health (+2) · pre-route snapshots (+2) · brain decay/fuzzy/conflicts (+11) ·
+scrollback (3) · mcp health (+2) · pre-route snapshots (+2) · project naming (6) · brain decay/fuzzy/conflicts (+11) ·
 doctor fixes (+4) · app-dom: browser tab, console filters, review comments (+5) ·
 backend loom state (+1)
