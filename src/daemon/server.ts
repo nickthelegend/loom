@@ -1792,11 +1792,15 @@ export class LoomDaemon {
             brain: body.brain,
             projection: body.projection,
             defaultAgent: body.defaultAgent,
+            git: body.git,
+            safety: body.safety,
           });
           res.json({
             brain: cfg.brain ?? {},
             projection: cfg.projection ?? {},
             defaultAgent: cfg.defaultAgent ?? "",
+            git: cfg.git ?? {},
+            safety: cfg.safety ?? {},
           });
         } catch (err) {
           res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

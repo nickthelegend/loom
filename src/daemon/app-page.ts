@@ -8779,7 +8779,35 @@ ${BRAND_SPRITE}
       }).join("");
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \\u00b7 baton " + esc(p.holder || "\\u2014") + "</div></div>" +
         '<div class="pssec">Agents \\u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
-        '<div class="pshint">Off agents stay in the roster but can\\u2019t take turns or hold the baton. Changes land on the next turn \\u2014 no restart. You can\\u2019t switch off the baton holder; hand it off first.</div>';
+        '<div class="pshint">Off agents stay in the roster but can\\u2019t take turns or hold the baton. Changes land on the next turn \\u2014 no restart. You can\\u2019t switch off the baton holder; hand it off first.</div>' +
+        '<div class="pssec" style="margin-top:14px">Policies \\u2014 all off by default</div>' +
+        '<div class="psrows" id="pspolicies"><div class="loader"><i></i><i></i><i></i><i></i></div></div>';
+      // The policy toggles, from the same settings the CLI and config file use.
+      api("/api/projects/" + pid + "/config").then(function(cfg){
+        var host = document.getElementById("pspolicies"); if (!host) return;
+        var POLS = [
+          ["git.commitPerTurn", "Commit each turn", "one commit per turn, agent as co-author, staged by the turn\\u2019s own files", (cfg.git || {}).commitPerTurn],
+          ["git.branchPerTask", "Branch per card", "dragging a card to Working checks out task/<id>-<slug>", (cfg.git || {}).branchPerTask],
+          ["git.worktreePerAgent", "Worktree per agent", "each agent in its own checkout on agent/<id> \\u2014 applies to agents spawned from now on; merging is manual", (cfg.git || {}).worktreePerAgent],
+          ["safety.snapshotBeforeRoutes", "Snapshot before routes", "checkpoint brain+board+config before a fleet runs unattended", (cfg.safety || {}).snapshotBeforeRoutes],
+        ];
+        host.innerHTML = POLS.map(function(pol){
+          return '<div class="psrow">' +
+            '<label class="psswitch" aria-label="' + esc(pol[1]) + '"><input type="checkbox" class="pspol" data-pol="' + pol[0] + '"' + (pol[3] ? " checked" : "") + '><span class="pssl"></span></label>' +
+            '<div class="psinfo"><div class="psname">' + esc(pol[1]) + '</div><div class="pskind">' + pol[2] + "</div></div></div>";
+        }).join("");
+        Array.prototype.forEach.call(host.querySelectorAll(".pspol"), function(cb){
+          cb.onchange = function(){
+            var parts = cb.getAttribute("data-pol").split(".");
+            var patch = {}; patch[parts[0]] = {}; patch[parts[0]][parts[1]] = cb.checked;
+            api("/api/projects/" + pid + "/config", { method: "PATCH", body: JSON.stringify(patch) })
+              .catch(function(err){ toast(err.message || "could not save"); cb.checked = !cb.checked; });
+          };
+        });
+      }).catch(function(){
+        var host = document.getElementById("pspolicies");
+        if (host) host.innerHTML = '<div class="obsub">Policies unavailable \\u2014 the daemon didn\\u2019t answer.</div>';
+      });
       Array.prototype.forEach.call(body.querySelectorAll(".psen"), function(cb){
         cb.onchange = function(){
           var agent = cb.getAttribute("data-agent");

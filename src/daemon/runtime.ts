@@ -587,6 +587,8 @@ export class ProjectRuntime {
     brain?: { extractor?: "auto" | "off"; model?: string };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
     defaultAgent?: string;
+    git?: { commitPerTurn?: boolean; branchPerTask?: boolean; worktreePerAgent?: boolean };
+    safety?: { snapshotBeforeRoutes?: boolean };
   }): ProjectConfig {
     // Validate everything that can be rejected BEFORE touching this.config, so a
     // bad field can't leave a half-applied change in memory that the next save
@@ -613,6 +615,25 @@ export class ProjectRuntime {
       if (!defaultId) delete this.config.defaultAgent;
       else this.config.defaultAgent = defaultId;
     }
+    if (patch.git) {
+      const g = { ...(this.config.git ?? {}) };
+      for (const k of ["commitPerTurn", "branchPerTask", "worktreePerAgent"] as const) {
+        if (typeof patch.git[k] === "boolean") {
+          if (patch.git[k]) g[k] = true;
+          else delete g[k];
+        }
+      }
+      if (Object.keys(g).length) this.config.git = g;
+      else delete this.config.git;
+      // worktreePerAgent takes effect for agents spawned from here on; the
+      // Settings screen says so rather than pretending it's instant.
+    }
+    if (patch.safety) {
+      if (typeof patch.safety.snapshotBeforeRoutes === "boolean") {
+        if (patch.safety.snapshotBeforeRoutes) this.config.safety = { snapshotBeforeRoutes: true };
+        else delete this.config.safety;
+      }
+    }
     this.saveConfig();
     return this.config;
   }
@@ -628,6 +649,8 @@ export class ProjectRuntime {
     brain: { extractor: "auto" | "off"; model: string };
     projection: { mode: "template" | "llm"; model: string };
     defaultAgent: string;
+    git: { commitPerTurn: boolean; branchPerTask: boolean; worktreePerAgent: boolean };
+    safety: { snapshotBeforeRoutes: boolean };
     agents: Array<{ id: string; kind: string; role?: string }>;
   } {
     return {
@@ -639,6 +662,12 @@ export class ProjectRuntime {
         mode: this.config.projection?.mode === "llm" ? "llm" : "template",
         model: this.config.projection?.model ?? "",
       },
+      git: {
+        commitPerTurn: Boolean(this.config.git?.commitPerTurn),
+        branchPerTask: Boolean(this.config.git?.branchPerTask),
+        worktreePerAgent: Boolean(this.config.git?.worktreePerAgent),
+      },
+      safety: { snapshotBeforeRoutes: Boolean(this.config.safety?.snapshotBeforeRoutes) },
       defaultAgent: this.config.defaultAgent ?? "",
       agents: this.config.agents.map((a) => ({ id: a.id, kind: a.kind, role: a.role })),
     };
