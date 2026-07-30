@@ -131,3 +131,64 @@ describe("everyone else", () => {
     expect(r.status).toBe(400);
   });
 });
+
+/**
+ * The small-surface routes shipped alongside scoping: version, HEAD health,
+ * rename, thread search, board-task listing. One suite because they share the
+ * daemon fixture, one test each because they share nothing else.
+ */
+describe("small surfaces", () => {
+  it("HEAD /api/health answers bodylessly", async () => {
+    const r = await fetch(`${baseUrl}/api/health`, { method: "HEAD" });
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe("");
+  });
+
+  it("GET /api/version names the build", async () => {
+    const r = await fetch(`${baseUrl}/api/version`, { headers: H(adminToken) });
+    const v = (await r.json()) as { rev: string; node: string; uptimeSec: number };
+    expect(v.rev).toBeTruthy();
+    expect(v.node).toContain("v");
+    expect(v.uptimeSec).toBeGreaterThanOrEqual(0);
+  });
+
+  it("renames the label and only the label", async () => {
+    const r = await fetch(`${baseUrl}/api/projects/${mineId}`, {
+      method: "PATCH",
+      headers: H(adminToken),
+      body: JSON.stringify({ name: "mine-renamed" }),
+    });
+    expect(r.status).toBe(200);
+    const g = await fetch(`${baseUrl}/api/projects/${mineId}`, { headers: H(adminToken) });
+    const { project } = (await g.json()) as { project: { id: string; name: string } };
+    expect(project.name).toBe("mine-renamed");
+    expect(project.id).toBe(mineId); // the id never moves
+  });
+
+  it("searches the thread", async () => {
+    await fetch(`${baseUrl}/api/projects/${mineId}/messages`, {
+      method: "POST",
+      headers: H(adminToken),
+      body: JSON.stringify({ text: "the xyzzy incident of tuesday" }),
+    });
+    const r = await fetch(
+      `${baseUrl}/api/projects/${mineId}/events/search?q=xyzzy`,
+      { headers: H(adminToken) },
+    );
+    const { hits } = (await r.json()) as { hits: Array<{ payload: { text?: string } }> };
+    expect(hits.some((h) => String(h.payload.text).includes("xyzzy"))).toBe(true);
+  });
+
+  it("lists the cards you wrote", async () => {
+    await fetch(`${baseUrl}/api/projects/${mineId}/board/tasks`, {
+      method: "POST",
+      headers: H(adminToken),
+      body: JSON.stringify({ title: "listable card" }),
+    });
+    const r = await fetch(`${baseUrl}/api/projects/${mineId}/board/tasks`, {
+      headers: H(adminToken),
+    });
+    const { tasks } = (await r.json()) as { tasks: Array<{ title: string }> };
+    expect(tasks.some((t) => t.title === "listable card")).toBe(true);
+  });
+});
