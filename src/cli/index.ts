@@ -284,6 +284,36 @@ program
   });
 
 program
+  .command("routes:save <name> <steps...>")
+  .description('define a named route, e.g. loom routes:save ship planner executor reviewer')
+  .action(async (name: string, steps: string[]) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      await client.saveRoute(project.id, name, steps);
+      console.log(`${pc.green("✓")} ${name}: ${steps.join(" → ")}`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("routes:rm <name>")
+  .description("remove a named route")
+  .action(async (name: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      await client.deleteRoute(project.id, name);
+      console.log(`${pc.red("-")} ${name} removed`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("retry <agentId>")
   .description("re-run the last failed turn on a different agent, failure attached as context")
   .action(async (agentId: string) => {

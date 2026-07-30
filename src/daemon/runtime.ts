@@ -63,7 +63,7 @@ import {
   installSkillFromGit,
   type SkillInstallResult,
 } from "../core/skill-install.js";
-import { RouteEngine } from "../core/routes.js";
+import { resolveSteps, RouteEngine } from "../core/routes.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
 import {
   newId,
@@ -1786,6 +1786,40 @@ export class ProjectRuntime {
       // nothing removes is a slow leak of the project's server URLs.
       .finally(() => mcp?.cleanup());
     return { agentId: target };
+  }
+
+  // -------------------------------------------------------------------------
+  // Named routes
+  // -------------------------------------------------------------------------
+  /**
+   * Define or replace a named route.
+   *
+   * Routes were config you hand-edited: `ship` was built at init and everything
+   * else meant opening .loom/config.json. Validated against the CURRENT roster
+   * before saving — a route that names an agent this project doesn't have would
+   * sit in the file looking runnable and fail at its first step. Saving through
+   * here puts the team's pipeline in a version-controllable file instead of one
+   * person's shell history.
+   */
+  saveRoute(name: string, steps: RouteStepSpec[]): Record<string, RouteStepSpec[]> {
+    const clean = name.trim().slice(0, 40);
+    if (!clean) throw new Error("a route needs a name");
+    resolveSteps(steps, this.config, (id) => {
+      const live = this.agents.get(id);
+      return Boolean(live && isAdapter(live));
+    });
+    this.config.routes = { ...(this.config.routes ?? {}), [clean]: steps };
+    this.saveConfig();
+    return this.config.routes;
+  }
+
+  deleteRoute(name: string): Record<string, RouteStepSpec[]> {
+    const routes = { ...(this.config.routes ?? {}) };
+    if (!(name in routes)) throw new Error(`no route named "${name}"`);
+    delete routes[name];
+    this.config.routes = routes;
+    this.saveConfig();
+    return routes;
   }
 
   // -------------------------------------------------------------------------

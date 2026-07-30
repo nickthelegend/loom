@@ -2024,6 +2024,34 @@ export class LoomDaemon {
       }),
     );
 
+    // Named routes: define and remove without hand-editing config.json.
+    // Validated against the current roster before saving.
+    app.put(
+      "/api/projects/:id/routes/:name",
+      withRuntime(async (rt, req, res) => {
+        const steps = (req.body as { steps?: unknown } | undefined)?.steps;
+        if (!Array.isArray(steps) || !steps.length) {
+          return void res.status(400).json({ error: "missing steps" });
+        }
+        try {
+          res.json({ routes: rt.saveRoute(String(req.params.name), steps as never) });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    app.delete(
+      "/api/projects/:id/routes/:name",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json({ routes: rt.deleteRoute(String(req.params.name)) });
+        } catch (err) {
+          res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     // Checkpoint and restore: brain + board + config, NOT the working tree
     // (git owns files) and NOT the event log (history is what happened).
     app.get(

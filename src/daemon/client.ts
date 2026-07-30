@@ -163,6 +163,21 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/subtasks`);
   }
 
+  saveRoute(id: string, name: string, steps: string[]): Promise<{ routes: Record<string, unknown> }> {
+    return this.request(
+      "PUT",
+      `/api/projects/${encodeURIComponent(id)}/routes/${encodeURIComponent(name)}`,
+      { steps },
+    );
+  }
+
+  deleteRoute(id: string, name: string): Promise<{ routes: Record<string, unknown> }> {
+    return this.request(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(id)}/routes/${encodeURIComponent(name)}`,
+    );
+  }
+
   /** Re-run the last failed turn on a different agent, failure attached. */
   retryTurn(id: string, agentId: string): Promise<{ agentId: string; retried: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/retry`, { agentId });
