@@ -215,6 +215,17 @@ export class DaemonClient {
     );
   }
 
+  version(): Promise<{ rev: string; node: string; platform: string; uptimeSec: number; pid: number }> {
+    return this.request("GET", "/api/version");
+  }
+
+  forgetMemory(id: string, memoryId: string): Promise<{ forgotten: boolean }> {
+    return this.request(
+      "DELETE",
+      `/api/projects/${encodeURIComponent(id)}/brain/${encodeURIComponent(memoryId)}`,
+    );
+  }
+
   renameProject(id: string, name: string): Promise<{ project: { id: string; name: string } }> {
     return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}`, { name });
   }

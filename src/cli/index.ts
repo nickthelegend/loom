@@ -329,6 +329,50 @@ program
   });
 
 program
+  .command("version")
+  .description("CLI build vs the daemon's — the mismatch loom up --restart fixes")
+  .action(async () => {
+    const { BUILD_REV } = await import("../daemon/server.js");
+    console.log(`cli     ${BUILD_REV}`);
+    try {
+      const client = await ensureDaemon();
+      const v = await client.version();
+      const stale = v.rev !== BUILD_REV;
+      console.log(`daemon  ${v.rev}  ${pc.dim(`node ${v.node} · up ${Math.round(v.uptimeSec / 60)}m`)}`);
+      if (stale) console.log(pc.yellow("daemon is running an older build — loom up --restart"));
+    } catch {
+      console.log(pc.dim("daemon  not running"));
+    }
+  });
+
+program
+  .command("brain:forget <memoryId>")
+  .description("forget one memory unit (its history stays in the log)")
+  .action(async (memoryId: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      await client.forgetMemory(project.id, memoryId);
+      console.log(`${pc.red("-")} ${memoryId} forgotten`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("open")
+  .description("open this machine's Loom app in the browser")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const url = `${client.baseUrl}/app`;
+    console.log(url);
+    const { spawn: sp } = await import("node:child_process");
+    const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+    sp(opener, [url], { detached: true, stdio: "ignore" }).unref();
+  });
+
+program
   .command("rename <name...>")
   .description("rename this project (the id never moves, so nothing orphans)")
   .action(async (words: string[]) => {
