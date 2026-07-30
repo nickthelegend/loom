@@ -59,6 +59,8 @@ export interface ResolvedSteps {
   ids: string[];
   /** Parallel to ids; null when the step carries no custom instruction. */
   instructions: Array<string | null>;
+  /** Parallel to ids; the step to jump back to when this one errors. */
+  onFail: Array<string | null>;
   /**
    * Parallel to ids; the job the step assigns, or null to inherit the agent's
    * own role. This is what lets a task say "claude-code plans, opencode
@@ -81,6 +83,7 @@ export function resolveSteps(
   const ids: string[] = [];
   const instructions: Array<string | null> = [];
   const roles: Array<string | null> = [];
+  const onFail: Array<string | null> = [];
   for (const entry of spec) {
     const step = stepName(entry);
     const byId = config.agents.find((a) => a.id === step);
@@ -101,8 +104,26 @@ export function resolveSteps(
     roles.push(
       typeof entry === "object" && entry.role?.trim() ? entry.role.trim().slice(0, 40) : null,
     );
+    onFail.push(typeof entry === "object" && entry.onFail?.trim() ? entry.onFail.trim() : null);
   }
-  return { ids, instructions, roles };
+  // onFail targets resolve the same way steps do, and must point BACKWARD:
+  // a forward jump on failure would skip work, and a self-jump is a retry
+  // loop with no progress between attempts.
+  const resolvedOnFail = onFail.map((target, i) => {
+    if (!target) return null;
+    const byId = config.agents.find((a) => a.id === target);
+    const byRole = config.agents.find((a) => a.role === target && isAdapterId(a.id));
+    const targetId = (byId ?? byRole)?.id;
+    if (!targetId) throw new Error(`onFail "${target}" matches no agent id or role`);
+    const at = ids.slice(0, i).lastIndexOf(targetId);
+    if (at === -1) {
+      throw new Error(
+        `step ${i + 1}'s onFail "${target}" must name an EARLIER step — loops go backward`,
+      );
+    }
+    return targetId;
+  });
+  return { ids, instructions, roles, onFail: resolvedOnFail };
 }
 
 const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
@@ -182,6 +203,9 @@ export class RouteEngine {
       steps: resolved.ids,
       stepRoles,
       stepInstructions: resolved.instructions,
+      ...(resolved.onFail.some(Boolean)
+        ? { stepOnFail: resolved.onFail, loops: 0, maxLoops: 3 }
+        : {}),
       current: 0,
       status: "running",
       mode: "static",
@@ -318,6 +342,40 @@ export class RouteEngine {
     }
 
     if (event.kind === "error" && r.status === "running") {
+      // A step with an onFail loops back instead of sinking the route — the
+      // "review fails → back to execute" arrow, as data. Budgeted: three
+      // re-entries, then the route fails with the loop named, because a
+      // pipeline that never converges should say so rather than orbit.
+      const jumpTo = r.mode === "static" ? (r.stepOnFail?.[r.current] ?? null) : null;
+      if (jumpTo) {
+        const budget = r.maxLoops ?? 3;
+        if ((r.loops ?? 0) >= budget) {
+          this.finish(
+            r,
+            "failed",
+            `step ${r.current + 1} (${currentAgent}) kept failing after ${budget} loops back to "${jumpTo}"`,
+          );
+          return;
+        }
+        const backTo = r.steps.slice(0, r.current).lastIndexOf(jumpTo);
+        r.loops = (r.loops ?? 0) + 1;
+        r.current = backTo;
+        this.write(r);
+        this.host.log.append({
+          kind: "route_step",
+          payload: {
+            routeId: r.id,
+            step: backTo,
+            of: r.steps.length,
+            agent: jumpTo,
+            loopedFrom: currentAgent,
+            loop: r.loops,
+            reason: `"${currentAgent}" errored — looping back`,
+          },
+        });
+        void this.beginStep(r).catch(() => {});
+        return;
+      }
       this.finish(
         r,
         "failed",

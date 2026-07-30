@@ -138,7 +138,19 @@ export interface UnifiedMemory {
  * agent can plan in one task and review in another. `instruction` is optional
  * free-text focus on top of the role.
  */
-export type RouteStepSpec = string | { step: string; role?: string; instruction?: string };
+export type RouteStepSpec =
+  | string
+  | {
+      step: string;
+      role?: string;
+      instruction?: string;
+      /**
+       * Where to go when THIS step errors: an earlier step's id/role, to retry
+       * from there instead of failing the route. "review fails → back to
+       * execute" as data. Guarded by RouteState.maxLoops.
+       */
+      onFail?: string;
+    };
 
 /** How shared memory is rendered on handoff. */
 export interface ProjectionConfig {
@@ -250,6 +262,11 @@ export interface RouteState {
   updatedAt: number;
   reason?: string;
   pendingQuestion?: string;
+  /** onFail jump budget: re-entries consumed so far, and the cap. */
+  loops?: number;
+  maxLoops?: number;
+  /** Parallel to steps: where each step jumps on error (static routes). */
+  stepOnFail?: Array<string | null>;
   /** Project cost total when the route started (internal baseline). */
   costStartUsd?: number;
   /** Spend attributed to this route (set when it ends). */
