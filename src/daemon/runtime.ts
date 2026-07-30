@@ -2156,6 +2156,11 @@ export class ProjectRuntime {
   ): Promise<{ id: string; agentId: string }> {
     const task = opts.task?.trim();
     if (!task) throw new Error("a subtask needs a task");
+    // A child's briefing is deliberately narrow; a 100KB "task" is the parent
+    // smuggling its whole context through the one field that was scoped.
+    if (task.length > 10_000) {
+      throw new Error("a subtask brief tops out at 10k chars — hand files, not transcripts");
+    }
 
     // The parent has to be a real agent in this project, so the thread can
     // indent under something that exists.
