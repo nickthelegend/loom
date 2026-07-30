@@ -1115,6 +1115,61 @@ describe("web app · the browser tab", () => {
 });
 
 /**
+ * Review comments on a diff (#18): click a line, type, and everything leaves
+ * as ONE staged message through the composer — the same contract as every
+ * other send, no parallel channel.
+ */
+describe("web app · review comments", () => {
+  it("collects line comments and stages them in the composer", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const client = new DaemonClient(readDaemonConfig()!);
+    const { projects } = await client.listProjects();
+    const projDir = projects.find((p) => p.id === projectId)!.dir;
+    // A real dirty tree, so the changes dock has a real diff to annotate.
+    const { execFileSync } = await import("node:child_process");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: projDir });
+    try {
+      git("init", "-q");
+      git("config", "user.email", "t@t");
+      git("config", "user.name", "t");
+      fs.writeFileSync(path.join(projDir, "reviewed.txt"), "line one\n");
+      git("add", "-A");
+      git("commit", "-qm", "seed");
+    } catch {
+      /* already a repo from an earlier test — fine */
+    }
+    fs.writeFileSync(path.join(projDir, "reviewed.txt"), "line one\nline two\n");
+
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, '.rvbtn[data-view="scm"]');
+    // Source-control rail, then the file's own row opens the changes dock.
+    click($(m, '.rvbtn[data-view="scm"]'));
+    await waitUntil(() => !!$(m, '.scmname[data-open="reviewed.txt"]'));
+    click($(m, '.scmname[data-open="reviewed.txt"]'));
+    await waitUntil(() => !!$(m, ".dl.cmt"));
+
+    // Click the commentable line, type, Enter.
+    click($(m, ".dl.cmt"));
+    await waitUntil(() => !!$(m, ".cmteditor input"));
+    const input = $(m, ".cmteditor input") as HTMLInputElement;
+    input.value = "rename this";
+    input.dispatchEvent(
+      new m.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    await waitUntil(() => !!$(m, "#reviewbar"));
+    expect(text(m, "#reviewbar")).toContain("1 review comment");
+
+    // Stage: the composer carries file:line and the words.
+    click($(m, "#reviewsend"));
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    expect(box.value).toContain("reviewed.txt");
+    expect(box.value).toContain("rename this");
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+/**
  * The agent picker.
  *
  * A project's roster used to be frozen at creation: install a new ADE and your

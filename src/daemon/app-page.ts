@@ -1105,6 +1105,17 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
   .browframe iframe{width:100%;height:100%;border:0;display:block}
   .browhint{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;
     color:var(--muted-foreground);font-size:12.5px;line-height:1.7;padding:24px}
+  /* review comments on diff lines */
+  .dl.cmt{cursor:pointer}
+  .dl.cmt:hover .lc{text-decoration:underline dotted}
+  .dl.commented{box-shadow:inset 2.5px 0 0 var(--live)}
+  .cmteditor{display:flex;gap:6px;padding:4px 8px 4px 46px;background:color-mix(in srgb, var(--accent) 40%, transparent)}
+  .cmteditor input{flex:1;height:24px;background:var(--editor-surface);border:1px solid var(--ring);
+    border-radius:6px;color:var(--foreground);font-family:var(--font-mono);font-size:11.5px;padding:0 8px;outline:none}
+  .reviewbar{position:absolute;left:12px;right:12px;bottom:10px;z-index:6;display:flex;align-items:center;gap:10px;
+    padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--editor-background);
+    box-shadow:0 6px 24px rgba(0,0,0,.45);font-size:12px}
+  .reviewbar .btn{margin-left:auto}
   .conwrap{position:absolute;inset:0;display:none;flex-direction:column;overflow:hidden;
     background:var(--background)}
   /* The console is a pseudo-pane: shown when its tab is active, and the terminal
@@ -2701,7 +2712,7 @@ ${BRAND_SPRITE}
     return "";
   }
   // Unified diff lines with an old/new line-number gutter (Orca diff view).
-  function renderDiffLines(lines){
+  function renderDiffLines(lines, commentFile){
     var oldN = 0, newN = 0, out = "";
     lines.forEach(function(line){
       var m = line.match(/^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
@@ -2722,7 +2733,10 @@ ${BRAND_SPRITE}
       else if (c === "del") { lo = String(oldN++); mark = "\\u2212"; }
       else { lo = String(oldN++); ln = String(newN++); }
       var content = ch === "+" || ch === "-" || ch === " " ? line.slice(1) : line;
-      out += '<div class="dl' + (c ? " " + c : "") + '">' +
+      // Reviewable rows carry their location, so a click can turn into a
+      // comment that names file:line instead of "that bit somewhere".
+      var loc = commentFile && ln ? ' data-cfile="' + esc(commentFile) + '" data-cline="' + ln + '"' : "";
+      out += '<div class="dl' + (c ? " " + c : "") + (loc ? " cmt" : "") + '"' + loc + ">" +
         '<span class="ln">' + lo + '</span><span class="ln">' + ln + "</span>" +
         '<span class="lm">' + mark + "</span>" +
         '<span class="lc">' + (esc(content) || " ") + "</span></div>";
@@ -2740,7 +2754,7 @@ ${BRAND_SPRITE}
       return '<div class="dfile" id="df-' + i + '">' +
         '<div class="dfh">' + ICONS.tree + '<span class="p">' + esc(f.path || "patch") + "</span>" +
         '<span class="cadd">+' + f.add + "</span><span class=\\"cdel\\">\\u2212" + f.del + "</span></div>" +
-        '<div class="dcode">' + renderDiffLines(f.lines) + "</div></div>";
+        '<div class="dcode">' + renderDiffLines(f.lines, f.path) + "</div></div>";
     }).join("");
   }
 
@@ -4298,8 +4312,87 @@ ${BRAND_SPRITE}
       });
     }
 
+    // ---- review comments: click a diff line, say what's wrong ---------------
+    // Comments stage locally and leave as ONE message through the composer, so
+    // the reply goes to whichever agent you pick there — same contract as
+    // every other send, no parallel channel to a special endpoint.
+    if (!state.review) state.review = [];
+
+    function reviewBar(){
+      var bar = document.getElementById("reviewbar");
+      if (!state.review.length) { if (bar) bar.remove(); return; }
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "reviewbar";
+        bar.className = "reviewbar";
+        var host = document.getElementById("dockpane");
+        if (host) host.appendChild(bar);
+      }
+      bar.innerHTML = '<span>' + state.review.length + " review comment" + (state.review.length === 1 ? "" : "s") + "</span>" +
+        '<button class="btn" id="reviewsend">stage in composer</button>' +
+        '<button class="iconbtn" id="reviewclear" title="discard">' + ICONS.x + "</button>";
+      var send = document.getElementById("reviewsend");
+      if (send) send.onclick = function(){
+        var box = document.getElementById("box");
+        if (!box) return;
+        box.value = "Review comments on your changes:\\n\\n" + state.review.map(function(c){
+          return "- " + c.file + ":" + c.line + " \\u2014 " + c.text;
+        }).join("\\n") + "\\n\\nAddress each one, or say why it should stay as it is.";
+        box.focus();
+        state.review = [];
+        reviewBar();
+        Array.prototype.forEach.call(document.querySelectorAll(".dl.commented"), function(el){
+          el.classList.remove("commented");
+        });
+        toast("comments staged \\u2014 pick the agent and send");
+      };
+      var clear = document.getElementById("reviewclear");
+      if (clear) clear.onclick = function(){
+        state.review = [];
+        reviewBar();
+        Array.prototype.forEach.call(document.querySelectorAll(".dl.commented"), function(el){
+          el.classList.remove("commented");
+        });
+      };
+    }
+
+    function bindReviewClicks(){
+      var pane = document.getElementById("pane-changes");
+      if (!pane || pane.dataset.reviewBound) return;
+      pane.dataset.reviewBound = "1";
+      pane.addEventListener("click", function(ev){
+        var row = ev.target.closest ? ev.target.closest(".dl.cmt") : null;
+        if (!row) return;
+        // An open editor on this row means the click is inside it — let it be.
+        if (row.nextElementSibling && row.nextElementSibling.classList.contains("cmteditor")) return;
+        var ed = document.createElement("div");
+        ed.className = "cmteditor";
+        ed.innerHTML = '<input placeholder="what\\u2019s wrong with this line? \\u21b5 to add" spellcheck="false">' +
+          '<button class="iconbtn xs" title="cancel">' + ICONS.x + "</button>";
+        row.after(ed);
+        var input = ed.querySelector("input");
+        input.focus();
+        ed.querySelector("button").onclick = function(){ ed.remove(); };
+        input.onkeydown = function(e){
+          if (e.key === "Escape") { ed.remove(); return; }
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          var text = input.value.trim();
+          if (!text) { ed.remove(); return; }
+          state.review.push({
+            file: row.getAttribute("data-cfile"),
+            line: row.getAttribute("data-cline"),
+            text: text,
+          });
+          row.classList.add("commented");
+          ed.remove();
+          reviewBar();
+        };
+      });
+    }
+
     // ---- diff/preview dock (right of the chat, opens on click) --------------
-    function openDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.add("open"); }
+    function openDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.add("open"); bindReviewClicks(); }
     function closeDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.remove("open"); }
     function dockTitle(icon, label){
       var i = document.getElementById("dockicon"); if (i) i.innerHTML = icon || "";
@@ -4336,7 +4429,7 @@ ${BRAND_SPRITE}
             return '<div class="dfile" id="df-' + i + '"><div class="dfh">' + ICONS.tree +
               '<span class="p">' + esc(f.path || "patch") + "</span>" +
               '<span class="cadd">+' + f.add + '</span><span class="cdel">\\u2212' + f.del + "</span></div>" +
-              '<div class="dcode">' + renderDiffLines(f.lines) + "</div></div>";
+              '<div class="dcode">' + renderDiffLines(f.lines, f.path) + "</div></div>";
           }).join("")
         : '<div class="dcode">' + renderDiffLines(String(patch).split("\\n")) + "</div>") + "</div>";
       var sc = el; if (sc) sc.scrollTop = 0;
