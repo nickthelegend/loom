@@ -2666,6 +2666,11 @@ ${BRAND_SPRITE}
         '<div class="tcdiff" style="display:none"></div></div>';
     }
     if (e.kind === "handoff") return '<div class="handoff"><span class="a">' + esc(p.from || "\\u2014") + '</span><span class="shuttle">\\u27ff</span><span class="b">' + esc(p.to || "\\u2014") + "</span></div>";
+    // Sub-agents: indent under the turn, marked as borrowed hands — the parent
+    // kept the baton, and the thread should read that way.
+    if (e.kind === "subtask_started") return '<div class="sys" style="padding-left:22px">\\u21b3 ' + esc(e.agentId) + " picks up a subtask for " + esc(p.parent) + ": " + esc(String(p.task || "").slice(0, 90)) + "</div>";
+    if (e.kind === "subtask_done") return '<div class="sys" style="padding-left:22px;color:var(--live)">\\u21b3 ' + esc(e.agentId) + " finished its subtask</div>";
+    if (e.kind === "subtask_failed") return '<div class="sys err" style="padding-left:22px">\\u21b3 ' + esc(e.agentId) + " subtask failed: " + esc(String(p.message || "").slice(0, 90)) + "</div>";
     if (e.kind === "suggestion") return '<div class="sys warn">\\u2726 ' + esc(p.reason || "handoff suggested") + "</div>";
     if (e.kind === "needs_input") return '<div class="sys warn">\\u23f8 ' + esc(e.agentId) + " asks: " + esc(p.question) + "</div>";
     if (e.kind === "decision") return '<div class="sys">\\u2605 ' + esc(p.text) + "</div>";
