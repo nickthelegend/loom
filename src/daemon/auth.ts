@@ -18,6 +18,7 @@ import { readDaemonConfig, writeDaemonConfig } from "../core/registry.js";
 const PAIR_TTL_MS = 10 * 60 * 1000;
 
 interface PendingPair {
+  projects?: string[];
   token: string;
   expiresAt: number;
 }
@@ -46,13 +47,24 @@ export class AuthManager {
     return this.config.adminToken;
   }
 
-  /** Mint a short-lived, single-use pairing token (admin only). */
-  newPairingToken(): { token: string; expiresAt: number } {
+  /**
+   * Mint a short-lived, single-use pairing token (admin only).
+   *
+   * `projects` scopes every client claimed from it: the phone paired for one
+   * project gets that project, not the daemon. Carried on the pending entry so
+   * the claimer cannot widen it — scope is chosen by the admin who mints, not
+   * the device that claims.
+   */
+  newPairingToken(projects?: string[]): { token: string; expiresAt: number } {
     this.gc();
     const token = crypto.randomBytes(16).toString("hex");
-    const entry = { token, expiresAt: Date.now() + PAIR_TTL_MS };
+    const entry = {
+      token,
+      expiresAt: Date.now() + PAIR_TTL_MS,
+      ...(projects?.length ? { projects } : {}),
+    };
     this.pending.set(token, entry);
-    return entry;
+    return { token: entry.token, expiresAt: entry.expiresAt };
   }
 
   /** Exchange a valid pairing token for a long-lived client token. */
@@ -66,6 +78,7 @@ export class AuthManager {
       name,
       token: crypto.randomBytes(32).toString("hex"),
       createdAt: Date.now(),
+      ...(entry.projects?.length ? { projects: entry.projects } : {}),
     };
     // Read-modify-write: never clobber fields (pid, host, port) that the
     // daemon wrote after this manager snapshotted the config.
@@ -93,6 +106,16 @@ export class AuthManager {
       createdAt,
       push: Boolean(pushToken),
     }));
+  }
+
+  /**
+   * The projects this token may touch: null = unrestricted (admin, or a client
+   * paired without scope), otherwise the allow-list.
+   */
+  allowedProjects(token: string | undefined): string[] | null {
+    if (!token || this.isAdmin(token)) return null;
+    const client = this.config.clients.find((c) => timingSafeEqualStr(token, c.token));
+    return client?.projects?.length ? client.projects : null;
   }
 
   /** Which paired client does this bearer token belong to? (admin → null) */

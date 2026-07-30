@@ -288,7 +288,7 @@ export class LoomDaemon {
   private wss: WebSocketServer | null = null;
   private auth: AuthManager;
   private runtimes = new Map<string, ProjectRuntime>();
-  private sockets = new Map<WebSocket, { project?: string }>();
+  private sockets = new Map<WebSocket, { project?: string; scope?: string[] }>();
   /** In-flight self-heal recheck timers, cleared on close. */
   private healTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Terminal shells — a real pty when node-pty loaded, else plain pipes. */
@@ -468,7 +468,21 @@ export class LoomDaemon {
       // promote every paired client that happens to connect over it, and a
       // revoked phone would keep working for as long as it stayed local.
       (req as Request & { isAdmin?: boolean }).isAdmin = this.auth.isAdmin(token);
+      (req as Request & { projectScope?: string[] | null }).projectScope =
+        this.auth.allowedProjects(token);
       next();
+    });
+
+    // The scope wall: one guard over every project route, so a scoped token
+    // cannot reach a project it wasn't paired for. Matching by resolved id —
+    // the param may be a name, and a scope you could dodge by spelling the
+    // project differently would be theatre.
+    app.use("/api/projects/:id", (req, res, next) => {
+      const scope = (req as Request & { projectScope?: string[] | null }).projectScope;
+      if (!scope) return void next();
+      const resolved = findProject(String(req.params.id))?.id ?? String(req.params.id);
+      if (scope.includes(resolved)) return void next();
+      res.status(403).json({ error: "this token is not scoped to that project" });
     });
 
     /**
@@ -748,7 +762,22 @@ export class LoomDaemon {
         }
         const allowed = new Set([this.host, lanIp(), ts].filter(Boolean) as string[]);
         const host = wanted && allowed.has(wanted) ? wanted : this.host;
-        const { token, expiresAt } = this.auth.newPairingToken();
+        const scopeIds = Array.isArray(req.body?.projects)
+          ? (req.body.projects as unknown[]).map(String).filter(Boolean)
+          : [];
+        // Scope is resolved to ids at mint: a name that matches nothing is a
+        // typo the admin should hear about now, not a permanently useless token.
+        const resolvedScope: string[] = [];
+        for (const p of scopeIds) {
+          const info = findProject(p);
+          if (!info) {
+            return void res.status(400).json({ error: `unknown project "${p}" in scope` });
+          }
+          resolvedScope.push(info.id);
+        }
+        const { token, expiresAt } = this.auth.newPairingToken(
+          resolvedScope.length ? resolvedScope : undefined,
+        );
         const url = `http://${host}:${this.port}`;
         // Deep link: scanning it with any camera opens the app, which claims the
         // single-use token from the URL fragment and pairs itself.
@@ -811,10 +840,15 @@ export class LoomDaemon {
       res.json({ sent: tokens.length });
     });
 
-    app.get("/api/projects", (_req, res) => {
+    app.get("/api/projects", (req, res) => {
       void (async () => {
+        // A scoped token's world IS its scope: other projects are not listed,
+        // not greyed out — a list that names what you cannot open is a map of
+        // someone else's machine.
+        const scope = (req as Request & { projectScope?: string[] | null }).projectScope;
         const projects = [];
         for (const info of listProjects()) {
+          if (scope && !scope.includes(info.id)) continue;
           try {
             const rt = await this.runtime(info.id);
             projects.push(await rt.status());
@@ -2865,6 +2899,7 @@ export class LoomDaemon {
     for (const [ws, sub] of this.sockets) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       if (sub.project && sub.project !== projectId) continue;
+      if (sub.scope && !sub.scope.includes(projectId)) continue;
       ws.send(frame);
     }
     // An agent's error is a thread event AND a log line. The thread shows it to
@@ -2892,8 +2927,13 @@ export class LoomDaemon {
   private streamLogs(): () => void {
     return logbook.subscribe((record) => {
       const frame = JSON.stringify({ type: "log", record });
-      for (const [ws] of this.sockets) {
-        if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+      for (const [ws, sub] of this.sockets) {
+        if (ws.readyState !== WebSocket.OPEN) continue;
+        // A scoped socket gets its own projects' records only. Daemon-level
+        // records (no project) stay admin/unscoped — a phone paired for one
+        // project has no business watching the whole machine fail.
+        if (sub.scope && (!record.project || !sub.scope.includes(record.project))) continue;
+        ws.send(frame);
       }
     });
   }
@@ -2904,6 +2944,7 @@ export class LoomDaemon {
     for (const [ws, sub] of this.sockets) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       if (sub.project && sub.project !== projectId) continue;
+      if (sub.scope && !sub.scope.includes(projectId)) continue;
       ws.send(payload);
     }
   }
@@ -3000,7 +3041,11 @@ export class LoomDaemon {
         // Ensure the runtime is live so its events flow.
         void this.runtime(project).catch(() => {});
       }
-      this.sockets.set(ws, { ...(resolvedProject ? { project: resolvedProject } : {}) });
+      const wsScope = this.auth.allowedProjects(token);
+      this.sockets.set(ws, {
+        ...(resolvedProject ? { project: resolvedProject } : {}),
+        ...(wsScope ? { scope: wsScope } : {}),
+      });
       ws.send(
         JSON.stringify({
           type: "hello",

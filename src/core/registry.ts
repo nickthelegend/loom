@@ -212,6 +212,12 @@ export interface PairedClient {
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
   platform?: string;
+  /**
+   * Project ids this token may touch. Absent means all — which keeps every
+   * client paired before scoping existed exactly as powerful as it was.
+   * Pairing a phone for one project used to hand over the whole daemon.
+   */
+  projects?: string[];
 }
 
 export interface DaemonConfig {
