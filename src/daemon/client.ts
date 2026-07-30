@@ -256,6 +256,16 @@ export class DaemonClient {
     );
   }
 
+  logs(opts: { level?: "error" | "warn" | "info"; project?: string } = {}): Promise<{
+    logs: Array<{ id: number; at: number; level: string; scope: string; message: string; detail?: string; project?: string }>;
+  }> {
+    const params = new URLSearchParams();
+    if (opts.level) params.set("level", opts.level);
+    if (opts.project) params.set("project", opts.project);
+    const qs = params.toString();
+    return this.request("GET", `/api/logs${qs ? `?${qs}` : ""}`);
+  }
+
   searchBrain(
     id: string,
     q: string,

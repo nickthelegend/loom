@@ -414,13 +414,36 @@ program
 
 program
   .command("specs:run <file>")
-  .description("run one Playwright spec through the daemon (watch it in the Browser tab or loom watch)")
-  .action(async (file: string) => {
+  .description("run one Playwright spec through the daemon")
+  .option("--wait", "block until the verdict lands, and exit 1 on failure")
+  .action(async (file: string, opts: { wait?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
       const { run } = await client.runSpec(project.id, file);
-      console.log(`${pc.cyan("▶")} ${run.file} ${pc.dim(`run ${run.id} — reporter streams to the app; result lands in the Console`)}`);
+      if (!opts.wait) {
+        console.log(`${pc.cyan("▶")} ${run.file} ${pc.dim(`run ${run.id} — reporter streams to the app; result lands in the Console`)}`);
+        return;
+      }
+      // Poll the runner state; the verdict is in the Console either way, but
+      // --wait exists so scripts and CI get an exit code, not a suggestion.
+      console.log(`${pc.cyan("▶")} ${run.file} ${pc.dim("waiting for the verdict…")}`);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const { running } = await client.listSpecs(project.id);
+        if (!running || running.id !== run.id) break;
+      }
+      const { logs } = await client.logs({ level: undefined });
+      const verdict = [...logs].reverse().find(
+        (l) => l.scope === "specs" && l.message.includes(run.file),
+      );
+      if (verdict?.message.includes("passed")) {
+        console.log(`${pc.green("✓")} ${verdict.message}`);
+      } else {
+        console.error(pc.red(`✗ ${verdict?.message ?? "no verdict recorded"}`));
+        if (verdict?.detail) console.error(pc.dim(verdict.detail.split("\n").slice(-12).join("\n")));
+        process.exitCode = 1;
+      }
     } catch (err) {
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
