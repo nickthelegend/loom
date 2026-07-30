@@ -329,6 +329,47 @@ program
   });
 
 program
+  .command("snapshot [file]")
+  .description("checkpoint this project's brain + board + config to a file")
+  .action(async (file: string | undefined) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const doc = await client.snapshot(project.id);
+    const out = file ?? `loom-snapshot-${project.name}.json`;
+    const fs = await import("node:fs");
+    fs.writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
+    const mems = ((doc.brain as { memories?: unknown[] })?.memories ?? []).length;
+    const tasks = ((doc.tasks as unknown[]) ?? []).length;
+    console.log(`${pc.green("✓")} ${out} ${pc.dim(`· ${mems} memories · ${tasks} cards`)}`);
+  });
+
+program
+  .command("restore <file>")
+  .description("bring a snapshot back — board and config replace, the brain merges")
+  .action(async (file: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const fs = await import("node:fs");
+    let doc: unknown;
+    try {
+      doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (err) {
+      console.error(pc.red(`could not read ${file}: ${err instanceof Error ? err.message : err}`));
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const out = await client.restore(project.id, doc);
+      console.log(
+        `${pc.green("✓")} restored ${pc.dim(`· brain +${out.brain.added} (${out.brain.known} known) · ${out.tasks} cards`)}`,
+      );
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("task <title...>")
   .description("put a card on the board")
   .option("--agent <id>", "who it's for")
