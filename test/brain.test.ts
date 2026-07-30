@@ -497,3 +497,46 @@ describe("recency decay", () => {
     expect(recencyFactor(Date.now())).toBeCloseTo(1, 5);
   });
 });
+
+/**
+ * The fuzzy channel (#4): morphology and typos, honestly not synonymy.
+ */
+describe("fuzzy retrieval", () => {
+  const mk = (id: string, text: string): Memory => ({
+    id, kind: "fact", text, entities: [], scope: {}, confidence: 0.9,
+    provenance: { agentId: "t", eventId: 1, ts: Date.now() },
+    createdAt: Date.now(), updatedAt: Date.now(), hash: id, version: 1,
+  });
+
+  it("finds a memory through a typo BM25 cannot match", () => {
+    const hits = retrieveFrom(
+      [mk("m1", "the sqlite database lives in .loom"), mk("m2", "the phone pairs over tailscale")],
+      { query: "sqllite databse" }, // both words misspelled — zero shared tokens
+    );
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.memory.id).toBe("m1");
+  });
+
+  it("matches across morphology", () => {
+    const hits = retrieveFrom(
+      [mk("m1", "deployment goes through the vercel pipeline"), mk("m2", "the board has four columns")],
+      { query: "deploying to vercel" },
+    );
+    expect(hits[0]!.memory.id).toBe("m1");
+  });
+
+  it("does not pretend to synonymy — unrelated words stay unmatched", () => {
+    const hits = retrieveFrom([mk("m1", "authentication uses bearer tokens")], {
+      query: "zebra painting", // nothing shared, no trigram overlap worth 0.3
+    });
+    expect(hits).toHaveLength(0);
+  });
+
+  it("shows the channel in explain mode", () => {
+    const hits = retrieveFrom([mk("m1", "the sqlite database lives in .loom")], {
+      query: "sqllite databse",
+      explain: true,
+    });
+    expect(hits[0]!.detail!.fuzzy).toBeGreaterThan(0);
+  });
+});

@@ -96,6 +96,8 @@ export interface RetrieveOpts {
 export interface ScoreDetail {
   bm25: number;
   entity: number;
+  /** Trigram-cosine channel, already weighted. Morphology and typos, not synonymy. */
+  fuzzy: number;
   kindBias: number;
   /** 1.0 fresh → 0.55 floor with age; multiplies the match, not the bias. */
   recency: number;
@@ -111,6 +113,48 @@ export interface Hit {
 
 function tokens(text: string): string[] {
   return lemmatize(text).split(" ").filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// The fuzzy channel: hashed character-trigram vectors
+// ---------------------------------------------------------------------------
+/**
+ * A local embedding of the cheapest honest kind: each text becomes a
+ * 256-dimension vector of hashed character trigrams, compared by cosine.
+ *
+ * What this buys that BM25 can't: morphology and typos. "deploying" matches
+ * "deployment", "sqlite" matches "sqllite", because they share most of their
+ * trigrams even though they share no token. What it does NOT buy is synonymy —
+ * "auth" will never match "login" here, and pretending otherwise is why this
+ * is a third channel at low weight rather than a replacement for the other
+ * two. Offline, keyless, deterministic; no model file, no network.
+ */
+const TRIGRAM_DIMS = 256;
+const FUZZY_WEIGHT = 0.35;
+
+export function trigramVector(text: string): Float32Array {
+  const v = new Float32Array(TRIGRAM_DIMS);
+  const s = `  ${text.toLowerCase().replace(/\s+/g, " ").trim()}  `;
+  for (let i = 0; i + 3 <= s.length; i++) {
+    // FNV-1a over the 3 chars — cheap, stable, spreads well at this scale.
+    let h = 0x811c9dc5;
+    for (let j = i; j < i + 3; j++) {
+      h ^= s.charCodeAt(j);
+      h = Math.imul(h, 0x01000193);
+    }
+    v[(h >>> 0) % TRIGRAM_DIMS]! += 1;
+  }
+  let norm = 0;
+  for (let i = 0; i < TRIGRAM_DIMS; i++) norm += v[i]! * v[i]!;
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < TRIGRAM_DIMS; i++) v[i]! /= norm;
+  return v;
+}
+
+export function cosine(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  for (let i = 0; i < TRIGRAM_DIMS; i++) dot += a[i]! * b[i]!;
+  return dot;
 }
 
 /** Entities are matched case-insensitively; everything else is exact. */
@@ -297,8 +341,21 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
   const bm = query.trim() ? index.bm25(query) : new Map<string, number>();
   const eh = ents.length ? index.entityHits(ents) : new Map<string, { score: number; matched: string[] }>();
 
-  // The union. Either channel alone is enough to be a candidate.
-  const ids = new Set<string>([...bm.keys(), ...eh.keys()]);
+  // The fuzzy channel: trigram cosine against every live memory. Linear scan —
+  // at brain scale (hundreds of units, not millions) that is faster than any
+  // index would pay for. Threshold keeps noise out of the candidate set: below
+  // 0.30 trigram cosine is mostly shared spaces and stopwords.
+  const fz = new Map<string, number>();
+  if (query.trim()) {
+    const qv = trigramVector(query);
+    for (const m of live) {
+      const sim = cosine(qv, trigramVector(m.text));
+      if (sim >= 0.3) fz.set(m.id, sim);
+    }
+  }
+
+  // The union. Any channel alone is enough to be a candidate.
+  const ids = new Set<string>([...bm.keys(), ...eh.keys(), ...fz.keys()]);
   if (!ids.size) return [];
 
   // BM25 is unbounded, so normalise against the best hit in this query to get
@@ -315,7 +372,8 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
     const bmNorm = maxBm > 0 ? (bm.get(id) ?? 0) / maxBm : 0;
     const ent = eh.get(id);
     const bias = KIND_BIAS[memory.kind] ?? 0;
-    const raw = bmNorm + (ent?.score ?? 0);
+    const fuzzy = (fz.get(id) ?? 0) * FUZZY_WEIGHT;
+    const raw = bmNorm + (ent?.score ?? 0) + fuzzy;
     // Decay multiplies the match, not the bias: how well it matches fades with
     // age; what KIND of thing it is doesn't.
     const recency = recencyFactor(memory.updatedAt, now);
@@ -328,6 +386,7 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
             detail: {
               bm25: round(bmNorm),
               entity: round(ent?.score ?? 0),
+              fuzzy: round(fuzzy),
               kindBias: bias,
               recency: round(recency),
               matchedEntities: ent?.matched ?? [],
