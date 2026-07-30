@@ -41,6 +41,8 @@ export interface BoardCard {
   /** Stable across refreshes: "pr-51", "agent-claude", "task-a1b2". Drag keys on it. */
   id: string;
   title: string;
+  /** How many unfinished blockers stand in this card's way (own cards only). */
+  blocked?: number;
   /** The agent that owns this work, when we know: an id for ours, a GitHub login for a PR. */
   agent: string;
   /** The agent's adapter kind, when this is one of ours — drives the brand mark. */
@@ -177,10 +179,17 @@ export async function buildBoard(
   const cards: BoardCard[] = [];
 
   // 0. Yours: cards you wrote. The column you put it in is the whole state.
+  // A card with unfinished blockers says how many — a dependent card that
+  // looks as startable as any other is how premature dispatches happen.
+  const taskById = new Map((opts.tasks ?? []).map((t) => [t.id, t]));
   for (const t of opts.tasks ?? []) {
     const column = (BOARD_COLUMNS as readonly string[]).includes(t.column)
       ? (t.column as BoardColumn)
       : "working";
+    const blocked = (t.blockedBy ?? []).filter((bid) => {
+      const b = taskById.get(bid);
+      return b && b.column !== "ready";
+    }).length;
     cards.push({
       id: `task-${t.id}`,
       title: t.title,
@@ -189,6 +198,7 @@ export async function buildBoard(
       state: TASK_STATE[column],
       column,
       own: true,
+      ...(blocked ? { blocked } : {}),
     });
   }
 
