@@ -2585,6 +2585,16 @@ export class LoomDaemon {
 
     // Cards you write yourself. Unlike an agent or a PR, these are ours, so a
     // drag really moves them — the column IS the state.
+    // List the cards you wrote. POST existed without GET — a client that
+    // wanted to render or script over its own tasks had to scrape the whole
+    // board payload for own:true rows.
+    app.get(
+      "/api/projects/:id/board/tasks",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ tasks: readProjectState(rt.info.dir).tasks ?? [] });
+      }),
+    );
+
     app.post(
       "/api/projects/:id/board/tasks",
       withRuntime(async (rt, req, res) => {

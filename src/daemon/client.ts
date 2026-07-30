@@ -163,6 +163,23 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/subtasks`);
   }
 
+  listTasks(id: string): Promise<{
+    tasks: Array<{ id: string; title: string; column: string; agent?: string; blockedBy?: string[] }>;
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/board/tasks`);
+  }
+
+  createTask(
+    id: string,
+    title: string,
+    opts: { column?: string; agent?: string; blockedBy?: string[] } = {},
+  ): Promise<{ task: { id: string; title: string; column: string } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/board/tasks`, {
+      title,
+      ...opts,
+    });
+  }
+
   saveRoute(id: string, name: string, steps: string[]): Promise<{ routes: Record<string, unknown> }> {
     return this.request(
       "PUT",
