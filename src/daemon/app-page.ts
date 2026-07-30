@@ -8903,6 +8903,12 @@ ${BRAND_SPRITE}
         C.push({ icon: ICONS.agents, label: "Agents", sub: "panel", run: function(){ state.showRail("tasks"); } });
       }
       C.push({ icon: ICONS.tasks, label: "New task", run: function(){ openTaskModal(pid); } });
+      // The dock surfaces this run added — reachable from the keyboard, like
+      // everything else worth reaching.
+      if (pid) {
+        C.push({ icon: ICONS.globe, label: "Browser \\u00b7 Playwright specs", sub: "dock", run: function(){ openBrowser(); } });
+        C.push({ icon: ICONS.console, label: "Console \\u00b7 errors and logs", sub: "dock", run: function(){ openConsole(); } });
+      }
       C.push({ icon: ICONS.folderPlus, label: "New project", run: function(){ openProjectModal(); } });
       C.push({ icon: ICONS.gear, label: "Settings", run: function(){ openSettingsModal("setup"); } });
       C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
