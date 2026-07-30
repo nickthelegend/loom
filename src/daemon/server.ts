@@ -474,6 +474,26 @@ export class LoomDaemon {
       next();
     });
 
+    // Cheap liveness: HEAD answers with no body, for probes that only ask "is
+    // it up" — a monitor hitting GET /api/health every second serialises the
+    // whole health payload to throw it away.
+    app.head("/api/health", (_req, res) => {
+      res.status(200).end();
+    });
+
+    // What exactly is running: build rev, node, uptime, platform. /api/health
+    // carries rev for staleness checks; this is the fuller "loom health"
+    // answer, and it's behind the wall because build details are inventory.
+    app.get("/api/version", (_req, res) => {
+      res.json({
+        rev: BUILD_REV,
+        node: process.version,
+        platform: `${process.platform}-${process.arch}`,
+        uptimeSec: Math.round(process.uptime()),
+        pid: process.pid,
+      });
+    });
+
     // The scope wall: one guard over every project route, so a scoped token
     // cannot reach a project it wasn't paired for. Matching by resolved id —
     // the param may be a name, and a scope you could dodge by spelling the
