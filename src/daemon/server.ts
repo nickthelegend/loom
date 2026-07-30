@@ -66,6 +66,7 @@ import { claudeText } from "../core/claude-cli.js";
 import { setupReport } from "../core/setup.js";
 import {
   ensureDaemonConfig,
+  ensureLoomHome,
   findProject,
   listProjects,
   readDaemonConfig,
@@ -303,7 +304,7 @@ export class LoomDaemon {
     },
     onTitle: (projectId, term, title) =>
       this.broadcastTerm(projectId, { type: "term", term, title }),
-  });
+  }, 12, path.join(ensureLoomHome(), "scrollback"));
   private unstreamLogs: (() => void) | null = null;
   /** Playwright runs, one per project at a time. See specs.ts. */
   private specRunner = new SpecRunner();

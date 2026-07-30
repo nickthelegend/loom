@@ -177,7 +177,9 @@ class PtySession implements TerminalSession {
     events: TermEvents,
     cols: number,
     rows: number,
+    seed = "",
   ) {
+    this.buf = seed;
     const shell = isWin ? "cmd.exe" : process.env.SHELL || "/bin/sh";
     this.proc = mod.spawn(shell, [], {
       name: "xterm-256color",
@@ -235,7 +237,9 @@ class PipeSession implements TerminalSession {
     readonly termId: string,
     public cwd: string,
     private events: TermEvents,
+    seed = "",
   ) {
+    this.buf = seed;
     const shell = isWin ? "cmd.exe" : process.env.SHELL || "/bin/sh";
     this.child = spawn(shell, isWin ? [] : ["-s"], {
       cwd,
@@ -361,10 +365,77 @@ export class TooManySessionsError extends Error {
 
 export class TerminalManager {
   private sessions = new Map<string, TerminalSession>();
+  private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private events: TermEvents;
+
+  /**
+   * The PROCESS dies with the daemon — a pty cannot outlive it — but the TEXT
+   * doesn't have to. Each session's scrollback is persisted (debounced) under
+   * persistDir and seeded into the next session with the same identity, under
+   * a divider that says plainly the process restarted. History survives;
+   * nothing pretends the shell did.
+   */
   constructor(
-    private events: TermEvents,
+    events: TermEvents,
     private maxSessions = 12,
-  ) {}
+    private persistDir: string | null = null,
+  ) {
+    // Wrap the caller's events so every data chunk also schedules a save.
+    this.events = {
+      ...events,
+      onData: (projectId, termId, chunk) => {
+        events.onData(projectId, termId, chunk);
+        this.scheduleSave(projectId, termId);
+      },
+    };
+  }
+
+  private fileFor(projectId: string, termId: string): string | null {
+    if (!this.persistDir) return null;
+    const safe = `${projectId}-${termId}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return path.join(this.persistDir, `${safe}.scrollback`);
+  }
+
+  private scheduleSave(projectId: string, termId: string): void {
+    const file = this.fileFor(projectId, termId);
+    if (!file) return;
+    const key = this.key(projectId, termId);
+    if (this.saveTimers.has(key)) return;
+    this.saveTimers.set(
+      key,
+      setTimeout(() => {
+        this.saveTimers.delete(key);
+        this.saveNow(projectId, termId);
+      }, 1500),
+    );
+  }
+
+  private saveNow(projectId: string, termId: string): void {
+    const file = this.fileFor(projectId, termId);
+    const sess = this.get(projectId, termId);
+    if (!file || !sess) return;
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, sess.scrollback().slice(-SCROLLBACK_MAX));
+    } catch {
+      /* a scrollback that can't be saved must never break a terminal */
+    }
+  }
+
+  private loadSeed(projectId: string, termId: string): string {
+    const file = this.fileFor(projectId, termId);
+    if (!file) return "";
+    try {
+      const prev = fs.readFileSync(file, "utf8");
+      if (!prev.trim()) return "";
+      return (
+        prev +
+        "\r\n\u001b[2m\u2500\u2500 restored scrollback \u00b7 the daemon restarted, this is a new shell \u2500\u2500\u001b[0m\r\n"
+      );
+    } catch {
+      return "";
+    }
+  }
 
   get mode(): TermMode {
     return loadPty() ? "pty" : "pipe";
@@ -389,9 +460,10 @@ export class TerminalManager {
     if (existing) return existing;
     if (this.sessions.size >= this.maxSessions) throw new TooManySessionsError(this.maxSessions);
     const mod = loadPty();
+    const seed = this.loadSeed(projectId, termId);
     const sess: TerminalSession = mod
-      ? new PtySession(projectId, termId, dir, mod, this.events, cols, rows)
-      : new PipeSession(projectId, termId, dir, this.events);
+      ? new PtySession(projectId, termId, dir, mod, this.events, cols, rows, seed)
+      : new PipeSession(projectId, termId, dir, this.events, seed);
     this.sessions.set(this.key(projectId, termId), sess);
     return sess;
   }
@@ -400,6 +472,17 @@ export class TerminalManager {
     const key = this.key(projectId, termId);
     const sess = this.sessions.get(key);
     if (!sess) return;
+    // A deliberate close forgets the scrollback too: the person shut this
+    // terminal, and replaying its history into a future one with the same id
+    // would be a haunting, not a restore. Only a daemon death preserves.
+    const file = this.fileFor(projectId, termId);
+    if (file) {
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {
+        /* nothing to remove */
+      }
+    }
     this.sessions.delete(key);
     sess.kill();
   }
@@ -410,6 +493,15 @@ export class TerminalManager {
   }
 
   closeAll(): void {
+    // Daemon shutdown: save everything first — this is exactly the moment the
+    // persistence exists for.
+    for (const [key, sess] of this.sessions) {
+      const [projectId, termId] = key.split(":") as [string, string];
+      void sess;
+      this.saveNow(projectId, termId);
+    }
+    for (const t of this.saveTimers.values()) clearTimeout(t);
+    this.saveTimers.clear();
     for (const [key, sess] of this.sessions) {
       this.sessions.delete(key);
       sess.kill();
