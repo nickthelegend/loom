@@ -329,6 +329,39 @@ program
   });
 
 program
+  .command("task <title...>")
+  .description("put a card on the board")
+  .option("--agent <id>", "who it's for")
+  .option("--column <col>", "working | needs-you | in-review | ready", "needs-you")
+  .option("--blocked-by <ids>", "comma-separated task ids this one waits on")
+  .action(async (words: string[], opts: { agent?: string; column: string; blockedBy?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { task } = await client.createTask(project.id, words.join(" "), {
+      column: opts.column,
+      ...(opts.agent ? { agent: opts.agent } : {}),
+      ...(opts.blockedBy ? { blockedBy: opts.blockedBy.split(",").map((s) => s.trim()) } : {}),
+    });
+    console.log(`${pc.green("+")} ${task.id} ${pc.dim(task.column)}  ${task.title}`);
+  });
+
+program
+  .command("tasks")
+  .description("the cards you wrote, by column")
+  .option("--json", "print as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { tasks } = await client.listTasks(project.id);
+    if (opts.json) return void console.log(JSON.stringify(tasks, null, 2));
+    if (!tasks.length) return void console.log(pc.dim("no cards — loom task <title> makes one"));
+    for (const t of tasks) {
+      const blocked = t.blockedBy?.length ? pc.red(` ⛔${t.blockedBy.join(",")}`) : "";
+      console.log(`${t.id}  ${t.column.padEnd(9)} ${t.agent ? pc.cyan(t.agent.padEnd(14)) : "".padEnd(14)} ${t.title}${blocked}`);
+    }
+  });
+
+program
   .command("budgets")
   .description("each agent's daily USD cap and today's real spend against it")
   .action(async () => {
