@@ -521,6 +521,28 @@ projections — they never hold the write lock. That's a design decision, not a 
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
 
+## The brain, sharpened
+
+Four retrieval behaviours worth knowing, all inspectable with `explain`:
+
+- **Recency decay** — a unit's match decays toward a floor (7-day half-life,
+  never below 0.55): an equal match, fresher, wins; a strong old constraint
+  still beats a weak new fact. Age tips ties, it never erases history.
+- **A fuzzy channel** — hashed character-trigram vectors catch typos and
+  morphology (`sqllite databse` finds `sqlite database`; `deploying` finds
+  `deployment`). Honestly **not** synonymy — `auth` will never match `login`
+  without a real model, and we'd rather name that gap than fake it with word
+  lists.
+- **Contradiction flags** — `loom brain:conflicts` scans same-kind units for
+  negation pairs (`always`/`never` on one topic) and same-topic-divergent
+  decisions. Every flag names the signal that tripped it, so you can judge the
+  judge. Resolution stays human.
+- **Portability** — `loom brain:export` writes what the project knows to a
+  plain file; `brain:import` brings one in, deduped by hash, so the same file
+  twice reports *known* rather than minting duplicates. `loom snapshot` /
+  `restore` widen that to brain+board+config — restore **merges** the brain,
+  because what the project learned since the snapshot should survive it.
+
 ## How memory actually reaches a model
 
 Worth being precise about, because this is the whole premise and it has a soft edge.
