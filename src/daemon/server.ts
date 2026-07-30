@@ -2072,7 +2072,12 @@ export class LoomDaemon {
         }
         const body = req.body as Buffer;
         if (!body?.length) return void res.status(400).json({ error: "no audio" });
-        const tmp = path.join(os.tmpdir(), `loom-voice-${Date.now()}.audio`);
+        // Date.now() alone collides when two clients release the mic in the
+        // same millisecond — one request then transcribes the other's audio.
+        const tmp = path.join(
+          os.tmpdir(),
+          `loom-voice-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.audio`,
+        );
         try {
           fs.writeFileSync(tmp, body);
           const text = await new Promise<string>((resolve, reject) => {
