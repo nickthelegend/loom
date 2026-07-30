@@ -783,6 +783,14 @@ roster at save, stored in the project config so they travel with the repo.
 
 ## Security model
 
+**Per-project tokens.** `POST /api/pair/new {"projects": ["<id>"]}` mints a
+pairing token whose claimed client can touch exactly those projects: everything
+else 403s (by id or name — the wall resolves names first), the project list
+filters to its world, and the event/terminal/log streams skip out-of-scope
+frames. The admin who mints chooses the scope; the device that claims cannot
+widen it. Clients paired before scoping existed keep the run of the place.
+
+
 - The daemon binds to `127.0.0.1` by default, or your **Tailscale interface** with
   `--tailnet` — never `0.0.0.0` on its own. **Connect-a-phone** can *add* a listener on a
   specific LAN/tailnet IP (never `0.0.0.0`, never an arbitrary host — the target is
@@ -865,6 +873,30 @@ Roles: `planner` · `executor` · `reviewer` · `general`. Claude Code options:
 `permissionMode` (default `acceptEdits`), `model`. OpenCode options:
 `model` (`"providerID/modelID"`, e.g. `"opencode/minimax-m2.5"` — **set this**: headless
 sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running server.
+
+## Odds and ends that pull their weight
+
+- **MCP health** — the daemon polls each project's HTTP MCP servers; a server
+  that stops answering is named in the Console and **withheld from turns**
+  (an absent tool the agent never saw beats a present tool that throws) until
+  it answers again. `loom mcp:health`.
+- **Terminal scrollback survives restarts** — the pty dies with the daemon
+  (physics), the text doesn't (persisted, seeded back under a divider that
+  says the shell is new). A deliberately closed terminal is forgotten — only
+  daemon death preserves.
+- **Console search + scope filter** — find the error from *grok* among six
+  agents' noise; the scope menu is built from the records themselves.
+- **Review comments** — click a line in any diff, type, Enter; comments stage
+  as one `file:line — comment` message in the composer, going to whichever
+  agent you pick. No side channel: baton, budgets and the thread all apply.
+- **Hold-to-talk** — the composer mic records while held and transcribes via
+  `LOOM_STT_CMD` (whisper.cpp or anything that takes `{file}` and prints
+  text). No cloud STT: no-keys is the contract. Voice fills the box; you still
+  press send.
+- **Skill authoring** — `POST /api/projects/:id/skills/author` scaffolds
+  `skills/<id>/SKILL.md`, validated by the same parser the roster reads with.
+- **The spend ledger** — `loom costs --series 14`: one line per day, per-agent
+  split inline, from the same events the budgets enforce against.
 
 ## Development
 
