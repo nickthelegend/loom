@@ -456,6 +456,25 @@ program
   });
 
 program
+  .command("brain:search <query...>")
+  .description("retrieval, exactly as a briefing would see it — scores and all")
+  .option("--explain", "show the arithmetic per hit (bm25, entity, fuzzy, recency)")
+  .action(async (words: string[], opts: { explain?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { hits } = await client.searchBrain(project.id, words.join(" "), {
+      explain: Boolean(opts.explain),
+    });
+    if (!hits.length) return void console.log(pc.dim("nothing retrieved — the briefing would carry no memories for this"));
+    for (const h of hits) {
+      console.log(
+        `${pc.bold((h.score.toFixed(2)))} ${pc.magenta(h.memory.kind.padEnd(10))} ${h.memory.text.slice(0, 100)}`,
+      );
+      if (opts.explain && h.detail) console.log(pc.dim(`      ${JSON.stringify(h.detail)}`));
+    }
+  });
+
+program
   .command("brain:conflicts")
   .description("units that likely contradict each other, for you to resolve")
   .action(async () => {

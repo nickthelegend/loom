@@ -256,6 +256,18 @@ export class DaemonClient {
     );
   }
 
+  searchBrain(
+    id: string,
+    q: string,
+    opts: { agent?: string; explain?: boolean; limit?: number } = {},
+  ): Promise<{ hits: Array<{ memory: Memory; score: number; detail?: Record<string, unknown> }> }> {
+    const params = new URLSearchParams({ q });
+    if (opts.agent) params.set("agent", opts.agent);
+    if (opts.explain) params.set("explain", "1");
+    if (opts.limit) params.set("limit", String(opts.limit));
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/search?${params}`);
+  }
+
   brainConflicts(id: string): Promise<{
     conflicts: Array<{ a: { text: string }; b: { text: string }; similarity: number; signal: string }>;
   }> {
