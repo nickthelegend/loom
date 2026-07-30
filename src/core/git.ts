@@ -395,6 +395,23 @@ export async function branches(dir: string): Promise<Branches> {
 }
 
 /**
+ * Create a branch (if needed) and switch to it — the board-card primitive.
+ *
+ * `checkout -B` would move an existing branch's tip, silently discarding where
+ * it pointed; this creates only when absent and otherwise just switches, so
+ * re-dragging a card to Working is idempotent rather than destructive.
+ */
+export async function ensureBranch(dir: string, name: string): Promise<{ branch: string; created: boolean }> {
+  const clean = assertRef(name);
+  const existing = await branches(dir);
+  const created = !existing.all.includes(clean);
+  if (created) await git(["branch", clean], dir);
+  await git(["checkout", clean], dir);
+  logbook.info("git", `${created ? "created and " : ""}checked out ${clean}`, dir);
+  return { branch: clean, created };
+}
+
+/**
  * Switch to a branch or commit.
  *
  * git refuses on its own when the switch would overwrite uncommitted changes,

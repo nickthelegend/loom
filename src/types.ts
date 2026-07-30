@@ -177,6 +177,8 @@ export interface ProjectConfig {
   git?: {
     /** Commit each turn's changes as they land, agent as co-author. */
     commitPerTurn?: boolean;
+    /** Dragging a card to Working checks out task/<id>-<slug>. */
+    branchPerTask?: boolean;
   };
 }
 

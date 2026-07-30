@@ -31,7 +31,7 @@ import { compileBrief, retrieve } from "../core/brain-index.js";
 import { extractFromTurn, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
-import { stageAndCommitFiles } from "../core/git.js";
+import { ensureBranch, stageAndCommitFiles } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
 import { renderProjection } from "../core/distill.js";
 import {
@@ -1224,6 +1224,16 @@ export class ProjectRuntime {
       .map((b) => ({ id: b.id, title: b.title, column: b.column }));
   }
 
+  /** task/<id>-<slug>: stable id first so a retitle doesn't orphan the branch. */
+  private taskBranchName(task: BoardTask): string {
+    const slug = task.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    return `task/${task.id}${slug ? `-${slug}` : ""}`;
+  }
+
   /** Move or retitle a card. Yours, so this is the real state — not a hint. */
   updateTask(
     id: string,
@@ -1232,6 +1242,35 @@ export class ProjectRuntime {
     const state = readProjectState(this.info.dir);
     const task = (state.tasks ?? []).find((t) => t.id === id);
     if (!task) return null;
+    // Opt-in: dragging a card to Working checks out its branch; reaching
+    // Review logs the PR command rather than running it — pushing publishes,
+    // and publishing implicitly is a line Loom doesn't cross even under a
+    // flag. The branch name leads with the stable id so a retitle doesn't
+    // orphan it. Failures (not a repo, dirty tree) land in the Console; the
+    // drag itself always succeeds — the board must not refuse to reflect
+    // reality because git had opinions.
+    if (this.config.git?.branchPerTask && patch.column && patch.column !== task.column) {
+      const branch = this.taskBranchName(task);
+      if (patch.column === "working") {
+        void ensureBranch(this.info.dir, branch)
+          .then(({ created }) =>
+            this.appendIfOpen({
+              kind: "status",
+              payload: { state: "task_branch", task: task.id, branch, created },
+            }),
+          )
+          .catch((err) =>
+            logbook.warn("git", `couldn't switch to ${branch}`, String(err), this.info.id),
+          );
+      } else if (patch.column === "in-review") {
+        logbook.info(
+          "git",
+          `"${task.title}" reached review — open the PR with: gh pr create --head ${branch}`,
+          undefined,
+          this.info.id,
+        );
+      }
+    }
     if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 200) || task.title;
     if (patch.column !== undefined) task.column = patch.column;
     if (patch.agent !== undefined) task.agent = patch.agent;

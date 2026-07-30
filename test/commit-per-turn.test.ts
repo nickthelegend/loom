@@ -119,3 +119,48 @@ describe("off by default", () => {
     }
   });
 });
+
+/**
+ * Branch-per-task (#12): dragging a card to Working checks out its branch.
+ * Same opt-in family as commitPerTurn, same failure posture — git trouble is a
+ * Console line, the drag itself always succeeds.
+ */
+describe("branch per task", () => {
+  it("creates task/<id>-<slug> on the move to working, idempotently", async () => {
+    const dir3 = tmpDir("bpt");
+    git(dir3, "init", "-q");
+    git(dir3, "config", "user.email", "t@t");
+    git(dir3, "config", "user.name", "t");
+    fs.writeFileSync(path.join(dir3, "seed.txt"), "seed\n");
+    git(dir3, "add", "-A");
+    git(dir3, "commit", "-qm", "seed");
+    writeProjectConfig(dir3, {
+      name: "bpt",
+      agents: [{ id: "plannerbot", kind: "echo", role: "planner" }],
+      brain: { extractor: "off" },
+      git: { branchPerTask: true },
+    });
+    const rt3 = await ProjectRuntime.open({ id: "bpt", name: "bpt", dir: dir3 });
+    try {
+      const t = rt3.createTask({ title: "Ship the Login Page!", column: "needs-you" });
+      rt3.updateTask(t.id, { column: "working" });
+      await waitUntil(() => {
+        try {
+          return git(dir3, "rev-parse", "--abbrev-ref", "HEAD").trim().startsWith("task/");
+        } catch {
+          return false;
+        }
+      });
+      const branch = git(dir3, "rev-parse", "--abbrev-ref", "HEAD").trim();
+      expect(branch).toBe(`task/${t.id}-ship-the-login-page`);
+
+      // Re-dragging is idempotent — same branch, nothing destroyed.
+      rt3.updateTask(t.id, { column: "needs-you" });
+      rt3.updateTask(t.id, { column: "working" });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(git(dir3, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(branch);
+    } finally {
+      await rt3.close();
+    }
+  });
+});
