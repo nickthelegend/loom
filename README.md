@@ -398,7 +398,24 @@ detects at least two roles.
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
 | `loom clients [--revoke <id>] [--ping]` | Paired devices: list, revoke, or send a test push |
-| `loom doctor [--json]` | Diagnose env, daemon, binding, and project config — with fixes or machine-readable JSON |
+| `loom doctor [--json] [--fix]` | Diagnose env, daemon, binding, and project config — `--fix` repairs what has exactly one safe repair |
+| `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
+| `loom subtasks` | Subtasks running right now |
+| `loom agents:add <kind> [--as name]` | Add an agent session — repeat for a second session of the same kind, same brain |
+| `loom agents:rm <id>` / `loom agents:available` | Remove a session · what this machine can drive and how many are here |
+| `loom watch [--all] [--json]` | Tail a project's events live — turns, handoffs, memory, subtasks |
+| `loom retry <agentId>` | Re-run the last failed turn on a different agent, failure attached |
+| `loom stale` / `loom reap <agentId>` | Sessions that look hung · respawn one fresh (baton released) |
+| `loom budgets` / `loom budget <id> <usd>` | Daily USD caps: measured spend vs cap · set or clear one |
+| `loom brain:export [file]` / `brain:import <file>` | The project's memory as a portable file — import dedupes |
+| `loom brain:conflicts` | Units that likely contradict each other, with the signal that tripped each |
+| `loom snapshot [file]` / `loom restore <file>` | Checkpoint brain+board+config · bring one back (brain merges) |
+| `loom routes:save <name> <steps...>` / `routes:rm` | Define a named pipeline, validated against the roster · remove one |
+| `loom task "<title>"` / `loom tasks` | Put a card on the board (`--agent`, `--blocked-by`) · list yours |
+| `loom specs` / `loom specs:run <file>` | The project's Playwright specs · run one through the daemon |
+| `loom mcp:health` | Each MCP server's live state from the background poll |
+| `loom costs --series [days]` | The spend ledger day by day, per agent |
+| `loom rename <name>` / `loom find <query>` | Rename the project (id never moves) · search the thread |
 
 ## Supported agents
 
