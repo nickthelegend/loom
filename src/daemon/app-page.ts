@@ -1697,6 +1697,7 @@ window.__loomTraceUrl="%%TRACE_UI_URL%%";
   .bempty{padding:14px 4px;text-align:center;font-size:11.5px;color:color-mix(in srgb, var(--muted-foreground) 70%, transparent)}
   /* your own cards: a hairline accent, because these you can really move */
   .bcard.own{border-left:2px solid color-mix(in srgb, var(--muted-foreground) 45%, transparent)}
+  .bblocked{color:var(--err);font-weight:600;margin-right:6px}
   .bcard.own .bct{cursor:text;border-radius:4px;margin:7px -3px 0;padding:0 3px}
   .bcard.own .bct:hover{background:color-mix(in srgb, var(--muted-foreground) 14%, transparent)}
   .bcedit{width:100%;background:var(--background);border:1px solid var(--ring);border-radius:4px;
@@ -5355,7 +5356,7 @@ ${BRAND_SPRITE}
         (c.branch ? '<div class="bcbr">' + esc(c.branch) + "</div>" : "") +
         '<div class="bcf">' +
           (c.own
-            ? "yours"
+            ? (c.blocked ? '<span class="bblocked" title="waiting on ' + c.blocked + ' other card' + (c.blocked === 1 ? "" : "s") + '">\\u26d4 ' + c.blocked + "</span> yours" : "yours")
             : c.pr
               ? '<a href="' + esc(c.pr.url) + '" target="_blank" rel="noreferrer">PR #' + c.pr.number + "</a> \\u00b7 " +
                 esc(c.pr.draft ? "draft" : c.pr.state)
