@@ -18,7 +18,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { LoomEvent, ProjectInfo } from "../types.js";
 import { NotHolderError } from "../core/baton.js";
 import type { MemoryKind, MemoryPatch } from "../core/brain.js";
-import { retrieve } from "../core/brain-index.js";
+import { findConflicts, retrieve } from "../core/brain-index.js";
 import { RouteActiveError } from "../core/routes.js";
 import { triageAgent } from "../observability/triage.js";
 import {
@@ -2261,6 +2261,15 @@ export class LoomDaemon {
         } catch (err) {
           res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
+      }),
+    );
+
+    // Likely contradictions between units, heuristically flagged for a human
+    // to resolve — each flag names the signal that tripped it.
+    app.get(
+      "/api/projects/:id/brain/conflicts",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ conflicts: findConflicts(rt.brain.all()) });
       }),
     );
 

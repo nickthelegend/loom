@@ -410,6 +410,79 @@ export function retrieve(brain: Brain, opts: RetrieveOpts): Hit[] {
   return retrieveFrom(brain.all(), opts);
 }
 
+// ---------------------------------------------------------------------------
+// Contradictions
+// ---------------------------------------------------------------------------
+export interface Conflict {
+  a: Memory;
+  b: Memory;
+  /** Trigram similarity of the pair — how same-topic they are. */
+  similarity: number;
+  /** What tripped the flag, so the human can judge the judge. */
+  signal: "negation" | "same-topic-divergent";
+}
+
+const NEGATIONS = [
+  ["always", "never"],
+  ["use", "don't use"],
+  ["use", "do not use"],
+  ["should", "should not"],
+  ["should", "shouldn't"],
+  ["enable", "disable"],
+  ["allow", "forbid"],
+  ["allow", "refuse"],
+  ["on", "off"],
+] as const;
+
+function negationPair(a: string, b: string): boolean {
+  const la = ` ${a.toLowerCase()} `;
+  const lb = ` ${b.toLowerCase()} `;
+  return NEGATIONS.some(
+    ([x, y]) =>
+      (la.includes(` ${x} `) && lb.includes(` ${y} `)) ||
+      (la.includes(` ${y} `) && lb.includes(` ${x} `)),
+  );
+}
+
+/**
+ * Likely contradictions between live units of the same kind.
+ *
+ * Heuristic, and says so in the shape of its output: each flag carries the
+ * signal that tripped it, because the human resolving a conflict needs to be
+ * able to judge the judge. Two signals:
+ *
+ *   negation             — same topic (trigram ≥ .45) and one side negates a
+ *                          word the other asserts. The strong flag.
+ *   same-topic-divergent — decisions/conventions only, very same-topic
+ *                          (.60–.92) yet worded apart. Weaker: often a
+ *                          refinement, sometimes a reversal. Above .92 it's a
+ *                          near-duplicate, which dedupe owns, not this.
+ *
+ * O(n²) over live units, which at brain scale (hundreds) is nothing. Facts are
+ * exempt from the divergent signal — two facts about one file are usually both
+ * true — but not from negation.
+ */
+export function findConflicts(memories: Memory[]): Conflict[] {
+  const live = memories.filter((m) => !isExpired(m));
+  const out: Conflict[] = [];
+  const vecs = new Map(live.map((m) => [m.id, trigramVector(m.text)]));
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      const a = live[i]!;
+      const b = live[j]!;
+      if (a.kind !== b.kind) continue;
+      const sim = cosine(vecs.get(a.id)!, vecs.get(b.id)!);
+      if (sim < 0.45 || sim >= 0.92) continue;
+      if (negationPair(a.text, b.text)) {
+        out.push({ a, b, similarity: round(sim), signal: "negation" });
+      } else if (sim >= 0.6 && (a.kind === "decision" || a.kind === "convention" || a.kind === "constraint")) {
+        out.push({ a, b, similarity: round(sim), signal: "same-topic-divergent" });
+      }
+    }
+  }
+  return out.sort((x, y) => y.similarity - x.similarity);
+}
+
 const KIND_LABEL: Record<MemoryKind, string> = {
   constraint: "Constraints reality imposes",
   failure: "Known failures — do not repeat these",

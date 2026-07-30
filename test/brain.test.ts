@@ -540,3 +540,51 @@ describe("fuzzy retrieval", () => {
     expect(hits[0]!.detail!.fuzzy).toBeGreaterThan(0);
   });
 });
+
+/**
+ * Contradiction flagging (#6): heuristic, and honest about being one — every
+ * flag names the signal that tripped it so the human can judge the judge.
+ */
+describe("conflicts", () => {
+  const mk2 = (id: string, kind: Memory["kind"], text: string): Memory => ({
+    id, kind, text, entities: [], scope: {}, confidence: 0.9,
+    provenance: { agentId: "t", eventId: 1, ts: Date.now() },
+    createdAt: Date.now(), updatedAt: Date.now(), hash: id, version: 1,
+  });
+
+  it("flags a negation pair on the same topic", async () => {
+    const { findConflicts } = await import("../src/core/brain-index.js");
+    const conflicts = findConflicts([
+      mk2("a", "convention", "always use tabs for indentation in this repo"),
+      mk2("b", "convention", "never use tabs for indentation in this repo"),
+      mk2("c", "fact", "the daemon binds port 7420"),
+    ]);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.signal).toBe("negation");
+    expect([conflicts[0]!.a.id, conflicts[0]!.b.id].sort()).toEqual(["a", "b"]);
+  });
+
+  it("flags same-topic divergent decisions, but not facts", async () => {
+    const { findConflicts } = await import("../src/core/brain-index.js");
+    const decisions = findConflicts([
+      mk2("a", "decision", "the deploy pipeline runs through vercel with preview builds"),
+      mk2("b", "decision", "the deploy pipeline runs through cloudflare with preview builds"),
+    ]);
+    expect(decisions.some((c) => c.signal === "same-topic-divergent")).toBe(true);
+
+    const facts = findConflicts([
+      mk2("a", "fact", "the daemon serves the app page from src/daemon/app-page.ts"),
+      mk2("b", "fact", "the daemon serves the health route from src/daemon/server.ts"),
+    ]);
+    expect(facts.filter((c) => c.signal === "same-topic-divergent")).toHaveLength(0);
+  });
+
+  it("leaves near-duplicates to dedupe, not conflict", async () => {
+    const { findConflicts } = await import("../src/core/brain-index.js");
+    const conflicts = findConflicts([
+      mk2("a", "decision", "we use sqlite for the event log"),
+      mk2("b", "decision", "we use sqlite for the event log."),
+    ]);
+    expect(conflicts).toHaveLength(0);
+  });
+});
