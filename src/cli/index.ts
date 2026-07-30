@@ -329,6 +329,35 @@ program
   });
 
 program
+  .command("specs")
+  .description("the project's Playwright specs, and whether one is running")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { specs, running } = await client.listSpecs(project.id);
+    if (!specs.length) return void console.log(pc.dim("no *.spec.* / *.e2e.* files here"));
+    for (const s of specs) {
+      const live = running?.file === s.path ? pc.green("  ← running") : "";
+      console.log(`${s.path}${live}`);
+    }
+  });
+
+program
+  .command("specs:run <file>")
+  .description("run one Playwright spec through the daemon (watch it in the Browser tab or loom watch)")
+  .action(async (file: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      const { run } = await client.runSpec(project.id, file);
+      console.log(`${pc.cyan("▶")} ${run.file} ${pc.dim(`run ${run.id} — reporter streams to the app; result lands in the Console`)}`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("stale")
   .description("sessions that look hung — busy far longer than any plausible turn")
   .action(async () => {
