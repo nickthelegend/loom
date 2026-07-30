@@ -753,6 +753,34 @@ The pad stays deliberately dumb: a small JSON protocol over WebSocket, and the
 daemon owns speech‑to‑text, session routing and CLI orchestration. Point it at
 your own stack by implementing one message handler.
 
+## Git policies (all opt-in)
+
+Three flags in `.loom/config.json → git`, off by default because committing is
+a policy, not a mechanic:
+
+- **`commitPerTurn`** — each turn's changes become one commit as they land:
+  subject from the prompt, `Co-Authored-By: <agent>` so blame answers "who
+  wrote this" with the agent, staged by exactly the files that turn touched —
+  a bystander's uncommitted mess is never swallowed.
+- **`worktreePerAgent`** — each adapter works in a sibling checkout on branch
+  `agent/<id>`; parallel edits can't collide in the filesystem. Merging is
+  deliberately manual (`git merge agent/<id>`); pair with `commitPerTurn` so
+  the branches actually carry the work.
+- **`branchPerTask`** — dragging a board card to Working checks out
+  `task/<id>-<slug>` (id first, so retitles don't orphan it; idempotent on
+  re-drag). Reaching Review logs the exact `gh pr create` command instead of
+  running it — pushing publishes, and that stays a human act.
+
+## Routes that loop
+
+A step can carry `onFail` naming an **earlier** step: when it errors, the route
+re-enters there instead of failing — "review fails → back to execute", as data.
+Backward-only (a forward jump would skip work), budgeted at three re-entries
+(a pipeline that never converges should say so, not orbit), and visible in the
+thread as `route_step {loopedFrom, loop}`. Define and keep pipelines with
+`loom routes:save <name> planner executor reviewer` — validated against the
+roster at save, stored in the project config so they travel with the repo.
+
 ## Security model
 
 - The daemon binds to `127.0.0.1` by default, or your **Tailscale interface** with
