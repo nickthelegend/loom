@@ -31,3 +31,11 @@ test("select locks the baton to an available agent", async (t) => {
   const r = await loomSelect(target);
   assert.equal(r.to, target, `baton handed to ${target}`);
 });
+
+test("agent state answers with one of the pad's four words", async (t) => {
+  if (!up) return t.skip("loom daemon not reachable");
+  const { loomAgentState } = await import("../loom.mjs");
+  const agents = loomAgents();
+  const state = await loomAgentState(agents[0]);
+  assert.ok(["thinking", "needs-you", "failed", "ready"].includes(state), `got "${state}"`);
+});

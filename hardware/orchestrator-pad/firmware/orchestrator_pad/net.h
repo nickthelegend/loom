@@ -69,6 +69,22 @@ public:
     return true;
   }
 
+  // GET /pad/state?agent=… — the selected agent's live state, for the LED.
+  // One of: thinking / needs-you / failed / ready. Any trouble reads as
+  // "ready": a polling hiccup must not paint a fault the agent doesn't have.
+  bool padState(const String &agent, String &stateOut) {
+    HTTPClient http; WiFiClient plain; WiFiClientSecure tls;
+    if (!beginReq(http, plain, tls, url((String("/pad/state?agent=") + urlEnc(agent)).c_str()))) return false;
+    auth(http);
+    http.setTimeout(4000);
+    int code = http.GET();
+    if (code != 200) { http.end(); return false; }
+    String body = http.getString();
+    http.end();
+    stateOut = jsonStr(body, "state");
+    return stateOut.length() > 0;
+  }
+
   // GET /speak?text=… → play it (connected cue, telnet `say`).
   bool speak(const String &text, Audio &audio) {
     HTTPClient http; WiFiClient plain; WiFiClientSecure tls;

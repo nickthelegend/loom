@@ -81,6 +81,26 @@ export function loomAgents() {
   return cache.agents;
 }
 
+/**
+ * The selected agent's live state, for the pad's LED.
+ *
+ * Four words the firmware can render without knowing Loom's internals:
+ *   thinking  — mid-turn (busy)
+ *   needs-you — blocked on a human answer
+ *   failed    — quarantined (a firing alert or a blown budget)
+ *   ready     — none of the above
+ */
+export async function loomAgentState(agent) {
+  const { projectId } = await loomInit();
+  const { project } = await loomFetch("GET", `/api/projects/${projectId}`);
+  const a = project.agents.find((x) => x.id === agent);
+  if (!a) return "ready";
+  if (project.quarantine && project.quarantine[agent]) return "failed";
+  if (project.needsInput && (project.needsInputAgent ?? project.holder) === agent) return "needs-you";
+  if (a.busy) return "thinking";
+  return "ready";
+}
+
 /** Lock the baton to an agent — the pad's "select". Returns {from, to}. */
 export async function loomSelect(agent) {
   const { projectId } = await loomInit();

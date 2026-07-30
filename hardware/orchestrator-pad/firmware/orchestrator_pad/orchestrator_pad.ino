@@ -38,8 +38,40 @@ uint32_t   recAutoStopAt = 0;          // 0 = manual (hold); else a ms deadline
 String     selAgent = "";              // currently selected agent
 uint8_t    selR = 0, selG = 20, selB = 0;
 
+// The LED as a report, not a decoration: while an agent is selected the pad
+// polls the backend for its LIVE state and renders it — the pad on your desk
+// answers "is it still going?" without a glance at the screen.
+//   thinking  → the agent colour, breathing
+//   needs-you → sharp white/colour blink (the only state that wants you NOW)
+//   failed    → solid red
+//   ready     → the agent colour, steady
+String     agentState = "ready";
+uint32_t   lastStatePoll = 0;
+const uint32_t STATE_POLL_MS = 1500;
+
 inline void led(uint8_t r, uint8_t g, uint8_t b) { rgbLedWrite(STATUS_LED, r, g, b); }
 inline void ledReady() { led(selAgent.length() ? selR : 0, selAgent.length() ? selG : 20, selAgent.length() ? selB : 0); }
+
+// Render agentState each pass through loop(). Time-sliced off millis(), never
+// blocking — the matrix scan and the mic share this loop.
+void ledTick() {
+  if (recording || !selAgent.length()) return;   // recording owns the LED
+  uint32_t t = millis();
+  if (agentState == "thinking") {
+    // triangle-wave breathe between 15% and 100% of the agent colour
+    uint32_t ph = t % 1600;
+    uint32_t up = ph < 800 ? ph : 1600 - ph;     // 0..800
+    uint8_t lvl = 38 + (up * 217) / 800;         // 38..255 scale factor
+    led((selR * lvl) / 255, (selG * lvl) / 255, (selB * lvl) / 255);
+  } else if (agentState == "needs-you") {
+    bool on = (t / 280) % 2 == 0;
+    if (on) led(255, 255, 255); else led(selR, selG, selB);
+  } else if (agentState == "failed") {
+    led(80, 0, 0);
+  } else {
+    ledReady();
+  }
+}
 
 // ── recording ────────────────────────────────────────────────────────────────
 void startRecording(uint32_t autoStopMs = 0) {
@@ -252,6 +284,19 @@ void setup() {
 void loop() {
   matrix.scan(onKey);
   telnet.poll();
+  ledTick();
+
+  // Poll the selected agent's live state. Skipped while recording — the mic
+  // read is timing-sensitive and an HTTP round-trip would drop samples.
+  if (!recording && selAgent.length() && WiFi.isConnected() &&
+      millis() - lastStatePoll >= STATE_POLL_MS) {
+    lastStatePoll = millis();
+    String st;
+    if (net.padState(selAgent, st)) {
+      if (st != agentState) telnet.logf("  state: %s\n", st.c_str());
+      agentState = st;
+    }
+  }
 
   if (recording && recBuf) {
     int16_t block[256];

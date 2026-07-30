@@ -144,6 +144,22 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- speak arbitrary text (amp test / telnet `say`) ---------------------
+  // The pad polls this for its LED: the selected agent's live state as one of
+  // four words (thinking / needs-you / failed / ready). Cheap on purpose — the
+  // pad asks every second or two.
+  if (req.method === "GET" && url.pathname === "/pad/state") {
+    if (!tokenOk(req)) return json(res, 401, { error: "bad token" });
+    const agent = url.searchParams.get("agent") || "";
+    if (!agent) return json(res, 400, { error: "missing agent" });
+    try {
+      const { loomAgentState } = await import("./loom.mjs");
+      return json(res, 200, { agent, state: await loomAgentState(agent) });
+    } catch {
+      // Loom unreachable — the pad shows ready rather than inventing a fault.
+      return json(res, 200, { agent, state: "ready", degraded: true });
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/speak") {
     const text = (url.searchParams.get("text") || "").trim();
     if (!text) return void json(res, 400, { error: "missing ?text=" });
