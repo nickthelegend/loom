@@ -900,6 +900,19 @@ export class LoomDaemon {
           return void res.status(400).json({ error: `no such directory: ${resolved}` });
         }
         let config = readProjectConfig(resolved);
+        // A config that exists but has no name is legal on disk and was silently
+        // corrosive: the defaulting branch below is skipped, `--name` is ignored,
+        // and `registerProject` stores `name: null`. That null then surfaces as a
+        // nameless row in the project list and as a missing `project` field in
+        // snapshots — which declare it as a string. ProjectConfig types `name` as
+        // required, but the file is read through an unchecked cast, so the type
+        // system never had a chance to notice. Fill it in, and persist, because
+        // the docs tell people to hand-edit this file for agents; forgetting the
+        // name while doing so should cost them nothing.
+        if (config && !String(config.name ?? "").trim()) {
+          config = { ...config, name: name?.trim() || path.basename(resolved) };
+          writeProjectConfig(resolved, config);
+        }
         if (!config) {
           // Every ADE Loom can drive, probed in parallel — see core/ades.ts.
           // This used to name claude and opencode by hand, which is how the list
@@ -914,7 +927,7 @@ export class LoomDaemon {
           };
           writeProjectConfig(resolved, config);
         }
-        const info = registerProject(resolved, config.name);
+        const info = registerProject(resolved, config.name || path.basename(resolved));
         res.json({ project: info, config });
       })();
     });

@@ -100,7 +100,14 @@ export function registerProject(dir: string, name: string): ProjectInfo {
   const resolved = path.resolve(dir);
   const existing = reg.projects.find((p) => path.resolve(p.dir) === resolved);
   if (existing) return existing;
-  const info: ProjectInfo = { id: newId(), name, dir: resolved };
+  // The signature says string and every caller is typed, but the name usually
+  // originates in a JSON file read through an unchecked cast — so "required"
+  // is a claim about the code, not about the bytes on disk. A registry row with
+  // no name is unfixable from the UI (nothing to click) and leaks into every
+  // surface that prints a project. Fall back to the directory, which is what
+  // the caller would have chosen anyway.
+  const label = String(name ?? "").trim() || path.basename(resolved);
+  const info: ProjectInfo = { id: newId(), name: label, dir: resolved };
   reg.projects.push(info);
   writeJson(registryFile(), reg);
   return info;
