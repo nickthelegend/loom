@@ -203,3 +203,43 @@ describe("installSkillFromGit", () => {
     expect(findSkillDir(tooDeep)).toBeNull();
   });
 });
+
+/**
+ * Authoring (#22): the scaffold is validated by the same parser the roster
+ * reads with, so a skill this accepts is one the loader will actually offer.
+ */
+describe("authoring a skill", () => {
+  it("scaffolds a loadable SKILL.md", async () => {
+    const { authorSkill } = await import("../src/core/skill-install.js");
+    const { loadSkills } = await import("../src/core/skills.js");
+    const dir = tmpDir("author");
+    const out = authorSkill(dir, {
+      id: "Deploy Checklist!",
+      name: "Deploy checklist",
+      description: "Use before every production deploy",
+    });
+    // id sanitised to a directory-safe slug
+    expect(out.dir.endsWith("skills/deploy-checklist")).toBe(true);
+
+    const skills = loadSkills([path.join(dir, "skills")]);
+    const mine = skills.find((s) => s.id === "deploy-checklist");
+    expect(mine).toBeTruthy();
+    expect(mine!.name).toBe("Deploy checklist");
+    expect(mine!.description).toBe("Use before every production deploy");
+  });
+
+  it("refuses to overwrite an existing skill", async () => {
+    const { authorSkill } = await import("../src/core/skill-install.js");
+    const dir = tmpDir("author2");
+    const input = { id: "one", name: "One", description: "d" };
+    authorSkill(dir, input);
+    expect(() => authorSkill(dir, input)).toThrow(/already exists/);
+  });
+
+  it("refuses the empty description that would make it undiscoverable", async () => {
+    const { authorSkill } = await import("../src/core/skill-install.js");
+    expect(() =>
+      authorSkill(tmpDir("author3"), { id: "x", name: "X", description: "  " }),
+    ).toThrow(/description/);
+  });
+});

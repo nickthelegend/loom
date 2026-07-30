@@ -131,6 +131,59 @@ function readManifest(dir: string): { name: string; description: string; file: s
  * and `references/` files next to them, and a skill installed without its
  * attachments is a skill whose instructions point at nothing.
  */
+/**
+ * Author a skill in place: scaffold `skills/<id>/SKILL.md`, validated.
+ *
+ * Skills could be browsed and installed but never written — authoring one
+ * meant knowing the frontmatter convention by heart and hand-building the
+ * directory. The validation is the same reader the roster uses (parseSkillMd),
+ * so a skill this accepts is a skill the loader will actually offer: refusing
+ * to write anything the roster would silently drop is the whole point.
+ */
+export function authorSkill(
+  projectDir: string,
+  input: { id: string; name: string; description: string; body?: string },
+): { dir: string; file: string } {
+  const id = input.id.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!id) throw new SkillInstallError("a skill needs an id (letters, digits, dashes)");
+  const name = input.name.trim();
+  if (!name) throw new SkillInstallError("a skill needs a name");
+  const description = input.description.trim();
+  if (!description) {
+    throw new SkillInstallError(
+      "a skill needs a description — it's how agents decide when to use it",
+    );
+  }
+  const skillsDir = path.join(projectDir, "skills");
+  const dest = path.join(skillsDir, id);
+  if (path.dirname(dest) !== skillsDir) {
+    throw new SkillInstallError(`refusing "${id}" — it resolves outside ${skillsDir}`);
+  }
+  const file = path.join(dest, "SKILL.md");
+  if (fs.existsSync(file)) {
+    throw new SkillInstallError(`"${id}" already exists — edit ${file} instead`);
+  }
+  const md =
+    `---\n` +
+    `name: ${name}\n` +
+    `description: ${description}\n` +
+    `---\n\n` +
+    (input.body?.trim()
+      ? `${input.body.trim()}\n`
+      : `# ${name}\n\nWrite the instructions an agent should follow here.\n\n` +
+        `## When to use\n\n${description}\n\n## Steps\n\n1. …\n`);
+  // Round-trip through the real parser before anything touches disk.
+  const parsed = parseSkillMd(md);
+  if (parsed.name !== name || parsed.description !== description) {
+    throw new SkillInstallError(
+      "the generated frontmatter didn't survive the parser — check for YAML-breaking characters",
+    );
+  }
+  fs.mkdirSync(dest, { recursive: true });
+  fs.writeFileSync(file, md);
+  return { dir: dest, file };
+}
+
 export function installSkillFromDir(
   srcDir: string,
   projectDir: string,

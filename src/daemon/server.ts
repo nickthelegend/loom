@@ -39,7 +39,7 @@ import { probeMcpServer, writeMcpSession } from "../core/mcp.js";
 import { findSpecs, SpecRunner, type SpecRun } from "./specs.js";
 import { searchCatalog } from "../core/mcp-catalog.js";
 import { buildSnapshots } from "../observability/snapshots.js";
-import { SkillInstallError } from "../core/skill-install.js";
+import { authorSkill, SkillInstallError } from "../core/skill-install.js";
 import { suggestSkill } from "../core/skills.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
@@ -1693,6 +1693,34 @@ export class LoomDaemon {
       withRuntime(async (rt, _req, res) => {
         await rt.pollMcpHealth();
         res.json({ health: rt.mcpHealthReport() });
+      }),
+    );
+
+    // Author a skill in place: scaffold skills/<id>/SKILL.md, validated by the
+    // same parser the roster reads with — a skill this accepts is one the
+    // loader will actually offer.
+    app.post(
+      "/api/projects/:id/skills/author",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as {
+          id?: string;
+          name?: string;
+          description?: string;
+          body?: string;
+          enable?: boolean;
+        };
+        try {
+          const out = authorSkill(rt.info.dir, {
+            id: String(b.id ?? ""),
+            name: String(b.name ?? ""),
+            description: String(b.description ?? ""),
+            ...(b.body ? { body: String(b.body) } : {}),
+          });
+          if (b.enable !== false) rt.setSkillEnabled(path.basename(out.dir), true);
+          res.json(out);
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 
