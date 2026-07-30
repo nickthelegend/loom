@@ -215,6 +215,53 @@ export class DaemonClient {
     );
   }
 
+  snapshot(id: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/snapshot`);
+  }
+
+  restore(id: string, doc: unknown): Promise<{ brain: { added: number; known: number }; tasks: number }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/restore`, doc as Record<string, unknown>);
+  }
+
+  staleSessions(id: string): Promise<{ stale: Array<{ agentId: string; busyMs: number }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/stale`);
+  }
+
+  reapSession(id: string, agentId: string): Promise<{ respawned: boolean }> {
+    return this.request(
+      "POST",
+      `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/reap`,
+    );
+  }
+
+  brainConflicts(id: string): Promise<{
+    conflicts: Array<{ a: { text: string }; b: { text: string }; similarity: number; signal: string }>;
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/conflicts`);
+  }
+
+  mcpHealth(id: string): Promise<{ health: Record<string, { up: boolean; failures: number; probedAt: number }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/mcps/health`);
+  }
+
+  listSpecs(id: string): Promise<{
+    specs: Array<{ path: string; bytes: number }>;
+    running: { id: string; file: string } | null;
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/specs`);
+  }
+
+  runSpec(id: string, file: string): Promise<{ run: { id: string; file: string } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/specs/run`, { file });
+  }
+
+  costSeries(id: string, days = 30): Promise<{
+    days: number;
+    series: Array<{ day: string; usd: number; turns: number; tokensIn: number; tokensOut: number; byAgent: Record<string, { usd: number; turns: number }> }>;
+  }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/costs/series?days=${days}`);
+  }
+
   /** The brain as a portable document — see Brain.export. */
   exportBrain(id: string): Promise<Record<string, unknown>> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/export`);
