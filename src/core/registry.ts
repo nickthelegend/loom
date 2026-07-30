@@ -106,6 +106,16 @@ export function registerProject(dir: string, name: string): ProjectInfo {
   return info;
 }
 
+/** Rename a project's label. The id — what tokens and state key on — never moves. */
+export function renameProject(id: string, name: string): ProjectInfo | null {
+  const reg = readJson<RegistryFile>(registryFile(), { projects: [] });
+  const info = reg.projects.find((p) => p.id === id);
+  if (!info) return null;
+  info.name = name;
+  writeJson(registryFile(), reg);
+  return info;
+}
+
 export function unregisterProject(id: string): void {
   const reg = readJson<RegistryFile>(registryFile(), { projects: [] });
   reg.projects = reg.projects.filter((p) => p.id !== id);
