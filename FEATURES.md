@@ -182,11 +182,26 @@ counted separately — a test proves a feature, it isn't one.
 151. content — 30 feature-request issues, written and triaged (29 closed with implementations)
 152. content — 6 follow-on issues capturing the honest next steps
 
+## The fable wave (153–165)
+153. feat — CLI `brain:search` (`--explain` shows the per-hit arithmetic)
+154. feat — typed client searchBrain
+155. feat — `specs:run --wait`: the verdict as an exit code, failure tail printed
+156. feat — typed client logs()
+157. feat — `safety.snapshotBeforeRoutes`: a pre-route checkpoint nobody had to remember
+158. feat — pre-route snapshots bounded to the newest five
+159. feat — CLI `budget all <usd>` — cap the whole fleet in one line
+160. feat — stale-build reload banner: socket reconnect compares page rev vs daemon rev
+161. feat — patchConfig accepts git + safety policies (false deletes the key)
+162. feat — settings() reports policies measured, not assumed
+163. feat — Settings modal: Policies section with one honest description each
+164. feat — Brain tab surfaces likely contradictions, quiet when clean
+165. content — 6 follow-on issues (#31–#36) capturing the honest next steps
+
 ## Test suites written or extended (proof, counted apart)
 agent-instances (12) · subagents (10) · specs+voice (10) · brain-portable (7) ·
 cli-watch (3) · budgets (+1) · retry (3) · stale-sessions (4) · costs (+2) ·
 board (+4) · snapshot (3) · scoped-tokens+small-surfaces (13) · routes-crud (5) ·
 routes-onfail (4) · commit-per-turn+branch (4) · worktree-per-agent (4) ·
-scrollback (3) · mcp health (+2) · brain decay/fuzzy/conflicts (+11) ·
+scrollback (3) · mcp health (+2) · pre-route snapshots (+2) · brain decay/fuzzy/conflicts (+11) ·
 doctor fixes (+4) · app-dom: browser tab, console filters, review comments (+5) ·
 backend loom state (+1)
