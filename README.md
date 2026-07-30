@@ -184,6 +184,45 @@ Surfaces, all talking to the same daemon:
   ([`app/`](app/README.md)): `cd app && npx expo install && npx expo start`.
 - **Web app** — no install; `loom pair` → open the link. Same workspace in the browser.
 
+## Fan out, retry, reap
+
+Three moves the fleet learned for when one turn isn't the right shape:
+
+- **Sub-agents** — a turn can fan a subtask out to a child that runs alongside
+  it and **never holds the baton**: `loom spawn "audit the tests" --agent codex`.
+  The child gets a narrowed briefing (its task, the project's rules, retrieval
+  scoped to its own work — not the parent's thread), reports back as
+  `subtask_done`, and everything it learns lands in the one brain. Capped at
+  four per project, because each child is a real CLI process.
+- **Retry on another agent** — when a turn fails, `loom retry <agentId>`
+  re-runs the failed prompt on the agent you choose, with the failure attached
+  as a briefing instead of pasted into the message: the thread shows a clean
+  prompt twice, and the second agent is told what was tried and what it died of.
+- **Reap a hung session** — a CLI that hangs holds `busy` forever and blocks
+  every dispatch. `loom stale` names what's hung (busy past ten minutes);
+  `loom reap <agentId>` interrupts, stops, respawns from config, and releases
+  the baton if the corpse held it.
+
+## Several sessions, one brain
+
+`loom agents:add claude-code` a second time doesn't error — it adds
+`claude-code-2`: its own session, its own context window, **the same project
+brain**. Name them for their jobs (`--as reviewer --role reviewer`) and pick
+per message. Memory import dedupes by file and units are project-scoped, so
+what one session learns the others retrieve. One baton still rules them all:
+two sessions of a kind never means two writers at once.
+
+## The Browser tab
+
+Agents write Playwright specs constantly and could never watch them run. The
+**Browser** tab (next to Console in the dock) lists the project's specs
+(`*.spec.*`, `*.e2e.*` — never inside `node_modules`), runs one on click with
+the reporter streaming line by line, records pass/fail in the Console, and on
+failure stages the reporter's own words in the composer to hand back to
+whichever agent should fix it. A URL bar beside it previews a local dev server
+next to its tests. Playwright stays the project's dependency (`npx
+--no-install`) — a project without it is told so plainly.
+
 ## The workspace
 
 On a wide screen the web app (and the desktop shell around it) is a full workspace for
