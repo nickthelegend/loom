@@ -56,3 +56,5 @@ jobs:
         working-directory: app
       - run: npx tsc --noEmit
         working-directory: app
+      # The phone carries copies of the relay protocol; they must match the daemon's.
+      - run: node app/scripts/check-relay-copies.mjs

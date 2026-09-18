@@ -2,6 +2,8 @@
 // Our own code: it starts the loom daemon and loads the same /app surface the
 // phone and browser use. No IDE, no editor — the continuity layer, on desktop.
 
+import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
 import { prepareAppUrl } from "./loom-app.js";
@@ -20,12 +22,66 @@ app.setName("Loom Desktop");
 const BG = "#0a0a0a";
 let win = null;
 
+// One Loom per machine: a second launch focuses the window that's already
+// open instead of racing it for the daemon.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+}
+
+// The window comes back where you left it. A saved rect that no longer fits a
+// display (monitor unplugged) is ignored rather than opened off-screen.
+const STATE_FILE = () => path.join(app.getPath("userData"), "window-state.json");
+
+function savedBounds() {
+  try {
+    const b = JSON.parse(fs.readFileSync(STATE_FILE(), "utf8"));
+    const visible = screen.getAllDisplays().some(({ workArea: a }) =>
+      b.x >= a.x - 40 && b.y >= a.y - 40 && b.x + 200 <= a.x + a.width && b.y + 100 <= a.y + a.height,
+    );
+    return visible && b.width >= 600 && b.height >= 400 ? b : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistBounds(w) {
+  let timer = null;
+  const save = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (w.isDestroyed() || w.isMinimized() || w.isFullScreen()) return;
+      try {
+        fs.writeFileSync(STATE_FILE(), JSON.stringify({ ...w.getBounds(), maximized: w.isMaximized() }));
+      } catch {
+        /* losing a window position is not worth an error */
+      }
+    }, 400);
+  };
+  w.on("resize", save);
+  w.on("move", save);
+  w.on("close", save);
+}
+
+/** Tell the web app a native menu item was chosen (see preload's onMenu). */
+function menuAction(action) {
+  const target = BrowserWindow.getFocusedWindow() ?? win;
+  target?.webContents.send("loom:menu", action);
+}
+
 async function createWindow() {
   // Orca-style: fill the work area on launch (never larger than the display).
   const area = screen.getPrimaryDisplay().workAreaSize;
+  const saved = savedBounds();
   win = new BrowserWindow({
-    width: Math.min(1512, area.width),
-    height: Math.min(945, area.height),
+    width: saved?.width ?? Math.min(1512, area.width),
+    height: saved?.height ?? Math.min(945, area.height),
+    ...(saved ? { x: saved.x, y: saved.y } : {}),
     minWidth: 600,
     minHeight: 400,
     backgroundColor: BG,
@@ -41,6 +97,9 @@ async function createWindow() {
       preload: PRELOAD,
     },
   });
+
+  if (saved?.maximized) win.maximize();
+  persistBounds(win);
 
   // Open external links (docs, github) in the real browser, not the shell.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -74,6 +133,18 @@ function buildMenu() {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       ...(isMac ? [{ role: "appMenu" }] : []),
+      {
+        label: "Loom",
+        submenu: [
+          { label: "New Orchestra…", accelerator: "CmdOrCtrl+Shift+O", click: () => menuAction("orchestrate") },
+          { label: "New Chat", accelerator: "CmdOrCtrl+N", click: () => menuAction("new-chat") },
+          { type: "separator" },
+          { label: "Connect a Phone…", accelerator: "CmdOrCtrl+Shift+P", click: () => menuAction("pair") },
+          { label: "Loom Cloud…", click: () => menuAction("cloud") },
+          { type: "separator" },
+          { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => menuAction("settings") },
+        ],
+      },
       { role: "editMenu" },
       {
         label: "View",

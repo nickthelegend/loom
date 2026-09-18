@@ -36,6 +36,13 @@ export type EventKind =
   | "subtask_started"
   | "subtask_done"
   | "subtask_failed"
+  // Orchestra: one orchestrator agent plans a goal into tasks, many worker
+  // agents run them in parallel, each in its own thread and worktree. One
+  // kind, `payload.phase` says which step. See core/orchestra.ts.
+  | "orchestra"
+  // An agent in "always ask" mode wants permission for a tool use; payload
+  // .phase is "requested" or "decided". See core/approvals.ts.
+  | "approval"
   | "memory_import" // an ADE's native memory pulled into the shared brain
   // The brain. A memory is not a row in a table somewhere — it is these three
   // events, folded. State is a fold, history is a filter, and the two can't
@@ -202,8 +209,20 @@ export interface ProjectConfig {
      * version: `git merge agent/<id>` is the handoff of record.
      */
     worktreePerAgent?: boolean;
+    /**
+     * What happens to finished work, in one setting (the status-bar toggle):
+     *   none   — nothing is committed for you; orchestra work waits on its branch
+     *   commit — each turn is committed; a finished orchestra merges into your branch
+     *   push   — commit, then push
+     *   pr     — commit; a finished orchestra pushes its own branch and opens a PR
+     * Implies commitPerTurn for everything but "none".
+     */
+    delivery?: GitDelivery;
   };
 }
+
+export type GitDelivery = "none" | "commit" | "push" | "pr";
+export const GIT_DELIVERIES: GitDelivery[] = ["none", "commit", "push", "pr"];
 
 /** One MCP server, in the shape the Anthropic API's `mcp_servers` accepts. */
 export interface McpServerConfig {
@@ -400,6 +419,8 @@ export interface AgentStatus {
   model: string;
   /** Switched on? An off agent stays in the roster but isn't spawned. */
   enabled?: boolean;
+  /** Permission mode in effect: bypass | auto | ask. See core/permissions.ts. */
+  permissions?: string;
 }
 
 export interface ProjectStatus {
@@ -428,6 +449,8 @@ export interface ProjectStatus {
    * "paused" rather than showing an agent that will refuse every prompt.
    */
   quarantine?: Record<string, { reason: string; since: number; displaced: boolean }>;
+  /** The live or latest orchestra run, compact. See core/orchestra.ts. */
+  orchestra?: Record<string, unknown> | null;
 }
 
 // ---------------------------------------------------------------------------

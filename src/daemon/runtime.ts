@@ -22,7 +22,7 @@ import type {
   UnifiedMemory,
 } from "../types.js";
 import type { RouteState, RouteStepSpec, RouterKind } from "../types.js";
-import { isAdapter, MAIN_CHAT } from "../types.js";
+import { GIT_DELIVERIES, isAdapter, MAIN_CHAT, type GitDelivery } from "../types.js";
 import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../adapters/index.js";
 import { ADES } from "../core/ades.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
@@ -31,7 +31,7 @@ import { compileBrief, retrieve } from "../core/brain-index.js";
 import { extractFromTurn, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
-import { addWorktree as gitAddWorktree, ensureBranch, stageAndCommitFiles, worktreePath } from "../core/git.js";
+import { addWorktree as gitAddWorktree, ensureBranch, push as gitPush, stageAndCommitFiles, worktreePath } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
 import { renderProjection } from "../core/distill.js";
 import {
@@ -65,6 +65,9 @@ import {
   type SkillInstallResult,
 } from "../core/skill-install.js";
 import { resolveSteps, RouteEngine } from "../core/routes.js";
+import { OrchestraEngine } from "../core/orchestra.js";
+import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
+import { detectAdes } from "../core/ades.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
 import {
   newId,
@@ -172,6 +175,10 @@ export class ProjectRuntime {
   readonly log: EventLog;
   readonly baton: BatonManager;
   readonly routes: RouteEngine;
+  /** One orchestrator, many parallel workers — see core/orchestra.ts. */
+  readonly orchestra: OrchestraEngine;
+  /** Adapter kinds installed on this machine, probed once at open. */
+  private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
   readonly brain: Brain;
   private agents = new Map<string, AnyAgent>();
@@ -212,6 +219,34 @@ export class ProjectRuntime {
         return Boolean(agent && isAdapter(agent));
       },
     });
+
+    this.orchestra = new OrchestraEngine({
+      projectId: info.id,
+      projectName: info.name,
+      projectDir: info.dir,
+      roster: () =>
+        this.config.agents.filter(
+          (a) => a.enabled !== false && tierForKind(a.kind) === "adapter" && !isWithdrawnKind(a.kind),
+        ),
+      installedKinds: () => this.installedKinds,
+      makeAgent: (cfg, dir) => {
+        const agent = createAgent({ ...cfg, options: { ...(cfg.options ?? {}), loomProject: info.id } }, dir);
+        if (!isAdapter(agent)) throw new Error(`"${cfg.id}" is a bridge — it cannot run orchestra work`);
+        return agent;
+      },
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      createChat: (title) => this.createChat(title),
+      briefingFor: (query, agentId) => {
+        const hits = retrieve(this.brain, { query, agent: agentId, limit: 6 });
+        return [this.activeSkillsBlock(), compileBrief(hits.map((h) => h.memory))].filter(Boolean).join("\n\n");
+      },
+      gate: (agentId) => {
+        this.enforceQuarantine(agentId);
+        this.enforceBudget(agentId);
+      },
+      observe: (event) => this.trackCost(event),
+      gitDelivery: () => this.config.git?.delivery ?? "none",
+    });
   }
 
   static async open(info: ProjectInfo): Promise<ProjectRuntime> {
@@ -229,6 +264,9 @@ export class ProjectRuntime {
     }
     // Watch the project's MCP servers, if it has any — see mcpHealth.
     rt.startMcpHealthLoop();
+    void detectAdes()
+      .then((found) => (rt.installedKinds = Object.keys(found).filter((k) => found[k])))
+      .catch(() => {});
     // Worktree-per-agent: prepare each adapter's checkout and respawn it there.
     // Safe pre-start — agents are constructed lazily-started, so replacing the
     // instance before its first turn loses nothing.
@@ -587,7 +625,7 @@ export class ProjectRuntime {
     brain?: { extractor?: "auto" | "off"; model?: string };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
     defaultAgent?: string;
-    git?: { commitPerTurn?: boolean; branchPerTask?: boolean; worktreePerAgent?: boolean };
+    git?: { commitPerTurn?: boolean; branchPerTask?: boolean; worktreePerAgent?: boolean; delivery?: string };
     safety?: { snapshotBeforeRoutes?: boolean };
   }): ProjectConfig {
     // Validate everything that can be rejected BEFORE touching this.config, so a
@@ -623,6 +661,13 @@ export class ProjectRuntime {
           else delete g[k];
         }
       }
+      if (patch.git.delivery !== undefined) {
+        if (!GIT_DELIVERIES.includes(patch.git.delivery as GitDelivery)) {
+          throw new Error(`git.delivery must be one of ${GIT_DELIVERIES.join(", ")}`);
+        }
+        if (patch.git.delivery === "none") delete g.delivery;
+        else g.delivery = patch.git.delivery as GitDelivery;
+      }
       if (Object.keys(g).length) this.config.git = g;
       else delete this.config.git;
       // worktreePerAgent takes effect for agents spawned from here on; the
@@ -649,7 +694,7 @@ export class ProjectRuntime {
     brain: { extractor: "auto" | "off"; model: string };
     projection: { mode: "template" | "llm"; model: string };
     defaultAgent: string;
-    git: { commitPerTurn: boolean; branchPerTask: boolean; worktreePerAgent: boolean };
+    git: { commitPerTurn: boolean; branchPerTask: boolean; worktreePerAgent: boolean; delivery: GitDelivery };
     safety: { snapshotBeforeRoutes: boolean };
     agents: Array<{ id: string; kind: string; role?: string }>;
   } {
@@ -666,6 +711,7 @@ export class ProjectRuntime {
         commitPerTurn: Boolean(this.config.git?.commitPerTurn),
         branchPerTask: Boolean(this.config.git?.branchPerTask),
         worktreePerAgent: Boolean(this.config.git?.worktreePerAgent),
+        delivery: this.config.git?.delivery ?? "none",
       },
       safety: { snapshotBeforeRoutes: Boolean(this.config.safety?.snapshotBeforeRoutes) },
       defaultAgent: this.config.defaultAgent ?? "",
@@ -803,7 +849,12 @@ export class ProjectRuntime {
    * there when the project opened.
    */
   private spawnAgent(cfg: AgentConfig): AnyAgent {
-    const agent = createAgent(cfg, this.agentDir(cfg.id));
+    // The project id rides along so an adapter can file approvals ("always
+    // ask") against the right project — see core/approvals.ts.
+    const agent = createAgent(
+      { ...cfg, options: { ...(cfg.options ?? {}), loomProject: this.info.id } },
+      this.agentDir(cfg.id),
+    );
     this.agents.set(cfg.id, agent);
     agent.onEvent((e) => {
       const chat = this.turnChat.get(agent.id);
@@ -908,6 +959,34 @@ export class ProjectRuntime {
       this.agents.delete(agentId);
     }
     this.spawnAgent(cfg);
+    this.saveConfig();
+    return cfg;
+  }
+
+  /**
+   * Choose how much an agent may do without asking: bypass | auto | ask.
+   *
+   * Same shape as setAgentModel — the mode is read when the adapter is built
+   * (it becomes CLI flags, or the env of opencode's server), so the agent is
+   * rebuilt. Refused mid-turn for the same reason.
+   */
+  setAgentPermissions(agentId: string, mode: PermissionMode): AgentConfig {
+    if (!isPermissionMode(mode)) throw new Error(`permissions must be bypass, auto or ask`);
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    const why = unsupportedReason(cfg.kind, mode);
+    if (why) throw new Error(`"${mode}" isn't available for ${cfg.kind}: ${why}`);
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live) && live.busy()) {
+      throw new Error(`"${agentId}" is mid-turn — wait for it to finish, then change its permissions`);
+    }
+    cfg.options = { ...(cfg.options ?? {}), permissions: mode };
+    if (live) {
+      void Promise.resolve(live.stop()).catch(() => {});
+      this.agents.delete(agentId);
+      this.startedAgents.delete(agentId);
+    }
+    if (cfg.enabled !== false) this.spawnAgent(cfg);
     this.saveConfig();
     return cfg;
   }
@@ -1404,6 +1483,9 @@ export class ProjectRuntime {
 
   /** Any adapter mid-turn? (Hot reloads are deferred while work is in flight.) */
   anyBusy(): boolean {
+    // A live orchestra run counts: reloading the project would close it, and
+    // closing aborts the run — a config edit must not kill a fleet mid-flight.
+    if (this.orchestra.active()) return true;
     return [...this.agents.values()].some((a) => isAdapter(a) && a.busy());
   }
 
@@ -1472,7 +1554,8 @@ export class ProjectRuntime {
    * work rather than whoever finishes second swallowing both.
    */
   private async commitTurn(agentId: string, files: string[]): Promise<void> {
-    if (!this.config.git?.commitPerTurn || !files.length) return;
+    const delivery = this.config.git?.delivery ?? "none";
+    if ((!this.config.git?.commitPerTurn && delivery === "none") || !files.length) return;
     try {
       const events = this.log.list({ limit: 60 });
       const prompt =
@@ -1489,6 +1572,12 @@ export class ProjectRuntime {
         agentId,
         payload: { state: "turn_committed", files: files.length, subject },
       });
+      // "push" delivers each committed turn; "pr" leaves pushing to the
+      // orchestra's branch (a PR per turn is the flood teams complain about).
+      if (delivery === "push") {
+        const pushed = await gitPush(this.agentDir(agentId));
+        this.log.append({ kind: "status", agentId, payload: { state: "turn_pushed", branch: pushed.branch } });
+      }
     } catch (err) {
       // A commit that can't happen (not a repo, hooks failed, nothing staged
       // after filters) is a Console line, never a failed turn.
@@ -1886,7 +1975,7 @@ export class ProjectRuntime {
   async sendMessage(
     text: string,
     agentId?: string,
-    opts: { source?: "user" | "route"; chat?: string } = {},
+    opts: { source?: "user" | "route"; chat?: string; plan?: boolean } = {},
   ): Promise<{ agentId: string }> {
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;
@@ -1924,7 +2013,11 @@ export class ProjectRuntime {
     const pendingBriefing = this.consumePendingBriefing(target);
     // Prepend the enabled skills so every turn carries them, alongside any
     // one-shot handoff briefing. Empty when no skills are on.
-    const briefing = [this.activeSkillsBlock(), pendingBriefing].filter(Boolean).join("\n").trim() || undefined;
+    const briefing =
+      [this.activeSkillsBlock(), pendingBriefing, opts.plan ? planModeBriefing(text) : ""]
+        .filter(Boolean)
+        .join("\n")
+        .trim() || undefined;
     // The project's configured MCP servers, rendered to a temp config file the
     // adapter hands to its CLI. Null when nothing is configured — or when this
     // adapter's CLI has no flag for it, because an "MCP attached" note on a
@@ -2592,6 +2685,7 @@ export class ProjectRuntime {
             busy: false,
             holdsBaton: false,
             model,
+            permissions: permissionFor(cfg.kind, cfg.options),
             // "not spawned" is not "switched off". An agent whose CLI is missing
             // is still enabled in config, and reporting it as disabled made the
             // project-settings toggle render off — clicking it then wrote the
@@ -2608,6 +2702,7 @@ export class ProjectRuntime {
           busy: isAdapter(live) ? live.busy() : false,
           holdsBaton: holder === cfg.id,
           model,
+          permissions: permissionFor(cfg.kind, cfg.options),
           enabled: true,
         };
       }),
@@ -2641,10 +2736,99 @@ export class ProjectRuntime {
       // rotation — the pause was real and completely invisible, which reads as
       // "the self-heal did nothing".
       quarantine: this.quarantined(),
+      orchestra: this.orchestraSummary(),
+    };
+  }
+
+  /**
+   * What every agent in this project is doing right now — for the fleet view.
+   *
+   * One row per roster agent (its thread, whether it's mid-turn, its last
+   * step) and one per orchestra task (worker sessions don't live in the
+   * roster). "Last step" is the newest event from that agent in that thread,
+   * summarised to a line: the tool it ran, the file it touched, what it said.
+   */
+  activity(): Record<string, unknown> {
+    const recent = this.log.list({ limit: 400 });
+    const chats = new Map(this.chats().map((c) => [c.id, c.title]));
+    const lastOf = (agentId: string, chat?: string) => {
+      for (let i = recent.length - 1; i >= 0; i--) {
+        const e = recent[i]!;
+        if (e.agentId !== agentId) continue;
+        if (chat !== undefined && (e.chat ?? MAIN_CHAT) !== chat) continue;
+        return { kind: e.kind, ts: e.ts, chat: e.chat ?? MAIN_CHAT, line: activityLine(e) };
+      }
+      return null;
+    };
+    const agents = this.config.agents.map((cfg) => {
+      const live = this.agents.get(cfg.id);
+      const chat = this.turnChat.get(cfg.id);
+      const last = lastOf(cfg.id, chat);
+      return {
+        id: cfg.id,
+        kind: cfg.kind,
+        role: cfg.role,
+        busy: Boolean(live && isAdapter(live) && live.busy()),
+        since: this.busySince.get(cfg.id) ?? null,
+        permissions: permissionFor(cfg.kind, cfg.options),
+        holdsBaton: this.validHolder() === cfg.id,
+        chat: chat ?? last?.chat ?? null,
+        chatTitle: chats.get(chat ?? last?.chat ?? "") ?? null,
+        last,
+      };
+    });
+    const run = this.orchestra.active() ?? this.orchestra.list()[0];
+    const orchestra = run
+      ? {
+          id: run.id,
+          goal: run.goal,
+          status: run.status,
+          chat: run.chat,
+          orchestrator: run.orchestrator.agent,
+          tasks: run.tasks.map((t) => ({
+            id: t.id,
+            title: t.title,
+            agent: t.agent,
+            status: t.status,
+            chat: t.chat,
+            attempts: t.attempts,
+            files: t.files?.length ?? 0,
+            last: lastOf(t.agent, t.chat),
+          })),
+        }
+      : null;
+    return {
+      project: { id: this.info.id, name: this.info.name },
+      agents,
+      orchestra,
+      subtasks: this.liveSubtasks(),
+      route: this.routes.state(),
+    };
+  }
+
+  /** The chat an agent's current (or last) turn belongs to, if any. */
+  chatOf(agentId: string): string | undefined {
+    return this.turnChat.get(agentId);
+  }
+
+  /** The live (or latest) orchestra run, compact — for status payloads. */
+  orchestraSummary(): Record<string, unknown> | null {
+    const run = this.orchestra.active() ?? this.orchestra.list()[0];
+    if (!run) return null;
+    return {
+      id: run.id,
+      goal: run.goal,
+      status: run.status,
+      chat: run.chat,
+      orchestrator: run.orchestrator.agent,
+      tasks: run.tasks.length,
+      done: run.tasks.filter((t) => t.status === "done").length,
+      running: run.tasks.filter((t) => t.status === "running").length,
     };
   }
 
   async close(): Promise<void> {
+    await this.orchestra.shutdown().catch(() => {});
     this.closed = true;
     if (this.mcpTimer) { clearInterval(this.mcpTimer); this.mcpTimer = null; }
     for (const id of this.startedAgents) {
@@ -2670,6 +2854,52 @@ export class ProjectRuntime {
     if (this.closed) return;
     this.log.append(event);
   }
+}
+
+/** One event, as one line of "what is it doing". */
+export function activityLine(e: LoomEvent): string {
+  const p = e.payload as Record<string, unknown>;
+  const cut = (v: unknown, n = 120) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, n);
+  switch (e.kind) {
+    case "tool_call":
+      return `${cut(p.tool ?? p.name, 40)} ${cut(p.command ?? p.input ?? p.summary ?? "", 90)}`.trim();
+    case "file_edit":
+      return `edited ${cut(p.path, 100)}`;
+    case "message":
+      return cut(p.text);
+    case "needs_input":
+      return `asks: ${cut(p.question)}`;
+    case "approval":
+      return p.phase === "requested" ? `wants approval for ${cut(p.tool, 60)}` : `approval ${cut(p.behavior, 10)}`;
+    case "run_complete":
+      return "finished its turn";
+    case "error":
+      return `error: ${cut(p.message)}`;
+    default:
+      return e.kind.replace(/_/g, " ");
+  }
+}
+
+/**
+ * Plan mode for an ordinary turn: think, don't touch — and leave the plan as a
+ * markdown spec any agent can execute later (or an orchestra can run).
+ */
+export function planModeBriefing(prompt: string): string {
+  const slug =
+    prompt
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "plan";
+  const day = new Date().toISOString().slice(0, 10);
+  return [
+    "[Loom · Plan mode] Do NOT change any code in this turn. Investigate the repository, then write a",
+    `complete implementation plan to plans/${day}-${slug}.md (create the plans/ folder if needed). Structure:`,
+    "front matter (title, status: proposed), then ## Goal, ## Context (relevant files by path and what they do),",
+    "## Approach, ## Tasks — each task self-contained with its files, steps and acceptance criteria, written so",
+    "a different coding agent could execute it with no other context — ## Risks, ## Verification (exact commands).",
+    "Then reply with a short summary and the file's path.",
+  ].join("\n");
 }
 
 export function relativeToProject(projectDir: string, p: string): string {

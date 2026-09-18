@@ -36,6 +36,7 @@ import type { AgentCapabilities, SendInput } from "../types.js";
 import { codexMcpArgs } from "../core/mcp.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, ADAPTER_CAPABILITIES, agentEnv, cliAvailable, frameBriefing } from "./base.js";
+import { permissionFor } from "../core/permissions.js";
 
 interface CodexOptions {
   /** Sandbox policy for model-run commands; default "workspace-write". */
@@ -134,16 +135,30 @@ export class CodexAdapter extends AdapterBase {
     // and passing them is a hard "unexpected argument" error that fails every
     // follow-up turn. So only the fresh turn sets them; resume inherits (and the
     // spawn's cwd is projectDir regardless).
+    //
+    // Permissions (core/permissions.ts): bypass drops the sandbox entirely;
+    // auto/ask pick workspace-write/read-only. A resumed session can't take
+    // -s, but it does take `-c sandbox_mode=…` and the bypass flag, so a mode
+    // changed mid-conversation still applies to the next turn.
+    const mode = permissionFor("codex", this.options as Record<string, unknown>);
+    const sandbox = this.options.sandbox ?? (mode === "ask" ? "read-only" : "workspace-write");
+    const bypass = mode === "bypass" && !this.options.sandbox;
     const args = this.threadId
-      ? ["exec", "resume", this.threadId, "--json", "--skip-git-repo-check"]
+      ? [
+          "exec",
+          "resume",
+          this.threadId,
+          "--json",
+          "--skip-git-repo-check",
+          ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["-c", `sandbox_mode="${sandbox}"`]),
+        ]
       : [
           "exec",
           "--json",
           "--skip-git-repo-check",
           "-C",
           this.projectDir,
-          "-s",
-          this.options.sandbox ?? "workspace-write",
+          ...(bypass ? ["--dangerously-bypass-approvals-and-sandbox"] : ["-s", sandbox]),
         ];
     if (this.options.model) args.push("-m", this.options.model);
     // The project's MCP servers, for this turn only. Codex has no

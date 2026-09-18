@@ -46,7 +46,7 @@ function scratchRepo() {
 const KIND_OPTIONS = {
   // opencode needs a provider/model pin, and which providers exist is that
   // install's business — LOOM_OC_MODEL overrides when this one goes away.
-  opencode: { model: process.env.LOOM_OC_MODEL || "opencode/north-mini-code-free" },
+  opencode: { model: process.env.LOOM_OC_MODEL || "opencode/big-pickle" },
 };
 const specs = ADES.map((a) => ({ id: a.kind, kind: a.kind, tier: a.tier, options: KIND_OPTIONS[a.kind] }));
 const ADAPTERS = specs.filter((s) => s.tier === "adapter");

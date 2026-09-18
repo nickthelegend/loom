@@ -4,3 +4,7 @@ android/
 ios/
 dist/
 *.apk
+
+# local Supabase keys (see .env.example)
+.env
+.env.local

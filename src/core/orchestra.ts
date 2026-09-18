@@ -1,0 +1,1400 @@
+/**
+ * Orchestra — one orchestrator agent, many worker agents, in parallel.
+ *
+ * A route passes one baton down a line; a subtask fans out but never reports
+ * back. Orchestra is the missing shape: an orchestrator agent (any adapter —
+ * Claude Code, Codex, Antigravity, Grok, OpenCode) turns a goal into a task
+ * graph, Loom runs every ready task at once on whichever worker agents the
+ * plan names, each in its own thread and its own git worktree, merges the
+ * finished work into one integration branch, and hands the orchestrator the
+ * results to review — accept, follow up, spawn more, or finish.
+ *
+ * Design lineage, credited: the orchestrator/worker split, the "coordinate,
+ * never implement" orchestrator rules and the worktree-per-worker isolation
+ * follow Agent Orchestrator (github.com/Untrivial-ai/agent-orchestrator,
+ * Apache-2.0). What differs, on purpose:
+ *
+ *  - **The orchestrator never needs a shell tool.** AO's orchestrator drives a
+ *    CLI (`ao spawn`, `ao send`) from its terminal, which fails for agents that
+ *    run sandboxed or can't execute commands headless. Here it answers in a
+ *    fenced ```loom block of JSON actions that Loom parses — so ANY agent can
+ *    orchestrate, including ones with no tools at all.
+ *  - **A real task graph.** Tasks declare `dependsOn`; a task starts only when
+ *    its dependencies merged, and it branches from the integration tip so it
+ *    sees their work.
+ *  - **Mixed fleets.** Each task names its worker; three Codex tasks and two
+ *    Antigravity tasks run side by side as separate CLI sessions.
+ *
+ * Everything is observable: every step is an `orchestra` event in the project
+ * log (so the web app, the phone and the CLI all watch the same run), and each
+ * task's agent output streams into that task's own chat.
+ */
+
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+import { loomHome } from "./registry.js";
+import type { Adapter, AgentConfig, ChatInfo, EventKind, GitDelivery, LoomEvent, SendInput } from "../types.js";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type OrchestraStatus =
+  | "starting"
+  | "planning" // orchestrator's first turn
+  | "running" // workers are running tasks
+  | "reviewing" // orchestrator is reading results
+  | "waiting_human" // orchestrator asked a question
+  | "completed"
+  | "failed"
+  | "aborted";
+
+export type TaskStatus =
+  | "pending" // waiting on dependencies or a free slot
+  | "running"
+  | "done" // finished and merged into the integration branch
+  | "conflict" // finished, but its merge conflicted — needs a follow-up
+  | "needs_input" // the worker ended its turn on a question
+  | "failed"
+  | "cancelled";
+
+export interface OrchestraTask {
+  id: string;
+  title: string;
+  prompt: string;
+  /** Roster agent id (or kind) that runs it. */
+  agent: string;
+  /** Adapter kind actually used. */
+  kind: string;
+  dependsOn: string[];
+  status: TaskStatus;
+  /** The chat (thread) this task's output streams into. */
+  chat: string;
+  branch?: string;
+  dir?: string;
+  attempts: number;
+  /** Follow-up messages queued by the orchestrator, run after the current turn. */
+  queued: string[];
+  result?: string;
+  files?: string[];
+  error?: string;
+  costUsd?: number;
+  startedAt?: number;
+  finishedAt?: number;
+  /** Set once the orchestrator has been shown this outcome. */
+  reported?: boolean;
+}
+
+export interface OrchestraRun {
+  id: string;
+  goal: string;
+  orchestrator: { agent: string; kind: string };
+  /** Agents the orchestrator may assign work to (roster ids). */
+  workers: string[];
+  status: OrchestraStatus;
+  /** The orchestrator's own thread. */
+  chat: string;
+  baseBranch: string | null;
+  baseCommit: string;
+  branch: string; // integration branch
+  dir: string; // integration worktree
+  tasks: OrchestraTask[];
+  round: number;
+  maxRounds: number;
+  maxParallel: number;
+  summary?: string;
+  question?: string;
+  error?: string;
+  /** Set when the integration branch was merged back into the project. */
+  applied?: { at: number; into: string };
+  /**
+   * Plan mode: the plan is written as markdown specs under plans/<run>/ on the
+   * integration branch — PLAN.md plus one self-contained file per task — so
+   * any agent (or teammate) can read, resume or re-run it. See writePlan.
+   */
+  plan?: boolean;
+  /** What the project's git delivery policy did with the finished run. */
+  delivered?: { mode: GitDelivery; into?: string; pushed?: string; prUrl?: string; at: number };
+  deliveryError?: string;
+  costUsd: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface OrchestraStartOptions {
+  goal: string;
+  /** Roster id (or kind) of the orchestrator. Defaults to the host's pick. */
+  orchestrator?: string;
+  /** Roster ids (or kinds) of allowed workers. Defaults to every adapter. */
+  workers?: string[];
+  maxParallel?: number;
+  maxRounds?: number;
+  /** Write the plan as markdown specs other agents can read (plans/<run>/). */
+  plan?: boolean;
+}
+
+/** What orchestra needs from the project that owns it. */
+export interface OrchestraHost {
+  projectId: string;
+  projectName: string;
+  projectDir: string;
+  /** Adapter entries of the roster (enabled only). */
+  roster(): AgentConfig[];
+  /** Kinds installed on this machine but not on the roster, usable as workers. */
+  installedKinds(): string[];
+  /** Build a fresh adapter instance for `cfg`, working in `dir`. */
+  makeAgent(cfg: AgentConfig, dir: string): Adapter;
+  append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
+  createChat(title: string): ChatInfo;
+  /** Skills + retrieved memories for a task, or "" — the project brain. */
+  briefingFor(query: string, agentId: string): string;
+  /** Throws when `agentId` is over budget or quarantined. */
+  gate(agentId: string): void;
+  /** Cost/metrics bookkeeping for a worker event. */
+  observe(event: LoomEvent): void;
+  /** The project's git delivery policy, read when a run completes. */
+  gitDelivery?(): GitDelivery;
+}
+
+// ---------------------------------------------------------------------------
+// The orchestrator protocol
+// ---------------------------------------------------------------------------
+
+export type OrchestraAction =
+  | { type: "spawn"; id?: string; title: string; agent: string; prompt: string; dependsOn?: string[] }
+  | { type: "send"; task: string; message: string }
+  | { type: "cancel"; task: string }
+  | { type: "ask"; question: string }
+  | { type: "done"; summary: string };
+
+/**
+ * Pull the actions out of an orchestrator reply.
+ *
+ * Accepts the last ```loom fence (the documented form), falling back to the
+ * last ```json fence holding an `actions` array, then to a bare object — models
+ * drift, and a plan lost to a fence label is a wasted round. Returns null when
+ * nothing parses, so the caller can ask again rather than guess.
+ */
+export function parseOrchestraActions(text: string): OrchestraAction[] | null {
+  const fences = [...text.matchAll(/```([a-zA-Z-]*)\s*\n([\s\S]*?)```/g)];
+  const candidates: string[] = [];
+  for (const f of fences.reverse()) {
+    if (f[1] === "loom") candidates.push(f[2]!);
+  }
+  for (const f of fences) {
+    if (f[1] !== "loom" && f[2]!.includes('"actions"')) candidates.push(f[2]!);
+  }
+  const bare = text.lastIndexOf('{"actions"');
+  if (bare >= 0) candidates.push(text.slice(bare));
+
+  for (const raw of candidates) {
+    const parsed = tryJson(raw.trim());
+    const list = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === "object" && Array.isArray((parsed as { actions?: unknown }).actions)
+        ? (parsed as { actions: unknown[] }).actions
+        : null;
+    if (!list) continue;
+    const actions = list.map(normalizeAction).filter((a): a is OrchestraAction => a !== null);
+    if (actions.length || list.length === 0) return actions;
+  }
+  return null;
+}
+
+function tryJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // A bare object followed by prose: cut at the matching close brace.
+    let depth = 0;
+    let inStr = false;
+    for (let i = 0; i < raw.length; i++) {
+      const c = raw[i];
+      if (inStr) {
+        if (c === "\\") i++;
+        else if (c === '"') inStr = false;
+        continue;
+      }
+      if (c === '"') inStr = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(raw.slice(0, i + 1));
+          } catch {
+            return null;
+          }
+        }
+      }
+    }
+    return null;
+  }
+}
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function normalizeAction(v: unknown): OrchestraAction | null {
+  if (!v || typeof v !== "object") return null;
+  const a = v as Record<string, unknown>;
+  const type = str(a.type ?? a.action).toLowerCase();
+  switch (type) {
+    case "spawn":
+    case "task":
+    case "assign": {
+      const prompt = str(a.prompt ?? a.instructions ?? a.task);
+      const title = str(a.title ?? a.name) || prompt.slice(0, 60);
+      const agent = str(a.agent ?? a.worker);
+      if (!prompt || !agent) return null;
+      const deps = Array.isArray(a.dependsOn ?? a.depends_on ?? a.after)
+        ? ((a.dependsOn ?? a.depends_on ?? a.after) as unknown[]).map(str).filter(Boolean)
+        : [];
+      const id = str(a.id);
+      return { type: "spawn", ...(id ? { id } : {}), title, agent, prompt, dependsOn: deps };
+    }
+    case "send":
+    case "followup":
+    case "follow_up": {
+      const task = str(a.task ?? a.id);
+      const message = str(a.message ?? a.prompt);
+      return task && message ? { type: "send", task, message } : null;
+    }
+    case "cancel":
+    case "kill": {
+      const task = str(a.task ?? a.id);
+      return task ? { type: "cancel", task } : null;
+    }
+    case "ask":
+    case "question": {
+      const question = str(a.question ?? a.message);
+      return question ? { type: "ask", question } : null;
+    }
+    case "done":
+    case "finish":
+    case "complete": {
+      return { type: "done", summary: str(a.summary ?? a.message) || "Done." };
+    }
+    default:
+      return null;
+  }
+}
+
+/** The orchestrator's standing instructions, sent with its first turn. */
+export function orchestratorBriefing(opts: {
+  project: string;
+  goal: string;
+  workers: Array<{ id: string; kind: string; role?: string }>;
+  maxParallel: number;
+  branch: string;
+  planDir?: string;
+}): string {
+  const roster = opts.workers
+    .map((w) => `- "${w.id}" — ${KIND_BLURBS[w.kind] ?? w.kind}${w.role && w.role !== w.id ? ` (role: ${w.role})` : ""}`)
+    .join("\n");
+  return [
+    `[Loom Orchestra] You are the ORCHESTRATOR for project "${opts.project}".`,
+    "Your job is to coordinate, not to implement. Break the goal into concrete, independently",
+    "verifiable tasks and assign each to a worker agent. Workers run IN PARALLEL, each in its own",
+    `git worktree; finished work is merged into the integration branch "${opts.branch}", which is`,
+    "the directory you are running in — read it to review results.",
+    "",
+    "Rules:",
+    "- Never edit files yourself. Every implementation, fix, or test goes to a worker.",
+    "- Ground every task in the real repository: look at the code first; never guess file names.",
+    "- Write each task prompt so a worker with NO other context can finish it: the outcome, the",
+    "  files involved, constraints, and how to verify.",
+    "- Prefer tasks that touch different files so parallel work merges cleanly. When one task needs",
+    "  another's output, list it in dependsOn — it will start from a branch that already has it.",
+    `- At most ${opts.maxParallel} tasks run at once; queue more and they start as slots free up.`,
+    "- Match tasks to agents' strengths, and spread work across agents when it helps.",
+    "",
+    "Available workers:",
+    roster,
+    "",
+    "End EVERY reply with exactly one fenced block tagged loom containing your actions:",
+    "```loom",
+    '{"actions": [',
+    '  {"type": "spawn", "id": "t1", "title": "short label", "agent": "<worker id>", "prompt": "full task", "dependsOn": []},',
+    '  {"type": "send", "task": "t1", "message": "follow-up for a finished/failed task (same worker, same worktree)"},',
+    '  {"type": "cancel", "task": "t2"},',
+    '  {"type": "ask", "question": "only when a human decision is truly required"},',
+    '  {"type": "done", "summary": "what was delivered and how it was verified"}',
+    "]}",
+    "```",
+    "After you reply, Loom runs the tasks and comes back to you with each result. Review them:",
+    "send follow-ups for anything incomplete or wrong, spawn new tasks if needed, and emit done",
+    "only when the goal is met. An empty actions list means: keep waiting for running tasks.",
+    "",
+    ...(opts.planDir
+      ? [
+          "",
+          `PLAN MODE is on. Every task prompt you write becomes a durable spec file at ${opts.planDir}/<id>.md,`,
+          `and the whole plan is written to ${opts.planDir}/PLAN.md, committed to the integration branch. Other`,
+          "agents and teammates will pick these up without you, so write each task prompt as a complete spec",
+          "with these headings: Goal, Context (the files and code involved, by path), Steps, Acceptance criteria,",
+          "Verification (exact commands). Plan the whole goal up front in your first reply.",
+        ]
+      : []),
+    "",
+    `The goal: ${opts.goal}`,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Plan files — the plan as markdown other agents can read
+// ---------------------------------------------------------------------------
+
+function yamlStr(v: string): string {
+  return JSON.stringify(v);
+}
+
+/** plans/<run>/PLAN.md — the index: goal, task table, how to use it, results. */
+export function renderPlanIndex(run: OrchestraRun): string {
+  const rows = run.tasks
+    .map(
+      (t) =>
+        `| [${t.id}](${t.id}.md) | ${t.title.replace(/\|/g, "\\|")} | ${t.agent} | ${t.dependsOn.join(", ") || "—"} | ${t.status} |`,
+    )
+    .join("\n");
+  return [
+    "---",
+    "loom-plan: 1",
+    `run: ${run.id}`,
+    `goal: ${yamlStr(run.goal)}`,
+    `orchestrator: ${run.orchestrator.agent}`,
+    `workers: [${run.workers.join(", ")}]`,
+    `status: ${run.status}`,
+    `branch: ${run.branch}`,
+    `created: ${new Date(run.createdAt).toISOString()}`,
+    "---",
+    "",
+    `# ${run.goal.split("\n")[0]!.slice(0, 100)}`,
+    "",
+    "## Goal",
+    "",
+    run.goal,
+    "",
+    "## Tasks",
+    "",
+    "| id | task | agent | depends on | status |",
+    "|---|---|---|---|---|",
+    rows || "| — | (no tasks yet) | | | |",
+    "",
+    "## How to use this plan",
+    "",
+    "Each task file in this folder is a self-contained spec: any coding agent (Claude Code, Codex,",
+    "Antigravity, Grok, OpenCode…) or a teammate can pick one up by reading it. Tasks whose",
+    "`depends_on` are all `done` are ready. Loom keeps the `status` fields current; don't edit them by hand",
+    "while a run is live.",
+    "",
+    ...(run.summary || run.error
+      ? ["## Result", "", run.summary ?? `Stopped: ${run.error}`, "", `Integration branch: \`${run.branch}\``, ""]
+      : []),
+  ].join("\n");
+}
+
+/** plans/<run>/<task>.md — one task, readable by any agent with no other context. */
+export function renderTaskFile(run: OrchestraRun, t: OrchestraTask): string {
+  return [
+    "---",
+    `id: ${t.id}`,
+    `title: ${yamlStr(t.title)}`,
+    `agent: ${t.agent}`,
+    `depends_on: [${t.dependsOn.join(", ")}]`,
+    `status: ${t.status}`,
+    `plan: PLAN.md`,
+    "---",
+    "",
+    `# ${t.id} · ${t.title}`,
+    "",
+    `Part of: ${run.goal.split("\n")[0]!.slice(0, 120)} (see [PLAN.md](PLAN.md))`,
+    "",
+    ...(t.dependsOn.length
+      ? ["## Depends on", "", ...t.dependsOn.map((d) => `- [${d}](${d}.md)`), ""]
+      : []),
+    "## Spec",
+    "",
+    t.prompt.trim(),
+    "",
+    "## Result",
+    "",
+    t.result && t.status !== "pending" && t.status !== "running"
+      ? [t.result.trim(), "", t.files?.length ? `Files changed: ${t.files.map((f) => `\`${f}\``).join(", ")}` : ""].join("\n")
+      : "_Filled in by Loom when the task finishes._",
+    "",
+  ].join("\n");
+}
+
+const KIND_BLURBS: Record<string, string> = {
+  "claude-code": "Claude Code (Anthropic): strong at multi-file changes, refactors, careful reasoning",
+  codex: "Codex (OpenAI / ChatGPT): strong at implementation and running tests",
+  "antigravity-cli": "Antigravity (Google Gemini): fast implementation, broad knowledge",
+  "grok-code": "Grok Code (xAI): quick edits and scripts",
+  opencode: "OpenCode: open-model agent, good for well-specified tasks",
+  echo: "Echo (test double — repeats the prompt)",
+};
+
+/** What a worker is told, alongside its task. */
+export function workerBriefing(opts: {
+  project: string;
+  runGoal: string;
+  task: OrchestraTask;
+  branch: string;
+  brain: string;
+  planFile?: string;
+}): string {
+  return [
+    `[Loom Orchestra] You are a WORKER in project "${opts.project}", running task ${opts.task.id}: ` +
+      `"${opts.task.title}".`,
+    `The overall goal (for context only — do just YOUR task): ${opts.runGoal}`,
+    `You are in your own git worktree on branch "${opts.branch}". Other workers are editing other`,
+    "worktrees at the same time; Loom merges your work when you finish.",
+    "- Inspect the relevant code before editing. Keep changes scoped to the task.",
+    "- Verify what you touched (run the relevant tests/build when there are any).",
+    "- Do not commit, push, or open PRs — Loom commits and merges for you.",
+    "- Finish with a short report: what you changed, how you verified it, anything left undone.",
+    "- If you cannot proceed without a decision, end your reply with the question.",
+    ...(opts.planFile
+      ? [
+          `- Your task's spec is ${opts.planFile} (the whole plan is next to it in PLAN.md). Read it first.`,
+          "  Don't edit files under plans/ — Loom updates them.",
+        ]
+      : []),
+    opts.brain,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// git
+// ---------------------------------------------------------------------------
+
+function git(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || err.message).trim()));
+      else resolve(stdout);
+    });
+  });
+}
+
+const gitOk = (args: string[], cwd: string) => git(args, cwd).then(() => true, () => false);
+
+/**
+ * Stage everything a worker changed, minus Loom's own files.
+ *
+ * Adapters keep session state in `<worktree>/.loom/`, which must never ride a
+ * commit into the project. An exclude pathspec looked right and wasn't: when
+ * the project already gitignores `.loom/` (most do), naming the ignored path
+ * makes `git add` exit 1 ("paths are ignored"), which failed every real Codex
+ * task. So: add all, then unstage `.loom` — a no-op when it's ignored.
+ */
+async function commitAll(dir: string, message: string): Promise<boolean> {
+  await git(["add", "-A"], dir);
+  await git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".loom"], dir).catch(() => {});
+  const staged = (await git(["diff", "--cached", "--name-only"], dir)).trim();
+  if (!staged) return false;
+  await git(
+    ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "commit", "-q", "--no-verify", "-m", message],
+    dir,
+  );
+  return true;
+}
+
+/** Where a run's plan lives inside the repo. */
+export function planDir(run: { id: string }): string {
+  return `plans/${run.id}`;
+}
+
+function gh(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("gh", args, { cwd, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || err.message).trim()));
+      else resolve(stdout);
+    });
+  });
+}
+
+/** Serialize git mutations: worktree add/merge on one repo race on its locks. */
+class Mutex {
+  private tail: Promise<unknown> = Promise.resolve();
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.tail.then(fn, fn);
+    this.tail = next.catch(() => {});
+    return next;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The engine
+// ---------------------------------------------------------------------------
+
+const DEFAULT_MAX_PARALLEL = 4;
+const DEFAULT_MAX_ROUNDS = 10;
+const HARD_MAX_PARALLEL = 12;
+const RESULT_CHARS = 4000;
+
+export class OrchestraEngine {
+  private runs = new Map<string, OrchestraRun>();
+  private live = new Map<string, Adapter>(); // `${runId}/${taskId|orch}` → adapter
+  private gitLock = new Mutex();
+  private turnText = new Map<string, string>();
+  private orchestratorBusy = new Set<string>();
+
+  constructor(private host: OrchestraHost) {
+    for (const run of this.loadRuns()) this.runs.set(run.id, run);
+    // A daemon restart kills every CLI a run was driving. Say so honestly
+    // instead of showing tasks "running" that nothing runs.
+    for (const run of this.runs.values()) {
+      if (!isTerminal(run.status) && run.status !== "waiting_human") {
+        run.status = "failed";
+        run.error = "the daemon restarted while this run was active";
+        for (const t of run.tasks) {
+          if (t.status === "running" || t.status === "pending") {
+            t.status = "cancelled";
+            t.error = "daemon restarted";
+          }
+        }
+        this.save(run);
+      }
+    }
+  }
+
+  // ── persistence ──
+
+  private runsDir(): string {
+    return path.join(this.host.projectDir, ".loom", "orchestra");
+  }
+
+  private loadRuns(): OrchestraRun[] {
+    const dir = this.runsDir();
+    if (!fs.existsSync(dir)) return [];
+    const out: OrchestraRun[] = [];
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        out.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as OrchestraRun);
+      } catch {
+        /* a torn file is one lost run, not a dead project */
+      }
+    }
+    return out.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  private save(run: OrchestraRun): void {
+    run.updatedAt = Date.now();
+    fs.mkdirSync(this.runsDir(), { recursive: true });
+    const file = path.join(this.runsDir(), `${run.id}.json`);
+    fs.writeFileSync(file + ".tmp", JSON.stringify(run, null, 2));
+    fs.renameSync(file + ".tmp", file);
+  }
+
+  list(): OrchestraRun[] {
+    return [...this.runs.values()].sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  get(id: string): OrchestraRun | undefined {
+    return this.runs.get(id);
+  }
+
+  active(): OrchestraRun | undefined {
+    return this.list().find((r) => !isTerminal(r.status));
+  }
+
+  private emit(run: OrchestraRun, phase: string, extra: Record<string, unknown> = {}, chat?: string): void {
+    this.host.append({
+      kind: "orchestra",
+      chat: chat ?? run.chat,
+      payload: { phase, runId: run.id, status: run.status, ...extra },
+    });
+  }
+
+  // ── agents ──
+
+  /** Resolve a name the orchestrator (or user) gave into a runnable config. */
+  resolveAgent(name: string): AgentConfig | null {
+    const roster = this.host.roster();
+    const n = name.trim().toLowerCase();
+    const byId = roster.find((a) => a.id.toLowerCase() === n);
+    if (byId) return byId;
+    const alias: Record<string, string> = {
+      claude: "claude-code",
+      "claude code": "claude-code",
+      chatgpt: "codex",
+      gpt: "codex",
+      openai: "codex",
+      antigravity: "antigravity-cli",
+      agy: "antigravity-cli",
+      gemini: "antigravity-cli",
+      grok: "grok-code",
+    };
+    const kind = alias[n] ?? n;
+    const byKind = roster.find((a) => a.kind === kind);
+    if (byKind) return byKind;
+    if (this.host.installedKinds().includes(kind)) return { id: kind, kind, role: kind };
+    return null;
+  }
+
+  // ── lifecycle ──
+
+  async start(opts: OrchestraStartOptions): Promise<OrchestraRun> {
+    const goal = opts.goal?.trim();
+    if (!goal) throw new Error("an orchestra run needs a goal");
+    const busy = this.active();
+    if (busy) throw new Error(`orchestra run ${busy.id} is still ${busy.status} — abort it or wait`);
+
+    const roster = this.host.roster();
+    const orchCfg = opts.orchestrator
+      ? this.resolveAgent(opts.orchestrator)
+      : (roster.find((a) => a.kind === "claude-code") ?? roster[0] ?? null);
+    if (!orchCfg) throw new Error(`no agent "${opts.orchestrator ?? ""}" can orchestrate here — add one first`);
+
+    const workerNames = opts.workers?.length ? opts.workers : roster.map((a) => a.id);
+    const workers: AgentConfig[] = [];
+    for (const w of workerNames) {
+      const cfg = this.resolveAgent(w);
+      if (!cfg) throw new Error(`unknown worker agent "${w}"`);
+      if (!workers.some((x) => x.id === cfg.id)) workers.push(cfg);
+    }
+    if (!workers.length) throw new Error("an orchestra needs at least one worker agent");
+    this.host.gate(orchCfg.id);
+
+    const dir = this.host.projectDir;
+    if (!(await gitOk(["rev-parse", "--is-inside-work-tree"], dir))) {
+      throw new Error("orchestra runs need a git repository — initialise one (git init) first");
+    }
+    // Worktrees branch from a commit. A repo with none gets an empty root
+    // commit rather than a cryptic "invalid reference: HEAD".
+    if (!(await gitOk(["rev-parse", "--verify", "HEAD"], dir))) {
+      await git(
+        ["-c", "user.name=Loom", "-c", "user.email=loom@loom.local", "commit", "-q", "--allow-empty", "-m", "Initial commit"],
+        dir,
+      );
+    }
+    const baseCommit = (await git(["rev-parse", "HEAD"], dir)).trim();
+    const baseBranch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim() || null;
+    const dirty = (await git(["status", "--porcelain"], dir)).trim().length > 0;
+
+    const id = `o${Date.now().toString(36)}`;
+    // Integration and task branches are siblings under one prefix: git can't
+    // hold both `a/b` and `a/b/c` as refs.
+    const branch = `loom/orchestra/${id}/main`;
+    const wtRoot = path.join(loomHome(), "orchestra", this.host.projectId, id);
+    const integration = path.join(wtRoot, "integration");
+    fs.mkdirSync(wtRoot, { recursive: true });
+    await this.gitLock.run(() => git(["worktree", "add", "-q", "-b", branch, integration, baseCommit], dir));
+
+    const chat = this.host.createChat(`🎼 ${goal.slice(0, 50)}`);
+    const run: OrchestraRun = {
+      id,
+      goal,
+      orchestrator: { agent: orchCfg.id, kind: orchCfg.kind },
+      workers: workers.map((w) => w.id),
+      status: "planning",
+      chat: chat.id,
+      baseBranch,
+      baseCommit,
+      branch,
+      dir: integration,
+      tasks: [],
+      round: 0,
+      maxRounds: clamp(opts.maxRounds ?? DEFAULT_MAX_ROUNDS, 1, 50),
+      maxParallel: clamp(opts.maxParallel ?? DEFAULT_MAX_PARALLEL, 1, HARD_MAX_PARALLEL),
+      ...(opts.plan ? { plan: true } : {}),
+      costUsd: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    this.workerCfgs.set(run.id, workers);
+    this.runs.set(id, run);
+    this.save(run);
+    this.host.append({ kind: "message", chat: run.chat, payload: { text: goal, author: "user" } });
+    this.emit(run, "started", {
+      goal,
+      orchestrator: run.orchestrator,
+      workers: run.workers,
+      branch,
+      maxParallel: run.maxParallel,
+      ...(dirty ? { note: "uncommitted changes in the project are not visible to workers — they start from the last commit" } : {}),
+    });
+
+    const briefing = orchestratorBriefing({
+      project: this.host.projectName,
+      goal,
+      workers: workers.map((w) => ({ id: w.id, kind: w.kind, role: w.role })),
+      maxParallel: run.maxParallel,
+      branch,
+      ...(run.plan ? { planDir: planDir(run) } : {}),
+    });
+    void this.orchestratorTurn(run, "Plan the goal into tasks and spawn them now.", briefing);
+    return run;
+  }
+
+  private workerCfgs = new Map<string, AgentConfig[]>();
+
+  private workersFor(run: OrchestraRun): AgentConfig[] {
+    const cached = this.workerCfgs.get(run.id);
+    if (cached) return cached;
+    const cfgs = run.workers.map((w) => this.resolveAgent(w)).filter((c): c is AgentConfig => !!c);
+    this.workerCfgs.set(run.id, cfgs);
+    return cfgs;
+  }
+
+  async abort(runId: string, reason = "aborted by the user"): Promise<OrchestraRun> {
+    const run = this.mustGet(runId);
+    if (isTerminal(run.status)) return run;
+    run.status = "aborted";
+    run.error = reason;
+    for (const t of run.tasks) {
+      if (t.status === "running" || t.status === "pending") {
+        t.status = "cancelled";
+        t.error = reason;
+      }
+    }
+    this.save(run);
+    await this.stopAll(run);
+    this.emit(run, "aborted", { reason });
+    return run;
+  }
+
+  /** The human answers an orchestrator's question (or adds direction mid-run). */
+  async reply(runId: string, text: string): Promise<OrchestraRun> {
+    const run = this.mustGet(runId);
+    const msg = text.trim();
+    if (!msg) throw new Error("empty reply");
+    if (isTerminal(run.status) && run.status !== "completed") {
+      throw new Error(`run ${run.id} is ${run.status}`);
+    }
+    this.host.append({ kind: "message", chat: run.chat, payload: { text: msg, author: "user" } });
+    run.question = undefined;
+    if (run.status === "completed") {
+      // Reopen: more work on the same integration branch.
+      run.status = "reviewing";
+      run.summary = undefined;
+    }
+    this.save(run);
+    if (this.orchestratorBusy.has(run.id)) {
+      this.pendingHuman.set(run.id, [...(this.pendingHuman.get(run.id) ?? []), msg]);
+      return run;
+    }
+    void this.orchestratorTurn(run, `The human says: ${msg}\n\n${this.statusReport(run)}`);
+    return run;
+  }
+
+  private pendingHuman = new Map<string, string[]>();
+
+  /**
+   * Merge the integration branch into the project's working tree.
+   *
+   * Explicit, never automatic: the run's work lands on its own branch, and the
+   * human decides when it reaches theirs.
+   */
+  async apply(runId: string): Promise<{ merged: string; into: string }> {
+    const run = this.mustGet(runId);
+    if (run.status !== "completed" && run.status !== "waiting_human" && run.status !== "failed" && run.status !== "aborted") {
+      throw new Error(`run ${run.id} is still ${run.status} — wait for it to finish`);
+    }
+    const dir = this.host.projectDir;
+    const into = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir)).trim();
+    await this.gitLock.run(async () => {
+      await commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false);
+      try {
+        await git(
+          ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `Merge orchestra run ${run.id}: ${run.goal.slice(0, 60)}`, run.branch],
+          dir,
+        );
+      } catch (err) {
+        await git(["merge", "--abort"], dir).catch(() => {});
+        throw new Error(`merge into ${into} failed — ${(err as Error).message}`);
+      }
+    });
+    run.applied = { at: Date.now(), into };
+    this.save(run);
+    this.emit(run, "applied", { into });
+    return { merged: run.branch, into };
+  }
+
+  /** Remove a finished run's worktrees (the branch stays for the record). */
+  async cleanup(runId: string): Promise<void> {
+    const run = this.mustGet(runId);
+    if (!isTerminal(run.status) && run.status !== "waiting_human") throw new Error("run is still active");
+    await this.stopAll(run);
+    const dirs = [run.dir, ...run.tasks.map((t) => t.dir).filter((d): d is string => !!d)];
+    await this.gitLock.run(async () => {
+      for (const d of dirs) await git(["worktree", "remove", "--force", d], this.host.projectDir).catch(() => {});
+      await git(["worktree", "prune"], this.host.projectDir).catch(() => {});
+    });
+    this.emit(run, "cleaned");
+  }
+
+  async shutdown(): Promise<void> {
+    for (const run of this.runs.values()) {
+      if (!isTerminal(run.status)) await this.abort(run.id, "the project was closed");
+    }
+  }
+
+  private mustGet(id: string): OrchestraRun {
+    const run = this.runs.get(id);
+    if (!run) throw new Error(`no orchestra run "${id}"`);
+    return run;
+  }
+
+  private async stopAll(run: OrchestraRun): Promise<void> {
+    for (const [key, agent] of [...this.live.entries()]) {
+      if (!key.startsWith(`${run.id}/`)) continue;
+      this.live.delete(key);
+      if (agent.busy()) await agent.interrupt().catch(() => {});
+      await agent.stop().catch(() => {});
+    }
+  }
+
+  // ── the orchestrator ──
+
+  private orchestratorAgent(run: OrchestraRun): Adapter {
+    const key = `${run.id}/orch`;
+    let agent = this.live.get(key);
+    if (agent) return agent;
+    const cfg = this.resolveAgent(run.orchestrator.agent) ?? {
+      id: run.orchestrator.agent,
+      kind: run.orchestrator.kind,
+      role: "orchestrator",
+    };
+    agent = this.host.makeAgent({ ...cfg, role: "orchestrator", options: orchestratorOptions(cfg) }, run.dir);
+    this.live.set(key, agent);
+    this.wire(run, agent, cfg.id, run.chat, key);
+    return agent;
+  }
+
+  private async orchestratorTurn(run: OrchestraRun, text: string, briefing?: string, retry = 0): Promise<void> {
+    if (isTerminal(run.status)) return;
+    if (run.round >= run.maxRounds) {
+      return this.finish(run, "failed", `stopped after ${run.maxRounds} orchestrator rounds without "done"`);
+    }
+    run.round++;
+    this.orchestratorBusy.add(run.id);
+    this.save(run);
+    const key = `${run.id}/orch`;
+    this.turnText.set(key, "");
+    let reply = "";
+    try {
+      this.host.gate(run.orchestrator.agent);
+      const agent = this.orchestratorAgent(run);
+      await agent.start();
+      this.host.append({
+        kind: "message",
+        chat: run.chat,
+        payload: { text, author: "loom", orchestra: { runId: run.id, to: "orchestrator" } },
+      });
+      await agent.send({ text, ...(briefing ? { briefing } : {}) } satisfies SendInput);
+      reply = this.turnText.get(key) ?? "";
+    } catch (err) {
+      this.orchestratorBusy.delete(run.id);
+      return this.finish(run, "failed", `orchestrator failed: ${(err as Error).message}`);
+    }
+    this.orchestratorBusy.delete(run.id);
+    if (isTerminal(run.status)) return;
+
+    const actions = parseOrchestraActions(reply);
+    if (actions === null) {
+      if (retry < 1) {
+        return this.orchestratorTurn(
+          run,
+          "Your reply had no ```loom actions block, so nothing ran. Reply again ending with exactly one " +
+            '```loom {"actions": [...]} ``` block (see your instructions).',
+          undefined,
+          retry + 1,
+        );
+      }
+      run.status = "waiting_human";
+      run.question = "The orchestrator's reply had no actions Loom could read. Reply with direction to continue.";
+      this.save(run);
+      this.emit(run, "waiting", { question: run.question });
+      return;
+    }
+    const human = this.pendingHuman.get(run.id);
+    if (human?.length) {
+      this.pendingHuman.delete(run.id);
+      this.applyActions(run, actions);
+      return this.orchestratorTurn(run, `The human says: ${human.join("\n")}\n\n${this.statusReport(run)}`);
+    }
+    this.applyActions(run, actions);
+  }
+
+  private applyActions(run: OrchestraRun, actions: OrchestraAction[]): void {
+    const notes: string[] = [];
+    let finished: { summary: string } | null = null;
+    let question: string | null = null;
+    for (const a of actions) {
+      try {
+        if (a.type === "spawn") this.addTask(run, a);
+        else if (a.type === "send") this.followUp(run, a.task, a.message);
+        else if (a.type === "cancel") this.cancelTask(run, a.task);
+        else if (a.type === "ask") question = a.question;
+        else if (a.type === "done") finished = { summary: a.summary };
+      } catch (err) {
+        notes.push(`${a.type}: ${(err as Error).message}`);
+      }
+    }
+    this.save(run);
+    this.emit(run, "plan", {
+      round: run.round,
+      actions: actions.map((a) => a.type),
+      tasks: run.tasks.map(taskSummary),
+      ...(notes.length ? { rejected: notes } : {}),
+    });
+
+    if (question) {
+      run.status = "waiting_human";
+      run.question = question;
+      this.save(run);
+      this.emit(run, "waiting", { question });
+      return;
+    }
+    const outstanding = run.tasks.some((t) => t.status === "running" || t.status === "pending");
+    if (finished && !outstanding) {
+      return void this.finish(run, "completed", undefined, (finished as { summary: string }).summary);
+    }
+    if (finished && outstanding) {
+      notes.push("done ignored: tasks are still running — review their results first");
+    }
+    if (notes.length && !outstanding) {
+      // Nothing to wait for and something went wrong: tell the orchestrator now.
+      void this.orchestratorTurn(run, `Some actions were rejected:\n- ${notes.join("\n- ")}\n\n${this.statusReport(run)}`);
+      return;
+    }
+    run.status = "running";
+    this.save(run);
+    // Plan mode: the specs land on the integration branch BEFORE any task
+    // branches from it, so every worker's worktree already has its file.
+    if (run.plan && actions.some((a) => a.type === "spawn")) {
+      void this.writePlan(run, "plan").then(() => this.schedule(run));
+    } else {
+      this.schedule(run);
+    }
+  }
+
+  /** Write (or refresh) plans/<run>/ on the integration branch and commit it. */
+  private async writePlan(run: OrchestraRun, why: "plan" | "final"): Promise<void> {
+    try {
+      await this.gitLock.run(async () => {
+        const dir = path.join(run.dir, planDir(run));
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "PLAN.md"), renderPlanIndex(run));
+        for (const t of run.tasks) fs.writeFileSync(path.join(dir, `${t.id}.md`), renderTaskFile(run, t));
+        await git(["add", "--", planDir(run)], run.dir);
+        const staged = (await git(["diff", "--cached", "--name-only"], run.dir)).trim();
+        if (staged) {
+          await git(
+            ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "commit", "-q", "--no-verify", "-m",
+              why === "plan" ? `plan: ${run.goal.split("\n")[0]!.slice(0, 60)}` : `plan: results of orchestra ${run.id}`],
+            run.dir,
+          );
+        }
+      });
+      this.emit(run, "plan_written", { dir: planDir(run), files: run.tasks.length + 1, final: why === "final" });
+    } catch (err) {
+      this.emit(run, "plan_failed", { error: (err as Error).message.slice(0, 300) });
+    }
+  }
+
+  private addTask(run: OrchestraRun, a: Extract<OrchestraAction, { type: "spawn" }>): OrchestraTask {
+    const allowed = this.workersFor(run);
+    const cfg =
+      allowed.find((w) => w.id.toLowerCase() === a.agent.toLowerCase()) ??
+      allowed.find((w) => w.kind === this.resolveAgent(a.agent)?.kind);
+    if (!cfg) {
+      throw new Error(`agent "${a.agent}" is not one of this run's workers (${run.workers.join(", ")})`);
+    }
+    let id = (a.id || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16);
+    if (!id || run.tasks.some((t) => t.id === id)) id = `t${run.tasks.length + 1}`;
+    while (run.tasks.some((t) => t.id === id)) id = `${id}x`;
+    const deps = (a.dependsOn ?? []).filter((d) => run.tasks.some((t) => t.id === d));
+    const chat = this.host.createChat(`${id} · ${a.title}`.slice(0, 60));
+    const task: OrchestraTask = {
+      id,
+      title: a.title.slice(0, 120),
+      prompt: a.prompt,
+      agent: cfg.id,
+      kind: cfg.kind,
+      dependsOn: deps,
+      status: "pending",
+      chat: chat.id,
+      attempts: 0,
+      queued: [],
+    };
+    run.tasks.push(task);
+    this.emit(run, "task", { task: taskSummary(task) });
+    return task;
+  }
+
+  private followUp(run: OrchestraRun, taskId: string, message: string): void {
+    const task = run.tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`no task "${taskId}"`);
+    if (task.status === "cancelled") throw new Error(`task ${taskId} was cancelled`);
+    task.queued.push(message);
+    task.reported = false;
+    if (task.status !== "running") task.status = "pending";
+  }
+
+  private cancelTask(run: OrchestraRun, taskId: string): void {
+    const task = run.tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`no task "${taskId}"`);
+    if (task.status === "done") throw new Error(`task ${taskId} already merged`);
+    task.status = "cancelled";
+    task.reported = true;
+    const live = this.live.get(`${run.id}/${task.id}`);
+    if (live?.busy()) void live.interrupt().catch(() => {});
+    this.emit(run, "task", { task: taskSummary(task) });
+  }
+
+  // ── scheduling ──
+
+  private schedule(run: OrchestraRun): void {
+    if (run.status !== "running") return;
+    const running = run.tasks.filter((t) => t.status === "running").length;
+    let slots = run.maxParallel - running;
+    for (const task of run.tasks) {
+      if (slots <= 0) break;
+      if (task.status !== "pending") continue;
+      const deps = task.dependsOn.map((d) => run.tasks.find((t) => t.id === d));
+      if (deps.some((d) => d && (d.status === "failed" || d.status === "cancelled"))) {
+        task.status = "failed";
+        task.error = "a dependency failed or was cancelled";
+        task.reported = false;
+        this.emit(run, "task", { task: taskSummary(task) });
+        continue;
+      }
+      if (!deps.every((d) => !d || d.status === "done")) continue;
+      slots--;
+      void this.runTask(run, task);
+    }
+    this.save(run);
+    this.maybeReview(run);
+  }
+
+  /** When nothing can move without the orchestrator, give it a turn. */
+  private maybeReview(run: OrchestraRun): void {
+    if (run.status !== "running" || this.orchestratorBusy.has(run.id)) return;
+    if (run.tasks.some((t) => t.status === "running")) return;
+    const startable = run.tasks.some(
+      (t) => t.status === "pending" && t.dependsOn.every((d) => run.tasks.find((x) => x.id === d)?.status === "done"),
+    );
+    if (startable) return;
+    run.status = "reviewing";
+    this.save(run);
+    this.emit(run, "reviewing", { round: run.round + 1 });
+    void this.orchestratorTurn(run, this.statusReport(run));
+  }
+
+  /** The report the orchestrator reviews: every task's outcome since last time. */
+  statusReport(run: OrchestraRun): string {
+    const lines = [`Status of orchestra run ${run.id} (integration branch ${run.branch}):`];
+    for (const t of run.tasks) {
+      const head = `\n### ${t.id} · ${t.title} — ${t.status.toUpperCase()} (worker: ${t.agent}, attempts: ${t.attempts})`;
+      lines.push(head);
+      if (t.reported && (t.status === "done" || t.status === "cancelled")) {
+        lines.push("(already reviewed)");
+        continue;
+      }
+      if (t.files?.length) lines.push(`Files changed: ${t.files.slice(0, 30).join(", ")}${t.files.length > 30 ? " …" : ""}`);
+      if (t.status === "conflict") {
+        lines.push(
+          `Its branch ${t.branch} conflicts with the integration branch. To fix, send it a follow-up asking it to ` +
+            `run \`git merge ${run.branch}\` in its worktree, resolve the conflicts, and verify.`,
+        );
+      }
+      if (t.error) lines.push(`Error: ${t.error}`);
+      if (t.result) lines.push(`Worker report:\n${t.result}`);
+      t.reported = true;
+    }
+    lines.push(
+      "\nReview the results (the integration branch in your working directory has every merged task). " +
+        "Reply with your next actions — follow-ups, new tasks, or done.",
+    );
+    this.save(run);
+    return lines.join("\n");
+  }
+
+  private async runTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    task.status = "running";
+    task.attempts++;
+    task.startedAt ??= Date.now();
+    task.error = undefined;
+    this.save(run);
+    this.emit(run, "task", { task: taskSummary(task) });
+    this.emit(run, "task_started", { taskId: task.id, agent: task.agent, title: task.title }, task.chat);
+
+    const key = `${run.id}/${task.id}`;
+    try {
+      this.host.gate(task.agent);
+      if (!task.dir) {
+        const slug = task.id;
+        const branch = `${run.branch.replace(/\/main$/, "")}/${slug}`;
+        const dir = path.join(path.dirname(run.dir), slug);
+        await this.gitLock.run(async () => {
+          // Branch from the integration tip, so dependencies' work is there.
+          const tip = (await git(["rev-parse", "HEAD"], run.dir)).trim();
+          await git(["worktree", "add", "-q", "-b", branch, dir, tip], this.host.projectDir);
+        });
+        task.branch = branch;
+        task.dir = dir;
+        this.save(run);
+      }
+      let agent = this.live.get(key);
+      if (!agent) {
+        const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
+        agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
+        this.live.set(key, agent);
+        this.wire(run, agent, cfg.id, task.chat, key);
+        await agent.start();
+      }
+
+      // The first attempt always sends the task itself — a follow-up the
+      // orchestrator queued in the same breath waits its turn behind it.
+      const first = task.attempts === 1;
+      const text = first ? task.prompt : task.queued.shift()!;
+      this.host.append({
+        kind: "message",
+        chat: task.chat,
+        payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
+      });
+      this.turnText.set(key, "");
+      const briefing = first
+        ? workerBriefing({
+            project: this.host.projectName,
+            runGoal: run.goal,
+            task,
+            branch: task.branch!,
+            brain: this.host.briefingFor(task.prompt, task.agent),
+            ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
+          })
+        : undefined;
+      await agent.send({ text, ...(briefing ? { briefing } : {}) });
+      if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
+
+      const reply = (this.turnText.get(key) ?? "").trim();
+      task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
+      const turnError = this.lastError.get(key);
+      this.lastError.delete(key);
+      if (turnError) task.error = turnError;
+
+      // A turn that errored and said nothing died — it is not "done", and a
+      // task depending on it must not start on top of it. (An error event
+      // alongside a real report is a warning the orchestrator gets to read.)
+      if (turnError && !reply) {
+        task.status = "failed";
+      } else if (task.queued.length) {
+        // The orchestrator already queued a follow-up: keep going on the same
+        // worktree before merging.
+        task.status = "pending";
+      } else {
+        await this.integrate(run, task);
+      }
+    } catch (err) {
+      if ((task.status as TaskStatus) !== "cancelled") {
+        task.status = "failed";
+        task.error = (err as Error).message.slice(0, 1000);
+      }
+    }
+    task.finishedAt = Date.now();
+    task.reported = false;
+    this.save(run);
+    this.emit(run, "task", { task: taskSummary(task) });
+    this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+    this.schedule(run);
+  }
+
+  private lastError = new Map<string, string>();
+
+  private async integrate(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    const dir = task.dir!;
+    await this.gitLock.run(async () => {
+      await commitAll(dir, `orchestra ${run.id} ${task.id}: ${task.title}`);
+      const files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => ""))
+        .split("\n")
+        .filter(Boolean);
+      task.files = files;
+      // Anything the orchestrator left lying in the integration tree would
+      // block the merge; record it rather than lose it.
+      await commitAll(run.dir, `orchestra ${run.id}: orchestrator edits`);
+      try {
+        await git(
+          ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `orchestra ${task.id}: ${task.title}`, task.branch!],
+          run.dir,
+        );
+        task.status = "done";
+      } catch (err) {
+        await git(["merge", "--abort"], run.dir).catch(() => {});
+        task.status = "conflict";
+        task.error = `merge conflict: ${(err as Error).message.slice(0, 400)}`;
+      }
+    });
+    if (task.status === "needs_input") return;
+    if (task.status === "done" && /\?\s*$/.test(task.result ?? "") && !task.files?.length) {
+      // Ended on a question and changed nothing: it's asking, not done.
+      task.status = "needs_input";
+    }
+  }
+
+  // ── event wiring ──
+
+  private wire(run: OrchestraRun, agent: Adapter, agentId: string, chat: string, key: string): void {
+    agent.onEvent((e) => {
+      const p = e.payload as Record<string, unknown>;
+      if (e.kind === "message" && !p.reasoning && p.role !== "user") {
+        const prev = this.turnText.get(key) ?? "";
+        this.turnText.set(key, `${prev}\n${String(p.text ?? "")}`.slice(-20_000));
+      }
+      if (e.kind === "error") this.lastError.set(key, String(p.message ?? "error"));
+      const event = this.host.append({
+        kind: e.kind,
+        agentId,
+        chat,
+        payload: { ...p, orchestra: { runId: run.id, ...(key.endsWith("/orch") ? { role: "orchestrator" } : { taskId: key.split("/")[1] }) } },
+      });
+      if (e.kind === "status" && p.state === "turn_cost") {
+        const usd = Number(p.costUsd ?? 0);
+        if (usd > 0) {
+          run.costUsd += usd;
+          const task = run.tasks.find((t) => `${run.id}/${t.id}` === key);
+          if (task) task.costUsd = (task.costUsd ?? 0) + usd;
+        }
+      }
+      this.host.observe(event);
+    });
+  }
+
+  private async finish(run: OrchestraRun, status: "completed" | "failed", error?: string, summary?: string): Promise<void> {
+    // Do the slow parts first, then flip the status and announce it in one
+    // synchronous step: a client that sees "completed" must also find the
+    // completed event (polling status in the gap raced this).
+    await this.stopAll(run);
+    if (run.plan) {
+      // The plan's final state — statuses and results — rides the branch too.
+      const final = { ...run, status, ...(error ? { error } : {}), ...(summary ? { summary } : {}) };
+      await this.writePlan(final as OrchestraRun, "final");
+    }
+    const commits = await git(["rev-list", "--count", `${run.baseCommit}..${run.branch}`], this.host.projectDir).catch(() => "0");
+    run.status = status;
+    if (error) run.error = error;
+    if (summary) run.summary = summary;
+    this.save(run);
+    this.emit(run, status, {
+      ...(summary ? { summary } : {}),
+      ...(error ? { error } : {}),
+      branch: run.branch,
+      commits: Number(commits.trim()) || 0,
+      tasks: run.tasks.map(taskSummary),
+      costUsd: run.costUsd,
+    });
+    if (summary) {
+      this.host.append({
+        kind: "message",
+        agentId: run.orchestrator.agent,
+        chat: run.chat,
+        payload: { text: `**Orchestra complete.** ${summary}\n\nAll work is on branch \`${run.branch}\` — apply it to merge into your branch.`, orchestra: { runId: run.id, role: "summary" } },
+      });
+    }
+    if (status === "completed") await this.deliver(run);
+  }
+
+  /**
+   * Do what the project's git delivery policy says with a completed run:
+   * nothing, merge it in, merge and push, or push its branch and open a PR.
+   * A failure here never un-completes the run — the work is safe on its
+   * branch — it's reported, and the manual Apply is still there.
+   */
+  async deliver(run: OrchestraRun, mode: GitDelivery = this.host.gitDelivery?.() ?? "none"): Promise<void> {
+    if (mode === "none") return;
+    try {
+      if (mode === "commit" || mode === "push") {
+        const { into } = await this.apply(run.id);
+        let pushed: string | undefined;
+        if (mode === "push") {
+          const up = await git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], this.host.projectDir).catch(() => "");
+          await git(up.trim() ? ["push", "-q"] : ["push", "-q", "-u", "origin", into], this.host.projectDir);
+          pushed = into;
+        }
+        run.delivered = { mode, into, ...(pushed ? { pushed } : {}), at: Date.now() };
+      } else if (mode === "pr") {
+        await this.gitLock.run(() => commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false));
+        await git(["push", "-q", "-u", "origin", `${run.branch}:${run.branch}`], run.dir);
+        const body = [
+          run.summary ?? "",
+          "",
+          "| task | agent | status | files |",
+          "|---|---|---|---|",
+          ...run.tasks.map((t) => `| ${t.id} · ${t.title} | ${t.agent} | ${t.status} | ${t.files?.length ?? 0} |`),
+          "",
+          ...(run.plan ? [`Plan: \`${planDir(run)}/PLAN.md\``, ""] : []),
+          `Orchestrated by Loom · ${run.orchestrator.agent} with ${run.workers.join(", ")}`,
+        ].join("\n");
+        const out = await gh(
+          ["pr", "create", "--head", run.branch, ...(run.baseBranch ? ["--base", run.baseBranch] : []),
+            "--title", run.goal.split("\n")[0]!.slice(0, 70), "--body", body],
+          this.host.projectDir,
+        );
+        const prUrl = out.match(/https:\/\/\S+/)?.[0];
+        run.delivered = { mode, pushed: run.branch, ...(prUrl ? { prUrl } : {}), at: Date.now() };
+      }
+      run.deliveryError = undefined;
+      this.save(run);
+      this.emit(run, "delivered", { ...run.delivered });
+    } catch (err) {
+      run.deliveryError = (err as Error).message.slice(0, 500);
+      this.save(run);
+      this.emit(run, "delivery_failed", { mode, error: run.deliveryError });
+    }
+  }
+}
+
+/**
+ * Verification commands a Claude orchestrator may run while reviewing.
+ *
+ * Headless Claude in acceptEdits mode can't run any shell command, so a Claude
+ * orchestrator could only read the workers' code and take their word that the
+ * tests passed (seen on a real run: "could not run node --test, approval not
+ * granted"). Codex, sandboxed, just ran them. These are the checks a reviewer
+ * runs — tests, typecheck, build, and read-only git — and nothing else.
+ */
+export const ORCHESTRATOR_VERIFY_TOOLS = [
+  "npm test", "npm run test", "npm run build", "npm run typecheck", "npm run lint",
+  "pnpm test", "yarn test", "bun test", "node --test", "npx vitest run", "npx tsc --noEmit",
+  "cargo test", "cargo check", "go test", "go build", "pytest", "python -m pytest",
+  "git log", "git diff", "git status", "git show",
+].map((c) => `Bash(${c}:*)`);
+
+function orchestratorOptions(cfg: AgentConfig): Record<string, unknown> | undefined {
+  if (cfg.kind !== "claude-code") return cfg.options;
+  const extra = Array.isArray(cfg.options?.extraArgs) ? (cfg.options!.extraArgs as string[]) : [];
+  return { ...(cfg.options ?? {}), extraArgs: [...extra, "--allowedTools", ORCHESTRATOR_VERIFY_TOOLS.join(",")] };
+}
+
+export function taskSummary(t: OrchestraTask): Record<string, unknown> {
+  return {
+    id: t.id,
+    title: t.title,
+    agent: t.agent,
+    kind: t.kind,
+    status: t.status,
+    dependsOn: t.dependsOn,
+    chat: t.chat,
+    attempts: t.attempts,
+    files: t.files ?? [],
+    ...(t.error ? { error: t.error } : {}),
+    ...(t.costUsd ? { costUsd: t.costUsd } : {}),
+  };
+}
+
+export function isTerminal(s: OrchestraStatus): boolean {
+  return s === "completed" || s === "failed" || s === "aborted";
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, Math.floor(Number(n) || lo)));
+}

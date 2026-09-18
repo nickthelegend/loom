@@ -4,11 +4,14 @@
  */
 
 import * as SecureStore from "expo-secure-store";
-import { Platform } from "react-native";
+import { AppState, Platform, type AppStateStatus } from "react-native";
+import { RelayClient, parseCloudFragment } from "./relay-client";
+import { unpackCredentials, type RelayCredentials } from "./relay-protocol";
+import { supabaseRelayTransport } from "./relay-transport";
 
 // Credentials live in the device keychain on native; on web (Expo web, used for
 // the browser demo) SecureStore isn't available, so fall back to localStorage.
-const kv = {
+export const kv = {
   get: (k: string): Promise<string | null> =>
     Platform.OS === "web"
       ? Promise.resolve(globalThis.localStorage?.getItem(k) ?? null)
@@ -23,9 +26,22 @@ const kv = {
       : SecureStore.deleteItemAsync(k),
 };
 
+/**
+ * Loom Cloud: how to reach the daemon when its URL doesn't answer. Present
+ * only when the pairing link carried the cloud params (the daemon owner turned
+ * Loom Cloud on). `supabaseUrl`/`anonKey` are the DAEMON's Supabase project,
+ * which need not be the one this app signs people in with.
+ */
+export interface CloudCreds {
+  creds: RelayCredentials;
+  supabaseUrl: string;
+  anonKey: string;
+}
+
 export interface Creds {
   url: string; // e.g. http://100.x.y.z:7420
   token: string;
+  relay?: CloudCreds;
 }
 
 export interface DaemonReachability {
@@ -46,6 +62,8 @@ export interface AgentStatus {
   model?: string;
   /** Off agents stay in the roster but aren't spawned and can't hold the baton. */
   enabled?: boolean;
+  /** The permission mode in effect (bypass | auto | ask). Absent on older daemons. */
+  permissions?: PermissionMode;
 }
 
 export interface RouteState {
@@ -409,32 +427,322 @@ export interface McpCatalog {
 
 const URL_KEY = "loomUrl";
 const TOKEN_KEY = "loomToken";
+const RELAY_KEY = "loomRelay";
+const RELAY_CLIENT_KEY = "loomRelayClientId";
 
 export async function loadCreds(): Promise<Creds | null> {
-  const [url, token] = await Promise.all([kv.get(URL_KEY), kv.get(TOKEN_KEY)]);
-  return url && token ? { url, token } : null;
+  const [url, token, relay] = await Promise.all([kv.get(URL_KEY), kv.get(TOKEN_KEY), kv.get(RELAY_KEY)]);
+  if (!url || !token) return null;
+  let cloud: CloudCreds | undefined;
+  try {
+    cloud = relay ? (JSON.parse(relay) as CloudCreds) : undefined;
+  } catch {
+    cloud = undefined; // a corrupt blob just means "no cloud route", never "not paired"
+  }
+  return { url, token, ...(cloud ? { relay: cloud } : {}) };
 }
 
 export async function saveCreds(creds: Creds): Promise<void> {
-  await Promise.all([kv.set(URL_KEY, creds.url), kv.set(TOKEN_KEY, creds.token)]);
+  await Promise.all([
+    kv.set(URL_KEY, creds.url),
+    kv.set(TOKEN_KEY, creds.token),
+    creds.relay ? kv.set(RELAY_KEY, JSON.stringify(creds.relay)) : kv.del(RELAY_KEY),
+  ]);
 }
 
 export async function clearCreds(): Promise<void> {
-  await Promise.all([kv.del(URL_KEY), kv.del(TOKEN_KEY)]);
+  connection.reset();
+  await Promise.all([kv.del(URL_KEY), kv.del(TOKEN_KEY), kv.del(RELAY_KEY)]);
 }
 
-/** Exchange a single-use pairing token (from `loom pair`) for a client token. */
-export async function claim(url: string, pairToken: string): Promise<Creds> {
-  const base = url.replace(/\/+$/, "").replace(/\/app.*$/, "");
-  const res = await fetch(`${base}/api/pair/claim`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: pairToken, name: "loom-app" }),
-  });
-  const json = (await res.json()) as { clientToken?: string; error?: string };
-  if (!res.ok || !json.clientToken) throw new Error(json.error ?? "pairing failed");
-  return { url: base, token: json.clientToken };
+/**
+ * The Loom Cloud half of a pairing link: `#pair=…&relay=<channel.key>&sb=…&sbk=…`.
+ * Null when the link has none (Loom Cloud off) or they don't parse.
+ */
+export function cloudFromLink(raw: string): CloudCreds | null {
+  const hash = raw.indexOf("#");
+  if (hash < 0) return null;
+  const fragment = raw.slice(hash).split(/\s/)[0]!;
+  const parsed = parseCloudFragment(fragment);
+  if (!parsed) return null;
+  const creds = unpackCredentials(parsed.relay);
+  if (!creds) return null;
+  return { creds, supabaseUrl: parsed.supabaseUrl, anonKey: parsed.anonKey };
 }
+
+/** `fetch` with a deadline — React Native's fetch has none of its own. */
+async function fetchWithin(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Exchange a single-use pairing token (from `loom pair`) for a client token.
+ *
+ * Direct first. If the daemon's URL doesn't answer (the phone is on another
+ * network) and the link carried Loom Cloud params, the claim goes through the
+ * relay instead — the daemon runs it against itself exactly as if it came in
+ * over the LAN.
+ */
+export async function claim(url: string, pairToken: string, cloud?: CloudCreds | null): Promise<Creds> {
+  const base = url.replace(/\/+$/, "").replace(/\/app.*$/, "");
+  const body = { token: pairToken, name: "loom-app" };
+  let direct: Response | null = null;
+  try {
+    direct = await fetchWithin(
+      `${base}/api/pair/claim`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      cloud ? 2500 : 15_000,
+    );
+  } catch (e) {
+    if (!cloud) throw e;
+  }
+  if (direct) {
+    const json = (await direct.json().catch(() => ({}))) as { clientToken?: string; error?: string };
+    if (!direct.ok || !json.clientToken) throw new Error(json.error ?? "pairing failed");
+    return { url: base, token: json.clientToken, ...(cloud ? { relay: cloud } : {}) };
+  }
+  // unreachable directly, cloud params present: claim through the relay
+  const transport = supabaseRelayTransport(cloud!.supabaseUrl, cloud!.anonKey, cloud!.creds.channel);
+  const client = new RelayClient(transport, cloud!.creds, { clientId: await relayClientId() });
+  try {
+    await withTimeout(transport.ready(), RELAY_JOIN_MS, "couldn't join Loom Cloud");
+    const res = await client.request("POST", "/api/pair/claim", { body, timeoutMs: 15_000 });
+    const json = (res.body ?? {}) as { clientToken?: string; clientId?: string; error?: string };
+    if (res.status >= 400 || !json.clientToken) throw new Error(json.error ?? `pairing failed (HTTP ${res.status})`);
+    const creds: Creds = { url: base, token: json.clientToken, relay: cloud! };
+    // We just proved the direct URL is dead and the relay works — start there.
+    connection.bind(creds);
+    connection.noteRoute(base, "cloud");
+    return creds;
+  } finally {
+    void client.close();
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(what)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** One relay client id per install — the daemon keys its per-client state on it. */
+let clientIdMemo: Promise<string> | null = null;
+function relayClientId(): Promise<string> {
+  clientIdMemo ??= kv.get(RELAY_CLIENT_KEY).then(async (saved) => {
+    if (saved) return saved;
+    const b = new Uint8Array(12);
+    globalThis.crypto.getRandomValues(b);
+    const id = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    await kv.set(RELAY_CLIENT_KEY, id).catch(() => {});
+    return id;
+  });
+  return clientIdMemo;
+}
+
+// ---------------------------------------------------------------------------
+// Connection manager: Direct → Loom Cloud → Offline
+// ---------------------------------------------------------------------------
+
+/** How the app is reaching the daemon right now. */
+export type ConnRoute = "direct" | "cloud" | "offline" | "checking";
+
+const DIRECT_PROBE_MS = 2500;
+const RELAY_JOIN_MS = 8000;
+/** Mobile OSes kill sockets silently; after this long away, assume they're dead. */
+const STALE_BACKGROUND_MS = 10_000;
+/** While on the relay, look for the direct path coming back this often. */
+const RECHECK_CLOUD_MS = 60_000;
+const RECHECK_OFFLINE_MS = 4000;
+
+/**
+ * Picks the route: the direct URL when `/api/health` answers within 2.5s,
+ * otherwise Loom Cloud when the pairing carried it, otherwise offline.
+ * Re-checks on foreground; after >10s in the background it also forces every
+ * live stream to start fresh (T3 Code's reconnection pattern).
+ */
+class ConnectionManager {
+  route: ConnRoute = "checking";
+  private creds: Creds | null = null;
+  private checkedAt = 0;
+  private probing: Promise<ConnRoute> | null = null;
+  private relay: RelayClient | null = null;
+  private relayJoined: Promise<void> | null = null;
+  private listeners = new Set<(r: ConnRoute) => void>();
+  private resumeListeners = new Set<() => void>();
+  private backgroundedAt: number | null = null;
+  private appStateHooked = false;
+
+  /** Point the manager at a paired daemon; a different daemon starts over. */
+  bind(creds: Creds): void {
+    this.hookAppState();
+    if (
+      this.creds &&
+      this.creds.url === creds.url &&
+      this.creds.token === creds.token &&
+      this.creds.relay?.creds.channel === creds.relay?.creds.channel
+    ) {
+      return;
+    }
+    this.reset();
+    this.creds = creds;
+  }
+
+  reset(): void {
+    this.creds = null;
+    this.checkedAt = 0;
+    this.probing = null;
+    void this.relay?.close();
+    this.relay = null;
+    this.relayJoined = null;
+    this.set("checking");
+  }
+
+  /** Claim-time hint: we already know the direct URL failed and the relay worked. */
+  noteRoute(url: string, route: ConnRoute): void {
+    if (this.creds && this.creds.url !== url) return;
+    this.route = route;
+    this.checkedAt = Date.now();
+    this.emit();
+  }
+
+  subscribe(fn: (r: ConnRoute) => void): () => void {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  }
+
+  /** Fires when the app comes back after long enough that sockets can't be trusted. */
+  onResume(fn: () => void): () => void {
+    this.resumeListeners.add(fn);
+    return () => void this.resumeListeners.delete(fn);
+  }
+
+  private set(r: ConnRoute): void {
+    if (this.route === r) return;
+    this.route = r;
+    this.emit();
+  }
+
+  private emit(): void {
+    for (const l of this.listeners) l(this.route);
+  }
+
+  /** The route to use now, probing when unknown or due. */
+  async routeFor(creds: Creds): Promise<ConnRoute> {
+    this.bind(creds);
+    const age = Date.now() - this.checkedAt;
+    if (this.route === "direct" && this.checkedAt) return "direct";
+    if (this.route === "cloud" && this.checkedAt) {
+      if (age > RECHECK_CLOUD_MS) void this.probe(); // look for direct coming back, without waiting
+      return "cloud";
+    }
+    if (this.route === "offline" && age < RECHECK_OFFLINE_MS) return "offline";
+    return this.probe();
+  }
+
+  /** Re-decide the route. Concurrent callers share one probe. */
+  probe(): Promise<ConnRoute> {
+    this.probing ??= this.runProbe().finally(() => {
+      this.probing = null;
+    });
+    return this.probing;
+  }
+
+  private async runProbe(): Promise<ConnRoute> {
+    const creds = this.creds;
+    if (!creds) return "checking";
+    let route: ConnRoute = "offline";
+    try {
+      // Any HTTP answer at all means the direct path works (a 401 is api()'s business).
+      await fetchWithin(`${creds.url}/api/health`, { headers: { Authorization: `Bearer ${creds.token}` } }, DIRECT_PROBE_MS);
+      route = "direct";
+    } catch {
+      if (creds.relay) {
+        const client = await this.relayClient().catch(() => null);
+        if (client && (await client.ping(6000)) !== null) route = "cloud";
+        else this.dropRelay(); // a broken channel is rebuilt on the next probe
+      }
+    }
+    if (this.creds !== creds) return this.route; // re-bound mid-probe; that probe wins
+    this.checkedAt = Date.now();
+    this.set(route);
+    return route;
+  }
+
+  /** The joined relay client for the bound daemon (created on first use). */
+  async relayClient(): Promise<RelayClient> {
+    const cloud = this.creds?.relay;
+    if (!cloud) throw new Error("this pairing has no Loom Cloud route");
+    if (!this.relay) {
+      const id = await relayClientId();
+      if (this.relay || this.creds?.relay !== cloud) return this.relayClient(); // raced another caller
+      const transport = supabaseRelayTransport(cloud.supabaseUrl, cloud.anonKey, cloud.creds.channel);
+      this.relay = new RelayClient(transport, cloud.creds, { clientId: id });
+      this.relayJoined = withTimeout(transport.ready(), RELAY_JOIN_MS, "couldn't join Loom Cloud");
+    }
+    const client = this.relay;
+    await this.relayJoined;
+    return client;
+  }
+
+  private dropRelay(): void {
+    void this.relay?.close();
+    this.relay = null;
+    this.relayJoined = null;
+  }
+
+  /** A direct request just got an HTTP answer: that settles the route. */
+  sawDirect(creds: Creds): void {
+    if (this.creds !== creds && this.creds?.url !== creds.url) return;
+    this.checkedAt = Date.now();
+    this.set("direct");
+  }
+
+  /** A direct request failed at the network level: find out where we stand now. */
+  async directFailed(creds: Creds): Promise<ConnRoute> {
+    this.bind(creds);
+    this.checkedAt = 0;
+    this.set("checking");
+    return this.probe();
+  }
+
+  private hookAppState(): void {
+    if (this.appStateHooked) return;
+    this.appStateHooked = true;
+    AppState.addEventListener("change", (s: AppStateStatus) => {
+      if (s === "background" || s === "inactive") {
+        this.backgroundedAt ??= Date.now();
+        return;
+      }
+      if (s !== "active") return;
+      const away = this.backgroundedAt ? Date.now() - this.backgroundedAt : 0;
+      this.backgroundedAt = null;
+      if (!this.creds) return;
+      if (away > STALE_BACKGROUND_MS) {
+        this.relay?.refresh();
+        for (const l of this.resumeListeners) l();
+      }
+      void this.probe();
+    });
+  }
+}
+
+export const connection = new ConnectionManager();
 
 /**
  * Registered by App.tsx: called when any request 401s (token revoked or
@@ -452,6 +760,10 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
  * own, so a request against a daemon that went away otherwise hangs the panel
  * forever with no error to show. Everything else leaves it unset and keeps the
  * old behaviour exactly.
+ *
+ * Routed: on Loom Cloud the same call rides the relay, and the daemon executes
+ * it against itself with this same bearer token — so status codes, errors and
+ * the 401 behaviour are identical on both paths.
  */
 export async function api<T>(
   creds: Creds,
@@ -459,6 +771,10 @@ export async function api<T>(
   init?: RequestInit,
   timeoutMs?: number,
 ): Promise<T> {
+  connection.bind(creds);
+  let route = creds.relay ? await connection.routeFor(creds) : "direct";
+  if (route === "cloud") return viaRelay<T>(creds, path, init, timeoutMs);
+
   const ctl = timeoutMs ? new AbortController() : null;
   const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
   let res: Response;
@@ -476,17 +792,48 @@ export async function api<T>(
     // An abort reads as "Aborted"/"AbortError", which tells a user nothing about
     // what they were waiting for. Say what actually ran out.
     if (ctl?.signal.aborted) throw new Error(`timed out after ${Math.round(timeoutMs! / 1000)}s`);
+    // The network went away under us (left the Wi-Fi, tailnet down). If this
+    // pairing has a cloud route, re-decide and carry the call over.
+    if (!init?.signal?.aborted) {
+      route = await connection.directFailed(creds);
+      if (route === "cloud") return viaRelay<T>(creds, path, init, timeoutMs);
+    }
     throw e;
   } finally {
     if (timer) clearTimeout(timer);
   }
+  connection.sawDirect(creds);
   const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status === 401) {
+  return settle<T>(res.status, json);
+}
+
+async function viaRelay<T>(creds: Creds, path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
+  const client = await connection.relayClient();
+  let body: unknown;
+  if (typeof init?.body === "string") {
+    try {
+      body = JSON.parse(init.body);
+    } catch {
+      body = init.body;
+    }
+  }
+  const res = await client.request((init?.method ?? "GET").toUpperCase(), path, {
+    auth: `Bearer ${creds.token}`,
+    ...(body !== undefined ? { body } : {}),
+    ...(timeoutMs ? { timeoutMs } : {}),
+  });
+  const json = (res.body && typeof res.body === "object" ? res.body : {}) as Record<string, unknown>;
+  return settle<T>(res.status, json);
+}
+
+/** The shared tail of both routes: 401 unpairs, other errors carry the daemon's words. */
+async function settle<T>(status: number, json: Record<string, unknown>): Promise<T> {
+  if (status === 401) {
     await clearCreds();
     onUnauthorized?.();
     throw new Error("unauthorized — pair again");
   }
-  if (!res.ok) throw new Error(String(json.message ?? json.error ?? `HTTP ${res.status}`));
+  if (status < 200 || status >= 300) throw new Error(String(json.message ?? json.error ?? `HTTP ${status}`));
   return json as T;
 }
 
@@ -530,10 +877,23 @@ export const getTriage = (c: Creds, id: string, agentId: string) =>
   api<{ triage: Triage }>(c, `/api/projects/${id}/triage/${encodeURIComponent(agentId)}`);
 export const getTasks = (c: Creds, id: string, kind: "issue" | "pr", search: string) =>
   api<TaskResult>(c, `/api/projects/${id}/tasks?kind=${kind}&search=${encodeURIComponent(search)}`);
-export const sendMessage = (c: Creds, id: string, text: string, agentId?: string, chat?: string) =>
+/** `plan: true` asks the agent for a plan markdown file instead of code. */
+export const sendMessage = (
+  c: Creds,
+  id: string,
+  text: string,
+  agentId?: string,
+  chat?: string,
+  opts?: { plan?: boolean },
+) =>
   api(c, `/api/projects/${id}/messages`, {
     method: "POST",
-    body: JSON.stringify({ text, ...(agentId ? { agentId } : {}), ...(chat ? { chat } : {}) }),
+    body: JSON.stringify({
+      text,
+      ...(agentId ? { agentId } : {}),
+      ...(chat ? { chat } : {}),
+      ...(opts?.plan ? { plan: true } : {}),
+    }),
   });
 export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });
@@ -679,8 +1039,351 @@ export const setAgentRole = (c: Creds, id: string, agentId: string, role: string
     body: JSON.stringify({ role }),
   });
 
+// --- Orchestra --------------------------------------------------------------
+
+export type OrchestraStatus =
+  | "starting"
+  | "planning"
+  | "running"
+  | "reviewing"
+  | "waiting_human"
+  | "completed"
+  | "failed"
+  | "aborted";
+
+export type OrchestraTaskStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "conflict"
+  | "needs_input"
+  | "failed"
+  | "cancelled";
+
+/** One unit of work a worker agent runs on its own branch. `chat` is its thread. */
+export interface OrchestraTask {
+  id: string;
+  title: string;
+  agent: string;
+  kind: string;
+  dependsOn: string[];
+  status: OrchestraTaskStatus;
+  chat: string;
+  attempts: number;
+  files?: string[];
+  error?: string;
+  result?: string;
+  costUsd?: number;
+}
+
+/** One orchestrator, many parallel workers, one integration branch. */
+export interface OrchestraRun {
+  id: string;
+  goal: string;
+  orchestrator: { agent: string; kind: string };
+  workers: string[];
+  status: OrchestraStatus;
+  chat: string;
+  branch: string;
+  tasks: OrchestraTask[];
+  round: number;
+  maxRounds: number;
+  maxParallel: number;
+  summary?: string;
+  question?: string;
+  error?: string;
+  applied?: { at: number; into: string };
+  /** Plan mode: PLAN.md plus one spec per task, written under plans/<run id>/ on the branch. */
+  plan?: boolean;
+  /** What the git delivery policy did with the finished run. */
+  delivered?: { mode: GitDelivery; into?: string; pushed?: string; prUrl?: string; at?: number };
+  /** Set when delivery was attempted and failed (push rejected, gh missing…). */
+  deliveryError?: string;
+  costUsd: number;
+  createdAt: number;
+}
+
+/** Where a run's plan lives inside the repo — the daemon's planDir(). */
+export const planPath = (run: { id: string }) => `plans/${run.id}/PLAN.md`;
+
+export const getOrchestra = (c: Creds, id: string) =>
+  api<{ runs: OrchestraRun[]; active: string | null }>(c, `/api/projects/${id}/orchestra`);
+
+export const getOrchestraRun = (c: Creds, id: string, runId: string) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}`);
+
+export const startOrchestra = (
+  c: Creds,
+  id: string,
+  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean },
+) => api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra`, { method: "POST", body: JSON.stringify(opts) });
+
+export const abortOrchestra = (c: Creds, id: string, runId: string) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/abort`, {
+    method: "POST",
+    body: "{}",
+  });
+
+export const replyOrchestra = (c: Creds, id: string, runId: string, text: string) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/reply`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+
+export const applyOrchestra = (c: Creds, id: string, runId: string) =>
+  api<{ merged: boolean; into: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/apply`, {
+    method: "POST",
+    body: "{}",
+  });
+
+/** Re-run the delivery policy (after fixing a push rejection, say). Answers with the run. */
+export const deliverOrchestra = (c: Creds, id: string, runId: string) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/deliver`, {
+    method: "POST",
+    body: "{}",
+  });
+
+// --- Permissions ------------------------------------------------------------
+
+export type PermissionMode = "bypass" | "auto" | "ask";
+export const PERMISSION_MODES: ReadonlyArray<PermissionMode> = ["bypass", "auto", "ask"];
+
+/** One cell of the table: what the agent is run with, and whether it works at all. */
+export interface PermissionCell {
+  flags: string;
+  label: string;
+  /** How "ask" is honoured: real approvals in Loom, or a read-only stand-in. */
+  ask?: "approvals" | "read-only";
+  /** Measured against the real CLI: this mode doesn't do what it says. Shown disabled. */
+  unsupported?: string;
+}
+
+export interface PermissionProfile {
+  default: PermissionMode;
+  modes: Record<PermissionMode, PermissionCell>;
+}
+
+export const getPermissionProfiles = (c: Creds) =>
+  api<{ profiles: Record<string, PermissionProfile> }>(c, "/api/permissions");
+
+/** 400 with the daemon's reason when the mode is unsupported or the agent is mid-turn. */
+export const setAgentPermissions = (c: Creds, id: string, agentId: string, permissions: PermissionMode) =>
+  api<{ agent: unknown }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/permissions`, {
+    method: "POST",
+    body: JSON.stringify({ permissions }),
+  });
+
+// --- Approvals --------------------------------------------------------------
+
+/** A tool call waiting on a human. `input` is the raw tool input (object) from GET. */
+export interface Approval {
+  id: string;
+  agent: string;
+  tool: string;
+  input: unknown;
+  createdAt: number;
+}
+
+export const getApprovals = (c: Creds, id: string) =>
+  api<{ approvals: Approval[] }>(c, `/api/projects/${id}/approvals`);
+
+/** 404 means someone (or the 30-minute timeout) already answered it. */
+export const decideApproval = (
+  c: Creds,
+  id: string,
+  approvalId: string,
+  decision: "allow" | "deny",
+  message?: string,
+) =>
+  api<{ ok: boolean }>(c, `/api/projects/${id}/approvals/${encodeURIComponent(approvalId)}`, {
+    method: "POST",
+    body: JSON.stringify({ decision, ...(message ? { message } : {}) }),
+  });
+
+// --- Git delivery -----------------------------------------------------------
+
+export type GitDelivery = "none" | "commit" | "push" | "pr";
+
+export interface ProjectConfig {
+  git: {
+    delivery: GitDelivery;
+    commitPerTurn?: boolean;
+    branchPerTask?: boolean;
+    worktreePerAgent?: boolean;
+  };
+}
+
+export const getProjectConfig = (c: Creds, id: string) => api<ProjectConfig>(c, `/api/projects/${id}/config`);
+
+export const setGitDelivery = (c: Creds, id: string, delivery: GitDelivery) =>
+  api<ProjectConfig>(c, `/api/projects/${id}/config`, {
+    method: "PATCH",
+    body: JSON.stringify({ git: { delivery } }),
+  });
+
+// --- Fleet activity ---------------------------------------------------------
+
+export interface ActivityLast {
+  line: string;
+  ts: number;
+  kind?: string;
+  chat?: string;
+}
+
+export interface ActivityAgent {
+  id: string;
+  kind: string;
+  role?: string;
+  busy: boolean;
+  since: number | null;
+  permissions?: PermissionMode;
+  holdsBaton: boolean;
+  chat: string | null;
+  chatTitle: string | null;
+  last: ActivityLast | null;
+}
+
+export interface ActivityTask {
+  id: string;
+  title: string;
+  agent: string;
+  status: OrchestraTaskStatus;
+  chat: string;
+  last: ActivityLast | null;
+}
+
+export interface ActivityProject {
+  project: { id: string; name: string };
+  agents: ActivityAgent[];
+  orchestra: { id: string; goal: string; status: OrchestraStatus; chat?: string; tasks: ActivityTask[] } | null;
+}
+
+export const getActivity = (c: Creds) =>
+  api<{ projects: ActivityProject[]; approvals: number; at: number }>(c, "/api/activity");
+
+// --- Prompt manager ---------------------------------------------------------
+
+export interface SavedPrompt {
+  id: string;
+  title: string;
+  text: string;
+  pinned: boolean;
+  uses: number;
+}
+
+export interface RecentPrompt {
+  text: string;
+  at: number;
+  mode?: string;
+}
+
+export const getPrompts = (c: Creds, q = "") =>
+  api<{ saved: SavedPrompt[]; recent: RecentPrompt[] }>(c, `/api/prompts?q=${encodeURIComponent(q)}`);
+
+export const savePrompt = (c: Creds, p: { title?: string; text: string; pinned?: boolean }) =>
+  api<{ prompt: SavedPrompt }>(c, "/api/prompts", { method: "POST", body: JSON.stringify(p) });
+
+export const updatePrompt = (c: Creds, promptId: string, patch: { pinned?: boolean; used?: true }) =>
+  api<{ prompt: SavedPrompt }>(c, `/api/prompts/${encodeURIComponent(promptId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+
+export const deletePrompt = (c: Creds, promptId: string) =>
+  api<{ ok: boolean }>(c, `/api/prompts/${encodeURIComponent(promptId)}`, { method: "DELETE" });
+
 export function wsUrl(creds: Creds, projectId: string): string {
   const proto = creds.url.startsWith("https") ? "wss" : "ws";
   const host = creds.url.replace(/^https?:\/\//, "");
   return `${proto}://${host}/ws?token=${encodeURIComponent(creds.token)}&project=${encodeURIComponent(projectId)}`;
+}
+
+/**
+ * The project's live event feed, on whichever route is up: the /ws socket when
+ * direct, the relay's stream when on Loom Cloud. Frames are identical either
+ * way. It follows the connection manager — a route change or a long trip to the
+ * background tears the feed down and opens a fresh one. Returns the closer.
+ */
+export function openLiveStream(creds: Creds, projectId: string, onFrame: (frame: unknown) => void): () => void {
+  let closed = false;
+  let mode: "direct" | "cloud" | null = null;
+  let ws: WebSocket | null = null;
+  let relay: RelayClient | null = null;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  let chain: Promise<void> = Promise.resolve();
+
+  const stop = () => {
+    if (retry) clearTimeout(retry);
+    retry = null;
+    if (ws) {
+      ws.onclose = null;
+      ws.onmessage = null;
+      ws.close();
+      ws = null;
+    }
+    relay?.closeStream();
+    relay = null;
+    mode = null;
+  };
+
+  const later = (fn: () => void, ms: number) => {
+    if (retry) clearTimeout(retry);
+    retry = setTimeout(() => {
+      retry = null;
+      fn();
+    }, ms);
+  };
+
+  const startDirect = () => {
+    const sock = new WebSocket(wsUrl(creds, projectId));
+    ws = sock;
+    sock.onmessage = (msg) => {
+      try {
+        onFrame(JSON.parse(String(msg.data)));
+      } catch {
+        // ignore malformed frames
+      }
+    };
+    sock.onclose = () => {
+      if (ws !== sock || closed) return;
+      ws = null;
+      mode = null;
+      // With a cloud route to fall back on, a dropped socket is a reason to re-decide.
+      later(() => void (creds.relay ? connection.directFailed(creds).then(() => pick()) : pick()), 3000);
+    };
+  };
+
+  const pickNow = async (force: boolean) => {
+    if (closed) return;
+    const route = creds.relay ? await connection.routeFor(creds) : "direct";
+    if (closed) return;
+    const want = route === "cloud" ? "cloud" : "direct"; // offline keeps knocking on the direct door
+    if (!force && want === mode) return;
+    stop();
+    mode = want;
+    if (want === "direct") return startDirect();
+    try {
+      const client = await connection.relayClient();
+      if (closed || mode !== "cloud") return;
+      relay = client;
+      client.openStream(`Bearer ${creds.token}`, { onFrame }, projectId);
+    } catch {
+      mode = null;
+      later(() => void pick(), 3000);
+    }
+  };
+  // Serialised, so a route event and a retry can't both open a socket.
+  const pick = (force = false): Promise<void> => (chain = chain.then(() => pickNow(force)).catch(() => {}));
+
+  const offRoute = connection.subscribe((r) => {
+    if (r === "direct" || r === "cloud") void pick();
+  });
+  const offResume = connection.onResume(() => void pick(true));
+  void pick();
+  return () => {
+    closed = true;
+    offRoute();
+    offResume();
+    stop();
+  };
 }

@@ -317,11 +317,14 @@ describe("git · branches and checkout", () => {
     write(dir, "shared.txt", "main version\n");
     await stage(dir, ["shared.txt"]);
     await commit(dir, "main adds shared");
+    // The starting branch is whatever init.defaultBranch says — "main" here,
+    // "master" on CI runners. Go back to it by name, not by assumption.
+    const start = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir, encoding: "utf8" }).trim();
     execFileSync("git", ["checkout", "-q", "-b", "other"], { cwd: dir });
     write(dir, "shared.txt", "other version\n");
     await stage(dir, ["shared.txt"]);
     await commit(dir, "other changes shared");
-    execFileSync("git", ["checkout", "-q", "main"], { cwd: dir });
+    execFileSync("git", ["checkout", "-q", start], { cwd: dir });
     write(dir, "shared.txt", "uncommitted local edit\n"); // dirty, uncommitted
     await expect(checkout(dir, "other")).rejects.toBeInstanceOf(GitError);
   });

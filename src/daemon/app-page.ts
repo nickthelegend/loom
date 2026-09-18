@@ -1658,6 +1658,465 @@ window.__loomPageRev="%%BUILD_REV%%";
   .psswitch input:checked+.pssl{background:color-mix(in srgb,var(--ok) 30%,transparent);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
   .psswitch input:checked+.pssl::after{transform:translateX(14px);background:var(--ok)}
   .psswitch input:disabled+.pssl{opacity:.6;cursor:default}
+  /* ── Composer: Chat | Orchestrate ──
+     The mode is a property of the send, not of the thread, so it lives in the
+     composer's own control row. Orchestrate swaps the one-agent picker for
+     the run's cast: who plans, who works, how many at once. */
+  .cmode{display:inline-flex;flex:none;height:26px;padding:2px;border-radius:99px;
+    background:color-mix(in srgb, var(--muted) 70%, transparent);border:1px solid var(--border)}
+  .cmode button{border:0;background:transparent;color:var(--muted-foreground);font:inherit;font-size:11px;
+    font-weight:500;height:20px;padding:0 9px;border-radius:99px;cursor:pointer;transition:background .12s,color .12s}
+  .cmode button:hover{color:var(--foreground)}
+  .cmode button.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgba(0,0,0,.16)}
+  .dark .cmode button.on{background:var(--accent)}
+  /* The sidebar's chat rows are also .crow, and their padding, hover wash and
+     pointer leaked onto the composer's control row (a 24px indent, a row that
+     lit up under the mouse). Scoped back to what the composer asked for. */
+  .cbox .crow{padding:8px 1px 0;margin-top:0;border:0;border-radius:0;cursor:auto;color:inherit;font-size:inherit;gap:6px}
+  .cbox .crow:hover{background:transparent;color:inherit}
+  .corch{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:8px 1px 2px;
+    margin-top:6px;border-top:1px solid var(--border)}
+  .corch .colbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--muted-foreground);margin-left:4px}
+  .corch .colbl:first-child{margin-left:0}
+  .cowk{display:inline-flex;flex-wrap:wrap;gap:4px}
+  .cowchip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:99px;cursor:pointer;
+    font:inherit;font-size:11px;border:1px solid var(--border);background:transparent;color:var(--muted-foreground);
+    transition:background .12s,color .12s,border-color .12s}
+  .cowchip .brand{width:12px;height:12px}
+  .cowchip:hover{color:var(--foreground)}
+  .cowchip.on{color:var(--foreground);border-color:color-mix(in srgb, var(--primary) 30%, transparent);
+    background:color-mix(in srgb, var(--primary) 11%, transparent)}
+  .cowchip:not(.on) .brand,.cowchip:not(.on) .agmono{opacity:.4;filter:grayscale(1)}
+  .cstep{display:inline-flex;align-items:center;height:24px;border:1px solid var(--border);border-radius:99px;overflow:hidden}
+  .cstep button{width:24px;height:22px;border:0;background:transparent;color:var(--muted-foreground);cursor:pointer;
+    font:inherit;font-size:13px;line-height:1}
+  .cstep button:hover{background:var(--sidebar-accent);color:var(--foreground)}
+  .cstep button:disabled{opacity:.35;cursor:default;background:transparent}
+  .cstep .cpar{min-width:20px;text-align:center;font-family:var(--font-mono);font-size:11px;color:var(--foreground)}
+  .sendbtn.orchsend{width:auto;padding:0 12px 0 10px;gap:6px;font:inherit;font-size:12px;font-weight:600;border:0;cursor:pointer}
+  .sendbtn.orchsend svg{width:13px;height:13px}
+  .sendbtn.orchsend:disabled{opacity:.5;cursor:default}
+  /* when a narrow row wraps, the send still sits at the right, where send lives */
+  .cbox .crow .sendbtn{margin-left:auto}
+  /* an agent with no brand mark (a custom adapter, echo) still gets a glyph */
+  .agmono{display:inline-flex;align-items:center;justify-content:center;flex:none;width:14px;height:14px;border-radius:4px;
+    font-size:8.5px;font-weight:700;font-family:var(--font-mono);text-transform:uppercase;line-height:1}
+  /* agent picker rows: busy state, and the not-yet entries */
+  .cmi .cmbusy{display:inline-flex;align-items:center;gap:5px;margin-left:auto;font-size:10.5px;color:var(--live);
+    font-family:var(--font-mono)}
+  .cmi .cmbusy::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--live);animation:autopulse 1.4s ease-in-out infinite}
+  .cmi.soon{cursor:default;opacity:.45}
+  .cmi.soon:hover{background:transparent}
+  .cmsep{height:1px;background:var(--border);margin:4px 6px}
+  /* ── Orchestra (one orchestrator plans, many workers run in parallel) ── */
+  #pane-orchestra{padding:18px 20px 40px}
+  .orchview{display:flex;flex-direction:column;gap:14px;max-width:1180px;margin:0 auto}
+  .ohead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .ohead .ot{font-size:20px;font-weight:650;letter-spacing:-.01em}
+  .ohead .os{font-size:12.5px;color:var(--muted-foreground)}
+  .ohead .spacer{margin-left:auto}
+  .ogrid{display:grid;grid-template-columns:240px minmax(0,1fr);gap:14px;align-items:start}
+  .oruns{display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:var(--radius-xl);
+    background:var(--card);padding:6px;max-height:70vh;overflow-y:auto}
+  .orunh{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);padding:6px 8px 4px}
+  .orun{display:flex;flex-direction:column;gap:3px;padding:8px 9px;border-radius:var(--radius-md);cursor:pointer;
+    border:1px solid transparent;transition:background .12s}
+  .orun:hover{background:var(--sidebar-accent)}
+  .orun[data-current="true"]{background:var(--sidebar-accent);border-color:var(--border)}
+  .orun .org{font-size:12.5px;font-weight:500;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.35}
+  .orun .orm{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--muted-foreground);font-family:var(--font-mono)}
+  .odot{width:7px;height:7px;border-radius:50%;flex:none;background:color-mix(in srgb, var(--muted-foreground) 45%, transparent)}
+  .odot.live{background:var(--thread);box-shadow:0 0 0 3px color-mix(in srgb, var(--thread) 20%, transparent)}
+  .odot.warn{background:var(--warn)}
+  .odot.ok{background:var(--ok)}
+  .odot.err{background:var(--err)}
+  .odetail{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .ocard{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--card);padding:14px 16px}
+  .ogoal{font-size:15px;font-weight:600;line-height:1.4;color:var(--foreground);word-break:break-word}
+  .ometa{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;margin-top:9px;font-size:12px;color:var(--muted-foreground)}
+  .ometa .omi{display:inline-flex;align-items:center;gap:5px}
+  .ometa .omk{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+  .ometa .omv{color:var(--foreground)}
+  .ometa code{font-family:var(--font-mono);font-size:11px;color:var(--foreground);background:var(--muted);
+    border:1px solid var(--border);border-radius:5px;padding:0 5px}
+  .opill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:99px;flex:none;
+    font-size:11px;font-weight:600;border:1px solid var(--border);color:var(--muted-foreground)}
+  .opill.live{color:var(--thread-ink);border-color:color-mix(in srgb, var(--thread) 40%, transparent);
+    background:color-mix(in srgb, var(--thread) 9%, transparent)}
+  .opill.warn{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 40%, transparent);
+    background:color-mix(in srgb, var(--warn) 10%, transparent)}
+  .opill.ok{color:var(--ok);border-color:color-mix(in srgb, var(--ok) 40%, transparent);
+    background:color-mix(in srgb, var(--ok) 10%, transparent)}
+  .opill.err{color:var(--err);border-color:color-mix(in srgb, var(--err) 40%, transparent);
+    background:color-mix(in srgb, var(--err) 9%, transparent)}
+  .opill.live .odot{animation:autopulse 1.6s ease-in-out infinite}
+  .oprog{display:flex;align-items:center;gap:10px;margin-top:12px}
+  .obar{flex:1;height:6px;border-radius:99px;background:var(--muted);overflow:hidden;display:flex}
+  .obar i{display:block;height:100%;background:var(--ok);transition:width .3s}
+  .obar i.run{background:var(--thread)}
+  .oprog .opn{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);flex:none}
+  .oacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .oask{border:1px solid color-mix(in srgb, var(--warn) 40%, transparent);background:color-mix(in srgb, var(--warn) 7%, var(--card));
+    border-radius:var(--radius-xl);padding:12px 14px}
+  .oask .oq{font-size:13px;line-height:1.5;color:var(--foreground);white-space:pre-wrap;word-break:break-word}
+  .oask .oqh{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--warn);margin-bottom:5px}
+  .oask textarea{display:block;width:100%;box-sizing:border-box;margin-top:10px;min-height:60px;resize:vertical;
+    background:var(--background);border:1px solid var(--input);border-radius:var(--radius-md);color:var(--foreground);
+    font:inherit;font-size:13px;padding:8px 10px;outline:none}
+  .oask textarea:focus-visible{border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb, var(--ring) 40%, transparent)}
+  .oask .row{display:flex;justify-content:flex-end;margin-top:8px}
+  .onote{font-size:12.5px;line-height:1.5;color:var(--muted-foreground);white-space:pre-wrap;word-break:break-word}
+  .onote.err{color:var(--err)}
+  .onote b{color:var(--foreground);font-weight:600}
+  .ogh{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:650;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--muted-foreground);margin:4px 2px 0}
+  .ogh .bn{font-family:var(--font-mono);letter-spacing:0}
+  .otasks{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+  .otask{border:1px solid var(--border);border-radius:var(--radius-md);background:var(--background);
+    padding:10px 11px;cursor:pointer;transition:border-color .12s;min-width:0}
+  .otask:hover{border-color:color-mix(in srgb, var(--muted-foreground) 40%, transparent)}
+  .otr1{display:flex;align-items:center;gap:6px;font-size:11px;min-width:0}
+  .otr1 .oid{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);
+    border:1px solid var(--border);border-radius:5px;padding:0 5px}
+  .otr1 .oag{color:var(--muted-foreground);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .otr1 .ost{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-weight:500;flex:none}
+  .otr1 .ost.live{color:var(--thread-ink)}.otr1 .ost.ok{color:var(--ok)}.otr1 .ost.warn{color:var(--warn)}.otr1 .ost.err{color:var(--err)}
+  .otr1 .ost.off{color:var(--muted-foreground)}
+  .ott{font-size:13px;font-weight:600;color:var(--foreground);line-height:1.35;margin-top:7px;word-break:break-word}
+  .otb{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:8px;font-family:var(--font-mono);
+    font-size:10.5px;color:var(--muted-foreground)}
+  .otb .obdg{border:1px solid var(--border);border-radius:99px;padding:0 6px;line-height:16px}
+  .otb .ofbtn{border:1px solid var(--border);border-radius:99px;padding:0 6px;line-height:16px;background:transparent;
+    color:var(--muted-foreground);font:inherit;cursor:pointer}
+  .otb .ofbtn:hover{color:var(--foreground);border-color:var(--muted-foreground)}
+  .ofiles{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-family:var(--font-mono);font-size:10.5px;
+    color:var(--muted-foreground);display:flex;flex-direction:column;gap:2px;word-break:break-all}
+  .oerr{margin-top:7px;font-size:11.5px;color:var(--err);line-height:1.45;word-break:break-word}
+  .oempty{padding:48px 16px;text-align:center;color:var(--muted-foreground);font-size:13px;line-height:1.7}
+  .oempty b{color:var(--foreground);font-weight:600}
+  .tab .tdot{width:6px;height:6px;border-radius:50%;background:var(--thread);margin-left:-2px;
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--thread) 20%, transparent)}
+  .tab .tdot.warn{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb, var(--warn) 20%, transparent)}
+  /* orchestra rows in the thread: compact system lines, never raw payloads */
+  .sys.orch{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px 8px}
+  .sys.orch .btn{font-family:var(--font-sans);height:22px;font-size:11px}
+  .sys.orch .brand,.sys.orch .agmono{width:12px;height:12px}
+  .orchbrief{max-width:92%;margin:6px auto;font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+  .orchbrief summary{cursor:pointer;list-style:none;text-align:center;letter-spacing:.02em}
+  .orchbrief summary::-webkit-details-marker{display:none}
+  .orchbrief .md{margin-top:6px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-md);
+    background:var(--card);font-family:var(--font-sans);font-size:12.5px;color:var(--foreground);max-height:320px;overflow:auto}
+  .msg.agent .who .orchmark{display:inline-flex;width:13px;height:13px}
+  .msg.agent .who .orchmark svg{width:13px;height:13px}
+  @media (max-width:899px){
+    .ogrid{grid-template-columns:minmax(0,1fr)}
+    .oruns{max-height:none;flex-direction:row;overflow-x:auto;padding:5px}
+    .oruns .orunh{display:none}
+    .orun{flex:none;width:200px}
+    .otasks{grid-template-columns:minmax(0,1fr)}
+    .corch .colbl{display:none}
+    .crow .cslot .cslotlbl{display:none}
+    /* the mode toggle costs a phone's row its send button — let it wrap */
+    .cbox .crow{flex-wrap:wrap;row-gap:6px}
+    .ohead .os{display:none}
+  }
+  /* ── Composer: prompts, plan, permissions ──
+     Three more controls in the same row, each the size of its neighbours. The
+     prompt manager is a chip (it opens something); Plan is a real switch (it
+     changes what send does, and you should see which way it's thrown); the
+     permission chip wears its mode's state colour — bypass amber, because it
+     is the one that can hurt; ask thread-cyan, because Loom will speak up. */
+  .cprompt{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 5px 0 8px;border-radius:8px;flex:none;
+    font:inherit;font-size:11.5px;font-weight:500;color:var(--muted-foreground);background:transparent;cursor:pointer;
+    border:1px solid color-mix(in srgb, var(--border) 80%, transparent);transition:background .12s,color .12s,border-color .12s}
+  .cprompt:hover,.cprompt.on{color:var(--foreground);background:var(--sidebar-accent);border-color:var(--border)}
+  .cprompt svg{width:13px;height:13px;flex:none}
+  .cprompt kbd,.pmfoot kbd{font-family:var(--font-mono);font-size:9.5px;line-height:14px;height:16px;padding:0 4px;border-radius:4px;
+    border:1px solid var(--border);background:color-mix(in srgb, var(--muted) 70%, transparent);color:var(--muted-foreground);
+    letter-spacing:.02em;display:inline-flex;align-items:center}
+  .cplan{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 9px 0 5px;border-radius:99px;flex:none;
+    font:inherit;font-size:11.5px;font-weight:500;color:var(--muted-foreground);background:transparent;border:1px solid transparent;
+    cursor:pointer;transition:background .12s,color .12s}
+  .cplan:hover{color:var(--foreground);background:var(--sidebar-accent)}
+  .cplan .ptrack{position:relative;width:26px;height:15px;border-radius:99px;flex:none;background:var(--secondary);
+    border:1px solid var(--border);transition:background .18s,border-color .18s}
+  .cplan .ptrack i{position:absolute;top:1px;left:1px;width:11px;height:11px;border-radius:50%;background:var(--muted-foreground);
+    transition:transform .18s cubic-bezier(.3,.7,.4,1),background .18s}
+  .cplan.on{color:var(--thread-ink)}
+  .cplan.on .ptrack{background:color-mix(in srgb, var(--thread) 30%, transparent);border-color:color-mix(in srgb, var(--thread) 55%, transparent)}
+  .cplan.on .ptrack i{transform:translateX(11px);background:var(--thread)}
+  /* The row grew three controls; when the card is narrower than all of them
+     it wraps (send stays right) rather than pushing send out of the card, and
+     the shortcut hint is the first thing to go. */
+  .cbox{container-type:inline-size}
+  .cbox .crow{flex-wrap:wrap;row-gap:6px}
+  @container (max-width:860px){ .cprompt kbd{display:none} }
+  @container (max-width:700px){ .cprompt .cslotlbl{display:none} .cprompt{padding:0 7px} }
+  .csend{display:inline-flex;align-items:center;gap:6px;flex:none;margin-left:auto}
+  .cbox.planon{border-color:color-mix(in srgb, var(--thread) 45%, var(--input))}
+  .cbox.planon:focus-within{box-shadow:0 0 0 3px color-mix(in srgb, var(--thread) 18%, transparent)}
+  .cperm{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 6px 0 8px;border-radius:99px;flex:none;
+    font:inherit;font-size:11px;font-weight:600;letter-spacing:.01em;cursor:pointer;color:var(--muted-foreground);
+    background:transparent;border:1px solid color-mix(in srgb, var(--border) 80%, transparent);transition:background .12s,border-color .12s,color .12s}
+  .cperm:hover{color:var(--foreground);background:var(--sidebar-accent);border-color:var(--border)}
+  .cperm svg{width:12px;height:12px;flex:none}
+  .cperm .cchev{width:10px;height:10px;opacity:.55}
+  .cperm.bypass,.pbdg.bypass{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 38%, transparent);
+    background:color-mix(in srgb, var(--warn) 9%, transparent)}
+  .cperm.ask,.pbdg.ask{color:var(--thread-ink);border-color:color-mix(in srgb, var(--thread) 42%, transparent);
+    background:color-mix(in srgb, var(--thread) 9%, transparent)}
+  .cperm.bypass:hover{background:color-mix(in srgb, var(--warn) 15%, transparent)}
+  .cperm.ask:hover{background:color-mix(in srgb, var(--thread) 15%, transparent)}
+  /* the tiny mode badge on worker chips, the orchestrator chip and Fleet rows */
+  .pbdg{display:inline-flex;align-items:center;height:15px;padding:0 5px;border-radius:99px;flex:none;
+    font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:.03em;line-height:1;text-transform:lowercase;
+    color:var(--muted-foreground);border:1px solid var(--border);background:color-mix(in srgb, var(--muted) 55%, transparent)}
+  button.pbdg,.pbdg[data-permof]{cursor:pointer}
+  .pbdg[data-permof]:hover{filter:brightness(1.15)}
+  /* permission menu rows: a title, what it means on this agent, the flags it runs with */
+  .cmi.pm{align-items:flex-start;padding:8px 9px}
+  .cmi.pm .ic{margin-top:3px}
+  .cmi.pm .pmt{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+  .cmi.pm .pmt b{font-weight:600;font-size:12.5px}
+  .cmi.pm .pmt small{font-size:11px;color:var(--muted-foreground);line-height:1.4}
+  .cmi.pm .pmt code{font-family:var(--font-mono);font-size:10px;color:color-mix(in srgb, var(--muted-foreground) 80%, transparent);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cmi.pm .tick{margin-top:2px}
+  .cmi.pm .tick svg,.pmrow .tick svg{width:14px;height:14px}
+  .cmi.pm.off{cursor:not-allowed;opacity:.5}
+  .cmi.pm.off:hover{background:transparent}
+  .cmi.pm.off small{color:var(--err)}
+  .pmdot{width:8px;height:8px;border-radius:50%;background:color-mix(in srgb, var(--muted-foreground) 60%, transparent)}
+  .pmdot.bypass{background:var(--warn)}.pmdot.ask{background:var(--thread)}
+  /* ── Prompt manager (a clipboard manager for prompts) ── */
+  .cmenu.pmgr{padding:0;max-height:none;overflow:hidden;display:flex;flex-direction:column;border-radius:12px;
+    background:var(--glass);border-color:var(--glass-border);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    box-shadow:0 18px 44px rgba(0,0,0,.34), inset 0 1px 0 var(--glass-highlight);animation:sheetin .14s ease}
+  .pmhead{display:flex;align-items:center;gap:8px;padding:9px 9px 8px;border-bottom:1px solid var(--border)}
+  .pmq{flex:1;display:flex;align-items:center;gap:7px;height:30px;padding:0 9px;border-radius:8px;min-width:0;
+    border:1px solid var(--input);background:color-mix(in srgb, var(--input) 22%, transparent);color:var(--muted-foreground)}
+  .pmq:focus-within{border-color:var(--ring)}
+  .pmq svg{width:13px;height:13px}
+  .pmq input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--foreground);font:inherit;font-size:13px}
+  .pmq input:focus-visible{box-shadow:none}
+  .pmsave{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;flex:none;cursor:pointer;
+    font:inherit;font-size:12px;font-weight:500;color:var(--foreground);background:var(--secondary);border:1px solid var(--border)}
+  .pmsave:hover{background:var(--accent)}
+  .pmsave:disabled{opacity:.45;cursor:default}
+  .pmsave svg{width:13px;height:13px}
+  .pmlist{max-height:min(360px, 46vh);overflow-y:auto;padding:4px 5px 6px}
+  .pmsec{display:flex;align-items:center;gap:6px;padding:9px 8px 4px;font-size:10px;font-weight:650;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted-foreground)}
+  .pmsec .bn{font-family:var(--font-mono);letter-spacing:0;opacity:.8}
+  .pmsec button{margin-left:auto;font:inherit;font-size:10px;letter-spacing:.04em;color:var(--muted-foreground);cursor:pointer;
+    padding:1px 6px;border-radius:5px}
+  .pmsec button:hover{color:var(--foreground);background:var(--sidebar-accent)}
+  .pmrow{position:relative;display:flex;align-items:flex-start;gap:9px;padding:7px 8px;border-radius:8px;cursor:pointer;
+    border:1px solid transparent}
+  .pmrow.sel{background:var(--sidebar-accent);border-color:var(--border)}
+  .pmrow .pmi{display:inline-flex;margin-top:2px;color:var(--muted-foreground);flex:none}
+  .pmrow .pmi svg{width:13px;height:13px}
+  .pmrow.pinned .pmi{color:var(--thread-ink)}
+  .pmrow .pmb{flex:1;min-width:0}
+  .pmrow .pmtt{font-size:12.5px;font-weight:550;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pmrow .pmsn{font-size:11.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+  .pmrow .pmm{flex:none;font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground);margin-top:2px}
+  .pmrow .pmacts{display:none;flex:none;gap:2px;margin:-2px -2px 0 0}
+  .pmrow.sel .pmacts,.pmrow:hover .pmacts{display:inline-flex}
+  .pmrow.sel .pmm,.pmrow:hover .pmm{display:none}
+  .pmrow .pmacts button{width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;
+    color:var(--muted-foreground);cursor:pointer}
+  .pmrow .pmacts button:hover{background:var(--accent);color:var(--foreground)}
+  .pmrow .pmacts button.on{color:var(--thread-ink)}
+  .pmrow .pmacts button.del:hover{color:var(--err);background:color-mix(in srgb, var(--err) 14%, transparent)}
+  .pmrow .pmacts svg{width:12.5px;height:12.5px}
+  .pmempty{padding:22px 12px;text-align:center;color:var(--muted-foreground);font-size:12px;line-height:1.6}
+  .pmfoot{display:flex;flex-wrap:wrap;align-items:center;gap:5px 12px;padding:7px 11px;border-top:1px solid var(--border);
+    font-size:10.5px;color:var(--muted-foreground)}
+  .pmfoot span{display:inline-flex;align-items:center;gap:4px}
+  /* ── Approvals: an agent in "always ask" waits on you ── */
+  .apcard{max-width:88%;margin:12px auto;border:1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+    border-radius:var(--radius-xl);background:color-mix(in srgb, var(--warn) 5%, var(--card));padding:11px 13px 12px;
+    box-shadow:0 1px 2px rgb(0 0 0 / .06);animation:sheetin .18s ease}
+  .aph{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;font-size:12.5px;min-width:0}
+  .aph .apk{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:650;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--warn)}
+  .aph .apk::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--warn);animation:autopulse 1.4s ease-in-out infinite}
+  .aph .apag{display:inline-flex;align-items:center;gap:5px;font-weight:600;color:var(--foreground)}
+  .aph .apag .brand,.aph .apag .agmono{width:13px;height:13px}
+  .aph .apw{color:var(--muted-foreground)}
+  .aptool{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);padding:1px 7px;border-radius:6px;
+    border:1px solid var(--border);background:var(--muted)}
+  .aph .aprel{margin-left:auto;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+  .apin{margin-top:8px}
+  .apin summary{cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);user-select:none}
+  .apin summary::-webkit-details-marker{display:none}
+  .apin summary::before{content:"\\25b8 ";font-size:9px}
+  .apin[open] summary::before{content:"\\25be "}
+  .apin pre{margin:6px 0 0;max-height:240px;overflow:auto;padding:8px 10px;border-radius:var(--radius-md);
+    border:1px solid var(--border);background:var(--editor-surface);font-family:var(--font-mono);font-size:11.5px;
+    line-height:1.5;color:var(--foreground);white-space:pre-wrap;word-break:break-word}
+  .apact{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .apact input{flex:1;min-width:0;height:28px;padding:0 10px;border-radius:var(--radius-md);border:1px solid var(--input);
+    background:color-mix(in srgb, var(--input) 18%, var(--background));color:var(--foreground);font:inherit;font-size:12px;outline:none}
+  .apact input:focus{border-color:var(--ring)}
+  .apact .btn{height:28px;font-size:12px;padding:0 12px}
+  .apact .btn svg{width:13px;height:13px}
+  .apact .apdeny:hover{color:var(--err);border-color:color-mix(in srgb, var(--err) 45%, transparent);
+    background:color-mix(in srgb, var(--err) 9%, transparent)}
+  .apcard.done{max-width:fit-content;padding:5px 12px;border-radius:99px;background:transparent;border-color:var(--border);
+    box-shadow:none;animation:none}
+  .apcard.done .apbody,.apcard.done .aph{display:none}
+  .apcard .apres{display:none;align-items:center;gap:7px;font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+  .apcard.done .apres{display:flex}
+  .apres .ok{color:var(--ok);font-weight:600}.apres .no{color:var(--err);font-weight:600}
+  .sys.apl .ok{color:var(--ok)}.sys.apl .no{color:var(--err)}
+  /* the pending-approvals badge (tab strip / phone header) and its list */
+  .apbadge{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 8px;border-radius:99px;flex:none;
+    font:inherit;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--warn);
+    border:1px solid color-mix(in srgb, var(--warn) 42%, transparent);background:color-mix(in srgb, var(--warn) 10%, transparent)}
+  .apbadge:hover{background:color-mix(in srgb, var(--warn) 17%, transparent)}
+  .apbadge svg{width:13px;height:13px}
+  .apbadge .apn{font-family:var(--font-mono);font-size:11px}
+  .apbadge::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--warn);animation:autopulse 1.4s ease-in-out infinite}
+  .appop,.gdmenu{position:fixed;z-index:70;background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;
+    box-shadow:0 18px 44px rgba(0,0,0,.34), inset 0 1px 0 var(--glass-highlight);
+    backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);animation:sheetin .14s ease}
+  .appop{width:min(440px, calc(100vw - 24px));max-height:min(560px, 70vh);display:flex;flex-direction:column}
+  .appoph{display:flex;align-items:center;gap:8px;padding:11px 13px 9px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600}
+  .appoph .bn{font-family:var(--font-mono);font-size:11px;color:var(--warn)}
+  .appoph .spacer{margin-left:auto}
+  .appopl{overflow-y:auto;padding:10px}
+  .appopl .apcard{max-width:none;margin:0 0 8px}
+  .appopl .apcard.done{max-width:none;border-radius:var(--radius-xl)}
+  .apopen{font:inherit;font-size:11px;color:var(--muted-foreground);cursor:pointer;padding:1px 6px;border-radius:5px}
+  .apopen:hover{color:var(--foreground);background:var(--sidebar-accent)}
+  /* ── Fleet: what every agent in every open project is doing ── */
+  #pane-fleet{padding:18px 20px 40px}
+  .fleetview{display:flex;flex-direction:column;gap:14px;max-width:1180px;margin:0 auto}
+  .fsum{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .fchip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:99px;font-size:11px;font-weight:600;
+    border:1px solid var(--border);color:var(--muted-foreground);font-family:var(--font-mono)}
+  .fchip.live{color:var(--thread-ink);border-color:color-mix(in srgb, var(--thread) 40%, transparent);background:color-mix(in srgb, var(--thread) 8%, transparent)}
+  .fchip.warn{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 40%, transparent);background:color-mix(in srgb, var(--warn) 9%, transparent)}
+  .fnote{font-size:12.5px;color:var(--muted-foreground);padding:2px 2px 0}
+  .fproj{border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--card);overflow:hidden}
+  .fph{display:flex;align-items:center;gap:10px;padding:11px 14px;min-width:0}
+  .fph .fpg{width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none;
+    font-size:11px;font-weight:700;text-transform:uppercase}
+  .fph .fpn{font-size:14px;font-weight:650;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fph .fpm{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);white-space:nowrap}
+  .fph .fcur{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);
+    border:1px solid var(--border);border-radius:99px;padding:0 7px;line-height:17px}
+  .fph .spacer{margin-left:auto}
+  .frow{display:grid;grid-template-columns:24px minmax(130px,200px) 118px minmax(0,1fr) auto;align-items:center;gap:12px;
+    padding:9px 14px;border-top:1px solid var(--border);min-width:0}
+  .frow.busy{background:color-mix(in srgb, var(--thread) 4%, transparent)}
+  .frow .fg{display:inline-flex;align-items:center;justify-content:center}
+  .frow .fg .brand{width:18px;height:18px}
+  .frow .fg .agmono{width:18px;height:18px;font-size:10px;border-radius:5px}
+  .frow .fn{min-width:0;display:flex;flex-direction:column;gap:1px}
+  .frow .fn b{font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .frow .fn small{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .frow .fs{font-family:var(--font-sans);display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted-foreground);white-space:nowrap}
+  .frow.busy .fs{color:var(--thread-ink);font-weight:500}
+  .fspin{width:11px;height:11px;border-radius:50%;flex:none;border:2px solid color-mix(in srgb, var(--thread) 22%, transparent);
+    border-top-color:var(--thread);animation:spin .8s linear infinite}
+  .fidle{width:7px;height:7px;border-radius:50%;flex:none;background:color-mix(in srgb, var(--muted-foreground) 45%, transparent)}
+  .frow .fa{min-width:0;display:flex;flex-direction:column;gap:2px}
+  .fthr{display:inline-flex;align-items:center;gap:5px;max-width:100%;font:inherit;font-size:12px;color:var(--foreground);
+    cursor:pointer;text-align:left;border-radius:5px;min-width:0}
+  .fthr svg{width:12px;height:12px;color:var(--muted-foreground);flex:none}
+  .fthr span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fthr:hover span{text-decoration:underline;text-underline-offset:2px}
+  .fline{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fline .ft{opacity:.7;margin-left:6px}
+  .frow .fb{display:inline-flex;align-items:center;gap:5px;justify-content:flex-end}
+  .fbaton{display:inline-flex;align-items:center;height:15px;padding:0 6px;border-radius:99px;font-family:var(--font-mono);font-size:9px;
+    font-weight:600;letter-spacing:.03em;color:var(--shuttle-ink);border:1px solid color-mix(in srgb, var(--shuttle) 42%, transparent);
+    background:color-mix(in srgb, var(--shuttle) 9%, transparent)}
+  .forch{border-top:1px solid var(--border);background:color-mix(in srgb, var(--muted) 30%, transparent);padding:10px 14px 8px}
+  .foh{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px}
+  .foh .fok{font-size:10px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-foreground);flex:none}
+  .foh .fog{color:var(--foreground);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .fotask{display:grid;grid-template-columns:96px minmax(110px,170px) minmax(0,1fr) auto;align-items:center;gap:10px;
+    padding:6px 0;border-top:1px dashed var(--border);font-size:12px;min-width:0}
+  .foh + .fotask{margin-top:8px}
+  .fotask .fost{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--muted-foreground)}
+  .fotask .fost.live{color:var(--thread-ink)}.fotask .fost.ok{color:var(--ok)}.fotask .fost.warn{color:var(--warn)}.fotask .fost.err{color:var(--err)}
+  .fotask .foag{display:inline-flex;align-items:center;gap:5px;min-width:0;color:var(--muted-foreground)}
+  .fotask .foag span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fotask .fotl{min-width:0;display:flex;flex-direction:column;gap:1px}
+  .fotask .fotl b{font-weight:550;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fextra{border-top:1px solid var(--border);padding:8px 14px;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);
+    display:flex;flex-direction:column;gap:3px}
+  .fextra .fx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fextra .fx b{color:var(--thread-ink);font-weight:600}
+  /* ── Git delivery (status bar) + the orchestra's delivery lines ── */
+  .statusbar .gitdel{height:19px;padding:0 7px;border-radius:5px;border:1px solid var(--border);color:var(--muted-foreground);
+    font:inherit;cursor:pointer;transition:background .12s,color .12s}
+  .statusbar .gitdel:hover{color:var(--foreground);background:var(--sidebar-accent)}
+  .statusbar .gitdel svg{width:11px;height:11px}
+  .statusbar .gitdel.push,.statusbar .gitdel.pr,.statusbar .gitdel.commit{color:var(--foreground)}
+  .statusbar .gitdel.none{border-style:dashed}
+  .gdmenu{width:290px;padding:5px}
+  .gdh{padding:7px 9px 5px;font-size:10px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-foreground);
+    display:flex;gap:6px}
+  .gdh .gdp{font-family:var(--font-mono);letter-spacing:0;text-transform:none;font-weight:500;margin-left:auto;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px}
+  .gdi{display:flex;align-items:flex-start;gap:9px;width:100%;padding:8px 9px;border-radius:8px;text-align:left;cursor:pointer;
+    font:inherit;color:var(--foreground)}
+  .gdi:hover,.gdi.sel{background:var(--sidebar-accent)}
+  .gdi .gic{display:inline-flex;margin-top:2px;color:var(--muted-foreground);flex:none}
+  .gdi .gic svg{width:14px;height:14px}
+  .gdi .gdt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+  .gdi .gdt b{font-size:12.5px;font-weight:600}
+  .gdi .gdt small{font-size:11px;color:var(--muted-foreground);line-height:1.4}
+  .gdi .tick{color:var(--ok);flex:none;margin-top:1px}
+  .gdi .tick svg{width:14px;height:14px}
+  .gdf{padding:6px 9px 5px;margin-top:3px;border-top:1px solid var(--border);font-size:10.5px;color:var(--muted-foreground)}
+  .olines{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid var(--border)}
+  .oline{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;font-size:12px;color:var(--muted-foreground);min-width:0}
+  .oline svg{width:13px;height:13px;flex:none}
+  .oline code{font-family:var(--font-mono);font-size:11px;color:var(--foreground);background:var(--muted);
+    border:1px solid var(--border);border-radius:5px;padding:0 5px;word-break:break-all}
+  .oline b{color:var(--foreground);font-weight:600}
+  .oline.ok{color:var(--ok)}.oline.ok b{color:var(--ok)}
+  .oline.err{color:var(--err)}
+  .oline.plan{color:var(--thread-ink)}
+  .oline a{color:var(--foreground);text-decoration:none;border-bottom:1px solid color-mix(in srgb, var(--foreground) 35%, transparent)}
+  .oline a:hover{border-bottom-color:var(--foreground)}
+  .oline .btn{height:24px;font-size:11.5px}
+  .sys.orch a{color:inherit}
+  @media (max-width:899px){
+    /* a phone's control row: everything a notch tighter, so Plan (with its
+       word — a bare switch says nothing) and send share the second line */
+    .cprompt .cslotlbl,.cprompt kbd{display:none}
+    .cplan{padding:0 7px 0 4px;gap:5px}
+    .cbox .crow .cslot,.cprompt{padding:0 7px}
+    .cbox .crow .cdiv{display:none}
+    .cperm .cpl{display:none}
+    .apcard{max-width:100%}
+    .apact{flex-wrap:wrap}
+    .apact input{flex-basis:100%}
+    .fleetview .ohead .os{display:none}
+    .frow{grid-template-columns:22px minmax(0,1fr) auto;row-gap:5px}
+    .frow .fa{grid-column:2 / -1}
+    .frow .fb{grid-column:2 / -1;justify-content:flex-start}
+    .frow .fs{grid-column:3;grid-row:1}
+    .frow .fb{grid-row:3}
+    .fotask{grid-template-columns:minmax(0,1fr) auto;row-gap:3px}
+    .fotask .fotl{grid-column:1 / -1}
+  }
+  /* Loom Cloud (Settings) + the pairing dialog's reach badge */
+  .cloudst{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0 4px}
+  .cloudin{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+  .cloudbadge{display:inline-flex;align-items:center;gap:6px;align-self:center;height:22px;padding:0 10px;border-radius:99px;
+    font-size:11px;font-weight:600;color:var(--thread-ink);border:1px solid color-mix(in srgb, var(--thread) 40%, transparent);
+    background:color-mix(in srgb, var(--thread) 9%, transparent)}
+  .cloudbadge svg{width:12px;height:12px}
   /* ── Board (work flowing from working → needs you → review → merge) ── */
   .boardview{display:flex;flex-direction:column;gap:14px;height:100%}
   .bhead{display:flex;align-items:baseline;gap:12px;flex:none}
@@ -2338,6 +2797,32 @@ ${BRAND_SPRITE}
     return '<svg class="' + (cls || "brand") + '" aria-hidden="true"><use href="#brand-' + sym + '"></use></svg>';
   }
   function hasBrand(kind){ return !!(kind && BRAND_TITLES[kind]); }
+  /**
+   * What a person calls each agent. The roster speaks in kinds ("codex",
+   * "grok-code"); the pickers speak in products. A kind with no entry here —
+   * echo, a custom adapter — is shown by its roster id, which is the name its
+   * owner gave it.
+   */
+  var AGENT_LABELS = { "codex": "Codex (ChatGPT)", "antigravity-cli": "Antigravity", "antigravity": "Antigravity",
+    "claude-code": "Claude Code", "grok-code": "Grok", "opencode": "OpenCode" };
+  function agentLabel(kind, id){ return (kind && AGENT_LABELS[kind]) || id || kind || "agent"; }
+  /** A roster id's label, resolving its kind from the open project. */
+  function labelOf(id){ return agentLabel(kindOf(id), id); }
+  /** The quiet second line of a picker row: id and role, each only if it adds something. */
+  function agentSub(a, lbl){
+    var bits = [];
+    if (a.id !== lbl) bits.push(a.id);
+    var role = a.tier === "bridge" ? "bridge" : (a.role || "");
+    if (role && bits.indexOf(role) < 0 && role !== lbl) bits.push(role);
+    return bits.join(" \\u00b7 ");
+  }
+  /** The brand mark, or a hue monogram for a kind that has none — never blank. */
+  function agentGlyph(kind, id, cls){
+    if (hasBrand(kind)) return brandMark(kind, cls);
+    var h = hue(String(id || kind || "?"));
+    return '<span class="agmono" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 20%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +
+      esc(String(id || kind || "?").slice(0, 1)) + "</span>";
+  }
   /** Look up an agent's kind from the project payload (rows only carry ids). */
   function kindOf(id){
     var p = state.project, list = (p && p.agents) || [];
@@ -2403,6 +2888,10 @@ ${BRAND_SPRITE}
     // a changed file: document outline with a small +/- pair inside
     tree: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/><path d="M12 11.5v4"/><path d="M10 13.5h4"/><path d="M10 18h4"/>'),
     route: svg('<circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="5.5" r="2.5"/><path d="M8 18.5h5.5a4 4 0 0 0 4-4V8"/>'),
+    // one node fanning out to three — an orchestrator and its workers
+    orchestra: svg('<circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="12" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v9"/><path d="M10.6 7.1 6.2 16.8"/><path d="m13.4 7.1 4.4 9.7"/>'),
+    // a cloud — Loom Cloud, the relay that reaches this machine from anywhere
+    cloud: svg('<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>'),
     // three columns of differing fill — a kanban board at 13px
     board: svg('<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="10" rx="1.5"/><rect x="17" y="4" width="4" height="6" rx="1.5"/>'),
     chat: svg('<path d="M21 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/>'),
@@ -2442,6 +2931,20 @@ ${BRAND_SPRITE}
     external: svg('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'),
     issue: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>'),
     pr: svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M6 8.5v7"/><circle cx="18" cy="18" r="2.5"/><path d="M18 15.5V9a3 3 0 0 0-3-3h-4"/><path d="m13 3-2 3 2 3"/>'),
+    // the prompt manager: a clipboard, because that is what it is for prompts
+    clipboard: svg('<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h4"/>'),
+    // permissions: a shield — who may do what without asking
+    shield: svg('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'),
+    pin: svg('<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>'),
+    bookmark: svg('<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>'),
+    clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+    trash: svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
+    check: svg('<path d="M20 6 9 17l-5-5"/>'),
+    // a plan: a document with a checklist
+    plan: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/><path d="m9 13 1.5 1.5L13 12"/><path d="M9 18h6"/>'),
+    // lucide activity — Fleet, the pulse of every agent at once
+    fleet: svg('<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>'),
+    push: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/><path d="M5 21h14"/>'),
     // Brand marks, filled — the one place brand assets are warranted. GitLab
     // and Linear ride along disabled: the row says which providers exist and
     // which one Loom can actually read.
@@ -2659,7 +3162,20 @@ ${BRAND_SPRITE}
     var p = e.payload || {};
     if (e.kind === "message") {
       if (!e.agentId) {
+        // Loom briefing an orchestrator is a page of instructions, not a line:
+        // fold it, headed by its first line, so the plan it produced stays in view.
+        if (p.author === "loom" && p.orchestra) {
+          return '<details class="orchbrief"><summary>\\u25b8 Loom \\u2192 orchestrator: ' + esc(String(p.text || "").split("\\n")[0].slice(0, 120)) + "</summary>" +
+            '<div class="md">' + mdToHtml(p.text) + "</div></details>";
+        }
         if (p.author === "loom") return '<div class="sys">\\u25b8 ' + esc(String(p.text).split("\\n")[0]) + "</div>";
+        // The orchestrator's brief to a worker opens every task thread. It is
+        // not yours, so it must not wear your bubble.
+        if (p.author === "orchestrator") {
+          return '<div class="msg agent"><div class="who" style="color:var(--thread-ink)"><span class="orchmark">' + ICONS.orchestra + "</span>orchestrator" +
+            (p.orchestra && p.orchestra.taskId ? '<span class="thinktag">' + esc(p.orchestra.taskId) + "</span>" : "") + "</div>" +
+            '<div class="bubble md" style="border-left-color:var(--thread)">' + mdToHtml(p.text) + "</div></div>";
+        }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
         return '<div class="msg user"><div class="bubble md">' + mdToHtml(p.text) + "</div></div>";
       }
@@ -2714,7 +3230,95 @@ ${BRAND_SPRITE}
     if (e.kind === "route_completed") return '<div class="sys ok">\\u2713 route completed</div>';
     if (e.kind === "route_failed") return '<div class="sys ' + (p.aborted ? "warn" : "err") + '">\\u2298 ' + esc(p.reason || "route ended") + "</div>";
     if (e.kind === "run_complete") return '<div class="tool">\\u2713 ' + esc(e.agentId) + " done</div>";
+    if (e.kind === "orchestra") return orchLine(p);
+    // An agent in "always ask" waiting on you: a card with the two answers.
+    // Its answer arrives as a second event, which folds the card (append()),
+    // so this line only shows when the card itself is out of the window.
+    if (e.kind === "approval") {
+      if (p.phase === "requested") return approvalCard({ approvalId: p.approvalId, agent: e.agentId, tool: p.tool, input: p.input, ts: e.ts });
+      if (p.phase === "decided") return '<div class="sys apl">' + (p.behavior === "allow" ? '<span class="ok">\\u2713 allowed</span> ' : '<span class="no">\\u2715 denied</span> ') +
+        esc(p.tool || "tool") + " for " + esc(labelOf(e.agentId)) + (p.message ? " \\u2014 " + esc(p.message) : "") + "</div>";
+    }
     return "";
+  }
+
+  /**
+   * One orchestra step as a thread line. Every phase gets words; an unknown
+   * one still reads as a sentence, never as the payload it came in.
+   */
+  var ORCH_TASK_ST = { pending: ["pending", "off"], running: ["running", "live"], done: ["done", "ok"],
+    conflict: ["conflict", "warn"], needs_input: ["needs input", "warn"], failed: ["failed", "err"], cancelled: ["cancelled", "off"] };
+  var ORCH_RUN_ST = { starting: ["starting", "live"], planning: ["planning", "live"], running: ["running", "live"],
+    reviewing: ["reviewing", "live"], waiting_human: ["needs you", "warn"], completed: ["completed", "ok"],
+    failed: ["failed", "err"], aborted: ["aborted", "off"] };
+  function orchLine(p){
+    var ph = p.phase;
+    var tone = { ok: " ok", warn: " warn", err: " err" };
+    function row(cls, html){ return '<div class="sys orch' + (cls || "") + '">' + html + "</div>"; }
+    function names(list){ return (list || []).map(function(id){ return esc(labelOf(id)); }).join(", "); }
+    if (ph === "started") {
+      var o = p.orchestrator || {};
+      return row("", "\\ud83c\\udfbc Orchestra started \\u2014 " + esc(agentLabel(o.kind, o.agent)) + " is orchestrating " +
+        (names(p.workers) || "its workers") + (p.maxParallel ? " (" + Number(p.maxParallel) + " in parallel)" : "")) +
+        (p.note ? row(" warn", "\\u26a0 " + esc(p.note)) : "");
+    }
+    if (ph === "plan") {
+      var acts = {};
+      (p.actions || []).forEach(function(a){ acts[a] = (acts[a] || 0) + 1; });
+      var said = [];
+      if (acts.spawn) said.push(acts.spawn + " new task" + (acts.spawn === 1 ? "" : "s"));
+      if (acts.send) said.push(acts.send + " follow-up" + (acts.send === 1 ? "" : "s"));
+      if (acts.cancel) said.push(acts.cancel + " cancelled");
+      if (acts.ask) said.push("a question for you");
+      if (acts.done) said.push("done");
+      return row("", "Round " + Number(p.round || 1) + ": orchestrator planned \\u2014 " + (said.join(", ") || "no changes")) +
+        (p.rejected && p.rejected.length ? row(" warn", "\\u26a0 not applied: " + esc(p.rejected.join("; ").slice(0, 240))) : "");
+    }
+    if (ph === "task" && p.task) {
+      var t = p.task, st = ORCH_TASK_ST[t.status] || [t.status || "", "off"];
+      return row(tone[st[1]] || "", esc(t.id) + " \\u00b7 " + esc(String(t.title || "").slice(0, 80)) + " \\u2192 " +
+        agentGlyph(t.kind, t.agent) + esc(agentLabel(t.kind, t.agent)) + " \\u00b7 " + esc(st[0]));
+    }
+    if (ph === "task_started") return row("", "\\u25b8 " + esc(p.taskId) + " started \\u2014 " + esc(String(p.title || "").slice(0, 90)) + (p.agent ? " \\u00b7 " + esc(labelOf(p.agent)) : ""));
+    if (ph === "task_finished") {
+      var fs = ORCH_TASK_ST[p.status] || [p.status || "finished", "off"], nf = (p.files || []).length;
+      return row(tone[fs[1]] || "", (fs[1] === "ok" ? "\\u2713 " : "\\u25a0 ") + esc(p.taskId) + " finished \\u00b7 " + esc(fs[0]) +
+        (nf ? " \\u00b7 " + nf + " file" + (nf === 1 ? "" : "s") + " changed" : ""));
+    }
+    if (ph === "reviewing") return row("", "Round " + Number(p.round || 1) + ": orchestrator reviewing results");
+    if (ph === "waiting") return row(" warn", "\\u23f8 Orchestrator asks: " + esc(p.question || "what next?"));
+    if (ph === "completed") {
+      var n = (p.tasks || []).length;
+      return row(" ok", "\\u2713 Orchestra complete" + (p.summary ? " \\u2014 " + esc(String(p.summary).slice(0, 200)) : "") +
+        " \\u00b7 " + n + " task" + (n === 1 ? "" : "s") + " \\u00b7 " + money(p.costUsd) +
+        (p.branch ? " \\u00b7 branch " + esc(p.branch) : "") +
+        (p.runId ? ' <button class="btn xs outline" type="button" data-orch-apply="' + esc(p.runId) + '">Apply</button>' : ""));
+    }
+    if (ph === "failed") return row(" err", "\\u2717 Orchestra failed \\u2014 " + esc(p.error || "stopped") +
+      (p.runId ? ' <button class="btn xs outline" type="button" data-orch-apply="' + esc(p.runId) + '">Apply what finished</button>' : ""));
+    if (ph === "aborted") return row(" warn", "\\u2298 Orchestra aborted" + (p.reason ? " \\u2014 " + esc(p.reason) : ""));
+    if (ph === "applied") return row(" ok", "\\u2713 Orchestra merged into " + esc(p.into || "your branch"));
+    if (ph === "cleaned") return row("", "Orchestra worktrees cleaned up");
+    // Plan mode: the orchestrator's plan, on the run's branch, as files.
+    if (ph === "plan_written") {
+      var specs = Math.max(0, Number(p.files || 0) - 1);
+      return row(" ok", "\\u270e " + (p.final ? "Plan updated with the results" : "Plan written") + " \\u2014 " + esc(p.dir || "plans") + "/PLAN.md" +
+        (specs ? " + " + specs + " task spec" + (specs === 1 ? "" : "s") : ""));
+    }
+    if (ph === "plan_failed") return row(" err", "\\u2717 Couldn\\u2019t write the plan \\u2014 " + esc(p.error || "unknown error"));
+    // Git delivery: what the project's policy did with the finished run.
+    if (ph === "delivered") {
+      if (p.mode === "pr") {
+        var num = String(p.prUrl || "").match(/\\/pull\\/(\\d+)/);
+        return row(" ok", /^https?:\\/\\//.test(String(p.prUrl || ""))
+          ? "\\u2713 Opened " + '<a href="' + esc(p.prUrl) + '" target="_blank" rel="noopener noreferrer">' + (num ? "PR #" + esc(num[1]) : "a PR") + " \\u2197</a>" + (p.pushed ? " from " + esc(p.pushed) : "")
+          : "\\u2713 Pushed " + esc(p.pushed || "the run\\u2019s branch"));
+      }
+      return row(" ok", "\\u2713 Merged into " + esc(p.into || "your branch") + (p.mode === "push" ? " and pushed" : ""));
+    }
+    if (ph === "delivery_failed") return row(" err", "\\u2717 Delivery (" + esc(p.mode || "git") + ") failed \\u2014 " + esc(String(p.error || "").slice(0, 200)) +
+      (p.runId ? ' <button class="btn xs outline" type="button" data-orch-deliver="' + esc(p.runId) + '">Retry delivery</button>' : ""));
+    return row("", "\\ud83c\\udfbc Orchestra \\u00b7 " + esc(String(ph || "update").replace(/_/g, " ")));
   }
 
   // ---- diff parsing (changes pane + rail) ---------------------------------
@@ -2808,6 +3412,22 @@ ${BRAND_SPRITE}
     state.pendingSelect = null;
     state.tab = "thread"; state.tree = null; state.lastQuestion = null;
     var expl = { kids: {}, open: {} }; // explorer tree cache — declared before any drawRail() call
+    // Orchestra runs for this project, and which one the view is showing. Up
+    // here because the socket and the status poll both reach for it early.
+    var orch = { runs: null, active: null, sel: state.pendingOrchRun || null, pinned: !!state.pendingOrchRun, t: null, files: {}, err: "" };
+    state.pendingOrchRun = null;
+    // Plan mode, remembered per project: the same send, but the agent writes a
+    // plan under plans/ instead of code — or, orchestrating, PLAN.md plus a
+    // spec per task. Storage can refuse (a private window); the switch still
+    // works for this view, it just won't be there after a reload.
+    var PLAN_KEY = "loomPlan:" + pid;
+    var planState = (function(){ try { return localStorage.getItem(PLAN_KEY) === "1"; } catch (e) { return false; } })();
+    // Approvals waiting in this project. Module-scoped (the badge and its list
+    // live outside this view), but reset here so another project's never show.
+    state.approvals = { pid: pid, list: [] };
+    // The Fleet view's reading of /api/activity (declared up here: showTab
+    // reaches for its poll during the first paint).
+    var fleet = { data: null, err: "", poll: null, t: null };
 
     var headerActions =
       // Nothing of the agent's lives up here on desktop any more.
@@ -2819,7 +3439,10 @@ ${BRAND_SPRITE}
       (desktop ? "" :
         '<button id="brainbtn" class="iconbtn" title="unified memory">' + ICONS.memory + "</button>" +
         '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
-        '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>");
+        '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>" +
+        '<button id="orchbtn" class="iconbtn" title="orchestra">' + ICONS.orchestra + "</button>" +
+        '<button id="fleetbtn" class="iconbtn" title="fleet \\u00b7 what every agent is doing">' + ICONS.fleet + "</button>" +
+        '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>');
 
     // Send and stop are one button, because they answer the same question — is
     // this turn running? — and it's never both. It belongs where you're already
@@ -2837,18 +3460,36 @@ ${BRAND_SPRITE}
       '<textarea id="box" class="cinput" rows="2" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
       '<div class="cskillsug" id="cskillsug" style="display:none"></div>' +
       '<div class="cpanel" id="cpanel" style="display:none"></div>' +
+      // Orchestrate mode's cast: who plans, who works, how many at once.
+      // Drawn by drawOrchControls(); hidden in Chat mode.
+      '<div class="corch" id="corch" style="display:none"></div>' +
       '<div class="crow">' +
+      '<div class="cmode" id="cmode" role="tablist" aria-label="composer mode">' +
+      '<button type="button" role="tab" data-cmode="chat" title="talk to one agent">Chat</button>' +
+      '<button type="button" role="tab" data-cmode="orch" title="one agent plans, many work in parallel">Orchestrate</button></div>' +
       '<button class="ctool iconly" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.plus + '</button>' +
       '<button class="cagent" id="cagent" type="button" title="who runs this turn \\u2014 AUTO routes it, or pick an agent" aria-label="who runs this turn"><span class="cadot" id="cadot"></span><span class="can">agent</span><span class="cchev">' + ICONS.chevron + "</span></button>" +
+      // What the chosen agent may do without asking. Drawn by drawPermChip().
+      '<button class="cperm" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
       '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.chevron + "</span></button>" +
       '<span class="cdiv"></span>' +
-      '<button class="cslot" id="mcpbtn" type="button" title="connect MCP servers"><span class="cslotico">' + ICONS.plug + '</span>MCPs</button>' +
-      '<button class="cslot" id="skillbtn" type="button" title="enable skills">' + ICONS.spark + 'Skills<span class="skcount" id="skcount" style="display:none">0</span></button>' +
+      '<button class="cslot" id="mcpbtn" type="button" title="connect MCP servers"><span class="cslotico">' + ICONS.plug + '</span><span class="cslotlbl">MCPs</span></button>' +
+      '<button class="cslot" id="skillbtn" type="button" title="enable skills">' + ICONS.spark + '<span class="cslotlbl">Skills</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
       '<button class="cslot" id="micbtn" type="button" title="hold to talk \u2014 needs LOOM_STT_CMD on the daemon"><span class="cslotico">' + ICONS.mic + "</span></button>" +
+      // Saved and recent prompts, a clipboard manager's worth (⌘⇧V).
+      '<button class="cprompt" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \\u2014 saved and recent (' + KMOD + '\\u21e7V)">' +
+        ICONS.clipboard + '<span class="cslotlbl">Prompts</span><kbd>' + KMOD + "\\u21e7V</kbd></button>" +
       '<span style="flex:1"></span>' +
+      // Plan and send travel together: when a narrow row wraps, the switch that
+      // changes what send does never ends up a line away from send.
+      '<span class="csend">' +
+      // Plan: a switch, not a mode tab — it changes what either send does.
+      '<button class="cplan" id="planbtn" type="button" role="switch" aria-checked="false" title="plan mode \\u2014 write a plan, change no code">' +
+        '<span class="ptrack"><i></i></span><span class="cplanlbl">Plan</span></button>' +
       '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
+      '<button class="sendbtn orchsend" id="orchsend" type="button" title="plan this goal and run it in parallel" style="display:none">' + ICONS.orchestra + "Orchestrate</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
-      ICONS.stop + "</button>" +
+      ICONS.stop + "</button></span>" +
       '</div>' +
       '<input type="file" id="cfile" accept="image/*,.md,.txt,.markdown" multiple style="display:none">' +
       "</form>" +
@@ -2866,6 +3507,8 @@ ${BRAND_SPRITE}
         // live on the sidebar row too, so nothing is lost with it.
         '<span id="tabsbox" style="display:contents"></span>' +
         '<span class="spacer"></span>' +
+        // Tool calls waiting on you, from any thread of this project.
+        '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>' +
         // &#96; is a backtick — a literal one would close this template literal
         '<button id="termbtn" class="iconbtn" title="toggle terminal (\\u2303&#96;)">' + ICONS.terminal + "</button>" +
         // Connect a phone: a QR (or copy link) that pairs the native app over the
@@ -2888,6 +3531,8 @@ ${BRAND_SPRITE}
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-observatory" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-board" style="display:none"></div>' +
+        '<div class="pane scroll" id="pane-orchestra" style="display:none"></div>' +
+        '<div class="pane scroll" id="pane-fleet" style="display:none"></div>' +
                 composerHtml +
         "</div>" +
         '<div class="dockpane" id="dockpane">' +
@@ -2959,18 +3604,27 @@ ${BRAND_SPRITE}
         .then(function(j){ toast(j.interrupted ? "interrupted " + j.interrupted : "nothing running"); })
         .catch(function(err){ toast(err.message); });
     };
+    var apBadge = document.getElementById("apbadge");
+    if (apBadge) apBadge.onclick = function(){ openApprovalsPop(apBadge); };
+    closeApprovalsPop(); // a list of the last project's requests has no business here
 
     // ---- desktop tabs (Thread / Tasks / Brain / Routes) --------------------
     // mobile has no #tabsbox, so this is a no-op there by construction
     function drawTabs(){
       var box = document.getElementById("tabsbox"); if (!box) return;
       var tabs = ["thread", "board", "brain", "observatory"];
+      // Orchestra sits beside Thread: a run is a conversation that fanned out,
+      // and its tasks are threads of their own.
+      tabs.splice(1, 0, "orchestra");
+      // Fleet sits beside Orchestra: the same question — who is doing what —
+      // asked of every agent in every open project, not one run's workers.
+      tabs.splice(2, 0, "fleet");
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
-      var LBL = { thread: [ICONS.thread, "Thread"], board: [ICONS.board, "Board"],
+      var LBL = { thread: [ICONS.thread, "Thread"], orchestra: [ICONS.orchestra, "Orchestra"], fleet: [ICONS.fleet, "Fleet"], board: [ICONS.board, "Board"],
                   brain: [ICONS.memory, "Brain"], observatory: [ICONS.telescope, "Observatory"] };
       box.innerHTML = tabs.map(function(tb){
         return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
-          LBL[tb][0] + LBL[tb][1] + "</button>";
+          LBL[tb][0] + LBL[tb][1] + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".tab"), function(tb){
         tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
@@ -2978,7 +3632,7 @@ ${BRAND_SPRITE}
     }
     function showTab(name){
       state.tab = name;
-      ["thread", "board", "brain", "observatory"].forEach(function(t){
+      ["thread", "orchestra", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -2992,6 +3646,10 @@ ${BRAND_SPRITE}
       // first open fetches; later opens keep the board (and your pins)
       if (name === "board") { if (board.data) drawBoardPane(); else loadBoard(); }
       if (name === "observatory") drawObservatory();
+      if (name === "orchestra") { drawOrch(); loadOrch(); }
+      // Fleet polls only while you can see it.
+      if (name === "fleet") { drawFleet(); loadFleet(); }
+      fleetPoll(name === "fleet");
       if (name === "thread") {
         var sc = document.getElementById("pane-thread");
         if (sc) sc.scrollTop = sc.scrollHeight;
@@ -4526,6 +5184,8 @@ ${BRAND_SPRITE}
       });
       drawTabs();
       showTab("thread");
+      // A just-launched orchestra lands on its own view, in its own chat.
+      if (state.pendingTab) { var pt = state.pendingTab; state.pendingTab = null; showTab(pt); }
       drawRail();
     }
 
@@ -5060,6 +5720,12 @@ ${BRAND_SPRITE}
     // click an Update(…) card in the thread → open its diff on the right
     // (desktop dock); on mobile, expand it inline.
     document.getElementById("feed").addEventListener("click", function(ev){
+      var ap = ev.target.closest && ev.target.closest("[data-orch-apply]");
+      if (ap) { applyOrch(ap.getAttribute("data-orch-apply"), ap); return; }
+      var rd = ev.target.closest && ev.target.closest("[data-orch-deliver]");
+      if (rd) { redeliverOrch(rd.getAttribute("data-orch-deliver"), rd); return; }
+      if (approvalClick(ev)) return;
+      if (ev.target.closest && ev.target.closest(".apcard")) return; // the card's own input, its details
       var t = ev.target;
       while (t && t !== this && !(t.classList && t.classList.contains("turncard"))) t = t.parentNode;
       if (!t || t === this) return;
@@ -5077,6 +5743,7 @@ ${BRAND_SPRITE}
       var ch = t.querySelector(".tchev");
       if (ch) ch.textContent = open ? "\\u25b8" : "\\u25be";
     });
+    document.getElementById("feed").addEventListener("keydown", approvalKey);
 
     // ---- working tree (feeds the Source Control rail view) -----------------
     function refreshTree(force){
@@ -5832,6 +6499,17 @@ ${BRAND_SPRITE}
         el.innerHTML = '<div class="sheet">' + routeFormHtml() + "</div>";
         bindRouteForm(function(){ sheetOpen = false; document.getElementById("routesheet").innerHTML = ""; });
       };
+      // The phone has no tab strip, so the Orchestra view is a sheet — the
+      // same drawing as the desktop tab, in the same slot as its siblings.
+      document.getElementById("orchbtn").onclick = function(){
+        if (document.getElementById("orchsheet")) { closeOrchSheet(); return; }
+        openOrchSheet();
+      };
+      // Fleet the same way: the desktop tab's drawing, in the sheet slot.
+      document.getElementById("fleetbtn").onclick = function(){
+        if (document.getElementById("fleetsheet")) { closeFleetSheet(); return; }
+        openFleetSheet();
+      };
     }
 
     // ---- right rail (source control) ----------------------------------------
@@ -6440,15 +7118,30 @@ ${BRAND_SPRITE}
       var anyBusy = adapters.some(function(a){ return a.busy; });
       var sendBtn = document.getElementById("send");
       var stopBtn = document.getElementById("stop");
+      // Orchestrate has its own send, and a run is stopped from its view
+      // (Abort), not by interrupting whichever agent the composer points at.
+      var orchMode = state.cmode === "orch";
       if (sendBtn && stopBtn) {
-        sendBtn.style.display = anyBusy ? "none" : "";
-        stopBtn.style.display = anyBusy ? "" : "none";
+        sendBtn.style.display = orchMode || anyBusy ? "none" : "";
+        stopBtn.style.display = !orchMode && anyBusy ? "" : "none";
       }
 
       var hint = document.getElementById("hint");
-      if (hint) hint.textContent = state.selected && state.selected !== p.holder
-        ? "send will shift the baton to " + state.selected
+      var orun = orchRunForChat();
+      if (hint) hint.textContent = orchMode
+        ? (planState
+          ? "plan mode \\u00b7 orchestrator writes PLAN.md + a spec per task that any agent can pick up"
+          : "the orchestrator plans your goal into tasks \\u00b7 each worker gets its own thread and git worktree")
+        : orun && !orchTerminal(orun.status)
+        ? "this is an orchestra thread \\u00b7 what you send goes to its orchestrator"
+        : orun && orun.status !== "aborted"
+        ? "this orchestra has finished \\u00b7 sending reopens it with its orchestrator"
+        : planState
+        ? "plan mode \\u00b7 agent writes a plan to plans/\\u2026, no code changes"
+        : state.selected && state.selected !== p.holder
+        ? "send will shift the baton to " + labelOf(state.selected)
         : (desktop ? "click the agent to switch \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
+      drawOrchTabDot(p.orchestra);
       updateModelLabel(); // the picker button reflects whoever's selected now
       if (!desktop) drawChips();
       // agent header block — who the composer talks to, and where
@@ -6517,14 +7210,21 @@ ${BRAND_SPRITE}
       var feed = document.getElementById("feed"); if (!feed) return;
       // only the loading placeholder gets cleared — never real history
       if (feed.firstChild && feed.firstChild.className === "loader") feed.innerHTML = "";
-      var html = "";
+      var html = "", added = false;
       events.forEach(function(e){
         if (e.id <= state.lastId) return;
         state.lastId = e.id;
         if (e.kind === "needs_input" && e.payload) state.lastQuestion = e.payload.question || null;
+        // An answered approval folds the card it answers. Only when that card
+        // is out of the loaded window does it need a line of its own — and
+        // the card may be in the html not yet inserted, so flush first.
+        if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
+          if (html) { feed.insertAdjacentHTML("beforeend", html); html = ""; added = true; }
+          if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
+        }
         html += lineFor(e);
       });
-      if (html) { feed.insertAdjacentHTML("beforeend", html);
+      if (html || added) { if (html) feed.insertAdjacentHTML("beforeend", html);
         var sc = feed.parentNode;
         if (sc && sc.scrollHeight) sc.scrollTop = sc.scrollHeight;
         else window.scrollTo(0, document.body.scrollHeight); }
@@ -6555,6 +7255,9 @@ ${BRAND_SPRITE}
       state.ws = ws;
       ws.onopen = function(){
         state.wsLive = true; drawStatusbar();
+        // (re)read what's waiting: anything filed while the socket was down
+        // arrived as events nobody heard
+        loadApprovals();
         // Open shells only once the socket is truly listening, or the pty's
         // first output (its prompt) is broadcast into the void. Runs once —
         // a reconnect must not spawn another set of terminals.
@@ -6577,6 +7280,13 @@ ${BRAND_SPRITE}
             // permitted) raise an OS notification. Deliberately above the
             // per-chat filter below, which would otherwise swallow it.
             if (frame.event.kind === "needs_input") notifyNeedsInput(frame.event);
+            // An orchestra spans many chats — its run's and one per task — so
+            // the view listens above the per-chat filter too.
+            onOrchEvent(frame.event);
+            // Approvals are per project, not per chat: the badge counts them
+            // all, and a request from another thread still reaches you.
+            onApprovalEvent(frame.event);
+            onFleetEvent(frame.event);
             // one socket carries the whole project; this thread is one chat.
             // An event with no chat predates chats and belongs to main.
             if ((frame.event.chat || "main") !== chatId) return;
@@ -6599,6 +7309,7 @@ ${BRAND_SPRITE}
     var attach = [];
 
     function send(){
+      if (state.cmode === "orch") return sendOrchestra();
       var box = document.getElementById("box");
       var text = (box.value || "").trim();
       // A message can be pure attachments — "look at this" with an image.
@@ -6613,13 +7324,29 @@ ${BRAND_SPRITE}
 
       box.value = ""; autosizeBox(); attach = []; drawAttach();
       var p = state.project || {};
+      var plan = planState;
+
+      // An orchestra's own thread talks to its orchestrator: a reply answers
+      // its question, or steers the run mid-flight (and reopens a finished
+      // one). Sending it to an agent instead would run that agent in the
+      // project checkout, outside the run's worktrees.
+      var orun = orchRunForChat();
+      if (orun && orun.status !== "aborted") {
+        api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(orun.id) + "/reply", {
+          method: "POST", body: JSON.stringify({ text: full }),
+        }).then(function(j){ if (j && j.run) mergeOrchRun(j.run); refresh(); })
+          .catch(function(err){ toast(err.message); });
+        return;
+      }
 
       // A bridge is driven, not handed a turn: Loom types into Antigravity's or
       // Kiro's own window and waits for the panel to settle. No handoff, because
       // it never takes the baton — whichever adapter holds it keeps it.
       var sel = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
       if (sel && sel.tier === "bridge") {
-        toast("typing into " + sel.id + "\\u2026");
+        // A bridge types into someone else's window; Loom can't brief it into
+        // plan mode, so say so rather than let the switch quietly lie.
+        toast(plan ? "plan mode doesn\\u2019t reach bridges \\u2014 typing into " + sel.id + " as-is" : "typing into " + sel.id + "\\u2026");
         api("/api/projects/" + pid + "/bridge/" + encodeURIComponent(sel.id) + "/ask", {
           method: "POST", body: JSON.stringify({ text: full, chat: chatId }),
         }).then(function(){ refresh(); }).catch(function(err){
@@ -6634,7 +7361,9 @@ ${BRAND_SPRITE}
 
       // AUTO mode: don't pick an agent — let the dynamic router decide who takes
       // this turn (planner/builder/reviewer) based on the prompt + hop history.
-      if (state.auto) {
+      // (Plan mode skips the router: a route hops between agents doing the work,
+      // and a plan is one agent's to write — the baton holder's.)
+      if (state.auto && !plan) {
         var achip = document.getElementById("cagent");
         if (achip) achip.classList.add("routing");
         api("/api/projects/" + pid + "/route", { method: "POST", body: JSON.stringify({ task: full, spec: "auto" }) })
@@ -6644,13 +7373,13 @@ ${BRAND_SPRITE}
       }
 
       var chain = Promise.resolve();
-      if (state.selected && state.selected !== p.holder) {
+      if (!state.auto && state.selected && state.selected !== p.holder) {
         chain = api("/api/projects/" + pid + "/handoff", { method: "POST", body: JSON.stringify({ to: state.selected }) });
       }
       chain.then(function(){
         // into the chat you're looking at — the agent's reply comes back here
         return api("/api/projects/" + pid + "/messages", { method: "POST",
-          body: JSON.stringify({ text: full, agentId: state.selected || undefined, chat: chatId }) });
+          body: JSON.stringify({ text: full, agentId: (state.auto ? undefined : state.selected) || undefined, chat: chatId, plan: plan || undefined }) });
       }).then(refresh).catch(function(err){ toast(err.message); });
     }
 
@@ -6710,11 +7439,16 @@ ${BRAND_SPRITE}
     function closeMenu(){
       menuState = null;
       document.removeEventListener("mousedown", menuAway);
-      var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; }
+      // the prompt manager dresses #cmenu up as a bigger glass panel; undress it
+      var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; m.className = "cmenu"; }
+      var pb = document.getElementById("promptbtn"); if (pb) pb.classList.remove("on");
     }
     // The model/agent pickers open from a button, not the textarea, so a blur
     // won't close them — a click anywhere outside the card does.
     function menuAway(e){
+      // A click that re-rendered its own row (pinning a prompt) leaves a
+      // detached target, which no card "contains" — that isn't a click away.
+      if (e.target && e.target.isConnected === false) return;
       var cb = document.querySelector(".cbox");
       if (cb && !cb.contains(e.target)) closeMenu();
     }
@@ -6724,7 +7458,7 @@ ${BRAND_SPRITE}
       if (!items.length) { closeMenu(); return; }
       menuState.items = items; if (menuState.sel == null) menuState.sel = 0;
       if (menuState.sel >= items.length) menuState.sel = items.length - 1;
-      m.style.display = "block";
+      m.style.display = "block"; m.className = "cmenu";
       m.innerHTML = (head ? '<div class="cmhead">' + esc(head) + "</div>" : "") +
         items.map(function(it, i){
           return '<div class="cmi' + (i === menuState.sel ? " sel" : "") + '" data-i="' + i + '">' +
@@ -6833,7 +7567,7 @@ ${BRAND_SPRITE}
       if (!cur || cur.tier === "bridge") { toast("pick an adapter first \\u2014 bridges choose their own model"); return; }
       var m = document.getElementById("cmenu"); if (!m) return;
       menuState = { kind: "modelmenu", at: 0, sel: 0, items: [] };
-      m.style.display = "block";
+      m.style.display = "block"; m.className = "cmenu";
       m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + '</div>' +
         '<input class="cmsearch" id="cmsearch" placeholder="search real models\\u2026" spellcheck="false" autocomplete="off">' +
         '<div class="cmlist" id="cmlist">' + LOADER + '</div>';
@@ -6906,17 +7640,25 @@ ${BRAND_SPRITE}
       if (!agents.length) { toast("no agents in this project yet"); return; }
       menuState = { kind: "agentmenu", at: 0, sel: 0, items: [] };
       var m = document.getElementById("cmenu"); if (!m) return;
-      m.style.display = "block";
+      m.style.display = "block"; m.className = "cmenu";
       // AUTO leads the list — it's the "let the system choose" option, not an agent.
       m.innerHTML = '<div class="cmhead">who runs this turn</div>' +
         '<div class="cmi cmauto' + (state.auto ? " on" : "") + '" data-auto="1"><span class="ic"><span class="autodot"></span></span><span>AUTO</span>' +
           (state.auto ? '<span class="tick">' + ICONS.info + "</span>" : '<span class="sub">smart routing</span>') + "</div>" +
         agents.map(function(a, i){
           var tick = !state.auto && a.id === state.selected;
-          var sub = a.tier === "bridge" ? "bridge" : (a.role || "");
-          return '<div class="cmi" data-ai="' + i + '"><span class="ic">' + brandMark(a.kind) + "</span><span>" + esc(a.id) + "</span>" +
-            (tick ? '<span class="tick">' + ICONS.info + "</span>" : (sub ? '<span class="sub">' + esc(sub) + "</span>" : "")) + "</div>";
-        }).join("");
+          var lbl = agentLabel(a.kind, a.id);
+          // the product name leads; the roster id follows when it says more
+          // (two Claude Codes with different roles are told apart by it)
+          var sub = agentSub(a, lbl);
+          return '<div class="cmi" data-ai="' + i + '"><span class="ic">' + agentGlyph(a.kind, a.id) + "</span><span>" + esc(lbl) + "</span>" +
+            (a.busy ? '<span class="cmbusy">working</span>' : "") +
+            (tick ? '<span class="tick"' + (a.busy ? ' style="margin-left:6px"' : "") + ">" + ICONS.info + "</span>"
+              : (sub && !a.busy ? '<span class="sub">' + esc(sub) + "</span>" : "")) + "</div>";
+        }).join("") +
+        // Cursor is on its way; listing it (inert) says so where you'd look for it.
+        '<div class="cmsep"></div><div class="cmi soon" aria-disabled="true"><span class="ic">' + agentGlyph("", "cursor") +
+          '</span><span>Cursor</span><span class="sub">coming soon</span></div>';
       var auto = m.querySelector("[data-auto]");
       if (auto) auto.onmousedown = function(ev){ ev.preventDefault(); closeMenu(); setAuto(true); var box = document.getElementById("box"); if (box) box.focus(); };
       Array.prototype.forEach.call(m.querySelectorAll("[data-ai]"), function(row){
@@ -6992,7 +7734,10 @@ ${BRAND_SPRITE}
         }
         if (imgs.length) { e.preventDefault(); imgs.forEach(uploadFile); }
       });
-      box.addEventListener("blur", function(){ setTimeout(closeMenu, 120); });
+      // Blur closes only the menus the textarea drives (@ and /). The pickers
+      // opened from buttons move focus into their own search box on purpose,
+      // and closing them on that blur shut the prompt manager as it opened.
+      box.addEventListener("blur", function(){ setTimeout(function(){ if (menuState && (menuState.kind === "file" || menuState.kind === "cmd")) closeMenu(); }, 120); });
 
       form.addEventListener("submit", function(ev){ ev.preventDefault(); send(); });
 
@@ -7017,11 +7762,29 @@ ${BRAND_SPRITE}
         if (menuState && menuState.kind === "agentmenu") { closeMenu(); return; }
         openAgentMenu();
       };
+      Array.prototype.forEach.call(document.querySelectorAll("#cmode [data-cmode]"), function(b){
+        b.onclick = function(){ setComposerMode(b.getAttribute("data-cmode")); var bx = document.getElementById("box"); if (bx) bx.focus(); };
+      });
+      var osend = document.getElementById("orchsend");
+      if (osend) osend.onclick = sendOrchestra;
+      var pc = document.getElementById("cperm");
+      if (pc) pc.onclick = function(){
+        if (menuState && menuState.kind === "permmenu") { closeMenu(); return; }
+        openPermMenu(state.selected);
+      };
+      var pb = document.getElementById("promptbtn");
+      if (pb) pb.onclick = openPrompts;
+      state.openPrompts = openPrompts; // ⌘⇧V, from the global key handler
+      var plb = document.getElementById("planbtn");
+      if (plb) plb.onclick = function(){ setPlan(!planState); var bx = document.getElementById("box"); if (bx) bx.focus(); };
+      drawPlan();
+      loadPermProfiles().then(function(){ updateModelLabel(); drawOrchControls(); });
       var mcpB = document.getElementById("mcpbtn");
       if (mcpB) mcpB.onclick = function(){ toggleComposerPanel("mcp"); };
       var skB = document.getElementById("skillbtn");
       if (skB) skB.onclick = function(){ toggleComposerPanel("skills"); };
       setAuto(state.auto);
+      setComposerMode(state.cmode || "chat");
       refreshSkillCount();
 
       // ---- hold-to-talk -----------------------------------------------------
@@ -7095,21 +7858,294 @@ ${BRAND_SPRITE}
       var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
       if (lbl) lbl.textContent = (cur && cur.model) ? cur.model : "model";
       var mp = document.getElementById("modelpick");
-      if (mp) mp.style.display = state.auto ? "none" : "";
+      if (mp) mp.style.display = state.auto || state.cmode === "orch" ? "none" : "";
       var chip = document.getElementById("cagent");
       if (!chip) return;
-      // Always visible: hiding it is what made the agent unswitchable before —
-      // you can't click a control that isn't painted.
-      chip.style.display = "";
+      // Always visible in Chat: hiding it is what made the agent unswitchable
+      // before — you can't click a control that isn't painted. Orchestrate
+      // has its own cast (drawOrchControls), so there it steps aside.
+      chip.style.display = state.cmode === "orch" ? "none" : "";
       chip.classList.remove("dim");
       chip.classList.toggle("auto", state.auto);
       if (state.auto) {
         chip.innerHTML = '<span class="autodot"></span><span class="can">AUTO</span><span class="cchev">' + ICONS.chevron + "</span>";
       } else if (cur) {
-        chip.innerHTML = brandMark(cur.kind) + '<span class="can">' + esc(cur.id) + "</span>" + '<span class="cchev">' + ICONS.chevron + "</span>";
+        chip.innerHTML = agentGlyph(cur.kind, cur.id) + '<span class="can">' + esc(agentLabel(cur.kind, cur.id)) + "</span>" +
+          (cur.busy ? '<span class="cadot" style="background:var(--live)" title="working"></span>' : "") +
+          '<span class="cchev">' + ICONS.chevron + "</span>";
       } else {
         chip.innerHTML = '<span class="cadot"></span><span class="can">agent</span><span class="cchev">' + ICONS.chevron + "</span>";
       }
+      drawPermChip(cur);
+    }
+
+    // ---- permissions -------------------------------------------------------
+    /** The chip beside the agent picker: the chosen agent's mode, in its state colour. */
+    function drawPermChip(cur){
+      var pc = document.getElementById("cperm"); if (!pc) return;
+      // Nothing to set for the router (AUTO picks per hop), a bridge (it runs
+      // in its own window, under its own rules), or in Orchestrate, whose
+      // cast wears its modes on the chips instead.
+      if (!cur || state.auto || state.cmode === "orch" || cur.tier === "bridge") { pc.style.display = "none"; return; }
+      var mode = permOf(cur), cell = permProfile(cur.kind).modes[mode] || {};
+      pc.style.display = "";
+      pc.className = "cperm " + mode;
+      pc.setAttribute("data-mode", mode);
+      pc.title = "permissions \\u00b7 " + (cell.label || PERM_NAMES[mode]) + " \\u2014 click to change";
+      pc.setAttribute("aria-label", "permissions: " + (PERM_NAMES[mode] || mode));
+      pc.innerHTML = ICONS.shield + '<span class="cpl">' + esc(PERM_SHORT[mode] || mode) + '</span><span class="cchev">' + ICONS.chevron + "</span>";
+    }
+    /**
+     * Bypass / Auto / Always ask for one agent. Each row says what the mode
+     * means on *this* CLI (they disagree), and a mode the real CLI couldn't
+     * honour is shown, disabled, with what was observed — not hidden, so you
+     * learn why it isn't there instead of assuming it is.
+     */
+    function openPermMenu(agentId){
+      var p = state.project || {};
+      var a = (p.agents || []).filter(function(x){ return x.id === agentId; })[0];
+      var m = document.getElementById("cmenu");
+      if (!m) return;
+      if (!a) { toast("pick an agent first"); return; }
+      menuState = { kind: "permmenu", at: 0, sel: 0, items: [], agent: agentId };
+      function paint(){
+        var prof = permProfile(a.kind), cur = permOf(a), lbl = agentLabel(a.kind, a.id);
+        var askCell = prof.modes.ask || {};
+        m.style.display = "block"; m.className = "cmenu";
+        m.innerHTML = '<div class="cmhead">permissions \\u00b7 ' + esc(lbl) + (a.id !== lbl ? " (" + esc(a.id) + ")" : "") + "</div>" +
+          PERM_MODES.map(function(mode){
+            var cell = prof.modes[mode] || {}, parts = permSplit(cell.label), off = !!cell.unsupported;
+            return '<div class="cmi pm' + (off ? " off" : "") + '" data-pm="' + mode + '" role="menuitemradio" aria-checked="' + (mode === cur) + '"' +
+              (off ? ' aria-disabled="true" title="' + esc(cell.unsupported) + '"' : "") + ">" +
+              '<span class="ic"><span class="pmdot ' + mode + '"></span></span>' +
+              '<span class="pmt"><b>' + esc(PERM_NAMES[mode]) + "</b>" +
+                "<small>" + esc(off ? "Unavailable \\u2014 " + cell.unsupported : (parts[1] || parts[0])) + "</small>" +
+                (cell.flags && !off ? "<code>" + esc(cell.flags) + "</code>" : "") + "</span>" +
+              (mode === cur ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</div>";
+          }).join("") +
+          (askCell.ask === "approvals" ? '<div class="cmfoot">Always ask: each tool call waits in the thread for you to allow or deny.</div>'
+            : askCell.ask === "read-only" ? '<div class="cmfoot">' + esc(lbl) + " can\\u2019t hand a prompt to Loom, so \\u201cask\\u201d runs it read-only.</div>" : "");
+        Array.prototype.forEach.call(m.querySelectorAll("[data-pm]"), function(row){
+          row.onmousedown = function(ev){
+            ev.preventDefault();
+            if (row.classList.contains("off")) { toast(row.getAttribute("title") || "not available for this agent"); return; }
+            var mode = row.getAttribute("data-pm");
+            closeMenu();
+            if (mode !== permOf(a)) setPermissions(a.id, mode);
+          };
+        });
+      }
+      paint();
+      if (!state.permProfiles) loadPermProfiles().then(function(){ if (menuState && menuState.kind === "permmenu" && menuState.agent === agentId) paint(); });
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+    }
+    function setPermissions(agentId, mode){
+      var a = ((state.project || {}).agents || []).filter(function(x){ return x.id === agentId; })[0];
+      var was = a && a.permissions;
+      if (a) a.permissions = mode; // paint it now; the POST confirms it or puts it back
+      updateModelLabel(); drawOrchControls();
+      api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agentId) + "/permissions", {
+        method: "POST", body: JSON.stringify({ permissions: mode }),
+      }).then(function(){
+        toast(labelOf(agentId) + " \\u2192 " + PERM_NAMES[mode].toLowerCase());
+        refresh();
+      }).catch(function(err){
+        if (a) a.permissions = was;
+        updateModelLabel(); drawOrchControls();
+        toast(err.message);
+      });
+    }
+
+    // ---- plan mode -----------------------------------------------------------
+    function setPlan(on){
+      planState = !!on;
+      try { if (planState) localStorage.setItem(PLAN_KEY, "1"); else localStorage.removeItem(PLAN_KEY); } catch (e) {}
+      drawPlan();
+    }
+    /** The switch, the card's edge, the placeholder, the orchestra's send, the hint. */
+    function drawPlan(){
+      var b = document.getElementById("planbtn");
+      if (b) { b.classList.toggle("on", planState); b.setAttribute("aria-checked", planState ? "true" : "false"); }
+      var cb = document.querySelector(".cbox"); if (cb) cb.classList.toggle("planon", planState);
+      var os = document.getElementById("orchsend");
+      if (os) os.innerHTML = planState ? ICONS.plan + "Write plan" : ICONS.orchestra + "Orchestrate";
+      var box = document.getElementById("box"); if (box) box.placeholder = composerPlaceholder();
+      drawStatus();
+    }
+    function composerPlaceholder(){
+      if (state.cmode === "orch") return planState
+        ? "Describe the goal \\u2014 the orchestrator writes PLAN.md and a spec per task, changing no code\\u2026"
+        : "Describe the goal \\u2014 the orchestrator splits it into tasks and runs them in parallel\\u2026";
+      return planState ? "What should be planned? The agent writes it to plans/ and changes no code\\u2026" : "Message\\u2026  @ for files, / for actions";
+    }
+
+    // ---- prompt manager ------------------------------------------------------
+    // A clipboard manager for prompts: what you saved (pinned first, then by
+    // use) above everything you've actually sent (newest first). Daemon-wide —
+    // a prompt you wrote in one project is there in the next. Opens from the
+    // chip or ⌘⇧V / Ctrl+Shift+V; ↑↓ move, Enter inserts, ⌘Enter inserts and
+    // sends — in Chat or Orchestrate, because send() already knows which.
+    var prompts = { saved: [], recent: [], q: "", sel: 0, rows: [], loaded: false };
+    function loadPrompts(){
+      return api("/api/prompts").then(function(j){
+        prompts.saved = j.saved || []; prompts.recent = j.recent || []; prompts.loaded = true;
+        if (menuState && menuState.kind === "prompts") drawPrompts();
+      }).catch(function(err){
+        var l = document.getElementById("pmlist"); if (l) l.innerHTML = '<div class="pmempty">' + esc(err.message) + "</div>";
+      });
+    }
+    function openPrompts(){
+      if (menuState && menuState.kind === "prompts") { closeMenu(); var bx = document.getElementById("box"); if (bx) bx.focus(); return; }
+      if (desktop && state.tab !== "thread") showTab("thread"); // the composer lives under Thread
+      var m = document.getElementById("cmenu"); if (!m) return;
+      closeMenu();
+      menuState = { kind: "prompts", at: 0, sel: 0, items: [] };
+      prompts.q = ""; prompts.sel = 0;
+      m.className = "cmenu pmgr";
+      m.style.display = "flex";
+      m.innerHTML = '<div class="pmhead"><label class="pmq">' + ICONS.search +
+          '<input id="pmq" placeholder="Search saved and recent prompts\\u2026" autocomplete="off" spellcheck="false" aria-label="search prompts" aria-controls="pmlist"></label>' +
+          '<button type="button" class="pmsave" id="pmsave" title="save what\\u2019s in the composer">' + ICONS.bookmark + "Save current</button></div>" +
+        '<div class="pmlist" id="pmlist" role="listbox" aria-label="prompts">' + (prompts.loaded ? "" : LOADER) + "</div>" +
+        '<div class="pmfoot"><span><kbd>\\u2191</kbd><kbd>\\u2193</kbd> move</span><span><kbd>\\u21b5</kbd> insert</span>' +
+          "<span><kbd>" + KMOD + "\\u21b5</kbd> insert &amp; send</span><span><kbd>esc</kbd> close</span></div>";
+      var pb = document.getElementById("promptbtn"); if (pb) pb.classList.add("on");
+      var q = document.getElementById("pmq");
+      q.oninput = function(){ prompts.q = q.value; prompts.sel = 0; drawPrompts(); };
+      q.onkeydown = promptKey;
+      document.getElementById("pmsave").onclick = saveCurrentPrompt;
+      if (prompts.loaded) drawPrompts();
+      loadPrompts();
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      q.focus();
+    }
+    function promptRows(){
+      var q = prompts.q.trim().toLowerCase();
+      var hit = function(t){ return !q || String(t || "").toLowerCase().indexOf(q) >= 0; };
+      var kept = {};
+      prompts.saved.forEach(function(sp){ kept[sp.text] = 1; });
+      var rows = [];
+      prompts.saved.forEach(function(sp){ if (hit(sp.title) || hit(sp.text)) rows.push({ kind: "saved", p: sp }); });
+      prompts.recent.forEach(function(r){ if (hit(r.text)) rows.push({ kind: "recent", p: r, kept: !!kept[r.text] }); });
+      return rows;
+    }
+    function promptRow(r, i){
+      var pr = r.p, text = String(pr.text || ""), lines = text.split("\\n");
+      var title = r.kind === "saved" ? (pr.title || lines[0]) : lines[0];
+      // the snippet is whatever the title didn't already say
+      var rest = title === lines[0] ? lines.slice(1).join(" ") : text;
+      var snippet = rest.replace(/\\s+/g, " ").trim();
+      var pinned = r.kind === "saved" && pr.pinned;
+      var meta = r.kind === "saved"
+        ? (pr.uses ? "used " + pr.uses + "\\u00d7" : "saved " + rel(pr.createdAt))
+        : (pr.mode && pr.mode !== "chat" ? (pr.mode === "orchestrate" ? "orchestra" : pr.mode) + " \\u00b7 " : "") + rel(pr.at);
+      var acts = r.kind === "saved"
+        ? '<button type="button" data-pma="pin" class="' + (pinned ? "on" : "") + '" title="' + (pinned ? "unpin" : "pin to the top") + '">' + ICONS.pin + "</button>" +
+          '<button type="button" data-pma="del" class="del" title="delete">' + ICONS.trash + "</button>"
+        : (r.kept ? '<button type="button" class="on" title="already saved" disabled>' + ICONS.check + "</button>"
+          : '<button type="button" data-pma="save" title="save this prompt">' + ICONS.bookmark + "</button>");
+      return '<div class="pmrow' + (i === prompts.sel ? " sel" : "") + (pinned ? " pinned" : "") + '" data-pr="' + i + '" role="option" aria-selected="' + (i === prompts.sel) + '">' +
+        '<span class="pmi">' + (r.kind === "recent" ? ICONS.clock : pinned ? ICONS.pin : ICONS.bookmark) + "</span>" +
+        '<span class="pmb"><div class="pmtt">' + esc(title || "(empty)") + "</div>" + (snippet ? '<div class="pmsn">' + esc(snippet.slice(0, 200)) + "</div>" : "") + "</span>" +
+        '<span class="pmm">' + esc(meta) + "</span>" +
+        '<span class="pmacts">' + acts + "</span></div>";
+    }
+    function drawPrompts(){
+      var list = document.getElementById("pmlist"); if (!list) return;
+      var rows = prompts.rows = promptRows();
+      if (prompts.sel >= rows.length) prompts.sel = Math.max(0, rows.length - 1);
+      var count = { pinned: 0, saved: 0, recent: 0 };
+      rows.forEach(function(r){ count[r.kind === "recent" ? "recent" : r.p.pinned ? "pinned" : "saved"]++; });
+      var NAMES = { pinned: "Pinned", saved: "Saved", recent: "Recent" };
+      var html = "", last = "";
+      rows.forEach(function(r, i){
+        var sec = r.kind === "recent" ? "recent" : r.p.pinned ? "pinned" : "saved";
+        if (sec !== last) {
+          html += '<div class="pmsec">' + NAMES[sec] + ' <span class="bn">' + count[sec] + "</span>" +
+            (sec === "recent" && !prompts.q ? '<button type="button" data-pmclear="1" title="forget every sent prompt">Clear</button>' : "") + "</div>";
+          last = sec;
+        }
+        html += promptRow(r, i);
+      });
+      if (!rows.length) html = prompts.q
+        ? '<div class="pmempty">Nothing matches \\u201c' + esc(prompts.q) + "\\u201d.</div>"
+        : '<div class="pmempty"><b>No prompts yet.</b><br>Everything you send lands under Recent \\u2014 save the ones worth keeping.</div>';
+      list.innerHTML = html;
+      Array.prototype.forEach.call(list.querySelectorAll("[data-pr]"), function(row){
+        row.onmousedown = function(ev){
+          ev.preventDefault(); // keep focus in the search box
+          var i = Number(row.getAttribute("data-pr"));
+          var act = ev.target.closest && ev.target.closest("[data-pma]");
+          if (act) { promptAction(i, act.getAttribute("data-pma")); return; }
+          if (ev.target.closest && ev.target.closest(".pmacts")) return;
+          insertPrompt(i, ev.metaKey || ev.ctrlKey);
+        };
+      });
+      var clr = list.querySelector("[data-pmclear]");
+      if (clr) clr.onmousedown = function(ev){
+        ev.preventDefault();
+        if (!window.confirm("Forget every prompt you've sent? Saved prompts stay.")) return;
+        api("/api/prompts/recent", { method: "DELETE" }).then(function(){ prompts.recent = []; drawPrompts(); }).catch(function(err){ toast(err.message); });
+      };
+      var sv = document.getElementById("pmsave"), bx = document.getElementById("box");
+      if (sv) sv.disabled = !(bx && bx.value.trim());
+      var sel = list.querySelector(".pmrow.sel");
+      if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
+    }
+    function promptKey(e){
+      var n = prompts.rows.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (n) { prompts.sel = (prompts.sel + (e.key === "ArrowDown" ? 1 : -1) + n) % n; drawPrompts(); }
+        return;
+      }
+      if (e.key === "Enter") { e.preventDefault(); insertPrompt(prompts.sel, e.metaKey || e.ctrlKey); return; }
+      if (e.key === "Escape") { e.preventDefault(); closeMenu(); var bx = document.getElementById("box"); if (bx) bx.focus(); }
+    }
+    /** Put a prompt in the composer: into an empty box whole, else at the caret. */
+    function insertPrompt(i, andSend){
+      var r = prompts.rows[i]; if (!r) return;
+      var box = document.getElementById("box"); if (!box) return;
+      var text = String(r.p.text || "");
+      closeMenu();
+      var v = box.value;
+      if (!v.trim()) { box.value = text; box.setSelectionRange(text.length, text.length); }
+      else {
+        var a = box.selectionStart, b = box.selectionEnd;
+        var before = v.slice(0, a), after = v.slice(b);
+        var pre = before && !/\\s$/.test(before) ? " " : "";
+        box.value = before + pre + text + after;
+        var caret = (before + pre + text).length;
+        box.setSelectionRange(caret, caret);
+      }
+      box.focus(); autosizeBox();
+      if (r.kind === "saved") {
+        r.p.uses = (r.p.uses || 0) + 1; // it floats up next time, as it will on the daemon
+        api("/api/prompts/" + encodeURIComponent(r.p.id), { method: "PATCH", body: JSON.stringify({ used: true }) }).catch(function(){});
+      }
+      if (andSend) send();
+    }
+    function promptAction(i, act){
+      var r = prompts.rows[i]; if (!r) return;
+      var done = function(){ return loadPrompts(); };
+      var fail = function(err){ toast(err.message); };
+      if (act === "pin") {
+        r.p.pinned = !r.p.pinned; drawPrompts();
+        api("/api/prompts/" + encodeURIComponent(r.p.id), { method: "PATCH", body: JSON.stringify({ pinned: r.p.pinned }) }).then(done, fail);
+      } else if (act === "del") {
+        prompts.saved = prompts.saved.filter(function(sp){ return sp !== r.p; }); drawPrompts();
+        api("/api/prompts/" + encodeURIComponent(r.p.id), { method: "DELETE" }).then(done, fail);
+      } else if (act === "save") {
+        api("/api/prompts", { method: "POST", body: JSON.stringify({ text: r.p.text }) })
+          .then(function(j){ toast("saved \\u201c" + trunc(j.prompt.title, 40) + "\\u201d"); return done(); }, fail);
+      }
+    }
+    function saveCurrentPrompt(){
+      var box = document.getElementById("box"), t = box ? box.value.trim() : "";
+      if (!t) { toast("type a prompt first, then save it"); return; }
+      api("/api/prompts", { method: "POST", body: JSON.stringify({ text: t }) })
+        .then(function(j){ toast("saved \\u201c" + trunc(j.prompt.title, 40) + "\\u201d"); prompts.q = ""; var q = document.getElementById("pmq"); if (q) q.value = ""; return loadPrompts(); })
+        .catch(function(err){ toast(err.message); });
     }
 
     // AUTO ⇄ specific-agent: one selector, repainted to whichever is live.
@@ -7363,7 +8399,865 @@ ${BRAND_SPRITE}
       }).catch(function(){});
     }
 
+    // ---- Orchestra: one orchestrator plans, many workers run in parallel -----
+    // The run lives on the daemon (core/orchestra.ts); this view is a reading of
+    // GET /orchestra, refetched whenever an orchestra event crosses the socket.
+    // The composer's Orchestrate mode starts a run; the view steers it.
+    function orchRoster(){
+      var p = state.project || {};
+      return (p.agents || []).filter(function(a){ return a.tier === "adapter" && a.enabled !== false; });
+    }
+    function orchCfg(){
+      var roster = orchRoster();
+      var c = state.orchCfg || (state.orchCfg = { orchestrator: null, off: {}, parallel: 4 });
+      var ids = roster.map(function(a){ return a.id; });
+      // Claude Code conducts by default when it's here; otherwise whoever's first.
+      if (!c.orchestrator || ids.indexOf(c.orchestrator) < 0) {
+        var cc = roster.filter(function(a){ return a.kind === "claude-code"; })[0] || roster[0];
+        c.orchestrator = cc ? cc.id : null;
+      }
+      return c;
+    }
+    function orchTerminal(st){ return st === "completed" || st === "failed" || st === "aborted"; }
+    function findOrchRun(id){ return (orch.runs || []).filter(function(r){ return r.id === id; })[0] || null; }
+    /** The run whose orchestrator thread this chat is, if it is one. */
+    function orchRunForChat(){
+      var hit = (orch.runs || []).filter(function(r){ return r.chat === chatId; })[0];
+      if (hit) return hit;
+      var s = state.project && state.project.orchestra;
+      return s && s.chat === chatId ? { id: s.id, status: s.status, chat: s.chat } : null;
+    }
+    function mergeOrchRun(run){
+      if (!run || !run.id) return;
+      var list = orch.runs || (orch.runs = []);
+      var i = list.map(function(r){ return r.id; }).indexOf(run.id);
+      if (i >= 0) list[i] = run; else list.unshift(run);
+      drawOrch();
+    }
+
+    function setComposerMode(mode){
+      state.cmode = mode === "orch" ? "orch" : "chat";
+      var orchMode = state.cmode === "orch";
+      Array.prototype.forEach.call(document.querySelectorAll("#cmode [data-cmode]"), function(b){
+        var on = b.getAttribute("data-cmode") === state.cmode;
+        b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      var co = document.getElementById("corch"); if (co) co.style.display = orchMode ? "" : "none";
+      var os = document.getElementById("orchsend"); if (os) os.style.display = orchMode ? "" : "none";
+      var box = document.getElementById("box");
+      if (box) box.placeholder = composerPlaceholder();
+      if (menuState && (menuState.kind === "agentmenu" || menuState.kind === "orchmenu" || menuState.kind === "permmenu")) closeMenu();
+      drawOrchControls();
+      updateModelLabel();
+      drawStatus(); // send/stop and the hint follow the mode
+    }
+    state.setComposerMode = setComposerMode;
+
+    function drawOrchControls(){
+      var el = document.getElementById("corch"); if (!el || state.cmode !== "orch") return;
+      var roster = orchRoster(), c = orchCfg();
+      if (!roster.length) {
+        el.innerHTML = '<span class="colbl">No adapters in this project \\u2014 add an agent to orchestrate</span>';
+        return;
+      }
+      var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0] || roster[0];
+      el.innerHTML =
+        '<span class="colbl">Orchestrator</span>' +
+        '<button class="cagent" id="corchpick" type="button" title="who plans the goal and reviews the results">' +
+          agentGlyph(lead.kind, lead.id) + '<span class="can">' + esc(agentLabel(lead.kind, lead.id)) + "</span>" +
+          permBadge(permOf(lead), lead.id) +
+          '<span class="cchev">' + ICONS.chevron + "</span></button>" +
+        '<span class="colbl">Workers</span>' +
+        '<span class="cowk" id="cowk">' + roster.map(function(a){
+          var on = !c.off[a.id];
+          return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '" title="' +
+            esc(a.id + (a.role ? " \\u00b7 " + a.role : "")) + '">' + agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
+            // each worker's mode, and the way to change it without leaving the row
+            permBadge(permOf(a), a.id) + "</button>";
+        }).join("") + "</span>" +
+        '<span class="colbl">Parallel</span>' +
+        '<span class="cstep" title="how many tasks run at once"><button type="button" data-step="-1" aria-label="fewer in parallel"' + (c.parallel <= 1 ? " disabled" : "") + ">\\u2212</button>" +
+          '<span class="cpar" id="cpar">' + c.parallel + "</span>" +
+          '<button type="button" data-step="1" aria-label="more in parallel"' + (c.parallel >= 12 ? " disabled" : "") + ">+</button></span>";
+      var pick = document.getElementById("corchpick");
+      if (pick) pick.onclick = function(){
+        if (menuState && menuState.kind === "orchmenu") { closeMenu(); return; }
+        openOrchestratorMenu();
+      };
+      Array.prototype.forEach.call(el.querySelectorAll("[data-wk]"), function(b){
+        b.onclick = function(){
+          var id = b.getAttribute("data-wk");
+          c.off[id] = !c.off[id];
+          drawOrchControls();
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-step]"), function(b){
+        b.onclick = function(){
+          c.parallel = Math.max(1, Math.min(12, c.parallel + Number(b.getAttribute("data-step"))));
+          drawOrchControls();
+        };
+      });
+      wirePermBadges(el);
+    }
+    /** A mode badge inside a chip opens that agent's permissions, not the chip's own action. */
+    function wirePermBadges(el){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-permof]"), function(b){
+        b.onmousedown = function(ev){ ev.stopPropagation(); };
+        b.onclick = function(ev){
+          ev.stopPropagation(); ev.preventDefault();
+          var id = b.getAttribute("data-permof");
+          if (menuState && menuState.kind === "permmenu" && menuState.agent === id) { closeMenu(); return; }
+          openPermMenu(id);
+        };
+      });
+    }
+
+    function openOrchestratorMenu(){
+      var roster = orchRoster(), c = orchCfg();
+      var m = document.getElementById("cmenu"); if (!m || !roster.length) return;
+      menuState = { kind: "orchmenu", at: 0, sel: 0, items: [] };
+      m.style.display = "block"; m.className = "cmenu";
+      m.innerHTML = '<div class="cmhead">who orchestrates</div>' + roster.map(function(a, i){
+        var lbl = agentLabel(a.kind, a.id);
+        var sub = agentSub(a, lbl);
+        return '<div class="cmi" data-oi="' + i + '"><span class="ic">' + agentGlyph(a.kind, a.id) + "</span><span>" + esc(lbl) + "</span>" +
+          permBadge(permOf(a), a.id) +
+          (a.busy ? '<span class="cmbusy">working</span>' : "") +
+          (a.id === c.orchestrator ? '<span class="tick"' + (a.busy ? ' style="margin-left:6px"' : "") + ">" + ICONS.info + "</span>"
+            : (sub && !a.busy ? '<span class="sub">' + esc(sub) + "</span>" : "")) + "</div>";
+      }).join("");
+      Array.prototype.forEach.call(m.querySelectorAll("[data-oi]"), function(row){
+        row.onmousedown = function(ev){
+          ev.preventDefault();
+          var a = roster[Number(row.getAttribute("data-oi"))];
+          closeMenu();
+          if (!a) return;
+          c.orchestrator = a.id;
+          drawOrchControls();
+        };
+      });
+      wirePermBadges(m);
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+    }
+
+    function sendOrchestra(){
+      var box = document.getElementById("box"); if (!box) return;
+      var text = (box.value || "").trim();
+      if (!text && !attach.length) { box.focus(); toast("describe the goal first"); return; }
+      if (attach.some(function(a){ return a.uploading; })) { toast("still uploading\\u2026"); return; }
+      var refs = attach.map(function(a){ return (a.kind === "image" ? "[image] " : "[file] ") + a.path; });
+      var goal = refs.length ? refs.join("\\n") + (text ? "\\n\\n" + text : "") : text;
+      var roster = orchRoster(), c = orchCfg();
+      if (!roster.length) { toast("no adapters in this project to orchestrate"); return; }
+      var workers = roster.filter(function(a){ return !c.off[a.id]; }).map(function(a){ return a.id; });
+      if (!workers.length) { toast("pick at least one worker"); return; }
+      var btn = document.getElementById("orchsend");
+      if (btn) btn.disabled = true;
+      api("/api/projects/" + pid + "/orchestra", { method: "POST", body: JSON.stringify({
+        goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, maxParallel: c.parallel,
+        plan: planState || undefined,
+      }) }).then(function(j){
+        // Only now is the goal gone from the box: a refused run (no git repo,
+        // one already running) leaves what you wrote where you wrote it.
+        box.value = ""; autosizeBox(); attach = []; drawAttach();
+        if (btn) btn.disabled = false;
+        state.cmode = "chat"; // the orchestrator's own thread takes replies, not new runs
+        openOrchRun(j.run);
+      }).catch(function(err){
+        if (btn) btn.disabled = false;
+        toast(err.message);
+        clog("error", "orchestra", "start failed: " + (err && err.message), err && err.stack);
+      });
+    }
+
+    /** Show a run: its orchestrator thread behind, its Orchestra view in front. */
+    function openOrchRun(run){
+      if (!run) return;
+      mergeOrchRun(run);
+      orch.sel = run.id;
+      if (desktop && state.setChat && run.chat && run.chat !== chatId) {
+        state.pendingTab = "orchestra"; state.pendingOrchRun = run.id;
+        state.setChat(pid, run.chat);
+        return;
+      }
+      setComposerMode(state.cmode || "chat");
+      if (desktop) showTab("orchestra"); else openOrchSheet();
+    }
+    function openOrchChat(chat){
+      if (!chat) return;
+      if (desktop && state.setChat) { if (chat === chatId) showTab("thread"); else state.setChat(pid, chat); return; }
+      toast("open this thread from the desktop app");
+    }
+
+    function loadOrch(){
+      return api("/api/projects/" + pid + "/orchestra").then(function(j){
+        if (state.pid !== pid) return;
+        orch.runs = j.runs || []; orch.active = j.active || null; orch.err = "";
+        // Follow the live run unless you picked one yourself — a run started
+        // from the CLI or a phone should take the view, not sit behind an old one.
+        if (!orch.pinned || !findOrchRun(orch.sel)) orch.sel = orch.active || (orch.runs[0] && orch.runs[0].id) || null;
+        drawOrch();
+        drawStatus();
+      }).catch(function(err){ orch.err = err.message; drawOrch(); });
+    }
+    /** Coalesce a burst of socket events (a plan spawns five tasks at once) into one fetch. */
+    function scheduleOrch(){
+      if (orch.t) return;
+      orch.t = setTimeout(function(){ orch.t = null; if (state.pid === pid) loadOrch(); }, 150);
+    }
+    // Worker events that change what a card says; the rest (every tool call,
+    // every streamed line) would only refetch an unchanged run.
+    var ORCH_TASK_KINDS = { run_complete: 1, file_edit: 1, error: 1, needs_input: 1, turn_diff: 1 };
+    function onOrchEvent(ev){
+      if (!ev) return;
+      var p = ev.payload || {};
+      if (ev.kind === "orchestra" || (p.orchestra && ORCH_TASK_KINDS[ev.kind])) scheduleOrch();
+    }
+    function drawOrchTabDot(sum){
+      var d = document.getElementById("orchtdot"); if (!d) return;
+      var live = sum && !orchTerminal(sum.status);
+      d.style.display = live ? "" : "none";
+      d.classList.toggle("warn", !!(sum && sum.status === "waiting_human"));
+    }
+
+    function orchEl(){
+      if (desktop) return state.tab === "orchestra" ? document.getElementById("pane-orchestra") : null;
+      return document.getElementById("orchsheet");
+    }
+    function openOrchSheet(){
+      var el = document.getElementById("routesheet"); if (!el) return;
+      el.innerHTML = '<div class="sheet"><div id="orchsheet"></div></div>';
+      drawOrch(); loadOrch();
+    }
+    function closeOrchSheet(){ var el = document.getElementById("routesheet"); if (el) el.innerHTML = ""; }
+
+    function orchPill(st){
+      var s = ORCH_RUN_ST[st] || [st || "\\u2014", "off"];
+      return '<span class="opill ' + s[1] + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span>";
+    }
+    function drawOrch(){
+      var el = orchEl(); if (!el) return;
+      var head = '<div class="ohead"><span class="ot">Orchestra</span>' +
+        '<span class="os">One agent plans the goal; the rest work it in parallel, each in its own worktree.</span>' +
+        '<span class="spacer"></span><button class="iconbtn" id="orefresh" title="refresh">' + ICONS.refresh + "</button></div>";
+      if (orch.runs === null) { el.innerHTML = '<div class="orchview">' + head + (orch.err ? '<div class="onote err">' + esc(orch.err) + "</div>" : LOADER) + "</div>"; wireOrchHead(); return; }
+      if (!orch.runs.length) {
+        el.innerHTML = '<div class="orchview">' + head + '<div class="oempty"><b>No orchestra runs yet.</b><br>' +
+          "Switch the composer to <b>Orchestrate</b>, describe a goal, and pick who plans and who works.<br>" +
+          '<button class="btn outline sm" id="ostart" style="margin-top:14px">' + ICONS.orchestra + "Start one</button></div></div>";
+        wireOrchHead();
+        var st = document.getElementById("ostart");
+        if (st) st.onclick = function(){ if (desktop) showTab("thread"); else closeOrchSheet(); setComposerMode("orch"); var b = document.getElementById("box"); if (b) b.focus(); };
+        return;
+      }
+      var run = findOrchRun(orch.sel) || orch.runs[0];
+      var list = '<div class="oruns"><div class="orunh">Runs</div>' + orch.runs.map(function(r){
+        var s = ORCH_RUN_ST[r.status] || ["", "off"];
+        var done = (r.tasks || []).filter(function(t){ return t.status === "done"; }).length;
+        return '<div class="orun" data-run="' + esc(r.id) + '"' + (r.id === run.id ? ' data-current="true"' : "") + ">" +
+          '<span class="org">' + esc(r.goal) + "</span>" +
+          '<span class="orm"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + " \\u00b7 " + done + "/" + (r.tasks || []).length +
+          " \\u00b7 " + rel(r.createdAt) + "</span></div>";
+      }).join("") + "</div>";
+      el.innerHTML = '<div class="orchview">' + head + '<div class="ogrid">' + list +
+        '<div class="odetail">' + orchDetail(run) + "</div></div></div>";
+      wireOrchHead();
+      wireOrchDetail(el, run);
+    }
+    function orchDetail(run){
+      var tasks = run.tasks || [];
+      var done = tasks.filter(function(t){ return t.status === "done"; }).length;
+      var running = tasks.filter(function(t){ return t.status === "running"; }).length;
+      var pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
+      var rpct = tasks.length ? Math.round(running / tasks.length * 100) : 0;
+      var o = run.orchestrator || {};
+      var terminal = orchTerminal(run.status);
+      var h = '<div class="ocard">' +
+        '<div class="ogoal">' + esc(run.goal) + "</div>" +
+        '<div class="ometa">' + orchPill(run.status) +
+          '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>" +
+          '<span class="omi"><span class="omk">Workers</span><span class="omv">' + (run.workers || []).map(function(w){ return agentGlyph(kindOf(w), w) + esc(labelOf(w)); }).join(", ") + "</span></span>" +
+          '<span class="omi"><span class="omk">Round</span><span class="omv">' + Number(run.round || 0) + "/" + Number(run.maxRounds || 0) + "</span></span>" +
+          '<span class="omi"><span class="omk">Parallel</span><span class="omv">' + Number(run.maxParallel || 0) + "</span></span>" +
+          '<span class="omi"><span class="omk">Cost</span><span class="omv">' + money(run.costUsd) + "</span></span>" +
+          '<span class="omi"><span class="omk">Branch</span><code>' + esc(run.branch || "\\u2014") + "</code></span>" +
+        "</div>" +
+        '<div class="oprog"><div class="obar" title="' + done + " done, " + running + ' running"><i style="width:' + pct + '%"></i><i class="run" style="width:' + rpct + '%"></i></div>' +
+          '<span class="opn">' + done + "/" + tasks.length + " done</span></div>" +
+        '<div class="oacts">' +
+          (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + "Orchestrator thread</button>" : "") +
+          (!terminal ? '<button class="btn outline sm prdanger" id="oabort">' + ICONS.stop + "Abort</button>" : "") +
+          (terminal && !run.applied ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
+          (terminal ? '<button class="btn ghost sm" id="oclean" title="remove this run\\u2019s worktrees (the branch stays)">Clean up</button>' : "") +
+        "</div>" + orchOutcome(run) + "</div>";
+      if (run.status === "waiting_human") {
+        h += '<div class="oask"><div class="oqh">The orchestrator asks</div>' +
+          '<div class="oq">' + esc(run.question || "What next?") + "</div>" +
+          '<textarea id="oreply" placeholder="Answer, or give it direction\\u2026"></textarea>' +
+          '<div class="row"><button class="btn primary sm" id="oreplybtn">Reply</button></div></div>';
+      }
+      if (run.summary) h += '<div class="ocard onote"><b>Summary.</b> ' + esc(run.summary) + "</div>";
+      if (run.error) h += '<div class="ocard onote err">' + esc(run.error) + "</div>";
+      if (run.applied && !run.delivered) h += '<div class="ocard onote"><b>Applied</b> to <code>' + esc(run.applied.into) + "</code> " + rel(run.applied.at) + ".</div>";
+      if (!tasks.length) {
+        h += '<div class="oempty">' + (terminal ? "This run ended before any task was planned."
+          : run.status === "waiting_human" ? "No tasks yet \\u2014 answer the orchestrator above and it plans again."
+          : "The orchestrator is planning\\u2026 tasks appear here as it spawns them.") + "</div>";
+        return h;
+      }
+      // What needs you first, then what's moving, then what's settled.
+      var ORDER = ["needs_input", "conflict", "running", "pending", "failed", "done", "cancelled"];
+      ORDER.forEach(function(stName){
+        var group = tasks.filter(function(t){ return t.status === stName; });
+        if (!group.length) return;
+        var s = ORCH_TASK_ST[stName];
+        h += '<div class="ogh"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + ' <span class="bn">' + group.length + "</span></div>" +
+          '<div class="otasks">' + group.map(function(t){ return orchTaskCard(run, t); }).join("") + "</div>";
+      });
+      return h;
+    }
+    /**
+     * Where a run's output went: its plan (plan mode), and what the project's
+     * git delivery policy did with it — merged, pushed, a PR — or why it
+     * couldn't, with the retry right there.
+     */
+    function orchOutcome(run){
+      var out = [];
+      if (run.plan) out.push('<div class="oline plan">' + ICONS.plan + "<span>Plan:</span><code>plans/" + esc(run.id) + "/PLAN.md</code>" +
+        "<span>on</span><code>" + esc(run.branch || "the run\\u2019s branch") + "</code></div>");
+      var dl = run.delivered;
+      if (dl) {
+        var what;
+        if (dl.mode === "pr" && /^https?:\\/\\//.test(String(dl.prUrl || ""))) {
+          var num = String(dl.prUrl).match(/\\/pull\\/(\\d+)/);
+          what = '<a href="' + esc(dl.prUrl) + '" target="_blank" rel="noopener noreferrer">' + (num ? "PR #" + esc(num[1]) : "Pull request") + " \\u2197</a>" +
+            (dl.pushed ? "<span>from</span><code>" + esc(dl.pushed) + "</code>" : "");
+        } else if (dl.mode === "pr" || dl.mode === "push") {
+          what = "<b>Pushed</b><code>" + esc(dl.pushed || dl.into || run.branch) + "</code>" + (dl.mode === "push" && dl.into ? "<span>after merging</span>" : "");
+        } else {
+          what = "<b>Merged into</b><code>" + esc(dl.into || run.baseBranch || "your branch") + "</code>";
+        }
+        out.push('<div class="oline ok">' + ICONS.check + what + (dl.at ? "<span>\\u00b7 " + rel(dl.at) + "</span>" : "") + "</div>");
+      }
+      if (run.deliveryError) {
+        out.push('<div class="oline err">' + ICONS.x + "<span>Delivery failed \\u2014 " + esc(run.deliveryError) + "</span>" +
+          '<button class="btn outline xs" type="button" id="oredeliver">' + ICONS.refresh + "Retry delivery</button></div>");
+      }
+      return out.length ? '<div class="olines">' + out.join("") + "</div>" : "";
+    }
+    function redeliverOrch(runId, btn){
+      var run = findOrchRun(runId) || { id: runId };
+      orchAction(run, "deliver", {}, btn, function(j){
+        var r = (j && j.run) || {};
+        toast(r.deliveryError ? "delivery failed again \\u2014 " + r.deliveryError.slice(0, 80) : "delivered");
+      });
+    }
+    function orchTaskCard(run, t){
+      var s = ORCH_TASK_ST[t.status] || [t.status, "off"];
+      var files = t.files || [];
+      var key = run.id + "/" + t.id;
+      var open = !!orch.files[key];
+      return '<div class="otask" data-otask="' + esc(t.id) + '" title="open ' + esc(t.id) + '\\u2019s thread">' +
+        '<div class="otr1">' + agentGlyph(t.kind, t.agent) + '<span class="oid">' + esc(t.id) + "</span>" +
+          '<span class="oag">' + esc(agentLabel(t.kind, t.agent)) + "</span>" +
+          '<span class="ost ' + s[1] + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span></div>" +
+        '<div class="ott">' + esc(t.title) + "</div>" +
+        '<div class="otb">' +
+          (t.dependsOn || []).map(function(d){ return '<span class="obdg" title="waits for ' + esc(d) + '">after ' + esc(d) + "</span>"; }).join("") +
+          (t.attempts > 1 ? '<span class="obdg" title="attempts">\\u00d7' + Number(t.attempts) + "</span>" : "") +
+          (t.costUsd ? '<span class="obdg">' + money(t.costUsd) + "</span>" : "") +
+          (files.length ? '<button type="button" class="ofbtn" data-ofiles="' + esc(key) + '">' + files.length + " file" + (files.length === 1 ? "" : "s") + (open ? " \\u25be" : " \\u25b8") + "</button>" : "") +
+        "</div>" +
+        (open && files.length ? '<div class="ofiles">' + files.map(function(f){ return "<span>" + esc(f) + "</span>"; }).join("") + "</div>" : "") +
+        (t.error ? '<div class="oerr">' + esc(t.error) + "</div>" : "") +
+        "</div>";
+    }
+    function wireOrchHead(){
+      var r = document.getElementById("orefresh"); if (r) r.onclick = loadOrch;
+    }
+    function orchAction(run, action, body, btn, done){
+      if (btn) btn.disabled = true;
+      return api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/" + action, {
+        method: "POST", body: JSON.stringify(body || {}),
+      }).then(function(j){
+        if (j && j.run) mergeOrchRun(j.run);
+        if (done) done(j);
+        loadOrch();
+      }).catch(function(err){ if (btn) btn.disabled = false; toast(err.message); });
+    }
+    function applyOrch(runId, btn){
+      var run = findOrchRun(runId) || { id: runId };
+      orchAction(run, "apply", {}, btn, function(j){ toast("merged into " + ((j && j.into) || "your branch")); refreshTree(true); if (state.refreshExplorer) state.refreshExplorer(); });
+    }
+    function wireOrchDetail(el, run){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-run]"), function(row){
+        row.onclick = function(){ orch.sel = row.getAttribute("data-run"); orch.pinned = true; drawOrch(); };
+      });
+      var th = el.querySelector("#othread"); if (th) th.onclick = function(){ openOrchChat(run.chat); };
+      var ab = el.querySelector("#oabort");
+      if (ab) ab.onclick = function(){
+        if (!window.confirm("Abort this orchestra run? Running workers are stopped; finished work stays on " + run.branch + ".")) return;
+        orchAction(run, "abort", {}, ab, function(){ toast("orchestra aborted"); });
+      };
+      var apb = el.querySelector("#oapply"); if (apb) apb.onclick = function(){ applyOrch(run.id, apb); };
+      var rdb = el.querySelector("#oredeliver"); if (rdb) rdb.onclick = function(){ redeliverOrch(run.id, rdb); };
+      var cl = el.querySelector("#oclean");
+      if (cl) cl.onclick = function(){ orchAction(run, "cleanup", {}, cl, function(){ toast("worktrees removed"); }); };
+      var rb = el.querySelector("#oreplybtn"), rt = el.querySelector("#oreply");
+      if (rb && rt) {
+        var go = function(){
+          var v = (rt.value || "").trim(); if (!v) { rt.focus(); return; }
+          orchAction(run, "reply", { text: v }, rb, function(){ toast("sent to the orchestrator"); });
+        };
+        rb.onclick = go;
+        rt.onkeydown = function(e){ if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); go(); } };
+      }
+      Array.prototype.forEach.call(el.querySelectorAll("[data-ofiles]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation(); // the card behind it opens the thread
+          var k = b.getAttribute("data-ofiles"); orch.files[k] = !orch.files[k]; drawOrch();
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-otask]"), function(card){
+        card.onclick = function(){
+          var t = (run.tasks || []).filter(function(x){ return x.id === card.getAttribute("data-otask"); })[0];
+          if (t) openOrchChat(t.chat);
+        };
+      });
+    }
+    loadOrch();
+
+    // ---- approvals: agents in "always ask" waiting on you --------------------
+    // The daemon holds each request open until someone answers; the thread
+    // shows it as a card (lineFor), the badge counts every one in the project.
+    function loadApprovals(){
+      api("/api/projects/" + pid + "/approvals").then(function(j){
+        if (state.pid !== pid) return;
+        state.approvals = { pid: pid, list: j.approvals || [] };
+        drawApBadge();
+      }).catch(function(){});
+    }
+    function onApprovalEvent(ev){
+      if (!ev || ev.kind !== "approval") return;
+      var p = ev.payload || {};
+      if (!state.approvals || state.approvals.pid !== pid) state.approvals = { pid: pid, list: [] };
+      if (p.phase === "requested") {
+        var list = state.approvals.list;
+        if (list.some(function(a){ return a.id === p.approvalId; })) return;
+        list.push({ id: p.approvalId, projectId: pid, agent: ev.agentId, tool: p.tool, input: p.input, createdAt: ev.ts, chat: ev.chat || "main" });
+        drawApBadge();
+        // In this thread the card is right there; anywhere else, say so.
+        var here = (ev.chat || "main") === chatId && (!desktop || state.tab === "thread");
+        if (!here) toast("\\u23f8 " + labelOf(ev.agentId) + " asks to use " + (p.tool || "a tool") + " \\u2014 see the approvals badge");
+        announce(labelOf(ev.agentId) + " is waiting for your approval to use " + (p.tool || "a tool"));
+      } else if (p.phase === "decided") {
+        dropApproval(p.approvalId);
+        settleApprovalCards(p.approvalId, p.behavior, p.message);
+      }
+    }
+    loadApprovals();
+
+    // ---- Fleet: what every agent in every open project is doing ------------
+    // A reading of GET /api/activity, polled every 2s while you can see it —
+    // the other projects' sockets aren't this view's to hold — and nudged
+    // sooner by this project's own events.
+    function fleetEl(){
+      if (desktop) return state.tab === "fleet" ? document.getElementById("pane-fleet") : null;
+      return document.getElementById("fleetsheet");
+    }
+    function loadFleet(){
+      return api("/api/activity").then(function(j){
+        if (state.pid !== pid) return;
+        fleet.data = j; fleet.err = "";
+        drawFleet();
+      }).catch(function(err){ fleet.err = err.message; drawFleet(); });
+    }
+    function fleetPoll(on){
+      if (on && !fleet.poll) {
+        fleet.poll = setInterval(function(){ if (!fleetEl()) { fleetPoll(false); return; } loadFleet(); }, 2000);
+        state.timers.push(fleet.poll); // a project switch clears it with the rest
+      } else if (!on && fleet.poll) { clearInterval(fleet.poll); fleet.poll = null; }
+    }
+    // Events that change a Fleet row; a burst (a plan spawning five tasks)
+    // coalesces into one fetch.
+    var FLEET_KINDS = { run_complete: 1, handoff: 1, status: 1, tool_call: 1, file_edit: 1, message: 1, orchestra: 1, approval: 1,
+      needs_input: 1, error: 1, agent_join: 1, agent_leave: 1, subtask_started: 1, subtask_done: 1, subtask_failed: 1,
+      route_started: 1, route_step: 1, route_completed: 1, route_failed: 1 };
+    function onFleetEvent(ev){
+      if (!ev || !FLEET_KINDS[ev.kind] || fleet.t || !fleetEl()) return;
+      fleet.t = setTimeout(function(){ fleet.t = null; if (state.pid === pid && fleetEl()) loadFleet(); }, 250);
+    }
+    function openFleetSheet(){
+      var el = document.getElementById("routesheet"); if (!el) return;
+      el.innerHTML = '<div class="sheet"><div id="fleetsheet"></div></div>';
+      // the sheet sits at the head of the thread, which is usually scrolled to its end
+      var sc = document.getElementById("pane-thread"); if (sc) sc.scrollTop = 0;
+      drawFleet(); loadFleet(); fleetPoll(true);
+    }
+    function closeFleetSheet(){
+      var el = document.getElementById("routesheet");
+      if (el && document.getElementById("fleetsheet")) el.innerHTML = "";
+      fleetPoll(false);
+    }
+    /** "2m 10s" since a turn started — how long it has been at it. */
+    function fleetSince(ts){
+      var s = Math.max(0, Math.floor((Date.now() - Number(ts)) / 1000));
+      if (s < 60) return s + "s";
+      if (s < 3600) return Math.floor(s / 60) + "m " + (s % 60) + "s";
+      return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+    }
+    function drawFleet(){
+      var el = fleetEl(); if (!el) return;
+      var d = fleet.data, projects = ((d && d.projects) || []).slice();
+      // this project first; the rest as the daemon lists them
+      projects.sort(function(a, b){ return ((b.project || {}).id === pid) - ((a.project || {}).id === pid); });
+      var agentsN = 0, busyN = 0;
+      projects.forEach(function(pr){ (pr.agents || []).forEach(function(a){ agentsN++; if (a.busy) busyN++; }); });
+      var head = '<div class="ohead"><span class="ot">Fleet</span>' +
+        '<span class="os">What every agent in every open project is doing, right now.</span><span class="spacer"></span>' +
+        (d ? '<span class="fsum"><span class="fchip' + (busyN ? " live" : "") + '">' + busyN + " working</span>" +
+          '<span class="fchip">' + agentsN + " agent" + (agentsN === 1 ? "" : "s") + "</span>" +
+          (d.approvals ? '<span class="fchip warn">' + Number(d.approvals) + " to approve</span>" : "") + "</span>" : "") +
+        '<button class="iconbtn" id="frefresh" title="refresh">' + ICONS.refresh + "</button></div>";
+      if (!d) {
+        el.innerHTML = '<div class="fleetview">' + head + (fleet.err ? '<div class="onote err">' + esc(fleet.err) + "</div>" : LOADER) + "</div>";
+      } else if (!agentsN) {
+        el.innerHTML = '<div class="fleetview">' + head + '<div class="oempty"><b>No agents running.</b><br>' +
+          "Open a project with agents on its roster and every one shows up here \\u2014 what it\\u2019s doing, in which thread, and for how long.</div></div>";
+      } else {
+        el.innerHTML = '<div class="fleetview">' + head +
+          (busyN ? "" : '<div class="fnote">No agents running right now \\u2014 everyone below is idle.</div>') +
+          projects.map(fleetProject).join("") + "</div>";
+      }
+      var rf = el.querySelector("#frefresh"); if (rf) rf.onclick = loadFleet;
+      Array.prototype.forEach.call(el.querySelectorAll("[data-fchat]"), function(b){
+        b.onclick = function(){ openFleetThread(b.getAttribute("data-fpid"), b.getAttribute("data-fchat")); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-fopen]"), function(b){
+        b.onclick = function(){ openFleetThread(b.getAttribute("data-fopen"), null); };
+      });
+    }
+    function fleetProject(pr){
+      var info = pr.project || {}, agents = pr.agents || [];
+      var busy = agents.filter(function(a){ return a.busy; }).length;
+      var holder = agents.filter(function(a){ return a.holdsBaton; })[0];
+      var kindIn = function(id){ var a = agents.filter(function(x){ return x.id === id; })[0]; return a ? a.kind : null; };
+      var h = hue(String(info.id || info.name || "?"));
+      var out = '<div class="fproj" data-fproj="' + esc(info.id) + '">' +
+        '<div class="fph"><span class="fpg" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 18%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +
+          esc(String(info.name || info.id || "?").slice(0, 1)) + "</span>" +
+          '<span class="fpn">' + esc(info.name || info.id) + "</span>" +
+          (info.id === pid ? '<span class="fcur">this project</span>' : "") +
+          '<span class="fpm">' + (busy ? busy + " working" : "idle") + (holder ? " \\u00b7 baton " + esc(holder.id) : "") + "</span>" +
+          '<span class="spacer"></span>' +
+          (info.id !== pid ? '<button class="btn ghost xs" type="button" data-fopen="' + esc(info.id) + '">Open</button>' : "") + "</div>" +
+        agents.map(function(a){ return fleetAgentRow(info, a); }).join("");
+      var o = pr.orchestra;
+      if (o && !orchTerminal(o.status)) {
+        out += '<div class="forch"><div class="foh"><span class="fok">Orchestra</span>' + orchPill(o.status) +
+          '<span class="fog" title="' + esc(o.goal) + '">' + esc(o.goal) + "</span>" +
+          (o.chat ? '<span class="spacer" style="margin-left:auto"></span><button class="fthr" type="button" data-fchat="' + esc(o.chat) + '" data-fpid="' + esc(info.id) + '">' +
+            ICONS.thread + "<span>orchestrator thread</span></button>" : "") + "</div>" +
+          (o.tasks || []).map(function(t){
+            var s = ORCH_TASK_ST[t.status] || [t.status || "", "off"], k = kindIn(t.agent);
+            return '<div class="fotask"><span class="fost ' + s[1] + '">' + (t.status === "running" ? '<span class="fspin"></span>' : '<span class="odot ' + s[1] + '"></span>') + esc(s[0]) + "</span>" +
+              '<span class="foag">' + agentGlyph(k, t.agent) + "<span>" + esc(agentLabel(k, t.agent)) + "</span></span>" +
+              '<span class="fotl"><b title="' + esc(t.title) + '">' + esc(t.id) + " \\u00b7 " + esc(t.title) + "</b>" +
+                (t.last && t.last.line ? '<span class="fline">' + esc(t.last.line) + '<span class="ft">' + rel(t.last.ts) + "</span></span>" : "") + "</span>" +
+              (t.chat ? '<button class="fthr" type="button" data-fchat="' + esc(t.chat) + '" data-fpid="' + esc(info.id) + '" title="open ' + esc(t.id) + '\\u2019s thread">' + ICONS.thread + "<span>thread</span></button>" : "<span></span>") +
+              "</div>";
+          }).join("") + "</div>";
+      }
+      // borrowed hands and a pipeline in flight, one line each
+      var extra = (pr.subtasks || []).map(function(st){
+        return '<div class="fx">\\u21b3 <b>' + esc(st.agentId) + "</b> subtask for " + esc(st.parent) + " \\u2014 " + esc(String(st.task || "").slice(0, 140)) + "</div>";
+      });
+      var r = pr.route;
+      if (r && (r.status === "running" || r.status === "waiting_human")) {
+        var steps = r.steps || [];
+        extra.push('<div class="fx">\\u25b8 route <b>' + esc(r.name || "route") + "</b> " +
+          (r.mode === "dynamic" ? "hop " + (Number(r.current) + 1) : "step " + (Number(r.current) + 1) + "/" + steps.length) +
+          (steps[r.current] ? " \\u00b7 " + esc(steps[r.current]) : "") + (r.status === "waiting_human" ? " \\u00b7 waiting for you" : "") + "</div>");
+      }
+      if (extra.length) out += '<div class="fextra">' + extra.join("") + "</div>";
+      return out + "</div>";
+    }
+    function fleetAgentRow(info, a){
+      var lbl = agentLabel(a.kind, a.id), last = a.last;
+      var sub = [a.id !== lbl ? a.id : "", a.role || ""].filter(Boolean).join(" \\u00b7 ");
+      var chatName = a.chatTitle || (a.chat === "main" ? "Main thread" : a.chat);
+      return '<div class="frow' + (a.busy ? " busy" : "") + '" data-fagent="' + esc(a.id) + '">' +
+        '<span class="fg">' + agentGlyph(a.kind, a.id) + "</span>" +
+        '<span class="fn"><b>' + esc(lbl) + "</b>" + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</span>" +
+        '<span class="fs">' + (a.busy ? '<span class="fspin"></span>working' + (a.since ? " \\u00b7 " + fleetSince(a.since) : "") : '<span class="fidle"></span>idle') + "</span>" +
+        '<span class="fa">' +
+          (a.chat ? '<button class="fthr" type="button" data-fchat="' + esc(a.chat) + '" data-fpid="' + esc(info.id) + '" title="open this thread">' + ICONS.thread + "<span>" + esc(chatName) + "</span></button>" : "") +
+          (last && last.line ? '<span class="fline">' + esc(last.line) + '<span class="ft">' + rel(last.ts) + "</span></span>" : (a.chat ? "" : '<span class="fline">no activity yet</span>')) +
+        "</span>" +
+        '<span class="fb">' + (a.holdsBaton ? '<span class="fbaton" title="holds the baton">baton</span>' : "") + permBadge(a.permissions || "auto") + "</span></div>";
+    }
+    /** Jump to a project's thread — this one or another; setChat handles both. */
+    function openFleetThread(toPid, chat){
+      if (desktop && state.setChat) {
+        if (chat) state.setChat(toPid, chat);
+        else if (state.selectProject) state.selectProject(toPid);
+        return;
+      }
+      // The phone has one thread per project: go to the project.
+      if (toPid !== pid) { location.hash = "#p/" + toPid; return; }
+      closeFleetSheet();
+    }
+
+    // Git delivery lives in the status bar, which only the desktop shell has.
+    if (desktop) loadGitDelivery(pid);
+
     bindComposer();
+  }
+
+  // ---- permissions: bypass | auto | ask, per agent -------------------------
+  // The table lives on the daemon (core/permissions.ts) and is fetched once:
+  // each kind's three cells, what they mean on that CLI, and the ones the real
+  // CLI couldn't honour. A kind with no row (echo, a custom adapter) still
+  // gets the three words, with meanings that promise nothing specific.
+  var PERM_MODES = ["bypass", "auto", "ask"];
+  var PERM_NAMES = { bypass: "Bypass", auto: "Auto", ask: "Always ask" };
+  var PERM_SHORT = { bypass: "Bypass", auto: "Auto", ask: "Ask" };
+  var GENERIC_PERMS = { default: "auto", modes: {
+    bypass: { flags: "", label: "Bypass \\u2014 runs anything, never asks" },
+    auto: { flags: "", label: "Auto \\u2014 the agent\\u2019s own defaults" },
+    ask: { flags: "", label: "Always ask \\u2014 nothing changes without you" } } };
+  function permProfile(kind){ var t = state.permProfiles; return (t && kind && t[kind]) || GENERIC_PERMS; }
+  function loadPermProfiles(){
+    if (state.permProfiles) return Promise.resolve(state.permProfiles);
+    if (!state.permLoading) {
+      state.permLoading = api("/api/permissions").then(function(j){
+        state.permProfiles = (j && j.profiles) || {}; state.permLoading = null; return state.permProfiles;
+      }).catch(function(){ state.permLoading = null; return null; });
+    }
+    return state.permLoading;
+  }
+  /** The mode an agent runs in: what the daemon says, else its kind's default. */
+  function permOf(a){ return (a && a.permissions) || permProfile(a && a.kind).default || "auto"; }
+  /** "Bypass — runs any tool" → ["Bypass", "runs any tool"]. */
+  function permSplit(label){
+    label = String(label || "");
+    var i = label.indexOf(" \\u2014 ");
+    return i < 0 ? [label, ""] : [label.slice(0, i), label.slice(i + 3)];
+  }
+  /** The tiny mode badge. With an agent id it's also the way to change it. */
+  function permBadge(mode, agentId){
+    return '<span class="pbdg ' + esc(mode) + '"' + (agentId ? ' data-permof="' + esc(agentId) + '"' : "") +
+      ' title="permissions: ' + esc(PERM_NAMES[mode] || mode) + (agentId ? " \\u2014 click to change" : "") + '">' + esc(mode) + "</span>";
+  }
+  // What the platform calls the command key, for the shortcuts we print.
+  var KMOD = /Mac|iPhone|iPad/.test(navigator.platform || "") ? "\\u2318" : "Ctrl+";
+
+  // ---- approvals: an agent in "always ask" waits on a human -----------------
+  // Claude Code routes each permission prompt through Loom's MCP approve tool
+  // (core/approvals.ts); the daemon holds the request open and puts it in the
+  // thread. These draw it, answer it, and fold it once answered — wherever the
+  // answer came from, this window, another, or the phone.
+  /** A tool's input for a human: JSON indented, else as sent. */
+  function prettyInput(v){
+    if (v == null) return "";
+    if (typeof v !== "string") { try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); } }
+    // a preview cut at 4000 chars no longer parses — show it as it came
+    try { return JSON.stringify(JSON.parse(v), null, 2); } catch (e) { return v; }
+  }
+  /** One request as a card: who, which tool, with what (folded when long), and the two answers. */
+  function approvalCard(a, opts){
+    opts = opts || {};
+    var id = a.approvalId || a.id, agent = a.agent || a.agentId || "agent";
+    var body = prettyInput(a.input);
+    var gist = String(body).replace(/\\s+/g, " ").slice(0, 80);
+    var when = a.createdAt || a.ts;
+    return '<div class="apcard" data-approval="' + esc(id) + '">' +
+      '<div class="aph"><span class="apk">Approval needed</span>' +
+        '<span class="apag">' + agentGlyph(kindOf(agent), agent) + esc(labelOf(agent)) + "</span>" +
+        '<span class="apw">wants to use</span><span class="aptool">' + esc(a.tool || "a tool") + "</span>" +
+        (when ? '<span class="aprel">' + rel(when) + "</span>" : "") + "</div>" +
+      '<div class="apbody">' +
+        (body && body !== "{}" ? '<details class="apin"' + (body.length <= 280 ? " open" : "") + "><summary>input \\u00b7 " + esc(gist) + "</summary><pre>" + esc(body) + "</pre></details>" : "") +
+        '<div class="apact"><input class="apwhy" placeholder="Reason, if you deny (optional)" maxlength="500" aria-label="reason for denying">' +
+          (opts.open && a.chat ? '<button class="apopen" type="button" data-apchat="' + esc(a.chat) + '" title="open the thread it came from">thread</button>' : "") +
+          '<button class="btn outline sm apdeny" type="button" data-apact="deny" data-apid="' + esc(id) + '">' + ICONS.x + "Deny</button>" +
+          '<button class="btn primary sm apallow" type="button" data-apact="allow" data-apid="' + esc(id) + '">' + ICONS.check + "Allow</button></div>" +
+      "</div>" +
+      '<div class="apres"></div></div>';
+  }
+  /**
+   * Fold every card for this request to its outcome. behavior "" means we
+   * know it was answered but not how (a 404: someone else got there first) —
+   * which never overwrites a card that already knows.
+   */
+  function settleApprovalCards(id, behavior, message){
+    var n = 0;
+    Array.prototype.forEach.call(document.querySelectorAll(".apcard[data-approval]"), function(c){
+      if (c.getAttribute("data-approval") !== id) return;
+      n++;
+      if (!behavior && c.classList.contains("done")) return;
+      var tool = (c.querySelector(".aptool") || {}).textContent || "tool";
+      var who = (c.querySelector(".apag") || {}).textContent || "";
+      var res = c.querySelector(".apres");
+      c.classList.add("done");
+      if (res) res.innerHTML = (behavior === "allow" ? '<span class="ok">\\u2713 allowed</span>'
+          : behavior === "deny" ? '<span class="no">\\u2715 denied</span>' : "<span>\\u2713 answered elsewhere</span>") +
+        "<span>" + esc(tool) + (who ? " \\u00b7 " + esc(who) : "") + (message ? " \\u2014 " + esc(message) : "") + "</span>";
+    });
+    return n > 0;
+  }
+  function pendingApprovals(){ return state.approvals && state.approvals.pid === state.pid ? state.approvals.list : []; }
+  function dropApproval(id){
+    var ap = state.approvals; if (!ap) return;
+    ap.list = ap.list.filter(function(a){ return a.id !== id; });
+    drawApBadge();
+  }
+  function decideApproval(id, decision, message, btn){
+    var pid = state.pid;
+    var card = btn && btn.closest ? btn.closest(".apcard") : null;
+    var btns = card ? card.querySelectorAll("button[data-apact]") : [];
+    Array.prototype.forEach.call(btns, function(b){ b.disabled = true; });
+    var body = { decision: decision };
+    if (decision === "deny" && message) body.message = message;
+    return api("/api/projects/" + pid + "/approvals/" + encodeURIComponent(id), { method: "POST", body: JSON.stringify(body) })
+      .then(function(){ settleApprovalCards(id, decision, decision === "deny" ? message : ""); dropApproval(id); })
+      .catch(function(err){
+        // Answered already (another window, the phone): the card is stale, not wrong.
+        if (/no such approval|already answered/i.test(err.message)) { settleApprovalCards(id, "", ""); dropApproval(id); return; }
+        Array.prototype.forEach.call(btns, function(b){ b.disabled = false; });
+        toast(err.message);
+      });
+  }
+  /** Delegated clicks for any surface that shows approval cards. True if it handled one. */
+  function approvalClick(ev){
+    var t = ev.target;
+    var open = t.closest && t.closest("[data-apchat]");
+    if (open) { closeApprovalsPop(); if (state.setChat) state.setChat(state.pid, open.getAttribute("data-apchat")); return true; }
+    var b = t.closest && t.closest("[data-apact]");
+    if (!b) return false;
+    var card = b.closest(".apcard"), why = card && card.querySelector(".apwhy");
+    decideApproval(b.getAttribute("data-apid"), b.getAttribute("data-apact"), why ? why.value.trim() : "", b);
+    return true;
+  }
+  /** Enter in a card's reason box denies with that reason. */
+  function approvalKey(ev){
+    if (ev.key !== "Enter" || !ev.target.classList || !ev.target.classList.contains("apwhy")) return;
+    ev.preventDefault();
+    var d = ev.target.closest(".apcard").querySelector('[data-apact="deny"]');
+    if (d && !d.disabled) d.click();
+  }
+  /** The pending count, wherever a badge for it is drawn (tab strip, phone header). */
+  function drawApBadge(){
+    var n = pendingApprovals().length;
+    Array.prototype.forEach.call(document.querySelectorAll(".apbadge"), function(b){
+      b.style.display = n ? "" : "none";
+      b.innerHTML = '<span class="apn">' + n + "</span> to approve";
+      b.title = n + " tool call" + (n === 1 ? "" : "s") + " waiting on your approval";
+    });
+    drawApPop();
+  }
+  /** Every request waiting in this project, answerable in place. */
+  function openApprovalsPop(anchor){
+    if (document.getElementById("appop")) { closeApprovalsPop(); return; }
+    var pop = document.createElement("div");
+    pop.id = "appop"; pop.className = "appop";
+    pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "pending approvals");
+    document.body.appendChild(pop);
+    pop.addEventListener("click", function(ev){ if (ev.target.closest && ev.target.closest("#appopx")) { closeApprovalsPop(); return; } approvalClick(ev); });
+    pop.addEventListener("keydown", approvalKey);
+    drawApPop();
+    var r = anchor.getBoundingClientRect();
+    pop.style.top = Math.round(r.bottom + 6) + "px";
+    pop.style.left = Math.max(12, Math.min(window.innerWidth - pop.offsetWidth - 12, Math.round(r.right - pop.offsetWidth))) + "px";
+    setTimeout(function(){ document.addEventListener("mousedown", apPopAway); document.addEventListener("keydown", apPopEsc); }, 0);
+  }
+  function drawApPop(){
+    var pop = document.getElementById("appop"); if (!pop) return;
+    var list = pendingApprovals();
+    pop.innerHTML = '<div class="appoph">Waiting on you <span class="bn">' + list.length + "</span>" +
+      '<span class="spacer"></span><button class="iconbtn" id="appopx" type="button" title="close">' + ICONS.x + "</button></div>" +
+      '<div class="appopl">' + (list.length ? list.map(function(a){ return approvalCard(a, { open: true }); }).join("")
+        : '<div class="pmempty">Nothing waiting \\u2014 every tool call has its answer.</div>') + "</div>";
+  }
+  function apPopAway(ev){
+    var pop = document.getElementById("appop");
+    if (pop && !pop.contains(ev.target) && !(ev.target.closest && ev.target.closest(".apbadge"))) closeApprovalsPop();
+  }
+  function apPopEsc(ev){ if (ev.key === "Escape") closeApprovalsPop(); }
+  function closeApprovalsPop(){
+    document.removeEventListener("mousedown", apPopAway); document.removeEventListener("keydown", apPopEsc);
+    var pop = document.getElementById("appop"); if (pop) pop.remove();
+  }
+
+  // ---- git delivery (per project; the status bar's toggle) -----------------
+  // What happens to finished work without you asking: nothing, a commit per
+  // turn, a push after it, or — for an orchestra — its own branch and a PR.
+  // It is project config (PATCH /config), so the CLI and a phone see the same.
+  var GIT_DELIVERY = [
+    { mode: "push", name: "Commit & push", short: "\\u21e1 push", icon: "",
+      sub: "Each turn is committed; a finished orchestra merges into your branch, then pushes." },
+    { mode: "pr", name: "Commit & open PR", short: "\\u21e1 PR", icon: "", menuIcon: ICONS.pr,
+      sub: "Each turn is committed; a finished orchestra pushes its own branch and opens a PR through gh." },
+    { mode: "commit", name: "Commit only", short: "commit", icon: ICONS.branch,
+      sub: "Each turn is committed; a finished orchestra merges into your branch. Nothing leaves this machine." },
+    { mode: "none", name: "No commit", short: "no commit", icon: ICONS.branch,
+      sub: "Nothing is committed for you \\u2014 the working tree is yours to commit." },
+  ];
+  function gitDeliveryInfo(mode){ return GIT_DELIVERY.filter(function(g){ return g.mode === mode; })[0] || GIT_DELIVERY[3]; }
+  function loadGitDelivery(pid){
+    api("/api/projects/" + pid + "/config").then(function(j){
+      if (state.pid !== pid) return;
+      state.gitDel = { pid: pid, mode: (j && j.git && j.git.delivery) || "none" };
+      drawStatusbar();
+    }).catch(function(){});
+  }
+  function setGitDelivery(pid, mode){
+    var was = state.gitDel;
+    state.gitDel = { pid: pid, mode: mode }; drawStatusbar(); // paint now; the PATCH confirms or puts it back
+    api("/api/projects/" + pid + "/config", { method: "PATCH", body: JSON.stringify({ git: { delivery: mode } }) })
+      .then(function(j){
+        state.gitDel = { pid: pid, mode: (j && j.git && j.git.delivery) || "none" };
+        drawStatusbar();
+        toast("git delivery \\u2192 " + gitDeliveryInfo(state.gitDel.mode).name.toLowerCase());
+      })
+      .catch(function(err){ state.gitDel = was; drawStatusbar(); toast(err.message); });
+  }
+  /** The four policies as a menu, opened upward from the status bar. */
+  function openGitDeliveryMenu(anchor){
+    if (document.getElementById("gdmenu")) { closeGitDeliveryMenu(); return; }
+    var p = state.project, gd = state.gitDel; if (!p || !gd) return;
+    var m = document.createElement("div");
+    m.id = "gdmenu"; m.className = "gdmenu"; m.setAttribute("role", "menu");
+    m.innerHTML = '<div class="gdh">Git delivery<span class="gdp">' + esc(p.name || p.id) + "</span></div>" +
+      GIT_DELIVERY.map(function(g){
+        return '<button class="gdi' + (g.mode === gd.mode ? " sel" : "") + '" type="button" role="menuitemradio" aria-checked="' + (g.mode === gd.mode) + '" data-gd="' + g.mode + '">' +
+          '<span class="gic">' + (g.menuIcon || g.icon || ICONS.push) + '</span><span class="gdt"><b>' + esc(g.name) + "</b><small>" + esc(g.sub) + "</small></span>" +
+          (g.mode === gd.mode ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</button>";
+      }).join("") +
+      '<div class="gdf">Per project \\u00b7 saved in its Loom config</div>';
+    document.body.appendChild(m);
+    var r = anchor.getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, Math.round(r.left))) + "px";
+    m.style.top = Math.max(8, Math.round(r.top - m.offsetHeight - 6)) + "px";
+    Array.prototype.forEach.call(m.querySelectorAll("[data-gd]"), function(b){
+      b.onclick = function(){ var mode = b.getAttribute("data-gd"); closeGitDeliveryMenu(); if (mode !== gd.mode) setGitDelivery(p.id, mode); };
+    });
+    var first = m.querySelector(".gdi.sel") || m.querySelector(".gdi"); if (first) first.focus();
+    setTimeout(function(){ document.addEventListener("mousedown", gdAway); document.addEventListener("keydown", gdKey); }, 0);
+  }
+  function gdAway(ev){ var m = document.getElementById("gdmenu"); if (m && !m.contains(ev.target) && ev.target.id !== "gitdel" && !(ev.target.closest && ev.target.closest("#gitdel"))) closeGitDeliveryMenu(); }
+  function gdKey(ev){
+    var m = document.getElementById("gdmenu"); if (!m) return;
+    if (ev.key === "Escape") { closeGitDeliveryMenu(); return; }
+    if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+    ev.preventDefault();
+    var items = Array.prototype.slice.call(m.querySelectorAll(".gdi"));
+    var i = items.indexOf(document.activeElement);
+    items[(i + (ev.key === "ArrowDown" ? 1 : -1) + items.length) % items.length].focus();
+  }
+  function closeGitDeliveryMenu(){
+    document.removeEventListener("mousedown", gdAway); document.removeEventListener("keydown", gdKey);
+    var m = document.getElementById("gdmenu"); if (m) m.remove();
   }
 
   // ---- status bar (desktop shell) ------------------------------------------
@@ -7408,6 +9302,14 @@ ${BRAND_SPRITE}
         ? "LoomPad voice backend connected" + (lp && lp.brain ? " \\u00b7 brain " + esc(String(lp.brain)) : "") + " \\u2014 the pad can speak"
         : "LoomPad voice backend offline \\u2014 start it so the pad can speak") +
       '"><span class="sdot' + (lpUp ? "" : " off") + '"></span>LoomPad' + (lpUp ? "" : " offline") + "</button>";
+    // Git delivery sits beside GitHub: both answer "where does finished work
+    // go?" — this one per project, read from its config, a click to change.
+    var gd = state.gitDel, gdSeg = "";
+    if (p && gd && gd.pid === p.id) {
+      var gi = gitDeliveryInfo(gd.mode);
+      gdSeg = '<button class="sit gitdel ' + esc(gi.mode) + '" id="gitdel" type="button" aria-haspopup="menu" title="git delivery for ' +
+        esc(p.name || p.id) + ": " + esc(gi.name) + ' \\u2014 click to change">' + gi.icon + esc(gi.short) + "</button>";
+    }
     el.innerHTML =
       '<span class="sit"><span class="sdot' + (state.wsLive ? "" : " off") + '"></span>' + (state.wsLive ? "live" : "offline") + "</span>" +
       '<span class="sit">' + esc(location.host) + "</span>" +
@@ -7427,6 +9329,7 @@ ${BRAND_SPRITE}
         : "") +
       '<span class="spacer"></span>' +
       lpSeg +
+      gdSeg +
       ghSeg +
       (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
       '<span class="sit">' + (state.projects || []).length + " project" + ((state.projects || []).length === 1 ? "" : "s") + "</span>" +
@@ -7437,6 +9340,8 @@ ${BRAND_SPRITE}
     if (lpp) lpp.onclick = openLoomPad;
     var upill = document.getElementById("usagepill");
     if (upill) upill.onclick = openUsage;
+    var gdb = document.getElementById("gitdel");
+    if (gdb) gdb.onclick = function(){ openGitDeliveryMenu(gdb); };
   }
 
   // GitHub connection, fetched once and after a connect. Machine-wide (gh auth
@@ -8015,12 +9920,18 @@ ${BRAND_SPRITE}
       q("phstage").innerHTML = LOADER;
       q("phlinkrow").style.display = "none";
       api("/api/pair/new", { method: "POST", body: JSON.stringify({ host: net.ip }) }).then(function(r){
-        q("phstage").innerHTML = r.qrSvg
+        // With Loom Cloud on, the link's fragment carries the relay too, so
+        // this phone will reach the machine from any network, not just this one.
+        var viaCloud = /[#&]relay=/.test(r.link || "");
+        q("phstage").innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:12px">' + (r.qrSvg
           ? '<div class="phqrcard">' + r.qrSvg + '</div>'
-          : '<div class="phmsg">Scan is not available here &#8212; use the link below.</div>';
+          : '<div class="phmsg">Scan is not available here &#8212; use the link below.</div>') +
+          (viaCloud ? '<span class="cloudbadge" id="phcloud">' + ICONS.cloud + "Works anywhere via Loom Cloud</span>" : "") + "</div>";
         q("phlinkrow").style.display = "";
         q("phlink").value = r.link;
-        q("phhint").innerHTML = 'Scan with your phone camera, or ' + (current === "tailnet" ? "on the same tailnet " : "on the same Wi-Fi ") + 'open the link. Single use.';
+        q("phhint").innerHTML = viaCloud
+          ? "Scan with your phone camera, or open the link. It pairs here, then keeps working on any network. Single use."
+          : 'Scan with your phone camera, or ' + (current === "tailnet" ? "on the same tailnet " : "on the same Wi-Fi ") + 'open the link. Single use.';
         q("phexp").textContent = r.expiresAt ? "expires " + new Date(r.expiresAt).toLocaleTimeString() : "";
       }).catch(function(e){
         q("phstage").innerHTML = '<div class="phmsg">Could not create a pairing code.</div>';
@@ -8473,6 +10384,7 @@ ${BRAND_SPRITE}
       { id: "preferences", label: "Preferences", icon: ICONS.gear },
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
+      { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "about", label: "About", icon: ICONS.info }
     ];
     var cur = section || "setup";
@@ -8683,9 +10595,11 @@ ${BRAND_SPRITE}
       out.innerHTML = LOADER;
       api("/api/pair/new", { method: "POST", body: "{}" }).then(function(p){
         var mins = p.expiresAt ? Math.max(1, Math.round((p.expiresAt - Date.now()) / 60000)) : 10;
+        var link = p.link || (p.url + "/#pair=" + p.token);
         out.innerHTML = '<div class="snote">On the other device, open <b>' + esc(p.url) +
           "</b> and it will pair automatically from this link. It works once and expires in about " + mins + " minutes.</div>" +
-          '<code class="scmd">' + esc(p.url) + "/#pair=" + esc(p.token) + "</code>";
+          (/[#&]relay=/.test(link) ? '<span class="cloudbadge">' + ICONS.cloud + "Works anywhere via Loom Cloud</span>" : "") +
+          '<code class="scmd">' + esc(link) + "</code>";
       }).catch(function(e){
         // Only an admin client (the one holding the daemon's own token, i.e. the
         // desktop shell) may mint pairing tokens. A paired phone can't — say so,
@@ -8729,6 +10643,68 @@ ${BRAND_SPRITE}
       }).catch(fail);
     }
 
+    // ---- Loom Cloud: the phone reaches this machine from any network ---------
+    // The daemon holds a Supabase Realtime channel open and relays the phone's
+    // requests through it, sealed end to end: the key travels only in the
+    // pairing link's fragment, so Supabase carries ciphertext it cannot read.
+    var cloudErr = "";
+    function renderCloud(){
+      busy();
+      api("/api/cloud").then(drawCloud).catch(fail);
+    }
+    function drawCloud(c){
+      c = c || {};
+      var err = cloudErr || c.error || "";
+      var h = '<div class="setphead">Loom Cloud</div>' +
+        '<div class="setpsub">Reach this computer from your phone on any network. End-to-end encrypted \\u2014 Supabase only relays ciphertext.</div>';
+      h += '<div class="cloudst" id="cloudst">';
+      if (c.connected) h += '<span class="updpill ok">Connected</span>';
+      else if (c.enabled) h += '<span class="updpill warn">On \\u00b7 not connected</span>';
+      else h += '<span class="updpill" style="color:var(--muted-foreground);background:var(--muted)">Off</span>';
+      if (c.enabled) h += '<span class="hintx">' + Number(c.clients || 0) + " phone" + (Number(c.clients) === 1 ? "" : "s") + " connected through the cloud</span>";
+      h += "</div>";
+      if (err) h += '<div class="snote" style="color:var(--err)">' + esc(err) + "</div>";
+      if (c.stats) {
+        h += '<dl class="abgrid"><dt>Requests</dt><dd>' + Number(c.stats.requests || 0) + "</dd>" +
+          "<dt>Frames</dt><dd>" + Number(c.stats.frames || 0) + "</dd>" +
+          "<dt>Rejected</dt><dd>" + Number(c.stats.rejected || 0) + "</dd></dl>";
+      }
+      h += '<div class="sgrouph">Supabase project</div>';
+      h += '<div class="cloudin">' +
+        '<div class="field"><label for="cloudurl">Supabase URL</label>' +
+        '<input id="cloudurl" placeholder="https://your-project.supabase.co" autocomplete="off" spellcheck="false" value="' + esc(c.supabaseUrl || "") + '"></div>' +
+        '<div class="field"><label for="cloudkey">Anon key <span class="opt">' + (c.configured ? "\\u2014 blank keeps the saved one" : "") + "</span></label>" +
+        '<input id="cloudkey" type="password" placeholder="' + (c.configured ? "\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022 saved" : "eyJhbGciOi\\u2026") + '" autocomplete="off" spellcheck="false"></div>' +
+        "</div>";
+      h += '<div class="pillrow">' +
+        '<button class="btn primary sm" id="cloudon">' + (c.enabled ? "Save & reconnect" : "Enable") + "</button>" +
+        (c.enabled ? '<button class="btn ghost sm" id="cloudoff">Disable</button>' : "") +
+        '<button class="btn ghost sm" id="cloudrot" title="a new channel and key">Rotate key</button></div>';
+      h += '<div class="snote">After enabling, pair the phone again (Connect a phone): its link now carries the relay, and the pairing dialog says <b>Works anywhere via Loom Cloud</b>. Rotating the key signs out every phone that paired through the cloud.</div>';
+      pane.innerHTML = h;
+      cloudErr = "";
+      function act(action, body, btn){
+        btn.disabled = true;
+        api("/api/cloud/" + action, { method: "POST", body: JSON.stringify(body || {}) })
+          .then(function(s){ toast(action === "enable" ? (s.connected ? "Loom Cloud connected" : "Loom Cloud on") : action === "disable" ? "Loom Cloud off" : "new key \\u2014 re-pair cloud phones"); drawCloud(s); })
+          .catch(function(e){ cloudErr = e.message; toast(e.message); renderCloud(); });
+      }
+      document.getElementById("cloudon").onclick = function(){
+        var url = document.getElementById("cloudurl").value.trim();
+        var key = document.getElementById("cloudkey").value.trim();
+        var body = {};
+        if (url && url !== (c.supabaseUrl || "")) body.supabaseUrl = url;
+        if (key) body.anonKey = key;
+        act("enable", body, this);
+      };
+      var off = document.getElementById("cloudoff");
+      if (off) off.onclick = function(){ act("disable", {}, off); };
+      document.getElementById("cloudrot").onclick = function(){
+        if (!window.confirm("Rotate the Loom Cloud key? Every phone paired through the cloud has to pair again.")) return;
+        act("rotate", {}, this);
+      };
+    }
+
     // ---- About --------------------------------------------------------------
     function renderAbout(){
       busy();
@@ -8754,6 +10730,7 @@ ${BRAND_SPRITE}
       else if (cur === "preferences") renderPrefs();
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();
+      else if (cur === "cloud") renderCloud();
       else if (cur === "about") renderAbout();
       else renderSetup();
     }
@@ -9548,7 +11525,7 @@ ${BRAND_SPRITE}
     // palette hooks close over the old render's DOM — drop them too
     state.openFile = null; state.showTab = null; state.showRail = null;
     state.selectAgent = null; state.termRun = null; state.setChat = null;
-    state.reloadBoard = null;
+    state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
@@ -9578,6 +11555,11 @@ ${BRAND_SPRITE}
       if (state.token && !document.querySelector(".scrim")) { e.preventDefault(); openPalette(); }
       return;
     }
+    // ⌘⇧V / Ctrl+Shift+V — the prompt manager, even mid-type (that's when you want it)
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === "v" || e.key === "V")) {
+      if (state.openPrompts && !document.querySelector(".scrim")) { e.preventDefault(); state.openPrompts(); }
+      return;
+    }
     if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === "\`" || e.key === "~")) {
       if (state.toggleTerm) { e.preventDefault(); state.toggleTerm(); }
       return;
@@ -9600,6 +11582,28 @@ ${BRAND_SPRITE}
         return false;
       });
     }).catch(function(){ return false; });
+  }
+  // The Electron shell's own menu bar. Each item arrives as a word; the browser
+  // build has no loomNative, so this is a no-op there.
+  if (window.loomNative && window.loomNative.onMenu) {
+    window.loomNative.onMenu(function(item){
+      if (!state.token) return;
+      if (item === "settings") { if (!document.querySelector(".scrim")) openSettingsModal(); return; }
+      if (item === "cloud") { if (!document.querySelector(".scrim")) openSettingsModal("cloud"); return; }
+      if (item === "pair") { openConnectPhone(); return; }
+      if (item === "new-chat") {
+        var rows = Array.prototype.filter.call(document.querySelectorAll("[data-newchat]"), function(r){ return r.getAttribute("data-newchat") === state.pid; });
+        var row = rows[0] || document.querySelector("[data-newchat]");
+        if (row) row.click(); else toast("open a project first");
+        return;
+      }
+      if (item === "orchestrate") {
+        if (!state.setComposerMode) { toast("open a project first"); return; }
+        if (state.showTab) state.showTab("thread");
+        state.setComposerMode("orch");
+        var box = document.getElementById("box"); if (box) box.focus();
+      }
+    });
   }
   bootstrapAdmin().then(function(){
     return pairFromHash();

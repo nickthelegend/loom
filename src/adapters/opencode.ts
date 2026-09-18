@@ -15,6 +15,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, agentEnv, cliAvailable, fetchJson, frameBriefing, freePort, waitFor } from "./base.js";
+import { permissionFor } from "../core/permissions.js";
 
 interface OpenCodeOptions {
   /** Reuse an already-running server instead of spawning one. */
@@ -39,6 +40,33 @@ export function parseModelRef(model: string): { providerID: string; id: string }
   const idx = model.indexOf("/");
   if (idx <= 0 || idx === model.length - 1) return null;
   return { providerID: model.slice(0, idx), id: model.slice(idx + 1) };
+}
+
+/**
+ * The model to use when the project pins none: opencode's free house model if
+ * the server offers it, else any free opencode-hosted model, else nothing
+ * (opencode's own default — the old behaviour).
+ */
+export function pickDefaultModel(ids: string[]): string | undefined {
+  if (ids.includes("opencode/big-pickle")) return "opencode/big-pickle";
+  return ids.find((id) => id.startsWith("opencode/") && id.endsWith("-free"));
+}
+
+/**
+ * Permissions (core/permissions.ts) for the spawned server, via opencode's
+ * inline-config variable — the user's own opencode.json is never touched.
+ */
+export function opencodePermissionEnv(options: object): Record<string, string> {
+  // Only bypass changes anything. "ask" is refused for opencode upstream (see
+  // core/permissions.ts): its headless session API ignored a deny-everything
+  // config and the read-only `plan` agent alike — a file write went through
+  // both (verified on opencode 1.18.31) — so a read-only switch here would lie.
+  if (permissionFor("opencode", options as Record<string, unknown>) !== "bypass") return {};
+  return {
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      permission: { edit: "allow", bash: "allow", webfetch: "allow", external_directory: "allow" },
+    }),
+  };
 }
 
 export class OpenCodeAdapter extends AdapterBase {
@@ -117,7 +145,7 @@ export class OpenCodeAdapter extends AdapterBase {
       const child = spawn(
         "opencode",
         ["serve", "--port", String(port), "--hostname", "127.0.0.1", ...(this.options.extraArgs ?? [])],
-        { cwd: this.projectDir, stdio: "ignore", env: agentEnv() },
+        { cwd: this.projectDir, stdio: "ignore", env: { ...agentEnv(), ...opencodePermissionEnv(this.options) } },
       );
       this.child = child;
       this.recordServePid(child.pid);
@@ -159,11 +187,17 @@ export class OpenCodeAdapter extends AdapterBase {
    * server can actually run — and fail loudly with suggestions instead.
    */
   private async assertModelAvailable(): Promise<void> {
-    if (!this.options.model) return;
     const res = await fetchJson<Json>(`${this.baseUrl}/api/model`).catch(() => null);
     const models = Array.isArray(res?.data) ? (res!.data as Json[]) : [];
     if (!models.length) return; // endpoint unavailable — don't block
     const ids = models.map((m) => `${String(m.providerID)}/${String(m.id)}`);
+    if (!this.options.model) {
+      // No pin: opencode's own default is often a model its Console won't
+      // serve headless ("Model is unavailable" on the first turn, verified on
+      // opencode 1.18.31). Pick one the server says it can run instead.
+      this.options.model = pickDefaultModel(ids);
+      return;
+    }
     if (ids.includes(this.options.model)) return;
     const base = this.options.model.split("/").pop()!.split("-")[0]!.toLowerCase();
     const near = ids.filter((id) => id.toLowerCase().includes(base)).slice(0, 5);

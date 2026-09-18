@@ -1734,7 +1734,7 @@ export function Sheet(props: {
               <Text style={{ color: T.dim, fontSize: 20, lineHeight: 22 }}>✕</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}>
             {props.children}
           </ScrollView>
         </View>

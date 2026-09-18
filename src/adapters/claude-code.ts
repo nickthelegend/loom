@@ -17,6 +17,9 @@ import readline from "node:readline";
 import type { AgentCapabilities, SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, ADAPTER_CAPABILITIES, agentEnv, cliAvailable } from "./base.js";
+import { writeApprovalMcpConfig } from "../core/approvals.js";
+import { permissionFor } from "../core/permissions.js";
+import fs from "node:fs";
 
 interface ClaudeOptions {
   /** claude permission mode for baton turns; default "acceptEdits". */
@@ -84,6 +87,21 @@ export class ClaudeCodeAdapter extends AdapterBase {
     this._busy = true;
     const started = Date.now();
 
+    // Permissions: an explicit legacy permissionMode wins; otherwise the
+    // Loom mode (bypass/auto/ask) maps to Claude's own — see core/permissions.
+    // "ask" routes every prompt to Loom's approval tool, so it needs a daemon
+    // to ask; without one it degrades to plan (read-only), never to "allow".
+    const mode = permissionFor("claude-code", this.options as Record<string, unknown>);
+    let approvalConfig: string | null = null;
+    if (mode === "ask" && !this.options.permissionMode) {
+      approvalConfig = writeApprovalMcpConfig({
+        project: String((this.options as Record<string, unknown>).loomProject ?? ""),
+        agent: this.id,
+      });
+    }
+    const claudeMode =
+      this.options.permissionMode ??
+      (mode === "bypass" ? "bypassPermissions" : mode === "ask" ? (approvalConfig ? "manual" : "plan") : "acceptEdits");
     const args = [
       "-p",
       input.text,
@@ -91,8 +109,9 @@ export class ClaudeCodeAdapter extends AdapterBase {
       "stream-json",
       "--verbose",
       "--permission-mode",
-      this.options.permissionMode ?? "acceptEdits",
+      claudeMode,
     ];
+    if (approvalConfig) args.push("--permission-prompt-tool", "mcp__loom__approve", "--mcp-config", approvalConfig);
     if (this.sessionId) args.push("--resume", this.sessionId);
     if (input.briefing) args.push("--append-system-prompt", input.briefing);
     // The project's MCP servers, for this turn only. The flag is passed ONLY
@@ -174,6 +193,7 @@ export class ClaudeCodeAdapter extends AdapterBase {
     } finally {
       this._busy = false;
       this.child = null;
+      if (approvalConfig) fs.rmSync(approvalConfig, { force: true });
     }
   }
 
