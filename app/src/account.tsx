@@ -13,6 +13,7 @@ import type { Creds } from "./api";
 import { ConnectionBadge, GoogleMark, routeHint, useConnRoute } from "./brand";
 import { Panel, SectionLabel, TAP } from "./components";
 import { Sheet } from "./observatory";
+import { useTeamSummary } from "./team";
 import {
   loadUsageStatsEnabled,
   profileOf,
@@ -90,8 +91,11 @@ export function AccountSheet(props: {
   user: User | null;
   creds: Creds | null;
   onSignedOut: () => void;
+  /** Open the Fleet screen's Team section. */
+  onOpenTeam?: () => void;
 }) {
   const profile = profileOf(props.user);
+  const team = useTeamSummary(props.creds, props.visible);
   const route = useConnRoute();
   const [stats, setStats] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -191,6 +195,50 @@ export function AccountSheet(props: {
           </Text>
         </Panel>
       </View>
+
+      {/* team: a pointer to the Fleet's Team section, not a second copy of it */}
+      {props.creds && team && props.onOpenTeam && (
+        <View style={{ gap: 6 }}>
+          <SectionLabel text="Team" />
+          <TouchableOpacity
+            onPress={props.onOpenTeam}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={
+              team.kind === "team"
+                ? `Team ${team.name}, ${team.members} members. Open the team view`
+                : team.kind === "none"
+                  ? "Not on a team. Join a team"
+                  : "Team view needs a full pairing"
+            }
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 10,
+              minHeight: TAP + 8,
+              paddingHorizontal: 12,
+              borderRadius: radii.card,
+              borderWidth: 1,
+              borderColor: T.line,
+              backgroundColor: T.panel,
+            }}
+          >
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: T.text, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>
+                {team.kind === "team" ? team.name : team.kind === "none" ? "Join a team" : "Team"}
+              </Text>
+              <Text style={{ color: T.dim, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                {team.kind === "team"
+                  ? `${team.members} member${team.members === 1 ? "" : "s"}${team.more > 0 ? ` · +${team.more} more team${team.more === 1 ? "" : "s"}` : ""}`
+                  : team.kind === "none"
+                    ? "See your teammates' live agents"
+                    : "Needs a full (unscoped) pairing"}
+              </Text>
+            </View>
+            <Text style={{ color: T.faint, fontSize: 18 }}>›</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* connection */}
       {props.creds && (

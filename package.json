@@ -50,13 +50,15 @@
     "prepare": "tsc",
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude 'test/app-*dom.test.ts' && vitest run --no-file-parallelism test/app-dom.test.ts test/app-orchestra-dom.test.ts test/app-composer-dom.test.ts",
+    "test": "vitest run --exclude 'test/app-*dom.test.ts' && vitest run --no-file-parallelism test/app-dom.test.ts test/app-orchestra-dom.test.ts test/app-composer-dom.test.ts test/app-team-dom.test.ts",
     "test:watch": "vitest",
     "test:all-parallel": "vitest run",
     "verify:adapters": "node scripts/verify-adapters.mjs"
   },
   "dependencies": {
     "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@supabase/supabase-js": "^2.116.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",

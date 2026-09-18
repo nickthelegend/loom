@@ -69,6 +69,8 @@ export interface OrchestraTask {
   /** Adapter kind actually used. */
   kind: string;
   dependsOn: string[];
+  /** File globs the orchestrator declared this task will touch (D9). */
+  touches?: string[];
   status: TaskStatus;
   /** The chat (thread) this task's output streams into. */
   chat: string;
@@ -156,6 +158,8 @@ export interface OrchestraHost {
   observe(event: LoomEvent): void;
   /** The project's git delivery policy, read when a run completes. */
   gitDelivery?(): GitDelivery;
+  /** The GitHub login of the member running this daemon, when on a team (commit trailers). */
+  member?(): string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +167,7 @@ export interface OrchestraHost {
 // ---------------------------------------------------------------------------
 
 export type OrchestraAction =
-  | { type: "spawn"; id?: string; title: string; agent: string; prompt: string; dependsOn?: string[] }
+  | { type: "spawn"; id?: string; title: string; agent: string; prompt: string; dependsOn?: string[]; touches?: string[] }
   | { type: "send"; task: string; message: string }
   | { type: "cancel"; task: string }
   | { type: "ask"; question: string }
@@ -254,7 +258,10 @@ function normalizeAction(v: unknown): OrchestraAction | null {
         ? ((a.dependsOn ?? a.depends_on ?? a.after) as unknown[]).map(str).filter(Boolean)
         : [];
       const id = str(a.id);
-      return { type: "spawn", ...(id ? { id } : {}), title, agent, prompt, dependsOn: deps };
+      const touches = Array.isArray(a.touches ?? a.files)
+        ? ((a.touches ?? a.files) as unknown[]).map(str).filter(Boolean).slice(0, 50)
+        : [];
+      return { type: "spawn", ...(id ? { id } : {}), title, agent, prompt, dependsOn: deps, ...(touches.length ? { touches } : {}) };
     }
     case "send":
     case "followup":
@@ -311,6 +318,7 @@ export function orchestratorBriefing(opts: {
     "  another's output, list it in dependsOn — it will start from a branch that already has it.",
     `- At most ${opts.maxParallel} tasks run at once; queue more and they start as slots free up.`,
     "- Match tasks to agents' strengths, and spread work across agents when it helps.",
+    '- Give each task "touches": the file globs it will change. Teammates\' agents see them to avoid collisions.',
     "",
     "Available workers:",
     roster,
@@ -318,7 +326,7 @@ export function orchestratorBriefing(opts: {
     "End EVERY reply with exactly one fenced block tagged loom containing your actions:",
     "```loom",
     '{"actions": [',
-    '  {"type": "spawn", "id": "t1", "title": "short label", "agent": "<worker id>", "prompt": "full task", "dependsOn": []},',
+    '  {"type": "spawn", "id": "t1", "title": "short label", "agent": "<worker id>", "prompt": "full task", "dependsOn": [], "touches": ["src/auth/**"]},',
     '  {"type": "send", "task": "t1", "message": "follow-up for a finished/failed task (same worker, same worktree)"},',
     '  {"type": "cancel", "task": "t2"},',
     '  {"type": "ask", "question": "only when a human decision is truly required"},',
@@ -504,6 +512,25 @@ async function commitAll(dir: string, message: string): Promise<boolean> {
     dir,
   );
   return true;
+}
+
+/**
+ * A worker's commit, traceable to its goal, task and agent from `git log`
+ * alone (docs/teams-architecture.md §7). GitHub reads Co-Authored-By; the
+ * Loom-* trailers are for people and tools (`git log --grep 'Loom-Goal: o7x'`).
+ */
+export function taskCommitMessage(run: OrchestraRun, task: OrchestraTask, member: string | null): string {
+  return [
+    `${task.title}`.slice(0, 72),
+    "",
+    `Task ${task.id} of orchestra ${run.id}: ${run.goal.split("\n")[0]!.slice(0, 120)}`,
+    "",
+    `Co-Authored-By: ${task.agent} <${task.agent}@loom.local>`,
+    ...(member ? [`Loom-Member: ${member}`] : []),
+    `Loom-Goal: ${run.id}`,
+    `Loom-Task: ${task.id}`,
+    `Loom-Agent: ${task.kind}`,
+  ].join("\n");
 }
 
 /** Where a run's plan lives inside the repo. */
@@ -1022,6 +1049,7 @@ export class OrchestraEngine {
       agent: cfg.id,
       kind: cfg.kind,
       dependsOn: deps,
+      ...(a.touches?.length ? { touches: a.touches } : {}),
       status: "pending",
       chat: chat.id,
       attempts: 0,
@@ -1214,7 +1242,7 @@ export class OrchestraEngine {
   private async integrate(run: OrchestraRun, task: OrchestraTask): Promise<void> {
     const dir = task.dir!;
     await this.gitLock.run(async () => {
-      await commitAll(dir, `orchestra ${run.id} ${task.id}: ${task.title}`);
+      await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
       const files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => ""))
         .split("\n")
         .filter(Boolean);

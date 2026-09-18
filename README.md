@@ -490,6 +490,8 @@ detects at least two roles.
 | `loom orchestrate --plan "<goal>"` | Plan mode: the plan and each task's spec land as markdown under `plans/<run>/` for any agent to pick up |
 | `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |
 | `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch · stop it · remove its worktrees |
+| `loom hub [--host --port --secret]` | Run a self-hosted Team Hub for your team |
+| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; membership and key rotation |
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
 | `loom subtasks` | Subtasks running right now |
@@ -800,16 +802,37 @@ A clipboard manager for prompts, built into the chat bar (⌘⇧V):
 
 Everything is stored in `~/.loom/prompts.json` and never leaves the machine.
 
-## Teams (design)
+## Teams — see each other's agents
 
-Five people, each with their own agents, on one repo: how agents see each other's
-work, avoid collisions, share one memory safely, and flow through PRs, merge queues
-and CI/CD. The researched architecture is in
-**[docs/teams-architecture.md](docs/teams-architecture.md)**. It covers:
-- advisory leases at plan time, plus continuous conflict prediction;
-- a three-tier team brain, with canon kept in git behind review;
-- one PR per goal through a merge queue;
-- bounded CI auto-fix loops.
+Five people, each with their own agents, on one repo. **Phase 1 is built:**
+teammates see each other's live agents and goals, and a team feed collects goals,
+plans, PRs and CI in one place. Content is end-to-end encrypted to the team, so
+the hub can't read goal titles.
+
+```bash
+loom hub --host 0.0.0.0 --secret <join-secret>   # one teammate runs a hub (or use hosted Loom Teams)
+loom team signin http://<hub>:7430 --secret <join-secret>
+loom team create "Acme"
+loom team invite            # one-time link; it carries the team key, so send it like a password
+loom team join '<link>'     # a teammate
+loom team share             # in a project: its repo now shows up for the team
+loom team                   # who's doing what, right now
+```
+
+- **What teammates see:** agents, state, branch, the files each task declared
+  it will touch, and goal and task titles. They never see your prompts or your
+  agents' transcripts.
+- **Sharing is opt-in per project.** A clone whose `origin` matches a team repo
+  is shared automatically, and `loom team unshare` opts it out.
+- **Removing a member rotates the team key.** The new key is sealed to every
+  remaining device, so the person who left can't read anything new.
+- **Worker commits carry `Loom-Goal`, `Loom-Task`, `Loom-Agent` and `Loom-Member`
+  trailers.** `git log` alone tells you which goal, task and agent wrote a line.
+
+The researched architecture (27 decisions, a 5-phase plan) is in
+**[docs/teams-architecture.md](docs/teams-architecture.md)**. It covers what
+comes next: leases and conflict prediction, the shared team brain with canon in
+`AGENTS.md`, and one PR per goal through a merge queue.
 
 ## Loom Cloud — your agents from any network
 

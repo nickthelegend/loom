@@ -173,6 +173,24 @@ export class DaemonClient {
     );
   }
 
+  // ── Loom Teams (daemon/team.ts) ──
+
+  team(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/api/team");
+  }
+
+  teamAction(action: string, body?: Record<string, unknown>): Promise<{ result: unknown; team: Record<string, unknown> }> {
+    return this.request("POST", `/api/team/${action}`, body ?? {});
+  }
+
+  shareProject(id: string, teamId?: string): Promise<{ repo: string; teamId: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/share`, teamId ? { teamId } : {});
+  }
+
+  unshareProject(id: string): Promise<{ ok: boolean }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/team/share`);
+  }
+
   // ── Loom Cloud (daemon/relay.ts) ──
 
   cloud(): Promise<Record<string, unknown>> {

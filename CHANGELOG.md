@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Loom Teams, Phase 1: see each other
+
+- **The design is settled:** 27 decisions from a design interview, recorded in
+  docs/teams-architecture.md §1a.
+- **Team crypto:**
+  - an XChaCha20-Poly1305 team key;
+  - an X25519 sealed box for key envelopes;
+  - Ed25519 signatures on everything a daemon publishes;
+  - the invite link carries the key in its `#fragment`.
+- **The hub:**
+  - the `HubClient` protocol, with `MemoryHub` as the reference rules;
+  - `loom hub`, a self-hosted hub over HTTP + WebSocket;
+  - the hosted hub's SQL (RLS plus rule functions), tested against a real Postgres.
+- **Team Link in the daemon:**
+  - sign-in, create, invite, join and leave;
+  - removal rotates the key forward;
+  - opt-in project sharing, with auto-match on the git remote;
+  - heartbeats carry intent only;
+  - a goal/plan/PR feed, with `gh` polling when there is no GitHub App.
+- **Worker commits carry `Loom-Goal`, `Loom-Task`, `Loom-Agent` and `Loom-Member`
+  trailers.**
+- **The orchestra protocol gains `touches`** (declared file globs per task).
+- **Fix:** a removed member's daemon now hears its own removal. It was cut off
+  before the announcement.
+
 ### Permissions, plan mode, git delivery, fleet, prompts
 
 - **Permission modes per agent: bypass, auto, always ask.**

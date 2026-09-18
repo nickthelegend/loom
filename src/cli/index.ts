@@ -964,6 +964,145 @@ program
     }
   });
 
+// ── Loom Teams (docs/teams-architecture.md, daemon/team.ts) ──
+
+program
+  .command("hub")
+  .description("run a self-hosted Team Hub for your team (no Supabase needed)")
+  .option("--port <n>", "port", "7430")
+  .option("--host <ip>", "interface to bind (use your LAN/tailnet IP so teammates can reach it)", "127.0.0.1")
+  .option("--secret <s>", "join secret every member must present (or LOOM_HUB_SECRET)")
+  .action(async (opts: { port: string; host: string; secret?: string }) => {
+    const secret = opts.secret || process.env.LOOM_HUB_SECRET;
+    const loopback = opts.host === "127.0.0.1" || opts.host === "localhost";
+    if (!loopback && !secret) {
+      console.error(pc.red("a hub reachable by others needs a join secret: --secret <s> (or LOOM_HUB_SECRET)"));
+      process.exitCode = 1;
+      return;
+    }
+    const { startHubServer } = await import("../hub/server.js");
+    const hub = await startHubServer({ port: Number(opts.port), host: opts.host, ...(secret ? { secret } : {}) });
+    console.log(`${pc.green("●")} Loom Team Hub on ${pc.bold(hub.url)}`);
+    console.log(pc.dim(`  members sign in with: loom team signin ${hub.url}${secret ? " --secret <secret>" : ""}`));
+    console.log(pc.dim("  state is in memory: members' daemons re-join on their own after a restart"));
+    const stop = async () => {
+      await hub.close();
+      process.exit(0);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+  });
+
+function printTeam(t: Record<string, unknown>): void {
+  if (!t.signedIn) {
+    console.log(pc.dim("not on a team hub — `loom team signin <hub-url>`, or join with an invite link"));
+    return;
+  }
+  console.log(`${pc.bold(String(t.github))} on ${pc.dim(String(t.hub))}`);
+  const teams = (t.teams as Array<Record<string, unknown>>) ?? [];
+  if (!teams.length) console.log(pc.dim("  no teams yet — `loom team create <name>` or `loom team join <link>`"));
+  for (const tm of teams) {
+    const members = (tm.members as Array<{ github: string; role: string }>) ?? [];
+    console.log(`\n${pc.magenta("◆")} ${pc.bold(String(tm.name))} ${pc.dim(`(${String(tm.role)} · key v${String(tm.keyVersion)})`)}`);
+    console.log(`  members  ${members.map((m) => (m.role === "owner" ? `${m.github}★` : m.github)).join(", ")}`);
+    console.log(`  repos    ${((tm.repos as string[]) ?? []).join(", ") || pc.dim("none shared yet — `loom team share` in a project")}`);
+    const presence = (tm.presence as Array<Record<string, unknown>>) ?? [];
+    if (presence.length) console.log("  live");
+    for (const p of presence) {
+      const intent = (p.intent ?? {}) as Record<string, string>;
+      const what = intent.task ? `${intent.task} ${pc.dim(`(${intent.goal ?? ""})`)}` : intent.goal ?? intent.thread ?? "";
+      const touches = (p.touches as string[]) ?? [];
+      console.log(
+        `    ${pc.cyan(String(p.github).padEnd(12))} ${String(p.agent).padEnd(22)} ${String(p.state).padEnd(10)} ${what}` +
+          (touches.length ? pc.dim(`  ${touches.slice(0, 3).join(" ")}`) : ""),
+      );
+    }
+    const feed = ((tm.feed as Array<Record<string, unknown>>) ?? []).slice(-8);
+    if (feed.length) console.log("  recent");
+    for (const e of feed) {
+      const c = (e.content ?? {}) as Record<string, string>;
+      const meta = (e.meta ?? {}) as Record<string, unknown>;
+      const label = c.goal ?? c.title ?? (meta.number ? `#${String(meta.number)}` : "");
+      const detail = label || String(meta.repo ?? (meta.version ? `v${String(meta.version)}` : ""));
+      // membership events are posted by the hub itself; the person is in meta
+      const who = String(e.github ?? meta.github ?? (String(e.type).startsWith("pr_") || String(e.type).startsWith("check_") ? "github" : "team"));
+      console.log(`    ${pc.dim(new Date(Number(e.ts)).toLocaleTimeString())} ${who.padEnd(10)} ${String(e.type).padEnd(14)} ${detail}`);
+    }
+  }
+}
+
+program
+  .command("team [action] [arg]")
+  .description("Loom Teams: status | signin <hub> | create <name> | invite | join <link> | share | unshare | remove <github> | leave")
+  .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")
+  .option("--secret <s>", "the hub's join secret")
+  .option("--team <id>", "which team, when you're in several")
+  .action(async (action: string | undefined, arg: string | undefined, opts: { github?: string; secret?: string; team?: string }) => {
+    const client = await ensureDaemon();
+    const a = (action ?? "status").toLowerCase();
+    const extra = { ...(opts.github ? { github: opts.github } : {}), ...(opts.secret ? { secret: opts.secret } : {}), ...(opts.team ? { teamId: opts.team } : {}) };
+    try {
+      if (a === "status") return void printTeam(await client.team());
+      if (a === "signin") {
+        if (!arg) throw new Error("which hub? loom team signin <hub-url>");
+        const out = await client.teamAction("signin", { hub: arg, ...extra });
+        return void printTeam(out.team);
+      }
+      if (a === "create") {
+        if (!arg) throw new Error("name it: loom team create <name>");
+        const out = await client.teamAction("create", { name: arg });
+        console.log(`${pc.green("✓")} created ${pc.bold(String((out.result as { name: string }).name))} — you're its owner`);
+        console.log(pc.dim("  invite teammates: loom team invite · share this project: loom team share"));
+        return;
+      }
+      if (a === "invite") {
+        const out = await client.teamAction("invite", extra);
+        const { link, expiresAt } = out.result as { link: string; expiresAt: number };
+        console.log(`${pc.bold("invite link")} ${pc.dim(`(single use, until ${new Date(expiresAt).toLocaleString()})`)}\n\n  ${link}\n`);
+        console.log(pc.yellow("  it carries the team key — send it like a password"));
+        qrcode.generate(link, { small: true });
+        return;
+      }
+      if (a === "join") {
+        if (!arg) throw new Error("paste the invite: loom team join '<link>'");
+        const out = await client.teamAction("join", { link: arg, ...extra });
+        console.log(`${pc.green("✓")} joined ${pc.bold(String((out.result as { name: string }).name))}`);
+        return void printTeam(out.team);
+      }
+      if (a === "share" || a === "unshare") {
+        const project = await currentProject(client);
+        if (a === "share") {
+          const out = await client.shareProject(project.id, opts.team);
+          console.log(`${pc.green("✓")} ${pc.bold(out.repo)} is shared — teammates see this project's agents and goals`);
+        } else {
+          await client.unshareProject(project.id);
+          console.log(`${pc.green("✓")} ${project.name} is private — nothing from it reaches the team`);
+        }
+        return;
+      }
+      if (a === "remove") {
+        if (!arg) throw new Error("who? loom team remove <github-login>");
+        const st = await client.team();
+        const teams = (st.teams as Array<{ id: string; members: Array<{ id: string; github: string }> }>) ?? [];
+        const team = opts.team ? teams.find((t) => t.id === opts.team) : teams[0];
+        const m = team?.members.find((x) => x.github === arg.toLowerCase());
+        if (!team || !m) throw new Error(`no member "${arg}"`);
+        const out = await client.teamAction("remove", { userId: m.id, teamId: team.id });
+        console.log(`${pc.green("✓")} removed ${arg}; team key rotated to v${String((out.result as { keyVersion: number }).keyVersion)}`);
+        return;
+      }
+      if (a === "leave") {
+        await client.teamAction("leave", extra);
+        console.log(`${pc.green("✓")} left the team`);
+        return;
+      }
+      throw new Error(`unknown action "${a}"`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
 // ── Loom Cloud: reach this daemon from any network (daemon/relay.ts) ──
 
 program

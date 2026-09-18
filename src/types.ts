@@ -219,9 +219,22 @@ export interface ProjectConfig {
      */
     delivery?: GitDelivery;
   };
+  /** Team Hub sharing — see ProjectTeamShare. */
+  team?: ProjectTeamShare | null;
 }
 
 export type GitDelivery = "none" | "commit" | "push" | "pr";
+
+/**
+ * Team sharing for a project (docs/teams-architecture.md, D8). Set by an
+ * explicit "Share with team"; `optOut` records an explicit "don't", which
+ * beats the auto-match on the project's git remote.
+ */
+export interface ProjectTeamShare {
+  teamId?: string;
+  repo?: string;
+  optOut?: boolean;
+}
 export const GIT_DELIVERIES: GitDelivery[] = ["none", "commit", "push", "pr"];
 
 /** One MCP server, in the shape the Anthropic API's `mcp_servers` accepts. */

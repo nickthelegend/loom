@@ -246,6 +246,7 @@ export class ProjectRuntime {
       },
       observe: (event) => this.trackCost(event),
       gitDelivery: () => this.config.git?.delivery ?? "none",
+      member: () => this.memberLogin,
     });
   }
 
@@ -2804,6 +2805,15 @@ export class ProjectRuntime {
       subtasks: this.liveSubtasks(),
       route: this.routes.state(),
     };
+  }
+
+  /** The team member running this daemon (set by Team Link), for commit trailers. */
+  memberLogin: string | null = null;
+
+  /** Share this project with a team, or record an explicit opt-out (null). */
+  setTeam(share: { teamId: string; repo: string } | null): void {
+    this.config.team = share ? { teamId: share.teamId, repo: share.repo } : { optOut: true };
+    this.saveConfig();
   }
 
   /** The chat an agent's current (or last) turn belongs to, if any. */

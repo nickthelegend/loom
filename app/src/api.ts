@@ -826,6 +826,17 @@ async function viaRelay<T>(creds: Creds, path: string, init?: RequestInit, timeo
   return settle<T>(res.status, json);
 }
 
+/**
+ * A non-2xx from the daemon. Carries the status so a caller can tell "you may
+ * not do this from a phone" (403) from "that failed" without parsing words.
+ */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 /** The shared tail of both routes: 401 unpairs, other errors carry the daemon's words. */
 async function settle<T>(status: number, json: Record<string, unknown>): Promise<T> {
   if (status === 401) {
@@ -833,7 +844,7 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
     onUnauthorized?.();
     throw new Error("unauthorized — pair again");
   }
-  if (status < 200 || status >= 300) throw new Error(String(json.message ?? json.error ?? `HTTP ${status}`));
+  if (status < 200 || status >= 300) throw new ApiError(String(json.message ?? json.error ?? `HTTP ${status}`), status);
   return json as T;
 }
 
@@ -1261,6 +1272,78 @@ export interface ActivityProject {
 export const getActivity = (c: Creds) =>
   api<{ projects: ActivityProject[]; approvals: number; at: number }>(c, "/api/activity");
 
+// --- Loom Teams --------------------------------------------------------------
+
+export interface TeamMember {
+  id: string;
+  github: string;
+  name: string;
+  role: string;
+}
+
+/** What a teammate's agent is about: titles only, never a transcript. */
+export interface TeamIntent {
+  goal?: string;
+  task?: string;
+  thread?: string;
+}
+
+export interface TeamPresence {
+  github: string;
+  repo: string;
+  agent: string;
+  kind: string;
+  branch?: string;
+  touches: string[];
+  state: string;
+  since: number;
+  mine: boolean;
+  intent: TeamIntent | null;
+}
+
+export interface TeamFeedEvent {
+  type: string;
+  github: string | null;
+  ts: number;
+  repo?: string;
+  meta: {
+    number?: number;
+    url?: string;
+    checks?: string[];
+    runId?: string;
+    prUrl?: string;
+    status?: string;
+    [k: string]: unknown;
+  };
+  content: { goal?: string; summary?: string; title?: string } | null;
+}
+
+export interface TeamView {
+  id: string;
+  name: string;
+  role: string;
+  keyVersion: number | null;
+  members: TeamMember[];
+  repos: string[];
+  presence: TeamPresence[];
+  feed: TeamFeedEvent[];
+}
+
+export interface TeamStatus {
+  signedIn: boolean;
+  hub: string | null;
+  github: string | null;
+  teams: TeamView[];
+}
+
+export type TeamAction = "invite" | "join" | "signin" | "create" | "leave";
+
+export const getTeam = (c: Creds) => api<TeamStatus>(c, "/api/team");
+
+/** Membership changes are admin-only on the daemon: a paired phone gets a 403 (ApiError.status). */
+export const teamAction = <R = unknown>(c: Creds, action: TeamAction, body: Record<string, string> = {}) =>
+  api<{ result: R; team: TeamStatus }>(c, `/api/team/${action}`, { method: "POST", body: JSON.stringify(body) });
+
 // --- Prompt manager ---------------------------------------------------------
 
 export interface SavedPrompt {
@@ -1292,10 +1375,11 @@ export const updatePrompt = (c: Creds, promptId: string, patch: { pinned?: boole
 export const deletePrompt = (c: Creds, promptId: string) =>
   api<{ ok: boolean }>(c, `/api/prompts/${encodeURIComponent(promptId)}`, { method: "DELETE" });
 
-export function wsUrl(creds: Creds, projectId: string): string {
+export function wsUrl(creds: Creds, projectId?: string): string {
   const proto = creds.url.startsWith("https") ? "wss" : "ws";
   const host = creds.url.replace(/^https?:\/\//, "");
-  return `${proto}://${host}/ws?token=${encodeURIComponent(creds.token)}&project=${encodeURIComponent(projectId)}`;
+  const project = projectId ? `&project=${encodeURIComponent(projectId)}` : "";
+  return `${proto}://${host}/ws?token=${encodeURIComponent(creds.token)}${project}`;
 }
 
 /**
@@ -1303,8 +1387,10 @@ export function wsUrl(creds: Creds, projectId: string): string {
  * direct, the relay's stream when on Loom Cloud. Frames are identical either
  * way. It follows the connection manager — a route change or a long trip to the
  * background tears the feed down and opens a fresh one. Returns the closer.
+ *
+ * With no project it is the daemon-level feed (team frames, for a full client).
  */
-export function openLiveStream(creds: Creds, projectId: string, onFrame: (frame: unknown) => void): () => void {
+export function openLiveStream(creds: Creds, projectId: string | undefined, onFrame: (frame: unknown) => void): () => void {
   let closed = false;
   let mode: "direct" | "cloud" | null = null;
   let ws: WebSocket | null = null;
