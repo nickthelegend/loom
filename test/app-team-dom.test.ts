@@ -353,8 +353,8 @@ describe("web app · Loom Teams", () => {
     await waitUntil(() => !!$(m, `[data-pset="${projectId}"]`));
     await ready(m, `[data-pset="${projectId}"]`);
     click($(m, `[data-pset="${projectId}"]`));
-    await waitUntil(() => !!$(m, "#psteam [data-tshare]"));
-    expect(text(m, "#psteam [data-tslabel]")).toBe("Shared with Acme");
+    // the control paints before its share state lands (Auto until then)
+    await waitUntil(() => text(m, "#psteam [data-tslabel]") === "Shared with Acme");
     click($(m, '#psteam [data-tsv="private"]'));
     await waitUntil(() => text(m, "#psteam [data-tslabel]") === "Private");
     expect($(m, '#psteam [data-tsv="private"]')?.classList.contains("on")).toBe(true);

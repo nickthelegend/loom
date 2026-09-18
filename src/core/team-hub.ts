@@ -19,6 +19,7 @@
 import crypto from "node:crypto";
 
 import type { Sealed } from "./team-crypto.js";
+import { overlap, zoneOf, type LeaseScope } from "./team-leases.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,6 +81,44 @@ export interface Presence extends PresenceIn {
   ts: number;
 }
 
+/** A goal's claim on part of a repo (Phase 2, D28–D36). */
+export interface Lease extends LeaseScope {
+  id: string;
+  teamId: string;
+  userId: string;
+  github: string;
+  deviceId: string;
+  repo: string;
+  runId: string;
+  taskId: string;
+  /** active while the task runs; landing after it finishes, until the goal's PR merges (D36). */
+  state: "active" | "landing";
+  /** Goal/task titles, sealed to the team (D2). */
+  sealed?: Sealed;
+  since: number;
+  ts: number;
+  /** Computed on read: no renewal within LEASE_TTL_MS (the owner's laptop is asleep — D12). */
+  stale?: boolean;
+}
+
+export interface LeaseClaim extends LeaseScope {
+  deviceId: string;
+  repo: string;
+  runId: string;
+  taskId: string;
+  /** The team policy's hard zones, as the claimer's reviewed loom.team.json says (D37). */
+  hardZones: string[];
+  sealed?: Sealed;
+}
+
+export interface ClaimResult {
+  /** Null when refused (a hard zone is held — D31). */
+  lease: Lease | null;
+  /** Everyone else's live leases this one overlaps, with the colliding paths (D29: advisory). */
+  overlaps: Array<{ lease: Lease; paths: string[] }>;
+  blockedBy?: { lease: Lease; zone: string };
+}
+
 export type FeedType =
   | "member_joined"
   | "member_left"
@@ -94,7 +133,12 @@ export type FeedType =
   | "check_failed"
   | "check_passed"
   | "review_requested"
-  | "review_submitted";
+  | "review_submitted"
+  | "lease_released"
+  | "overlap_decided"
+  | "drift"
+  | "zone_waiting"
+  | "conflict_predicted";
 
 export interface FeedIn {
   repo?: string;
@@ -118,6 +162,8 @@ export interface FeedEvent extends FeedIn {
 }
 
 export type HubEvent =
+  | { type: "lease"; teamId: string; lease: Lease }
+  | { type: "lease_gone"; teamId: string; leaseIds: string[]; runId: string }
   | { type: "presence"; teamId: string; presence: Presence }
   | { type: "presence_gone"; teamId: string; userId: string; deviceId: string; agent: string; repo: string }
   | { type: "feed"; teamId: string; event: FeedEvent };
@@ -144,6 +190,16 @@ export interface HubClient {
   appendFeed(teamId: string, e: FeedIn): Promise<FeedEvent | null>;
   feed(teamId: string, opts?: { since?: number; limit?: number }): Promise<FeedEvent[]>;
   subscribe(teamId: string, cb: (e: HubEvent) => void): Promise<() => void>;
+  // ── Phase 2: leases ──
+  claimLease(teamId: string, c: LeaseClaim): Promise<ClaimResult>;
+  /** Widen a lease to more paths (drift, D33). Same answer shape as a claim; a held hard zone refuses. */
+  extendLease(teamId: string, leaseId: string, scope: LeaseScope, hardZones: string[]): Promise<ClaimResult>;
+  /** Heartbeat for leases: keeps every lease of this device fresh (D12). */
+  renewLeases(teamId: string, deviceId: string): Promise<number>;
+  setRunLeaseState(teamId: string, runId: string, state: "active" | "landing"): Promise<number>;
+  /** The goal merged or was abandoned (D36). Owners release their own; returns how many. */
+  releaseLeases(teamId: string, runId: string, reason: string): Promise<number>;
+  leases(teamId: string, repo?: string): Promise<Lease[]>;
 }
 
 export class HubError extends Error {
@@ -164,6 +220,8 @@ export class HubError extends Error {
 export const PRESENCE_TTL_MS = 45_000;
 export const INVITE_TTL_MS = 24 * 60 * 60_000;
 export const FREE_SEATS = 3; // D21 — enforced by billing, surfaced by the hub
+/** A lease not renewed for this long is stale: its owner's machine is asleep or gone (D12). */
+export const LEASE_TTL_MS = 10 * 60_000;
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 export function normalizeRepo(repo: string): string {
@@ -198,6 +256,7 @@ export class MemoryHub {
   private feedByTeam = new Map<string, FeedEvent[]>();
   private dedupe = new Set<string>();
   private feedSeq = 0;
+  private leasesByTeam = new Map<string, Map<string, Lease>>();
   private listeners = new Map<string, Set<(e: HubEvent) => void>>();
   constructor(private now: () => number = Date.now) {}
 
@@ -339,6 +398,138 @@ export class MemoryHub {
     // owner's next step, and the feed says so.
     for (const d of this.devices.values()) if (d.userId === target) this.envelopes.delete(`${teamId}/${d.id}`);
     for (const [k, p] of this.presenceByTeam.get(teamId) ?? []) if (p.userId === target) this.presenceByTeam.get(teamId)!.delete(k);
+    for (const [k, l] of this.leasesByTeam.get(teamId) ?? []) if (l.userId === target) this.leasesByTeam.get(teamId)!.delete(k);
+  }
+
+  // ── leases (Phase 2) ──
+
+  private withStale(l: Lease): Lease {
+    return { ...l, stale: this.now() - l.ts > LEASE_TTL_MS };
+  }
+
+  /** Everyone's live (non-stale) leases in a repo, except those of one run. */
+  private rivals(teamId: string, repo: string, exceptRun: string): Lease[] {
+    return [...(this.leasesByTeam.get(teamId)?.values() ?? [])]
+      .map((l) => this.withStale(l))
+      .filter((l) => l.repo === repo && l.runId !== exceptRun && !l.stale);
+  }
+
+  private judge(teamId: string, repo: string, runId: string, scope: LeaseScope, hardZones: string[]): Omit<ClaimResult, "lease"> {
+    const rivals = this.rivals(teamId, repo, runId);
+    const overlaps = rivals
+      .map((l) => ({ lease: l, paths: overlap(scope, l) }))
+      .filter((o) => o.paths.length > 0);
+    // D31: in a hard zone, any rival lease inside the same zone refuses the claim.
+    const zone = zoneOf(scope, hardZones);
+    if (zone) {
+      const holder = rivals.find((l) => zoneOf(l, [zone]) === zone);
+      if (holder) return { overlaps, blockedBy: { lease: holder, zone } };
+    }
+    return { overlaps };
+  }
+
+  claimLease(userId: string, teamId: string, c: LeaseClaim): ClaimResult {
+    this.requireRole(teamId, userId, "member");
+    this.device(c.deviceId, userId);
+    const repo = normalizeRepo(c.repo);
+    if (!this.reposByTeam.get(teamId)?.has(repo)) throw new HubError(`${repo} isn't shared with this team`, 403);
+    const scope: LeaseScope = { globs: c.globs.slice(0, 50), files: c.files.slice(0, 500), prefixes: c.prefixes.slice(0, 50) };
+    const verdict = this.judge(teamId, repo, c.runId, scope, c.hardZones);
+    if (verdict.blockedBy) return { lease: null, ...verdict };
+    const map = this.leasesByTeam.get(teamId) ?? new Map<string, Lease>();
+    // one lease per (run, task): a re-claim replaces the old one
+    const existing = [...map.values()].find((l) => l.userId === userId && l.runId === c.runId && l.taskId === c.taskId);
+    const lease: Lease = {
+      ...scope,
+      id: existing?.id ?? id("l"),
+      teamId,
+      userId,
+      github: this.user(userId).github,
+      deviceId: c.deviceId,
+      repo,
+      runId: c.runId,
+      taskId: c.taskId,
+      state: "active",
+      ...(c.sealed ? { sealed: c.sealed } : {}),
+      since: existing?.since ?? this.now(),
+      ts: this.now(),
+    };
+    map.set(lease.id, lease);
+    this.leasesByTeam.set(teamId, map);
+    this.emit(teamId, { type: "lease", teamId, lease: this.withStale(lease) });
+    return { lease: this.withStale(lease), ...verdict };
+  }
+
+  private ownLease(userId: string, teamId: string, leaseId: string): Lease {
+    this.requireRole(teamId, userId, "member");
+    const l = this.leasesByTeam.get(teamId)?.get(leaseId);
+    if (!l || l.userId !== userId) throw new HubError("that lease isn't yours", 403);
+    return l;
+  }
+
+  extendLease(userId: string, teamId: string, leaseId: string, scope: LeaseScope, hardZones: string[]): ClaimResult {
+    const l = this.ownLease(userId, teamId, leaseId);
+    const wider: LeaseScope = {
+      globs: [...new Set([...l.globs, ...scope.globs])].slice(0, 50),
+      files: [...new Set([...l.files, ...scope.files])].slice(0, 500),
+      prefixes: [...new Set([...l.prefixes, ...scope.prefixes])].slice(0, 50),
+    };
+    // only the NEW part is judged — what was already held stays held
+    const verdict = this.judge(teamId, l.repo, l.runId, scope, hardZones);
+    if (verdict.blockedBy) return { lease: null, ...verdict };
+    Object.assign(l, wider, { ts: this.now() });
+    this.emit(teamId, { type: "lease", teamId, lease: this.withStale(l) });
+    return { lease: this.withStale(l), ...verdict };
+  }
+
+  renewLeases(userId: string, teamId: string, deviceId: string): number {
+    this.requireRole(teamId, userId, "member");
+    this.device(deviceId, userId);
+    let n = 0;
+    for (const l of this.leasesByTeam.get(teamId)?.values() ?? []) {
+      if (l.userId === userId && l.deviceId === deviceId) {
+        l.ts = this.now();
+        n++;
+      }
+    }
+    return n;
+  }
+
+  setRunLeaseState(userId: string, teamId: string, runId: string, state: "active" | "landing"): number {
+    this.requireRole(teamId, userId, "member");
+    let n = 0;
+    for (const l of this.leasesByTeam.get(teamId)?.values() ?? []) {
+      if (l.userId === userId && l.runId === runId && l.state !== state) {
+        l.state = state;
+        l.ts = this.now();
+        this.emit(teamId, { type: "lease", teamId, lease: this.withStale(l) });
+        n++;
+      }
+    }
+    return n;
+  }
+
+  releaseLeases(userId: string, teamId: string, runId: string, reason: string): number {
+    this.requireRole(teamId, userId, "member");
+    const map = this.leasesByTeam.get(teamId);
+    const gone = [...(map?.values() ?? [])].filter((l) => l.userId === userId && l.runId === runId);
+    if (!gone.length) return 0;
+    for (const l of gone) map!.delete(l.id);
+    this.emit(teamId, { type: "lease_gone", teamId, leaseIds: gone.map((l) => l.id), runId });
+    this.appendFeedRaw(teamId, userId, {
+      type: "lease_released",
+      repo: gone[0]!.repo,
+      meta: { runId, leases: gone.length, reason: reason.slice(0, 120) },
+    });
+    return gone.length;
+  }
+
+  leases(userId: string, teamId: string, repo?: string): Lease[] {
+    this.requireRole(teamId, userId, "viewer");
+    const r = repo ? normalizeRepo(repo) : null;
+    return [...(this.leasesByTeam.get(teamId)?.values() ?? [])]
+      .filter((l) => !r || l.repo === r)
+      .map((l) => this.withStale(l));
   }
 
   putKeyEnvelopes(userId: string, teamId: string, version: number, envs: Array<{ deviceId: string; box: string }>): void {
@@ -549,6 +740,24 @@ class MemoryHubClient implements HubClient {
   }
   subscribe(teamId: string, cb: (e: HubEvent) => void) {
     return this.run(() => this.hub.subscribe(this.userId, teamId, cb));
+  }
+  claimLease(teamId: string, c: LeaseClaim) {
+    return this.run(() => this.hub.claimLease(this.userId, teamId, c));
+  }
+  extendLease(teamId: string, leaseId: string, scope: LeaseScope, hardZones: string[]) {
+    return this.run(() => this.hub.extendLease(this.userId, teamId, leaseId, scope, hardZones));
+  }
+  renewLeases(teamId: string, deviceId: string) {
+    return this.run(() => this.hub.renewLeases(this.userId, teamId, deviceId));
+  }
+  setRunLeaseState(teamId: string, runId: string, state: "active" | "landing") {
+    return this.run(() => this.hub.setRunLeaseState(this.userId, teamId, runId, state));
+  }
+  releaseLeases(teamId: string, runId: string, reason: string) {
+    return this.run(() => this.hub.releaseLeases(this.userId, teamId, runId, reason));
+  }
+  leases(teamId: string, repo?: string) {
+    return this.run(() => this.hub.leases(this.userId, teamId, repo));
   }
 }
 

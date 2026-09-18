@@ -21,6 +21,7 @@ import {
   teamAction,
   type Creds,
   type TeamFeedEvent,
+  type TeamLease,
   type TeamPresence,
   type TeamStatus,
   type TeamView,
@@ -110,6 +111,37 @@ function sentence(e: TeamFeedEvent): string {
       return `${who(actor)} asked for a review on ${pr}${inRepo}`;
     case "review_submitted":
       return `${who(actor)} reviewed ${pr}${inRepo}`;
+    case "lease_released": {
+      const n = typeof m.leases === "number" ? m.leases : null;
+      const what = n ? `${n} lease${n === 1 ? "" : "s"}` : "its leases";
+      const why = typeof m.reason === "string" && m.reason ? ` (${m.reason})` : "";
+      return `${who(actor)} released ${what}${inRepo}${why}`;
+    }
+    case "overlap_decided": {
+      const cc = c as { reason?: string; goal?: string };
+      const goal = cc.goal ? ` on ${quoted(cc.goal)}` : "";
+      const why = cc.reason ? `: ${cc.reason}` : "";
+      return `${who(actor)} chose to proceed alongside a teammate's files${goal}${inRepo}${why}`;
+    }
+    case "drift": {
+      const paths = Array.isArray(m.paths) ? (m.paths as unknown[]).map(String) : [];
+      const holders = Array.isArray(m.holders) ? (m.holders as unknown[]).map((h) => `@${String(h)}`) : [];
+      const where = paths.length ? `${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ` +${paths.length - 3}` : ""}` : "files";
+      const whose = holders.length ? `, overlapping ${holders.join(", ")}` : "";
+      return `${who(actor)}'s agent edited ${where} outside its declared files${inRepo}${whose}`;
+    }
+    case "zone_waiting": {
+      const zone = typeof m.zone === "string" ? m.zone : "a hard zone";
+      const holder = typeof m.holder === "string" ? `@${m.holder}` : "a teammate";
+      return `${who(actor)} is queued behind ${holder} for ${zone}${inRepo}`;
+    }
+    case "conflict_predicted": {
+      const members = Array.isArray(m.members) ? (m.members as unknown[]).map((x) => `@${String(x)}`) : [];
+      const files = Array.isArray(m.files) ? (m.files as unknown[]).map(String) : [];
+      const between = members.length >= 2 ? `${members[0]} and ${members[1]}` : "two goals";
+      const where = files.length ? ` in ${files.slice(0, 3).join(", ")}${files.length > 3 ? ` +${files.length - 3}` : ""}` : "";
+      return `Merge conflict ahead between ${between}${where}${inRepo}`;
+    }
     default:
       return `${who(actor)} · ${e.type.replace(/_/g, " ")}${c.summary ? ` · ${c.summary}` : ""}`;
   }
@@ -122,7 +154,15 @@ const FEED_COLOR: Record<string, string> = {
   check_passed: T.ok,
   goal_started: T.thread,
   goal_finished: T.ok,
+  lease_released: T.dim,
+  overlap_decided: T.thread,
+  drift: T.warn,
+  zone_waiting: T.warn,
+  conflict_predicted: T.warn,
 };
+
+/** Feed rows that warn: a merge conflict is coming if nobody acts. */
+const WARNING = new Set(["conflict_predicted"]);
 
 // ── pieces ──
 
@@ -214,8 +254,114 @@ function PresenceRow(props: { p: TeamPresence; now: number }) {
   );
 }
 
-/** Who holds which files: every glob a live session touches, and whose it is. */
-function Leases(props: { presence: TeamPresence[] }) {
+const LEASE_STATE: Record<string, { label: string; color: string }> = {
+  active: { label: "active", color: T.ok },
+  landing: { label: "landing", color: T.shuttle },
+  stale: { label: "stale", color: T.faint },
+};
+
+/** One lease: its state, which goal/task holds it, and the globs it covers. */
+function LeaseRow(props: { l: TeamLease; now: number }) {
+  const { l } = props;
+  const st = l.stale ? LEASE_STATE.stale! : LEASE_STATE[l.state] ?? { label: l.state, color: T.dim };
+  const title = l.intent?.task ?? l.intent?.goal ?? null;
+  const sub = l.intent?.task && l.intent.goal ? l.intent.goal : null;
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${title ?? `task ${l.taskId}`}, ${st.label}, ${l.fileCount} file${l.fileCount === 1 ? "" : "s"}${l.stale ? ". Not renewed lately" : ""}`}
+      style={{
+        gap: 4,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        borderRadius: radii.key,
+        borderWidth: 1,
+        borderColor: T.line,
+        borderLeftWidth: 2,
+        borderLeftColor: st.color,
+        backgroundColor: T.raised,
+        opacity: l.stale ? 0.55 : 1,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Text style={{ color: T.text, fontSize: 12.5, fontWeight: "600", flexShrink: 1 }} numberOfLines={1}>
+          {title ?? l.taskId}
+        </Text>
+        <Badge text={st.label} tint={st.color} />
+        <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono, marginLeft: "auto" }}>
+          {l.fileCount} file{l.fileCount === 1 ? "" : "s"}
+        </Text>
+      </View>
+      {sub ? (
+        <Text style={{ color: T.dim, fontSize: 11.5, lineHeight: 16 }} numberOfLines={1}>
+          ◇ {sub}
+        </Text>
+      ) : null}
+      <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }} numberOfLines={1}>
+        {l.repo ? `${l.repo} · ` : ""}
+        {l.runId}/{l.taskId}
+        {l.stale && l.ts ? ` · last seen ${dur(Math.max(0, props.now - l.ts)).replace(/ \d+s$/, "")} ago` : ""}
+      </Text>
+      {l.globs.length ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+          {l.globs.slice(0, 6).map((g) => (
+            <Chip key={g} text={g} />
+          ))}
+          {l.globs.length > 6 ? <Chip text={`+${l.globs.length - 6}`} /> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** Who holds which files: every lease on the team's shared repos, grouped by member. */
+function Leases(props: { leases: TeamLease[]; nameOf: Map<string, string>; now: number }) {
+  if (!props.leases.length) return null;
+  const groups = new Map<string, TeamLease[]>();
+  for (const l of props.leases) {
+    const k = l.mine ? "\u0000you" : l.github;
+    groups.set(k, [...(groups.get(k) ?? []), l]);
+  }
+  // you first, then teammates; within a member, live before stale, active before landing
+  const rank = (l: TeamLease) => (l.stale ? 2 : l.state === "active" ? 0 : 1);
+  const entries = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return (
+    <View style={{ gap: 6 }}>
+      <SectionLabel text={`Leases · ${props.leases.length}`} />
+      {entries.map(([k, rows]) => {
+        const mine = k === "\u0000you";
+        const gh = rows[0]!.github;
+        const name = props.nameOf.get(gh);
+        return (
+          <View key={k} style={{ gap: 6 }}>
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+              <Text style={{ color: T.text, fontSize: 13, fontWeight: "600" }}>
+                {mine ? "You" : name && name !== gh ? name : `@${gh}`}
+              </Text>
+              {!mine && name && name !== gh ? (
+                <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }}>@{gh}</Text>
+              ) : null}
+              <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono, marginLeft: "auto" }}>
+                {rows.length} lease{rows.length === 1 ? "" : "s"}
+              </Text>
+            </View>
+            {[...rows]
+              .sort((a, b) => rank(a) - rank(b))
+              .map((l) => (
+                <LeaseRow key={l.id} l={l} now={props.now} />
+              ))}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * Who touches which files, from presence alone: the fallback for a daemon that
+ * predates real leases.
+ */
+function TouchedFiles(props: { presence: TeamPresence[] }) {
   const byGlob = new Map<string, Set<string>>();
   for (const p of props.presence) {
     for (const g of p.touches) {
@@ -264,10 +410,14 @@ function FeedRow(props: { e: TeamFeedEvent; now: number }) {
     ? openable(e.meta?.url) ?? openable(e.meta?.prUrl)
     : openable(e.meta?.prUrl);
   const color = FEED_COLOR[e.type] ?? T.faint;
+  const warning = WARNING.has(e.type);
   const body = (
     <>
-      <Text style={{ color, fontSize: 11, fontFamily: T.mono, width: 12 }}>●</Text>
-      <Text style={{ color: T.text, fontSize: 12.5, lineHeight: 18, flex: 1 }} numberOfLines={3}>
+      <Text style={{ color, fontSize: 11, fontFamily: T.mono, width: 12 }}>{warning ? "▲" : "●"}</Text>
+      <Text
+        style={{ color: warning ? T.warn : T.text, fontSize: 12.5, lineHeight: 18, flex: 1, fontWeight: warning ? "600" : "400" }}
+        numberOfLines={3}
+      >
         {sentence(e)}
       </Text>
       <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }}>
@@ -276,8 +426,28 @@ function FeedRow(props: { e: TeamFeedEvent; now: number }) {
       {url ? <Text style={{ color: T.faint, fontSize: 15 }}>›</Text> : null}
     </>
   );
-  const style = { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: 8, paddingVertical: 6 };
-  if (!url) return <View style={style}>{body}</View>;
+  const style = {
+    flexDirection: "row" as const,
+    alignItems: "flex-start" as const,
+    gap: 8,
+    paddingVertical: 6,
+    ...(warning
+      ? {
+          paddingHorizontal: 8,
+          marginHorizontal: -4,
+          borderRadius: radii.row,
+          borderWidth: 1,
+          borderColor: T.warn,
+          backgroundColor: T.raised,
+        }
+      : {}),
+  };
+  if (!url)
+    return (
+      <View style={style} accessible accessibilityLabel={warning ? `Warning: ${sentence(e)}` : sentence(e)}>
+        {body}
+      </View>
+    );
   return (
     <TouchableOpacity
       onPress={() => void Linking.openURL(url).catch(() => {})}
@@ -554,7 +724,11 @@ function TeamBody(props: { creds: Creds; team: TeamView; multi: boolean; now: nu
         ))
       )}
 
-      <Leases presence={team.presence} />
+      {team.leases ? (
+        <Leases leases={team.leases} nameOf={nameOf} now={now} />
+      ) : (
+        <TouchedFiles presence={team.presence} />
+      )}
 
       <View style={{ gap: 6 }}>
         <SectionLabel text="Team feed" />

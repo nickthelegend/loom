@@ -88,6 +88,19 @@ on them. Later sections implement them.
 | D24 | Visibility into teammates' work | **Intent, not transcripts** | Goal and task titles, agents, file globs, state and PR/CI status (decrypted client-side). Prompts and agent output only when a thread is explicitly shared. |
 | D25 | Phone alerts | **Only what needs you** | A review requested from you; your CI failed after auto-fix; a predicted conflict with your goal; an approval your agent needs; an adopt request. Everything else goes to the feed and a daily digest. |
 | D26 | Where teammates show up | **A Team section in Fleet, plus a lease map** | Desktop and phone. The same data feeds orchestrators' planning context. |
+| **Phase 2: stop colliding** (settled 2026-09-19) |||
+| D28 | When leases overlap | **Expand globs to real files, then compare sets** | Each daemon sends the globs, the concrete files (`git ls-files` matches, capped) and literal directory prefixes (for files not yet created). Overlap is a shared file or a prefix containment. |
+| D29 | What an orchestrator must do on overlap | **Declare how it handles it** | Loom won't spawn an overlapping task until the task carries `overlap: "wait:<goal>" \| "narrow" \| "proceed:<reason>"`. The refusal returns to its planning turn with the holder and their intent. The choice is posted to the feed. |
+| D30 | When a `wait:` task starts | **When the other goal's PR merges to main** | Seen through the feed (`pr_merged` on `loom/orchestra/<run>/main`). The waiting goal's integration branch is then rebased onto fresh main before the task starts. |
+| D31 | A claimed hard zone | **Queue the task; it starts on its own when the zone is released** | The goal's other tasks keep running. The feed and the holder are told someone is waiting. |
+| D32 | A waited-on goal that never merges | **Unblock when it ends without a PR, or on "Stop waiting"** | It unblocks when that goal is aborted or failed, or 24h after it finishes with no PR, or when the waiting goal's owner clicks "Stop waiting". Every unblock is logged with its reason. |
+| D33 | Drift outside declared touches | **Extend the lease and flag it; stop only in hard zones** | The lease widens, and the holder of the area plus the feed are told. Drift into someone else's hard zone interrupts the task until the zone frees up. |
+| D34 | A predicted conflict | **Tell both owners and both orchestrators** | A feed item plus a phone alert to both owners with the files. Orchestrators see it at their next review. Nothing replans mid-task on its own. |
+| D35 | Cadence | **On every task merge, plus every 5 min** | Push `refs/loom/wip/<member>/<run>` and run `git merge-tree --write-tree --name-only` against teammates' refs. Verified: GitHub accepts these refs and they trigger no CI. |
+| D36 | When a lease is released | **When the goal's PR merges** (or the goal is abandoned) | After a task finishes, its leases are held as *landing*. D12's staleness still applies while the owner's laptop sleeps. |
+| D37 | Where policy comes from | **`loom.team.json` on the default branch at origin** | Read with `git show origin/HEAD:loom.team.json`, so policy changes need a reviewed PR. A local copy can only make rules stricter. |
+| D38 | What policy enforces in Phase 2 | **Hard zones, a permission ceiling (+ `bypassRequiresPlan`), an agent allowlist, protected-branch delivery, concurrency caps** | Caps: `maxParallelPerMember`, and `teamMaxConcurrentAgents` counted from hub presence. |
+| D39 | A policy change mid-run | **Applies to new actions only** | Running tasks finish under the old rules; spawns, mode changes and deliveries use the new ones. Violations are noted in the feed. |
 | **Build approach** |||
 | D27 | Build before a live Supabase exists | **In-memory hub + real migrations** | The hub protocol is tested against an in-memory hub with two real daemons as two members; SQL, RLS and Edge Functions ship ready to deploy. |
 
@@ -461,7 +474,19 @@ The original Phase 1 plan:
 - GitHub App: webhook to Edge Function to feed (PRs, checks, reviews).
 - `delivery: "pr"` as the team default (exists today), plus commit trailers.
 
-**Phase 2: stop colliding (2 weeks)**
+**Phase 2: stop colliding.** Built per D28–D39. Status on 2026-09-19:
+
+| Piece | Status |
+|---|---|
+| Lease scopes, overlap and hard zones (`src/core/team-leases.ts`) | ✅ built, tested (including `**/*.test.ts` vs `src/auth/**`) |
+| Team policy `loom.team.json` from origin, local-only-stricter (`src/core/team-policy.ts`) | ✅ built, tested |
+| Hub leases: claim, extend, renew, landing, release; atomic hard-zone arbitration | ✅ MemoryHub + `loom hub` + SQL (`0003_team_leases.sql`, tested on Postgres 16) |
+| Orchestra holds (decide, wait, zone, capacity), `overlap` decisions, rebase before a wait, pause on drift, "Stop waiting" | ✅ built, tested |
+| Team coordinator (`src/daemon/team-coordinator.ts`): admission, drift, WIP refs, `merge-tree` prediction, lease lifecycle | ✅ built; two members tested end to end on a real bare origin |
+| Policy enforced: permission ceiling, agent allowlist, protected-branch delivery, concurrency caps | ✅ built, tested |
+| UI: holds on task cards, lease list, new feed sentences, policy panel (desktop and phone) | 🔨 in progress |
+
+The original Phase 2 plan:
 - `touches` in the orchestra protocol; lease claims and renewals; lease context in
   planning turns.
 - WIP refs and periodic `merge-tree` prediction, reported into the feed and to

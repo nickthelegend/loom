@@ -37,11 +37,13 @@ import {
   type TeamKey,
 } from "../core/team-crypto.js";
 import {
+  LEASE_TTL_MS,
   normalizeRepo,
   type FeedEvent,
   type FeedIn,
   type HubClient,
   type HubEvent,
+  type Lease,
   type MemberView,
   type Presence,
   type PresenceIn,
@@ -50,6 +52,7 @@ import {
 import { HttpHubClient, hubSignIn } from "../hub/client.js";
 import type { LoomEvent } from "../types.js";
 import type { ProjectRuntime } from "./runtime.js";
+import { TeamCoordinator } from "./team-coordinator.js";
 
 // ---------------------------------------------------------------------------
 // Local state
@@ -88,8 +91,19 @@ function run(cmd: string, args: string[], cwd?: string): Promise<string> {
   });
 }
 
-/** The project's GitHub repo ("owner/name"), from its origin remote. */
+/**
+ * The project's GitHub repo ("owner/name"): `git config loom.repo` when set (a
+ * mirror, or a remote that isn't github.com), else its origin remote.
+ */
 export async function repoOf(dir: string): Promise<string | null> {
+  const pinned = (await run("git", ["config", "--get", "loom.repo"], dir).catch(() => "")).trim();
+  if (pinned) {
+    try {
+      return normalizeRepo(pinned);
+    } catch {
+      /* fall through to origin */
+    }
+  }
   try {
     return normalizeRepo((await run("git", ["remote", "get-url", "origin"], dir)).trim());
   } catch {
@@ -117,6 +131,7 @@ interface TeamView {
   repos: string[];
   presence: Map<string, Presence>;
   feed: FeedEvent[];
+  leases: Map<string, Lease>;
 }
 
 const HEARTBEAT_MS = 15_000;
@@ -131,6 +146,7 @@ export class TeamLink {
   private timers: Array<ReturnType<typeof setInterval>> = [];
   private live = new Map<string, Set<string>>(); // teamId → presence keys this device reported last beat
   private logSubs = new Map<string, () => void>(); // projectId → log unsubscribe
+  private coordinators = new Map<string, TeamCoordinator>(); // projectId → coordinator (Phase 2)
   private started = false;
 
   constructor(private host: TeamLinkHost) {
@@ -156,6 +172,7 @@ export class TeamLink {
     this.unsubs.clear();
     for (const u of this.logSubs.values()) u();
     this.logSubs.clear();
+    for (const c of this.coordinators.values()) c.stop();
     // Say goodbye rather than let teammates wait out the TTL.
     await this.clearAllPresence().catch(() => {});
     this.started = false;
@@ -246,17 +263,19 @@ export class TeamLink {
 
   private async attach(teamId: string): Promise<void> {
     if (this.unsubs.has(teamId)) return;
-    const [members, repos, presence, feed] = await Promise.all([
+    const [members, repos, presence, feed, leases] = await Promise.all([
       this.hub().members(teamId),
       this.hub().repos(teamId),
       this.hub().presence(teamId),
       this.hub().feed(teamId, { limit: 200 }),
+      this.hub().leases(teamId).catch(() => [] as Lease[]),
     ]);
     this.views.set(teamId, {
       members,
       repos,
       presence: new Map(presence.map((p) => [presenceKey(p), p])),
       feed,
+      leases: new Map(leases.map((l) => [l.id, l])),
     });
     const unsub = await this.hub().subscribe(teamId, (e) => void this.onHubEvent(e));
     this.unsubs.set(teamId, unsub);
@@ -265,13 +284,22 @@ export class TeamLink {
   private async onHubEvent(e: HubEvent): Promise<void> {
     const v = this.views.get(e.teamId);
     if (!v) return;
-    if (e.type === "presence") v.presence.set(presenceKey(e.presence), e.presence);
+    if (e.type === "lease") v.leases.set(e.lease.id, e.lease);
+    else if (e.type === "lease_gone") for (const id of e.leaseIds) v.leases.delete(id);
+    else if (e.type === "presence") v.presence.set(presenceKey(e.presence), e.presence);
     else if (e.type === "presence_gone") {
       for (const [k, p] of v.presence) {
         if (p.userId === e.userId && p.deviceId === e.deviceId && p.agent === e.agent && p.repo === e.repo) v.presence.delete(k);
       }
     } else if (e.type === "feed") {
       v.feed.push(e.event);
+      for (const c of this.coordinators.values()) {
+        try {
+          c.onTeamEvent(e.event);
+        } catch {
+          /* one project's coordinator never breaks the feed */
+        }
+      }
       if (v.feed.length > 500) v.feed.splice(0, v.feed.length - 500);
       const t = e.event.type;
       if (t === "key_rotated") await this.pullKeys(e.teamId).then(() => writeState(this.file, this.state)).catch(() => {});
@@ -430,6 +458,10 @@ export class TeamLink {
       }
     }
     this.live = seen;
+    // Leases live as long as this device keeps saying so (D12).
+    for (const teamId of Object.keys(this.state.teams)) {
+      await this.hub().renewLeases(teamId, this.device().id).catch(() => 0);
+    }
     return count;
   }
 
@@ -457,13 +489,37 @@ export class TeamLink {
   /** Called by the daemon when it opens a runtime. */
   attachRuntime(rt: ProjectRuntime): void {
     rt.memberLogin = this.state.hub?.github ?? null;
+    this.coordinatorFor(rt);
     if (this.state.hub) this.watchRuntimes();
+  }
+
+  /** Phase 2: the project's team coordinator, created once and handed to its orchestra. */
+  coordinatorFor(rt: ProjectRuntime): TeamCoordinator {
+    let c = this.coordinators.get(rt.info.id);
+    if (!c) {
+      c = new TeamCoordinator(rt, {
+        hub: () => this.hubClient,
+        deviceId: () => this.state.device?.id ?? null,
+        github: () => this.state.hub?.github ?? null,
+        share: (r) => (this.hubClient ? this.teamFor(r) : Promise.resolve(null)),
+        keys: (teamId) => this.state.teams[teamId]?.keys ?? [],
+        feed: (teamId) => this.views.get(teamId)?.feed ?? [],
+        presence: (teamId) => [...(this.views.get(teamId)?.presence.values() ?? [])],
+      });
+      this.coordinators.set(rt.info.id, c);
+      rt.coordinator = c;
+    }
+    return c;
   }
 
   private async onProjectEvent(rt: ProjectRuntime, e: LoomEvent): Promise<void> {
     if (e.kind !== "orchestra" || !this.hubClient) return;
     const p = e.payload as Record<string, unknown>;
     const phase = String(p.phase ?? "");
+    // D36: work that reached the base branch without a PR has landed too.
+    if ((phase === "delivered" && (p.mode === "commit" || p.mode === "push")) || phase === "applied") {
+      void this.coordinators.get(rt.info.id)?.release(String(p.runId), phase === "applied" ? "applied locally" : `delivered (${String(p.mode)})`);
+    }
     const map: Record<string, FeedIn["type"]> = {
       started: "goal_started",
       completed: "goal_finished",
@@ -546,6 +602,7 @@ export class TeamLink {
           repos: v?.repos ?? [],
           presence: v ? [...v.presence.values()].filter((p) => Date.now() - p.ts < 45_000).map((p) => this.decryptPresence(id, p)) : [],
           feed: v ? v.feed.slice(-100).map((e) => this.decryptFeed(id, e)) : [],
+          leases: v ? [...v.leases.values()].map((l) => this.decryptLease(id, l)) : [],
         };
       }),
     };
@@ -556,12 +613,28 @@ export class TeamLink {
     return { ...rest, intent: openFromTeam(this.state.teams[teamId]?.keys ?? [], sealed) ?? null, mine: p.userId === this.state.hub?.userId };
   }
 
+  /** A lease for the UI: who, which goal/task (decrypted), what it covers, and its state. */
+  private decryptLease(teamId: string, l: Lease): Record<string, unknown> {
+    const { sealed, files, ...rest } = l;
+    return {
+      ...rest,
+      fileCount: files.length,
+      files: files.slice(0, 20),
+      // computed on every read: a flag frozen when the lease last changed would
+      // show a sleeping teammate as active until something else happened (D12)
+      stale: Date.now() - l.ts > LEASE_TTL_MS,
+      intent: openFromTeam(this.state.teams[teamId]?.keys ?? [], sealed) ?? null,
+      mine: l.userId === this.state.hub?.userId,
+    };
+  }
+
   private decryptFeed(teamId: string, e: FeedEvent): Record<string, unknown> {
     const { sealed, sig: _sig, ...rest } = e;
     return { ...rest, content: openFromTeam(this.state.teams[teamId]?.keys ?? [], sealed) ?? null };
   }
 
   private decryptEvent(e: HubEvent): Record<string, unknown> {
+    if (e.type === "lease") return { type: e.type, lease: this.decryptLease(e.teamId, e.lease) };
     if (e.type === "presence") return { type: e.type, presence: this.decryptPresence(e.teamId, e.presence) };
     if (e.type === "feed") return { type: e.type, event: this.decryptFeed(e.teamId, e.event) };
     return { ...e };

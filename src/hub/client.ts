@@ -6,7 +6,17 @@
 
 import WebSocket from "ws";
 
-import { HubError, type FeedIn, type HubClient, type HubEvent, type PresenceIn } from "../core/team-hub.js";
+import {
+  HubError,
+  type ClaimResult,
+  type FeedIn,
+  type HubClient,
+  type HubEvent,
+  type Lease,
+  type LeaseClaim,
+  type PresenceIn,
+} from "../core/team-hub.js";
+import type { LeaseScope } from "../core/team-leases.js";
 
 export async function hubSignIn(
   baseUrl: string,
@@ -97,6 +107,25 @@ export class HttpHubClient implements HubClient {
   }
   feed(teamId: string, opts?: { since?: number; limit?: number }) {
     return this.call<Awaited<ReturnType<HubClient["feed"]>>>("feed", teamId, opts ?? {});
+  }
+
+  claimLease(teamId: string, c: LeaseClaim) {
+    return this.call<ClaimResult>("claimLease", teamId, c);
+  }
+  extendLease(teamId: string, leaseId: string, scope: LeaseScope, hardZones: string[]) {
+    return this.call<ClaimResult>("extendLease", teamId, leaseId, scope, hardZones);
+  }
+  renewLeases(teamId: string, deviceId: string) {
+    return this.call<number>("renewLeases", teamId, deviceId);
+  }
+  setRunLeaseState(teamId: string, runId: string, state: "active" | "landing") {
+    return this.call<number>("setRunLeaseState", teamId, runId, state);
+  }
+  releaseLeases(teamId: string, runId: string, reason: string) {
+    return this.call<number>("releaseLeases", teamId, runId, reason);
+  }
+  leases(teamId: string, repo?: string) {
+    return this.call<Lease[]>("leases", teamId, ...(repo === undefined ? [] : [repo]));
   }
 
   /**

@@ -835,6 +835,7 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
     const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
     const files = t.files?.length ? pc.dim(` · ${t.files.length} file${t.files.length === 1 ? "" : "s"}`) : "";
     console.log(`   ${color(t.status.padEnd(11))} ${pc.bold(t.id)} ${t.title} ${pc.dim(`→ ${t.agent}`)}${deps}${files}`);
+    if (t.hold) console.log(`               ${pc.yellow(`held (${t.hold.kind}):`)} ${t.hold.reason.slice(0, 200)}`);
     if (t.error) console.log(`               ${pc.red(t.error.split("\n")[0]!.slice(0, 160))}`);
   }
   if (run.question) console.log(`   ${pc.yellow("asks:")} ${run.question}  ${pc.dim(`(loom orchestra:reply ${run.id} "…")`)}`);
@@ -1015,6 +1016,16 @@ function printTeam(t: Record<string, unknown>): void {
       console.log(
         `    ${pc.cyan(String(p.github).padEnd(12))} ${String(p.agent).padEnd(22)} ${String(p.state).padEnd(10)} ${what}` +
           (touches.length ? pc.dim(`  ${touches.slice(0, 3).join(" ")}`) : ""),
+      );
+    }
+    const leases = ((tm.leases as Array<Record<string, unknown>>) ?? []).filter((l) => !l.stale);
+    if (leases.length) console.log("  leases");
+    for (const l of leases) {
+      const intent = (l.intent ?? {}) as Record<string, string>;
+      const globs = ((l.globs as string[]) ?? []).slice(0, 3).join(" ");
+      console.log(
+        `    ${pc.cyan(String(l.github).padEnd(12))} ${String(l.runId)}/${String(l.taskId)} ${pc.dim(String(l.state).padEnd(8))} ${globs}` +
+          (intent.task ? pc.dim(`  ${intent.task}`) : ""),
       );
     }
     const feed = ((tm.feed as Array<Record<string, unknown>>) ?? []).slice(-8);

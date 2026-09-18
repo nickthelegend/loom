@@ -41,6 +41,12 @@ const METHODS = new Set<keyof HubClient>([
   "presence",
   "appendFeed",
   "feed",
+  "claimLease",
+  "extendLease",
+  "renewLeases",
+  "setRunLeaseState",
+  "releaseLeases",
+  "leases",
 ]);
 
 export interface HubServerOptions {
