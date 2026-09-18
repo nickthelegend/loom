@@ -121,6 +121,7 @@ import {
 import { packCredentials, toB64, type RelayTransport } from "../core/relay-protocol.js";
 import { approvalEndpoint, setApprovalEndpoint, type ApprovalDecision } from "../core/approvals.js";
 import { PERMISSION_PROFILES } from "../core/permissions.js";
+import { loadPolicy } from "../core/team-policy.js";
 import { clearRecent, deletePrompt, listPrompts, recordRecent, savePrompt, updatePrompt } from "../core/prompts.js";
 
 export interface DaemonOptions {
@@ -2502,6 +2503,14 @@ export class LoomDaemon {
       res.json({ ok: true });
     });
 
+    // ---- team policy in effect for a project (D37) ----
+    app.get(
+      "/api/projects/:id/team/policy",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ policy: await loadPolicy(rt.info.dir) });
+      }),
+    );
+
     // ---- team sharing, per project (D8: opt-in) ----
     // What this project has chosen (config `team`) and which GitHub repo its
     // origin is — the two facts the UI needs to show Shared / Private / Auto.
@@ -2623,6 +2632,18 @@ export class LoomDaemon {
         res.json({ run });
       }),
     );
+    // D32: the owner releases a task that waits on a teammate's goal.
+    app.post(
+      "/api/projects/:id/orchestra/:runId/tasks/:taskId/stop-waiting",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json({ task: rt.orchestra.stopWaiting(String(req.params.runId), String(req.params.taskId)) });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+
     // Re-run the delivery policy by hand (e.g. after fixing a push rejection).
     app.post(
       "/api/projects/:id/orchestra/:runId/deliver",

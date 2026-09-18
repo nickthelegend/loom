@@ -347,3 +347,13 @@ describe("the daemon's team routes and the `loom team` CLI", () => {
     }
   });
 });
+
+describe("lease staleness in the team view", () => {
+  it("is computed from the last renewal on every read, not frozen", async () => {
+    const link = new TeamLink({ runtimes: () => [], broadcast: () => {}, statePath: path.join(tmpDir("stale"), "team.json") });
+    const lease = { id: "l1", teamId: "t", userId: "u", github: "bob", deviceId: "d", repo: "a/b", runId: "o1", taskId: "t1",
+      state: "active", since: 0, ts: Date.now() - 11 * 60_000, stale: false, globs: [], files: [], prefixes: [] };
+    const view = (link as unknown as { decryptLease(t: string, l: unknown): { stale: boolean } }).decryptLease("t", lease);
+    expect(view.stale).toBe(true);
+  });
+});

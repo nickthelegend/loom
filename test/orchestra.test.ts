@@ -27,12 +27,20 @@ const git = (dir: string, ...args: string[]): string => execFileSync("git", args
 let script: string[] = [];
 const seen: SendInput[] = [];
 
+/** When set, the orchestrator's stop() stalls — holding finish() at its wrap-up step. */
+let stall: { entered: boolean; release: () => void; gate: Promise<void> } | null = null;
+
 class ScriptedOrchestrator extends AdapterBase {
   async available() {
     return true;
   }
   async start() {}
-  async stop() {}
+  async stop() {
+    if (stall) {
+      stall.entered = true;
+      await stall.gate;
+    }
+  }
   async interrupt() {}
   async diff() {
     return "";
@@ -282,6 +290,38 @@ describe("orchestra runs", () => {
     r = rt.orchestra.get(run.id)!;
     expect(r.summary).toBe("after human");
     expect(seen.at(-1)!.text).toContain("The human says: just finish");
+  });
+
+  it("an empty reply with nothing running waits for a human instead of looping to maxRounds", async () => {
+    await openProject();
+    script = [loom([{ type: "spawn", title: "one", agent: "alpha", prompt: "write:e.txt" }]), loom([])];
+    const run = await rt.orchestra.start({ goal: "quiet", orchestrator: "conductor" });
+    await settle(run.id);
+    const r = rt.orchestra.get(run.id)!;
+    expect(r.status).toBe("waiting_human");
+    expect(r.round).toBe(2);
+    expect(r.question).toMatch(/Nothing is running/);
+  });
+
+  it("an abort during the final wrap-up stands — it isn't overwritten by completed", async () => {
+    await openProject();
+    script = [loom([{ type: "spawn", title: "one", agent: "alpha", prompt: "write:f.txt" }]), loom([{ type: "done", summary: "ok" }])];
+    let release!: () => void;
+    stall = { entered: false, release: () => release(), gate: new Promise<void>((r) => (release = r)) };
+    const run = await rt.orchestra.start({ goal: "race", orchestrator: "conductor" });
+    try {
+      // finish() is now parked in its wrap-up (stopping the agents)…
+      await waitUntil(() => stall!.entered);
+      // …and the human aborts right then
+      const aborting = rt.orchestra.abort(run.id);
+      stall.release();
+      await aborting;
+      await new Promise((r) => setTimeout(r, 200));
+      expect(rt.orchestra.get(run.id)!.status).toBe("aborted");
+    } finally {
+      stall.release();
+      stall = null;
+    }
   });
 
   it("rejects work for agents outside the run's workers, and tells the orchestrator", async () => {

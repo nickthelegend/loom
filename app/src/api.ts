@@ -1071,6 +1071,22 @@ export type OrchestraTaskStatus =
   | "failed"
   | "cancelled";
 
+/**
+ * Why a ready task isn't running yet (Loom Teams, Phase 2). "decide" waits on
+ * the orchestrator; "wait" on a teammate's goal (the owner can stop waiting);
+ * "zone" on a teammate's hard-zone lease; "capacity" on the team's caps.
+ */
+export interface OrchestraTaskHold {
+  kind: "decide" | "wait" | "zone" | "capacity";
+  reason: string;
+  /** wait: the teammate goal this task waits on. */
+  runId?: string;
+  /** zone: the hard zone and who holds it. */
+  zone?: string;
+  holder?: string;
+  since: number;
+}
+
 /** One unit of work a worker agent runs on its own branch. `chat` is its thread. */
 export interface OrchestraTask {
   id: string;
@@ -1085,6 +1101,11 @@ export interface OrchestraTask {
   error?: string;
   result?: string;
   costUsd?: number;
+  /** File globs the orchestrator declared this task will touch; teammates see them. */
+  touches?: string[];
+  /** The orchestrator's answer to a teammate overlap: wait:<goal> | narrow | proceed:<reason>. */
+  overlap?: string;
+  hold?: OrchestraTaskHold;
 }
 
 /** One orchestrator, many parallel workers, one integration branch. */
@@ -1112,6 +1133,8 @@ export interface OrchestraRun {
   deliveryError?: string;
   costUsd: number;
   createdAt: number;
+  /** Things the team coordinator told the orchestrator (drift, predicted conflicts). */
+  notes?: string[];
 }
 
 /** Where a run's plan lives inside the repo — the daemon's planDir(). */
@@ -1153,6 +1176,14 @@ export const deliverOrchestra = (c: Creds, id: string, runId: string) =>
     method: "POST",
     body: "{}",
   });
+
+/** Release a task's `wait` hold: it proceeds alongside the teammate's goal. */
+export const stopWaitingOrchestra = (c: Creds, id: string, runId: string, taskId: string) =>
+  api<{ task: OrchestraTask }>(
+    c,
+    `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/stop-waiting`,
+    { method: "POST", body: "{}" },
+  );
 
 // --- Permissions ------------------------------------------------------------
 
@@ -1318,6 +1349,26 @@ export interface TeamFeedEvent {
   content: { goal?: string; summary?: string; title?: string } | null;
 }
 
+/** A file lease one orchestra task holds on a shared repo. Titles only, sealed to the team. */
+export interface TeamLease {
+  id: string;
+  github: string;
+  repo: string;
+  runId: string;
+  taskId: string;
+  globs: string[];
+  fileCount: number;
+  files?: string[];
+  /** active while the task runs; landing after it finishes, until the goal's PR merges. */
+  state: "active" | "landing";
+  /** No renewal lately: the owner's laptop is probably asleep. */
+  stale: boolean;
+  intent: { goal?: string; task?: string } | null;
+  mine: boolean;
+  since?: number;
+  ts?: number;
+}
+
 export interface TeamView {
   id: string;
   name: string;
@@ -1327,6 +1378,8 @@ export interface TeamView {
   repos: string[];
   presence: TeamPresence[];
   feed: TeamFeedEvent[];
+  /** Phase 2; missing from an older daemon. */
+  leases?: TeamLease[];
 }
 
 export interface TeamStatus {
@@ -1343,6 +1396,20 @@ export const getTeam = (c: Creds) => api<TeamStatus>(c, "/api/team");
 /** Membership changes are admin-only on the daemon: a paired phone gets a 403 (ApiError.status). */
 export const teamAction = <R = unknown>(c: Creds, action: TeamAction, body: Record<string, string> = {}) =>
   api<{ result: R; team: TeamStatus }>(c, `/api/team/${action}`, { method: "POST", body: JSON.stringify(body) });
+
+/** `loom.team.json` in effect for a project: reviewed from origin, tightened by a local copy. */
+export interface TeamPolicy {
+  hardZones: string[];
+  permissions: { ceiling: PermissionMode; bypassRequiresPlan: boolean };
+  /** null = any agent */
+  agents: { allow: string[] | null };
+  delivery: { protected: string[] };
+  orchestra: { maxParallelPerMember: number | null; teamMaxConcurrentAgents: number | null };
+  source: "origin" | "local" | "none";
+}
+
+export const getTeamPolicy = (c: Creds, id: string) =>
+  api<{ policy: TeamPolicy }>(c, `/api/projects/${id}/team/policy`);
 
 // --- Prompt manager ---------------------------------------------------------
 

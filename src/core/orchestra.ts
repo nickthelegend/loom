@@ -60,6 +60,23 @@ export type TaskStatus =
   | "failed"
   | "cancelled";
 
+/**
+ * Why a ready task isn't running yet (Loom Teams, Phase 2). "decide" needs the
+ * orchestrator (an overlap without an `overlap` decision, missing `touches`, a
+ * disallowed agent); the rest clear on their own and are re-checked.
+ */
+export interface TaskHold {
+  kind: "decide" | "wait" | "zone" | "capacity";
+  reason: string;
+  /** wait: the teammate goal this task waits on. */
+  runId?: string;
+  /** zone: the hard zone and who holds it. */
+  zone?: string;
+  holder?: string;
+  since: number;
+  checkedAt?: number;
+}
+
 export interface OrchestraTask {
   id: string;
   title: string;
@@ -71,6 +88,10 @@ export interface OrchestraTask {
   dependsOn: string[];
   /** File globs the orchestrator declared this task will touch (D9). */
   touches?: string[];
+  /** The orchestrator's answer to a teammate overlap (D29): wait:<goal> | narrow | proceed:<reason>. */
+  overlap?: string;
+  /** Set while the task waits on something other than its own dependencies. */
+  hold?: TaskHold;
   status: TaskStatus;
   /** The chat (thread) this task's output streams into. */
   chat: string;
@@ -120,6 +141,8 @@ export interface OrchestraRun {
   /** What the project's git delivery policy did with the finished run. */
   delivered?: { mode: GitDelivery; into?: string; pushed?: string; prUrl?: string; at: number };
   deliveryError?: string;
+  /** Team facts for the orchestrator's next review: predicted conflicts, drift (D33, D34). */
+  notes?: string[];
   costUsd: number;
   createdAt: number;
   updatedAt: number;
@@ -160,6 +183,27 @@ export interface OrchestraHost {
   gitDelivery?(): GitDelivery;
   /** The GitHub login of the member running this daemon, when on a team (commit trailers). */
   member?(): string | null;
+  /** The team coordinator for this project, when it's shared with a team (Phase 2). */
+  coordinator?(): OrchestraCoordinator | null;
+}
+
+/** What a task's admission decided. */
+export type Admission = { go: true; rebase?: boolean; note?: string } | { go: false; hold: TaskHold };
+
+/**
+ * Loom Teams, Phase 2 — the team's say over when a task runs (leases, hard
+ * zones, waits, capacity, policy) and what it hears back (drift, WIP, landing).
+ * Implemented by the daemon's Team Link; absent for solo projects.
+ */
+export interface OrchestraCoordinator {
+  admit(run: OrchestraRun, task: OrchestraTask): Promise<Admission>;
+  onEdit?(run: OrchestraRun, task: OrchestraTask, path: string): void;
+  onTaskDone?(run: OrchestraRun, task: OrchestraTask): void;
+  onRunEnd?(run: OrchestraRun): void;
+  /** Policy cap on tasks at once for this member (D38). */
+  maxParallel?(): number | null;
+  /** Protected branches only receive PRs (D38). */
+  isProtected?(branch: string): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +211,16 @@ export interface OrchestraHost {
 // ---------------------------------------------------------------------------
 
 export type OrchestraAction =
-  | { type: "spawn"; id?: string; title: string; agent: string; prompt: string; dependsOn?: string[]; touches?: string[] }
+  | {
+      type: "spawn";
+      id?: string;
+      title: string;
+      agent: string;
+      prompt: string;
+      dependsOn?: string[];
+      touches?: string[];
+      overlap?: string;
+    }
   | { type: "send"; task: string; message: string }
   | { type: "cancel"; task: string }
   | { type: "ask"; question: string }
@@ -261,7 +314,17 @@ function normalizeAction(v: unknown): OrchestraAction | null {
       const touches = Array.isArray(a.touches ?? a.files)
         ? ((a.touches ?? a.files) as unknown[]).map(str).filter(Boolean).slice(0, 50)
         : [];
-      return { type: "spawn", ...(id ? { id } : {}), title, agent, prompt, dependsOn: deps, ...(touches.length ? { touches } : {}) };
+      const overlapDecision = str(a.overlap);
+      return {
+        type: "spawn",
+        ...(id ? { id } : {}),
+        title,
+        agent,
+        prompt,
+        dependsOn: deps,
+        ...(touches.length ? { touches } : {}),
+        ...(overlapDecision ? { overlap: overlapDecision } : {}),
+      };
     }
     case "send":
     case "followup":
@@ -565,6 +628,8 @@ const DEFAULT_MAX_PARALLEL = 4;
 const DEFAULT_MAX_ROUNDS = 10;
 const HARD_MAX_PARALLEL = 12;
 const RESULT_CHARS = 4000;
+/** How often a task waiting on the team (a PR, a zone, capacity) is re-admitted. */
+const RECHECK_MS = 15_000;
 
 export class OrchestraEngine {
   private runs = new Map<string, OrchestraRun>();
@@ -731,7 +796,10 @@ export class OrchestraEngine {
       tasks: [],
       round: 0,
       maxRounds: clamp(opts.maxRounds ?? DEFAULT_MAX_ROUNDS, 1, 50),
-      maxParallel: clamp(opts.maxParallel ?? DEFAULT_MAX_PARALLEL, 1, HARD_MAX_PARALLEL),
+      maxParallel: Math.min(
+        clamp(opts.maxParallel ?? DEFAULT_MAX_PARALLEL, 1, HARD_MAX_PARALLEL),
+        this.host.coordinator?.()?.maxParallel?.() ?? HARD_MAX_PARALLEL,
+      ),
       ...(opts.plan ? { plan: true } : {}),
       costUsd: 0,
       createdAt: Date.now(),
@@ -786,6 +854,7 @@ export class OrchestraEngine {
     this.save(run);
     await this.stopAll(run);
     this.emit(run, "aborted", { reason });
+    this.host.coordinator?.()?.onRunEnd?.(run);
     return run;
   }
 
@@ -983,6 +1052,16 @@ export class OrchestraEngine {
       return;
     }
     const outstanding = run.tasks.some((t) => t.status === "running" || t.status === "pending");
+    // Nothing running, nothing asked, nothing new: asking again would just loop
+    // to maxRounds (a scripted or real model that says "keep waiting" when there
+    // is nothing to wait for). Stop and let a human steer.
+    if (!actions.length && !outstanding) {
+      run.status = "waiting_human";
+      run.question = "Nothing is running and the orchestrator gave no next step. Reply to steer it, or tell it to finish.";
+      this.save(run);
+      this.emit(run, "waiting", { question: run.question });
+      return;
+    }
     if (finished && !outstanding) {
       return void this.finish(run, "completed", undefined, (finished as { summary: string }).summary);
     }
@@ -1038,6 +1117,22 @@ export class OrchestraEngine {
       throw new Error(`agent "${a.agent}" is not one of this run's workers (${run.workers.join(", ")})`);
     }
     let id = (a.id || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16);
+    // Re-sending a spawn for a task that hasn't started revises it: that's how
+    // the orchestrator answers a hold (an overlap decision, narrower touches,
+    // another agent) without inventing a new task.
+    const unstarted = run.tasks.find((t) => t.id === id && t.attempts === 0 && t.status === "pending");
+    if (unstarted) {
+      unstarted.title = a.title.slice(0, 120);
+      unstarted.prompt = a.prompt;
+      unstarted.agent = cfg.id;
+      unstarted.kind = cfg.kind;
+      if (a.touches?.length) unstarted.touches = a.touches;
+      if (a.overlap) unstarted.overlap = a.overlap;
+      if (a.dependsOn) unstarted.dependsOn = a.dependsOn.filter((d) => d !== id && run.tasks.some((t) => t.id === d));
+      unstarted.hold = undefined;
+      this.emit(run, "task", { task: taskSummary(unstarted) });
+      return unstarted;
+    }
     if (!id || run.tasks.some((t) => t.id === id)) id = `t${run.tasks.length + 1}`;
     while (run.tasks.some((t) => t.id === id)) id = `${id}x`;
     const deps = (a.dependsOn ?? []).filter((d) => run.tasks.some((t) => t.id === d));
@@ -1050,6 +1145,7 @@ export class OrchestraEngine {
       kind: cfg.kind,
       dependsOn: deps,
       ...(a.touches?.length ? { touches: a.touches } : {}),
+      ...(a.overlap ? { overlap: a.overlap } : {}),
       status: "pending",
       chat: chat.id,
       attempts: 0,
@@ -1082,13 +1178,24 @@ export class OrchestraEngine {
 
   // ── scheduling ──
 
+  private admitting = new Set<string>(); // `${run}/${task}` mid-admission
+  private recheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   private schedule(run: OrchestraRun): void {
     if (run.status !== "running") return;
-    const running = run.tasks.filter((t) => t.status === "running").length;
-    let slots = run.maxParallel - running;
+    const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`)).length;
+    let slots = run.maxParallel - inFlight;
+    let waiting = false;
     for (const task of run.tasks) {
       if (slots <= 0) break;
       if (task.status !== "pending") continue;
+      if (this.admitting.has(`${run.id}/${task.id}`)) continue;
+      // "decide" holds wait for the orchestrator; the rest are re-checked, not hammered
+      if (task.hold?.kind === "decide") continue;
+      if (task.hold && Date.now() - (task.hold.checkedAt ?? task.hold.since) < RECHECK_MS) {
+        waiting = true;
+        continue;
+      }
       const deps = task.dependsOn.map((d) => run.tasks.find((t) => t.id === d));
       if (deps.some((d) => d && (d.status === "failed" || d.status === "cancelled"))) {
         task.status = "failed";
@@ -1099,20 +1206,151 @@ export class OrchestraEngine {
       }
       if (!deps.every((d) => !d || d.status === "done")) continue;
       slots--;
-      void this.runTask(run, task);
+      void this.admitAndRun(run, task);
     }
     this.save(run);
+    if (waiting || run.tasks.some((t) => t.status === "pending" && t.hold && t.hold.kind !== "decide")) this.armRecheck(run);
     this.maybeReview(run);
+  }
+
+  private armRecheck(run: OrchestraRun): void {
+    if (this.recheckTimers.has(run.id)) return;
+    const t = setTimeout(() => {
+      this.recheckTimers.delete(run.id);
+      if (!isTerminal(run.status)) this.schedule(run);
+    }, RECHECK_MS);
+    t.unref?.();
+    this.recheckTimers.set(run.id, t);
+  }
+
+  /** Something the team coordinator watches changed (a lease freed, a PR merged): look again now. */
+  recheck(runId: string): void {
+    const run = this.runs.get(runId);
+    if (!run || run.status !== "running") return;
+    for (const t of run.tasks) if (t.hold && t.hold.kind !== "decide") t.hold.checkedAt = 0;
+    this.schedule(run);
+  }
+
+  /**
+   * Stop a running task and hold it (D33: drift into someone's hard zone).
+   * It keeps its worktree and session; when the hold clears it resumes with a
+   * "continue" follow-up instead of starting over.
+   */
+  pauseTask(runId: string, taskId: string, hold: TaskHold): void {
+    const run = this.runs.get(runId);
+    const task = run?.tasks.find((t) => t.id === taskId);
+    if (!run || !task || task.status !== "running") return;
+    task.status = "pending";
+    task.hold = hold;
+    task.queued.unshift(
+      `You were paused: ${hold.reason}. It's clear now — continue your task where you left off, and stay out of the area you were paused for unless you must.`,
+    );
+    const live = this.live.get(`${run.id}/${task.id}`);
+    if (live?.busy()) void live.interrupt().catch(() => {});
+    this.save(run);
+    this.emit(run, "task", { task: taskSummary(task) });
+    this.emit(run, "task_held", { taskId: task.id, hold }, task.chat);
+  }
+
+  /**
+   * The owner says stop waiting (D32): a `wait:` hold is released and the task
+   * proceeds alongside the other goal, with the reason on record.
+   */
+  stopWaiting(runId: string, taskId: string): OrchestraTask {
+    const run = this.mustGet(runId);
+    const task = run.tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`no task "${taskId}"`);
+    if (task.hold?.kind !== "wait") throw new Error(`task ${taskId} isn't waiting on another goal`);
+    task.overlap = `proceed:the owner stopped waiting on ${task.hold.runId ?? "the other goal"}`;
+    task.hold = undefined;
+    this.save(run);
+    this.emit(run, "task", { task: taskSummary(task) });
+    this.schedule(run);
+    return task;
+  }
+
+  /** A team fact for the orchestrator's next review (D33, D34). */
+  addNote(runId: string, note: string): void {
+    const run = this.runs.get(runId);
+    if (!run || isTerminal(run.status)) return;
+    run.notes = [...(run.notes ?? []), note.slice(0, 1000)].slice(-20);
+    this.save(run);
+  }
+
+  /** Ask the team coordinator (if any) whether this task may start, then start it. */
+  private async admitAndRun(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    const coord = this.host.coordinator?.();
+    if (!coord) return this.runTask(run, task);
+    const key = `${run.id}/${task.id}`;
+    this.admitting.add(key);
+    let a: Admission;
+    try {
+      a = await coord.admit(run, task);
+    } catch (err) {
+      a = { go: false, hold: { kind: "capacity", reason: `team hub unreachable: ${(err as Error).message}`, since: Date.now() } };
+    }
+    this.admitting.delete(key);
+    if (isTerminal(run.status) || task.status !== "pending") return;
+    if (!a.go) {
+      const was = task.hold?.reason;
+      task.hold = { ...a.hold, since: task.hold?.since ?? a.hold.since, checkedAt: Date.now() };
+      task.reported = false;
+      this.save(run);
+      if (was !== task.hold.reason) {
+        this.emit(run, "task", { task: taskSummary(task) });
+        this.emit(run, "task_held", { taskId: task.id, hold: task.hold }, task.chat);
+      }
+      this.schedule(run);
+      return;
+    }
+    task.hold = undefined;
+    if (a.note) this.addNote(run.id, a.note);
+    if (a.rebase) {
+      try {
+        await this.syncWithBase(run);
+      } catch (err) {
+        task.hold = { kind: "decide", reason: `couldn't bring fresh ${run.baseBranch ?? "main"} into the goal before starting: ${(err as Error).message}`, since: Date.now() };
+        this.save(run);
+        this.emit(run, "task", { task: taskSummary(task) });
+        this.maybeReview(run);
+        return;
+      }
+    }
+    return this.runTask(run, task);
+  }
+
+  /**
+   * Bring the base branch's latest into the integration branch (D30): a task
+   * that waited for a teammate's PR must build on the merged code.
+   */
+  private async syncWithBase(run: OrchestraRun): Promise<void> {
+    const base = run.baseBranch;
+    if (!base) return;
+    await this.gitLock.run(async () => {
+      await git(["fetch", "-q", "origin", base], run.dir).catch(() => {});
+      const ref = (await gitOk(["rev-parse", "--verify", `origin/${base}`], run.dir)) ? `origin/${base}` : base;
+      await commitAll(run.dir, `orchestra ${run.id}: orchestrator edits`);
+      try {
+        await git(["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-edit", "-q", ref], run.dir);
+      } catch (err) {
+        await git(["merge", "--abort"], run.dir).catch(() => {});
+        throw err;
+      }
+    });
+    this.emit(run, "synced", { with: base });
   }
 
   /** When nothing can move without the orchestrator, give it a turn. */
   private maybeReview(run: OrchestraRun): void {
     if (run.status !== "running" || this.orchestratorBusy.has(run.id)) return;
-    if (run.tasks.some((t) => t.status === "running")) return;
-    const startable = run.tasks.some(
-      (t) => t.status === "pending" && t.dependsOn.every((d) => run.tasks.find((x) => x.id === d)?.status === "done"),
-    );
-    if (startable) return;
+    if (run.tasks.some((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`))) return;
+    const ready = (t: OrchestraTask) =>
+      t.status === "pending" && t.dependsOn.every((d) => run.tasks.find((x) => x.id === d)?.status === "done");
+    if (run.tasks.some((t) => ready(t) && !t.hold)) return;
+    // Waiting on teammates (a PR, a zone, capacity) is not a reason to wake
+    // the orchestrator — unless something needs its decision.
+    const needsDecision = run.tasks.some((t) => ready(t) && t.hold?.kind === "decide");
+    if (!needsDecision && run.tasks.some((t) => ready(t) && t.hold)) return;
     run.status = "reviewing";
     this.save(run);
     this.emit(run, "reviewing", { round: run.round + 1 });
@@ -1136,9 +1374,24 @@ export class OrchestraEngine {
             `run \`git merge ${run.branch}\` in its worktree, resolve the conflicts, and verify.`,
         );
       }
+      if (t.hold) {
+        lines.push(`On hold (${t.hold.kind}): ${t.hold.reason}`);
+        if (t.hold.kind === "decide") {
+          lines.push(
+            `Answer by re-sending the spawn for ${t.id} (same id) with "overlap": "wait:<goal id>" (start after that ` +
+              `teammate's PR merges), "narrow" (with revised, non-overlapping "touches"), or "proceed:<why it's safe>"; ` +
+              `or give it "touches" / another agent as the reason says.`,
+          );
+        }
+      }
       if (t.error) lines.push(`Error: ${t.error}`);
       if (t.result) lines.push(`Worker report:\n${t.result}`);
       t.reported = true;
+    }
+    if (run.notes?.length) {
+      lines.push("\n## From your team");
+      for (const n of run.notes) lines.push(`- ${n}`);
+      run.notes = [];
     }
     lines.push(
       "\nReview the results (the integration branch in your working directory has every merged task). " +
@@ -1204,6 +1457,11 @@ export class OrchestraEngine {
         : undefined;
       await agent.send({ text, ...(briefing ? { briefing } : {}) });
       if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
+      // paused mid-turn (pauseTask): not finished, nothing to integrate yet
+      if ((task.status as TaskStatus) === "pending") {
+        this.schedule(run);
+        return;
+      }
 
       const reply = (this.turnText.get(key) ?? "").trim();
       task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
@@ -1234,6 +1492,7 @@ export class OrchestraEngine {
     this.save(run);
     this.emit(run, "task", { task: taskSummary(task) });
     this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+    if ((task.status as TaskStatus) === "done") this.host.coordinator?.()?.onTaskDone?.(run, task);
     this.schedule(run);
   }
 
@@ -1279,6 +1538,10 @@ export class OrchestraEngine {
         this.turnText.set(key, `${prev}\n${String(p.text ?? "")}`.slice(-20_000));
       }
       if (e.kind === "error") this.lastError.set(key, String(p.message ?? "error"));
+      if (e.kind === "file_edit" && !key.endsWith("/orch") && typeof p.path === "string") {
+        const task = run.tasks.find((t) => `${run.id}/${t.id}` === key);
+        if (task) this.host.coordinator?.()?.onEdit?.(run, task, p.path);
+      }
       const event = this.host.append({
         kind: e.kind,
         agentId,
@@ -1308,6 +1571,8 @@ export class OrchestraEngine {
       await this.writePlan(final as OrchestraRun, "final");
     }
     const commits = await git(["rev-list", "--count", `${run.baseCommit}..${run.branch}`], this.host.projectDir).catch(() => "0");
+    // Aborted while we were finishing up: the human's abort stands.
+    if (run.status === "aborted") return;
     run.status = status;
     if (error) run.error = error;
     if (summary) run.summary = summary;
@@ -1328,6 +1593,7 @@ export class OrchestraEngine {
         payload: { text: `**Orchestra complete.** ${summary}\n\nAll work is on branch \`${run.branch}\` — apply it to merge into your branch.`, orchestra: { runId: run.id, role: "summary" } },
       });
     }
+    this.host.coordinator?.()?.onRunEnd?.(run);
     if (status === "completed") await this.deliver(run);
   }
 
@@ -1339,6 +1605,12 @@ export class OrchestraEngine {
    */
   async deliver(run: OrchestraRun, mode: GitDelivery = this.host.gitDelivery?.() ?? "none"): Promise<void> {
     if (mode === "none") return;
+    // D38: a protected branch only receives PRs, whatever the project setting says.
+    const intoBranch = run.baseBranch ?? "";
+    if ((mode === "commit" || mode === "push") && intoBranch && this.host.coordinator?.()?.isProtected?.(intoBranch)) {
+      this.emit(run, "delivery_policy", { from: mode, to: "pr", branch: intoBranch });
+      mode = "pr";
+    }
     try {
       if (mode === "commit" || mode === "push") {
         const { into } = await this.apply(run.id);
@@ -1414,6 +1686,9 @@ export function taskSummary(t: OrchestraTask): Record<string, unknown> {
     chat: t.chat,
     attempts: t.attempts,
     files: t.files ?? [],
+    ...(t.touches?.length ? { touches: t.touches } : {}),
+    ...(t.overlap ? { overlap: t.overlap } : {}),
+    ...(t.hold ? { hold: t.hold } : {}),
     ...(t.error ? { error: t.error } : {}),
     ...(t.costUsd ? { costUsd: t.costUsd } : {}),
   };

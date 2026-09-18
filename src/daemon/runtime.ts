@@ -65,7 +65,8 @@ import {
   type SkillInstallResult,
 } from "../core/skill-install.js";
 import { resolveSteps, RouteEngine } from "../core/routes.js";
-import { OrchestraEngine } from "../core/orchestra.js";
+import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
+import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { detectAdes } from "../core/ades.js";
 import { buildBriefing, buildProjection } from "../core/projection.js";
@@ -230,7 +231,7 @@ export class ProjectRuntime {
         ),
       installedKinds: () => this.installedKinds,
       makeAgent: (cfg, dir) => {
-        const agent = createAgent({ ...cfg, options: { ...(cfg.options ?? {}), loomProject: info.id } }, dir);
+        const agent = createAgent({ ...cfg, options: { ...this.policyOptions(cfg), loomProject: info.id } }, dir);
         if (!isAdapter(agent)) throw new Error(`"${cfg.id}" is a bridge — it cannot run orchestra work`);
         return agent;
       },
@@ -247,6 +248,7 @@ export class ProjectRuntime {
       observe: (event) => this.trackCost(event),
       gitDelivery: () => this.config.git?.delivery ?? "none",
       member: () => this.memberLogin,
+      coordinator: () => this.coordinator,
     });
   }
 
@@ -853,7 +855,7 @@ export class ProjectRuntime {
     // The project id rides along so an adapter can file approvals ("always
     // ask") against the right project — see core/approvals.ts.
     const agent = createAgent(
-      { ...cfg, options: { ...(cfg.options ?? {}), loomProject: this.info.id } },
+      { ...cfg, options: { ...this.policyOptions(cfg), loomProject: this.info.id } },
       this.agentDir(cfg.id),
     );
     this.agents.set(cfg.id, agent);
@@ -977,6 +979,10 @@ export class ProjectRuntime {
     if (!cfg) throw new Error(`unknown agent "${agentId}"`);
     const why = unsupportedReason(cfg.kind, mode);
     if (why) throw new Error(`"${mode}" isn't available for ${cfg.kind}: ${why}`);
+    // D38: a team-shared project can't go looser than loom.team.json allows.
+    if (this.teamPolicy && cappedPermission(this.teamPolicy, mode, true) !== mode) {
+      throw new Error(`team policy caps permissions at "${this.teamPolicy.permissions.ceiling}" on this repo (loom.team.json)`);
+    }
     const live = this.agents.get(agentId);
     if (live && isAdapter(live) && live.busy()) {
       throw new Error(`"${agentId}" is mid-turn — wait for it to finish, then change its permissions`);
@@ -1990,6 +1996,10 @@ export class ProjectRuntime {
     // is logged would leave a prompt in the conversation that nothing answers.
     this.enforceQuarantine(target);
     this.enforceBudget(target);
+    const kind = this.config.agents.find((a) => a.id === target)?.kind ?? "";
+    if (this.teamPolicy && !agentAllowed(this.teamPolicy, kind)) {
+      throw new Error(`team policy doesn't allow ${kind} on this repo (loom.team.json)`);
+    }
 
     const holder = this.validHolder();
     if (holder === null) {
@@ -2809,6 +2819,24 @@ export class ProjectRuntime {
 
   /** The team member running this daemon (set by Team Link), for commit trailers. */
   memberLogin: string | null = null;
+  /** Loom Teams, Phase 2: this project's team coordinator (set by Team Link). */
+  coordinator: OrchestraCoordinator | null = null;
+  /** The effective loom.team.json while shared with a team (D37); null when solo. */
+  teamPolicy: TeamPolicy | null = null;
+
+  /**
+   * An agent's options under the team policy (D38): its permission mode capped
+   * at the ceiling. Plan mode can't be known when an agent is built, so
+   * `bypassRequiresPlan` treats it as off — the stricter reading.
+   */
+  private policyOptions(cfg: AgentConfig): Record<string, unknown> {
+    const opts = { ...(cfg.options ?? {}) };
+    if (!this.teamPolicy) return opts;
+    const wanted = permissionFor(cfg.kind, opts);
+    const capped = cappedPermission(this.teamPolicy, wanted, false);
+    if (capped !== wanted) opts.permissions = capped;
+    return opts;
+  }
 
   /** Share this project with a team, or record an explicit opt-out (null). */
   setTeam(share: { teamId: string; repo: string } | null): void {

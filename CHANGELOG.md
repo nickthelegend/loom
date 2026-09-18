@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Loom Teams, Phase 2: stop colliding
+
+- **12 more design decisions** (D28–D39), settled in a design interview.
+- **Leases:**
+  - scopes are expanded to real files plus directory prefixes, and hard zones come
+    from `loom.team.json`;
+  - hub claim, extend, renew, landing and release, with atomic hard-zone
+    arbitration, in both MemoryHub and SQL (tested on Postgres).
+- **Orchestra holds** stop a task from starting:
+  - **decide:** the task overlaps a teammate's lease and needs an `overlap`
+    decision;
+  - **wait:** it waits for another goal's PR to merge, then rebases onto main;
+  - **zone:** it queues behind a held hard zone;
+  - **capacity:** the team is at its agent limit;
+  - "Stop waiting" releases a wait by hand.
+- **Drift:** when a worker edits outside its declared touches, the lease widens and
+  the team is told. Drift into someone else's hard zone pauses the worker.
+- **WIP refs** (`refs/loom/wip/<member>/<run>`) plus `git merge-tree` predict
+  conflicts. Both owners and both orchestrators hear about them.
+- **Leases are released when the goal lands.** "Landing" means a merged PR, a
+  delivered push, or an applied run.
+- **Team policy enforced:** permission ceiling (`bypassRequiresPlan`), agent
+  allowlist, protected-branch delivery (forces a PR), and per-member and
+  team-wide concurrency caps.
+- **Fixes:**
+  - an orchestrator replying with no actions while nothing was running looped
+    until the round limit, and now waits for a human;
+  - an abort during a run's final wrap-up was overwritten by "completed";
+  - a member's own `gh` poll reporting their PR merged was ignored.
+
 ### Loom Teams, Phase 1: see each other
 
 - **The design is settled:** 27 decisions from a design interview, recorded in

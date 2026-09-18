@@ -804,7 +804,7 @@ Everything is stored in `~/.loom/prompts.json` and never leaves the machine.
 
 ## Teams — see each other's agents
 
-Five people, each with their own agents, on one repo. **Phase 1 is built:**
+Five people, each with their own agents, on one repo. **Phases 1 and 2 are built.** Phase 1:
 teammates see each other's live agents and goals, and a team feed collects goals,
 plans, PRs and CI in one place. Content is end-to-end encrypted to the team, so
 the hub can't read goal titles.
@@ -829,7 +829,30 @@ loom team                   # who's doing what, right now
 - **Worker commits carry `Loom-Goal`, `Loom-Task`, `Loom-Agent` and `Loom-Member`
   trailers.** `git log` alone tells you which goal, task and agent wrote a line.
 
-The researched architecture (27 decisions, a 5-phase plan) is in
+**Phase 2 (stop colliding) is built too:**
+- **Declaring touches.** On a team project, every orchestra task declares the files
+  it will `touch`, and Loom takes a lease on them.
+- **Overlap needs a decision.** If a teammate's goal already holds some of those
+  files, the task waits until the orchestrator decides: wait for their PR, narrow
+  its scope, or proceed with a reason the team can see.
+- **Hard zones.** Areas listed in `loom.team.json` (migrations, lockfiles) take one
+  goal at a time. Other tasks queue and start on their own when the area frees up.
+- **Conflict prediction.** Work in progress goes to hidden `refs/loom/wip/*` refs,
+  and `git merge-tree` predicts merge conflicts before anyone opens a PR. Both
+  people involved hear about it.
+- **Team policy.** `loom.team.json` on your default branch sets a permission
+  ceiling, the allowed agents, protected branches and concurrency caps. Changing it
+  takes a reviewed PR.
+
+```jsonc
+// loom.team.json
+{ "hardZones": ["db/migrations/**", "package-lock.json"],
+  "permissions": { "ceiling": "auto", "bypassRequiresPlan": true },
+  "delivery": { "protected": ["main"] },
+  "orchestra": { "maxParallelPerMember": 6, "teamMaxConcurrentAgents": 20 } }
+```
+
+The researched architecture (39 decisions, a 5-phase plan) is in
 **[docs/teams-architecture.md](docs/teams-architecture.md)**. It covers what
 comes next: leases and conflict prediction, the shared team brain with canon in
 `AGENTS.md`, and one PR per goal through a merge queue.

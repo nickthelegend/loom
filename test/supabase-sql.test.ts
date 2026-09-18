@@ -106,7 +106,7 @@ beforeAll(async () => {
     grant usage on schema public, auth, extensions to anon, authenticated;
     grant execute on function auth.uid() to anon, authenticated;
   `);
-  for (const m of ["0001_app_opens.sql", "0002_teams.sql"]) {
+  for (const m of ["0001_app_opens.sql", "0002_teams.sql", "0003_team_leases.sql"]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
   psql(`insert into auth.users (id, raw_user_meta_data) values
@@ -183,6 +183,42 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
     expect(asUser(ALICE, `select key_version from public.teams where id = '${team}';`)).toBe("2");
   });
 
+  it("globs and overlap match the TypeScript rules (D28)", () => {
+    const q = (sql: string) => psql(`select ${sql};`);
+    expect(q(`'src/auth/session.test.ts' ~ public.glob_regex('**/*.test.ts')`)).toBe("t");
+    expect(q(`'src/a/b.ts' ~ public.glob_regex('src/*.ts')`)).toBe("f");
+    expect(q(`'src/auth/x.ts' ~ public.glob_regex('src/auth')`)).toBe("t");
+    // the hard case: **/*.test.ts vs src/auth/**, through real files
+    expect(q(`array_to_string(public.lease_overlap(
+      '{"**/*.test.ts"}', '{"src/auth/session.test.ts"}', '{""}',
+      '{"src/auth/**"}', '{"src/auth/session.ts","src/auth/session.test.ts"}', '{"src/auth/"}'), ',')`)).toBe("src/auth/session.test.ts");
+    expect(q(`cardinality(public.lease_overlap('{"**/*.md"}', '{"README.md"}', '{""}', '{"src/**"}', '{"src/a.ts"}', '{"src/"}'))`)).toBe("0");
+    expect(q(`public.lease_zone('{}', '{"db/"}', '{"db/migrations/**"}')`)).toBe("db/migrations/**");
+  });
+
+  it("leases: overlaps are reported, a held hard zone refuses, release frees it (D29, D31, D36)", () => {
+    const claim = (user: string, dev: string, run: string, globs: string, files: string, prefixes: string) =>
+      JSON.parse(asUser(user, `select public.claim_lease('${team}', '{"deviceId":"${dev}","repo":"acme/app","runId":"${run}","taskId":"t1","globs":${globs},"files":${files},"prefixes":${prefixes},"hardZones":["db/migrations/**"]}');`));
+    const a = claim(ALICE, aliceDev, "o1", '["src/auth/**"]', '["src/auth/session.ts"]', '["src/auth/"]');
+    expect(a.lease.run_id).toBe("o1");
+    const b = claim(BOB, bobDev, "o2", '["src/auth/session.ts"]', '["src/auth/session.ts"]', '["src/auth/session.ts"]');
+    expect(b.lease).toBeTruthy();
+    expect(b.overlaps[0].paths).toEqual(["src/auth/session.ts"]);
+    claim(ALICE, aliceDev, "o3", '["db/migrations/**"]', '[]', '["db/migrations/"]');
+    const z = claim(BOB, bobDev, "o4", '["db/**"]', '[]', '["db/"]');
+    expect(z.lease).toBeNull();
+    expect(z.blockedBy.zone).toBe("db/migrations/**");
+    expect(asUser(BOB, `select public.release_leases('${team}', 'o3', 'nope');`)).toBe("0"); // not bob's
+    expect(asUser(ALICE, `select public.release_leases('${team}', 'o3', 'PR merged');`)).toBe("1");
+    expect(claim(BOB, bobDev, "o4", '["db/**"]', '[]', '["db/"]').lease).toBeTruthy();
+    // stale leases stop blocking (D12)
+    psql(`update public.leases set ts = now() - interval '11 minutes' where run_id = 'o4';`);
+    expect(claim(ALICE, aliceDev, "o5", '["db/migrations/**"]', '[]', '["db/migrations/"]').lease).toBeTruthy();
+    expect(asUser(ALICE, `select public.set_run_lease_state('${team}', 'o5', 'landing');`)).toBe("1");
+    expect(fails(() => asUser(BOB, `insert into public.leases (team_id) values ('${team}');`))).toMatch(/permission denied/);
+    expect(asUser(BOB, `select (public.append_feed('${team}', '{"type":"conflict_predicted","meta":{"runs":["o1","o2"]}}')).id is not null;`)).toBe("t");
+  });
+
   it("feed dedupes by key; removal is announced, then the member is cut off", () => {
     const post = `select coalesce(id::text, 'deduped') from public.append_feed('${team}', '{"type":"pr_opened","repo":"acme/app","meta":{"n":7},"dedupeKey":"gh:acme/app#7:opened"}');`;
     expect(asUser(BOB, post)).toMatch(/^\d+$/);
@@ -192,8 +228,10 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
     asUser(ALICE, `select public.remove_member('${team}', '${BOB}');`);
     expect(asUser(BOB, `select count(*) from public.feed where team_id = '${team}';`)).toBe("0");
     expect(asUser(BOB, `select count(*) from public.key_envelopes where team_id = '${team}';`)).toBe("0");
-    expect(asUser(ALICE, `select string_agg(type, ',' order by id) from public.feed where team_id = '${team}';`)).toBe(
-      "member_joined,repo_shared,key_rotated,pr_opened,member_left",
-    );
+    const types = asUser(ALICE, `select string_agg(type, ',' order by id) from public.feed where team_id = '${team}';`);
+    expect(types.startsWith("member_joined,repo_shared,key_rotated")).toBe(true);
+    expect(types.endsWith("pr_opened,member_left")).toBe(true);
+    // and their leases went with them
+    expect(asUser(ALICE, `select count(*) from public.leases where team_id = '${team}' and user_id = '${BOB}';`)).toBe("0");
   });
 });

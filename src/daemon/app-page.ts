@@ -300,6 +300,7 @@ window.__loomPageRev="%%BUILD_REV%%";
   .sys.warn{color:var(--warn)}
   .sys.err{color:var(--err)}
   .sys.ok{color:var(--ok)}
+  .sys.live{color:var(--thread-ink)}
   .tool{color:color-mix(in srgb, var(--muted-foreground) 75%, transparent);
     font-size:11.5px;font-family:var(--font-mono);margin:3px 0 3px 14px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1794,6 +1795,30 @@ window.__loomPageRev="%%BUILD_REV%%";
   .ofiles{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-family:var(--font-mono);font-size:10.5px;
     color:var(--muted-foreground);display:flex;flex-direction:column;gap:2px;word-break:break-all}
   .oerr{margin-top:7px;font-size:11.5px;color:var(--err);line-height:1.45;word-break:break-word}
+  /* Teams, Phase 2 on a task card: the files it declared, how it answered an
+     overlap, and \u2014 when the team is why it isn't running \u2014 a hold banner */
+  .otask .otouch{margin-top:7px}
+  .otb .obdg.ovl{font-family:var(--font-sans);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .otb .obdg.ovl.go{color:var(--foreground)}
+  .otb .obdg.ovl.wait{color:var(--thread-ink);border-color:color-mix(in srgb, var(--thread) 40%, transparent)}
+  .ohold{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:6px 8px;margin-top:8px;padding:7px 9px;border-radius:var(--radius-md);
+    border:1px solid var(--border);background:color-mix(in srgb, var(--muted) 50%, transparent);font-size:11.5px;line-height:1.45;
+    color:var(--muted-foreground);cursor:default}
+  .ohold .ohi{display:inline-flex;flex:none;margin-top:1px}
+  .ohold .ohi svg{width:13px;height:13px}
+  .ohold .oht{min-width:0;color:var(--foreground);overflow-wrap:anywhere}
+  .ohold .oht b{font-weight:600}
+  .ohold .oht small{display:block;color:var(--muted-foreground);font-size:11px;margin-top:1px}
+  .ohold code{font-family:var(--font-mono);font-size:10.5px;background:var(--muted);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+  .ohold .ohs{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);flex:none;margin-top:1px}
+  .ohold .btn{grid-column:2 / -1;justify-self:start}
+  .ohold.warn{border-color:color-mix(in srgb, var(--warn) 40%, transparent);background:color-mix(in srgb, var(--warn) 8%, transparent)}
+  .ohold.warn .ohi{color:var(--warn)}
+  .ohold.live{border-color:color-mix(in srgb, var(--thread) 40%, transparent);background:color-mix(in srgb, var(--thread) 8%, transparent)}
+  .ohold.live .ohi{color:var(--thread-ink)}
+  .onotes{display:flex;flex-direction:column;gap:5px}
+  .onotes .onn{display:flex;gap:7px;align-items:flex-start}
+  .onotes .onn svg{width:13px;height:13px;flex:none;margin-top:2px;color:var(--muted-foreground)}
   .oempty{padding:48px 16px;text-align:center;color:var(--muted-foreground);font-size:13px;line-height:1.7}
   .oempty b{color:var(--foreground);font-weight:600}
   .tab .tdot{width:6px;height:6px;border-radius:50%;background:var(--thread);margin-left:-2px;
@@ -2136,6 +2161,46 @@ window.__loomPageRev="%%BUILD_REV%%";
   .tlease .tlw b{color:var(--foreground);font-weight:550}
   .tlease .tav{width:16px;height:16px;font-size:8.5px}
   .tlease.clash .tglob{border-color:color-mix(in srgb, var(--warn) 55%, transparent);color:var(--warn)}
+  /* leases, Phase 2: per member, a row per task's claim */
+  .tlgrp + .tlgrp{margin-top:4px}
+  .tsech.tclh{margin-top:10px}
+  .tlrow{padding:6px 0 6px 28px;border-top:1px dashed var(--border);min-width:0;display:flex;flex-direction:column;gap:4px}
+  .tgh + .tlrow{border-top:0}
+  .tlrow .tlr1{display:flex;align-items:center;gap:8px;min-width:0}
+  .tlrow .tlt{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+  .tlrow .tlt b{font-size:12.5px;font-weight:550;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tlrow .tlt small{font-size:11px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tlrow .tlt .sealed{font-style:italic;color:var(--muted-foreground);font-weight:450}
+  .tlrow .opill{flex:none}
+  .tlrow .tlr2{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+  .tlrow .oid{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);border:1px solid var(--border);border-radius:5px;padding:0 5px;line-height:16px}
+  .tlrow .tlfc{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);margin-left:2px}
+  .tlrow.stale{opacity:.5}
+  .tlrow.clash{box-shadow:inset 2px 0 0 var(--warn);padding-left:26px;margin-left:2px}
+  .tlrow.clash .tglob{border-color:color-mix(in srgb, var(--warn) 55%, transparent);color:var(--warn)}
+  .tlclash{display:flex;align-items:flex-start;gap:6px;font-size:11.5px;color:var(--warn);line-height:1.45}
+  .tlclash svg{width:12px;height:12px;flex:none;margin-top:2px}
+  .tlclash code{font-family:var(--font-mono);font-size:10.5px}
+  .tfe.warn .tfi{color:var(--warn);background:color-mix(in srgb, var(--warn) 12%, transparent)}
+  /* the team policy a project runs under: loom.team.json, read-only */
+  .tpol{margin-top:10px;padding:10px 14px 11px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card);
+    display:flex;flex-direction:column;gap:6px;min-width:0}
+  .tpolh{display:flex;align-items:center;gap:7px;font-size:13px;min-width:0}
+  .tpolh svg{width:14px;height:14px;color:var(--muted-foreground);flex:none}
+  .tpolh b{font-weight:600;color:var(--foreground)}
+  .tpolh small{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .tpolh .tpolsrc{margin-left:auto;font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);flex:none}
+  .tpolr{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:baseline;font-size:12px;min-width:0}
+  .tpolk{font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
+  .tpolv{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:var(--foreground);min-width:0}
+  .tpolv .tglobs{margin-top:0}
+  .tpolv .tpolin{line-height:1.6}
+  .tpolv .tpolin .pbdg{margin-right:6px}
+  .tpolnone{color:var(--muted-foreground);font-size:11.5px}
+  .tpols{font-size:11.5px;color:var(--muted-foreground);line-height:1.5}
+  .tpols code,.tpolsample{font-family:var(--font-mono);font-size:11px;color:var(--foreground)}
+  .tpolsample{display:block;padding:6px 8px;border-radius:var(--radius-md);background:var(--muted);border:1px solid var(--border);
+    overflow-x:auto;white-space:pre}
   /* the feed: sentences, newest first */
   .tfe{display:grid;grid-template-columns:22px minmax(0,1fr) auto;align-items:start;gap:9px;padding:6px 0;border-top:1px dashed var(--border);
     font-size:12.5px;line-height:1.45;min-width:0}
@@ -2205,6 +2270,9 @@ window.__loomPageRev="%%BUILD_REV%%";
     .trepoh{padding-left:0}
     .tlease{grid-template-columns:minmax(0,1fr);gap:4px}
     .tlease .tlw{justify-content:flex-start}
+    .tlrow{padding-left:0}
+    .tlrow.clash{padding-left:8px}
+    .tpolr{grid-template-columns:minmax(0,1fr);gap:3px}
     .tsplit{grid-template-columns:minmax(0,1fr)}
     .tsplit > .tsec + .tsec{border-left:0;border-top:1px solid var(--border)}
     .tjoin{grid-template-columns:minmax(0,1fr)}
@@ -2247,6 +2315,7 @@ window.__loomPageRev="%%BUILD_REV%%";
   .oline a:hover{border-bottom-color:var(--foreground)}
   .oline .btn{height:24px;font-size:11.5px}
   .sys.orch a{color:inherit}
+  .sys.orch code{font-family:var(--font-mono);font-size:11px}
   @media (max-width:899px){
     /* a phone's control row: everything a notch tighter, so Plan (with its
        word — a bare switch says nothing) and send share the second line */
@@ -3107,6 +3176,10 @@ ${BRAND_SPRITE}
     key: svg('<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>'),
     copy: svg('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
     push: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/><path d="M5 21h14"/>'),
+    // lucide lock — a hard zone someone else holds
+    lock: svg('<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+    // lucide triangle-alert — a predicted collision
+    alert: svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>'),
     // Brand marks, filled — the one place brand assets are warranted. GitLab
     // and Linear ride along disabled: the row says which providers exist and
     // which one Loom can actually read.
@@ -3478,6 +3551,17 @@ ${BRAND_SPRITE}
       }
       return row(" ok", "\\u2713 Merged into " + esc(p.into || "your branch") + (p.mode === "push" ? " and pushed" : ""));
     }
+    // Loom Teams, Phase 2: what the team made a task wait for, and what it changed.
+    if (ph === "task_held") {
+      var hd = p.hold || {}, tid = esc(p.taskId || "a task");
+      if (hd.kind === "wait") return row(" live", "\\u23f8 " + tid + " waits for " + orchGoalName(hd.runId) + "\\u2019s PR to merge before it starts");
+      if (hd.kind === "zone") return row(" warn", "\\u23f8 " + tid + " is queued behind " + esc(hd.holder || "a teammate") + "\\u2019s hard zone <code>" + esc(hd.zone || "") + "</code>");
+      if (hd.kind === "capacity") return row("", "\\u23f8 " + tid + " is queued \\u2014 " + esc(String(hd.reason || "the team is at its agent limit").slice(0, 200)));
+      return row(" warn", "\\u23f8 " + tid + " needs the orchestrator \\u2014 " + esc(String(hd.reason || "a teammate overlaps it").slice(0, 240)));
+    }
+    if (ph === "synced") return row("", "\\u21bb Brought the goal up to date with " + esc(p.with || "main") + " before a waiting task started");
+    if (ph === "delivery_policy") return row(" warn", "\\u26a0 " + esc(p.branch || "the base branch") + " is protected by team policy \\u2014 delivering as a PR instead of " +
+      (p.from === "push" ? "merging and pushing" : "merging"));
     if (ph === "delivery_failed") return row(" err", "\\u2717 Delivery (" + esc(p.mode || "git") + ") failed \\u2014 " + esc(String(p.error || "").slice(0, 200)) +
       (p.runId ? ' <button class="btn xs outline" type="button" data-orch-deliver="' + esc(p.runId) + '">Retry delivery</button>' : ""));
     return row("", "\\ud83c\\udfbc Orchestra \\u00b7 " + esc(String(ph || "update").replace(/_/g, " ")));
@@ -8816,6 +8900,8 @@ ${BRAND_SPRITE}
         return;
       }
       var run = findOrchRun(orch.sel) || orch.runs[0];
+      // A wait names a teammate's goal, and its title is in the team view.
+      if (!state.team && !state.teamErr && (run.tasks || []).some(function(t){ return (t.hold && t.hold.runId) || /^wait:/.test(t.overlap || ""); })) loadTeam();
       var list = '<div class="oruns"><div class="orunh">Runs</div>' + orch.runs.map(function(r){
         var s = ORCH_RUN_ST[r.status] || ["", "off"];
         var done = (r.tasks || []).filter(function(t){ return t.status === "done"; }).length;
@@ -8862,6 +8948,11 @@ ${BRAND_SPRITE}
           '<div class="row"><button class="btn primary sm" id="oreplybtn">Reply</button></div></div>';
       }
       if (run.summary) h += '<div class="ocard onote"><b>Summary.</b> ' + esc(run.summary) + "</div>";
+      // Team facts (drift, predicted conflicts) the orchestrator hears at its next review.
+      if ((run.notes || []).length) {
+        h += '<div class="ocard onote onotes"><b>From the team, for the orchestrator\\u2019s next review</b>' +
+          run.notes.map(function(n){ return '<span class="onn">' + ICONS.team + "<span>" + esc(n) + "</span></span>"; }).join("") + "</div>";
+      }
       if (run.error) h += '<div class="ocard onote err">' + esc(run.error) + "</div>";
       if (run.applied && !run.delivered) h += '<div class="ocard onote"><b>Applied</b> to <code>' + esc(run.applied.into) + "</code> " + rel(run.applied.at) + ".</div>";
       if (!tasks.length) {
@@ -8932,14 +9023,71 @@ ${BRAND_SPRITE}
           (t.attempts > 1 ? '<span class="obdg" title="attempts">\\u00d7' + Number(t.attempts) + "</span>" : "") +
           (t.costUsd ? '<span class="obdg">' + money(t.costUsd) + "</span>" : "") +
           (files.length ? '<button type="button" class="ofbtn" data-ofiles="' + esc(key) + '">' + files.length + " file" + (files.length === 1 ? "" : "s") + (open ? " \\u25be" : " \\u25b8") + "</button>" : "") +
+          orchOverlapChip(t.overlap) +
         "</div>" +
+        ((t.touches || []).length ? '<div class="tglobs otouch" title="the files it declared it will touch">' + teamGlobs(t.touches, 4) + "</div>" : "") +
         (open && files.length ? '<div class="ofiles">' + files.map(function(f){ return "<span>" + esc(f) + "</span>"; }).join("") + "</div>" : "") +
+        (t.hold && t.status === "pending" ? orchHoldHtml(t) : "") +
         (t.error ? '<div class="oerr">' + esc(t.error) + "</div>" : "") +
         "</div>";
+    }
+    /**
+     * The orchestrator's answer to a teammate overlap (D29), as a chip:
+     * "proceed:<why>", "wait:<goal>" or "narrow".
+     */
+    function orchOverlapChip(ov){
+      ov = String(ov || "");
+      if (!ov) return "";
+      var m = ov.match(/^(proceed|wait):\\s*([\\s\\S]*)$/);
+      if (m && m[1] === "proceed") {
+        return '<span class="obdg ovl go" title="' + esc(ov) + '">proceeds' + (m[2] ? ": " + esc(m[2].slice(0, 60)) + (m[2].length > 60 ? "\\u2026" : "") : "") + "</span>";
+      }
+      if (m) return '<span class="obdg ovl wait" title="' + esc(ov) + '">waits for ' + esc(teamGoalOf(m[2]).goal || m[2]) + "</span>";
+      if (ov === "narrow") return '<span class="obdg ovl" title="it narrowed its files to stay clear of a teammate">narrowed</span>';
+      return '<span class="obdg ovl">' + esc(ov.slice(0, 40)) + "</span>";
+    }
+    /**
+     * Why a ready task isn't running, when the team is the reason: the
+     * orchestrator owes an answer (decide), a teammate's PR hasn't merged
+     * (wait \\u2014 which you can call off), a hard zone is held (zone), or the
+     * team is at its agent limit (capacity).
+     */
+    function orchHoldHtml(t){
+      var h = t.hold, reason = String(h.reason || ""), body;
+      var since = h.since ? '<span class="ohs">' + fleetSince(h.since) + "</span>" : "";
+      if (h.kind === "wait") {
+        var g = teamGoalOf(h.runId);
+        var detail = reason.indexOf(" \\u2014 ") >= 0 ? reason.slice(reason.indexOf(" \\u2014 ") + 3) : "";
+        body = '<span class="ohi">' + ICONS.clock + '</span><span class="oht">Waiting for ' +
+          (g.github ? "<b>" + esc(g.github) + "</b>\\u2019s PR for " : "the PR for ") +
+          (g.goal ? "\\u2018" + esc(g.goal) + "\\u2019" : "goal <code>" + esc(h.runId || "?") + "</code>") + "\\u2026" +
+          (detail ? "<small>" + esc(detail) + "</small>" : "") + "</span>" + since +
+          '<button class="btn outline xs" type="button" data-ostopwait="' + esc(t.id) + '">Stop waiting</button>';
+        return '<div class="ohold live" data-ohold="wait">' + body + "</div>";
+      }
+      if (h.kind === "zone") {
+        // paused mid-turn (drift into the zone, D33) or queued before it started (D31)
+        var paused = /^it edited /.test(reason), tail = reason.lastIndexOf(" \\u2014 ");
+        body = '<span class="ohi">' + ICONS.lock + '</span><span class="oht">' + (paused ? "Paused inside " : "Queued behind ") + "<b>" + esc(h.holder || "a teammate") +
+          "</b>\\u2019s hard zone <code>" + esc(h.zone || "?") + "</code>" +
+          (paused ? "<small>" + esc(reason) + "</small>" : tail >= 0 ? "<small>" + esc(reason.slice(tail + 3)) + "</small>" : "") + "</span>" + since;
+        return '<div class="ohold warn" data-ohold="zone" title="' + esc(reason) + '">' + body + "</div>";
+      }
+      if (h.kind === "capacity") {
+        return '<div class="ohold" data-ohold="capacity"><span class="ohi">' + ICONS.team + '</span><span class="oht">' + esc(reason || "The team is at its agent limit") + "</span>" + since + "</div>";
+      }
+      return '<div class="ohold warn" data-ohold="decide"><span class="ohi">' + ICONS.orchestra + '</span><span class="oht">Needs the orchestrator: ' + esc(reason) + "</span>" + since + "</div>";
     }
     function wireOrchHead(){
       var r = document.getElementById("orefresh"); if (r) r.onclick = loadOrch;
     }
+    // The team view landed or changed: goal titles on hold banners may have too.
+    teamHooks().orch = function(){
+      if (state.pid !== pid) return;
+      var el = orchEl(), run = orch.runs && (findOrchRun(orch.sel) || orch.runs[0]);
+      var names = run && (run.tasks || []).some(function(t){ return (t.hold && t.hold.runId) || /^wait:/.test(t.overlap || ""); });
+      if (el && names && !teamEditing(el)) drawOrch();
+    };
     function orchAction(run, action, body, btn, done){
       if (btn) btn.disabled = true;
       return api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/" + action, {
@@ -8968,6 +9116,22 @@ ${BRAND_SPRITE}
       var rdb = el.querySelector("#oredeliver"); if (rdb) rdb.onclick = function(){ redeliverOrch(run.id, rdb); };
       var cl = el.querySelector("#oclean");
       if (cl) cl.onclick = function(){ orchAction(run, "cleanup", {}, cl, function(){ toast("worktrees removed"); }); };
+      // D32: the owner calls off a wait on a teammate's goal; the task starts
+      // alongside it, and the team feed says so.
+      Array.prototype.forEach.call(el.querySelectorAll("[data-ostopwait]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation(); // the card behind it opens the thread
+          var tid = b.getAttribute("data-ostopwait");
+          var t = (run.tasks || []).filter(function(x){ return x.id === tid; })[0];
+          var g = teamGoalOf(t && t.hold && t.hold.runId);
+          if (!window.confirm("Stop waiting? " + tid + " starts now, alongside " + (g.goal ? "\\u2018" + g.goal + "\\u2019" : "the other goal") +
+            " instead of after its PR merges \\u2014 you may have a conflict to resolve when both land.")) return;
+          b.disabled = true;
+          api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/tasks/" + encodeURIComponent(tid) + "/stop-waiting", { method: "POST", body: "{}" })
+            .then(function(){ toast(tid + " stopped waiting"); loadOrch(); })
+            .catch(function(err){ b.disabled = false; toast(err.message); });
+        };
+      });
       var rb = el.querySelector("#oreplybtn"), rt = el.querySelector("#oreply");
       if (rb && rt) {
         var go = function(){
@@ -9288,6 +9452,32 @@ ${BRAND_SPRITE}
     return out.join("");
   }
   function teamOthers(t){ return (t.presence || []).filter(function(p){ return !p.mine; }); }
+  /**
+   * A goal on the team, by run id: its title (when this device holds the key)
+   * and whose it is, from its leases or the feed. {} when nobody has said.
+   */
+  function teamGoalOf(runId){
+    var out = {};
+    if (!runId) return out;
+    ((state.team && state.team.teams) || []).forEach(function(t){
+      (t.leases || []).forEach(function(l){
+        if (l.runId !== runId) return;
+        out.github = out.github || l.github;
+        if (l.intent && l.intent.goal) out.goal = out.goal || l.intent.goal;
+      });
+      (t.feed || []).forEach(function(e){
+        if (!e.meta || e.meta.runId !== runId) return;
+        if (e.type === "goal_started") out.github = out.github || e.github;
+        if (e.content && e.content.goal) out.goal = out.goal || e.content.goal;
+      });
+    });
+    return out;
+  }
+  /** "‘Add OAuth login’", or the bare run id when the title isn't known here. */
+  function orchGoalName(runId){
+    var g = teamGoalOf(runId);
+    return g.goal ? "\\u2018" + esc(g.goal) + "\\u2019" : "goal <code>" + esc(runId || "?") + "</code>";
+  }
 
   /** One teammate session: who, doing what (by title), claiming which files, on which branch. */
   function teamRow(p){
@@ -9334,19 +9524,29 @@ ${BRAND_SPRITE}
     }).join("");
   }
   /**
-   * The lease map, Phase 1: every glob a teammate's session has claimed, and
+   * The lease map, Phase 1: every glob a teammate's session has declared, and
    * whose. Two people on one glob is the collision it exists to show early.
+   * Drawn whole for a daemon that predates real leases, and under the real
+   * ones for sessions that hold none \\u2014 a task queued before it could claim,
+   * or a teammate on an older Loom.
    */
-  function teamLeasesHtml(t){
+  function teamPresenceLeasesHtml(t){
+    var others = teamOthers(t);
+    var globs = teamClaimMap(others);
+    var head = '<div class="tsech">Lease map<span class="n">' + Object.keys(globs).length + "</span></div>";
+    if (!Object.keys(globs).length) return head + '<div class="tempty">No files claimed. The globs a teammate\\u2019s task touches land here, so you can see which areas are taken before you start.</div>';
+    return head + teamClaimRows(globs);
+  }
+  function teamClaimMap(sessions){
     var map = {};
-    teamOthers(t).forEach(function(p){
+    sessions.forEach(function(p){
       var a = teamAgentOf(p);
       (p.touches || []).forEach(function(g){ (map[g] = map[g] || []).push({ who: p.github, agent: a.what ? a.label + " \\u00b7 " + a.what : a.label }); });
     });
-    var globs = Object.keys(map).sort();
-    var head = '<div class="tsech">Lease map<span class="n">' + globs.length + "</span></div>";
-    if (!globs.length) return head + '<div class="tempty">No files claimed. The globs a teammate\\u2019s task touches land here, so you can see which areas are taken before you start.</div>';
-    return head + globs.map(function(g){
+    return map;
+  }
+  function teamClaimRows(map){
+    return Object.keys(map).sort().map(function(g){
       var ws = map[g], people = {};
       ws.forEach(function(w){ people[w.who] = 1; });
       return '<div class="tlease' + (Object.keys(people).length > 1 ? " clash" : "") + '" data-tlease="' + esc(g) + '">' +
@@ -9354,8 +9554,88 @@ ${BRAND_SPRITE}
         '<span class="tlw">' + ws.map(function(w){ return "<span>" + teamAvatar(w.who) + "<b>" + esc(w.who) + "</b>" + esc(w.agent) + "</span>"; }).join("") + "</span></div>";
     }).join("");
   }
+  // ---- leases, Phase 2: what each goal's tasks have claimed (D28, D36) ------
+  // A lease is active while its task runs, landing once it's done but the
+  // goal's PR hasn't merged, and stale when its owner's machine has gone
+  // quiet for 10 minutes (it no longer blocks anyone).
+  var LEASE_STALE_MS = 10 * 60000;
+  function leaseStale(l){ return !!l.stale || (l.ts && Date.now() - Number(l.ts) > LEASE_STALE_MS); }
+  /** "src/auth/x.ts" under "src/auth/" (or equal to an exact path). "" is repo-wide. */
+  function leaseUnder(p, prefix){
+    if (prefix === "") return true;
+    if (prefix.slice(-1) === "/") return p.indexOf(prefix) === 0;
+    return p === prefix || p.indexOf(prefix + "/") === 0;
+  }
+  // A glob's literal directory prefix: "src/auth/**" gives "src/auth/"; a glob that
+  // starts with a wildcard gives "" (repo-wide).
+  function leasePrefix(g){
+    g = String(g || "").replace(/^\\.\\//, "");
+    var w = g.search(/[*?{]/);
+    if (w < 0) return g;
+    var head = g.slice(0, w), sl = head.lastIndexOf("/");
+    return sl < 0 ? "" : head.slice(0, sl + 1);
+  }
+  /**
+   * Where two leases seem to collide: a shared file, a file of one under the
+   * other's prefix, or nested prefixes. A hint only \\u2014 it sees the first 20
+   * files of each; the hub's own check (team-leases.ts) is the authority.
+   */
+  function leaseClash(a, b){
+    var out = [];
+    var add = function(p){ if (out.indexOf(p) < 0) out.push(p); };
+    var pre = function(l){ return ((l.prefixes && l.prefixes.length) ? l.prefixes : (l.globs || []).map(leasePrefix)).filter(function(p){ return p !== ""; }); };
+    var af = a.files || [], bf = b.files || [], ap = pre(a), bp = pre(b);
+    af.forEach(function(f){ if (bf.indexOf(f) >= 0) add(f); });
+    af.forEach(function(f){ if (bp.some(function(p){ return leaseUnder(f, p); })) add(f); });
+    bf.forEach(function(f){ if (ap.some(function(p){ return leaseUnder(f, p); })) add(f); });
+    ap.forEach(function(x){ bp.forEach(function(y){ if (leaseUnder(x, y) || leaseUnder(y, x)) add(x.length >= y.length ? x : y); }); });
+    return out.sort();
+  }
+  function leasePill(l){
+    if (leaseStale(l)) return '<span class="opill off" title="its owner\\u2019s machine has been quiet for over 10 minutes \\u2014 it no longer blocks anyone"><span class="odot off"></span>stale</span>';
+    if (l.state === "landing") return '<span class="opill ok" title="the task is done; the goal\\u2019s PR hasn\\u2019t merged yet"><span class="odot ok"></span>landing</span>';
+    return '<span class="opill live"><span class="odot live"></span>active</span>';
+  }
+  function teamLeaseRow(l, mine){
+    var it = l.intent, main, sub = "";
+    if (!it) main = '<span class="sealed">sealed \\u2014 this device has no key for it</span>';
+    else { main = esc(it.task || it.goal || "untitled"); sub = it.task && it.goal ? esc(it.goal) : ""; }
+    // a teammate's live lease against one of yours: the collision, early
+    var clash = [];
+    if (!l.mine && !leaseStale(l)) mine.forEach(function(m){ leaseClash(l, m).forEach(function(p){ if (clash.indexOf(p) < 0) clash.push(p); }); });
+    var n = Number(l.fileCount != null ? l.fileCount : (l.files || []).length);
+    return '<div class="tlrow' + (leaseStale(l) ? " stale" : "") + (clash.length ? " clash" : "") + '" data-tlease="' + esc(l.id) + '" data-tlstate="' + (leaseStale(l) ? "stale" : esc(l.state || "active")) + '">' +
+      '<div class="tlr1"><span class="tlt"><b class="tit">' + main + "</b>" + (sub ? '<small class="tsub">' + sub + "</small>" : "") + "</span>" + leasePill(l) + "</div>" +
+      '<div class="tlr2"><span class="oid">' + esc(l.taskId || "") + "</span>" + teamGlobs(l.globs || [], 3) +
+        '<span class="tlfc">' + n + " file" + (n === 1 ? "" : "s") + "</span></div>" +
+      (clash.length ? '<div class="tlclash">' + ICONS.alert + "<span>overlaps yours: " + clash.slice(0, 3).map(function(p){ return "<code>" + esc(p) + "</code>"; }).join(", ") +
+        (clash.length > 3 ? " +" + (clash.length - 3) : "") + "</span></div>" : "") + "</div>";
+  }
+  /** Every lease on the team, grouped by member (roster order, yours last). */
+  function teamLeasesHtml(t){
+    if (!Array.isArray(t.leases)) return teamPresenceLeasesHtml(t);
+    var leases = t.leases, leased = {};
+    leases.forEach(function(l){ leased[l.runId + "/" + l.taskId] = 1; });
+    var claims = teamClaimMap(teamOthers(t).filter(function(p){ return p.taskId && !leased[p.runId + "/" + p.taskId]; }));
+    var nc = Object.keys(claims).length;
+    var tail = nc ? '<div class="tsech tclh">Declared, no lease yet<span class="n">' + nc + "</span></div>" + teamClaimRows(claims) : "";
+    var head = '<div class="tsech">Leases<span class="n">' + leases.length + "</span></div>";
+    if (!leases.length) return head + (nc ? "" : '<div class="tempty">No files claimed. When a goal\\u2019s task starts, the files it declared land here \\u2014 so you can see which areas are taken before you start.</div>') + tail;
+    var mine = leases.filter(function(l){ return l.mine && !leaseStale(l); });
+    var order = (t.members || []).map(function(m){ return m.github; });
+    var by = {};
+    leases.forEach(function(l){ var k = l.mine ? "" : l.github || "?"; (by[k] = by[k] || []).push(l); });
+    var rank = function(k){ if (k === "") return 2e6; var i = order.indexOf(k); return i < 0 ? 1e6 : i; };
+    return head + Object.keys(by).sort(function(a, b){ return rank(a) - rank(b) || (a < b ? -1 : 1); }).map(function(k){
+      var list = by[k].slice().sort(function(a, b){ return leaseStale(a) - leaseStale(b) || Number(a.since) - Number(b.since); });
+      var who = k || (state.team && state.team.github) || "you";
+      return '<div class="tlgrp" data-tlmember="' + esc(k || "you") + '"><div class="tgh">' + teamAvatar(who) + "<b>" + esc(k ? k : "Yours") + "</b>" +
+        "<small>" + list.length + " lease" + (list.length === 1 ? "" : "s") + "</small></div>" +
+        list.map(function(l){ return teamLeaseRow(l, mine); }).join("") + "</div>";
+    }).join("") + tail;
+  }
   /** A feed event as a sentence, with an icon and a state tint. Never the payload. */
-  function teamFeedLine(e){
+  function teamFeedLine(e, t){
     var m = e.meta || {}, c = e.content;
     var who = "<b>" + esc(e.github || m.github || m.author || "someone") + "</b>";
     var q = function(s){ return '<span class="tq">\\u2018' + esc(s) + "\\u2019</span>"; };
@@ -9396,15 +9676,64 @@ ${BRAND_SPRITE}
       case "check_passed": return { icon: ICONS.check, cls: "ok", html: "checks passed on " + pr };
       case "review_requested": return { icon: ICONS.pr, cls: "", html: "review requested on " + pr + title };
       case "review_submitted": return { icon: ICONS.pr, cls: "", html: who + " reviewed " + pr + title };
+      // Phase 2: leases, overlaps and zones (D29\\u2013D36)
+      case "lease_released": {
+        var nl = Number(m.leases || 0), why = String(m.reason || "");
+        var landed = /merged|applied|delivered/i.test(why);
+        return { icon: landed ? ICONS.check : ICONS.info, cls: landed ? "ok" : "",
+          html: who + "\\u2019s " + teamFeedGoal(m.runId, c) + (landed ? " landed \\u2014 " : " \\u2014 ") + (nl || "its") + " lease" + (nl === 1 ? "" : "s") + " released" +
+            (why ? " (" + esc(why) + ")" : "") };
+      }
+      case "overlap_decided": {
+        var mineRuns = teamMyRuns(t), withs = Array.isArray(m.with) ? m.with : [];
+        var yours = withs.some(function(r){ return mineRuns.indexOf(r) >= 0; });
+        var what = c && c.goal ? q(c.goal) : "<code>" + esc(m.taskId || "a task") + "</code>";
+        var along = yours ? "yours" : withs.length ? withs.map(function(r){ return teamFeedGoal(r, null); }).join(", ") : "a teammate\\u2019s work";
+        return { icon: ICONS.orchestra, cls: yours ? "warn" : "",
+          html: who + "\\u2019s " + what + " proceeds alongside " + along + (c && c.reason ? ": " + esc(c.reason) : "") };
+      }
+      case "drift": {
+        var paths = Array.isArray(m.paths) ? m.paths : [], holders = Array.isArray(m.holders) ? m.holders : [];
+        var me = state.team && state.team.github;
+        var names = holders.map(function(h){ return h === me ? "you" : "<b>" + esc(h) + "</b>"; });
+        var held = names.length ? " (" + names.join(" and ") + " " + (names.length === 1 && names[0] !== "you" ? "holds" : "hold") + " " + (paths.length === 1 ? "it" : "them") + ")" : "";
+        return { icon: ICONS.alert, cls: holders.length ? "warn" : "",
+          html: who + "\\u2019s " + esc(m.taskId || "task") + " edited " + teamPaths(paths) + " outside its plan" + held };
+      }
+      case "zone_waiting": {
+        var holder = m.holder && state.team && m.holder === state.team.github ? "your" : "<b>" + esc(m.holder || "a teammate") + "</b>\\u2019s";
+        return { icon: ICONS.lock, cls: "",
+          html: who + "\\u2019s " + esc(m.taskId || "task") + " is queued behind " + holder + " hard zone <code>" + esc(m.zone || "?") + "</code>" };
+      }
+      case "conflict_predicted": {
+        var runs = Array.isArray(m.runs) ? m.runs : [], mem = Array.isArray(m.members) ? m.members : [];
+        var side = function(i){ return "<b>" + esc(mem[i] || "someone") + "</b>\\u2019s " + teamFeedGoal(runs[i], null); };
+        return { icon: ICONS.alert, cls: "err",
+          html: "merge conflict predicted between " + side(0) + " and " + side(1) + " in " + teamPaths(Array.isArray(m.files) ? m.files : []) };
+      }
       default: return { icon: ICONS.info, cls: "", html: who + " \\u00b7 " + esc(String(e.type || "event").replace(/_/g, " ")) };
     }
+  }
+  /** A goal in a feed sentence: its title from the event, or from the rest of the team's view, else its id. */
+  function teamFeedGoal(runId, c){
+    if (c && c.goal) return '<span class="tq">\\u2018' + esc(c.goal) + "\\u2019</span>";
+    var g = teamGoalOf(runId);
+    return g.goal ? '<span class="tq">\\u2018' + esc(g.goal) + "\\u2019</span>" : runId ? "<code>" + esc(runId) + "</code>" : "goal";
+  }
+  /** Paths as code, the first three then "+N more". */
+  function teamPaths(list){
+    return (list.slice(0, 3).map(function(p){ return "<code>" + esc(p) + "</code>"; }).join(", ") || "files") + (list.length > 3 ? " +" + (list.length - 3) + " more" : "");
+  }
+  /** Run ids of this member's own goals on a team, as its leases say. */
+  function teamMyRuns(t){
+    return ((t && t.leases) || []).filter(function(l){ return l.mine; }).map(function(l){ return l.runId; });
   }
   function teamFeedHtml(t, n){
     var feed = (t.feed || []).slice(-n).reverse();
     var head = '<div class="tsech">Team feed<span class="n">' + (t.feed || []).length + "</span></div>";
     if (!feed.length) return head + '<div class="tempty">Nothing yet. Goals started and finished, plans, PRs and checks from shared repos land here.</div>';
     return head + feed.map(function(e){
-      var f = teamFeedLine(e);
+      var f = teamFeedLine(e, t);
       return '<div class="tfe' + (f.cls ? " " + f.cls : "") + '" data-tfeed="' + esc(e.type) + '"><span class="tfi">' + f.icon + "</span>" +
         '<span class="tft">' + f.html + "</span>" + '<span class="tfr">' + (e.ts ? rel(e.ts) : "") + "</span></div>";
     }).join("");
@@ -9620,6 +9949,51 @@ ${BRAND_SPRITE}
         toast("shared " + r.repo + (tm ? " with " + tm.name : ""));
         return loadTeam(); // the team's repo list just grew
       });
+  }
+  // ---- team policy: loom.team.json, read-only (D37, D38) --------------------
+  // The daemon reads it from origin's default branch, so changing it takes a
+  // reviewed PR; a local copy can only tighten it. Shown, never edited, here.
+  var teamPolicies = {}; // pid \\u2192 {policy} | {err} | {loading: true}
+  function loadTeamPolicy(pid, force){
+    var cur = teamPolicies[pid];
+    if (cur && (cur.loading || !force)) return;
+    teamPolicies[pid] = { loading: true, policy: cur && cur.policy };
+    api("/api/projects/" + pid + "/team/policy").then(function(j){
+      teamPolicies[pid] = { policy: (j && j.policy) || null };
+    }, function(err){
+      teamPolicies[pid] = { err: err.message || String(err), policy: cur && cur.policy };
+    }).then(function(){ teamNotify(false); });
+  }
+  var TEAM_POLICY_SAMPLE = '{"hardZones": ["db/migrations/**"], "permissions": {"ceiling": "auto"}}';
+  /** The policy in effect for a project. label: whose it is, where several are listed. */
+  function teamPolicyHtml(pid, label){
+    if (!teamPolicies[pid]) loadTeamPolicy(pid); // paints again when it lands
+    var tp = teamPolicies[pid] || {}, pol = tp.policy;
+    var head = '<div class="tpolh">' + ICONS.shield + "<b>Team policy</b>" + (label ? "<small>" + esc(label) + "</small>" : "");
+    if (!pol) {
+      return '<div class="tpol" data-tpolicy="' + esc(pid) + '">' + head + "</div>" +
+        (tp.err ? '<div class="tpols">' + esc(tp.err) + "</div>" : LOADER) + "</div>";
+    }
+    if (pol.source === "none") {
+      return '<div class="tpol none" data-tpolicy="' + esc(pid) + '" data-tpsrc="none">' + head + '<span class="tpolsrc">no team policy</span></div>' +
+        '<div class="tpols">No <code>loom.team.json</code> on origin \\u2014 any agent, any permission, no hard zones. Add one with a PR, e.g.</div>' +
+        '<code class="tpolsample">' + esc(TEAM_POLICY_SAMPLE) + "</code></div>";
+    }
+    var chips = function(list, empty){ return list && list.length ? '<span class="tglobs">' + list.map(function(g){ return '<span class="tglob" title="' + esc(g) + '">' + esc(g) + "</span>"; }).join("") + "</span>" : '<span class="tpolnone">' + empty + "</span>"; };
+    var pm = pol.permissions || {}, orc = pol.orchestra || {}, caps = [];
+    if (orc.maxParallelPerMember) caps.push(Number(orc.maxParallelPerMember) + " in parallel per member");
+    if (orc.teamMaxConcurrentAgents) caps.push(Number(orc.teamMaxConcurrentAgents) + " agents across the team");
+    var row = function(k, v){ return '<div class="tpolr"><span class="tpolk">' + k + '</span><span class="tpolv">' + v + "</span></div>"; };
+    return '<div class="tpol" data-tpolicy="' + esc(pid) + '" data-tpsrc="' + esc(pol.source) + '">' + head +
+        '<span class="tpolsrc">' + (pol.source === "local" ? "local copy" : "from origin") + "</span></div>" +
+      row("Hard zones", chips(pol.hardZones, "none \\u2014 two goals may share any file")) +
+      row("Permissions", '<span class="tpolin">' + permBadge(pm.ceiling || "bypass") + '<span class="tpolnone">the ceiling \\u2014 no agent runs looser' + (pm.bypassRequiresPlan ? "; bypass only in plan mode" : "") + "</span></span>") +
+      row("Agents", pol.agents && pol.agents.allow ? chips(pol.agents.allow, "none allowed") : '<span class="tpolnone">any agent</span>') +
+      row("Protected", chips((pol.delivery || {}).protected, "no protected branches")) +
+      row("Caps", caps.length ? esc(caps.join(" \\u00b7 ")) : '<span class="tpolnone">no caps</span>') +
+      '<div class="tpols">' + (pol.source === "local"
+        ? "From a local <code>loom.team.json</code> only \\u2014 not reviewed, and it can only tighten what origin says. Open a PR to make it the team\\u2019s."
+        : "From <code>loom.team.json</code> on origin\\u2019s default branch \\u2014 change it with a PR to <code>loom.team.json</code>.") + "</div></div>";
   }
   // ---- the Team block under Fleet ------------------------------------------
   function teamHeadHtml(){
@@ -11397,6 +11771,13 @@ ${BRAND_SPRITE}
         });
         h += '<div class="snote">Repos: ' + ((tm.repos || []).map(function(r){ return "<b>" + esc(r) + "</b>"; }).join(", ") || "none shared yet") +
           ". A project is shared when you choose Shared, or automatically when its origin remote is one of these.</div>";
+        // each of this machine's projects shared with this team, and the policy its repo sets
+        (state.projects || []).forEach(function(pr){
+          if (!teamShares[pr.id]) loadTeamShare(pr.id); // paints again when it lands
+          var sh = teamShareOf(pr.id);
+          if (sh.mode === "private" || !sh.team || sh.team.id !== tm.id) return;
+          h += teamPolicyHtml(pr.id, pr.name + (sh.repo ? " \\u00b7 " + sh.repo : ""));
+        });
         h += teamInviteHtml(tm.id);
         h += '<div class="pillrow">' +
           (tm.role !== "viewer" ? '<button class="btn primary sm" type="button" data-tinvite="' + esc(tm.id) + '">Invite</button>' : "") +
@@ -11586,9 +11967,11 @@ ${BRAND_SPRITE}
         if (go) go.onclick = function(){ close(); openSettingsModal("team"); };
         return;
       }
-      host.innerHTML = teamShareHtml(pid, true);
+      if (!psPolicyAsked) { psPolicyAsked = true; loadTeamPolicy(pid, true); } // fresh each time the modal opens
+      host.innerHTML = teamShareHtml(pid, true) + teamPolicyHtml(pid);
       wireTeamShare(host, drawPsTeam);
     }
+    var psPolicyAsked = false;
     teamHooks().pset = function(){ drawPsTeam(); };
     function load(){
       api("/api/projects/" + pid).then(function(j){ renderBody(j.project); }).catch(function(){ var b = document.getElementById("psbody"); if (b) b.innerHTML = '<div class="obsub" style="padding:20px">Could not load project.</div>'; });

@@ -33,15 +33,18 @@ import {
   planPath,
   replyOrchestra,
   startOrchestra,
+  stopWaitingOrchestra,
   type Creds,
   type OrchestraRun,
   type OrchestraStatus,
   type OrchestraTask,
+  type OrchestraTaskHold,
   type OrchestraTaskStatus,
   type Project,
 } from "./api";
 import { AgentIcon, agentLabel } from "./agents";
-import { Badge, Callout, Empty, Panel, SectionLabel, TAP, Unreachable, ago, field } from "./components";
+import { Badge, Callout, Empty, Panel, SectionLabel, TAP, Unreachable, ago, dur, field } from "./components";
+import { TeamPolicyCard } from "./team-policy";
 import { T, radii, spacing, usd } from "./theme";
 
 const RUN_LOOK: Record<OrchestraStatus, { label: string; color: string }> = {
@@ -114,24 +117,132 @@ function Progress(props: { tasks: OrchestraTask[] }) {
   );
 }
 
-function TaskCard(props: { task: OrchestraTask; onOpen: () => void }) {
+/** The orchestrator's answer to a teammate overlap, as a short chip. */
+function overlapText(o: string): { text: string; tint: string } {
+  if (o.startsWith("wait:")) return { text: `waits on ${o.slice(5).trim() || "a teammate"}`, tint: T.warn };
+  if (o.startsWith("proceed:")) return { text: `proceeds · ${o.slice(8).trim() || "alongside"}`, tint: T.thread };
+  if (o === "narrow") return { text: "narrowed its files", tint: T.dim };
+  return { text: o, tint: T.dim };
+}
+
+function MiniChip(props: { text: string; tint?: string; mono?: boolean }) {
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: props.tint ?? T.line2,
+        backgroundColor: T.raised,
+        borderRadius: radii.row,
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        maxWidth: "100%",
+      }}
+    >
+      <Text
+        style={{ color: props.tint ?? T.dim, fontSize: 10.5, fontFamily: props.mono === false ? undefined : T.mono }}
+        numberOfLines={1}
+      >
+        {props.text}
+      </Text>
+    </View>
+  );
+}
+
+const HOLD_LOOK: Record<OrchestraTaskHold["kind"], { title: (h: OrchestraTaskHold) => string; tint: string; glyph: string }> = {
+  decide: { title: () => "Needs the orchestrator", tint: T.warn, glyph: "◇" },
+  wait: { title: () => "Waiting on a teammate's goal", tint: T.warn, glyph: "⏸" },
+  zone: { title: (h) => `Queued behind ${h.holder ? `@${h.holder}` : "a teammate"}'s hard zone`, tint: T.warn, glyph: "🔒" },
+  capacity: { title: () => "Waiting for team capacity", tint: T.dim, glyph: "…" },
+};
+
+/** Why a ready task isn't running: the orchestrator, a teammate's goal, a hard zone, or the caps. */
+function HoldBanner(props: { hold: OrchestraTaskHold; now: number; busy: boolean; onStopWaiting: () => void }) {
+  const { hold } = props;
+  const look = HOLD_LOOK[hold.kind] ?? HOLD_LOOK.capacity;
+  return (
+    <View
+      accessible={hold.kind !== "wait"}
+      accessibilityLabel={`${look.title(hold)}. ${hold.reason}`}
+      style={{
+        borderWidth: 1,
+        borderColor: hold.kind === "capacity" ? T.line2 : look.tint,
+        backgroundColor: T.raised,
+        borderRadius: radii.key,
+        padding: 10,
+        gap: 6,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Text style={{ color: look.tint, fontSize: 12 }}>{look.glyph}</Text>
+        <Text style={{ color: look.tint, fontSize: 12.5, fontWeight: "600", flex: 1 }} numberOfLines={2}>
+          {look.title(hold)}
+        </Text>
+        {hold.since ? (
+          <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }}>{dur(Math.max(0, props.now - hold.since))}</Text>
+        ) : null}
+      </View>
+      <Text style={{ color: T.dim, fontSize: 12, lineHeight: 17 }} numberOfLines={4}>
+        {hold.reason}
+      </Text>
+      {hold.kind === "zone" && hold.zone ? (
+        <View style={{ flexDirection: "row" }}>
+          <MiniChip text={hold.zone} tint={T.warn} />
+        </View>
+      ) : null}
+      {hold.kind === "wait" ? (
+        <TouchableOpacity
+          onPress={props.onStopWaiting}
+          disabled={props.busy}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Stop waiting and start this task alongside the teammate's goal"
+          style={{
+            minHeight: TAP,
+            borderRadius: radii.key,
+            borderWidth: 1,
+            borderColor: T.line2,
+            backgroundColor: T.panel,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {props.busy ? (
+            <ActivityIndicator color={T.dim} />
+          ) : (
+            <Text style={{ color: T.text, fontWeight: "600", fontSize: 13.5 }}>Stop waiting</Text>
+          )}
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
+function TaskCard(props: {
+  task: OrchestraTask;
+  now: number;
+  busy: boolean;
+  onOpen: () => void;
+  onStopWaiting: () => void;
+}) {
   const { task } = props;
   const look = TASK_LOOK[task.status] ?? TASK_LOOK.pending;
   const [open, setOpen] = useState(false);
   const detail = task.error || task.result;
+  const touches = task.touches ?? [];
+  const overlap = task.overlap ? overlapText(task.overlap) : null;
   return (
     <TouchableOpacity
       onPress={props.onOpen}
       onLongPress={() => setOpen((o) => !o)}
       activeOpacity={0.7}
       accessibilityRole="button"
-      accessibilityLabel={`${task.title}, ${agentLabel(task.kind)}, ${look.label}. Opens the task's thread`}
+      accessibilityLabel={`${task.title}, ${agentLabel(task.kind)}, ${look.label}${task.hold ? ", on hold" : ""}. Opens the task's thread`}
       style={{
         backgroundColor: T.panel,
         borderWidth: 1,
         borderColor: T.line,
         borderLeftWidth: 2,
-        borderLeftColor: look.color,
+        borderLeftColor: task.hold && task.hold.kind !== "capacity" ? T.warn : look.color,
         borderRadius: radii.card,
         padding: spacing.md,
         gap: 8,
@@ -159,6 +270,18 @@ function TaskCard(props: { task: OrchestraTask; onOpen: () => void }) {
       </View>
       {task.dependsOn.length ? (
         <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }}>after {task.dependsOn.join(", ")}</Text>
+      ) : null}
+      {touches.length || overlap ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+          {overlap ? <MiniChip text={overlap.text} tint={overlap.tint} mono={false} /> : null}
+          {touches.slice(0, 6).map((g) => (
+            <MiniChip key={g} text={g} />
+          ))}
+          {touches.length > 6 ? <MiniChip text={`+${touches.length - 6}`} /> : null}
+        </View>
+      ) : null}
+      {task.hold ? (
+        <HoldBanner hold={task.hold} now={props.now} busy={props.busy} onStopWaiting={props.onStopWaiting} />
       ) : null}
       {detail ? (
         <Text
@@ -397,10 +520,10 @@ function RunView(props: {
 }) {
   const { run } = props;
   const [reply, setReply] = useState("");
-  const [busy, setBusy] = useState<"reply" | "abort" | "apply" | "deliver" | null>(null);
+  const [busy, setBusy] = useState<"reply" | "abort" | "apply" | "deliver" | `wait:${string}` | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const act = async (kind: "reply" | "abort" | "apply" | "deliver", fn: () => Promise<void>) => {
+  const act = async (kind: "reply" | "abort" | "apply" | "deliver" | `wait:${string}`, fn: () => Promise<void>) => {
     setErr(null);
     setBusy(kind);
     try {
@@ -447,6 +570,23 @@ function RunView(props: {
           }),
       },
     ]);
+
+  const stopWaiting = (task: OrchestraTask) =>
+    Alert.alert(
+      "Stop waiting?",
+      `${task.id} starts now, alongside the teammate's goal it was waiting on. Your files may overlap theirs, so expect to resolve conflicts when both land.`,
+      [
+        { text: "Keep waiting", style: "cancel" },
+        {
+          text: "Stop waiting",
+          onPress: () =>
+            void act(`wait:${task.id}`, async () => {
+              await stopWaitingOrchestra(props.creds, props.projectId, run.id, task.id);
+              props.onRun((await getOrchestraRun(props.creds, props.projectId, run.id)).run);
+            }),
+        },
+      ],
+    );
 
   const redeliver = () =>
     void act("deliver", async () => {
@@ -537,6 +677,7 @@ function RunView(props: {
         <Callout label="Applied" text={`Merged into ${run.applied.into} ${ago(new Date(run.applied.at).toISOString())}.`} tint={T.ok} />
       ) : null}
       <Delivery run={run} busy={busy === "deliver"} onRetry={redeliver} />
+      {run.notes?.length ? <TeamNotes notes={run.notes} /> : null}
       {err && <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text>}
 
       {(live || canApply) && (
@@ -589,11 +730,50 @@ function RunView(props: {
       <View style={{ gap: spacing.sm }}>
         <SectionLabel text={`Tasks · ${run.tasks.length}`} />
         {run.tasks.length ? (
-          run.tasks.map((t) => <TaskCard key={t.id} task={t} onOpen={() => props.onOpenChat(t.chat, t.title)} />)
+          run.tasks.map((t) => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              now={Date.now()}
+              busy={busy === `wait:${t.id}`}
+              onOpen={() => props.onOpenChat(t.chat, t.title)}
+              onStopWaiting={() => stopWaiting(t)}
+            />
+          ))
         ) : (
           <Empty text={live ? "The orchestrator is planning — tasks appear here as it assigns them." : "This run ended before any tasks were planned."} />
         )}
       </View>
+    </View>
+  );
+}
+
+/** What the team coordinator told the orchestrator: drift, predicted conflicts, overlaps. */
+function TeamNotes(props: { notes: string[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? props.notes : props.notes.slice(-3);
+  return (
+    <View style={{ gap: 5 }}>
+      <SectionLabel text={`Team notes · ${props.notes.length}`} />
+      <Panel>
+        {shown.map((n, i) => (
+          <View key={`${i}:${n.slice(0, 24)}`} style={{ flexDirection: "row", gap: 8 }}>
+            <Text style={{ color: T.warn, fontSize: 11, fontFamily: T.mono, width: 12 }}>●</Text>
+            <Text style={{ color: T.text, fontSize: 12.5, lineHeight: 18, flex: 1 }} selectable>
+              {n}
+            </Text>
+          </View>
+        ))}
+        {props.notes.length > 3 ? (
+          <TouchableOpacity
+            onPress={() => setAll((a) => !a)}
+            accessibilityRole="button"
+            style={{ minHeight: 32, justifyContent: "center" }}
+          >
+            <Text style={{ color: T.dim, fontSize: 12 }}>{all ? "Show fewer" : `Show all ${props.notes.length}`}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </Panel>
     </View>
   );
 }
@@ -829,6 +1009,8 @@ export function OrchestraView(props: {
             ))}
         </View>
       )}
+
+      {runs && !composing ? <TeamPolicyCard creds={creds} projectId={project.id} /> : null}
     </ScrollView>
   );
 }
