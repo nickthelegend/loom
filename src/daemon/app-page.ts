@@ -10412,6 +10412,19 @@ ${BRAND_SPRITE}
         b.onclick = function(){ cur = b.getAttribute("data-sec"); drawNav(); render(); };
       });
     }
+    // Every section loads asynchronously into one pane. A slow response for a
+    // section you've already left (Setup probing every agent CLI, say) used to
+    // land late and overwrite the section you'd moved to. Requests carry the
+    // navigation generation they started in; a stale answer is dropped.
+    var gen = 0;
+    function sapi(path, opts){
+      var g = gen;
+      var never = new Promise(function(){});
+      return api(path, opts).then(
+        function(r){ return g === gen ? r : never; },
+        function(e){ if (g === gen) throw e; return never; }
+      );
+    }
     function busy(){ pane.innerHTML = LOADER; }
     function fail(err){ pane.innerHTML = '<div class="snote">' + esc(err && err.message ? err.message : String(err)) + "</div>"; }
 
@@ -10444,7 +10457,7 @@ ${BRAND_SPRITE}
     }
     function renderSetup(){
       busy();
-      api("/api/setup").then(function(s){
+      sapi("/api/setup").then(function(s){
         var osname = s.platform === "darwin" ? "macOS" : s.platform === "win32" ? "Windows" : "Linux";
         var h = '<div class="setphead">Setup</div><div class="setpsub">What this machine still needs to run agents.</div>';
         h += '<div class="sgrouph">Runtime</div>';
@@ -10491,7 +10504,7 @@ ${BRAND_SPRITE}
     // ---- Diagnostics: loom doctor, live -------------------------------------
     function renderDiag(){
       busy();
-      api("/api/doctor" + (pid ? "?project=" + encodeURIComponent(pid) : "")).then(function(d){
+      sapi("/api/doctor" + (pid ? "?project=" + encodeURIComponent(pid) : "")).then(function(d){
         var checks = d.checks || [];
         var bad = checks.filter(function(c){ return c.status === "fail"; }).length;
         var warn = checks.filter(function(c){ return c.status === "warn"; }).length;
@@ -10514,7 +10527,7 @@ ${BRAND_SPRITE}
 
     // ---- Preferences: theme, and per-project brain/handoff knobs -------------
     function patchCfg(body, okMsg){
-      api("/api/projects/" + pid + "/config", { method: "PATCH", body: JSON.stringify(body) })
+      sapi("/api/projects/" + pid + "/config", { method: "PATCH", body: JSON.stringify(body) })
         .then(function(){ if (okMsg) toast(okMsg); })
         .catch(function(e){ toast(e.message); renderPrefs(); });
     }
@@ -10534,7 +10547,7 @@ ${BRAND_SPRITE}
       var pp = document.getElementById("projprefs");
       if (!pid) { pp.innerHTML = '<div class="snote">Open a project to change how its brain learns and how handoff briefs are written.</div>'; return; }
       pp.innerHTML = LOADER;
-      api("/api/projects/" + pid + "/config").then(function(cfg){
+      sapi("/api/projects/" + pid + "/config").then(function(cfg){
         var pname = state.project && state.project.name ? state.project.name : "this project";
         var hh = '<div class="sgrouph">Brain \\u00b7 ' + esc(pname) + "</div>";
         hh += '<div class="prow"><div class="pl"><div class="pt">Memory extractor</div>' +
@@ -10560,7 +10573,7 @@ ${BRAND_SPRITE}
     // ---- Updates: is this build current -------------------------------------
     function renderUpdates(){
       busy();
-      api("/api/updates").then(function(u){
+      sapi("/api/updates").then(function(u){
         var g = u.git;
         var behind = g && g.behind ? g.behind : 0;
         var shortRev = (u.rev || "").slice(0, 7);
@@ -10593,7 +10606,7 @@ ${BRAND_SPRITE}
     function pairNewDevice(){
       var out = document.getElementById("devpairout");
       out.innerHTML = LOADER;
-      api("/api/pair/new", { method: "POST", body: "{}" }).then(function(p){
+      sapi("/api/pair/new", { method: "POST", body: "{}" }).then(function(p){
         var mins = p.expiresAt ? Math.max(1, Math.round((p.expiresAt - Date.now()) / 60000)) : 10;
         var link = p.link || (p.url + "/#pair=" + p.token);
         out.innerHTML = '<div class="snote">On the other device, open <b>' + esc(p.url) +
@@ -10614,7 +10627,7 @@ ${BRAND_SPRITE}
       var me = id === state.clientId;
       if (!window.confirm(me ? "Revoke THIS device? You\\u2019ll be signed out and have to pair again."
         : "Revoke this device? Its token stops working immediately.")) return;
-      api("/api/pair/clients/" + encodeURIComponent(id), { method: "DELETE" }).then(function(){
+      sapi("/api/pair/clients/" + encodeURIComponent(id), { method: "DELETE" }).then(function(){
         if (me) { close(); logout(); return; }
         toast("device revoked");
         renderDevices();
@@ -10622,7 +10635,7 @@ ${BRAND_SPRITE}
     }
     function renderDevices(){
       busy();
-      api("/api/pair/clients").then(function(d){
+      sapi("/api/pair/clients").then(function(d){
         var clients = d.clients || [];
         var h = '<div class="setphead">Devices</div>' +
           '<div class="setpsub">Every client paired to this Loom. Revoke one and its token stops working at once.</div>';
@@ -10650,7 +10663,7 @@ ${BRAND_SPRITE}
     var cloudErr = "";
     function renderCloud(){
       busy();
-      api("/api/cloud").then(drawCloud).catch(fail);
+      sapi("/api/cloud").then(drawCloud).catch(fail);
     }
     function drawCloud(c){
       c = c || {};
@@ -10685,7 +10698,7 @@ ${BRAND_SPRITE}
       cloudErr = "";
       function act(action, body, btn){
         btn.disabled = true;
-        api("/api/cloud/" + action, { method: "POST", body: JSON.stringify(body || {}) })
+        sapi("/api/cloud/" + action, { method: "POST", body: JSON.stringify(body || {}) })
           .then(function(s){ toast(action === "enable" ? (s.connected ? "Loom Cloud connected" : "Loom Cloud on") : action === "disable" ? "Loom Cloud off" : "new key \\u2014 re-pair cloud phones"); drawCloud(s); })
           .catch(function(e){ cloudErr = e.message; toast(e.message); renderCloud(); });
       }
@@ -10708,7 +10721,7 @@ ${BRAND_SPRITE}
     // ---- About --------------------------------------------------------------
     function renderAbout(){
       busy();
-      api("/api/health").then(function(hh){
+      sapi("/api/health").then(function(hh){
         var shortRev = (hh.rev || "").slice(0, 7);
         var h = '<div class="abhead"><div class="abmark">lo<b>om</b></div>' +
           '<div><div style="font-size:13px;font-weight:600">Agent orchestration</div>' +
@@ -10726,6 +10739,7 @@ ${BRAND_SPRITE}
     }
 
     function render(){
+      gen++;
       if (cur === "diagnostics") renderDiag();
       else if (cur === "preferences") renderPrefs();
       else if (cur === "updates") renderUpdates();

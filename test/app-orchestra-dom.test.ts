@@ -437,6 +437,36 @@ describe("web app · orchestra", () => {
   });
 });
 
+describe("web app · settings sections don't overwrite each other", () => {
+  it("a slow Setup response arriving after you switched sections is dropped", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    // Setup probes every agent CLI; on a slow machine that answer lands after
+    // you've moved on. Hold it back until the other section has rendered.
+    const realFetch = m.window.fetch;
+    let releaseSetup!: () => void;
+    const setupHeld = new Promise<void>((r) => (releaseSetup = r));
+    let setupAnswered: Promise<unknown> = Promise.resolve();
+    m.window.fetch = ((input: string, init?: RequestInit) => {
+      const p = realFetch(input, init);
+      if (!String(input).includes("/api/setup")) return p;
+      const held = setupHeld.then(() => p);
+      setupAnswered = held.then((r) => (r as Response).clone().text());
+      return held;
+    }) as typeof m.window.fetch;
+
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, '.setnav [data-sec="cloud"]'));
+    click($(m, '.setnav [data-sec="cloud"]'));
+    await waitUntil(() => !!$(m, "#setpane #cloudurl"));
+    releaseSetup();
+    await setupAnswered; // the late answer has actually arrived…
+    await new Promise((r) => setTimeout(r, 200)); // …and had its chance to paint
+    expect($(m, "#setpane #cloudurl"), "the Cloud section survived the late Setup answer").toBeTruthy();
+    expect(text(m, "#setpane")).not.toContain("What this machine still needs");
+  });
+});
+
 describe("web app · Loom Cloud settings", () => {
   it("has its own section: what it is, the Supabase fields, and the switches", async () => {
     const m = mount();
