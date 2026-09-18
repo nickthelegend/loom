@@ -1,7 +1,9 @@
 # Loom Teams — architecture for many people, many agents, one repo
 
-> Status: **design, researched 2026-09-18.** Nothing here is built yet except where a
-> section says "exists today". It is the plan for taking Loom from one developer's
+> Status: **design, researched and decided 2026-09-18.** The decision record in
+> [§1a](#1a-decision-record) was settled in a design interview with the owner, and it
+> overrides anything below that disagrees with it. Nothing here is built yet except
+> where a section says "exists today". It is the plan for taking Loom from one developer's
 > fleet to a team of 2–10 people, each running their own agents against the same
 > GitHub repository. Sources for every claim about other tools are in
 > [§12](#12-sources).
@@ -47,6 +49,48 @@ on what.** Loom Teams is the answer to that second question.
 7. **Private by default.** Content (code, prompts, memory) is end-to-end encrypted
    to the team. The coordination plane sees only what it must.
 
+## 1a. Decision record
+
+These were settled one at a time, root first, in the order the design tree depends
+on them. Later sections implement them.
+
+| # | Decision | Chosen | Why it matters downstream |
+|---|---|---|---|
+| **Foundations** |||
+| D1 | Who runs the Team Hub | **Hosted by Loom *and* self-hostable from day one** | One schema, migrations and Edge Functions deploy to any Supabase. `LOOM_TEAM_HUB_URL` picks the hub. |
+| D2 | Privacy from the hub operator | **Content E2E, metadata plain** | Prompts, memory text, plans, goal/task titles and snippets are team-key encrypted. Member, agent, state, branch and **file paths/globs are plaintext**, so the hub arbitrates leases itself. |
+| D3 | What a team is | **People; projects are GitHub repos** | Invite-based membership. One team spans many repos. A person can be in several teams. |
+| D4 | Identity | **GitHub required, Google optional** | Every member maps to a GitHub login, for commit trailers, CODEOWNERS and reviewer routing. |
+| **Keys, joining, scope** |||
+| D5 | How a new member gets the team key | **The key rides the invite link's `#fragment`** | Same pattern as phone pairing. Invites are one-time and expire in 24h. |
+| D6 | Offboarding | **Rotate forward** | The new key is sealed to each remaining **device key** (Ed25519/X25519). Invites cover joining; device keys cover rotation. History stays under the old key. |
+| D7 | GitHub App for self-hosters | **One-click manifest App; `gh` polling fallback** | Hosted teams use Loom's App. Self-hosted teams generate their own, pointed at their hub. With no App, daemons poll with the member's `gh`. |
+| D8 | Which projects are shared | **Opt-in per project** | Explicit "Share with team", or auto when the git remote matches a repo the team connected. Nothing else leaves the machine. |
+| **Coordination** |||
+| D9 | Where "touches" come from | **Declared by the orchestrator, corrected by reality** | `touches` globs are required in team mode. Leases widen on any edit outside them: live for Claude and Codex (they emit `file_edit`), at task end for Grok and Antigravity. |
+| D10 | Lease strength | **Advisory, plus hard zones** | `loom.team.json` `hardZones` (e.g. `db/migrations/**`) refuse a second claim. Everything else is planning context. |
+| D11 | Where WIP code is shared | **Hidden refs on GitHub** | `refs/loom/wip/<member>/<run>` hold WIP; `git merge-tree` predicts conflicts; the refs are deleted when the goal lands. |
+| D12 | Lease lifetime | **Heartbeat TTL (~10 min) + reclaim on wake** | A sleeping laptop's leases go stale. On wake, the goal reclaims and gets a report of what moved. |
+| **Memory** |||
+| D13 | What auto-shares | **Durable kinds above the confidence floor** | Constraint, decision, convention, fact and failure memories at ≥0.6 become *proposed*. Task memories stay personal. Any memory can be marked private. |
+| D14 | Who promotes to canon | **Anyone proposes; the PR decides** | Promotion opens a PR on the canon section. The repo's review rules (CODEOWNERS on AGENTS.md) gate it, so there's no separate ACL. |
+| D15 | Where canon lives | **A managed section in `AGENTS.md`** | Between `<!-- loom:canon -->` markers. `CLAUDE.md` gets `@AGENTS.md`. One source of truth. |
+| D16 | Aging | **Failures and facts decay (~90d) unless re-confirmed; rules persist** | A resolved contradiction marks the loser *superseded*, never deleted. |
+| **Landing** |||
+| D17 | Reviewable unit | **One PR per goal; auto-stack when big** | Over ~400 changed lines or 3 independent task clusters → a stack of 2–4 PRs cut along the plan graph. |
+| D18 | Review | **A cross-vendor agent review is a required status check, *plus* a human CODEOWNER approval** | The reviewer agent is from a different vendor than the authors. It blocks on high-severity findings and comments on the rest. It never clicks Approve. |
+| D19 | Who runs CI auto-fix | **The owner's machine; teammates can Adopt** | At most 2 attempts. After 15+ min with the owner offline, the goal shows "needs someone" and any member can Adopt it onto their daemon. |
+| D20 | Testing the merged result | **GitHub merge queue if the repo has it; otherwise a Loom landing lease** | The fallback serializes landing through a hub lease on `main`: rebase on fresh main, fast tests, merge. It's the same lease machinery. |
+| **Business and UX** |||
+| D21 | Pricing (hosted) | **Per seat, free up to 3 members** | The hub counts members and nothing else. Model costs stay on each member's own agent subscriptions; Loom never resells tokens. |
+| D22 | Who sees whose spend | **Owners see everything; members see team totals + their own** | No leaderboard of colleagues. |
+| D23 | Policy enforcement | **Enforced for team-shared projects** | The daemon refuses a mode looser than `loom.team.json` allows and says why. Members can go stricter. Side projects are untouched. |
+| D24 | Visibility into teammates' work | **Intent, not transcripts** | Goal and task titles, agents, file globs, state and PR/CI status (decrypted client-side). Prompts and agent output only when a thread is explicitly shared. |
+| D25 | Phone alerts | **Only what needs you** | A review requested from you; your CI failed after auto-fix; a predicted conflict with your goal; an approval your agent needs; an adopt request. Everything else goes to the feed and a daily digest. |
+| D26 | Where teammates show up | **A Team section in Fleet, plus a lease map** | Desktop and phone. The same data feeds orchestrators' planning context. |
+| **Build approach** |||
+| D27 | Build before a live Supabase exists | **In-memory hub + real migrations** | The hub protocol is tested against an in-memory hub with two real daemons as two members; SQL, RLS and Edge Functions ship ready to deploy. |
+
 ## 2. The shape
 
 ```
@@ -84,17 +128,19 @@ on what.** Loom Teams is the answer to that second question.
 ## 3. Identity, roles and policy
 
 **Identity**
-- Members sign in with Google through Supabase Auth. Sign-in exists today in the
-  phone app.
+- Members sign in with **GitHub** (required, D4), or with Google plus a linked GitHub
+  account, through Supabase Auth. Google sign-in exists today in the phone app.
 - Each device generates an Ed25519 key. The hub stores the public key per
   `(member, device)`.
 - Every event a daemon publishes is signed with it.
 
 **The team key**
 - A 32-byte **team key** encrypts content.
-- It is distributed sealed to each device's public key, the way 1Password vaults or
-  Keybase teams do it.
-- Removing a member rotates the key.
+- **Joining (D5):** a one-time invite link (24h) carries the key in its `#fragment`,
+  which is never sent to a server. It's the same pattern as phone pairing.
+- **Rotation (D6):** removing a member mints a new key, sealed to each remaining
+  device's public key (X25519 sealed box). Rotation is forward-only; history keeps
+  its old key.
 
 **Roles**
 
@@ -173,10 +219,10 @@ locks that deadlock.
   ```
 - Before spawning, Team Link claims a **lease** per glob and per issue: a row with
   a unique constraint, a TTL of about 10 minutes, and renewal by heartbeat.
-- To stay private, lease keys are **HMAC(team key, normalized glob or issue)**. The
-  hub can detect collisions without learning file names. Glob overlap is checked
-  client-side against the decrypted lease list; the HMAC row catches exact
-  duplicates such as the same issue.
+- File globs are **plaintext metadata** (D2), so the hub settles overlaps itself, in
+  one Postgres transaction per claim. Glob overlap uses a normalized prefix match,
+  with a conservative "may overlap" for wildcards. **Hard zones** (D10) are refused
+  there. Everything else is returned as context.
 
 **When a new plan overlaps someone else's lease**, the orchestrator gets it as
 context in its planning turn: *"src/auth/** is leased by Priya's run o7x (claude,
@@ -390,7 +436,22 @@ Cursor background agents and Codex cloud do it. Not in v1.
 
 ## 13. Build plan
 
-**Phase 1: see each other (2–3 weeks)**
+**Phase 1: see each other.** Built per D27. Status on 2026-09-18:
+
+| Piece | Status |
+|---|---|
+| Team crypto: team key, sealed boxes, Ed25519 signatures, invite fragments (`src/core/team-crypto.ts`) | ✅ built, tested |
+| Hub protocol plus reference hub (`src/core/team-hub.ts`: `HubClient`, `MemoryHub`) | ✅ built, tested |
+| Self-hosted hub: `loom hub` server plus `HttpHubClient` (`src/hub/`) | ✅ built, tested over real HTTP + WebSocket |
+| Team Link in the daemon (`src/daemon/team.ts`): sign-in, create, invite and join, forward rotation, opt-in sharing plus remote auto-match, heartbeats (intent only), goal feed, `gh` polling fallback | ✅ built; two members tested end to end |
+| Hosted-hub SQL (`supabase/migrations/0002_teams.sql`): tables, RLS, rule functions, Realtime | ✅ built; tested against a real Postgres 16 as the `authenticated` role |
+| Commit trailers on worker commits (`Loom-Goal`, `Loom-Task`, `Loom-Agent`, `Loom-Member`) | ✅ built, tested |
+| CLI: `loom hub`, `loom team [signin/create/invite/join/share/unshare/remove/leave]`; REST `/api/team/*` | ✅ built, tested |
+| Team section in Fleet (desktop and phone), Team settings | 🔨 in progress |
+| Hosted client: `SupabaseHubClient` + GitHub OAuth loopback sign-in | ⏳ waits for a live Supabase project, so it's tested for real rather than written blind |
+| GitHub App manifest flow + webhook Edge Function (D7) | ⏳ with the hosted client; until then the `gh` polling fallback covers PRs and checks |
+
+The original Phase 1 plan:
 - Team Hub schema:
   - `teams`, `members`, `devices` and `team_keys`;
   - `presence` over Realtime;

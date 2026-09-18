@@ -27,7 +27,7 @@ import { WelcomeScreen } from "./src/welcome";
 type Route =
   | { name: "pair" }
   | { name: "board" }
-  | { name: "fleet" }
+  | { name: "fleet"; focus?: "team" }
   | { name: "project"; project: Project; chat?: { id: string; title: string }; from?: "board" | "fleet" };
 
 export default function App() {
@@ -120,7 +120,9 @@ export default function App() {
         />
       ) : route.name === "fleet" ? (
         <FleetScreen
+          key={route.focus ?? "fleet"}
           creds={creds}
+          focusTeam={route.focus === "team"}
           onBack={() => setRoute({ name: "board" })}
           onOpen={(projectId, chat) =>
             void getProject(creds, projectId)
@@ -142,6 +144,10 @@ export default function App() {
         onClose={() => setAccountOpen(false)}
         user={auth.user}
         creds={creds}
+        onOpenTeam={() => {
+          setAccountOpen(false);
+          setRoute({ name: "fleet", focus: "team" });
+        }}
         onSignedOut={() => {
           // back to the welcome, which is where signing out should land you
           setAccountOpen(false);

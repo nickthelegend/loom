@@ -3,9 +3,12 @@
  * per agent (busy or idle, which thread, its last step, its permission mode)
  * and the live orchestra's tasks beneath. Polls every 3s while on screen and
  * the app is in front; tapping a row opens that project on that thread.
+ *
+ * Below the local fleet, the Team section (team.tsx): teammates' live agents,
+ * who holds which files, and the team feed.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, RefreshControl, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { getActivity, type ActivityAgent, type ActivityProject, type ActivityTask, type Creds } from "./api";
 import { AgentIcon, agentLabel } from "./agents";
@@ -13,6 +16,7 @@ import { ApprovalBanner, ApprovalsSheet } from "./approvals";
 import { ConnectionBadge } from "./brand";
 import { Empty, SectionLabel, TAP, Unreachable, dur } from "./components";
 import { PermissionTag } from "./permissions";
+import { TeamSection } from "./team";
 import { T, radii, spacing } from "./theme";
 
 const POLL_MS = 3000;
@@ -118,12 +122,17 @@ export function FleetScreen(props: {
   creds: Creds;
   onBack: () => void;
   onOpen: (projectId: string, chat?: { id: string; title: string }) => void;
+  /** Scroll to the Team section on arrival (from the account sheet's Team row). */
+  focusTeam?: boolean;
 }) {
   const [data, setData] = useState<{ projects: ActivityProject[]; approvals: number; at: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [teamRefresh, setTeamRefresh] = useState(0);
+  const scroller = useRef<ScrollView>(null);
+  const scrolledToTeam = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -201,6 +210,7 @@ export function FleetScreen(props: {
       </View>
 
       <ScrollView
+        ref={scroller}
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: spacing.md, gap: spacing.lg, paddingBottom: 40 }}
         refreshControl={
@@ -208,6 +218,7 @@ export function FleetScreen(props: {
             refreshing={refreshing}
             onRefresh={async () => {
               setRefreshing(true);
+              setTeamRefresh((n) => n + 1);
               await load();
               setRefreshing(false);
             }}
@@ -264,6 +275,19 @@ export function FleetScreen(props: {
           ))
         )}
         {err && data ? <Text style={{ color: T.err, fontSize: 12, textAlign: "center" }}>{err}</Text> : null}
+
+        <View
+          style={{ borderTopWidth: 1, borderTopColor: T.line, paddingTop: spacing.lg }}
+          onLayout={(e) => {
+            // once, when asked: the section moves as the fleet above it loads
+            if (!props.focusTeam || scrolledToTeam.current || !data) return;
+            scrolledToTeam.current = true;
+            const y = e.nativeEvent.layout.y;
+            setTimeout(() => scroller.current?.scrollTo({ y: Math.max(0, y - spacing.md), animated: true }), 50);
+          }}
+        >
+          <TeamSection creds={props.creds} refreshKey={teamRefresh} />
+        </View>
       </ScrollView>
 
       <ApprovalsSheet

@@ -148,6 +148,12 @@ describe("orchestra runs", () => {
     expect(seen[1]!.text).toContain("t1 · file a — DONE");
     expect(seen[1]!.text).toContain("a.txt");
 
+    // worker commits carry trailers that trace them to goal, task and agent
+    const msg = git(dir, "log", "-1", "--format=%B", `${done.branch.replace(/\/main$/, "")}/t1`);
+    expect(msg).toContain(`Loom-Goal: ${run.id}`);
+    expect(msg).toContain("Loom-Task: t1");
+    expect(msg).toContain("Co-Authored-By: alpha <alpha@loom.local>");
+
     // apply lands the integration branch in the project
     const applied = await rt.orchestra.apply(run.id);
     expect(applied.into).toBe("main");

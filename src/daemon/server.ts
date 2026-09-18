@@ -6,6 +6,8 @@
 
 import { execFile, spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { repoOf, TeamLink } from "./team.js";
+import type { HubClient } from "../core/team-hub.js";
 import fs from "node:fs";
 import http, { type Server } from "node:http";
 import { createRequire } from "node:module";
@@ -131,6 +133,8 @@ export interface DaemonOptions {
    * an in-memory bus. See daemon/relay.ts.
    */
   relayTransport?: (channel: string) => Promise<RelayTransport>;
+  /** Build the Team Hub client. Defaults to HTTP (`loom hub`); tests pass their own. */
+  hubFactory?: (url: string, token: string) => HubClient;
 }
 
 export const DEFAULT_PORT = 7420;
@@ -356,7 +360,21 @@ export class LoomDaemon {
   private relayError: string | null = null;
   private relayTransportFactory: DaemonOptions["relayTransport"];
 
+  /** Loom Teams: this daemon on a Team Hub. See daemon/team.ts. */
+  readonly team: TeamLink;
+
   constructor(opts: DaemonOptions = {}) {
+    this.team = new TeamLink({
+      runtimes: () => [...this.runtimes.values()],
+      broadcast: (frame) => {
+        const payload = JSON.stringify(frame);
+        // Team frames are daemon-level: unscoped (admin / full) clients only.
+        for (const [ws, sub] of this.sockets) {
+          if (ws.readyState === WebSocket.OPEN && !sub.scope) ws.send(payload);
+        }
+      },
+      ...(opts.hubFactory ? { hubFactory: opts.hubFactory } : {}),
+    });
     this.relayTransportFactory = opts.relayTransport;
     this.host = opts.host ?? "127.0.0.1";
     this.port = opts.port ?? DEFAULT_PORT;
@@ -911,6 +929,47 @@ export class LoomDaemon {
       })();
     });
 
+    // ---- Loom Teams: this daemon on a Team Hub (daemon/team.ts) -------------
+    // Reading the team view is for any full client; changing membership,
+    // keys or sign-in is admin-only — it's this machine's identity.
+    app.get("/api/team", (req, res) => {
+      if (this.auth.allowedProjects(bearerToken(req.headers.authorization) ?? "")) {
+        return void res.status(403).json({ error: "team view needs a full (unscoped) client" });
+      }
+      res.json(this.team.status());
+    });
+    app.post("/api/team/:action", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      const b = (req.body ?? {}) as Record<string, string | undefined>;
+      const action = String(req.params.action);
+      void (async () => {
+        try {
+          let out: unknown = { ok: true };
+          if (action === "signin") {
+            if (!b.hub) throw new Error("missing hub url");
+            await this.team.signIn(b.hub, { ...(b.github ? { github: b.github } : {}), ...(b.secret ? { secret: b.secret } : {}) });
+            await this.team.connect();
+          } else if (action === "create") out = await this.team.createTeam(String(b.name ?? ""));
+          else if (action === "invite") out = await this.team.invite(b.teamId || undefined);
+          else if (action === "join") {
+            if (!b.link) throw new Error("missing invite link");
+            out = await this.team.join(b.link, { ...(b.github ? { github: b.github } : {}), ...(b.secret ? { secret: b.secret } : {}) });
+          } else if (action === "leave") await this.team.leave(b.teamId || undefined);
+          else if (action === "remove") {
+            if (!b.userId) throw new Error("missing userId");
+            out = await this.team.removeMember(b.userId, b.teamId || undefined);
+          } else if (action === "rotate") out = await this.team.rotate(b.teamId || undefined);
+          else if (action === "beat") out = { sessions: await this.team.beat() };
+          else if (action === "poll-github") out = { added: await this.team.pollGitHub() };
+          else return void res.status(404).json({ error: `unknown team action "${action}"` });
+          res.json({ result: out, team: this.team.status() });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      })();
+    });
     // ---- Loom Cloud: reach this daemon from any network (daemon/relay.ts) ----
     app.get("/api/cloud", (_req, res) => {
       res.json(this.cloudStatus());
@@ -2443,6 +2502,35 @@ export class LoomDaemon {
       res.json({ ok: true });
     });
 
+    // ---- team sharing, per project (D8: opt-in) ----
+    // What this project has chosen (config `team`) and which GitHub repo its
+    // origin is — the two facts the UI needs to show Shared / Private / Auto.
+    app.get(
+      "/api/projects/:id/team/share",
+      withRuntime(async (rt, _req, res) => {
+        // cfg is omitted when nothing was chosen — "auto", not "private".
+        res.json({ ...(rt.config.team ? { cfg: rt.config.team } : {}), repo: (await repoOf(rt.info.dir)) ?? "" });
+      }),
+    );
+    app.post(
+      "/api/projects/:id/team/share",
+      withRuntime(async (rt, req, res) => {
+        try {
+          const b = (req.body ?? {}) as { teamId?: string };
+          res.json(await this.team.share(rt, b.teamId || undefined));
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+    app.delete(
+      "/api/projects/:id/team/share",
+      withRuntime(async (rt, _req, res) => {
+        this.team.unshare(rt);
+        res.json({ ok: true });
+      }),
+    );
+
     // ---- permissions & approvals (core/permissions.ts, core/approvals.ts) ---
     app.get("/api/permissions", (_req, res) => {
       res.json({ profiles: PERMISSION_PROFILES });
@@ -3393,6 +3481,7 @@ export class LoomDaemon {
       recordAgentEvent(e, { project: info.name });
     });
     this.runtimes.set(info.id, rt);
+    this.team.attachRuntime(rt);
     return rt;
   }
 
@@ -3512,6 +3601,7 @@ export class LoomDaemon {
     this.unstreamLogs = this.streamLogs();
     this.writeConfig();
     if (readCloudSettings().enabled) void this.startCloud().catch(() => {});
+    void this.team.start().catch(() => {});
 
     return { host: this.host, port: this.port };
   }
@@ -3738,6 +3828,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    await this.team.stop().catch(() => {});
     await this.relay?.close().catch(() => {});
     this.relay = null;
     for (const t of this.healTimers) clearTimeout(t);
