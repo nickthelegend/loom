@@ -86,19 +86,39 @@ export function listProjects(): ProjectInfo[] {
   return readJson<RegistryFile>(registryFile(), { projects: [] }).projects;
 }
 
+/**
+ * A directory as the filesystem knows it: absolute, with symlinks resolved.
+ *
+ * Comparing `path.resolve` strings registered one folder twice whenever it was
+ * reached through a symlink — on macOS every temp dir is (/var → /private/var),
+ * and a shell's cwd reports the resolved side. Two registry rows then meant two
+ * runtimes over ONE .loom/: two engines appending to the same log, each blind
+ * to the other's in-memory state. Found by an orchestra run whose reply landed
+ * in the twin.
+ */
+export function canonicalDir(dir: string): string {
+  const abs = path.resolve(dir);
+  try {
+    return fs.realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
 export function findProject(idOrDirOrName: string): ProjectInfo | undefined {
   const projects = listProjects();
-  const dir = path.resolve(idOrDirOrName);
-  return projects.find(
-    (p) => p.id === idOrDirOrName || p.name === idOrDirOrName || path.resolve(p.dir) === dir,
-  );
+  const byKey = projects.find((p) => p.id === idOrDirOrName || p.name === idOrDirOrName);
+  if (byKey) return byKey;
+  const dir = canonicalDir(idOrDirOrName);
+  return projects.find((p) => canonicalDir(p.dir) === dir);
 }
 
 export function registerProject(dir: string, name: string): ProjectInfo {
   ensureLoomHome();
   const reg = readJson<RegistryFile>(registryFile(), { projects: [] });
   const resolved = path.resolve(dir);
-  const existing = reg.projects.find((p) => path.resolve(p.dir) === resolved);
+  const canonical = canonicalDir(dir);
+  const existing = reg.projects.find((p) => canonicalDir(p.dir) === canonical);
   if (existing) return existing;
   // The signature says string and every caller is typed, but the name usually
   // originates in a JSON file read through an unchecked cast — so "required"

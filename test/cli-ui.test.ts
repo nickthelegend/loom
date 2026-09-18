@@ -1,6 +1,10 @@
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { formatAgentRosterRow } from "../src/cli/ui.js";
 import type { AgentStatus } from "../src/types.js";
+
+// picocolors turns colour on under CI=true; assert on the words, not the escapes.
+const plain = (s: string) => stripVTControlCharacters(s);
 
 function agent(overrides: Partial<AgentStatus> = {}): AgentStatus {
   return {
@@ -18,7 +22,7 @@ function agent(overrides: Partial<AgentStatus> = {}): AgentStatus {
 
 describe("CLI agent roster", () => {
   it("shows each agent's id, kind, role, configured model, and baton eligibility", () => {
-    const row = formatAgentRosterRow(agent());
+    const row = plain(formatAgentRosterRow(agent()));
 
     expect(row).toContain("codex");
     expect(row).toContain("role: executor");
@@ -27,7 +31,7 @@ describe("CLI agent roster", () => {
   });
 
   it("labels bridges as unable to hold the baton and uses the default model label", () => {
-    const row = formatAgentRosterRow(agent({ id: "kiro", kind: "kiro", tier: "bridge", model: "" }));
+    const row = plain(formatAgentRosterRow(agent({ id: "kiro", kind: "kiro", tier: "bridge", model: "" })));
 
     expect(row).toContain("kiro");
     expect(row).toContain("model: default");

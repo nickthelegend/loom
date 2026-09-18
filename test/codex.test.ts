@@ -124,6 +124,11 @@ describe("codex · a normal turn", () => {
       "019f-keep",
       "--json",
       "--skip-git-repo-check",
+      // resume can't take -s, but it does take a config override — so a
+      // permission mode changed mid-conversation still applies (verified on
+      // codex-cli 0.155.0: ask → no write, back to auto → write)
+      "-c",
+      'sandbox_mode="read-only"',
       "-m",
       "o3",
       "more",

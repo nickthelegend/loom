@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Permissions, plan mode, git delivery, fleet, prompts
+
+- **Permission modes per agent: bypass, auto, always ask.**
+  - Each is mapped onto each CLI's own flags, and every cell was verified against
+    the real CLI (`scripts/verify-permissions.mjs`).
+  - Always ask on Claude Code routes each tool use to a real approval in Loom,
+    through a built-in MCP permission-prompt server. Verified with the real CLI
+    (`scripts/verify-approvals.mjs`).
+  - Two cells measured broken are shown as unavailable instead of lying: OpenCode
+    "ask", and Antigravity "auto" (which writes to agy's scratch folder).
+- **Plan mode.**
+  - Chat turns write a markdown plan instead of code.
+  - Orchestras commit `plans/<run>/PLAN.md` plus a spec per task before workers
+    start, and write results back at the end.
+- **Git delivery policy: none, commit, push, or PR.** Covers chat turns and finished
+  orchestras. PR mode pushes the run's branch and opens a PR with `gh`.
+- **Fleet:** `GET /api/activity` and a Fleet view of every agent's thread, task and
+  last step.
+- **Prompt manager:** saved and pinned prompts, plus automatic sent-prompt history
+  (`/api/prompts`).
+- **Teams:** researched architecture in docs/teams-architecture.md.
+
+### Orchestra: one orchestrator, many parallel workers
+
+- **`loom orchestrate "<goal>"`**, plus Orchestrate mode in the app.
+  - Any agent can orchestrate: Claude Code, Codex, Antigravity, Grok or OpenCode.
+    It plans the goal into a task graph.
+  - Worker agents run every ready task at once, mixed kinds or several of the same
+    kind. Each task gets its own thread and git worktree.
+  - Finished work merges into `loom/orchestra/<run>/main`, and the orchestrator
+    reviews, follows up, or finishes.
+  - `orchestra:apply` merges the run into your branch. Nothing touches it before
+    that.
+  - Verified against the real CLIs:
+    - Claude orchestrating Codex and Antigravity (278 s);
+    - Codex orchestrating Grok, OpenCode and Claude Code (82 s, $0.31).
+    - Both delivered working code with passing tests
+      (`scripts/verify-orchestra.mjs`).
+  - Design credit: Agent Orchestrator (Apache-2.0). See THIRD_PARTY_NOTICES.md.
+
+### Loom Cloud: reach your agents from any network
+
+- A Supabase Realtime relay, end-to-end encrypted (XChaCha20-Poly1305). The key
+  exists only in the pairing QR's URL fragment, so Supabase relays ciphertext.
+- Relayed requests run against the daemon with the phone's own token. The admin
+  bootstrap is refused over the relay.
+- New commands: `loom cloud enable|disable|rotate`. Setup guide: docs/cloud.md.
+- Connection patterns credited to T3 Code (MIT).
+
+### Fixes found by running the real agents
+
+- A worker's `.loom/` state made `git add` fail whenever the project gitignored
+  `.loom/`. That failed every real Codex task.
+- A project reached through a symlink (every macOS temp dir) registered twice, so
+  two runtimes ran over one `.loom/`.
+- OpenCode's default model is refused headless ("Model is unavailable"). With no
+  model pinned, the adapter now picks one the server can actually run.
+- `test/git.test.ts` assumed the default branch is `main`; CI runners use `master`.
+
+
 ### Hardening (production-readiness pass)
 
 - **Closed a DNS-rebinding path to the admin token.** `GET /api/bootstrap` handed

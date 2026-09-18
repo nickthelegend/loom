@@ -809,6 +809,193 @@ program
     }
   });
 
+// ── orchestra: one orchestrator, many parallel workers (core/orchestra.ts) ──
+
+const RUN_DONE = new Set(["completed", "failed", "aborted", "waiting_human"]);
+const TASK_COLOR: Record<string, (s: string) => string> = {
+  done: pc.green,
+  running: pc.cyan,
+  pending: pc.dim,
+  failed: pc.red,
+  conflict: pc.yellow,
+  needs_input: pc.yellow,
+  cancelled: pc.dim,
+};
+
+function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
+  const done = run.tasks.filter((t) => t.status === "done").length;
+  console.log(
+    `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(run.status)}  ${done}/${run.tasks.length} tasks · ` +
+      `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
+  );
+  console.log(`   ${pc.dim("goal")} ${run.goal}`);
+  console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.join(", ")}`);
+  for (const t of run.tasks) {
+    const color = TASK_COLOR[t.status] ?? ((x: string) => x);
+    const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
+    const files = t.files?.length ? pc.dim(` · ${t.files.length} file${t.files.length === 1 ? "" : "s"}`) : "";
+    console.log(`   ${color(t.status.padEnd(11))} ${pc.bold(t.id)} ${t.title} ${pc.dim(`→ ${t.agent}`)}${deps}${files}`);
+    if (t.error) console.log(`               ${pc.red(t.error.split("\n")[0]!.slice(0, 160))}`);
+  }
+  if (run.question) console.log(`   ${pc.yellow("asks:")} ${run.question}  ${pc.dim(`(loom orchestra:reply ${run.id} "…")`)}`);
+  if (run.summary) console.log(`   ${pc.green("summary:")} ${run.summary}`);
+  if (run.error) console.log(`   ${pc.red("error:")} ${run.error}`);
+  if (run.status === "completed" && !run.applied) console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
+}
+
+async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string): Promise<void> {
+  let last = "";
+  for (;;) {
+    const { run } = await client.orchestraRun(projectId, runId);
+    const line = `${run.status}|${run.tasks.map((t) => `${t.id}:${t.status}`).join(",")}`;
+    if (line !== last) {
+      last = line;
+      const stamp = new Date().toLocaleTimeString();
+      console.log(
+        pc.dim(stamp) + " " + pc.bold(run.status) + "  " +
+          run.tasks.map((t) => (TASK_COLOR[t.status] ?? ((x: string) => x))(`${t.id}[${t.agent}]`)).join(" "),
+      );
+    }
+    if (RUN_DONE.has(run.status)) {
+      console.log("");
+      printRun(run);
+      if (run.status === "failed" || run.status === "aborted") process.exitCode = 1;
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+program
+  .command("orchestrate <goal>")
+  .description("one orchestrator plans the goal; many worker agents build it in parallel, each in its own worktree")
+  .option("-o, --orchestrator <agent>", "who plans and reviews (default: claude-code if present)")
+  .option("-w, --workers <agents>", "comma-separated worker agents (default: every agent in the project)")
+  .option("-p, --parallel <n>", "tasks running at once (1-12, default 4)")
+  .option("--rounds <n>", "orchestrator review rounds before giving up (default 10)")
+  .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
+  .option("--no-watch", "start it and return instead of following it to the end")
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; watch: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      const { run } = await client.startOrchestra(project.id, {
+        goal,
+        ...(opts.orchestrator ? { orchestrator: opts.orchestrator } : {}),
+        ...(opts.workers ? { workers: opts.workers.split(",").map((w) => w.trim()).filter(Boolean) } : {}),
+        ...(opts.parallel ? { maxParallel: Number(opts.parallel) } : {}),
+        ...(opts.rounds ? { maxRounds: Number(opts.rounds) } : {}),
+        ...(opts.plan ? { plan: true } : {}),
+      });
+      console.log(
+        `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +
+          `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
+      );
+      if (opts.watch) await watchRun(client, project.id, run.id);
+      else console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("orchestra [runId]")
+  .description("orchestra runs in this project — or one run in detail")
+  .option("--watch", "follow the run until it finishes")
+  .action(async (runId: string | undefined, opts: { watch?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      if (runId) {
+        if (opts.watch) return void (await watchRun(client, project.id, runId));
+        return void printRun((await client.orchestraRun(project.id, runId)).run);
+      }
+      const { runs } = await client.orchestraRuns(project.id);
+      if (!runs.length) return void console.log(pc.dim('no orchestra runs yet — loom orchestrate "<goal>"'));
+      for (const r of runs.slice(0, 15)) {
+        const done = r.tasks.filter((t) => t.status === "done").length;
+        console.log(
+          `${pc.bold(r.id)}  ${r.status.padEnd(13)} ${String(done).padStart(2)}/${String(r.tasks.length).padEnd(2)} ` +
+            `${pc.dim(new Date(r.createdAt).toLocaleString())}  ${r.goal.slice(0, 70)}`,
+        );
+      }
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+for (const action of ["abort", "apply", "cleanup"] as const) {
+  const blurb = {
+    abort: "stop a run — every worker is interrupted",
+    apply: "merge a run's integration branch into your current branch",
+    cleanup: "remove a finished run's worktrees (its branch stays)",
+  }[action];
+  program
+    .command(`orchestra:${action} <runId>`)
+    .description(blurb)
+    .action(async (runId: string) => {
+      const client = await ensureDaemon();
+      const project = await currentProject(client);
+      try {
+        const out = await client.orchestraAction(project.id, runId, action);
+        if (action === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(String(out.merged))} into ${pc.bold(String(out.into))}`);
+        else console.log(`${pc.green("✓")} ${action} ${runId}`);
+      } catch (err) {
+        console.error(pc.red(err instanceof Error ? err.message : String(err)));
+        process.exitCode = 1;
+      }
+    });
+}
+
+program
+  .command("orchestra:reply <runId> <text>")
+  .description("answer the orchestrator's question, or steer a running orchestra")
+  .action(async (runId: string, text: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      await client.orchestraAction(project.id, runId, "reply", { text });
+      console.log(`${pc.green("✓")} sent to the orchestrator`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+// ── Loom Cloud: reach this daemon from any network (daemon/relay.ts) ──
+
+program
+  .command("cloud [action]")
+  .description("Loom Cloud relay: status | enable | disable | rotate — reach your agents from anywhere, end-to-end encrypted")
+  .option("--url <supabaseUrl>", "Supabase project URL (or LOOM_SUPABASE_URL)")
+  .option("--key <anonKey>", "Supabase anon key (or LOOM_SUPABASE_ANON_KEY)")
+  .action(async (action: string | undefined, opts: { url?: string; key?: string }) => {
+    const client = await ensureDaemon();
+    try {
+      const a = (action ?? "status").toLowerCase();
+      let s: Record<string, unknown>;
+      if (a === "status") s = await client.cloud();
+      else if (a === "enable" || a === "disable" || a === "rotate") {
+        s = await client.cloudAction(a, {
+          ...(opts.url ? { supabaseUrl: opts.url } : {}),
+          ...(opts.key ? { anonKey: opts.key } : {}),
+        });
+      } else throw new Error(`unknown action "${a}" — status, enable, disable or rotate`);
+      const on = s.connected ? pc.green("connected") : s.enabled ? pc.yellow("enabled, not connected") : pc.dim("off");
+      console.log(`Loom Cloud  ${on}${s.supabaseUrl ? pc.dim(`  via ${String(s.supabaseUrl)}`) : ""}`);
+      if (s.connected) console.log(pc.dim(`  ${String(s.clients)} phone(s) on the relay · end-to-end encrypted — Supabase relays ciphertext only`));
+      if (s.error) console.log(pc.red(`  ${String(s.error)}`));
+      if (!s.configured) console.log(pc.dim("  set a Supabase project: loom cloud enable --url https://<ref>.supabase.co --key <anon key>"));
+      if (a === "enable" && s.connected) console.log(pc.dim("  pair a phone with `loom pair` — its QR now works from any network"));
+      if (a === "rotate") console.log(pc.dim("  new key minted — phones paired through the cloud must pair again"));
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
 program
   .command("subtasks")
   .description("subtasks running right now")

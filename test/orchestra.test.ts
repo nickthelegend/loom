@@ -1,0 +1,344 @@
+/**
+ * Orchestra: one orchestrator, many parallel workers, one integration branch.
+ *
+ * The orchestrator here is a scripted adapter that replies with canned
+ * ```loom blocks round by round; the workers are echo agents, which write real
+ * files (write:<path>) in their worktrees. So every git step is real — the
+ * worktrees, the commits, the merges, the conflicts — and only the model is
+ * faked.
+ */
+
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import { registerAgentKind } from "../src/adapters/index.js";
+import { AdapterBase } from "../src/adapters/base.js";
+import { parseOrchestraActions, type OrchestraRun } from "../src/core/orchestra.js";
+import { writeProjectConfig } from "../src/core/registry.js";
+import { ProjectRuntime } from "../src/daemon/runtime.js";
+import type { SendInput } from "../src/types.js";
+import { tmpDir, waitUntil } from "./helpers.js";
+
+const git = (dir: string, ...args: string[]): string => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+
+/** Replies from a per-test script: one entry per orchestrator round. */
+let script: string[] = [];
+const seen: SendInput[] = [];
+
+class ScriptedOrchestrator extends AdapterBase {
+  async available() {
+    return true;
+  }
+  async start() {}
+  async stop() {}
+  async interrupt() {}
+  async diff() {
+    return "";
+  }
+  async send(input: SendInput): Promise<void> {
+    this._busy = true;
+    seen.push(input);
+    await new Promise((r) => setTimeout(r, 10));
+    const reply = script.shift() ?? "```loom\n{\"actions\": [{\"type\": \"done\", \"summary\": \"script ran out\"}]}\n```";
+    this.emit({ kind: "message", payload: { text: reply } });
+    this.emit({ kind: "run_complete", payload: { durationMs: 10 } });
+    this._busy = false;
+  }
+}
+registerAgentKind("scripted", (cfg, dir) => new ScriptedOrchestrator(cfg.id, "scripted", dir));
+
+const loom = (actions: unknown[]) => "Here's the plan.\n```loom\n" + JSON.stringify({ actions }) + "\n```";
+
+let rt: ProjectRuntime;
+let dir: string;
+
+async function openProject(): Promise<void> {
+  dir = tmpDir("orch");
+  git(dir, "init", "-q", "-b", "main");
+  git(dir, "config", "user.email", "t@t");
+  git(dir, "config", "user.name", "t");
+  fs.writeFileSync(path.join(dir, "seed.txt"), "seed\n");
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".loom/\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "seed");
+  writeProjectConfig(dir, {
+    name: "orch",
+    agents: [
+      { id: "conductor", kind: "scripted", role: "orchestrator" },
+      { id: "alpha", kind: "echo", role: "worker" },
+      { id: "beta", kind: "echo", role: "worker" },
+    ],
+    brain: { extractor: "off" },
+  });
+  rt = await ProjectRuntime.open({ id: `orch-${path.basename(dir)}`, name: "orch", dir });
+}
+
+const settle = (id: string) =>
+  waitUntil(() => ["completed", "failed", "aborted", "waiting_human"].includes(rt.orchestra.get(id)!.status), {
+    timeoutMs: 30_000,
+  });
+
+beforeAll(() => {
+  process.env.LOOM_HOME = tmpDir("home-orch");
+  process.env.LOOM_NO_NOTIFY = "1";
+});
+
+afterEach(async () => {
+  await rt?.close();
+  script = [];
+  seen.length = 0;
+});
+
+describe("orchestra protocol", () => {
+  it("reads the last loom block, and tolerates json fences and aliases", () => {
+    expect(
+      parseOrchestraActions(
+        'thinking…\n```loom\n{"actions":[{"type":"done","summary":"old"}]}\n```\nthen\n```loom\n{"actions":[{"type":"spawn","title":"A","agent":"codex","prompt":"do a"}]}\n```',
+      ),
+    ).toEqual([{ type: "spawn", title: "A", agent: "codex", prompt: "do a", dependsOn: [] }]);
+    expect(
+      parseOrchestraActions('```json\n{"actions":[{"action":"assign","name":"B","worker":"claude","instructions":"do b","after":["t1"]}]}\n```'),
+    ).toEqual([{ type: "spawn", title: "B", agent: "claude", prompt: "do b", dependsOn: ["t1"] }]);
+    expect(parseOrchestraActions('ok {"actions":[{"type":"finish","summary":"all good"}]} bye')).toEqual([
+      { type: "done", summary: "all good" },
+    ]);
+    expect(parseOrchestraActions("```loom\n{\"actions\": []}\n```")).toEqual([]);
+    expect(parseOrchestraActions("no plan here")).toBeNull();
+  });
+});
+
+describe("orchestra runs", () => {
+  it("fans out in parallel, honours dependsOn, merges everything, and finishes on done", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", id: "t1", title: "file a", agent: "alpha", prompt: "sleep:400 write:a.txt" },
+        { type: "spawn", id: "t2", title: "file b", agent: "beta", prompt: "sleep:400 write:b.txt" },
+        { type: "spawn", id: "t3", title: "file c", agent: "alpha", prompt: "write:c.txt", dependsOn: ["t1"] },
+      ]),
+      loom([{ type: "done", summary: "three files" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "make three files", orchestrator: "conductor", workers: ["alpha", "beta"] });
+    await settle(run.id);
+    const done = rt.orchestra.get(run.id)!;
+
+    expect(done.status).toBe("completed");
+    expect(done.summary).toBe("three files");
+    expect(done.tasks.map((t) => t.status)).toEqual(["done", "done", "done"]);
+    // t1 and t2 overlapped in time: parallel, not a queue
+    const [t1, t2, t3] = done.tasks as [OrchestraRun["tasks"][0], OrchestraRun["tasks"][0], OrchestraRun["tasks"][0]];
+    expect(t2.startedAt!).toBeLessThan(t1.finishedAt!);
+    // t3 waited for t1, and started from a branch that already had a.txt
+    expect(t3.startedAt!).toBeGreaterThanOrEqual(t1.finishedAt!);
+    expect(fs.existsSync(path.join(t3.dir!, "a.txt"))).toBe(true);
+    // every task's work is on the integration branch; the user's tree is untouched
+    const files = git(dir, "ls-tree", "-r", "--name-only", done.branch).split("\n");
+    expect(files).toEqual(expect.arrayContaining(["a.txt", "b.txt", "c.txt", "seed.txt"]));
+    expect(files.some((f) => f.startsWith(".loom"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "a.txt"))).toBe(false);
+    // each task streamed into its own thread
+    expect(new Set(done.tasks.map((t) => t.chat)).size).toBe(3);
+    expect(rt.chats().map((c) => c.id)).toEqual(expect.arrayContaining(done.tasks.map((t) => t.chat)));
+    const t1Events = rt.log.list({}).filter((e) => e.chat === t1.chat && e.kind === "message" && e.agentId === "alpha");
+    expect(t1Events.length).toBeGreaterThan(0);
+    // the orchestrator was briefed once, then reviewed the results it was shown
+    expect(seen[0]!.briefing).toContain("ORCHESTRATOR");
+    expect(seen[1]!.text).toContain("t1 · file a — DONE");
+    expect(seen[1]!.text).toContain("a.txt");
+
+    // apply lands the integration branch in the project
+    const applied = await rt.orchestra.apply(run.id);
+    expect(applied.into).toBe("main");
+    expect(fs.readFileSync(path.join(dir, "c.txt"), "utf8")).toContain("echo(alpha)");
+  });
+
+  it("sends a task's own prompt first, even when a follow-up is queued in the same reply", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", id: "t1", title: "two steps", agent: "alpha", prompt: "write:first.txt" },
+        { type: "send", task: "t1", message: "write:second.txt" },
+      ]),
+      loom([{ type: "done", summary: "ok" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "queue", orchestrator: "conductor" });
+    await settle(run.id);
+    const r = rt.orchestra.get(run.id)!;
+    expect(r.tasks[0]!.attempts).toBe(2);
+    const files = git(dir, "ls-tree", "-r", "--name-only", r.branch);
+    expect(files).toContain("first.txt");
+    expect(files).toContain("second.txt");
+  });
+
+  it("keeps a worker's .loom state out of commits, whether or not the project ignores it", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", title: "state", agent: "alpha", prompt: "write:.loom/state.json" },
+        { type: "spawn", title: "real", agent: "beta", prompt: "write:real.txt" },
+      ]),
+      loom([{ type: "done", summary: "ok" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "state files", orchestrator: "conductor" });
+    await settle(run.id);
+    const done = rt.orchestra.get(run.id)!;
+    expect(done.tasks.map((t) => t.status)).toEqual(["done", "done"]);
+    const files = git(dir, "ls-tree", "-r", "--name-only", done.branch);
+    expect(files).toContain("real.txt");
+    expect(files).not.toContain(".loom");
+
+    // and with no .gitignore entry at all
+    fs.writeFileSync(path.join(dir, ".gitignore"), "");
+    git(dir, "commit", "-qam", "unignore");
+    script = [loom([{ type: "spawn", title: "state2", agent: "alpha", prompt: "write:.loom/state.json" }]), loom([{ type: "done", summary: "ok" }])];
+    const run2 = await rt.orchestra.start({ goal: "state files 2", orchestrator: "conductor" });
+    await settle(run2.id);
+    const r2 = rt.orchestra.get(run2.id)!;
+    expect(r2.tasks[0]!.status).toBe("done");
+    expect(git(dir, "ls-tree", "-r", "--name-only", r2.branch)).not.toContain(".loom");
+  });
+
+  it("runs several tasks on the same worker agent at once, as separate sessions", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", title: "one", agent: "alpha", prompt: "sleep:400 write:one.txt" },
+        { type: "spawn", title: "two", agent: "alpha", prompt: "sleep:400 write:two.txt" },
+        { type: "spawn", title: "three", agent: "alpha", prompt: "sleep:400 write:three.txt" },
+      ]),
+      loom([{ type: "done", summary: "ok" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "same agent thrice", orchestrator: "conductor", workers: ["alpha"] });
+    await settle(run.id);
+    const done = rt.orchestra.get(run.id)!;
+    expect(done.status).toBe("completed");
+    const starts = done.tasks.map((t) => t.startedAt!);
+    const firstEnd = Math.min(...done.tasks.map((t) => t.finishedAt!));
+    expect(starts.every((s) => s < firstEnd)).toBe(true);
+  });
+
+  it("caps parallelism at maxParallel", async () => {
+    await openProject();
+    script = [
+      loom(
+        ["a", "b", "c", "d"].map((n) => ({ type: "spawn", title: n, agent: "beta", prompt: `sleep:250 write:${n}.txt` })),
+      ),
+      loom([{ type: "done", summary: "ok" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "four", orchestrator: "conductor", workers: ["beta"], maxParallel: 2 });
+    let peak = 0;
+    const timer = setInterval(() => {
+      const r = rt.orchestra.get(run.id);
+      if (r) peak = Math.max(peak, r.tasks.filter((t) => t.status === "running").length);
+    }, 10);
+    await settle(run.id);
+    clearInterval(timer);
+    expect(rt.orchestra.get(run.id)!.status).toBe("completed");
+    expect(peak).toBe(2);
+  });
+
+  it("reports a merge conflict to the orchestrator, and a follow-up can fix it", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", id: "t1", title: "alpha writes x", agent: "alpha", prompt: "write:x.txt" },
+        { type: "spawn", id: "t2", title: "beta writes x", agent: "beta", prompt: "sleep:200 write:x.txt" },
+      ]),
+      // round 2: sees the conflict, asks beta to take a different file
+      loom([{ type: "send", task: "t2", message: "write:y.txt" }]),
+      loom([{ type: "done", summary: "resolved" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "collide", orchestrator: "conductor" });
+    await settle(run.id);
+    const done = rt.orchestra.get(run.id)!;
+    expect(seen[1]!.text).toContain("CONFLICT");
+    expect(seen[1]!.text).toContain("git merge");
+    // the follow-up re-ran t2 in the same worktree; its commit still carries the
+    // conflicting x.txt, so it conflicts again — reported, not silently dropped
+    expect(done.tasks.find((t) => t.id === "t2")!.attempts).toBe(2);
+    expect(done.status).toBe("completed");
+  });
+
+  it("asks again when the orchestrator forgets the actions block, then waits for the human", async () => {
+    await openProject();
+    script = ["I think we should do stuff.", "Still no block, sorry."];
+    const run = await rt.orchestra.start({ goal: "vague", orchestrator: "conductor" });
+    await settle(run.id);
+    let r = rt.orchestra.get(run.id)!;
+    expect(r.status).toBe("waiting_human");
+    expect(seen[1]!.text).toContain("no ```loom actions block");
+
+    script = [loom([{ type: "done", summary: "after human" }])];
+    await rt.orchestra.reply(run.id, "just finish");
+    await waitUntil(() => rt.orchestra.get(run.id)!.status === "completed");
+    r = rt.orchestra.get(run.id)!;
+    expect(r.summary).toBe("after human");
+    expect(seen.at(-1)!.text).toContain("The human says: just finish");
+  });
+
+  it("rejects work for agents outside the run's workers, and tells the orchestrator", async () => {
+    await openProject();
+    script = [
+      loom([{ type: "spawn", title: "nope", agent: "gamma", prompt: "x" }]),
+      loom([{ type: "done", summary: "fine" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "bad agent", orchestrator: "conductor", workers: ["alpha"] });
+    await settle(run.id);
+    expect(seen[1]!.text).toContain('agent "gamma" is not one of this run');
+    expect(rt.orchestra.get(run.id)!.status).toBe("completed");
+  });
+
+  it("fails a task whose dependency failed, and aborts cleanly", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", id: "t1", title: "boom", agent: "alpha", prompt: "fail:kaboom" },
+        { type: "spawn", id: "t2", title: "after boom", agent: "beta", prompt: "write:z.txt", dependsOn: ["t1"] },
+      ]),
+      loom([{ type: "ask", question: "t1 failed — what now?" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "chain", orchestrator: "conductor" });
+    await settle(run.id);
+    const r = rt.orchestra.get(run.id)!;
+    expect(r.status).toBe("waiting_human");
+    expect(r.question).toContain("what now");
+    // echo's fail: emits an error event rather than throwing — the error rides the result
+    expect(r.tasks[0]!.error).toContain("kaboom");
+    // a turn that died is failed, not merged — and its dependant never started
+    expect(r.tasks.map((t) => t.status)).toEqual(["failed", "failed"]);
+    expect(r.tasks[1]!.error).toContain("dependency failed");
+    expect(r.tasks[1]!.attempts).toBe(0);
+    await rt.orchestra.abort(run.id);
+    expect(rt.orchestra.get(run.id)!.status).toBe("aborted");
+  });
+
+  it("refuses a second concurrent run and a non-git project", async () => {
+    await openProject();
+    script = [loom([{ type: "spawn", title: "slow", agent: "alpha", prompt: "sleep:600 write:s.txt" }])];
+    const run = await rt.orchestra.start({ goal: "first", orchestrator: "conductor" });
+    await expect(rt.orchestra.start({ goal: "second" })).rejects.toThrow(/still/);
+    await rt.orchestra.abort(run.id);
+
+    const plain = tmpDir("orch-plain");
+    writeProjectConfig(plain, { name: "plain", agents: [{ id: "alpha", kind: "echo", role: "w" }], brain: { extractor: "off" } });
+    const rt2 = await ProjectRuntime.open({ id: "plain", name: "plain", dir: plain });
+    await expect(rt2.orchestra.start({ goal: "x" })).rejects.toThrow(/git repository/);
+    await rt2.close();
+  });
+
+  it("emits orchestra events that clients can render from, and shows in status", async () => {
+    await openProject();
+    script = [loom([{ type: "spawn", title: "one", agent: "alpha", prompt: "write:o.txt" }]), loom([{ type: "done", summary: "ok" }])];
+    const run = await rt.orchestra.start({ goal: "events", orchestrator: "conductor" });
+    await settle(run.id);
+    const phases = rt.log
+      .list({ kinds: ["orchestra"] })
+      .filter((e) => e.payload.runId === run.id)
+      .map((e) => e.payload.phase);
+    expect(phases).toEqual(expect.arrayContaining(["started", "plan", "task", "task_started", "task_finished", "reviewing", "completed"]));
+    const status = await rt.status();
+    expect(status.orchestra).toMatchObject({ id: run.id, status: "completed", tasks: 1, done: 1 });
+  });
+});

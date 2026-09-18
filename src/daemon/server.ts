@@ -108,12 +108,29 @@ import {
 import { linearCreateIssue, linearTeams, listLinearIssues } from "./linear.js";
 import { TerminalManager, TooManySessionsError } from "./terminals.js";
 import { recordAgentEvent } from "../observability/index.js";
+import {
+  ensureCredentials,
+  readCloudSettings,
+  RelayBridge,
+  supabaseTarget,
+  supabaseTransport,
+  writeCloudSettings,
+} from "./relay.js";
+import { packCredentials, toB64, type RelayTransport } from "../core/relay-protocol.js";
+import { approvalEndpoint, setApprovalEndpoint, type ApprovalDecision } from "../core/approvals.js";
+import { PERMISSION_PROFILES } from "../core/permissions.js";
+import { clearRecent, deletePrompt, listPrompts, recordRecent, savePrompt, updatePrompt } from "../core/prompts.js";
 
 export interface DaemonOptions {
   host?: string;
   port?: number;
   /** Bind to the Tailscale interface instead of localhost. */
   tailnet?: boolean;
+  /**
+   * Build the Loom Cloud transport. Defaults to Supabase Realtime; tests pass
+   * an in-memory bus. See daemon/relay.ts.
+   */
+  relayTransport?: (channel: string) => Promise<RelayTransport>;
 }
 
 export const DEFAULT_PORT = 7420;
@@ -320,7 +337,27 @@ export class LoomDaemon {
    */
   private extra = new Map<string, { server: Server; wss: WebSocketServer }>();
 
+  /** Tool uses waiting on a human, from agents in "always ask" mode. */
+  private approvals = new Map<
+    string,
+    {
+      id: string;
+      projectId: string;
+      agent: string;
+      tool: string;
+      input: unknown;
+      createdAt: number;
+      settle: (d: ApprovalDecision) => void;
+    }
+  >();
+
+  /** Loom Cloud relay, when enabled. See daemon/relay.ts. */
+  private relay: RelayBridge | null = null;
+  private relayError: string | null = null;
+  private relayTransportFactory: DaemonOptions["relayTransport"];
+
   constructor(opts: DaemonOptions = {}) {
+    this.relayTransportFactory = opts.relayTransport;
     this.host = opts.host ?? "127.0.0.1";
     this.port = opts.port ?? DEFAULT_PORT;
     const cfg = ensureDaemonConfig({ host: this.host, port: this.port });
@@ -442,10 +479,61 @@ export class LoomDaemon {
       // Both must hold: the TCP peer is loopback (can't be spoofed by a header),
       // AND the Host is a loopback literal (defeats DNS rebinding, where the
       // socket is loopback but the browser sends the attacker's hostname).
-      if (!isLoopback(req.socket.remoteAddress) || !isLoopbackHost(req.headers.host)) {
+      // A relayed request arrives from loopback too — it must never be local.
+      if (req.headers["x-loom-via"] || !isLoopback(req.socket.remoteAddress) || !isLoopbackHost(req.headers.host)) {
         return void res.status(403).json({ error: "not a local request" });
       }
       res.json({ token: this.auth.adminToken(), admin: true });
+    });
+
+    // An agent in "always ask" mode files a permission request here, through
+    // Loom's MCP approval server (src/mcp/approve.ts), and the response waits
+    // until a human decides. Guarded by the per-daemon approval secret, not a
+    // client token: the MCP child can file requests and nothing else.
+    app.post("/api/approvals/request", (req, res) => {
+      const ep = approvalEndpoint();
+      const given = String(req.headers["x-loom-approval"] ?? "");
+      if (!ep || given.length !== ep.secret.length ||
+          !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(ep.secret))) {
+        return void res.status(403).json({ error: "bad approval secret" });
+      }
+      const b = (req.body ?? {}) as { project?: string; agent?: string; tool?: string; input?: unknown };
+      const info = b.project ? findProject(String(b.project)) : undefined;
+      if (!info) return void res.status(400).json({ error: "unknown project" });
+      void (async () => {
+        const rt = await this.runtime(info.id).catch(() => null);
+        if (!rt) return void res.status(400).json({ error: "project not open" });
+        const id = crypto.randomBytes(6).toString("hex");
+        const agent = String(b.agent ?? "agent");
+        const tool = String(b.tool ?? "tool").slice(0, 120);
+        const preview = JSON.stringify(b.input ?? {}).slice(0, 4000);
+        const chat = rt.chatOf(agent);
+        rt.log.append({
+          kind: "approval",
+          agentId: agent,
+          ...(chat ? { chat } : {}),
+          payload: { phase: "requested", approvalId: id, tool, input: preview },
+        });
+        const decision = await new Promise<ApprovalDecision>((resolve) => {
+          const timer = setTimeout(() => settle({ behavior: "deny", message: "No answer within 30 minutes — denied." }), 30 * 60_000);
+          const settle = (d: ApprovalDecision) => {
+            clearTimeout(timer);
+            if (!this.approvals.delete(id)) return;
+            rt.log.append({
+              kind: "approval",
+              agentId: agent,
+              ...(chat ? { chat } : {}),
+              payload: { phase: "decided", approvalId: id, tool, behavior: d.behavior, ...(d.message ? { message: d.message } : {}) },
+            });
+            resolve(d);
+          };
+          this.approvals.set(id, { id, projectId: info.id, agent, tool, input: b.input ?? {}, createdAt: Date.now(), settle });
+          req.on("close", () => {
+            if (!res.writableEnded) settle({ behavior: "deny", message: "The agent stopped waiting." });
+          });
+        });
+        if (!res.writableEnded) res.json(decision);
+      })();
     });
 
     // Everything else requires a bearer token.
@@ -803,7 +891,11 @@ export class LoomDaemon {
         const url = `http://${host}:${this.port}`;
         // Deep link: scanning it with any camera opens the app, which claims the
         // single-use token from the URL fragment and pairs itself.
-        const link = `${url}/app#pair=${token}`;
+        // With Loom Cloud on, the fragment also carries the relay channel + key
+        // and the Supabase project, so the phone can reach this daemon from any
+        // network. Fragment only: none of it is ever sent to a server.
+        const cloud = this.cloudLinkParams();
+        const link = `${url}/app#pair=${token}${cloud}`;
         let qrSvg: string | undefined;
         try {
           qrSvg = await QRCode.toString(link, {
@@ -816,6 +908,40 @@ export class LoomDaemon {
           logbook.warn("pair", "QR render failed — the copy link still works", err);
         }
         res.json({ token, expiresAt, url, link, ...(qrSvg ? { qrSvg } : {}) });
+      })();
+    });
+
+    // ---- Loom Cloud: reach this daemon from any network (daemon/relay.ts) ----
+    app.get("/api/cloud", (_req, res) => {
+      res.json(this.cloudStatus());
+    });
+    app.post("/api/cloud/:action", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      const action = String(req.params.action);
+      void (async () => {
+        try {
+          if (action === "enable") {
+            const b = (req.body ?? {}) as { supabaseUrl?: string; anonKey?: string };
+            if (b.supabaseUrl || b.anonKey) {
+              const s = readCloudSettings();
+              if (b.supabaseUrl) s.supabaseUrl = String(b.supabaseUrl).trim();
+              if (b.anonKey) s.anonKey = String(b.anonKey).trim();
+              writeCloudSettings(s);
+            }
+            await this.startCloud();
+          } else if (action === "disable") await this.stopCloud();
+          else if (action === "rotate") {
+            // New channel + key: every phone paired through the cloud must re-pair.
+            const was = readCloudSettings().enabled;
+            await this.stopCloud({ rotate: true });
+            if (was) await this.startCloud();
+          } else return void res.status(404).json({ error: `unknown action "${action}"` });
+          res.json(this.cloudStatus());
+        } catch (err) {
+          res.status(400).json({ ...this.cloudStatus(), error: (err as Error).message });
+        }
       })();
     });
 
@@ -1416,13 +1542,15 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/messages",
       withRuntime(async (rt, req, res) => {
-        const { text, agentId, chat } = (req.body ?? {}) as {
+        const { text, agentId, chat, plan } = (req.body ?? {}) as {
           text?: string;
           agentId?: string;
           chat?: string;
+          plan?: boolean;
         };
         if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
-        const result = await rt.sendMessage(text, agentId, chat ? { chat } : {});
+        const result = await rt.sendMessage(text, agentId, { ...(chat ? { chat } : {}), ...(plan ? { plan: true } : {}) });
+        recordRecent(text, { project: rt.info.name, mode: plan ? "plan" : "chat" });
         res.json(result);
       }),
     );
@@ -2277,6 +2405,170 @@ export class LoomDaemon {
         res.json({ subtasks: rt.liveSubtasks() });
       }),
     );
+
+    // ---- fleet: what every agent in every open project is doing ----------
+    app.get("/api/activity", (req, res) => {
+      const scope = this.auth.allowedProjects(bearerToken(req.headers.authorization) ?? "");
+      const projects = [...this.runtimes.values()]
+        .filter((rt) => !scope || scope.includes(rt.info.id))
+        .map((rt) => rt.activity());
+      const pending = [...this.approvals.values()].filter((a) => !scope || scope.includes(a.projectId)).length;
+      res.json({ projects, approvals: pending, at: Date.now() });
+    });
+
+    // ---- prompt manager (core/prompts.ts) --------------------------------
+    app.get("/api/prompts", (req, res) => {
+      res.json(listPrompts(String(req.query.q ?? "")));
+    });
+    app.post("/api/prompts", (req, res) => {
+      try {
+        res.json({ prompt: savePrompt((req.body ?? {}) as { title?: string; text: string; pinned?: boolean }) });
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+      }
+    });
+    app.delete("/api/prompts/recent", (_req, res) => {
+      clearRecent();
+      res.json({ ok: true });
+    });
+    app.patch("/api/prompts/:promptId", (req, res) => {
+      try {
+        res.json({ prompt: updatePrompt(String(req.params.promptId), (req.body ?? {}) as never) });
+      } catch (err) {
+        res.status(404).json({ error: (err as Error).message });
+      }
+    });
+    app.delete("/api/prompts/:promptId", (req, res) => {
+      if (!deletePrompt(String(req.params.promptId))) return void res.status(404).json({ error: "no such prompt" });
+      res.json({ ok: true });
+    });
+
+    // ---- permissions & approvals (core/permissions.ts, core/approvals.ts) ---
+    app.get("/api/permissions", (_req, res) => {
+      res.json({ profiles: PERMISSION_PROFILES });
+    });
+    app.post(
+      "/api/projects/:id/agents/:agentId/permissions",
+      withRuntime(async (rt, req, res) => {
+        const { permissions } = (req.body ?? {}) as { permissions?: string };
+        try {
+          const cfg = rt.setAgentPermissions(String(req.params.agentId), permissions as never);
+          res.json({ agent: cfg });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    app.get(
+      "/api/projects/:id/approvals",
+      withRuntime(async (rt, _req, res) => {
+        const pending = [...this.approvals.values()]
+          .filter((a) => a.projectId === rt.info.id)
+          .map(({ settle: _s, ...a }) => a);
+        res.json({ approvals: pending });
+      }),
+    );
+    app.post(
+      "/api/projects/:id/approvals/:approvalId",
+      withRuntime(async (rt, req, res) => {
+        const a = this.approvals.get(String(req.params.approvalId));
+        if (!a || a.projectId !== rt.info.id) return void res.status(404).json({ error: "no such approval (already answered?)" });
+        const b = (req.body ?? {}) as { decision?: string; message?: string };
+        if (b.decision !== "allow" && b.decision !== "deny") {
+          return void res.status(400).json({ error: 'decision must be "allow" or "deny"' });
+        }
+        a.settle(
+          b.decision === "allow"
+            ? { behavior: "allow" }
+            : { behavior: "deny", message: String(b.message ?? "Denied in Loom.").slice(0, 500) },
+        );
+        res.json({ ok: true });
+      }),
+    );
+
+    // ---- orchestra: one orchestrator, many parallel workers ---------------
+    // See core/orchestra.ts. Every step is also an `orchestra` event on the
+    // WebSocket, so clients render live from events and use these for actions.
+    const orchestraError = (res: express.Response, err: unknown) =>
+      void res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+
+    app.get(
+      "/api/projects/:id/orchestra",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ runs: rt.orchestra.list(), active: rt.orchestra.active()?.id ?? null });
+      }),
+    );
+    app.post(
+      "/api/projects/:id/orchestra",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as {
+          goal?: string;
+          orchestrator?: string;
+          workers?: unknown;
+          maxParallel?: number;
+          maxRounds?: number;
+          plan?: boolean;
+        };
+        if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
+        const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
+        try {
+          const run = await rt.orchestra.start({
+            goal: b.goal,
+            ...(b.orchestrator ? { orchestrator: String(b.orchestrator) } : {}),
+            ...(workers?.length ? { workers } : {}),
+            ...(b.maxParallel ? { maxParallel: Number(b.maxParallel) } : {}),
+            ...(b.maxRounds ? { maxRounds: Number(b.maxRounds) } : {}),
+            ...(b.plan ? { plan: true } : {}),
+          });
+          recordRecent(b.goal, { project: rt.info.name, mode: "orchestrate" });
+          res.json({ run });
+        } catch (err) {
+          orchestraError(res, err);
+        }
+      }),
+    );
+    app.get(
+      "/api/projects/:id/orchestra/:runId",
+      withRuntime(async (rt, req, res) => {
+        const run = rt.orchestra.get(String(req.params.runId));
+        if (!run) return void res.status(404).json({ error: "no such run" });
+        res.json({ run });
+      }),
+    );
+    // Re-run the delivery policy by hand (e.g. after fixing a push rejection).
+    app.post(
+      "/api/projects/:id/orchestra/:runId/deliver",
+      withRuntime(async (rt, req, res) => {
+        const run = rt.orchestra.get(String(req.params.runId));
+        if (!run) return void res.status(404).json({ error: "no such run" });
+        const mode = String((req.body as { mode?: string } | undefined)?.mode ?? "");
+        const modes = ["commit", "push", "pr"];
+        if (mode && !modes.includes(mode)) return void res.status(400).json({ error: `mode must be ${modes.join(", ")}` });
+        await rt.orchestra.deliver(run, (mode || undefined) as never);
+        res.json({ run });
+      }),
+    );
+    for (const action of ["abort", "reply", "apply", "cleanup"] as const) {
+      app.post(
+        `/api/projects/:id/orchestra/:runId/${action}`,
+        withRuntime(async (rt, req, res) => {
+          const runId = String(req.params.runId);
+          try {
+            if (action === "abort") res.json({ run: await rt.orchestra.abort(runId) });
+            else if (action === "reply") {
+              const text = String((req.body as { text?: string } | undefined)?.text ?? "");
+              res.json({ run: await rt.orchestra.reply(runId, text) });
+            } else if (action === "apply") res.json(await rt.orchestra.apply(runId));
+            else {
+              await rt.orchestra.cleanup(runId);
+              res.json({ ok: true });
+            }
+          } catch (err) {
+            orchestraError(res, err);
+          }
+        }),
+      );
+    }
 
     // Add an agent to a project. A roster used to be frozen at creation: install
     // a new ADE and your existing projects never heard of it.
@@ -3214,10 +3506,12 @@ export class LoomDaemon {
     if (addr && typeof addr === "object") this.port = addr.port; // ephemeral port support
 
     this.wss = this.attachWs(this.server!);
+    setApprovalEndpoint(`http://127.0.0.1:${this.port}`);
 
     // Fan every log record out to connected clients (the Console tab).
     this.unstreamLogs = this.streamLogs();
     this.writeConfig();
+    if (readCloudSettings().enabled) void this.startCloud().catch(() => {});
 
     return { host: this.host, port: this.port };
   }
@@ -3370,7 +3664,82 @@ export class LoomDaemon {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Loom Cloud
+  // -------------------------------------------------------------------------
+
+  /** `&relay=<channel.key>&sb=<url>&sbk=<anon key>` when the relay is on, else "". */
+  private cloudLinkParams(): string {
+    const s = readCloudSettings();
+    const target = supabaseTarget(s);
+    if (!s.enabled || !s.channel || !s.key || !target) return "";
+    const b64 = (v: string) => toB64(new TextEncoder().encode(v));
+    return `&relay=${packCredentials({ channel: s.channel, key: s.key })}&sb=${b64(target.url)}&sbk=${b64(target.anonKey)}`;
+  }
+
+  cloudStatus(): Record<string, unknown> {
+    const s = readCloudSettings();
+    const target = supabaseTarget(s);
+    return {
+      configured: Boolean(target || this.relayTransportFactory),
+      enabled: s.enabled,
+      connected: Boolean(this.relay),
+      clients: this.relay?.clientCount() ?? 0,
+      stats: this.relay?.stats ?? null,
+      supabaseUrl: target?.url ?? null,
+      error: this.relayError,
+    };
+  }
+
+  async startCloud(): Promise<void> {
+    const s = readCloudSettings();
+    const creds = ensureCredentials(s);
+    s.enabled = true;
+    writeCloudSettings(s);
+    await this.relay?.close().catch(() => {});
+    this.relay = null;
+    this.relayError = null;
+    try {
+      let transport: RelayTransport;
+      if (this.relayTransportFactory) transport = await this.relayTransportFactory(creds.channel);
+      else {
+        const target = supabaseTarget(s);
+        if (!target) throw new Error("no Supabase project — set LOOM_SUPABASE_URL and LOOM_SUPABASE_ANON_KEY");
+        transport = await supabaseTransport(target.url, target.anonKey, creds.channel);
+      }
+      await Promise.race([
+        transport.ready(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("timed out joining the relay channel")), 15_000)),
+      ]);
+      this.relay = new RelayBridge({
+        transport,
+        key: creds.key,
+        localBase: () => `http://127.0.0.1:${this.port}`,
+        identity: () => ({ version: BUILD_REV, name: os.hostname() }),
+      });
+      logbook.info("cloud", "Loom Cloud relay connected");
+    } catch (err) {
+      this.relayError = (err as Error).message;
+      logbook.warn("cloud", "Loom Cloud relay failed to start", this.relayError);
+      throw err;
+    }
+  }
+
+  async stopCloud(opts: { rotate?: boolean } = {}): Promise<void> {
+    await this.relay?.close().catch(() => {});
+    this.relay = null;
+    const s = readCloudSettings();
+    s.enabled = false;
+    if (opts.rotate) {
+      delete s.channel;
+      delete s.key;
+    }
+    writeCloudSettings(s);
+  }
+
   async close(): Promise<void> {
+    await this.relay?.close().catch(() => {});
+    this.relay = null;
     for (const t of this.healTimers) clearTimeout(t);
     this.healTimers.clear();
     this.unstreamLogs?.();

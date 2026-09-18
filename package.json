@@ -1,7 +1,7 @@
 {
   "name": "@loompad/cli",
   "version": "0.1.0",
-  "description": "Loom \u2014 local-first control plane for coding agents: one CLI, shared memory, baton handoffs and routes across Claude Code, OpenCode, and friends.",
+  "description": "Loom — local-first control plane for coding agents: one CLI, shared memory, baton handoffs and routes across Claude Code, OpenCode, and friends.",
   "type": "module",
   "license": "MIT",
   "publishConfig": {
@@ -29,7 +29,8 @@
     "dist",
     "docs/**/*.md",
     "CHANGELOG.md",
-    "ARCHITECTURE.md"
+    "ARCHITECTURE.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "engines": {
     "node": ">=22.5.0"
@@ -49,12 +50,14 @@
     "prepare": "tsc",
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude 'test/app-dom.test.ts' && vitest run test/app-dom.test.ts",
+    "test": "vitest run --exclude 'test/app-*dom.test.ts' && vitest run --no-file-parallelism test/app-dom.test.ts test/app-orchestra-dom.test.ts test/app-composer-dom.test.ts",
     "test:watch": "vitest",
     "test:all-parallel": "vitest run",
     "verify:adapters": "node scripts/verify-adapters.mjs"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@supabase/supabase-js": "^2.116.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",

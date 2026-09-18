@@ -43,6 +43,54 @@ and memory they don't share on their own.
   <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
 </p>
 
+## Orchestra — one conductor, many agents, in parallel
+
+Give Loom a goal and let one agent run the others. The **orchestrator** can be any
+agent: Claude Code, Codex (ChatGPT), Antigravity, Grok or OpenCode.
+
+1. It reads the repository and splits the goal into a **task graph**.
+2. Loom runs every ready task **at the same time** on the **worker** agents the
+   plan names. Each task gets its own thread and its own git worktree.
+3. Loom merges each finished task into one integration branch.
+4. The orchestrator reviews the results. It can accept them, send follow-ups,
+   spawn more tasks, or finish.
+
+```bash
+loom orchestrate "add OAuth login with tests" -o claude-code -w codex,antigravity,claude-code -p 6
+```
+
+```
+                 ┌──────────── orchestrator (any agent) ────────────┐
+   goal ──▶ plan │  t1 → codex        t2 → antigravity    t3 → codex │ ◀── review, follow up, done
+                 └──────┬──────────────────┬────────────────┬──────┘
+                        ▼                  ▼                ▼  (after t1)
+                   worktree t1        worktree t2      worktree t3
+                        └──────── merged into loom/orchestra/<run>/main ──▶ apply to your branch
+```
+
+- **Any agent can orchestrate.** The orchestrator never runs shell commands. It
+  answers in a small JSON block that Loom parses, so an agent in a sandbox or with
+  no tools at all can still lead.
+- **Many workers, mixed or the same kind.** Three Codex tasks and two Antigravity
+  tasks run side by side as separate CLI sessions, capped by `--parallel` (1–12).
+- **Real dependencies.** A task with `dependsOn` starts only after those tasks are
+  merged, and it branches from a tip that already contains their work.
+- **Nothing touches your branch until you say so.** All work lands on
+  `loom/orchestra/<run>/main`. You merge it with `loom orchestra:apply <run>`, or
+  with the **Apply** button in the app. Merge conflicts go back to the
+  orchestrator, which can ask the worker to resolve them.
+- **You're in the loop.** When the orchestrator needs a decision it asks, and the
+  run waits for your reply (`loom orchestra:reply <run> "…"`, or the app on your
+  phone). You can steer a run mid-flight the same way.
+- **Everything is visible.** Every step is an `orchestra` event. The web app,
+  desktop app, phone and CLI all watch the same run live, and each task's stream
+  sits in its own thread. The project's budgets, quarantine and shared brain apply
+  to every worker.
+
+Under the hood: [`src/core/orchestra.ts`](src/core/orchestra.ts).
+`node scripts/verify-orchestra.mjs` runs a real orchestra against your installed
+CLIs and checks the result on disk.
+
 ## Codex & GPT‑5.6
 
 Loom is built around orchestrating **OpenAI Codex** as a first‑class agent — and in this
@@ -438,6 +486,11 @@ detects at least two roles.
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
 | `loom clients [--revoke <id>] [--ping]` | Paired devices: list, revoke, or send a test push |
 | `loom doctor [--json] [--fix]` | Diagnose env, daemon, binding, and project config — `--fix` repairs what has exactly one safe repair |
+| `loom orchestrate "<goal>"` | One orchestrator plans, many workers build in parallel worktrees (`-o`, `-w`, `-p`, `--no-watch`) |
+| `loom orchestrate --plan "<goal>"` | Plan mode: the plan and each task's spec land as markdown under `plans/<run>/` for any agent to pick up |
+| `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |
+| `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch · stop it · remove its worktrees |
+| `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
 | `loom subtasks` | Subtasks running right now |
 | `loom agents:add <kind> [--as name]` | Add an agent session — repeat for a second session of the same kind, same brain |
@@ -460,11 +513,12 @@ detects at least two roles.
 
 | Agent | Tier | Transport | Status |
 |---|---|---|---|
-| Claude Code | adapter (full-duplex) | headless CLI, `stream-json`, `--resume`, briefing via `--append-system-prompt` | ✅ verified against 2.1.83 |
-| Codex | adapter (full-duplex) | `codex exec --json` (JSONL), `exec resume <thread>`; found on PATH **or inside Codex.app** | ✅ verified against codex-cli 0.142.4 |
-| OpenCode | adapter (full-duplex) | `opencode serve` HTTP + SSE (`/prompt`, `/interrupt`, `/event`) | ✅ verified against 1.17.20 |
+| Claude Code | adapter (full-duplex) | headless CLI, `stream-json`, `--resume`, briefing via `--append-system-prompt` | ✅ verified against 2.1.83; re-verified 2.1.276 (2026-09-18) |
+| Codex | adapter (full-duplex) | `codex exec --json` (JSONL), `exec resume <thread>`; found on PATH **or inside Codex.app** | ✅ verified against codex-cli 0.142.4; re-verified 0.155.0 (2026-09-18) |
+| OpenCode | adapter (full-duplex) | `opencode serve` HTTP + SSE (`/prompt`, `/interrupt`, `/event`) | ✅ verified against 1.17.20; re-verified 1.18.31 (2026-09-18) |
 | Grok Code | adapter (full-duplex) | `grok -p --output-format json`, `-r <session>` | 🔶 verified against 0.2.54 — **answers only, no tool or edit events** (see below) |
-| Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6 |
+| Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6; re-verified 1.2.6 (2026-09-18) |
+| Cursor | — | `cursor-agent --print` | 🔜 coming soon |
 | Echo | adapter (demo/tests) | in-process | ✅ |
 | Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
@@ -672,6 +726,119 @@ after pairing and it registers its Expo push token with the daemon. From then on
 phone buzzes when an agent **needs input**, when a **route completes or fails**, and
 when a solo turn finishes — route hops are deliberately silent (a 5-step pipeline
 buzzes once, not five times). Verify with `loom clients --ping`.
+
+## Permissions: bypass, auto, or always ask
+
+Every agent CLI has its own idea of "may I?". Loom gives you one dropdown with
+three words and maps them onto each CLI. Every cell below was checked against the
+real CLI with `node scripts/verify-permissions.mjs`, not read off `--help`.
+
+| | Bypass | Auto | Always ask |
+|---|---|---|---|
+| Claude Code | `bypassPermissions` | `acceptEdits` *(default)* | **real approvals**: each tool call waits for your Allow / Deny in Loom, on desktop or phone |
+| Codex | no sandbox | `workspace-write` *(default)* | `read-only`: proposes, changes nothing |
+| Antigravity | `--dangerously-skip-permissions` *(default)* | ✗ unavailable: agy 1.2.6 headless writes into its own scratch folder, not your project | `--mode plan` |
+| Grok | `bypassPermissions` *(default)* | `auto` | `plan` |
+| OpenCode | allow-all | its defaults *(default)* | ✗ unavailable: opencode 1.18.31 ignores read-only settings on its headless API |
+
+- "Unavailable" cells are shown disabled with the reason, and the API refuses them.
+- **Always ask on Claude Code** runs through a tiny built-in MCP server
+  (`src/mcp/approve.ts`) passed as `--permission-prompt-tool`. The request appears
+  in the thread as an approval card; nothing happens until you answer.
+- `node scripts/verify-approvals.mjs` proves it against the real CLI: the file does
+  not exist until you press Allow.
+
+## Plan mode
+
+Turn on **Plan** in the composer and agents write plans, not code.
+
+- **In a chat:** the agent investigates, then writes
+  `plans/<date>-<slug>.md` (Goal, Context, Approach, self-contained Tasks, Risks,
+  Verification) and stops.
+- **In an orchestra** (`loom orchestrate --plan "<goal>"`):
+  - the orchestrator's plan becomes `plans/<run>/PLAN.md` plus one spec file per
+    task, committed to the run's branch *before* any worker starts;
+  - each worker is pointed at its own spec;
+  - when the run ends, statuses and results are written back.
+
+Every file has front matter (`id`, `agent`, `depends_on`, `status`) and is written
+so another agent, or a teammate, can pick up any task with no other context.
+
+## Git delivery: commit, push, or open a PR
+
+One per-project setting decides what happens to finished work. It's the toggle
+next to GitHub in the status bar, or `git.delivery` in `.loom/config.json`.
+
+| | Chat turns | A finished orchestra |
+|---|---|---|
+| **No commit** *(default)* | left uncommitted | waits on its branch until you Apply |
+| **Commit only** | committed, agent as co-author | merged into your branch |
+| **Commit & push** | committed and pushed | merged and pushed |
+| **Commit & open PR** | committed | its branch pushed, and a PR opened with `gh`: summary, task table, PLAN.md |
+
+A failed push never un-finishes a run. The error is shown, and **Retry delivery**
+is one click.
+
+## Fleet: what every agent is doing
+
+The **Fleet** tab (and the phone's Fleet screen) shows every agent in every open
+project, updated live:
+- its thread;
+- whether it's mid-turn, and for how long;
+- its permission mode;
+- the last thing it did: the command it ran, the file it edited, or what it said.
+
+Orchestra tasks are listed too, each with a link to its thread.
+`GET /api/activity` serves the same data.
+
+## Prompt manager
+
+A clipboard manager for prompts, built into the chat bar (⌘⇧V):
+- **Saved** prompts: pinned first, then most used.
+- **Recent:** every prompt you actually sent (chats, plans, orchestra goals),
+  de-duplicated and searchable.
+
+Everything is stored in `~/.loom/prompts.json` and never leaves the machine.
+
+## Teams (design)
+
+Five people, each with their own agents, on one repo: how agents see each other's
+work, avoid collisions, share one memory safely, and flow through PRs, merge queues
+and CI/CD. The researched architecture is in
+**[docs/teams-architecture.md](docs/teams-architecture.md)**. It covers:
+- advisory leases at plan time, plus continuous conflict prediction;
+- a three-tier team brain, with canon kept in git behind review;
+- one PR per goal through a merge queue;
+- bounded CI auto-fix loops.
+
+## Loom Cloud — your agents from any network
+
+Tailscale is great when your phone is on your tailnet. **Loom Cloud** reaches your
+computer from anywhere (mobile data, a café, another country) with nothing to
+install on the computer's network.
+
+```bash
+loom cloud enable --url https://<ref>.supabase.co --key <anon key>
+loom pair            # the QR now works from any network
+```
+
+- **End-to-end encrypted.** The daemon and the phone meet on a Supabase Realtime
+  channel. Every message is XChaCha20-Poly1305 with a key that exists only in the
+  pairing QR. Supabase relays ciphertext it cannot read or forge. `loom cloud rotate`
+  mints a new key and locks out every phone that paired with the old one.
+- **Same auth as the LAN.** Each relayed request becomes a real call against the
+  daemon, carrying the phone's own paired token. Scopes, admin-only routes and
+  revocation behave identically. The local admin bootstrap is never reachable
+  through the relay.
+- **Direct when it can, cloud when it must.** The phone tries the LAN or tailnet
+  address first and falls back to the relay. It reconnects on its own when you
+  come back to the app.
+- **Bring your own Supabase project.** Free tier is plenty. Loom never runs a
+  server of its own.
+
+Setup, including Google sign-in and the country-only usage stats, takes about 10 minutes:
+[docs/cloud.md](docs/cloud.md). Protocol: [`src/core/relay-protocol.ts`](src/core/relay-protocol.ts).
+Daemon side: [`src/daemon/relay.ts`](src/daemon/relay.ts).
 
 ## Hardware
 
@@ -937,6 +1104,24 @@ color reserved for state (thread cyan = live, shuttle magenta = the baton).
 Adapted from the [Orca](https://github.com/stablyai/orca) design system (MIT,
 © Lovecast Inc.); the Geist typeface is © Vercel under the SIL Open Font
 License 1.1. Tokens and rules: [docs/design-system.md](docs/design-system.md).
+
+## Credits
+
+Loom stands on good open-source work. Full license texts are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+- **[Agent Orchestrator](https://github.com/Untrivial-ai/agent-orchestrator)**
+  (Apache-2.0, © Untrivial). Loom adapted its orchestrator/worker model, its
+  "coordinate, never implement" orchestrator rules, its worker rules and its
+  worktree-per-worker isolation. Loom rebuilt the orchestration around a parsed
+  action protocol and a dependency graph, so any agent can orchestrate any mix
+  of workers.
+- **[T3 Code](https://github.com/pingdotgg/t3code)** (MIT, © T3 Tools Inc.). Loom
+  adapted its mobile connection patterns: the pairing secret in the URL fragment,
+  resuming a stream from a known sequence, and a reconnect supervisor that forces
+  a fresh connection after the app was backgrounded.
+- **[Orca](https://github.com/stablyai/orca)** (MIT). The design system (see
+  [Design](#design)).
 
 ## License
 

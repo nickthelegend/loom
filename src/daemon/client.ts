@@ -15,6 +15,7 @@ import type {
   RouteStepSpec,
   UnifiedMemory,
 } from "../types.js";
+import type { OrchestraRun } from "../core/orchestra.js";
 import {
   readDaemonConfig,
   type DaemonConfig,
@@ -142,6 +143,46 @@ export class DaemonClient {
    * The parent keeps the baton — this is one turn borrowing another pair of
    * hands, not a handoff.
    */
+  // ── orchestra (core/orchestra.ts) ──
+
+  orchestraRuns(id: string): Promise<{ runs: OrchestraRun[]; active: string | null }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/orchestra`);
+  }
+
+  orchestraRun(id: string, runId: string): Promise<{ run: OrchestraRun }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(runId)}`);
+  }
+
+  startOrchestra(
+    id: string,
+    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean },
+  ): Promise<{ run: OrchestraRun }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, body);
+  }
+
+  orchestraAction(
+    id: string,
+    runId: string,
+    action: "abort" | "reply" | "apply" | "cleanup",
+    body?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.request(
+      "POST",
+      `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(runId)}/${action}`,
+      body ?? {},
+    );
+  }
+
+  // ── Loom Cloud (daemon/relay.ts) ──
+
+  cloud(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/api/cloud");
+  }
+
+  cloudAction(action: "enable" | "disable" | "rotate", body?: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request("POST", `/api/cloud/${action}`, body ?? {});
+  }
+
   spawnSubtask(
     id: string,
     parent: string,

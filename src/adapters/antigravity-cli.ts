@@ -38,6 +38,7 @@ import path from "node:path";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, agentEnv, cliAvailable, frameBriefing } from "./base.js";
+import { permissionFor } from "../core/permissions.js";
 
 interface AntigravityOptions {
   /** Model the CLI runs, e.g. "gemini-3.6-flash-medium" or "claude-sonnet-4-6". */
@@ -140,7 +141,13 @@ export class AntigravityCliAdapter extends AdapterBase {
     const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
 
     const resume = this.conversationId;
-    const args = ["--print", text, "--dangerously-skip-permissions", "--print-timeout", this.timeoutArg()];
+    // Permissions (core/permissions.ts). Bypass is the default and has to be
+    // explicit: headless, with no one to answer, any tool agy wants to confirm
+    // stalls the turn until --print-timeout. auto = accept-edits, ask = plan.
+    const mode = permissionFor("antigravity-cli", this.options as Record<string, unknown>);
+    const permArgs =
+      mode === "bypass" ? ["--dangerously-skip-permissions"] : ["--mode", mode === "ask" ? "plan" : "accept-edits"];
+    const args = ["--print", text, ...permArgs, "--print-timeout", this.timeoutArg()];
     if (resume) {
       // A resumed conversation keeps its original workspace; --add-dir is only
       // meaningful (and only needed) when opening a fresh one.

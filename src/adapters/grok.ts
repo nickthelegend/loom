@@ -33,6 +33,7 @@ import fs from "node:fs";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, agentEnv, cliAvailable } from "./base.js";
+import { permissionFor } from "../core/permissions.js";
 
 interface GrokOptions {
   /**
@@ -138,7 +139,10 @@ export class GrokAdapter extends AdapterBase {
       "--cwd",
       this.projectDir,
       "--permission-mode",
-      this.options.permissionMode ?? "bypassPermissions",
+      this.options.permissionMode ??
+        { bypass: "bypassPermissions", auto: "auto", ask: "plan" }[
+          permissionFor("grok-code", this.options as Record<string, unknown>)
+        ],
     ];
     if (input.briefing?.trim()) {
       args.push(
