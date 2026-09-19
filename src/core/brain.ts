@@ -98,6 +98,14 @@ export interface Memory {
   updatedAt: number;
   /** `task` memories die with their run; constraints and failures never do. */
   expiresAt?: number;
+  /**
+   * Learned while the agent was reading outside content — web pages, issue or
+   * PR text, fetched docs. Stays personal until a human marks it trusted: the
+   * memory-poisoning defence (docs/teams-architecture.md D43).
+   */
+  untrusted?: boolean;
+  /** Never shared with a team, whatever its kind (D13). */
+  private?: boolean;
 }
 
 /** What a caller hands us. The derived fields are ours to compute. */
@@ -110,6 +118,8 @@ export interface NewMemory {
   confidence?: number;
   evidence?: string;
   expiresAt?: number;
+  untrusted?: boolean;
+  private?: boolean;
 }
 
 export interface MemoryPatch {
@@ -119,6 +129,8 @@ export interface MemoryPatch {
   confidence?: number;
   evidence?: string;
   expiresAt?: number;
+  untrusted?: boolean;
+  private?: boolean;
 }
 
 /** One line of a memory's life, straight out of the log. */
@@ -303,6 +315,8 @@ export function foldMemories(events: LoomEvent[]): Map<string, Memory> {
       if (typeof patch.confidence === "number") next.confidence = clamp01(patch.confidence);
       if (typeof patch.evidence === "string") next.evidence = patch.evidence;
       if (patch.expiresAt !== undefined) next.expiresAt = patch.expiresAt;
+      if (typeof patch.untrusted === "boolean") next.untrusted = patch.untrusted;
+      if (typeof patch.private === "boolean") next.private = patch.private;
       byId.set(cur.id, next);
       continue;
     }
@@ -480,6 +494,8 @@ export class Brain {
       createdAt: ts,
       updatedAt: ts,
       ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
+      ...(input.untrusted ? { untrusted: true } : {}),
+      ...(input.private ? { private: true } : {}),
     };
 
     this.log.append({
@@ -489,6 +505,18 @@ export class Brain {
       payload: { memory },
     });
     return { memory, created: true };
+  }
+
+  /**
+   * Someone learned this again: refresh it (updatedAt) without changing it, so
+   * aging (D16) sees it's still true. An untrusted copy never launders a
+   * trusted memory, and a trusted re-learn never un-flags an untrusted one.
+   */
+  confirm(id: string, by: string): Memory | null {
+    const cur = this.state().get(id);
+    if (!cur) return null;
+    this.log.append({ kind: "memory_update", agentId: by, payload: { id, patch: {}, by, confirm: true } });
+    return this.state().get(id) ?? cur;
   }
 
   /** Correct something we already believe. */

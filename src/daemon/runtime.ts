@@ -26,13 +26,14 @@ import { GIT_DELIVERIES, isAdapter, MAIN_CHAT, type GitDelivery } from "../types
 import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../adapters/index.js";
 import { ADES } from "../core/ades.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
-import { Brain, CONFIDENCE_FLOOR } from "../core/brain.js";
-import { compileBrief, retrieve } from "../core/brain-index.js";
-import { extractFromTurn, type ExtractEngine } from "../core/brain-extract.js";
+import { Brain, CONFIDENCE_FLOOR, type Memory } from "../core/brain.js";
+import { compileBrief, retrieve, type RetrieveOpts } from "../core/brain-index.js";
+import { extractFromTurn, readExternalContent, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
 import { addWorktree as gitAddWorktree, ensureBranch, push as gitPush, stageAndCommitFiles, worktreePath } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
+import { compileTieredBrief, retrieveTiered, type TieredMemory } from "../core/team-memory.js";
 import { renderProjection } from "../core/distill.js";
 import {
   buildUnifiedMemory,
@@ -170,6 +171,14 @@ export function withLoomAskTimeout<T>(reply: Promise<T>): Promise<T> {
   });
 }
 
+/** What briefings need from the team brain (src/daemon/team-brain.ts). */
+export interface TeamBrainHook {
+  /** The tiered pool (canon, team, own), or null when the project isn't shared. */
+  pool(own: Memory[]): TieredMemory[] | null;
+  /** Live team context near these paths (D48), or "". */
+  context(files: string[]): string;
+}
+
 export class ProjectRuntime {
   readonly info: ProjectInfo;
   readonly config: ProjectConfig;
@@ -237,10 +246,10 @@ export class ProjectRuntime {
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       createChat: (title) => this.createChat(title),
-      briefingFor: (query, agentId) => {
-        const hits = retrieve(this.brain, { query, agent: agentId, limit: 6 });
-        return [this.activeSkillsBlock(), compileBrief(hits.map((h) => h.memory))].filter(Boolean).join("\n\n");
-      },
+      briefingFor: (query, agentId, files) =>
+        [this.activeSkillsBlock(), this.brainBrief({ query, agent: agentId, limit: 6 }), this.teamBrain?.context(files ?? []) ?? ""]
+          .filter(Boolean)
+          .join("\n\n"),
       gate: (agentId) => {
         this.enforceQuarantine(agentId);
         this.enforceBudget(agentId);
@@ -1613,12 +1622,14 @@ export class ProjectRuntime {
     const model = this.config.brain?.model ?? "haiku";
     const engine: ExtractEngine = (p) =>
       claudeText(`${p.system}\n\n${p.user}`, { model, timeoutMs: 60_000 });
+    const recent = this.log.list({ limit: 80 }).filter((e) => (e.chat ?? MAIN_CHAT) === chat);
     void extractFromTurn(this.brain, turn, {
       engine,
       agentId,
       chat,
       ...(files.length ? { files } : {}),
       eventId: this.log.lastId(),
+      ...(readExternalContent(recent) ? { untrusted: true } : {}),
     })
       .then((res) => {
         const learned = res.added.length + res.updated.length + res.forgotten.length;
@@ -1711,14 +1722,26 @@ export class ProjectRuntime {
       ),
     ].slice(-20);
     if (!query.trim() && !files.length) return "";
-    const hits = retrieve(this.brain, {
+    const brief = this.brainBrief({
       ...(query.trim() ? { query } : {}),
       ...(files.length ? { files } : {}),
       agent: agentId,
       minConfidence: CONFIDENCE_FLOOR,
       limit: 14,
     });
-    return compileBrief(hits.map((h) => h.memory));
+    const team = files.length ? (this.teamBrain?.context(files) ?? "") : "";
+    return [brief, team].filter(Boolean).join("\n\n");
+  }
+
+  /**
+   * The memory brief for a query. Solo: this project's brain. Shared with a
+   * team: canon, confirmed, own and teammates' proposals ranked together, each
+   * line labelled with how sure to be (Loom Teams D42).
+   */
+  private brainBrief(opts: RetrieveOpts): string {
+    const pool = this.teamBrain?.pool(this.brain.all());
+    if (!pool) return compileBrief(retrieve(this.brain, opts).map((h) => h.memory));
+    return compileTieredBrief(retrieveTiered(pool, opts));
   }
 
   /**
@@ -2388,8 +2411,7 @@ export class ProjectRuntime {
     const skills = this.activeSkillsBlock();
     if (skills) parts.push(skills);
     // Retrieval scoped to the child's own task rather than the parent's thread.
-    const hits = retrieve(this.brain, { query: task, agent: childId, limit: 6 });
-    const brief = compileBrief(hits.map((h) => h.memory));
+    const brief = this.brainBrief({ query: task, agent: childId, limit: 6 });
     if (brief) parts.push(brief);
     return parts.filter(Boolean).join("\n\n");
   }
@@ -2821,6 +2843,8 @@ export class ProjectRuntime {
   memberLogin: string | null = null;
   /** Loom Teams, Phase 2: this project's team coordinator (set by Team Link). */
   coordinator: OrchestraCoordinator | null = null;
+  /** Loom Teams, Phase 3: this project's share of the team brain (set by Team Link). */
+  teamBrain: TeamBrainHook | null = null;
   /** The effective loom.team.json while shared with a team (D37); null when solo. */
   teamPolicy: TeamPolicy | null = null;
 

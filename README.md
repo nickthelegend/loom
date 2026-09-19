@@ -491,7 +491,7 @@ detects at least two roles.
 | `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |
 | `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch · stop it · remove its worktrees |
 | `loom hub [--host --port --secret]` | Run a self-hosted Team Hub for your team |
-| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; membership and key rotation |
+| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; membership and key rotation |
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
 | `loom subtasks` | Subtasks running right now |
@@ -804,7 +804,7 @@ Everything is stored in `~/.loom/prompts.json` and never leaves the machine.
 
 ## Teams — see each other's agents
 
-Five people, each with their own agents, on one repo. **Phases 1 and 2 are built.** Phase 1:
+Five people, each with their own agents, on one repo. **Phases 1, 2 and 3 are built.** Phase 1:
 teammates see each other's live agents and goals, and a team feed collects goals,
 plans, PRs and CI in one place. Content is end-to-end encrypted to the team, so
 the hub can't read goal titles.
@@ -852,10 +852,37 @@ loom team                   # who's doing what, right now
   "orchestra": { "maxParallelPerMember": 6, "teamMaxConcurrentAgents": 20 } }
 ```
 
-The researched architecture (39 decisions, a 5-phase plan) is in
-**[docs/teams-architecture.md](docs/teams-architecture.md)**. It covers what
-comes next: leases and conflict prediction, the shared team brain with canon in
-`AGENTS.md`, and one PR per goal through a merge queue.
+**Phase 3 (one brain) is built too:**
+- **What one agent learns, the team's agents know.** Durable memories
+  (constraints, failures, decisions, conventions, facts) from a shared project
+  reach teammates, encrypted to the team. `task` notes, memories you mark
+  private, and anything learned while reading outside content (web pages, issue
+  and PR text) stay on your machine.
+- **Every briefed line says how sure to be.** Briefings rank team canon first,
+  then memories confirmed by two or more teammates, then your own, then a single
+  teammate's proposal, and label each one. When two people's agents learn the
+  same thing, it becomes one memory with two confirmations.
+- **Canon lives in `AGENTS.md`, reviewed like code.** "Propose as canon" adds a
+  memory to a Loom-managed section of `AGENTS.md` on one rolling `loom/canon` PR,
+  and adds `@AGENTS.md` to `CLAUDE.md`. Once merged, every agent reads it, Loom or
+  not. Edit or delete a line in any PR to change canon.
+- **An inbox for what needs a human:** contradictions between teammates' memories,
+  near-duplicates, corrections waiting on a decision, untrusted memories, and
+  memories ready for canon. Resolving keeps the loser, linked to the winner.
+- **Live team context.** Worker briefings also say which teammates hold leases on
+  the same paths, which open PRs change them, which checks are failing, and where
+  a conflict is predicted.
+
+```bash
+loom team brain                     # the team's memories and your inbox
+loom team brain promote <id>        # propose as canon (opens or updates the loom/canon PR)
+loom team brain resolve <keep> <drop> "why"
+loom team brain trust <id>          # an untrusted memory is fine: share it
+```
+
+The researched architecture (51 decisions, a 5-phase plan) is in
+**[docs/teams-architecture.md](docs/teams-architecture.md)**. Next is Phase 4:
+landing safely, with one PR per goal through a merge queue.
 
 ## Loom Cloud — your agents from any network
 

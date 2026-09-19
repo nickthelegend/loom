@@ -106,7 +106,7 @@ beforeAll(async () => {
     grant usage on schema public, auth, extensions to anon, authenticated;
     grant execute on function auth.uid() to anon, authenticated;
   `);
-  for (const m of ["0001_app_opens.sql", "0002_teams.sql", "0003_team_leases.sql"]) {
+  for (const m of ["0001_app_opens.sql", "0002_teams.sql", "0003_team_leases.sql", "0004_team_memories.sql"]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
   psql(`insert into auth.users (id, raw_user_meta_data) values
@@ -217,6 +217,29 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
     expect(asUser(ALICE, `select public.set_run_lease_state('${team}', 'o5', 'landing');`)).toBe("1");
     expect(fails(() => asUser(BOB, `insert into public.leases (team_id) values ('${team}');`))).toMatch(/permission denied/);
     expect(asUser(BOB, `select (public.append_feed('${team}', '{"type":"conflict_predicted","meta":{"runs":["o1","o2"]}}')).id is not null;`)).toBe("t");
+  });
+
+  it("team memories: twins confirm, only authors edit, resolution keeps the loser (D40, D41, D47)", () => {
+    const pub = (user: string, dev: string, id: string, hmac: string, extra = "") =>
+      JSON.parse(asUser(user, `select public.publish_memory('${team}', '{"id":"${id}","repo":"acme/app","hmac":"${hmac}","sealed":{"v":1,"c":"x"},"deviceId":"${dev}"${extra}}');`));
+    expect(pub(ALICE, aliceDev, "mem1", "v1:zod").merged).toBe(false);
+    const twin = pub(BOB, bobDev, "mem9", "v1:zod");
+    expect(twin.merged).toBe(true);
+    expect(twin.memory.id).toBe("mem1");
+    expect(twin.memory.confirmed_by).toEqual(["alice", "bob"]);
+    expect(fails(() => pub(BOB, bobDev, "mem1", "v1:other"))).toMatch(/belongs to someone else/);
+    expect(fails(() => pub(BOB, bobDev, "mem3", "v1:z", ',"supersedes":"nope"'))).toMatch(/to supersede/);
+    expect(fails(() => asUser(BOB, `select public.forget_team_memory('${team}', 'mem1', 'no');`))).toMatch(/only its author/);
+    expect(fails(() => asUser(BOB, `select public.update_team_memory('${team}', 'mem1', 'v1:y', '{"v":1,"c":"y"}');`))).toMatch(/only its author/);
+    pub(BOB, bobDev, "mem2", "v1:valibot", ',"supersedes":"mem1"');
+    asUser(ALICE, `select public.resolve_memories('${team}', 'mem2', 'mem1', 'moved to valibot');`);
+    expect(asUser(BOB, `select string_agg(id || ':' || state, ',' order by id) from public.team_memories where team_id = '${team}';`))
+      .toBe("mem1:superseded,mem2:live");
+    expect(asUser(BOB, `select array_to_string(confirmed_by, ',') from public.team_memories where id = 'mem2';`)).toBe("bob,alice");
+    expect(asUser(BOB, `select resolved_by || '>' || superseded_by from public.team_memories where id = 'mem1';`)).toBe("alice>mem2");
+    expect(asUser(BOB, `select type from public.feed where team_id = '${team}' order by id desc limit 1;`)).toBe("memory_resolved");
+    expect(fails(() => asUser(BOB, `insert into public.team_memories (id, team_id) values ('mem7', '${team}');`))).toMatch(/permission denied/);
+    expect(asUser(BOB, `select (public.append_feed('${team}', '{"type":"canon_proposed","repo":"acme/app","meta":{"ids":["mem2"]}}')).id is not null;`)).toBe("t");
   });
 
   it("feed dedupes by key; removal is announced, then the member is cut off", () => {

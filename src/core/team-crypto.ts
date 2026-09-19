@@ -19,6 +19,7 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { randomBytes } from "@noble/ciphers/utils.js";
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
+import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 
 import { fromB64, toB64 } from "./relay-protocol.js";
@@ -198,4 +199,20 @@ export function unpackInvite(s: string): InviteFragment | null {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Memory dedupe (Phase 3, D41)
+// ---------------------------------------------------------------------------
+
+
+/**
+ * A team memory's dedupe key: HMAC-SHA256 of its normalized text under the
+ * team key. The hub merges exact duplicates by comparing these without ever
+ * reading the text. Prefixed with the key version — after a rotation, a
+ * memory only merges with others hashed under the same key.
+ */
+export function memoryHmac(key: TeamKey, text: string): string {
+  const norm = text.trim().toLowerCase().replace(/\s+/g, " ");
+  return `v${key.version}:${toB64(hmac(sha256, fromB64(key.key), enc.encode(norm)))}`;
 }

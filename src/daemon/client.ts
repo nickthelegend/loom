@@ -191,6 +191,16 @@ export class DaemonClient {
     return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/team/share`);
   }
 
+  /** The team brain for a project (Phase 3): status, memories with tiers, inbox. */
+  teamBrain(id: string, opts: { sync?: boolean; history?: boolean } = {}): Promise<TeamBrainView> {
+    const q = [opts.sync ? "sync=1" : "", opts.history ? "history=1" : ""].filter(Boolean).join("&");
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/team/brain${q ? `?${q}` : ""}`);
+  }
+
+  teamBrainAction(id: string, action: string, body: Record<string, unknown> = {}): Promise<TeamBrainView & { result: unknown }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/brain/${action}`, body);
+  }
+
   // ── Loom Cloud (daemon/relay.ts) ──
 
   cloud(): Promise<Record<string, unknown>> {
@@ -599,4 +609,10 @@ export async function stopDaemon(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export interface TeamBrainView {
+  status: Record<string, unknown>;
+  memories: Array<{ id: string; text: string; kind: string; tier: string; author: string | null; confirmedBy: string[]; mine: boolean; state: string; untrusted?: boolean }>;
+  inbox: Array<{ id: string; type: string; detail: string; a: { id: string; text: string; tier: string; author: string | null }; b?: { id: string; text: string; tier: string; author: string | null } }>;
 }

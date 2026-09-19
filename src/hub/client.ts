@@ -15,7 +15,10 @@ import {
   type Lease,
   type LeaseClaim,
   type PresenceIn,
+  type TeamMemory,
+  type TeamMemoryIn,
 } from "../core/team-hub.js";
+import type { Sealed } from "../core/team-crypto.js";
 import type { LeaseScope } from "../core/team-leases.js";
 
 export async function hubSignIn(
@@ -126,6 +129,22 @@ export class HttpHubClient implements HubClient {
   }
   leases(teamId: string, repo?: string) {
     return this.call<Lease[]>("leases", teamId, ...(repo === undefined ? [] : [repo]));
+  }
+
+  publishMemory(teamId: string, m: TeamMemoryIn) {
+    return this.call<{ memory: TeamMemory; merged: boolean }>("publishMemory", teamId, m);
+  }
+  updateTeamMemory(teamId: string, id: string, patch: { hmac: string; sealed: Sealed }) {
+    return this.call<TeamMemory>("updateTeamMemory", teamId, id, patch);
+  }
+  forgetTeamMemory(teamId: string, id: string, reason: string) {
+    return this.call<void>("forgetTeamMemory", teamId, id, reason);
+  }
+  resolveMemories(teamId: string, winnerId: string, loserId: string, reason: string) {
+    return this.call<TeamMemory>("resolveMemories", teamId, winnerId, loserId, reason);
+  }
+  teamMemories(teamId: string, repo: string, opts?: { history?: boolean }) {
+    return this.call<TeamMemory[]>("teamMemories", teamId, repo, opts ?? {});
   }
 
   /**

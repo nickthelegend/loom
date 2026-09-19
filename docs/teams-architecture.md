@@ -101,6 +101,19 @@ on them. Later sections implement them.
 | D37 | Where policy comes from | **`loom.team.json` on the default branch at origin** | Read with `git show origin/HEAD:loom.team.json`, so policy changes need a reviewed PR. A local copy can only make rules stricter. |
 | D38 | What policy enforces in Phase 2 | **Hard zones, a permission ceiling (+ `bypassRequiresPlan`), an agent allowlist, protected-branch delivery, concurrency caps** | Caps: `maxParallelPerMember`, and `teamMaxConcurrentAgents` counted from hub presence. |
 | D39 | A policy change mid-run | **Applies to new actions only** | Running tasks finish under the old rules; spawns, mode changes and deliveries use the new ones. Violations are noted in the feed. |
+| **Phase 3: one brain** (settled 2026-09-19) |||
+| D40 | Who changes a teammate's memory | **The author edits; others supersede** | Only the author's daemon updates or forgets its own memories. A teammate records a correction linked to the original, and both stay visible until a human resolves it. |
+| D41 | Duplicates | **Exact matches merge and count; near-duplicates are flagged** | An identical memory from another member becomes "confirmed by N" (the hub matches an HMAC of the normalized text, so it never reads the text). A near-paraphrase goes to the inbox for a one-click merge. |
+| D42 | Trust in briefings | **Canon > confirmed > own > a teammate's proposal** | Each briefed memory is labelled with its tier ("team canon" / "confirmed by 3" / "proposed by bob"). |
+| D43 | Untrusted memories | **Learned while reading external content** | A turn that read web pages, issue or PR text, or fetched docs tags its memories untrusted. They stay personal until a human marks them trusted. |
+| D44 | Canon's source of truth | **The managed `AGENTS.md` section on main** | Lines carry hidden `<!-- loom:m:<id> -->` markers so they round-trip. Hand edits in any PR are real canon changes. Native-memory import skips the section (no feedback loop). |
+| D45 | How promotion reaches the repo | **One rolling canon PR per repo** | Branch `loom/canon`. Later promotions, from anyone, append to the open PR until it merges through the normal review rules. |
+| D46 | Claude Code outside Loom | **Add `@AGENTS.md` to CLAUDE.md in the canon PR** | Only if CLAUDE.md exists and lacks it. A one-time change, reviewed in the PR. |
+| D47 | Resolving a contradiction | **The loser is superseded, kept with a link** | It leaves briefings but stays in history, with who resolved it and why. A canon loser is removed in the canon PR. |
+| D48 | Live team context in briefings | **Nearby leases, PRs and failures, capped at ~1.5k chars** | Covers the files a task touches: teammates' overlapping or adjacent leases, open PRs that changed those paths, recent failed checks on them, and predicted conflicts. |
+| D49 | Where people review | **A Team view in the Brain tab, plus the phone** | Tiers (Canon · Confirmed · Proposed · Mine · Untrusted) plus an Inbox: contradictions, likely duplicates, untrusted. Actions: Promote, Supersede, Merge, Mark trusted, Make private. |
+| D50 | Backfill for a new member or device | **All live memories as a snapshot, then the stream** | Superseded and forgotten memories load only when someone opens history. |
+| D51 | Scope | **Per repo, never across** | Side projects never enter a team brain, and a team brain never leaks into unrelated projects. |
 | **Build approach** |||
 | D27 | Build before a live Supabase exists | **In-memory hub + real migrations** | The hub protocol is tested against an in-memory hub with two real daemons as two members; SQL, RLS and Edge Functions ship ready to deploy. |
 
@@ -494,7 +507,27 @@ The original Phase 2 plan:
 - `loom.team.json` policy: agent allowlist, permission ceiling, delivery rules,
   concurrency caps.
 
-**Phase 3: one brain (3 weeks)**
+**Phase 3: one brain.** Built per D40–D51. Status on 2026-09-19:
+
+| Piece | Status |
+|---|---|
+| Canon in a managed `AGENTS.md` section: parse, render, upsert; hand-added lines honoured; native import skips it; `@AGENTS.md` for CLAUDE.md (`src/core/team-canon.ts`) | ✅ built, tested |
+| Tiered retrieval and labelled briefs, canon first; failures/facts age out after ~90 days (`src/core/team-memory.ts`) | ✅ built, tested |
+| Untrusted tagging: a turn that read the web, `gh issue/pr` text or fetched URLs marks what it taught as untrusted (`readExternalContent`) | ✅ built, tested |
+| Memory HMAC under the team key (`memoryHmac`), so the hub merges exact twins without reading them | ✅ built, tested |
+| Hub team memories: publish (twin → confirmation), author-only edit/forget, resolve (loser kept and linked, winner inherits confirmations), history | ✅ MemoryHub + `loom hub` + SQL (`0004_team_memories.sql`, tested on Postgres 16) |
+| Team Brain in the daemon (`src/daemon/team-brain.ts`): snapshot-then-stream backfill, stateless publish, canon from `origin/HEAD:AGENTS.md`, the tiered pool in every briefing (orchestra workers, subtasks, handoffs), inbox, corrections, resolution | ✅ built; two members tested end to end |
+| Promotion: one rolling `loom/canon` PR, rebuilt from the default branch each time (its canon + what's pending + the new entries) | ✅ built; tested on a real bare origin with a stub `gh` |
+| Live team context (≤1.5k chars): teammates' leases on these paths, open PRs changing them (`files` now in PR feed metadata), failing checks, predicted conflicts | ✅ built, tested |
+| REST `GET/POST /api/projects/:id/team/brain[/:action]`; CLI `loom team brain [inbox\|sync\|promote\|resolve\|merge\|correct\|trust\|private]` | ✅ built |
+| Team view in the Brain tab with the inbox (desktop and phone) | 🔨 in progress |
+
+How it differs from the original sketch below: no per-member signed streams or
+HLC union. The hub already orders writes and enforces who may change what (D40),
+so memories replicate as sealed rows with an HMAC handle, not as merged logs.
+One less protocol to get wrong, and the same guarantees for five people.
+
+The original Phase 3 plan:
 - Signed per-member streams, encrypted replication, HLC union.
 - Personal, proposed and canon tiers; promotion flow; canon export to AGENTS.md
   through a PR.

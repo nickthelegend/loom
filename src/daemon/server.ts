@@ -2540,6 +2540,54 @@ export class LoomDaemon {
       }),
     );
 
+    // ---- the team brain, per project (Phase 3, daemon/team-brain.ts) ----
+    // The Team view (D49): canon, the team's memories with their tiers, and the
+    // inbox of what needs a human.
+    app.get(
+      "/api/projects/:id/team/brain",
+      withRuntime(async (rt, req, res) => {
+        const tb = this.team.brainFor(rt);
+        if (req.query.sync === "1") await tb.sync().catch(() => {});
+        res.json({
+          status: tb.status(),
+          memories: tb.memories({ history: req.query.history === "1" }),
+          inbox: tb.inbox(),
+        });
+      }),
+    );
+    app.post(
+      "/api/projects/:id/team/brain/:action",
+      withRuntime(async (rt, req, res) => {
+        const tb = this.team.brainFor(rt);
+        const b = (req.body ?? {}) as Record<string, unknown>;
+        const str = (k: string) => {
+          const v = String(b[k] ?? "").trim();
+          if (!v) throw new Error(`missing ${k}`);
+          return v;
+        };
+        try {
+          let out: unknown = { ok: true };
+          const action = String(req.params.action);
+          if (action === "sync") await tb.sync();
+          else if (action === "promote") {
+            const ids = Array.isArray(b.ids) ? b.ids.map(String) : [str("id")];
+            out = await tb.promote(ids);
+          } else if (action === "correct") out = await tb.correct(str("id"), str("text"));
+          else if (action === "resolve") await tb.resolve(str("winner"), str("loser"), String(b.reason ?? ""));
+          else if (action === "merge") await tb.resolve(str("keep"), str("drop"), "duplicate");
+          else if (action === "trust" || action === "private") {
+            const id = str("id");
+            const value = b.value === undefined ? true : Boolean(b.value);
+            rt.brain.update(id, action === "trust" ? { untrusted: !value } : { private: value }, "user");
+            await tb.sync();
+          } else return void res.status(404).json({ error: `unknown team brain action "${action}"` });
+          res.json({ result: out, status: tb.status(), memories: tb.memories(), inbox: tb.inbox() });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+
     // ---- permissions & approvals (core/permissions.ts, core/approvals.ts) ---
     app.get("/api/permissions", (_req, res) => {
       res.json({ profiles: PERMISSION_PROFILES });

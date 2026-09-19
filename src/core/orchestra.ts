@@ -173,8 +173,8 @@ export interface OrchestraHost {
   makeAgent(cfg: AgentConfig, dir: string): Adapter;
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
   createChat(title: string): ChatInfo;
-  /** Skills + retrieved memories for a task, or "" — the project brain. */
-  briefingFor(query: string, agentId: string): string;
+  /** Skills + retrieved memories for a task, or "" — the project brain (and the team's, when shared). */
+  briefingFor(query: string, agentId: string, files?: string[]): string;
   /** Throws when `agentId` is over budget or quarantined. */
   gate(agentId: string): void;
   /** Cost/metrics bookkeeping for a worker event. */
@@ -1451,7 +1451,7 @@ export class OrchestraEngine {
             runGoal: run.goal,
             task,
             branch: task.branch!,
-            brain: this.host.briefingFor(task.prompt, task.agent),
+            brain: this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
             ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
           })
         : undefined;

@@ -52,6 +52,7 @@ import {
 import { HttpHubClient, hubSignIn } from "../hub/client.js";
 import type { LoomEvent } from "../types.js";
 import type { ProjectRuntime } from "./runtime.js";
+import { TeamBrain } from "./team-brain.js";
 import { TeamCoordinator } from "./team-coordinator.js";
 
 // ---------------------------------------------------------------------------
@@ -136,6 +137,7 @@ interface TeamView {
 
 const HEARTBEAT_MS = 15_000;
 const GH_POLL_MS = 60_000;
+const BRAIN_SYNC_MS = 60_000;
 
 export class TeamLink {
   private file: string;
@@ -147,6 +149,7 @@ export class TeamLink {
   private live = new Map<string, Set<string>>(); // teamId → presence keys this device reported last beat
   private logSubs = new Map<string, () => void>(); // projectId → log unsubscribe
   private coordinators = new Map<string, TeamCoordinator>(); // projectId → coordinator (Phase 2)
+  private brains = new Map<string, TeamBrain>(); // projectId → team brain (Phase 3)
   private started = false;
 
   constructor(private host: TeamLinkHost) {
@@ -162,6 +165,7 @@ export class TeamLink {
     if (this.state.hub) await this.connect().catch((e) => logbook.warn("team", "couldn't reach the team hub", String(e)));
     this.timers.push(setInterval(() => void this.beat().catch(() => {}), HEARTBEAT_MS));
     this.timers.push(setInterval(() => void this.pollGitHub().catch(() => {}), GH_POLL_MS));
+    this.timers.push(setInterval(() => void this.syncBrains().catch(() => {}), BRAIN_SYNC_MS));
     for (const t of this.timers) t.unref?.();
   }
 
@@ -173,6 +177,7 @@ export class TeamLink {
     for (const u of this.logSubs.values()) u();
     this.logSubs.clear();
     for (const c of this.coordinators.values()) c.stop();
+    for (const b of this.brains.values()) b.stop();
     // Say goodbye rather than let teammates wait out the TTL.
     await this.clearAllPresence().catch(() => {});
     this.started = false;
@@ -240,6 +245,7 @@ export class TeamLink {
     }
     writeState(this.file, this.state);
     this.watchRuntimes();
+    void this.syncBrains().catch(() => {});
   }
 
   /** Open any key envelopes sealed to this device we don't have yet (D6). */
@@ -284,7 +290,8 @@ export class TeamLink {
   private async onHubEvent(e: HubEvent): Promise<void> {
     const v = this.views.get(e.teamId);
     if (!v) return;
-    if (e.type === "lease") v.leases.set(e.lease.id, e.lease);
+    if (e.type === "memory") for (const b of this.brains.values()) b.onMemory(e.memory);
+    else if (e.type === "lease") v.leases.set(e.lease.id, e.lease);
     else if (e.type === "lease_gone") for (const id of e.leaseIds) v.leases.delete(id);
     else if (e.type === "presence") v.presence.set(presenceKey(e.presence), e.presence);
     else if (e.type === "presence_gone") {
@@ -399,6 +406,7 @@ export class TeamLink {
     await this.hub().shareRepo(teamId, repo);
     rt.setTeam({ teamId, repo });
     this.watchRuntimes();
+    void this.brainFor(rt).sync().catch(() => {});
     return { repo, teamId };
   }
 
@@ -490,6 +498,8 @@ export class TeamLink {
   attachRuntime(rt: ProjectRuntime): void {
     rt.memberLogin = this.state.hub?.github ?? null;
     this.coordinatorFor(rt);
+    const brain = this.brainFor(rt);
+    if (this.hubClient) void brain.sync().catch(() => {});
     if (this.state.hub) this.watchRuntimes();
   }
 
@@ -510,6 +520,33 @@ export class TeamLink {
       rt.coordinator = c;
     }
     return c;
+  }
+
+  /** Phase 3: the project's share of the team brain, created once and handed to its runtime. */
+  brainFor(rt: ProjectRuntime): TeamBrain {
+    let b = this.brains.get(rt.info.id);
+    if (!b) {
+      b = new TeamBrain(rt, {
+        hub: () => this.hubClient,
+        deviceId: () => this.state.device?.id ?? null,
+        github: () => this.state.hub?.github ?? null,
+        share: (r) => (this.hubClient ? this.teamFor(r) : Promise.resolve(null)),
+        keys: (teamId) => this.state.teams[teamId]?.keys ?? [],
+        feed: (teamId) => this.views.get(teamId)?.feed ?? [],
+        leases: (teamId) => [...(this.views.get(teamId)?.leases.values() ?? [])],
+      });
+      this.brains.set(rt.info.id, b);
+      rt.teamBrain = b;
+    }
+    return b;
+  }
+
+  /** Sync every open project's team brain (backfill, publish, canon). */
+  async syncBrains(): Promise<void> {
+    if (!this.hubClient) return;
+    for (const rt of this.host.runtimes()) {
+      await this.brainFor(rt).sync().catch((e) => logbook.warn("team", "team brain sync failed", String(e)));
+    }
   }
 
   private async onProjectEvent(rt: ProjectRuntime, e: LoomEvent): Promise<void> {
@@ -565,7 +602,7 @@ export class TeamLink {
         prs = JSON.parse(
           await run("gh", [
             "pr", "list", "--repo", share.repo, "--state", "all", "--limit", "20",
-            "--json", "number,title,state,headRefName,author,url,mergedAt,statusCheckRollup",
+            "--json", "number,title,state,headRefName,author,url,mergedAt,statusCheckRollup,files",
           ]),
         ) as Array<Record<string, unknown>>;
       } catch {
@@ -707,7 +744,14 @@ export function githubFeedEvents(repo: string, pr: Record<string, unknown>): Fee
   const n = Number(pr.number);
   const state = String(pr.state ?? "").toUpperCase();
   const author = (pr.author as { login?: string } | undefined)?.login ?? null;
-  const base = { number: n, url: pr.url, branch: pr.headRefName, author, loom: String(pr.headRefName ?? "").startsWith("loom/") };
+  // Changed paths are metadata like lease globs (D2): the live team context needs them (D48).
+  const files = Array.isArray(pr.files)
+    ? (pr.files as Array<{ path?: string }>).map((f) => String(f.path ?? "")).filter(Boolean).slice(0, 50)
+    : [];
+  const base = {
+    number: n, url: pr.url, branch: pr.headRefName, author, loom: String(pr.headRefName ?? "").startsWith("loom/"),
+    ...(files.length ? { files } : {}),
+  };
   const out: FeedIn[] = [{ repo, type: "pr_opened", meta: base, dedupeKey: `gh:${repo}#${n}:opened` }];
   if (state === "MERGED") out.push({ repo, type: "pr_merged", meta: base, dedupeKey: `gh:${repo}#${n}:merged` });
   if (state === "CLOSED") out.push({ repo, type: "pr_closed", meta: base, dedupeKey: `gh:${repo}#${n}:closed` });
