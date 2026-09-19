@@ -3001,7 +3001,8 @@ ${BRAND_SPRITE}
     return safe.slice(0, at) + "<mark>" + safe.slice(at, at + needle.length) + "</mark>" + safe.slice(at + needle.length);
   }
 
-  function toast(msg){ var t = document.getElementById("toast"); t.textContent = msg;
+  // a request that fails after the page is gone (a closed tab, a torn-down test window) has no one to tell
+  function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return; t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   /** Assertive screen-reader announcement for high-stakes moments (an agent
    *  needs you). Cleared then re-set so repeats are re-announced. */
