@@ -343,8 +343,16 @@ describe("Phase 6: the landing train (no merge queue)", () => {
     await waitUntil(() => landLeases("alice").map((l) => l.taskId).sort().join() === "land:api,land:web");
 
     checkAt = () => "pass";
-    await Promise.all([L("alice").tick(), L("bob").tick()]);
-    await waitUntil(() => run("alice", g3.id).landing!.state === "merged" && run("bob", g4.id).landing!.state === "merged", { timeoutMs: 20_000 });
+    // a turn is several steps (fresh base, push, green, merge); the product ticks
+    // every 30s, so keep ticking while waiting rather than trusting one tick —
+    // on a slow CI machine one wasn't enough (the goals merged a tick later)
+    await waitUntil(
+      async () => {
+        await Promise.all([L("alice").tick(), L("bob").tick()]);
+        return run("alice", g3.id).landing!.state === "merged" && run("bob", g4.id).landing!.state === "merged";
+      },
+      { timeoutMs: 30_000 },
+    );
     expect(git(origin, "show", "main:web/page.ts")).toContain("line 0");
     expect(git(origin, "show", "main:api/route.ts")).toContain("line 0");
   });
