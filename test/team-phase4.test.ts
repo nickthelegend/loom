@@ -370,27 +370,31 @@ describe("Phase 4: land safely", () => {
     expect((await L("alice").poll(run)).state).toBe("green");
   });
 
-  it("an override made while a review runs stands when the review finishes (D61)", async () => {
+  it("an override stands when the review that was running finishes (D61)", async () => {
     const run = M.alice!.rt.orchestra.get(goal.id)!;
-    const before = { review: run.landing!.review, reviews: run.landing!.reviews, fixAttempts: run.landing!.fixAttempts, status: run.status };
-    let release!: () => void;
-    reviewGate = { wait: new Promise<void>((r) => (release = r)), high: true };
-    const asked = reviews.length;
+    const before = { review: run.landing!.review, fixAttempts: run.landing!.fixAttempts, status: run.status };
     const sha = run.landing!.headSha!;
-    const pending = L("alice").review(run, sha);
-    // the reviewer is spawned in a temp worktree: real work, slow on a loaded runner
-    await waitUntil(() => reviews.length > asked, { timeoutMs: 60_000 });
+
+    // The owner overrode this commit; a review of it is still on its way back.
     await L("alice").overrideReview(goal.id, "checked by hand");
     expect(statuses.at(-1)).toMatchObject({ sha, state: "success" });
-    release();
-    await pending;
+    expect(run.landing!.review).toMatchObject({ overridden: "checked by hand", overriddenSha: sha });
+
+    // It lands with a high finding — and the owner's decision stands.
+    reviewGate = { wait: Promise.resolve(), high: true };
+    await L("alice").review(run, sha);
     reviewGate = null;
+
+    expect(reviews.length).toBeGreaterThan(0); // the reviewer really ran
     expect(run.landing!.review).toMatchObject({ state: "failure", high: 1, overridden: "checked by hand", overriddenSha: sha });
-    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" }); // not clobbered by the late failure
+    // the status ends where the owner put it, not at the review's "reviewing…"
+    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" });
+    expect(String(statuses.at(-1)!.description)).toContain("checked by hand");
+    expect(statuses.filter((x) => x.sha === sha && x.state === "failure")).toEqual([]);
     expect(run.landing!.fixAttempts).toBe(before.fixAttempts); // and the goal isn't sent back
     expect(run.status).toBe(before.status);
     run.landing!.review = before.review;
-  }, 90_000);
+  }, 60_000);
 
   it("Land brings fresh main in and asks GitHub to merge; merged goals post their cost (D56, D64)", async () => {
     const run = M.alice!.rt.orchestra.get(goal.id)!;

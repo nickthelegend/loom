@@ -411,7 +411,12 @@ export class Landing {
       // the owner overrode this commit while the review ran: the findings go on the PR, the decision stands (D61)
       const prior = run.landing!.review;
       const kept = prior?.overridden && prior.overriddenSha === sha ? { overridden: prior.overridden, overriddenSha: sha } : null;
-      if (repo && !kept) await this.postStatus(repo, sha, state, state === "failure" ? `${high} high-severity finding${high === 1 ? "" : "s"}` : "no high-severity findings");
+      if (repo) {
+        // The status ends where the owner put it — not at the "reviewing…" this
+        // review posted on its way in, which would sit pending for ever.
+        if (kept) await this.postStatus(repo, sha, "success", `overridden by ${this.deps.github() ?? "the owner"}: ${kept.overridden}`.slice(0, 140));
+        else await this.postStatus(repo, sha, state, state === "failure" ? `${high} high-severity finding${high === 1 ? "" : "s"}` : "no high-severity findings");
+      }
       this.set(run, {
         reviews: run.landing!.reviews + 1,
         reviewedSha: sha,
