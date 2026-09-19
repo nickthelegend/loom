@@ -1083,12 +1083,15 @@ function printTeam(t: Record<string, unknown>): void {
 
 program
   .command("team [action] [args...]")
-  .description("Loom Teams: status | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | deploys | release-notes <since> | remove <github> | leave")
+  .description("Loom Teams: status | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | deploys | release-notes <since> | webhook [--repo r] [--install] | remove <github> | leave")
   .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")
+  .option("--repo <owner/name>", "webhook: which repo (defaults to this project's)")
+  .option("--install", "webhook: create it on the repo with gh (needs repo admin)")
+  .option("--rotate", "webhook: replace the secret (update the repo's webhook after)")
   .option("--secret <s>", "the hub's join secret")
   .option("--team <id>", "which team, when you're in several")
   .option("--paste", "hosted sign-in without a local browser: open the link anywhere, paste back where you land")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; team?: string; paste?: boolean }) => {
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; team?: string; paste?: boolean; repo?: string; install?: boolean; rotate?: boolean }) => {
     const client = await ensureDaemon();
     const a = (action ?? "status").toLowerCase();
     const arg = args?.[0];
@@ -1249,6 +1252,26 @@ program
           console.log(`\n${pc.bold("needs someone")}`);
           for (const p of v.adoptable) console.log(`  #${String(p.pr)} ${String(p.owner)} — ${String(p.reason)}  ${pc.dim(`loom team adopt ${String(p.pr)}`)}`);
         }
+        return;
+      }
+      if (a === "webhook") {
+        // Phase 6 (D83): GitHub events pushed to the hub instead of polled
+        const project = await currentProject(client).catch(() => null);
+        const out = await client.teamAction("webhook", {
+          ...extra,
+          ...(opts.repo ? { repo: opts.repo } : {}),
+          ...(project ? { projectId: project.id } : {}),
+          ...(opts.install ? { install: "1" } : {}),
+          ...(opts.rotate ? { rotate: "1" } : {}),
+        });
+        const w = out.result as { url: string; secret: string; repo: string | null; events: string[]; installed?: { id: number | null; repo: string }; warning?: string };
+        console.log(`${pc.bold("payload URL")}   ${w.url}`);
+        console.log(`${pc.bold("secret")}        ${w.secret}  ${pc.yellow("(treat it like a password)")}`);
+        console.log(`${pc.bold("content type")}  application/json`);
+        console.log(`${pc.bold("events")}        ${w.events.join(", ")}`);
+        if (w.warning) console.log(pc.yellow(`  ${w.warning}`));
+        if (w.installed) console.log(`${pc.green("✓")} webhook created on ${w.installed.repo}${w.installed.id ? pc.dim(` (id ${w.installed.id})`) : ""}`);
+        else console.log(pc.dim(`\n  install it: loom team webhook --install${w.repo ? ` --repo ${w.repo}` : " --repo owner/name"}  (or GitHub → Settings → Webhooks)`));
         return;
       }
       if (a === "leave") {

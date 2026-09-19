@@ -11,7 +11,10 @@
  *   - where a big goal's stack is cut (along the integration branch's merges)
  *   - whether a repo's workflows can run in a merge queue, and the fix
  *   - cost rollups from the team feed
+ *   - Phase 6: the landing train — lanes, the slot lease, the next step (D79–D82)
  */
+
+import { globToRegExp, normPath } from "./team-leases.js";
 
 // ── checks ──
 
@@ -460,4 +463,115 @@ export function spentToday(feed: CostEvent[], member: string, running: number[],
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+// ── the landing train (Phase 6, D79–D82): D20's "otherwise a Loom landing lease" ──
+
+/** The lane a goal lands in when the team named none, or none of its files match one. */
+export const MAIN_LANE = "main";
+/** Lane names ride in a lease's task id (≤32 chars in SQL, as `land:<lane>`). */
+const LANE_RE = /^[A-Za-z0-9_.-]{1,24}$/;
+
+/** `landing.lanes` from loom.team.json, cleaned: valid names, non-empty glob lists. */
+export function parseLanes(raw: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [name, globs] of Object.entries(raw as Record<string, unknown>)) {
+    if (!LANE_RE.test(name)) continue;
+    const list = (Array.isArray(globs) ? globs : typeof globs === "string" ? [globs] : [])
+      .map((g) => normPath(String(g)))
+      .filter(Boolean)
+      .slice(0, 50);
+    if (list.length) out[name] = list;
+    if (Object.keys(out).length >= 20) break;
+  }
+  return out;
+}
+
+/**
+ * The lanes a goal needs (Aviator-style path scopes): every lane with a glob
+ * matching a file in the PR's diff, sorted — claims go in this order, so two
+ * goals needing the same lanes can't each hold one and wait on the other.
+ * No lanes configured, or no match: the single lane `main`.
+ */
+export function lanesFor(files: string[], lanes: Record<string, string[]>): string[] {
+  const hit = Object.entries(lanes)
+    .filter(([, globs]) => {
+      const res = globs.map(globToRegExp);
+      return files.some((f) => res.some((r) => r.test(normPath(f))));
+    })
+    .map(([name]) => name);
+  return hit.length ? [...new Set(hit)].sort() : [MAIN_LANE];
+}
+
+/** The synthetic path a lane's landing slot is leased on. */
+export function laneSlot(lane: string): string {
+  return `.loom/landing/${lane}`;
+}
+
+/**
+ * A lease claim that is a lane's slot. Its only path is the lane's synthetic
+ * path, which is also its own hard zone, so every hub (MemoryHub, `loom hub`,
+ * the SQL) refuses a second claimer atomically with no new API (D31's
+ * machinery). One zone per lane: a shared `.loom/landing/**` zone would make
+ * every lane the same lane.
+ */
+export function laneClaim(lane: string): { globs: string[]; files: string[]; prefixes: string[]; hardZones: string[]; taskId: string } {
+  const p = laneSlot(lane);
+  return { globs: [p], files: [p], prefixes: [p], hardZones: [p], taskId: `land:${lane}` };
+}
+
+/** The run id a goal's slot leases live under: apart from its task leases, so releasing one never drops the other (D36). */
+export function landRunId(runId: string): string {
+  return `${runId}:land`;
+}
+
+/** Does GitHub's `rules/branches/{branch}` answer include a merge queue? */
+export function hasMergeQueue(rules: Array<{ type: string }> | null | undefined): boolean {
+  return Array.isArray(rules) && rules.some((r) => r?.type === "merge_queue");
+}
+
+/**
+ * How Land gets a goal onto main (D20, D80):
+ *   queue: the repo has a merge queue — `gh pr merge --auto`; the queue tests the merged result
+ *   train: no queue, and a team hub — lanes, one goal per lane at a time, merged by Loom
+ *   auto:  no team — GitHub auto-merge, as before
+ * Stacks keep landing bottom-up through auto-merge either way (D59).
+ */
+export function landingRoute(opts: { rules: Array<{ type: string }> | null; team: boolean; stack: boolean }): "queue" | "train" | "auto" {
+  if (hasMergeQueue(opts.rules)) return "queue";
+  if (!opts.team || opts.stack) return "auto";
+  return "train";
+}
+
+export type TrainStep = "claim" | "refresh" | "wait" | "merge";
+
+/**
+ * The next step of a goal in the train, once its checks aren't red (a red
+ * check releases the slot and goes to the fix loop before this is asked):
+ * not holding its lanes → claim them; holding, but the PR head isn't the one
+ * this turn pushed → bring fresh base in (again); checks or the review still
+ * running, or no checks reported yet on a head just pushed → wait; green → merge.
+ */
+export function trainStep(s: {
+  holding: boolean;
+  turnSha?: string;
+  headSha: string;
+  checks: CheckSummary;
+  rows: number;
+  reviewing: boolean;
+  sinceTurnMs: number;
+  settleMs: number;
+}): TrainStep {
+  if (!s.holding) return "claim";
+  if (!s.turnSha || s.turnSha !== s.headSha) return "refresh";
+  if (s.checks.pending.length || s.reviewing) return "wait";
+  // CI takes a moment to register checks on a fresh push: "none yet" isn't "none"
+  if (!s.rows && s.sinceTurnMs < s.settleMs) return "wait";
+  return "merge";
+}
+
+/** "waiting behind bob's goal in lane api". */
+export function queuedReason(who: string | null, lane: string): string {
+  return `waiting behind ${who ? `${who}'s` : "another"} goal in lane ${lane}`;
 }

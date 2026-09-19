@@ -170,7 +170,8 @@ export interface OrchestraRun {
 export interface LandingState {
   pr: number;
   url: string;
-  state: "open" | "pending" | "green" | "failing" | "fixing" | "needs_human" | "landing" | "merged" | "closed";
+  /** "queued": Land was clicked, and another goal holds a lane this one needs (Phase 6, D82). */
+  state: "open" | "pending" | "green" | "failing" | "fixing" | "needs_human" | "queued" | "landing" | "merged" | "closed";
   headSha?: string;
   /** Fix attempts spent (D55: checks and high review findings share them). */
   fixAttempts: number;
@@ -192,12 +193,24 @@ export interface LandingState {
   adoptedBy?: string;
   /** An adopted goal, handed back to its owner. */
   returned?: boolean;
+  /** The PR head when it started waiting on a human: it keeps waiting until that changes. */
+  needsHumanSha?: string;
   /** The commit the PR merged as (deploy alerts, D72). */
   mergeSha?: string;
   /** Actions minutes the goal's branch used, recorded when it lands (§10). */
   ciMinutes?: number;
   /** Stacked delivery (D59): the PRs bottom-up; the last is this goal's own branch. */
   stack?: Array<{ pr: number; url: string; branch: string; base: string; state?: string }>;
+  // ── Phase 6: the landing train (D79–D82), when the repo has no merge queue ──
+  /** Land goes through the train: Loom merges it when its lanes' turn comes. */
+  train?: boolean;
+  /** The lanes it needs (path scopes from `landing.lanes`; "main" when none match). */
+  lanes?: string[];
+  /** It holds its lanes' slots right now: its turn. */
+  slot?: boolean;
+  /** The PR head this turn pushed (fresh base merged in), and when. */
+  turnSha?: string;
+  turnAt?: number;
   updatedAt: number;
 }
 

@@ -119,6 +119,8 @@ const fakeGh: Exec = async (cmd, args, cwd, opts) => {
   }
   if (args[0] === "pr" && args[1] === "checks") return ok([{ name: "test", bucket: "pass" }]);
   if (args[0] === "pr" && args[1] === "diff") return ok("");
+  // the repo has a merge queue, so Land takes the auto-merge path these tests watch for (the train is Phase 6's)
+  if (args[0] === "api" && args.some((a) => /\/rules\/branches\//.test(a))) return ok([{ type: "merge_queue" }]);
   if (args[0] === "api") return ok("[]");
   return ok("");
 };

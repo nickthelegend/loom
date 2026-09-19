@@ -18,6 +18,7 @@
 
 import crypto from "node:crypto";
 
+import { githubWebhookFeed } from "./github-events.js";
 import type { Sealed } from "./team-crypto.js";
 import { overlap, zoneOf, type LeaseScope } from "./team-leases.js";
 
@@ -186,7 +187,10 @@ export type FeedType =
   | "goal_moved"
   | "deploy_started"
   | "deploy_succeeded"
-  | "deploy_failed";
+  | "deploy_failed"
+  // Phase 6: the landing train
+  | "land_queued"
+  | "land_turn";
 
 export interface FeedIn {
   repo?: string;
@@ -336,6 +340,10 @@ export interface HubClient {
   /** Its author withdraws it; a runner holding it stops. */
   cancelJob(teamId: string, jobId: string): Promise<Job>;
   jobs(teamId: string, opts?: { active?: boolean }): Promise<Job[]>;
+
+  // ── GitHub webhooks (Phase 6, D83) ──
+  /** The team's webhook secret, created on first ask; `rotate` replaces it. Owners only. */
+  webhookSecret(teamId: string, rotate?: boolean): Promise<{ secret: string }>;
 }
 
 export class HubError extends Error {
@@ -396,6 +404,7 @@ export class MemoryHub {
   private memoriesByTeam = new Map<string, Map<string, TeamMemory>>();
   private runnersByDevice = new Map<string, Runner>();
   private jobsByTeam = new Map<string, Map<string, Job>>();
+  private webhookSecrets = new Map<string, string>(); // team → GitHub webhook secret (D83)
   private listeners = new Map<string, Set<(e: HubEvent) => void>>();
   constructor(private now: () => number = Date.now) {}
 
@@ -910,6 +919,37 @@ export class MemoryHub {
       .map((j) => ({ ...j }));
   }
 
+  // ── GitHub webhooks (Phase 6, D83) ──
+
+  webhookSecret(userId: string, teamId: string, rotate = false): { secret: string } {
+    this.team(teamId);
+    this.requireRole(teamId, userId, "owner");
+    let secret = this.webhookSecrets.get(teamId);
+    if (!secret || rotate) {
+      secret = crypto.randomBytes(32).toString("hex");
+      this.webhookSecrets.set(teamId, secret);
+    }
+    return { secret };
+  }
+
+  /** The receiver's side (no session): the secret to verify a delivery against; null for no such team, or none set. */
+  webhookSecretOf(teamId: string): string | null {
+    return this.teamsById.has(teamId) ? (this.webhookSecrets.get(teamId) ?? null) : null;
+  }
+
+  /**
+   * A verified delivery: its events, for repos this team shares only, appended
+   * as system events (no member). Returns how many were new — the rest were
+   * already in the feed (polled first, or a redelivery).
+   */
+  receiveGithubWebhook(teamId: string, event: string, payload: unknown): number {
+    this.team(teamId);
+    const repos = [...(this.reposByTeam.get(teamId) ?? [])];
+    let n = 0;
+    for (const e of githubWebhookFeed(event, payload, repos)) if (this.appendFeedRaw(teamId, null, e)) n++;
+    return n;
+  }
+
   leases(userId: string, teamId: string, repo?: string): Lease[] {
     this.requireRole(teamId, userId, "viewer");
     const r = repo ? normalizeRepo(repo) : null;
@@ -1186,6 +1226,9 @@ class MemoryHubClient implements HubClient {
   }
   jobs(teamId: string, opts?: { active?: boolean }) {
     return this.run(() => this.hub.jobs(this.userId, teamId, opts));
+  }
+  webhookSecret(teamId: string, rotate?: boolean) {
+    return this.run(() => this.hub.webhookSecret(this.userId, teamId, rotate));
   }
 }
 

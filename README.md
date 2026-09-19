@@ -491,7 +491,7 @@ detects at least two roles.
 | `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |
 | `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch · stop it · remove its worktrees |
 | `loom hub [--host --port --secret]` | Run a self-hosted Team Hub for your team |
-| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|landing\|doctor\|adopt\|deploys\|release-notes\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; landing goal PRs; membership and key rotation |
+| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|landing\|doctor\|adopt\|deploys\|release-notes\|webhook\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; landing goal PRs; GitHub webhooks; membership and key rotation |
 | `loom land [runId]` | Land a goal's PR: fresh main in, fast tests, push, merge when GitHub's rules pass |
 | `loom runner [status\|pair\|join\|start\|stop\|token\|doctor\|install\|revoke\|goal\|move\|back\|jobs]` | Runners: your always-on Loom that takes goals while you're away |
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
@@ -806,7 +806,7 @@ Everything is stored in `~/.loom/prompts.json` and never leaves the machine.
 
 ## Teams — see each other's agents
 
-Five people, each with their own agents, on one repo. **Phases 1 to 4 are built.** Phase 1:
+Five people, each with their own agents, on one repo. **Phases 1 to 6 are built.** Phase 1:
 teammates see each other's live agents and goals, and a team feed collects goals,
 plans, PRs and CI in one place. Content is end-to-end encrypted to the team, so
 the hub can't read goal titles.
@@ -947,8 +947,32 @@ loom runner move <runId>            # move a running goal; `loom runner back <ru
 
 Or with Docker: `docker build -f Dockerfile.runner -t loom-runner .`
 
+**Phase 6 (land in turn, hear it now) is built too:**
+- **A landing train when there's no merge queue.** Land queues the goal in its
+  lanes and merges it on its turn: fresh main in, fast tests, push, green on that
+  commit, then `gh pr merge --squash`. The next goal in the lane lands on top of
+  it. A goal waiting shows **queued**; a red check on its turn hands the lane to
+  the next goal, and it rejoins when green. Repos with a merge queue keep
+  Phase 4's path.
+- **Lanes.** Path scopes in `loom.team.json`: goals in different lanes land side
+  by side.
+- **GitHub webhooks, no App needed.** `loom team webhook --install` points a repo
+  webhook at your hub (self-hosted, or the hosted hub's Edge Function). Checks,
+  merges, reviews and deploys reach the team feed as they happen, signed and
+  verified, and your daemon acts on your PR's CI result at once. Polling keeps
+  running; nothing is posted twice.
+
+```jsonc
+// loom.team.json — Phase 6 addition
+{ "landing": { "lanes": { "web": ["web/**"], "api": ["api/**", "db/**"] } } }
+```
+
+```bash
+loom team webhook --install         # a repo webhook to the team hub (prints the URL and secret)
+```
+
 **How to use it, step by step: [docs/teams.md](docs/teams.md).** The researched
-architecture (78 decisions, five phases, all built) is in
+architecture (84 decisions, six phases, all built) is in
 **[docs/teams-architecture.md](docs/teams-architecture.md)**. Every doc is indexed
 in [docs/README.md](docs/README.md); the code map is [src/README.md](src/README.md).
 

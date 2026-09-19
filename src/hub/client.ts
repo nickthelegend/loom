@@ -177,6 +177,9 @@ export class HttpHubClient implements HubClient {
   jobs(teamId: string, opts?: { active?: boolean }) {
     return this.call<Job[]>("jobs", teamId, opts ?? {});
   }
+  webhookSecret(teamId: string, rotate?: boolean) {
+    return this.call<{ secret: string }>("webhookSecret", teamId, Boolean(rotate));
+  }
 
   /**
    * Live events. Reconnects with capped backoff (the relay's supervisor

@@ -5,6 +5,7 @@
 | `install.sh` | One-line install: clone, build, link `loom` (`curl -fsSL …/scripts/install.sh \| bash`) |
 | `stage-daemon.mjs` | Copies the built daemon into `desktop/build/daemon` before packaging the desktop app |
 | `gen-brand-icons.mjs` | Regenerates the app and agent brand icons |
+| `sync-edge-shared.mjs` | Copies self-contained `src/core` files the hosted hub's Edge Functions run (`supabase/functions/_shared/`); `test/github-events.test.ts` fails when a copy drifts |
 | `verify-adapters.mjs` | Drives every installed agent CLI through a real turn |
 | `verify-permissions.mjs` | The bypass / auto / always-ask matrix, per CLI |
 | `verify-approvals.mjs` | "Always ask" approvals end to end with a real Claude |

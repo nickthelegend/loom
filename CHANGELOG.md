@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Loom Teams, Phase 6: land in turn, hear it now
+
+- **6 more design decisions** (D79–D84), settled with the owner.
+- **The landing train:** on a repo with no merge queue, Land queues a goal in its
+  lanes and Loom merges it on its turn: fresh main in, the fast tests, a push,
+  green checks on that commit, then `gh pr merge --squash`. The slot is a team-hub
+  lease on `.loom/landing/<lane>` held as a hard zone, so every hub (in-memory,
+  `loom hub`, hosted SQL) arbitrates it with no new API. Waiting goals show
+  **queued** and go as soon as the lane frees. A red check on its turn hands the
+  lane on, and the goal rejoins when it's green. Repos with a merge queue land as
+  before.
+- **Lanes:** `landing.lanes` in `loom.team.json` are path scopes; goals in
+  different lanes land at the same time.
+- **GitHub webhooks into the hub, no App needed:** `loom hub` takes
+  `POST /github/webhook/:teamId`, checks `X-Hub-Signature-256` against the team's
+  secret, and posts PR, check, review and deploy events to the feed.
+  `loom team webhook [--install] [--rotate]` sets it up. The hosted hub gets a
+  `github-webhook` Edge Function and `supabase/migrations/0009_phase6.sql`
+  (deployment pending).
+- **Polling and webhooks agree:** one mapping (`src/core/github-events.ts`) gives
+  both the same dedupe keys, so a fact is posted once. Failing checks are now one
+  feed event per check and commit, and `gh pr list` polling reads `headRefOid`.
+- **Faster fixes:** a check result or merge for one of your goal PRs makes your
+  daemon look at it immediately, not at the next 30-second poll.
+- **UI:** a `queued` landing chip (desktop and phone), and feed lines for the
+  train and for reviews that arrive by webhook.
+
 ## [0.2.0] — 2026-09-19
 
 Loom Teams: five phases, 78 design decisions, several people and their agents on

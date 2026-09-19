@@ -72,6 +72,43 @@ Deliver goals as PRs (`git.delivery: "pr"`). Your daemon then watches them:
 `loom team landing` lists goal PRs, and teammates' goals that need someone:
 `loom team adopt <pr>` takes one over and hands it back when it's green.
 
+### Phase 6: landing in turn, and hearing GitHub at once
+
+**No merge queue? Land still lands one at a time.** On a repo without GitHub's
+merge queue, Land joins Loom's landing train. Each goal waits for its lane,
+then takes its turn: fresh main merged in, the fast tests, a push, green checks
+on that exact commit, then Loom merges it (`gh pr merge --squash`). The next goal
+in the lane goes after that, on top of it. A goal in the queue shows **queued**
+("waiting behind bob's goal in lane api"). If a check fails on its turn, the lane
+moves on to the next goal, and yours rejoins by itself once it's green again.
+
+Lanes are path scopes. Goals in different lanes land at the same time; a goal
+that touches two lanes waits for both. With no lanes, everything shares `main`.
+
+```jsonc
+// loom.team.json
+{ "landing": { "fastTest": "npm test -- --changed",
+               "lanes": { "web": ["web/**"], "api": ["api/**", "db/**"] } } }
+```
+
+With a merge queue on the branch, Land works as in Phase 4: GitHub's queue does
+this job.
+
+**Webhooks: CI results the moment they happen.** Without them, Loom learns
+about PRs and checks by polling `gh` (every 30–60 s). A repo webhook pushes them
+to the hub instead, and your daemon reacts to a failed check or a merge right
+away. Team owners set it up once per repo:
+
+```bash
+loom team webhook                     # prints the payload URL and the secret
+loom team webhook --install           # or creates the webhook with gh (needs repo admin)
+loom team webhook --rotate            # new secret; update the repo's webhook after
+```
+
+A self-hosted hub must be reachable from GitHub for this (a public host or a
+tunnel). The hosted hub receives webhooks through a Supabase Edge Function.
+Polling keeps running either way, and nothing shows up twice.
+
 ## 6. Runners (Phase 5)
 
 A runner is your own always-on Loom (a VPS, a home server, a container) that

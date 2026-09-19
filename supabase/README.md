@@ -14,6 +14,7 @@ deploys to Loom's own project or to any Supabase project you run (D1 in
 | `0006_landing.sql` | Landing feed events: landed, needs someone, adopted, returned, flaky (Phase 4) |
 | `0007_runners.sql` | Runners and the job queue with atomic claims (Phase 5) |
 | `0008_key_version_conflict.sql` | A stale key-version write answers 409 instead of hanging |
+| `0009_phase6.sql` | Landing-train feed events; per-team GitHub webhook secrets and the webhook ingest (Phase 6) |
 
 **The hub never reads content.** Goal and task titles, memory text and job
 payloads are sealed to the team key before they leave a member's machine. The
@@ -35,6 +36,24 @@ done
 ```
 
 They're idempotent: re-running one is safe.
+
+## Edge Functions
+
+`functions/github-webhook` receives GitHub repo webhooks for the hosted hub
+(Phase 6, D83). It checks each delivery's `X-Hub-Signature-256` against the
+team's secret, maps it with `functions/_shared/github-events.ts` (a copy of
+`src/core/github-events.ts`; refresh it with `node scripts/sync-edge-shared.mjs`),
+and appends the events through `github_webhook_ingest`. Deploy it with a
+Supabase access token:
+
+```bash
+supabase functions deploy github-webhook --no-verify-jwt --project-ref <ref>
+```
+
+`--no-verify-jwt` because GitHub sends no Supabase token; the webhook signature
+is the check. The payload URL is
+`https://<ref>.supabase.co/functions/v1/github-webhook/<team id>`, which
+`loom team webhook` prints with the secret.
 
 ## Sign-in
 
