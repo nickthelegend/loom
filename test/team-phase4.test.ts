@@ -385,11 +385,17 @@ describe("Phase 4: land safely", () => {
     expect(run.landing!.review).toMatchObject({ overridden: "checked by hand", overriddenSha: sha });
 
     // It lands with a high finding — and the owner's decision stands.
+    // One review per goal at a time: a call made while another is in flight
+    // returns without asking anyone, so keep asking until this one really runs.
     reviewGate = { wait: Promise.resolve(), high: true };
-    await L("alice").review(run, sha);
+    const asked = reviews.length;
+    for (let i = 0; i < 40 && reviews.length === asked; i++) {
+      await L("alice").review(run, sha);
+      if (reviews.length > asked) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
     reviewGate = null;
-
-    expect(reviews.length).toBeGreaterThan(0); // the reviewer really ran
+    expect(reviews.length).toBeGreaterThan(asked); // this test's review, not someone else's
     expect(run.landing!.review).toMatchObject({ state: "failure", high: 1, overridden: "checked by hand", overriddenSha: sha });
     // the status ends where the owner put it, not at the review's "reviewing…"
     expect(forSha().at(-1)).toMatchObject({ state: "success" });
