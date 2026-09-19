@@ -491,7 +491,8 @@ detects at least two roles.
 | `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |
 | `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch · stop it · remove its worktrees |
 | `loom hub [--host --port --secret]` | Run a self-hosted Team Hub for your team |
-| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; membership and key rotation |
+| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|landing\|doctor\|adopt\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; landing goal PRs; membership and key rotation |
+| `loom land [runId]` | Land a goal's PR: fresh main in, fast tests, push, merge when GitHub's rules pass |
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
 | `loom subtasks` | Subtasks running right now |
@@ -804,7 +805,7 @@ Everything is stored in `~/.loom/prompts.json` and never leaves the machine.
 
 ## Teams — see each other's agents
 
-Five people, each with their own agents, on one repo. **Phases 1, 2 and 3 are built.** Phase 1:
+Five people, each with their own agents, on one repo. **Phases 1 to 4 are built.** Phase 1:
 teammates see each other's live agents and goals, and a team feed collects goals,
 plans, PRs and CI in one place. Content is end-to-end encrypted to the team, so
 the hub can't read goal titles.
@@ -880,9 +881,49 @@ loom team brain resolve <keep> <drop> "why"
 loom team brain trust <id>          # an untrusted memory is fine: share it
 ```
 
-The researched architecture (51 decisions, a 5-phase plan) is in
-**[docs/teams-architecture.md](docs/teams-architecture.md)**. Next is Phase 4:
-landing safely, with one PR per goal through a merge queue.
+**Phase 4 (land safely) is built too:**
+- **CI comes back to the owner.** Your daemon watches your goal PRs. A failing
+  required check is rerun once; if it passes, it's labelled flaky and no agent
+  touches it. A real failure's log goes to the goal's orchestrator, which fixes
+  it and pushes to the same PR — at most 2 attempts, then your phone buzzes.
+- **A second opinion from another vendor.** An agent from a different vendor
+  than the goal's authors reviews each goal PR (on open and after each fix) and
+  posts a `loom/review` check that fails only on high-severity findings. It
+  comments; it never approves.
+- **Land.** One click (or `loom land`) merges fresh main into the goal, runs the
+  team's fast tests, pushes, and asks GitHub to merge when approvals and checks
+  pass. A conflict gets one agent attempt; a conflict in a hard zone goes to you.
+- **Stacks, Adopt, budgets.** Big goals can land as a stack of PRs
+  (`"delivery": {"stack": "auto"}`). When your goal is stuck and you're offline,
+  a teammate can adopt it, get it green on your branch, and hand it back. Goals
+  and members can have budgets, and the team view rolls up cost per member, per
+  goal and per landed PR.
+- **Doctor.** `loom team doctor` checks your repo for merge-queue traps
+  (workflows that don't run on `merge_group`, no required checks) and offers a
+  fix PR. It never changes repo settings.
+
+```bash
+loom team landing           # your goal PRs, and teammates' goals that need someone
+loom land                   # land the goal PR
+loom team adopt 123         # take a stuck teammate goal and make it green
+loom team doctor            # merge-queue setup check (add "fix" to open the PR)
+```
+
+```jsonc
+// loom.team.json — Phase 4 additions
+{ "landing": { "fastTest": "npm test -- --changed", "timeoutMin": 10, "autoFixAttempts": 2 },
+  "review": { "enabled": true, "maxRuns": 3 },
+  "delivery": { "protected": ["main"], "stack": "auto" },
+  "budgets": { "perGoalUsd": 15, "perMemberDailyUsd": 60 } }
+```
+
+**Hosted hub.** `loom team signin` with no URL signs in to hosted Loom Teams with
+your GitHub account; `loom team signin http://host:7430` still uses a
+self-hosted `loom hub`.
+
+The researched architecture (66 decisions, a 5-phase plan) is in
+**[docs/teams-architecture.md](docs/teams-architecture.md)**. Phase 5 (optional
+cloud sandboxes, deploys and release notes) is what's left.
 
 ## Loom Cloud — your agents from any network
 

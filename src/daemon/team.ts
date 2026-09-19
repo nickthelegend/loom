@@ -50,17 +50,27 @@ import {
   type TeamRole,
 } from "../core/team-hub.js";
 import { HttpHubClient, hubSignIn } from "../hub/client.js";
+import { hostedSignIn, openInBrowser, SupabaseHubClient, type HostedSession } from "../hub/supabase-client.js";
+import { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } from "../core/hosted.js";
 import type { LoomEvent } from "../types.js";
 import type { ProjectRuntime } from "./runtime.js";
+import { Landing, type Exec } from "./landing.js";
 import { TeamBrain } from "./team-brain.js";
 import { TeamCoordinator } from "./team-coordinator.js";
+import { rollupCosts } from "../core/team-landing.js";
 
 // ---------------------------------------------------------------------------
 // Local state
 // ---------------------------------------------------------------------------
 
 interface TeamState {
-  hub?: { url: string; token: string; github: string; userId: string };
+  /**
+   * The hub session. Self-hosted: `url` is the `loom hub` URL, `token` its
+   * session token. Hosted: `url` is `supabase:<project url>`, `token` the
+   * current Supabase refresh token (it rotates — every refresh is written
+   * back), `key` the project's publishable key.
+   */
+  hub?: { url: string; token: string; github: string; userId: string; key?: string };
   device?: DeviceKeys & { id?: string };
   teams: Record<string, { name: string; role: TeamRole; keys: TeamKey[] }>;
 }
@@ -125,6 +135,9 @@ export interface TeamLinkHost {
   hubFactory?: (url: string, token: string) => HubClient;
   /** Where team.json lives; defaults to ~/.loom/team.json. Tests run two members in one process. */
   statePath?: string;
+  /** Tests swap `gh` (and friends) for the landing flow (Phase 4). */
+  landingExec?: Exec;
+  landingRerunSettleMs?: number;
 }
 
 interface TeamView {
@@ -150,6 +163,7 @@ export class TeamLink {
   private logSubs = new Map<string, () => void>(); // projectId → log unsubscribe
   private coordinators = new Map<string, TeamCoordinator>(); // projectId → coordinator (Phase 2)
   private brains = new Map<string, TeamBrain>(); // projectId → team brain (Phase 3)
+  private landings = new Map<string, Landing>(); // projectId → goal PRs on their way to main (Phase 4)
   private started = false;
 
   constructor(private host: TeamLinkHost) {
@@ -178,6 +192,7 @@ export class TeamLink {
     this.logSubs.clear();
     for (const c of this.coordinators.values()) c.stop();
     for (const b of this.brains.values()) b.stop();
+    for (const l of this.landings.values()) l.stop();
     // Say goodbye rather than let teammates wait out the TTL.
     await this.clearAllPresence().catch(() => {});
     this.started = false;
@@ -188,12 +203,41 @@ export class TeamLink {
     return this.hubClient;
   }
 
-  private makeClient(url: string, token: string): HubClient {
-    return this.host.hubFactory ? this.host.hubFactory(url, token) : new HttpHubClient(url, token);
+  private makeClient(url: string, token: string, key?: string): HubClient {
+    if (this.host.hubFactory) return this.host.hubFactory(url, token);
+    const supabaseUrl = hostedSupabaseUrl(url);
+    if (supabaseUrl === null) return new HttpHubClient(url, token);
+    return new SupabaseHubClient({
+      supabaseUrl,
+      publishableKey: key || publishableKeyFor(supabaseUrl),
+      refreshToken: token,
+      onSession: (s) => this.persistHostedSession(hostedHubUrl(supabaseUrl), s.refreshToken),
+    });
   }
 
-  /** Sign in to a hub as a GitHub login (defaults to the local `gh` user). */
+  /** Refresh tokens rotate: the one in team.json must always be the newest, or the next start signs us out. */
+  private persistHostedSession(url: string, refreshToken: string): void {
+    const h = this.state.hub;
+    if (!h || h.url !== url || h.token === refreshToken) return;
+    h.token = refreshToken;
+    writeState(this.file, this.state);
+  }
+
+  /** Swap the hub client, closing a hosted one we replace (its refresh timer would race the new one's). */
+  private setHubClient(client: HubClient): void {
+    const old = this.hubClient;
+    this.hubClient = client;
+    if (old && old !== client && old instanceof SupabaseHubClient) void old.close();
+  }
+
+  /**
+   * Sign in to a hub. Hosted (no URL, "hosted", or `supabase:<url>`): GitHub
+   * OAuth in the browser, or a refresh token from a CLI that already did it.
+   * Self-hosted: as a GitHub login (defaults to the local `gh` user).
+   */
   async signIn(url: string, opts: { github?: string; secret?: string; token?: string } = {}): Promise<void> {
+    const supabaseUrl = hostedSupabaseUrl(url);
+    if (supabaseUrl !== null) return this.signInHosted(supabaseUrl, opts.token);
     const github = opts.github || (await run("gh", ["api", "user", "-q", ".login"]).then((s) => s.trim()).catch(() => ""));
     if (!github) throw new Error("which GitHub account? pass --github <login> (or sign in to gh)");
     let token = opts.token;
@@ -207,7 +251,44 @@ export class TeamLink {
     if (!userId) userId = (await client.me()).id;
     this.state = { ...this.state, hub: { url: url.replace(/\/$/, ""), token, github: github.toLowerCase(), userId } };
     writeState(this.file, this.state);
-    this.hubClient = client;
+    this.setHubClient(client);
+    for (const rt of this.host.runtimes()) rt.memberLogin = this.state.hub!.github;
+    await this.ensureDevice();
+  }
+
+  /** The hosted hub (D65): a Supabase session from GitHub OAuth, kept as its refresh token. */
+  private async signInHosted(supabaseUrl: string, refreshToken?: string): Promise<void> {
+    const url = hostedHubUrl(supabaseUrl);
+    const publishableKey = publishableKeyFor(supabaseUrl);
+    let client: HubClient;
+    let session: HostedSession | null = null;
+    if (this.host.hubFactory) {
+      if (!refreshToken) throw new Error("hosted sign-in needs a browser; tests pass a token");
+      client = this.host.hubFactory(url, refreshToken);
+    } else {
+      session = refreshToken
+        ? null
+        : await hostedSignIn({
+            supabaseUrl,
+            publishableKey,
+            openBrowser: (u) => {
+              logbook.info("team", "opening GitHub sign-in in your browser", u);
+              openInBrowser(u);
+            },
+          });
+      client = new SupabaseHubClient({
+        supabaseUrl,
+        publishableKey,
+        ...(session ? { session } : { refreshToken: refreshToken! }),
+        onSession: (s) => this.persistHostedSession(url, s.refreshToken),
+      });
+    }
+    const me = await client.me();
+    // me() restored (and maybe refreshed) the session: keep the newest refresh token
+    const token = client instanceof SupabaseHubClient ? (client.session()?.refreshToken ?? refreshToken!) : refreshToken!;
+    this.state = { ...this.state, hub: { url, token, github: me.github.toLowerCase(), userId: me.id, key: publishableKey } };
+    writeState(this.file, this.state);
+    this.setHubClient(client);
     for (const rt of this.host.runtimes()) rt.memberLogin = this.state.hub!.github;
     await this.ensureDevice();
   }
@@ -230,7 +311,11 @@ export class TeamLink {
   async connect(): Promise<void> {
     const h = this.state.hub;
     if (!h) return;
-    this.hubClient = this.makeClient(h.url, h.token);
+    // A hosted client already holds the live session (its refresh token may be
+    // newer than any we'd rebuild from): keep it rather than race it.
+    const cur = this.hubClient;
+    const keep = cur instanceof SupabaseHubClient && hostedSupabaseUrl(h.url) === cur.supabaseUrl && !this.host.hubFactory;
+    if (!keep) this.setHubClient(this.makeClient(h.url, h.token, h.key));
     await this.ensureDevice();
     const teams = await this.hub().teams();
     // Forget teams we were removed from; learn roles and any new key versions.
@@ -305,6 +390,13 @@ export class TeamLink {
           c.onTeamEvent(e.event);
         } catch {
           /* one project's coordinator never breaks the feed */
+        }
+      }
+      for (const l of this.landings.values()) {
+        try {
+          l.onTeamEvent(e.event);
+        } catch {
+          /* nor does its landing */
         }
       }
       if (v.feed.length > 500) v.feed.splice(0, v.feed.length - 500);
@@ -500,7 +592,29 @@ export class TeamLink {
     this.coordinatorFor(rt);
     const brain = this.brainFor(rt);
     if (this.hubClient) void brain.sync().catch(() => {});
+    this.landingFor(rt).start();
     if (this.state.hub) this.watchRuntimes();
+  }
+
+  /** Phase 4: the project's goal PRs — checks, fixes, review, landing, adopt. */
+  landingFor(rt: ProjectRuntime): Landing {
+    let l = this.landings.get(rt.info.id);
+    if (!l) {
+      l = new Landing(rt, {
+        hub: () => this.hubClient,
+        deviceId: () => this.state.device?.id ?? null,
+        github: () => this.state.hub?.github ?? null,
+        share: (r) => (this.hubClient ? this.teamFor(r) : Promise.resolve(null)),
+        keys: (teamId) => this.state.teams[teamId]?.keys ?? [],
+        feed: (teamId) => this.views.get(teamId)?.feed ?? [],
+        presence: (teamId) => [...(this.views.get(teamId)?.presence.values() ?? [])],
+        policy: () => this.coordinatorFor(rt).teamPolicy(),
+        ...(this.host.landingExec ? { exec: this.host.landingExec } : {}),
+        ...(this.host.landingRerunSettleMs !== undefined ? { rerunSettleMs: this.host.landingRerunSettleMs } : {}),
+      });
+      this.landings.set(rt.info.id, l);
+    }
+    return l;
   }
 
   /** Phase 2: the project's team coordinator, created once and handed to its orchestra. */
@@ -575,6 +689,8 @@ export class TeamLink {
       runId: p.runId,
       status: p.status,
       ...(run ? { orchestrator: run.orchestrator.agent, workers: run.workers, tasks: run.tasks.length, branch: run.branch } : {}),
+      // what the goal cost, for the team's rollups (D64)
+      ...(run && type === "goal_finished" ? { costUsd: Math.round(run.costUsd * 100) / 100 } : {}),
       ...(p.prUrl ? { prUrl: p.prUrl } : {}),
       ...(phase === "plan_written" ? { dir: p.dir } : {}),
     };
@@ -640,6 +756,7 @@ export class TeamLink {
           presence: v ? [...v.presence.values()].filter((p) => Date.now() - p.ts < 45_000).map((p) => this.decryptPresence(id, p)) : [],
           feed: v ? v.feed.slice(-100).map((e) => this.decryptFeed(id, e)) : [],
           leases: v ? [...v.leases.values()].map((l) => this.decryptLease(id, l)) : [],
+          costs: v ? rollupCosts(v.feed) : null,
         };
       }),
     };

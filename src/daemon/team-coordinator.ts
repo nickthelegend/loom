@@ -16,9 +16,10 @@ import { execFile } from "node:child_process";
 
 import { logbook } from "../core/logbook.js";
 import { notify } from "../core/notify.js";
-import type { Admission, OrchestraCoordinator, OrchestraRun, OrchestraTask } from "../core/orchestra.js";
+import { isTerminal, type Admission, type OrchestraCoordinator, type OrchestraRun, type OrchestraTask } from "../core/orchestra.js";
 import { openFromTeam, sealForTeam, type TeamKey } from "../core/team-crypto.js";
 import type { FeedEvent, FeedIn, HubClient, Lease, Presence } from "../core/team-hub.js";
+import { spentToday } from "../core/team-landing.js";
 import { covered, overlap, scopeOf, zoneOf } from "../core/team-leases.js";
 import { agentAllowed, isProtected, loadPolicy, type TeamPolicy } from "../core/team-policy.js";
 import type { ProjectRuntime } from "./runtime.js";
@@ -74,7 +75,9 @@ export class TeamCoordinator implements OrchestraCoordinator {
   // ── policy (D37–D39) ──
 
   async teamPolicy(): Promise<TeamPolicy | null> {
-    if (!(await this.ctx.share(this.rt))) return null;
+    const share = await this.ctx.share(this.rt);
+    this.lastShare = share;
+    if (!share) return null;
     if (!this.policy || Date.now() - this.policy.at > POLICY_TTL_MS) {
       const p = await loadPolicy(this.rt.info.dir);
       this.policy = { ...p, at: Date.now() };
@@ -89,6 +92,31 @@ export class TeamCoordinator implements OrchestraCoordinator {
 
   isProtected(branch: string): boolean {
     return this.policy ? isProtected(this.policy, branch) : false;
+  }
+
+  private lastShare: { teamId: string; repo: string } | null = null;
+
+  // ── budgets and delivery shape (Phase 4: D59, D64) ──
+  // Synchronous reads of the cached policy: the landing manager's tick keeps it fresh.
+
+  goalBudgetUsd(): number | null {
+    return this.lastShare ? (this.policy?.budgets.perGoalUsd ?? null) : null;
+  }
+
+  stackMode(): "auto" | "off" {
+    return this.lastShare ? (this.policy?.delivery.stack ?? "off") : "off";
+  }
+
+  /** D64: a member past their daily budget starts no new goals (running ones finish). */
+  canStart(): string | null {
+    const cap = this.lastShare ? this.policy?.budgets.perMemberDailyUsd : null;
+    const me = this.ctx.github();
+    if (!cap || !me || !this.lastShare) return null;
+    const running = this.rt.orchestra.list().filter((r) => !isTerminal(r.status)).map((r) => r.costUsd);
+    const spent = spentToday(this.ctx.feed(this.lastShare.teamId), me, running);
+    return spent >= cap
+      ? `you've spent $${spent.toFixed(2)} of your $${cap.toFixed(2)} daily budget on this team (loom.team.json budgets.perMemberDailyUsd) — new goals start tomorrow, or raise the cap in a reviewed PR`
+      : null;
   }
 
   // ── admission ──
@@ -130,7 +158,9 @@ export class TeamCoordinator implements OrchestraCoordinator {
 
     const tracked = await this.tracked(run.dir);
     const scope = scopeOf(task.touches, tracked);
-    const rivals = (await hub.leases(share.teamId, share.repo)).filter((l) => !l.stale && l.runId !== run.id);
+    // An adopted goal (D63) works on the owner's goal itself: its leases aren't a rival's.
+    const own = new Set([run.id, ...(run.from?.ownerRunId ? [run.from.ownerRunId] : [])]);
+    const rivals = (await hub.leases(share.teamId, share.repo)).filter((l) => !l.stale && !own.has(l.runId));
     const zone = zoneOf(scope, policy.hardZones);
     const zoneHolder = zone ? rivals.find((l) => zoneOf(l, [zone]) === zone) : undefined;
     if (zone && zoneHolder) {

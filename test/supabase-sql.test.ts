@@ -75,6 +75,7 @@ async function freePort(): Promise<number> {
 
 const ALICE = "00000000-0000-4000-8000-00000000a11c";
 const BOB = "00000000-0000-4000-8000-000000000b0b";
+const CAROL = "00000000-0000-4000-8000-0000000ca201";
 
 beforeAll(async () => {
   if (!hasPg) return;
@@ -106,12 +107,20 @@ beforeAll(async () => {
     grant usage on schema public, auth, extensions to anon, authenticated;
     grant execute on function auth.uid() to anon, authenticated;
   `);
-  for (const m of ["0001_app_opens.sql", "0002_teams.sql", "0003_team_leases.sql", "0004_team_memories.sql"]) {
+  for (const m of [
+    "0001_app_opens.sql",
+    "0002_teams.sql",
+    "0003_team_leases.sql",
+    "0004_team_memories.sql",
+    "0005_hosted_hub.sql",
+    "0006_landing.sql",
+  ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
   psql(`insert into auth.users (id, raw_user_meta_data) values
     ('${ALICE}', '{"user_name":"Alice","full_name":"Alice A"}'),
-    ('${BOB}', '{"user_name":"bob"}');`);
+    ('${BOB}', '{"user_name":"bob"}'),
+    ('${CAROL}', '{"user_name":"carol"}');`);
 }, 60_000);
 
 afterAll(async () => {
@@ -129,7 +138,7 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
   let bobDev = "";
 
   it("creates profiles from GitHub sign-up metadata", () => {
-    expect(psql("select github from public.profiles order by github;")).toBe("alice\nbob");
+    expect(psql("select github from public.profiles order by github;")).toBe("alice\nbob\ncarol");
   });
 
   it("the creator owns the team; invites are single-use", () => {
@@ -242,6 +251,13 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
     expect(asUser(BOB, `select (public.append_feed('${team}', '{"type":"canon_proposed","repo":"acme/app","meta":{"ids":["mem2"]}}')).id is not null;`)).toBe("t");
   });
 
+  it("members can post the Phase 4 landing events, and nothing made up (D53, D55, D63, D64)", () => {
+    for (const t of ["goal_landed", "goal_needs_someone", "goal_adopted", "goal_returned", "check_flaky"]) {
+      expect(asUser(BOB, `select (public.append_feed('${team}', '{"type":"${t}","repo":"acme/app","meta":{"pr":7}}')).id is not null;`)).toBe("t");
+    }
+    expect(fails(() => asUser(BOB, `select public.append_feed('${team}', '{"type":"merged_by_agent","meta":{}}');`))).toMatch(/can't post/);
+  });
+
   it("feed dedupes by key; removal is announced, then the member is cut off", () => {
     const post = `select coalesce(id::text, 'deduped') from public.append_feed('${team}', '{"type":"pr_opened","repo":"acme/app","meta":{"n":7},"dedupeKey":"gh:acme/app#7:opened"}');`;
     expect(asUser(BOB, post)).toMatch(/^\d+$/);
@@ -256,5 +272,67 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
     expect(types.endsWith("pr_opened,member_left")).toBe(true);
     // and their leases went with them
     expect(asUser(ALICE, `select count(*) from public.leases where team_id = '${team}' and user_id = '${BOB}';`)).toBe("0");
+  });
+});
+
+describe.skipIf(!hasPg)("hosted Team Hub SQL, 0005 (extend_lease, team_member_list)", () => {
+  let team = "";
+  let aliceDev = "";
+  let bobDev = "";
+  const claim = (user: string, dev: string, run: string, globs: string, files: string, prefixes: string) =>
+    JSON.parse(asUser(user, `select public.claim_lease('${team}', '{"deviceId":"${dev}","repo":"acme/web","runId":"${run}","taskId":"t1","globs":${globs},"files":${files},"prefixes":${prefixes},"hardZones":["db/migrations/**"]}');`));
+  const extend = (user: string, lease: string, globs: string, files: string, prefixes: string) =>
+    JSON.parse(asUser(user, `select public.extend_lease('${team}', '${lease}', '{"globs":${globs},"files":${files},"prefixes":${prefixes}}', '["db/migrations/**"]');`));
+
+  beforeAll(() => {
+    if (!hasPg) return;
+    team = asUser(ALICE, "select id from public.create_team('Web');");
+    aliceDev = asUser(ALICE, "select id from public.register_device('mac', 'sealA', 'signA');");
+    bobDev = asUser(BOB, "select id from public.register_device('mbp', 'sealB', 'signB');");
+    const invite = JSON.parse(asUser(ALICE, `select public.create_invite('${team}', 3600);`)).invite;
+    asUser(BOB, `select public.redeem_invite('${invite}');`);
+    asUser(ALICE, `select public.share_repo('${team}', 'acme/web');`);
+  });
+
+  it("widens your own lease, reports overlaps on the new part, and refuses a held hard zone (D31, D33)", () => {
+    const a = claim(ALICE, aliceDev, "w1", '["src/ui/**"]', '["src/ui/app.ts"]', '["src/ui/"]');
+    claim(BOB, bobDev, "w2", '["src/api/**"]', '["src/api/server.ts"]', '["src/api/"]');
+    claim(BOB, bobDev, "w3", '["db/migrations/**"]', '[]', '["db/migrations/"]');
+    const wide = extend(ALICE, a.lease.id, '["src/api/server.ts","src/ui/**"]', '["src/api/server.ts"]', '["src/api/server.ts"]');
+    expect(wide.lease.id).toBe(a.lease.id);
+    expect(wide.lease.globs).toEqual(["src/ui/**", "src/api/server.ts"]); // union, first-seen order
+    expect(wide.lease.files).toEqual(["src/ui/app.ts", "src/api/server.ts"]);
+    expect(wide.lease.prefixes).toEqual(["src/ui/", "src/api/server.ts"]);
+    expect(wide.overlaps).toHaveLength(1);
+    expect(wide.overlaps[0].lease.run_id).toBe("w2");
+    expect(wide.overlaps[0].paths).toEqual(["src/api/server.ts"]);
+    expect(wide.blockedBy).toBeUndefined();
+    // a held hard zone refuses, and the lease stays as it was
+    const z = extend(ALICE, a.lease.id, '["db/**"]', '[]', '["db/"]');
+    expect(z.lease).toBeNull();
+    expect(z.blockedBy).toMatchObject({ zone: "db/migrations/**", lease: { run_id: "w3" } });
+    expect(asUser(ALICE, `select array_to_string(globs, ',') from public.leases where id = '${a.lease.id}';`)).toBe("src/ui/**,src/api/server.ts");
+    // once the holder is gone, the widening lands
+    asUser(BOB, `select public.release_leases('${team}', 'w3', 'merged');`);
+    expect(extend(ALICE, a.lease.id, '["db/**"]', '[]', '["db/"]').lease.prefixes).toContain("db/");
+  });
+
+  it("only the lease's owner can widen it; non-members are refused", () => {
+    const b = claim(BOB, bobDev, "w4", '["docs/**"]', '[]', '["docs/"]');
+    expect(fails(() => extend(ALICE, b.lease.id, '["x/**"]', '[]', '["x/"]'))).toMatch(/isn't yours/);
+    expect(fails(() => extend(CAROL, b.lease.id, '["x/**"]', '[]', '["x/"]'))).toMatch(/not a member/);
+    expect(fails(() => extend(BOB, "00000000-0000-4000-8000-000000000000", '["x/**"]', '[]', '["x/"]'))).toMatch(/isn't yours/);
+    expect(fails(() => psql(`select public.extend_lease('${team}', '${b.lease.id}', '{}', '[]');`, { as: "anon" }))).toMatch(
+      /permission denied/,
+    );
+  });
+
+  it("team_member_list: members with logins, roles and devices, for members only", () => {
+    const list = JSON.parse(asUser(BOB, `select public.team_member_list('${team}');`));
+    expect(list.map((m: { user: { github: string }; role: string }) => `${m.user.github}:${m.role}`)).toEqual(["alice:owner", "bob:member"]);
+    expect(list[0].user).toEqual({ id: ALICE, github: "alice", name: "Alice A" });
+    expect(list[1].devices[0]).toMatchObject({ id: bobDev, userId: BOB, label: "mbp", sealPub: "sealB", signPub: "signB" });
+    expect(typeof list[0].joinedAt).toBe("number");
+    expect(fails(() => asUser(CAROL, `select public.team_member_list('${team}');`))).toMatch(/not a member/);
   });
 });

@@ -201,6 +201,23 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/brain/${action}`, body);
   }
 
+  /** Goal PRs on their way to main, and teammates' goals to adopt (Phase 4). */
+  landing(id: string, opts: { poll?: boolean } = {}): Promise<{ goals: Array<Record<string, unknown>>; adoptable: Array<Record<string, unknown>> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/team/landing${opts.poll ? "?poll=1" : ""}`);
+  }
+
+  landingAction(id: string, action: string, body: Record<string, unknown> = {}): Promise<{ result: unknown; goals: Array<Record<string, unknown>> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/landing/${action}`, body);
+  }
+
+  teamDoctor(id: string): Promise<{ repo: string | null; branch: string; findings: Array<{ level: string; what: string; fix?: string }>; fixable: string[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/team/doctor`);
+  }
+
+  teamDoctorFix(id: string): Promise<{ prUrl: string | null; files: string[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/doctor/fix`, {});
+  }
+
   // ── Loom Cloud (daemon/relay.ts) ──
 
   cloud(): Promise<Record<string, unknown>> {

@@ -12,8 +12,13 @@
  *     "permissions": { "ceiling": "auto", "bypassRequiresPlan": true },
  *     "agents": { "allow": ["claude-code", "codex", "antigravity-cli"] },
  *     "delivery": { "protected": ["main", "release/*"] },
- *     "orchestra": { "maxParallelPerMember": 6, "teamMaxConcurrentAgents": 20 }
+ *     "orchestra": { "maxParallelPerMember": 6, "teamMaxConcurrentAgents": 20 },
+ *     "landing": { "fastTest": "npm test -- --changed", "timeoutMin": 10, "autoFixAttempts": 2 },
+ *     "review": { "enabled": true, "maxRuns": 3 },
+ *     "budgets": { "perGoalUsd": 15, "perMemberDailyUsd": 60 }
  *   }
+ *
+ * Phase 4 (D56–D64) adds landing, review, stacks (`delivery.stack`) and budgets.
  */
 
 import { execFile } from "node:child_process";
@@ -27,16 +32,22 @@ export interface TeamPolicy {
   hardZones: string[];
   permissions: { ceiling: PermissionMode; bypassRequiresPlan: boolean };
   agents: { allow: string[] | null }; // null = any agent
-  delivery: { protected: string[] };
+  delivery: { protected: string[]; stack: "auto" | "off" };
   orchestra: { maxParallelPerMember: number | null; teamMaxConcurrentAgents: number | null };
+  landing: { fastTest: string | null; timeoutMin: number; autoFixAttempts: number };
+  review: { enabled: boolean; maxRuns: number };
+  budgets: { perGoalUsd: number | null; perMemberDailyUsd: number | null };
 }
 
 export const OPEN_POLICY: TeamPolicy = {
   hardZones: [],
   permissions: { ceiling: "bypass", bypassRequiresPlan: false },
   agents: { allow: null },
-  delivery: { protected: [] },
+  delivery: { protected: [], stack: "off" },
   orchestra: { maxParallelPerMember: null, teamMaxConcurrentAgents: null },
+  landing: { fastTest: null, timeoutMin: 10, autoFixAttempts: 2 },
+  review: { enabled: true, maxRuns: 3 },
+  budgets: { perGoalUsd: null, perMemberDailyUsd: null },
 };
 
 const RANK: Record<PermissionMode, number> = { ask: 0, auto: 1, bypass: 2 };
@@ -50,6 +61,16 @@ function posInt(v: unknown): number | null {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
+function posNum(v: unknown): number | null {
+  const n = Number(v);
+  return v !== null && v !== undefined && Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function intIn(v: unknown, lo: number, hi: number, dflt: number): number {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= lo && n <= hi ? n : dflt;
+}
+
 /** Parse a policy file leniently: unknown keys ignored, bad values fall back to open. */
 export function parsePolicy(raw: unknown): TeamPolicy {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, Record<string, unknown> | unknown>;
@@ -59,15 +80,25 @@ export function parsePolicy(raw: unknown): TeamPolicy {
   const allow = Array.isArray(agents.allow) ? strs(agents.allow) : null;
   const orch = (o.orchestra ?? {}) as Record<string, unknown>;
   const del = (o.delivery ?? {}) as Record<string, unknown>;
+  const land = (o.landing ?? {}) as Record<string, unknown>;
+  const rev = (o.review ?? {}) as Record<string, unknown>;
+  const bud = (o.budgets ?? {}) as Record<string, unknown>;
   return {
     hardZones: strs(o.hardZones),
     permissions: { ceiling, bypassRequiresPlan: perm.bypassRequiresPlan === true },
     agents: { allow },
-    delivery: { protected: strs(del.protected) },
+    delivery: { protected: strs(del.protected), stack: del.stack === "auto" ? "auto" : "off" },
     orchestra: {
       maxParallelPerMember: posInt(orch.maxParallelPerMember),
       teamMaxConcurrentAgents: posInt(orch.teamMaxConcurrentAgents),
     },
+    landing: {
+      fastTest: typeof land.fastTest === "string" && land.fastTest.trim() ? land.fastTest.trim().slice(0, 500) : null,
+      timeoutMin: intIn(land.timeoutMin, 1, 120, 10),
+      autoFixAttempts: intIn(land.autoFixAttempts, 0, 5, 2),
+    },
+    review: { enabled: rev.enabled !== false, maxRuns: intIn(rev.maxRuns, 0, 10, 3) },
+    budgets: { perGoalUsd: posNum(bud.perGoalUsd), perMemberDailyUsd: posNum(bud.perMemberDailyUsd) },
   };
 }
 
@@ -88,10 +119,25 @@ export function stricter(base: TeamPolicy, local: TeamPolicy): TeamPolicy {
       bypassRequiresPlan: base.permissions.bypassRequiresPlan || local.permissions.bypassRequiresPlan,
     },
     agents: { allow },
-    delivery: { protected: [...new Set([...base.delivery.protected, ...local.delivery.protected])] },
+    delivery: {
+      protected: [...new Set([...base.delivery.protected, ...local.delivery.protected])],
+      // stacking is a delivery shape, not a safety rule: the reviewed file decides
+      stack: base.delivery.stack,
+    },
     orchestra: {
       maxParallelPerMember: minN(base.orchestra.maxParallelPerMember, local.orchestra.maxParallelPerMember),
       teamMaxConcurrentAgents: minN(base.orchestra.teamMaxConcurrentAgents, local.orchestra.teamMaxConcurrentAgents),
+    },
+    landing: {
+      // a local file may add a fast test the team didn't require, never drop one
+      fastTest: base.landing.fastTest ?? local.landing.fastTest,
+      timeoutMin: base.landing.timeoutMin,
+      autoFixAttempts: Math.min(base.landing.autoFixAttempts, local.landing.autoFixAttempts),
+    },
+    review: { enabled: base.review.enabled || local.review.enabled, maxRuns: base.review.maxRuns },
+    budgets: {
+      perGoalUsd: minN(base.budgets.perGoalUsd, local.budgets.perGoalUsd),
+      perMemberDailyUsd: minN(base.budgets.perMemberDailyUsd, local.budgets.perMemberDailyUsd),
     },
   };
 }

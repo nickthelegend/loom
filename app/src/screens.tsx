@@ -66,6 +66,7 @@ import { OrchestraView } from "./orchestra";
 import { ObservatoryView } from "./observatory";
 import { ToolsView } from "./tools";
 import { TeamBrainView, useBrainSummary } from "./team-brain";
+import { TeamLandingView, useLandingSummary } from "./team-landing";
 import { useStt } from "./stt";
 import { T, radii, spacing, usd } from "./theme";
 
@@ -715,7 +716,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "tasks" | "changes" | "tools";
+type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "landing" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -729,6 +730,8 @@ const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "ask", label: "Ask", accent: T.primary },
   // only while the repo is shared with a team (see visibleTabs below)
   { key: "brain", label: "Team brain", accent: T.ok },
+  // Phase 4: goal PRs on their way to main; shown with a team or once there are any
+  { key: "landing", label: "Landing", accent: T.warn },
   { key: "tasks", label: "Tasks" },
   { key: "changes", label: "Changes" },
   { key: "tools", label: "Tools" },
@@ -774,6 +777,8 @@ export function ProjectScreen(props: {
   const lastId = useRef(0);
   // Loom Teams Phase 3: the team brain's inbox count, for the tab badge.
   const brain = useBrainSummary(creds, props.project.id);
+  // Phase 4: goal PRs that need you + teammates' goals that need someone.
+  const landing = useLandingSummary(creds, props.project.id, orchPulse.n);
   const listRef = useRef<FlatList<LoomEvent>>(null);
 
   // Voice input: dictation appends to whatever is already typed.
@@ -1040,48 +1045,55 @@ export function ProjectScreen(props: {
           style={{ flexGrow: 0 }}
           contentContainerStyle={{ paddingHorizontal: spacing.md, gap: spacing.lg, alignItems: "stretch" }}
         >
-          {TABS.filter(
-            (t) => t.key !== "brain" || tab === "brain" || (brain.summary.shared && !brain.summary.hidden),
-          ).map((t) => (
-            <TouchableOpacity
-              key={t.key}
-              onPress={() => setTab(t.key)}
-              activeOpacity={0.7}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: tab === t.key }}
-              style={{
-                justifyContent: "center",
-                minHeight: 44,
-                borderBottomWidth: 2,
-                borderBottomColor: tab === t.key ? (t.accent ?? T.dim) : "transparent",
-                marginBottom: -1,
-              }}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                <Text style={{ color: tab === t.key ? T.text : T.dim, fontWeight: "600", fontSize: 13 }}>
-                  {t.label}
-                </Text>
-                {t.key === "brain" && brain.summary.inbox > 0 ? (
-                  <View
-                    accessibilityLabel={`${brain.summary.inbox} to review`}
-                    style={{
-                      minWidth: 17,
-                      height: 17,
-                      paddingHorizontal: 4,
-                      borderRadius: radii.pill,
-                      backgroundColor: T.warn,
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Text style={{ color: T.onBright, fontSize: 10, fontWeight: "700" }}>
-                      {brain.summary.inbox > 99 ? "99+" : brain.summary.inbox}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-            </TouchableOpacity>
-          ))}
+          {TABS.filter((t) => {
+            if (t.key === tab) return true;
+            if (t.key === "brain") return brain.summary.shared && !brain.summary.hidden;
+            if (t.key === "landing")
+              return !landing.summary.hidden && (brain.summary.shared || landing.summary.goals > 0 || landing.summary.count > 0);
+            return true;
+          }).map((t) => {
+            const count = t.key === "brain" ? brain.summary.inbox : t.key === "landing" ? landing.summary.count : 0;
+            return (
+              <TouchableOpacity
+                key={t.key}
+                onPress={() => setTab(t.key)}
+                activeOpacity={0.7}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: tab === t.key }}
+                style={{
+                  justifyContent: "center",
+                  minHeight: 44,
+                  borderBottomWidth: 2,
+                  borderBottomColor: tab === t.key ? (t.accent ?? T.dim) : "transparent",
+                  marginBottom: -1,
+                }}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                  <Text style={{ color: tab === t.key ? T.text : T.dim, fontWeight: "600", fontSize: 13 }}>
+                    {t.label}
+                  </Text>
+                  {count > 0 ? (
+                    <View
+                      accessibilityLabel={t.key === "landing" ? `${count} need you` : `${count} to review`}
+                      style={{
+                        minWidth: 17,
+                        height: 17,
+                        paddingHorizontal: 4,
+                        borderRadius: radii.pill,
+                        backgroundColor: T.warn,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text style={{ color: T.onBright, fontSize: 10, fontWeight: "700" }}>
+                        {count > 99 ? "99+" : count}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
         {routeActive && (
           <View style={{ paddingHorizontal: spacing.md, paddingBottom: 6 }}>
@@ -1328,6 +1340,14 @@ export function ProjectScreen(props: {
         <AskView creds={creds} project={project} />
       ) : tab === "brain" ? (
         <TeamBrainView creds={creds} project={project} onChanged={brain.update} />
+      ) : tab === "landing" ? (
+        <TeamLandingView
+          creds={creds}
+          project={project}
+          teamId={brain.summary.teamId}
+          pulse={orchPulse.n}
+          onChanged={landing.update}
+        />
       ) : tab === "tools" ? (
         <ToolsView
           creds={creds}

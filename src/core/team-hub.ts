@@ -175,7 +175,13 @@ export type FeedType =
   | "zone_waiting"
   | "conflict_predicted"
   | "memory_resolved"
-  | "canon_proposed";
+  | "canon_proposed"
+  // Phase 4: land safely
+  | "goal_landed"
+  | "goal_needs_someone"
+  | "goal_adopted"
+  | "goal_returned"
+  | "check_flaky";
 
 export interface FeedIn {
   repo?: string;

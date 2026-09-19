@@ -89,7 +89,7 @@ import { grokBin } from "../adapters/grok.js";
 import { APP_HTML, APP_MANIFEST } from "./app-page.js";
 import { GEIST_WOFF2 } from "./geist-font.js";
 import { AuthManager, bearerToken } from "./auth.js";
-import { PUSH_KINDS, pushContent, sendExpoPush } from "./push.js";
+import { pushContent, sendExpoPush, shouldPush } from "./push.js";
 import {
   BudgetExceededError,
   LoomAskTimeoutError,
@@ -949,8 +949,12 @@ export class LoomDaemon {
         try {
           let out: unknown = { ok: true };
           if (action === "signin") {
-            if (!b.hub) throw new Error("missing hub url");
-            await this.team.signIn(b.hub, { ...(b.github ? { github: b.github } : {}), ...(b.secret ? { secret: b.secret } : {}) });
+            // no hub = the hosted one; `token` is a hosted refresh token from a CLI that ran the browser sign-in
+            await this.team.signIn(b.hub ?? "", {
+              ...(b.github ? { github: b.github } : {}),
+              ...(b.secret ? { secret: b.secret } : {}),
+              ...(b.token ? { token: b.token } : {}),
+            });
             await this.team.connect();
           } else if (action === "create") out = await this.team.createTeam(String(b.name ?? ""));
           else if (action === "invite") out = await this.team.invite(b.teamId || undefined);
@@ -2588,6 +2592,67 @@ export class LoomDaemon {
       }),
     );
 
+    // ---- landing, per project (Phase 4, daemon/landing.ts) ----
+    // Goal PRs on their way to main — checks, fixes, review, Land — plus
+    // teammates' goals waiting for someone to adopt them (D52–D63).
+    app.get(
+      "/api/projects/:id/team/landing",
+      withRuntime(async (rt, req, res) => {
+        const l = this.team.landingFor(rt);
+        if (req.query.poll === "1") await l.tick().catch(() => {});
+        res.json({ goals: l.status(), adoptable: await l.adoptable().catch(() => []) });
+      }),
+    );
+    app.post(
+      "/api/projects/:id/team/landing/:action",
+      withRuntime(async (rt, req, res) => {
+        const l = this.team.landingFor(rt);
+        const b = (req.body ?? {}) as Record<string, unknown>;
+        const runId = String(b.runId ?? "");
+        try {
+          let out: unknown = { ok: true };
+          const action = String(req.params.action);
+          if (action === "land") out = await l.land(runId);
+          else if (action === "poll") await l.tick();
+          else if (action === "review") {
+            const run = rt.orchestra.get(runId);
+            if (!run?.landing?.headSha) throw new Error("that goal has no PR commit to review yet");
+            await l.review(run, run.landing.headSha);
+            out = run.landing;
+          } else if (action === "override") out = await l.overrideReview(runId, String(b.reason ?? ""));
+          else if (action === "adopt") out = await l.adopt(Number(b.pr), {
+            ...(b.orchestrator ? { orchestrator: String(b.orchestrator) } : {}),
+            ...(Array.isArray(b.workers) ? { workers: b.workers.map(String) } : {}),
+          });
+          else return void res.status(404).json({ error: `unknown landing action "${action}"` });
+          res.json({ result: out, goals: l.status() });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+    // Repo setup for landing safely (D62): report, and a fix PR on request.
+    app.get(
+      "/api/projects/:id/team/doctor",
+      withRuntime(async (rt, _req, res) => {
+        try {
+          res.json(await this.team.landingFor(rt).doctor());
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+    app.post(
+      "/api/projects/:id/team/doctor/fix",
+      withRuntime(async (rt, _req, res) => {
+        try {
+          res.json(await this.team.landingFor(rt).doctorFix());
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+
     // ---- permissions & approvals (core/permissions.ts, core/approvals.ts) ---
     app.get("/api/permissions", (_req, res) => {
       res.json({ profiles: PERMISSION_PROFILES });
@@ -3618,7 +3683,7 @@ export class LoomDaemon {
 
   /** Fire-and-notify to phones. Route hops stay quiet; the outcome pushes. */
   private maybePush(projectId: string, event: LoomEvent): void {
-    if (!PUSH_KINDS.has(event.kind)) return;
+    if (!shouldPush(event)) return;
     if (event.kind === "run_complete" && this.runtimes.get(projectId)?.routes.isActive()) {
       return; // a pipeline in flight buzzes once at the end, not per hop
     }
