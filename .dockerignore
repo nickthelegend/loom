@@ -1,0 +1,13 @@
+# Dockerfile.runner only needs package*.json, tsconfig and src — keep the build
+# context small (node_modules and videos alone are gigabytes).
+node_modules
+dist
+app
+desktop
+hardware
+videos
+docs
+test
+.git
+.env
+.env.*
