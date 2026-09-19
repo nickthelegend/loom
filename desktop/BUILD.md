@@ -44,11 +44,27 @@ the daemon starts and every agent turn dies at launch.
 
 ## Signing and notarization
 
-Unsigned by default. electron-builder skips signing when it finds no
-`Developer ID Application` identity rather than failing the build, so the DMG is
-real but macOS will ask for a right-click → Open on first launch.
+**macOS, without a Developer ID (the default).** `build/adhoc-sign.cjs` runs
+after packaging and ad-hoc signs the whole bundle with the hardened runtime and
+`build/entitlements.mac.plist`. Without it, electron-builder skips signing and
+the app keeps only the Electron binary's linker signature: an invalid bundle
+signature, identifier "Electron", and a downloaded copy macOS may call
+"damaged". Ad-hoc signed, it verifies (`codesign --verify --deep --strict`),
+identifies as `dev.loom.desktop`, and opens with right-click → Open the first
+time. With a real identity the hook steps aside.
 
-To sign and notarize, set these in the environment and rebuild:
+**Android.** Release APKs are built with `assembleRelease` (which bundles the
+JavaScript) and signed with the project's release key (RSA 4096, alias `loom`,
+certificate SHA-256
+`48:02:6C:20:D9:77:50:02:20:80:A9:D2:C3:3F:3B:B3:FB:4E:C9:FE:E3:B4:B8:16:88:D9:5D:FB:C4:47:DA:B8`).
+The key lives in the repo's Actions secrets (`ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`); its master copy is outside
+the repo on the maintainer's machine. **Losing it means the next APK can't
+update installed ones** — keep a backup in a password manager.
+
+**macOS with a Developer ID.** To sign and notarize for real (no right-click
+needed), set these in the environment — locally, or as Actions secrets passed to
+the release workflow's desktop job — and rebuild:
 
 ```sh
 CSC_LINK=/path/to/DeveloperID.p12
