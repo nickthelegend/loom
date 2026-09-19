@@ -1,0 +1,87 @@
+{
+  "D1": {
+    "status": "PASS",
+    "evidence": "create/rename/delete ok; main rename(empty)→400, delete main→400",
+    "at": "2026-09-19T20:04:18.045Z"
+  },
+  "D7": {
+    "status": "PASS",
+    "evidence": "400 {\"error\":\"missing text\"}",
+    "at": "2026-09-19T20:04:18.047Z"
+  },
+  "D2": {
+    "status": "PASS",
+    "evidence": "claude-code → \"PONG\" · turn_cost events=1 usd=0.0225 tokens=null",
+    "at": "2026-09-19T20:04:23.110Z"
+  },
+  "D3": {
+    "status": "PASS",
+    "evidence": "codex → \"PONG\" · turn_cost events=0 usd=0.0000 tokens=null",
+    "at": "2026-09-19T20:06:37.648Z"
+  },
+  "D4a": {
+    "status": "PASS",
+    "evidence": "opencode → \"PONG\" · turn_cost events=0 usd=0.0000 tokens=null",
+    "at": "2026-09-19T20:06:46.907Z"
+  },
+  "D4b": {
+    "status": "PASS",
+    "evidence": "grok-code → \"PONG\" · turn_cost events=0 usd=0.0000 tokens=null",
+    "at": "2026-09-19T20:06:56.524Z"
+  },
+  "D4c": {
+    "status": "PASS",
+    "evidence": "antigravity-cli → \"PONG\" · turn_cost events=0 usd=0.0000 tokens=null",
+    "at": "2026-09-19T20:07:09.343Z"
+  },
+  "D5": {
+    "status": "PASS",
+    "evidence": "claude noted ZEBRA5048; handoff → holder codex; codex answered \"ZEBRA5048\"",
+    "at": "2026-09-19T20:04:37.734Z"
+  },
+  "D6": {
+    "status": "PASS",
+    "evidence": "interrupt {\"interrupted\":\"claude-code\"}; idle after 1637ms; events message:,run_complete:",
+    "at": "2026-09-19T20:07:12.509Z"
+  },
+  "D9": {
+    "status": "PASS",
+    "evidence": "second send → {\"agentId\":\"claude-code\",\"queued\":1}; replies in order",
+    "at": "2026-09-19T20:15:47.868Z"
+  },
+  "D8": {
+    "status": "PASS",
+    "evidence": "no failed turn to retry → 400 \"no failed turn to retry\" (the honest answer); missing agentId → 400",
+    "at": "2026-09-19T20:05:08.102Z"
+  },
+  "E1": {
+    "status": "PASS",
+    "evidence": "add/update/forget; history 298 bytes",
+    "at": "2026-09-19T20:11:14.809Z"
+  },
+  "E3": {
+    "status": "PASS",
+    "evidence": "1 conflict(s): negation",
+    "at": "2026-09-19T20:11:14.815Z"
+  },
+  "E4": {
+    "status": "PASS",
+    "evidence": "event 27 + memory",
+    "at": "2026-09-19T20:05:08.125Z"
+  },
+  "E5": {
+    "status": "PASS",
+    "evidence": "imported on open (1 import event(s), CLAUDE.md); manual re-import → {\"imported\":0,\"sources\":[]}",
+    "at": "2026-09-19T20:11:14.823Z"
+  },
+  "E2": {
+    "status": "PASS",
+    "evidence": "memory \"port 8416\" → handoff brief → codex answered \"8416\"",
+    "at": "2026-09-19T20:17:42.277Z"
+  },
+  "A8": {
+    "status": "PASS",
+    "evidence": "after restart: 2 chats, 6 memories, 29 events, prompts equal",
+    "at": "2026-09-19T20:05:08.435Z"
+  }
+}

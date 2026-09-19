@@ -945,6 +945,12 @@ export class OrchestraEngine {
       // Reopen: more work on the same integration branch.
       run.status = "reviewing";
       run.summary = undefined;
+    } else if (run.status === "waiting_human") {
+      // Answered: the orchestrator is working on it now. Leaving the status at
+      // waiting_human showed "waiting on you" for the whole turn, and any
+      // client polling for the next wait returned at once (found by e2e F5).
+      run.status = "reviewing";
+      this.emit(run, "reviewing", { round: run.round + 1 });
     }
     this.save(run);
     if (this.orchestratorBusy.has(run.id)) {
@@ -1678,6 +1684,12 @@ export class OrchestraEngine {
           );
         }
       }
+      if (t.status === "needs_input") {
+        lines.push(
+          `${t.id} is waiting on an answer. Reply to it with a \`send\` action (task "${t.id}") — it resumes in the same worktree — ` +
+            `or, if only the human can answer, use \`ask\`.`,
+        );
+      }
       if (t.error) lines.push(`Error: ${t.error}`);
       if (t.result) lines.push(`Worker report:\n${t.result}`);
       t.reported = true;
@@ -1761,6 +1773,21 @@ export class OrchestraEngine {
       task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
       const turnError = this.lastError.get(key);
       this.lastError.delete(key);
+      const asked = this.workerQuestion.get(key);
+      this.workerQuestion.delete(key);
+      if (asked) {
+        // Its work so far stays in the worktree, unmerged; the orchestrator
+        // answers with a `send` (the task resumes there) or asks the human.
+        task.status = "needs_input";
+        task.result = `The worker stopped to ask: ${asked}${reply ? `\n\nWhat it said before asking:\n${task.result}` : ""}`;
+        task.finishedAt = Date.now();
+        task.reported = false;
+        this.save(run);
+        this.emit(run, "task", { task: taskSummary(task) });
+        this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+        this.schedule(run);
+        return;
+      }
       if (turnError) task.error = turnError;
 
       // A turn that errored and said nothing died — it is not "done", and a
@@ -1791,6 +1818,8 @@ export class OrchestraEngine {
   }
 
   private lastError = new Map<string, string>();
+  /** `${run}/${task}` → the question a worker stopped to ask mid-turn. */
+  private workerQuestion = new Map<string, string>();
 
   private async integrate(run: OrchestraRun, task: OrchestraTask): Promise<void> {
     const dir = task.dir!;
@@ -1835,6 +1864,14 @@ export class OrchestraEngine {
         this.turnText.set(key, `${prev}\n${String(p.text ?? "")}`.slice(-20_000));
       }
       if (e.kind === "error") this.lastError.set(key, String(p.message ?? "error"));
+      // A worker that stops mid-turn to ask (opencode's question tool, a CLI's
+      // permission prompt) would wait forever for an answer nobody gives — the
+      // goal hung (found by the real-product e2e run). Take the question up to
+      // the orchestrator: stop the turn, and the task ends as needs_input.
+      if (e.kind === "needs_input" && !key.endsWith("/orch") && !this.workerQuestion.has(key)) {
+        this.workerQuestion.set(key, String(p.question ?? "the worker needs input").slice(0, 500));
+        void agent.interrupt().catch(() => {});
+      }
       if (e.kind === "file_edit" && !key.endsWith("/orch") && typeof p.path === "string") {
         const task = run.tasks.find((t) => `${run.id}/${t.id}` === key);
         if (task) this.host.coordinator?.()?.onEdit?.(run, task, p.path);

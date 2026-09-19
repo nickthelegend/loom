@@ -894,9 +894,12 @@ export class ProjectRuntime {
       }
       // Any terminal event stops the stale-session clock — a turn that ended in
       // an error is over, not hung.
-      if (e.kind === "run_complete" || e.kind === "error" ||
-          (e.kind === "status" && p.state === "interrupted")) {
+      const turnOver = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted");
+      if (turnOver) {
         this.busySince.delete(agent.id);
+        // Stop means stop: an interrupt drops what was queued behind the turn.
+        if (e.kind === "status" && p.state === "interrupted") this.promptQueue.delete(agent.id);
+        else queueMicrotask(() => void this.drainQueue(agent.id));
       }
       const event = this.log.append({
         kind: e.kind,
@@ -2002,11 +2005,29 @@ export class ProjectRuntime {
     }
   }
 
+  /** Prompts sent while their agent was mid-turn, run in order when it's free. */
+  private promptQueue = new Map<string, Array<{ text: string; opts: { source?: "user" | "route"; chat?: string; plan?: boolean } }>>();
+
+  private async drainQueue(agentId: string): Promise<void> {
+    if (this.closed || this.busySince.has(agentId)) return;
+    const q = this.promptQueue.get(agentId);
+    const next = q?.shift();
+    if (!q?.length) this.promptQueue.delete(agentId);
+    if (!next) return;
+    try {
+      await this.sendMessage(next.text, agentId, { ...next.opts, fromQueue: true });
+    } catch (err) {
+      // refused now (budget, quarantine, the baton moved): say so rather than drop it silently
+      this.appendIfOpen({ kind: "error", agentId, payload: { message: `queued prompt not sent: ${err instanceof Error ? err.message : String(err)}` } });
+      void this.drainQueue(agentId);
+    }
+  }
+
   async sendMessage(
     text: string,
     agentId?: string,
-    opts: { source?: "user" | "route"; chat?: string; plan?: boolean } = {},
-  ): Promise<{ agentId: string }> {
+    opts: { source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean } = {},
+  ): Promise<{ agentId: string; queued?: number }> {
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;
     let target = agentId ?? this.validHolder() ?? this.defaultAdapterId();
@@ -2031,17 +2052,31 @@ export class ProjectRuntime {
       throw new NotHolderError(target, holder);
     }
 
+    // The agent is mid-turn: queue the prompt, in order, and run it when the
+    // turn ends. It used to go straight to the adapter, which threw "busy" into
+    // an error event — the prompt was lost while the send had said 200.
+    if (!opts.fromQueue && this.busySince.has(target)) {
+      const q = this.promptQueue.get(target) ?? [];
+      q.push({ text, opts: { ...opts } });
+      this.promptQueue.set(target, q);
+      this.log.append({ kind: "message", chat, payload: { text, author: source === "route" ? "loom" : "user", queued: q.length } });
+      return { agentId: target, queued: q.length };
+    }
+
     // A user reply to a paused route's question resumes the route.
     if (source === "user") this.routes.onUserMessage(target);
 
     // everything this turn produces belongs to the chat you sent from
     this.turnChat.set(target, chat);
     this.busySince.set(target, Date.now()); // the stale-session clock starts
-    this.log.append({
-      kind: "message",
-      chat,
-      payload: { text, author: source === "route" ? "loom" : "user" },
-    });
+    // a queued prompt was logged when it was queued
+    if (!opts.fromQueue) {
+      this.log.append({
+        kind: "message",
+        chat,
+        payload: { text, author: source === "route" ? "loom" : "user" },
+      });
+    }
     await this.ensureStarted(target);
 
     const pendingBriefing = this.consumePendingBriefing(target);
@@ -2554,7 +2589,12 @@ export class ProjectRuntime {
     const enriched = parts.join("\n\n---\n");
     await target.injectMemory(enriched);
     writeMemoryFile(this.info.dir, to, enriched); // idempotent with default impl
-    this.pendingBriefings.set(to, buildBriefing(input));
+    // The memory file above is only read by CLIs that look for it; most don't
+    // (codex, opencode, grok and agy never did), so the one briefing every
+    // adapter actually receives — prepended to its next turn — carries the
+    // retrieved brain brief too. Without it, a handoff to codex arrived with
+    // the conversation but none of what the project (or team) had learned.
+    this.pendingBriefings.set(to, [buildBriefing(input), brainBrief].filter(Boolean).join("\n\n"));
     if (rendered.mode === "llm") {
       this.log.append({
         kind: "status",
@@ -2590,6 +2630,10 @@ export class ProjectRuntime {
     const holder = this.validHolder();
     if (!holder) return { interrupted: null };
     const agent = this.agent(holder);
+    // Stop means stop: prompts queued behind this turn don't start after it.
+    const dropped = this.promptQueue.get(holder)?.length ?? 0;
+    this.promptQueue.delete(holder);
+    if (dropped) this.log.append({ kind: "status", agentId: holder, payload: { state: "queue_cleared", dropped } });
     if (isAdapter(agent) && agent.busy()) {
       await agent.interrupt();
       return { interrupted: holder };

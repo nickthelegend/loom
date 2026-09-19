@@ -579,6 +579,18 @@ describe("conflicts", () => {
     expect(facts.filter((c) => c.signal === "same-topic-divergent")).toHaveLength(0);
   });
 
+  it("flags a negation even when the two sentences are nearly identical", async () => {
+    // "we use X" vs "we do not use X" is ≥ .92 similar — it used to be skipped
+    // as a near-duplicate, leaving both contradicting beliefs unflagged.
+    const { findConflicts } = await import("../src/core/brain-index.js");
+    const conflicts = findConflicts([
+      mk2("a", "convention", "We use tabs for indentation in TypeScript files."),
+      mk2("b", "convention", "We do not use tabs for indentation in TypeScript files."),
+    ]);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]!.signal).toBe("negation");
+  });
+
   it("leaves near-duplicates to dedupe, not conflict", async () => {
     const { findConflicts } = await import("../src/core/brain-index.js");
     const conflicts = findConflicts([
