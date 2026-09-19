@@ -245,9 +245,8 @@ describe("web app · the prompt queue", () => {
       const seen = await rest<{ events: Array<{ kind: string; agentId?: string; payload: { text?: string } }> }>("GET", "/events?limit=200");
       return seen.events.some((e) => e.kind === "message" && !e.agentId && e.payload.text === "answering right now");
     }, { timeoutMs: 20_000 });
-    const still = await rest<QueueView>("GET", "/queue");
-    expect(still.queue.map((i) => i.text)).toEqual(["held behind the question"]);
-    expect(still.paused).toBe(true);
+    // answering lifts the hold: what waited behind the question runs next
+    await waitUntil(async () => (await rest<QueueView>("GET", "/queue")).queue.length === 0, { timeoutMs: 30_000 });
     expect(m.errors).toEqual([]);
   }, 60_000);
 

@@ -815,8 +815,8 @@ yours until it's sent:
   never silently discards what you lined up behind it.
 - **A question holds the queue.** If the agent stops to ask you something, the
   next queued prompt would answer a question you never read — so the queue
-  waits, says who asked, and lets you answer (your reply goes out at once) or
-  resume.
+  waits and says who asked. Your reply goes out at once and lifts the hold; a
+  pause you set yourself stays until you resume it.
 - A prompt enters the conversation when it is actually sent, not when it's
   queued, so the thread stays an honest record of what the agent was asked.
 

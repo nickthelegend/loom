@@ -180,6 +180,9 @@ export interface TeamBrainHook {
   context(files: string[]): string;
 }
 
+/** The queue is holding because this agent asked the human something. */
+const questionHold = (agentId: string) => `${agentId} asked you something — answer it, or resume to send what's queued`;
+
 export class ProjectRuntime {
   readonly info: ProjectInfo;
   readonly config: ProjectConfig;
@@ -2069,7 +2072,20 @@ export class ProjectRuntime {
     if (!head || this.queue.paused) return;
     const mine = head.target.kind === "agent" ? head.target.agentId === agentId : head.target.kind === "auto";
     if (!mine) return;
-    this.queue.setPaused(true, `${agentId} asked you something — answer it, or resume to send what's queued`);
+    this.queue.setPaused(true, questionHold(agentId));
+  }
+
+  /**
+   * You answered, so the hold is over.
+   *
+   * Only a hold this agent's own question put there: a queue you paused
+   * yourself stays paused, and so does one stopped mid-turn. Without this, the
+   * next thing you typed while the agent worked would queue behind the held
+   * prompt and sit there, in a queue nothing was going to resume.
+   */
+  private releaseQuestionHold(agentId: string): void {
+    if (!this.queue.paused || this.queue.snapshot().reason !== questionHold(agentId)) return;
+    this.queue.setPaused(false);
   }
 
   private kickQueue(): void {
@@ -2156,14 +2172,20 @@ export class ProjectRuntime {
     // The agent is mid-turn: queue the prompt, in order, and run it when the
     // turn ends. It used to go straight to the adapter, which threw "busy" into
     // an error event — the prompt was lost while the send had said 200.
+    // Answering while the agent is still busy is still answering.
+    if (source === "user") this.releaseQuestionHold(target);
     // It shows in the queue, editable, and enters the thread when it's sent.
     if (!opts.fromQueue && this.busySince.has(target)) {
       const item = this.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source, ...(opts.plan ? { plan: true } : {}) });
       return { agentId: target, queued: this.queue.length, queueId: item.id };
     }
 
-    // A user reply to a paused route's question resumes the route.
-    if (source === "user") this.routes.onUserMessage(target);
+    // A user reply to a paused route's question resumes the route — and to an
+    // agent's own question, the queue it was holding.
+    if (source === "user") {
+      this.routes.onUserMessage(target);
+      this.releaseQuestionHold(target);
+    }
 
     // everything this turn produces belongs to the chat you sent from
     this.turnChat.set(target, chat);

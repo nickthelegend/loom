@@ -155,9 +155,21 @@ describe("prompts sent to a busy agent", () => {
     expect(r.queue.paused).toBe(true);
     expect(r.queue.snapshot().reason).toMatch(/asked you something/);
     expect(replies(r).some((t) => t.includes("unrelated next thing"))).toBe(false);
-    // and answering by hand still goes out at once, past the held queue
+    // and answering by hand goes out at once — and lifts the hold, so what was
+    // waiting behind the question runs after your answer
     await r.sendMessage("use notes.txt", "echo");
     await waitUntil(() => prompts(r).includes("use notes.txt"), { timeoutMs: 10_000 });
+    expect(r.queue.paused).toBe(false);
+    await waitUntil(() => replies(r).some((t) => t.includes("unrelated next thing")), { timeoutMs: 10_000 });
+  });
+
+  it("a hold you put there yourself survives answering", async () => {
+    const r = await open();
+    r.queue.setPaused(true, "you paused the queue");
+    r.enqueue({ text: "not yet", target: { kind: "agent", agentId: "echo" } });
+    await r.sendMessage("meanwhile", "echo");
+    await waitUntil(() => replies(r).some((t) => t.includes("meanwhile")), { timeoutMs: 10_000 });
+    expect(r.queue.paused).toBe(true);
     expect(r.queue.length).toBe(1);
   });
 
