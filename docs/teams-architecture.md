@@ -114,6 +114,22 @@ on them. Later sections implement them.
 | D49 | Where people review | **A Team view in the Brain tab, plus the phone** | Tiers (Canon · Confirmed · Proposed · Mine · Untrusted) plus an Inbox: contradictions, likely duplicates, untrusted. Actions: Promote, Supersede, Merge, Mark trusted, Make private. |
 | D50 | Backfill for a new member or device | **All live memories as a snapshot, then the stream** | Superseded and forgotten memories load only when someone opens history. |
 | D51 | Scope | **Per repo, never across** | Side projects never enter a team brain, and a team brain never leaks into unrelated projects. |
+| **Phase 4: land safely** (settled 2026-09-19) |||
+| D52 | How CI results reach the owner | **The owner's daemon polls its own goal PRs** | Every 30s, `gh pr checks --required` on open goal PRs. No GitHub App needed; the existing feed poll still tells teammates. |
+| D53 | A failing check | **Rerun once, then fix** | `gh run rerun --failed` first; a pass on rerun is labelled flaky, never "fixed" by an agent. A second failure sends the `--log-failed` tail (~200 lines, fenced as untrusted) to the orchestrator, which reopens the goal and routes a fix to the worker owning the files. |
+| D54 | Which checks count | **Required checks only** | Branch-protection-required checks; every failing check when the repo requires none. Optional ones only reach the feed. |
+| D55 | Fix budget | **2 attempts per goal, shared with review findings** | Then the goal waits on a human and the owner's phone is alerted (D25). |
+| D56 | Landing | **The owner clicks Land** | Pushrebase-lite (merge fresh main into the goal branch, fast tests, push), then `gh pr merge --auto --squash`: the queue or GitHub merges when approvals and checks pass. A human triggers it; GitHub enforces the rules. |
+| D57 | Fast tests | **`landing.fastTest` in loom.team.json, else skipped** | With `timeoutMin`. No guessing at commands; CI stays the source of truth. |
+| D58 | A conflict with fresh main | **One agent attempt, then a human** | A merge task for the worker owning the conflicted files; always a human in a hard zone. |
+| D59 | Stacks | **Opt-in: `delivery.stack: "auto"`** | Cut along the integration branch's merge commits in landing order (D17's thresholds), each PR based on the one below; stacks land with the merge method and the next PR is retargeted. |
+| D60 | Who runs the review agent | **The owner's daemon** | A different vendor than the goal's authors, on the diff and PLAN.md, read-only. Posts a COMMENT review (never Approve) and a `loom/review` commit status. |
+| D61 | Review cadence and blocking | **On open and after each fix push, at most 3 per goal** | Only high findings (bug, security, data loss) fail `loom/review`; they go to the orchestrator like a failed check. The owner can override with a logged reason. |
+| D62 | Repo setup | **`loom team doctor` reports and offers a fix PR** | Checks rules (merge queue, required checks, `loom/review`) and `merge_group` triggers; the PR adds `merge_group:`. It never changes repo settings. |
+| D63 | Adopt | **A takeover run on the adopter's machine, handed back when green** | "Make PR #n green" pushes to the same branch; `goal_adopted` / `goal_returned` on the feed make the owner's daemon back off. Offered after the owner is offline 15+ min and the goal needs someone. |
+| D64 | Budgets | **Per-goal cap and per-member daily cap, plus rollups** | `budgets: {perGoalUsd, perMemberDailyUsd}`. A goal over its cap pauses for a human; a member over the daily cap can't start goals. Rollups per member/day, per goal and per landed PR (abandoned goals count), from feed costs. |
+| D65 | Hosted hub sign-in | **GitHub OAuth through Supabase, loopback redirect** | `loom team signin` with no URL uses the hosted hub (its URL and publishable key ship in the build); a URL still means a self-hosted hub. |
+| D66 | Deploys and release notes | **Deferred to Phase 5** | GitHub Environments stay the deploy gate. |
 | **Build approach** |||
 | D27 | Build before a live Supabase exists | **In-memory hub + real migrations** | The hub protocol is tested against an in-memory hub with two real daemons as two members; SQL, RLS and Edge Functions ship ready to deploy. |
 
@@ -534,7 +550,25 @@ The original Phase 3 plan:
 - Untrusted-input tagging; trust-weighted retrieval; the team-context block in
   briefings.
 
-**Phase 4: land safely (2 weeks)**
+**Phase 4: land safely.** Built per D52–D66. Status on 2026-09-19:
+
+| Piece | Status |
+|---|---|
+| Pure decisions (`src/core/team-landing.ts`): check buckets, rerun-then-fix, fenced log tails, cross-vendor reviewer pick, review prompt/parse/verdict, stack cuts, `merge_group` doctor and fixer, cost rollups | ✅ built, tested |
+| Orchestra: landing state per goal, `reopen` for fixes, fixes pushed to the existing PR, stacked delivery along merge commits, adopted runs from a teammate's branch, per-goal budget pause, daily cap at start | ✅ built, tested (budget and a real two-slice stack on a bare origin) |
+| Landing in the daemon (`src/daemon/landing.ts`): 30s poll of own goal PRs, rerun once, flaky label, fix loop (2 attempts), cross-vendor review with `loom/review`, Land (fresh main, fast tests, push, auto-merge), hard-zone conflicts to a human, needs-someone, Adopt and hand-back, doctor + fix PR, phone alerts | ✅ built; two members tested end to end with a fake GitHub |
+| Policy: `landing`, `review`, `delivery.stack`, `budgets` in `loom.team.json` | ✅ built, tested |
+| Feed: `goal_landed`, `goal_needs_someone`, `goal_adopted`, `goal_returned`, `check_flaky`; goal costs on `goal_finished`; rollups in the team view (SQL `0006_landing.sql`) | ✅ built; SQL tested on Postgres and applied to the hosted project |
+| Hosted hub: `SupabaseHubClient` (RPC + Realtime), `extend_lease` (`0005_hosted_hub.sql`), session refresh, `loom team signin` defaults to hosted | ✅ built; live two-member test against the real project passes |
+| GitHub sign-in to the hosted hub (OAuth loopback) | 🔨 built and unit-tested; needs the GitHub OAuth App configured on the project |
+| REST `/api/projects/:id/team/landing[/:action]`, `/team/doctor[/fix]`; CLI `loom land`, `loom team landing \| doctor [fix] \| adopt <pr>` | ✅ built |
+| UI: landing on goal cards, Land, Adopt, doctor, costs (desktop and phone) | 🔨 in progress |
+
+Deferred: deploy status and release notes (D66), CI minutes per goal (needs the
+GitHub App), auto-fix for lower PRs of a stack (a failing lower slice waits on a
+human).
+
+The original Phase 4 plan:
 - Merge-queue integration (`merge_group` doctor check); pushrebase-lite; stacked
   goal PRs.
 - The check relay drives the orchestrator's bounded auto-fix loop; flake

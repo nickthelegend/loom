@@ -2862,6 +2862,49 @@ export class ProjectRuntime {
     return opts;
   }
 
+  /** Adapter kinds usable on this machine: the roster's plus installed CLIs. */
+  usableKinds(): string[] {
+    const roster = this.config.agents.filter((a) => a.enabled !== false && tierForKind(a.kind) === "adapter").map((a) => a.kind);
+    return [...new Set([...roster, ...this.installedKinds])];
+  }
+
+  /**
+   * One question to one agent, outside any thread: the Phase 4 review (D60).
+   * Runs in `dir` (a throwaway directory, so a reviewer that forgets it's
+   * read-only can't touch the project), returns everything it said, and
+   * counts its cost like any turn.
+   */
+  async askAgent(kind: string, dir: string, text: string, opts: { timeoutMs?: number } = {}): Promise<string> {
+    const cfg: AgentConfig = this.config.agents.find((a) => a.kind === kind) ?? { id: `${kind}-review`, kind, role: "reviewer" };
+    const agent = createAgent({ ...cfg, id: `${cfg.id}-review`, options: { ...this.policyOptions(cfg), loomProject: this.info.id } }, dir);
+    if (!isAdapter(agent)) throw new Error(`"${kind}" can't answer questions headless`);
+    let said = "";
+    const off = agent.onEvent((e) => {
+      const p = e.payload as Record<string, unknown>;
+      if (e.kind === "message" && !p.reasoning && p.role !== "user") said += `\n${String(p.text ?? "")}`;
+      if (e.kind === "status" && p.state === "turn_cost") {
+        this.trackCost({ id: -1, ts: Date.now(), kind: e.kind, agentId: agent.id, payload: p } as LoomEvent);
+      }
+    });
+    const timeout = opts.timeoutMs ?? 15 * 60_000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await agent.start();
+      await Promise.race([
+        agent.send({ text }),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${kind} didn't answer within ${Math.round(timeout / 60_000)} min`)), timeout);
+        }),
+      ]);
+      return said.trim();
+    } finally {
+      if (timer) clearTimeout(timer);
+      off();
+      if (agent.busy()) await agent.interrupt().catch(() => {});
+      await agent.stop().catch(() => {});
+    }
+  }
+
   /** Share this project with a team, or record an explicit opt-out (null). */
   setTeam(share: { teamId: string; repo: string } | null): void {
     this.config.team = share ? { teamId: share.teamId, repo: share.repo } : { optOut: true };

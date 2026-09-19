@@ -427,13 +427,19 @@ export function TeamBrainView(props: { creds: Creds; project: Project; onChanged
  * predates the team brain or won't show it to this pairing.
  */
 export function useBrainSummary(creds: Creds, projectId: string) {
-  const [summary, setSummary] = useState<{ shared: boolean; inbox: number; hidden: boolean }>({
+  const [summary, setSummary] = useState<{ shared: boolean; inbox: number; hidden: boolean; teamId: string | null }>({
     shared: false,
     inbox: 0,
     hidden: false,
+    teamId: null,
   });
   const update = useCallback((b: TeamBrain) => {
-    setSummary({ shared: Boolean(b.status?.shared), inbox: b.inbox?.length ?? 0, hidden: false });
+    setSummary({
+      shared: Boolean(b.status?.shared),
+      inbox: b.inbox?.length ?? 0,
+      hidden: false,
+      teamId: b.status?.teamId ?? null,
+    });
   }, []);
   useEffect(() => {
     let live = true;
@@ -448,7 +454,7 @@ export function useBrainSummary(creds: Creds, projectId: string) {
           const st = statusOf(e);
           if (st === 404 || st === 403) {
             gone = true;
-            if (live) setSummary({ shared: false, inbox: 0, hidden: true });
+            if (live) setSummary({ shared: false, inbox: 0, hidden: true, teamId: null });
           }
         });
     };

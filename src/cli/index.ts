@@ -1044,7 +1044,7 @@ function printTeam(t: Record<string, unknown>): void {
 
 program
   .command("team [action] [args...]")
-  .description("Loom Teams: status | signin <hub> | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | remove <github> | leave")
+  .description("Loom Teams: status | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | remove <github> | leave")
   .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")
   .option("--secret <s>", "the hub's join secret")
   .option("--team <id>", "which team, when you're in several")
@@ -1056,7 +1056,24 @@ program
     try {
       if (a === "status") return void printTeam(await client.team());
       if (a === "signin") {
-        if (!arg) throw new Error("which hub? loom team signin <hub-url>");
+        const { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+        const supabaseUrl = hostedSupabaseUrl(arg);
+        if (supabaseUrl !== null) {
+          // The hosted hub: GitHub sign-in in the browser, run here (it can take
+          // minutes); the daemon only receives the resulting session.
+          const { hostedSignIn, openInBrowser } = await import("../hub/supabase-client.js");
+          console.log(pc.dim("signing in to the hosted Loom Team Hub with GitHub…"));
+          const session = await hostedSignIn({
+            supabaseUrl,
+            publishableKey: publishableKeyFor(supabaseUrl),
+            openBrowser: (url) => {
+              console.log(`${pc.dim("  if your browser didn't open:")} ${url}`);
+              openInBrowser(url);
+            },
+          });
+          const out = await client.teamAction("signin", { hub: hostedHubUrl(supabaseUrl), token: session.refreshToken, ...extra });
+          return void printTeam(out.team);
+        }
         const out = await client.teamAction("signin", { hub: arg, ...extra });
         return void printTeam(out.team);
       }
@@ -1146,12 +1163,76 @@ program
         }
         return;
       }
+      if (a === "landing" || a === "doctor" || a === "adopt") {
+        const project = await currentProject(client);
+        if (a === "doctor") {
+          if ((args ?? []).includes("--fix") || arg === "fix") {
+            const out = await client.teamDoctorFix(project.id);
+            console.log(out.prUrl ? `${pc.green("✓")} opened ${out.prUrl} (${out.files.join(", ")})` : pc.dim("nothing to fix in the workflows"));
+            return;
+          }
+          const d = await client.teamDoctor(project.id);
+          console.log(`${pc.bold("landing doctor")}  ${d.repo ?? pc.dim("(no GitHub repo)")} · ${d.branch}`);
+          const icon: Record<string, string> = { ok: pc.green("✓"), warn: pc.yellow("!"), error: pc.red("✗") };
+          for (const f of d.findings) {
+            console.log(`  ${icon[f.level] ?? "·"} ${f.what}`);
+            if (f.fix) console.log(pc.dim(`      ${f.fix}`));
+          }
+          if (d.fixable.length) console.log(pc.dim(`\n  loom team doctor fix — opens a PR adding merge_group to ${d.fixable.join(", ")}`));
+          return;
+        }
+        if (a === "adopt") {
+          const pr = Number(String(arg ?? "").replace(/^#/, ""));
+          if (!pr) throw new Error("which PR? loom team adopt <number>");
+          const out = await client.landingAction(project.id, "adopt", { pr });
+          console.log(`${pc.green("✓")} adopted PR #${pr} — goal ${String((out.result as { id: string }).id)} is making it green; it's handed back when it is`);
+          return;
+        }
+        const v = await client.landing(project.id, { poll: true });
+        if (!v.goals.length && !v.adoptable.length) return void console.log(pc.dim("no goal PRs in flight"));
+        for (const g of v.goals) {
+          const l = g.landing as { pr: number; state: string; fixAttempts: number; reason?: string; review?: { state: string; high: number } ; checks?: { failing: string[]; pending: string[] } };
+          const col = l.state === "green" || l.state === "merged" ? pc.green : l.state === "needs_human" || l.state === "failing" ? pc.red : pc.yellow;
+          console.log(`  ${col(l.state.padEnd(12))} #${l.pr}  ${String(g.goal)}  ${pc.dim(`${String(g.runId)} · fixes ${l.fixAttempts} · $${Number(g.costUsd ?? 0).toFixed(2)}`)}`);
+          if (l.checks?.failing.length) console.log(pc.red(`      failing: ${l.checks.failing.join(", ")}`));
+          if (l.review) console.log(pc.dim(`      review: ${l.review.state}${l.review.high ? ` (${l.review.high} high)` : ""}`));
+          if (l.reason) console.log(pc.yellow(`      ${l.reason}`));
+        }
+        if (v.adoptable.length) {
+          console.log(`\n${pc.bold("needs someone")}`);
+          for (const p of v.adoptable) console.log(`  #${String(p.pr)} ${String(p.owner)} — ${String(p.reason)}  ${pc.dim(`loom team adopt ${String(p.pr)}`)}`);
+        }
+        return;
+      }
       if (a === "leave") {
         await client.teamAction("leave", extra);
         console.log(`${pc.green("✓")} left the team`);
         return;
       }
       throw new Error(`unknown action "${a}"`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("land [runId]")
+  .description("land a goal's PR: fresh main in, fast tests, push, merge when GitHub's rules pass (Loom Teams D56)")
+  .action(async (runId: string | undefined) => {
+    const client = await ensureDaemon();
+    try {
+      const project = await currentProject(client);
+      let id = runId;
+      if (!id) {
+        const v = await client.landing(project.id);
+        const ready = v.goals.filter((g) => !["merged", "closed"].includes(String((g.landing as { state: string }).state)));
+        if (ready.length !== 1) throw new Error(ready.length ? `several goals have PRs — say which: ${ready.map((g) => String(g.runId)).join(", ")}` : "no goal PR to land");
+        id = String(ready[0]!.runId);
+      }
+      const out = await client.landingAction(project.id, "land", { runId: id });
+      const l = out.result as { pr: number; state: string; reason?: string };
+      console.log(l.state === "landing" ? `${pc.green("✓")} PR #${l.pr} will merge when its checks and approvals pass` : `PR #${l.pr}: ${l.state}${l.reason ? ` — ${l.reason}` : ""}`);
     } catch (err) {
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;

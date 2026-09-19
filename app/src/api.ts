@@ -1380,6 +1380,16 @@ export interface TeamView {
   feed: TeamFeedEvent[];
   /** Phase 2; missing from an older daemon. */
   leases?: TeamLease[];
+  /** Phase 4: spend rolled up from the team feed; null/missing when there's no feed yet. */
+  costs?: TeamCosts | null;
+}
+
+/** What the team's goals cost (D64): per member per UTC day, and per landed PR. */
+export interface TeamCosts {
+  byMemberDay: Array<{ member: string; day: string; usd: number; goals: number }>;
+  landed: number;
+  totalUsd: number;
+  perLandedPrUsd: number | null;
 }
 
 export interface TeamStatus {
@@ -1479,6 +1489,87 @@ export const getTeamBrain = (c: Creds, id: string, opts: { sync?: boolean; histo
 /** Every action answers with the brain as it now stands, so the screen never refetches. */
 export const teamBrainAction = <R = unknown>(c: Creds, id: string, action: BrainAction, body: Record<string, unknown> = {}) =>
   api<TeamBrain & { result: R }>(c, `/api/projects/${id}/team/brain/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+// --- Landing (Loom Teams Phase 4) ---------------------------------------------
+
+export type LandingStateName =
+  | "open"
+  | "pending"
+  | "green"
+  | "failing"
+  | "fixing"
+  | "needs_human"
+  | "landing"
+  | "merged"
+  | "closed";
+
+/** A goal PR's journey to main, as the daemon keeps it on the run (core/orchestra.ts). */
+export interface LandingState {
+  pr: number;
+  url: string;
+  state: LandingStateName;
+  /** The PR commit checks and the review ran against; Re-review needs one. */
+  headSha?: string;
+  fixAttempts: number;
+  flaky: string[];
+  checks?: { failing: string[]; pending: string[]; passing: number };
+  reviews: number;
+  review?: {
+    state: "success" | "failure" | "skipped";
+    reviewer: string | null;
+    high: number;
+    findings: number;
+    at?: number;
+    overridden?: string;
+  };
+  /** Why it waits on a human. */
+  reason?: string;
+  landRequested?: boolean;
+  /** A teammate holds this goal right now. */
+  adoptedBy?: string;
+  returned?: boolean;
+  stack?: Array<{ pr: number; url: string; branch: string; base: string; state?: string }>;
+  updatedAt?: number;
+}
+
+export interface LandingGoal {
+  runId: string;
+  goal: string;
+  /** The run's OrchestraStatus; a string so a newer daemon's status still parses. */
+  status: string;
+  costUsd: number;
+  /** This run adopted a teammate's PR. */
+  adopted?: { branch: string; pr: number; url: string; ownerRunId?: string; owner?: string };
+  landing: LandingState;
+}
+
+/** A teammate's goal PR that has waited long enough for someone else to pick it up. */
+export interface AdoptablePr {
+  pr: number;
+  url: string;
+  branch: string;
+  owner: string;
+  ownerRunId?: string;
+  reason: string;
+}
+
+export interface TeamLanding {
+  goals: LandingGoal[];
+  adoptable: AdoptablePr[];
+}
+
+export type LandingAction = "land" | "poll" | "review" | "override" | "adopt";
+
+/** `poll` asks the daemon to check the PRs with the git host first (slower). */
+export const getTeamLanding = (c: Creds, id: string, opts: { poll?: boolean } = {}) =>
+  api<TeamLanding>(c, `/api/projects/${id}/team/landing${opts.poll ? "?poll=1" : ""}`);
+
+/** Every action answers with the goals as they now stand (not `adoptable`). */
+export const teamLandingAction = <R = unknown>(c: Creds, id: string, action: LandingAction, body: Record<string, unknown> = {}) =>
+  api<{ result: R; goals: LandingGoal[] }>(c, `/api/projects/${id}/team/landing/${action}`, {
     method: "POST",
     body: JSON.stringify(body),
   });

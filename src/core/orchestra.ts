@@ -35,6 +35,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { loomHome } from "./registry.js";
+import { cutStack, type MergedTask } from "./team-landing.js";
 import type { Adapter, AgentConfig, ChatInfo, EventKind, GitDelivery, LoomEvent, SendInput } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,9 @@ export interface OrchestraTask {
   files?: string[];
   error?: string;
   costUsd?: number;
+  /** The integration branch's merge commit for this task, and the lines it changed (stacks, D59). */
+  mergeCommit?: string;
+  lines?: number;
   startedAt?: number;
   finishedAt?: number;
   /** Set once the orchestrator has been shown this outcome. */
@@ -143,8 +147,48 @@ export interface OrchestraRun {
   deliveryError?: string;
   /** Team facts for the orchestrator's next review: predicted conflicts, drift (D33, D34). */
   notes?: string[];
+  /** Phase 4: the goal's PR on its way to main — checks, fixes, review, landing. */
+  landing?: LandingState;
+  /** An adopted goal (D63): this run fixes a teammate's PR, starting from and pushing to its branch. */
+  from?: { branch: string; pr: number; url: string; ownerRunId?: string; owner?: string };
+  /** This goal's spending cap in USD (D64), raised each time a human says continue. */
+  budgetUsd?: number;
   costUsd: number;
   createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * A goal PR's journey to main (Loom Teams, Phase 4 — D52–D63). Kept on the
+ * run so it survives restarts and shows wherever the run does.
+ */
+export interface LandingState {
+  pr: number;
+  url: string;
+  state: "open" | "pending" | "green" | "failing" | "fixing" | "needs_human" | "landing" | "merged" | "closed";
+  headSha?: string;
+  /** Fix attempts spent (D55: checks and high review findings share them). */
+  fixAttempts: number;
+  /** `${sha}:${check}` already rerun once (D53). */
+  reruns: string[];
+  /** Checks that failed, then passed on rerun. */
+  flaky: string[];
+  checks?: { failing: string[]; pending: string[]; passing: number };
+  reviews: number;
+  reviewedSha?: string;
+  review?: { state: "success" | "failure" | "skipped"; reviewer: string | null; high: number; findings: number; at: number; overridden?: string };
+  /** Why it waits on a human. */
+  reason?: string;
+  /** The owner clicked Land: keep going (pushrebase-lite, auto-merge) until merged (D56). */
+  landRequested?: boolean;
+  /** One agent attempt at a conflict with fresh main (D58). */
+  conflictTried?: boolean;
+  /** A teammate holds this goal right now (D63). */
+  adoptedBy?: string;
+  /** An adopted goal, handed back to its owner. */
+  returned?: boolean;
+  /** Stacked delivery (D59): the PRs bottom-up; the last is this goal's own branch. */
+  stack?: Array<{ pr: number; url: string; branch: string; base: string; state?: string }>;
   updatedAt: number;
 }
 
@@ -158,6 +202,8 @@ export interface OrchestraStartOptions {
   maxRounds?: number;
   /** Write the plan as markdown specs other agents can read (plans/<run>/). */
   plan?: boolean;
+  /** Adopt (D63): start from a teammate's PR branch and push back to it. */
+  from?: OrchestraRun["from"];
 }
 
 /** What orchestra needs from the project that owns it. */
@@ -204,6 +250,12 @@ export interface OrchestraCoordinator {
   maxParallel?(): number | null;
   /** Protected branches only receive PRs (D38). */
   isProtected?(branch: string): boolean;
+  /** Why this member can't start a goal right now (D64: over the daily budget), or null. */
+  canStart?(): string | null;
+  /** The per-goal budget in USD (D64), or null for none. */
+  goalBudgetUsd?(): number | null;
+  /** Stacked delivery for big goals (D59). */
+  stackMode?(): "auto" | "off";
 }
 
 // ---------------------------------------------------------------------------
@@ -755,6 +807,8 @@ export class OrchestraEngine {
     }
     if (!workers.length) throw new Error("an orchestra needs at least one worker agent");
     this.host.gate(orchCfg.id);
+    const blocked = this.host.coordinator?.()?.canStart?.();
+    if (blocked) throw new Error(blocked);
 
     const dir = this.host.projectDir;
     if (!(await gitOk(["rev-parse", "--is-inside-work-tree"], dir))) {
@@ -768,8 +822,14 @@ export class OrchestraEngine {
         dir,
       );
     }
-    const baseCommit = (await git(["rev-parse", "HEAD"], dir)).trim();
-    const baseBranch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim() || null;
+    let baseCommit = (await git(["rev-parse", "HEAD"], dir)).trim();
+    let baseBranch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir).catch(() => "")).trim() || null;
+    if (opts.from) {
+      // Adopting a teammate's goal: work starts from their pushed branch (D63).
+      await git(["fetch", "-q", "origin", `+refs/heads/${opts.from.branch}:refs/remotes/origin/${opts.from.branch}`], dir);
+      baseCommit = (await git(["rev-parse", `origin/${opts.from.branch}`], dir)).trim();
+      baseBranch = null;
+    }
     const dirty = (await git(["status", "--porcelain"], dir)).trim().length > 0;
 
     const id = `o${Date.now().toString(36)}`;
@@ -801,6 +861,7 @@ export class OrchestraEngine {
         this.host.coordinator?.()?.maxParallel?.() ?? HARD_MAX_PARALLEL,
       ),
       ...(opts.plan ? { plan: true } : {}),
+      ...(opts.from ? { from: opts.from, landing: newLanding(opts.from.pr, opts.from.url) } : {}),
       costUsd: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -868,6 +929,9 @@ export class OrchestraEngine {
     }
     this.host.append({ kind: "message", chat: run.chat, payload: { text: msg, author: "user" } });
     run.question = undefined;
+    // Over its budget (D64): a human saying continue raises the cap by one more budget.
+    const cap = this.goalCap(run);
+    if (cap !== null && run.costUsd >= cap) run.budgetUsd = run.costUsd + (this.host.coordinator?.()?.goalBudgetUsd?.() ?? cap);
     if (run.status === "completed") {
       // Reopen: more work on the same integration branch.
       run.status = "reviewing";
@@ -883,6 +947,87 @@ export class OrchestraEngine {
   }
 
   private pendingHuman = new Map<string, string[]>();
+
+  /**
+   * Put a completed goal back to work (Phase 4): a failed check, a high review
+   * finding, a conflict with fresh main. Same integration branch, same task
+   * worktrees; the orchestrator gets the problem and a fresh round budget.
+   * Whatever landed on the pushed branch meanwhile (an adopter's fix) comes in first.
+   */
+  async reopen(runId: string, text: string, why: string): Promise<OrchestraRun> {
+    const run = this.mustGet(runId);
+    if (run.status !== "completed") throw new Error(`run ${run.id} is ${run.status} — only a completed goal can be reopened`);
+    run.status = "reviewing";
+    run.summary = undefined;
+    run.maxRounds = run.round + 10;
+    this.save(run);
+    this.emit(run, "reopened", { why });
+    await this.pullPushed(run).catch(() => {});
+    this.host.append({ kind: "message", chat: run.chat, payload: { text, author: "loom", orchestra: { runId: run.id, reopened: why } } });
+    void this.orchestratorTurn(run, `${text}\n\n${this.statusReport(run)}`, this.briefingOf(run));
+    return run;
+  }
+
+  /** The orchestrator's standing instructions, for a fresh orchestrator session. */
+  private briefingOf(run: OrchestraRun): string {
+    return orchestratorBriefing({
+      project: this.host.projectName,
+      goal: run.goal,
+      workers: this.workersFor(run).map((w) => ({ id: w.id, kind: w.kind, role: w.role })),
+      maxParallel: run.maxParallel,
+      branch: run.branch,
+      ...(run.plan ? { planDir: planDir(run) } : {}),
+    });
+  }
+
+  /** The branch this goal's PR is on. */
+  prBranch(run: OrchestraRun): string {
+    return run.from?.branch ?? run.branch;
+  }
+
+  /** Bring commits pushed to the goal's PR branch by someone else into the integration branch. */
+  async pullPushed(run: OrchestraRun): Promise<void> {
+    if (!run.delivered?.prUrl && !run.from) return;
+    const b = this.prBranch(run);
+    await this.gitLock.run(async () => {
+      await git(["fetch", "-q", "origin", `+refs/heads/${b}:refs/remotes/origin/${b}`], run.dir);
+      await commitAll(run.dir, `orchestra ${run.id}: orchestrator edits`).catch(() => false);
+      try {
+        await git(["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-edit", "-q", `origin/${b}`], run.dir);
+      } catch (err) {
+        await git(["merge", "--abort"], run.dir).catch(() => {});
+        throw err;
+      }
+    });
+  }
+
+  /** Record where a goal's PR stands (the landing manager owns the transitions). */
+  setLanding(runId: string, patch: Partial<LandingState>): LandingState | undefined {
+    const run = this.runs.get(runId);
+    if (!run?.landing && !(patch.pr && patch.url)) return undefined;
+    if (!run) return undefined;
+    run.landing = { ...(run.landing ?? newLanding(patch.pr!, patch.url!)), ...patch, updatedAt: Date.now() };
+    this.save(run);
+    this.emit(run, "landing", { landing: run.landing });
+    return run.landing;
+  }
+
+  private goalCap(run: OrchestraRun): number | null {
+    return run.budgetUsd ?? this.host.coordinator?.()?.goalBudgetUsd?.() ?? null;
+  }
+
+  /** D64: a goal over its cap stops asking for more work until a human says continue. */
+  private overBudget(run: OrchestraRun): boolean {
+    const cap = this.goalCap(run);
+    if (cap === null || run.costUsd < cap) return false;
+    run.status = "waiting_human";
+    run.question =
+      `This goal has spent $${run.costUsd.toFixed(2)} of its $${cap.toFixed(2)} budget (loom.team.json budgets.perGoalUsd). ` +
+      "Running work finishes its turn; nothing new starts. Reply to continue — that allows one more budget's worth.";
+    this.save(run);
+    this.emit(run, "waiting", { question: run.question, budget: { spent: run.costUsd, cap } });
+    return true;
+  }
 
   /**
    * Merge the integration branch into the project's working tree.
@@ -968,6 +1113,7 @@ export class OrchestraEngine {
 
   private async orchestratorTurn(run: OrchestraRun, text: string, briefing?: string, retry = 0): Promise<void> {
     if (isTerminal(run.status)) return;
+    if (this.overBudget(run)) return;
     if (run.round >= run.maxRounds) {
       return this.finish(run, "failed", `stopped after ${run.maxRounds} orchestrator rounds without "done"`);
     }
@@ -1183,6 +1329,7 @@ export class OrchestraEngine {
 
   private schedule(run: OrchestraRun): void {
     if (run.status !== "running") return;
+    if (this.overBudget(run)) return;
     const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`)).length;
     let slots = run.maxParallel - inFlight;
     let waiting = false;
@@ -1515,6 +1662,9 @@ export class OrchestraEngine {
           run.dir,
         );
         task.status = "done";
+        task.mergeCommit = (await git(["rev-parse", "HEAD"], run.dir)).trim();
+        const stat = await git(["diff", "--shortstat", `${task.mergeCommit}^1`, task.mergeCommit], run.dir).catch(() => "");
+        task.lines = [...stat.matchAll(/(\d+) (?:insertion|deletion)/g)].reduce((n, m) => n + Number(m[1]), 0);
       } catch (err) {
         await git(["merge", "--abort"], run.dir).catch(() => {});
         task.status = "conflict";
@@ -1594,7 +1744,8 @@ export class OrchestraEngine {
       });
     }
     this.host.coordinator?.()?.onRunEnd?.(run);
-    if (status === "completed") await this.deliver(run);
+    // A goal that already has a PR (a fix round, an adopted goal) always goes back to that PR.
+    if (status === "completed") await this.deliver(run, run.from || run.delivered?.prUrl ? "pr" : undefined);
   }
 
   /**
@@ -1603,6 +1754,52 @@ export class OrchestraEngine {
    * A failure here never un-completes the run — the work is safe on its
    * branch — it's reported, and the manual Apply is still there.
    */
+  /**
+   * D59: where a big goal's stack is cut — tasks in the order they merged into
+   * the integration branch, sliced by size (cutStack). Null when unknowable.
+   */
+  private async stackSlices(run: OrchestraRun): Promise<MergedTask[][] | null> {
+    const order = (await git(["rev-list", "--first-parent", "--reverse", `${run.baseCommit}..${run.branch}`], run.dir).catch(() => ""))
+      .split("\n")
+      .filter(Boolean);
+    const merged = run.tasks
+      .filter((t) => t.status === "done" && t.mergeCommit && order.includes(t.mergeCommit))
+      .sort((a, b) => order.indexOf(a.mergeCommit!) - order.indexOf(b.mergeCommit!))
+      .map((t) => ({ id: t.id, commit: t.mergeCommit!, lines: t.lines ?? 0, dependsOn: t.dependsOn }));
+    return merged.length ? cutStack(merged) : null;
+  }
+
+  /**
+   * Push one branch per slice and open a PR for each, each based on the one
+   * below; the top slice is the goal's own branch (so fixes land on it). The
+   * landing manager lands them bottom-up with the merge method.
+   */
+  private async deliverStack(run: OrchestraRun, slices: MergedTask[][]): Promise<string> {
+    const prefix = run.branch.replace(/\/main$/, "");
+    const base = run.baseBranch ?? "main";
+    const stack: NonNullable<LandingState["stack"]> = [];
+    let below = base;
+    for (let i = 0; i < slices.length; i++) {
+      const top = i === slices.length - 1;
+      const branch = top ? run.branch : `${prefix}/stack-${i + 1}`;
+      if (!top) await git(["push", "-q", "-f", "origin", `${slices[i]!.at(-1)!.commit}:refs/heads/${branch}`], run.dir);
+      const ids = slices[i]!.map((t) => t.id);
+      const out = await gh(
+        ["pr", "create", "--head", branch, "--base", below,
+          "--title", `${run.goal.split("\n")[0]!.slice(0, 60)} (${i + 1}/${slices.length})`,
+          "--body", prBody(run, [`Part ${i + 1} of ${slices.length} of a stacked goal — tasks ${ids.join(", ")}. Land bottom-up.`, ""])],
+        this.host.projectDir,
+      );
+      const url = out.match(/https:\/\/\S+/)?.[0] ?? "";
+      stack.push({ pr: Number(/\/pull\/(\d+)/.exec(url)?.[1] ?? 0), url, branch, base: below });
+      below = branch;
+    }
+    const topPr = stack.at(-1)!;
+    run.landing = { ...newLanding(topPr.pr, topPr.url), stack };
+    this.emit(run, "stacked", { stack });
+    return topPr.url;
+  }
+
   async deliver(run: OrchestraRun, mode: GitDelivery = this.host.gitDelivery?.() ?? "none"): Promise<void> {
     if (mode === "none") return;
     // D38: a protected branch only receives PRs, whatever the project setting says.
@@ -1623,24 +1820,28 @@ export class OrchestraEngine {
         run.delivered = { mode, into, ...(pushed ? { pushed } : {}), at: Date.now() };
       } else if (mode === "pr") {
         await this.gitLock.run(() => commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false));
-        await git(["push", "-q", "-u", "origin", `${run.branch}:${run.branch}`], run.dir);
-        const body = [
-          run.summary ?? "",
-          "",
-          "| task | agent | status | files |",
-          "|---|---|---|---|",
-          ...run.tasks.map((t) => `| ${t.id} · ${t.title} | ${t.agent} | ${t.status} | ${t.files?.length ?? 0} |`),
-          "",
-          ...(run.plan ? [`Plan: \`${planDir(run)}/PLAN.md\``, ""] : []),
-          `Orchestrated by Loom · ${run.orchestrator.agent} with ${run.workers.join(", ")}`,
-        ].join("\n");
-        const out = await gh(
-          ["pr", "create", "--head", run.branch, ...(run.baseBranch ? ["--base", run.baseBranch] : []),
-            "--title", run.goal.split("\n")[0]!.slice(0, 70), "--body", body],
-          this.host.projectDir,
-        );
-        const prUrl = out.match(/https:\/\/\S+/)?.[0];
-        run.delivered = { mode, pushed: run.branch, ...(prUrl ? { prUrl } : {}), at: Date.now() };
+        const target = this.prBranch(run);
+        await git(["push", "-q", "-u", "origin", `${run.branch}:${target}`], run.dir);
+        if (run.delivered?.prUrl || run.from) {
+          // A fix to a PR that already exists (Phase 4): the push is the delivery.
+          const prUrl = run.delivered?.prUrl ?? run.from!.url;
+          run.delivered = { mode, pushed: target, prUrl, at: Date.now() };
+        } else {
+          const stack = this.host.coordinator?.()?.stackMode?.() === "auto" ? await this.stackSlices(run) : null;
+          if (stack && stack.length > 1) {
+            run.delivered = { mode, pushed: target, prUrl: await this.deliverStack(run, stack), at: Date.now() };
+          } else {
+            const out = await gh(
+              ["pr", "create", "--head", run.branch, ...(run.baseBranch ? ["--base", run.baseBranch] : []),
+                "--title", run.goal.split("\n")[0]!.slice(0, 70), "--body", prBody(run)],
+              this.host.projectDir,
+            );
+            const prUrl = out.match(/https:\/\/\S+/)?.[0];
+            run.delivered = { mode, pushed: run.branch, ...(prUrl ? { prUrl } : {}), at: Date.now() };
+            const n = Number(/\/pull\/(\d+)/.exec(prUrl ?? "")?.[1]);
+            if (prUrl && n) run.landing = newLanding(n, prUrl);
+          }
+        }
       }
       run.deliveryError = undefined;
       this.save(run);
@@ -1651,6 +1852,26 @@ export class OrchestraEngine {
       this.emit(run, "delivery_failed", { mode, error: run.deliveryError });
     }
   }
+}
+
+/** A new PR's landing record. */
+export function newLanding(pr: number, url: string): LandingState {
+  return { pr, url, state: "open", fixAttempts: 0, reruns: [], flaky: [], reviews: 0, updatedAt: Date.now() };
+}
+
+/** The goal PR's description: the summary, the task table, the plan. */
+export function prBody(run: OrchestraRun, extra: string[] = []): string {
+  return [
+    run.summary ?? "",
+    "",
+    ...extra,
+    "| task | agent | status | files |",
+    "|---|---|---|---|",
+    ...run.tasks.map((t) => `| ${t.id} · ${t.title} | ${t.agent} | ${t.status} | ${t.files?.length ?? 0} |`),
+    "",
+    ...(run.plan ? [`Plan: \`${planDir(run)}/PLAN.md\``, ""] : []),
+    `Orchestrated by Loom · ${run.orchestrator.agent} with ${run.workers.join(", ")}`,
+  ].join("\n");
 }
 
 /**

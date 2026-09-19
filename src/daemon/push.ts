@@ -23,6 +23,11 @@ export interface PushMessage {
 /** Kinds that reach the phone. run_complete is filtered upstream during routes. */
 export const PUSH_KINDS = new Set(["needs_input", "run_complete", "route_completed", "route_failed"]);
 
+/** Does this event buzz the phone? The kinds above, plus orchestra alerts (a goal PR needs you — D25). */
+export function shouldPush(event: LoomEvent): boolean {
+  return PUSH_KINDS.has(event.kind) || (event.kind === "orchestra" && event.payload.phase === "alert");
+}
+
 export function pushContent(projectName: string, event: LoomEvent): PushMessage {
   const title = `Loom · ${projectName}`;
   const p = event.payload;
@@ -38,6 +43,8 @@ export function pushContent(projectName: string, event: LoomEvent): PushMessage 
         title,
         body: `${p.aborted ? "⊘ route stopped" : "✗ route failed"}: ${String(p.reason ?? "").slice(0, 120)}`,
       };
+    case "orchestra":
+      return { title, body: String(p.text ?? "a goal needs you").slice(0, 160) };
     default:
       return { title, body: event.kind };
   }

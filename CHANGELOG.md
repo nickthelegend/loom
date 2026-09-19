@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Loom Teams, Phase 4: land safely
+
+- **15 more design decisions** (D52–D66), settled in a design interview.
+- **Checks come back to the owner:** the owner's daemon polls its goal PRs every
+  30s (`gh pr checks --required`). A failing check is rerun once; a pass on rerun
+  is labelled `loom:flaky`. A real failure's log tail (fenced as untrusted) reopens
+  the goal, and the fix is pushed to the same PR. At most 2 attempts, then the
+  goal needs a human and the phone is alerted.
+- **Cross-vendor review:** a different-vendor agent reviews each goal PR on open
+  and after each fix (max 3), posts a COMMENT review and a `loom/review` status;
+  only high findings fail it, and they share the fix budget. Owners can override
+  with a reason.
+- **Land** (`loom land`, a button on desktop and phone): fresh main merged in,
+  `landing.fastTest` from `loom.team.json`, push, `gh pr merge --auto --squash`.
+  Conflicts get one agent attempt; hard-zone conflicts go to a human.
+- **Stacks** (opt-in, `delivery.stack: "auto"`): big goals become 2–4 PRs cut
+  along the integration branch's merge commits, landed bottom-up.
+- **Adopt:** a teammate takes a stuck goal whose owner is away, fixes it on the
+  owner's branch, and hands it back; the owner's daemon backs off meanwhile.
+- **Budgets:** per-goal cap (pauses the goal) and per-member daily cap (no new
+  goals); cost rollups per member/day, per goal and per landed PR.
+- **Doctor:** `loom team doctor` reports merge-queue traps and opens a PR adding
+  `merge_group:` to workflows. It never changes settings.
+- **Hosted hub:** `SupabaseHubClient` over RPC and Realtime, GitHub sign-in via
+  Supabase (loopback), `loom team signin` defaults to hosted; SQL `0005`
+  (`extend_lease`, `team_member_list`) and `0006` (landing feed events).
+
 ### Loom Teams, Phase 3: one brain
 
 - **12 more design decisions** (D40–D51), settled in a design interview.

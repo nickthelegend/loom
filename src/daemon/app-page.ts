@@ -2347,6 +2347,36 @@ window.__loomPageRev="%%BUILD_REV%%";
   .oline a{color:var(--foreground);text-decoration:none;border-bottom:1px solid color-mix(in srgb, var(--foreground) 35%, transparent)}
   .oline a:hover{border-bottom-color:var(--foreground)}
   .oline .btn{height:24px;font-size:11.5px}
+  /* Teams, Phase 4: a goal PR on its way to main (checks, review, Land), and
+     what sits beside it — goals that need someone, costs, the landing doctor */
+  .oland{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid var(--border)}
+  .oland .olr1{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;font-size:12px;color:var(--muted-foreground);min-width:0}
+  .oland a{color:var(--foreground);text-decoration:none;font-weight:600;border-bottom:1px solid color-mix(in srgb, var(--foreground) 35%, transparent)}
+  .oland a:hover{border-bottom-color:var(--foreground)}
+  .oland .olk{font-family:var(--font-mono);font-size:10.5px}
+  .oland .oll{display:flex;align-items:flex-start;gap:7px;font-size:12px;line-height:1.45;color:var(--muted-foreground);min-width:0;overflow-wrap:anywhere}
+  .oland .oll svg{width:13px;height:13px;flex:none;margin-top:2px}
+  .oland .oll b{color:var(--foreground);font-weight:600}
+  .oland .oll code{font-family:var(--font-mono);font-size:10.5px;color:var(--foreground);background:var(--muted);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+  .oland .oll.err{color:var(--err)}.oland .oll.warn{color:var(--warn)}.oland .oll.ok{color:var(--ok)}
+  .oland .olstack{display:flex;flex-direction:column;gap:3px;padding-left:20px;font-size:11.5px}
+  .oland .olacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+  .orun .orm .opill{height:16px;padding:0 6px;font-size:9.5px;gap:4px}
+  .tneed{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 10px;padding:7px 0;border-top:1px dashed var(--border);font-size:12.5px;min-width:0}
+  .tsech + .tneed{border-top:0}
+  .tneed .tnt{min-width:0;overflow-wrap:anywhere;color:var(--foreground)}
+  .tneed .tnt a{color:var(--foreground);font-weight:600}
+  .tneed .tnt small{display:block;font-size:11.5px;color:var(--muted-foreground);margin-top:1px}
+  .tcost{width:100%;border-collapse:collapse;font-size:12px;margin:2px 0 8px}
+  .tcost td{padding:4px 0;border-top:1px dashed var(--border);color:var(--foreground)}
+  .tcost tr:first-child td{border-top:0}
+  .tcost td.n{text-align:right;font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);padding-left:10px;white-space:nowrap}
+  .tcost tr.sum td{color:var(--muted-foreground);border-top:1px solid var(--border)}
+  .tdocf{display:grid;grid-template-columns:16px minmax(0,1fr);gap:7px;align-items:start;font-size:12px;line-height:1.45;color:var(--foreground)}
+  .tdocf svg{width:13px;height:13px;margin-top:2px}
+  .tdocf.ok svg{color:var(--ok)}.tdocf.warn svg{color:var(--warn)}.tdocf.error svg{color:var(--err)}
+  .tdocf small{display:block;color:var(--muted-foreground);font-size:11.5px;overflow-wrap:anywhere}
+  .tdoc .pillrow{margin:4px 0 0}
   .sys.orch a{color:inherit}
   .sys.orch code{font-family:var(--font-mono);font-size:11px}
   @media (max-width:899px){
@@ -3519,6 +3549,13 @@ ${BRAND_SPRITE}
   var ORCH_RUN_ST = { starting: ["starting", "live"], planning: ["planning", "live"], running: ["running", "live"],
     reviewing: ["reviewing", "live"], waiting_human: ["needs you", "warn"], completed: ["completed", "ok"],
     failed: ["failed", "err"], aborted: ["aborted", "off"] };
+  // Loom Teams, Phase 4: a goal PR's way to main (LandingState.state, D52\\u2013D63)
+  var LAND_ST = { open: ["PR open", "off"], pending: ["checks running", "live"], green: ["green", "ok"], failing: ["failing", "err"],
+    fixing: ["fixing", "live"], needs_human: ["needs you", "warn"], landing: ["landing", "live"], merged: ["merged", "ok"], closed: ["closed", "off"] };
+  function landPill(l){
+    var s = LAND_ST[l && l.state] || [(l && l.state) || "\\u2014", "off"];
+    return '<span class="opill ' + s[1] + '" data-lstate="' + esc(l && l.state) + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span>";
+  }
   function orchLine(p){
     var ph = p.phase;
     var tone = { ok: " ok", warn: " warn", err: " err" };
@@ -3592,6 +3629,10 @@ ${BRAND_SPRITE}
       if (hd.kind === "capacity") return row("", "\\u23f8 " + tid + " is queued \\u2014 " + esc(String(hd.reason || "the team is at its agent limit").slice(0, 200)));
       return row(" warn", "\\u23f8 " + tid + " needs the orchestrator \\u2014 " + esc(String(hd.reason || "a teammate overlaps it").slice(0, 240)));
     }
+    // Phase 4: the PR's own state lives on the run card (every poll emits
+    // one); an alert is the sentence worth keeping in the thread.
+    if (ph === "landing") return "";
+    if (ph === "alert") return row(" warn", "\\u26a0 " + esc(String(p.text || "").slice(0, 240)));
     if (ph === "synced") return row("", "\\u21bb Brought the goal up to date with " + esc(p.with || "main") + " before a waiting task started");
     if (ph === "delivery_policy") return row(" warn", "\\u26a0 " + esc(p.branch || "the base branch") + " is protected by team policy \\u2014 delivering as a PR instead of " +
       (p.from === "push" ? "merging and pushing" : "merging"));
@@ -9032,6 +9073,12 @@ ${BRAND_SPRITE}
     function onOrchEvent(ev){
       if (!ev) return;
       var p = ev.payload || {};
+      // Phase 4: a PR's landing state repaints its card now; an alert is a toast.
+      if (ev.kind === "orchestra" && p.phase === "landing" && p.landing) {
+        var lr = findOrchRun(p.runId);
+        if (lr) { lr.landing = p.landing; drawOrch(); }
+      }
+      if (ev.kind === "orchestra" && p.phase === "alert" && p.text) toast(String(p.text));
       if (ev.kind === "orchestra" || (p.orchestra && ORCH_TASK_KINDS[ev.kind])) scheduleOrch();
     }
     function drawOrchTabDot(sum){
@@ -9080,7 +9127,7 @@ ${BRAND_SPRITE}
         return '<div class="orun" data-run="' + esc(r.id) + '"' + (r.id === run.id ? ' data-current="true"' : "") + ">" +
           '<span class="org">' + esc(r.goal) + "</span>" +
           '<span class="orm"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + " \\u00b7 " + done + "/" + (r.tasks || []).length +
-          " \\u00b7 " + rel(r.createdAt) + "</span></div>";
+          " \\u00b7 " + rel(r.createdAt) + (r.landing ? " " + landPill(r.landing) : "") + "</span></div>";
       }).join("") + "</div>";
       el.innerHTML = '<div class="orchview">' + head + '<div class="ogrid">' + list +
         '<div class="odetail">' + orchDetail(run) + "</div></div></div>";
@@ -9112,7 +9159,7 @@ ${BRAND_SPRITE}
           (!terminal ? '<button class="btn outline sm prdanger" id="oabort">' + ICONS.stop + "Abort</button>" : "") +
           (terminal && !run.applied ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
           (terminal ? '<button class="btn ghost sm" id="oclean" title="remove this run\\u2019s worktrees (the branch stays)">Clean up</button>' : "") +
-        "</div>" + orchOutcome(run) + "</div>";
+        "</div>" + orchOutcome(run) + orchLandingHtml(run) + "</div>";
       if (run.status === "waiting_human") {
         h += '<div class="oask"><div class="oqh">The orchestrator asks</div>' +
           '<div class="oq">' + esc(run.question || "What next?") + "</div>" +
@@ -9178,6 +9225,78 @@ ${BRAND_SPRITE}
       orchAction(run, "deliver", {}, btn, function(j){
         var r = (j && j.run) || {};
         toast(r.deliveryError ? "delivery failed again \\u2014 " + r.deliveryError.slice(0, 80) : "delivered");
+      });
+    }
+    /**
+     * Phase 4 ("land safely"): the goal's PR on its way to main \\u2014 its state,
+     * checks, the cross-vendor review, fixes spent, and Land. The daemon's
+     * landing loop (daemon/landing.ts) does the work; this shows it and asks.
+     */
+    function orchLandingHtml(run){
+      var l = run.landing; if (!l) return "";
+      var st = l.state, done = st === "merged" || st === "closed";
+      var ck = l.checks || {}, failing = ck.failing || [], pending = ck.pending || [], rv = l.review;
+      var code = function(list){ return list.slice(0, 4).map(function(n){ return "<code>" + esc(n) + "</code>"; }).join(" ") + (list.length > 4 ? " +" + (list.length - 4) : ""); };
+      var line = function(cls, icon, html){ return '<div class="oll' + (cls ? " " + cls : "") + '">' + icon + "<span>" + html + "</span></div>"; };
+      var h = '<div class="oland" data-oland="' + esc(run.id) + '"><div class="olr1">' + landPill(l) +
+        (/^https?:\\/\\//.test(String(l.url || "")) ? '<a href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer">PR #' + Number(l.pr) + " \\u2197</a>" : "<b>PR #" + Number(l.pr) + "</b>") +
+        (ck.passing || failing.length || pending.length ? '<span class="olk">' + Number(ck.passing || 0) + " passing" + (pending.length ? " \\u00b7 " + pending.length + " running" : "") + "</span>" : "") +
+        (l.fixAttempts ? '<span class="olk" title="fix attempts spent on failing checks and high review findings">' + Number(l.fixAttempts) + " fix attempt" + (l.fixAttempts === 1 ? "" : "s") + "</span>" : "") +
+        (l.updatedAt ? '<span class="olk">' + rel(l.updatedAt) + "</span>" : "") + "</div>";
+      if (failing.length) h += line("err", ICONS.x, "Failing: " + code(failing));
+      if ((l.flaky || []).length) h += line("", ICONS.refresh, "Flaky (passed on rerun): " + code(l.flaky));
+      if (rv) {
+        var said = rv.overridden ? "overridden \\u2014 " + esc(rv.overridden)
+          : rv.state === "skipped" ? "skipped"
+          : rv.state === "failure" ? Number(rv.high) + " high finding" + (rv.high === 1 ? "" : "s") + (rv.findings > rv.high ? " of " + Number(rv.findings) : "")
+          : "passed" + (rv.findings ? " (" + Number(rv.findings) + " note" + (rv.findings === 1 ? "" : "s") + ")" : "");
+        h += line(rv.overridden || rv.state === "success" ? "ok" : rv.state === "failure" ? "err" : "", ICONS.pr,
+          "<b>loom/review</b>: " + said + (rv.reviewer ? " \\u00b7 " + esc(labelOf(rv.reviewer)) : ""));
+      }
+      if (st === "needs_human" && l.reason) h += line("warn", ICONS.alert, esc(l.reason));
+      if (l.adoptedBy) h += line("", ICONS.team, "Adopted by <b>" + esc(l.adoptedBy) + "</b> \\u2014 they\\u2019re making it green, then hand it back");
+      if (run.from) h += line("", ICONS.team, "You adopted <b>" + esc(run.from.owner || "a teammate") + "</b>\\u2019s PR #" + Number(run.from.pr) + "; it goes back to them when green");
+      if ((l.stack || []).length) {
+        h += line("", ICONS.branch, "Stacked \\u2014 lands bottom-up") + '<div class="olstack">' + l.stack.map(function(s){
+          return "<span>" + (/^https?:\\/\\//.test(String(s.url || "")) ? '<a href="' + esc(s.url) + '" target="_blank" rel="noopener noreferrer">#' + Number(s.pr) + "</a>" : "#" + Number(s.pr)) +
+            " <code>" + esc(s.branch) + "</code> \\u2192 <code>" + esc(s.base) + "</code>" + (s.state ? " \\u00b7 " + esc(s.state) : "") + "</span>";
+        }).join("") + "</div>";
+      }
+      if (done) return h + "</div>";
+      var canLand = !run.from && !l.landRequested && st !== "landing" && !l.adoptedBy;
+      var reviewFailed = rv && rv.state === "failure" && !rv.overridden;
+      h += '<div class="olacts">' +
+        (canLand ? '<button class="btn ' + (st === "green" ? "primary" : "outline") + ' sm" type="button" data-oland-act="land">' + ICONS.check + "Land</button>" : "") +
+        (l.headSha ? '<button class="btn ghost sm" type="button" data-oland-act="review">Re-review</button>' : "") +
+        (reviewFailed ? '<button class="btn ghost sm" type="button" data-oland-act="override">Override review</button>' : "") +
+        "</div>";
+      return h + "</div>";
+    }
+    /** POST /team/landing/:action; the answer carries every goal's landing, merged into the runs. */
+    function landAct(action, body, btn, done){
+      if (btn) btn.disabled = true;
+      return api("/api/projects/" + pid + "/team/landing/" + action, { method: "POST", body: JSON.stringify(body || {}) }).then(function(j){
+        ((j && j.goals) || []).forEach(function(g){ var r = findOrchRun(g.runId); if (r && g.landing) r.landing = g.landing; });
+        if (done) done(j);
+        drawOrch();
+      }).catch(function(err){ if (btn) btn.disabled = false; toast(err.message); });
+    }
+    function wireOrchLanding(el, run){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-oland-act]"), function(b){
+        b.onclick = function(){
+          var act = b.getAttribute("data-oland-act"), l = run.landing || {};
+          if (act === "land") {
+            if (l.state !== "green" && !window.confirm("PR #" + l.pr + " isn\\u2019t green yet (" + ((LAND_ST[l.state] || [l.state])[0]) +
+              "). Land it anyway? Loom brings in fresh main, runs the fast tests, pushes and merges once GitHub\\u2019s required checks pass.")) return;
+            landAct("land", { runId: run.id }, b, function(){ toast("landing PR #" + l.pr + "\\u2026"); });
+          } else if (act === "review") {
+            landAct("review", { runId: run.id }, b, function(){ toast("review requested"); });
+          } else if (act === "override") {
+            var why = window.prompt("Override loom/review on PR #" + l.pr + "? Say why \\u2014 it goes on the PR.");
+            if (!why || !why.trim()) return;
+            landAct("override", { runId: run.id, reason: why.trim() }, b, function(){ toast("review overridden"); });
+          }
+        };
       });
     }
     function orchTaskCard(run, t){
@@ -9286,6 +9405,7 @@ ${BRAND_SPRITE}
       };
       var apb = el.querySelector("#oapply"); if (apb) apb.onclick = function(){ applyOrch(run.id, apb); };
       var rdb = el.querySelector("#oredeliver"); if (rdb) rdb.onclick = function(){ redeliverOrch(run.id, rdb); };
+      wireOrchLanding(el, run);
       var cl = el.querySelector("#oclean");
       if (cl) cl.onclick = function(){ orchAction(run, "cleanup", {}, cl, function(){ toast("worktrees removed"); }); };
       // D32: the owner calls off a wait on a teammate's goal; the task starts
@@ -9537,6 +9657,19 @@ ${BRAND_SPRITE}
       wireTeamForms(host, teamAct);
       wireTeamInvites(host, teamAct);
       wireTeamShare(host, function(){ drawTeamBlock(true); });
+      // D63: take a teammate's stuck goal \u2014 a small run here that makes its PR green
+      Array.prototype.forEach.call(host.querySelectorAll("[data-tadopt]"), function(b){
+        b.onclick = function(){
+          var n = Number(b.getAttribute("data-tadopt")), owner = b.getAttribute("data-towner") || "a teammate";
+          if (!window.confirm("Adopt PR #" + n + "? Your agents will work on " + owner + "\u2019s branch.")) return;
+          b.disabled = true;
+          api("/api/projects/" + pid + "/team/landing/adopt", { method: "POST", body: JSON.stringify({ pr: n }) }).then(function(j){
+            toast("adopted PR #" + n + " \u2014 it goes back to " + owner + " when green");
+            if (j && j.result && j.result.id) mergeOrchRun(j.result);
+            loadTeamLanding(pid, true);
+          }).catch(function(err){ b.disabled = false; toast(err.message); });
+        };
+      });
     }
     teamHooks().fleet = function(force){ if (state.pid === pid) drawTeamBlock(force); };
 
@@ -9579,6 +9712,8 @@ ${BRAND_SPRITE}
     // the one brain moved (a memory, a resolution, a canon PR): the Team view re-reads
     var ev = (frame && frame.event) || {}, fe = ev.event || {};
     if ((ev.type === "memory" || (ev.type === "feed" && (fe.type === "memory_resolved" || fe.type === "canon_proposed"))) && state.teamBrainPing) state.teamBrainPing();
+    // a goal came up for adoption, was taken or landed: "Needs someone" re-reads
+    if (ev.type === "feed" && TEAM_LANDING_EVENTS[fe.type] && state.pid && teamLandings[state.pid]) loadTeamLanding(state.pid, true);
     if (teamFrameT) return;
     teamFrameT = setTimeout(function(){ teamFrameT = null; loadTeam(); }, 300);
   }
@@ -9816,7 +9951,7 @@ ${BRAND_SPRITE}
     var q = function(s){ return '<span class="tq">\\u2018' + esc(s) + "\\u2019</span>"; };
     var goal = c && c.goal ? q(c.goal) : c ? "a goal" : '<span class="sealed">a goal it can\\u2019t read (no key)</span>';
     var url = m.url || m.prUrl || "";
-    var num = m.number || (String(url).match(/\\/pull\\/(\\d+)/) || [])[1];
+    var num = m.number || m.pr || (String(url).match(/\\/pull\\/(\\d+)/) || [])[1];
     var prTxt = num ? "PR #" + esc(num) : "a PR";
     var pr = url ? '<a href="' + esc(url) + '" target="_blank" rel="noreferrer">' + prTxt + "</a>" : "<b>" + prTxt + "</b>";
     var title = c && c.title ? " \\u2014 " + q(c.title) : "";
@@ -9850,7 +9985,20 @@ ${BRAND_SPRITE}
       }
       case "check_passed": return { icon: ICONS.check, cls: "ok", html: "checks passed on " + pr };
       case "review_requested": return { icon: ICONS.pr, cls: "", html: "review requested on " + pr + title };
-      case "review_submitted": return { icon: ICONS.pr, cls: "", html: who + " reviewed " + pr + title };
+      case "review_submitted": {
+        // Loom's own cross-vendor review (D60) says who reviewed and how it went
+        if (!m.reviewer && !m.state) return { icon: ICONS.pr, cls: "", html: who + " reviewed " + pr + title };
+        var hi = Number(m.high || 0);
+        var verdict = m.state === "skipped" ? "skipped" : m.state === "failure" ? hi + " high finding" + (hi === 1 ? "" : "s") : "passed";
+        return { icon: ICONS.pr, cls: m.state === "failure" ? "err" : m.state === "success" ? "ok" : "",
+          html: "loom/review on " + who + "\u2019s " + pr + (m.reviewer ? " by " + esc(labelOf(String(m.reviewer))) : "") + ": " + verdict };
+      }
+      // Phase 4: landing safely (D52\u2013D64)
+      case "goal_landed": return { icon: ICONS.check, cls: "ok", html: who + "\u2019s " + teamFeedGoal(m.runId, c) + " landed \u2014 " + pr + " merged" + (m.costUsd ? " (" + money(m.costUsd) + ")" : "") };
+      case "goal_needs_someone": return { icon: ICONS.alert, cls: "warn", html: who + "\u2019s " + pr + " needs someone" + (m.reason ? ": " + esc(String(m.reason)) : "") };
+      case "goal_adopted": return { icon: ICONS.team, cls: "live", html: "<b>" + esc(m.by || e.github || "someone") + "</b> adopted " + (m.owner ? "<b>" + esc(m.owner) + "</b>\u2019s " : "") + pr };
+      case "goal_returned": return { icon: ICONS.team, cls: "ok", html: "<b>" + esc(m.by || e.github || "someone") + "</b> handed " + pr + " back" + (m.owner ? " to <b>" + esc(m.owner) + "</b>" : "") + " \u2014 green" };
+      case "check_flaky": return { icon: ICONS.refresh, cls: "", html: "<code>" + esc(m.check || "a check") + "</code> was flaky on " + pr + " \u2014 failed, then passed on rerun" };
       // Phase 2: leases, overlaps and zones (D29\\u2013D36)
       case "lease_released": {
         var nl = Number(m.leases || 0), why = String(m.reason || "");
@@ -10139,7 +10287,49 @@ ${BRAND_SPRITE}
       teamPolicies[pid] = { err: err.message || String(err), policy: cur && cur.policy };
     }).then(function(){ teamNotify(false); });
   }
-  var TEAM_POLICY_SAMPLE = '{"hardZones": ["db/migrations/**"], "permissions": {"ceiling": "auto"}}';
+  // ---- landing, Phase 4: teammates' goals that need someone (D63) ----------
+  // GET /team/landing per project: its adoptable list is teammates' goal PRs
+  // whose owner ran out of fixes, or went quiet with checks failing.
+  var teamLandings = {}; // pid \\u2192 {adoptable, goals} | {err} | {loading: true}
+  var TEAM_LANDING_EVENTS = { goal_needs_someone: 1, goal_adopted: 1, goal_returned: 1, goal_landed: 1, check_failed: 1, check_passed: 1, pr_merged: 1, pr_closed: 1 };
+  function loadTeamLanding(pid, force){
+    var cur = teamLandings[pid];
+    if (cur && (cur.loading || !force)) return;
+    teamLandings[pid] = { loading: true, adoptable: cur && cur.adoptable };
+    api("/api/projects/" + pid + "/team/landing").then(function(j){
+      teamLandings[pid] = { adoptable: (j && j.adoptable) || [], goals: (j && j.goals) || [] };
+    }, function(err){
+      teamLandings[pid] = { err: err.message || String(err), adoptable: cur && cur.adoptable };
+    }).then(function(){ teamNotify(false); });
+  }
+  function teamNeedsHtml(pid){
+    if (!pid) return "";
+    if (!teamLandings[pid]) loadTeamLanding(pid); // paints again when it lands
+    var list = (teamLandings[pid] || {}).adoptable || [];
+    if (!list.length) return "";
+    return '<div class="tcard tneeds"><div class="tsec" style="border-top:0"><div class="tsech">Needs someone<span class="n">' + list.length + "</span></div>" +
+      list.map(function(a){
+        var pr = /^https?:\\/\\//.test(String(a.url || "")) ? '<a href="' + esc(a.url) + '" target="_blank" rel="noreferrer">PR #' + Number(a.pr) + "</a>" : "<b>PR #" + Number(a.pr) + "</b>";
+        return '<div class="tneed" data-tneed="' + Number(a.pr) + '"><span class="tnt">' + teamAvatar(a.owner) + " " + pr + " \\u00b7 <b>" + esc(a.owner) + "</b>\\u2019s <code>" + esc(a.branch) + "</code>" +
+          (a.reason ? "<small>" + esc(a.reason) + "</small>" : "") + "</span>" +
+          '<button class="btn outline xs" type="button" data-tadopt="' + Number(a.pr) + '" data-towner="' + esc(a.owner) + '">Adopt</button></div>';
+      }).join("") + "</div></div>";
+  }
+  /** What the team spent, from the feed (D64): each member today, per landed PR, total. */
+  function teamCostsHtml(t){
+    var c = t.costs; if (!c) return "";
+    var today = new Date().toISOString().slice(0, 10); // the rollup's days are UTC dates
+    var rows = (c.byMemberDay || []).filter(function(r){ return r.day === today; });
+    return '<div class="tsec"><div class="tsech">Costs<span class="n">' + money(c.totalUsd) + '</span></div><table class="tcost">' +
+      (rows.length ? rows.map(function(r){
+        return '<tr data-tcost="' + esc(r.member) + '"><td>' + teamAvatar(r.member) + " <b>" + esc(r.member) + "</b> today</td>" +
+          '<td class="n">' + Number(r.goals) + " goal" + (r.goals === 1 ? "" : "s") + '</td><td class="n">' + money(r.usd) + "</td></tr>";
+      }).join("") : '<tr><td colspan="3" class="n" style="text-align:left">Nothing finished today.</td></tr>') +
+      '<tr class="sum"><td>Per landed PR</td><td class="n">' + Number(c.landed || 0) + ' landed</td><td class="n" data-tcost-per>' +
+        (c.perLandedPrUsd != null ? money(c.perLandedPrUsd) : "\\u2014") + "</td></tr>" +
+      '<tr class="sum"><td>Total</td><td class="n">' + (c.byGoal || []).length + ' goals</td><td class="n" data-tcost-total>' + money(c.totalUsd) + "</td></tr></table></div>";
+  }
+  var TEAM_POLICY_SAMPLE ='{"hardZones": ["db/migrations/**"], "permissions": {"ceiling": "auto"}}';
   /** The policy in effect for a project. label: whose it is, where several are listed. */
   function teamPolicyHtml(pid, label){
     if (!teamPolicies[pid]) loadTeamPolicy(pid); // paints again when it lands
@@ -10193,12 +10383,13 @@ ${BRAND_SPRITE}
       '<div class="tinvslot">' + teamInviteHtml(t.id) + "</div>" +
       '<div class="tsec">' + teamSessionsHtml(t) + "</div>" +
       '<div class="tsplit"><div class="tsec">' + teamLeasesHtml(t) + '</div><div class="tsec">' + teamFeedHtml(t, 15) + "</div></div>" +
+      teamCostsHtml(t) +
     "</div>";
   }
   function teamFleetHtml(st, pid){
     var teams = st.teams || [];
     if (!teams.length) return teamHeadHtml() + teamJoinCardHtml();
-    return teamHeadHtml() + teamShareHtml(pid, true) + teams.map(teamCardHtml).join("");
+    return teamHeadHtml() + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teams.map(teamCardHtml).join("");
   }
 
   // ---- permissions: bypass | auto | ask, per agent -------------------------
@@ -11926,6 +12117,48 @@ ${BRAND_SPRITE}
       // the hook above paints the pane from what arrives
       sapi("/api/team").then(function(j){ state.team = j; state.teamErr = ""; teamNotify(true); }).catch(fail);
     }
+    // ---- the landing doctor (D62): is this repo set up to land safely? ------
+    // Merge queue, required checks, workflows that run on merge_group. Run on
+    // request (it asks GitHub); the one fix it makes is a PR, never a setting.
+    var tdoc = null; // {loading} | {data} | {err}, plus {fix: {prUrl, files}} once asked
+    function doctorHtml(){
+      if (!pid) return "";
+      var pr = (state.projects || []).filter(function(x){ return x.id === pid; })[0];
+      var d = tdoc && tdoc.data;
+      var icon = { ok: ICONS.check, warn: ICONS.alert, error: ICONS.x };
+      var h = '<div class="sgrouph">Landing doctor</div><div class="tpol tdoc" data-tdoctor="' + esc(pid) + '">' +
+        '<div class="tpolh">' + ICONS.shield + "<b>" + esc((pr && pr.name) || "This project") + "</b>" +
+          (d ? "<small>" + esc((d.repo || "no GitHub repo") + " \u00b7 " + d.branch) + "</small>" : "") + "</div>";
+      if (!tdoc) h += '<div class="tpols">Checks the repo can land goal PRs safely: a merge queue or required checks on the default branch, and workflows that also run in the queue.</div>';
+      else if (tdoc.loading) h += LOADER;
+      else if (tdoc.err) h += '<div class="tpols" style="color:var(--err)">' + esc(tdoc.err) + "</div>";
+      if (d) h += (d.findings || []).map(function(f){
+        return '<div class="tdocf ' + esc(f.level) + '" data-tdocf="' + esc(f.level) + '">' + (icon[f.level] || ICONS.info) +
+          "<span>" + esc(f.what) + (f.fix ? "<small>" + esc(f.fix) + "</small>" : "") + "</span></div>";
+      }).join("");
+      var fix = tdoc && tdoc.fix;
+      if (fix) h += '<div class="tpols tdocpr">' + (fix.prUrl ? 'Opened <a href="' + esc(fix.prUrl) + '" target="_blank" rel="noreferrer">' + esc(fix.prUrl) + "</a>" : "Nothing to fix") +
+        ((fix.files || []).length ? " \u2014 " + fix.files.map(function(f){ return "<code>" + esc(f) + "</code>"; }).join(", ") : "") + "</div>";
+      h += '<div class="pillrow"><button class="btn outline sm" type="button" data-tdocrun' + (tdoc && tdoc.loading ? " disabled" : "") + ">" + (d ? "Check again" : "Run doctor") + "</button>" +
+        (d && (d.fixable || []).length && !(fix && fix.prUrl) ? '<button class="btn primary sm" type="button" data-tdocfix>Open fix PR</button>' +
+          '<span class="hintx">adds <b>merge_group:</b> to ' + d.fixable.length + " workflow" + (d.fixable.length === 1 ? "" : "s") + "</span>" : "") + "</div></div>";
+      return h;
+    }
+    function wireDoctor(){
+      var redraw = function(){ if (cur === "team" && pane.isConnected) drawTeamSettings(); };
+      var run = pane.querySelector("[data-tdocrun]");
+      if (run) run.onclick = function(){
+        tdoc = { loading: true }; redraw();
+        sapi("/api/projects/" + pid + "/team/doctor").then(function(j){ tdoc = { data: j }; }, function(err){ tdoc = { err: err.message || String(err) }; }).then(redraw);
+      };
+      var fx = pane.querySelector("[data-tdocfix]");
+      if (fx) fx.onclick = function(){
+        fx.disabled = true;
+        sapi("/api/projects/" + pid + "/team/doctor/fix", { method: "POST", body: "{}" }).then(function(j){
+          tdoc = { data: tdoc && tdoc.data, fix: j }; toast(j && j.prUrl ? "opened the fix PR" : "nothing to fix"); redraw();
+        }).catch(function(err){ fx.disabled = false; toast(err.message); });
+      };
+    }
     function drawTeamSettings(){
       var t = state.team || {}, teams = t.teams || [];
       var h = '<div class="setphead">Team</div>' +
@@ -11959,6 +12192,7 @@ ${BRAND_SPRITE}
           (owner ? '<button class="btn ghost sm" type="button" data-trotate="' + esc(tm.id) + '">Rotate key</button>' : "") +
           '<button class="btn ghost sm" type="button" data-tleave="' + esc(tm.id) + '">Leave</button></div></div>';
       });
+      h += doctorHtml();
       // your teams first; then making or joining another
       if (!t.signedIn) {
         h += '<div class="sgrouph">Sign in to a hub</div><div class="cloudin">' +
@@ -11978,6 +12212,7 @@ ${BRAND_SPRITE}
       pane.innerHTML = h;
       wireTeamForms(pane, teamSact);
       wireTeamInvites(pane, teamSact);
+      wireDoctor();
       var nameOf = function(id){ var x = teams.filter(function(y){ return y.id === id; })[0]; return x ? x.name : "the team"; };
       var kvOf = function(id){ var x = teams.filter(function(y){ return y.id === id; })[0]; return x && x.keyVersion != null ? Number(x.keyVersion) : 0; };
       Array.prototype.forEach.call(pane.querySelectorAll("[data-tremove]"), function(b){
