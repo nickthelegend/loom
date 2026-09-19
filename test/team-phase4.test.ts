@@ -375,9 +375,13 @@ describe("Phase 4: land safely", () => {
     const before = { review: run.landing!.review, fixAttempts: run.landing!.fixAttempts, status: run.status };
     const sha = run.landing!.headSha!;
 
+    // Only this commit's statuses: the landing loop is live, and another goal's
+    // poll can post between two lines of this test.
+    const forSha = () => statuses.filter((x) => x.sha === sha);
+
     // The owner overrode this commit; a review of it is still on its way back.
     await L("alice").overrideReview(goal.id, "checked by hand");
-    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" });
+    expect(forSha().at(-1)).toMatchObject({ state: "success" });
     expect(run.landing!.review).toMatchObject({ overridden: "checked by hand", overriddenSha: sha });
 
     // It lands with a high finding — and the owner's decision stands.
@@ -388,9 +392,9 @@ describe("Phase 4: land safely", () => {
     expect(reviews.length).toBeGreaterThan(0); // the reviewer really ran
     expect(run.landing!.review).toMatchObject({ state: "failure", high: 1, overridden: "checked by hand", overriddenSha: sha });
     // the status ends where the owner put it, not at the review's "reviewing…"
-    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" });
-    expect(String(statuses.at(-1)!.description)).toContain("checked by hand");
-    expect(statuses.filter((x) => x.sha === sha && x.state === "failure")).toEqual([]);
+    expect(forSha().at(-1)).toMatchObject({ state: "success" });
+    expect(String(forSha().at(-1)!.description)).toContain("checked by hand");
+    expect(forSha().filter((x) => x.state === "failure")).toEqual([]);
     expect(run.landing!.fixAttempts).toBe(before.fixAttempts); // and the goal isn't sent back
     expect(run.status).toBe(before.status);
     run.landing!.review = before.review;
