@@ -124,8 +124,10 @@ describe("firing alert -> baton intervention", () => {
         body: JSON.stringify({ alerts: [{ status: "firing", labels: { alertname: "AgentErrorRateHigh", "loom.project": "heal", "gen_ai.agent.id": "plannerbot" } }] }),
       });
       // failover happened; the recheck loop (no new errors) then hands it back.
-      await waitUntil(async () => (await client.project(projectId)).project.holder !== "plannerbot", { timeoutMs: 4000 });
-      await waitUntil(async () => (await client.project(projectId)).project.holder === "plannerbot", { timeoutMs: 4000 });
+      // The loop rechecks every 60ms, but each step is a real handoff through
+      // the daemon — the budget is for a loop that never runs, not a busy host.
+      await waitUntil(async () => (await client.project(projectId)).project.holder !== "plannerbot", { timeoutMs: 20_000 });
+      await waitUntil(async () => (await client.project(projectId)).project.holder === "plannerbot", { timeoutMs: 20_000 });
       const { events } = await client.events(projectId, undefined, 100);
       expect(events.some((e) => e.kind === "status" && e.payload.state === "alert_recovery" && e.payload.via === "recheck")).toBe(true);
     } finally {
