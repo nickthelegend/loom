@@ -115,17 +115,34 @@ jobs:
           npx eas-cli build -p android --profile preview --non-interactive --wait
           npx eas-cli build:download --platform android --latest --output "$GITHUB_WORKSPACE/loompad.apk"
 
-      # Otherwise a local debug-signed apk. Debug signing is deliberate: an
-      # unsigned release apk cannot be installed at all, so it would be a file
-      # that looks like a deliverable and isn't.
-      - name: Local gradle build (debug-signed)
+      # Otherwise a local release build, signed with the project's own release
+      # key. It used to be `assembleDebug`, which never bundles the JavaScript —
+      # the v0.2.0 apk had no index.android.bundle and would only open against a
+      # dev server. A release build carries its bundle; the key (a GitHub secret)
+      # keeps every future apk installable as an update of this one.
+      - name: Local gradle release build (release-signed)
         if: env.HAS_EXPO == 'no'
         working-directory: app
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "no ANDROID_KEYSTORE_BASE64 secret — refusing to ship an unsigned or debug apk"; exit 1; }
           npm install --no-audit --no-fund
           npx expo prebuild -p android --no-install
-          cd android && ./gradlew assembleDebug --no-daemon
-          find app/build/outputs/apk -name "*.apk" -print -exec cp {} "$GITHUB_WORKSPACE/loompad.apk" \;
+          (cd android && ./gradlew assembleRelease --no-daemon)
+          APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          test -n "$APK" || { echo "gradle produced no release apk"; exit 1; }
+          unzip -l "$APK" | grep -q "assets/index.android.bundle" || { echo "the apk has no JavaScript bundle"; exit 1; }
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          "$BT/zipalign" -f -p 4 "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.keystore" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --out "$GITHUB_WORKSPACE/loompad.apk" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify --verbose --print-certs "$GITHUB_WORKSPACE/loompad.apk" | grep -E "Verified using|Signer #1 certificate SHA-256"
+          rm -f "$RUNNER_TEMP/release.keystore"
 
       - name: Name it after the release
         run: |
