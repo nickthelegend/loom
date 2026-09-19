@@ -378,7 +378,8 @@ describe("Phase 4: land safely", () => {
     const asked = reviews.length;
     const sha = run.landing!.headSha!;
     const pending = L("alice").review(run, sha);
-    await waitUntil(() => reviews.length > asked);
+    // the reviewer is spawned in a temp worktree: real work, slow on a loaded runner
+    await waitUntil(() => reviews.length > asked, { timeoutMs: 60_000 });
     await L("alice").overrideReview(goal.id, "checked by hand");
     expect(statuses.at(-1)).toMatchObject({ sha, state: "success" });
     release();
@@ -389,7 +390,7 @@ describe("Phase 4: land safely", () => {
     expect(run.landing!.fixAttempts).toBe(before.fixAttempts); // and the goal isn't sent back
     expect(run.status).toBe(before.status);
     run.landing!.review = before.review;
-  });
+  }, 90_000);
 
   it("Land brings fresh main in and asks GitHub to merge; merged goals post their cost (D56, D64)", async () => {
     const run = M.alice!.rt.orchestra.get(goal.id)!;

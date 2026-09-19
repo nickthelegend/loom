@@ -2111,6 +2111,10 @@ export class ProjectRuntime {
     const head = this.queue.peek();
     if (!head || this.queueBlocker(head)) return;
     this.draining = true;
+    // Out of the queue, then sent: what you can still see is what hasn't gone.
+    // (Leaving it in place until the send returns would survive a crash
+    // mid-dispatch, at the price of a prompt you can edit or remove after it
+    // has already reached the agent — a worse thing to be wrong about.)
     const item = this.queue.shift()!;
     try {
       await this.dispatchQueued(item);
