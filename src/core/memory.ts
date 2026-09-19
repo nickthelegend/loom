@@ -14,6 +14,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { withoutCanon } from "./team-canon.js";
 import path from "node:path";
 import type {
   AgentConfig,
@@ -73,7 +74,9 @@ export function readNativeMemory(projectDir: string, config: ProjectConfig): Imp
       const abs = path.join(projectDir, norm);
       if (!fs.existsSync(abs)) continue;
       try {
-        const raw = fs.readFileSync(abs, "utf8").trim();
+        // Loom's own canon section (AGENTS.md) is canon, parsed as such by the
+        // team brain — never pasted back in as raw text (no feedback loop, D44).
+        const raw = withoutCanon(fs.readFileSync(abs, "utf8")).trim();
         if (!raw) continue;
         seenFiles.add(norm);
         blocks.push({

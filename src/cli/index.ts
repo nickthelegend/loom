@@ -1043,14 +1043,15 @@ function printTeam(t: Record<string, unknown>): void {
 }
 
 program
-  .command("team [action] [arg]")
-  .description("Loom Teams: status | signin <hub> | create <name> | invite | join <link> | share | unshare | remove <github> | leave")
+  .command("team [action] [args...]")
+  .description("Loom Teams: status | signin <hub> | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | remove <github> | leave")
   .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")
   .option("--secret <s>", "the hub's join secret")
   .option("--team <id>", "which team, when you're in several")
-  .action(async (action: string | undefined, arg: string | undefined, opts: { github?: string; secret?: string; team?: string }) => {
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; team?: string }) => {
     const client = await ensureDaemon();
     const a = (action ?? "status").toLowerCase();
+    const arg = args?.[0];
     const extra = { ...(opts.github ? { github: opts.github } : {}), ...(opts.secret ? { secret: opts.secret } : {}), ...(opts.team ? { teamId: opts.team } : {}) };
     try {
       if (a === "status") return void printTeam(await client.team());
@@ -1100,6 +1101,49 @@ program
         if (!team || !m) throw new Error(`no member "${arg}"`);
         const out = await client.teamAction("remove", { userId: m.id, teamId: team.id });
         console.log(`${pc.green("✓")} removed ${arg}; team key rotated to v${String((out.result as { keyVersion: number }).keyVersion)}`);
+        return;
+      }
+      if (a === "brain") {
+        // loom team brain [inbox|sync|promote <id,id>|resolve <winner> --loser <id>|trust <id>|private <id>]
+        const project = await currentProject(client);
+        const sub = (arg ?? "").toLowerCase();
+        const rest = (args ?? []).slice(1);
+        let view;
+        if (!sub || sub === "inbox" || sub === "status") view = await client.teamBrain(project.id, { sync: true });
+        else if (sub === "sync") view = await client.teamBrainAction(project.id, "sync");
+        else if (sub === "promote") {
+          if (!rest[0]) throw new Error("which memories? loom team brain promote <id>[,<id>…]");
+          const out = await client.teamBrainAction(project.id, "promote", { ids: rest[0].split(",") });
+          const r = out.result as { prUrl: string | null; added: number; note?: string; branch: string };
+          console.log(`${pc.green("✓")} ${r.added ? `proposed ${r.added} as canon on ${r.branch}` : "already canon"}${r.prUrl ? ` — ${r.prUrl}` : ""}`);
+          if (r.note) console.log(pc.yellow(`  ${r.note}`));
+          return;
+        } else if (sub === "resolve" || sub === "merge") {
+          if (!rest[0] || !rest[1]) throw new Error(`loom team brain ${sub} <keep-id> <drop-id> [reason]`);
+          view = await client.teamBrainAction(project.id, "resolve", { winner: rest[0], loser: rest[1], reason: rest.slice(2).join(" ") || sub });
+        } else if (sub === "correct") {
+          if (!rest[0] || !rest[1]) throw new Error("loom team brain correct <id> <the corrected sentence>");
+          view = await client.teamBrainAction(project.id, "correct", { id: rest[0], text: rest.slice(1).join(" ") });
+        } else if (sub === "trust" || sub === "private") {
+          if (!rest[0]) throw new Error(`loom team brain ${sub} <id>`);
+          view = await client.teamBrainAction(project.id, sub, { id: rest[0] });
+        } else throw new Error(`unknown brain action "${sub}" — inbox, sync, promote, resolve, merge, correct, trust, private`);
+        const st = view.status;
+        if (!st.shared) return void console.log(pc.dim("this project isn't shared with a team — `loom team share`"));
+        console.log(`${pc.bold("team brain")}  ${String(st.repo)}  ${pc.dim(`${String(st.canon)} canon · ${String(st.team)} team · ${String(st.confirmed)} confirmed · ${String(st.mine)} yours`)}`);
+        if (st.lastError) console.log(pc.red(`  ${String(st.lastError)}`));
+        const tag: Record<string, string> = { canon: pc.green("canon"), confirmed: pc.cyan("confirmed"), own: pc.dim("yours"), proposed: pc.yellow("proposed") };
+        for (const m of view.memories.slice(0, 40)) {
+          console.log(`  ${(tag[m.tier] ?? m.tier).padEnd(20)} ${m.text}${m.author && !m.mine ? pc.dim(`  — ${m.author}`) : ""}  ${pc.dim(m.id)}`);
+        }
+        if (view.inbox.length) {
+          console.log(`\n${pc.bold("inbox")} ${pc.dim(`(${view.inbox.length})`)}`);
+          for (const i of view.inbox) {
+            console.log(`  ${pc.magenta(i.type.padEnd(13))} ${i.detail}`);
+            console.log(`    ${pc.dim(i.a.id)} ${i.a.text}`);
+            if (i.b) console.log(`    ${pc.dim(i.b.id)} ${i.b.text}`);
+          }
+        }
         return;
       }
       if (a === "leave") {

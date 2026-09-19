@@ -1411,6 +1411,78 @@ export interface TeamPolicy {
 export const getTeamPolicy = (c: Creds, id: string) =>
   api<{ policy: TeamPolicy }>(c, `/api/projects/${id}/team/policy`);
 
+// --- Team brain (Loom Teams Phase 3) ------------------------------------------
+
+export type BrainTier = "canon" | "confirmed" | "own" | "proposed";
+
+/** One team memory as the daemon shows it: canon from git, or a sealed team memory, or yours. */
+export interface BrainMemory {
+  id: string;
+  text: string;
+  kind: string;
+  tier: BrainTier;
+  /** null for canon: it came from a reviewed PR, not a person. */
+  author: string | null;
+  confirmedBy: string[];
+  mine: boolean;
+  /** Learned while reading outside content; stays local until trusted. */
+  untrusted?: boolean;
+  /** Only on the memories list (history=1 adds the non-live ones). */
+  state?: "live" | "superseded" | "forgotten";
+  supersedes?: string;
+  supersededBy?: string;
+  resolvedBy?: string;
+  resolvedReason?: string;
+}
+
+/** Something in the team brain that needs a human. */
+export interface BrainInboxItem {
+  id: string;
+  type: "contradiction" | "duplicate" | "correction" | "untrusted" | "promote";
+  detail: string;
+  a: BrainMemory;
+  b?: BrainMemory;
+}
+
+export interface BrainStatus {
+  shared: boolean;
+  teamId: string | null;
+  repo: string | null;
+  canon: number;
+  team: number;
+  confirmed: number;
+  mine: number;
+  lastError: string | null;
+}
+
+export interface TeamBrain {
+  status: BrainStatus;
+  memories: BrainMemory[];
+  inbox: BrainInboxItem[];
+}
+
+export type BrainAction = "sync" | "promote" | "correct" | "resolve" | "merge" | "trust" | "private";
+
+export interface PromoteResult {
+  branch: string;
+  prUrl: string | null;
+  added: number;
+  note?: string;
+}
+
+/** `sync` pulls the team's memories first (slower, hits the hub and git); `history` adds resolved ones. */
+export const getTeamBrain = (c: Creds, id: string, opts: { sync?: boolean; history?: boolean } = {}) => {
+  const q = [opts.sync ? "sync=1" : null, opts.history ? "history=1" : null].filter(Boolean).join("&");
+  return api<TeamBrain>(c, `/api/projects/${id}/team/brain${q ? `?${q}` : ""}`);
+};
+
+/** Every action answers with the brain as it now stands, so the screen never refetches. */
+export const teamBrainAction = <R = unknown>(c: Creds, id: string, action: BrainAction, body: Record<string, unknown> = {}) =>
+  api<TeamBrain & { result: R }>(c, `/api/projects/${id}/team/brain/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
 // --- Prompt manager ---------------------------------------------------------
 
 export interface SavedPrompt {

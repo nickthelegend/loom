@@ -47,6 +47,11 @@ const METHODS = new Set<keyof HubClient>([
   "setRunLeaseState",
   "releaseLeases",
   "leases",
+  "publishMemory",
+  "updateTeamMemory",
+  "forgetTeamMemory",
+  "resolveMemories",
+  "teamMemories",
 ]);
 
 export interface HubServerOptions {

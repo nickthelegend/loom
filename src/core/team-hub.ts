@@ -119,6 +119,41 @@ export interface ClaimResult {
   blockedBy?: { lease: Lease; zone: string };
 }
 
+/**
+ * A memory shared with the team (Phase 3, D40–D51). The hub holds its content
+ * sealed; `hmac` (HMAC of the normalized text under the team key) lets it
+ * merge exact duplicates as confirmations without reading them (D41).
+ */
+export interface TeamMemory {
+  id: string;
+  teamId: string;
+  repo: string;
+  authorId: string;
+  author: string; // github login
+  hmac: string;
+  sealed: Sealed;
+  /** live → in briefings; superseded → resolved against (D47); forgotten → its author withdrew it. */
+  state: "live" | "superseded" | "forgotten";
+  /** A correction points at what it corrects (D40). */
+  supersedes?: string;
+  supersededBy?: string;
+  resolvedBy?: string;
+  resolvedReason?: string;
+  /** Members whose agents learned exactly this — the author first (D41). */
+  confirmedBy: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TeamMemoryIn {
+  id: string;
+  repo: string;
+  hmac: string;
+  sealed: Sealed;
+  deviceId: string;
+  supersedes?: string;
+}
+
 export type FeedType =
   | "member_joined"
   | "member_left"
@@ -138,7 +173,9 @@ export type FeedType =
   | "overlap_decided"
   | "drift"
   | "zone_waiting"
-  | "conflict_predicted";
+  | "conflict_predicted"
+  | "memory_resolved"
+  | "canon_proposed";
 
 export interface FeedIn {
   repo?: string;
@@ -162,6 +199,7 @@ export interface FeedEvent extends FeedIn {
 }
 
 export type HubEvent =
+  | { type: "memory"; teamId: string; memory: TeamMemory }
   | { type: "lease"; teamId: string; lease: Lease }
   | { type: "lease_gone"; teamId: string; leaseIds: string[]; runId: string }
   | { type: "presence"; teamId: string; presence: Presence }
@@ -200,6 +238,17 @@ export interface HubClient {
   /** The goal merged or was abandoned (D36). Owners release their own; returns how many. */
   releaseLeases(teamId: string, runId: string, reason: string): Promise<number>;
   leases(teamId: string, repo?: string): Promise<Lease[]>;
+  // ── Phase 3: the team brain ──
+  /** Share a memory; an exact duplicate (same hmac) becomes a confirmation instead (D41). */
+  publishMemory(teamId: string, m: TeamMemoryIn): Promise<{ memory: TeamMemory; merged: boolean }>;
+  /** The author revises their own memory (D40). */
+  updateTeamMemory(teamId: string, id: string, patch: { hmac: string; sealed: Sealed }): Promise<TeamMemory>;
+  /** The author withdraws it (made private, or forgotten). */
+  forgetTeamMemory(teamId: string, id: string, reason: string): Promise<void>;
+  /** A human picks the winner of a contradiction or duplicate; the loser is superseded, kept (D47). */
+  resolveMemories(teamId: string, winnerId: string, loserId: string, reason: string): Promise<TeamMemory>;
+  /** Live memories (D50 snapshot); with history, superseded and forgotten ones too. */
+  teamMemories(teamId: string, repo: string, opts?: { history?: boolean }): Promise<TeamMemory[]>;
 }
 
 export class HubError extends Error {
@@ -257,6 +306,7 @@ export class MemoryHub {
   private dedupe = new Set<string>();
   private feedSeq = 0;
   private leasesByTeam = new Map<string, Map<string, Lease>>();
+  private memoriesByTeam = new Map<string, Map<string, TeamMemory>>();
   private listeners = new Map<string, Set<(e: HubEvent) => void>>();
   constructor(private now: () => number = Date.now) {}
 
@@ -524,6 +574,110 @@ export class MemoryHub {
     return gone.length;
   }
 
+  // ── team memories (Phase 3) ──
+
+  private mem(teamId: string): Map<string, TeamMemory> {
+    let m = this.memoriesByTeam.get(teamId);
+    if (!m) this.memoriesByTeam.set(teamId, (m = new Map()));
+    return m;
+  }
+
+  publishMemory(userId: string, teamId: string, m: TeamMemoryIn): { memory: TeamMemory; merged: boolean } {
+    this.requireRole(teamId, userId, "member");
+    this.device(m.deviceId, userId);
+    const repo = normalizeRepo(m.repo);
+    if (!this.reposByTeam.get(teamId)?.has(repo)) throw new HubError(`${repo} isn't shared with this team`, 403);
+    if (!/^[A-Za-z0-9_-]{4,64}$/.test(m.id)) throw new HubError("bad memory id");
+    if (!m.hmac || !m.sealed?.c) throw new HubError("a team memory needs its hmac and sealed content");
+    const github = this.user(userId).github;
+    const map = this.mem(teamId);
+    const own = map.get(m.id);
+    if (own && own.authorId !== userId) throw new HubError("that memory id belongs to someone else", 403);
+    const twin = [...map.values()].find((x) => x.repo === repo && x.hmac === m.hmac && x.state === "live" && x.id !== m.id);
+    if (twin && !own) {
+      if (!twin.confirmedBy.includes(github)) twin.confirmedBy.push(github);
+      twin.updatedAt = this.now();
+      this.emit(teamId, { type: "memory", teamId, memory: { ...twin } });
+      return { memory: { ...twin }, merged: true };
+    }
+    if (m.supersedes && !map.has(m.supersedes)) throw new HubError(`no team memory "${m.supersedes}" to supersede`, 404);
+    const tm: TeamMemory = {
+      id: m.id,
+      teamId,
+      repo,
+      authorId: userId,
+      author: github,
+      hmac: m.hmac,
+      sealed: m.sealed,
+      state: "live",
+      ...(m.supersedes ? { supersedes: m.supersedes } : {}),
+      confirmedBy: own?.confirmedBy ?? [github],
+      createdAt: own?.createdAt ?? this.now(),
+      updatedAt: this.now(),
+    };
+    map.set(tm.id, tm);
+    this.emit(teamId, { type: "memory", teamId, memory: { ...tm } });
+    return { memory: { ...tm }, merged: false };
+  }
+
+  private ownMemory(userId: string, teamId: string, id: string): TeamMemory {
+    this.requireRole(teamId, userId, "member");
+    const m = this.mem(teamId).get(id);
+    if (!m) throw new HubError(`no team memory "${id}"`, 404);
+    if (m.authorId !== userId) throw new HubError("only its author can change a memory — record a correction instead", 403);
+    return m;
+  }
+
+  updateTeamMemory(userId: string, teamId: string, id: string, patch: { hmac: string; sealed: Sealed }): TeamMemory {
+    const m = this.ownMemory(userId, teamId, id);
+    m.hmac = patch.hmac;
+    m.sealed = patch.sealed;
+    m.updatedAt = this.now();
+    this.emit(teamId, { type: "memory", teamId, memory: { ...m } });
+    return { ...m };
+  }
+
+  forgetTeamMemory(userId: string, teamId: string, id: string, reason: string): void {
+    const m = this.ownMemory(userId, teamId, id);
+    m.state = "forgotten";
+    m.resolvedReason = reason.slice(0, 200);
+    m.updatedAt = this.now();
+    this.emit(teamId, { type: "memory", teamId, memory: { ...m } });
+  }
+
+  resolveMemories(userId: string, teamId: string, winnerId: string, loserId: string, reason: string): TeamMemory {
+    this.requireRole(teamId, userId, "member");
+    const map = this.mem(teamId);
+    const winner = map.get(winnerId);
+    const loser = map.get(loserId);
+    if (!winner || !loser) throw new HubError("both memories must exist", 404);
+    if (winnerId === loserId) throw new HubError("a memory can't supersede itself");
+    loser.state = "superseded";
+    loser.supersededBy = winnerId;
+    loser.resolvedBy = this.user(userId).github;
+    loser.resolvedReason = reason.slice(0, 200);
+    loser.updatedAt = this.now();
+    // the winner inherits the loser's confirmations: they agreed on the topic
+    for (const g of loser.confirmedBy) if (!winner.confirmedBy.includes(g)) winner.confirmedBy.push(g);
+    winner.updatedAt = this.now();
+    this.emit(teamId, { type: "memory", teamId, memory: { ...loser } });
+    this.emit(teamId, { type: "memory", teamId, memory: { ...winner } });
+    this.appendFeedRaw(teamId, userId, {
+      type: "memory_resolved",
+      repo: loser.repo,
+      meta: { winner: winnerId, loser: loserId, reason: reason.slice(0, 200) },
+    });
+    return { ...loser };
+  }
+
+  teamMemories(userId: string, teamId: string, repo: string, opts: { history?: boolean } = {}): TeamMemory[] {
+    this.requireRole(teamId, userId, "viewer");
+    const r = normalizeRepo(repo);
+    return [...this.mem(teamId).values()]
+      .filter((m) => m.repo === r && (opts.history || m.state === "live"))
+      .map((m) => ({ ...m, confirmedBy: [...m.confirmedBy] }));
+  }
+
   leases(userId: string, teamId: string, repo?: string): Lease[] {
     this.requireRole(teamId, userId, "viewer");
     const r = repo ? normalizeRepo(repo) : null;
@@ -758,6 +912,21 @@ class MemoryHubClient implements HubClient {
   }
   leases(teamId: string, repo?: string) {
     return this.run(() => this.hub.leases(this.userId, teamId, repo));
+  }
+  publishMemory(teamId: string, m: TeamMemoryIn) {
+    return this.run(() => this.hub.publishMemory(this.userId, teamId, m));
+  }
+  updateTeamMemory(teamId: string, id: string, patch: { hmac: string; sealed: Sealed }) {
+    return this.run(() => this.hub.updateTeamMemory(this.userId, teamId, id, patch));
+  }
+  forgetTeamMemory(teamId: string, id: string, reason: string) {
+    return this.run(() => this.hub.forgetTeamMemory(this.userId, teamId, id, reason));
+  }
+  resolveMemories(teamId: string, winnerId: string, loserId: string, reason: string) {
+    return this.run(() => this.hub.resolveMemories(this.userId, teamId, winnerId, loserId, reason));
+  }
+  teamMemories(teamId: string, repo: string, opts?: { history?: boolean }) {
+    return this.run(() => this.hub.teamMemories(this.userId, teamId, repo, opts));
   }
 }
 

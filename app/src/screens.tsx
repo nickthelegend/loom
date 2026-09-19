@@ -65,6 +65,7 @@ import { ConnectionBadge } from "./brand";
 import { OrchestraView } from "./orchestra";
 import { ObservatoryView } from "./observatory";
 import { ToolsView } from "./tools";
+import { TeamBrainView, useBrainSummary } from "./team-brain";
 import { useStt } from "./stt";
 import { T, radii, spacing, usd } from "./theme";
 
@@ -714,7 +715,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "observatory" | "ask" | "tasks" | "changes" | "tools";
+type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -726,6 +727,8 @@ const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "orchestra", label: "Orchestra", accent: T.thread },
   { key: "observatory", label: "Observatory", accent: T.primary },
   { key: "ask", label: "Ask", accent: T.primary },
+  // only while the repo is shared with a team (see visibleTabs below)
+  { key: "brain", label: "Team brain", accent: T.ok },
   { key: "tasks", label: "Tasks" },
   { key: "changes", label: "Changes" },
   { key: "tools", label: "Tools" },
@@ -769,6 +772,8 @@ export function ProjectScreen(props: {
   const [text, setText] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const lastId = useRef(0);
+  // Loom Teams Phase 3: the team brain's inbox count, for the tab badge.
+  const brain = useBrainSummary(creds, props.project.id);
   const listRef = useRef<FlatList<LoomEvent>>(null);
 
   // Voice input: dictation appends to whatever is already typed.
@@ -1035,7 +1040,9 @@ export function ProjectScreen(props: {
           style={{ flexGrow: 0 }}
           contentContainerStyle={{ paddingHorizontal: spacing.md, gap: spacing.lg, alignItems: "stretch" }}
         >
-          {TABS.map((t) => (
+          {TABS.filter(
+            (t) => t.key !== "brain" || tab === "brain" || (brain.summary.shared && !brain.summary.hidden),
+          ).map((t) => (
             <TouchableOpacity
               key={t.key}
               onPress={() => setTab(t.key)}
@@ -1050,9 +1057,29 @@ export function ProjectScreen(props: {
                 marginBottom: -1,
               }}
             >
-              <Text style={{ color: tab === t.key ? T.text : T.dim, fontWeight: "600", fontSize: 13 }}>
-                {t.label}
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                <Text style={{ color: tab === t.key ? T.text : T.dim, fontWeight: "600", fontSize: 13 }}>
+                  {t.label}
+                </Text>
+                {t.key === "brain" && brain.summary.inbox > 0 ? (
+                  <View
+                    accessibilityLabel={`${brain.summary.inbox} to review`}
+                    style={{
+                      minWidth: 17,
+                      height: 17,
+                      paddingHorizontal: 4,
+                      borderRadius: radii.pill,
+                      backgroundColor: T.warn,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text style={{ color: T.onBright, fontSize: 10, fontWeight: "700" }}>
+                      {brain.summary.inbox > 99 ? "99+" : brain.summary.inbox}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -1299,6 +1326,8 @@ export function ProjectScreen(props: {
         <ObservatoryView creds={creds} project={project} />
       ) : tab === "ask" ? (
         <AskView creds={creds} project={project} />
+      ) : tab === "brain" ? (
+        <TeamBrainView creds={creds} project={project} onChanged={brain.update} />
       ) : tab === "tools" ? (
         <ToolsView
           creds={creds}

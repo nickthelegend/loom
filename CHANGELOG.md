@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Loom Teams, Phase 3: one brain
+
+- **12 more design decisions** (D40–D51), settled in a design interview.
+- **Team memories:** durable memories from a shared project are published to the
+  hub sealed under the team key, with an HMAC of the normalized text. The hub
+  merges exact twins as confirmations without reading them (MemoryHub, `loom hub`
+  and SQL `0004_team_memories.sql`, tested on Postgres).
+- **Who can change what:** only a memory's author edits or forgets it; a teammate
+  records a correction that supersedes it. Resolving keeps the loser, linked to
+  the winner, which inherits its confirmations.
+- **Tiered briefings:** canon > confirmed by 2+ > your own > a teammate's
+  proposal, each line labelled. Failures and facts age out of briefings after ~90
+  days unless re-confirmed.
+- **Untrusted memories:** a turn that read the web, GitHub issue/PR text or a
+  fetched URL marks what it taught as untrusted. Untrusted memories stay personal
+  until you trust them.
+- **Canon in `AGENTS.md`:** a Loom-managed section with per-line markers; lines
+  added by hand count too. Promotion goes through one rolling `loom/canon` PR,
+  which also adds `@AGENTS.md` to `CLAUDE.md`. The native-memory import skips the
+  section, so canon never loops back in.
+- **Live team context** in worker and handoff briefings, up to 1.5k characters:
+  - teammates' leases on the same paths;
+  - open PRs that change them (PR feed events now carry changed paths);
+  - failing checks;
+  - predicted conflicts.
+- **Inbox:** contradictions, near-duplicates, corrections, untrusted memories and
+  promotion candidates. REST `/api/projects/:id/team/brain[/:action]` and
+  `loom team brain`.
+
 ### Loom Teams, Phase 2: stop colliding
 
 - **12 more design decisions** (D28–D39), settled in a design interview.

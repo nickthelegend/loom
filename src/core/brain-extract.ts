@@ -178,6 +178,8 @@ export interface ApplyOpts {
   by: string;
   eventId: number;
   chat?: string;
+  /** The turn read outside content: tag what it teaches as untrusted (D43). */
+  untrusted?: boolean;
 }
 
 /**
@@ -212,10 +214,15 @@ export function applyExtraction(
         ...(op.confidence !== undefined ? { confidence: op.confidence } : {}),
         evidence: op.evidence,
         ...(opts.chat ? { scope: { chat: opts.chat } } : {}),
+        ...(opts.untrusted ? { untrusted: true } : {}),
         provenance: prov,
       });
       if (created) res.added.push(memory);
-      else res.dropped.push({ op, reason: "already known (hash match)" });
+      else {
+        // learned again: that's a confirmation, and it keeps the memory fresh (D16)
+        brain.confirm(memory.id, opts.by);
+        res.dropped.push({ op, reason: "already known (hash match)" });
+      }
     } else if (op.op === "UPDATE") {
       const target = byInt.get(op.id);
       if (!target) {
@@ -264,6 +271,8 @@ export interface ExtractFromTurnOpts {
   /** How many existing memories to show the extractor as collision candidates. */
   candidateLimit?: number;
   eventId?: number;
+  /** The turn read outside content (web, issues, PRs) — D43. */
+  untrusted?: boolean;
 }
 
 /**
@@ -307,5 +316,26 @@ export async function extractFromTurn(
     by: opts.agentId,
     eventId: opts.eventId ?? 0,
     ...(opts.chat ? { chat: opts.chat } : {}),
+    ...(opts.untrusted ? { untrusted: true } : {}),
+  });
+}
+
+/**
+ * Did this turn read outside content? Tool calls that fetch the web or read
+ * GitHub issue/PR text mean anything learned may carry someone else's words —
+ * the memory-poisoning vector (D43). Conservative on purpose: a false
+ * "untrusted" costs a click; a false "trusted" can spread a planted instruction
+ * to every teammate's agent.
+ */
+export function readExternalContent(events: Array<{ kind: string; payload: Record<string, unknown> }>): boolean {
+  const external =
+    /\b(web_?fetch|web_?search|fetch_url|browse|browser|firecrawl|webpage)\b|https?:\/\/(?!127\.0\.0\.1|localhost)|\bgh\s+(issue|pr)\s+(view|list|diff)|\bgh\s+api\b|\bcurl\s|\bwget\s/i;
+  return events.some((e) => {
+    if (e.kind !== "tool_call" && e.kind !== "tool_result") return false;
+    const p = e.payload;
+    const hay = [p.tool, p.name, p.command, p.summary, typeof p.input === "string" ? p.input : JSON.stringify(p.input ?? "")]
+      .filter(Boolean)
+      .join(" ");
+    return external.test(hay);
   });
 }
