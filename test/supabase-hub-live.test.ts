@@ -1,6 +1,6 @@
 /**
  * The hosted Team Hub, live: two throwaway members on the real Supabase
- * project, running the Phase 1–3 flow through SupabaseHubClient — RLS, rule
+ * project, running the Phase 1–5 flow through SupabaseHubClient — RLS, rule
  * functions and Realtime as they actually behave in production.
  *
  * Opt-in: LOOM_LIVE_SUPABASE=1 plus SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY and
@@ -236,6 +236,60 @@ describe.skipIf(!live)("hosted Team Hub, live (two members through SupabaseHubCl
     expect(upd.hmac).toBe(`v2:valibot-${tag}`);
     await waitFor("memory events", () => events.find((e) => e.type === "memory" && e.memory.id === `m1-${tag}` && e.memory.state === "superseded"));
     expect(events.some((e) => e.type === "feed" && e.event.type === "memory_resolved")).toBe(true);
+  }, 60_000);
+
+  it("runners and jobs: register, target, claim, heartbeat, finish, cancel, revoke — heard live (D67–D74)", async () => {
+    const bobRunner = (await bob.hub.registerDevice({ label: "box", sealPub: `sealBR-${tag}`, signPub: `signBR-${tag}` })).id;
+    const r = await bob.hub.registerRunner({ deviceId: bobRunner, kinds: ["codex", "claude", "codex"], shared: false, capacity: 20 });
+    expect(r).toMatchObject({ deviceId: bobRunner, userId: bob.id, github: bob.login, label: "box", kinds: ["codex", "claude"], shared: false, capacity: 8 });
+    expect(r.lastSeen).toBeGreaterThan(Date.now() - 120_000);
+    await expect(alice.hub.registerRunner({ deviceId: bobRunner, kinds: [], shared: true })).rejects.toMatchObject({ status: 403 });
+    expect((await alice.hub.runners(team)).map((x) => x.deviceId)).toEqual([bobRunner]);
+
+    // a personal runner: alice can't aim at it, and it won't take her goals
+    await expect(alice.hub.createJob(team, { repo, kind: "start", sealed, deviceId: aliceDev, target: bobRunner })).rejects.toMatchObject({ status: 403 });
+    const hers = await alice.hub.createJob(team, { repo, kind: "start", sealed, deviceId: aliceDev });
+    expect(hers).toMatchObject({ teamId: team, repo, kind: "start", userId: alice.id, github: alice.login, state: "queued", sealed });
+    expect(hers.target).toBeUndefined();
+    expect(hers.runnerId).toBeUndefined();
+    expect(await bob.hub.claimJob(team, bobRunner)).toBeNull();
+    await expect(bob.hub.createJob(team, { repo, kind: "deploy" as never, sealed, deviceId: bobDev })).rejects.toMatchObject({ status: 400 });
+
+    const his = await bob.hub.createJob(team, { repo, kind: "land", sealed, deviceId: bobDev, target: bobRunner });
+    const got = await bob.hub.claimJob(team, bobRunner);
+    expect(got).toMatchObject({ id: his.id, state: "claimed", runnerId: bobRunner, runnerGithub: bob.login, target: bobRunner });
+    expect(got!.heartbeatAt).toBeGreaterThan(Date.now() - 120_000);
+    await expect(alice.hub.heartbeatJob(team, his.id, aliceDev)).rejects.toMatchObject({ status: 409 });
+    const beat = await bob.hub.heartbeatJob(team, his.id, bobRunner, { v: 1, c: "cHJvZ3Jlc3M" } as never);
+    expect(beat.progress).toEqual({ v: 1, c: "cHJvZ3Jlc3M" });
+    const done = await bob.hub.finishJob(team, his.id, bobRunner, { state: "done", result: sealed });
+    expect(done).toMatchObject({ state: "done", result: sealed });
+    expect(done.error).toBeUndefined();
+    await expect(bob.hub.finishJob(team, his.id, bobRunner, { state: "done" })).rejects.toMatchObject({ status: 409 });
+    const heard = await waitFor("job done, live", () =>
+      events.find((e) => e.type === "job" && e.job.id === his.id && e.job.state === "done"),
+    );
+    expect(heard).toMatchObject({ type: "job", teamId: team, job: { runnerGithub: bob.login, github: bob.login, kind: "land" } });
+    expect(typeof (heard as { job: { updatedAt: number } }).job.updatedAt).toBe("number");
+
+    // a shared runner takes a teammate's goal; only its author cancels it
+    await bob.hub.registerRunner({ deviceId: bobRunner, kinds: ["codex"], shared: true });
+    expect((await bob.hub.claimJob(team, bobRunner))!.id).toBe(hers.id);
+    await expect(bob.hub.cancelJob(team, hers.id)).rejects.toMatchObject({ status: 403 });
+    expect((await alice.hub.cancelJob(team, hers.id)).state).toBe("cancelled");
+    await expect(bob.hub.heartbeatJob(team, hers.id, bobRunner)).rejects.toMatchObject({ status: 409 });
+    expect(await alice.hub.jobs(team, { active: true })).toEqual([]);
+    expect((await alice.hub.jobs(team)).map((j) => `${j.kind}:${j.state}`)).toEqual(["start:cancelled", "land:done"]);
+    await waitFor("job cancelled, live", () => events.find((e) => e.type === "job" && e.job.id === hers.id && e.job.state === "cancelled"));
+
+    for (const t of ["goal_moved", "deploy_started", "deploy_succeeded", "deploy_failed"] as const) {
+      expect(await bob.hub.appendFeed(team, { type: t, repo, meta: { n: 1 } })).toMatchObject({ type: t });
+    }
+
+    await expect(alice.hub.revokeDevice(bobRunner)).rejects.toMatchObject({ status: 403 });
+    await bob.hub.revokeDevice(bobRunner);
+    expect(await alice.hub.runners(team)).toEqual([]);
+    expect((await alice.hub.members(team)).find((m) => m.user.id === bob.id)!.devices.map((d) => d.id)).toEqual([bobDev]);
   }, 60_000);
 
   it("a member can leave; a non-member can't read or subscribe", async () => {

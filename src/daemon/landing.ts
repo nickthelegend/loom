@@ -267,7 +267,14 @@ export class Landing {
   }
 
   private async merged(run: OrchestraRun): Promise<LandingState> {
-    const st = this.set(run, { state: "merged", landRequested: false });
+    const mc = await this.exec("gh", ["pr", "view", String(run.landing!.pr), "--json", "mergeCommit"], this.rt.info.dir).catch(() => null);
+    let mergeSha: string | undefined;
+    try {
+      mergeSha = mc?.code === 0 ? (JSON.parse(mc.out) as { mergeCommit?: { oid?: string } }).mergeCommit?.oid : undefined;
+    } catch {
+      mergeSha = undefined;
+    }
+    const st = this.set(run, { state: "merged", landRequested: false, ...(mergeSha ? { mergeSha } : {}) });
     await this.post(run, "goal_landed", { runId: run.id, pr: st.pr, costUsd: Math.round(run.costUsd * 100) / 100 }, `landed:${run.id}`);
     if (run.from) await this.handBack(run).catch(() => {});
     return st;

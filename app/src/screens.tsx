@@ -67,6 +67,8 @@ import { ObservatoryView } from "./observatory";
 import { ToolsView } from "./tools";
 import { TeamBrainView, useBrainSummary } from "./team-brain";
 import { TeamLandingView, useLandingSummary } from "./team-landing";
+import { TeamRunnersView, useRunnersSummary } from "./team-runners";
+import { runnersTabVisible } from "./team-runners-model";
 import { useStt } from "./stt";
 import { T, radii, spacing, usd } from "./theme";
 
@@ -716,7 +718,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "landing" | "tasks" | "changes" | "tools";
+type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -732,6 +734,8 @@ const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "brain", label: "Team brain", accent: T.ok },
   // Phase 4: goal PRs on their way to main; shown with a team or once there are any
   { key: "landing", label: "Landing", accent: T.warn },
+  // Phase 5: goals on always-on runners, and deploys; shown with a team or once there are runners
+  { key: "runners", label: "Runners", accent: T.primary },
   { key: "tasks", label: "Tasks" },
   { key: "changes", label: "Changes" },
   { key: "tools", label: "Tools" },
@@ -743,10 +747,14 @@ export function ProjectScreen(props: {
   onBack: () => void;
   /** Open on this thread instead of main — the Fleet screen's rows point at one. */
   initialChat?: { id: string; title: string };
+  /** Open on this tab (a tapped push notification: its goal's Orchestra tab). */
+  initialTab?: "thread" | "orchestra";
+  /** With initialTab "orchestra": open on this run. */
+  initialRunId?: string;
 }) {
   const { creds } = props;
   const [project, setProject] = useState(props.project);
-  const [tab, setTab] = useState<Tab>("thread");
+  const [tab, setTab] = useState<Tab>(props.initialTab ?? "thread");
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
   const [chats, setChats] = useState<Chat[]>([]);
   // A chat opened from elsewhere (an Orchestra task) that isn't in the sidebar list.
@@ -779,6 +787,8 @@ export function ProjectScreen(props: {
   const brain = useBrainSummary(creds, props.project.id);
   // Phase 4: goal PRs that need you + teammates' goals that need someone.
   const landing = useLandingSummary(creds, props.project.id, orchPulse.n);
+  // Phase 5: runners that take this project's goals, and the goals on them.
+  const runners = useRunnersSummary(creds, props.project.id, orchPulse.n);
   const listRef = useRef<FlatList<LoomEvent>>(null);
 
   // Voice input: dictation appends to whatever is already typed.
@@ -1050,6 +1060,7 @@ export function ProjectScreen(props: {
             if (t.key === "brain") return brain.summary.shared && !brain.summary.hidden;
             if (t.key === "landing")
               return !landing.summary.hidden && (brain.summary.shared || landing.summary.goals > 0 || landing.summary.count > 0);
+            if (t.key === "runners") return runnersTabVisible({ ...runners.summary, shared: brain.summary.shared });
             return true;
           }).map((t) => {
             const count = t.key === "brain" ? brain.summary.inbox : t.key === "landing" ? landing.summary.count : 0;
@@ -1328,6 +1339,7 @@ export function ProjectScreen(props: {
           project={project}
           pulse={orchPulse.n}
           pulseRunId={orchPulse.runId}
+          {...(props.initialRunId ? { initialRunId: props.initialRunId } : {})}
           onOpenChat={(id, title) => {
             if (!chats.some((c) => c.id === id)) setExtraChat({ id, title, createdAt: Date.now() });
             setChatId(id);
@@ -1348,6 +1360,8 @@ export function ProjectScreen(props: {
           pulse={orchPulse.n}
           onChanged={landing.update}
         />
+      ) : tab === "runners" ? (
+        <TeamRunnersView creds={creds} project={project} pulse={orchPulse.n} onChanged={runners.update} />
       ) : tab === "tools" ? (
         <ToolsView
           creds={creds}

@@ -142,6 +142,18 @@ function sentence(e: TeamFeedEvent): string {
       const where = files.length ? ` in ${files.slice(0, 3).join(", ")}${files.length > 3 ? ` +${files.length - 3}` : ""}` : "";
       return `Merge conflict ahead between ${between}${where}${inRepo}`;
     }
+    case "goal_moved": {
+      const to = typeof m.to === "string" && m.to ? m.to : "a runner";
+      return `${who(actor)} moved ${quoted(c.goal) || "a goal"} to ${to}${inRepo}`;
+    }
+    case "deploy_started":
+    case "deploy_succeeded":
+    case "deploy_failed": {
+      const env = typeof m.environment === "string" && m.environment ? m.environment : "an environment";
+      const sha = typeof m.sha === "string" && m.sha ? ` (${m.sha.slice(0, 7)})` : "";
+      const verb = e.type === "deploy_started" ? "started" : e.type === "deploy_succeeded" ? "succeeded" : "failed";
+      return `Deploy to ${env}${sha} ${verb}${inRepo}`;
+    }
     default:
       return `${who(actor)} · ${e.type.replace(/_/g, " ")}${c.summary ? ` · ${c.summary}` : ""}`;
   }
@@ -159,6 +171,10 @@ const FEED_COLOR: Record<string, string> = {
   drift: T.warn,
   zone_waiting: T.warn,
   conflict_predicted: T.warn,
+  goal_moved: T.thread,
+  deploy_started: T.thread,
+  deploy_succeeded: T.ok,
+  deploy_failed: T.err,
 };
 
 /** Feed rows that warn: a merge conflict is coming if nobody acts. */
@@ -406,7 +422,7 @@ function TouchedFiles(props: { presence: TeamPresence[] }) {
 
 function FeedRow(props: { e: TeamFeedEvent; now: number }) {
   const { e } = props;
-  const url = e.type.startsWith("pr_") || e.type.startsWith("check_") || e.type.startsWith("review_")
+  const url = e.type.startsWith("pr_") || e.type.startsWith("check_") || e.type.startsWith("review_") || e.type.startsWith("deploy_")
     ? openable(e.meta?.url) ?? openable(e.meta?.prUrl)
     : openable(e.meta?.prUrl);
   const color = FEED_COLOR[e.type] ?? T.faint;

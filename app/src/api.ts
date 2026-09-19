@@ -1060,7 +1060,9 @@ export type OrchestraStatus =
   | "waiting_human"
   | "completed"
   | "failed"
-  | "aborted";
+  | "aborted"
+  /** Phase 5: the goal went to another machine (a runner, or back home); this copy is read-only. */
+  | "moved";
 
 export type OrchestraTaskStatus =
   | "pending"
@@ -1135,6 +1137,10 @@ export interface OrchestraRun {
   createdAt: number;
   /** Things the team coordinator told the orchestrator (drift, predicted conflicts). */
   notes?: string[];
+  /** Phase 5: where a "moved" run went, and when. */
+  movedTo?: { where: string; at: number };
+  /** Phase 5: on its way to another machine (running turns are finishing). */
+  moving?: boolean;
 }
 
 /** Where a run's plan lives inside the repo — the daemon's planDir(). */
@@ -1573,6 +1579,90 @@ export const teamLandingAction = <R = unknown>(c: Creds, id: string, action: Lan
     method: "POST",
     body: JSON.stringify(body),
   });
+
+// --- Runners and deploys (Loom Teams Phase 5) ---------------------------------
+
+/** An always-on Loom daemon that takes goals (D67): yours, or a teammate's shared one. */
+export interface TeamRunner {
+  deviceId: string;
+  github: string;
+  label: string;
+  /** Agent kinds installed on it. */
+  kinds: string[];
+  /** Takes any member's goals, not just its owner's (D68). */
+  shared: boolean;
+  lastSeen: number;
+  mine: boolean;
+  online: boolean;
+}
+
+export type RunnerJobKind = "start" | "continue" | "fix" | "return" | "land";
+export type RunnerJobState = "queued" | "claimed" | "done" | "failed" | "cancelled";
+
+/** The runner's latest snapshot of the goal it holds (daemon/runner.ts JobProgress). */
+export interface RunnerJobProgress {
+  runId: string | null;
+  goal: string;
+  /** The run's OrchestraStatus, or "preparing" before the run exists. */
+  status: string;
+  tasks: Array<{ id: string; title: string; agent: string; status: string }>;
+  costUsd: number;
+  landing: LandingState | null;
+  question?: string;
+  at: number;
+}
+
+export interface RunnerJob {
+  id: string;
+  /** Kinds and states are strings so a newer daemon's still parse. */
+  kind: RunnerJobKind | (string & {});
+  state: RunnerJobState | (string & {});
+  github: string;
+  runnerGithub?: string;
+  error?: string;
+  goal: string;
+  runId: string | null;
+  progress: RunnerJobProgress | null;
+  mine: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface TeamRunners {
+  runners: TeamRunner[];
+  jobs: RunnerJob[];
+}
+
+export type RunnerAction = "start" | "continue" | "bring-back" | "land";
+
+export const getTeamRunners = (c: Creds, id: string) => api<TeamRunners>(c, `/api/projects/${id}/team/runners`);
+
+/**
+ * start {goal, orchestrator?, workers?, plan?, runner?} · continue {runId, runner?}
+ * · bring-back {runId} · land {runId}. Answers with the runners and jobs as they now stand.
+ */
+export const teamRunnerAction = <R = unknown>(c: Creds, id: string, action: RunnerAction, body: Record<string, unknown> = {}) =>
+  api<TeamRunners & { result: R }>(
+    c,
+    `/api/projects/${id}/team/runners/${action}`,
+    { method: "POST", body: JSON.stringify(body) },
+    // continue answers once running turns have finished (up to 2 min) and the branches are pushed
+    action === "continue" ? 200_000 : undefined,
+  );
+
+export interface TeamDeployment {
+  id: number;
+  environment: string;
+  sha: string;
+  /** Latest status: queued | in_progress | success | failure | error | inactive | pending. */
+  state: string;
+  url: string | null;
+  at: number;
+}
+
+/** Read-only (D72): GitHub deployment statuses for the shared repo. */
+export const getTeamDeploys = (c: Creds, id: string) =>
+  api<{ deployments: TeamDeployment[] }>(c, `/api/projects/${id}/team/deploys`);
 
 // --- Prompt manager ---------------------------------------------------------
 

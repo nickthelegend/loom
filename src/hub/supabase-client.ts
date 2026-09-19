@@ -3,7 +3,7 @@
  *
  * Same `HubClient` contract as MemoryHub (the reference) and HttpHubClient
  * (a self-hosted `loom hub`), against the Supabase schema in
- * supabase/migrations/0002–0005: reads are RLS-guarded selects, writes are the
+ * supabase/migrations/0002–0007: reads are RLS-guarded selects, writes are the
  * SECURITY DEFINER rule functions called through `rpc`, and live events are
  * Realtime `postgres_changes` (RLS decides who hears what).
  *
@@ -33,11 +33,14 @@ import {
   type HubDevice,
   type HubEvent,
   type HubUser,
+  type Job,
+  type JobIn,
   type Lease,
   type LeaseClaim,
   type MemberView,
   type Presence,
   type PresenceIn,
+  type Runner,
   type Team,
   type TeamMemory,
   type TeamMemoryIn,
@@ -112,6 +115,7 @@ export function hubErrorFrom(err: PgError | null | undefined, httpStatus?: numbe
   if (code === "42501") status = 403;
   else if (code === "P0002") status = 404;
   else if (code === "40001") status = 409;
+  else if (/^PT[45]\d\d$/.test(code)) status = Number(code.slice(2)); // PostgREST's "PTxyz" = HTTP xyz
   else if (code === "PGRST301" || code === "PGRST302" || code === "PGRST303" || httpStatus === 401) status = 401;
   return new HubError(message, status);
 }
@@ -233,6 +237,48 @@ export function mapFeed(r: Row, github: string | null): FeedEvent {
     userId: (r.user_id as string | null) ?? null,
     github,
     ts: ms(r.ts),
+  };
+}
+
+/** A `jobs` row (PostgREST or Realtime) → the Job MemoryHub returns. */
+export function mapJob(r: Row): Job {
+  return {
+    id: str(r.id),
+    teamId: str(r.team_id),
+    repo: str(r.repo),
+    kind: str(r.kind) as Job["kind"],
+    userId: str(r.user_id),
+    github: str(r.github),
+    ...opt({ target: r.target as string | undefined }),
+    state: str(r.state) as Job["state"],
+    ...opt({
+      runnerId: r.runner_id as string | undefined,
+      runnerGithub: r.runner_github as string | undefined,
+      claimedAt: r.claimed_at == null ? undefined : ms(r.claimed_at),
+      heartbeatAt: r.heartbeat_at == null ? undefined : ms(r.heartbeat_at),
+    }),
+    sealed: r.sealed as Sealed,
+    ...opt({
+      progress: r.progress as Sealed | undefined,
+      result: r.result as Sealed | undefined,
+      error: r.error as string | undefined,
+    }),
+    createdAt: ms(r.created_at),
+    updatedAt: ms(r.updated_at),
+  };
+}
+
+/** team_runners / register_runner JSON (already camelCase) → Runner. */
+export function mapRunner(r: Row): Runner {
+  return {
+    deviceId: str(r.deviceId),
+    userId: str(r.userId),
+    github: str(r.github),
+    label: str(r.label),
+    kinds: arr(r.kinds),
+    shared: Boolean(r.shared),
+    capacity: Number(r.capacity ?? 1),
+    lastSeen: ms(r.lastSeen),
   };
 }
 
@@ -560,10 +606,77 @@ export class SupabaseHubClient implements HubClient {
     return rows.map(mapMemory);
   }
 
+  // ── Phase 5: runners and jobs ──
+
+  async registerRunner(input: { deviceId: string; kinds: string[]; shared: boolean; capacity?: number }): Promise<Runner> {
+    return mapRunner(
+      await this.rpc<Row>("register_runner", {
+        p_device: input.deviceId,
+        p_kinds: input.kinds.map(String),
+        p_shared: Boolean(input.shared),
+        p_capacity: Math.floor(input.capacity ?? 1),
+      }),
+    );
+  }
+
+  async runners(teamId: string): Promise<Runner[]> {
+    return ((await this.rpc<Row[] | null>("team_runners", { p_team: teamId })) ?? []).map(mapRunner);
+  }
+
+  async revokeDevice(deviceId: string): Promise<void> {
+    await this.rpc("revoke_device", { p_device: deviceId });
+  }
+
+  async createJob(teamId: string, j: JobIn): Promise<Job> {
+    return mapJob(await this.rpc<Row>("create_job", { p_team: teamId, j }));
+  }
+
+  async claimJob(teamId: string, runnerDeviceId: string): Promise<Job | null> {
+    const row = await this.rpc<Row | null>("claim_job", { p_team: teamId, p_runner: runnerDeviceId });
+    // a composite-returning function answers "none" as a row of nulls
+    return !row || row.id == null ? null : mapJob(row);
+  }
+
+  async heartbeatJob(teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed): Promise<Job> {
+    return mapJob(
+      await this.rpc<Row>("heartbeat_job", { p_team: teamId, p_job: jobId, p_runner: runnerDeviceId, ...(progress ? { p_progress: progress } : {}) }),
+    );
+  }
+
+  async finishJob(
+    teamId: string,
+    jobId: string,
+    runnerDeviceId: string,
+    outcome: { state: "done" | "failed"; result?: Sealed; error?: string },
+  ): Promise<Job> {
+    return mapJob(
+      await this.rpc<Row>("finish_job", {
+        p_team: teamId,
+        p_job: jobId,
+        p_runner: runnerDeviceId,
+        p_state: outcome.state,
+        ...(outcome.result ? { p_result: outcome.result } : {}),
+        ...(outcome.error ? { p_error: outcome.error } : {}),
+      }),
+    );
+  }
+
+  async cancelJob(teamId: string, jobId: string): Promise<Job> {
+    return mapJob(await this.rpc<Row>("cancel_job", { p_team: teamId, p_job: jobId }));
+  }
+
+  async jobs(teamId: string, opts: { active?: boolean } = {}): Promise<Job[]> {
+    const rows = await this.select((sb) => {
+      const q = sb.from("jobs").select("*").eq("team_id", teamId).order("created_at").order("id");
+      return opts.active ? q.in("state", ["queued", "claimed"]) : q;
+    });
+    return rows.map(mapJob);
+  }
+
   // ── live events ──
 
   /**
-   * Realtime `postgres_changes` on feed, presence, leases and team_memories,
+   * Realtime `postgres_changes` on feed, presence, leases, team_memories and jobs,
    * as the HubEvents MemoryHub emits. Inserts and updates are filtered to the
    * team and RLS-checked per member. Deletes can't be filtered and carry only
    * the primary key, so: presence's key includes the team, and lease ids are
@@ -636,6 +749,9 @@ export class SupabaseHubClient implements HubClient {
     const memory = (p: Change) => emit(async () => ({ type: "memory", teamId, memory: mapMemory(p.new) }));
     on("team_memories", "INSERT", memory);
     on("team_memories", "UPDATE", memory);
+    const job = (p: Change) => emit(async () => ({ type: "job", teamId, job: mapJob(p.new) }));
+    on("jobs", "INSERT", job);
+    on("jobs", "UPDATE", job);
 
     // Ready means both: the channel joined (SUBSCRIBED) *and* Realtime says the
     // Postgres subscription is live — that system message comes later, and a

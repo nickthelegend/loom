@@ -50,7 +50,8 @@ export type OrchestraStatus =
   | "waiting_human" // orchestrator asked a question
   | "completed"
   | "failed"
-  | "aborted";
+  | "aborted"
+  | "moved"; // Phase 5: the goal went to another machine (a runner, or back) — this copy is read-only
 
 export type TaskStatus =
   | "pending" // waiting on dependencies or a free slot
@@ -153,6 +154,10 @@ export interface OrchestraRun {
   from?: { branch: string; pr: number; url: string; ownerRunId?: string; owner?: string };
   /** This goal's spending cap in USD (D64), raised each time a human says continue. */
   budgetUsd?: number;
+  /** Phase 5: set while the goal is being handed to another machine; nothing new starts. */
+  moving?: boolean;
+  /** Where the goal went (D75). */
+  movedTo?: { where: string; at: number };
   costUsd: number;
   createdAt: number;
   updatedAt: number;
@@ -187,6 +192,8 @@ export interface LandingState {
   adoptedBy?: string;
   /** An adopted goal, handed back to its owner. */
   returned?: boolean;
+  /** The commit the PR merged as (deploy alerts, D72). */
+  mergeSha?: string;
   /** Stacked delivery (D59): the PRs bottom-up; the last is this goal's own branch. */
   stack?: Array<{ pr: number; url: string; branch: string; base: string; state?: string }>;
   updatedAt: number;
@@ -968,6 +975,144 @@ export class OrchestraEngine {
     return run;
   }
 
+  /**
+   * Hand a goal to another machine (Phase 5, D75): stop starting anything,
+   * let running turns finish (interrupting them after `graceMs`), commit every
+   * worktree, and push the integration and task branches to hidden refs. The
+   * returned record is what the other side needs to rebuild the run; this
+   * copy becomes "moved" and read-only.
+   */
+  async moveOut(runId: string, where: string, opts: { graceMs?: number } = {}): Promise<{ record: OrchestraRun; refs: string[] }> {
+    const run = this.mustGet(runId);
+    if (run.status === "moved") throw new Error(`run ${run.id} has already moved to ${run.movedTo?.where ?? "another machine"}`);
+    if (run.status === "failed" || run.status === "aborted") throw new Error(`run ${run.id} is ${run.status} — nothing to move`);
+    run.moving = true;
+    this.save(run);
+    this.emit(run, "moving", { to: where });
+    const grace = opts.graceMs ?? 120_000;
+    const busy = () => this.orchestratorBusy.has(run.id) || run.tasks.some((t) => t.status === "running");
+    const deadline = Date.now() + grace;
+    while (busy() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+    // Out of patience: stop what's still going; each such task resumes where it left off.
+    for (const t of run.tasks) {
+      if (t.status !== "running") continue;
+      t.status = "pending";
+      t.queued.unshift("You were moved to another machine mid-task. Your work so far is committed in this worktree — continue your task where you left off.");
+    }
+    await this.stopAll(run);
+    this.orchestratorBusy.delete(run.id);
+    const refs: string[] = [];
+    await this.gitLock.run(async () => {
+      await commitAll(run.dir, `orchestra ${run.id}: moved to ${where}`).catch(() => false);
+      await git(["push", "-q", "-f", "origin", `${run.branch}:${runRef(run.id, "main")}`], run.dir);
+      refs.push(runRef(run.id, "main"));
+      for (const t of run.tasks) {
+        if (!t.dir || !t.branch || !fs.existsSync(t.dir)) continue;
+        await commitAll(t.dir, `orchestra ${run.id}/${t.id}: work in progress, moved to ${where}`).catch(() => false);
+        await git(["push", "-q", "-f", "origin", `${t.branch}:${runRef(run.id, t.id)}`], t.dir);
+        refs.push(runRef(run.id, t.id));
+      }
+    });
+    const record: OrchestraRun = JSON.parse(JSON.stringify({ ...run, moving: undefined, movedTo: undefined }));
+    run.moving = undefined;
+    run.status = "moved";
+    run.movedTo = { where, at: Date.now() };
+    this.save(run);
+    this.emit(run, "moved", { to: where, refs });
+    return { record, refs };
+  }
+
+  /**
+   * Rebuild a moved goal here (a runner taking it, or bringing it back):
+   * fetch its hidden refs, recreate the integration and task worktrees, and
+   * give the orchestrator a review turn to carry on (D75, D76).
+   */
+  async importRun(record: OrchestraRun, opts: { from?: string; resume?: boolean } = {}): Promise<OrchestraRun> {
+    const dir = this.host.projectDir;
+    const id = record.id;
+    const existing = this.runs.get(id);
+    if (existing && !isTerminal(existing.status)) throw new Error(`run ${id} is active here already`);
+    await git(["fetch", "-q", "origin", `+refs/loom/run/${id}/*:refs/remotes/loom-run/${id}/*`], dir);
+    const wtRoot = path.join(loomHome(), "orchestra", this.host.projectId, id);
+    // a copy left here by an earlier move goes first
+    if (existing) {
+      const old = [existing.dir, ...existing.tasks.map((t) => t.dir).filter((d): d is string => !!d)];
+      await this.gitLock.run(async () => {
+        for (const d of old) await git(["worktree", "remove", "--force", d], dir).catch(() => {});
+        await git(["worktree", "prune"], dir).catch(() => {});
+      });
+    }
+    fs.mkdirSync(wtRoot, { recursive: true });
+    const integration = path.join(wtRoot, "integration");
+    // The other machine's agents may not exist here: same name, else same kind,
+    // else this machine's own orchestrator / first worker — and say so.
+    const roster = this.host.roster();
+    const swaps: string[] = [];
+    const local = (agent: string, kind: string, fallback: AgentConfig | undefined): AgentConfig | null => {
+      const cfg = this.resolveAgent(agent) ?? this.resolveAgent(kind) ?? fallback ?? null;
+      if (cfg && cfg.kind !== kind) swaps.push(`${agent} (${kind}) → ${cfg.id} (${cfg.kind})`);
+      return cfg;
+    };
+    const orchCfg = local(record.orchestrator.agent, record.orchestrator.kind, roster.find((a) => a.role === "orchestrator") ?? roster[0]);
+    if (!orchCfg) throw new Error("no agent here can orchestrate this goal");
+    const workerCfgs = record.workers.map((w) => this.resolveAgent(w)).filter((c): c is AgentConfig => !!c);
+    const firstWorker = workerCfgs[0] ?? roster.find((a) => a.role !== "orchestrator") ?? roster[0];
+    const tasks: OrchestraTask[] = [];
+    await this.gitLock.run(async () => {
+      await git(["worktree", "add", "-q", "-B", record.branch, integration, `refs/remotes/loom-run/${id}/main`], dir);
+      for (const t of record.tasks) {
+        const copy: OrchestraTask = { ...t, queued: [...t.queued] };
+        const wcfg = local(t.agent, t.kind, firstWorker);
+        if (wcfg) {
+          copy.agent = wcfg.id;
+          copy.kind = wcfg.kind;
+          if (!workerCfgs.some((w) => w.id === wcfg.id)) workerCfgs.push(wcfg);
+        }
+        const ref = `refs/remotes/loom-run/${id}/${t.id}`;
+        if (t.branch && (await gitOk(["rev-parse", "--verify", ref], dir))) {
+          const tdir = path.join(wtRoot, t.id);
+          await git(["worktree", "add", "-q", "-B", t.branch, tdir, ref], dir);
+          copy.dir = tdir;
+        } else {
+          delete copy.dir;
+          delete copy.branch;
+        }
+        if (copy.status === "running") copy.status = "pending";
+        copy.chat = this.host.createChat(`${t.id} · ${t.title}`.slice(0, 60)).id;
+        copy.reported = false;
+        tasks.push(copy);
+      }
+    });
+    if (!workerCfgs.length && firstWorker) workerCfgs.push(firstWorker);
+    const run: OrchestraRun = {
+      ...record,
+      orchestrator: { agent: orchCfg.id, kind: orchCfg.kind },
+      workers: workerCfgs.map((w) => w.id),
+      ...(swaps.length ? { notes: [...(record.notes ?? []), `Agents changed on the move: ${[...new Set(swaps)].join("; ")}`] } : {}),
+      dir: integration,
+      tasks,
+      chat: this.host.createChat(`🎼 ${record.goal.slice(0, 50)}`).id,
+      status: isTerminal(record.status) || record.status === "waiting_human" ? record.status : "reviewing",
+      maxRounds: record.round + 20,
+      moving: undefined,
+      movedTo: undefined,
+      updatedAt: Date.now(),
+    };
+    this.runs.set(id, run);
+    this.workerCfgs.delete(id);
+    this.save(run);
+    this.host.append({ kind: "message", chat: run.chat, payload: { text: run.goal, author: "user" } });
+    this.emit(run, "imported", { from: opts.from ?? "another machine", tasks: run.tasks.length });
+    if (opts.resume !== false && run.status === "reviewing") {
+      void this.orchestratorTurn(
+        run,
+        `This goal was moved here from ${opts.from ?? "another machine"}. Every task's work so far is on its branch; interrupted tasks resume where they left off.\n\n${this.statusReport(run)}`,
+        this.briefingOf(run),
+      );
+    }
+    return run;
+  }
+
   /** The orchestrator's standing instructions, for a fresh orchestrator session. */
   private briefingOf(run: OrchestraRun): string {
     return orchestratorBriefing({
@@ -1112,7 +1257,7 @@ export class OrchestraEngine {
   }
 
   private async orchestratorTurn(run: OrchestraRun, text: string, briefing?: string, retry = 0): Promise<void> {
-    if (isTerminal(run.status)) return;
+    if (isTerminal(run.status) || run.moving) return;
     if (this.overBudget(run)) return;
     if (run.round >= run.maxRounds) {
       return this.finish(run, "failed", `stopped after ${run.maxRounds} orchestrator rounds without "done"`);
@@ -1328,7 +1473,7 @@ export class OrchestraEngine {
   private recheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private schedule(run: OrchestraRun): void {
-    if (run.status !== "running") return;
+    if (run.status !== "running" || run.moving) return;
     if (this.overBudget(run)) return;
     const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`)).length;
     let slots = run.maxParallel - inFlight;
@@ -1916,7 +2061,12 @@ export function taskSummary(t: OrchestraTask): Record<string, unknown> {
 }
 
 export function isTerminal(s: OrchestraStatus): boolean {
-  return s === "completed" || s === "failed" || s === "aborted";
+  return s === "completed" || s === "failed" || s === "aborted" || s === "moved";
+}
+
+/** Where a moved goal's branches travel: hidden refs, like WIP refs (D11, D75). */
+export function runRef(runId: string, name: string): string {
+  return `refs/loom/run/${runId}/${name}`;
 }
 
 function clamp(n: number, lo: number, hi: number): number {

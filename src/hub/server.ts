@@ -52,6 +52,15 @@ const METHODS = new Set<keyof HubClient>([
   "forgetTeamMemory",
   "resolveMemories",
   "teamMemories",
+  "registerRunner",
+  "runners",
+  "revokeDevice",
+  "createJob",
+  "claimJob",
+  "heartbeatJob",
+  "finishJob",
+  "cancelJob",
+  "jobs",
 ]);
 
 export interface HubServerOptions {

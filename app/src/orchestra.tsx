@@ -45,6 +45,8 @@ import {
 import { AgentIcon, agentLabel } from "./agents";
 import { Badge, Callout, Empty, Panel, SectionLabel, TAP, Unreachable, ago, dur, field } from "./components";
 import { TeamPolicyCard } from "./team-policy";
+import { RunRunnerBar } from "./team-runners";
+import { movedLabel } from "./team-runners-model";
 import { T, radii, spacing, usd } from "./theme";
 
 const RUN_LOOK: Record<OrchestraStatus, { label: string; color: string }> = {
@@ -56,6 +58,7 @@ const RUN_LOOK: Record<OrchestraStatus, { label: string; color: string }> = {
   completed: { label: "completed", color: T.ok },
   failed: { label: "failed", color: T.err },
   aborted: { label: "aborted", color: T.faint },
+  moved: { label: "moved", color: T.primary },
 };
 
 const TASK_LOOK: Record<OrchestraTaskStatus, { label: string; color: string; glyph: string }> = {
@@ -68,7 +71,8 @@ const TASK_LOOK: Record<OrchestraTaskStatus, { label: string; color: string; gly
   cancelled: { label: "cancelled", color: T.faint, glyph: "–" },
 };
 
-const terminal = (s: OrchestraStatus) => s === "completed" || s === "failed" || s === "aborted";
+// "moved" (Phase 5): the goal carries on elsewhere; this copy is read-only.
+const terminal = (s: OrchestraStatus) => s === "completed" || s === "failed" || s === "aborted" || s === "moved";
 
 function StatusPill(props: { status: OrchestraStatus }) {
   const look = RUN_LOOK[props.status] ?? RUN_LOOK.starting;
@@ -676,6 +680,25 @@ function RunView(props: {
       {run.applied ? (
         <Callout label="Applied" text={`Merged into ${run.applied.into} ${ago(new Date(run.applied.at).toISOString())}.`} tint={T.ok} />
       ) : null}
+      {run.status === "moved" ? (
+        <Callout
+          label={movedLabel(run) ?? "Moved"}
+          text={`This goal carries on ${run.movedTo?.where ? `on ${run.movedTo.where}` : "on another machine"}${run.movedTo?.at ? ` (moved ${ago(new Date(run.movedTo.at).toISOString())})` : ""}. This copy is read-only — watch it in the Runners tab.`}
+          tint={T.primary}
+        />
+      ) : run.moving ? (
+        <Callout label="Moving" text="Running tasks are finishing their turn; then the goal moves to the runner." tint={T.primary} />
+      ) : null}
+      <RunRunnerBar
+        creds={props.creds}
+        projectId={props.projectId}
+        run={run}
+        onChanged={() =>
+          void getOrchestraRun(props.creds, props.projectId, run.id)
+            .then(({ run: r }) => props.onRun(r))
+            .catch(() => {})
+        }
+      />
       <Delivery run={run} busy={busy === "deliver"} onRetry={redeliver} />
       {run.notes?.length ? <TeamNotes notes={run.notes} /> : null}
       {err && <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text>}
@@ -869,10 +892,12 @@ export function OrchestraView(props: {
   pulse: number;
   pulseRunId: string | null;
   onOpenChat: (chatId: string, title: string) => void;
+  /** Open on this run (a tapped push notification names one). */
+  initialRunId?: string;
 }) {
   const { creds, project } = props;
   const [runs, setRuns] = useState<OrchestraRun[] | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(props.initialRunId ?? null);
   const [composing, setComposing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -882,7 +907,8 @@ export function OrchestraView(props: {
       setErr(null);
       const sorted = [...r.runs].sort((a, b) => b.createdAt - a.createdAt);
       setRuns(sorted);
-      setSelected((cur) => cur ?? r.active ?? sorted[0]?.id ?? null);
+      // keep the pick while it exists (a notification's run may be gone from the list)
+      setSelected((cur) => (cur && sorted.some((x) => x.id === cur) ? cur : r.active ?? sorted[0]?.id ?? null));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }

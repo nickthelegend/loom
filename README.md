@@ -491,8 +491,9 @@ detects at least two roles.
 | `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |
 | `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch · stop it · remove its worktrees |
 | `loom hub [--host --port --secret]` | Run a self-hosted Team Hub for your team |
-| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|landing\|doctor\|adopt\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; landing goal PRs; membership and key rotation |
+| `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|landing\|doctor\|adopt\|deploys\|release-notes\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; landing goal PRs; membership and key rotation |
 | `loom land [runId]` | Land a goal's PR: fresh main in, fast tests, push, merge when GitHub's rules pass |
+| `loom runner [status\|pair\|join\|start\|stop\|token\|doctor\|install\|revoke\|goal\|move\|back\|jobs]` | Runners: your always-on Loom that takes goals while you're away |
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
 | `loom subtasks` | Subtasks running right now |
@@ -921,9 +922,33 @@ loom team doctor            # merge-queue setup check (add "fix" to open the PR)
 your GitHub account; `loom team signin http://host:7430` still uses a
 self-hosted `loom hub`.
 
-The researched architecture (66 decisions, a 5-phase plan) is in
-**[docs/teams-architecture.md](docs/teams-architecture.md)**. Phase 5 (optional
-cloud sandboxes, deploys and release notes) is what's left.
+**Phase 5 (runners) is built too:**
+- **Your goals keep going when your laptop sleeps.** A runner is your own
+  always-on Loom (a VPS, a home server, a container) paired to your account. Start
+  a goal on it, or move a running goal there — from the desktop or your phone —
+  and bring it back whenever you like. Its code never touches Loom's servers.
+- **Its own trust tier.** Each goal gets a fresh clone (a fresh container when
+  Docker runs), agents get a scrubbed environment with only their logins and a
+  fine-grained GitHub token, and `loom.team.json` sets how far they may go.
+- **CI fixes while you're away.** If your goal needs a fix and you've been offline
+  15 minutes, your runner takes it.
+- **Shared runners** can take teammates' goals when the repo's policy allows it.
+- **Deploys and release notes.** Deploy results show in the team feed, a failed
+  deploy that contains your goal buzzes your phone, and
+  `loom team release-notes --since v1.2.0` writes the notes.
+
+```bash
+loom runner pair                    # on your laptop: a one-time link
+loom runner join '<link>'           # on the always-on box (then: loom runner install)
+loom runner token github_pat_…      # a fine-grained token: contents + pull requests
+loom runner goal "Add rate limiting"  # start a goal there
+loom runner move <runId>            # move a running goal; `loom runner back <runId>` to return it
+```
+
+Or with Docker: `docker build -f Dockerfile.runner -t loom-runner .`
+
+The researched architecture (78 decisions, a 5-phase plan) is in
+**[docs/teams-architecture.md](docs/teams-architecture.md)**.
 
 ## Loom Cloud — your agents from any network
 

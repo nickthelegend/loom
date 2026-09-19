@@ -15,7 +15,8 @@
  *     "orchestra": { "maxParallelPerMember": 6, "teamMaxConcurrentAgents": 20 },
  *     "landing": { "fastTest": "npm test -- --changed", "timeoutMin": 10, "autoFixAttempts": 2 },
  *     "review": { "enabled": true, "maxRuns": 3 },
- *     "budgets": { "perGoalUsd": 15, "perMemberDailyUsd": 60 }
+ *     "budgets": { "perGoalUsd": 15, "perMemberDailyUsd": 60 },
+ *     "runners": { "shared": true, "permissions": "bypass" }
  *   }
  *
  * Phase 4 (D56–D64) adds landing, review, stacks (`delivery.stack`) and budgets.
@@ -37,6 +38,8 @@ export interface TeamPolicy {
   landing: { fastTest: string | null; timeoutMin: number; autoFixAttempts: number };
   review: { enabled: boolean; maxRuns: number };
   budgets: { perGoalUsd: number | null; perMemberDailyUsd: number | null };
+  /** Phase 5 (D68, D70): may a member's runner take teammates' goals; the permission ceiling on runners. */
+  runners: { shared: boolean; permissions: PermissionMode };
 }
 
 export const OPEN_POLICY: TeamPolicy = {
@@ -48,6 +51,7 @@ export const OPEN_POLICY: TeamPolicy = {
   landing: { fastTest: null, timeoutMin: 10, autoFixAttempts: 2 },
   review: { enabled: true, maxRuns: 3 },
   budgets: { perGoalUsd: null, perMemberDailyUsd: null },
+  runners: { shared: false, permissions: "bypass" },
 };
 
 const RANK: Record<PermissionMode, number> = { ask: 0, auto: 1, bypass: 2 };
@@ -83,6 +87,7 @@ export function parsePolicy(raw: unknown): TeamPolicy {
   const land = (o.landing ?? {}) as Record<string, unknown>;
   const rev = (o.review ?? {}) as Record<string, unknown>;
   const bud = (o.budgets ?? {}) as Record<string, unknown>;
+  const run = (o.runners ?? {}) as Record<string, unknown>;
   return {
     hardZones: strs(o.hardZones),
     permissions: { ceiling, bypassRequiresPlan: perm.bypassRequiresPlan === true },
@@ -99,6 +104,10 @@ export function parsePolicy(raw: unknown): TeamPolicy {
     },
     review: { enabled: rev.enabled !== false, maxRuns: intIn(rev.maxRuns, 0, 10, 3) },
     budgets: { perGoalUsd: posNum(bud.perGoalUsd), perMemberDailyUsd: posNum(bud.perMemberDailyUsd) },
+    runners: {
+      shared: run.shared === true,
+      permissions: ["ask", "auto", "bypass"].includes(String(run.permissions)) ? (run.permissions as PermissionMode) : "bypass",
+    },
   };
 }
 
@@ -138,6 +147,10 @@ export function stricter(base: TeamPolicy, local: TeamPolicy): TeamPolicy {
     budgets: {
       perGoalUsd: minN(base.budgets.perGoalUsd, local.budgets.perGoalUsd),
       perMemberDailyUsd: minN(base.budgets.perMemberDailyUsd, local.budgets.perMemberDailyUsd),
+    },
+    runners: {
+      shared: base.runners.shared && local.runners.shared,
+      permissions: RANK[local.runners.permissions] < RANK[base.runners.permissions] ? local.runners.permissions : base.runners.permissions,
     },
   };
 }
