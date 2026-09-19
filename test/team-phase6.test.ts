@@ -154,7 +154,8 @@ const fakeGh: Exec = async (cmd, args, cwd, opts) => {
     git(merger, "fetch", "-q", "origin");
     git(merger, "checkout", "-q", "-B", "main", "origin/main");
     try {
-      git(merger, "merge", "--squash", `origin/${pr.branch}`);
+      // GitHub has an identity; CI runners don't, and a squash onto a moved main needs one
+      git(merger, "-c", "user.name=GitHub", "-c", "user.email=noreply@github.com", "merge", "--squash", `origin/${pr.branch}`);
     } catch (e) {
       mergeErrors.push(`#${n}: ${String((e as { stderr?: string }).stderr ?? e).slice(0, 300)}`);
       git(merger, "reset", "-q", "--hard");
