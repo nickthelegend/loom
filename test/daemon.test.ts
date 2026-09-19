@@ -333,7 +333,7 @@ describe("settings endpoints", () => {
       version: string;
       rev: string;
     };
-    expect(u.version).toBe("0.1.0");
+    expect(u.version).toBe(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
     expect(typeof u.rev).toBe("string");
     expect(u.rev.length).toBeGreaterThan(0);
   });

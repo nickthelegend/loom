@@ -25,6 +25,7 @@ import {
 import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
 import { ensureLoomHome, loomHome } from "../core/registry.js";
+import { VERSION } from "../version.js";
 import { serviceFile, tokenFindings } from "../core/runner-setup.js";
 import { readRunnerConfig, readRunnerToken, scrubEnv, writeRunnerToken } from "../daemon/runner.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
@@ -55,7 +56,7 @@ const program = new Command();
 program
   .name("loom")
   .description("one CLI for all your coding agents — shared thread, shared memory, one baton")
-  .version("0.1.0");
+  .version(VERSION);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -64,6 +65,34 @@ program
 function fail(message: string): never {
   console.error(pc.red(`✗ ${message}`));
   process.exit(1);
+}
+
+/** A hosted-hub session: a local browser (loopback), or --paste for machines without one (D74). */
+async function hostedSession(supabaseUrl: string, publishableKey: string, paste: boolean): Promise<{ refreshToken: string }> {
+  const { hostedSignIn, openInBrowser, pasteSignIn } = await import("../hub/supabase-client.js");
+  if (paste) {
+    return pasteSignIn({
+      supabaseUrl,
+      publishableKey,
+      ask: async (url) => {
+        console.log(`${pc.bold("sign in with GitHub")} — open this on any device:\n\n  ${url}\n`);
+        console.log(pc.dim("you'll land on a page that won't load; copy its whole address and paste it here."));
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const line = await new Promise<string>((resolve) => rl.question("address: ", resolve));
+        rl.close();
+        return line;
+      },
+    });
+  }
+  console.log(pc.dim("signing in to the hosted Loom Team Hub with GitHub…"));
+  return hostedSignIn({
+    supabaseUrl,
+    publishableKey,
+    openBrowser: (url) => {
+      console.log(`${pc.dim("  if your browser didn't open:")} ${url}`);
+      openInBrowser(url);
+    },
+  });
 }
 
 async function currentProject(client: DaemonClient): Promise<ProjectStatus> {
@@ -1058,7 +1087,8 @@ program
   .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")
   .option("--secret <s>", "the hub's join secret")
   .option("--team <id>", "which team, when you're in several")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; team?: string }) => {
+  .option("--paste", "hosted sign-in without a local browser: open the link anywhere, paste back where you land")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; team?: string; paste?: boolean }) => {
     const client = await ensureDaemon();
     const a = (action ?? "status").toLowerCase();
     const arg = args?.[0];
@@ -1071,16 +1101,7 @@ program
         if (supabaseUrl !== null) {
           // The hosted hub: GitHub sign-in in the browser, run here (it can take
           // minutes); the daemon only receives the resulting session.
-          const { hostedSignIn, openInBrowser } = await import("../hub/supabase-client.js");
-          console.log(pc.dim("signing in to the hosted Loom Team Hub with GitHub…"));
-          const session = await hostedSignIn({
-            supabaseUrl,
-            publishableKey: publishableKeyFor(supabaseUrl),
-            openBrowser: (url) => {
-              console.log(`${pc.dim("  if your browser didn't open:")} ${url}`);
-              openInBrowser(url);
-            },
-          });
+          const session = await hostedSession(supabaseUrl, publishableKeyFor(supabaseUrl), Boolean(opts.paste));
           const out = await client.teamAction("signin", { hub: hostedHubUrl(supabaseUrl), token: session.refreshToken, ...extra });
           return void printTeam(out.team);
         }
@@ -1252,7 +1273,8 @@ program
   .option("--runner <id>", "which runner (device id or label)")
   .option("--job <id>", "exec: the claimed job to run")
   .option("--team <id>", "exec: the job's team")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; token?: string; shared?: boolean; runner?: string; job?: string; team?: string }) => {
+  .option("--browser", "join: sign in with a local browser instead of pasting the address back")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; token?: string; shared?: boolean; runner?: string; job?: string; team?: string; browser?: boolean }) => {
     const a = (action ?? "status").toLowerCase();
     const arg = args?.[0];
     try {
@@ -1300,7 +1322,21 @@ program
       }
       if (a === "join") {
         if (!arg) throw new Error("paste the link from `loom runner pair`");
-        const out = await client.runnerAction("join", { link: arg, ...(opts.github ? { github: opts.github } : {}), ...(opts.secret ? { secret: opts.secret } : {}), ...(opts.token ? { token: opts.token } : {}), ...(opts.shared ? { shared: true } : {}) });
+        let token = opts.token;
+        if (!token && !opts.secret) {
+          // A hosted hub: sign in as yourself here (a runner box usually has no browser — D74).
+          const hubUrl = (() => {
+            try {
+              return String((JSON.parse(Buffer.from(arg.replace(/^loom-runner:/, ""), "base64url").toString("utf8")) as { hub?: string }).hub ?? "");
+            } catch {
+              return "";
+            }
+          })();
+          const { hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+          const sbUrl = hostedSupabaseUrl(hubUrl);
+          if (sbUrl !== null) token = (await hostedSession(sbUrl, publishableKeyFor(sbUrl), !opts.browser)).refreshToken;
+        }
+        const out = await client.runnerAction("join", { link: arg, ...(opts.github ? { github: opts.github } : {}), ...(opts.secret ? { secret: opts.secret } : {}), ...(token ? { token } : {}), ...(opts.shared ? { shared: true } : {}) });
         console.log(`${pc.green("✓")} this machine is now a runner`, pc.dim(JSON.stringify((out.result as { registered?: unknown }).registered ?? {})));
         console.log(pc.dim("  keep it running: loom runner install · check it: loom runner doctor"));
         return;

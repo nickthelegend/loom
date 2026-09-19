@@ -10571,6 +10571,7 @@ ${BRAND_SPRITE}
       }).join("") : '<tr><td colspan="3" class="n" style="text-align:left">Nothing finished today.</td></tr>') +
       '<tr class="sum"><td>Per landed PR</td><td class="n">' + Number(c.landed || 0) + ' landed</td><td class="n" data-tcost-per>' +
         (c.perLandedPrUsd != null ? money(c.perLandedPrUsd) : "\\u2014") + "</td></tr>" +
+      (c.ciMinutes ? '<tr class="sum"><td>CI time of landed goals</td><td class="n"></td><td class="n" data-tcost-ci>' + Number(c.ciMinutes) + " min</td></tr>" : "") +
       '<tr class="sum"><td>Total</td><td class="n">' + (c.byGoal || []).length + ' goals</td><td class="n" data-tcost-total>' + money(c.totalUsd) + "</td></tr></table></div>";
   }
   var TEAM_POLICY_SAMPLE ='{"hardZones": ["db/migrations/**"], "permissions": {"ceiling": "auto"}}';

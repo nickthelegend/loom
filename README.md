@@ -947,8 +947,10 @@ loom runner move <runId>            # move a running goal; `loom runner back <ru
 
 Or with Docker: `docker build -f Dockerfile.runner -t loom-runner .`
 
-The researched architecture (78 decisions, a 5-phase plan) is in
-**[docs/teams-architecture.md](docs/teams-architecture.md)**.
+**How to use it, step by step: [docs/teams.md](docs/teams.md).** The researched
+architecture (78 decisions, five phases, all built) is in
+**[docs/teams-architecture.md](docs/teams-architecture.md)**. Every doc is indexed
+in [docs/README.md](docs/README.md); the code map is [src/README.md](src/README.md).
 
 ## Loom Cloud — your agents from any network
 

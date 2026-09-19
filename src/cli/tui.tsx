@@ -14,6 +14,7 @@
  */
 
 import { useApp, useInput, useStdout, render, Box, Text } from "ink";
+import { VERSION } from "../version.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import pc from "picocolors";
 import qrcode from "qrcode-terminal";
@@ -453,7 +454,7 @@ function App({ client, initial }: AppProps) {
     <Box flexDirection="column">
       <Box justifyContent="space-between">
         <Text>{renderTabs(view)}</Text>
-        <Text>{scrollHint || pc.dim("loom 0.1.0 ")}</Text>
+        <Text>{scrollHint || pc.dim(`loom ${VERSION} `)}</Text>
       </Box>
       <Box height={vh} flexDirection="column">
         {visible.map((line, i) => (

@@ -943,3 +943,45 @@ export async function hostedSignIn(opts: {
     await sb.auth.stopAutoRefresh().catch(() => {});
   }
 }
+
+/** The authorization code in whatever the user pasted: a full URL, a query string, or the bare code. */
+export function codeFromPasted(pasted: string): string | null {
+  const t = pasted.trim();
+  if (!t) return null;
+  const m = /[?&#]code=([^&#\s]+)/.exec(t);
+  if (m) return decodeURIComponent(m[1]!);
+  const err = /[?&#]error_description=([^&#\s]+)/.exec(t);
+  if (err) throw new HubError(decodeURIComponent(err[1]!.replace(/\+/g, " ")), 401);
+  return /^[A-Za-z0-9._~-]{8,}$/.test(t) ? t : null;
+}
+
+/**
+ * Hosted sign-in on a machine with no browser — a runner box over SSH (Loom
+ * Teams D74). Same PKCE flow as hostedSignIn, but the redirect goes to a
+ * loopback address nothing listens on: the user opens the URL anywhere, signs
+ * in with GitHub, lands on an error page, and pastes that page's address back.
+ * The code is useless without this process's verifier, so pasting it is safe.
+ */
+export async function pasteSignIn(opts: {
+  supabaseUrl: string;
+  publishableKey: string;
+  /** Show the URL, return what the user pasted. */
+  ask(url: string): Promise<string>;
+}): Promise<HostedSession> {
+  const sb = await newSupabase(opts.supabaseUrl, opts.publishableKey);
+  try {
+    const { data, error } = await sb.auth.signInWithOAuth({
+      provider: "github",
+      options: { redirectTo: "http://127.0.0.1:1/loom-signin", skipBrowserRedirect: true },
+    });
+    if (error || !data?.url) throw hubErrorFrom(error as PgError, 400);
+    const code = codeFromPasted(await opts.ask(data.url));
+    if (!code) throw new HubError("that didn't contain a sign-in code — paste the whole address you landed on", 400);
+    const ex = await sb.auth.exchangeCodeForSession(code);
+    if (ex.error || !ex.data.session) throw new HubError(ex.error?.message ?? "no session came back", 401);
+    return toHostedSession(ex.data.session);
+  } finally {
+    await sb.auth.stopAutoRefresh().catch(() => {});
+  }
+}
+

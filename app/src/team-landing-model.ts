@@ -103,6 +103,7 @@ export interface CostSummary {
   totalUsd: number;
   landed: number;
   perLandedPrUsd: number | null;
+  ciMinutes: number;
 }
 
 /** Today's spend per member (the daemon buckets by UTC day), plus the running totals. */
@@ -119,6 +120,7 @@ export function costSummary(c: TeamCosts | null | undefined, now = Date.now()): 
     totalUsd: c.totalUsd ?? 0,
     landed: c.landed ?? 0,
     perLandedPrUsd: c.perLandedPrUsd ?? null,
+    ciMinutes: c.ciMinutes ?? 0,
   };
 }
 

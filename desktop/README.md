@@ -1,5 +1,11 @@
 # Loom desktop (Electron)
 
+**Download:** the latest macOS (`.dmg`, Apple Silicon and Intel), Windows
+(`.exe`) and Linux (`.AppImage`, `.deb`) installers are on the
+[Releases page](https://github.com/nickthelegend/loom/releases/latest). They're
+unsigned: on macOS, right-click → Open the first time; on Windows, "More info →
+Run anyway".
+
 A thin, **first-party** Electron shell around the loom daemon's web app — the same
 `/app` surface the phone and browser use, in a native window. It's deliberately *not* an
 IDE: no editor, no embedded browser. It's the continuity/memory layer on the desktop.
@@ -30,6 +36,20 @@ degrade the store to JSONL. Set `LOOM_NODE` to pick the runtime explicitly.
 cd desktop
 npm run dist           # electron-builder → dmg / nsis / AppImage in dist/
 ```
+
+Each platform's installer builds on its own OS; the
+[release workflow](../.github/workflows/release.yml) does all of them on GitHub's
+runners when a `v*` tag is pushed and attaches them to the release. See
+[BUILD.md](BUILD.md) for why the config looks the way it does, and for signing
+and notarization.
+
+## What's in the window
+
+The same web app as the browser and the phone: the board, threads, the
+orchestra (plan mode, permissions, git delivery), the Fleet, and Loom Teams:
+teammates' live agents, leases and holds on task cards, the team brain with its
+inbox, landing (Land, review, adopt, the doctor, costs), runners (Continue on
+runner, Bring back, runner settings and pairing), deploys and release notes.
 
 ## How it stays honest
 

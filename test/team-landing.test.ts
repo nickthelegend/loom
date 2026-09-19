@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  actionsMinutes,
   addMergeGroupTrigger,
   cutStack,
   doctor,
@@ -165,3 +166,26 @@ describe("cost (§10)", () => {
     expect(spentToday(feed, "bob", [], day)).toBe(0);
   });
 });
+
+describe("CI minutes per goal (§10)", () => {
+  it("sums completed runs' wall clock, ignoring the rest", () => {
+    expect(
+      actionsMinutes([
+        { status: "completed", run_started_at: "2026-09-19T10:00:00Z", updated_at: "2026-09-19T10:04:30Z" },
+        { status: "completed", run_started_at: "2026-09-19T11:00:00Z", updated_at: "2026-09-19T11:01:00Z" },
+        { status: "in_progress", run_started_at: "2026-09-19T12:00:00Z", updated_at: "2026-09-19T12:30:00Z" },
+        { status: "completed", run_started_at: "bogus", updated_at: "2026-09-19T12:30:00Z" },
+      ]),
+    ).toBe(5.5);
+  });
+
+  it("landed goals report their minutes into the rollup", () => {
+    const r = rollupCosts([
+      { type: "goal_finished", github: "a", ts: 1, meta: { runId: "o1", costUsd: 1 } },
+      { type: "goal_landed", github: "a", ts: 2, meta: { runId: "o1", ciMinutes: 12.5 } },
+    ]);
+    expect(r.ciMinutes).toBe(12.5);
+    expect(r.byGoal[0]).toMatchObject({ runId: "o1", ciMinutes: 12.5, landed: true });
+  });
+});
+

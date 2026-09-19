@@ -25,6 +25,7 @@ import {
   ms,
   SupabaseHubClient,
   type HostedSession,
+  codeFromPasted,
 } from "../src/hub/supabase-client.js";
 
 // ---------------------------------------------------------------------------
@@ -292,3 +293,15 @@ describe("the hosted hub constants", () => {
     expect(publishableKeyFor("https://mine.supabase.co", env)).toBe("sb_publishable_mine");
   });
 });
+
+describe("paste-the-URL sign-in on a machine without a browser (D74)", () => {
+  it("finds the code in a full address, a query string, or on its own; surfaces GitHub's refusal", () => {
+    expect(codeFromPasted("http://127.0.0.1:1/loom-signin?code=abc123-def_456")).toBe("abc123-def_456");
+    expect(codeFromPasted("  ?state=x&code=zz%2Fyy  ")).toBe("zz/yy");
+    expect(codeFromPasted("9f8e7d6c5b4a")).toBe("9f8e7d6c5b4a");
+    expect(codeFromPasted("")).toBeNull();
+    expect(codeFromPasted("hello there")).toBeNull();
+    expect(() => codeFromPasted("http://127.0.0.1:1/loom-signin?error=access_denied&error_description=The+user+denied")).toThrow("The user denied");
+  });
+});
+
