@@ -423,6 +423,27 @@ describe("orchestra runs", () => {
     await rt2.close();
   });
 
+  it("a goal typed while one is running waits in the queue, then starts itself", async () => {
+    await openProject();
+    script = [
+      loom([{ type: "spawn", title: "slow", agent: "alpha", prompt: "sleep:500 write:first.txt" }]),
+      loom([{ type: "done", summary: "first done" }]),
+      loom([{ type: "spawn", title: "next", agent: "alpha", prompt: "write:second.txt" }]),
+      loom([{ type: "done", summary: "second done" }]),
+    ];
+    const first = await rt.orchestra.start({ goal: "the first goal", orchestrator: "conductor", workers: ["alpha"] });
+    const queued = rt.enqueue({ text: "the second goal", target: { kind: "orchestra", orchestrator: "conductor", workers: ["alpha"] } });
+    // one goal at a time: it waits for the running one rather than being refused
+    expect(rt.queueBlocker(queued)).toMatch(/the first goal/);
+    await settle(first.id);
+    await waitUntil(() => rt.orchestra.list().some((r) => r.goal === "the second goal"), { timeoutMs: 20_000 });
+    const second = rt.orchestra.list().find((r) => r.goal === "the second goal")!;
+    await settle(second.id);
+    expect(rt.orchestra.get(second.id)!.summary).toBe("second done");
+    expect(rt.queue.length).toBe(0);
+    expect(rt.queue.paused).toBe(false);
+  });
+
   it("emits orchestra events that clients can render from, and shows in status", async () => {
     await openProject();
     script = [loom([{ type: "spawn", title: "one", agent: "alpha", prompt: "write:o.txt" }]), loom([{ type: "done", summary: "ok" }])];

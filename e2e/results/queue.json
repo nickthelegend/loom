@@ -1,0 +1,32 @@
+{
+  "O1": {
+    "status": "PASS",
+    "evidence": "3 queued behind a real turn; edited, removed and reordered; sent in queue order (Reply with exactly: THREE → Reply with exactly: ONE-EDITED); 8 live frames; nothing in the thread before it was sent",
+    "at": "2026-09-19T21:48:08.888Z"
+  },
+  "O2": {
+    "status": "PASS",
+    "evidence": "retargeted while waiting: codex took it, baton on codex, and codex's reply carries the token",
+    "at": "2026-09-19T21:48:30.238Z"
+  },
+  "O4": {
+    "status": "PASS",
+    "evidence": "Stop paused the queue (\"you pressed Stop — resume to run what's queued\") and kept the prompt; resume sent it",
+    "at": "2026-09-19T21:51:17.900Z"
+  },
+  "O3": {
+    "status": "PASS",
+    "evidence": "goal 2 waited for goal 1 (a direct second start is still refused: 400), then ran itself: omu8x8h8n completed · $0.033",
+    "at": "2026-09-19T21:51:10.831Z"
+  },
+  "O5": {
+    "status": "PASS",
+    "evidence": "loom queue: add/list/edit/move/to/rm/clear/pause/resume all drive the same queue (list showed:\n1 orchestrate  a whole goal ⏎                qmu8xb37d2 ⏎  2 opencode     first one, edited)",
+    "at": "2026-09-19T21:52:46.148Z"
+  },
+  "O6": {
+    "status": "PASS",
+    "evidence": "t1:opencode:done, t2:codex:done — different vendors in parallel, both files merged onto loom/orchestra/omu8xbpy0/main · $0.043",
+    "at": "2026-09-19T21:54:39.021Z"
+  }
+}

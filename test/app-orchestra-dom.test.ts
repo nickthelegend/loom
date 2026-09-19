@@ -420,8 +420,9 @@ describe("web app · orchestra", () => {
     expect(m.errors.join("\n")).toBe("");
   });
 
-  it("says so, in the composer's own toast, when a run is refused", async () => {
-    // one active run per project: a second start is a 400 with a reason
+  it("queues a second goal behind the running one instead of refusing it", async () => {
+    // one goal runs at a time — a direct second start is still a 400, so the
+    // composer lines it up rather than throwing away what you wrote
     await rest("POST", "/orchestra", { goal: `first ${Date.now()}` });
     const m = mount({ hash: `#p/${projectId}` });
     await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
@@ -430,9 +431,13 @@ describe("web app · orchestra", () => {
     await ready(m, "#orchsend");
     box(m).value = "a second, concurrent goal";
     click($(m, "#orchsend"));
-    await waitUntil(() => text(m, "#toast").length > 0);
-    // and what you wrote is still there to send again
-    expect(box(m).value).toBe("a second, concurrent goal");
+    await waitUntil(() => [...m.window.document.querySelectorAll("#cqueue .cqtext")].some((e) => e.textContent === "a second, concurrent goal"));
+    // it's the orchestrator's, and the box is clear because nothing was lost
+    const view = await rest<{ queue: Array<{ text: string; target: { kind: string } }> }>("GET", "/queue");
+    expect(view.queue.map((i) => i.text)).toEqual(["a second, concurrent goal"]);
+    expect(view.queue[0]!.target.kind).toBe("orchestra");
+    expect(box(m).value).toBe("");
+    await rest("DELETE", "/queue");
     expect(m.errors.join("\n")).toBe("");
   });
 });

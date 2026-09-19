@@ -12,6 +12,8 @@
  */
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import os from "node:os";
 import { GuiChatDriver } from "../adapters/bridges/gui-chat.js";
 import { agyBin } from "../adapters/antigravity-cli.js";
@@ -108,7 +110,8 @@ const AUTH: Record<string, string> = {
  *               nothing. When signed IN it would cost a token or two, so it is
  *               capped hard and a slow answer counts as "signed in": only the
  *               instant refusal is diagnostic.
- *   grok      — has no status command; unknown rather than guessed.
+ *   grok      — no status command; its ~/.grok/auth.json session is read
+ *               (shape only) instead.
  */
 async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail?: string }> {
   const run = (cmd: string, args: string[], ms: number): Promise<{ code: number | null; out: string }> =>
@@ -163,16 +166,31 @@ async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail
       }
       return { authed: true };
     }
+    if (kind === "grok-code") {
+      // grok has no status command, but it keeps its session in ~/.grok/auth.json:
+      // an entry with a refresh token is a session it can renew on its own. Only
+      // the shape is read — no token leaves the file.
+      const file = path.join(os.homedir(), ".grok", "auth.json");
+      if (!fs.existsSync(file)) return { authed: false, detail: "no grok session on this machine" };
+      const entries = Object.values(JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, { refresh_token?: string; key?: string }>);
+      if (entries.some((e) => typeof e?.refresh_token === "string" && e.refresh_token.length > 0)) return { authed: true };
+      if (entries.some((e) => typeof e?.key === "string" && e.key.length > 0)) return { authed: true };
+      return { authed: false, detail: "grok's auth file has no session" };
+    }
     if (kind === "antigravity-cli") {
       // agy has no status command. Listing models needs the account, so a signed-
       // out CLI can't and says so; a signed-in one prints the catalog cheaply.
       const bin = agyBin();
       if (!bin) return { authed: null };
-      const { out } = await run(bin, ["models"], 6000);
+      // `agy models` takes ~4s idle, so 6s was flaky on a busy machine (found by e2e).
+      const { out } = await run(bin, ["models"], 15000);
       if (/sign in|log ?in|not authenticated|unauthenticated|please authenticate/i.test(out)) {
         return { authed: false, detail: "the CLI says: not signed in" };
       }
       if (/gemini-|claude-|gpt-/i.test(out)) return { authed: true };
+      // No verdict in time: its stored OAuth token is the next best evidence.
+      const tokenFile = path.join(os.homedir(), ".gemini", "antigravity-cli", "antigravity-oauth-token");
+      if (fs.existsSync(tokenFile) && fs.statSync(tokenFile).size > 0) return { authed: true };
       return { authed: null };
     }
   } catch {

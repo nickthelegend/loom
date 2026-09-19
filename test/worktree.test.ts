@@ -56,6 +56,30 @@ describe("per-prompt diffs", () => {
     expect(String(diff.payload.patch)).toContain("notes.txt");
   });
 
+  it("never blames a turn for Loom's own .loom/ bookkeeping", async () => {
+    // A project that doesn't gitignore .loom/ used to see the event log, the
+    // prompt queue and adapter session state land in the agent's turn diff.
+    const dir = makeProjectDir({ name: "loomstate" });
+    gitInit(dir);
+    const id = (await client.addProject(dir)).project.id;
+
+    await client.send(id, "sleep:600 please write:src/real.txt for me");
+    // …and queue one behind it, which writes .loom/queue.json mid-turn
+    await client.queueAdd(id, { text: "and this one after", target: "plannerbot" });
+    await waitUntil(async () => {
+      const { events } = await client.events(id, undefined, 100);
+      return events.some((e) => e.kind === "turn_diff");
+    });
+    const { events } = await client.events(id, undefined, 100);
+    const files = events
+      .filter((e) => e.kind === "turn_diff")
+      .flatMap((e) => e.payload.files as Array<{ path: string }>);
+    expect(files.some((f) => f.path.includes("real.txt"))).toBe(true);
+    expect(files.filter((f) => f.path.startsWith(".loom"))).toEqual([]);
+    const patches = events.filter((e) => e.kind === "turn_diff").map((e) => String(e.payload.patch));
+    expect(patches.some((p) => p.includes(".loom/"))).toBe(false);
+  });
+
   it("a turn that changes nothing produces no turn_diff", async () => {
     const dir = makeProjectDir({ name: "quiet" });
     gitInit(dir);

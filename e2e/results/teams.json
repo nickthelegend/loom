@@ -1,0 +1,57 @@
+{
+  "L2": {
+    "status": "PASS",
+    "evidence": "team 101eba91-40f6-421a-aeff-05a91c685368 on the hosted hub; members loomtest-hqa78-alice,loomtest-hqa78-bob seen by both",
+    "at": "2026-09-19T20:57:10.327Z"
+  },
+  "L3": {
+    "status": "PASS",
+    "evidence": "bob sees loomtest-hqa78-alice's claude-code on nickthelegend/loom-e2e-sandbox (running), intent {\"thread\":\"Main\"}",
+    "at": "2026-09-19T20:57:14.295Z"
+  },
+  "L4": {
+    "status": "PASS",
+    "evidence": "bob's feed: goal_started omu8vbxj6 by loomtest-hqa78-alice, decrypted \"Add a function sub(a, b) returning a - b to src/math.js (kee\"",
+    "at": "2026-09-19T20:57:15.182Z"
+  },
+  "L7a": {
+    "status": "PASS",
+    "evidence": "real PR #1 (loom/orchestra/omu8vbxj6/main) with src/math.js, test/math.test.js · $0.054",
+    "at": "2026-09-19T20:58:50.810Z"
+  },
+  "L7b": {
+    "status": "FAIL",
+    "evidence": "Error: expected: loom/review status on the head commit, got []\n    at expect (file:///Volumes/Extreme%20SSD/Projects/loom/e2e/lib.mjs:169:20)\n    at file:///Volumes/Extreme%20SSD/Projects/loom/e2e/run-teams.mjs:157:5\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async check (file:///Volumes/Extreme%20SSD/Projects/loom/e2e/lib.mjs:160:16)\n    at async file:///Volumes/Extreme%20SSD/Projects/loom/e2e/run-teams.mjs:143:3",
+    "at": "2026-09-19T21:03:31.447Z"
+  },
+  "L9a": {
+    "status": "PASS",
+    "evidence": "tagged main as e2e-hqa78",
+    "at": "2026-09-19T21:03:32.690Z"
+  },
+  "L7c": {
+    "status": "PASS",
+    "evidence": "landed via auto-merge; PR #1 MERGED on GitHub; main has sub(); landing=merged",
+    "at": "2026-09-19T21:03:44.461Z"
+  },
+  "L9b": {
+    "status": "PASS",
+    "evidence": "deployment 6545084006 to staging: success; release notes since e2e-hqa78 list #1",
+    "at": "2026-09-19T21:03:47.630Z"
+  },
+  "L8": {
+    "status": "PASS",
+    "evidence": "findings: warn,warn,warn; fix PR #2 adds merge_group to ci.yml",
+    "at": "2026-09-19T21:03:54.195Z"
+  },
+  "L6": {
+    "status": "PASS",
+    "evidence": "bob sees \"Sandbox functions live in src/math.js (hqa78).\" proposed by loomtest-hqa78-alice; promoted → canon PR #3 (AGENTS.md on loom/canon)",
+    "at": "2026-09-19T21:04:01.336Z"
+  },
+  "L10": {
+    "status": "PASS",
+    "evidence": "runner Niveshs-Mac-mini.local ran the goal in a fresh clone: PR #4 (OPEN), status completed",
+    "at": "2026-09-19T21:05:10.364Z"
+  }
+}

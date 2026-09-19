@@ -123,6 +123,7 @@ import { packCredentials, toB64, type RelayTransport } from "../core/relay-proto
 import { approvalEndpoint, setApprovalEndpoint, type ApprovalDecision } from "../core/approvals.js";
 import { PERMISSION_PROFILES } from "../core/permissions.js";
 import { loadPolicy } from "../core/team-policy.js";
+import { parseTarget, QueueItemGone } from "../core/prompt-queue.js";
 import { clearRecent, deletePrompt, listPrompts, recordRecent, savePrompt, updatePrompt } from "../core/prompts.js";
 
 export interface DaemonOptions {
@@ -1670,6 +1671,99 @@ export class LoomDaemon {
         const result = await rt.sendMessage(text, agentId, { ...(chat ? { chat } : {}), ...(plan ? { plan: true } : {}) });
         recordRecent(text, { project: rt.info.name, mode: plan ? "plan" : "chat" });
         res.json(result);
+      }),
+    );
+
+    /** The queue as clients read it: the items, plus why the head is waiting. */
+    const queueView = (rt: ProjectRuntime) => {
+      const q = rt.queue.snapshot();
+      const head = q.items[0];
+      const waitingFor = head && !q.paused ? rt.queueBlocker(head) : null;
+      return { queue: q.items, paused: q.paused, ...(q.reason ? { reason: q.reason } : {}), ...(waitingFor ? { waitingFor } : {}) };
+    };
+    const queueError = (res: express.Response, err: unknown) =>
+      void res.status(err instanceof QueueItemGone ? 404 : 400).json({ error: err instanceof Error ? err.message : String(err) });
+
+    /**
+     * The prompt queue: what you've lined up for this project.
+     *
+     * A prompt typed while an agent is mid-turn — or a goal typed while one is
+     * still running — waits here instead of being refused, and stays yours
+     * until it's sent: edit the text, change who takes it, reorder it, drop it.
+     * The daemon sends the head as soon as nothing is in its way, one at a time.
+     */
+    app.get(
+      "/api/projects/:id/queue",
+      withRuntime(async (rt, _req, res) => {
+        res.json(queueView(rt));
+      }),
+    );
+    app.post(
+      "/api/projects/:id/queue",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as { text?: string; target?: unknown; chat?: string; plan?: boolean };
+        if (!b.text?.trim()) return void res.status(400).json({ error: "missing text" });
+        try {
+          const item = rt.enqueue({
+            text: b.text,
+            target: parseTarget(b.target),
+            ...(b.chat ? { chat: b.chat } : {}),
+            ...(b.plan ? { plan: true } : {}),
+          });
+          recordRecent(b.text, { project: rt.info.name, mode: item.target.kind === "orchestra" ? "orchestrate" : "chat" });
+          res.json({ item, ...queueView(rt) });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    app.patch(
+      "/api/projects/:id/queue/:itemId",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as { text?: string; target?: unknown; plan?: boolean; to?: number };
+        try {
+          if (b.text !== undefined || b.target !== undefined || b.plan !== undefined) {
+            rt.queue.edit(String(req.params.itemId), {
+              ...(b.text !== undefined ? { text: String(b.text) } : {}),
+              ...(b.target !== undefined ? { target: parseTarget(b.target) } : {}),
+              ...(b.plan !== undefined ? { plan: Boolean(b.plan) } : {}),
+            });
+          }
+          if (b.to !== undefined) rt.queue.move(String(req.params.itemId), Number(b.to));
+          void rt.drainPromptQueue();
+          res.json(queueView(rt));
+        } catch (err) {
+          queueError(res, err);
+        }
+      }),
+    );
+    app.delete(
+      "/api/projects/:id/queue/:itemId",
+      withRuntime(async (rt, req, res) => {
+        try {
+          rt.queue.remove(String(req.params.itemId));
+          void rt.drainPromptQueue();
+          res.json(queueView(rt));
+        } catch (err) {
+          queueError(res, err);
+        }
+      }),
+    );
+    app.delete(
+      "/api/projects/:id/queue",
+      withRuntime(async (rt, _req, res) => {
+        const dropped = rt.queue.clear();
+        res.json({ dropped, ...queueView(rt) });
+      }),
+    );
+    /** Hold the queue where it is, or let it run again. */
+    app.post(
+      "/api/projects/:id/queue/pause",
+      withRuntime(async (rt, req, res) => {
+        const paused = (req.body ?? {}).paused !== false;
+        rt.queue.setPaused(paused, paused ? "you paused the queue" : undefined);
+        if (!paused) void rt.drainPromptQueue();
+        res.json(queueView(rt));
       }),
     );
 
@@ -3727,6 +3821,18 @@ export class LoomDaemon {
       }
     }
     const rt = await ProjectRuntime.open(info);
+    rt.onQueueChange((q) => {
+      const head = q.items[0];
+      const waitingFor = head && !q.paused ? rt.queueBlocker(head) : null;
+      this.broadcastFrame({
+        type: "queue",
+        projectId: info.id,
+        queue: q.items,
+        paused: q.paused,
+        ...(q.reason ? { reason: q.reason } : {}),
+        ...(waitingFor ? { waitingFor } : {}),
+      }, info.id);
+    });
     rt.log.onEvent((e) => {
       this.broadcast(info.id, e);
       // The single central hook for live events — agent turns as well as
@@ -3739,14 +3845,19 @@ export class LoomDaemon {
     return rt;
   }
 
-  private broadcast(projectId: string, event: LoomEvent): void {
-    const frame = JSON.stringify({ type: "event", projectId, event });
+  /** One frame to everyone watching this project (or everyone, with no project). */
+  private broadcastFrame(payload: Record<string, unknown>, projectId?: string): void {
+    const frame = JSON.stringify(payload);
     for (const [ws, sub] of this.sockets) {
       if (ws.readyState !== WebSocket.OPEN) continue;
-      if (sub.project && sub.project !== projectId) continue;
-      if (sub.scope && !sub.scope.includes(projectId)) continue;
+      if (projectId && sub.project && sub.project !== projectId) continue;
+      if (projectId && sub.scope && !sub.scope.includes(projectId)) continue;
       ws.send(frame);
     }
+  }
+
+  private broadcast(projectId: string, event: LoomEvent): void {
+    this.broadcastFrame({ type: "event", projectId, event }, projectId);
     // An agent's error is a thread event AND a log line. The thread shows it to
     // whoever is reading that conversation; the Console shows it to whoever is
     // wondering why nothing happened. Those are often the same person and never

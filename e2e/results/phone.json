@@ -1,0 +1,12 @@
+{
+  "K1": {
+    "status": "PASS",
+    "evidence": "device-only; empty→400; stored on the client record; removed on DELETE (delivery to a phone: see N6)",
+    "at": "2026-09-19T20:50:49.835Z"
+  },
+  "K2": {
+    "status": "PASS",
+    "evidence": "connected via https://ufpkfpzspfzzxabklyec.supabase.co; ping 41.80078125ms; claim over relay → token; /api/projects 200 (1); /api/bootstrap → 403; no token → 401 (all end-to-end encrypted through Supabase Realtime)",
+    "at": "2026-09-19T20:50:51.142Z"
+  }
+}

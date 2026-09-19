@@ -408,14 +408,17 @@ export class Landing {
       const state = reviewState(parsed.findings);
       const high = parsed.findings.filter((f) => f.severity === "high").length;
       await this.gh(["pr", "review", String(l.pr), "--comment", "--body", renderReview(parsed, reviewer)]);
-      if (repo) await this.postStatus(repo, sha, state, state === "failure" ? `${high} high-severity finding${high === 1 ? "" : "s"}` : "no high-severity findings");
+      // the owner overrode this commit while the review ran: the findings go on the PR, the decision stands (D61)
+      const prior = run.landing!.review;
+      const kept = prior?.overridden && prior.overriddenSha === sha ? { overridden: prior.overridden, overriddenSha: sha } : null;
+      if (repo && !kept) await this.postStatus(repo, sha, state, state === "failure" ? `${high} high-severity finding${high === 1 ? "" : "s"}` : "no high-severity findings");
       this.set(run, {
         reviews: run.landing!.reviews + 1,
         reviewedSha: sha,
-        review: { state, reviewer, high, findings: parsed.findings.length, at: Date.now() },
+        review: { state, reviewer, high, findings: parsed.findings.length, at: Date.now(), ...(kept ?? {}) },
       });
       await this.post(run, "review_submitted", { pr: l.pr, reviewer, state, high, findings: parsed.findings.length });
-      if (state === "failure") {
+      if (state === "failure" && !kept) {
         // high findings share the fix budget with failing checks (D55, D61)
         if (run.landing!.fixAttempts >= maxFix) {
           await this.needsHuman(run, `the review found ${high} high-severity problem${high === 1 ? "" : "s"} and the fix budget is spent`);
@@ -441,7 +444,7 @@ export class Landing {
     const repo = await this.repo();
     if (repo && l.headSha) await this.postStatus(repo, l.headSha, "success", `overridden by ${this.deps.github() ?? "the owner"}: ${reason}`.slice(0, 140));
     await this.gh(["pr", "comment", String(l.pr), "--body", `**Loom review overridden** by @${this.deps.github() ?? "the owner"}: ${reason}`]);
-    return this.set(run, { review: { ...(l.review ?? { state: "failure", reviewer: null, high: 0, findings: 0, at: Date.now() }), overridden: reason } });
+    return this.set(run, { review: { ...(l.review ?? { state: "failure", reviewer: null, high: 0, findings: 0, at: Date.now() }), overridden: reason, ...(l.headSha ? { overriddenSha: l.headSha } : {}) } });
   }
 
   private async postStatus(repo: string, sha: string, state: "success" | "failure" | "pending", description: string): Promise<void> {

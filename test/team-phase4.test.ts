@@ -91,6 +91,8 @@ registerAgentKind("p4-writer", (cfg, dir) => new Writer(cfg.id, "p4-writer", dir
 
 /** The reviewer, another "vendor": a high finding while the code has no guard, clean after. */
 const reviews: string[] = [];
+/** Set to hold the reviewer mid-review and force a high finding (the override race). */
+let reviewGate: { wait: Promise<void>; high: boolean } | null = null;
 class Reviewer extends AdapterBase {
   async available() {
     return true;
@@ -104,7 +106,8 @@ class Reviewer extends AdapterBase {
   async send(input: SendInput) {
     this._busy = true;
     reviews.push(input.text);
-    const guarded = input.text.includes("guard.ts");
+    if (reviewGate) await reviewGate.wait;
+    const guarded = input.text.includes("guard.ts") && !reviewGate?.high;
     const block = guarded
       ? { summary: "Looks right.", findings: [{ severity: "low", title: "naming nit" }] }
       : { summary: "Missing input check.", findings: [{ severity: "high", title: "No guard on user input", file: "src/app.ts", line: 1, detail: "add src/guard.ts" }] };
@@ -365,6 +368,27 @@ describe("Phase 4: land safely", () => {
     expect(statuses.at(-1)).toMatchObject({ state: "success" });
     expect(reviews[0]).toContain("Do not modify any files");
     expect((await L("alice").poll(run)).state).toBe("green");
+  });
+
+  it("an override made while a review runs stands when the review finishes (D61)", async () => {
+    const run = M.alice!.rt.orchestra.get(goal.id)!;
+    const before = { review: run.landing!.review, reviews: run.landing!.reviews, fixAttempts: run.landing!.fixAttempts, status: run.status };
+    let release!: () => void;
+    reviewGate = { wait: new Promise<void>((r) => (release = r)), high: true };
+    const asked = reviews.length;
+    const sha = run.landing!.headSha!;
+    const pending = L("alice").review(run, sha);
+    await waitUntil(() => reviews.length > asked);
+    await L("alice").overrideReview(goal.id, "checked by hand");
+    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" });
+    release();
+    await pending;
+    reviewGate = null;
+    expect(run.landing!.review).toMatchObject({ state: "failure", high: 1, overridden: "checked by hand", overriddenSha: sha });
+    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" }); // not clobbered by the late failure
+    expect(run.landing!.fixAttempts).toBe(before.fixAttempts); // and the goal isn't sent back
+    expect(run.status).toBe(before.status);
+    run.landing!.review = before.review;
   });
 
   it("Land brings fresh main in and asks GitHub to merge; merged goals post their cost (D56, D64)", async () => {

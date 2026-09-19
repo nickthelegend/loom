@@ -42,14 +42,24 @@ export interface TurnDiff {
   truncated: boolean;
 }
 
+/** Loom's own bookkeeping inside the project — never an agent's work. */
+const isLoomState = (path: string) => path === ".loom" || path.startsWith(".loom/");
+
 /**
  * Changes attributable to one turn: files whose porcelain line differs from
  * the pre-turn snapshot, with a patch limited to those files.
+ *
+ * `.loom/` is not one of them. The event log, the prompt queue and the
+ * adapters' session state live there and change while a turn runs; a project
+ * that doesn't gitignore `.loom/` used to see them land in the turn's diff,
+ * telling you the agent had edited files it never touched.
  */
 export async function diffSinceSnapshot(dir: string, before: string): Promise<TurnDiff | null> {
   const after = await porcelainStatus(dir);
   const beforeSet = new Set(before.split("\n").filter(Boolean));
-  const changedLines = after.split("\n").filter((l) => l && !beforeSet.has(l));
+  const changedLines = after
+    .split("\n")
+    .filter((l) => l && !beforeSet.has(l) && !isLoomState(l.slice(3).trim()));
   if (!changedLines.length) return null;
   const files = parsePorcelain(changedLines.join("\n"));
   const paths = files.map((f) => f.path);
