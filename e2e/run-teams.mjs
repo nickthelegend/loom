@@ -272,6 +272,14 @@ try {
       if (JSON.parse(gh("pr", "view", String(n), "-R", SANDBOX, "--json", "state")).state === "OPEN") gh("pr", "close", String(n), "-R", SANDBOX, "--delete-branch");
     } catch { /* already gone */ }
   }
+  // A merged PR's branch and this run's tag outlive the PRs: the sandbox is a
+  // fixture, and the next run should find it as this one did.
+  try {
+    for (const b of JSON.parse(gh("api", `repos/${SANDBOX}/branches`, "--paginate")).map((x) => x.name)) {
+      if (/^loom\//.test(b)) gh("api", "-X", "DELETE", `repos/${SANDBOX}/git/refs/heads/${b}`);
+    }
+    gh("api", "-X", "DELETE", `repos/${SANDBOX}/git/refs/tags/e2e-${tag}`);
+  } catch { /* nothing to clean */ }
   await A.stop();
   await B.stop();
   // clean the hosted project: the e2e team and users
