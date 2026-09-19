@@ -110,7 +110,10 @@ try {
   let goalRun = "";
   await check(rec, "L4", async () => {
     const r = await A.post(`${a.P}/orchestra`, {
-      goal: "Add a function sub(a, b) returning a - b to src/math.js (keep add as is), and a test for it in test/math.test.js. One task for the opencode worker, touching src/math.js and test/math.test.js.",
+      // The sandbox keeps what earlier runs landed, so each run asks for its
+      // own function: repeating a goal that is already on main produces no
+      // commits, and a PR with no commits is a fixture bug, not a finding.
+      goal: `Add a function sub_${tag}(a, b) returning a - b to src/math.js (keep every existing function as it is), and a test for it in test/math.test.js. One task for the opencode worker, touching src/math.js and test/math.test.js.`,
       orchestrator: "claude-code",
       workers: ["opencode"],
       maxRounds: 6,
@@ -121,7 +124,7 @@ try {
       const t = await teamOf(B);
       return (t?.feed ?? []).find((e) => e.type === "goal_started" && e.meta?.runId === goalRun) ?? null;
     }, { timeoutMs: 60_000, what: "goal_started in bob's feed" });
-    expect(String(ev.content?.goal ?? "").includes("sub(a, b)"), `bob decrypts the goal title, got ${JSON.stringify(ev.content)}`);
+    expect(String(ev.content?.goal ?? "").includes(`sub_${tag}`), `bob decrypts the goal title, got ${JSON.stringify(ev.content)}`);
     return `bob's feed: goal_started ${goalRun} by ${ev.github}, decrypted "${String(ev.content.goal).slice(0, 60)}"`;
   });
 
@@ -185,9 +188,9 @@ try {
       return JSON.parse(gh("pr", "view", String(pr), "-R", SANDBOX, "--json", "state")).state === "MERGED";
     }, { timeoutMs: 900_000, every: 15_000, what: "PR merged on GitHub" });
     const main = gh("api", `repos/${SANDBOX}/contents/src/math.js?ref=main`, "-q", ".content");
-    expect(Buffer.from(main, "base64").toString().includes("sub"), "main has sub()");
+    expect(Buffer.from(main, "base64").toString().includes(`sub_${tag}`), `main has sub_${tag}()`);
     const final = (await A.get(`${a.P}/team/landing`)).body.goals.find((x) => x.runId === goalRun);
-    return `landed via ${final.landing.train ? "the landing train (no merge queue)" : "auto-merge"}; PR #${pr} MERGED on GitHub; main has sub(); landing=${final.landing.state}`;
+    return `landed via ${final.landing.train ? "the landing train (no merge queue)" : "auto-merge"}; PR #${pr} MERGED on GitHub; main has sub_${tag}(); landing=${final.landing.state}`;
   });
 
   await check(rec, "L9b", async () => {
