@@ -100,6 +100,7 @@ interface FakePr {
 }
 const prs = new Map<number, FakePr>();
 const calls: string[][] = [];
+const mergeErrors: string[] = [];
 const merges: number[] = [];
 let checkAt: (pr: FakePr, sha: string, reruns: number) => "pass" | "fail" | "pending" = () => "pass";
 const rerunCount = new Map<string, number>();
@@ -154,7 +155,8 @@ const fakeGh: Exec = async (cmd, args, cwd, opts) => {
     git(merger, "checkout", "-q", "-B", "main", "origin/main");
     try {
       git(merger, "merge", "--squash", `origin/${pr.branch}`);
-    } catch {
+    } catch (e) {
+      mergeErrors.push(`#${n}: ${String((e as { stderr?: string }).stderr ?? e).slice(0, 300)}`);
       git(merger, "reset", "-q", "--hard");
       return { code: 1, out: "", err: "Pull request is not mergeable: the merge commit cannot be cleanly created" };
     }
@@ -358,7 +360,7 @@ describe("Phase 6: the landing train (no merge queue)", () => {
         const l = run(w, id).landing!;
         return `${w}: state=${l.state} reason=${l.reason ?? "-"} lanes=${JSON.stringify(l.lanes)} checks=${JSON.stringify(l.checks)}`;
       };
-      throw new Error(`${(e as Error).message}\n${show("alice", g3.id)}\n${show("bob", g4.id)}\ngh calls: ${JSON.stringify(calls.slice(-12))}`);
+      throw new Error(`${(e as Error).message}\n${show("alice", g3.id)}\n${show("bob", g4.id)}\nmerge errors: ${JSON.stringify(mergeErrors)}\nmerges: ${JSON.stringify(merges)}\ngh calls: ${JSON.stringify(calls.filter((c) => c[1] === "merge").slice(-6))}`);
     });
     expect(git(origin, "show", "main:web/page.ts")).toContain("line 0");
     expect(git(origin, "show", "main:api/route.ts")).toContain("line 0");

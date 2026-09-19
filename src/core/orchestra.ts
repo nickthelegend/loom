@@ -193,6 +193,8 @@ export interface LandingState {
   adoptedBy?: string;
   /** An adopted goal, handed back to its owner. */
   returned?: boolean;
+  /** The PR head when it started waiting on a human: it keeps waiting until that changes. */
+  needsHumanSha?: string;
   /** The commit the PR merged as (deploy alerts, D72). */
   mergeSha?: string;
   /** Actions minutes the goal's branch used, recorded when it lands (§10). */

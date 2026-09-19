@@ -263,6 +263,11 @@ export class Landing {
 
     if (run.landing!.landRequested && run.landing!.train) return this.trainTurn(run, policy, sha, view.reviewDecision, rows, sum);
 
+    // Waiting on a human (GitHub refused the merge, fixes ran out) stays so until
+    // something changes — a new commit, or Land again. A later poll used to flip
+    // it to "green" and drop the reason, hiding what the owner was alerted about.
+    if (run.landing!.state === "needs_human" && !run.landing!.landRequested && run.landing!.needsHumanSha === sha) return run.landing!;
+
     if (sum.pending.length) return this.set(run, { state: run.landing!.landRequested ? "landing" : "pending" });
     if (run.landing!.review?.state === "failure" && !run.landing!.review.overridden) return run.landing!;
     if (sum.green || !rows.length) {
@@ -319,7 +324,7 @@ export class Landing {
   }
 
   private async needsHuman(run: OrchestraRun, reason: string): Promise<LandingState> {
-    const st = this.set(run, { state: "needs_human", reason });
+    const st = this.set(run, { state: "needs_human", needsHumanSha: run.landing!.headSha, reason });
     const key = `${run.id}:${reason}`;
     if (!this.alerted.has(key)) {
       this.alerted.add(key);
