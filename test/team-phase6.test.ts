@@ -352,7 +352,14 @@ describe("Phase 6: the landing train (no merge queue)", () => {
         return run("alice", g3.id).landing!.state === "merged" && run("bob", g4.id).landing!.state === "merged";
       },
       { timeoutMs: 30_000 },
-    );
+    ).catch((e) => {
+      // say where each goal got stuck, so a CI-only failure explains itself
+      const show = (w: "alice" | "bob", id: string) => {
+        const l = run(w, id).landing!;
+        return `${w}: state=${l.state} reason=${l.reason ?? "-"} lanes=${JSON.stringify(l.lanes)} checks=${JSON.stringify(l.checks)}`;
+      };
+      throw new Error(`${(e as Error).message}\n${show("alice", g3.id)}\n${show("bob", g4.id)}\ngh calls: ${JSON.stringify(calls.slice(-12))}`);
+    });
     expect(git(origin, "show", "main:web/page.ts")).toContain("line 0");
     expect(git(origin, "show", "main:api/route.ts")).toContain("line 0");
   });
