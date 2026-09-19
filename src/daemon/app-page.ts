@@ -7986,11 +7986,16 @@ ${BRAND_SPRITE}
      * and a second start is a 400).
      */
     function wouldQueue(){
-      if (queue.items.length) return true;
-      if (state.cmode !== "orch") return false;
-      var p = state.project || {};
-      var run = (orch.runs || []).filter(function(r){ return !isTerminalOrch(r.status); })[0];
-      return Boolean(run || (p.orchestra && !isTerminalOrch(p.orchestra.status)));
+      if (state.cmode === "orch") {
+        // a goal can't start while one runs, and a new one mustn't overtake
+        // goals already lined up — even while the queue is held
+        var p = state.project || {};
+        var run = (orch.runs || []).filter(function(r){ return !isTerminalOrch(r.status); })[0];
+        return Boolean(queue.items.length || run || (p.orchestra && !isTerminalOrch(p.orchestra.status)));
+      }
+      // A held queue isn't racing you: it's waiting, often because the agent
+      // asked you something. What you type now is the answer, and it goes now.
+      return queue.items.length > 0 && !queue.paused;
     }
     function isTerminalOrch(st){
       return st === "completed" || st === "failed" || st === "aborted" || st === "moved";
