@@ -130,6 +130,19 @@ on them. Later sections implement them.
 | D64 | Budgets | **Per-goal cap and per-member daily cap, plus rollups** | `budgets: {perGoalUsd, perMemberDailyUsd}`. A goal over its cap pauses for a human; a member over the daily cap can't start goals. Rollups per member/day, per goal and per landed PR (abandoned goals count), from feed costs. |
 | D65 | Hosted hub sign-in | **GitHub OAuth through Supabase, loopback redirect** | `loom team signin` with no URL uses the hosted hub (its URL and publishable key ship in the build); a URL still means a self-hosted hub. |
 | D66 | Deploys and release notes | **Deferred to Phase 5** | GitHub Environments stay the deploy gate. |
+| **Phase 5: runners** (settled 2026-09-19) |||
+| D67 | Where cloud sandboxes run | **`loom runner`, hosted by the team** | A headless Loom daemon in runner mode on any always-on machine (VPS, home server, Railway, Fly, Docker). Code never touches Loom's servers; it reuses the daemon, orchestra and landing. |
+| D68 | Whose credentials and goals | **Personal first, shared opt-in** | A runner is one member's: their agent logins and keys, their goals (and goals they adopt). A runner marked shared (allowed by `runners.shared` in loom.team.json) takes any member's goals, billed to its owner, visible in the feed. |
+| D69 | How goals reach a runner | **Explicit, plus automatic CI fixes** | "Start on runner" and "Continue on runner" (desktop and phone). A goal needing a CI fix while its owner has been offline 15+ min is taken by the owner's runner, like an Adopt (D63). Goals travel as pushed branches plus a sealed run record, never local-only state. |
+| D70 | The trust tier | **A container per goal, minimal secrets** | Docker when available, else a fresh clone and a scrubbed environment per goal. Agents may bypass inside, capped by `runners.permissions`. It holds only agent logins and a fine-grained GitHub token; no production secrets; destroyed after the goal. |
+| D71 | Job transport | **A hub job table with claim leases** | Runners register (owner, installed kinds, shared). Jobs (start / continue / fix / return) carry sealed payloads; a runner claims one atomically and heartbeats it; silence for 10 min makes it claimable again (D12). |
+| D72 | Deploys and release notes | **Both, read-only** | Deployment statuses from `gh api` go to the feed (`deploy_started/succeeded/failed`), and a failed deploy containing your merged goal alerts your phone. `loom team release-notes --since <tag>` writes notes from merged goals. GitHub Environments stay the gate; Loom never deploys. |
+| D73 | The phone and runners | **Start, continue, watch** | Start a goal on your runner, move a running goal there, and watch runner goals through the hub. Tapping an alert opens its project and goal. |
+| D74 | Runner identity | **Paired like a device** | `loom runner pair` prints a one-time link carrying the team keys; `loom runner join <link>` signs in as the member (loopback or paste-the-URL OAuth on a headless box) and registers a device marked runner. Revoking it removes the device and rotates the team key (D6). |
+| D75 | Moving a running goal | **Pause at a safe point** | Stop new work, let running turns finish (interrupt after 2 min), commit, push the integration and task branches to `refs/loom/run/<id>/*`. The runner rebuilds the run and its orchestrator carries on; the local run becomes "moved", read-only. |
+| D76 | After the owner is back | **The runner finishes the goal** | No ping-pong. "Bring back" moves it home the same way, when the owner chooses. |
+| D77 | The runner's GitHub access | **A fine-grained token, checked** | `loom runner join` takes a fine-grained PAT or uses `gh auth`; `loom runner doctor` warns when it can do more than contents and pull requests on the shared repos. Stored 0600 on the runner, never sent through the hub. |
+| D78 | Packaging | **A Docker image and an installer** | `Dockerfile.runner` and `loom runner install` (a systemd or launchd unit). Nothing is deployed to anyone's cloud account by Loom. |
 | **Build approach** |||
 | D27 | Build before a live Supabase exists | **In-memory hub + real migrations** | The hub protocol is tested against an in-memory hub with two real daemons as two members; SQL, RLS and Edge Functions ship ready to deploy. |
 
@@ -575,7 +588,23 @@ The original Phase 4 plan:
   classification.
 - Cost rollups per member, goal and landed PR; team budgets.
 
-**Phase 5 (optional): cloud sandboxes** for away-from-keyboard goals.
+**Phase 5: runners.** Built per D67–D78. Status on 2026-09-19:
+
+| Piece | Status |
+|---|---|
+| Hub protocol: runners (a member's device marked runner) and a job queue (start / continue / fix / return / land) with atomic claims, heartbeats and stale reclaim; `revokeDevice` | ✅ MemoryHub + `loom hub` + SQL (`0007_runners.sql`) |
+| Orchestra: `moveOut` (safe point, branches to `refs/loom/run/<id>/*`, status "moved") and `importRun` (worktrees rebuilt, orchestrator resumes) | ✅ built, tested |
+| Runner in the daemon (`src/daemon/runner.ts`): register, claim, a fresh clone per goal as its own project, progress heartbeats, finish when the goal lands / fails / moves, cleanup; Land and Bring back as jobs; takes the owner's stuck goal when they're away | ✅ built; tested end to end (laptop + runner + teammate on a real hub and bare origin) |
+| Trust tier: scrubbed environment, runner permission ceiling (`runners.permissions`), shared runners only when `runners.shared` allows, fine-grained token stored 0600 and checked by `loom runner doctor` | ✅ built, tested |
+| Docker per goal (`loom runner exec` in a container) | 🔨 built; command tested, not run here (no Docker daemon on the build machine) |
+| Pairing (`loom runner pair` / `join`), revoke with key rotation, `loom runner install` (launchd / systemd), `Dockerfile.runner` | ✅ built; service files tested |
+| Deploys to the feed (+ an alert when a failed deploy contains your goal) and `loom team release-notes --since <tag>` | ✅ built, tested |
+| REST `/api/projects/:id/team/runners[/:action]`, `/api/runner[/:action]`, `/team/deploys`, `/team/release-notes`; CLI `loom runner …`, `loom team deploys \| release-notes` | ✅ built |
+| UI: runners, jobs, Continue on runner / Bring back, runner settings, deploys, release notes (desktop); runners and notification-tap deep links (phone) | 🔨 in progress |
+
+Not done: headless sign-in to the hosted hub on a runner box needs the GitHub
+OAuth App (then `loom runner join` takes the session from the paste-the-URL
+flow); CI minutes per goal and auto-fixing lower stack PRs stay open.
 
 ## 14. What Loom already has that this builds on
 

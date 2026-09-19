@@ -37,7 +37,8 @@ export function stateChip(state: string): StateChip {
 }
 
 const DONE = new Set(["merged", "closed"]);
-const RUN_TERMINAL = new Set(["completed", "failed", "aborted"]);
+// "moved" (Phase 5): the daemon hands Land on a moved goal to the runner holding it.
+const RUN_TERMINAL = new Set(["completed", "failed", "aborted", "moved"]);
 
 /** Mirrors the daemon's own guard on Land: an adopted goal belongs to its owner, a live one isn't done. */
 export function isRunDone(status: string): boolean {

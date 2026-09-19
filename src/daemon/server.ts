@@ -136,6 +136,8 @@ export interface DaemonOptions {
   relayTransport?: (channel: string) => Promise<RelayTransport>;
   /** Build the Team Hub client. Defaults to HTTP (`loom hub`); tests pass their own. */
   hubFactory?: (url: string, token: string) => HubClient;
+  /** `loom runner exec` in a container: run this one claimed job, then call done (Phase 5, D70). */
+  runnerExec?: { teamId: string; jobId: string; done(ok: boolean): void };
 }
 
 export const DEFAULT_PORT = 7420;
@@ -375,6 +377,14 @@ export class LoomDaemon {
         }
       },
       ...(opts.hubFactory ? { hubFactory: opts.hubFactory } : {}),
+      ...(opts.runnerExec ? { runnerExec: opts.runnerExec } : {}),
+      // Phase 5: a runner opens each goal's fresh clone as its own project, and drops it after.
+      openProject: async (dir, name) => this.runtime(registerProject(dir, name).id),
+      closeProject: async (rt) => {
+        await rt.close().catch(() => {});
+        this.runtimes.delete(rt.info.id);
+        unregisterProject(rt.info.id);
+      },
     });
     this.relayTransportFactory = opts.relayTransport;
     this.host = opts.host ?? "127.0.0.1";
@@ -975,6 +985,37 @@ export class LoomDaemon {
         }
       })();
     });
+    // ---- this daemon as a runner (Phase 5): admin only — it's this machine ----
+    app.get("/api/runner", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "admin only" });
+      res.json(this.team.runner?.status() ?? { running: false, config: this.team.runnerConfig() });
+    });
+    app.post("/api/runner/:action", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "admin only" });
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      void (async () => {
+        try {
+          const action = String(req.params.action);
+          let out: unknown = { ok: true };
+          if (action === "pair") out = { link: this.team.pairRunnerLink() };
+          else if (action === "join") {
+            out = await this.team.joinAsRunner(String(b.link ?? ""), {
+              ...(b.github ? { github: String(b.github) } : {}),
+              ...(b.secret ? { secret: String(b.secret) } : {}),
+              ...(b.token ? { token: String(b.token) } : {}),
+              ...(b.shared !== undefined ? { shared: Boolean(b.shared) } : {}),
+            });
+          } else if (action === "start") out = await this.team.startRunner({ ...(b.shared !== undefined ? { shared: Boolean(b.shared) } : {}), ...(b.capacity ? { capacity: Number(b.capacity) } : {}) });
+          else if (action === "stop") await this.team.stopRunner();
+          else if (action === "revoke") await this.team.revokeRunner(String(b.deviceId ?? ""));
+          else return void res.status(404).json({ error: `unknown runner action "${action}"` });
+          res.json({ result: out });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      })();
+    });
+
     // ---- Loom Cloud: reach this daemon from any network (daemon/relay.ts) ----
     app.get("/api/cloud", (_req, res) => {
       res.json(this.cloudStatus());
@@ -2612,7 +2653,10 @@ export class LoomDaemon {
         try {
           let out: unknown = { ok: true };
           const action = String(req.params.action);
-          if (action === "land") out = await l.land(runId);
+          if (action === "land") {
+            // a goal that moved to a runner is landed there (Phase 5)
+            out = rt.orchestra.get(runId)?.status === "moved" ? await this.team.landOnRunner(rt, runId) : await l.land(runId);
+          }
           else if (action === "poll") await l.tick();
           else if (action === "review") {
             const run = rt.orchestra.get(runId);
@@ -2631,6 +2675,69 @@ export class LoomDaemon {
         }
       }),
     );
+    // ---- deploys and release notes (Phase 5, daemon/deploys.ts) — read-only ----
+    app.get(
+      "/api/projects/:id/team/deploys",
+      withRuntime(async (rt, _req, res) => {
+        try {
+          res.json({ deployments: await this.team.deploysFor(rt).list() });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+    app.get(
+      "/api/projects/:id/team/release-notes",
+      withRuntime(async (rt, req, res) => {
+        try {
+          const since = String(req.query.since ?? "").trim();
+          if (!since) throw new Error("since which tag or commit? ?since=v1.2.0");
+          res.json({ markdown: await this.team.deploysFor(rt).releaseNotes(since) });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+
+    // ---- runners (Phase 5, daemon/runner.ts) ----
+    // A project's view: runners that can take its goals, and the jobs in flight.
+    app.get(
+      "/api/projects/:id/team/runners",
+      withRuntime(async (rt, _req, res) => {
+        try {
+          res.json(await this.team.runnersView(rt));
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+    app.post(
+      "/api/projects/:id/team/runners/:action",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as Record<string, unknown>;
+        const str = (k: string) => (b[k] === undefined || b[k] === null || b[k] === "" ? undefined : String(b[k]));
+        try {
+          const action = String(req.params.action);
+          let out: unknown;
+          if (action === "start") {
+            out = await this.team.startOnRunner(rt, {
+              goal: String(b.goal ?? ""),
+              ...(str("orchestrator") ? { orchestrator: str("orchestrator")! } : {}),
+              ...(Array.isArray(b.workers) ? { workers: b.workers.map(String) } : {}),
+              ...(b.plan ? { plan: true } : {}),
+              ...(str("runner") ? { runner: str("runner")! } : {}),
+            });
+          } else if (action === "continue") out = await this.team.continueOnRunner(rt, String(b.runId ?? ""), { ...(str("runner") ? { runner: str("runner")! } : {}) });
+          else if (action === "bring-back") out = await this.team.bringBack(rt, String(b.runId ?? ""));
+          else if (action === "land") out = await this.team.landOnRunner(rt, String(b.runId ?? ""));
+          else return void res.status(404).json({ error: `unknown runner action "${action}"` });
+          res.json({ result: out, ...(await this.team.runnersView(rt)) });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      }),
+    );
+
     // Repo setup for landing safely (D62): report, and a fix PR on request.
     app.get(
       "/api/projects/:id/team/doctor",
@@ -3692,7 +3799,8 @@ export class LoomDaemon {
     const name = listProjects().find((p) => p.id === projectId)?.name ?? "project";
     void sendExpoPush(tokens, {
       ...pushContent(name, event),
-      data: { projectId, kind: event.kind },
+      // the phone opens this project (and goal) when the alert is tapped
+      data: { projectId, kind: event.kind, ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}) },
     });
   }
 

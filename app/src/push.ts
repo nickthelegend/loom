@@ -69,3 +69,41 @@ export function notifyApproval(what: { agent: string; tool: string; project?: st
     trigger: null,
   }).catch(() => {});
 }
+
+/**
+ * Tapping a Loom push opens its project (and goal): `onOpen` gets the pushed
+ * `data` — `{ projectId, kind, runId? }` from the daemon (see
+ * team-runners-model notificationRoute). Covers both a tap while the app runs
+ * (the response listener) and a tap that launched it (the last response, read
+ * once). Each notification is handled once even if both report it. No-op on web.
+ */
+export function onNotificationOpen(onOpen: (data: unknown) => void): () => void {
+  if (Platform.OS === "web") return () => {};
+  const seen = new Set<string>();
+  let live = true;
+  const handle = (r: Notifications.NotificationResponse | null) => {
+    if (!live || !r) return;
+    if (r.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return; // a tap, not a dismiss or custom action
+    const id = r.notification.request.identifier;
+    if (seen.has(id)) return;
+    seen.add(id);
+    onOpen(r.notification.request.content.data);
+  };
+  let sub: { remove: () => void } | null = null;
+  try {
+    sub = Notifications.addNotificationResponseReceivedListener(handle);
+  } catch {
+    // no native module (Expo Go without notifications) — nothing to listen to
+  }
+  void Notifications.getLastNotificationResponseAsync()
+    .then((r) => {
+      handle(r);
+      // so a later remount (or a re-pair) doesn't reopen the same alert
+      if (r) void Notifications.clearLastNotificationResponseAsync?.().catch(() => {});
+    })
+    .catch(() => {});
+  return () => {
+    live = false;
+    sub?.remove();
+  };
+}

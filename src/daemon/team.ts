@@ -54,9 +54,12 @@ import { hostedSignIn, openInBrowser, SupabaseHubClient, type HostedSession } fr
 import { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } from "../core/hosted.js";
 import type { LoomEvent } from "../types.js";
 import type { ProjectRuntime } from "./runtime.js";
+import { DEPLOY_POLL_MS, Deploys } from "./deploys.js";
 import { Landing, type Exec } from "./landing.js";
 import { TeamBrain } from "./team-brain.js";
 import { TeamCoordinator } from "./team-coordinator.js";
+import type { OrchestraRun } from "../core/orchestra.js";
+import { Runner, readRunnerConfig, writeRunnerConfig, type JobPayload, type JobProgress, type RunnerConfig } from "./runner.js";
 import { rollupCosts } from "../core/team-landing.js";
 
 // ---------------------------------------------------------------------------
@@ -138,6 +141,17 @@ export interface TeamLinkHost {
   /** Tests swap `gh` (and friends) for the landing flow (Phase 4). */
   landingExec?: Exec;
   landingRerunSettleMs?: number;
+  /** Phase 5: open a directory as a project (a runner's per-goal clone), and close it again. */
+  openProject?(dir: string, name: string): Promise<ProjectRuntime>;
+  closeProject?(rt: ProjectRuntime): Promise<void>;
+  /** Tests: where a runner clones a repo from, and which agent kinds it offers. */
+  runnerCloneUrl?(repo: string): string;
+  runnerKinds?(): Promise<string[]>;
+  /** Tests: the runner's config instead of ~/.loom/runner.json. */
+  runnerConfig?(): RunnerConfig;
+  runnerAwayMs?: number;
+  /** `loom runner exec` inside a container: run this one job, then call done. */
+  runnerExec?: { teamId: string; jobId: string; done(ok: boolean): void };
 }
 
 interface TeamView {
@@ -164,6 +178,11 @@ export class TeamLink {
   private coordinators = new Map<string, TeamCoordinator>(); // projectId → coordinator (Phase 2)
   private brains = new Map<string, TeamBrain>(); // projectId → team brain (Phase 3)
   private landings = new Map<string, Landing>(); // projectId → goal PRs on their way to main (Phase 4)
+  private deploys = new Map<string, Deploys>(); // projectId → deploy watch (Phase 5)
+  /** Phase 5: this daemon as a runner, when it's configured as one. */
+  runner: Runner | null = null;
+  /** Return jobs we asked for → the project whose goal comes home (D76). */
+  private pendingReturns = new Map<string, string>();
   private started = false;
 
   constructor(private host: TeamLinkHost) {
@@ -180,7 +199,9 @@ export class TeamLink {
     this.timers.push(setInterval(() => void this.beat().catch(() => {}), HEARTBEAT_MS));
     this.timers.push(setInterval(() => void this.pollGitHub().catch(() => {}), GH_POLL_MS));
     this.timers.push(setInterval(() => void this.syncBrains().catch(() => {}), BRAIN_SYNC_MS));
+    this.timers.push(setInterval(() => void this.pollDeploys().catch(() => {}), DEPLOY_POLL_MS));
     for (const t of this.timers) t.unref?.();
+    if ((this.runnerConfig().enabled || this.host.runnerExec) && this.state.hub) await this.startRunner().catch((e) => logbook.warn("runner", "couldn't start the runner", String(e)));
   }
 
   async stop(): Promise<void> {
@@ -193,6 +214,7 @@ export class TeamLink {
     for (const c of this.coordinators.values()) c.stop();
     for (const b of this.brains.values()) b.stop();
     for (const l of this.landings.values()) l.stop();
+    await this.runner?.stop();
     // Say goodbye rather than let teammates wait out the TTL.
     await this.clearAllPresence().catch(() => {});
     this.started = false;
@@ -376,6 +398,7 @@ export class TeamLink {
     const v = this.views.get(e.teamId);
     if (!v) return;
     if (e.type === "memory") for (const b of this.brains.values()) b.onMemory(e.memory);
+    else if (e.type === "job") this.onJob(e.teamId, e.job);
     else if (e.type === "lease") v.leases.set(e.lease.id, e.lease);
     else if (e.type === "lease_gone") for (const id of e.leaseIds) v.leases.delete(id);
     else if (e.type === "presence") v.presence.set(presenceKey(e.presence), e.presence);
@@ -594,6 +617,278 @@ export class TeamLink {
     if (this.hubClient) void brain.sync().catch(() => {});
     this.landingFor(rt).start();
     if (this.state.hub) this.watchRuntimes();
+  }
+
+  // ── runners (Phase 5, D67–D77) ──
+
+  runnerConfig(): RunnerConfig {
+    return this.host.runnerConfig?.() ?? readRunnerConfig();
+  }
+
+  /** Turn this daemon into a runner (or restart it with new settings). */
+  async startRunner(patch: Partial<RunnerConfig> = {}): Promise<Record<string, unknown>> {
+    if (!this.state.hub || !this.state.device?.id) throw new Error("sign in first — a runner is one of your devices on the team hub");
+    if (!this.host.runnerConfig && !this.host.runnerExec) writeRunnerConfig({ ...this.runnerConfig(), ...patch, enabled: true });
+    if (!this.host.openProject || !this.host.closeProject) throw new Error("this daemon can't open projects for a runner");
+    if (!this.runner) {
+      this.runner = new Runner({
+        hub: () => this.hubClient,
+        deviceId: () => this.state.device?.id ?? null,
+        userId: () => this.state.hub?.userId ?? null,
+        github: () => this.state.hub?.github ?? null,
+        teams: () => Object.keys(this.state.teams),
+        keys: (teamId) => this.state.teams[teamId]?.keys ?? [],
+        feed: (teamId) => this.views.get(teamId)?.feed ?? [],
+        presence: (teamId) => [...(this.views.get(teamId)?.presence.values() ?? [])],
+        openProject: this.host.openProject.bind(this.host),
+        closeProject: async (rt) => {
+          this.landings.get(rt.info.id)?.stop();
+          this.landings.delete(rt.info.id);
+          this.brains.get(rt.info.id)?.stop();
+          this.brains.delete(rt.info.id);
+          this.coordinators.get(rt.info.id)?.stop();
+          this.coordinators.delete(rt.info.id);
+          this.logSubs.get(rt.info.id)?.();
+          this.logSubs.delete(rt.info.id);
+          await this.host.closeProject!(rt);
+        },
+        share: async (rt, teamId) => {
+          const repo = await repoOf(rt.info.dir);
+          if (repo) rt.setTeam({ teamId, repo });
+          this.watchRuntimes();
+          await this.coordinatorFor(rt).teamPolicy().catch(() => null);
+        },
+        landing: (rt) => this.landingFor(rt),
+        ...(this.host.runnerCloneUrl ? { cloneUrl: this.host.runnerCloneUrl.bind(this.host) } : {}),
+        kinds: async () => {
+          const c = this.runnerConfig();
+          if (c.kinds.length) return c.kinds;
+          if (this.host.runnerKinds) return this.host.runnerKinds();
+          const { detectAdes } = await import("../core/ades.js");
+          const found = await detectAdes();
+          return Object.entries(found).filter(([, ok]) => ok).map(([k]) => k);
+        },
+        config: () => this.runnerConfig(),
+        statePath: () => this.file,
+        ...(this.host.runnerExec ? { exec: this.host.runnerExec } : {}),
+        ...(this.host.runnerAwayMs !== undefined ? { awayMs: this.host.runnerAwayMs } : {}),
+      });
+    } else {
+      await this.runner.register();
+    }
+    await this.runner.start();
+    return this.runner.status();
+  }
+
+  async stopRunner(): Promise<void> {
+    await this.runner?.stop();
+    if (!this.host.runnerConfig) writeRunnerConfig({ ...this.runnerConfig(), enabled: false });
+  }
+
+  private onJob(teamId: string, job: import("../core/team-hub.js").Job): void {
+    this.runner?.onJob(teamId, job);
+    // Bring back (D76): the runner handed the goal over; rebuild it here.
+    const projectId = this.pendingReturns.get(job.id);
+    if (!projectId || (job.state !== "done" && job.state !== "failed")) return;
+    this.pendingReturns.delete(job.id);
+    const rt = this.host.runtimes().find((r) => r.info.id === projectId);
+    if (!rt) return;
+    if (job.state === "failed") {
+      logbook.warn("runner", "the runner couldn't hand the goal back", job.error ?? "");
+      return;
+    }
+    const res = openFromTeam<{ record?: OrchestraRun }>(this.state.teams[teamId]?.keys ?? [], job.result);
+    if (res?.record) void rt.orchestra.importRun(res.record, { from: job.runnerGithub ? `${job.runnerGithub}'s runner` : "the runner" }).catch((e) => logbook.warn("runner", "couldn't bring the goal back", String(e)));
+  }
+
+  /** A one-time link that makes another machine one of your runners (D74). Send it like a password. */
+  pairRunnerLink(): string {
+    const h = this.state.hub;
+    if (!h) throw new Error("sign in first");
+    const body = {
+      v: 1,
+      hub: h.url,
+      ...(h.key ? { key: h.key } : {}),
+      github: h.github,
+      teams: Object.fromEntries(Object.entries(this.state.teams).map(([id, t]) => [id, { name: t.name, role: t.role, keys: t.keys }])),
+    };
+    return `loom-runner:${Buffer.from(JSON.stringify(body)).toString("base64url")}`;
+  }
+
+  /**
+   * On the runner box: take the pairing link's team keys, sign in as the same
+   * member (self-hosted: --secret; hosted: a refresh token from the paste-URL
+   * flow), register this device, and seal the keys to it.
+   */
+  async joinAsRunner(link: string, opts: { github?: string; secret?: string; token?: string; shared?: boolean } = {}): Promise<Record<string, unknown>> {
+    const raw = link.trim().replace(/^loom-runner:/, "");
+    let body: { hub: string; github: string; teams: Record<string, { name: string; role: TeamRole; keys: TeamKey[] }> };
+    try {
+      body = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+    } catch {
+      throw new Error("that isn't a Loom runner pairing link");
+    }
+    if (!body.hub || !body.teams) throw new Error("that isn't a Loom runner pairing link");
+    await this.signIn(body.hub, { github: opts.github ?? body.github, ...(opts.secret ? { secret: opts.secret } : {}), ...(opts.token ? { token: opts.token } : {}) });
+    if (this.state.hub?.github !== body.github) throw new Error(`this link is ${body.github}'s — sign in as them on the runner`);
+    for (const [id, t] of Object.entries(body.teams)) {
+      this.state.teams[id] = { name: t.name, role: t.role, keys: t.keys };
+      for (const k of t.keys) {
+        await this.hub().putKeyEnvelopes(id, k.version, [{ deviceId: this.device().id, box: sealTeamKey(this.device().sealPub, k) }]).catch(() => {});
+      }
+    }
+    writeState(this.file, this.state);
+    await this.connect();
+    return this.startRunner({ ...(opts.shared !== undefined ? { shared: opts.shared } : {}) });
+  }
+
+  /** Revoke a runner: remove the device, then rotate every team's key (D74, D6). */
+  async revokeRunner(deviceId: string): Promise<void> {
+    await this.hub().revokeDevice(deviceId);
+    for (const teamId of Object.keys(this.state.teams)) await this.rotate(teamId).catch((e) => logbook.warn("runner", "rotation failed", String(e)));
+  }
+
+  /** Runners that can take this project's goals, and the jobs in flight (decrypted). */
+  async runnersView(rt: ProjectRuntime): Promise<{ runners: Array<Record<string, unknown>>; jobs: Array<Record<string, unknown>> }> {
+    const share = await this.teamFor(rt);
+    if (!share || !this.hubClient) return { runners: [], jobs: [] };
+    const me = this.state.hub?.userId;
+    const keys = this.state.teams[share.teamId]?.keys ?? [];
+    const runners = (await this.hub().runners(share.teamId)).filter((r) => r.userId === me || r.shared);
+    const jobs = (await this.hub().jobs(share.teamId)).filter((j) => j.repo === share.repo).slice(-50);
+    return {
+      runners: runners.map((r) => ({ ...r, mine: r.userId === me, online: Date.now() - r.lastSeen < 3 * 60_000 })),
+      jobs: jobs.map((j) => {
+        const { sealed, progress, result, ...rest } = j;
+        const p = openFromTeam<JobPayload>(keys, sealed);
+        return {
+          ...rest,
+          goal: (p?.goal ?? p?.record?.goal ?? "").split("\n")[0]!.slice(0, 200),
+          runId: p?.runId ?? p?.record?.id ?? null,
+          progress: openFromTeam<JobProgress>(keys, progress) ?? null,
+          mine: j.userId === me,
+          ...(result ? { hasResult: true } : {}),
+        };
+      }),
+    };
+  }
+
+  private async jobShare(rt: ProjectRuntime): Promise<{ teamId: string; repo: string; key: TeamKey; device: string }> {
+    const share = await this.teamFor(rt);
+    if (!share) throw new Error("runners take goals of team projects — share this project first");
+    return { ...share, key: this.currentKey(share.teamId), device: this.device().id };
+  }
+
+  /** Pick a runner: the one named, else my first online one. */
+  private async pickRunner(teamId: string, wanted?: string): Promise<string | undefined> {
+    const runners = await this.hub().runners(teamId);
+    if (wanted) {
+      const r = runners.find((x) => x.deviceId === wanted || x.label === wanted);
+      if (!r) throw new Error(`no runner "${wanted}"`);
+      return r.deviceId;
+    }
+    const mine = runners.filter((r) => r.userId === this.state.hub?.userId && r.deviceId !== this.state.device?.id);
+    if (!mine.length) throw new Error("you have no runner yet — `loom runner pair` here, then `loom runner join <link>` on the box");
+    return (mine.sort((a, b) => b.lastSeen - a.lastSeen)[0] ?? mine[0]!).deviceId;
+  }
+
+  /** Start a new goal on a runner (D69, D73). */
+  async startOnRunner(rt: ProjectRuntime, g: { goal: string; orchestrator?: string; workers?: string[]; plan?: boolean; runner?: string }): Promise<{ jobId: string }> {
+    if (!g.goal?.trim()) throw new Error("what's the goal?");
+    const s = await this.jobShare(rt);
+    const target = await this.pickRunner(s.teamId, g.runner);
+    const payload: JobPayload = { goal: g.goal.trim(), ...(g.orchestrator ? { orchestrator: g.orchestrator } : {}), ...(g.workers?.length ? { workers: g.workers } : {}), ...(g.plan ? { plan: true } : {}), from: os.hostname() };
+    const job = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "start", ...(target ? { target } : {}), sealed: sealForTeam(s.key, payload), deviceId: s.device });
+    return { jobId: job.id };
+  }
+
+  /** Move a running goal to a runner at a safe point (D75). */
+  async continueOnRunner(rt: ProjectRuntime, runId: string, opts: { runner?: string; graceMs?: number } = {}): Promise<{ jobId: string }> {
+    const s = await this.jobShare(rt);
+    const target = await this.pickRunner(s.teamId, opts.runner);
+    const runners = await this.hub().runners(s.teamId);
+    const label = runners.find((r) => r.deviceId === target)?.label ?? "a runner";
+    const { record } = await rt.orchestra.moveOut(runId, `runner ${label}`, { ...(opts.graceMs !== undefined ? { graceMs: opts.graceMs } : {}) });
+    const payload: JobPayload = { record, from: os.hostname() };
+    const job = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "continue", ...(target ? { target } : {}), sealed: sealForTeam(s.key, payload), deviceId: s.device });
+    const fe: FeedIn = { repo: s.repo, type: "goal_moved", meta: { runId, to: label, jobId: job.id }, deviceId: s.device, sealed: sealForTeam(s.key, { goal: record.goal.split("\n")[0]!.slice(0, 200) }) };
+    await this.hub().appendFeed(s.teamId, fe).catch(() => null);
+    return { jobId: job.id };
+  }
+
+  /** The runner job currently holding a goal. */
+  private async holderJob(teamId: string, runId: string): Promise<import("../core/team-hub.js").Job> {
+    const keys = this.state.teams[teamId]?.keys ?? [];
+    const jobs = await this.hub().jobs(teamId, { active: true });
+    const j = jobs.find((x) => {
+      if (x.kind === "return" || x.kind === "land") return false;
+      const p = openFromTeam<JobProgress>(keys, x.progress);
+      const pl = openFromTeam<JobPayload>(keys, x.sealed);
+      return p?.runId === runId || pl?.record?.id === runId;
+    });
+    if (!j?.runnerId) throw new Error(`no runner holds goal ${runId}`);
+    return j;
+  }
+
+  /** Bring a goal home from the runner (D76): the runner moves it out, this daemon imports it. */
+  async bringBack(rt: ProjectRuntime, runId: string): Promise<{ jobId: string }> {
+    const s = await this.jobShare(rt);
+    const holder = await this.holderJob(s.teamId, runId);
+    const job = await this.hub().createJob(s.teamId, {
+      repo: s.repo,
+      kind: "return",
+      target: holder.runnerId!,
+      sealed: sealForTeam(s.key, { runId, from: os.hostname() } satisfies JobPayload),
+      deviceId: s.device,
+    });
+    this.pendingReturns.set(job.id, rt.info.id);
+    return { jobId: job.id };
+  }
+
+  /** Land a goal that lives on a runner (the owner's click, carried as a job). */
+  async landOnRunner(rt: ProjectRuntime, runId: string): Promise<{ jobId: string }> {
+    const s = await this.jobShare(rt);
+    const holder = await this.holderJob(s.teamId, runId);
+    const job = await this.hub().createJob(s.teamId, {
+      repo: s.repo,
+      kind: "land",
+      target: holder.runnerId!,
+      sealed: sealForTeam(s.key, { runId } satisfies JobPayload),
+      deviceId: s.device,
+    });
+    return { jobId: job.id };
+  }
+
+  /** Phase 5 (D72): the project's deploy watch and release notes. */
+  deploysFor(rt: ProjectRuntime): Deploys {
+    let d = this.deploys.get(rt.info.id);
+    if (!d) {
+      d = new Deploys(rt, {
+        share: (r) => (this.hubClient ? this.teamFor(r) : Promise.resolve(null)),
+        post: async (r, e) => {
+          const share = await this.teamFor(r);
+          if (!share || !this.hubClient || !this.state.device?.id) return;
+          await this.hub().appendFeed(share.teamId, { ...e, deviceId: this.state.device.id }).catch(() => null);
+        },
+        ...(this.host.landingExec ? { exec: this.host.landingExec } : {}),
+      });
+      this.deploys.set(rt.info.id, d);
+    }
+    return d;
+  }
+
+  /** One deploy poll per shared repo (the feed dedupes across members). */
+  async pollDeploys(): Promise<number> {
+    if (!this.hubClient) return 0;
+    let n = 0;
+    const seen = new Set<string>();
+    for (const rt of this.host.runtimes()) {
+      const share = await this.teamFor(rt);
+      if (!share || seen.has(share.repo) || rt.runnerMode) continue;
+      seen.add(share.repo);
+      n += await this.deploysFor(rt).poll().catch(() => 0);
+    }
+    return n;
   }
 
   /** Phase 4: the project's goal PRs — checks, fixes, review, landing, adopt. */

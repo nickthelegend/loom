@@ -2377,6 +2377,27 @@ window.__loomPageRev="%%BUILD_REV%%";
   .tdocf.ok svg{color:var(--ok)}.tdocf.warn svg{color:var(--warn)}.tdocf.error svg{color:var(--err)}
   .tdocf small{display:block;color:var(--muted-foreground);font-size:11.5px;overflow-wrap:anywhere}
   .tdoc .pillrow{margin:4px 0 0}
+  /* Teams, Phase 5: runners — where a goal runs besides here, their jobs,
+     deploys and release notes, and this machine as a runner */
+  .trn{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 10px;padding:6px 0;border-top:1px dashed var(--border);font-size:12.5px;min-width:0}
+  .tsech + .trn,.trsub + .trn{border-top:0}
+  .trn .tnt{min-width:0;overflow-wrap:anywhere;color:var(--foreground)}
+  .trn .tnt a{color:var(--foreground);font-weight:600}
+  .trn .tnt .odot{display:inline-block;margin-right:6px;vertical-align:1px}
+  .trn small{display:block;font-size:11.5px;color:var(--muted-foreground);margin-top:1px;overflow-wrap:anywhere}
+  .trn small.err{color:var(--err)}
+  .trn code{font-family:var(--font-mono);font-size:11px}
+  .tbdg{font-size:9.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);border:1px solid var(--border);border-radius:99px;padding:0 6px;margin-left:6px;vertical-align:1px}
+  .trsub{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin:10px 0 2px}
+  .trsub .btn{margin-left:auto}
+  .trform{display:flex;gap:6px;align-items:center;margin-top:6px}
+  .trform input{flex:1;min-width:0;height:28px;font-family:var(--font-mono);font-size:11.5px;padding:0 9px;border:1px solid var(--input);border-radius:var(--radius-md);background:var(--background);color:var(--foreground)}
+  .trmd{max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--font-mono);font-size:11px;line-height:1.5;color:var(--foreground);
+    padding:8px 10px;margin:6px 0 0;border-radius:var(--radius-md);background:var(--muted);border:1px solid var(--border)}
+  .trsw{display:flex;gap:8px;align-items:flex-start;font-size:12px;line-height:1.45;color:var(--foreground);cursor:pointer}
+  .trsw input{margin-top:2px;flex:none}
+  .trsw small{display:block;color:var(--muted-foreground);font-size:11.5px}
+  .tinv code.trcmd{font-family:var(--font-mono);font-size:10.5px;overflow-wrap:anywhere;color:var(--foreground)}
   .sys.orch a{color:inherit}
   .sys.orch code{font-family:var(--font-mono);font-size:11px}
   @media (max-width:899px){
@@ -3548,7 +3569,7 @@ ${BRAND_SPRITE}
     conflict: ["conflict", "warn"], needs_input: ["needs input", "warn"], failed: ["failed", "err"], cancelled: ["cancelled", "off"] };
   var ORCH_RUN_ST = { starting: ["starting", "live"], planning: ["planning", "live"], running: ["running", "live"],
     reviewing: ["reviewing", "live"], waiting_human: ["needs you", "warn"], completed: ["completed", "ok"],
-    failed: ["failed", "err"], aborted: ["aborted", "off"] };
+    failed: ["failed", "err"], aborted: ["aborted", "off"], moved: ["moved", "off"] };
   // Loom Teams, Phase 4: a goal PR's way to main (LandingState.state, D52\\u2013D63)
   var LAND_ST = { open: ["PR open", "off"], pending: ["checks running", "live"], green: ["green", "ok"], failing: ["failing", "err"],
     fixing: ["fixing", "live"], needs_human: ["needs you", "warn"], landing: ["landing", "live"], merged: ["merged", "ok"], closed: ["closed", "off"] };
@@ -3633,7 +3654,11 @@ ${BRAND_SPRITE}
     // one); an alert is the sentence worth keeping in the thread.
     if (ph === "landing") return "";
     if (ph === "alert") return row(" warn", "\\u26a0 " + esc(String(p.text || "").slice(0, 240)));
-    if (ph === "synced") return row("", "\\u21bb Brought the goal up to date with " + esc(p.with || "main") + " before a waiting task started");
+    // Phase 5: the goal moving to a runner and back (D75, D76)
+    if (ph === "moving") return row(" live", "\\u21e2 Moving to " + esc(p.to || "a runner") + " \\u2014 running turns finish first (up to 2 min)");
+    if (ph === "moved") return row("", "\\u21e2 Moved to " + esc(p.to || "a runner") + " \\u2014 it carries on there; this copy is read-only");
+    if (ph === "imported") return row(" ok", "\\u21e0 Picked up from " + esc(p.from || "another machine") + (p.tasks ? " \\u00b7 " + Number(p.tasks) + " task" + (p.tasks === 1 ? "" : "s") : ""));
+    if (ph === "synced") return row("","\\u21bb Brought the goal up to date with " + esc(p.with || "main") + " before a waiting task started");
     if (ph === "delivery_policy") return row(" warn", "\\u26a0 " + esc(p.branch || "the base branch") + " is protected by team policy \\u2014 delivering as a PR instead of " +
       (p.from === "push" ? "merging and pushing" : "merging"));
     if (ph === "delivery_failed") return row(" err", "\\u2717 Delivery (" + esc(p.mode || "git") + ") failed \\u2014 " + esc(String(p.error || "").slice(0, 200)) +
@@ -7592,7 +7617,7 @@ ${BRAND_SPRITE}
           : "the orchestrator plans your goal into tasks \\u00b7 each worker gets its own thread and git worktree")
         : orun && !orchTerminal(orun.status)
         ? "this is an orchestra thread \\u00b7 what you send goes to its orchestrator"
-        : orun && orun.status !== "aborted"
+        : orun && orun.status !== "aborted" && orun.status !== "moved"
         ? "this orchestra has finished \\u00b7 sending reopens it with its orchestrator"
         : planState
         ? "plan mode \\u00b7 agent writes a plan to plans/\\u2026, no code changes"
@@ -8880,7 +8905,8 @@ ${BRAND_SPRITE}
       }
       return c;
     }
-    function orchTerminal(st){ return st === "completed" || st === "failed" || st === "aborted"; }
+    // "moved" (Phase 5, D75): the goal carries on on another machine; this copy is read-only
+    function orchTerminal(st){ return st === "completed" || st === "failed" || st === "aborted" || st === "moved"; }
     function findOrchRun(id){ return (orch.runs || []).filter(function(r){ return r.id === id; })[0] || null; }
     /** The run whose orchestrator thread this chat is, if it is one. */
     function orchRunForChat(){
@@ -8940,7 +8966,8 @@ ${BRAND_SPRITE}
         '<span class="colbl">Parallel</span>' +
         '<span class="cstep" title="how many tasks run at once"><button type="button" data-step="-1" aria-label="fewer in parallel"' + (c.parallel <= 1 ? " disabled" : "") + ">\\u2212</button>" +
           '<span class="cpar" id="cpar">' + c.parallel + "</span>" +
-          '<button type="button" data-step="1" aria-label="more in parallel"' + (c.parallel >= 12 ? " disabled" : "") + ">+</button></span>";
+          '<button type="button" data-step="1" aria-label="more in parallel"' + (c.parallel >= 12 ? " disabled" : "") + ">+</button></span>" +
+        runOnHtml(c);
       var pick = document.getElementById("corchpick");
       if (pick) pick.onclick = function(){
         if (menuState && menuState.kind === "orchmenu") { closeMenu(); return; }
@@ -8953,6 +8980,9 @@ ${BRAND_SPRITE}
           drawOrchControls();
         };
       });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-runon]"), function(b){
+        b.onclick = function(){ c.runOn = b.getAttribute("data-runon"); drawOrchControls(); };
+      });
       Array.prototype.forEach.call(el.querySelectorAll("[data-step]"), function(b){
         b.onclick = function(){
           c.parallel = Math.max(1, Math.min(12, c.parallel + Number(b.getAttribute("data-step"))));
@@ -8960,6 +8990,22 @@ ${BRAND_SPRITE}
         };
       });
       wirePermBadges(el);
+    }
+    /**
+     * Phase 5 (D69, D73): where the goal runs \u2014 this machine, or one of the
+     * project's online runners (mine, or a teammate's shared one). Only shown
+     * when there's a runner to pick; a runner that went away falls back here.
+     */
+    function runOnHtml(c){
+      var rs = onlineRunners(pid, false);
+      if (c.runOn && !rs.some(function(r){ return r.deviceId === c.runOn; })) c.runOn = "";
+      if (!rs.length) return "";
+      return '<span class="colbl">Run on</span><span class="cowk" id="crunon">' + [{ deviceId: "", label: "This machine", mine: true }].concat(rs).map(function(r){
+        var on = (c.runOn || "") === r.deviceId;
+        return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-runon="' + esc(r.deviceId) + '" aria-pressed="' + on + '"' +
+          (r.deviceId ? ' title="' + esc((r.mine ? "your runner" : (r.github || "a teammate") + "\u2019s shared runner") + " \u00b7 " + (r.kinds || []).join(", ")) + '"' : "") + ">" +
+          esc(r.deviceId ? runnerName(r) : r.label) + (r.deviceId && !r.mine ? " \u00b7 " + esc(r.github || "") : "") + "</button>";
+      }).join("") + "</span>";
     }
     /** A mode badge inside a chip opens that agent's permissions, not the chip's own action. */
     function wirePermBadges(el){
@@ -9015,6 +9061,16 @@ ${BRAND_SPRITE}
       if (!workers.length) { toast("pick at least one worker"); return; }
       var btn = document.getElementById("orchsend");
       if (btn) btn.disabled = true;
+      // Run on a runner (D69): the hub queues a start job; the runner clones and runs it there.
+      var target = c.runOn && onlineRunners(pid, false).filter(function(r){ return r.deviceId === c.runOn; })[0];
+      if (target) {
+        runnerAct(pid, "start", { goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, plan: planState || undefined, runner: target.deviceId }).then(function(res){
+          box.value = ""; autosizeBox(); attach = []; drawAttach();
+          if (btn) btn.disabled = false;
+          toast("started on " + runnerName(target) + " \u2014 job " + ((res && res.jobId) || "queued"));
+        }).catch(function(err){ if (btn) btn.disabled = false; toast(err.message); });
+        return;
+      }
       api("/api/projects/" + pid + "/orchestra", { method: "POST", body: JSON.stringify({
         goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, maxParallel: c.parallel,
         plan: planState || undefined,
@@ -9141,7 +9197,9 @@ ${BRAND_SPRITE}
       var pct = tasks.length ? Math.round(done / tasks.length * 100) : 0;
       var rpct = tasks.length ? Math.round(running / tasks.length * 100) : 0;
       var o = run.orchestrator || {};
-      var terminal = orchTerminal(run.status);
+      var terminal = orchTerminal(run.status), moved = run.status === "moved";
+      // Phase 5 (D75): a live or finished goal can move to one of my online runners
+      var canMove = !run.moving && ["running", "reviewing", "completed"].indexOf(run.status) >= 0 && onlineRunners(pid, true).length > 0;
       var h = '<div class="ocard">' +
         '<div class="ogoal">' + esc(run.goal) + "</div>" +
         '<div class="ometa">' + orchPill(run.status) +
@@ -9157,9 +9215,10 @@ ${BRAND_SPRITE}
         '<div class="oacts">' +
           (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + "Orchestrator thread</button>" : "") +
           (!terminal ? '<button class="btn outline sm prdanger" id="oabort">' + ICONS.stop + "Abort</button>" : "") +
-          (terminal && !run.applied ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
-          (terminal ? '<button class="btn ghost sm" id="oclean" title="remove this run\\u2019s worktrees (the branch stays)">Clean up</button>' : "") +
-        "</div>" + orchOutcome(run) + orchLandingHtml(run) + "</div>";
+          (terminal && !moved && !run.applied ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
+          (terminal && !moved ? '<button class="btn ghost sm" id="oclean" title="remove this run\\u2019s worktrees (the branch stays)">Clean up</button>' : "") +
+          (canMove ? '<button class="btn outline sm" type="button" id="orunner" title="move it to your runner; it carries on there">' + ICONS.orchestra + "Continue on runner</button>" : "") +
+        "</div>" + orchMovedHtml(run) + orchOutcome(run) + orchLandingHtml(run) + "</div>";
       if (run.status === "waiting_human") {
         h += '<div class="oask"><div class="oqh">The orchestrator asks</div>' +
           '<div class="oq">' + esc(run.question || "What next?") + "</div>" +
@@ -9262,7 +9321,7 @@ ${BRAND_SPRITE}
             " <code>" + esc(s.branch) + "</code> \\u2192 <code>" + esc(s.base) + "</code>" + (s.state ? " \\u00b7 " + esc(s.state) : "") + "</span>";
         }).join("") + "</div>";
       }
-      if (done) return h + "</div>";
+      if (done || run.status === "moved") return h + "</div>"; // a moved run lands from its own card (orchMovedHtml)
       var canLand = !run.from && !l.landRequested && st !== "landing" && !l.adoptedBy;
       var reviewFailed = rv && rv.state === "failure" && !rv.overridden;
       h += '<div class="olacts">' +
@@ -9271,6 +9330,25 @@ ${BRAND_SPRITE}
         (reviewFailed ? '<button class="btn ghost sm" type="button" data-oland-act="override">Override review</button>' : "") +
         "</div>";
       return h + "</div>";
+    }
+    /**
+     * Phase 5 (D75, D76): a goal on its way to a runner, or already there.
+     * This copy is read-only; the runner's sealed progress says how it's
+     * going, and Bring back / Land go to the runner through the hub.
+     */
+    function orchMovedHtml(run){
+      if (run.moving && run.status !== "moved") return '<div class="oland" data-omoving><div class="olr1"><span class="opill live"><span class="odot live"></span>moving</span>' +
+        '<span class="olk">running turns finish (up to 2 min), then it continues on the runner</span></div></div>';
+      if (run.status !== "moved") return "";
+      var mv = run.movedTo || {};
+      var job = ((teamRunners[pid] || {}).jobs || []).filter(function(j){ return j.runId === run.id && j.progress; }).slice(-1)[0];
+      var p = job && job.progress;
+      var h = '<div class="oland omoved" data-omoved="' + esc(run.id) + '"><div class="olr1"><span class="opill off" data-moved><span class="odot off"></span>moved to ' + esc(mv.where || "a runner") + "</span>" +
+        (mv.at ? '<span class="olk">' + rel(mv.at) + "</span>" : "") + "</div>";
+      if (p) h += '<div class="oll">' + ICONS.orchestra + "<span>There: <b>" + esc(jobProgressText(p)) + "</b>" + (p.landing ? " " + landPill(p.landing) : "") + (p.at ? " \\u00b7 " + rel(p.at) : "") + "</span></div>";
+      h += '<div class="oll">' + ICONS.info + "<span>Read-only here \\u2014 the runner finishes the goal. Bring it back to carry on on this machine.</span></div>";
+      return h + '<div class="olacts"><button class="btn outline sm" type="button" data-omove="bring-back">Bring back</button>' +
+        '<button class="btn outline sm" type="button" data-omove="land">' + ICONS.check + "Land</button></div></div>";
     }
     /** POST /team/landing/:action; the answer carries every goal's landing, merged into the runs. */
     function landAct(action, body, btn, done){
@@ -9406,6 +9484,25 @@ ${BRAND_SPRITE}
       var apb = el.querySelector("#oapply"); if (apb) apb.onclick = function(){ applyOrch(run.id, apb); };
       var rdb = el.querySelector("#oredeliver"); if (rdb) rdb.onclick = function(){ redeliverOrch(run.id, rdb); };
       wireOrchLanding(el, run);
+      var mvb = el.querySelector("#orunner");
+      if (mvb) mvb.onclick = function(){
+        var r = onlineRunners(pid, true)[0]; if (!r) return;
+        if (!window.confirm("Move this goal to " + runnerName(r) + "? Running tasks finish their turn (up to 2 min), then it continues there.")) return;
+        mvb.disabled = true;
+        runnerAct(pid, "continue", { runId: run.id, runner: r.deviceId }).then(function(res){
+          toast("moving to " + runnerName(r) + (res && res.jobId ? " \\u2014 job " + res.jobId : "")); loadOrch();
+        }).catch(function(err){ mvb.disabled = false; toast(err.message); });
+      };
+      Array.prototype.forEach.call(el.querySelectorAll("[data-omove]"), function(b){
+        b.onclick = function(){
+          var act = b.getAttribute("data-omove");
+          if (act === "bring-back" && !window.confirm("Bring this goal back here? The runner pauses it at a safe point and hands it over.")) return;
+          b.disabled = true;
+          runnerAct(pid, act, { runId: run.id }).then(function(res){
+            toast((act === "land" ? "the runner lands it" : "coming back") + (res && res.jobId ? " \\u2014 job " + res.jobId : ""));
+          }).catch(function(err){ b.disabled = false; toast(err.message); });
+        };
+      });
       var cl = el.querySelector("#oclean");
       if (cl) cl.onclick = function(){ orchAction(run, "cleanup", {}, cl, function(){ toast("worktrees removed"); }); };
       // D32: the owner calls off a wait on a teammate's goal; the task starts
@@ -9657,6 +9754,7 @@ ${BRAND_SPRITE}
       wireTeamForms(host, teamAct);
       wireTeamInvites(host, teamAct);
       wireTeamShare(host, function(){ drawTeamBlock(true); });
+      wireTeamDeploys(host);
       // D63: take a teammate's stuck goal \u2014 a small run here that makes its PR green
       Array.prototype.forEach.call(host.querySelectorAll("[data-tadopt]"), function(b){
         b.onclick = function(){
@@ -9672,6 +9770,15 @@ ${BRAND_SPRITE}
       });
     }
     teamHooks().fleet = function(force){ if (state.pid === pid) drawTeamBlock(force); };
+    // Phase 5: this project's runners, read once per view \u2014 they decide whether
+    // the composer offers "Run on" and a run card offers "Continue on runner".
+    runnerHooks.orch = function(p){
+      if (p !== pid || state.pid !== pid) return;
+      var el = orchEl();
+      if (el && orch.runs && !teamEditing(el)) drawOrch();
+      drawOrchControls();
+    };
+    loadTeamRunners(pid, true);
 
     // Git delivery lives in the status bar, which only the desktop shell has.
     if (desktop) loadGitDelivery(pid);
@@ -9707,13 +9814,17 @@ ${BRAND_SPRITE}
   }
   // A heartbeat is one frame per live session every 15s; a burst of them (a
   // teammate's plan fanning out) coalesces into one read.
-  var teamFrameT = null;
+  var teamFrameT = null, runnerFrameT = null;
   function onTeamFrame(frame){
     // the one brain moved (a memory, a resolution, a canon PR): the Team view re-reads
     var ev = (frame && frame.event) || {}, fe = ev.event || {};
     if ((ev.type === "memory" || (ev.type === "feed" && (fe.type === "memory_resolved" || fe.type === "canon_proposed"))) && state.teamBrainPing) state.teamBrainPing();
     // a goal came up for adoption, was taken or landed: "Needs someone" re-reads
     if (ev.type === "feed" && TEAM_LANDING_EVENTS[fe.type] && state.pid && teamLandings[state.pid]) loadTeamLanding(state.pid, true);
+    // Phase 5: a runner claimed, advanced or finished a job \u2014 the Runners list re-reads, once per burst
+    if ((ev.type === "job" || (ev.type === "feed" && fe.type === "goal_moved")) && state.pid && !runnerFrameT) {
+      runnerFrameT = setTimeout(function(){ runnerFrameT = null; if (state.pid) loadTeamRunners(state.pid, true); }, 400);
+    }
     if (teamFrameT) return;
     teamFrameT = setTimeout(function(){ teamFrameT = null; loadTeam(); }, 300);
   }
@@ -9999,6 +10110,16 @@ ${BRAND_SPRITE}
       case "goal_adopted": return { icon: ICONS.team, cls: "live", html: "<b>" + esc(m.by || e.github || "someone") + "</b> adopted " + (m.owner ? "<b>" + esc(m.owner) + "</b>\u2019s " : "") + pr };
       case "goal_returned": return { icon: ICONS.team, cls: "ok", html: "<b>" + esc(m.by || e.github || "someone") + "</b> handed " + pr + " back" + (m.owner ? " to <b>" + esc(m.owner) + "</b>" : "") + " \u2014 green" };
       case "check_flaky": return { icon: ICONS.refresh, cls: "", html: "<code>" + esc(m.check || "a check") + "</code> was flaky on " + pr + " \u2014 failed, then passed on rerun" };
+      // Phase 5: runners and deploys (D69, D72, D75) \\u2014 Loom reads deploys, never runs them
+      case "goal_moved": return { icon: ICONS.orchestra, cls: "live", html: who + " moved " + teamFeedGoal(m.runId, c) + " to <b>" + esc(m.to || "a runner") + "</b>" };
+      case "deploy_started": case "deploy_succeeded": case "deploy_failed": {
+        var env = "<b>" + esc(m.environment || "an environment") + "</b>", sha = m.sha ? "<code>" + esc(String(m.sha).slice(0, 7)) + "</code>" : "a deploy";
+        var tail = (m.creator ? " by <b>" + esc(m.creator) + "</b>" : "") +
+          (/^https?:\\/\\//.test(String(m.url || "")) ? ' \\u2014 <a href="' + esc(m.url) + '" target="_blank" rel="noreferrer">log</a>' : "");
+        if (e.type === "deploy_started") return { icon: ICONS.cloud, cls: "live", html: "deploying " + sha + " to " + env + tail };
+        if (e.type === "deploy_succeeded") return { icon: ICONS.check, cls: "ok", html: sha + " deployed to " + env + tail };
+        return { icon: ICONS.x, cls: "err", html: "deploy of " + sha + " to " + env + " failed" + tail };
+      }
       // Phase 2: leases, overlaps and zones (D29\\u2013D36)
       case "lease_released": {
         var nl = Number(m.leases || 0), why = String(m.reason || "");
@@ -10315,6 +10436,128 @@ ${BRAND_SPRITE}
           '<button class="btn outline xs" type="button" data-tadopt="' + Number(a.pr) + '" data-towner="' + esc(a.owner) + '">Adopt</button></div>';
       }).join("") + "</div></div>";
   }
+  // ---- runners, Phase 5 (D67\\u2013D78): where a goal runs besides here ------
+  // GET /team/runners per project: runners that take its goals (mine, and
+  // teammates' shared ones) and its recent jobs, progress unsealed. Read once
+  // per project view and again on a hub job frame; an action's answer carries
+  // the fresh view.
+  var teamRunners = {}; // pid \\u2192 {runners, jobs} | {err} | {loading: true}
+  var runnerHooks = {}; // views drawn from a project's runners (the orchestra), told when they change
+  function setTeamRunners(pid, j){ teamRunners[pid] = { runners: (j && j.runners) || [], jobs: (j && j.jobs) || [] }; }
+  function runnersChanged(pid){
+    if (!window.document) return; // an answer that landed after the page closed
+    teamNotify(false); Object.keys(runnerHooks).forEach(function(k){ runnerHooks[k](pid); }); }
+  function loadTeamRunners(pid, force){
+    var cur = teamRunners[pid];
+    if (cur && (cur.loading || !force)) return;
+    teamRunners[pid] = { loading: true, runners: cur && cur.runners, jobs: cur && cur.jobs };
+    api("/api/projects/" + pid + "/team/runners").then(function(j){ setTeamRunners(pid, j); }, function(err){
+      teamRunners[pid] = { err: err.message || String(err), runners: cur && cur.runners, jobs: cur && cur.jobs };
+    }).then(function(){ runnersChanged(pid); });
+  }
+  /** Online runners for a project, most recently seen first; mine: only my own (moving a goal is mine to do). */
+  function onlineRunners(pid, mine){
+    return ((teamRunners[pid] || {}).runners || []).filter(function(r){ return r.online && (!mine || r.mine); })
+      .sort(function(a, b){ return Number(b.lastSeen) - Number(a.lastSeen); });
+  }
+  function runnerName(r){ return (r && (r.label || r.deviceId)) || "a runner"; }
+  /** POST /team/runners/:action \\u2014 start, continue, bring-back, land. */
+  function runnerAct(pid, action, body){
+    return api("/api/projects/" + pid + "/team/runners/" + action, { method: "POST", body: JSON.stringify(body || {}) }).then(function(j){
+      if (j && j.runners) { setTeamRunners(pid, j); runnersChanged(pid); }
+      return j ? j.result : null;
+    });
+  }
+  var JOB_ST = { queued: ["queued", "off"], claimed: ["running", "live"], done: ["done", "ok"], failed: ["failed", "err"], cancelled: ["cancelled", "off"] };
+  var JOB_KIND = { start: "Start", "continue": "Continue", fix: "CI fix", "return": "Bring back", land: "Land" };
+  /** A job's sealed progress as a line: its run's status, tasks done/total, cost. */
+  function jobProgressText(p){
+    if (!p) return "";
+    var ts = p.tasks || [], done = ts.filter(function(t){ return t.status === "done"; }).length;
+    return (ORCH_RUN_ST[p.status] || [p.status || "preparing"])[0] + " \\u00b7 " + done + "/" + ts.length + " tasks \\u00b7 " + money(p.costUsd) +
+      (p.question ? " \\u00b7 asks: " + p.question : "");
+  }
+  function teamRunnersHtml(pid){
+    if (!pid) return "";
+    if (!teamRunners[pid]) loadTeamRunners(pid); // paints again when it lands
+    var tr = teamRunners[pid] || {}, rs = tr.runners || [], jobs = (tr.jobs || []).slice(-8).reverse();
+    if (!rs.length && !jobs.length) return "";
+    var byId = {}; rs.forEach(function(r){ byId[r.deviceId] = r; });
+    var h = '<div class="tcard trunners"><div class="tsec" style="border-top:0"><div class="tsech">Runners<span class="n">' +
+      rs.filter(function(r){ return r.online; }).length + "/" + rs.length + " online</span></div>";
+    h += rs.map(function(r){
+      return '<div class="trn" data-trunner="' + esc(r.deviceId) + '"><span class="tnt"><span class="odot ' + (r.online ? "ok" : "off") + '" title="' + (r.online ? "online" : "offline") + '"></span>' +
+        "<b>" + esc(runnerName(r)) + "</b>" + (r.shared ? '<span class="tbdg">shared</span>' : "") +
+        "<small>" + (r.mine ? "yours" : esc(r.github || "a teammate") + "\\u2019s") + " \\u00b7 " + (esc((r.kinds || []).join(", ")) || "no agents yet") +
+          (r.capacity ? " \\u00b7 " + Number(r.capacity) + " at a time" : "") + (r.online ? "" : " \\u00b7 seen " + rel(r.lastSeen)) + "</small></span></div>";
+    }).join("");
+    if (jobs.length) h += '<div class="trsub">Jobs</div>' + jobs.map(function(j){
+      var s = JOB_ST[j.state] || [j.state || "\\u2014", "off"], on = byId[j.runnerId];
+      return '<div class="trn" data-tjob="' + esc(j.id) + '"><span class="tnt"><b>' + esc(JOB_KIND[j.kind] || j.kind) + "</b> " +
+          (j.goal ? '<span class="tq">\\u2018' + esc(j.goal) + "\\u2019</span>" : "") +
+          "<small>" + (j.mine ? "yours" : esc(j.github || "a teammate") + "\\u2019s") + (on || j.runnerGithub ? " \\u00b7 on " + esc(on ? runnerName(on) : j.runnerGithub + "\\u2019s runner") : "") +
+            " \\u00b7 " + rel(j.updatedAt || j.createdAt) + (j.progress ? " \\u00b7 " + esc(jobProgressText(j.progress)) : "") + "</small>" +
+          (j.error ? '<small class="err">' + esc(j.error) + "</small>" : "") + "</span>" +
+        '<span class="opill ' + s[1] + '" data-jstate="' + esc(j.state) + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span></div>";
+    }).join("");
+    return h + "</div></div>";
+  }
+  // ---- deploys and release notes (D72): GitHub's, read-only, on request ----
+  // Each check asks GitHub (gh api), so it runs when you ask, like the doctor.
+  // pid \\u2192 {list} | {err} | {loading}, plus notes: {since, md} | {since, err} | {since, loading},
+  // and since: the tag as typed, so a redraw (a teammate's heartbeat) keeps it
+  var teamDeploys = {};
+  var DEPLOY_ST = { success: ["deployed", "ok"], failure: ["failed", "err"], error: ["error", "err"], in_progress: ["deploying", "live"],
+    queued: ["queued", "live"], pending: ["pending", "live"], inactive: ["inactive", "off"] };
+  function teamDeploysHtml(pid){
+    if (!pid) return "";
+    var d = teamDeploys[pid] || {}, list = (d.list || []).slice(0, 6), n = d.notes || {};
+    var h = '<div class="tcard tdeploys" data-tdeploys="' + esc(pid) + '"><div class="tsec" style="border-top:0"><div class="tsech">Deploys' +
+      (d.list ? '<span class="n">' + d.list.length + "</span>" : "") + '<span class="spacer"></span>' +
+      '<button class="btn ghost xs" type="button" data-tdepload' + (d.loading ? " disabled" : "") + ">" + (d.list ? "Check again" : "Check deploys") + "</button></div>";
+    if (d.loading) h += LOADER;
+    else if (d.err) h += '<div class="tpols" style="color:var(--err)">' + esc(d.err) + "</div>";
+    else if (!d.list) h += '<div class="tpols">GitHub\\u2019s deployments of this repo. Loom reads them and tells the feed; it never deploys.</div>';
+    else if (!list.length) h += '<div class="tpols">No deployments on GitHub yet.</div>';
+    h += list.map(function(x){
+      var s = DEPLOY_ST[x.state] || [x.state || "\\u2014", "off"];
+      return '<div class="trn" data-tdeploy="' + esc(x.id) + '"><span class="tnt"><b>' + esc(x.environment || "?") + "</b> <code>" + esc(String(x.sha || "").slice(0, 7)) + "</code>" +
+          (/^https?:\\/\\//.test(String(x.url || "")) ? ' <a href="' + esc(x.url) + '" target="_blank" rel="noreferrer">log \\u2197</a>' : "") +
+          "<small>" + (x.creator ? esc(x.creator) + " \\u00b7 " : "") + (x.ref ? esc(x.ref) + " \\u00b7 " : "") + rel(x.at) + "</small></span>" +
+        '<span class="opill ' + s[1] + '" data-dstate="' + esc(x.state) + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span></div>";
+    }).join("");
+    h += '<div class="trsub">Release notes</div><div class="trform"><input data-trsince aria-label="since which tag" placeholder="since a tag, e.g. v1.2.0" value="' + esc(d.since != null ? d.since : n.since || "") + '">' +
+      '<button class="btn outline xs" type="button" data-trnotes' + (n.loading ? " disabled" : "") + ">Write</button></div>";
+    if (n.loading) h += LOADER;
+    else if (n.err) h += '<div class="tpols" style="color:var(--err)">' + esc(n.err) + "</div>";
+    else if (n.md != null) h += '<pre class="trmd" data-trmd>' + esc(n.md) + '</pre><div class="trform"><span class="tpols">from goals merged since <b>' + esc(n.since) + "</b></span>" +
+      '<span class="spacer" style="margin-left:auto"></span><button class="btn ghost xs" type="button" data-trcopy>' + ICONS.copy + "Copy</button></div>";
+    return h + "</div></div>";
+  }
+  function wireTeamDeploys(host){
+    var box = host.querySelector("[data-tdeploys]"); if (!box) return;
+    var pid = box.getAttribute("data-tdeploys"), d = function(){ return teamDeploys[pid] || (teamDeploys[pid] = {}); };
+    var ld = box.querySelector("[data-tdepload]");
+    if (ld) ld.onclick = function(){
+      var keep = function(o){ o.notes = d().notes; o.since = d().since; teamDeploys[pid] = o; };
+      keep({ loading: true }); teamNotify(true);
+      api("/api/projects/" + pid + "/team/deploys").then(function(j){ keep({ list: (j && j.deployments) || [] }); },
+        function(err){ keep({ err: err.message || String(err) }); }).then(function(){ teamNotify(true); });
+    };
+    var go = box.querySelector("[data-trnotes]"), inp = box.querySelector("[data-trsince]");
+    var write = function(){
+      var since = (inp.value || "").trim();
+      if (!since) { inp.focus(); toast("since which tag?"); return; }
+      d().notes = { since: since, loading: true }; teamNotify(true);
+      api("/api/projects/" + pid + "/team/release-notes?since=" + encodeURIComponent(since)).then(function(j){ d().notes = { since: since, md: String((j && j.markdown) || "") }; },
+        function(err){ d().notes = { since: since, err: err.message || String(err) }; }).then(function(){ teamNotify(true); });
+    };
+    if (go) go.onclick = write;
+    if (inp) inp.oninput = function(){ d().since = inp.value; };
+    if (inp) inp.onkeydown = function(ev){ if (ev.key === "Enter") { ev.preventDefault(); write(); } };
+    var cp = box.querySelector("[data-trcopy]");
+    if (cp) cp.onclick = function(){ copyText((d().notes || {}).md || ""); };
+  }
   /** What the team spent, from the feed (D64): each member today, per landed PR, total. */
   function teamCostsHtml(t){
     var c = t.costs; if (!c) return "";
@@ -10389,7 +10632,7 @@ ${BRAND_SPRITE}
   function teamFleetHtml(st, pid){
     var teams = st.teams || [];
     if (!teams.length) return teamHeadHtml() + teamJoinCardHtml();
-    return teamHeadHtml() + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teams.map(teamCardHtml).join("");
+    return teamHeadHtml() + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
   }
 
   // ---- permissions: bypass | auto | ask, per agent -------------------------
@@ -12159,6 +12402,86 @@ ${BRAND_SPRITE}
         }).catch(function(err){ fx.disabled = false; toast(err.message); });
       };
     }
+    // ---- this machine as a runner (D67, D74): admin-only, it's this daemon ----
+    // Start/Stop take jobs from the hub; Pair makes the one-time link another
+    // box joins with. Below, this project's runners that are mine, revocable.
+    var trun = null, tpair = null, trShared = null; // status {loading}|{data}|{err}; the pairing link while shown; the toggle before Start
+    function loadRunnerStatus(){
+      trun = { loading: true, data: trun && trun.data };
+      sapi("/api/runner").then(function(j){ trun = { data: j }; }, function(err){ trun = { err: err.message || String(err) }; })
+        .then(function(){ if (cur === "team" && pane.isConnected) drawTeamSettings(); });
+    }
+    function runnerSact(action, body){
+      return sapi("/api/runner/" + action, { method: "POST", body: JSON.stringify(body || {}) }).then(function(j){ loadRunnerStatus(); return j ? j.result : null; });
+    }
+    function runnerPanelHtml(){
+      if (!trun) loadRunnerStatus();
+      if (pid && !teamRunners[pid]) loadTeamRunners(pid); // the list below; paints again when it lands
+      var d = (trun && trun.data) || null, cfg = (d && d.config) || {};
+      var shared = trShared != null ? trShared : !!cfg.shared;
+      var mine = pid ? ((teamRunners[pid] || {}).runners || []).filter(function(r){ return r.mine; }) : [];
+      var h = '<div class="sgrouph">This machine as a runner</div><div class="tpol trunpanel" data-trunpanel>' +
+        '<div class="tpolh">' + ICONS.orchestra + "<b>" + (d ? (d.running ? "Running" : "Stopped") : "Runner") + "</b>" +
+          (d ? "<small>" + [cfg.shared ? "shared" : "personal", Number(cfg.capacity || 1) + " at a time", cfg.isolation || "", (cfg.kinds || []).join(", ")]
+            .filter(Boolean).map(esc).join(" \\u00b7 ") + "</small>" : "") + "</div>" +
+        '<div class="tpols">Takes your goals from the hub \\u2014 Start or Continue on runner, CI fixes while you\\u2019re away \\u2014 each in a fresh container with your agent logins and a GitHub token, nothing else. Usually an always-on box; this machine works too.</div>';
+      if (!d && trun && trun.loading) h += LOADER;
+      if (trun && trun.err) h += '<div class="tpols" style="color:var(--err)">' + esc(trun.err) + "</div>";
+      if (d) h += (d.active || []).map(function(a){
+        return '<div class="tdocf ok" data-tractive="' + esc(a.jobId) + '">' + ICONS.orchestra + "<span>" + esc(JOB_KIND[a.kind] || a.kind) + " \\u00b7 <code>" + esc(a.repo || "") + "</code>" +
+          (a.owner ? " for <b>" + esc(a.owner) + "</b>" : "") + "</span></div>";
+      }).join("");
+      if (d && d.lastError) h += '<div class="tdocf error">' + ICONS.x + "<span>" + esc(d.lastError) + "</span></div>";
+      if (d && d.running && !d.token) h += '<div class="tdocf warn">' + ICONS.alert + "<span>No GitHub token for the runner<small>loom runner join takes a fine-grained token (contents and pull requests only), or uses gh auth</small></span></div>";
+      h += '<label class="trsw"><input type="checkbox" data-trshared' + (shared ? " checked" : "") + "><span>Shared" +
+        "<small>take teammates\\u2019 goals when their repo\\u2019s loom.team.json allows <code>runners.shared</code> \\u2014 billed to you, shown in the feed</small></span></label>";
+      h += '<div class="pillrow">' + (d && d.running ? '<button class="btn outline sm" type="button" data-trstop>Stop</button>' : '<button class="btn primary sm" type="button" data-trstart>Start</button>') +
+        '<button class="btn outline sm" type="button" data-trpair>Pair a runner</button><span class="hintx">another box, with <b>loom runner join</b></span></div>';
+      if (tpair) h += '<div class="tinv" data-trpairbox><div class="tinvw">' + ICONS.shield + "<span><b>It carries your team keys; send it like a password.</b> Whoever opens it can sign in as you on a runner and read every team goal. Use it once, on your own box.</span></div>" +
+        '<div class="tinvrow"><input readonly class="tinvlink" aria-label="runner pairing link" value="' + esc(tpair) + '">' +
+          '<button class="btn ghost sm" type="button" data-trpshow>Show</button>' +
+          '<button class="btn outline sm" type="button" data-trpcopy>' + ICONS.copy + "Copy</button>" +
+          '<button class="iconbtn" type="button" data-trphide title="forget this link" aria-label="forget this link">' + ICONS.x + "</button></div>" +
+        "<span class=\\"tinvx\\">on the runner: <code class=\\"trcmd\\">loom runner join '\\u2026'</code> " +
+          '<button class="btn ghost xs" type="button" data-trpcmd>Copy command</button></span></div>';
+      if (mine.length) h += '<div class="trsub">Your runners</div>' + mine.map(function(r){
+        return '<div class="trn" data-trmine="' + esc(r.deviceId) + '"><span class="tnt"><span class="odot ' + (r.online ? "ok" : "off") + '"></span><b>' + esc(runnerName(r)) + "</b>" +
+          (r.shared ? '<span class="tbdg">shared</span>' : "") + "<small>" + (esc((r.kinds || []).join(", ")) || "no agents yet") + " \\u00b7 " + (r.online ? "online" : "seen " + rel(r.lastSeen)) + "</small></span>" +
+          '<button class="btn ghost sm danger" type="button" data-trrevoke="' + esc(r.deviceId) + '" data-trlabel="' + esc(runnerName(r)) + '">Revoke</button></div>';
+      }).join("");
+      return h + "</div>";
+    }
+    function wireRunnerPanel(){
+      var box = pane.querySelector("[data-trunpanel]"); if (!box) return;
+      var redraw = function(){ if (cur === "team" && pane.isConnected) drawTeamSettings(); };
+      var fail = function(b){ return function(err){ if (b) b.disabled = false; toast(err.message); }; };
+      var sh = box.querySelector("[data-trshared]");
+      if (sh) sh.onchange = function(){
+        trShared = sh.checked;
+        // running: restart with the new setting; stopped: it applies on Start
+        if (trun && trun.data && trun.data.running) runnerSact("start", { shared: sh.checked }).then(function(){ toast(sh.checked ? "shared \\u2014 takes teammates\\u2019 goals" : "personal \\u2014 your goals only"); }, fail(null));
+      };
+      var st = box.querySelector("[data-trstart]");
+      if (st) st.onclick = function(){ st.disabled = true; runnerSact("start", trShared != null ? { shared: trShared } : {}).then(function(){ toast("runner started"); }, fail(st)); };
+      var sp = box.querySelector("[data-trstop]");
+      if (sp) sp.onclick = function(){ sp.disabled = true; runnerSact("stop").then(function(){ toast("runner stopped"); }, fail(sp)); };
+      var pr = box.querySelector("[data-trpair]");
+      if (pr) pr.onclick = function(){ pr.disabled = true; runnerSact("pair").then(function(r){ tpair = (r && r.link) || null; redraw(); }, fail(pr)); };
+      var inp = box.querySelector("[data-trpairbox] .tinvlink");
+      var ps = box.querySelector("[data-trpshow]");
+      if (ps) ps.onclick = function(){ var on = inp.classList.toggle("shown"); ps.textContent = on ? "Hide" : "Show"; };
+      var pc = box.querySelector("[data-trpcopy]"); if (pc) pc.onclick = function(){ inp.select(); copyText(tpair); };
+      var pm = box.querySelector("[data-trpcmd]"); if (pm) pm.onclick = function(){ copyText("loom runner join '" + tpair + "'"); };
+      var ph = box.querySelector("[data-trphide]"); if (ph) ph.onclick = function(){ tpair = null; redraw(); };
+      Array.prototype.forEach.call(box.querySelectorAll("[data-trrevoke]"), function(b){
+        b.onclick = function(){
+          var label = b.getAttribute("data-trlabel");
+          if (!window.confirm("Revoke " + label + "? It\\u2019s removed from the hub and every team key rotates: your devices and teammates get the new key automatically; the runner can\\u2019t read anything new.")) return;
+          b.disabled = true;
+          runnerSact("revoke", { deviceId: b.getAttribute("data-trrevoke") }).then(function(){ toast("revoked " + label + " \\u2014 team keys rotated"); if (pid) loadTeamRunners(pid, true); }, fail(b));
+        };
+      });
+    }
     function drawTeamSettings(){
       var t = state.team || {}, teams = t.teams || [];
       var h = '<div class="setphead">Team</div>' +
@@ -12193,6 +12516,7 @@ ${BRAND_SPRITE}
           '<button class="btn ghost sm" type="button" data-tleave="' + esc(tm.id) + '">Leave</button></div></div>';
       });
       h += doctorHtml();
+      if (t.signedIn) h += runnerPanelHtml();
       // your teams first; then making or joining another
       if (!t.signedIn) {
         h += '<div class="sgrouph">Sign in to a hub</div><div class="cloudin">' +
@@ -12213,6 +12537,7 @@ ${BRAND_SPRITE}
       wireTeamForms(pane, teamSact);
       wireTeamInvites(pane, teamSact);
       wireDoctor();
+      wireRunnerPanel();
       var nameOf = function(id){ var x = teams.filter(function(y){ return y.id === id; })[0]; return x ? x.name : "the team"; };
       var kvOf = function(id){ var x = teams.filter(function(y){ return y.id === id; })[0]; return x && x.keyVersion != null ? Number(x.keyVersion) : 0; };
       Array.prototype.forEach.call(pane.querySelectorAll("[data-tremove]"), function(b){

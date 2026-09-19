@@ -1,0 +1,39 @@
+# Loom runner (Loom Teams, Phase 5 — docs/teams-architecture.md D67–D78).
+#
+# One image serves both roles:
+#   - the runner itself:        docker run -d -v loom-home:/loom loom-runner
+#                               (pair it once: docker exec -it <c> loom runner join '<link>')
+#   - a goal's own container:   the runner starts `loom runner exec --job … --team …`
+#                               in a fresh container per goal when Docker is available (D70)
+#
+# It holds agent logins and a fine-grained GitHub token, nothing else (D70, D77).
+# Build:  docker build -f Dockerfile.runner -t loom-runner .
+# Agents: add the CLIs you use with --build-arg AGENTS="@anthropic-ai/claude-code @openai/codex"
+
+FROM node:22-bookworm-slim AS build
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY tsconfig*.json ./
+COPY src ./src
+RUN npm run build && npm prune --omit=dev
+
+FROM node:22-bookworm-slim
+ARG AGENTS=""
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates curl gnupg \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/*
+RUN if [ -n "$AGENTS" ]; then npm install -g $AGENTS; fi
+RUN useradd -m -s /bin/bash loom && mkdir -p /loom && chown loom:loom /loom
+COPY --from=build /src/dist /opt/loom/dist
+COPY --from=build /src/node_modules /opt/loom/node_modules
+COPY --from=build /src/package.json /opt/loom/package.json
+RUN ln -s /opt/loom/dist/cli/index.js /usr/local/bin/loom && chmod +x /opt/loom/dist/cli/index.js
+USER loom
+ENV LOOM_HOME=/loom
+VOLUME ["/loom"]
+EXPOSE 7420
+CMD ["loom", "daemon", "--host", "0.0.0.0"]

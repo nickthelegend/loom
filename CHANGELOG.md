@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Loom Teams, Phase 5: runners
+
+- **12 more design decisions** (D67–D78), settled in a design interview.
+- **Runners:** a member's always-on Loom daemon that takes goals from the team
+  hub. Pair it with `loom runner pair` / `join` (a device of the same member,
+  revocable with key rotation); keep it up with `loom runner install` or
+  `Dockerfile.runner`.
+- **Jobs on the hub:** start / continue / fix / return / land, with atomic claims,
+  heartbeats carrying a progress snapshot, and stale reclaim (MemoryHub, `loom
+  hub`, SQL `0007_runners.sql`).
+- **Move a running goal** to a runner at a safe point (branches pushed to
+  `refs/loom/run/<id>/*`, the orchestrator resumes there) and **bring it back**;
+  Land reaches goals that live on a runner.
+- **Trust tier:** a fresh clone (or container) per goal, a scrubbed environment,
+  `runners.permissions` as the ceiling, shared runners only when
+  `runners.shared` allows, a fine-grained token checked by `loom runner doctor`.
+- **Away-from-keyboard CI fixes:** the owner's runner takes a goal that needs
+  someone once the owner has been offline 15 minutes.
+- **Deploys and release notes:** deployment results in the feed, a phone alert
+  when a failed deploy contains your goal, `loom team release-notes --since`.
+- **Phone:** tapping an alert opens its project and goal.
+
 ### Loom Teams, Phase 4: land safely
 
 - **15 more design decisions** (D52–D66), settled in a design interview.

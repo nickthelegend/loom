@@ -12,9 +12,12 @@ import {
   type FeedIn,
   type HubClient,
   type HubEvent,
+  type Job,
+  type JobIn,
   type Lease,
   type LeaseClaim,
   type PresenceIn,
+  type Runner,
   type TeamMemory,
   type TeamMemoryIn,
 } from "../core/team-hub.js";
@@ -145,6 +148,34 @@ export class HttpHubClient implements HubClient {
   }
   teamMemories(teamId: string, repo: string, opts?: { history?: boolean }) {
     return this.call<TeamMemory[]>("teamMemories", teamId, repo, opts ?? {});
+  }
+
+  registerRunner(input: { deviceId: string; kinds: string[]; shared: boolean; capacity?: number }) {
+    return this.call<Runner>("registerRunner", input);
+  }
+  runners(teamId: string) {
+    return this.call<Runner[]>("runners", teamId);
+  }
+  revokeDevice(deviceId: string) {
+    return this.call<void>("revokeDevice", deviceId);
+  }
+  createJob(teamId: string, j: JobIn) {
+    return this.call<Job>("createJob", teamId, j);
+  }
+  claimJob(teamId: string, runnerDeviceId: string) {
+    return this.call<Job | null>("claimJob", teamId, runnerDeviceId);
+  }
+  heartbeatJob(teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed) {
+    return this.call<Job>("heartbeatJob", teamId, jobId, runnerDeviceId, ...(progress === undefined ? [] : [progress]));
+  }
+  finishJob(teamId: string, jobId: string, runnerDeviceId: string, outcome: { state: "done" | "failed"; result?: Sealed; error?: string }) {
+    return this.call<Job>("finishJob", teamId, jobId, runnerDeviceId, outcome);
+  }
+  cancelJob(teamId: string, jobId: string) {
+    return this.call<Job>("cancelJob", teamId, jobId);
+  }
+  jobs(teamId: string, opts?: { active?: boolean }) {
+    return this.call<Job[]>("jobs", teamId, opts ?? {});
   }
 
   /**

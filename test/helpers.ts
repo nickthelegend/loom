@@ -4,8 +4,27 @@ import path from "node:path";
 import { writeProjectConfig } from "../src/core/registry.js";
 import type { ProjectConfig } from "../src/types.js";
 
+/**
+ * Every temp dir a test makes goes when its worker exits. They used to pile
+ * up — thousands of repos, homes and bare origins — until the disk filled and
+ * whole files failed with ENOSPC.
+ */
+const made: string[] = [];
+process.once("exit", () => {
+  if (process.env.LOOM_KEEP_TEST_DIRS) return;
+  for (const d of made) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  }
+});
+
 export function tmpDir(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `loom-test-${prefix}-`));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), `loom-test-${prefix}-`));
+  made.push(d);
+  return d;
 }
 
 export function makeProjectDir(config?: Partial<ProjectConfig>): string {

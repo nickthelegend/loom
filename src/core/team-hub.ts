@@ -181,7 +181,12 @@ export type FeedType =
   | "goal_needs_someone"
   | "goal_adopted"
   | "goal_returned"
-  | "check_flaky";
+  | "check_flaky"
+  // Phase 5: runners and deploys
+  | "goal_moved"
+  | "deploy_started"
+  | "deploy_succeeded"
+  | "deploy_failed";
 
 export interface FeedIn {
   repo?: string;
@@ -204,13 +209,72 @@ export interface FeedEvent extends FeedIn {
   ts: number;
 }
 
+/**
+ * A runner (Phase 5, D67–D71): one member's always-on Loom daemon that takes
+ * goals from the hub. A device of that member, marked runner.
+ */
+export interface Runner {
+  deviceId: string;
+  userId: string;
+  github: string;
+  label: string;
+  /** Agent kinds installed on it. */
+  kinds: string[];
+  /** Takes any member's goals, not just its owner's (D68). */
+  shared: boolean;
+  /** Goals at once. */
+  capacity: number;
+  lastSeen: number;
+}
+
+export type JobKind = "start" | "continue" | "fix" | "return" | "land";
+export type JobState = "queued" | "claimed" | "done" | "failed" | "cancelled";
+
+/** Work for a runner (D71). Everything but routing metadata is sealed to the team. */
+export interface Job {
+  id: string;
+  teamId: string;
+  repo: string;
+  kind: JobKind;
+  /** Who asked. */
+  userId: string;
+  github: string;
+  /** A specific runner (device id), or any eligible one. */
+  target?: string;
+  state: JobState;
+  runnerId?: string;
+  runnerGithub?: string;
+  claimedAt?: number;
+  heartbeatAt?: number;
+  /** The goal, the run record, the briefing. */
+  sealed: Sealed;
+  /** The runner's latest snapshot of the goal (status, tasks, landing). */
+  progress?: Sealed;
+  result?: Sealed;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface JobIn {
+  repo: string;
+  kind: JobKind;
+  target?: string;
+  sealed: Sealed;
+  deviceId: string;
+}
+
+/** A claimed job whose runner went quiet this long is claimable again (D12, D71). */
+export const JOB_TTL_MS = 10 * 60_000;
+
 export type HubEvent =
   | { type: "memory"; teamId: string; memory: TeamMemory }
   | { type: "lease"; teamId: string; lease: Lease }
   | { type: "lease_gone"; teamId: string; leaseIds: string[]; runId: string }
   | { type: "presence"; teamId: string; presence: Presence }
   | { type: "presence_gone"; teamId: string; userId: string; deviceId: string; agent: string; repo: string }
-  | { type: "feed"; teamId: string; event: FeedEvent };
+  | { type: "feed"; teamId: string; event: FeedEvent }
+  | { type: "job"; teamId: string; job: Job };
 
 /** Everything a daemon (or phone) can do against a hub, as one signed-in user. */
 export interface HubClient {
@@ -255,6 +319,23 @@ export interface HubClient {
   resolveMemories(teamId: string, winnerId: string, loserId: string, reason: string): Promise<TeamMemory>;
   /** Live memories (D50 snapshot); with history, superseded and forgotten ones too. */
   teamMemories(teamId: string, repo: string, opts?: { history?: boolean }): Promise<TeamMemory[]>;
+
+  // ── runners and jobs (Phase 5, D67–D77) ──
+  /** Mark one of your devices a runner (or update it). Visible to every team you're in. */
+  registerRunner(input: { deviceId: string; kinds: string[]; shared: boolean; capacity?: number }): Promise<Runner>;
+  /** Runners that can take this team's goals: members' runners. */
+  runners(teamId: string): Promise<Runner[]>;
+  /** Remove one of your devices (a runner being revoked); rotate the team key after (D74). */
+  revokeDevice(deviceId: string): Promise<void>;
+  createJob(teamId: string, j: JobIn): Promise<Job>;
+  /** The oldest job this runner may take, claimed atomically; null when none. */
+  claimJob(teamId: string, runnerDeviceId: string): Promise<Job | null>;
+  /** The claiming runner is alive; optionally with a progress snapshot. */
+  heartbeatJob(teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed): Promise<Job>;
+  finishJob(teamId: string, jobId: string, runnerDeviceId: string, outcome: { state: "done" | "failed"; result?: Sealed; error?: string }): Promise<Job>;
+  /** Its author withdraws it; a runner holding it stops. */
+  cancelJob(teamId: string, jobId: string): Promise<Job>;
+  jobs(teamId: string, opts?: { active?: boolean }): Promise<Job[]>;
 }
 
 export class HubError extends Error {
@@ -313,6 +394,8 @@ export class MemoryHub {
   private feedSeq = 0;
   private leasesByTeam = new Map<string, Map<string, Lease>>();
   private memoriesByTeam = new Map<string, Map<string, TeamMemory>>();
+  private runnersByDevice = new Map<string, Runner>();
+  private jobsByTeam = new Map<string, Map<string, Job>>();
   private listeners = new Map<string, Set<(e: HubEvent) => void>>();
   constructor(private now: () => number = Date.now) {}
 
@@ -684,6 +767,149 @@ export class MemoryHub {
       .map((m) => ({ ...m, confirmedBy: [...m.confirmedBy] }));
   }
 
+  // ── runners and jobs (Phase 5) ──
+
+  registerRunner(userId: string, input: { deviceId: string; kinds: string[]; shared: boolean; capacity?: number }): Runner {
+    const d = this.device(input.deviceId, userId);
+    const r: Runner = {
+      deviceId: d.id,
+      userId,
+      github: this.user(userId).github,
+      label: d.label,
+      kinds: [...new Set(input.kinds.map(String))].slice(0, 20),
+      shared: Boolean(input.shared),
+      capacity: Math.max(1, Math.min(8, Math.floor(input.capacity ?? 1))),
+      lastSeen: this.now(),
+    };
+    this.runnersByDevice.set(d.id, r);
+    return { ...r };
+  }
+
+  runners(userId: string, teamId: string): Runner[] {
+    this.requireRole(teamId, userId, "viewer");
+    const members = this.memberships.get(teamId) ?? new Map();
+    return [...this.runnersByDevice.values()].filter((r) => members.has(r.userId)).map((r) => ({ ...r }));
+  }
+
+  revokeDevice(userId: string, deviceId: string): void {
+    this.device(deviceId, userId);
+    this.devices.delete(deviceId);
+    this.runnersByDevice.delete(deviceId);
+    for (const k of [...this.envelopes.keys()]) if (k.endsWith(`/${deviceId}`)) this.envelopes.delete(k);
+  }
+
+  private jobMap(teamId: string): Map<string, Job> {
+    let m = this.jobsByTeam.get(teamId);
+    if (!m) this.jobsByTeam.set(teamId, (m = new Map()));
+    return m;
+  }
+
+  /** May this runner take this job? Its owner's jobs, or anyone's when shared (D68). */
+  private eligible(r: Runner, j: Job): boolean {
+    if (j.target) return j.target === r.deviceId;
+    return j.userId === r.userId || r.shared;
+  }
+
+  createJob(userId: string, teamId: string, j: JobIn): Job {
+    this.requireRole(teamId, userId, "member");
+    this.device(j.deviceId, userId);
+    const repo = normalizeRepo(j.repo);
+    if (!this.reposByTeam.get(teamId)?.has(repo)) throw new HubError(`${repo} isn't shared with this team`, 403);
+    if (!["start", "continue", "fix", "return", "land"].includes(j.kind)) throw new HubError("bad job kind");
+    if (!j.sealed?.c) throw new HubError("a job needs its sealed payload");
+    if (j.target) {
+      const r = this.runnersByDevice.get(j.target);
+      const members = this.memberships.get(teamId);
+      if (!r || !members?.has(r.userId)) throw new HubError("no such runner on this team", 404);
+      if (r.userId !== userId && !r.shared) throw new HubError("that runner isn't shared", 403);
+    }
+    const job: Job = {
+      id: id("j"),
+      teamId,
+      repo,
+      kind: j.kind,
+      userId,
+      github: this.user(userId).github,
+      ...(j.target ? { target: j.target } : {}),
+      state: "queued",
+      sealed: j.sealed,
+      createdAt: this.now(),
+      updatedAt: this.now(),
+    };
+    this.jobMap(teamId).set(job.id, job);
+    this.emit(teamId, { type: "job", teamId, job: { ...job } });
+    return { ...job };
+  }
+
+  claimJob(userId: string, teamId: string, runnerDeviceId: string): Job | null {
+    this.requireRole(teamId, userId, "member");
+    this.device(runnerDeviceId, userId);
+    const r = this.runnersByDevice.get(runnerDeviceId);
+    if (!r) throw new HubError("that device isn't a runner — register it first", 403);
+    r.lastSeen = this.now();
+    const now = this.now();
+    const open = [...this.jobMap(teamId).values()]
+      .filter((j) => j.state === "queued" || (j.state === "claimed" && now - (j.heartbeatAt ?? 0) > JOB_TTL_MS))
+      .filter((j) => this.eligible(r, j))
+      .sort((a, b) => a.createdAt - b.createdAt);
+    const j = open[0];
+    if (!j) return null;
+    Object.assign(j, { state: "claimed", runnerId: r.deviceId, runnerGithub: r.github, claimedAt: now, heartbeatAt: now, updatedAt: now });
+    this.emit(teamId, { type: "job", teamId, job: { ...j } });
+    return { ...j };
+  }
+
+  private heldJob(userId: string, teamId: string, jobId: string, runnerDeviceId: string): Job {
+    this.requireRole(teamId, userId, "member");
+    this.device(runnerDeviceId, userId);
+    const j = this.jobMap(teamId).get(jobId);
+    if (!j) throw new HubError(`no job "${jobId}"`, 404);
+    if (j.runnerId !== runnerDeviceId || j.state !== "claimed") throw new HubError("that runner doesn't hold this job", 409);
+    return j;
+  }
+
+  heartbeatJob(userId: string, teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed): Job {
+    const j = this.heldJob(userId, teamId, jobId, runnerDeviceId);
+    j.heartbeatAt = this.now();
+    j.updatedAt = this.now();
+    if (progress) j.progress = progress;
+    const r = this.runnersByDevice.get(runnerDeviceId);
+    if (r) r.lastSeen = this.now();
+    this.emit(teamId, { type: "job", teamId, job: { ...j } });
+    return { ...j };
+  }
+
+  finishJob(userId: string, teamId: string, jobId: string, runnerDeviceId: string, outcome: { state: "done" | "failed"; result?: Sealed; error?: string }): Job {
+    const j = this.heldJob(userId, teamId, jobId, runnerDeviceId);
+    if (outcome.state !== "done" && outcome.state !== "failed") throw new HubError("a job finishes done or failed");
+    j.state = outcome.state;
+    if (outcome.result) j.result = outcome.result;
+    if (outcome.error) j.error = outcome.error.slice(0, 500);
+    j.updatedAt = this.now();
+    this.emit(teamId, { type: "job", teamId, job: { ...j } });
+    return { ...j };
+  }
+
+  cancelJob(userId: string, teamId: string, jobId: string): Job {
+    this.requireRole(teamId, userId, "member");
+    const j = this.jobMap(teamId).get(jobId);
+    if (!j) throw new HubError(`no job "${jobId}"`, 404);
+    if (j.userId !== userId) throw new HubError("only whoever asked can cancel a job", 403);
+    if (j.state === "done" || j.state === "failed") return { ...j };
+    j.state = "cancelled";
+    j.updatedAt = this.now();
+    this.emit(teamId, { type: "job", teamId, job: { ...j } });
+    return { ...j };
+  }
+
+  jobs(userId: string, teamId: string, opts: { active?: boolean } = {}): Job[] {
+    this.requireRole(teamId, userId, "viewer");
+    return [...this.jobMap(teamId).values()]
+      .filter((j) => !opts.active || j.state === "queued" || j.state === "claimed")
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((j) => ({ ...j }));
+  }
+
   leases(userId: string, teamId: string, repo?: string): Lease[] {
     this.requireRole(teamId, userId, "viewer");
     const r = repo ? normalizeRepo(repo) : null;
@@ -933,6 +1159,33 @@ class MemoryHubClient implements HubClient {
   }
   teamMemories(teamId: string, repo: string, opts?: { history?: boolean }) {
     return this.run(() => this.hub.teamMemories(this.userId, teamId, repo, opts));
+  }
+  registerRunner(input: { deviceId: string; kinds: string[]; shared: boolean; capacity?: number }) {
+    return this.run(() => this.hub.registerRunner(this.userId, input));
+  }
+  runners(teamId: string) {
+    return this.run(() => this.hub.runners(this.userId, teamId));
+  }
+  revokeDevice(deviceId: string) {
+    return this.run(() => this.hub.revokeDevice(this.userId, deviceId));
+  }
+  createJob(teamId: string, j: JobIn) {
+    return this.run(() => this.hub.createJob(this.userId, teamId, j));
+  }
+  claimJob(teamId: string, runnerDeviceId: string) {
+    return this.run(() => this.hub.claimJob(this.userId, teamId, runnerDeviceId));
+  }
+  heartbeatJob(teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed) {
+    return this.run(() => this.hub.heartbeatJob(this.userId, teamId, jobId, runnerDeviceId, progress));
+  }
+  finishJob(teamId: string, jobId: string, runnerDeviceId: string, outcome: { state: "done" | "failed"; result?: Sealed; error?: string }) {
+    return this.run(() => this.hub.finishJob(this.userId, teamId, jobId, runnerDeviceId, outcome));
+  }
+  cancelJob(teamId: string, jobId: string) {
+    return this.run(() => this.hub.cancelJob(this.userId, teamId, jobId));
+  }
+  jobs(teamId: string, opts?: { active?: boolean }) {
+    return this.run(() => this.hub.jobs(this.userId, teamId, opts));
   }
 }
 

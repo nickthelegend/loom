@@ -8,7 +8,7 @@
  * Skips when Postgres isn't installed (CI); runs on any dev machine with it.
  */
 
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execFileSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -114,6 +114,8 @@ beforeAll(async () => {
     "0004_team_memories.sql",
     "0005_hosted_hub.sql",
     "0006_landing.sql",
+    "0007_runners.sql",
+    "0008_key_version_conflict.sql",
   ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
@@ -334,5 +336,164 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL, 0005 (extend_lease, team_member_li
     expect(list[1].devices[0]).toMatchObject({ id: bobDev, userId: BOB, label: "mbp", sealPub: "sealB", signPub: "signB" });
     expect(typeof list[0].joinedAt).toBe("number");
     expect(fails(() => asUser(CAROL, `select public.team_member_list('${team}');`))).toMatch(/not a member/);
+  });
+});
+
+describe.skipIf(!hasPg)("hosted Team Hub SQL, 0007 (runners and jobs, D67–D78)", () => {
+  let team = "";
+  let aliceDev = "";
+  let bobDev = "";
+  let aliceRunner = "";
+  let bobRunner = "";
+  const sealed = '{"v":1,"c":"sealed"}';
+  const job = (user: string, dev: string, extra = "") =>
+    JSON.parse(asUser(user, `select to_jsonb(public.create_job('${team}', '{"repo":"acme/ops","kind":"start","sealed":${sealed},"deviceId":"${dev}"${extra}}'));`));
+  const claim = (user: string, runner: string) =>
+    JSON.parse(asUser(user, `select coalesce(to_jsonb(j), 'null') from public.claim_job('${team}', '${runner}') j where j.id is not null union all select 'null'::jsonb limit 1;`));
+  const beat = (user: string, id: string, runner: string) =>
+    JSON.parse(asUser(user, `select to_jsonb(public.heartbeat_job('${team}', '${id}', '${runner}', '{"v":1,"c":"p"}'));`));
+  const finish = (user: string, id: string, runner: string) =>
+    JSON.parse(asUser(user, `select to_jsonb(public.finish_job('${team}', '${id}', '${runner}', 'done', '{"v":1,"c":"r"}', null));`));
+  const cancel = (user: string, id: string) => JSON.parse(asUser(user, `select to_jsonb(public.cancel_job('${team}', '${id}'));`));
+  /** Leave the queue empty so each case starts clean. */
+  const drain = () => psql(`update public.jobs set state = 'cancelled' where team_id = '${team}' and state in ('queued', 'claimed');`);
+
+  beforeAll(() => {
+    if (!hasPg) return;
+    team = asUser(ALICE, "select id from public.create_team('Ops');");
+    aliceDev = asUser(ALICE, "select id from public.register_device('mac', 'sealA', 'signA');");
+    bobDev = asUser(BOB, "select id from public.register_device('mbp', 'sealB', 'signB');");
+    aliceRunner = asUser(ALICE, "select id from public.register_device('vps', 'sealAR', 'signAR');");
+    bobRunner = asUser(BOB, "select id from public.register_device('box', 'sealBR', 'signBR');");
+    const invite = JSON.parse(asUser(ALICE, `select public.create_invite('${team}', 3600);`)).invite;
+    asUser(BOB, `select public.redeem_invite('${invite}');`);
+    asUser(ALICE, `select public.share_repo('${team}', 'acme/ops');`);
+  });
+
+  it("registers a runner on your own device; teammates see it, others don't", () => {
+    const r = JSON.parse(asUser(ALICE, `select public.register_runner('${aliceRunner}', '["codex","claude","codex"]', false, 20);`));
+    expect(r).toMatchObject({ deviceId: aliceRunner, userId: ALICE, github: "alice", label: "vps", kinds: ["codex", "claude"], shared: false, capacity: 8 });
+    expect(typeof r.lastSeen).toBe("number");
+    expect(fails(() => asUser(BOB, `select public.register_runner('${aliceRunner}', '[]', true, 1);`))).toMatch(/isn't yours/);
+    asUser(BOB, `select public.register_runner('${bobRunner}', '["codex"]', false, 1);`);
+    const list = JSON.parse(asUser(BOB, `select public.team_runners('${team}');`));
+    expect(list.map((x: { github: string }) => x.github).sort()).toEqual(["alice", "bob"]);
+    expect(asUser(BOB, `select count(*) from public.runners where user_id = '${ALICE}';`)).toBe("1"); // RLS: teammates
+    expect(asUser(CAROL, `select count(*) from public.runners;`)).toBe("0");
+    expect(fails(() => asUser(CAROL, `select public.team_runners('${team}');`))).toMatch(/not a member/);
+    expect(fails(() => asUser(BOB, `insert into public.runners (device_id, user_id) values ('${bobDev}', '${BOB}');`))).toMatch(/permission denied/);
+    expect(fails(() => psql(`select public.register_runner('${aliceRunner}', '[]', false, 1);`, { as: "anon" }))).toMatch(/permission denied/);
+  });
+
+  it("jobs need a shared repo, your device, a real kind and a sealed payload", () => {
+    expect(fails(() => asUser(BOB, `select public.create_job('${team}', '{"repo":"acme/other","kind":"start","sealed":${sealed},"deviceId":"${bobDev}"}');`))).toMatch(/isn't shared/);
+    expect(fails(() => job(BOB, aliceDev))).toMatch(/isn't yours/);
+    expect(fails(() => asUser(BOB, `select public.create_job('${team}', '{"repo":"acme/ops","kind":"deploy","sealed":${sealed},"deviceId":"${bobDev}"}');`))).toMatch(/bad job kind/);
+    expect(fails(() => asUser(BOB, `select public.create_job('${team}', '{"repo":"acme/ops","kind":"start","sealed":{"v":1},"deviceId":"${bobDev}"}');`))).toMatch(/sealed payload/);
+    expect(fails(() => job(CAROL, bobDev))).toMatch(/not a member/);
+    expect(fails(() => job(BOB, bobDev, `,"target":"${aliceRunner}"`))).toMatch(/isn't shared/); // alice's runner is personal
+    expect(fails(() => job(BOB, bobDev, `,"target":"${bobDev}"`))).toMatch(/no such runner/);
+    const j = job(BOB, bobDev, ',"kind":"land"');
+    expect(j).toMatchObject({ kind: "land", state: "queued", user_id: BOB, github: "bob", repo: "acme/ops" });
+    expect(fails(() => asUser(BOB, `update public.jobs set state = 'done' where id = '${j.id}';`))).toMatch(/permission denied/);
+    drain();
+  });
+
+  it("eligibility: own jobs, anyone's only when shared, a targeted job only for its runner (D68)", () => {
+    const bobs = job(BOB, bobDev);
+    expect(claim(ALICE, aliceRunner)).toBeNull(); // alice's personal runner won't take bob's goal
+    expect(fails(() => claim(ALICE, bobRunner))).toMatch(/isn't yours/);
+    expect(fails(() => claim(ALICE, aliceDev))).toMatch(/isn't a runner/);
+    asUser(ALICE, `select public.register_runner('${aliceRunner}', '["codex"]', true, 2);`);
+    const got = claim(ALICE, aliceRunner);
+    expect(got).toMatchObject({ id: bobs.id, state: "claimed", runner_id: aliceRunner, runner_github: "alice" });
+    expect(got.claimed_at).toBeTruthy();
+    // a job targeted at alice's (now shared) runner: bob's own runner can't take it
+    const t = job(BOB, bobDev, `,"target":"${aliceRunner}"`);
+    expect(claim(BOB, bobRunner)).toBeNull();
+    expect(claim(ALICE, aliceRunner).id).toBe(t.id);
+    // bob's own job goes to bob's runner, oldest first
+    const o1 = job(BOB, bobDev);
+    job(BOB, bobDev);
+    expect(claim(BOB, bobRunner).id).toBe(o1.id);
+    drain();
+  });
+
+  it("claims are atomic: two runners at once, one job, one winner", async () => {
+    const j = job(ALICE, aliceDev);
+    const run = (runner: string) =>
+      new Promise<string>((resolve, reject) => {
+        const child = execFile(
+          "psql",
+          ["-h", sockDir, "-p", String(port), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-At", "-q"],
+          (err, out) => (err ? reject(err) : resolve(out.trim().split("\n").pop() ?? "")),
+        );
+        child.stdin!.end(
+          `set role authenticated; select set_config('request.jwt.claim.sub', '${runner === aliceRunner ? ALICE : BOB}', false);\n` +
+            `select coalesce((select id::text from public.claim_job('${team}', '${runner}') where id is not null), 'none');`,
+        );
+      });
+    // bob's runner shared too, so both are eligible for alice's job
+    asUser(BOB, `select public.register_runner('${bobRunner}', '["codex"]', true, 1);`);
+    const got = await Promise.all([run(aliceRunner), run(bobRunner)]);
+    expect(got.filter((x) => x === j.id)).toHaveLength(1);
+    expect(got.filter((x) => x === "none")).toHaveLength(1);
+    drain();
+  });
+
+  it("only the holder heartbeats and finishes (409); a silent claim is claimable again (D12, D71)", () => {
+    const j = job(ALICE, aliceDev);
+    expect(claim(ALICE, aliceRunner).id).toBe(j.id);
+    expect(fails(() => beat(BOB, j.id, bobRunner))).toMatch(/doesn't hold this job/);
+    expect(fails(() => beat(BOB, j.id, aliceRunner))).toMatch(/isn't yours/);
+    expect(fails(() => beat(ALICE, "00000000-0000-4000-8000-000000000000", aliceRunner))).toMatch(/no job/);
+    expect(beat(ALICE, j.id, aliceRunner).progress).toEqual({ v: 1, c: "p" });
+    // fresh: nobody else can take it
+    expect(claim(BOB, bobRunner)).toBeNull();
+    // ten minutes of silence: bob's shared runner takes it over
+    psql(`update public.jobs set heartbeat_at = now() - interval '11 minutes' where id = '${j.id}';`);
+    const taken = claim(BOB, bobRunner);
+    expect(taken).toMatchObject({ id: j.id, runner_id: bobRunner, runner_github: "bob", progress: { v: 1, c: "p" } });
+    expect(fails(() => beat(ALICE, j.id, aliceRunner))).toMatch(/doesn't hold this job/); // the old holder lost it
+    expect(fails(() => asUser(BOB, `select public.finish_job('${team}', '${j.id}', '${bobRunner}', 'cancelled');`))).toMatch(/done or failed/);
+    const done = finish(BOB, j.id, bobRunner);
+    expect(done).toMatchObject({ state: "done", result: { v: 1, c: "r" } });
+    expect(fails(() => finish(BOB, j.id, bobRunner))).toMatch(/doesn't hold this job/);
+    // a finished job stays finished when its author cancels
+    expect(cancel(ALICE, j.id).state).toBe("done");
+    const f = job(ALICE, aliceDev);
+    claim(ALICE, aliceRunner);
+    const failed = JSON.parse(asUser(ALICE, `select to_jsonb(public.finish_job('${team}', '${f.id}', '${aliceRunner}', 'failed', null, '${"x".repeat(600)}'));`));
+    expect(failed.state).toBe("failed");
+    expect(failed.error).toHaveLength(500);
+  });
+
+  it("only the author cancels; a cancelled job stops its runner", () => {
+    const j = job(BOB, bobDev);
+    expect(fails(() => cancel(ALICE, j.id))).toMatch(/only whoever asked/);
+    expect(claim(BOB, bobRunner).id).toBe(j.id);
+    expect(cancel(BOB, j.id).state).toBe("cancelled");
+    expect(fails(() => beat(BOB, j.id, bobRunner))).toMatch(/doesn't hold this job/);
+    expect(asUser(ALICE, `select count(*) from public.jobs where team_id = '${team}';`)).not.toBe("0"); // viewers read the queue
+    expect(asUser(CAROL, `select count(*) from public.jobs where team_id = '${team}';`)).toBe("0");
+  });
+
+  it("members can post the Phase 5 events (D72, D75)", () => {
+    for (const t of ["goal_moved", "deploy_started", "deploy_succeeded", "deploy_failed"]) {
+      expect(asUser(BOB, `select (public.append_feed('${team}', '{"type":"${t}","repo":"acme/ops","meta":{"n":1}}')).id is not null;`)).toBe("t");
+    }
+    expect(fails(() => asUser(BOB, `select public.append_feed('${team}', '{"type":"deploy_rolled_back","meta":{}}');`))).toMatch(/can't post/);
+  });
+
+  it("revoking a device removes it, its runner record and its envelopes — your own only (D74)", () => {
+    asUser(BOB, `select public.put_key_envelopes('${team}', 1, '[{"deviceId":"${bobRunner}","box":"br1"}]');`);
+    expect(fails(() => asUser(ALICE, `select public.revoke_device('${bobRunner}');`))).toMatch(/isn't yours/);
+    asUser(BOB, `select public.revoke_device('${bobRunner}');`);
+    expect(psql(`select count(*) from public.devices where id = '${bobRunner}';`)).toBe("0");
+    expect(psql(`select count(*) from public.runners where device_id = '${bobRunner}';`)).toBe("0");
+    expect(psql(`select count(*) from public.key_envelopes where device_id = '${bobRunner}';`)).toBe("0");
+    expect(JSON.parse(asUser(ALICE, `select public.team_runners('${team}');`)).map((r: { github: string }) => r.github)).toEqual(["alice"]);
+    // the jobs it ran keep their history
+    expect(asUser(ALICE, `select count(*) from public.jobs where runner_id = '${bobRunner}';`)).not.toBe("0");
   });
 });

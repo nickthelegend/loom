@@ -2855,12 +2855,24 @@ export class ProjectRuntime {
    */
   private policyOptions(cfg: AgentConfig): Record<string, unknown> {
     const opts = { ...(cfg.options ?? {}) };
+    if (this.runnerMode) {
+      // A runner is its own trust tier (D70): agents bypass inside the sandbox,
+      // capped by the team's runners.permissions rather than the laptop ceiling.
+      const wanted = opts.permissions ? permissionFor(cfg.kind, opts) : "bypass";
+      const ceiling = this.teamPolicy?.runners.permissions ?? "bypass";
+      const rank = { ask: 0, auto: 1, bypass: 2 } as const;
+      opts.permissions = rank[wanted] > rank[ceiling] ? ceiling : wanted;
+      return opts;
+    }
     if (!this.teamPolicy) return opts;
     const wanted = permissionFor(cfg.kind, opts);
     const capped = cappedPermission(this.teamPolicy, wanted, false);
     if (capped !== wanted) opts.permissions = capped;
     return opts;
   }
+
+  /** Phase 5: this project is a runner's workspace for one goal (D70). */
+  runnerMode = false;
 
   /** Adapter kinds usable on this machine: the roster's plus installed CLIs. */
   usableKinds(): string[] {

@@ -218,6 +218,32 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/doctor/fix`, {});
   }
 
+  // ── runners, deploys, release notes (Phase 5) ──
+
+  runner(): Promise<Record<string, unknown>> {
+    return this.request("GET", "/api/runner");
+  }
+
+  runnerAction(action: string, body: Record<string, unknown> = {}): Promise<{ result: unknown }> {
+    return this.request("POST", `/api/runner/${action}`, body);
+  }
+
+  runners(id: string): Promise<{ runners: Array<Record<string, unknown>>; jobs: Array<Record<string, unknown>> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/team/runners`);
+  }
+
+  runnersAction(id: string, action: string, body: Record<string, unknown> = {}): Promise<{ result: unknown; runners: Array<Record<string, unknown>>; jobs: Array<Record<string, unknown>> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/runners/${action}`, body);
+  }
+
+  deploys(id: string): Promise<{ deployments: Array<Record<string, unknown>> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/team/deploys`);
+  }
+
+  releaseNotes(id: string, since: string): Promise<{ markdown: string }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/team/release-notes?since=${encodeURIComponent(since)}`);
+  }
+
   // ── Loom Cloud (daemon/relay.ts) ──
 
   cloud(): Promise<Record<string, unknown>> {

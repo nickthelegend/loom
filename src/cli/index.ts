@@ -24,7 +24,9 @@ import {
 } from "../daemon/client.js";
 import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
-import { ensureLoomHome } from "../core/registry.js";
+import { ensureLoomHome, loomHome } from "../core/registry.js";
+import { serviceFile, tokenFindings } from "../core/runner-setup.js";
+import { readRunnerConfig, readRunnerToken, scrubEnv, writeRunnerToken } from "../daemon/runner.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
 import { fmtUsd, formatAgentRosterRow, formatAgentRow, formatEvent, formatProjectRow } from "./ui.js";
 
@@ -119,6 +121,14 @@ program
       console.error(pc.red(`✗ invalid --port "${opts.port}"`));
       process.exit(1);
     }
+    // A runner box's agents don't inherit its secrets (Loom Teams D70).
+    if (readRunnerConfig().enabled) {
+      const { env, removed } = scrubEnv(process.env);
+      for (const k of Object.keys(process.env)) if (!(k in env)) delete process.env[k];
+      if (removed.length) console.log(pc.dim(`runner: kept ${removed.length} secret-looking variable${removed.length === 1 ? "" : "s"} away from agents`));
+    }
+    const token = readRunnerToken();
+    if (readRunnerConfig().enabled && token && !process.env.GH_TOKEN) process.env.GH_TOKEN = token;
     const daemon = new LoomDaemon({ host: opts.host, port });
     let bound: { host: string; port: number };
     try {
@@ -1044,7 +1054,7 @@ function printTeam(t: Record<string, unknown>): void {
 
 program
   .command("team [action] [args...]")
-  .description("Loom Teams: status | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | remove <github> | leave")
+  .description("Loom Teams: status | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | deploys | release-notes <since> | remove <github> | leave")
   .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")
   .option("--secret <s>", "the hub's join secret")
   .option("--team <id>", "which team, when you're in several")
@@ -1163,6 +1173,22 @@ program
         }
         return;
       }
+      if (a === "release-notes" || a === "deploys") {
+        const project = await currentProject(client);
+        if (a === "release-notes") {
+          if (!arg) throw new Error("since which tag? loom team release-notes v1.2.0");
+          process.stdout.write((await client.releaseNotes(project.id, arg)).markdown);
+          return;
+        }
+        const { deployments } = await client.deploys(project.id);
+        if (!deployments.length) return void console.log(pc.dim("no deployments on this repo"));
+        for (const d of deployments) {
+          const st = String(d.state);
+          const col = st === "success" ? pc.green : st === "failure" || st === "error" ? pc.red : pc.yellow;
+          console.log(`  ${col(st.padEnd(12))} ${String(d.environment).padEnd(14)} ${String(d.sha).slice(0, 8)}  ${pc.dim(String(d.url ?? ""))}`);
+        }
+        return;
+      }
       if (a === "landing" || a === "doctor" || a === "adopt") {
         const project = await currentProject(client);
         if (a === "doctor") {
@@ -1210,6 +1236,149 @@ program
         return;
       }
       throw new Error(`unknown action "${a}"`);
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("runner [action] [args...]")
+  .description("Loom runners: status | pair | join <link> | start | stop | token <PAT> | doctor | install | revoke <device> | goal \"<goal>\" | move <runId> | back <runId> | jobs | exec")
+  .option("--github <login>", "your GitHub login (self-hosted hub)")
+  .option("--secret <s>", "the self-hosted hub's join secret")
+  .option("--token <refresh>", "hosted hub: a session refresh token (from the paste-the-URL sign-in)")
+  .option("--shared", "take teammates' goals too (when their repo's policy allows)")
+  .option("--runner <id>", "which runner (device id or label)")
+  .option("--job <id>", "exec: the claimed job to run")
+  .option("--team <id>", "exec: the job's team")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { github?: string; secret?: string; token?: string; shared?: boolean; runner?: string; job?: string; team?: string }) => {
+    const a = (action ?? "status").toLowerCase();
+    const arg = args?.[0];
+    try {
+      if (a === "install") {
+        const loomBin = fileURLToPath(new URL("./index.js", import.meta.url));
+        const f = serviceFile({ platform: process.platform, home: process.env.HOME ?? "", node: process.execPath, loom: loomBin, ...(process.env.LOOM_HOME ? { loomHome: process.env.LOOM_HOME } : {}) });
+        fs.mkdirSync(path.dirname(f.path), { recursive: true });
+        fs.writeFileSync(f.path, f.content);
+        console.log(`${pc.green("✓")} wrote ${f.path}`);
+        for (const cmd of f.enable) {
+          await new Promise<void>((resolve) => spawn(cmd[0]!, cmd.slice(1), { stdio: "inherit" }).on("exit", () => resolve()));
+        }
+        console.log(pc.dim("  the daemon now starts at login and restarts if it stops; `loom runner status` to check"));
+        return;
+      }
+      if (a === "token") {
+        if (!arg) throw new Error("paste a fine-grained PAT: loom runner token github_pat_…");
+        writeRunnerToken(arg);
+        console.log(`${pc.green("✓")} saved (0600, ${path.join(loomHome(), "runner-token")}) — it never goes through the hub. Check it: loom runner doctor`);
+        return;
+      }
+      if (a === "exec") {
+        // Inside a runner's container: run one claimed job, then exit (D70).
+        if (!opts.job || !opts.team) throw new Error("runner exec needs --job and --team");
+        const daemon = new LoomDaemon({ host: "127.0.0.1", port: 0, runnerExec: { teamId: opts.team, jobId: opts.job, done: (ok) => process.exit(ok ? 0 : 1) } });
+        await daemon.listen();
+        return;
+      }
+      const client = await ensureDaemon();
+      if (a === "status") {
+        const s = await client.runner();
+        const c = s.config as { enabled?: boolean; shared?: boolean; capacity?: number; isolation?: string };
+        console.log(`runner  ${s.running ? pc.green("running") : c?.enabled ? pc.yellow("enabled, not running") : pc.dim("off")}${c ? pc.dim(`  · ${c.shared ? "shared" : "personal"} · ${c.capacity ?? 1} at a time · isolation ${c.isolation ?? "auto"}`) : ""}`);
+        for (const j of (s.active as Array<Record<string, unknown>> | undefined) ?? []) console.log(`  ${String(j.kind).padEnd(9)} ${String(j.repo)}  ${pc.dim(`${String(j.owner)} · job ${String(j.jobId)}${j.runId ? ` · goal ${String(j.runId)}` : ""}`)}`);
+        if (!s.token) console.log(pc.dim("  no runner token — `loom runner token <PAT>` (see `loom runner doctor`)"));
+        if (s.lastError) console.log(pc.red(`  ${String(s.lastError)}`));
+        return;
+      }
+      if (a === "pair") {
+        const out = await client.runnerAction("pair");
+        const { link } = out.result as { link: string };
+        console.log(`${pc.bold("runner pairing link")} — on the box: ${pc.cyan("loom runner join '<link>'")}\n\n  ${link}\n`);
+        console.log(pc.yellow("  it carries your team keys — send it like a password, to a machine you control"));
+        return;
+      }
+      if (a === "join") {
+        if (!arg) throw new Error("paste the link from `loom runner pair`");
+        const out = await client.runnerAction("join", { link: arg, ...(opts.github ? { github: opts.github } : {}), ...(opts.secret ? { secret: opts.secret } : {}), ...(opts.token ? { token: opts.token } : {}), ...(opts.shared ? { shared: true } : {}) });
+        console.log(`${pc.green("✓")} this machine is now a runner`, pc.dim(JSON.stringify((out.result as { registered?: unknown }).registered ?? {})));
+        console.log(pc.dim("  keep it running: loom runner install · check it: loom runner doctor"));
+        return;
+      }
+      if (a === "start" || a === "stop") {
+        await client.runnerAction(a, a === "start" && opts.shared ? { shared: true } : {});
+        console.log(`${pc.green("✓")} runner ${a === "start" ? "started" : "stopped"}`);
+        return;
+      }
+      if (a === "revoke") {
+        if (!arg) throw new Error("which runner device? see `loom runner jobs`");
+        await client.runnerAction("revoke", { deviceId: arg });
+        console.log(`${pc.green("✓")} revoked ${arg}; team keys rotated`);
+        return;
+      }
+      if (a === "doctor") {
+        const token = readRunnerToken();
+        const repos: Record<string, Record<string, boolean> | null> = {};
+        let scopes: string[] = [];
+        if (token) {
+          const env = { ...process.env, GH_TOKEN: token };
+          const run = (argv: string[]) => new Promise<string>((resolve) => {
+            const p = spawn("gh", argv, { env });
+            let out = "";
+            p.stdout.on("data", (d) => (out += String(d)));
+            p.on("exit", () => resolve(out));
+            p.on("error", () => resolve(""));
+          });
+          const head = await run(["api", "-i", "user"]);
+          scopes = (/^x-oauth-scopes:\s*(.*)$/im.exec(head)?.[1] ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+          const team = await client.team();
+          for (const t of (team.teams as Array<{ repos: string[] }>) ?? []) {
+            for (const r of t.repos) {
+              try {
+                repos[r] = (JSON.parse(await run(["api", `repos/${r}`])) as { permissions?: Record<string, boolean> }).permissions ?? null;
+              } catch {
+                repos[r] = null;
+              }
+            }
+          }
+        }
+        const s = await client.runner();
+        const items = [
+          ...(s.running ? [{ level: "ok", what: "runner is running" }] : [{ level: "warn", what: "runner isn't running", fix: "loom runner start" }]),
+          ...tokenFindings({ present: Boolean(token), scopes, repos }),
+        ];
+        const icon: Record<string, string> = { ok: pc.green("✓"), warn: pc.yellow("!"), error: pc.red("✗") };
+        for (const f of items) {
+          console.log(`  ${icon[f.level]} ${f.what}`);
+          if ("fix" in f && f.fix) console.log(pc.dim(`      ${f.fix}`));
+        }
+        return;
+      }
+      const project = await currentProject(client);
+      if (a === "goal") {
+        const goal = (args ?? []).join(" ").trim();
+        if (!goal) throw new Error('what\'s the goal? loom runner goal "Add rate limiting"');
+        const out = await client.runnersAction(project.id, "start", { goal, ...(opts.runner ? { runner: opts.runner } : {}) });
+        console.log(`${pc.green("✓")} queued for your runner — job ${String((out.result as { jobId: string }).jobId)}; watch it: loom runner jobs`);
+        return;
+      }
+      if (a === "move" || a === "back") {
+        if (!arg) throw new Error(`which goal? loom runner ${a} <runId>`);
+        const out = await client.runnersAction(project.id, a === "move" ? "continue" : "bring-back", { runId: arg, ...(opts.runner ? { runner: opts.runner } : {}) });
+        console.log(`${pc.green("✓")} ${a === "move" ? "moving the goal to your runner" : "asked the runner to hand it back"} — job ${String((out.result as { jobId: string }).jobId)}`);
+        return;
+      }
+      if (a === "jobs") {
+        const v = await client.runners(project.id);
+        for (const r of v.runners) console.log(`  ${r.online ? pc.green("●") : pc.dim("○")} ${String(r.label)}  ${pc.dim(`${String(r.github)} · ${(r.kinds as string[]).join(", ")}${r.shared ? " · shared" : ""} · ${String(r.deviceId)}`)}`);
+        if (!v.runners.length) console.log(pc.dim("  no runners — `loom runner pair`, then `loom runner join <link>` on an always-on box"));
+        for (const j of v.jobs.slice(-15)) {
+          const p = j.progress as { status?: string; tasks?: unknown[]; costUsd?: number } | null;
+          console.log(`  ${String(j.state).padEnd(9)} ${String(j.kind).padEnd(8)} ${String(j.goal || j.runId || "")}  ${pc.dim(`${p?.status ?? ""}${p?.tasks ? ` · ${p.tasks.length} tasks` : ""}${p?.costUsd ? ` · $${p.costUsd}` : ""}${j.error ? ` · ${String(j.error)}` : ""}`)}`);
+        }
+        return;
+      }
+      throw new Error(`unknown runner action "${a}"`);
     } catch (err) {
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
