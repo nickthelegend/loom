@@ -477,6 +477,10 @@ detects at least two roles.
 | `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
 | `loom routes` | List named pipelines defined for this project |
 | `loom interrupt` | Stop the current holder's turn (cancels an active route) |
+| `loom queue` | What's lined up behind the running turn — position, who takes it, why it's waiting |
+| `loom queue add "<text>" [--to <agent\|orchestrate\|auto>] [--plan]` | Line a prompt up; it goes when nothing is in its way |
+| `loom queue edit / to / move / rm / clear` | Rewrite one, send it to someone else, reorder it, drop it, empty the queue |
+| `loom queue pause` / `loom queue resume` | Hold the queue where it is · let it run again |
 | `loom decision <text>` | Record a decision into shared memory |
 | `loom memory [import]` | The unified brain — one memory across every connected ADE |
 | `loom log [-f]` | Show (or follow) the project event log |

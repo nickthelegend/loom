@@ -53,7 +53,9 @@ Credentials are stored in the device keychain (expo-secure-store).
 - `src/api.ts` — daemon client (REST + WS URL builder), typed to the loom API.
 - `src/screens.tsx` — Board (needs-input dots, route badges, $), and the Project
   tab host: **Thread** (live WS events, chips that shift the baton on send, route
-  banner), **Tasks** (issues/PRs from `GET /api/projects/:id/tasks`, read through
+  banner, and the **prompt queue** above the composer — what you typed while an
+  agent was working, editable, retargetable and droppable before it runs),
+  **Tasks** (issues/PRs from `GET /api/projects/:id/tasks`, read through
   the daemon host's own `gh`), and **Changes** (working tree: branch, changed
   files, colored patch). The three heavier tabs live in their own files.
 - `src/observatory.tsx` — the Observatory's eight views on a phone (metrics,

@@ -906,6 +906,41 @@ export const sendMessage = (
       ...(opts?.plan ? { plan: true } : {}),
     }),
   });
+/**
+ * The prompt queue: what's lined up for this project, run one at a time.
+ *
+ * A prompt sent to a busy agent joins it on its own (POST /messages answers
+ * with its position), so the phone mostly needs to *show* the queue — and let
+ * you change your mind about what's in it before it runs.
+ */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  target: { kind: "agent"; agentId: string } | { kind: "orchestra" } | { kind: "auto" };
+  chat: string;
+  plan?: boolean;
+  at: number;
+  editedAt?: number;
+}
+export interface QueueView {
+  queue: QueuedPrompt[];
+  paused: boolean;
+  reason?: string;
+  waitingFor?: string;
+}
+export const getQueue = (c: Creds, id: string) => api<QueueView>(c, `/api/projects/${id}/queue`);
+export const queueAdd = (c: Creds, id: string, text: string, target?: string, chat?: string) =>
+  api<QueueView & { item: QueuedPrompt }>(c, `/api/projects/${id}/queue`, {
+    method: "POST",
+    body: JSON.stringify({ text, ...(target ? { target } : {}), ...(chat ? { chat } : {}) }),
+  });
+export const queueEdit = (c: Creds, id: string, itemId: string, patch: { text?: string; target?: string; to?: number }) =>
+  api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "PATCH", body: JSON.stringify(patch) });
+export const queueRemove = (c: Creds, id: string, itemId: string) =>
+  api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "DELETE" });
+export const queuePause = (c: Creds, id: string, paused: boolean) =>
+  api<QueueView>(c, `/api/projects/${id}/queue/pause`, { method: "POST", body: JSON.stringify({ paused }) });
+
 export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });
 export const interrupt = (c: Creds, id: string) =>

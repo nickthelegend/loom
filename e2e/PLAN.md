@@ -139,9 +139,22 @@ report.
 - **N6 — Phone app on a device.** BLOCKED without an Android device/emulator here.
 - **N7 — LoomPad hardware.** BLOCKED without the device.
 
+## O. The prompt queue and multi-agent workflows (real agents)
+
+- **O1 — Queue behind a real turn.** Send a prompt that keeps a real CLI busy, queue three more: the queue lists them, says what it's waiting for, and **none of them is in the thread yet**. Edit one, remove one, reorder them; when the turn ends they go in the queue's order, one at a time, and the removed one never runs. Live `queue` frames reach the socket · PASS.
+- **O2 — Change who takes a waiting prompt.** A prompt queued for claude-code, retargeted to codex while it waits: the baton moves to codex, and codex's reply carries the token · PASS.
+- **O3 — A goal queued behind a goal.** One orchestra run at a time (a direct second start is still 400); a goal queued for the orchestrator starts itself when the first finishes, and completes · PASS.
+- **O4 — Stop holds the queue.** Stop mid-turn pauses the queue with a reason and keeps the prompt; nothing runs while it's paused; resume sends it · PASS.
+- **O5 — `loom queue` from the terminal.** add / list / edit / move / to / rm / clear / pause / resume all drive the same queue the app shows · PASS.
+- **O6 — One orchestrator, two vendors in parallel.** A goal whose two tasks go to different agents (opencode and codex): both run in their own worktrees, and both files land on the integration branch · PASS.
+
 ## Added during testing
 
 (Discovered gaps become tests here: DEFINE → FAIL → FIX → VERIFY.)
 
 - **X1 — v0.2.0 apk has no JS bundle** (found while planning N3): the release built `assembleDebug`. → fixed to a release-signed `assembleRelease` with a bundle check.
 - **X2 — Mac app bundle signature invalid** (found while planning N2): only Electron's linker signature. → fixed with an ad-hoc signing hook.
+- **X3 — "offline" before a project is open** (found in M1): the status bar read the WebSocket, which only opens with a project. → it now reads the daemon's own reachability.
+- **X4 — grok-code and agy reported signed-out** (found in M1/Setup): the probes ran a CLI that needed a TTY, or timed out at 6s. → both now read their own auth files, with a longer probe.
+- **X5 — A late review clobbers an override** (found in L7b, on a real sandbox PR): the owner overrode `loom/review`, and the review that was still running finished and wrote `failure` over it, in the GitHub status and in the goal. → an override now names the commit it covers, and a review that finishes after it leaves the decision alone.
+- **X6 — Queued prompts were invisible** (found while testing the queue by hand): a prompt sent to a busy agent was logged into the thread as if sent, couldn't be seen, edited or reordered, and Stop dropped it. → the prompt queue (area O).

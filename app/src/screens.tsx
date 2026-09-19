@@ -42,6 +42,11 @@ import {
   pingDaemon,
   saveCreds,
   sendMessage,
+  getQueue,
+  queueEdit,
+  queuePause,
+  queueRemove,
+  type QueueView,
   cloudFromLink,
   type Approval,
   type Chat,
@@ -781,6 +786,9 @@ export function ProjectScreen(props: {
     props.project.holder ?? props.project.agents.find((a) => a.tier === "adapter")?.id ?? null,
   );
   const [text, setText] = useState("");
+  /** What's lined up behind the running turn — see core/prompt-queue.ts. */
+  const [queue, setQueue] = useState<QueueView | null>(null);
+  const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const lastId = useRef(0);
   // Loom Teams Phase 3: the team brain's inbox count, for the tab badge.
@@ -866,6 +874,9 @@ export function ProjectScreen(props: {
         .then(({ project: p }) => setProject(p))
         .catch(() => {});
       loadPending();
+      void getQueue(creds, project.id)
+        .then(setQueue)
+        .catch(() => {});
       if (tab === "changes") {
         void getTree(creds, project.id)
           .then(({ tree }) => setTree(tree))
@@ -967,7 +978,13 @@ export function ProjectScreen(props: {
     setErr(null);
     try {
       if (selected && selected !== project.holder) await handoff(creds, project.id, selected);
-      await sendMessage(creds, project.id, message, selected ?? undefined, chatId, plan ? { plan: true } : undefined);
+      const res = await sendMessage(creds, project.id, message, selected ?? undefined, chatId, plan ? { plan: true } : undefined);
+      // a prompt to a busy agent joins the queue: show it now, not at the next poll
+      if ((res as { queued?: number }).queued) {
+        void getQueue(creds, project.id)
+          .then(setQueue)
+          .catch(() => {});
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -1185,6 +1202,111 @@ export function ProjectScreen(props: {
           />
           {/* command dock */}
           <View style={{ backgroundColor: T.panel, borderTopWidth: 1, borderTopColor: T.line }}>
+            {/*
+              What's lined up behind the running turn. A prompt you send to a
+              busy agent joins this by itself; here you can see it, fix its
+              wording, send it somewhere else, or drop it before it runs.
+            */}
+            {queue && queue.queue.length > 0 && (
+              <View style={{ paddingHorizontal: spacing.sm + 2, paddingTop: spacing.sm, gap: 4 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={{ color: T.dim, fontSize: 11, fontWeight: "700", letterSpacing: 0.6 }}>
+                    {`QUEUE · ${queue.queue.length}`}
+                  </Text>
+                  <Text numberOfLines={1} style={{ color: T.faint, fontSize: 11, flex: 1 }}>
+                    {queue.paused ? queue.reason ?? "paused" : queue.waitingFor ?? ""}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      void queuePause(creds, project.id, !queue.paused)
+                        .then(setQueue)
+                        .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+                    }}
+                    accessibilityLabel={queue.paused ? "resume the queue" : "pause the queue"}
+                  >
+                    <Text style={{ color: T.primary, fontSize: 11, fontWeight: "600" }}>
+                      {queue.paused ? "Resume" : "Pause"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                {queue.queue.map((item, i) => {
+                  const who =
+                    item.target.kind === "orchestra"
+                      ? "orchestrate"
+                      : item.target.kind === "auto"
+                        ? "auto"
+                        : item.target.agentId;
+                  const editing = editingQueued?.id === item.id;
+                  return (
+                    <View
+                      key={item.id}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 8,
+                        opacity: queue.paused ? 0.65 : 1,
+                        borderWidth: 1,
+                        borderColor: T.line,
+                        backgroundColor: T.raised,
+                        borderRadius: radii.key,
+                        paddingHorizontal: 8,
+                        paddingVertical: 6,
+                      }}
+                    >
+                      <Text style={{ color: T.faint, fontFamily: T.mono, fontSize: 11 }}>{i + 1}</Text>
+                      {editing ? (
+                        <>
+                          <TextInput
+                            style={{ ...field, flex: 1, paddingVertical: 6, fontSize: 13 }}
+                            value={editingQueued.text}
+                            onChangeText={(t) => setEditingQueued({ id: item.id, text: t })}
+                            autoFocus
+                            onSubmitEditing={() => {
+                              const next = editingQueued.text.trim();
+                              setEditingQueued(null);
+                              if (!next || next === item.text) return;
+                              void queueEdit(creds, project.id, item.id, { text: next })
+                                .then(setQueue)
+                                .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+                            }}
+                            returnKeyType="done"
+                          />
+                          <TouchableOpacity onPress={() => setEditingQueued(null)} accessibilityLabel="cancel the edit">
+                            <Text style={{ color: T.dim, fontSize: 11 }}>Cancel</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <>
+                          <TouchableOpacity
+                            style={{ flex: 1 }}
+                            onPress={() => setEditingQueued({ id: item.id, text: item.text })}
+                            accessibilityLabel={`edit the queued prompt for ${who}`}
+                          >
+                            <Text numberOfLines={2} style={{ color: T.text, fontSize: 13 }}>
+                              {item.text}
+                            </Text>
+                            <Text style={{ color: T.faint, fontSize: 10, fontFamily: T.mono, marginTop: 2 }}>
+                              {`to ${who}${item.editedAt ? " · edited" : ""}${item.plan ? " · plan" : ""}`}
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => {
+                              void queueRemove(creds, project.id, item.id)
+                                .then(setQueue)
+                                .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+                            }}
+                            accessibilityLabel="remove this queued prompt"
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <Text style={{ color: T.dim, fontSize: 14 }}>×</Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
             <View
               style={{
                 flexDirection: "row",

@@ -15,6 +15,7 @@ import { Command } from "commander";
 import pc from "picocolors";
 import qrcode from "qrcode-terminal";
 import type { LoomEvent, ProjectStatus } from "../types.js";
+import type { QueueItem } from "../core/prompt-queue.js";
 import {
   DaemonClient,
   DaemonError,
@@ -1728,6 +1729,133 @@ program
     const project = await currentProject(client);
     const { interrupted } = await client.interrupt(project.id);
     console.log(pc.dim(interrupted ? `interrupted ${interrupted}` : "nothing running"));
+  });
+
+/**
+ * The prompt queue: what you've lined up for this project, run one at a time.
+ *
+ * `loom queue` shows it; `loom queue add` puts one at the back; the rest edit
+ * what's waiting. Positions are what you see in the list (1 is next to run), so
+ * `loom queue rm 2` removes the one printed as 2 — ids work too.
+ */
+const queueCmd = program
+  .command("queue")
+  .description("prompts lined up for this project — see, edit, reorder, pause")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const view = await client.queue(project.id);
+    if (!view.queue.length) {
+      console.log(pc.dim("nothing queued — loom queue add \"…\" puts one in line"));
+      return;
+    }
+    const where = (t: QueueItem["target"]) =>
+      t.kind === "orchestra" ? "orchestrate" : t.kind === "auto" ? "auto" : t.agentId;
+    view.queue.forEach((item, i) => {
+      const head = `${pc.dim(String(i + 1).padStart(2))} ${pc.cyan(where(item.target).padEnd(12))}`;
+      const lines = item.text.split("\n");
+      console.log(`${head} ${lines[0]}${lines.length > 1 ? pc.dim(` +${lines.length - 1} more lines`) : ""}`);
+      console.log(`${" ".repeat(15)}${pc.dim(item.id + (item.editedAt ? " · edited" : "") + (item.plan ? " · plan mode" : ""))}`);
+    });
+    const note = view.paused ? pc.yellow(view.reason ?? "paused") : view.waitingFor ? pc.dim(view.waitingFor) : pc.dim("next one goes as soon as it can");
+    console.log(`\n${view.queue.length} queued${view.paused ? pc.yellow(" · paused") : ""} · ${note}`);
+  });
+
+/** The item you meant: a position from the printed list, or an id. */
+async function queueItemId(client: DaemonClient, projectId: string, which: string): Promise<string> {
+  const { queue } = await client.queue(projectId);
+  const n = Number(which);
+  if (Number.isInteger(n) && n >= 1 && n <= queue.length) return queue[n - 1]!.id;
+  const hit = queue.find((i) => i.id === which);
+  if (!hit) throw new Error(`no queued prompt "${which}" — loom queue lists them`);
+  return hit.id;
+}
+
+queueCmd
+  .command("add <text...>")
+  .description("line a prompt up behind whatever is running")
+  .option("--to <target>", 'who takes it: an agent id, "orchestrate" for a new goal, or "auto"', "auto")
+  .option("--plan", "queue it in plan mode")
+  .action(async (text: string[], opts: { to: string; plan?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const target = opts.to === "orchestrate" ? "orchestra" : opts.to;
+    const res = await client.queueAdd(project.id, { text: text.join(" "), target, ...(opts.plan ? { plan: true } : {}) });
+    console.log(pc.dim(`queued ${res.item.id} · ${res.queue.length} waiting`));
+  });
+
+queueCmd
+  .command("edit <which> <text...>")
+  .description("rewrite a queued prompt (by position or id)")
+  .action(async (which: string, text: string[]) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const id = await queueItemId(client, project.id, which);
+    await client.queueEdit(project.id, id, { text: text.join(" ") });
+    console.log(pc.dim(`edited ${id}`));
+  });
+
+queueCmd
+  .command("to <which> <target>")
+  .description('send a waiting prompt somewhere else: an agent id, "orchestrate" or "auto"')
+  .action(async (which: string, target: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const id = await queueItemId(client, project.id, which);
+    await client.queueEdit(project.id, id, { target: target === "orchestrate" ? "orchestra" : target });
+    console.log(pc.dim(`${id} → ${target}`));
+  });
+
+queueCmd
+  .command("move <which> <position>")
+  .description("move a queued prompt (1 is next to run)")
+  .action(async (which: string, position: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const id = await queueItemId(client, project.id, which);
+    await client.queueEdit(project.id, id, { to: Math.max(0, Number(position) - 1) });
+    console.log(pc.dim(`moved ${id} to ${position}`));
+  });
+
+queueCmd
+  .command("rm <which>")
+  .description("drop a queued prompt before it runs")
+  .action(async (which: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const id = await queueItemId(client, project.id, which);
+    const res = await client.queueRemove(project.id, id);
+    console.log(pc.dim(`removed ${id} · ${res.queue.length} waiting`));
+  });
+
+queueCmd
+  .command("clear")
+  .description("drop everything that's waiting")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const res = await client.queueClear(project.id);
+    console.log(pc.dim(`dropped ${res.dropped}`));
+  });
+
+queueCmd
+  .command("pause")
+  .description("hold the queue where it is")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    await client.queuePause(project.id, true);
+    console.log(pc.dim("paused — loom queue resume lets it run"));
+  });
+
+queueCmd
+  .command("resume")
+  .description("let the queue run again")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const view = await client.queuePause(project.id, false);
+    console.log(pc.dim(`running · ${view.queue.length} waiting`));
   });
 
 const memoryCmd = program

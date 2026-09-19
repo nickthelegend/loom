@@ -7966,15 +7966,21 @@ ${BRAND_SPRITE}
       if (state.auto && !planState) return { kind: "auto" };
       return { kind: "agent", agentId: state.selected || (state.project || {}).holder };
     }
-    /** Something in the way? Then a send joins the queue instead of being refused. */
+    /**
+     * Should this send join the queue instead of going out now?
+     *
+     * Only when it would otherwise jump the line or be refused. A prompt for a
+     * busy agent doesn't need us: /messages queues it itself, in the same
+     * queue, and answers with its position. So this is about order (something
+     * is already waiting) and about goals (GitHub-style: one runs at a time,
+     * and a second start is a 400).
+     */
     function wouldQueue(){
       if (queue.items.length) return true;
+      if (state.cmode !== "orch") return false;
       var p = state.project || {};
-      if (state.cmode === "orch") {
-        var run = (orch.runs || []).filter(function(r){ return !isTerminalOrch(r.status); })[0];
-        return Boolean(run || (p.orchestra && !isTerminalOrch(p.orchestra.status)));
-      }
-      return (p.agents || []).some(function(a){ return a.busy; });
+      var run = (orch.runs || []).filter(function(r){ return !isTerminalOrch(r.status); })[0];
+      return Boolean(run || (p.orchestra && !isTerminalOrch(p.orchestra.status)));
     }
     function isTerminalOrch(st){
       return st === "completed" || st === "failed" || st === "aborted" || st === "moved";

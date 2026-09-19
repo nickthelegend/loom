@@ -16,6 +16,7 @@ import type {
   UnifiedMemory,
 } from "../types.js";
 import type { OrchestraRun } from "../core/orchestra.js";
+import type { QueueItem } from "../core/prompt-queue.js";
 import {
   readDaemonConfig,
   type DaemonConfig,
@@ -33,6 +34,16 @@ export class DaemonError extends Error {
     super(message);
     this.name = "DaemonError";
   }
+}
+
+/** What the daemon says about a project's prompt queue. */
+export interface QueueView {
+  queue: QueueItem[];
+  paused: boolean;
+  /** Why it paused itself (a refused send, a Stop, a restart). */
+  reason?: string;
+  /** What the head is waiting for, when it's waiting on something. */
+  waitingFor?: string;
 }
 
 export class DaemonClient {
@@ -459,6 +470,32 @@ export class DaemonClient {
 
   interrupt(id: string): Promise<{ interrupted: string | null }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/interrupt`, {});
+  }
+
+  // ── the prompt queue (core/prompt-queue.ts) ──
+
+  queue(id: string): Promise<QueueView> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/queue`);
+  }
+
+  queueAdd(id: string, body: { text: string; target?: unknown; chat?: string; plan?: boolean }): Promise<QueueView & { item: QueueItem }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/queue`, body as Record<string, unknown>);
+  }
+
+  queueEdit(id: string, itemId: string, patch: { text?: string; target?: unknown; to?: number }): Promise<QueueView> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/queue/${encodeURIComponent(itemId)}`, patch as Record<string, unknown>);
+  }
+
+  queueRemove(id: string, itemId: string): Promise<QueueView> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/queue/${encodeURIComponent(itemId)}`);
+  }
+
+  queueClear(id: string): Promise<QueueView & { dropped: number }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/queue`);
+  }
+
+  queuePause(id: string, paused: boolean): Promise<QueueView> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/queue/pause`, { paused });
   }
 
   decision(id: string, text: string): Promise<{ event: LoomEvent }> {
