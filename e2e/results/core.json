@@ -1,97 +1,97 @@
 {
   "A1": {
     "status": "PASS",
-    "evidence": "health={\"ok\":true,\"name\":\"loom\",\"version\":\"0.2.0\",\"rev\":\"5e987a28d3b0a4ce\",\"terminal\":\"pty\"}; daemon.json mode=600",
-    "at": "2026-09-19T20:02:36.600Z"
+    "evidence": "health={\"ok\":true,\"name\":\"loom\",\"version\":\"0.2.0\",\"rev\":\"5b92dc1fe558813a\",\"terminal\":\"pty\"}; daemon.json mode=600",
+    "at": "2026-09-19T22:06:08.235Z"
   },
   "A2": {
     "status": "PASS",
     "evidence": "no token → 401, wrong token → 401",
-    "at": "2026-09-19T20:02:36.609Z"
+    "at": "2026-09-19T22:06:08.241Z"
   },
   "A3": {
     "status": "PASS",
     "evidence": "loopback 200 admin, Host evil → 403, x-loom-via → 403",
-    "at": "2026-09-19T20:02:36.624Z"
+    "at": "2026-09-19T22:06:08.249Z"
   },
   "A4": {
     "status": "PASS",
-    "evidence": "version {\"rev\":\"5e987a28d3b0a4ce\",\"node\":\"v26.5.0\",\"platform\":\"darwin-arm64\",\"uptimeSec\":1,\"pid\":76805} · updates.version=0.2.0",
-    "at": "2026-09-19T20:02:37.843Z"
+    "evidence": "version {\"rev\":\"5b92dc1fe558813a\",\"node\":\"v26.5.0\",\"platform\":\"darwin-arm64\",\"uptimeSec\":1,\"pid\":5839} · updates.version=0.2.0",
+    "at": "2026-09-19T22:06:08.971Z"
   },
   "B1": {
     "status": "PASS",
-    "evidence": "project 6741907af127; agents claude-code,codex,opencode,grok-code,antigravity-cli",
-    "at": "2026-09-19T20:02:39.030Z"
+    "evidence": "project 81320139b974; agents claude-code,codex,opencode,grok-code,antigravity-cli",
+    "at": "2026-09-19T22:06:09.226Z"
   },
   "B2": {
     "status": "PASS",
     "evidence": "400 no such directory: /nonexistent/loom-e2e",
-    "at": "2026-09-19T20:02:40.913Z"
+    "at": "2026-09-19T22:06:09.736Z"
   },
   "B3": {
     "status": "PASS",
     "evidence": "5 agents; holder=null",
-    "at": "2026-09-19T20:02:42.644Z"
+    "at": "2026-09-19T22:06:10.215Z"
   },
   "B4": {
     "status": "PASS",
     "evidence": "404 {\"error\":\"unknown project\"}",
-    "at": "2026-09-19T20:02:42.652Z"
+    "at": "2026-09-19T22:06:10.218Z"
   },
   "B5": {
     "status": "PASS",
     "evidence": "projection.mode=template round-trips and is on disk",
-    "at": "2026-09-19T20:02:42.663Z"
+    "at": "2026-09-19T22:06:10.225Z"
   },
   "C1": {
     "status": "PASS",
     "evidence": "claude-code:claude-code:up codex:codex:up opencode:opencode:up grok-code:grok-code:up antigravity:antigravity-cli:up",
-    "at": "2026-09-19T20:02:43.428Z"
+    "at": "2026-09-19T22:06:10.462Z"
   },
   "C2": {
     "status": "PASS",
     "evidence": "add→listed, remove→gone, invalid kind→400 unknown agent kind \"not-an-agent\" (known: echo, claude-code, codex, opencode, grok-code, antigravity-cli, antigravity, kiro)",
-    "at": "2026-09-19T20:02:45.240Z"
+    "at": "2026-09-19T22:06:10.944Z"
   },
   "C3": {
     "status": "PASS",
     "evidence": "claude model=haiku persisted; models source=builtin n=4 (turn-level use verified in D2)",
-    "at": "2026-09-19T20:02:46.790Z"
+    "at": "2026-09-19T22:06:11.455Z"
   },
   "C4": {
     "status": "PASS",
     "evidence": "claude-code:bypass=200 claude-code:auto=200 claude-code:ask=200 codex:bypass=200 codex:auto=200 codex:ask=200 opencode:bypass=200 opencode:auto=200 opencode:ask=400 grok-code:bypass=200 grok-code:auto=200 grok-code:ask=200 antigravity-cli:bypass=200 antigravity-cli:auto=400 antigravity-cli:ask=200 · invalid→400",
-    "at": "2026-09-19T20:02:47.745Z"
+    "at": "2026-09-19T22:06:11.731Z"
   },
   "C5": {
     "status": "PASS",
     "evidence": "disabled → false, enabled → true",
-    "at": "2026-09-19T20:02:50.054Z"
+    "at": "2026-09-19T22:06:12.501Z"
   },
   "A5": {
     "status": "PASS",
-    "evidence": "claim→token, reuse→403, client mint→403, recorded in daemon.json; link=http://127.0.0.1:56394/app#…",
-    "at": "2026-09-19T20:02:50.805Z"
+    "evidence": "claim→token, reuse→403, client mint→403, recorded in daemon.json; link=http://127.0.0.1:58984/app#…",
+    "at": "2026-09-19T22:06:12.864Z"
   },
   "A6": {
     "status": "PASS",
-    "evidence": "lists [6741907af127], other → 403, own → 200",
-    "at": "2026-09-19T20:02:53.533Z"
+    "evidence": "lists [81320139b974], other → 403, own → 200",
+    "at": "2026-09-19T22:06:13.734Z"
   },
   "A7": {
     "status": "PASS",
-    "evidence": "revoked 0eb79f0eb0ef; its token → 401",
-    "at": "2026-09-19T20:02:53.543Z"
+    "evidence": "revoked ef24fe5315d0; its token → 401",
+    "at": "2026-09-19T22:06:13.740Z"
   },
   "A9": {
     "status": "PASS",
-    "evidence": " ✓ node        v26.5.0 |  ✓ claude-code Claude Code · signed in |  ✓ codex       Codex · signed in |  ✓ opencode    OpenCode · signed in |  ⚠ grok-code   Grok Code found — couldn't confirm sign-in · run `grok` once and sign in |  ✓ antigravity-cli Antigravity · signed in |  ⚠ kiro        not running |  ✓ tailscale   1.94.1 |  ✓ daemon      http://127.0.0.1:56394 · current build |  ⚠ binding     localhost only — phones can't reach it (loom up --restart --tailnet) |  ✓ devices     1 paired |  ✓ project     loom-e2e-repo-core-9sSS1V (/private/var/folders/tp/gcpvr1451r350sq27v4csrq40000gn/T/loom-e2e-repo-core-9sSS1V)",
-    "at": "2026-09-19T20:03:15.603Z"
+    "evidence": " ✓ node        v26.5.0 |  ✓ claude-code Claude Code · signed in |  ✓ codex       Codex · signed in |  ✓ opencode    OpenCode · signed in |  ✓ grok-code   Grok Code · signed in |  ✓ antigravity-cli Antigravity · signed in |  ⚠ kiro        not running |  ✓ tailscale   1.94.1 |  ✓ daemon      http://127.0.0.1:58984 · current build |  ⚠ binding     localhost only — phones can't reach it (loom up --restart --tailnet) |  ✓ devices     1 paired |  ✓ project     loom-e2e-repo-core-Iyvbo6 (/private/var/folders/tp/gcpvr1451r350sq27v4csrq40000gn/T/loom-e2e-repo-core-Iyvbo6)",
+    "at": "2026-09-19T22:06:29.933Z"
   },
   "B6": {
     "status": "PASS",
     "evidence": "removed; files untouched: .git,.loom,README.md",
-    "at": "2026-09-19T20:03:16.445Z"
+    "at": "2026-09-19T22:06:30.179Z"
   }
 }

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### The prompt queue
+
+- **What you type while something is running now waits where you can see it.** A
+  prompt sent to a busy agent used to be queued invisibly — logged into the
+  thread as if it had been sent, with nothing to look at and nothing to change —
+  and a goal typed while another goal ran was refused outright.
+- **The queue is a surface**, above the composer on the web, the desktop app and
+  the phone, and `loom queue` in the terminal: every waiting prompt with who
+  takes it, editable in place, movable, removable, pausable.
+- **Each prompt names its own target:** one agent, the **orchestrator** (a whole
+  new goal, started when the running one finishes), or the auto router — and you
+  can change it while the prompt waits. The baton moves with it.
+- **A question holds the queue:** an agent that stops to ask you something isn't
+  answered by whatever you queued behind it. The queue waits, names who asked,
+  and your typed reply still goes straight out.
+- **Stop pauses the queue** instead of emptying it, and a prompt that can't be
+  sent (budget, quarantine, a policy, a missing agent) stays put with the reason
+  on the queue rather than disappearing.
+- **A prompt enters the conversation when it is sent**, not when it is queued, so
+  the thread stays an honest record of what each agent was actually asked.
+- Survives a daemon restart, reloaded **paused** (`.loom/queue.json`). API:
+  `GET/POST /api/projects/:id/queue`, `PATCH|DELETE .../queue/:itemId`,
+  `POST .../queue/pause`, `DELETE .../queue`, plus a live `queue` socket frame.
+
+### Fixed
+
+- **An override of `loom/review` made while that review is still running** is no
+  longer overwritten when the review finishes (D61) — found on a real PR, where
+  a late review wrote `failure` over the owner's decision.
+- **A turn is no longer blamed for Loom's own `.loom/` files.** In a project that
+  doesn't gitignore `.loom/`, the event log and the queue file were landing in
+  the agent's turn diff.
+- **grok-code and agy** are detected from their own auth files instead of being
+  reported signed-out, and the status bar says **live**, not offline, before a
+  project is open.
+- **A reply that lands after its window closed** no longer throws from a redraw.
+
 ### Loom Teams, Phase 6: land in turn, hear it now
 
 - **6 more design decisions** (D79–D84), settled with the owner.

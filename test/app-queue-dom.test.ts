@@ -228,6 +228,29 @@ describe("web app · the prompt queue", () => {
     expect(m.errors).toEqual([]);
   }, 60_000);
 
+  it("holds the queue when the agent asks, and lets you answer past it", async () => {
+    const m = mount();
+    await ready(m);
+    // the turn ends by asking the human; the prompt typed behind it waits
+    await sendPrompt(m, "sleep:1200 ask: which file should I write?");
+    await sendPrompt(m, "held behind the question");
+    await waitUntil(() => all(m, "#cqueue .cqitem").length === 1, { timeoutMs: 15_000 });
+    await waitUntil(async () => (await rest<QueueView>("GET", "/queue")).paused, { timeoutMs: 20_000 });
+    expect(text(m, "#cqueue .cqhead")).toMatch(/asked you something/);
+    expect(text(m, '#cqueue [data-q="pause"]')).toBe("Resume");
+
+    // your answer is a reply, not a queue entry: it goes out now, past the hold
+    await sendPrompt(m, "answering right now");
+    await waitUntil(async () => {
+      const seen = await rest<{ events: Array<{ kind: string; agentId?: string; payload: { text?: string } }> }>("GET", "/events?limit=200");
+      return seen.events.some((e) => e.kind === "message" && !e.agentId && e.payload.text === "answering right now");
+    }, { timeoutMs: 20_000 });
+    const still = await rest<QueueView>("GET", "/queue");
+    expect(still.queue.map((i) => i.text)).toEqual(["held behind the question"]);
+    expect(still.paused).toBe(true);
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
   it("sends a queued prompt to another agent when you change its target", async () => {
     const m = mount();
     await ready(m);
