@@ -795,6 +795,28 @@ project, updated live:
 Orchestra tasks are listed too, each with a link to its thread.
 `GET /api/activity` serves the same data.
 
+## The prompt queue — line up the next ones
+
+Type while an agent is mid-turn, or while a goal is still running, and the
+prompt waits above the composer instead of being refused or lost. It stays
+yours until it's sent:
+
+- **Queue as many as you like.** They run strictly one at a time, in order.
+- **Send each one where you want it:** one agent by name, the **orchestrator**
+  (a whole new goal, started when the running one finishes), or **Auto** to let
+  the router pick. Change a waiting prompt's target from the list on the item.
+- **Edit, reorder, drop.** Click a queued prompt to edit it (⌘⏎ saves, Esc
+  cancels), move it up or down, or remove it — all before it runs.
+- **Pause and resume** the whole queue. **Stop** pauses it too: stopping a turn
+  never silently discards what you lined up behind it.
+- A prompt enters the conversation when it is actually sent, not when it's
+  queued, so the thread stays an honest record of what the agent was asked.
+
+It survives a daemon restart (reloaded paused, so an hour-old queue doesn't
+start itself), and lives in the project's `.loom/queue.json`. Over the API:
+`GET/POST /api/projects/:id/queue`, `PATCH|DELETE .../queue/:itemId` (text,
+target, or `to` for its position), `POST .../queue/pause`, `DELETE .../queue`.
+
 ## Prompt manager
 
 A clipboard manager for prompts, built into the chat bar (⌘⇧V):

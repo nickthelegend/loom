@@ -67,6 +67,7 @@ import {
 } from "../core/skill-install.js";
 import { resolveSteps, RouteEngine } from "../core/routes.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
+import { PromptQueue, type QueueInput, type QueueItem, type QueueState } from "../core/prompt-queue.js";
 import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { detectAdes } from "../core/ades.js";
@@ -200,6 +201,10 @@ export class ProjectRuntime {
    * run_complete, a diff) still belong to the chat that prompted them.
    */
   private turnChat = new Map<string, string>();
+  /** What you've lined up, run one at a time — see core/prompt-queue.ts. */
+  readonly queue: PromptQueue;
+  private queueListeners = new Set<(s: QueueState) => void>();
+  private draining = false;
 
   private constructor(info: ProjectInfo, config: ProjectConfig, log: EventLog) {
     this.info = info;
@@ -258,6 +263,14 @@ export class ProjectRuntime {
       gitDelivery: () => this.config.git?.delivery ?? "none",
       member: () => this.memberLogin,
       coordinator: () => this.coordinator,
+    });
+
+    this.queue = new PromptQueue(path.join(projectLoomDir(info.dir), "queue.json"), (q) => {
+      for (const cb of this.queueListeners) cb(q);
+    });
+    // a goal or a route that ends frees the head of the queue
+    log.onEvent((e) => {
+      if (e.kind === "orchestra" || e.kind === "route_completed" || e.kind === "route_failed") this.kickQueue();
     });
   }
 
@@ -897,9 +910,8 @@ export class ProjectRuntime {
       const turnOver = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted");
       if (turnOver) {
         this.busySince.delete(agent.id);
-        // Stop means stop: an interrupt drops what was queued behind the turn.
-        if (e.kind === "status" && p.state === "interrupted") this.promptQueue.delete(agent.id);
-        else queueMicrotask(() => void this.drainQueue(agent.id));
+        // the next queued prompt may go (a Stop paused the queue first — see interrupt)
+        this.kickQueue();
       }
       const event = this.log.append({
         kind: e.kind,
@@ -2005,29 +2017,99 @@ export class ProjectRuntime {
     }
   }
 
-  /** Prompts sent while their agent was mid-turn, run in order when it's free. */
-  private promptQueue = new Map<string, Array<{ text: string; opts: { source?: "user" | "route"; chat?: string; plan?: boolean } }>>();
+  // ── the prompt queue (core/prompt-queue.ts) ──
 
-  private async drainQueue(agentId: string): Promise<void> {
-    if (this.closed || this.busySince.has(agentId)) return;
-    const q = this.promptQueue.get(agentId);
-    const next = q?.shift();
-    if (!q?.length) this.promptQueue.delete(agentId);
-    if (!next) return;
-    try {
-      await this.sendMessage(next.text, agentId, { ...next.opts, fromQueue: true });
-    } catch (err) {
-      // refused now (budget, quarantine, the baton moved): say so rather than drop it silently
-      this.appendIfOpen({ kind: "error", agentId, payload: { message: `queued prompt not sent: ${err instanceof Error ? err.message : String(err)}` } });
-      void this.drainQueue(agentId);
+  /** Live queue changes, for the socket. Returns unsubscribe. */
+  onQueueChange(cb: (q: QueueState) => void): () => void {
+    this.queueListeners.add(cb);
+    return () => this.queueListeners.delete(cb);
+  }
+
+  /** Line a prompt up; it goes as soon as nothing ahead of it is in the way. */
+  enqueue(input: QueueInput): QueueItem {
+    const t = input.target ?? { kind: "auto" as const };
+    if (t.kind === "agent") {
+      const agent = this.agents.get(t.agentId);
+      if (!agent) throw new Error(`no agent "${t.agentId}" in this project`);
+      if (!isAdapter(agent)) throw new Error(`agent "${t.agentId}" is a bridge (read-only) — it cannot take turns`);
     }
+    const item = this.queue.add(input);
+    this.kickQueue();
+    return item;
+  }
+
+  /** Why the head can't go yet, or null when it can. */
+  queueBlocker(item: QueueItem): string | null {
+    const route = this.routeState();
+    const routing = route && (route.status === "running" || route.status === "waiting_human");
+    const holder = this.validHolder();
+    if (item.target.kind === "orchestra") {
+      const run = this.orchestra.active();
+      return run ? `waiting for the goal "${run.goal.slice(0, 60)}" to finish` : null;
+    }
+    if (routing) return "waiting for the running route";
+    if (item.target.kind === "agent" && this.busySince.has(item.target.agentId)) return `waiting for ${item.target.agentId} to finish its turn`;
+    if (holder && this.busySince.has(holder)) return `waiting for ${holder} to finish its turn`;
+    return null;
+  }
+
+  private kickQueue(): void {
+    if (this.closed || this.draining || this.queue.paused || !this.queue.length) return;
+    queueMicrotask(() => void this.drainPromptQueue());
+  }
+
+  /** Send the head of the queue if it may go; then look again. */
+  async drainPromptQueue(): Promise<void> {
+    if (this.closed || this.draining || this.queue.paused) return;
+    const head = this.queue.peek();
+    if (!head || this.queueBlocker(head)) return;
+    this.draining = true;
+    const item = this.queue.shift()!;
+    try {
+      await this.dispatchQueued(item);
+    } catch (err) {
+      // refused (budget, quarantine, policy, a missing agent): keep it where it
+      // was and stop, so you can edit it or send it elsewhere — never drop it
+      const message = err instanceof Error ? err.message : String(err);
+      if (!this.closed) {
+        this.queue.unshift(item);
+        this.queue.setPaused(true, `the next prompt wasn't sent: ${message}`);
+        this.appendIfOpen({ kind: "error", chat: item.chat, payload: { message: `queued prompt not sent: ${message}` } });
+      }
+    } finally {
+      this.draining = false;
+    }
+    this.kickQueue();
+  }
+
+  private async dispatchQueued(item: QueueItem): Promise<void> {
+    const t = item.target;
+    if (t.kind === "orchestra") {
+      await this.orchestra.start({
+        goal: item.text,
+        ...(t.orchestrator ? { orchestrator: t.orchestrator } : {}),
+        ...(t.workers?.length ? { workers: t.workers } : {}),
+        ...(t.maxParallel ? { maxParallel: t.maxParallel } : {}),
+        ...(item.plan ? { plan: true } : {}),
+      });
+      return;
+    }
+    if (t.kind === "auto" && !item.plan) {
+      await this.startRoute({ task: item.text, spec: "auto" });
+      return;
+    }
+    // one agent: the baton moves to it first, as when you pick it and send
+    const to = t.kind === "agent" ? t.agentId : undefined;
+    const holder = this.validHolder();
+    if (to && holder && holder !== to) await this.handoff(to, { source: item.source });
+    await this.sendMessage(item.text, to, { source: item.source, chat: item.chat, fromQueue: true, ...(item.plan ? { plan: true } : {}) });
   }
 
   async sendMessage(
     text: string,
     agentId?: string,
     opts: { source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean } = {},
-  ): Promise<{ agentId: string; queued?: number }> {
+  ): Promise<{ agentId: string; queued?: number; queueId?: string }> {
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;
     let target = agentId ?? this.validHolder() ?? this.defaultAdapterId();
@@ -2055,12 +2137,10 @@ export class ProjectRuntime {
     // The agent is mid-turn: queue the prompt, in order, and run it when the
     // turn ends. It used to go straight to the adapter, which threw "busy" into
     // an error event — the prompt was lost while the send had said 200.
+    // It shows in the queue, editable, and enters the thread when it's sent.
     if (!opts.fromQueue && this.busySince.has(target)) {
-      const q = this.promptQueue.get(target) ?? [];
-      q.push({ text, opts: { ...opts } });
-      this.promptQueue.set(target, q);
-      this.log.append({ kind: "message", chat, payload: { text, author: source === "route" ? "loom" : "user", queued: q.length } });
-      return { agentId: target, queued: q.length };
+      const item = this.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source, ...(opts.plan ? { plan: true } : {}) });
+      return { agentId: target, queued: this.queue.length, queueId: item.id };
     }
 
     // A user reply to a paused route's question resumes the route.
@@ -2069,14 +2149,11 @@ export class ProjectRuntime {
     // everything this turn produces belongs to the chat you sent from
     this.turnChat.set(target, chat);
     this.busySince.set(target, Date.now()); // the stale-session clock starts
-    // a queued prompt was logged when it was queued
-    if (!opts.fromQueue) {
-      this.log.append({
-        kind: "message",
-        chat,
-        payload: { text, author: source === "route" ? "loom" : "user" },
-      });
-    }
+    this.log.append({
+      kind: "message",
+      chat,
+      payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}) },
+    });
     await this.ensureStarted(target);
 
     const pendingBriefing = this.consumePendingBriefing(target);
@@ -2630,10 +2707,12 @@ export class ProjectRuntime {
     const holder = this.validHolder();
     if (!holder) return { interrupted: null };
     const agent = this.agent(holder);
-    // Stop means stop: prompts queued behind this turn don't start after it.
-    const dropped = this.promptQueue.get(holder)?.length ?? 0;
-    this.promptQueue.delete(holder);
-    if (dropped) this.log.append({ kind: "status", agentId: holder, payload: { state: "queue_cleared", dropped } });
+    // Stop means stop: what's queued doesn't start after it — it waits,
+    // paused, for you to resume, edit or clear it.
+    if ((opts.source ?? "user") === "user" && this.queue.length && !this.queue.paused) {
+      this.queue.setPaused(true, "you pressed Stop — resume to run what's queued");
+      this.log.append({ kind: "status", agentId: holder, payload: { state: "queue_paused", waiting: this.queue.length } });
+    }
     if (isAdapter(agent) && agent.busy()) {
       await agent.interrupt();
       return { interrupted: holder };

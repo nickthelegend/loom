@@ -452,6 +452,31 @@ window.__loomPageRev="%%BUILD_REV%%";
   .cchip .rm:hover{color:var(--foreground)}
   .cchip .rm svg{width:12px;height:12px}
   .cchip.up{opacity:.55}
+  /* the prompt queue, above what you're typing: what runs after this turn */
+  .cqueue{padding:2px 2px 6px;display:flex;flex-direction:column;gap:4px}
+  .cqhead{display:flex;align-items:center;gap:8px;font-size:10.5px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--muted-foreground);padding:0 2px}
+  .cqhead .cqwait{text-transform:none;letter-spacing:0;font-size:11px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cqhead .sp{flex:1}
+  .cqbtn{border:0;background:none;color:var(--muted-foreground);cursor:pointer;font:inherit;
+    text-transform:none;letter-spacing:0;font-size:11px;padding:2px 4px;border-radius:6px}
+  .cqbtn:hover{color:var(--foreground);background:var(--sidebar-accent)}
+  .cqitem{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px solid var(--border);
+    border-radius:9px;background:var(--sidebar-accent);font-size:12px}
+  .cqitem.paused{opacity:.65}
+  .cqn{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);padding-top:2px;flex:none}
+  .cqbody{flex:1;min-width:0}
+  .cqtext{white-space:pre-wrap;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;cursor:text}
+  .cqmeta{display:flex;align-items:center;gap:6px;margin-top:3px;font-size:10.5px;color:var(--muted-foreground)}
+  .cqto{font-family:var(--font-mono)}
+  .cqedit{width:100%;box-sizing:border-box;background:var(--background);color:var(--foreground);
+    border:1px solid var(--border);border-radius:7px;padding:6px 7px;font:inherit;resize:vertical;min-height:52px}
+  .cqacts{display:flex;align-items:center;gap:2px;flex:none}
+  .cqacts button{border:0;background:none;color:var(--muted-foreground);cursor:pointer;padding:3px;
+    border-radius:6px;display:inline-flex;font-size:11px}
+  .cqacts button:hover{color:var(--foreground);background:var(--background)}
+  .cqacts button:disabled{opacity:.3;cursor:default}
+  .cqacts svg{width:12px;height:12px}
   /* the @ / popover, mounted over the textarea */
   .cmenu{position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);z-index:30;
     background:var(--popover,var(--background));border:1px solid var(--border);border-radius:10px;
@@ -3380,7 +3405,8 @@ ${BRAND_SPRITE}
     opts.headers = opts.headers || {};
     opts.headers["Authorization"] = "Bearer " + state.token;
     if (opts.body) opts.headers["Content-Type"] = "application/json";
-    return fetch(path, opts).then(function(r){
+    return fetch(path, opts).catch(function(err){ daemonReached(false); throw err; }).then(function(r){
+      daemonReached(true);
       if (r.status === 401 && !retried) {
         return reauth().then(function(ok){
           if (!ok) { logout(); throw new Error("session revoked — pair again"); }
@@ -3393,6 +3419,12 @@ ${BRAND_SPRITE}
         return j;
       });
     });
+  }
+  /** Whether the daemon answered the last request — the status bar's "live" when no project socket is open. */
+  function daemonReached(up){
+    if (state.daemonUp === up) return;
+    state.daemonUp = up;
+    if (typeof drawStatusbar === "function") drawStatusbar();
   }
   function logout(){ state.token = ""; state.clientId = ""; localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CLIENT_ID_KEY); route(); }
 
@@ -3803,6 +3835,7 @@ ${BRAND_SPRITE}
       '<div class="composer" id="composerwrap"><form class="cbox" id="cform">' +
       '<div class="cmenu" id="cmenu" style="display:none"></div>' +
       '<div class="cchips" id="cchips" style="display:none"></div>' +
+      '<div class="cqueue" id="cqueue" style="display:none"></div>' +
       '<textarea id="box" class="cinput" rows="2" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
       '<div class="cskillsug" id="cskillsug" style="display:none"></div>' +
       '<div class="cpanel" id="cpanel" style="display:none"></div>' +
@@ -7760,6 +7793,8 @@ ${BRAND_SPRITE}
           // Loom Teams: a teammate's presence or a feed event. Daemon-level, so
           // it arrives on whichever project socket is open; re-read the view.
           if (frame.type === "team") { onTeamFrame(frame); return; }
+          // the prompt queue changed \u2014 sent, edited, reordered, paused
+          if (frame.type === "queue") { onQueueFrame(frame); return; }
           if (frame.type === "event" && frame.event) {
             // "an agent needs you" is the whole reason Loom exists, so it must
             // reach you even when this isn't the chat you're looking at, or the
@@ -7859,6 +7894,16 @@ ${BRAND_SPRITE}
         return;
       }
 
+      // Something is already running, or prompts are already lined up: this
+      // one joins the queue rather than being refused or jumping the line.
+      if (wouldQueue()) {
+        queueFromComposer(full, plan).catch(function(err){
+          toast(err.message);
+          box.value = full; autosizeBox(); // a refused queue leaves what you wrote where you wrote it
+        });
+        return;
+      }
+
       var chain = Promise.resolve();
       if (!state.auto && state.selected && state.selected !== p.holder) {
         chain = api("/api/projects/" + pid + "/handoff", { method: "POST", body: JSON.stringify({ to: state.selected }) });
@@ -7868,6 +7913,167 @@ ${BRAND_SPRITE}
         return api("/api/projects/" + pid + "/messages", { method: "POST",
           body: JSON.stringify({ text: full, agentId: (state.auto ? undefined : state.selected) || undefined, chat: chatId, plan: plan || undefined }) });
       }).then(refresh).catch(function(err){ toast(err.message); });
+    }
+
+    // ---- the prompt queue --------------------------------------------------
+    // What you've lined up while something else is running. Yours until it's
+    // sent: edit the text, change who takes it, reorder it, drop it. The
+    // daemon sends the head as soon as nothing is in its way, one at a time.
+
+    var queue = { items: [], paused: false, reason: "", waitingFor: "", editing: null };
+
+    function loadQueue(){
+      api("/api/projects/" + pid + "/queue").then(applyQueue).catch(function(){});
+    }
+    function applyQueue(j){
+      if (!j || !j.queue) return;
+      queue.items = j.queue;
+      queue.paused = !!j.paused;
+      queue.reason = j.reason || "";
+      queue.waitingFor = j.waitingFor || "";
+      if (queue.editing && !queue.items.filter(function(i){ return i.id === queue.editing; }).length) queue.editing = null;
+      drawQueue();
+    }
+    function onQueueFrame(frame){
+      if (frame.projectId && frame.projectId !== pid) return;
+      applyQueue(frame);
+    }
+    /** Who a queued prompt goes to, in the words the composer uses. */
+    function qTargetLabel(t){
+      if (!t || t.kind === "auto") return "Auto";
+      if (t.kind === "orchestra") return "Orchestrate";
+      return labelOf(t.agentId);
+    }
+    function qTargetValue(t){
+      if (!t || t.kind === "auto") return "auto";
+      if (t.kind === "orchestra") return "orchestra";
+      return t.agentId;
+    }
+    /** Every action here is the same round trip: act, then redraw from the server's answer. */
+    function qAct(path, opts){
+      return api("/api/projects/" + pid + "/queue" + path, opts)
+        .then(applyQueue)
+        .catch(function(err){ toast(err.message); loadQueue(); });
+    }
+    function queueTarget(){
+      // what the composer would send right now, as a queue target
+      if (state.cmode === "orch") {
+        var c = orchCfg(), roster = orchRoster();
+        return { kind: "orchestra", orchestrator: c.orchestrator || undefined,
+          workers: roster.filter(function(a){ return !c.off[a.id]; }).map(function(a){ return a.id; }),
+          maxParallel: c.parallel };
+      }
+      if (state.auto && !planState) return { kind: "auto" };
+      return { kind: "agent", agentId: state.selected || (state.project || {}).holder };
+    }
+    /** Something in the way? Then a send joins the queue instead of being refused. */
+    function wouldQueue(){
+      if (queue.items.length) return true;
+      var p = state.project || {};
+      if (state.cmode === "orch") {
+        var run = (orch.runs || []).filter(function(r){ return !isTerminalOrch(r.status); })[0];
+        return Boolean(run || (p.orchestra && !isTerminalOrch(p.orchestra.status)));
+      }
+      return (p.agents || []).some(function(a){ return a.busy; });
+    }
+    function isTerminalOrch(st){
+      return st === "completed" || st === "failed" || st === "aborted" || st === "moved";
+    }
+    /** Queue what's in the box (the composer's fallback when it can't send now). */
+    function queueFromComposer(text, plan){
+      var body = { text: text, target: queueTarget(), chat: chatId };
+      if (plan) body.plan = true;
+      return api("/api/projects/" + pid + "/queue", { method: "POST", body: JSON.stringify(body) })
+        .then(function(j){
+          applyQueue(j);
+          toast("queued — " + (queue.items.length) + " waiting");
+        });
+    }
+
+    function drawQueue(){
+      var el = document.getElementById("cqueue");
+      if (!el) return;
+      if (!queue.items.length) { el.style.display = "none"; el.innerHTML = ""; return; }
+      el.style.display = "flex";
+      var note = queue.paused ? (queue.reason || "paused") : (queue.waitingFor || "");
+      var h = '<div class="cqhead"><span>Queue · ' + queue.items.length + "</span>" +
+        (note ? '<span class="cqwait">' + esc(note) + "</span>" : "") +
+        '<span class="sp"></span>' +
+        '<button class="cqbtn" type="button" data-q="pause">' + (queue.paused ? "Resume" : "Pause") + "</button>" +
+        '<button class="cqbtn" type="button" data-q="clear">Clear</button></div>';
+      var agents = ((state.project || {}).agents || []).filter(function(a){ return a.tier !== "bridge"; });
+      queue.items.forEach(function(it, i){
+        var editing = queue.editing === it.id;
+        var opts = '<option value="auto"' + (qTargetValue(it.target) === "auto" ? " selected" : "") + ">Auto</option>" +
+          '<option value="orchestra"' + (qTargetValue(it.target) === "orchestra" ? " selected" : "") + ">Orchestrate</option>" +
+          agents.map(function(a){
+            return '<option value="' + esc(a.id) + '"' + (qTargetValue(it.target) === a.id ? " selected" : "") + ">" + esc(labelOf(a.id)) + "</option>";
+          }).join("");
+        h += '<div class="cqitem' + (queue.paused ? " paused" : "") + '" data-qid="' + esc(it.id) + '">' +
+          '<span class="cqn">' + (i + 1) + "</span>" +
+          '<div class="cqbody">' +
+          (editing
+            ? '<textarea class="cqedit" data-qedit="' + esc(it.id) + '">' + esc(it.text) + "</textarea>" +
+              '<div class="cqmeta"><button class="cqbtn" type="button" data-q="save">Save</button>' +
+              '<button class="cqbtn" type="button" data-q="cancel">Cancel</button>' +
+              "<span>⌘⏎ saves · Esc cancels</span></div>"
+            : '<div class="cqtext" data-q="edit" title="click to edit">' + esc(it.text) + "</div>" +
+              '<div class="cqmeta"><span>to</span><select class="cqto" data-q="target" aria-label="who takes this prompt">' + opts + "</select>" +
+              (it.plan ? "<span>· plan mode</span>" : "") +
+              (it.editedAt ? "<span>· edited</span>" : "") + "</div>") +
+          "</div>" +
+          '<div class="cqacts">' +
+          '<button type="button" data-q="up" title="move up" aria-label="move up"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
+          '<button type="button" data-q="down" title="move down" aria-label="move down"' + (i === queue.items.length - 1 ? " disabled" : "") + ">↓</button>" +
+          '<button type="button" data-q="rm" title="remove" aria-label="remove">' + ICONS.x + "</button>" +
+          "</div></div>";
+      });
+      el.innerHTML = h;
+      bindQueue(el);
+    }
+
+    function bindQueue(el){
+      el.querySelector('[data-q="pause"]').onclick = function(){
+        qAct("/pause", { method: "POST", body: JSON.stringify({ paused: !queue.paused }) });
+      };
+      el.querySelector('[data-q="clear"]').onclick = function(){
+        if (queue.items.length > 1 && !window.confirm("Drop all " + queue.items.length + " queued prompts?")) return;
+        qAct("", { method: "DELETE" });
+      };
+      Array.prototype.forEach.call(el.querySelectorAll(".cqitem"), function(row){
+        var id = row.getAttribute("data-qid");
+        var at = queue.items.map(function(x){ return x.id; }).indexOf(id);
+        var find = function(sel){ return row.querySelector(sel); };
+        var text = find('[data-q="edit"]');
+        if (text) text.onclick = function(){ queue.editing = id; drawQueue(); };
+        var sel = find('[data-q="target"]');
+        if (sel) sel.onchange = function(){
+          qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ target: sel.value }) });
+        };
+        var box = find("[data-qedit]");
+        if (box) {
+          box.focus();
+          var save = function(){
+            var v = box.value.trim();
+            queue.editing = null;
+            if (!v || v === (queue.items[at] || {}).text) return drawQueue();
+            qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ text: v }) });
+          };
+          box.onkeydown = function(e){
+            if (e.key === "Escape") { e.preventDefault(); queue.editing = null; drawQueue(); }
+            else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
+          };
+          find('[data-q="save"]').onclick = save;
+          find('[data-q="cancel"]').onclick = function(){ queue.editing = null; drawQueue(); };
+        }
+        find('[data-q="up"]').onclick = function(){
+          qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ to: Math.max(0, at - 1) }) });
+        };
+        find('[data-q="down"]').onclick = function(){
+          qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ to: at + 1 }) });
+        };
+        find('[data-q="rm"]').onclick = function(){ qAct("/" + encodeURIComponent(id), { method: "DELETE" }); };
+      });
     }
 
     // ---- composer plumbing -------------------------------------------------
@@ -9061,6 +9267,14 @@ ${BRAND_SPRITE}
       var workers = roster.filter(function(a){ return !c.off[a.id]; }).map(function(a){ return a.id; });
       if (!workers.length) { toast("pick at least one worker"); return; }
       var btn = document.getElementById("orchsend");
+      // One goal runs at a time: a second one waits in the queue and starts
+      // itself when the first finishes (edit or reorder it while it waits).
+      if (wouldQueue() && !c.runOn) {
+        queueFromComposer(goal, planState).then(function(){
+          box.value = ""; autosizeBox(); attach = []; drawAttach();
+        }).catch(function(err){ toast(err.message); });
+        return;
+      }
       if (btn) btn.disabled = true;
       // Run on a runner (D69): the hub queues a start job; the runner clones and runs it there.
       var target = c.runOn && onlineRunners(pid, false).filter(function(r){ return r.deviceId === c.runOn; })[0];
@@ -9786,6 +10000,7 @@ ${BRAND_SPRITE}
     if (desktop) loadGitDelivery(pid);
 
     bindComposer();
+    loadQueue();
   }
 
   // ---- Loom Teams, Phase 1: see each other (docs/teams-architecture.md) -----
@@ -10941,7 +11156,11 @@ ${BRAND_SPRITE}
         esc(p.name || p.id) + ": " + esc(gi.name) + ' \\u2014 click to change">' + gi.icon + esc(gi.short) + "</button>";
     }
     el.innerHTML =
-      '<span class="sit"><span class="sdot' + (state.wsLive ? "" : " off") + '"></span>' + (state.wsLive ? "live" : "offline") + "</span>" +
+      // a project's live socket when one is open; otherwise whether the daemon itself answers
+      (function(){
+        var up = p ? state.wsLive : state.daemonUp !== false;
+        return '<span class="sit"><span class="sdot' + (up ? "" : " off") + '"></span>' + (up ? "live" : "offline") + "</span>";
+      })() +
       '<span class="sit">' + esc(location.host) + "</span>" +
       (p ? '<span class="sit">baton ' + esc(p.holder || "\\u2014") + "</span>" : "") +
       (p && p.costUsd > 0

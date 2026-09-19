@@ -182,7 +182,7 @@ export interface LandingState {
   checks?: { failing: string[]; pending: string[]; passing: number };
   reviews: number;
   reviewedSha?: string;
-  review?: { state: "success" | "failure" | "skipped"; reviewer: string | null; high: number; findings: number; at: number; overridden?: string };
+  review?: { state: "success" | "failure" | "skipped"; reviewer: string | null; high: number; findings: number; at: number; overridden?: string; overriddenSha?: string };
   /** Why it waits on a human. */
   reason?: string;
   /** The owner clicked Land: keep going (pushrebase-lite, auto-merge) until merged (D56). */
