@@ -131,6 +131,7 @@ jobs:
         run: |
           test -f loompad.apk || { echo "no apk was produced"; exit 1; }
           V="${GITHUB_REF_NAME#v}"
+          V="${V//\//-}"   # a dry run from a branch like ci/x must still make a valid file name
           mv loompad.apk "loompad-${V}-android.apk"
           ls -la *.apk
       - uses: actions/upload-artifact@v4
