@@ -57,6 +57,36 @@ class ScriptedOrchestrator extends AdapterBase {
 }
 registerAgentKind("scripted", (cfg, dir) => new ScriptedOrchestrator(cfg.id, "scripted", dir));
 
+/** A worker that stops mid-turn to ask (like opencode's question tool) and waits until interrupted. */
+class Asker extends AdapterBase {
+  private stopped = false;
+  async available() {
+    return true;
+  }
+  async start() {}
+  async stop() {}
+  async interrupt() {
+    this.stopped = true;
+  }
+  async diff() {
+    return "";
+  }
+  async send(input: SendInput): Promise<void> {
+    this._busy = true;
+    this.stopped = false;
+    if (/answer: use (\S+)/.test(input.text)) {
+      fs.writeFileSync(path.join(this.projectDir, /answer: use (\S+)/.exec(input.text)![1]!), "ok\n");
+      this.emit({ kind: "message", payload: { text: "created it" } });
+    } else {
+      this.emit({ kind: "needs_input", payload: { question: "Which file name?" } });
+      for (let i = 0; i < 2000 && !this.stopped; i++) await new Promise((r) => setTimeout(r, 25));
+    }
+    this.emit({ kind: "run_complete", payload: {} });
+    this._busy = false;
+  }
+}
+registerAgentKind("asker", (cfg, dir) => new Asker(cfg.id, "asker", dir));
+
 const loom = (actions: unknown[]) => "Here's the plan.\n```loom\n" + JSON.stringify({ actions }) + "\n```";
 
 let rt: ProjectRuntime;
@@ -275,6 +305,23 @@ describe("orchestra runs", () => {
     expect(done.status).toBe("completed");
   });
 
+  it("a worker that stops mid-turn to ask doesn't hang the goal: the question goes to the orchestrator", async () => {
+    await openProject();
+    rt.addAgent("asker", { id: "asker", role: "worker" });
+    script = [
+      loom([{ type: "spawn", id: "t1", title: "name a file", agent: "asker", prompt: "create the file" }]),
+      // the review shows the question; the orchestrator answers with a follow-up
+      loom([{ type: "send", task: "t1", message: "answer: use named.txt" }]),
+      loom([{ type: "done", summary: "answered and done" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "ask me", orchestrator: "conductor" });
+    await waitUntil(() => rt.orchestra.get(run.id)!.status === "completed", { timeoutMs: 20_000 });
+    const review = seen.find((i) => i.text.includes("stopped to ask"));
+    expect(review?.text).toContain("Which file name?");
+    expect(review?.text).toContain('`send` action (task "t1")');
+    expect(fs.readFileSync(path.join(rt.orchestra.get(run.id)!.dir, "named.txt"), "utf8")).toBe("ok\n");
+  });
+
   it("asks again when the orchestrator forgets the actions block, then waits for the human", async () => {
     await openProject();
     script = ["I think we should do stuff.", "Still no block, sorry."];
@@ -285,7 +332,9 @@ describe("orchestra runs", () => {
     expect(seen[1]!.text).toContain("no ```loom actions block");
 
     script = [loom([{ type: "done", summary: "after human" }])];
-    await rt.orchestra.reply(run.id, "just finish");
+    const answered = await rt.orchestra.reply(run.id, "just finish");
+    // answered means the orchestrator is on it — not still "waiting on you"
+    expect(answered.status).toBe("reviewing");
     await waitUntil(() => rt.orchestra.get(run.id)!.status === "completed");
     r = rt.orchestra.get(run.id)!;
     expect(r.summary).toBe("after human");

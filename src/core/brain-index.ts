@@ -472,10 +472,14 @@ export function findConflicts(memories: Memory[]): Conflict[] {
       const b = live[j]!;
       if (a.kind !== b.kind) continue;
       const sim = cosine(vecs.get(a.id)!, vecs.get(b.id)!);
-      if (sim < 0.45 || sim >= 0.92) continue;
+      if (sim < 0.45) continue;
+      // Negation first, at any similarity: "we use tabs" vs "we do not use
+      // tabs" is nearly identical text (≥ .92) and the plainest contradiction
+      // there is. Skipping it as a "near-duplicate" left both beliefs in the
+      // brain with nothing flagging them — dedupe only merges exact text.
       if (negationPair(a.text, b.text)) {
         out.push({ a, b, similarity: round(sim), signal: "negation" });
-      } else if (sim >= 0.6 && (a.kind === "decision" || a.kind === "convention" || a.kind === "constraint")) {
+      } else if (sim >= 0.6 && sim < 0.92 && (a.kind === "decision" || a.kind === "convention" || a.kind === "constraint")) {
         out.push({ a, b, similarity: round(sim), signal: "same-topic-divergent" });
       }
     }

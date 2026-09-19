@@ -1,0 +1,92 @@
+{
+  "F1": {
+    "status": "PASS",
+    "evidence": "run omu8u3c4q completed in 2 rounds; tasks t1:opencode:done; loom/orchestra/omu8u3c4q/main:hello.txt=\"hi\" · $0.035",
+    "at": "2026-09-19T20:23:37.753Z"
+  },
+  "F3": {
+    "status": "PASS",
+    "evidence": "applied into main; hello.txt on the project branch",
+    "at": "2026-09-19T20:23:37.892Z"
+  },
+  "F2": {
+    "status": "PASS",
+    "evidence": "status completed; plans/omu8u4ppq: PLAN.md, t1.md",
+    "at": "2026-09-19T20:24:20.172Z"
+  },
+  "F4": {
+    "status": "PASS",
+    "evidence": "aborted: aborted by the user; tasks (none yet)",
+    "at": "2026-09-19T20:24:24.844Z"
+  },
+  "F5": {
+    "status": "PASS",
+    "evidence": "asked \"Which file name should I create?\" → replied → completed; answer.txt=\"ok\"",
+    "at": "2026-09-19T20:36:53.020Z"
+  },
+  "G1": {
+    "status": "PASS",
+    "evidence": "status/diff/branches(7)/log match git",
+    "at": "2026-09-19T20:24:34.132Z"
+  },
+  "G2": {
+    "status": "PASS",
+    "evidence": "\"-\" ref → 400; worktree e2e-wt created/listed/removed",
+    "at": "2026-09-19T20:24:34.357Z"
+  },
+  "G3": {
+    "status": "PASS",
+    "evidence": "staged, committed \"e2e: answer is 43\", pushed to origin",
+    "at": "2026-09-19T20:24:34.692Z"
+  },
+  "G4": {
+    "status": "PASS",
+    "evidence": "tree/file/find/grep real; ../etc/passwd → 404",
+    "at": "2026-09-19T20:37:04.717Z"
+  },
+  "H1": {
+    "status": "PASS",
+    "evidence": "create/pin/search/delete; empty → 400",
+    "at": "2026-09-19T20:24:34.743Z"
+  },
+  "H2": {
+    "status": "PASS",
+    "evidence": "create/move/delete; empty title → 400",
+    "at": "2026-09-19T20:24:34.753Z"
+  },
+  "H3": {
+    "status": "PASS",
+    "evidence": "skills=98, catalog=98; authored + removed e2e-skill",
+    "at": "2026-09-19T20:33:30.481Z"
+  },
+  "H4": {
+    "status": "PASS",
+    "evidence": "catalog 19 rows; add/remove e2e-fs in config",
+    "at": "2026-09-19T20:33:31.711Z"
+  },
+  "I1": {
+    "status": "PASS",
+    "evidence": "turns=8 usd=0.1013 agents=claude-code,opencode",
+    "at": "2026-09-19T20:24:35.872Z"
+  },
+  "I2": {
+    "status": "PASS",
+    "evidence": "over budget → 409 {\"error\":\"budget_exceeded\",\"agentId\":\"claude-code\",\"budgetUsd\":0.0001,\"spentTodayUsd\":0.10129790000000001,\"message\":\"age",
+    "at": "2026-09-19T20:24:36.383Z"
+  },
+  "I3": {
+    "status": "PASS",
+    "evidence": "logs 5 records; activity lists the project",
+    "at": "2026-09-19T20:24:36.388Z"
+  },
+  "I4": {
+    "status": "PASS",
+    "evidence": "firing → {\"ok\":true,\"actions\":[{\"project\":\"loom-e2e-repo-work-sN19FH\",\"agent\":\"codex\",\"alert\":\"HighErrorRate\",\"action\":\"quarantin · resolved → {\"ok\":true,\"actions\":[{\"project\":\"loom-e2e-repo-work-sN19FH\",\"agent\":\"codex\",\"alert\":\"HighErrorRate\",\"action\":\"recovered",
+    "at": "2026-09-19T20:24:36.943Z"
+  },
+  "J1": {
+    "status": "PASS",
+    "evidence": "mode=pty; typed echo → \"loom-42\" came back over WS; resize/signal/close 200",
+    "at": "2026-09-19T20:24:37.710Z"
+  }
+}
