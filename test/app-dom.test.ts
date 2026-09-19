@@ -15,6 +15,7 @@
  * developer is running, and the loser serves someone a stale app.
  */
 
+import fs from "node:fs";
 import { JSDOM, VirtualConsole } from "jsdom";
 import WebSocket from "ws";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -23,6 +24,9 @@ import { APP_HTML } from "../src/daemon/app-page.js";
 import { DaemonClient } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
+
+/** The version the app should show: package.json's, whatever it is today. */
+const PKG_VERSION: string = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 let daemon: LoomDaemon;
 let baseUrl: string;
@@ -844,7 +848,7 @@ describe("web app · settings", () => {
     await openSection(m, "updates");
     await waitUntil(() => !!$(m, "#setpane .abgrid"));
     // the version the daemon actually reports, not a hardcoded page string
-    expect(text(m, "#setpane .abgrid")).toMatch(/0\.1\.0/);
+    expect(text(m, "#setpane .abgrid")).toContain(PKG_VERSION);
     expect($(m, "#setpane .updpill"), "an up-to-date / behind pill").toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
   });
@@ -863,7 +867,7 @@ describe("web app · settings", () => {
     const m = mount();
     await openSection(m, "about");
     await waitUntil(() => !!$(m, "#setpane .abmark"));
-    expect(text(m, "#setpane")).toMatch(/0\.1\.0/);
+    expect(text(m, "#setpane")).toContain(PKG_VERSION);
     const repo = $(m, '#setpane a[href*="github.com"]');
     expect(repo, "a GitHub link").toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
