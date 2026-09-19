@@ -185,8 +185,13 @@ describe("prompts sent to a busy agent", () => {
     expect(r.log.list({ kinds: ["error"] }).some((e) => /queued prompt not sent/.test(String(e.payload.message)))).toBe(true);
   });
 
-  it("refuses an agent this project doesn't have, before it's queued", async () => {
+  it("refuses an agent this project doesn't have — when queued, and when retargeted", async () => {
     const r = await open();
     expect(() => r.enqueue({ text: "hi", target: { kind: "agent", agentId: "nope" } })).toThrow(/no agent "nope"/);
+    r.queue.setPaused(true, "you paused the queue");
+    const item = r.enqueue({ text: "hi", target: { kind: "agent", agentId: "echo" } });
+    expect(() => r.editQueued(item.id, { target: { kind: "agent", agentId: "nope" } })).toThrow(/no agent "nope"/);
+    // and the prompt is untouched: a refused change changes nothing
+    expect(r.queue.snapshot().items[0]).toMatchObject({ text: "hi", target: { kind: "agent", agentId: "echo" } });
   });
 });

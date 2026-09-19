@@ -1723,7 +1723,7 @@ export class LoomDaemon {
         const b = (req.body ?? {}) as { text?: string; target?: unknown; plan?: boolean; to?: number };
         try {
           if (b.text !== undefined || b.target !== undefined || b.plan !== undefined) {
-            rt.queue.edit(String(req.params.itemId), {
+            rt.editQueued(String(req.params.itemId), {
               ...(b.text !== undefined ? { text: String(b.text) } : {}),
               ...(b.target !== undefined ? { target: parseTarget(b.target) } : {}),
               ...(b.plan !== undefined ? { plan: Boolean(b.plan) } : {}),

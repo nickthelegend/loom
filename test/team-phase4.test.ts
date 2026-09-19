@@ -370,26 +370,41 @@ describe("Phase 4: land safely", () => {
     expect((await L("alice").poll(run)).state).toBe("green");
   });
 
-  it("an override made while a review runs stands when the review finishes (D61)", async () => {
+  it("an override stands when the review that was running finishes (D61)", async () => {
     const run = M.alice!.rt.orchestra.get(goal.id)!;
-    const before = { review: run.landing!.review, reviews: run.landing!.reviews, fixAttempts: run.landing!.fixAttempts, status: run.status };
-    let release!: () => void;
-    reviewGate = { wait: new Promise<void>((r) => (release = r)), high: true };
-    const asked = reviews.length;
+    const before = { review: run.landing!.review, fixAttempts: run.landing!.fixAttempts, status: run.status };
     const sha = run.landing!.headSha!;
-    const pending = L("alice").review(run, sha);
-    await waitUntil(() => reviews.length > asked);
+
+    // Only this commit's statuses: the landing loop is live, and another goal's
+    // poll can post between two lines of this test.
+    const forSha = () => statuses.filter((x) => x.sha === sha);
+
+    // The owner overrode this commit; a review of it is still on its way back.
     await L("alice").overrideReview(goal.id, "checked by hand");
-    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" });
-    release();
-    await pending;
+    expect(forSha().at(-1)).toMatchObject({ state: "success" });
+    expect(run.landing!.review).toMatchObject({ overridden: "checked by hand", overriddenSha: sha });
+
+    // It lands with a high finding — and the owner's decision stands.
+    // One review per goal at a time: a call made while another is in flight
+    // returns without asking anyone, so keep asking until this one really runs.
+    reviewGate = { wait: Promise.resolve(), high: true };
+    const asked = reviews.length;
+    for (let i = 0; i < 40 && reviews.length === asked; i++) {
+      await L("alice").review(run, sha);
+      if (reviews.length > asked) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
     reviewGate = null;
+    expect(reviews.length).toBeGreaterThan(asked); // this test's review, not someone else's
     expect(run.landing!.review).toMatchObject({ state: "failure", high: 1, overridden: "checked by hand", overriddenSha: sha });
-    expect(statuses.at(-1)).toMatchObject({ sha, state: "success" }); // not clobbered by the late failure
+    // the status ends where the owner put it, not at the review's "reviewing…"
+    expect(forSha().at(-1)).toMatchObject({ state: "success" });
+    expect(String(forSha().at(-1)!.description)).toContain("checked by hand");
+    expect(forSha().filter((x) => x.state === "failure")).toEqual([]);
     expect(run.landing!.fixAttempts).toBe(before.fixAttempts); // and the goal isn't sent back
     expect(run.status).toBe(before.status);
     run.landing!.review = before.review;
-  });
+  }, 60_000);
 
   it("Land brings fresh main in and asks GitHub to merge; merged goals post their cost (D56, D64)", async () => {
     const run = M.alice!.rt.orchestra.get(goal.id)!;

@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported signed-out, and the status bar says **live**, not offline, before a
   project is open.
 - **A reply that lands after its window closed** no longer throws from a redraw.
+- **An overridden review leaves its status where the owner put it.** A review
+  coming back to a commit that was already overridden kept the decision but
+  posted nothing, leaving its own "reviewing…" status pending — on a repo that
+  requires `loom/review`, for ever.
+- **Retargeting a queued prompt** to an agent the project doesn't have is
+  refused when you make the change, not when the queue reaches it.
 
 ### Loom Teams, Phase 6: land in turn, hear it now
 

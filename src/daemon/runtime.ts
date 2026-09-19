@@ -67,7 +67,7 @@ import {
 } from "../core/skill-install.js";
 import { resolveSteps, RouteEngine } from "../core/routes.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
-import { PromptQueue, type QueueInput, type QueueItem, type QueueState } from "../core/prompt-queue.js";
+import { PromptQueue, type QueueInput, type QueueItem, type QueueState, type QueueTarget } from "../core/prompt-queue.js";
 import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { detectAdes } from "../core/ades.js";
@@ -2036,14 +2036,26 @@ export class ProjectRuntime {
   /** Line a prompt up; it goes as soon as nothing ahead of it is in the way. */
   enqueue(input: QueueInput): QueueItem {
     const t = input.target ?? { kind: "auto" as const };
-    if (t.kind === "agent") {
-      const agent = this.agents.get(t.agentId);
-      if (!agent) throw new Error(`no agent "${t.agentId}" in this project`);
-      if (!isAdapter(agent)) throw new Error(`agent "${t.agentId}" is a bridge (read-only) — it cannot take turns`);
-    }
+    if (t.kind === "agent") this.mustTakeTurns(t.agentId);
     const item = this.queue.add(input);
     this.kickQueue();
     return item;
+  }
+
+  /** Change a waiting prompt. A target this project can't run is refused now,
+   * not when the queue reaches it and has to stop. */
+  editQueued(itemId: string, patch: { text?: string; target?: QueueTarget; plan?: boolean }): QueueItem {
+    if (patch.target?.kind === "agent") this.mustTakeTurns(patch.target.agentId);
+    const item = this.queue.edit(itemId, patch);
+    this.kickQueue();
+    return item;
+  }
+
+  /** An agent in this project that can hold the baton, or the reason it can't. */
+  private mustTakeTurns(agentId: string): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error(`no agent "${agentId}" in this project`);
+    if (!isAdapter(agent)) throw new Error(`agent "${agentId}" is a bridge (read-only) — it cannot take turns`);
   }
 
   /** Why the head can't go yet, or null when it can. */
@@ -2099,6 +2111,10 @@ export class ProjectRuntime {
     const head = this.queue.peek();
     if (!head || this.queueBlocker(head)) return;
     this.draining = true;
+    // Out of the queue, then sent: what you can still see is what hasn't gone.
+    // (Leaving it in place until the send returns would survive a crash
+    // mid-dispatch, at the price of a prompt you can edit or remove after it
+    // has already reached the agent — a worse thing to be wrong about.)
     const item = this.queue.shift()!;
     try {
       await this.dispatchQueued(item);
