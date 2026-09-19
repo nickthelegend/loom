@@ -143,6 +143,13 @@ on them. Later sections implement them.
 | D76 | After the owner is back | **The runner finishes the goal** | No ping-pong. "Bring back" moves it home the same way, when the owner chooses. |
 | D77 | The runner's GitHub access | **A fine-grained token, checked** | `loom runner join` takes a fine-grained PAT or uses `gh auth`; `loom runner doctor` warns when it can do more than contents and pull requests on the shared repos. Stored 0600 on the runner, never sent through the hub. |
 | D78 | Packaging | **A Docker image and an installer** | `Dockerfile.runner` and `loom runner install` (a systemd or launchd unit). Nothing is deployed to anyone's cloud account by Loom. |
+| **Phase 6: land in turn, hear it now** (settled 2026-09-20) |||
+| D79 | The landing slot (D20's missing half) | **A hub lease per lane on `.loom/landing/<lane>`, that path its own hard zone** | Every hub (MemoryHub, `loom hub`, the SQL) refuses a second claimer atomically through D31's machinery, with no new hub API. Claimed under the run id `<run>:land`, so releasing the slot never drops the goal's task leases (D36). Stale after 10 minutes like any lease (D12). One zone per lane: a shared `.loom/landing/**` zone would make every lane one lane. |
+| D80 | When Land takes the train | **The base branch has no merge queue, on a team repo** | Read from `gh api repos/{r}/rules/branches/{base}` (cached 10 min per repo). A merge queue keeps Phase 4's path (`gh pr merge --auto`). No team hub, or a stack (D59), keeps auto-merge. |
+| D81 | Lanes | **`landing.lanes` path scopes, Aviator-style** | A goal takes every lane whose globs match a file in its PR's diff (`gh pr diff --name-only`); none configured or none matching is the lane `main`. Lanes are taken in sorted order, all or none (look first, roll back a lost race). Only the reviewed `loom.team.json` can split lanes. A diff Loom can't read waits for every lane. |
+| D82 | A turn | **Fresh base, fast tests, push, green on that head, then `gh pr merge --squash`** | The holder merges fresh base in (D58's conflict handling), runs `landing.fastTest`, pushes, and waits for the PR's required checks on the new head. A red check, or a blocking review, gives the lane back and goes to the fix loop; the goal requeues itself once green (`landRequested` stays). Waiters show `queued` ("waiting behind bob's goal in lane api") and retry each tick and at once on `lease_released` / `goal_landed`. A PR still waiting for an approval doesn't take a turn. Feed: `land_queued`, `land_turn`. |
+| D83 | GitHub events without an App | **Repo webhooks with a per-team secret, into `loom hub` or the hosted Edge Function** | Owners create and rotate the secret (`webhookSecret`). `POST /github/webhook/:teamId` (self-hosted) and the `github-webhook` Edge Function (hosted) check `X-Hub-Signature-256` (HMAC-SHA256, constant time): unknown team 404, bad or missing signature 401, `ping` acknowledged. Events for shared repos land as system events. `loom team webhook [--install]` prints the URL and secret, or makes the webhook with `gh`. |
+| D84 | Webhooks and polling together | **One mapping, the same dedupe keys, and an immediate poll** | `core/github-events.ts` maps both `gh` polling and webhook deliveries, keyed per fact (a failing check is per check, per commit), so running both never posts a fact twice. A `check_failed`, `check_passed` or `pr_merged` on a goal's PR polls that goal now instead of at the next 30s tick. Polling stays as the fallback. |
 | **Build approach** |||
 | D27 | Build before a live Supabase exists | **In-memory hub + real migrations** | The hub protocol is tested against an in-memory hub with two real daemons as two members; SQL, RLS and Edge Functions ship ready to deploy. |
 
@@ -605,6 +612,25 @@ The original Phase 4 plan:
 Not done: headless sign-in to the hosted hub on a runner box needs the GitHub
 OAuth App (then `loom runner join` takes the session from the paste-the-URL
 flow); CI minutes per goal and auto-fixing lower stack PRs stay open.
+
+**Phase 6: land in turn, hear it now.** Built per D79–D84. Status on 2026-09-20:
+
+| Piece | Status |
+|---|---|
+| Pure decisions (`src/core/team-landing.ts`): lanes from a diff, lane claims, routing (queue / train / auto), a turn's next step | ✅ built, tested |
+| The landing train in the daemon (`src/daemon/landing.ts`): the slot as a lease per lane, queued waiters woken by the feed, a turn (fresh base, fast tests, push, green, `gh pr merge --squash`), a red check gives the lane back and requeues when green | ✅ built; two members tested end to end on a real hub, a bare origin and a fake GitHub that squash-merges for real |
+| Policy: `landing.lanes` in `loom.team.json` | ✅ built, tested |
+| Feed: `land_queued`, `land_turn` (SQL `0009_phase6.sql`) | ✅ built; SQL tested on Postgres 16, not yet applied to the hosted project |
+| GitHub mapping (`src/core/github-events.ts`): webhook deliveries and `gh` polling produce the same dedupe keys; signature checks | ✅ built, tested (key equality included) |
+| `loom hub`: `POST /github/webhook/:teamId`, owner-only webhook secrets | ✅ built; tested over real HTTP (404, 401, ping, 202, heard by subscribers) |
+| Hosted: webhook secrets and ingest in SQL (`0009_phase6.sql`), the `github-webhook` Edge Function (`supabase/functions/`) | 🔨 built; SQL and the handler tested, not deployed (needs a Supabase access token: `supabase functions deploy github-webhook --no-verify-jwt`) |
+| Landing polls a goal the moment a check result or merge for its PR reaches the feed | ✅ built, tested end to end with a signed webhook |
+| CLI `loom team webhook [--repo] [--install] [--rotate]`; REST `POST /api/team/webhook` | ✅ built |
+| UI: `queued` landing chip (desktop and phone), feed lines for the train and for webhook reviews | ✅ built |
+
+Known gaps: a pull request's changed files (used by the live team context,
+D48) only come from polling, so a `pr_opened` that a webhook posts first has
+none. Stacks keep landing through auto-merge even without a merge queue.
 
 ## 14. What Loom already has that this builds on
 

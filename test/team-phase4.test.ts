@@ -369,6 +369,8 @@ describe("Phase 4: land safely", () => {
 
   it("Land brings fresh main in and asks GitHub to merge; merged goals post their cost (D56, D64)", async () => {
     const run = M.alice!.rt.orchestra.get(goal.id)!;
+    // a repo with a merge queue: Land asks GitHub to merge (without one, Phase 6's train lands it — team-phase6)
+    rules = [{ type: "merge_queue" }];
     // main moved on meanwhile
     fs.writeFileSync(path.join(seed, "README.md"), "hello\n");
     git(seed, "add", "-A");

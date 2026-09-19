@@ -3573,7 +3573,7 @@ ${BRAND_SPRITE}
     failed: ["failed", "err"], aborted: ["aborted", "off"], moved: ["moved", "off"] };
   // Loom Teams, Phase 4: a goal PR's way to main (LandingState.state, D52\\u2013D63)
   var LAND_ST = { open: ["PR open", "off"], pending: ["checks running", "live"], green: ["green", "ok"], failing: ["failing", "err"],
-    fixing: ["fixing", "live"], needs_human: ["needs you", "warn"], landing: ["landing", "live"], merged: ["merged", "ok"], closed: ["closed", "off"] };
+    fixing: ["fixing", "live"], needs_human: ["needs you", "warn"], queued: ["queued", "off"], landing: ["landing", "live"], merged: ["merged", "ok"], closed: ["closed", "off"] };
   function landPill(l){
     var s = LAND_ST[l && l.state] || [(l && l.state) || "\\u2014", "off"];
     return '<span class="opill ' + s[1] + '" data-lstate="' + esc(l && l.state) + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span>";
@@ -9314,6 +9314,7 @@ ${BRAND_SPRITE}
           "<b>loom/review</b>: " + said + (rv.reviewer ? " \\u00b7 " + esc(labelOf(rv.reviewer)) : ""));
       }
       if (st === "needs_human" && l.reason) h += line("warn", ICONS.alert, esc(l.reason));
+      if (st === "queued" && l.reason) h += line("", ICONS.branch, "Queued to land \\u2014 " + esc(l.reason) + ((l.lanes || []).length ? " (lane" + (l.lanes.length === 1 ? " " : "s ") + l.lanes.map(function(x){ return "<code>" + esc(x) + "</code>"; }).join(", ") + ")" : ""));
       if (l.adoptedBy) h += line("", ICONS.team, "Adopted by <b>" + esc(l.adoptedBy) + "</b> \\u2014 they\\u2019re making it green, then hand it back");
       if (run.from) h += line("", ICONS.team, "You adopted <b>" + esc(run.from.owner || "a teammate") + "</b>\\u2019s PR #" + Number(run.from.pr) + "; it goes back to them when green");
       if ((l.stack || []).length) {
@@ -10098,6 +10099,9 @@ ${BRAND_SPRITE}
       case "check_passed": return { icon: ICONS.check, cls: "ok", html: "checks passed on " + pr };
       case "review_requested": return { icon: ICONS.pr, cls: "", html: "review requested on " + pr + title };
       case "review_submitted": {
+        // a human's review, from a GitHub webhook (Phase 6, D83)
+        if (m.review) return { icon: ICONS.pr, cls: m.review === "changes_requested" ? "warn" : m.review === "approved" ? "ok" : "",
+          html: "<b>" + esc(m.by || "someone") + "</b> " + (m.review === "approved" ? "approved" : m.review === "changes_requested" ? "asked for changes on" : "reviewed") + " " + pr + title };
         // Loom's own cross-vendor review (D60) says who reviewed and how it went
         if (!m.reviewer && !m.state) return { icon: ICONS.pr, cls: "", html: who + " reviewed " + pr + title };
         var hi = Number(m.high || 0);
@@ -10111,6 +10115,9 @@ ${BRAND_SPRITE}
       case "goal_adopted": return { icon: ICONS.team, cls: "live", html: "<b>" + esc(m.by || e.github || "someone") + "</b> adopted " + (m.owner ? "<b>" + esc(m.owner) + "</b>\u2019s " : "") + pr };
       case "goal_returned": return { icon: ICONS.team, cls: "ok", html: "<b>" + esc(m.by || e.github || "someone") + "</b> handed " + pr + " back" + (m.owner ? " to <b>" + esc(m.owner) + "</b>" : "") + " \u2014 green" };
       case "check_flaky": return { icon: ICONS.refresh, cls: "", html: "<code>" + esc(m.check || "a check") + "</code> was flaky on " + pr + " \u2014 failed, then passed on rerun" };
+      // Phase 6: the landing train (D79\\u2013D82)
+      case "land_queued": return { icon: ICONS.branch, cls: "", html: who + "\u2019s " + pr + " is queued to land" + (m.lane ? " in lane <code>" + esc(m.lane) + "</code>" : "") + (m.behind ? ", behind <b>" + esc(m.behind) + "</b>" : "") };
+      case "land_turn": return { icon: ICONS.branch, cls: "live", html: who + "\u2019s " + pr + " is landing now" + (Array.isArray(m.lanes) && m.lanes.length ? " (lane" + (m.lanes.length === 1 ? " " : "s ") + m.lanes.map(function(x){ return "<code>" + esc(x) + "</code>"; }).join(", ") + ")" : "") };
       // Phase 5: runners and deploys (D69, D72, D75) \\u2014 Loom reads deploys, never runs them
       case "goal_moved": return { icon: ICONS.orchestra, cls: "live", html: who + " moved " + teamFeedGoal(m.runId, c) + " to <b>" + esc(m.to || "a runner") + "</b>" };
       case "deploy_started": case "deploy_succeeded": case "deploy_failed": {
@@ -10413,7 +10420,7 @@ ${BRAND_SPRITE}
   // GET /team/landing per project: its adoptable list is teammates' goal PRs
   // whose owner ran out of fixes, or went quiet with checks failing.
   var teamLandings = {}; // pid \\u2192 {adoptable, goals} | {err} | {loading: true}
-  var TEAM_LANDING_EVENTS = { goal_needs_someone: 1, goal_adopted: 1, goal_returned: 1, goal_landed: 1, check_failed: 1, check_passed: 1, pr_merged: 1, pr_closed: 1 };
+  var TEAM_LANDING_EVENTS = { goal_needs_someone: 1, goal_adopted: 1, goal_returned: 1, goal_landed: 1, check_failed: 1, check_passed: 1, pr_merged: 1, pr_closed: 1, land_queued: 1, land_turn: 1 };
   function loadTeamLanding(pid, force){
     var cur = teamLandings[pid];
     if (cur && (cur.loading || !force)) return;

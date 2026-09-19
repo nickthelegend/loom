@@ -13,7 +13,8 @@
  *     "agents": { "allow": ["claude-code", "codex", "antigravity-cli"] },
  *     "delivery": { "protected": ["main", "release/*"] },
  *     "orchestra": { "maxParallelPerMember": 6, "teamMaxConcurrentAgents": 20 },
- *     "landing": { "fastTest": "npm test -- --changed", "timeoutMin": 10, "autoFixAttempts": 2 },
+ *     "landing": { "fastTest": "npm test -- --changed", "timeoutMin": 10, "autoFixAttempts": 2,
+ *                  "lanes": { "web": ["web/**"], "api": ["api/**", "db/**"] } },
  *     "review": { "enabled": true, "maxRuns": 3 },
  *     "budgets": { "perGoalUsd": 15, "perMemberDailyUsd": 60 },
  *     "runners": { "shared": true, "permissions": "bypass" }
@@ -27,6 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { PermissionMode } from "./permissions.js";
+import { parseLanes } from "./team-landing.js";
 import { globToRegExp } from "./team-leases.js";
 
 export interface TeamPolicy {
@@ -35,7 +37,8 @@ export interface TeamPolicy {
   agents: { allow: string[] | null }; // null = any agent
   delivery: { protected: string[]; stack: "auto" | "off" };
   orchestra: { maxParallelPerMember: number | null; teamMaxConcurrentAgents: number | null };
-  landing: { fastTest: string | null; timeoutMin: number; autoFixAttempts: number };
+  /** Phase 6 (D81): `lanes` are path scopes for the landing train — goals in different lanes land at once. */
+  landing: { fastTest: string | null; timeoutMin: number; autoFixAttempts: number; lanes: Record<string, string[]> };
   review: { enabled: boolean; maxRuns: number };
   budgets: { perGoalUsd: number | null; perMemberDailyUsd: number | null };
   /** Phase 5 (D68, D70): may a member's runner take teammates' goals; the permission ceiling on runners. */
@@ -48,7 +51,7 @@ export const OPEN_POLICY: TeamPolicy = {
   agents: { allow: null },
   delivery: { protected: [], stack: "off" },
   orchestra: { maxParallelPerMember: null, teamMaxConcurrentAgents: null },
-  landing: { fastTest: null, timeoutMin: 10, autoFixAttempts: 2 },
+  landing: { fastTest: null, timeoutMin: 10, autoFixAttempts: 2, lanes: {} },
   review: { enabled: true, maxRuns: 3 },
   budgets: { perGoalUsd: null, perMemberDailyUsd: null },
   runners: { shared: false, permissions: "bypass" },
@@ -101,6 +104,7 @@ export function parsePolicy(raw: unknown): TeamPolicy {
       fastTest: typeof land.fastTest === "string" && land.fastTest.trim() ? land.fastTest.trim().slice(0, 500) : null,
       timeoutMin: intIn(land.timeoutMin, 1, 120, 10),
       autoFixAttempts: intIn(land.autoFixAttempts, 0, 5, 2),
+      lanes: parseLanes(land.lanes),
     },
     review: { enabled: rev.enabled !== false, maxRuns: intIn(rev.maxRuns, 0, 10, 3) },
     budgets: { perGoalUsd: posNum(bud.perGoalUsd), perMemberDailyUsd: posNum(bud.perMemberDailyUsd) },
@@ -142,6 +146,8 @@ export function stricter(base: TeamPolicy, local: TeamPolicy): TeamPolicy {
       fastTest: base.landing.fastTest ?? local.landing.fastTest,
       timeoutMin: base.landing.timeoutMin,
       autoFixAttempts: Math.min(base.landing.autoFixAttempts, local.landing.autoFixAttempts),
+      // lanes let goals land side by side: only the reviewed file may split them
+      lanes: base.landing.lanes,
     },
     review: { enabled: base.review.enabled || local.review.enabled, maxRuns: base.review.maxRuns },
     budgets: {

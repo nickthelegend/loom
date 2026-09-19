@@ -8,6 +8,8 @@
  *   POST /hub/rpc/:method       bearer token, body {args: [...]} → {result} | {error}
  *   WS   /hub/subscribe?team=   bearer via subprotocol "loom.hub.<token>" → HubEvent frames
  *   GET  /hub/health
+ *   POST /github/webhook/:teamId  a repo webhook (Phase 6, D83): X-Hub-Signature-256
+ *                               verified with the team's secret; events land in the feed
  *
  * Sign-in trusts the claimed GitHub login, which is fine on a hub you run for
  * your own team — so it is gated: set a join secret (LOOM_HUB_SECRET / --secret)
@@ -21,6 +23,7 @@ import crypto from "node:crypto";
 import express from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 
+import { verifyGithubSignature } from "../core/github-events.js";
 import { HubError, MemoryHub, type HubClient } from "../core/team-hub.js";
 
 const METHODS = new Set<keyof HubClient>([
@@ -61,6 +64,7 @@ const METHODS = new Set<keyof HubClient>([
   "finishJob",
   "cancelJob",
   "jobs",
+  "webhookSecret",
 ]);
 
 export interface HubServerOptions {
@@ -78,6 +82,36 @@ export async function startHubServer(opts: HubServerOptions = {}): Promise<{
 }> {
   const hub = opts.hub ?? new MemoryHub();
   const app = express();
+
+  // GitHub webhooks (D7 without an App, D83). Registered before the JSON parser:
+  // the signature is over the raw bytes, so nothing may re-serialize them first.
+  app.post("/github/webhook/:teamId", express.raw({ type: () => true, limit: "5mb" }), (req, res) => {
+    void (async () => {
+      const teamId = String(req.params.teamId);
+      const secret = hub.webhookSecretOf(teamId);
+      // an unknown team and "no webhook set up" look the same from outside
+      if (!secret) return void res.status(404).json({ error: "no webhook for this team" });
+      const body = Buffer.isBuffer(req.body) ? (req.body as Buffer) : Buffer.alloc(0);
+      const sig = req.headers["x-hub-signature-256"];
+      if (!(await verifyGithubSignature(secret, new Uint8Array(body), Array.isArray(sig) ? sig[0] : sig))) {
+        return void res.status(401).json({ error: "bad or missing X-Hub-Signature-256" });
+      }
+      const event = String(req.headers["x-github-event"] ?? "");
+      if (event === "ping") return void res.json({ ok: true, pong: true });
+      let payload: unknown;
+      try {
+        payload = JSON.parse(body.toString("utf8"));
+      } catch {
+        return void res.status(400).json({ error: "the payload isn't JSON: set the webhook's content type to application/json" });
+      }
+      try {
+        res.status(202).json({ accepted: hub.receiveGithubWebhook(teamId, event, payload) });
+      } catch (err) {
+        res.status(err instanceof HubError ? err.status : 400).json({ error: (err as Error).message });
+      }
+    })();
+  });
+
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/hub/health", (_req, res) => void res.json({ ok: true, name: "loom-hub", version: 1 }));

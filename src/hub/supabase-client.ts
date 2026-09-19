@@ -673,6 +673,11 @@ export class SupabaseHubClient implements HubClient {
     return rows.map(mapJob);
   }
 
+  /** Owners only (0009_phase6.sql); the Edge Function verifies deliveries with it (D83). */
+  async webhookSecret(teamId: string, rotate = false): Promise<{ secret: string }> {
+    return { secret: String(await this.rpc<string>("webhook_secret", { p_team: teamId, p_rotate: rotate })) };
+  }
+
   // ── live events ──
 
   /**

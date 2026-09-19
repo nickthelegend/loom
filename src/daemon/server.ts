@@ -979,6 +979,18 @@ export class LoomDaemon {
           } else if (action === "rotate") out = await this.team.rotate(b.teamId || undefined);
           else if (action === "beat") out = { sessions: await this.team.beat() };
           else if (action === "poll-github") out = { added: await this.team.pollGitHub() };
+          else if (action === "webhook") {
+            // Phase 6 (D83): the team's GitHub webhook — payload URL + secret, optionally installed on the repo
+            const q = (req.body ?? {}) as Record<string, unknown>;
+            const rt = q.projectId ? this.runtimes.get(String(q.projectId)) : undefined;
+            out = await this.team.webhook({
+              ...(b.teamId ? { teamId: b.teamId } : {}),
+              ...(b.repo ? { repo: b.repo } : {}),
+              ...(q.install ? { install: true } : {}),
+              ...(q.rotate ? { rotate: true } : {}),
+              ...(rt ? { rt } : {}),
+            });
+          }
           else return void res.status(404).json({ error: `unknown team action "${action}"` });
           res.json({ result: out, team: this.team.status() });
         } catch (err) {

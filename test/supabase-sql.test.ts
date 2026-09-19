@@ -104,7 +104,7 @@ beforeAll(async () => {
     create table auth.users (id uuid primary key, raw_user_meta_data jsonb default '{}');
     create function auth.uid() returns uuid language sql stable as
       $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
-    grant usage on schema public, auth, extensions to anon, authenticated;
+    grant usage on schema public, auth, extensions to anon, authenticated, service_role;
     grant execute on function auth.uid() to anon, authenticated;
   `);
   for (const m of [
@@ -116,6 +116,7 @@ beforeAll(async () => {
     "0006_landing.sql",
     "0007_runners.sql",
     "0008_key_version_conflict.sql",
+    "0009_phase6.sql",
   ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
@@ -495,5 +496,72 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL, 0007 (runners and jobs, D67–D78)
     expect(JSON.parse(asUser(ALICE, `select public.team_runners('${team}');`)).map((r: { github: string }) => r.github)).toEqual(["alice"]);
     // the jobs it ran keep their history
     expect(asUser(ALICE, `select count(*) from public.jobs where runner_id = '${bobRunner}';`)).not.toBe("0");
+  });
+});
+
+describe.skipIf(!hasPg)("hosted Team Hub SQL, 0009 (landing train events, GitHub webhooks)", () => {
+  let team = "";
+  let aliceDev = "";
+  let bobDev = "";
+  const asService = (sql: string) => psql(sql, { as: "service_role" }).split("\n").pop() ?? "";
+  const lane = (user: string, dev: string, run: string, name: string) =>
+    JSON.parse(asUser(user, `select public.claim_lease('${team}', '{"deviceId":"${dev}","repo":"acme/train","runId":"${run}:land","taskId":"land:${name}","globs":[".loom/landing/${name}"],"files":[".loom/landing/${name}"],"prefixes":[".loom/landing/${name}"],"hardZones":[".loom/landing/${name}"]}');`));
+
+  beforeAll(() => {
+    if (!hasPg) return;
+    team = asUser(ALICE, "select id from public.create_team('Train');");
+    aliceDev = asUser(ALICE, "select id from public.register_device('mac', 'sealA', 'signA');");
+    bobDev = asUser(BOB, "select id from public.register_device('mbp', 'sealB', 'signB');");
+    const invite = JSON.parse(asUser(ALICE, `select public.create_invite('${team}', 3600);`)).invite;
+    asUser(BOB, `select public.redeem_invite('${invite}');`);
+    asUser(ALICE, `select public.share_repo('${team}', 'acme/train');`);
+  });
+
+  it("a lane's slot is a lease on its own hard zone: one goal per lane, other lanes free, release hands it on (D79)", () => {
+    expect(lane(ALICE, aliceDev, "o1", "main").lease.run_id).toBe("o1:land");
+    const refused = lane(BOB, bobDev, "o2", "main");
+    expect(refused.lease).toBeNull();
+    expect(refused.blockedBy).toMatchObject({ zone: ".loom/landing/main", lease: { run_id: "o1:land" } });
+    expect(lane(BOB, bobDev, "o2", "api").lease).toBeTruthy();
+    expect(lane(BOB, bobDev, "o3", "mainx").lease).toBeTruthy();
+    expect(asUser(ALICE, `select public.release_leases('${team}', 'o1:land', 'merged');`)).toBe("1");
+    expect(lane(BOB, bobDev, "o2", "main").lease).toBeTruthy();
+  });
+
+  it("members can post land_queued and land_turn (D82)", () => {
+    for (const t of ["land_queued", "land_turn"]) {
+      expect(asUser(BOB, `select (public.append_feed('${team}', '{"type":"${t}","repo":"acme/train","meta":{"pr":7,"lane":"main"}}')).id is not null;`)).toBe("t");
+    }
+    expect(fails(() => asUser(BOB, `select public.append_feed('${team}', '{"type":"land_skipped","meta":{}}');`))).toMatch(/can't post/);
+  });
+
+  it("the webhook secret: owners create and rotate it, nobody reads the table (D83)", () => {
+    expect(fails(() => asUser(BOB, `select public.webhook_secret('${team}');`))).toMatch(/needs owner/);
+    const s1 = asUser(ALICE, `select public.webhook_secret('${team}');`);
+    expect(s1).toMatch(/^[0-9a-f]{64}$/);
+    expect(asUser(ALICE, `select public.webhook_secret('${team}');`)).toBe(s1);
+    const s2 = asUser(ALICE, `select public.webhook_secret('${team}', true);`);
+    expect(s2).not.toBe(s1);
+    expect(fails(() => asUser(ALICE, "select secret from public.team_webhook_secrets;"))).toMatch(/permission denied/);
+    expect(fails(() => asUser(ALICE, `select public.github_webhook_secret('${team}');`))).toMatch(/permission denied/);
+    expect(asService(`select public.github_webhook_secret('${team}');`)).toBe(s2);
+    expect(fails(() => psql(`select public.webhook_secret('${team}');`, { as: "anon" }))).toMatch(/permission denied/);
+  });
+
+  it("ingest: GitHub kinds only, shared repos only, as system events, deduped with polling (D83, D84)", () => {
+    const events = JSON.stringify([
+      { repo: "Acme/Train", type: "check_failed", meta: { number: 7, checks: ["test"] }, dedupeKey: "gh:acme/train#7:failed:abc:test" },
+      { repo: "acme/elsewhere", type: "pr_merged", meta: { number: 1 }, dedupeKey: "gh:acme/elsewhere#1:merged" },
+      { repo: "acme/train", type: "goal_landed", meta: {}, dedupeKey: "x" },
+      { repo: "not a repo", type: "pr_opened", meta: {}, dedupeKey: "y" },
+    ]);
+    expect(fails(() => asUser(ALICE, `select public.github_webhook_ingest('${team}', '${events}');`))).toMatch(/permission denied/);
+    expect(asService(`select public.github_webhook_ingest('${team}', '${events}');`)).toBe("1");
+    expect(asService(`select public.github_webhook_ingest('${team}', '${events}');`)).toBe("0"); // redelivered
+    expect(asUser(BOB, `select type || '|' || coalesce(user_id::text, 'system') || '|' || repo from public.feed where team_id = '${team}' and dedupe_key = 'gh:acme/train#7:failed:abc:test';`)).toBe(
+      "check_failed|system|acme/train",
+    );
+    // a daemon polling the same fact later adds nothing
+    expect(asUser(BOB, `select coalesce(id::text, 'deduped') from public.append_feed('${team}', '{"type":"check_failed","repo":"acme/train","meta":{},"dedupeKey":"gh:acme/train#7:failed:abc:test"}');`)).toBe("deduped");
   });
 });

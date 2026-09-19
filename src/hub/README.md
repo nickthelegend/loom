@@ -18,3 +18,10 @@ project, opt-in).
 The hub stores routing metadata in the clear and everything else sealed to the
 team key; it can arbitrate leases and claims without reading goals, memories
 or jobs.
+
+**GitHub webhooks (Phase 6).** `loom hub` also takes repo webhooks at
+`POST /github/webhook/:teamId`. It checks `X-Hub-Signature-256` against the
+team's secret (`webhookSecret`, owners only), maps the delivery with
+[`core/github-events.ts`](../core/github-events.ts), and appends the events for
+the team's shared repos to its feed. The hosted hub does the same in the
+`github-webhook` Edge Function (`supabase/functions/`).

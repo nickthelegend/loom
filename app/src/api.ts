@@ -1510,6 +1510,7 @@ export type LandingStateName =
   | "failing"
   | "fixing"
   | "needs_human"
+  | "queued"
   | "landing"
   | "merged"
   | "closed";
@@ -1540,6 +1541,10 @@ export interface LandingState {
   adoptedBy?: string;
   returned?: boolean;
   stack?: Array<{ pr: number; url: string; branch: string; base: string; state?: string }>;
+  /** Phase 6: landing through the train, the lanes it needs, and whether it holds them now. */
+  train?: boolean;
+  lanes?: string[];
+  slot?: boolean;
   updatedAt?: number;
 }
 

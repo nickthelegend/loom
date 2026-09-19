@@ -11,6 +11,7 @@ import { execFile } from "node:child_process";
 
 import { logbook } from "../core/logbook.js";
 import { notify } from "../core/notify.js";
+import { deployEventType, ghKey, type GhFeedType } from "../core/github-events.js";
 import type { FeedIn } from "../core/team-hub.js";
 import type { Exec } from "./landing.js";
 import type { ProjectRuntime } from "./runtime.js";
@@ -28,10 +29,7 @@ export interface Deployment {
 
 /** The feed event a deployment's latest status is, if any (D72). */
 export function deployEvent(d: Deployment): FeedIn["type"] | null {
-  if (d.state === "success") return "deploy_succeeded";
-  if (d.state === "failure" || d.state === "error") return "deploy_failed";
-  if (d.state === "queued" || d.state === "in_progress" || d.state === "pending") return "deploy_started";
-  return null;
+  return deployEventType(d.state);
 }
 
 export interface ReleaseEntry {
@@ -141,7 +139,8 @@ export class Deploys {
         repo: share.repo,
         type,
         meta: { id: d.id, environment: d.environment, sha: d.sha, ref: d.ref, state: d.state, url: d.url, creator: d.creator },
-        dedupeKey: `deploy:${share.repo}:${d.id}:${type}`,
+        // the same key a deployment_status webhook produces (D84)
+        dedupeKey: ghKey.deploy(share.repo, d.id, type as GhFeedType),
       });
       posted++;
       if (type === "deploy_failed") await this.alertIfOurs(d).catch(() => {});

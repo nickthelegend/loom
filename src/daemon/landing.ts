@@ -12,6 +12,14 @@
  *     (D56–D58); stacks land bottom-up (D59)
  *   - says when a goal needs someone, adopts a teammate's goal on request, and
  *     hands it back when green (D63)
+ *   - Phase 6, on a repo with no merge queue: the landing train (D20, D79–D82).
+ *     Land queues the goal in its lanes (path scopes from `landing.lanes`); the
+ *     slot is a hub lease on `.loom/landing/<lane>`, a hard zone, so one goal per
+ *     lane holds it. The holder brings fresh base in, runs the fast tests,
+ *     pushes, waits for green on that head, and merges; a red check gives the
+ *     slot back and the goal requeues itself once it's green again.
+ *   - Phase 6: a feed event about one of its PRs (a webhook's check result, a
+ *     merge) polls that goal now, not at the next 30s tick (D84)
  *
  * Everything outside git and the hub goes through `gh`, injectable for tests.
  */
@@ -43,7 +51,15 @@ import {
   actionsMinutes,
   triggersMergeGroup,
   triggersPullRequest,
+  landingRoute,
+  laneClaim,
+  lanesFor,
+  landRunId,
+  MAIN_LANE,
+  queuedReason,
+  trainStep,
   type CheckRow,
+  type CheckSummary,
   type DoctorFinding,
 } from "../core/team-landing.js";
 import { zoneOf } from "../core/team-leases.js";
@@ -66,6 +82,8 @@ export interface LandingDeps {
   exec?: Exec;
   /** Tests shorten the rerun settle window. */
   rerunSettleMs?: number;
+  /** How long a freshly pushed turn with no checks reported yet waits before "no CI" (tests: 0). */
+  trainSettleMs?: number;
 }
 
 export const POLL_MS = 30_000;
@@ -73,6 +91,12 @@ export const POLL_MS = 30_000;
 export const ADOPT_AFTER_MS = 15 * 60_000;
 /** How long after asking for a rerun a still-failing check is taken as the old result. */
 export const RERUN_SETTLE_MS = 90_000;
+/** A turn's fresh push with no checks reported after this long has no CI to wait for. */
+export const TRAIN_SETTLE_MS = 2 * 60_000;
+/** How long a repo's branch rules (merge queue or not) are trusted (D80). */
+export const RULES_TTL_MS = 10 * 60_000;
+
+export const defaultExec: Exec = (cmd, args, cwd, opts) => realExec(cmd, args, cwd, opts);
 
 const realExec: Exec = (cmd, args, cwd, opts = {}) =>
   new Promise((resolve) => {
@@ -87,6 +111,8 @@ export class Landing {
   private timer: ReturnType<typeof setInterval> | null = null;
   private alerted = new Set<string>();
   private rerunAt = new Map<string, number>(); // `${sha}:${check}` → when we asked for the rerun
+  private rules = new Map<string, { at: number; rules: Array<{ type: string }> | null }>(); // `${repo}@${base}`
+  private inflight = new Map<string, { p: Promise<LandingState>; again: boolean }>(); // runId → a poll in flight
 
   constructor(private rt: ProjectRuntime, private deps: LandingDeps) {}
 
@@ -134,12 +160,44 @@ export class Landing {
     const policy = await this.deps.policy().catch(() => null);
     for (const run of this.goals()) {
       if (this.busy.has(run.id)) continue;
-      try {
-        await this.poll(run, policy);
-      } catch (e) {
-        logbook.warn("team", `landing: couldn't check PR #${run.landing!.pr}`, String(e));
-      }
+      await this.pollNow(run, policy);
     }
+  }
+
+  /**
+   * Poll one goal now, at most one poll per goal at a time: a poll asked for
+   * while one runs makes that one go round again (a webhook's check result
+   * mid-poll isn't lost), and both callers get its answer.
+   */
+  pollNow(run: OrchestraRun, policy?: TeamPolicy | null): Promise<LandingState> {
+    const cur = this.inflight.get(run.id);
+    if (cur) {
+      cur.again = true;
+      return cur.p;
+    }
+    const slot = { again: false, p: Promise.resolve(run.landing!) };
+    slot.p = (async () => {
+      try {
+        const pol = policy === undefined ? await this.deps.policy().catch(() => null) : policy;
+        let st = run.landing!;
+        do {
+          slot.again = false;
+          const r = this.rt.orchestra.get(run.id) ?? run;
+          if (!r.landing || r.landing.state === "merged" || r.landing.state === "closed") return r.landing ?? st;
+          try {
+            st = await this.poll(r, pol);
+          } catch (e) {
+            logbook.warn("team", `landing: couldn't check PR #${r.landing.pr}`, String(e));
+            return r.landing;
+          }
+        } while (slot.again);
+        return st;
+      } finally {
+        this.inflight.delete(run.id);
+      }
+    })();
+    this.inflight.set(run.id, slot);
+    return slot.p;
   }
 
   /** One look at one goal PR, and whatever it calls for. */
@@ -147,13 +205,19 @@ export class Landing {
     const l = run.landing!;
     if (l.adoptedBy) return l; // a teammate holds it (D63)
     if (l.stack?.length) return this.pollStack(run, policy);
-    const view = JSON.parse(await this.gh(["pr", "view", String(l.pr), "--json", "state,headRefOid,url"])) as { state: string; headRefOid: string };
+    const view = JSON.parse(await this.gh(["pr", "view", String(l.pr), "--json", "state,headRefOid,url,reviewDecision"])) as { state: string; headRefOid: string; reviewDecision?: string };
     if (view.state === "MERGED") return this.merged(run);
-    if (view.state === "CLOSED") return this.set(run, { state: "closed" });
+    if (view.state === "CLOSED") {
+      await this.releaseSlot(run, "PR closed");
+      return this.set(run, { state: "closed" });
+    }
     const sha = view.headRefOid;
     if (sha !== l.headSha) this.set(run, { headSha: sha });
     // a goal back at work (a fix, a conflict) is the orchestrator's until it delivers
-    if (!isTerminal(run.status) && run.status !== "waiting_human") return this.set(run, { state: "fixing" });
+    if (!isTerminal(run.status) && run.status !== "waiting_human") {
+      await this.releaseSlot(run, "the goal is being fixed");
+      return this.set(run, { state: "fixing" });
+    }
 
     const rows = await this.checks(l.pr);
     const sum = summarizeChecks(rows);
@@ -171,6 +235,8 @@ export class Landing {
     }
 
     const maxFix = policy?.landing.autoFixAttempts ?? 2;
+    // a red check on its turn gives the lane back: the goal requeues once it's green (D82)
+    if (sum.failing.length && run.landing!.slot) await this.releaseSlot(run, `"${sum.failing[0]!.name}" failed on its turn`);
     for (const c of sum.failing) {
       const k = `${sha}:${c.name}`;
       const verdict = failureVerdict(c.name, sha, run.landing!.reruns);
@@ -194,6 +260,8 @@ export class Landing {
     if (rev.enabled && run.landing!.reviewedSha !== sha && run.landing!.reviews < rev.maxRuns && !sum.failing.length) {
       void this.review(run, sha, maxFix);
     }
+
+    if (run.landing!.landRequested && run.landing!.train) return this.trainTurn(run, policy, sha, view.reviewDecision, rows, sum);
 
     if (sum.pending.length) return this.set(run, { state: run.landing!.landRequested ? "landing" : "pending" });
     if (run.landing!.review?.state === "failure" && !run.landing!.review.overridden) return run.landing!;
@@ -268,6 +336,7 @@ export class Landing {
   }
 
   private async merged(run: OrchestraRun): Promise<LandingState> {
+    await this.releaseSlot(run, "merged");
     const mc = await this.exec("gh", ["pr", "view", String(run.landing!.pr), "--json", "mergeCommit"], this.rt.info.dir).catch(() => null);
     let mergeSha: string | undefined;
     try {
@@ -387,46 +456,267 @@ export class Landing {
     if (run.from) throw new Error("this goal is a teammate's — hand it back and let them land it");
     if (!isTerminal(run.status)) throw new Error(`the goal is still ${run.status} — land it once it's done`);
     if (this.busy.has(run.id)) throw new Error("a fix or land step is already running for this goal");
+    const policy = await this.deps.policy().catch(() => null);
+    // D20, D80: no merge queue on a team repo → the train; Loom merges when the goal's lanes are its
+    if (!run.landing!.stack?.length && (await this.route(run)) === "train") {
+      this.set(run, { landRequested: true, train: true, state: "landing", reason: undefined });
+      return this.pollNow(run, policy);
+    }
     this.busy.add(run.id);
     try {
-      this.set(run, { landRequested: true, state: "landing", reason: undefined });
-      const policy = await this.deps.policy().catch(() => null);
-      const base = run.baseBranch ?? "main";
+      this.set(run, { landRequested: true, train: false, state: "landing", reason: undefined });
       if (run.landing!.stack?.length) return await this.landStack(run);
-
-      // 1. fresh main (D56, D58)
-      await this.git(["fetch", "-q", "origin", base], run.dir);
-      const merge = await this.exec("git", ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-edit", "-q", `origin/${base}`], run.dir);
-      if (merge.code !== 0) {
-        const files = (await this.exec("git", ["diff", "--name-only", "--diff-filter=U"], run.dir)).out.split("\n").filter(Boolean);
-        await this.exec("git", ["merge", "--abort"], run.dir);
-        return await this.conflict(run, base, files, policy);
-      }
-
-      // 2. fast tests, if the team set any (D57)
-      if (policy?.landing.fastTest) {
-        const t = await this.exec("sh", ["-c", policy.landing.fastTest], run.dir, { timeoutMs: policy.landing.timeoutMin * 60_000 });
-        if (t.code !== 0) {
-          const max = policy.landing.autoFixAttempts;
-          if (run.landing!.fixAttempts >= max) return await this.needsHuman(run, `the fast tests (\`${policy.landing.fastTest}\`) fail on fresh ${base}`);
-          const attempt = run.landing!.fixAttempts + 1;
-          this.set(run, { fixAttempts: attempt, state: "fixing" });
-          await this.rt.orchestra.reopen(
-            run.id,
-            fixPrompt({ pr: run.landing!.pr, check: `fast tests: ${policy.landing.fastTest}`, log: logTail(`${t.out}\n${t.err}`), attempt, max }),
-            "fast tests failed before landing",
-          );
-          return run.landing!;
-        }
-      }
-
-      // 3. push, then 4. merge when GitHub's rules pass
-      await this.git(["push", "-q", "origin", `${run.branch}:${this.rt.orchestra.prBranch(run)}`], run.dir);
+      if (!(await this.pushrebase(run, policy))) return run.landing!;
+      // 4. merge when GitHub's rules pass (the merge queue, or auto-merge)
       await this.autoMerge(run.landing!.pr, "--squash");
       return this.set(run, { state: "landing" });
     } finally {
       this.busy.delete(run.id);
     }
+  }
+
+  /**
+   * Pushrebase-lite (D56–D58): fresh base merged into the goal (one agent
+   * attempt at a conflict), the fast tests, push. False when it went to a fix
+   * or a human instead of pushing.
+   */
+  private async pushrebase(run: OrchestraRun, policy: TeamPolicy | null): Promise<boolean> {
+    const base = run.baseBranch ?? "main";
+    // 1. fresh main (D56, D58)
+    await this.git(["fetch", "-q", "origin", base], run.dir);
+    const merge = await this.exec("git", ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-edit", "-q", `origin/${base}`], run.dir);
+    if (merge.code !== 0) {
+      const files = (await this.exec("git", ["diff", "--name-only", "--diff-filter=U"], run.dir)).out.split("\n").filter(Boolean);
+      await this.exec("git", ["merge", "--abort"], run.dir);
+      await this.conflict(run, base, files, policy);
+      return false;
+    }
+
+    // 2. fast tests, if the team set any (D57)
+    if (policy?.landing.fastTest) {
+      const t = await this.exec("sh", ["-c", policy.landing.fastTest], run.dir, { timeoutMs: policy.landing.timeoutMin * 60_000 });
+      if (t.code !== 0) {
+        const max = policy.landing.autoFixAttempts;
+        if (run.landing!.fixAttempts >= max) {
+          await this.needsHuman(run, `the fast tests (\`${policy.landing.fastTest}\`) fail on fresh ${base}`);
+          return false;
+        }
+        const attempt = run.landing!.fixAttempts + 1;
+        this.set(run, { fixAttempts: attempt, state: "fixing" });
+        await this.rt.orchestra.reopen(
+          run.id,
+          fixPrompt({ pr: run.landing!.pr, check: `fast tests: ${policy.landing.fastTest}`, log: logTail(`${t.out}\n${t.err}`), attempt, max }),
+          "fast tests failed before landing",
+        );
+        return false;
+      }
+    }
+
+    // 3. push
+    await this.git(["push", "-q", "origin", `${run.branch}:${this.rt.orchestra.prBranch(run)}`], run.dir);
+    return true;
+  }
+
+  // ── the landing train (Phase 6: D20's fallback, D79–D82) ──
+
+  /** Merge queue, train or auto-merge, for this goal (D80). Branch rules are cached per repo for 10 minutes. */
+  async route(run: OrchestraRun): Promise<"queue" | "train" | "auto"> {
+    const share = await this.deps.share(this.rt);
+    const team = Boolean(share && this.deps.hub() && this.deps.deviceId());
+    if (!share) return "auto";
+    const base = run.baseBranch ?? "main";
+    const key = `${share.repo}@${base}`;
+    let hit = this.rules.get(key);
+    if (!hit || Date.now() - hit.at > RULES_TTL_MS) {
+      const r = await this.exec("gh", ["api", `repos/${share.repo}/rules/branches/${base}`], this.rt.info.dir);
+      let rules: Array<{ type: string }> | null = null;
+      if (r.code === 0) {
+        try {
+          const v = JSON.parse(r.out) as unknown;
+          rules = Array.isArray(v) ? (v as Array<{ type: string }>) : null;
+        } catch {
+          rules = null;
+        }
+      }
+      hit = { at: Date.now(), rules };
+      this.rules.set(key, hit);
+    }
+    return landingRoute({ rules: hit.rules, team, stack: Boolean(run.landing?.stack?.length) });
+  }
+
+  /** The lanes this goal's PR needs: path scopes matched against its diff (D81). */
+  private async lanesOf(run: OrchestraRun, policy: TeamPolicy | null): Promise<string[]> {
+    const lanes = policy?.landing.lanes ?? {};
+    if (!Object.keys(lanes).length) return [MAIN_LANE];
+    const pr = await this.exec("gh", ["pr", "diff", String(run.landing!.pr), "--name-only"], this.rt.info.dir);
+    let files = pr.code === 0 ? pr.out.split("\n").map((f) => f.trim()).filter(Boolean) : null;
+    if (!files) {
+      const base = run.baseBranch ?? "main";
+      const local = await this.exec("git", ["diff", "--name-only", `origin/${base}...${run.branch}`], run.dir);
+      files = local.code === 0 ? local.out.split("\n").map((f) => f.trim()).filter(Boolean) : null;
+    }
+    // what it changes is unknown: it waits for every lane rather than guess one
+    if (!files) return [...new Set([...Object.keys(lanes), MAIN_LANE])].sort();
+    return lanesFor(files, lanes);
+  }
+
+  /**
+   * One step of a goal in the train: claim its lanes (or queue behind their
+   * holder), bring fresh base in and push on a new turn, wait for green on
+   * that head, merge.
+   */
+  private async trainTurn(
+    run: OrchestraRun,
+    policy: TeamPolicy | null,
+    sha: string,
+    reviewDecision: string | undefined,
+    rows: CheckRow[],
+    sum: CheckSummary,
+  ): Promise<LandingState> {
+    const l = run.landing!;
+    if (sum.failing.length) return l; // the fix loop has it; it requeues once green
+    if (l.review?.state === "failure" && !l.review.overridden) {
+      await this.releaseSlot(run, "the review blocks it");
+      return run.landing!;
+    }
+    if (!l.slot) {
+      // red at this commit and rerunning: it rejoins once the rerun says flake (it's green), not before
+      if (sum.pending.length && l.reruns.some((k) => k.startsWith(`${sha}:`) && !l.flaky.includes(k))) {
+        return this.set(run, { state: "pending", reason: "rerunning a failed check before it rejoins the landing train" });
+      }
+      // a turn is for a PR that can merge: one waiting on a human approval doesn't hold a lane
+      if (/CHANGES_REQUESTED|REVIEW_REQUIRED/i.test(reviewDecision ?? "")) {
+        return this.set(run, { state: "queued", reason: "waiting for a reviewer's approval before its turn to land" });
+      }
+      if (!(await this.claimSlot(run, policy))) return run.landing!;
+    }
+    let head = sha;
+    let cur = { rows, sum };
+    if (run.landing!.turnSha !== head) {
+      if (!(await this.pushrebase(run, policy))) {
+        await this.releaseSlot(run, "its turn found a conflict or failing fast tests");
+        return run.landing!;
+      }
+      const pushed = (await this.git(["rev-parse", run.branch], run.dir)).trim();
+      if (pushed && pushed !== head) {
+        head = pushed;
+        const fresh = await this.checks(l.pr);
+        cur = { rows: fresh, sum: summarizeChecks(fresh) };
+        this.set(run, { checks: { failing: cur.sum.failing.map((c) => c.name), pending: cur.sum.pending.map((c) => c.name), passing: cur.sum.passing.length } });
+      }
+      this.set(run, { headSha: head, turnSha: head, turnAt: Date.now() });
+      if (cur.sum.failing.length) return this.set(run, { state: "landing" }); // the next poll's red path takes it
+    }
+    const step = trainStep({
+      holding: true,
+      turnSha: run.landing!.turnSha,
+      headSha: head,
+      checks: cur.sum,
+      rows: cur.rows.length,
+      reviewing: this.busy.has(`review:${run.id}`),
+      sinceTurnMs: Date.now() - (run.landing!.turnAt ?? 0),
+      settleMs: this.deps.trainSettleMs ?? TRAIN_SETTLE_MS,
+    });
+    if (step !== "merge") return this.set(run, { state: "landing", reason: undefined });
+    return this.mergeNow(run);
+  }
+
+  /**
+   * Take every lane the goal needs, in order, or none: a lane held by someone
+   * else queues the goal behind them. The hub decides atomically — a lane's
+   * slot is a hard zone (D31), so a second claimer is refused.
+   */
+  private async claimSlot(run: OrchestraRun, policy: TeamPolicy | null): Promise<boolean> {
+    const hub = this.deps.hub();
+    const device = this.deps.deviceId();
+    const share = await this.deps.share(this.rt);
+    if (!hub || !device || !share) {
+      this.set(run, { state: "queued", reason: "waiting for the team hub" });
+      return false;
+    }
+    const lanes = await this.lanesOf(run, policy);
+    this.set(run, { lanes });
+    const mine = landRunId(run.id);
+    const queued = async (lane: string, who: string | null, holderRun: string | null): Promise<false> => {
+      const reason = queuedReason(who, lane);
+      const news = run.landing!.state !== "queued" || run.landing!.reason !== reason;
+      this.set(run, { state: "queued", slot: false, reason });
+      if (news) await this.post(run, "land_queued", { runId: run.id, pr: run.landing!.pr, lane, lanes, behind: who, behindRun: holderRun });
+      return false;
+    };
+    // look before taking: a goal that would only get some of its lanes doesn't take any
+    const held = (await hub.leases(share.teamId, share.repo).catch(() => [])).filter((x) => !x.stale && x.runId !== mine && x.runId.endsWith(":land"));
+    for (const lane of lanes) {
+      const h = held.find((x) => x.taskId === laneClaim(lane).taskId);
+      if (h) return queued(lane, h.github, h.runId.replace(/:land$/, ""));
+    }
+    const keys = this.deps.keys(share.teamId);
+    const key = keys[keys.length - 1];
+    let got = 0;
+    for (const lane of lanes) {
+      const c = laneClaim(lane);
+      const res = await hub.claimLease(share.teamId, {
+        globs: c.globs,
+        files: c.files,
+        prefixes: c.prefixes,
+        hardZones: c.hardZones,
+        deviceId: device,
+        repo: share.repo,
+        runId: mine,
+        taskId: c.taskId,
+        ...(key ? { sealed: sealForTeam(key, { goal: run.goal.split("\n")[0]!.slice(0, 200), task: `landing in lane ${lane}` }) } : {}),
+      });
+      if (!res.lease) {
+        // lost a race for a later lane: give back the earlier ones ("rollback" wakes nobody — ticks retry)
+        if (got) await hub.releaseLeases(share.teamId, mine, `rollback: lane ${lane} is taken`).catch(() => 0);
+        const b = res.blockedBy;
+        return queued(lane, b?.lease.github ?? null, b ? b.lease.runId.replace(/:land$/, "") : null);
+      }
+      got++;
+    }
+    this.set(run, { slot: true, turnSha: undefined, turnAt: undefined, state: "landing", reason: undefined });
+    await this.post(run, "land_turn", { runId: run.id, pr: run.landing!.pr, lanes });
+    return true;
+  }
+
+  /** Give the goal's lanes back (and only them: its task leases stay until it lands, D36). */
+  private async releaseSlot(run: OrchestraRun, reason: string): Promise<void> {
+    if (!run.landing?.slot) return;
+    this.set(run, { slot: false, turnSha: undefined, turnAt: undefined });
+    const hub = this.deps.hub();
+    const share = await this.deps.share(this.rt);
+    if (!hub || !share) return;
+    await hub.releaseLeases(share.teamId, landRunId(run.id), reason).catch((e) => logbook.warn("team", "couldn't release the landing slot", String(e)));
+  }
+
+  /** Still the holder of every lane? A slot that went stale (a long sleep) may be someone else's now. */
+  private async stillHolding(run: OrchestraRun): Promise<boolean> {
+    const hub = this.deps.hub();
+    const share = await this.deps.share(this.rt);
+    if (!hub || !share) return false;
+    let leases;
+    try {
+      leases = await hub.leases(share.teamId, share.repo);
+    } catch {
+      return true; // a hub hiccup isn't a lost slot; GitHub's own rules still guard the merge
+    }
+    const mine = leases.filter((x) => x.runId === landRunId(run.id) && !x.stale && x.deviceId === this.deps.deviceId());
+    return (run.landing!.lanes ?? [MAIN_LANE]).every((lane) => mine.some((x) => x.taskId === laneClaim(lane).taskId));
+  }
+
+  /** Its turn, green: merge now (not --auto — the train is the queue), then hand the lanes on. */
+  private async mergeNow(run: OrchestraRun): Promise<LandingState> {
+    if (!(await this.stillHolding(run))) {
+      this.set(run, { slot: false, turnSha: undefined, turnAt: undefined });
+      return this.set(run, { state: "queued", reason: "its landing slot lapsed — queuing again" });
+    }
+    const r = await this.exec("gh", ["pr", "merge", String(run.landing!.pr), "--squash"], this.rt.info.dir);
+    if (r.code !== 0) {
+      await this.releaseSlot(run, "GitHub refused the merge");
+      this.set(run, { landRequested: false });
+      return this.needsHuman(run, `GitHub refused the merge: ${(r.err || r.out).trim().slice(0, 200)}`);
+    }
+    return this.merged(run);
   }
 
   private async autoMerge(pr: number, method: "--squash" | "--merge"): Promise<void> {
@@ -583,6 +873,13 @@ export class Landing {
 
   /** The owner's side: a teammate took (or returned) one of our goals. */
   onTeamEvent(e: FeedEvent): void {
+    // D82: a lane may have freed — queued goals try now, not at the next tick.
+    // A partial claim's rollback wakes nobody (two goals would wake each other forever).
+    if ((e.type === "lease_released" && !/^rollback/.test(String(e.meta.reason ?? ""))) || e.type === "goal_landed") {
+      for (const run of this.goals()) if (run.landing!.state === "queued" && run.landing!.landRequested) void this.pollNow(run);
+    }
+    // D84: a check result or a merge on one of our PRs (a webhook, or polling) — look now
+    if (e.type === "check_failed" || e.type === "check_passed" || e.type === "pr_merged") this.wakePr(e);
     if (e.type !== "goal_adopted" && e.type !== "goal_returned") return;
     if (e.github === this.deps.github()) return;
     const run = this.rt.orchestra.list().find((r) => r.landing && (r.id === e.meta.runId || r.landing.pr === Number(e.meta.pr)));
@@ -595,6 +892,18 @@ export class Landing {
       void this.rt.orchestra.pullPushed(run).catch(() => {});
       this.alert(run, `${e.github ?? "A teammate"} handed PR #${run.landing!.pr} back`);
     }
+  }
+
+  private wakePr(e: FeedEvent): void {
+    const n = Number(e.meta.number ?? e.meta.pr);
+    if (!Number.isInteger(n) || n <= 0) return;
+    const runs = this.goals().filter((r) => r.landing!.pr === n && !r.landing!.adoptedBy);
+    if (!runs.length) return;
+    void (async () => {
+      const share = await this.deps.share(this.rt).catch(() => null);
+      if (e.repo && share && e.repo !== share.repo) return; // same number, another repo
+      for (const run of runs) if (!this.busy.has(run.id)) void this.pollNow(run);
+    })();
   }
 
   // ── repo doctor (D62) ──

@@ -62,7 +62,14 @@ describe("stateChip", () => {
   });
 
   it("an unknown state from a newer daemon gets a quiet chip", () => {
-    assert.deepEqual(stateChip("queued"), { label: "queued", tone: "dim", attention: false });
+    assert.deepEqual(stateChip("parked"), { label: "parked", tone: "dim", attention: false });
+  });
+
+  it("Phase 6: queued in the landing train is a known, quiet chip; no Land button; it says who it waits behind", () => {
+    assert.deepEqual(STATE_CHIP.queued, { label: "queued", tone: "dim", attention: false });
+    const g = goal("q1", { state: "queued", landRequested: true, train: true, reason: "waiting behind bob's goal in lane api" });
+    assert.deepEqual(landingButtons(g), ["review"]);
+    assert.equal(landBlockedNote(g), "Queued to land — waiting behind bob's goal in lane api.");
   });
 });
 

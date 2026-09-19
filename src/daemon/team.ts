@@ -55,12 +55,13 @@ import { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } from "../core/host
 import type { LoomEvent } from "../types.js";
 import type { ProjectRuntime } from "./runtime.js";
 import { DEPLOY_POLL_MS, Deploys } from "./deploys.js";
-import { Landing, type Exec } from "./landing.js";
+import { defaultExec, Landing, type Exec } from "./landing.js";
 import { TeamBrain } from "./team-brain.js";
 import { TeamCoordinator } from "./team-coordinator.js";
 import type { OrchestraRun } from "../core/orchestra.js";
 import { Runner, readRunnerConfig, writeRunnerConfig, type JobPayload, type JobProgress, type RunnerConfig } from "./runner.js";
 import { rollupCosts } from "../core/team-landing.js";
+import { prRowFeed, WEBHOOK_EVENTS } from "../core/github-events.js";
 
 // ---------------------------------------------------------------------------
 // Local state
@@ -141,6 +142,8 @@ export interface TeamLinkHost {
   /** Tests swap `gh` (and friends) for the landing flow (Phase 4). */
   landingExec?: Exec;
   landingRerunSettleMs?: number;
+  /** Tests: how long a landing turn waits for checks to show up on a fresh push (Phase 6). */
+  landingTrainSettleMs?: number;
   /** Phase 5: open a directory as a project (a runner's per-goal clone), and close it again. */
   openProject?(dir: string, name: string): Promise<ProjectRuntime>;
   closeProject?(rt: ProjectRuntime): Promise<void>;
@@ -906,6 +909,7 @@ export class TeamLink {
         policy: () => this.coordinatorFor(rt).teamPolicy(),
         ...(this.host.landingExec ? { exec: this.host.landingExec } : {}),
         ...(this.host.landingRerunSettleMs !== undefined ? { rerunSettleMs: this.host.landingRerunSettleMs } : {}),
+        ...(this.host.landingTrainSettleMs !== undefined ? { trainSettleMs: this.host.landingTrainSettleMs } : {}),
       });
       this.landings.set(rt.info.id, l);
     }
@@ -1013,7 +1017,7 @@ export class TeamLink {
         prs = JSON.parse(
           await run("gh", [
             "pr", "list", "--repo", share.repo, "--state", "all", "--limit", "20",
-            "--json", "number,title,state,headRefName,author,url,mergedAt,statusCheckRollup,files",
+            "--json", "number,title,state,headRefName,headRefOid,author,url,mergedAt,statusCheckRollup,files",
           ]),
         ) as Array<Record<string, unknown>>;
       } catch {
@@ -1027,6 +1031,71 @@ export class TeamLink {
       }
     }
     return added;
+  }
+
+  // ── GitHub webhooks into the hub (Phase 6, D83): D7's App path without an App ──
+
+  /** Where a repo webhook posts for this team: the self-hosted hub's route, or the hosted hub's Edge Function. */
+  webhookUrl(teamId: string): string {
+    const h = this.state.hub;
+    if (!h) throw new Error("sign in to a team hub first");
+    const supabaseUrl = hostedSupabaseUrl(h.url);
+    if (supabaseUrl !== null) return `${supabaseUrl.replace(/\/$/, "")}/functions/v1/github-webhook/${teamId}`;
+    return `${h.url.replace(/\/$/, "")}/github/webhook/${teamId}`;
+  }
+
+  /**
+   * The team's webhook: its payload URL and secret (owners only; created on
+   * first ask, replaced with `rotate`), and with `install` a repo webhook made
+   * through `gh` for the events Loom maps. The repo defaults to the project's
+   * shared repo, or the team's only one.
+   */
+  async webhook(opts: { teamId?: string; repo?: string; install?: boolean; rotate?: boolean; rt?: ProjectRuntime } = {}): Promise<{
+    teamId: string;
+    url: string;
+    secret: string;
+    repo: string | null;
+    events: string[];
+    installed?: { id: number | null; repo: string };
+    warning?: string;
+  }> {
+    let teamId = opts.teamId;
+    let repo = opts.repo ? normalizeRepo(opts.repo) : null;
+    if (!repo && opts.rt) {
+      const share = await this.teamFor(opts.rt);
+      if (share) {
+        repo = share.repo;
+        teamId ??= share.teamId;
+      }
+    }
+    teamId ??= this.defaultTeam();
+    const repos = this.views.get(teamId)?.repos ?? (await this.hub().repos(teamId));
+    if (!repo && repos.length === 1) repo = repos[0]!;
+    const { secret } = await this.hub().webhookSecret(teamId, Boolean(opts.rotate));
+    const url = this.webhookUrl(teamId);
+    const local = /^https?:\/\/(localhost|127\.|\[::1\]|0\.0\.0\.0)/.test(url);
+    const out: Awaited<ReturnType<TeamLink["webhook"]>> = {
+      teamId,
+      url,
+      secret,
+      repo,
+      events: [...WEBHOOK_EVENTS],
+      ...(local ? { warning: "this hub listens on a local address GitHub can't reach — expose it (a tunnel or a public host) first" } : {}),
+    };
+    if (repo && !repos.includes(repo)) out.warning = `${repo} isn't shared with this team — its events would be dropped (loom team share)`;
+    if (!opts.install) return out;
+    if (!repo) throw new Error("which repo? pass --repo owner/name");
+    const body = JSON.stringify({ name: "web", active: true, events: [...WEBHOOK_EVENTS], config: { url, content_type: "json", secret, insecure_ssl: "0" } });
+    const exec = this.host.landingExec ?? defaultExec;
+    const r = await exec("gh", ["api", `repos/${repo}/hooks`, "-X", "POST", "--input", "-"], process.cwd(), { input: body, timeoutMs: 30_000 });
+    if (r.code !== 0) throw new Error(`gh couldn't create the webhook on ${repo} (it needs admin on the repo): ${(r.err || r.out).trim().slice(0, 300)}`);
+    let id: number | null = null;
+    try {
+      id = Number((JSON.parse(r.out) as { id?: number }).id) || null;
+    } catch {
+      id = null;
+    }
+    return { ...out, installed: { id, repo } };
   }
 
   // ── the view the UI reads ──
@@ -1151,30 +1220,11 @@ export function sessionsOf(
   return out;
 }
 
-/** PR and check facts from one `gh pr list` row, as idempotent feed events. */
+/**
+ * PR and check facts from one `gh pr list` row, as idempotent feed events. The
+ * mapping lives in core/github-events.ts, shared with the webhook receivers so
+ * polling and webhooks produce the same dedupe keys (D84).
+ */
 export function githubFeedEvents(repo: string, pr: Record<string, unknown>): FeedIn[] {
-  const n = Number(pr.number);
-  const state = String(pr.state ?? "").toUpperCase();
-  const author = (pr.author as { login?: string } | undefined)?.login ?? null;
-  // Changed paths are metadata like lease globs (D2): the live team context needs them (D48).
-  const files = Array.isArray(pr.files)
-    ? (pr.files as Array<{ path?: string }>).map((f) => String(f.path ?? "")).filter(Boolean).slice(0, 50)
-    : [];
-  const base = {
-    number: n, url: pr.url, branch: pr.headRefName, author, loom: String(pr.headRefName ?? "").startsWith("loom/"),
-    ...(files.length ? { files } : {}),
-  };
-  const out: FeedIn[] = [{ repo, type: "pr_opened", meta: base, dedupeKey: `gh:${repo}#${n}:opened` }];
-  if (state === "MERGED") out.push({ repo, type: "pr_merged", meta: base, dedupeKey: `gh:${repo}#${n}:merged` });
-  if (state === "CLOSED") out.push({ repo, type: "pr_closed", meta: base, dedupeKey: `gh:${repo}#${n}:closed` });
-  const checks = Array.isArray(pr.statusCheckRollup) ? (pr.statusCheckRollup as Array<Record<string, unknown>>) : [];
-  const failed = checks.filter((c) => /FAIL|ERROR|TIMED_OUT|CANCELLED/i.test(String(c.conclusion ?? c.state ?? "")));
-  const done = checks.length > 0 && checks.every((c) => String(c.status ?? "COMPLETED").toUpperCase() === "COMPLETED" || c.state);
-  if (failed.length) {
-    const names = failed.map((c) => String(c.name ?? c.context ?? "check")).sort();
-    out.push({ repo, type: "check_failed", meta: { ...base, checks: names }, dedupeKey: `gh:${repo}#${n}:failed:${names.join(",")}` });
-  } else if (done && checks.every((c) => /SUCCESS|NEUTRAL|SKIPPED/i.test(String(c.conclusion ?? c.state ?? "")))) {
-    out.push({ repo, type: "check_passed", meta: base, dedupeKey: `gh:${repo}#${n}:passed:${checks.length}` });
-  }
-  return out;
+  return prRowFeed(repo, pr);
 }

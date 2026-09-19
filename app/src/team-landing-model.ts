@@ -26,6 +26,8 @@ export const STATE_CHIP: Record<LandingStateName, StateChip> = {
   failing: { label: "failing", tone: "err", attention: false },
   fixing: { label: "fixing", tone: "warn", attention: false },
   needs_human: { label: "needs you", tone: "err", attention: true },
+  // Phase 6: Land was clicked; another goal holds a lane it needs (the landing train)
+  queued: { label: "queued", tone: "dim", attention: false },
   landing: { label: "landing", tone: "live", attention: false },
   merged: { label: "merged", tone: "merged", attention: false },
   closed: { label: "closed", tone: "dim", attention: false },
@@ -63,6 +65,7 @@ export function landingButtons(g: Pick<LandingGoal, "status" | "adopted" | "land
 export function landBlockedNote(g: Pick<LandingGoal, "status" | "adopted" | "landing">): string | null {
   const l = g.landing;
   if (DONE.has(l.state)) return null;
+  if (l.state === "queued") return l.reason ? `Queued to land — ${l.reason}.` : "Queued to land behind another goal.";
   if (l.state === "landing" || (l.landRequested && l.state !== "needs_human")) return "Land requested — Loom merges it once GitHub's rules pass.";
   if (g.adopted) return `Adopted from ${g.adopted.owner ? `@${g.adopted.owner}` : "a teammate"} — they land it.`;
   if (!isRunDone(g.status)) return `The goal is still ${g.status.replace(/_/g, " ")} — land it once it's done.`;

@@ -21,7 +21,8 @@ is TypeScript compiled to `dist/` (`npm run build`).
 | `team-crypto.ts` | Team keys, sealed boxes, signatures, invite fragments, memory HMACs |
 | `team-leases.ts`, `team-policy.ts` | Leases, overlap, hard zones; `loom.team.json` |
 | `team-memory.ts`, `team-canon.ts` | Tiered team memory; canon in `AGENTS.md` |
-| `team-landing.ts` | Landing decisions: checks, flakes, review, stacks, doctor, cost |
+| `team-landing.ts` | Landing decisions: checks, flakes, review, stacks, doctor, cost, the landing train (lanes, turns) |
+| `github-events.ts` | GitHub PR, check, review and deploy facts as feed events, from polling or webhooks (same dedupe keys); webhook signatures |
 | `runner-setup.ts`, `hosted.ts` | Runner service files and token checks; the hosted hub's address |
 
 ## `daemon/`: the process
