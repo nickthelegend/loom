@@ -905,6 +905,11 @@ export class ProjectRuntime {
           ...(cost !== undefined ? { costUsd: cost } : {}),
         };
       }
+      // An agent that stops to ask you something is the whole reason Loom
+      // exists: the next queued prompt would answer a question you never saw,
+      // so the queue waits for you instead. Answering goes out immediately —
+      // a paused queue holds what's lined up, not what you type now.
+      if (e.kind === "needs_input") this.holdQueueFor(agent.id);
       // Any terminal event stops the stale-session clock — a turn that ended in
       // an error is over, not hung.
       const turnOver = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted");
@@ -2051,6 +2056,20 @@ export class ProjectRuntime {
     if (item.target.kind === "agent" && this.busySince.has(item.target.agentId)) return `waiting for ${item.target.agentId} to finish its turn`;
     if (holder && this.busySince.has(holder)) return `waiting for ${holder} to finish its turn`;
     return null;
+  }
+
+  /**
+   * Hold the queue because `agentId` asked the human something — but only when
+   * the queue is actually pointed at that agent. An orchestra worker's question
+   * is the orchestrator's to answer (see core/orchestra.ts) and shouldn't
+   * freeze a queue lined up for someone else.
+   */
+  private holdQueueFor(agentId: string): void {
+    const head = this.queue.peek();
+    if (!head || this.queue.paused) return;
+    const mine = head.target.kind === "agent" ? head.target.agentId === agentId : head.target.kind === "auto";
+    if (!mine) return;
+    this.queue.setPaused(true, `${agentId} asked you something — answer it, or resume to send what's queued`);
   }
 
   private kickQueue(): void {

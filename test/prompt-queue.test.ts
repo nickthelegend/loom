@@ -145,6 +145,22 @@ describe("prompts sent to a busy agent", () => {
     await waitUntil(() => replies(r).some((t) => t.includes("after the stop")), { timeoutMs: 10_000 });
   });
 
+  it("waits when the agent stops to ask you something", async () => {
+    const r = await open();
+    await r.sendMessage("sleep:400 ask: which file should I write?", "echo");
+    r.enqueue({ text: "unrelated next thing", target: { kind: "agent", agentId: "echo" } });
+    await waitUntil(() => r.log.list({ kinds: ["needs_input"] }).length > 0, { timeoutMs: 10_000 });
+    await new Promise((res) => setTimeout(res, 800));
+    // the question stands: the queued prompt would have answered it unseen
+    expect(r.queue.paused).toBe(true);
+    expect(r.queue.snapshot().reason).toMatch(/asked you something/);
+    expect(replies(r).some((t) => t.includes("unrelated next thing"))).toBe(false);
+    // and answering by hand still goes out at once, past the held queue
+    await r.sendMessage("use notes.txt", "echo");
+    await waitUntil(() => prompts(r).includes("use notes.txt"), { timeoutMs: 10_000 });
+    expect(r.queue.length).toBe(1);
+  });
+
   it("keeps a prompt it couldn't send, and says why it stopped", async () => {
     const r = await open();
     await r.sendMessage("sleep:600 working", "echo");

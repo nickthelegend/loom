@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Each prompt names its own target:** one agent, the **orchestrator** (a whole
   new goal, started when the running one finishes), or the auto router — and you
   can change it while the prompt waits. The baton moves with it.
+- **A question holds the queue:** an agent that stops to ask you something isn't
+  answered by whatever you queued behind it. The queue waits, names who asked,
+  and your typed reply still goes straight out.
 - **Stop pauses the queue** instead of emptying it, and a prompt that can't be
   sent (budget, quarantine, a policy, a missing agent) stays put with the reason
   on the queue rather than disappearing.

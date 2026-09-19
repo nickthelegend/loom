@@ -813,6 +813,10 @@ yours until it's sent:
   cancels), move it up or down, or remove it — all before it runs.
 - **Pause and resume** the whole queue. **Stop** pauses it too: stopping a turn
   never silently discards what you lined up behind it.
+- **A question holds the queue.** If the agent stops to ask you something, the
+  next queued prompt would answer a question you never read — so the queue
+  waits, says who asked, and lets you answer (your reply goes out at once) or
+  resume.
 - A prompt enters the conversation when it is actually sent, not when it's
   queued, so the thread stays an honest record of what the agent was asked.
 
