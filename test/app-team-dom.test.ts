@@ -344,7 +344,9 @@ describe("web app · Loom Teams", () => {
     await waitUntil(() => !!$(m, `[data-pset="${other}"]`));
     await ready(m, `[data-pset="${other}"]`);
     click($(m, `[data-pset="${other}"]`));
-    await waitUntil(() => text(m, "#psteam [data-tslabel]").startsWith("Auto ("));
+    // opening project settings resolves the git remote and asks the hub what
+    // it knows about it — seconds of real work on a loaded runner
+    await waitUntil(() => text(m, "#psteam [data-tslabel]").startsWith("Auto ("), { timeoutMs: 45_000 });
     expect(text(m, "#psteam [data-tslabel]")).toBe("Auto (remote matches acme/app)");
     expect(text(m, "#psteam .tshare small")).toContain("Published to Acme");
     click($(m, "#psx"));
@@ -354,12 +356,12 @@ describe("web app · Loom Teams", () => {
     await ready(m, `[data-pset="${projectId}"]`);
     click($(m, `[data-pset="${projectId}"]`));
     // the control paints before its share state lands (Auto until then)
-    await waitUntil(() => text(m, "#psteam [data-tslabel]") === "Shared with Acme");
+    await waitUntil(() => text(m, "#psteam [data-tslabel]") === "Shared with Acme", { timeoutMs: 45_000 });
     click($(m, '#psteam [data-tsv="private"]'));
-    await waitUntil(() => text(m, "#psteam [data-tslabel]") === "Private");
+    await waitUntil(() => text(m, "#psteam [data-tslabel]") === "Private", { timeoutMs: 45_000 });
     expect($(m, '#psteam [data-tsv="private"]')?.classList.contains("on")).toBe(true);
     expect(m.errors.join("\n")).toBe("");
-  }, 30_000);
+  }, 120_000);
 
   it("the phone shows the Team block in the Fleet sheet", async () => {
     const m = mount({ desktop: false });
