@@ -76,7 +76,7 @@ jobs:
           docker run --rm loom-runner sh -c 'test "$(id -un)" = loom && test "$LOOM_HOME" = /loom && gh --version | head -1'
       - name: The daemon starts and answers health
         run: |
-          docker run -d --name r -p 7420:7420 loom-runner
+          docker run -d --name loom-runner-smoke -p 7420:7420 loom-runner
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:7420/api/health && break; sleep 1; done
           curl -fsS http://127.0.0.1:7420/api/health
-          docker rm -f r
+          docker rm -f loom-runner-smoke
