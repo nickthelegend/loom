@@ -2,7 +2,7 @@
   "O1": {
     "status": "PASS",
     "evidence": "3 queued behind a real turn; edited, removed and reordered; sent in queue order (Reply with exactly: THREE → Reply with exactly: ONE-EDITED); 8 live frames; nothing in the thread before it was sent",
-    "at": "2026-09-19T21:48:08.888Z"
+    "at": "2026-09-19T22:45:29.869Z"
   },
   "O2": {
     "status": "PASS",
@@ -12,7 +12,7 @@
   "O4": {
     "status": "PASS",
     "evidence": "Stop paused the queue (\"you pressed Stop — resume to run what's queued\") and kept the prompt; resume sent it",
-    "at": "2026-09-19T21:51:17.900Z"
+    "at": "2026-09-19T22:45:36.750Z"
   },
   "O3": {
     "status": "PASS",
@@ -21,8 +21,8 @@
   },
   "O5": {
     "status": "PASS",
-    "evidence": "loom queue: add/list/edit/move/to/rm/clear/pause/resume all drive the same queue (list showed:\n1 orchestrate  a whole goal ⏎                qmu8xb37d2 ⏎  2 opencode     first one, edited)",
-    "at": "2026-09-19T21:52:46.148Z"
+    "evidence": "loom queue: add/list/edit/move/to/rm/clear/pause/resume all drive the same queue (list showed:\n1 orchestrate  a whole goal ⏎                qmu8z7g0q6 ⏎  2 opencode     first one, edited)",
+    "at": "2026-09-19T22:45:46.550Z"
   },
   "O6": {
     "status": "PASS",

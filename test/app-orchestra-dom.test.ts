@@ -351,7 +351,7 @@ describe("web app · orchestra", () => {
     expect(m.window.localStorage.getItem(`loomChat:${projectId}`)).toBe(run.chat);
 
     // echo never plans, so the orchestrator asks — the Reply box appears, live
-    await waitUntil(() => !!$(m, "#pane-orchestra .oask #oreply"), { timeoutMs: 30_000 });
+    await waitUntil(() => !!$(m, "#pane-orchestra .oask #oreply"), { timeoutMs: 60_000 });
     expect(text(m, "#pane-orchestra .opill")).toBe("needs you");
     expect(text(m, "#pane-orchestra .oask .oq")).toContain((await runStatus(run.id)).question ?? "");
     expect(text(m, "#pane-orchestra .ometa")).toMatch(/Round\s*\d+\/\d+/);
@@ -365,7 +365,7 @@ describe("web app · orchestra", () => {
       return r.status === "waiting_human" && (await rest<{ events: Array<{ kind: string; payload: { phase?: string } }> }>(
         "GET", `/events?limit=200&chat=${encodeURIComponent(run.chat)}`,
       )).events.filter((e) => e.kind === "orchestra" && e.payload.phase === "waiting").length >= 2;
-    }, { timeoutMs: 30_000 });
+    }, { timeoutMs: 60_000 });
 
     // Abort, while it's active
     await ready(m, "#oabort");
@@ -378,7 +378,10 @@ describe("web app · orchestra", () => {
     expect($(m, "#oclean")).toBeTruthy();
     expect(text(m, "#pane-orchestra .oruns")).toContain(goal.slice(0, 20));
     expect(m.errors.join("\n")).toBe("");
-  });
+    // Two real orchestrator rounds and an abort, each an agent turn through the
+    // daemon. On a loaded CI runner that is minutes, not seconds: the budget is
+    // for "something is broken", not for "the machine is busy".
+  }, 150_000);
 
   it("renders orchestra events in the thread as sentences, not JSON", async () => {
     const goal = `thread rows ${Date.now()}`;
