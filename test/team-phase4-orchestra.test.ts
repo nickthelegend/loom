@@ -14,6 +14,7 @@ import { registerAgentKind } from "../src/adapters/index.js";
 import { AdapterBase } from "../src/adapters/base.js";
 import type { OrchestraCoordinator } from "../src/core/orchestra.js";
 import { writeProjectConfig } from "../src/core/registry.js";
+import { Landing, type Exec } from "../src/daemon/landing.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
 import type { SendInput } from "../src/types.js";
 import { tmpDir, waitUntil } from "./helpers.js";
@@ -182,4 +183,33 @@ describe("Phase 4 in the orchestra", () => {
     expect(r.tasks.map((t) => t.lines)).toEqual([300, 300]);
     coord.stack = "off";
   });
+
+  it("a lower slice that keeps failing folds the stack into one PR the fix loop can fix (D59, D55)", async () => {
+    const run = rt.orchestra.list().find((r) => r.landing?.stack?.length)!;
+    const [lower, top] = run.landing!.stack!;
+    const calls: string[][] = [];
+    const fake: Exec = async (cmd, args) => {
+      if (cmd !== "gh") return { code: 0, out: "", err: "" };
+      calls.push(args);
+      if (args[0] === "pr" && args[1] === "view") return { code: 0, out: JSON.stringify({ state: "OPEN", headRefOid: `sha-${args[2]}` }), err: "" };
+      if (args[0] === "pr" && args[1] === "checks") {
+        const fail = Number(args[2]) === lower!.pr;
+        return { code: fail ? 1 : 0, out: JSON.stringify([{ name: "test", bucket: fail ? "fail" : "pass", link: "https://github.com/acme/app/actions/runs/77/job/1" }]), err: "" };
+      }
+      return { code: 0, out: "", err: "" };
+    };
+    const l = new Landing(rt, {
+      hub: () => null, deviceId: () => null, github: () => "o", share: async () => null, keys: () => [], feed: () => [], presence: () => [],
+      policy: async () => null, exec: fake, rerunSettleMs: 0,
+    });
+    await l.poll(rt.orchestra.get(run.id)!); // first failure: rerun once
+    expect(calls.some((c) => c[0] === "run" && c[1] === "rerun")).toBe(true);
+    expect(rt.orchestra.get(run.id)!.landing!.stack).toHaveLength(2);
+    const st = await l.poll(rt.orchestra.get(run.id)!); // still failing: fold
+    expect(st).toMatchObject({ pr: top!.pr, state: "failing" });
+    expect(st.stack).toBeUndefined();
+    expect(calls.some((c) => c[0] === "pr" && c[1] === "close" && c[2] === String(lower!.pr))).toBe(true);
+    expect(calls.some((c) => c[0] === "pr" && c[1] === "edit" && c[2] === String(top!.pr) && c.includes("--base") && c.includes("main"))).toBe(true);
+  });
 });
+

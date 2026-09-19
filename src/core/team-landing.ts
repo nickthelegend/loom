@@ -376,6 +376,18 @@ export function doctor(opts: { branch: string; rules: Array<{ type: string; para
 
 // ── cost (§10) ──
 
+/** Wall-clock Actions minutes across workflow runs (completed ones), rounded to 0.1. */
+export function actionsMinutes(runs: Array<Record<string, unknown>>): number {
+  let ms = 0;
+  for (const r of runs) {
+    if (r.status !== "completed") continue;
+    const a = Date.parse(String(r.run_started_at ?? r.created_at ?? ""));
+    const b = Date.parse(String(r.updated_at ?? ""));
+    if (Number.isFinite(a) && Number.isFinite(b) && b > a) ms += b - a;
+  }
+  return Math.round(ms / 6000) / 10;
+}
+
 export interface CostEvent {
   type: string;
   github: string | null;
@@ -385,9 +397,11 @@ export interface CostEvent {
 
 export interface CostRollup {
   byMemberDay: Array<{ member: string; day: string; usd: number; goals: number }>;
-  byGoal: Array<{ runId: string; member: string; usd: number; status: string; landed: boolean }>;
+  byGoal: Array<{ runId: string; member: string; usd: number; status: string; landed: boolean; ciMinutes?: number }>;
   landed: number;
   totalUsd: number;
+  /** Actions minutes of landed goals (reported when they land). */
+  ciMinutes: number;
   /** Everything spent (abandoned goals too) divided by PRs that landed. */
   perLandedPrUsd: number | null;
 }
@@ -396,10 +410,15 @@ export interface CostRollup {
 export function rollupCosts(feed: CostEvent[]): CostRollup {
   const goals = new Map<string, { runId: string; member: string; usd: number; status: string; landed: boolean; ts: number }>();
   const landed = new Set<string>();
+  const ci = new Map<string, number>();
   for (const e of feed) {
     const runId = String(e.meta.runId ?? "");
     if (!runId) continue;
-    if (e.type === "goal_landed") landed.add(runId);
+    if (e.type === "goal_landed") {
+      landed.add(runId);
+      const m = Number(e.meta.ciMinutes);
+      if (Number.isFinite(m) && m > 0) ci.set(runId, m);
+    }
     if (e.type !== "goal_finished") continue;
     const usd = Number(e.meta.costUsd ?? 0);
     goals.set(runId, { runId, member: e.github ?? "?", usd: Number.isFinite(usd) ? usd : 0, status: String(e.meta.status ?? ""), landed: false, ts: e.ts });
@@ -419,9 +438,10 @@ export function rollupCosts(feed: CostEvent[]): CostRollup {
   const n = [...goals.values()].filter((g) => g.landed).length;
   return {
     byMemberDay: [...byDay.values()].sort((a, b) => b.day.localeCompare(a.day) || b.usd - a.usd),
-    byGoal: [...goals.values()].sort((a, b) => b.ts - a.ts).map(({ ts: _ts, ...g }) => g),
+    byGoal: [...goals.values()].sort((a, b) => b.ts - a.ts).map(({ ts: _ts, ...g }) => (ci.has(g.runId) ? { ...g, ciMinutes: ci.get(g.runId)! } : g)),
     landed: n,
     totalUsd: round2(total),
+    ciMinutes: Math.round([...ci.values()].reduce((a, b) => a + b, 0) * 10) / 10,
     perLandedPrUsd: n ? round2(total / n) : null,
   };
 }

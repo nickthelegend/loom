@@ -266,6 +266,7 @@ function CostsPanel(props: { costs: TeamCosts }) {
             ["today", dollars(c.todayUsd)],
             ["per landed PR", c.perLandedPrUsd == null ? "—" : dollars(c.perLandedPrUsd)],
             ["total", dollars(c.totalUsd)],
+            ...(c.ciMinutes ? [["CI time", `${c.ciMinutes} min`]] : []),
           ].map(([k, v]) => (
             <View key={k} style={{ flex: 1, gap: 2 }}>
               <Text style={{ color: T.text, fontSize: 15, fontWeight: "600", fontFamily: T.mono }}>{v}</Text>

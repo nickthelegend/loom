@@ -5,6 +5,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
+import { VERSION } from "../version.js";
 import crypto from "node:crypto";
 import { repoOf, TeamLink } from "./team.js";
 import type { HubClient } from "../core/team-hub.js";
@@ -481,7 +482,7 @@ export class LoomDaemon {
       res.json({
         ok: true,
         name: "loom",
-        version: "0.1.0",
+        version: VERSION,
         rev: BUILD_REV,
         terminal: this.terminals.mode,
       });
@@ -679,7 +680,7 @@ export class LoomDaemon {
           const { remoteBehind } = await import("../core/git.js");
           git = await remoteBehind(root).catch(() => null);
         }
-        res.json({ version: "0.1.0", rev: BUILD_REV, root, git });
+        res.json({ version: VERSION, rev: BUILD_REV, root, git });
       })();
     });
 

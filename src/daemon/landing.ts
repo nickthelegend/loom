@@ -40,6 +40,7 @@ import {
   reviewState,
   runIdOf,
   summarizeChecks,
+  actionsMinutes,
   triggersMergeGroup,
   triggersPullRequest,
   type CheckRow,
@@ -274,10 +275,31 @@ export class Landing {
     } catch {
       mergeSha = undefined;
     }
-    const st = this.set(run, { state: "merged", landRequested: false, ...(mergeSha ? { mergeSha } : {}) });
-    await this.post(run, "goal_landed", { runId: run.id, pr: st.pr, costUsd: Math.round(run.costUsd * 100) / 100 }, `landed:${run.id}`);
+    const ciMinutes = await this.ciMinutes(run).catch(() => null);
+    const st = this.set(run, { state: "merged", landRequested: false, ...(mergeSha ? { mergeSha } : {}), ...(ciMinutes !== null ? { ciMinutes } : {}) });
+    await this.post(
+      run,
+      "goal_landed",
+      { runId: run.id, pr: st.pr, costUsd: Math.round(run.costUsd * 100) / 100, ...(ciMinutes !== null ? { ciMinutes } : {}) },
+      `landed:${run.id}`,
+    );
     if (run.from) await this.handBack(run).catch(() => {});
     return st;
+  }
+
+  /** Actions minutes the goal's branch used (§10: CI cost per goal, no App needed). */
+  async ciMinutes(run: OrchestraRun): Promise<number | null> {
+    const repo = await this.repo();
+    if (!repo) return null;
+    const branch = this.rt.orchestra.prBranch(run);
+    const r = await this.exec("gh", ["api", `repos/${repo}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=100`], this.rt.info.dir);
+    if (r.code !== 0) return null;
+    try {
+      const runs = (JSON.parse(r.out) as { workflow_runs?: Array<Record<string, unknown>> }).workflow_runs ?? [];
+      return actionsMinutes(runs);
+    } catch {
+      return null;
+    }
   }
 
   // ── review (D60, D61) ──
@@ -443,8 +465,27 @@ export class Landing {
     for (let i = 0; i < stack.length; i++) {
       const p = stack[i]!;
       if (p.state === "MERGED") continue;
-      const v = JSON.parse(await this.gh(["pr", "view", String(p.pr), "--json", "state"])) as { state: string };
+      const v = JSON.parse(await this.gh(["pr", "view", String(p.pr), "--json", "state,headRefOid"])) as { state: string; headRefOid?: string };
       stack[i] = { ...p, state: v.state };
+      // A lower slice failing for real (rerun once already) can't be auto-fixed
+      // in place — fixes land on the goal's own branch at the top. Fold the
+      // stack into one PR and let the normal fix loop take it (D59, D55).
+      const top = i === stack.length - 1;
+      if (!top && v.state === "OPEN" && v.headRefOid) {
+        const failing = summarizeChecks(await this.checks(p.pr)).failing;
+        for (const c of failing) {
+          const k = `${v.headRefOid}:${c.name}`;
+          if (!run.landing!.reruns.includes(k)) {
+            this.set(run, { reruns: [...run.landing!.reruns, k] });
+            this.rerunAt.set(k, Date.now());
+            const id = runIdOf(c.link);
+            if (id) await this.gh(["run", "rerun", id, "--failed"]).catch(() => {});
+            continue;
+          }
+          if (Date.now() - (this.rerunAt.get(k) ?? 0) < (this.deps.rerunSettleMs ?? RERUN_SETTLE_MS)) continue;
+          return this.collapseStack(run, stack, `"${c.name}" fails on part ${i + 1} (#${p.pr})`);
+        }
+      }
       if (v.state === "MERGED") {
         const next = stack[i + 1];
         if (next) {
@@ -457,6 +498,22 @@ export class Landing {
     this.set(run, { stack });
     if (stack.every((p) => p.state === "MERGED")) return this.merged(run);
     return run.landing!;
+  }
+
+  /**
+   * Close the stack's unmerged lower PRs and point the top one at the base
+   * branch: one PR again, carrying everything, that the fix loop can fix.
+   */
+  async collapseStack(run: OrchestraRun, stack: NonNullable<LandingState["stack"]>, why: string): Promise<LandingState> {
+    const base = run.baseBranch ?? "main";
+    const top = stack[stack.length - 1]!;
+    for (const p of stack.slice(0, -1)) {
+      if (p.state === "MERGED" || p.state === "CLOSED") continue;
+      await this.gh(["pr", "close", String(p.pr), "--comment", `**Loom:** ${why}, which can't be fixed in place on a stacked slice. Folded into #${top.pr}, which now carries this part too.`]).catch(() => {});
+    }
+    await this.gh(["pr", "edit", String(top.pr), "--base", base]);
+    await this.gh(["pr", "comment", String(top.pr), "--body", `**Loom:** the stack was folded into this PR (${why}). It now targets \`${base}\` and carries every part; fixes land here.`]).catch(() => {});
+    return this.set(run, { stack: undefined, pr: top.pr, url: top.url, state: "failing" });
   }
 
   private async landStack(run: OrchestraRun): Promise<LandingState> {

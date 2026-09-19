@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-19
+
+Loom Teams: five phases, 78 design decisions, several people and their agents on
+one repo. The sections below go phase by phase, newest first.
+
+### Loom Teams: loose ends closed
+
+- **Paste-the-URL sign-in** for the hosted hub on machines without a browser
+  (`loom team signin --paste`; `loom runner join` uses it by default).
+- **Stacks fold when a lower PR keeps failing:** its lower PRs close and the top
+  one retargets the base branch, so the normal fix loop can fix it.
+- **CI minutes per goal:** Actions time on a goal's branch is recorded when it
+  lands and shown in team spend (desktop and phone).
+- **Docs:** a Teams user guide ([docs/teams.md](docs/teams.md)), a docs index,
+  a source map, and READMEs for `supabase/`, `src/hub/`, `test/`, `scripts/`
+  and `hardware/`.
+
 ### Loom Teams, Phase 5: runners
 
 - **12 more design decisions** (D67–D78), settled in a design interview.

@@ -194,6 +194,8 @@ export interface LandingState {
   returned?: boolean;
   /** The commit the PR merged as (deploy alerts, D72). */
   mergeSha?: string;
+  /** Actions minutes the goal's branch used, recorded when it lands (§10). */
+  ciMinutes?: number;
   /** Stacked delivery (D59): the PRs bottom-up; the last is this goal's own branch. */
   stack?: Array<{ pr: number; url: string; branch: string; base: string; state?: string }>;
   updatedAt: number;

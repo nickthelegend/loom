@@ -78,13 +78,37 @@ one spends money and moves the baton. When the daemon host has no `gh`, is signe
 or the project has no GitHub remote, the tab says which; it never shows an empty list to
 mean "unavailable".
 
+## Loom Teams on the phone
+
+When a project is shared with a team, three more tabs appear:
+
+- **Team brain**: the team's memories by tier (canon, confirmed, yours,
+  proposed) and an inbox to triage on the go: keep A or B on a contradiction,
+  merge duplicates, trust or keep private, propose as canon (it opens the canon
+  PR and links to it).
+- **Landing**: your goal PRs (checks, flaky checks, review result, fix
+  attempts, why one needs you) with **Land**, **Re-review** and **Override
+  review**; teammates' goals that need someone, with **Adopt**; and team spend,
+  including CI time.
+- **Runners**: your runners and what they're doing. **Start on runner** from
+  the phone while your laptop is off, **Continue on runner** for a running goal,
+  **Bring back** and **Land** for goals living on a runner, and recent deploys.
+
+The Team block in the Fleet sheet shows who is doing what, the team feed, and
+leases. The pure logic behind these tabs (`src/team-*-model.ts`) is tested with
+`npm test` in this folder.
+
 ## Push notifications
 
 Open the app once after pairing — it asks permission, fetches its Expo push token, and
 registers it with the daemon (`POST /api/push/register`, attached to this device's
 paired-client record). The daemon then pushes on `needs_input`, `route_completed`,
 `route_failed`, and solo `run_complete` — route hops are suppressed on the server so
-pipelines buzz once. Test from the computer: `loom clients --ping`.
+pipelines buzz once. Loom Teams adds alerts for what needs you: a goal PR out of
+fix attempts, a failed deploy containing your goal, a teammate adopting your
+goal. **Tapping a notification opens its project** (and the goal, when the alert
+names one), whether the app was running or not. Test from the computer:
+`loom clients --ping`.
 
 ## Notes
 

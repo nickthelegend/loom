@@ -1396,6 +1396,8 @@ export interface TeamCosts {
   landed: number;
   totalUsd: number;
   perLandedPrUsd: number | null;
+  /** Actions minutes of landed goals. */
+  ciMinutes?: number;
 }
 
 export interface TeamStatus {
