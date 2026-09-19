@@ -2937,6 +2937,16 @@ ${BRAND_SPRITE}
                 auto: false, cpanel: null };
   var root = document.getElementById("root");
 
+  /**
+   * Is this window still here?
+   *
+   * A reply can land after the window has gone — a closed tab, a torn-down
+   * test — and the document is undefined by then. A late redraw that throws
+   * turns into an unhandled rejection and blames whatever ran next, so the
+   * few redraws that late replies reach ask first.
+   */
+  function pageGone(){ return typeof document === "undefined" || !document; }
+
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","'":"&#39;"}[c]; }); }
 
@@ -7997,6 +8007,7 @@ ${BRAND_SPRITE}
     }
 
     function drawQueue(){
+      if (pageGone()) return;
       var el = document.getElementById("cqueue");
       if (!el) return;
       if (!queue.items.length) { el.style.display = "none"; el.innerHTML = ""; return; }
@@ -9366,6 +9377,7 @@ ${BRAND_SPRITE}
     }
 
     function orchEl(){
+      if (pageGone()) return null;
       if (desktop) return state.tab === "orchestra" ? document.getElementById("pane-orchestra") : null;
       return document.getElementById("orchsheet");
     }
