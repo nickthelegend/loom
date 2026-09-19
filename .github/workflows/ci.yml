@@ -58,3 +58,25 @@ jobs:
         working-directory: app
       # The phone carries copies of the relay protocol; they must match the daemon's.
       - run: node app/scripts/check-relay-copies.mjs
+      # The pure logic behind the phone's team tabs (node's own test runner).
+      - run: npm test
+        working-directory: app
+
+  # The runner image (Loom Teams D78): proves Dockerfile.runner builds and the
+  # CLI inside it runs. The build machine behind this repo has no Docker, so CI
+  # is where the image is actually exercised.
+  runner-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f Dockerfile.runner -t loom-runner .
+      - name: The CLI inside runs, as the unprivileged user, with its own home
+        run: |
+          docker run --rm loom-runner loom --version
+          docker run --rm loom-runner sh -c 'test "$(id -un)" = loom && test "$LOOM_HOME" = /loom && gh --version | head -1'
+      - name: The daemon starts and answers health
+        run: |
+          docker run -d --name loom-runner-smoke -p 7420:7420 loom-runner
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:7420/api/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:7420/api/health
+          docker rm -f loom-runner-smoke

@@ -95,7 +95,12 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      # The default package list includes "tools", which current SDK command-line
+      # tools no longer ship ("Failed to find package 'tools'" failed the job);
+      # the runner's preinstalled SDK has the rest.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       # Signed cloud build when the repo has an Expo token. `--wait` on purpose:
       # --no-wait returns before the binary exists, so there would be nothing to
@@ -126,6 +131,7 @@ jobs:
         run: |
           test -f loompad.apk || { echo "no apk was produced"; exit 1; }
           V="${GITHUB_REF_NAME#v}"
+          V="${V//\//-}"   # a dry run from a branch like ci/x must still make a valid file name
           mv loompad.apk "loompad-${V}-android.apk"
           ls -la *.apk
       - uses: actions/upload-artifact@v4
