@@ -254,3 +254,34 @@ describe("web app · the script parses", () => {
   });
 
 });
+
+/**
+ * A task thread used to claim to be whoever held the project baton, so during
+ * a run with four workers you could not tell a Codex task from an Antigravity
+ * one by looking at it. Proven against a real run: t1 read claude-code, t2
+ * codex, t3 antigravity.
+ */
+describe("web app · whose thread is this", () => {
+  it("resolves the header from the task, not the baton", () => {
+    expect(APP_HTML).toContain("function threadAgent(");
+    expect(APP_HTML).toContain("var wanted = threadAgent(p) || state.selected || p.holder;");
+    // A task's agent field is an id OR a kind, and an unresolvable one must
+    // fall through to the baton rather than hiding the header.
+    expect(APP_HTML).toMatch(/if \(agents\[k\]\.id === want\)/);
+    expect(APP_HTML).toMatch(/if \(agents\[m\]\.kind === want\)/);
+    // currentChat() lives in the shell's scope; this render is in another.
+    // Calling the bare name threw and took the whole header with it.
+    expect(APP_HTML).toContain("state.currentChat ? state.currentChat() : null");
+  });
+
+  it("marks a thread running, done or failed — and says nothing when it can't know", () => {
+    expect(APP_HTML).toContain("function chatStatusMark(");
+    expect(APP_HTML).toContain('cstat run');
+    expect(APP_HTML).toContain('cstat done');
+    expect(APP_HTML).toContain('cstat bad');
+    expect(APP_HTML).toContain("@keyframes cstatpulse");
+    // Every answer comes from a status the daemon reports. A thread with no
+    // task and no run behind it gets no mark at all rather than a guess.
+    expect(APP_HTML).toContain('if (!t) return "";');
+  });
+});

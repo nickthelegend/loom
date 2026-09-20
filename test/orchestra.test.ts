@@ -491,3 +491,45 @@ describe("orchestra runs", () => {
     expect(status.orchestra).toMatchObject({ id: run.id, status: "completed", tasks: 1, done: 1 });
   });
 });
+
+/**
+ * The status payload used to carry a task COUNT and nothing else, so no
+ * surface could answer questions the daemon knew the answer to: which agent
+ * owns a thread, whether a thread is still running, where a task's work went.
+ * Three features needed the same three fields.
+ */
+describe("what the status payload says about a run's threads", () => {
+  it("names every task's thread, agent and state — not just how many there are", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", id: "t1", title: "first", agent: "alpha", prompt: "do the first thing" },
+        { type: "spawn", id: "t2", title: "second", agent: "beta", prompt: "do the second thing" },
+      ]),
+      loom([{ type: "finish", summary: "done" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "two tasks", orchestrator: "conductor" });
+    await settle(run.id);
+
+    const summary = rt.orchestraSummary()!;
+    expect(summary.tasks).toBe(2); // the count is still there
+    const threads = summary.threads as Array<Record<string, string>>;
+    expect(threads).toHaveLength(2);
+
+    // Each row carries what a thread needs to identify itself.
+    const t1 = threads.find((t) => t.id === "t1")!;
+    expect(t1.agent).toBe("alpha");
+    expect(t1.title).toBe("first");
+    expect(t1.status).toBe("done");
+    // …and a chat that really exists, because a thread id nothing can open is
+    // worse than no thread id.
+    expect(t1.chat).toBeTruthy();
+    expect(rt.chats().some((c) => c.id === t1.chat)).toBe(true);
+
+    // Two tasks on two agents are two different threads — the thing that was
+    // impossible to see when every task claimed the baton holder.
+    const t2 = threads.find((t) => t.id === "t2")!;
+    expect(t2.agent).toBe("beta");
+    expect(t2.chat).not.toBe(t1.chat);
+  }, 60_000);
+});
