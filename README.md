@@ -633,16 +633,26 @@ agents without a stable API can't be trusted with interrupt-safe writes. See
 
 ## The brain, sharpened
 
-Four retrieval behaviours worth knowing, all inspectable with `explain`:
+Five retrieval behaviours worth knowing, all inspectable with `explain`:
 
 - **Recency decay** — a unit's match decays toward a floor (7-day half-life,
   never below 0.55): an equal match, fresher, wins; a strong old constraint
   still beats a weak new fact. Age tips ties, it never erases history.
 - **A fuzzy channel** — hashed character-trigram vectors catch typos and
   morphology (`sqllite databse` finds `sqlite database`; `deploying` finds
-  `deployment`). Honestly **not** synonymy — `auth` will never match `login`
-  without a real model, and we'd rather name that gap than fake it with word
-  lists.
+  `deployment`). Honestly **not** synonymy: that needs a model, which is the
+  next one.
+- **A semantic channel, opt-in** (`brain.semantic`, or Settings → Brain) —
+  all-MiniLM-L6-v2 embeddings, so *how does login work* reaches a note about
+  Supabase JWKS. Measured on `test/brain-recall.test.ts`, recall@5 goes
+  **0.50 → 1.00** on queries that share no word with the memory they want,
+  **0.80 → 1.00** across word forms, and stays **1.00** on the literal ones —
+  it costs nothing where the lexical channels already worked. It is **not** a
+  dependency: the 23MB model needs a ~470MB ONNX runtime, so Loom asks you to
+  install it (`npm i -g @huggingface/transformers`) and works exactly as
+  before if you don't. Scored relative to the best hit in the query, like
+  BM25, because this model's absolute similarities don't mean enough to
+  threshold.
 - **Contradiction flags** — `loom brain:conflicts` scans same-kind units for
   negation pairs (`always`/`never` on one topic) and same-topic-divergent
   decisions. Every flag names the signal that tripped it, so you can judge the
@@ -880,6 +890,20 @@ output streams while they run, and the daemon restarts itself on the new build
 with the page reconnecting to it.
 
 From the terminal: `loom update --check` to look, `loom update` to do it.
+
+**The desktop app** has its own, under **Help → Check for Updates…**, because
+an installed application is not a checkout:
+
+- **Windows** and the **Linux AppImage** update themselves — it asks before
+  downloading, installs on quit, and restarts only when you press Restart.
+- **macOS** finds the build for your architecture, downloads it, and
+  **verifies its SHA-256** against the checksums the release publishes (a file
+  that doesn't match is deleted, not opened), then opens the disk image for
+  you to drag across. The drag stays yours: macOS only lets an app signed by a
+  certificate it already trusts replace itself, and this build is ad-hoc
+  signed. Automating the *checking* is the part worth having — the checksums
+  have shipped since 0.2.0 and nobody compares them by hand.
+- A **`.deb`** is left to the package manager that owns it.
 
 ## More than one goal, when they can't collide
 

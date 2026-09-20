@@ -45,9 +45,18 @@ electron-updater reads.
 workflow collects `latest.yml` and `latest-linux.yml` and deliberately leaves
 `latest-mac.yml` behind: macOS will only replace an app signed by a certificate
 it already trusts, and this build is ad-hoc signed. Advertising an update that
-the OS will refuse to install is worse than advertising none — see
-`desktop/updater.js`, which refuses on macOS in the same words and opens the
-releases page instead.
+the OS will refuse to install is worse than advertising none.
+
+**What macOS does instead** (`desktop/updater-mac.js`): finds the dmg for the
+running architecture, downloads it, and verifies its SHA-256 against the
+`SHA256SUMS.txt` the release publishes — deleting the file rather than opening
+it if the two disagree — then opens the disk image so you can drag the new app
+over the old one. The last step stays yours on purpose. An app *can* replace
+its own bundle (it is what Sparkle does outside the App Store), but on an
+ad-hoc-signed build that means writing over an installed application and
+stepping around the OS's own update path, which is not something to ship
+quietly. A Developer ID turns it into the ordinary, supported, one-click
+thing — that's still #70.
 
 **The entitlements are load-bearing.** Loom's job is spawning other people's
 agents (`claude`, `codex`, `grok`) and a shell for the terminal pane. Under the

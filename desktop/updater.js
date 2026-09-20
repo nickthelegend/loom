@@ -4,16 +4,17 @@
 // safe is a property of how the app was signed and how it was installed, not
 // of the code, so this decides first and acts second:
 //
-//   macOS        — refused. Squirrel.Mac will only replace a bundle signed by
-//                  a certificate the OS trusts, and Loom's macOS build is
-//                  ad-hoc signed (desktop/build/adhoc-sign.cjs) because there
-//                  is no Developer ID. An auto-updater pointed at an ad-hoc
-//                  build fails in ways that look like corruption, so it opens
-//                  the release page instead and says why.
 //   Linux .deb   — refused. The package manager owns those files.
-//   Linux AppImage / Windows — supported: a single artifact the app may
-//                  replace, and the feed electron-builder publishes says
-//                  what's out there.
+//   Linux AppImage / Windows — electron-updater, against the feed
+//                  electron-builder publishes: a single artifact the app may
+//                  replace.
+//   macOS        — not electron-updater. Squirrel.Mac will only replace a
+//                  bundle signed by a Developer ID the OS trusts, and this
+//                  build is ad-hoc signed. It does the part that can be
+//                  automated instead — find the right dmg, download it, and
+//                  VERIFY it against the release's published checksums — and
+//                  leaves the drag to Applications to you. See updater-mac.js
+//                  for why the last step is deliberately still yours.
 //
 // Nothing downloads without being asked, and nothing restarts under you: the
 // install happens on quit, and "Restart now" is a button you press.
@@ -25,7 +26,13 @@ const electron = () => import("electron");
 
 const RELEASES = "https://github.com/nickthelegend/loom/releases/latest";
 
-/** Why this copy can't replace itself, or null when it can. */
+/**
+ * Why this copy can't replace itself, or null when it can.
+ *
+ * macOS answers "can't" too — its build is ad-hoc signed, and the OS won't
+ * swap one of those — but it has somewhere better to go than the releases
+ * page, so `macAssist` handles it rather than this.
+ */
 export function refusal(platform, packaged, env = process.env) {
   if (!packaged) return "this is a development build — run it from the checkout instead";
   if (platform === "darwin") {
@@ -45,6 +52,86 @@ async function openReleases() {
 }
 
 /**
+ * macOS: find it, fetch it, check it, hand it over.
+ *
+ * The swap itself stays a drag, because this build is ad-hoc signed — see
+ * updater-mac.js. Everything before it is automated, and the checksum is
+ * actually verified, which is more than a person downloading the dmg by hand
+ * realistically does.
+ */
+export async function macAssist(opts = {}) {
+  const say = opts.dialog ?? (await electron()).dialog;
+  const version = opts.version ?? (await electron()).app.getVersion();
+  const mac = opts.mac ?? (await import("./updater-mac.js"));
+
+  let release;
+  try {
+    release = await mac.latestRelease();
+  } catch (err) {
+    await say.showMessageBox({
+      type: "info",
+      message: `Loom Desktop ${version}`,
+      detail: `Couldn't reach the releases (${String(err?.message ?? err)}).`,
+      buttons: ["Open Releases", "Close"],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    return { updated: false, reason: "unreachable" };
+  }
+
+  if (!isNewer(release.version, version)) {
+    await say.showMessageBox({
+      type: "info",
+      message: `Loom Desktop ${version} is up to date`,
+      buttons: ["Close"],
+    });
+    return { updated: false, reason: "current" };
+  }
+
+  const asset = mac.pickAsset(release.assets, opts.arch ?? process.arch);
+  const ask = await say.showMessageBox({
+    type: "question",
+    message: `Loom Desktop ${release.version} is available`,
+    detail: `Loom will download the ${opts.arch ?? process.arch} build${asset?.size ? ` (${mac.mb(asset.size)})` : ""} and check it against the checksums this release publishes. macOS won't let an app that isn't signed by a certificate it trusts replace itself, so the last step is yours: drag the new Loom Desktop over the old one.`,
+    buttons: ["Download", "Not now"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (ask.response !== 0) return { updated: false, reason: "declined" };
+
+  let got;
+  try {
+    got = await mac.downloadVerified({
+      release,
+      ...(opts.arch ? { arch: opts.arch } : {}),
+      ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+    });
+  } catch (err) {
+    await say.showMessageBox({
+      type: "error",
+      message: "That download wasn't usable",
+      detail: String(err?.message ?? err),
+      buttons: ["Open Releases", "Close"],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    return { updated: false, reason: "download-failed" };
+  }
+
+  const then = await say.showMessageBox({
+    type: "info",
+    message: `Loom Desktop ${got.version} is downloaded and verified`,
+    detail: `Its SHA-256 matches the one this release publishes.\n\nOpening it mounts the disk image: drag Loom Desktop onto Applications, replacing the old one, then quit this copy and open the new one.\n\n${got.file}`,
+    buttons: ["Open it", "Show in Finder", "Later"],
+    defaultId: 0,
+    cancelId: 2,
+  });
+  if (then.response === 0) await (opts.openPath ?? (async (f) => (await electron()).shell.openPath(f)))(got.file);
+  if (then.response === 1) await (opts.showItem ?? (async (f) => (await electron()).shell.showItemInFolder(f)))(got.file);
+  return { updated: false, staged: true, version: got.version, file: got.file, sha256: got.sha256 };
+}
+
+/**
  * Check, ask, download, and offer to restart. Every step is a question.
  *
  * `deps` is injectable so the decisions above can be tested without an
@@ -53,10 +140,18 @@ async function openReleases() {
 export async function checkForUpdates(opts = {}) {
   const say = opts.dialog ?? (await electron()).dialog;
   const version = opts.version ?? (await electron()).app.getVersion();
-  const why =
-    opts.refusal !== undefined
-      ? opts.refusal
-      : refusal(process.platform, (await electron()).app.isPackaged);
+  const platform = opts.platform ?? process.platform;
+  let why = opts.refusal;
+  if (why === undefined) {
+    // Asking Electron is deferred until something actually needs the answer:
+    // a caller that states its own refusal is testing a branch, not asking to
+    // be told what it's running inside.
+    const packaged = opts.packaged ?? (await electron()).app.isPackaged;
+    // macOS can't swap itself, but it doesn't have to be sent to a web page
+    // either.
+    if (platform === "darwin" && packaged) return macAssist(opts);
+    why = refusal(platform, packaged);
+  }
 
   if (why) {
     const r = await say.showMessageBox({

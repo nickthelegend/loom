@@ -27,7 +27,7 @@ import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../a
 import { ADES } from "../core/ades.js";
 import { BatonManager, NotHolderError } from "../core/baton.js";
 import { Brain, CONFIDENCE_FLOOR, type Memory } from "../core/brain.js";
-import { compileBrief, retrieve, type RetrieveOpts } from "../core/brain-index.js";
+import { compileBrief, retrieve, type Hit, type RetrieveOpts } from "../core/brain-index.js";
 import { extractFromTurn, readExternalContent, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
@@ -102,6 +102,7 @@ import {
   type WorkingTree,
 } from "../core/worktree.js";
 import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
+import { SemanticIndex } from "../core/semantic.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
@@ -236,11 +237,34 @@ export class ProjectRuntime {
   private queueListeners = new Set<(s: QueueState) => void>();
   private draining = false;
 
+  /**
+   * The dense retrieval channel, when this project opted in (brain.semantic).
+   *
+   * Null is the normal state, and null costs nothing: no model is loaded, no
+   * vectors are written, and retrieval is the three lexical channels. Loading
+   * happens in the background — the first brief after a cold start uses
+   * whatever is ready, which is the honest thing for something that takes ten
+   * seconds to warm up.
+   */
+  private semantic: SemanticIndex | null = null;
+
   private constructor(info: ProjectInfo, config: ProjectConfig, log: EventLog) {
     this.info = info;
     this.config = config;
     this.log = log;
     this.baton = new BatonManager(info.dir, log);
+    if (config.brain?.semantic) {
+      const index = new SemanticIndex(path.join(info.dir, ".loom"));
+      void index
+        .start()
+        .then(async (ok) => {
+          if (!ok) return; // the runtime isn't installed; logbook said so
+          this.semantic = index;
+          const made = await index.sync(this.brain.all());
+          if (made) logbook.info("brain", `embedded ${made} memories for semantic retrieval`, "", info.id);
+        })
+        .catch((err) => logbook.warn("brain", "semantic retrieval didn't start", String(err), info.id));
+    }
     this.brain = new Brain(log);
 
     // Same path as addAgent: an agent added at runtime must behave exactly like
@@ -282,8 +306,12 @@ export class ProjectRuntime {
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       createChat: (title) => this.createChat(title),
-      briefingFor: (query, agentId, files) =>
-        [this.activeSkillsBlock(), this.brainBrief({ query, agent: agentId, limit: 6 }), this.teamBrain?.context(files ?? []) ?? ""]
+      briefingFor: async (query, agentId, files) =>
+        [
+          this.activeSkillsBlock(),
+          await this.brainBriefFor({ query, agent: agentId, limit: 6 }),
+          this.teamBrain?.context(files ?? []) ?? "",
+        ]
           .filter(Boolean)
           .join("\n\n"),
       gate: (agentId) => {
@@ -700,7 +728,7 @@ export class ProjectRuntime {
    * with no restart. Only the known keys are honoured; unknown ones are ignored.
    */
   patchConfig(patch: {
-    brain?: { extractor?: "auto" | "off"; model?: string };
+    brain?: { extractor?: "auto" | "off"; model?: string; semantic?: boolean };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
     defaultAgent?: string;
     git?: {
@@ -723,6 +751,10 @@ export class ProjectRuntime {
     if (patch.brain) {
       const b = { ...(this.config.brain ?? {}) };
       if (patch.brain.extractor === "auto" || patch.brain.extractor === "off") b.extractor = patch.brain.extractor;
+      if (typeof patch.brain.semantic === "boolean") {
+        if (patch.brain.semantic) b.semantic = true;
+        else delete b.semantic;
+      }
       if (typeof patch.brain.model === "string") b.model = patch.brain.model.trim() || undefined;
       this.config.brain = b;
     }
@@ -780,7 +812,7 @@ export class ProjectRuntime {
    * a blank that hides what's actually running.
    */
   settings(): {
-    brain: { extractor: "auto" | "off"; model: string };
+    brain: { extractor: "auto" | "off"; model: string; semantic: boolean };
     projection: { mode: "template" | "llm"; model: string };
     defaultAgent: string;
     git: {
@@ -797,6 +829,7 @@ export class ProjectRuntime {
       brain: {
         extractor: this.config.brain?.extractor === "off" ? "off" : "auto",
         model: this.config.brain?.model ?? "",
+        semantic: Boolean(this.config.brain?.semantic),
       },
       projection: {
         mode: this.config.projection?.mode === "llm" ? "llm" : "template",
@@ -1866,7 +1899,7 @@ export class ProjectRuntime {
    * held back from injection (they stay visible in the Brain tab). Empty string
    * when there's nothing relevant, so callers append it unconditionally.
    */
-  private retrieveBrief(events: LoomEvent[], agentId: string): string {
+  private async retrieveBrief(events: LoomEvent[], agentId: string): Promise<string> {
     const query = events
       .filter((e) => e.kind === "message")
       .slice(-8)
@@ -1885,7 +1918,7 @@ export class ProjectRuntime {
       ),
     ].slice(-20);
     if (!query.trim() && !files.length) return "";
-    const brief = this.brainBrief({
+    const brief = await this.brainBriefFor({
       ...(query.trim() ? { query } : {}),
       ...(files.length ? { files } : {}),
       agent: agentId,
@@ -1905,6 +1938,48 @@ export class ProjectRuntime {
     const pool = this.teamBrain?.pool(this.brain.all());
     if (!pool) return compileBrief(retrieve(this.brain, opts).map((h) => h.memory));
     return compileTieredBrief(retrieveTiered(pool, opts));
+  }
+
+  /**
+   * The same brief, with the dense channel when this project has one.
+   *
+   * Embedding is real work (a millisecond, warm) and retrieval is sync, so the
+   * vectors are computed here and handed in. Everything about this is
+   * best-effort: no model, no network, a slow first load — the brief is the
+   * one the three lexical channels produce, which is the brief Loom has always
+   * produced.
+   */
+  private async brainBriefFor(opts: RetrieveOpts): Promise<string> {
+    const dense = await this.denseFor(opts.query ?? "");
+    return this.brainBrief(dense ? { ...opts, dense } : opts);
+  }
+
+  /**
+   * Retrieval exactly as a briefing sees it — including the dense channel.
+   *
+   * The Brain tab and `loom brain:search` use this: a search that scored
+   * differently from the briefing it's meant to explain would be worse than
+   * no search at all.
+   */
+  async searchBrain(opts: RetrieveOpts): Promise<Hit[]> {
+    const dense = await this.denseFor(opts.query ?? "");
+    return retrieve(this.brain, dense ? { ...opts, dense } : opts);
+  }
+
+  /** Vectors for one query, or null when the channel isn't available. */
+  private async denseFor(query: string): Promise<RetrieveOpts["dense"] | null> {
+    if (!this.semantic || !query.trim()) return null;
+    try {
+      const memories = this.brain.all();
+      await this.semantic.sync(memories);
+      const q = await this.semantic.query(query);
+      if (!q) return null;
+      const byId = this.semantic.byId(memories);
+      return byId.size ? { query: q, byId } : null;
+    } catch (err) {
+      logbook.warn("brain", "the dense channel didn't answer", String(err), this.info.id);
+      return null;
+    }
   }
 
   /**
@@ -2972,7 +3047,7 @@ export class ProjectRuntime {
     // is the recent conversation plus the files recent turns touched; scoped to
     // this chat and to the incoming agent; low-confidence memories are held back
     // from injection (they're still visible in the Brain tab).
-    const brainBrief = this.retrieveBrief(events, to);
+    const brainBrief = await this.retrieveBrief(events, to);
     // Append the unified cross-ADE memory so the incoming agent sees the
     // whole brain, not just this project's log.
     const unified = this.unifiedMemory();
@@ -3010,7 +3085,7 @@ export class ProjectRuntime {
       // Bridges get the retrieved brain brief too — they can't take a system
       // prompt, but their shared-context file is the only memory they have, so
       // it shouldn't be the one view without the learned memories in it.
-      const bridgeBrief = this.retrieveBrief(events, cfg.id);
+      const bridgeBrief = await this.retrieveBrief(events, cfg.id);
       const bridgeView = bridgeBrief
         ? `${buildProjection({ ...input, targetAgentId: cfg.id })}\n\n---\n${bridgeBrief}`
         : buildProjection({ ...input, targetAgentId: cfg.id });

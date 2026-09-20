@@ -3392,7 +3392,9 @@ export class LoomDaemon {
         if (!q.q?.trim() && !files.length) {
           return void res.status(400).json({ error: "missing q or files" });
         }
-        const hits = retrieve(rt.brain, {
+        // searchBrain, not retrieve: a search that scored differently from
+        // the briefing it exists to explain would be worse than no search.
+        const hits = await rt.searchBrain({
           ...(q.q ? { query: q.q } : {}),
           ...(files.length ? { files } : {}),
           ...(q.chat ? { chat: q.chat } : {}),

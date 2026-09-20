@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Retrieval that can follow a synonym
+
+- **A semantic channel for the brain** (`brain.semantic`, or Settings →
+  Brain): all-MiniLM-L6-v2 embeddings unioned with the three lexical channels,
+  so *how does login work* reaches a note about Supabase JWKS. Measured on the
+  recall set that shipped with 0.2.4: recall@5 **0.50 → 1.00** on synonyms,
+  **0.80 → 1.00** across word forms, unchanged at **1.00** on literal queries.
+  Warm cost is about a millisecond a query.
+- It is **not** a dependency and never will be: the model is 23MB but its ONNX
+  runtime is ~470MB, so Loom asks you to install that yourself
+  (`npm i -g @huggingface/transformers`) and behaves exactly as before when
+  it's missing — a channel that can be absent must fail into the old answer,
+  not into an error. Vectors are cached per memory hash beside the brain, and
+  the model stays offline after its first download.
+
+### macOS gets the update too
+
+- **Help → Check for Updates… on macOS** now finds the build for your
+  architecture, downloads it, and **verifies its SHA-256** against the
+  checksums the release publishes — a file that doesn't match is deleted
+  rather than opened — then opens the disk image for you to drag across. The
+  drag stays yours: macOS only lets an app signed by a certificate it trusts
+  replace itself, and this build is ad-hoc signed. The checking is the part
+  worth having; the checksums have shipped since 0.2.0 and nobody compares
+  them by hand.
+
 ## [0.2.4] — 2026-09-20
 
 ### The desktop app can update itself, where that's honest

@@ -252,7 +252,12 @@ export interface OrchestraHost {
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
   createChat(title: string): ChatInfo;
   /** Skills + retrieved memories for a task, or "" — the project brain (and the team's, when shared). */
-  briefingFor(query: string, agentId: string, files?: string[]): string;
+  /**
+   * The memory brief for a task. May be async: with the dense channel on
+   * (core/semantic.ts) the query has to be embedded first, which is a
+   * millisecond of real work rather than a lookup.
+   */
+  briefingFor(query: string, agentId: string, files?: string[]): string | Promise<string>;
   /** Throws when `agentId` is over budget or quarantined. */
   gate(agentId: string): void;
   /** Cost/metrics bookkeeping for a worker event. */
@@ -1833,7 +1838,7 @@ export class OrchestraEngine {
             runGoal: run.goal,
             task,
             branch: task.branch!,
-            brain: this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
+            brain: await this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
             ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
           })
         : undefined;

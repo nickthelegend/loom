@@ -185,6 +185,15 @@ export interface BrainConfig {
   extractor?: "auto" | "off";
   /** Model for the extractor call; small+fast is right. */
   model?: string;
+  /**
+   * The dense retrieval channel — the one that can follow a synonym.
+   *
+   * Off by default, and deliberately not a dependency: the 23MB model needs a
+   * ~470MB ONNX runtime that Loom asks you to install rather than shipping to
+   * everyone. With it missing, retrieval is the three lexical channels it has
+   * always been. See core/semantic.ts.
+   */
+  semantic?: boolean;
 }
 
 import type { ServerConfig } from "./core/servers.js";

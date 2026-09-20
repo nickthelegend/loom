@@ -525,7 +525,7 @@ program
 program
   .command("brain:search <query...>")
   .description("retrieval, exactly as a briefing would see it — scores and all")
-  .option("--explain", "show the arithmetic per hit (bm25, entity, fuzzy, recency)")
+  .option("--explain", "show the arithmetic per hit (bm25, entity, fuzzy, dense, recency)")
   .action(async (words: string[], opts: { explain?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
