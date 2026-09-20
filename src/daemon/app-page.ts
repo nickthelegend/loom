@@ -14593,6 +14593,16 @@ ${BRAND_SPRITE}
   if (window.loomNative && window.loomNative.onMenu) {
     window.loomNative.onMenu(function(item){
       if (!state.token) return;
+      // The shell asking for a command to be run where you can see it — the
+      // Homebrew upgrade, today. It goes into the terminal you already have
+      // rather than running invisibly inside the app.
+      if (item.indexOf("run:") === 0) {
+        var cmd = item.slice(4);
+        if (!state.termRun) { toast("open a project first \u2014 the terminal lives in one"); return; }
+        state.termRun(cmd);
+        toast("running in the terminal \u2014 restart Loom when it finishes");
+        return;
+      }
       if (item === "settings") { if (!document.querySelector(".scrim")) openSettingsModal(); return; }
       if (item === "cloud") { if (!document.querySelector(".scrim")) openSettingsModal("cloud"); return; }
       if (item === "pair") { openConnectPhone(); return; }

@@ -16,6 +16,14 @@ see [Supported agents](#supported-agents) for exactly how far each one goes, and
 [How memory actually reaches a model](#how-memory-actually-reaches-a-model) for the
 part most tools gloss over.
 
+An agent doesn't have to be a CLI any more. A **[`model` agent](#agents-that-are-models)**
+is an HTTP endpoint — any OpenAI-compatible provider, a model you pick from a list,
+nothing to install — which means the cheap work can go somewhere cheap, and on a
+provider's free tier it costs nothing at all. Pin one to a
+**[thread](#threads-and-who-answers-in-them)** and two conversations run on two models
+at once; **[ask several](#asking-several-models-at-once)** and one prompt fans out to
+all of them.
+
 And because a fleet you can't see is a fleet you can't trust, every turn, handoff and
 route step is exported as **OpenTelemetry** — traces, metrics and logs — and read back
 into an in-app **[Observatory](#observability)**.
@@ -533,7 +541,12 @@ detects at least two roles.
 | `loom memory [import]` | The unified brain — one memory across every connected ADE |
 | `loom log [-f]` | Show (or follow) the project event log |
 | `loom costs` | Project spend: total + per-agent turns, $ and agent time |
-| `loom agents` / `loom models <agentId>` / `loom projects` / `loom status` | Agent roster, real agent models, project board, daemon health |
+| `loom agents` / `loom projects` / `loom status` | Agent roster, project board, daemon health |
+| `loom providers` | Where model agents send their turns, and whether each has a key |
+| `loom providers:set <id> [--key --base-url --header]` | Point Loom at a provider — the key goes to `~/.loom/providers.json` (0600) or the env, never a project |
+| `loom providers:rm <id>` | Forget a provider's key and settings |
+| `loom models [agentId] [--provider --free --refresh]` | With an agent: the models it reports. Without: what every configured provider has right now |
+| `loom ask "<text>" [--models a,b,c \| --free --limit n]` | One prompt to several models at once, a thread each, side by side |
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
 | `loom clients [--revoke <id>] [--ping]` | Paired devices: list, revoke, or send a test push |
@@ -549,7 +562,8 @@ detects at least two roles.
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
 | `loom subtasks` | Subtasks running right now |
-| `loom agents:add <kind> [--as name]` | Add an agent session — repeat for a second session of the same kind, same brain |
+| `loom agents:add <kind> [--as name] [--role r]` | Add an agent session — repeat for a second session of the same kind, same brain |
+| `loom agents:add model --model <id> [--tools --write --run "npm test"]` | An agent that *is* a model: no CLI, and what it may read, write or run |
 | `loom agents:rm <id>` / `loom agents:available` | Remove a session · what this machine can drive and how many are here |
 | `loom watch [--all] [--json]` | Tail a project's events live — turns, handoffs, memory, subtasks |
 | `loom retry <agentId>` | Re-run the last failed turn on a different agent, failure attached |
@@ -575,6 +589,7 @@ detects at least two roles.
 | Grok Code | adapter (full-duplex) | `grok -p --output-format json`, `-r <session>` | 🔶 verified against 0.2.54 — **answers only, no tool or edit events** (see below) |
 | Antigravity | adapter (full-duplex) | `agy -p` headless, `--conversation <id>` to resume | ✅ verified against agy 1.1.6; re-verified 1.2.6 (2026-09-18) |
 | Cursor | — | `cursor-agent --print` | 🔜 coming soon |
+| **Model (API)** | adapter (full-duplex) | `POST /v1/chat/completions`, streamed — any OpenAI-compatible provider | ✅ no CLI to install; tools are read-only unless you allow more (see [below](#agents-that-are-models)) |
 | Echo | adapter (demo/tests) | in-process | ✅ |
 | Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
@@ -631,38 +646,6 @@ projections — they never hold the write lock. That's a design decision, not a 
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
 
-## Asking several models at once
-
-```sh
-loom ask --free --limit 3 "is this migration reversible?"
-loom ask --models "openrouter/qwen/qwen3.8-27b:free,ollama/llama3" "review this approach"
-```
-
-One prompt, one thread per model, all at the same time, each thread named
-after the model that answered in it. With free quota this costs what asking
-one model costs, and picking the good answer takes a person ten seconds.
-
-The agents that run are transient — five asks don't leave five agents in the
-roster — and one model failing leaves its error in its own thread while the
-others carry on.
-
-## Threads, and who answers in them
-
-A thread can name its own agent. It then answers there whatever the baton is
-doing elsewhere, which is what lets two threads talk to two agents at once —
-one planning on a free model, one editing with Claude Code, neither waiting for
-the other.
-
-Pinning does **not** take the baton. The baton is the write lock for work that
-touches the repository; a conversation doesn't need it, and taking it would
-stop whatever is actually working. The main thread still follows the baton,
-because that's what makes it the main thread.
-
-A thread may pin a **model** as well, for agents that can change model per turn
-(the `model` kind). Pinning one to an agent whose model is baked into a spawned
-process is refused at the point of pinning — a setting that silently does
-nothing is worse than an error.
-
 ## Agents that are models
 
 Every other agent in Loom wraps a CLI. A `model` agent is an HTTP endpoint:
@@ -675,10 +658,10 @@ loom agents:add model --as cheap --role reviewer \
 ```
 
 It streams into the thread like any other agent, shows reasoning as reasoning,
-reports its token counts, and holds the baton. It has **no tools yet**, so it
-is a thinker rather than an editor — planning, reviewing, summarising,
-answering, routing. That is most of what a fleet does between edits, and free
-quota is very happy to pay for it.
+reports its token counts, and holds the baton. Out of the box it is a thinker
+rather than an editor — planning, reviewing, summarising, answering, routing,
+which is most of what a fleet does between edits and what free quota is very
+happy to pay for — and it becomes an editor only when you say so, below.
 
 **It can read the project, if you let it.** `--tools` adds `read_file`,
 `list_files` and `search` — read-only, inside the project, with `.git` and
@@ -702,10 +685,32 @@ The allow-list is a prefix match on whole commands and there is no shell — so
 `npm test; rm -rf ~`, backticks, pipes and redirection — and a tool is only
 offered to the model when it can actually be used.
 
+**Providers Loom knows by name** — and anything else that speaks
+`/v1/chat/completions` works with a base URL:
+
+| provider | base URL | free tier |
+|---|---|---|
+| `openrouter` | `https://openrouter.ai/api` | models whose id ends `:free` |
+| `agentrouter` | `https://agentrouter.org` | all of it — but see the note below |
+| `groq` | `https://api.groq.com/openai` | — |
+| `openai` | `https://api.openai.com` | — |
+| `ollama` | `http://127.0.0.1:11434` | local, no key |
+| *anything* | `loom providers:set mine --base-url …` | whatever you tell it |
+
 **Keys are never project config.** `.loom/config.json` names a provider;
 the key lives in the environment or in `~/.loom/providers.json` (mode 0600),
 and nothing — no route, no log, no listing — hands it back. You get the last
 four characters, which is enough to tell two keys apart.
+
+**A fallback chain, for when the free pool is dry:**
+
+```json
+{ "id": "cheap", "kind": "model", "role": "reviewer",
+  "options": { "provider": "openrouter",
+               "model": "google/gemma-4-31b-it:free",
+               "fallbacks": ["qwen/qwen3.8-27b:free"],
+               "tools": true } }
+```
 
 **Refusals are read, not guessed at.** A dry free pool (402) or a rate limit
 (429) moves to the next model in `fallbacks` and says so once; a model name
@@ -713,6 +718,38 @@ that doesn't exist (503) stops, because falling back would hide the typo. And
 a provider that rejects *Loom* rather than your key says exactly that —
 AgentRouter, for one, only accepts clients it recognises, which is a thing to
 ask them about rather than a key to go and regenerate.
+
+## Threads, and who answers in them
+
+A thread can name its own agent. It then answers there whatever the baton is
+doing elsewhere, which is what lets two threads talk to two agents at once —
+one planning on a free model, one editing with Claude Code, neither waiting for
+the other.
+
+Pinning does **not** take the baton. The baton is the write lock for work that
+touches the repository; a conversation doesn't need it, and taking it would
+stop whatever is actually working. The main thread still follows the baton,
+because that's what makes it the main thread.
+
+A thread may pin a **model** as well, for agents that can change model per turn
+(the `model` kind). Pinning one to an agent whose model is baked into a spawned
+process is refused at the point of pinning — a setting that silently does
+nothing is worse than an error.
+
+## Asking several models at once
+
+```sh
+loom ask --free --limit 3 "is this migration reversible?"
+loom ask --models "openrouter/qwen/qwen3.8-27b:free,ollama/llama3" "review this approach"
+```
+
+One prompt, one thread per model, all at the same time, each thread named
+after the model that answered in it. With free quota this costs what asking
+one model costs, and picking the good answer takes a person ten seconds.
+
+The agents that run are transient — five asks don't leave five agents in the
+roster — and one model failing leaves its error in its own thread while the
+others carry on.
 
 ## The brain, sharpened
 
@@ -988,7 +1025,16 @@ an installed application is not a checkout:
   have shipped since 0.2.0 and nobody compares them by hand.
 - A **`.deb`** is left to the package manager that owns it — and so is a
   **Homebrew** install: `brew install --cask` means `brew upgrade --cask`, and
-  Loom says so rather than downloading over a copy brew is tracking.
+  Loom says so rather than downloading over a copy brew is tracking. It also
+  offers to **run that command in Loom's own terminal**, the one in the dock,
+  so you watch the upgrade happen instead of it happening inside the app:
+
+  > Loom Desktop 0.2.4 was installed with Homebrew
+  > &nbsp;&nbsp;`brew upgrade --cask loom-desktop`
+  > &nbsp;&nbsp;[Run it in Loom] [Copy command] [Close]
+
+  It replaces the app in place, so restart Loom when it finishes. An upgrade
+  that happens invisibly inside an app is an upgrade nobody can check.
 
 **On a Mac, Homebrew is the easy way in:**
 
