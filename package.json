@@ -1,6 +1,6 @@
 {
   "name": "@loompad/cli",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "Loom — local-first control plane for coding agents: one CLI, shared memory, baton handoffs and routes across Claude Code, OpenCode, and friends.",
   "type": "module",
   "license": "MIT",
