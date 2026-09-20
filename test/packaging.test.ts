@@ -94,9 +94,19 @@ describe("packaging · the desktop app", () => {
    * one line, and `brew upgrade --cask` after that. It is NOT an answer to
    * Gatekeeper, and these hold it to both halves of that.
    */
-  it("ships a Homebrew cask that matches the version being built", () => {
+  it("ships a Homebrew cask that never points past what has been released", () => {
     const cask = fs.readFileSync(path.join(root, "Casks/loom-desktop.rb"), "utf8");
-    expect(cask).toContain(`version "${pkg.version}"`);
+    const caskVersion = /version "([^"]+)"/.exec(cask)![1]!;
+    // The cask carries checksums, which only exist once the artifacts have
+    // been built — so the release job rewrites it AFTER publishing, and
+    // between a version bump and its release the cask is legitimately one
+    // behind. What it must never be is AHEAD: that's a cask pointing at a
+    // download nobody can fetch, which fails at `brew install` with a
+    // checksum mismatch and looks like the release is broken.
+    const parts = (v: string) => v.split(".").map(Number);
+    const [cask0, pkg0] = [parts(caskVersion), parts(pkg.version as string)];
+    const ahead = cask0.some((n, i) => n !== pkg0[i] && n > (pkg0[i] ?? 0));
+    expect(ahead, `cask is ${caskVersion}, package is ${pkg.version}`).toBe(false);
     // Per-architecture, because handing an Intel dmg to an Apple Silicon Mac
     // is a download that works and an app that doesn't.
     expect(cask).toMatch(/arch arm: "arm64", intel: "x64"/);
