@@ -46,6 +46,7 @@ import { authorSkill, SkillInstallError } from "../core/skill-install.js";
 import { suggestSkill } from "../core/skills.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { defaultExec } from "./landing.js";
+import { suggestServers, type ServerConfig } from "../core/servers.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
 import {
   CHECK_TTL_MS,
@@ -317,6 +318,26 @@ function kairoMetrics(rt: ProjectRuntime): Record<string, unknown> {
     retriesTotal: events.filter((e) => e.kind === "error" || e.kind === "route_failed").length,
     tokenSparkline: recent.map((e) => num(e.payload.inputTokens) + num(e.payload.outputTokens)),
     costSparkline: recent.map((e) => num(e.payload.costUsd)),
+  };
+}
+
+/** A server entry from the wire, checked — a command is a thing we will run. */
+function parseServerConfig(raw: unknown): ServerConfig {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const name = String(r.name ?? "").trim();
+  const command = String(r.command ?? "").trim();
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name)) throw new Error(`"${name}" isn't a usable server name`);
+  if (!command) throw new Error(`server "${name}" has no command`);
+  const port = Number(r.port);
+  const url = typeof r.url === "string" && r.url.trim() ? r.url.trim() : undefined;
+  if (url && !/^https?:\/\//.test(url)) throw new Error(`server "${name}" has a url that isn't http(s)`);
+  return {
+    name,
+    command,
+    ...(typeof r.cwd === "string" && r.cwd.trim() ? { cwd: r.cwd.trim() } : {}),
+    ...(Number.isInteger(port) && port > 0 && port < 65536 ? { port } : {}),
+    ...(url ? { url } : {}),
+    ...(r.env && typeof r.env === "object" ? { env: Object.fromEntries(Object.entries(r.env as Record<string, unknown>).map(([k, v]) => [k, String(v)])) } : {}),
   };
 }
 
@@ -1745,6 +1766,60 @@ export class LoomDaemon {
         const result = await rt.sendMessage(text, agentId, { ...(chat ? { chat } : {}), ...(plan ? { plan: true } : {}) });
         recordRecent(text, { project: rt.info.name, mode: plan ? "plan" : "chat" });
         res.json(result);
+      }),
+    );
+
+    /**
+     * The project's dev servers: what's configured, and what each one is doing.
+     *
+     * "Running" means a port answered, not that a process exists — the
+     * difference is the whole point of Loom knowing about them (core/servers.ts).
+     */
+    app.get(
+      "/api/projects/:id/servers",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ servers: rt.servers.list(), suggested: suggestServers(rt.info.dir) });
+      }),
+    );
+    app.post(
+      "/api/projects/:id/servers",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as { servers?: unknown };
+        if (!Array.isArray(b.servers)) return void res.status(400).json({ error: "servers must be a list" });
+        try {
+          const servers = b.servers.map(parseServerConfig);
+          writeProjectConfig(rt.info.dir, { ...rt.config, servers });
+          rt.config.servers = servers;
+          res.json({ servers: rt.servers.list() });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    for (const action of ["start", "stop", "restart"] as const) {
+      app.post(
+        `/api/projects/:id/servers/:name/${action}`,
+        withRuntime(async (rt, req, res) => {
+          try {
+            const status = await rt.servers[action](String(req.params.name));
+            res.json({ server: status });
+          } catch (err) {
+            res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+          }
+        }),
+      );
+    }
+    /** A server's recent output — the log pane, and what an agent reads. */
+    app.get(
+      "/api/projects/:id/servers/:name/log",
+      withRuntime(async (rt, req, res) => {
+        try {
+          rt.servers.mustConfig(String(req.params.name));
+          const limit = req.query.limit ? Math.max(1, Number(req.query.limit)) : 200;
+          res.json({ lines: rt.servers.log(String(req.params.name), limit) });
+        } catch (err) {
+          res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 
@@ -3895,6 +3970,9 @@ export class LoomDaemon {
       }
     }
     const rt = await ProjectRuntime.open(info);
+    rt.onServerEvent((f) => {
+      this.broadcastFrame({ type: "server", projectId: info.id, ...f }, info.id);
+    });
     rt.onQueueChange((q) => {
       const head = q.items[0];
       const waitingFor = head && !q.paused ? rt.queueBlocker(head) : null;

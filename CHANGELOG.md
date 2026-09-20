@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### The Browser tab knows your dev servers
+
+- **Loom can run them.** Declared under `servers` in `.loom/config.json` and
+  suggested from `package.json` (a suggestion you accept, never something that
+  starts itself). Start, stop and restart from the Browser tab or the CLI.
+- **The state is a fact, not a guess**: *running* means a port answered,
+  *starting* means the process is up and nothing is listening yet, and
+  *crashed* carries the exit code.
+- **Its output is there too**, under the page it serves — which is where the
+  reason for a blank frame usually is — and a server that dies while an agent
+  is working against it says so in the thread.
+- Clicking a server points the preview at it; no more typing ports from memory.
+- Every server Loom started is stopped when the daemon goes, so nothing is left
+  holding a port.
+- `loom servers`, `loom servers start|stop|restart <name>`, `loom servers logs
+  <name>`.
+
 ### An Update button that actually updates
 
 - **Loom says when a newer version is out** — checked against the published

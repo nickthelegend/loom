@@ -267,9 +267,21 @@ Agents write Playwright specs constantly and could never watch them run. The
 (`*.spec.*`, `*.e2e.*` — never inside `node_modules`), runs one on click with
 the reporter streaming line by line, records pass/fail in the Console, and on
 failure stages the reporter's own words in the composer to hand back to
-whichever agent should fix it. A URL bar beside it previews a local dev server
-next to its tests. Playwright stays the project's dependency (`npx
+whichever agent should fix it. Playwright stays the project's dependency (`npx
 --no-install`) — a project without it is told so plainly.
+
+**Your dev servers live there too.** Declare them under `servers` in
+`.loom/config.json` (Loom suggests them from `package.json` and waits for you
+to accept) and the rail shows each one's real state: **running** means a port
+answered, **starting** means the process is up but nothing is listening yet,
+and **crashed** carries the exit code it died with. Start, stop and restart
+from the row; click the row to point the preview at it; open its output under
+the page, which is where the reason for a blank frame usually is. A server
+that dies while an agent works against it says so in the thread, and every
+server Loom started is stopped when the daemon goes.
+
+From the terminal: `loom servers`, `loom servers start|stop|restart <name>`,
+`loom servers logs <name> -n 100`.
 
 ## The workspace
 
@@ -478,6 +490,7 @@ detects at least two roles.
 | `loom routes` | List named pipelines defined for this project |
 | `loom interrupt` | Stop the current holder's turn (cancels an active route) |
 | `loom update [--check] [--yes]` | Is there a newer Loom — and install it, in the commands it prints first |
+| `loom servers [start\|stop\|restart\|logs] [name]` | The project's dev servers: real state, start/stop, and their output |
 | `loom queue` | What's lined up behind the running turn — position, who takes it, why it's waiting |
 | `loom queue add "<text>" [--to <agent\|orchestrate\|auto>] [--plan]` | Line a prompt up; it goes when nothing is in its way |
 | `loom queue edit / to / move / rm / clear` | Rewrite one, send it to someone else, reorder it, drop it, empty the queue |

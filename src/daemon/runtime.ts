@@ -68,6 +68,7 @@ import {
 import { resolveSteps, RouteEngine } from "../core/routes.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
 import { PromptQueue, type QueueInput, type QueueItem, type QueueState, type QueueTarget } from "../core/prompt-queue.js";
+import { Servers, type LogLine, type ServerStatus } from "../core/servers.js";
 import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { detectAdes } from "../core/ades.js";
@@ -183,6 +184,11 @@ export interface TeamBrainHook {
 /** The queue is holding because this agent asked the human something. */
 const questionHold = (agentId: string) => `${agentId} asked you something — answer it, or resume to send what's queued`;
 
+/** What the socket carries about a server: a state change, or a line of output. */
+export type ServerFrame =
+  | { kind: "state"; name: string; status: ServerStatus }
+  | { kind: "line"; name: string; line: LogLine };
+
 export class ProjectRuntime {
   readonly info: ProjectInfo;
   readonly config: ProjectConfig;
@@ -206,6 +212,9 @@ export class ProjectRuntime {
   private turnChat = new Map<string, string>();
   /** What you've lined up, run one at a time — see core/prompt-queue.ts. */
   readonly queue: PromptQueue;
+  /** This project's dev servers — see core/servers.ts. */
+  readonly servers: Servers;
+  private serverListeners = new Set<(f: ServerFrame) => void>();
   private queueListeners = new Set<(s: QueueState) => void>();
   private draining = false;
 
@@ -270,6 +279,25 @@ export class ProjectRuntime {
 
     this.queue = new PromptQueue(path.join(projectLoomDir(info.dir), "queue.json"), (q) => {
       for (const cb of this.queueListeners) cb(q);
+    });
+
+    this.servers = new Servers({
+      projectDir: info.dir,
+      configs: () => this.config.servers ?? [],
+      onChange: (name, status) => {
+        for (const cb of this.serverListeners) cb({ kind: "state", name, status });
+        // A server that died while an agent worked against it is the answer to
+        // "why is the page blank?" — it belongs in the thread, not only a pane.
+        if (status.state === "crashed") {
+          this.appendIfOpen({
+            kind: "status",
+            payload: { state: "server_crashed", server: name, exitCode: status.exitCode },
+          });
+        }
+      },
+      onLine: (name, line) => {
+        for (const cb of this.serverListeners) cb({ kind: "line", name, line });
+      },
     });
     // a goal or a route that ends frees the head of the queue
     log.onEvent((e) => {
@@ -2027,6 +2055,12 @@ export class ProjectRuntime {
 
   // ── the prompt queue (core/prompt-queue.ts) ──
 
+  /** Live server state and output, for the socket. Returns unsubscribe. */
+  onServerEvent(cb: (f: ServerFrame) => void): () => void {
+    this.serverListeners.add(cb);
+    return () => this.serverListeners.delete(cb);
+  }
+
   /** Live queue changes, for the socket. Returns unsubscribe. */
   onQueueChange(cb: (q: QueueState) => void): () => void {
     this.queueListeners.add(cb);
@@ -3132,6 +3166,9 @@ export class ProjectRuntime {
       await this.agent(id).stop().catch(() => {});
     }
     this.startedAgents.clear();
+    // A dev server outlives the daemon that started it unless we say otherwise,
+    // and an orphan holding port 3000 is a bad thing to leave behind.
+    await this.servers.closeAll().catch(() => {});
     this.brain.close(); // unsubscribes before the log drops its listeners
     this.log.close();
   }

@@ -1141,6 +1141,45 @@ window.__loomPageRev="%%BUILD_REV%%";
     background:var(--danger,#e5484d);display:none;box-shadow:0 0 0 1.5px var(--card)}
   .errdot.on{display:block}
   #consolebtn{position:relative}
+  /* dev servers: the rail rows, and a server's output under the page */
+  .srvlist{display:flex;flex-direction:column;gap:2px;padding:4px}
+  .srvrow{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;font-size:12px}
+  .srvrow:hover{background:var(--sidebar-accent)}
+  .srvrow .sdot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted-foreground)}
+  .srvrow .sdot.ok{background:var(--ok)}
+  .srvrow .sdot.warn{background:var(--warn)}
+  .srvrow .sdot.err{background:var(--err)}
+  .srvrow .sdot.off{background:var(--muted-foreground);opacity:.5}
+  .srvrow .nm{font-weight:600;color:var(--foreground)}
+  .srvrow .st{flex:1;color:var(--muted-foreground);font-size:10.5px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .srvrow .acts{display:none;gap:1px;flex:none}
+  .srvrow:hover .acts{display:flex}
+  .linkbtn{border:0;background:none;color:var(--accentBlue);cursor:pointer;font:inherit;padding:0;text-decoration:underline}
+  .srvlog{display:none;flex-direction:column;border-top:1px solid var(--border);max-height:38%;min-height:120px}
+  .srvlogbar{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-bottom:1px solid var(--border);
+    font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
+  .srvloglines{flex:1;overflow:auto;padding:6px 9px;font-family:var(--font-mono);font-size:11.5px;line-height:1.55;color:var(--foreground)}
+  .srvloglines .e{color:var(--err)}
+  .srvloglines .m{color:var(--muted-foreground)}
+  /* dev servers: the rail rows, and a server's output under the page */
+  .srvlist{display:flex;flex-direction:column;gap:2px;padding:4px}
+  .srvrow{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;font-size:12px}
+  .srvrow:hover{background:var(--sidebar-accent)}
+  .srvrow .sdot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted-foreground)}
+  .srvrow .sdot.ok{background:var(--ok)}
+  .srvrow .sdot.warn{background:var(--warn)}
+  .srvrow .sdot.err{background:var(--err)}
+  .srvrow .sdot.off{background:var(--muted-foreground);opacity:.5}
+  .srvrow .nm{font-weight:600;color:var(--foreground)}
+  .srvrow .st{flex:1;color:var(--muted-foreground);font-size:10.5px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .srvrow .acts{display:none;gap:1px;flex:none}
+  .srvrow:hover .acts{display:flex}
+  .linkbtn{border:0;background:none;color:var(--accentBlue);cursor:pointer;font:inherit;padding:0;text-decoration:underline}
+  .srvlog{display:none;flex-direction:column;border-top:1px solid var(--border);max-height:38%;min-height:120px}
+  .srvlogbar{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
+  .srvloglines{flex:1;overflow:auto;padding:6px 9px;font-family:var(--font-mono);font-size:11.5px;line-height:1.55;color:var(--foreground)}
+  .srvloglines .e{color:var(--err)}
+  .srvloglines .m{color:var(--muted-foreground)}
   /* the Browser tab — live page + the project's Playwright specs */
   .browwrap{position:absolute;inset:0;display:none;overflow:hidden;
     background:var(--editor-background);border-top:1px solid var(--border)}
@@ -3960,6 +3999,11 @@ ${BRAND_SPRITE}
         "</div>" +
         '<div class="browwrap" id="browwrap">' +
         '<div class="browrail">' +
+        // The servers this project runs, above its tests: what's up, on which
+        // port, and one click to start, stop or look at what it printed.
+        '<div class="browbar"><span class="lbl">Dev servers</span><span class="spacer" style="flex:1"></span>' +
+        '<button id="srvreload" class="iconbtn xs" title="refresh">' + ICONS.refresh + "</button></div>" +
+        '<div class="srvlist" id="srvlist">' + LOADER + "</div>" +
         '<div class="browbar"><span class="lbl">Playwright specs</span><span class="spacer" style="flex:1"></span>' +
         '<button id="specreload" class="iconbtn xs" title="rescan">' + ICONS.refresh + "</button></div>" +
         '<div class="speclist" id="speclist">' + LOADER + "</div>" +
@@ -3973,7 +4017,14 @@ ${BRAND_SPRITE}
         '<div class="browframe" id="browframe">' +
         '<div class="browhint">Point this at a running dev server to see the page beside its tests.<br>' +
         "Sites that forbid embedding (X-Frame-Options) won\\u2019t render here \\u2014 local ones do.</div>" +
-        "</div></div>" +
+        "</div>" +
+        // A server's own output, under the page it serves: when the frame goes
+        // blank, the reason is usually in here.
+        '<div class="srvlog" id="srvlog" style="display:none"><div class="srvlogbar">' +
+        '<span class="lbl" id="srvlogname"></span><span class="spacer" style="flex:1"></span>' +
+        '<button id="srvlogclose" class="iconbtn xs" title="hide">' + ICONS.x + "</button></div>" +
+        '<div class="srvloglines" id="srvloglines"></div></div>' +
+        "</div>" +
         "</div></div>" +
         '<form class="terminput" id="termform" style="display:none"><span class="pr">&#10095;</span>' +
         '<input id="terminput" placeholder="run a command\\u2026" autocomplete="off" autocapitalize="off" spellcheck="false">' +
@@ -5899,6 +5950,10 @@ ${BRAND_SPRITE}
       if (!termOpen()) toggleTerm();
       activeTerm = BROWSER_TAB;
       drawTermTabs(); showTermPane();
+      // Whenever the pane becomes visible — including a dock restored from a
+      // previous session, which never went through openBrowser — its contents
+      // load. A rail that spins for ever is worse than an empty one.
+      fillBrowserPane();
     }
     function hideBrowserPane(){
       brow.present = false;
@@ -7811,6 +7866,8 @@ ${BRAND_SPRITE}
           if (frame.type === "team") { onTeamFrame(frame); return; }
           // the prompt queue changed \u2014 sent, edited, reordered, paused
           if (frame.type === "queue") { onQueueFrame(frame); return; }
+          // a dev server started, stopped, crashed, or printed a line
+          if (frame.type === "server") { onServerFrame(frame); return; }
           if (frame.type === "event" && frame.event) {
             // "an agent needs you" is the whole reason Loom exists, so it must
             // reach you even when this isn't the chat you're looking at, or the
@@ -11413,6 +11470,138 @@ ${BRAND_SPRITE}
   // and — when it fails — hand the failure straight back to whoever wrote it.
   var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "" };
 
+  // ---- dev servers (core/servers.ts) --------------------------------------
+  // What this project runs, and what it's doing right now. "running" means a
+  // port answered — a process that exists but never listens stays "starting",
+  // which is the honest thing to say about it.
+  var srv = { list: [], suggested: [], log: null, lines: [], busy: {}, err: "" };
+
+  function loadServers(){
+    var el = document.getElementById("srvlist");
+    if (!state.pid) {
+      if (el) el.innerHTML = '<div class="specempty">Open a project to see its servers.</div>';
+      return;
+    }
+    api("/api/projects/" + state.pid + "/servers").then(function(j){
+      srv.list = j.servers || [];
+      srv.suggested = j.suggested || [];
+      srv.err = "";
+      drawServers();
+    }).catch(function(e){
+      // A spinner that never stops is a lie: say what went wrong.
+      srv.err = e.message;
+      if (el) el.innerHTML = '<div class="specempty">' + esc(e.message) + "</div>";
+    });
+  }
+
+  function serverUrl(s){
+    if (s.url) return s.url;
+    return s.port ? "http://localhost:" + s.port : null;
+  }
+
+  function drawServers(){
+    var el = document.getElementById("srvlist"); if (!el) return;
+    if (!srv.list.length) {
+      el.innerHTML = '<div class="specempty">No dev servers configured.' +
+        (srv.suggested.length
+          ? "<br>package.json suggests <b>" + srv.suggested.map(function(x){ return esc(x.name); }).join("</b>, <b>") + "</b>" +
+            ' — <button class="linkbtn" id="srvadopt">add them</button>'
+          : '<br>Add them under <code>servers</code> in <code>.loom/config.json</code>.') +
+        "</div>";
+      var adopt = document.getElementById("srvadopt");
+      if (adopt) adopt.onclick = function(){
+        api("/api/projects/" + state.pid + "/servers", { method: "POST", body: JSON.stringify({ servers: srv.suggested }) })
+          .then(function(j){ srv.list = j.servers || []; drawServers(); toast("added " + srv.list.length + " server" + (srv.list.length === 1 ? "" : "s")); })
+          .catch(function(e){ toast(e.message); });
+      };
+      return;
+    }
+    el.innerHTML = srv.list.map(function(s){
+      var st = s.state;
+      var cls = st === "running" ? "ok" : st === "starting" ? "warn" : st === "crashed" ? "err" : "off";
+      var why = st === "crashed" && s.exitCode !== null && s.exitCode !== undefined ? " · exit " + s.exitCode : "";
+      var up = s.startedAt ? " · " + Math.max(1, Math.round((Date.now() - s.startedAt) / 1000)) + "s" : "";
+      return '<div class="srvrow" data-srv="' + esc(s.name) + '">' +
+        '<span class="sdot ' + cls + '"></span>' +
+        '<span class="nm">' + esc(s.name) + "</span>" +
+        '<span class="st">' + esc(st) + esc(why) + esc(up) + "</span>" +
+        '<span class="acts">' +
+        (st === "running" || st === "starting"
+          ? '<button class="iconbtn xs" data-act="stop" title="stop">' + ICONS.stop + "</button>"
+          : '<button class="iconbtn xs" data-act="start" title="start">' + ICONS.play + "</button>") +
+        '<button class="iconbtn xs" data-act="restart" title="restart">' + ICONS.refresh + "</button>" +
+        '<button class="iconbtn xs" data-act="log" title="output">' + ICONS.console + "</button>" +
+        "</span></div>";
+    }).join("");
+    Array.prototype.forEach.call(el.querySelectorAll(".srvrow"), function(row){
+      var name = row.getAttribute("data-srv");
+      var s = srv.list.filter(function(x){ return x.name === name; })[0] || {};
+      // The row itself points the preview at the server — the reason it's here.
+      row.onclick = function(ev){
+        if (ev.target.closest("[data-act]")) return;
+        var url = serverUrl(s);
+        if (!url) return toast(name + " has no port or url to preview");
+        var input = document.getElementById("browurl");
+        if (input) input.value = url;
+        browseTo(url);
+      };
+      Array.prototype.forEach.call(row.querySelectorAll("[data-act]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var act = b.getAttribute("data-act");
+          if (act === "log") return showServerLog(name);
+          srv.busy[name] = true;
+          api("/api/projects/" + state.pid + "/servers/" + encodeURIComponent(name) + "/" + act, { method: "POST", body: "{}" })
+            .then(function(){ delete srv.busy[name]; loadServers(); })
+            .catch(function(e){ delete srv.busy[name]; toast(e.message); });
+        };
+      });
+    });
+  }
+
+  /** A server's own output, under the page it serves. */
+  function showServerLog(name){
+    srv.log = name;
+    var wrap = document.getElementById("srvlog");
+    var title = document.getElementById("srvlogname");
+    if (title) title.textContent = name;
+    if (wrap) wrap.style.display = "flex";
+    var close = document.getElementById("srvlogclose");
+    if (close) close.onclick = function(){ srv.log = null; wrap.style.display = "none"; };
+    api("/api/projects/" + state.pid + "/servers/" + encodeURIComponent(name) + "/log?limit=200")
+      .then(function(j){ srv.lines = j.lines || []; drawServerLog(); })
+      .catch(function(e){ toast(e.message); });
+  }
+
+  function drawServerLog(){
+    var el = document.getElementById("srvloglines"); if (!el) return;
+    var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = srv.lines.map(function(l){
+      return '<div class="' + (l.stream === "err" ? "e" : l.stream === "loom" ? "m" : "") + '">' + esc(l.text) + "</div>";
+    }).join("");
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  /** Live: a state change repaints the row, a line lands in the open log. */
+  function onServerFrame(f){
+    if (!f || f.projectId !== state.pid) return;
+    if (f.kind === "state" && f.status) {
+      var found = false;
+      srv.list = srv.list.map(function(x){
+        if (x.name !== f.name) return x;
+        found = true;
+        return f.status;
+      });
+      if (!found) srv.list.push(f.status);
+      drawServers();
+      if (f.status.state === "crashed") toast(f.name + " exited (code " + f.status.exitCode + ")");
+    } else if (f.kind === "line" && f.name === srv.log) {
+      srv.lines.push(f.line);
+      if (srv.lines.length > 500) srv.lines.shift();
+      drawServerLog();
+    }
+  }
+
   function drawBrowser(){
     var list = document.getElementById("speclist"); if (!list) return;
     if (brow.specs === null) { return; } // still loading — the loader is in place
@@ -11518,24 +11707,34 @@ ${BRAND_SPRITE}
     }
   }
 
-  function openBrowser(){
-    if (state.showBrowser) state.showBrowser();
+  /** Point the preview at a URL — the address bar, or a server row. */
+  function browseTo(u){
+    if (!u) return;
+    if (!/^https?:\\/\\//.test(u)) u = "http://" + u;
+    brow.url = u;
+    var host = document.getElementById("browframe");
+    if (host) host.innerHTML = '<iframe src="' + esc(u) + '" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>';
+  }
+
+  /** Load and wire whatever the Browser pane is showing right now. */
+  function fillBrowserPane(){
     if (brow.specs === null) refreshSpecs();
+    loadServers();
+    var sre = document.getElementById("srvreload");
+    if (sre) sre.onclick = loadServers;
     var re = document.getElementById("specreload");
     if (re) re.onclick = function(){ brow.specs = null; refreshSpecs(); };
     var go = document.getElementById("browgo");
     var url = document.getElementById("browurl");
-    var nav = function(){
-      var u = (url && url.value || "").trim();
-      if (!u) return;
-      if (!/^https?:\\/\\//.test(u)) u = "http://" + u;
-      brow.url = u;
-      var host = document.getElementById("browframe");
-      if (host) host.innerHTML = '<iframe src="' + esc(u) + '" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>';
-    };
+    var nav = function(){ browseTo((url && url.value || "").trim()); };
     if (go) go.onclick = nav;
     if (url) url.onkeydown = function(ev){ if (ev.key === "Enter") { ev.preventDefault(); nav(); } };
     drawBrowser();
+  }
+
+  function openBrowser(){
+    if (state.showBrowser) state.showBrowser();
+    fillBrowserPane();
   }
 
   function closeBrowser(){
