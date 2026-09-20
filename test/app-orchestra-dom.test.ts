@@ -357,9 +357,17 @@ describe("web app · orchestra", () => {
     expect(text(m, "#pane-orchestra .ometa")).toMatch(/Round\s*\d+\/\d+/);
     expect(text(m, "#pane-orchestra .ometa")).toContain("loom/");
 
-    // a reply goes to the orchestrator, which turns another round
-    ($(m, "#oreply") as HTMLTextAreaElement).value = "just stop after one task";
-    click($(m, "#oreplybtn"));
+    // A reply goes to the orchestrator, which turns another round. The view
+    // redraws on every event the run emits, so the box can be replaced between
+    // finding it and using it: fill and send inside one render, and retry.
+    await waitUntil(() => {
+      const box = $(m, "#oreply") as HTMLTextAreaElement | null;
+      const send = $(m, "#oreplybtn");
+      if (!box || !send) return false;
+      box.value = "just stop after one task";
+      click(send);
+      return true;
+    }, { timeoutMs: 30_000 });
     await waitUntil(async () => {
       const r = await runStatus(run.id);
       return r.status === "waiting_human" && (await rest<{ events: Array<{ kind: string; payload: { phase?: string } }> }>(
