@@ -580,6 +580,7 @@ detects at least two roles.
 | `loom brain:export [file]` / `brain:import <file>` | The project's memory as a portable file — import dedupes |
 | `loom brain:conflicts` | Units that likely contradict each other, with the signal that tripped each |
 | `loom snapshot [file]` / `loom restore <file>` | Checkpoint brain+board+config · bring one back (brain merges) |
+| `loom rewind [checkpoint]` | Points the working tree can go back to · put the files back to one |
 | `loom routes:save <name> <steps...>` / `routes:rm` | Define a named pipeline, validated against the roster · remove one |
 | `loom task "<title>"` / `loom tasks` | Put a card on the board (`--agent`, `--blocked-by`) · list yours |
 | `loom specs` / `loom specs:run <file>` | The project's Playwright specs · run one through the daemon |
@@ -976,6 +977,40 @@ next to GitHub in the status bar, or `git.delivery` in `.loom/config.json`.
 
 A failed push never un-finishes a run. The error is shown, and **Retry delivery**
 is one click.
+
+## Rewind: put the work back the way it was
+
+An agent turn can touch forty files, and until now the honest answer to *undo
+that* was "read the diff and retype it". So **Loom writes down what the files
+were before every turn**, and the turn's Update card offers **Rewind**.
+
+It is a working tree, not a history. Rewinding restores what changed, removes
+what was created, brings back what was deleted — and does not move HEAD, does
+not touch your commits, and does not edit the thread. What happened still
+happened; the files just don't have to live with it.
+
+**Three things it will never touch.** Checkpoints are taken with `git add -A`,
+so `.gitignore` applies at capture: your `node_modules`, your build output and
+your `.env` are never read, never stored and never restored. `.loom/` is
+ignored too, which is why a rewind cannot eat the event log.
+
+**It is itself rewindable.** A rewind saves what it is about to replace before
+it replaces it, and hands you that checkpoint back — in the thread as *Undo the
+rewind*, and on the command line as the id to pass next. A one-way undo is a
+trap, and the one time it matters is the time someone rewinds past work they
+meant to keep.
+
+**It refuses while an agent is mid-turn**, naming who. Replacing the tree under
+a running agent gives it a working directory that contradicts everything it has
+read, and the damage lands in whatever it writes next.
+
+```sh
+loom rewind                 # the points you can go back to
+loom rewind cm8x2k1p        # go back to one (asks first)
+```
+
+Checkpoints live on hidden refs under `refs/loom/checkpoints/`, so no branch
+listing, no stash and no `git log` ever shows them. The newest 60 are kept.
 
 ## Opening a PR from a card
 

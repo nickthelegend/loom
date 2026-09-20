@@ -285,3 +285,232 @@ describe("web app · whose thread is this", () => {
     expect(APP_HTML).toContain('if (!t) return "";');
   });
 });
+
+/**
+ * The transcript used to be one fixed level of detail: reasoning always
+ * folded, tool payloads never shown, and a long block — the orchestrator's
+ * plan, say — clipped inside a scroll box you could not reach the end of.
+ */
+describe("web app · transcript view", () => {
+  it("offers Normal, Thinking and Verbose, and remembers the choice per project", () => {
+    expect(APP_HTML).toContain('var TVIEWS = ["normal", "thinking", "verbose"];');
+    expect(APP_HTML).toContain("function tview(");
+    expect(APP_HTML).toContain("function setTView(");
+    // Per project, not per app: you read one project's run at Verbose without
+    // turning every other project's thread into a wall of JSON.
+    expect(APP_HTML).toContain('localStorage.setItem("loomTView:" + state.pid, v)');
+    // Changing the level re-reads the thread; a level nothing redraws is a
+    // setting that appears not to work.
+    expect(APP_HTML).toContain("if (state.redrawFeed) state.redrawFeed();");
+    expect(APP_HTML).toContain("state.redrawFeed = loadHistory");
+    // …and all three are reachable from More.
+    expect(APP_HTML).toContain('setTView("normal")');
+    expect(APP_HTML).toContain('setTView("thinking")');
+    expect(APP_HTML).toContain('setTView("verbose")');
+    expect(APP_HTML).toContain('{ head: "transcript" }');
+  });
+
+  it("shows more at each level, and only there", () => {
+    // Normal drops reasoning entirely — it is the working out, not the
+    // transcript. Thinking folds it in, Verbose opens it.
+    expect(APP_HTML).toContain('if (tv === "normal") return "";');
+    expect(APP_HTML).toContain('(tv === "verbose" ? " open" : "")');
+    // Raw payloads are Verbose only, on tool calls and on the orchestrator's
+    // brief — the two places a summary is standing in for something bigger.
+    expect(APP_HTML).toContain('tview() === "verbose" ? rawBlock(p) : ""');
+    expect(APP_HTML.match(/tview\(\) === "verbose" \? rawBlock\(p\) : ""/g)?.length).toBe(2);
+  });
+
+  /**
+   * The complaint that opened #97: a block of output you can see the start of
+   * and never the end of. Whatever the level, a long block has to be readable.
+   */
+  it("never hides the end of a block behind a scrollbar", () => {
+    // Code wraps instead of scrolling sideways off the bubble.
+    expect(APP_HTML).toContain("white-space:pre-wrap;overflow-wrap:anywhere");
+    expect(APP_HTML).not.toContain(".md .mdcode code{font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--foreground);\n    white-space:pre}");
+    // And every block carries a copy button, so the part that is too long to
+    // read on screen is still a paste away.
+    expect(APP_HTML).toContain('<div class="mdcodewrap"><button class="mdcopy"');
+    expect(APP_HTML).toContain('<button class="mdcopy" type="button" title="copy">');
+    // Wired: the feed delegates the click, and does it before the turn card
+    // and approval handlers that would otherwise swallow it.
+    expect(APP_HTML).toContain('ev.target.closest(".mdcopy")');
+    expect(APP_HTML).toContain('if (box) copyText(box.textContent || "");');
+    const feed = APP_HTML.indexOf('document.getElementById("feed").addEventListener("click"');
+    expect(feed).toBeGreaterThan(-1);
+    const copyAt = APP_HTML.indexOf('closest(".mdcopy")', feed);
+    const cardAt = APP_HTML.indexOf("if (approvalClick(ev)) return;", feed);
+    expect(copyAt).toBeGreaterThan(feed);
+    expect(copyAt).toBeLessThan(cardAt);
+  });
+});
+
+/**
+ * Orchestrate could pick who runs the goal but never what they run it on.
+ * The model picker existed — for the one agent the chat composer was aimed
+ * at, which in Orchestrate is nobody.
+ */
+describe("web app · picking models in Orchestrate", () => {
+  it("gives the orchestrator and every worker a model chip", () => {
+    expect(APP_HTML).toContain("function modelBadge(");
+    expect(APP_HTML).toContain('data-modelof="');
+    // On the orchestrator button…
+    expect(APP_HTML).toContain("permBadge(permOf(lead), lead.id) + modelBadge(lead)");
+    // …and on each worker chip.
+    expect(APP_HTML).toContain("permBadge(permOf(a), a.id) + modelBadge(a)");
+    expect(APP_HTML).toContain("function wireModelBadges(");
+    expect(APP_HTML).toContain("wireModelBadges(el);");
+  });
+
+  /**
+   * openModelMenu read state.selected, which Orchestrate deliberately does
+   * not set — it has a cast, not a selection. A chip that opened the wrong
+   * agent's list would be worse than no chip.
+   */
+  it("opens the list for the agent whose chip was clicked", () => {
+    expect(APP_HTML).toContain("function openModelMenu(who){");
+    expect(APP_HTML).toContain("var agentId = who || state.selected;");
+    expect(APP_HTML).toContain("openModelMenu(id);");
+    // Clicking the same chip twice closes it, which needs the menu to
+    // remember whose it is.
+    expect(APP_HTML).toContain('menuState = { kind: "modelmenu", agent: agentId');
+    expect(APP_HTML).toMatch(/menuState\.kind === "modelmenu" && menuState\.agent === id/);
+  });
+
+  /**
+   * A roster of CLIs is whatever you happened to install. An API model is a
+   * name off a list, so there was no way to get one into a run without the
+   * CLI — and the one it lands in, with no model chosen, is the one state it
+   * cannot run in.
+   */
+  it("adds an API model as a worker, and refuses to start one that has none", () => {
+    expect(APP_HTML).toContain('id="cowadd"');
+    expect(APP_HTML).toContain("function addModelWorker(");
+    expect(APP_HTML).toContain('JSON.stringify({ kind: "model" })');
+    // Added, then asked which model — not left as a chip that fails on send.
+    expect(APP_HTML).toContain("if (a && a.id) openModelMenu(a.id);");
+    // The roster is re-read before anything is drawn off it.
+    expect(APP_HTML).toContain("return refresh().then(function(){ return a; });");
+    expect(APP_HTML).toContain('return api("/api/projects/" + pid).then(function(j){');
+    // And the send guard covers the orchestrator as well as the workers.
+    expect(APP_HTML).toContain('return a.kind === "model" && !a.model;');
+    expect(APP_HTML).toContain("cast.concat(lead ? [lead] : [])");
+    expect(APP_HTML).toContain("openModelMenu(blank[0].id);");
+  });
+
+  /** A provider-qualified id is long; the chip shows the part that names it. */
+  it("shortens a long model id without dropping what identifies it", () => {
+    expect(APP_HTML).toContain("function shortModel(");
+    expect(APP_HTML).toContain('var cut = v.lastIndexOf("/");');
+    expect(APP_HTML).toContain("v.length > 24 ?");
+  });
+});
+
+/**
+ * The model list has three sources and the footer named two of them. A
+ * `model` agent's list is asked of the providers, and that case fell through
+ * to "no model list for this agent" — printed directly above 202 of them.
+ */
+describe("web app · what the model list says about itself", () => {
+  it("says the providers were asked, when they were", () => {
+    expect(APP_HTML).toContain('j.source === "api" ? "asked every provider with a key');
+  });
+
+  /** A CLI has a default. A model agent has no such thing to offer. */
+  it("does not offer a model agent a default it cannot have", () => {
+    expect(APP_HTML).toContain('var head = cur.kind === "model" ? []');
+  });
+});
+
+/**
+ * Orchestrating from Main opened a thread of its own and walked you into it,
+ * so the goal you typed and every word of its answer lived somewhere you
+ * hadn't asked for — and the task threads it spawned were findable only by
+ * hunting the sidebar for a title you half remembered.
+ */
+describe("web app · orchestrating where you asked", () => {
+  it("tells the run which thread the goal was given in", () => {
+    expect(APP_HTML).toContain("chat: chatId,");
+    // Queued goals already carried it; both paths now agree.
+    expect(APP_HTML).toContain("var body = { text: text, target: queueTarget(), chat: chatId };");
+  });
+
+  it("stays on the thread when the run is this thread", () => {
+    // The old code always jumped: to the run's new chat, then to the board.
+    expect(APP_HTML).toContain("else if (run.chat === chatId) showTab(\"thread\");");
+    expect(APP_HTML).toContain('if (desktop && state.setChat && run.chat && run.chat !== chatId)');
+  });
+
+  /**
+   * The dangerous half. A thread the run opened is the run's for good, so
+   * replying there steers it. Main is not the run's — if it kept forwarding
+   * after the run finished, every message you ever sent in Main would go to a
+   * dead run instead of your agent.
+   */
+  it("gives a borrowed thread back when the run ends", () => {
+    expect(APP_HTML).toContain("function owns(r){ return r && r.chat === chatId && (!r.inPlace || !orchTerminal(r.status)); }");
+    expect(APP_HTML).toContain("var hit = (orch.runs || []).filter(owns)[0];");
+    expect(APP_HTML).toContain("return owns(s) ?");
+  });
+
+  it("makes each task row open that task's thread", () => {
+    expect(APP_HTML).toContain('data-gochat="');
+    expect(APP_HTML).toContain('ev.target.closest("[data-gochat]")');
+    expect(APP_HTML).toContain('openOrchChat(go.getAttribute("data-gochat"))');
+    // A task with no chat still renders as the line it always was.
+    expect(APP_HTML).toContain("return row(tone[st[1]] || \"\", t.chat");
+    expect(APP_HTML).toContain(".sys.orch .tlink{");
+  });
+});
+
+/**
+ * Rewind (#101). The button throws work away, so most of what matters here is
+ * what it says before it does, and what it promises not to touch.
+ */
+describe("web app · rewind", () => {
+  it("offers Rewind on the turn card whose changes it undoes", () => {
+    expect(APP_HTML).toContain('data-rewind="');
+    expect(APP_HTML).toContain('class="tcrw"');
+    // Only when the daemon gave that turn a checkpoint — a project that isn't
+    // a git repo gets the card without a button it couldn't honour.
+    expect(APP_HTML).toContain("(p.checkpoint ? '<button class=\"tcrw\"");
+    expect(APP_HTML).toContain(".turncard .tcrw{");
+  });
+
+  it("intercepts the click before the card opens its diff", () => {
+    expect(APP_HTML).toContain('ev.target.closest("[data-rewind]")');
+    expect(APP_HTML).toContain("askRewind(rw.getAttribute(\"data-rewind\"), rw)");
+    const feed = APP_HTML.indexOf('document.getElementById("feed").addEventListener("click"');
+    const rewindAt = APP_HTML.indexOf('closest("[data-rewind]")', feed);
+    const cardAt = APP_HTML.indexOf('t.getAttribute("data-patch")', feed);
+    expect(rewindAt).toBeGreaterThan(feed);
+    expect(rewindAt).toBeLessThan(cardAt);
+  });
+
+  /**
+   * "Are you sure?" tells you nothing you didn't know. The confirm names the
+   * checkpoint, says what goes, and says what stays — because the fear that
+   * stops someone clicking is that it will eat their commits.
+   */
+  it("names what it will do, and what it will not touch", () => {
+    expect(APP_HTML).toContain("function askRewind(");
+    expect(APP_HTML).toContain("Anything written since is removed");
+    expect(APP_HTML).toContain("Your commits, your history and files git ignores are untouched");
+    expect(APP_HTML).toContain("is saved, so you can undo it.");
+    expect(APP_HTML).toContain('"/checkpoints/" + encodeURIComponent(id) + "/rewind"');
+    // The Changes pane is now wrong; it gets re-read rather than left stale.
+    expect(APP_HTML).toContain("refreshTree(true);");
+  });
+
+  it("lists every checkpoint from More, and offers to undo a rewind", () => {
+    expect(APP_HTML).toContain("function openRewindMenu(");
+    expect(APP_HTML).toContain('{ label: "Rewind\u2026", icon: ICONS.rewind');
+    expect(APP_HTML).toContain('"/api/projects/" + pid + "/checkpoints"');
+    // An empty list says why it is empty rather than sitting blank.
+    expect(APP_HTML).toContain("no checkpoints yet \\u2014 one is taken before every turn");
+    // A rewind that happened is a line in the thread, with the way back on it.
+    expect(APP_HTML).toContain('if (p.reason !== "rewound")');
+    expect(APP_HTML).toContain("Undo the rewind");
+  });
+});

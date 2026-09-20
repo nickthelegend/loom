@@ -533,3 +533,77 @@ describe("what the status payload says about a run's threads", () => {
     expect(t2.chat).not.toBe(t1.chat);
   }, 60_000);
 });
+
+/**
+ * Orchestrating from a thread used to abandon it: the run opened a thread of
+ * its own, the UI walked you into it, and the thread you typed the goal in
+ * said nothing about the goal ever again (#100).
+ */
+describe("which thread the orchestrator answers in", () => {
+  it("answers in the thread the goal was given in, and does not open one of its own", async () => {
+    await openProject();
+    const before = rt.chats().length;
+    script = [
+      loom([{ type: "spawn", id: "t1", title: "first", agent: "alpha", prompt: "do it" }]),
+      loom([{ type: "finish", summary: "done" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "stay here", orchestrator: "conductor", chat: "main" });
+
+    expect(run.chat).toBe("main");
+    expect(run.inPlace).toBe(true);
+    // One new thread, and it is the task's — not a thread for the run.
+    await settle(run.id);
+    const made = rt.chats().filter((c) => c.id !== "main").map((c) => c.title);
+    expect(rt.chats().length).toBe(before + 1);
+    expect(made.some((t) => t.startsWith("t1 ·"))).toBe(true);
+    expect(made.some((t) => t.includes("stay here"))).toBe(false);
+
+    // The goal is not replayed: it is already in the thread you typed it in,
+    // and saying it twice reads like the run misheard you.
+    const said = rt.log
+      .list({ limit: 500 })
+      .filter((e) => e.kind === "message" && (e.chat ?? "main") === "main")
+      .filter((e) => (e.payload as { author?: string }).author === "user");
+    expect(said.filter((e) => (e.payload as { text?: string }).text === "stay here")).toHaveLength(0);
+  }, 60_000);
+
+  it("opens its own thread when no thread is named, and replays the goal into it", async () => {
+    await openProject();
+    script = [loom([{ type: "finish", summary: "done" }])];
+    const run = await rt.orchestra.start({ goal: "somewhere new", orchestrator: "conductor" });
+
+    expect(run.chat).not.toBe("main");
+    expect(run.inPlace).toBeUndefined();
+    expect(rt.chats().some((c) => c.id === run.chat && c.title.includes("somewhere new"))).toBe(true);
+    // An empty thread has to be told what it is about.
+    const opened = rt.log
+      .list({ limit: 500 })
+      .filter((e) => e.kind === "message" && e.chat === run.chat)
+      .filter((e) => (e.payload as { author?: string }).author === "user");
+    expect((opened[0]!.payload as { text: string }).text).toBe("somewhere new");
+  }, 60_000);
+
+  /**
+   * A chat id is a claim about this machine's state. A run told to answer in a
+   * thread that isn't there must not lose its output to an id nothing opens.
+   */
+  it("falls back to a thread of its own when the named one does not exist", async () => {
+    await openProject();
+    script = [loom([{ type: "finish", summary: "done" }])];
+    const run = await rt.orchestra.start({ goal: "ghost thread", orchestrator: "conductor", chat: "nope" });
+    expect(run.chat).not.toBe("nope");
+    expect(rt.chats().some((c) => c.id === run.chat)).toBe(true);
+    expect(run.inPlace).toBeUndefined();
+  }, 60_000);
+
+  /** The status poll has to carry it, because that is what the UI reads. */
+  it("says on the status payload whether the thread is the run's own", async () => {
+    await openProject();
+    script = [loom([{ type: "finish", summary: "done" }])];
+    const run = await rt.orchestra.start({ goal: "borrowed", orchestrator: "conductor", chat: "main" });
+    await settle(run.id);
+    const summary = rt.orchestraSummary()!;
+    expect(summary.chat).toBe("main");
+    expect(summary.inPlace).toBe(true);
+  }, 60_000);
+});

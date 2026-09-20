@@ -73,6 +73,8 @@ interface Run {
   goal: string;
   status: string;
   chat: string;
+  /** True when the run borrowed an existing thread rather than opening one. */
+  inPlace?: boolean;
   question?: string;
 }
 
@@ -281,8 +283,17 @@ describe("web app · composer modes", () => {
     // no claude-code on this roster, so the first adapter conducts
     expect(text(m, "#corchpick")).toContain("plannerbot");
     // every adapter works by default, the orchestrator included
-    const chips = [...m.window.document.querySelectorAll("#cowk .cowchip")];
+    // The workers are the chips that name one; the row also carries the
+    // dashed "+ model" chip, which is an action rather than a worker.
+    const chips = [...m.window.document.querySelectorAll("#cowk [data-wk]")];
     expect(chips.map((c) => c.getAttribute("data-wk"))).toEqual(["plannerbot", "execbot"]);
+    expect($(m, "#cowadd")?.classList.contains("cowadd")).toBe(true);
+    // Each chip says which model it will run, and so does the orchestrator.
+    expect(chips.map((c) => c.querySelector("[data-modelof]")?.getAttribute("data-modelof"))).toEqual([
+      "plannerbot",
+      "execbot",
+    ]);
+    expect($(m, "#corchpick [data-modelof]")?.getAttribute("data-modelof")).toBe("plannerbot");
     expect(chips[0].textContent).toContain("plannerbot");
     expect(chips.every((c) => c.classList.contains("on"))).toBe(true);
     expect(text(m, "#cpar")).toBe("4");
@@ -342,13 +353,26 @@ describe("web app · orchestra", () => {
     box(m).value = goal;
     click($(m, "#orchsend"));
 
-    // the view opens on the new run, in its own orchestrator chat
+    // The run answers in the thread the goal was given in (#100): no new
+    // thread, no jump to one, and the Thread tab stays in front.
+    let run!: Run;
+    await waitUntil(async () => {
+      const { runs } = await rest<{ runs: Run[] }>("GET", "/orchestra");
+      const hit = runs.find((r) => r.goal === goal);
+      if (hit) run = hit;
+      return !!hit;
+    }, { timeoutMs: 30_000 });
+    expect(run.chat).toBe("main");
+    expect(run.inPlace).toBe(true);
+    await waitUntil(() => text(m, "#feed").includes("Orchestra started"));
+    expect($(m, '.tab[data-tab="thread"]')?.classList.contains("active")).toBe(true);
+    // …and the composer did not move you: still Main, stored or implied.
+    expect([null, "main"]).toContain(m.window.localStorage.getItem(`loomChat:${projectId}`));
+
+    // The Orchestra view still has it, for the parts of a run a thread can't
+    // show — the board, Reply, Abort.
+    click($(m, '.tab[data-tab="orchestra"]'));
     await waitUntil(() => shown($(m, "#pane-orchestra")) && text(m, "#pane-orchestra .ogoal") === goal);
-    expect($(m, '.tab[data-tab="orchestra"]')?.classList.contains("active")).toBe(true);
-    const { runs } = await rest<{ runs: Run[] }>("GET", "/orchestra");
-    const run = runs.find((r) => r.goal === goal)!;
-    expect(run, "the POST reached the daemon").toBeTruthy();
-    expect(m.window.localStorage.getItem(`loomChat:${projectId}`)).toBe(run.chat);
 
     // echo never plans, so the orchestrator asks — the Reply box appears, live
     await waitUntil(() => !!$(m, "#pane-orchestra .oask #oreply"), { timeoutMs: 60_000 });

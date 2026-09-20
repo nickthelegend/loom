@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-21
+
+### Rewind — put the work back the way it was
+
+- **A checkpoint before every turn**, and **Rewind** on the Update card of the
+  turn it undoes. There is a **Rewind…** list under More for all of them, and
+  `loom rewind` in the terminal. The honest answer to *undo that* used to be
+  "read the diff and retype it": `turn_diff` looks like the answer and isn't,
+  since its patch is truncated at 12KB and an untracked file appears in it as
+  a line with no content.
+- **It restores files, not history.** HEAD does not move, your commits are not
+  touched, and the thread is not edited. What happened still happened.
+- **`.gitignore` applies at capture**, so `node_modules`, build output, `.env`
+  and `.loom/` are never read, never stored and never restored — which is why
+  a rewind cannot eat the event log.
+- **A rewind is itself rewindable.** It saves what it is about to replace
+  before replacing it, and hands that back: *Undo the rewind* in the thread,
+  an id on the command line.
+- **Refused while an agent is mid-turn**, naming who. Replacing the tree under
+  a running agent puts the damage in whatever it writes next.
+- Checkpoints live on hidden refs under `refs/loom/checkpoints/`, so no branch
+  listing, no stash and no `git log` shows one. The newest 60 are kept.
+
+### A transcript you can turn up
+
+- **Normal / Thinking / Verbose**, under More. Normal drops reasoning entirely
+  rather than folding it — the working out is not the transcript. Verbose
+  opens it and attaches the raw payload to tool calls and to the
+  orchestrator's brief, the two places a summary stands in for something
+  bigger. Remembered per project.
+- **A long block is readable to the end.** Code wraps instead of scrolling out
+  of the bubble, and every block — markdown or raw — carries a copy button.
+  The orchestrator's `{"actions": …}` plan used to be clipped in a scroll box
+  with no way to reach the closing brace.
+
+### Orchestrating from Main stays in Main
+
+- **The orchestrator answers in the thread you asked in.** It used to open one
+  of its own and walk you into it, leaving the goal you typed behind in a
+  thread that then said nothing about it.
+- **Each task row opens that task's thread.** They were findable only by
+  hunting the sidebar for a title you half remembered.
+- **A borrowed thread is given back.** Replying in a run's own thread steers
+  the run for good; a thread the run borrowed stops answering for it once the
+  run is terminal, so Main goes back to being Main rather than forwarding
+  every later message to a finished goal.
+
 ### A thread says who's working in it, and whether it's still going
 
 - **A task thread is labelled with the agent doing that task**, not with
@@ -20,6 +67,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no mark rather than a guess.
 - The status payload now carries one row per task (thread, agent, kind,
   state) instead of only a count, which is what made both of those possible.
+
+### Models in Orchestrate
+
+- **Every agent chip carries its model**, orchestrator and workers alike,
+  beside its permission chip. Orchestrate could pick who ran a goal and never
+  what they ran it on: the model picker was bound to the one agent the chat
+  composer is aimed at, which in Orchestrate is nobody.
+- **A dashed “+ model” chip** adds an API model to the cast and opens its
+  picker straight away. Until a model is picked the chip warns, and Orchestrate
+  refuses to start — naming the agent — rather than failing three tasks in.
+- The model list's provider-asked source had no case in its footer, so it
+  printed *“no model list for this agent”* directly above 446 of them. And it
+  no longer offers a model agent a **Default**, which for that kind is the one
+  option that cannot work.
 
 ## [0.2.6] — 2026-09-20
 

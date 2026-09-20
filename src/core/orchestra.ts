@@ -123,8 +123,15 @@ export interface OrchestraRun {
   /** Agents the orchestrator may assign work to (roster ids). */
   workers: string[];
   status: OrchestraStatus;
-  /** The orchestrator's own thread. */
+  /** The thread the orchestrator answers in. */
   chat: string;
+  /**
+   * True when `chat` is a thread that already existed and will outlive the
+   * run \u2014 you orchestrated from Main and the orchestrator answered there.
+   * The difference matters after the run ends: a thread the run made belongs
+   * to it forever, and Main goes back to being Main.
+   */
+  inPlace?: boolean;
   baseBranch: string | null;
   baseCommit: string;
   branch: string; // integration branch
@@ -236,6 +243,12 @@ export interface OrchestraStartOptions {
   maxUsd?: number;
   /** The paths this goal expects to touch, when the caller already knows. */
   touches?: string[];
+  /**
+   * The thread the goal was given in. The orchestrator answers there instead
+   * of in a thread of its own, so orchestrating from Main leaves you in Main.
+   * The caller proves the chat exists; an unknown one gets a new thread.
+   */
+  chat?: string;
 }
 
 /** What orchestra needs from the project that owns it. */
@@ -251,6 +264,8 @@ export interface OrchestraHost {
   makeAgent(cfg: AgentConfig, dir: string): Adapter;
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
   createChat(title: string): ChatInfo;
+  /** Does this thread exist? Asked before a run is told to answer in one. */
+  chatExists?(id: string): boolean;
   /** Skills + retrieved memories for a task, or "" — the project brain (and the team's, when shared). */
   /**
    * The memory brief for a task. May be async: with the dense channel on
@@ -910,7 +925,12 @@ export class OrchestraEngine {
     fs.mkdirSync(wtRoot, { recursive: true });
     await this.gitLock.run(() => git(["worktree", "add", "-q", "-b", branch, integration, baseCommit], dir));
 
-    const chat = this.host.createChat(`🎼 ${goal.slice(0, 50)}`);
+    // Orchestrating from a thread used to abandon it: the run opened a thread
+    // of its own and the UI walked you into it, so the goal you typed in Main
+    // and every word of its answer lived somewhere else (#100). When the
+    // caller names the thread it was asked in, the orchestrator answers there.
+    const inPlace = opts.chat && (this.host.chatExists?.(opts.chat) ?? false) ? opts.chat : null;
+    const chat = inPlace ? { id: inPlace } : this.host.createChat(`🎼 ${goal.slice(0, 50)}`);
     const run: OrchestraRun = {
       id,
       goal,
@@ -918,6 +938,7 @@ export class OrchestraEngine {
       workers: workers.map((w) => w.id),
       status: "planning",
       chat: chat.id,
+      ...(inPlace ? { inPlace: true } : {}),
       baseBranch,
       baseCommit,
       branch,
@@ -940,7 +961,9 @@ export class OrchestraEngine {
     this.workerCfgs.set(run.id, workers);
     this.runs.set(id, run);
     this.save(run);
-    this.host.append({ kind: "message", chat: run.chat, payload: { text: goal, author: "user" } });
+    // A new thread starts empty, so the goal is replayed into it. The thread
+    // you typed it in already has it — replaying would say it twice.
+    if (!inPlace) this.host.append({ kind: "message", chat: run.chat, payload: { text: goal, author: "user" } });
     this.emit(run, "started", {
       goal,
       orchestrator: run.orchestrator,

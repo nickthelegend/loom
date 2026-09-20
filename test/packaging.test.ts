@@ -103,10 +103,27 @@ describe("packaging · the desktop app", () => {
     // behind. What it must never be is AHEAD: that's a cask pointing at a
     // download nobody can fetch, which fails at `brew install` with a
     // checksum mismatch and looks like the release is broken.
+    // Compared the way a version is actually ordered: on the FIRST component
+    // that differs, and no further. Judging each component on its own said
+    // 0.2.6 was ahead of 1.0.0 because 2 > 0 — which only a major bump could
+    // ever have revealed, and it revealed it by failing the 1.0 release.
     const parts = (v: string) => v.split(".").map(Number);
-    const [cask0, pkg0] = [parts(caskVersion), parts(pkg.version as string)];
-    const ahead = cask0.some((n, i) => n !== pkg0[i] && n > (pkg0[i] ?? 0));
+    const cmp = (a: number[], b: number[]) => {
+      for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        const d = (a[i] ?? 0) - (b[i] ?? 0);
+        if (d) return d;
+      }
+      return 0;
+    };
+    const ahead = cmp(parts(caskVersion), parts(pkg.version as string)) > 0;
     expect(ahead, `cask is ${caskVersion}, package is ${pkg.version}`).toBe(false);
+    // …and the comparison still refuses a cask that really is ahead, which is
+    // the only reason this check exists. A guard nothing can fail is decoration.
+    expect(cmp(parts("1.0.1"), parts("1.0.0"))).toBeGreaterThan(0);
+    expect(cmp(parts("1.1.0"), parts("1.0.9"))).toBeGreaterThan(0);
+    expect(cmp(parts("2.0.0"), parts("1.9.9"))).toBeGreaterThan(0);
+    expect(cmp(parts("0.2.6"), parts("1.0.0"))).toBeLessThan(0); // the 1.0 case
+    expect(cmp(parts("1.0.0"), parts("1.0.0"))).toBe(0);
     // Per-architecture, because handing an Intel dmg to an Apple Silicon Mac
     // is a download that works and an app that doesn't.
     expect(cask).toMatch(/arch arm: "arm64", intel: "x64"/);

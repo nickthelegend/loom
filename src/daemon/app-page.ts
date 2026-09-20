@@ -279,8 +279,39 @@ window.__loomPageRev="%%BUILD_REV%%";
   .md a{color:var(--thread,#67e8f9);text-decoration:underline;text-underline-offset:2px}
   .md .mdcode{margin:0 0 8px;background:var(--editor-surface,color-mix(in srgb, var(--foreground) 6%, var(--background)));
     border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto}
-  .md .mdcode code{font-family:var(--font-mono);font-size:12.5px;line-height:1.5;white-space:pre;color:var(--foreground)}
+  .md .mdcode code{font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--foreground);
+    white-space:pre-wrap;overflow-wrap:anywhere}
+  .md .mdcodewrap{position:relative}
+  .md .mdcodewrap .mdcopy{position:absolute;top:6px;right:6px;width:24px;height:24px;padding:0;
+    display:inline-flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;
+    background:var(--background);border:1px solid var(--border);color:var(--muted-foreground);opacity:0;transition:opacity .12s}
+  .md .mdcodewrap:hover .mdcopy,.md .mdcodewrap .mdcopy:focus-visible{opacity:1}
+  .md .mdcodewrap .mdcopy svg{width:13px;height:13px}
   .md strong{font-weight:650}
+  /* An orchestra task row that opens its own thread. It has to read as the
+     same line it always was, with the affordance only on hover. */
+  .sys.orch .tlink{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:0;border:0;background:none;
+    font:inherit;color:inherit;text-align:left;cursor:pointer;border-radius:5px}
+  .sys.orch .tlink:hover{color:var(--foreground);text-decoration:underline;text-underline-offset:2px}
+  .sys.orch .tlink .tlinkgo{display:inline-flex;width:12px;height:12px;opacity:0;transition:opacity .12s}
+  .sys.orch .tlink .tlinkgo svg{width:12px;height:12px}
+  .sys.orch .tlink:hover .tlinkgo,.sys.orch .tlink:focus-visible .tlinkgo{opacity:.8}
+  .rawbox{margin-top:6px;font-size:11.5px}
+  .rawbox summary{cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:10.5px;
+    letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground);opacity:.8}
+  .rawbox summary::-webkit-details-marker{display:none}
+  .rawbox summary::before{content:"\\25b8 ";font-size:9px}
+  .rawbox[open] summary::before{content:"\\25be "}
+  .rawbox .mdcodewrap{position:relative;margin-top:5px}
+  .rawbox pre.mdcode{margin:0;background:var(--editor-surface,color-mix(in srgb, var(--foreground) 6%, var(--background)));
+    border:1px solid var(--border);border-radius:8px;padding:10px 12px;max-height:60vh;overflow:auto}
+  .rawbox pre.mdcode code{font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:var(--foreground);
+    white-space:pre-wrap;overflow-wrap:anywhere}
+  .rawbox .mdcopy{position:absolute;top:6px;right:6px;width:24px;height:24px;padding:0;
+    display:inline-flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;
+    background:var(--background);border:1px solid var(--border);color:var(--muted-foreground);opacity:0;transition:opacity .12s}
+  .rawbox:hover .mdcopy,.rawbox .mdcopy:focus-visible{opacity:1}
+  .rawbox .mdcopy svg{width:13px;height:13px}
   /* --- reasoning / thinking block --- */
   .msg.agent.thinking{align-items:flex-start;margin-bottom:2px}
   .thinktag{font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
@@ -772,6 +803,14 @@ window.__loomPageRev="%%BUILD_REV%%";
   .turncard .tca{color:var(--git-add);margin-left:auto}
   .turncard .tcd{color:var(--git-del)}
   .turncard .tchev{color:var(--muted-foreground)}
+  /* Rewind lives on the card whose changes it undoes, and stays out of the
+     way until you look for it — it throws work away when clicked. */
+  .turncard .tcrw{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;margin-left:8px;
+    border-radius:99px;border:1px solid var(--border);background:var(--background);color:var(--muted-foreground);
+    font:inherit;font-size:10.5px;font-weight:600;cursor:pointer;opacity:0;transition:opacity .12s,color .12s}
+  .turncard .tcrw svg{width:11px;height:11px}
+  .turncard:hover .tcrw,.turncard .tcrw:focus-visible{opacity:1}
+  .turncard .tcrw:hover{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 45%, transparent)}
   .turncard .tcf{color:var(--muted-foreground);font-size:11px;margin-top:3px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}
@@ -1857,6 +1896,9 @@ window.__loomPageRev="%%BUILD_REV%%";
   .cowchip.on{color:var(--foreground);border-color:color-mix(in srgb, var(--primary) 30%, transparent);
     background:color-mix(in srgb, var(--primary) 11%, transparent)}
   .cowchip:not(.on) .brand,.cowchip:not(.on) .agmono{opacity:.4;filter:grayscale(1)}
+  .cowchip.cowadd{border-style:dashed;gap:3px}
+  .cowchip.cowadd svg{width:11px;height:11px}
+  .cowchip.cowadd:disabled{opacity:.5;cursor:default}
   .cstep{display:inline-flex;align-items:center;height:24px;border:1px solid var(--border);border-radius:99px;overflow:hidden}
   .cstep button{width:24px;height:22px;border:0;background:transparent;color:var(--muted-foreground);cursor:pointer;
     font:inherit;font-size:13px;line-height:1}
@@ -2068,6 +2110,11 @@ window.__loomPageRev="%%BUILD_REV%%";
     color:var(--muted-foreground);border:1px solid var(--border);background:color-mix(in srgb, var(--muted) 55%, transparent)}
   button.pbdg,.pbdg[data-permof]{cursor:pointer}
   .pbdg[data-permof]:hover{filter:brightness(1.15)}
+  .pbdg[data-modelof]{cursor:pointer;text-transform:none;letter-spacing:0;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pbdg[data-modelof]:hover{filter:brightness(1.15)}
+  /* A model agent with no model can't take a turn. Say so before the run does. */
+  .pbdg.mbdg.needs{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 45%, transparent);
+    background:color-mix(in srgb, var(--warn) 12%, transparent)}
   /* permission menu rows: a title, what it means on this agent, the flags it runs with */
   .cmi.pm{align-items:flex-start;padding:8px 9px}
   .cmi.pm .ic{margin-top:3px}
@@ -3101,7 +3148,12 @@ ${BRAND_SPRITE}
       if (FENCE.test(line)) {
         var code = [], j = i + 1;
         while (j < lines.length && !FENCE_END.test(lines[j])) { code.push(lines[j]); j++; }
-        out.push('<pre class="mdcode"><code>' + code.join("\\n") + "</code></pre>");
+        // A code block used to scroll sideways with no way to reach the end,
+        // which is how an orchestrator's whole plan became unreadable. It
+        // wraps now, and carries a copy button for the times you want it
+        // somewhere else rather than on screen.
+        out.push('<div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
+          '</button><pre class="mdcode"><code>' + code.join("\\n") + "</code></pre></div>");
         i = j + 1; continue;
       }
       var h = line.match(HEAD);
@@ -3362,6 +3414,8 @@ ${BRAND_SPRITE}
     // lucide sliders-horizontal: setup is knobs, not a spinning cog
     gear: svg('<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>'),
     back: svg('<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>'),
+    // lucide rotate-ccw: putting the files back where they were
+    rewind: svg('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'),
     up: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
     stop: svg('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
     thread: svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
@@ -3675,7 +3729,8 @@ ${BRAND_SPRITE}
         if (p.author === "orchestrator") {
           return '<div class="msg agent"><div class="who" style="color:var(--thread-ink)"><span class="orchmark">' + ICONS.orchestra + "</span>orchestrator" +
             (p.orchestra && p.orchestra.taskId ? '<span class="thinktag">' + esc(p.orchestra.taskId) + "</span>" : "") + "</div>" +
-            '<div class="bubble md" style="border-left-color:var(--thread)">' + mdToHtml(p.text) + "</div></div>";
+            '<div class="bubble md" style="border-left-color:var(--thread)">' + mdToHtml(p.text) +
+            (tview() === "verbose" ? rawBlock(p) : "") + "</div></div>";
         }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
         return '<div class="msg user"><div class="bubble md">' + mdToHtml(p.text) + "</div></div>";
@@ -3685,15 +3740,23 @@ ${BRAND_SPRITE}
       // collapsible block above the reply — dimmed, folded by default, so it's
       // there when you want it and out of the way when you don't.
       if (p.reasoning) {
+        // At Normal the reasoning isn't the transcript — it's the working out.
+        // Thinking folds it in; Verbose opens it.
+        var tv = tview();
+        if (tv === "normal") return "";
         return '<div class="msg agent thinking"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
           brandMark(kindOf(e.agentId)) + esc(e.agentId) + '<span class="thinktag">thinking</span></div>' +
-          '<details class="thinkbox"><summary>reasoning</summary><div class="md">' + mdToHtml(p.text) + "</div></details></div>";
+          '<details class="thinkbox"' + (tv === "verbose" ? " open" : "") + '><summary>reasoning</summary><div class="md">' +
+          mdToHtml(p.text) + "</div></details></div>";
       }
       return '<div class="msg agent"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
         brandMark(kindOf(e.agentId)) + esc(e.agentId) +
         '</div><div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div></div>";
     }
-    if (e.kind === "tool_call") return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool) + "</div>";
+    if (e.kind === "tool_call") {
+      return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool || p.name) +
+        (tview() === "verbose" ? rawBlock(p) : "") + "</div>";
+    }
     if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
@@ -3702,9 +3765,17 @@ ${BRAND_SPRITE}
       return '<div class="turncard" data-patch="' + enc + '" data-label="' + esc(lbl) + '">' +
         '<div class="tch"><span>\\u270e ' + lbl + "</span>" +
         '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\\u2212' + Number(p.removed || 0) + "</span>" +
+        (p.checkpoint ? '<button class="tcrw" type="button" data-rewind="' + esc(p.checkpoint) +
+            '" title="put these files back the way they were before this turn">' + ICONS.rewind + "Rewind</button>" : "") +
         '<span class="tchev">\\u25b8</span></div>' +
         '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \\u2026" : "") + "</div>" +
         '<div class="tcdiff" style="display:none"></div></div>';
+    }
+    if (e.kind === "checkpoint") {
+      if (p.reason !== "rewound") return tview() === "verbose" ? '<div class="sys" style="opacity:.6">\\u21ba checkpoint \\u00b7 ' + esc(p.label || p.id) + "</div>" : "";
+      return '<div class="sys ok">\\u21ba Rewound to \\u201c' + esc(String(p.label || p.id).slice(0, 80)) + '\\u201d \\u00b7 ' +
+        Number(p.files || 0) + " file" + (Number(p.files || 0) === 1 ? "" : "s") +
+        (p.undo ? ' <button class="btn xs outline" type="button" data-rewind="' + esc(p.undo) + '">Undo the rewind</button>' : "") + "</div>";
     }
     if (e.kind === "handoff") return '<div class="handoff"><span class="a">' + esc(p.from || "\\u2014") + '</span><span class="shuttle">\\u27ff</span><span class="b">' + esc(p.to || "\\u2014") + "</span></div>";
     // Sub-agents: indent under the turn, marked as borrowed hands — the parent
@@ -3788,8 +3859,15 @@ ${BRAND_SPRITE}
     }
     if (ph === "task" && p.task) {
       var t = p.task, st = ORCH_TASK_ST[t.status] || [t.status || "", "off"];
-      return row(tone[st[1]] || "", esc(t.id) + " \\u00b7 " + esc(String(t.title || "").slice(0, 80)) + " \\u2192 " +
-        agentGlyph(t.kind, t.agent) + esc(agentLabel(t.kind, t.agent)) + " \\u00b7 " + esc(st[0]));
+      // Each task runs in its own thread. The row that announces it is the
+      // way in \u2014 otherwise the orchestrator names threads you can only find
+      // by hunting the sidebar for a title you half remember (#100).
+      var inner = esc(t.id) + " \\u00b7 " + esc(String(t.title || "").slice(0, 80)) + " \\u2192 " +
+        agentGlyph(t.kind, t.agent) + esc(agentLabel(t.kind, t.agent)) + " \\u00b7 " + esc(st[0]);
+      return row(tone[st[1]] || "", t.chat
+        ? '<button class="tlink" type="button" data-gochat="' + esc(t.chat) + '" title="open ' + esc(t.id) + '\\u2019s thread">' +
+            inner + '<span class="tlinkgo">' + ICONS.thread + "</span></button>"
+        : inner);
     }
     if (ph === "task_started") return row("", "\\u25b8 " + esc(p.taskId) + " started \\u2014 " + esc(String(p.title || "").slice(0, 90)) + (p.agent ? " \\u00b7 " + esc(labelOf(p.agent)) : ""));
     if (ph === "task_finished") {
@@ -6302,6 +6380,21 @@ ${BRAND_SPRITE}
     // click an Update(…) card in the thread → open its diff on the right
     // (desktop dock); on mobile, expand it inline.
     document.getElementById("feed").addEventListener("click", function(ev){
+      // A code block's copy button. First, because it lives inside cards that
+      // claim clicks of their own (a turn card opens its diff, a details folds).
+      // Rewind, before the turn card's own click — the button sits inside the
+      // card, and opening a diff dock instead of asking would be a surprise.
+      var rw = ev.target.closest && ev.target.closest("[data-rewind]");
+      if (rw) { ev.preventDefault(); ev.stopPropagation(); askRewind(rw.getAttribute("data-rewind"), rw); return; }
+      var go = ev.target.closest && ev.target.closest("[data-gochat]");
+      if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
+      var cp = ev.target.closest && ev.target.closest(".mdcopy");
+      if (cp) {
+        ev.preventDefault(); ev.stopPropagation();
+        var box = cp.parentNode && cp.parentNode.querySelector("code");
+        if (box) copyText(box.textContent || "");
+        return;
+      }
       var ap = ev.target.closest && ev.target.closest("[data-orch-apply]");
       if (ap) { applyOrch(ap.getAttribute("data-orch-apply"), ap); return; }
       var rd = ev.target.closest && ev.target.closest("[data-orch-deliver]");
@@ -8007,7 +8100,9 @@ ${BRAND_SPRITE}
     }
 
     function refresh(){
-      api("/api/projects/" + pid).then(function(j){
+      // Returned, so a caller that changed the roster can wait for the answer
+      // before redrawing off it.
+      return api("/api/projects/" + pid).then(function(j){
         state.project = j.project;
         drawStatus();
       }).catch(function(err){ toast(err.message); });
@@ -8045,9 +8140,20 @@ ${BRAND_SPRITE}
       historyLoaded = true;
       if (pendingWs.length) { append(pendingWs); pendingWs = []; }
     }
-    api("/api/projects/" + pid + "/events?limit=60&chat=" + encodeURIComponent(chatId))
-      .then(function(j){ append(j.events || []); flushPending(); })
-      .catch(function(err){ toast(err.message); flushPending(); });
+    // Reading the thread again from scratch. Changing the transcript level
+    // changes what every past line renders as, so there is nothing to patch —
+    // the whole feed is re-read rather than re-styled.
+    function loadHistory(){
+      var feed = document.getElementById("feed");
+      if (feed) feed.innerHTML = '<div class="loader"></div>';
+      state.lastId = 0;
+      return api("/api/projects/" + pid + "/events?limit=60&chat=" + encodeURIComponent(chatId))
+        .then(function(j){ append(j.events || []); flushPending(); })
+        .catch(function(err){ toast(err.message); flushPending(); });
+    }
+    // The transcript-level menu lives in the shell's scope, and this doesn't.
+    state.redrawFeed = loadHistory;
+    loadHistory();
     refresh();
     state.timers.push(setInterval(refresh, 4000));
     if (desktop) {
@@ -8616,13 +8722,15 @@ ${BRAND_SPRITE}
         .catch(function(){ closeMenu(); });
     }
 
-    function openModelMenu(){
-      var agentId = state.selected;
+    function openModelMenu(who){
+      // Orchestrate has no "selected" agent \u2014 it has a cast \u2014 so the caller
+      // names the one it means. Chat still means whoever the composer is aimed at.
+      var agentId = who || state.selected;
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === agentId; })[0];
       if (!cur || cur.tier === "bridge") { toast("pick an adapter first \\u2014 bridges choose their own model"); return; }
       var m = document.getElementById("cmenu"); if (!m) return;
-      menuState = { kind: "modelmenu", at: 0, sel: 0, items: [] };
+      menuState = { kind: "modelmenu", agent: agentId, at: 0, sel: 0, items: [] };
       m.style.display = "block"; m.className = "cmenu";
       m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + '</div>' +
         '<input class="cmsearch" id="cmsearch" placeholder="search real models\\u2026" spellcheck="false" autocomplete="off">' +
@@ -8641,7 +8749,8 @@ ${BRAND_SPRITE}
         var f = (filter || "").trim().toLowerCase();
         var shown = f ? allModels.filter(function(mm){ return mm.toLowerCase().indexOf(f) >= 0; }) : allModels;
         var cap = 200; // don't paint 500 rows — the search narrows it
-        var head = [{ label: "Default", sub: cur.kind + "'s own choice", value: "" }];
+        var head = cur.kind === "model" ? []
+          : [{ label: "Default", sub: cur.kind + "'s own choice", value: "" }];
         if (!f) head.push({ label: "Custom\\u2026", value: "__custom__", plus: true });
         var rows = head.concat(shown.slice(0, cap).map(function(mm){ return { label: mm, value: mm }; }));
         var list = document.getElementById("cmlist"); if (!list) return;
@@ -8663,6 +8772,7 @@ ${BRAND_SPRITE}
         var mn = document.getElementById("cmenu");
         if (mn && j && j.source){
           var note = j.source === "cli" ? "asked " + esc(cur.kind || "the tool")
+            : j.source === "api" ? "asked every provider with a key \\u2014 " + (j.count || 0) + " models"
             : j.source === "builtin" ? esc(cur.kind || "this tool") + " can\\u2019t list models \\u2014 these are its documented aliases"
             : "no model list for this agent";
           var ft = document.createElement("div");
@@ -8844,6 +8954,16 @@ ${BRAND_SPRITE}
         var items = [
           { label: "MCP servers", icon: ICONS.plug, hint: "connect", run: function(){ toggleComposerPanel("mcp"); } },
           { label: "Skills", icon: ICONS.spark, hint: skillHint(), run: function(){ toggleComposerPanel("skills"); } },
+          { sep: true },
+          { head: "transcript" },
+          { label: "Normal", icon: tview() === "normal" ? ICONS.check : "", hint: "what it said and did",
+            run: function(){ setTView("normal"); } },
+          { label: "Thinking", icon: tview() === "thinking" ? ICONS.check : "", hint: "+ reasoning",
+            run: function(){ setTView("thinking"); } },
+          { label: "Verbose", icon: tview() === "verbose" ? ICONS.check : "", hint: "+ raw payloads",
+            run: function(){ setTView("verbose"); } },
+          { sep: true },
+          { label: "Rewind\u2026", icon: ICONS.rewind, hint: "put the files back", run: function(){ openRewindMenu(); } },
           { sep: true },
           { label: "Prompts", icon: ICONS.clipboard, hint: KMOD + "\u21e7V", run: function(){ openPrompts(); } },
           { label: "Attach a file", icon: ICONS.plus, run: function(){ var a = document.getElementById("attach"); if (a) a.click(); } },
@@ -9494,11 +9614,19 @@ ${BRAND_SPRITE}
     function orchTerminal(st){ return st === "completed" || st === "failed" || st === "aborted" || st === "moved"; }
     function findOrchRun(id){ return (orch.runs || []).filter(function(r){ return r.id === id; })[0] || null; }
     /** The run whose orchestrator thread this chat is, if it is one. */
+    /**
+     * The run this thread answers for, if any. A thread the run opened is the
+     * run's for good \u2014 replying there always steers it, even after it
+     * finishes. A thread the run borrowed (you orchestrated from Main) is only
+     * its while it is live; when it ends, Main goes back to being Main rather
+     * than forwarding every message you ever send to a finished run (#100).
+     */
+    function owns(r){ return r && r.chat === chatId && (!r.inPlace || !orchTerminal(r.status)); }
     function orchRunForChat(){
-      var hit = (orch.runs || []).filter(function(r){ return r.chat === chatId; })[0];
+      var hit = (orch.runs || []).filter(owns)[0];
       if (hit) return hit;
       var s = state.project && state.project.orchestra;
-      return s && s.chat === chatId ? { id: s.id, status: s.status, chat: s.chat } : null;
+      return owns(s) ? { id: s.id, status: s.status, chat: s.chat, inPlace: s.inPlace } : null;
     }
     function mergeOrchRun(run){
       if (!run || !run.id) return;
@@ -9538,16 +9666,21 @@ ${BRAND_SPRITE}
         '<span class="colbl">Orchestrator</span>' +
         '<button class="cagent" id="corchpick" type="button" title="who plans the goal and reviews the results">' +
           agentGlyph(lead.kind, lead.id) + '<span class="can">' + esc(agentLabel(lead.kind, lead.id)) + "</span>" +
-          permBadge(permOf(lead), lead.id) +
+          permBadge(permOf(lead), lead.id) + modelBadge(lead) +
           '<span class="cchev">' + ICONS.chevron + "</span></button>" +
         '<span class="colbl">Workers</span>' +
         '<span class="cowk" id="cowk">' + roster.map(function(a){
           var on = !c.off[a.id];
           return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '" title="' +
             esc(a.id + (a.role ? " \\u00b7 " + a.role : "")) + '">' + agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
-            // each worker's mode, and the way to change it without leaving the row
-            permBadge(permOf(a), a.id) + "</button>";
-        }).join("") + "</span>" +
+            // each worker's mode and model, changeable without leaving the row
+            permBadge(permOf(a), a.id) + modelBadge(a) + "</button>";
+        }).join("") +
+          // A roster of CLIs is whatever you happen to have installed. An API
+          // model is a name off a list, so it can be added here, in the row
+          // where you are already deciding who runs the goal.
+          '<button type="button" class="cowchip cowadd" id="cowadd" title="add an API model as a worker">' +
+            ICONS.plus + "model</button>" + "</span>" +
         '<span class="colbl">Parallel</span>' +
         '<span class="cstep" title="how many tasks run at once"><button type="button" data-step="-1" aria-label="fewer in parallel"' + (c.parallel <= 1 ? " disabled" : "") + ">\\u2212</button>" +
           '<span class="cpar" id="cpar">' + c.parallel + "</span>" +
@@ -9565,6 +9698,8 @@ ${BRAND_SPRITE}
           drawOrchControls();
         };
       });
+      var add = document.getElementById("cowadd");
+      if (add) add.onclick = function(){ addModelWorker(add); };
       Array.prototype.forEach.call(el.querySelectorAll("[data-runon]"), function(b){
         b.onclick = function(){ c.runOn = b.getAttribute("data-runon"); drawOrchControls(); };
       });
@@ -9575,6 +9710,25 @@ ${BRAND_SPRITE}
         };
       });
       wirePermBadges(el);
+      wireModelBadges(el);
+    }
+    /**
+     * A model agent joins the cast with no model chosen, which is the one
+     * state it cannot run in \u2014 so adding one opens its model picker
+     * immediately rather than leaving a chip that fails on send.
+     */
+    function addModelWorker(btn){
+      btn.disabled = true;
+      api("/api/projects/" + pid + "/agents", { method: "POST", body: JSON.stringify({ kind: "model" }) })
+        .then(function(a){
+          return refresh().then(function(){ return a; });
+        })
+        .then(function(a){
+          drawOrchControls();
+          if (a && a.id) openModelMenu(a.id);
+        })
+        .catch(function(e){ toast(e.message); })
+        .then(function(){ var b = document.getElementById("cowadd"); if (b) b.disabled = false; });
     }
     /**
      * Phase 5 (D69, D73): where the goal runs \u2014 this machine, or one of the
@@ -9591,6 +9745,18 @@ ${BRAND_SPRITE}
           (r.deviceId ? ' title="' + esc((r.mine ? "your runner" : (r.github || "a teammate") + "\u2019s shared runner") + " \u00b7 " + (r.kinds || []).join(", ")) + '"' : "") + ">" +
           esc(r.deviceId ? runnerName(r) : r.label) + (r.deviceId && !r.mine ? " \u00b7 " + esc(r.github || "") : "") + "</button>";
       }).join("") + "</span>";
+    }
+    /** Likewise for the model chip: it picks that agent's model, not the chip's action. */
+    function wireModelBadges(el){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-modelof]"), function(b){
+        b.onmousedown = function(ev){ ev.stopPropagation(); };
+        b.onclick = function(ev){
+          ev.stopPropagation(); ev.preventDefault();
+          var id = b.getAttribute("data-modelof");
+          if (menuState && menuState.kind === "modelmenu" && menuState.agent === id) { closeMenu(); return; }
+          openModelMenu(id);
+        };
+      });
     }
     /** A mode badge inside a chip opens that agent's permissions, not the chip's own action. */
     function wirePermBadges(el){
@@ -9642,8 +9808,18 @@ ${BRAND_SPRITE}
       var goal = refs.length ? refs.join("\\n") + (text ? "\\n\\n" + text : "") : text;
       var roster = orchRoster(), c = orchCfg();
       if (!roster.length) { toast("no adapters in this project to orchestrate"); return; }
-      var workers = roster.filter(function(a){ return !c.off[a.id]; }).map(function(a){ return a.id; });
+      var cast = roster.filter(function(a){ return !c.off[a.id]; });
+      var workers = cast.map(function(a){ return a.id; });
       if (!workers.length) { toast("pick at least one worker"); return; }
+      // A model agent with no model is a name for nothing. Catch it here, where
+      // the chip that fixes it is on screen, rather than three tasks into a run.
+      var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0];
+      var blank = cast.concat(lead ? [lead] : []).filter(function(a){ return a.kind === "model" && !a.model; });
+      if (blank.length) {
+        toast(blank[0].id + " has no model yet \u2014 click its chip and pick one");
+        openModelMenu(blank[0].id);
+        return;
+      }
       var btn = document.getElementById("orchsend");
       // One goal runs at a time: a second one waits in the queue and starts
       // itself when the first finishes (edit or reorder it while it waits).
@@ -9667,6 +9843,10 @@ ${BRAND_SPRITE}
       api("/api/projects/" + pid + "/orchestra", { method: "POST", body: JSON.stringify({
         goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, maxParallel: c.parallel,
         plan: planState || undefined,
+        // Orchestrate here, answer here. Without this the run opened a thread
+        // of its own and walked you into it, leaving the goal you typed behind
+        // in a thread that then said nothing at all (#100).
+        chat: chatId,
       }) }).then(function(j){
         // Only now is the goal gone from the box: a refused run (no git repo,
         // one already running) leaves what you wrote where you wrote it.
@@ -9681,6 +9861,69 @@ ${BRAND_SPRITE}
       });
     }
 
+    /**
+     * Rewind (#101): put the files back to a checkpoint.
+     *
+     * This throws work away, so it asks first \u2014 and the asking names the
+     * checkpoint rather than saying "are you sure", because "are you sure"
+     * tells you nothing you didn't already know. It says what stays too: this
+     * is the working tree, not your commits and not the conversation.
+     */
+    function askRewind(id, btn){
+      if (!id) return;
+      var known = (state.checkpoints || []).filter(function(c){ return c.id === id; })[0];
+      var what = known ? '\\u201c' + known.label + '\\u201d' : "that checkpoint";
+      if (!window.confirm(
+        "Put the files back to " + what + "?\\n\\n" +
+        "Anything written since is removed, and anything removed since comes back. " +
+        "Your commits, your history and files git ignores are untouched \\u2014 and the rewind itself " +
+        "is saved, so you can undo it."
+      )) return;
+      if (btn) btn.disabled = true;
+      api("/api/projects/" + pid + "/checkpoints/" + encodeURIComponent(id) + "/rewind", { method: "POST" })
+        .then(function(j){
+          var n = (j && j.changed || []).length;
+          toast("rewound \\u00b7 " + n + " file" + (n === 1 ? "" : "s"));
+          state.checkpoints = null;
+          refreshTree(true);
+          if (state.refreshExplorer) state.refreshExplorer();
+        })
+        .catch(function(err){ toast(err.message); })
+        .then(function(){ if (btn) btn.disabled = false; });
+    }
+
+    /**
+     * Every point the files can be put back to. Read when the menu opens
+     * rather than on a timer \u2014 it is a list nobody looks at until the moment
+     * they want it, and asking git for it costs a process.
+     */
+    function openRewindMenu(){
+      var m = document.getElementById("cmenu"); if (!m) return;
+      menuState = { kind: "rewindmenu", at: 0, sel: 0, items: [] };
+      m.style.display = "block"; m.className = "cmenu";
+      m.innerHTML = '<div class="cmhead">put the files back to\\u2026</div><div class="cmlist" id="cmlist">' + LOADER + "</div>";
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      api("/api/projects/" + pid + "/checkpoints").then(function(j){
+        var rows = (j && j.checkpoints) || [];
+        state.checkpoints = rows;
+        var list = document.getElementById("cmlist"); if (!list) return;
+        if (!rows.length) {
+          list.innerHTML = '<div class="cmmore">no checkpoints yet \\u2014 one is taken before every turn, in a git repository</div>';
+          return;
+        }
+        list.innerHTML = rows.slice(0, 40).map(function(c){
+          return '<div class="cmi" data-rw="' + esc(c.id) + '"><span class="ic">' + ICONS.rewind + "</span><span>" +
+            esc(String(c.label || c.id).slice(0, 70)) + '</span><span class="sub">' + esc(rel(c.at)) + "</span></div>";
+        }).join("");
+        Array.prototype.forEach.call(list.querySelectorAll("[data-rw]"), function(row){
+          row.onmousedown = function(ev){ ev.preventDefault(); var id = row.getAttribute("data-rw"); closeMenu(); askRewind(id, null); };
+        });
+      }).catch(function(err){
+        var list = document.getElementById("cmlist");
+        if (list) list.innerHTML = '<div class="cmmore">' + esc(err.message) + "</div>";
+      });
+    }
+
     /** Show a run: its orchestrator thread behind, its Orchestra view in front. */
     function openOrchRun(run){
       if (!run) return;
@@ -9692,7 +9935,11 @@ ${BRAND_SPRITE}
         return;
       }
       setComposerMode(state.cmode || "chat");
-      if (desktop) showTab("orchestra"); else openOrchSheet();
+      // The run's thread is this one, so the thread is what to look at. Jumping
+      // to the board would hide the summary in the place it was asked for.
+      if (!desktop) openOrchSheet();
+      else if (run.chat === chatId) showTab("thread");
+      else showTab("orchestra");
     }
     function openOrchChat(chat){
       if (!chat) return;
@@ -10927,10 +11174,65 @@ ${BRAND_SPRITE}
   }
   state.closeMenu = closeMenu;
 
+  /**
+   * How much of a turn the thread shows.
+   *
+   *   normal   — what an agent said and did: prose, edits, one line per tool
+   *   thinking — plus the reasoning it streamed, which Loom already receives
+   *   verbose  — plus the raw material: the full payload behind each tool
+   *              call, and nothing folded
+   *
+   * Per project, because "show me everything" is a thing you want while
+   * reading one project's run and not while reading another's.
+   */
+  var TVIEWS = ["normal", "thinking", "verbose"];
+  function tview(){
+    try {
+      var v = localStorage.getItem("loomTView:" + state.pid);
+      return TVIEWS.indexOf(v) >= 0 ? v : "normal";
+    } catch (e) { return "normal"; }
+  }
+  function setTView(v){
+    if (TVIEWS.indexOf(v) < 0) return;
+    try { localStorage.setItem("loomTView:" + state.pid, v); } catch (e) {}
+    if (state.redrawFeed) state.redrawFeed();
+    toast("transcript: " + v);
+  }
+
+  /** Raw payload, for verbose — the thing the summary was made from. */
+  function rawBlock(payload){
+    var text = "";
+    try { text = JSON.stringify(payload, null, 2); } catch (e) { text = String(payload); }
+    if (!text || text === "{}") return "";
+    return '<details class="rawbox"><summary>raw</summary><div class="mdcodewrap">' +
+      '<button class="mdcopy" type="button" title="copy">' + ICONS.copy + '</button>' +
+      '<pre class="mdcode"><code>' + esc(text) + "</code></pre></div></details>";
+  }
+
+  // The async clipboard is the good path and it is also the one that refuses:
+  // no permission, no user gesture, an insecure origin. Falling back to a
+  // throwaway textarea and execCommand is deprecated and still works
+  // everywhere, which is the whole argument for keeping it.
+  function copyFallback(v){
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = v;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select(); ta.setSelectionRange(0, v.length);
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
   function copyText(v){
+    function missed(){
+      toast(copyFallback(v) ? "copied" : "copy failed \\u2014 select it and copy by hand");
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(v).then(function(){ toast("copied"); }, function(){ toast("copy failed \\u2014 select the link and copy it"); });
-    } else toast("copy not available \\u2014 select the link and copy it");
+      navigator.clipboard.writeText(v).then(function(){ toast("copied"); }, missed);
+    } else missed();
   }
   function wireTeamInvites(host, act){
     Array.prototype.forEach.call(host.querySelectorAll("[data-tinvite]"), function(b){
@@ -11386,6 +11688,26 @@ ${BRAND_SPRITE}
     return i < 0 ? [label, ""] : [label.slice(0, i), label.slice(i + 3)];
   }
   /** The tiny mode badge. With an agent id it's also the way to change it. */
+  /**
+   * The model an agent will actually run, as a chip you can click. A CLI has
+   * its own default and the chip says so; a model agent has no default at
+   * all \u2014 it is a name off a provider's list \u2014 so until one is picked the
+   * chip says that, loudly, because that agent cannot take a single turn.
+   */
+  function modelBadge(a){
+    var needs = a.kind === "model" && !a.model;
+    var txt = a.model ? shortModel(a.model) : (needs ? "pick a model" : "default");
+    return '<span class="pbdg mbdg' + (needs ? " needs" : "") + '" data-modelof="' + esc(a.id) + '"' +
+      ' title="model: ' + esc(a.model || (needs ? "none chosen \u2014 this agent can\u2019t run yet" : a.kind + "\u2019s own choice")) +
+      ' \u2014 click to change">' + esc(txt) + "</span>";
+  }
+  /** Provider-qualified ids are long; the tail is the part that identifies it. */
+  function shortModel(m){
+    var v = String(m);
+    var cut = v.lastIndexOf("/");
+    if (cut >= 0) v = v.slice(cut + 1);
+    return v.length > 24 ? v.slice(0, 23) + "\u2026" : v;
+  }
   function permBadge(mode, agentId){
     return '<span class="pbdg ' + esc(mode) + '"' + (agentId ? ' data-permof="' + esc(agentId) + '"' : "") +
       ' title="permissions: ' + esc(PERM_NAMES[mode] || mode) + (agentId ? " \\u2014 click to change" : "") + '">' + esc(mode) + "</span>";
@@ -14838,6 +15160,7 @@ ${BRAND_SPRITE}
     state.openFile = null; state.showTab = null; state.showRail = null; state.teamBrainPing = null;
     state.selectAgent = null; state.termRun = null; state.setChat = null;
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
+    state.redrawFeed = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);

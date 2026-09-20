@@ -3027,6 +3027,33 @@ export class LoomDaemon {
       }),
     );
 
+    /**
+     * Rewind (#101): points the *working tree* can be put back to.
+     *
+     * The pair above is deliberately not this. That one restores brain, board
+     * and config and leaves files to git; this one is the files, and leaves
+     * brain, board and history alone. Both exist because they answer different
+     * questions, and a single "restore" that did both would be a button nobody
+     * could predict.
+     */
+    app.get(
+      "/api/projects/:id/checkpoints",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ checkpoints: await rt.checkpoints() });
+      }),
+    );
+
+    app.post(
+      "/api/projects/:id/checkpoints/:cpId/rewind",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(await rt.rewind(String(req.params.cpId)));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     // Hung sessions: busy far longer than any plausible turn. GET lists them;
     // POST reaps one — interrupt, stop, respawn from config, baton released if
     // the corpse held it.
@@ -3385,12 +3412,15 @@ export class LoomDaemon {
           maxRounds?: number;
           plan?: boolean;
           maxUsd?: number;
+          /** The thread the goal was typed in; the orchestrator answers there. */
+          chat?: string;
         };
         if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
         const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
         try {
           const run = await rt.orchestra.start({
             goal: b.goal,
+            ...(b.chat ? { chat: String(b.chat) } : {}),
             ...(b.orchestrator ? { orchestrator: String(b.orchestrator) } : {}),
             ...(workers?.length ? { workers } : {}),
             ...(b.maxParallel ? { maxParallel: Number(b.maxParallel) } : {}),
