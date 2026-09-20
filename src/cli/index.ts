@@ -707,6 +707,56 @@ program
     }
   });
 
+/**
+ * Rewind (#101). Deliberately a sibling of snapshot/restore above and not a
+ * flag on it: that pair moves the brain, the board and the config and leaves
+ * files to git. This one is the files, and leaves those alone. One command
+ * that did both would be a command nobody could predict.
+ */
+program
+  .command("rewind [checkpoint]")
+  .description("put the working tree back to a checkpoint (no argument lists them)")
+  .option("-y, --yes", "don't ask")
+  .action(async (checkpoint: string | undefined, opts: { yes?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { checkpoints } = await client.checkpoints(project.id);
+    if (!checkpoints.length) {
+      console.log(pc.dim("no checkpoints yet — one is taken before every turn, in a git repository"));
+      return;
+    }
+    if (!checkpoint) {
+      for (const c of checkpoints.slice(0, 20)) {
+        console.log(`  ${pc.bold(c.id)}  ${pc.dim(new Date(c.at).toLocaleString())}  ${c.label}`);
+      }
+      console.log(pc.dim(`
+  loom rewind <id>   ·  ${checkpoints.length} checkpoint${checkpoints.length === 1 ? "" : "s"}`));
+      return;
+    }
+    const target = checkpoints.find((c) => c.id === checkpoint);
+    if (!target) {
+      console.error(pc.red(`no checkpoint "${checkpoint}" — run \`loom rewind\` to see them`));
+      process.exitCode = 1;
+      return;
+    }
+    if (!opts.yes) {
+      console.log(`${pc.yellow("!")} this puts the files back to ${pc.bold(target.label)}`);
+      console.log(pc.dim("  anything written since is removed; commits, history and ignored files are untouched"));
+      console.log(pc.dim("  the rewind is itself saved, so it can be undone"));
+      const ok = await confirm("rewind?");
+      if (!ok) return;
+    }
+    try {
+      const out = await client.rewind(project.id, target.id);
+      console.log(
+        `${pc.green("✓")} rewound ${pc.dim(`· ${out.changed.length} file${out.changed.length === 1 ? "" : "s"} · undo with \`loom rewind ${out.undo.id}\``)}`,
+      );
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
+
 program
   .command("task <title...>")
   .description("put a card on the board")

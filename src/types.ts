@@ -29,6 +29,9 @@ export type EventKind =
   | "route_completed"
   | "route_failed"
   | "turn_diff" // working-tree changes attributed to one agent turn
+  // A point the files can be put back to. Written before a turn runs, and
+  // when a rewind saves what it is about to replace. See core/checkpoint.ts.
+  | "checkpoint"
   // Sub-agents. A turn can fan a subtask out to a child that runs alongside it
   // and never holds the baton — the parent keeps the lock, so a fan-out cannot
   // steal the conversation from the agent that started it. See

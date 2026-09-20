@@ -30,6 +30,7 @@ import { Brain, CONFIDENCE_FLOOR, type Memory } from "../core/brain.js";
 import { compileBrief, retrieve, type Hit, type RetrieveOpts } from "../core/brain-index.js";
 import { extractFromTurn, readExternalContent, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
+import * as checkpoints from "../core/checkpoint.js";
 import { EventLog } from "../core/eventlog.js";
 import { addWorktree as gitAddWorktree, ensureBranch, push as gitPush, readOut, stageAndCommitFiles, worktreePath } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
@@ -1839,6 +1840,72 @@ export class ProjectRuntime {
   /** Pre-turn porcelain snapshots, for per-prompt diff attribution. */
   private preTurnTree = new Map<string, string>();
 
+  /** The checkpoint taken before each agent's current turn (#101). */
+  private turnCheckpoint = new Map<string, string>();
+
+  /**
+   * Write down what the files are, before a turn changes them (#101).
+   *
+   * Announced in the log so the thread can offer "put it back" on the turn
+   * that follows it, and so the list survives a daemon restart with the
+   * labels intact. Failing is not an error: a checkpoint is a courtesy, and
+   * a project that isn't a git repo simply doesn't get one. What it must
+   * never do is stop the turn.
+   */
+  private async checkpointBefore(agentId: string, prompt: string): Promise<void> {
+    try {
+      const label = prompt.replace(/\s+/g, " ").trim().slice(0, 120) || `a turn by ${agentId}`;
+      const cp = await checkpoints.capture(this.agentDir(agentId), label);
+      if (!cp) return;
+      // Carried onto this turn's turn_diff, so the card that shows what
+      // changed also knows the point to put it back to. Working it out in the
+      // client by "the checkpoint nearest above this card" would be right
+      // until the day two turns interleave.
+      this.turnCheckpoint.set(agentId, cp.id);
+      this.log.append({
+        kind: "checkpoint",
+        agentId,
+        payload: { id: cp.id, label: cp.label, at: cp.at, dirty: cp.dirty, branch: cp.branch, reason: "before_turn" },
+      });
+    } catch {
+      /* never the reason a turn doesn't run */
+    }
+  }
+
+  /** Every point this project's files can be put back to, newest first. */
+  checkpoints(): Promise<checkpoints.Checkpoint[]> {
+    return checkpoints.list(this.info.dir);
+  }
+
+  /**
+   * Put the files back, and say what moved.
+   *
+   * Refused while an agent is mid-turn: rewinding the tree under a running
+   * agent gives it a working directory that contradicts everything it has
+   * read this turn, and the damage lands in whatever it writes next.
+   */
+  async rewind(id: string): Promise<checkpoints.RestoreResult> {
+    const busy = [...this.busySince.keys()];
+    if (busy.length) {
+      throw new Error(
+        `${busy.join(", ")} ${busy.length === 1 ? "is" : "are"} mid-turn — stop the turn first, or the rewind lands underneath it`,
+      );
+    }
+    const out = await checkpoints.restore(this.info.dir, id);
+    this.log.append({
+      kind: "checkpoint",
+      payload: {
+        id: out.restored.id,
+        label: out.restored.label,
+        at: Date.now(),
+        reason: "rewound",
+        files: out.changed.length,
+        undo: out.undo.id,
+      },
+    });
+    return out;
+  }
+
   /**
    * The diff of each agent's most recent turn, as a promise.
    *
@@ -1868,6 +1935,8 @@ export class ProjectRuntime {
       return;
     }
     this.preTurnTree.delete(agentId);
+    const checkpoint = this.turnCheckpoint.get(agentId);
+    this.turnCheckpoint.delete(agentId);
     const pending = diffSinceSnapshot(this.agentDir(agentId), before).catch(() => null);
     this.lastTurnDiff.set(agentId, pending);
     void pending
@@ -1882,6 +1951,9 @@ export class ProjectRuntime {
               removed: diff.removed,
               patch: diff.patch,
               truncated: diff.truncated,
+              // The point these changes can be put back to, when there is one
+              // — a project that isn't a git repo has no checkpoint to offer.
+              ...(checkpoint ? { checkpoint } : {}),
             },
           });
           void this.commitTurn(agentId, diff.files.map((f) => f.path));
@@ -2703,6 +2775,10 @@ export class ProjectRuntime {
     }
     // Snapshot the tree so this prompt's changes can be attributed to it.
     this.preTurnTree.set(target, await porcelainStatus(this.agentDir(target)));
+    // …and a checkpoint you can actually go back to. The porcelain snapshot
+    // above only says *which* paths changed; this holds their content, so
+    // "undo what that turn did" is a click rather than a re-typing (#101).
+    await this.checkpointBefore(target, text);
     // Fire-and-notify: the turn runs in the background; progress streams
     // into the log and completion lands as run_complete.
     void agent

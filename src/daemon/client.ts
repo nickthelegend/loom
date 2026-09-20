@@ -15,6 +15,7 @@ import type {
   RouteStepSpec,
   UnifiedMemory,
 } from "../types.js";
+import type { Checkpoint, RestoreResult } from "../core/checkpoint.js";
 import type { OrchestraRun } from "../core/orchestra.js";
 import type { QueueItem } from "../core/prompt-queue.js";
 import type { LogLine, ServerConfig, ServerStatus } from "../core/servers.js";
@@ -384,6 +385,18 @@ export class DaemonClient {
 
   restore(id: string, doc: unknown): Promise<{ brain: { added: number; known: number }; tasks: number }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/restore`, doc as Record<string, unknown>);
+  }
+
+  /** Rewind (#101): points the working tree can be put back to. */
+  checkpoints(id: string): Promise<{ checkpoints: Checkpoint[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/checkpoints`);
+  }
+
+  rewind(id: string, checkpointId: string): Promise<RestoreResult> {
+    return this.request(
+      "POST",
+      `/api/projects/${encodeURIComponent(id)}/checkpoints/${encodeURIComponent(checkpointId)}/rewind`,
+    );
   }
 
   staleSessions(id: string): Promise<{ stale: Array<{ agentId: string; busyMs: number }> }> {

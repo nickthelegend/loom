@@ -803,6 +803,14 @@ window.__loomPageRev="%%BUILD_REV%%";
   .turncard .tca{color:var(--git-add);margin-left:auto}
   .turncard .tcd{color:var(--git-del)}
   .turncard .tchev{color:var(--muted-foreground)}
+  /* Rewind lives on the card whose changes it undoes, and stays out of the
+     way until you look for it — it throws work away when clicked. */
+  .turncard .tcrw{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;margin-left:8px;
+    border-radius:99px;border:1px solid var(--border);background:var(--background);color:var(--muted-foreground);
+    font:inherit;font-size:10.5px;font-weight:600;cursor:pointer;opacity:0;transition:opacity .12s,color .12s}
+  .turncard .tcrw svg{width:11px;height:11px}
+  .turncard:hover .tcrw,.turncard .tcrw:focus-visible{opacity:1}
+  .turncard .tcrw:hover{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 45%, transparent)}
   .turncard .tcf{color:var(--muted-foreground);font-size:11px;margin-top:3px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}
@@ -3406,6 +3414,8 @@ ${BRAND_SPRITE}
     // lucide sliders-horizontal: setup is knobs, not a spinning cog
     gear: svg('<path d="M21 4h-7"/><path d="M10 4H3"/><path d="M21 12h-9"/><path d="M8 12H3"/><path d="M21 20h-5"/><path d="M12 20H3"/><path d="M14 2v4"/><path d="M8 10v4"/><path d="M16 18v4"/>'),
     back: svg('<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>'),
+    // lucide rotate-ccw: putting the files back where they were
+    rewind: svg('<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'),
     up: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
     stop: svg('<rect x="6" y="6" width="12" height="12" rx="1.5"/>'),
     thread: svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'),
@@ -3755,9 +3765,17 @@ ${BRAND_SPRITE}
       return '<div class="turncard" data-patch="' + enc + '" data-label="' + esc(lbl) + '">' +
         '<div class="tch"><span>\\u270e ' + lbl + "</span>" +
         '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\\u2212' + Number(p.removed || 0) + "</span>" +
+        (p.checkpoint ? '<button class="tcrw" type="button" data-rewind="' + esc(p.checkpoint) +
+            '" title="put these files back the way they were before this turn">' + ICONS.rewind + "Rewind</button>" : "") +
         '<span class="tchev">\\u25b8</span></div>' +
         '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \\u2026" : "") + "</div>" +
         '<div class="tcdiff" style="display:none"></div></div>';
+    }
+    if (e.kind === "checkpoint") {
+      if (p.reason !== "rewound") return tview() === "verbose" ? '<div class="sys" style="opacity:.6">\\u21ba checkpoint \\u00b7 ' + esc(p.label || p.id) + "</div>" : "";
+      return '<div class="sys ok">\\u21ba Rewound to \\u201c' + esc(String(p.label || p.id).slice(0, 80)) + '\\u201d \\u00b7 ' +
+        Number(p.files || 0) + " file" + (Number(p.files || 0) === 1 ? "" : "s") +
+        (p.undo ? ' <button class="btn xs outline" type="button" data-rewind="' + esc(p.undo) + '">Undo the rewind</button>' : "") + "</div>";
     }
     if (e.kind === "handoff") return '<div class="handoff"><span class="a">' + esc(p.from || "\\u2014") + '</span><span class="shuttle">\\u27ff</span><span class="b">' + esc(p.to || "\\u2014") + "</span></div>";
     // Sub-agents: indent under the turn, marked as borrowed hands — the parent
@@ -6364,6 +6382,10 @@ ${BRAND_SPRITE}
     document.getElementById("feed").addEventListener("click", function(ev){
       // A code block's copy button. First, because it lives inside cards that
       // claim clicks of their own (a turn card opens its diff, a details folds).
+      // Rewind, before the turn card's own click — the button sits inside the
+      // card, and opening a diff dock instead of asking would be a surprise.
+      var rw = ev.target.closest && ev.target.closest("[data-rewind]");
+      if (rw) { ev.preventDefault(); ev.stopPropagation(); askRewind(rw.getAttribute("data-rewind"), rw); return; }
       var go = ev.target.closest && ev.target.closest("[data-gochat]");
       if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
       var cp = ev.target.closest && ev.target.closest(".mdcopy");
@@ -8941,6 +8963,8 @@ ${BRAND_SPRITE}
           { label: "Verbose", icon: tview() === "verbose" ? ICONS.check : "", hint: "+ raw payloads",
             run: function(){ setTView("verbose"); } },
           { sep: true },
+          { label: "Rewind\u2026", icon: ICONS.rewind, hint: "put the files back", run: function(){ openRewindMenu(); } },
+          { sep: true },
           { label: "Prompts", icon: ICONS.clipboard, hint: KMOD + "\u21e7V", run: function(){ openPrompts(); } },
           { label: "Attach a file", icon: ICONS.plus, run: function(){ var a = document.getElementById("attach"); if (a) a.click(); } },
         ];
@@ -9834,6 +9858,69 @@ ${BRAND_SPRITE}
         if (btn) btn.disabled = false;
         toast(err.message);
         clog("error", "orchestra", "start failed: " + (err && err.message), err && err.stack);
+      });
+    }
+
+    /**
+     * Rewind (#101): put the files back to a checkpoint.
+     *
+     * This throws work away, so it asks first \u2014 and the asking names the
+     * checkpoint rather than saying "are you sure", because "are you sure"
+     * tells you nothing you didn't already know. It says what stays too: this
+     * is the working tree, not your commits and not the conversation.
+     */
+    function askRewind(id, btn){
+      if (!id) return;
+      var known = (state.checkpoints || []).filter(function(c){ return c.id === id; })[0];
+      var what = known ? '\\u201c' + known.label + '\\u201d' : "that checkpoint";
+      if (!window.confirm(
+        "Put the files back to " + what + "?\\n\\n" +
+        "Anything written since is removed, and anything removed since comes back. " +
+        "Your commits, your history and files git ignores are untouched \\u2014 and the rewind itself " +
+        "is saved, so you can undo it."
+      )) return;
+      if (btn) btn.disabled = true;
+      api("/api/projects/" + pid + "/checkpoints/" + encodeURIComponent(id) + "/rewind", { method: "POST" })
+        .then(function(j){
+          var n = (j && j.changed || []).length;
+          toast("rewound \\u00b7 " + n + " file" + (n === 1 ? "" : "s"));
+          state.checkpoints = null;
+          refreshTree(true);
+          if (state.refreshExplorer) state.refreshExplorer();
+        })
+        .catch(function(err){ toast(err.message); })
+        .then(function(){ if (btn) btn.disabled = false; });
+    }
+
+    /**
+     * Every point the files can be put back to. Read when the menu opens
+     * rather than on a timer \u2014 it is a list nobody looks at until the moment
+     * they want it, and asking git for it costs a process.
+     */
+    function openRewindMenu(){
+      var m = document.getElementById("cmenu"); if (!m) return;
+      menuState = { kind: "rewindmenu", at: 0, sel: 0, items: [] };
+      m.style.display = "block"; m.className = "cmenu";
+      m.innerHTML = '<div class="cmhead">put the files back to\\u2026</div><div class="cmlist" id="cmlist">' + LOADER + "</div>";
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      api("/api/projects/" + pid + "/checkpoints").then(function(j){
+        var rows = (j && j.checkpoints) || [];
+        state.checkpoints = rows;
+        var list = document.getElementById("cmlist"); if (!list) return;
+        if (!rows.length) {
+          list.innerHTML = '<div class="cmmore">no checkpoints yet \\u2014 one is taken before every turn, in a git repository</div>';
+          return;
+        }
+        list.innerHTML = rows.slice(0, 40).map(function(c){
+          return '<div class="cmi" data-rw="' + esc(c.id) + '"><span class="ic">' + ICONS.rewind + "</span><span>" +
+            esc(String(c.label || c.id).slice(0, 70)) + '</span><span class="sub">' + esc(rel(c.at)) + "</span></div>";
+        }).join("");
+        Array.prototype.forEach.call(list.querySelectorAll("[data-rw]"), function(row){
+          row.onmousedown = function(ev){ ev.preventDefault(); var id = row.getAttribute("data-rw"); closeMenu(); askRewind(id, null); };
+        });
+      }).catch(function(err){
+        var list = document.getElementById("cmlist");
+        if (list) list.innerHTML = '<div class="cmmore">' + esc(err.message) + "</div>";
       });
     }
 

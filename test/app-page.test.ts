@@ -463,3 +463,54 @@ describe("web app · orchestrating where you asked", () => {
     expect(APP_HTML).toContain(".sys.orch .tlink{");
   });
 });
+
+/**
+ * Rewind (#101). The button throws work away, so most of what matters here is
+ * what it says before it does, and what it promises not to touch.
+ */
+describe("web app · rewind", () => {
+  it("offers Rewind on the turn card whose changes it undoes", () => {
+    expect(APP_HTML).toContain('data-rewind="');
+    expect(APP_HTML).toContain('class="tcrw"');
+    // Only when the daemon gave that turn a checkpoint — a project that isn't
+    // a git repo gets the card without a button it couldn't honour.
+    expect(APP_HTML).toContain("(p.checkpoint ? '<button class=\"tcrw\"");
+    expect(APP_HTML).toContain(".turncard .tcrw{");
+  });
+
+  it("intercepts the click before the card opens its diff", () => {
+    expect(APP_HTML).toContain('ev.target.closest("[data-rewind]")');
+    expect(APP_HTML).toContain("askRewind(rw.getAttribute(\"data-rewind\"), rw)");
+    const feed = APP_HTML.indexOf('document.getElementById("feed").addEventListener("click"');
+    const rewindAt = APP_HTML.indexOf('closest("[data-rewind]")', feed);
+    const cardAt = APP_HTML.indexOf('t.getAttribute("data-patch")', feed);
+    expect(rewindAt).toBeGreaterThan(feed);
+    expect(rewindAt).toBeLessThan(cardAt);
+  });
+
+  /**
+   * "Are you sure?" tells you nothing you didn't know. The confirm names the
+   * checkpoint, says what goes, and says what stays — because the fear that
+   * stops someone clicking is that it will eat their commits.
+   */
+  it("names what it will do, and what it will not touch", () => {
+    expect(APP_HTML).toContain("function askRewind(");
+    expect(APP_HTML).toContain("Anything written since is removed");
+    expect(APP_HTML).toContain("Your commits, your history and files git ignores are untouched");
+    expect(APP_HTML).toContain("is saved, so you can undo it.");
+    expect(APP_HTML).toContain('"/checkpoints/" + encodeURIComponent(id) + "/rewind"');
+    // The Changes pane is now wrong; it gets re-read rather than left stale.
+    expect(APP_HTML).toContain("refreshTree(true);");
+  });
+
+  it("lists every checkpoint from More, and offers to undo a rewind", () => {
+    expect(APP_HTML).toContain("function openRewindMenu(");
+    expect(APP_HTML).toContain('{ label: "Rewind\u2026", icon: ICONS.rewind');
+    expect(APP_HTML).toContain('"/api/projects/" + pid + "/checkpoints"');
+    // An empty list says why it is empty rather than sitting blank.
+    expect(APP_HTML).toContain("no checkpoints yet \\u2014 one is taken before every turn");
+    // A rewind that happened is a line in the thread, with the way back on it.
+    expect(APP_HTML).toContain('if (p.reason !== "rewound")');
+    expect(APP_HTML).toContain("Undo the rewind");
+  });
+});
