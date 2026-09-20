@@ -986,7 +986,33 @@ an installed application is not a checkout:
   certificate it already trusts replace itself, and this build is ad-hoc
   signed. Automating the *checking* is the part worth having — the checksums
   have shipped since 0.2.0 and nobody compares them by hand.
-- A **`.deb`** is left to the package manager that owns it.
+- A **`.deb`** is left to the package manager that owns it — and so is a
+  **Homebrew** install: `brew install --cask` means `brew upgrade --cask`, and
+  Loom says so rather than downloading over a copy brew is tracking.
+
+**On a Mac, Homebrew is the easy way in:**
+
+```sh
+brew tap nickthelegend/loom https://github.com/nickthelegend/loom
+brew install --cask loom-desktop
+brew upgrade --cask loom-desktop
+```
+
+The cask lives in this repo because the official tap requires every cask to be
+signed and notarized by Apple, and Loom's macOS build is ad-hoc signed. **There
+is no free Developer ID for open-source projects** — Apple's fee waiver covers
+nonprofits, schools and government entities, and a free Apple ID cannot sign
+for distribution at all — so the honest options are to buy one, to be one of
+those entities, or to ship unsigned and say so.
+
+Installing with Homebrew does **not** get past Gatekeeper: brew applies the
+quarantine attribute to cask downloads deliberately, and removed the flag that
+used to skip it. The first launch asks, exactly as it does for a dmg you
+downloaded yourself — right-click, Open, Open, once. Some taps strip the
+attribute in a postflight; this one doesn't, because quarantine is the
+protection that exists *because* the app is unsigned. What the cask buys is a
+one-line install and a real update path owned by a package manager you already
+trust.
 
 ## More than one goal, when they can't collide
 

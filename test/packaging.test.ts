@@ -88,6 +88,42 @@ describe("packaging · the desktop app", () => {
     expect(pkg.dependencies["electron-updater"]).toBeTruthy();
   });
 
+  /**
+   * The cask is the open-source answer to "how do I install this on a Mac" —
+   * one line, and `brew upgrade --cask` after that. It is NOT an answer to
+   * Gatekeeper, and these hold it to both halves of that.
+   */
+  it("ships a Homebrew cask that matches the version being built", () => {
+    const cask = fs.readFileSync(path.join(root, "Casks/loom-desktop.rb"), "utf8");
+    expect(cask).toContain(`version "${pkg.version}"`);
+    // Per-architecture, because handing an Intel dmg to an Apple Silicon Mac
+    // is a download that works and an app that doesn't.
+    expect(cask).toMatch(/arch arm: "arm64", intel: "x64"/);
+    expect(cask).toMatch(/sha256 arm:\s+"[0-9a-f]{64}",/);
+    expect(cask).toMatch(/intel: "[0-9a-f]{64}"/);
+    expect(cask).toContain("Loom-Desktop-#{version}-#{arch}.dmg");
+  });
+
+  it("does not turn Gatekeeper off on the user's behalf", () => {
+    // Some third-party taps strip com.apple.quarantine in a postflight so an
+    // unsigned app launches without the prompt. Quarantine is the protection
+    // that exists BECAUSE the app is unsigned; an install command should not
+    // quietly remove it. If this ever needs to change it should be a decision
+    // someone argues for, not a line that slips in.
+    const cask = fs.readFileSync(path.join(root, "Casks/loom-desktop.rb"), "utf8");
+    const code = cask.replace(/^\s*#.*$/gm, ""); // the comments discuss it; the code mustn't do it
+    expect(code).not.toMatch(/xattr/);
+    expect(code).not.toMatch(/quarantine/);
+    // And it mustn't claim to update itself: brew skips such casks on upgrade.
+    expect(code).not.toMatch(/^\s*auto_updates true/m);
+  });
+
+  it("keeps the cask current from the release job, not by hand", () => {
+    const wf = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+    expect(wf).toContain("Casks/loom-desktop.rb");
+    expect(wf).toContain("SHA256SUMS.txt");
+  });
+
   it("publishes the feed only for the platforms that can use it", () => {
     // macOS is ad-hoc signed and will refuse the swap; advertising an update
     // it can't install is worse than advertising none.

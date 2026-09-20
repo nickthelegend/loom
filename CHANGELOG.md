@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Install it with Homebrew
+
+- **`brew tap nickthelegend/loom https://github.com/nickthelegend/loom` then
+  `brew install --cask loom-desktop`** — and `brew upgrade --cask` after that,
+  which is a real update path for the macOS build that can't replace itself.
+  The cask carries both architectures and is regenerated from the published
+  checksums by the release job, so it can't go stale.
+- **Check for Updates… recognises a Homebrew install** and hands you the
+  `brew upgrade` command instead of downloading over a copy brew is tracking —
+  the same rule the Linux `.deb` already had.
+- It does **not** get you past Gatekeeper, and doesn't pretend to: brew
+  quarantines cask downloads on purpose. First launch asks once, as it does
+  for a dmg you downloaded yourself. The cask deliberately does not strip the
+  quarantine attribute — that protection exists *because* the app is unsigned.
+
 ### A model agent can write, when you say so
 
 - **`--write`** gives a model agent `write_file`, and **`--run "npm test"`**
