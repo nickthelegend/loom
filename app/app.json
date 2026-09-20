@@ -2,7 +2,7 @@
   "expo": {
     "name": "Loom",
     "slug": "loom",
-    "version": "0.2.5",
+    "version": "0.2.6",
     "scheme": "loom",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",

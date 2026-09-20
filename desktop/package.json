@@ -1,6 +1,6 @@
 {
   "name": "loom-desktop",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "type": "module",
   "description": "Loom desktop \u2014 an Electron shell around the loom daemon's web app. See BUILD.md for why the build config looks like this.",
