@@ -2206,6 +2206,29 @@ window.__loomPageRev="%%BUILD_REV%%";
   .apact .btn svg{width:13px;height:13px}
   .apact .apdeny:hover{color:var(--err);border-color:color-mix(in srgb, var(--err) 45%, transparent);
     background:color-mix(in srgb, var(--err) 9%, transparent)}
+  /* An agent's question, answerable where it was asked (#106). Shaped like
+     the approval card beside it, because it is the same kind of moment. */
+  .nicard{max-width:88%;margin:12px 0;padding:11px 13px;border-radius:var(--radius);
+    border:1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+    background:color-mix(in srgb, var(--warn) 7%, var(--card))}
+  .nicard .nih{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:650}
+  .nicard .nih .brand{width:13px;height:13px;flex:none}
+  .nicard .nitag{font-family:var(--font-mono);font-size:9.5px;font-weight:600;letter-spacing:.05em;
+    text-transform:uppercase;color:var(--warn);margin-left:auto}
+  .nicard .niq{margin:7px 0 9px;font-size:12.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+  .nicard .niopts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+  .nicard .nio{padding:5px 10px;border-radius:99px;cursor:pointer;font:inherit;font-size:11.5px;
+    border:1px solid var(--border);background:var(--background);color:var(--foreground);text-align:left}
+  .nicard .nio:hover{border-color:color-mix(in srgb, var(--primary) 45%, transparent);
+    background:color-mix(in srgb, var(--primary) 10%, transparent)}
+  .nicard .nirow{display:flex;gap:7px}
+  .nicard .nitext{flex:1;min-width:0;height:28px;padding:0 10px;border-radius:7px;font:inherit;font-size:12px;
+    border:1px solid var(--border);background:var(--background);color:var(--foreground)}
+  .nicard .nitext:focus{outline:none;border-color:color-mix(in srgb, var(--primary) 50%, transparent)}
+  .nicard .nidone{display:none;font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground)}
+  .nicard.done{max-width:fit-content;padding:5px 12px;border-radius:99px;background:transparent;border-color:var(--border)}
+  .nicard.done .nih,.nicard.done .niq,.nicard.done .niopts,.nicard.done .nirow{display:none}
+  .nicard.done .nidone{display:block}
   .apcard.done{max-width:fit-content;padding:5px 12px;border-radius:99px;background:transparent;border-color:var(--border);
     box-shadow:none;animation:none}
   .apcard.done .apbody,.apcard.done .aph{display:none}
@@ -2669,6 +2692,7 @@ window.__loomPageRev="%%BUILD_REV%%";
   .qbox.bq{flex:none;width:min(340px,34vw);height:28px}
   .qbox.bq input{font-size:11.5px}
   .bnote{flex:none;font-size:11.5px;color:var(--muted-foreground);display:flex;align-items:center;gap:6px}
+  .bnote svg{width:13px;height:13px;flex:none}
 
   /* the board's search box */
   .qbox{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:32px;padding:0 11px;
@@ -3407,8 +3431,21 @@ ${BRAND_SPRITE}
   var LOADER = '<div class="loader"><i></i><i></i><i></i><i></i></div>';
 
   // Inline icon set — 24px grid, stroke 2, currentColor (no emoji, no CDN).
+  /**
+   * An icon carries its own size (#105).
+   *
+   * Every icon here is sized by a CSS rule on its container, and a container
+   * that forgot one used to get an SVG with no intrinsic dimensions \u2014 which in
+   * a flex row stretches to fill the line. The .bnote row was such a one, so
+   * the quiet footnote about pull requests became a 900px \u24d8 covering the
+   * whole Board. The width/height attributes below are a floor, not a policy:
+   * CSS beats presentational attributes, so every existing svg width rule
+   * still wins and nothing else changes. What they buy is that the next
+   * icon dropped into an unstyled container looks slightly wrong instead of
+   * eating the screen.
+   */
   function svg(inner){
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
+    return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
   }
   var ICONS = {
     // lucide sliders-horizontal: setup is knobs, not a spinning cog
@@ -3784,7 +3821,25 @@ ${BRAND_SPRITE}
     if (e.kind === "subtask_done") return '<div class="sys" style="padding-left:22px;color:var(--live)">\\u21b3 ' + esc(e.agentId) + " finished its subtask</div>";
     if (e.kind === "subtask_failed") return '<div class="sys err" style="padding-left:22px">\\u21b3 ' + esc(e.agentId) + " subtask failed: " + esc(String(p.message || "").slice(0, 90)) + "</div>";
     if (e.kind === "suggestion") return '<div class="sys warn">\\u2726 ' + esc(p.reason || "handoff suggested") + "</div>";
-    if (e.kind === "needs_input") return '<div class="sys warn">\\u23f8 ' + esc(e.agentId) + " asks: " + esc(p.question) + "</div>";
+    if (e.kind === "needs_input") {
+      // The one moment Loom exists to surface \u2014 an agent blocked on a human \u2014
+      // used to be a line of text with nothing to click. Worse in an orchestra
+      // thread, where the composer aims at the orchestrator, so typing the
+      // answer sent it to the wrong agent entirely (#106).
+      var q = String(p.question || "what next?");
+      var who = String(e.agentId || "agent");
+      var opts = questionChoices(q);
+      return '<div class="nicard" data-niask="' + esc(who) + '" data-nichat="' + esc(e.chat || "") + '">' +
+        '<div class="nih">' + brandMark(kindOf(who)) + '<span class="niwho">' + esc(who) + "</span>" +
+        '<span class="nitag">needs you</span></div>' +
+        '<div class="niq">' + esc(q) + "</div>" +
+        (opts.length ? '<div class="niopts">' + opts.map(function(o){
+          return '<button class="nio" type="button" data-nipick="' + esc(o) + '">' + esc(o) + "</button>";
+        }).join("") + "</div>" : "") +
+        '<div class="nirow"><input class="nitext" placeholder="answer ' + esc(who) + '\u2026" spellcheck="false">' +
+        '<button class="btn primary xs nisend" type="button">Send</button></div>' +
+        '<div class="nidone"></div></div>';
+    }
     if (e.kind === "decision") return '<div class="sys">\\u2605 ' + esc(p.text) + "</div>";
     if (e.kind === "memory_import") return '<div class="sys" style="color:var(--thread-ink)">\\u25c8 imported ' + esc(p.file) + " into the shared brain</div>";
     if (e.kind === "error") return '<div class="sys err">\\u2717 ' + esc(p.message) + "</div>";
@@ -6380,8 +6435,11 @@ ${BRAND_SPRITE}
     // click an Update(…) card in the thread → open its diff on the right
     // (desktop dock); on mobile, expand it inline.
     document.getElementById("feed").addEventListener("click", function(ev){
-      // A code block's copy button. First, because it lives inside cards that
-      // claim clicks of their own (a turn card opens its diff, a details folds).
+      // An agent's question, answered in place. First: the card lives inside
+      // the feed, and its input must not read as a click on the card behind it.
+      if (needsInputClick(ev)) return;
+      // A code block's copy button, because it lives inside cards that claim
+      // clicks of their own (a turn card opens its diff, a details folds).
       // Rewind, before the turn card's own click — the button sits inside the
       // card, and opening a diff dock instead of asking would be a surprise.
       var rw = ev.target.closest && ev.target.closest("[data-rewind]");
@@ -6419,6 +6477,12 @@ ${BRAND_SPRITE}
       if (ch) ch.textContent = open ? "\\u25b8" : "\\u25be";
     });
     document.getElementById("feed").addEventListener("keydown", approvalKey);
+    // Enter in an answer box sends it, the way Enter sends anywhere else.
+    document.getElementById("feed").addEventListener("keydown", function(ev){
+      if (ev.key !== "Enter" || !ev.target.classList || !ev.target.classList.contains("nitext")) return;
+      ev.preventDefault();
+      answerAgent(ev.target.closest(".nicard"), ev.target.value);
+    });
 
     // ---- working tree (feeds the Source Control rail view) -----------------
     function refreshTree(force){
@@ -9862,6 +9926,54 @@ ${BRAND_SPRITE}
     }
 
     /**
+     * A click inside an agent's question card (#106). Returns true when it
+     * handled one, so the feed's other handlers stay out of the way.
+     */
+    function needsInputClick(ev){
+      var card = ev.target.closest && ev.target.closest(".nicard");
+      if (!card) return false;
+      var pick = ev.target.closest("[data-nipick]");
+      if (pick) { answerAgent(card, pick.getAttribute("data-nipick")); return true; }
+      if (ev.target.closest(".nisend")) {
+        var box = card.querySelector(".nitext");
+        answerAgent(card, box ? box.value : "");
+        return true;
+      }
+      // Clicking into the text box is not a click on whatever is behind it.
+      return !!ev.target.closest(".nitext");
+    }
+
+    /**
+     * Send an answer to the agent that asked for it.
+     *
+     * Deliberately not the composer's path: the composer aims at
+     * state.selected, and in an orchestra thread that is the orchestrator — so
+     * answering a worker's question through it sent the answer to the wrong
+     * agent. The card carries who asked and in which thread; that is what is
+     * used, whatever the composer happens to be pointed at.
+     */
+    function answerAgent(card, text){
+      if (!card) return;
+      var answer = String(text || "").trim();
+      if (!answer) { var box = card.querySelector(".nitext"); if (box) box.focus(); return; }
+      var who = card.getAttribute("data-niask") || undefined;
+      var where = card.getAttribute("data-nichat") || chatId;
+      var lock = function(on){
+        Array.prototype.forEach.call(card.querySelectorAll("button,input"), function(el){ el.disabled = on; });
+      };
+      lock(true);
+      api("/api/projects/" + pid + "/messages", {
+        method: "POST",
+        body: JSON.stringify({ text: answer, agentId: who, chat: where }),
+      }).then(function(){
+        var done = card.querySelector(".nidone");
+        if (done) done.textContent = "\u21b3 " + (who || "agent") + ": " + answer;
+        card.classList.add("done");
+        refresh();
+      }).catch(function(err){ toast(err.message); lock(false); });
+    }
+
+    /**
      * Rewind (#101): put the files back to a checkpoint.
      *
      * This throws work away, so it asks first \u2014 and the asking names the
@@ -11197,6 +11309,38 @@ ${BRAND_SPRITE}
     try { localStorage.setItem("loomTView:" + state.pid, v); } catch (e) {}
     if (state.redrawFeed) state.redrawFeed();
     toast("transcript: " + v);
+  }
+
+  /**
+   * The options an agent's question offers, when it plainly offers some.
+   *
+   * "Want me to dig into the DBC integration, or get the tree committable?"
+   * is two choices and should be two buttons. This only fires when the split
+   * is unambiguous \u2014 a question mark, an "or" joining clauses of a sensible
+   * length \u2014 because a wrong guess puts words in your mouth and sends them to
+   * an agent. When unsure it returns nothing and you get the text box, which
+   * is never wrong.
+   */
+  function questionChoices(q){
+    var text = String(q || "").trim();
+    // The last SENTENCE, not the last question — splitting only on "?" left
+    // "I found three failing tests." glued to the front of the first option.
+    var ask = text.split(/(?<=[.?!])\\s+/).filter(Boolean).pop() || text;
+    if (ask.indexOf("?") < 0) return [];
+    var parts = ask.replace(/\\?+\\s*$/, "").split(/,\\s+or\\s+|\\s+or\\s+/i);
+    if (parts.length < 2 || parts.length > 3) return [];
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var c = parts[i]
+        .replace(/^(?:so\\s+)?(?:do you want me to|would you like me to|want me to|should i|shall i|do you want|i can)\\s+/i, "")
+        .replace(/^[\\s,;:\\-\\u2014]+|[\\s,;:.]+$/g, "")
+        .trim();
+      // "npm" is a real answer; two characters is where it stops being one.
+      if (c.length < 2 || c.length > 70) return [];
+      // The agent's own casing. Capitalising turned "npm" into "Npm".
+      out.push(c);
+    }
+    return out;
   }
 
   /** Raw payload, for verbose — the thing the summary was made from. */

@@ -514,3 +514,115 @@ describe("web app · rewind", () => {
     expect(APP_HTML).toContain("Undo the rewind");
   });
 });
+
+/**
+ * The whole page is one TS template literal, so a backtick anywhere inside it
+ * — including in a comment — ends the literal and the file stops being valid
+ * TypeScript. It has happened three times: `loom projects --forget` in a
+ * JSDoc, then twice more while fixing other things. The failure is loud (the
+ * file won't compile) but the cause reads as unrelated, so this names it.
+ */
+describe("web app · the template literal itself", () => {
+  it("has no stray backtick in the served page", async () => {
+    const src = await import("node:fs/promises").then((fs) =>
+      fs.readFile(new URL("../src/daemon/app-page.ts", import.meta.url), "utf8"),
+    );
+    // The literal runs from the first backtick after APP_HTML's `=` to the
+    // one that closes it; anything inside must be an escaped \` or ${…}.
+    const start = src.indexOf("`", src.indexOf("APP_HTML"));
+    expect(start).toBeGreaterThan(-1);
+    const offenders: string[] = [];
+    for (let i = start + 1; i < src.length; i++) {
+      if (src[i] === "\\") { i++; continue; }
+      if (src[i] !== "`") continue;
+      // The first unescaped backtick after the opening one closes the literal.
+      // Everything after it is ordinary code, so we only care that the page
+      // content itself reached the end — if it closed early, the line it
+      // closed on is the offender.
+      const line = src.slice(0, i).split("\n").length;
+      const rest = src.slice(i + 1, i + 80).replace(/\n/g, " ");
+      if (i < src.length - 200) offenders.push(`line ${line}: …${rest}`);
+      break;
+    }
+    expect(offenders, "a backtick closed the page literal early").toEqual([]);
+  });
+
+  /** An icon with no size fills its container (#105). */
+  it("gives every icon an intrinsic size", () => {
+    expect(APP_HTML).toContain('<svg viewBox="0 0 24 24" width="16" height="16"');
+    expect(APP_HTML).toContain(".bnote svg{width:13px;height:13px;flex:none}");
+  });
+});
+
+/**
+ * An agent blocked on a human is the moment Loom exists to surface, and it had
+ * the worst affordance in the app: one line of text, no way to reply. In an
+ * orchestra thread it was worse than useless — the composer aims at the
+ * orchestrator, so the answer went to the wrong agent (#106).
+ */
+describe("web app · answering an agent in the thread", () => {
+  it("renders the question as a card carrying who asked and where", () => {
+    expect(APP_HTML).toContain('class="nicard" data-niask="');
+    expect(APP_HTML).toContain('data-nichat="');
+    expect(APP_HTML).toContain('class="nitext"');
+    expect(APP_HTML).toContain("nisend");
+    // The old dead one-liner is gone, not merely supplemented. (route_paused
+    // still uses the same "asks:" phrasing, which is why this names the kind.)
+    expect(APP_HTML).not.toContain('if (e.kind === "needs_input") return ');
+    expect(APP_HTML).toContain(".nicard{");
+  });
+
+  /**
+   * The whole point: the answer goes to the agent that asked, taken off the
+   * card, never off state.selected.
+   */
+  it("sends to the agent that asked, not to whoever the composer aims at", () => {
+    expect(APP_HTML).toContain("function answerAgent(");
+    expect(APP_HTML).toContain('var who = card.getAttribute("data-niask") || undefined;');
+    expect(APP_HTML).toContain('var where = card.getAttribute("data-nichat") || chatId;');
+    expect(APP_HTML).toContain("JSON.stringify({ text: answer, agentId: who, chat: where })");
+    // The body reads the card and nothing else — no composer state in it.
+    const body = APP_HTML.slice(APP_HTML.indexOf("function answerAgent("));
+    expect(body.slice(0, body.indexOf("\n    }"))).not.toContain("state.selected");
+  });
+
+  it("handles its own clicks before the cards it sits inside", () => {
+    expect(APP_HTML).toContain("function needsInputClick(");
+    const feed = APP_HTML.indexOf('document.getElementById("feed").addEventListener("click"');
+    const ni = APP_HTML.indexOf("needsInputClick(ev)", feed);
+    const rewind = APP_HTML.indexOf('closest("[data-rewind]")', feed);
+    expect(ni).toBeGreaterThan(feed);
+    expect(ni).toBeLessThan(rewind);
+    // Enter sends, the way Enter sends everywhere else.
+    expect(APP_HTML).toContain('contains("nitext")');
+  });
+
+  it("folds once answered, showing what was said", () => {
+    expect(APP_HTML).toContain('card.classList.add("done");');
+    expect(APP_HTML).toContain(".nicard.done .nih,.nicard.done .niq");
+  });
+
+  /** Offered choices become buttons; anything ambiguous falls back to typing. */
+  it("turns a plain either/or into buttons and guesses at nothing else", () => {
+    const src = APP_HTML.match(/function questionChoices\(q\)\{[\s\S]*?\n {2}\}/);
+    expect(src, "questionChoices not found").not.toBeNull();
+    const choices = new Function(`return ${src![0]}`)() as (q: string) => string[];
+
+    expect(choices("Want me to dig into the DBC integration specifically, or get the working tree into a committable state?"))
+      .toEqual(["dig into the DBC integration specifically", "get the working tree into a committable state"]);
+    expect(choices("Shall I proceed with the migration, or wait for your review, or skip it entirely?"))
+      .toEqual(["proceed with the migration", "wait for your review", "skip it entirely"]);
+    // A preamble sentence must not be glued onto the first option.
+    expect(choices("I found three failing tests. Do you want me to fix them now, or open an issue?"))
+      .toEqual(["fix them now", "open an issue"]);
+    // The agent's own casing survives: capitalising turned "npm" into "Npm".
+    expect(choices("Should I use pnpm or npm?")).toEqual(["use pnpm", "npm"]);
+
+    // Nothing offered, nothing invented — a wrong guess would put words in
+    // your mouth and send them to an agent.
+    expect(choices("What should I do next?")).toEqual([]);
+    expect(choices("Continue?")).toEqual([]);
+    expect(choices("The build is broken in two places. Want me to keep going?")).toEqual([]);
+    expect(choices("")).toEqual([]);
+  });
+});
