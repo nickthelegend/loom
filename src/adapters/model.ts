@@ -1,0 +1,442 @@
+/**
+ * An agent that is a model, not a command.
+ *
+ * Every other adapter here wraps a CLI: spawn it, feed it stdin, parse what it
+ * prints. That buys tools, a session and someone else's auth, and it costs
+ * whatever that CLI's subscription costs — for every turn, including the ones
+ * that are a sentence long.
+ *
+ * This one is an HTTP request. `POST {provider}/v1/chat/completions`, streamed,
+ * with the conversation Loom already has. It has no tools yet (#87) and does
+ * not pretend to: what it is good for is the work that is thinking rather than
+ * editing — planning, reviewing, summarising, answering, routing — which is
+ * most of what a fleet actually does between edits, and which free quota is
+ * very happy to pay for.
+ *
+ * ## What it keeps
+ *
+ * The conversation. A CLI remembers its own session; this doesn't, so the
+ * adapter holds the messages and sends them each turn. That is also why
+ * `interrupt()` can be honest: aborting the request ends the turn, and what
+ * was streamed before the abort stays in the transcript, because the person
+ * saw it.
+ *
+ * ## What it refuses
+ *
+ * To guess. A model name that the provider doesn't have is an error at `send`
+ * with the provider's own words, not a silent fallback to something else — the
+ * one exception being an exhausted free pool, where trying the next model in
+ * `fallbacks` is exactly what the person configured it for (#83).
+ */
+
+import type { SendInput } from "../types.js";
+import {
+  MAX_HOPS,
+  READ_TOOLS,
+  runReadTool,
+  type ToolCall,
+} from "../core/model-tools.js";
+import {
+  chatUrl,
+  explainStatus,
+  isExhausted,
+  modelsUrl,
+  requestHeaders,
+  resolveProvider,
+  type ResolvedProvider,
+} from "../core/providers.js";
+import { AdapterBase } from "./base.js";
+
+/** One turn of the conversation, as the wire wants it. */
+interface WireMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  /** Set on an assistant turn that asked for tools. */
+  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  /** Set on the answer to one. */
+  tool_call_id?: string;
+}
+
+export interface ModelAdapterOptions {
+  provider?: string;
+  model?: string;
+  /** Tried in order when the provider says the pool is dry (402/429). */
+  fallbacks?: string[];
+  system?: string;
+  temperature?: number;
+  maxTokens?: number;
+  /** How much conversation to send back each turn. */
+  history?: number;
+  /**
+   * Let it read the project: read_file, list_files, search (core/model-tools).
+   * Read-only, inside the project, bounded. Off unless asked for — a model
+   * that can read your repository should be a decision, not a default.
+   */
+  tools?: boolean;
+}
+
+const DEFAULT_HISTORY = 24;
+const DEFAULT_MAX_TOKENS = 4096;
+
+export class ModelAdapter extends AdapterBase {
+  private opts: ModelAdapterOptions;
+  private history: WireMessage[] = [];
+  private abort: AbortController | null = null;
+  /** Set when a turn is cut short by us, so the error isn't reported as one. */
+  private interrupted = false;
+
+  constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
+    super(id, "model", projectDir);
+    this.opts = options as ModelAdapterOptions;
+  }
+
+  private provider(): ResolvedProvider | null {
+    return resolveProvider(this.opts.provider ?? "openrouter");
+  }
+
+  /** The models to try, in order: the configured one, then its fallbacks. */
+  private chain(): string[] {
+    const first = this.opts.model?.trim();
+    const rest = (this.opts.fallbacks ?? []).map((m) => m.trim()).filter(Boolean);
+    return [...(first ? [first] : []), ...rest.filter((m) => m !== first)];
+  }
+
+  /**
+   * Reachable and usable: the provider answers, and the model is in its list.
+   *
+   * "Is a binary on PATH" has no meaning here, and neither does "did the key
+   * parse" — the only useful answer is whether a turn would work.
+   */
+  async available(): Promise<boolean> {
+    const p = this.provider();
+    if (!p) return false;
+    if (!p.key && p.id !== "ollama") return false;
+    try {
+      const res = await fetch(modelsUrl(p), { headers: requestHeaders(p) });
+      if (!res.ok) return false;
+      const body = (await res.json()) as { data?: Array<{ id?: string }> };
+      const ids = (body.data ?? []).map((m) => String(m.id));
+      const want = this.chain();
+      return want.length === 0 || want.some((m) => ids.includes(m));
+    } catch {
+      return false;
+    }
+  }
+
+  async start(): Promise<void> {
+    this.emit({ kind: "status", payload: { state: "started", model: this.opts.model ?? "" } });
+  }
+
+  async stop(): Promise<void> {
+    await this.interrupt();
+    this.emit({ kind: "status", payload: { state: "stopped" } });
+  }
+
+  async interrupt(): Promise<void> {
+    if (!this._busy) return;
+    this.interrupted = true;
+    this.abort?.abort();
+  }
+
+  /** Loom's memory file is the system prompt here — there's nowhere else to put it. */
+  private systemPrompt(): string {
+    return [
+      this.opts.system,
+      `You are "${this.id}", one agent in a Loom project.`,
+      this.opts.tools
+        ? "You can read this project with read_file, list_files and search. Read before you describe code — a guess about a file you have not opened is worse than saying you have not opened it. You cannot write files or run commands."
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  async send(input: SendInput): Promise<void> {
+    if (this._busy) throw new Error(`model agent "${this.id}" is busy`);
+    const p = this.provider();
+    if (!p) {
+      throw new Error(
+        `agent "${this.id}" names provider "${this.opts.provider ?? "openrouter"}", which isn't configured — \`loom providers\``,
+      );
+    }
+    if (!p.key && p.id !== "ollama") {
+      throw new Error(`${p.label} has no key — \`loom providers set ${p.id} --key …\``);
+    }
+    // A thread can pin a model (types.ts SendInput.model): it takes the place
+    // of the configured one for this turn, and the fallbacks still apply.
+    const chain = input.model ? [input.model, ...this.chain().filter((m) => m !== input.model)] : this.chain();
+    if (!chain.length) throw new Error(`agent "${this.id}" has no model set — \`loom model ${this.id} <name>\``);
+
+    this._busy = true;
+    this.interrupted = false;
+    const started = Date.now();
+    try {
+      // The briefing rides with the turn, exactly as it does for a CLI: it is
+      // context for this turn, not a permanent part of the conversation.
+      const text = input.briefing ? `${input.briefing}\n\n---\n\n${input.text}` : input.text;
+      this.history.push({ role: "user", content: text });
+
+      let lastError = "";
+      for (const [i, model] of chain.entries()) {
+        if (this.interrupted) break;
+        if (i > 0) {
+          // Say it once, in the thread, so a turn that answered on the second
+          // model never looks like it answered on the first.
+          this.emit({
+            kind: "status",
+            payload: { state: "model_fallback", from: chain[i - 1], to: model, reason: lastError },
+          });
+        }
+        const result = await this.turn(p, model, started);
+        if (result.ok) return;
+        lastError = result.error;
+        if (!result.retryable) break;
+      }
+      if (this.interrupted) {
+        this.emit({ kind: "status", payload: { state: "interrupted" } });
+        return;
+      }
+      this.emit({ kind: "error", payload: { message: lastError || "the model didn't answer" } });
+    } finally {
+      this._busy = false;
+      this.abort = null;
+    }
+  }
+
+  /**
+   * One attempt at one model, including however many tool hops it asks for.
+   *
+   * The loop is bounded: a model that keeps reading and never answers is
+   * spending someone's quota in a circle, so after MAX_HOPS it is told to
+   * answer with what it has rather than being cut off mid-thought.
+   */
+  private async turn(
+    p: ResolvedProvider,
+    model: string,
+    started: number,
+  ): Promise<{ ok: true } | { ok: false; error: string; retryable: boolean }> {
+    const scratch: WireMessage[] = [];
+    let answered = "";
+    let totals: Record<string, number> | undefined;
+
+    for (let hop = 0; ; hop++) {
+      const step = await this.once(p, model, scratch, hop);
+      if (!step.ok) return step;
+      answered += step.text;
+      if (step.usage) {
+        totals = totals ?? {};
+        for (const [k, v] of Object.entries(step.usage)) {
+          if (typeof v === "number") totals[k] = (totals[k] ?? 0) + v;
+        }
+      }
+      if (!step.calls.length) break;
+
+      // What it asked for, and what it got — in the thread, like any agent's
+      // tool use, because work nobody can see is work nobody can check.
+      scratch.push({
+        role: "assistant",
+        content: step.text,
+        tool_calls: step.calls.map((c) => ({
+          id: c.id,
+          type: "function" as const,
+          function: { name: c.name, arguments: JSON.stringify(c.args) },
+        })),
+      });
+      for (const call of step.calls) {
+        const result = runReadTool(this.projectDir, call);
+        this.emit({
+          kind: "tool_call",
+          payload: { name: call.name, args: call.args, summary: result.summary, ok: result.ok },
+        });
+        scratch.push({ role: "tool", tool_call_id: call.id, content: result.content });
+      }
+      if (hop + 1 >= MAX_HOPS) {
+        scratch.push({
+          role: "user",
+          content: `You have used ${MAX_HOPS} tool calls on this turn. Answer now with what you have.`,
+        });
+      }
+      if (this.interrupted) return { ok: false, error: "interrupted", retryable: false };
+    }
+
+    if (answered.trim()) this.history.push({ role: "assistant", content: answered });
+    this.emit({
+      kind: "run_complete",
+      payload: {
+        durationMs: Date.now() - started,
+        model,
+        provider: p.id,
+        ...(totals
+          ? {
+              inputTokens: totals.prompt_tokens ?? 0,
+              outputTokens: totals.completion_tokens ?? 0,
+              ...(p.free(model) ? { costUsd: 0 } : {}),
+            }
+          : {}),
+      },
+    });
+    return { ok: true };
+  }
+
+  /** One request. Returns what was said and what it asked to run. */
+  private async once(
+    p: ResolvedProvider,
+    model: string,
+    scratch: WireMessage[],
+    hop: number,
+  ): Promise<
+    | { ok: true; text: string; calls: ToolCall[]; usage?: Record<string, number> }
+    | { ok: false; error: string; retryable: boolean }
+  > {
+    const messages: WireMessage[] = [
+      { role: "system", content: this.systemPrompt() },
+      ...this.history.slice(-(this.opts.history ?? DEFAULT_HISTORY)),
+      ...scratch,
+    ];
+    this.abort = new AbortController();
+
+    let res: Response;
+    try {
+      res = await fetch(chatUrl(p), {
+        method: "POST",
+        headers: requestHeaders(p),
+        signal: this.abort.signal,
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          stream_options: { include_usage: true },
+          max_tokens: this.opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+          ...(this.opts.temperature !== undefined ? { temperature: this.opts.temperature } : {}),
+          // Offered only when the project asked for it, and never past the
+          // hop budget — the last request of a turn must be an answer.
+          ...(this.opts.tools && hop < MAX_HOPS ? { tools: READ_TOOLS } : {}),
+        }),
+      });
+    } catch (err) {
+      if (this.interrupted) return { ok: false, error: "interrupted", retryable: false };
+      return { ok: false, error: `couldn't reach ${p.label}: ${String((err as Error).message)}`, retryable: false };
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return {
+        ok: false,
+        error: explainStatus(res.status, body, p),
+        // A dry pool is the case fallbacks exist for; a wrong model name is not.
+        retryable: isExhausted(res.status),
+      };
+    }
+    if (!res.body) return { ok: false, error: `${p.label} sent no body`, retryable: false };
+
+    const out = await this.readStream(res.body, model);
+    if (this.interrupted) return { ok: false, error: "interrupted", retryable: false };
+    if (out.error) return { ok: false, error: out.error, retryable: false };
+    return { ok: true, text: out.text, calls: out.calls, ...(out.usage ? { usage: out.usage } : {}) };
+  }
+
+  /**
+   * Read the SSE stream, emitting as it arrives.
+   *
+   * Reasoning deltas come back on their own field and are emitted as
+   * reasoning, which the thread already renders differently — a model that
+   * thinks out loud shouldn't have its thinking read as its answer.
+   */
+  private async readStream(
+    body: ReadableStream<Uint8Array>,
+    model: string,
+  ): Promise<{ text: string; calls: ToolCall[]; usage?: Record<string, number>; error?: string }> {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let pending = "";
+    let usage: Record<string, number> | undefined;
+    // Tool calls stream in pieces too: the name arrives once, the arguments
+    // in fragments, keyed by index.
+    const partial = new Map<number, { id: string; name: string; args: string }>();
+
+    // Emit on sentence-ish boundaries rather than per token: one event per
+    // token would be a few hundred rows in the log for one paragraph.
+    const flush = (force = false) => {
+      if (!pending) return;
+      if (!force && pending.length < 80 && !/[.!?\n]\s*$/.test(pending)) return;
+      this.emit({ kind: "message", payload: { text: pending, model } });
+      text += pending;
+      pending = "";
+    };
+
+    try {
+      for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
+          let frame: {
+            choices?: Array<{
+              delta?: {
+                content?: string;
+                reasoning_content?: string;
+                tool_calls?: Array<{
+                  index?: number;
+                  id?: string;
+                  function?: { name?: string; arguments?: string };
+                }>;
+              };
+            }>;
+            usage?: Record<string, number>;
+            error?: { message?: string };
+          };
+          try {
+            frame = JSON.parse(data);
+          } catch {
+            continue; // a partial frame; the next chunk completes it
+          }
+          if (frame.error?.message) return { text, calls: [], error: frame.error.message };
+          if (frame.usage) usage = frame.usage;
+          const delta = frame.choices?.[0]?.delta;
+          if (delta?.reasoning_content) {
+            this.emit({
+              kind: "message",
+              payload: { text: delta.reasoning_content, reasoning: true, model },
+            });
+          }
+          if (delta?.content) {
+            pending += delta.content;
+            flush();
+          }
+          for (const tc of delta?.tool_calls ?? []) {
+            const at = tc.index ?? 0;
+            const have = partial.get(at) ?? { id: "", name: "", args: "" };
+            partial.set(at, {
+              id: tc.id ?? have.id,
+              name: tc.function?.name ?? have.name,
+              args: have.args + (tc.function?.arguments ?? ""),
+            });
+          }
+        }
+      }
+    } catch (err) {
+      flush(true);
+      if (this.interrupted) return { text, calls: [] };
+      return { text, calls: [], error: `the stream broke: ${String((err as Error).message)}` };
+    }
+    flush(true);
+    // Arguments that don't parse are a call we can't honestly run, so it is
+    // dropped rather than guessed at — the model gets no result for it and
+    // says what it can.
+    const calls: ToolCall[] = [];
+    for (const [i, c] of partial) {
+      if (!c.name) continue;
+      try {
+        calls.push({ id: c.id || `call_${i}`, name: c.name, args: JSON.parse(c.args || "{}") });
+      } catch {
+        /* unparseable arguments: not a call we can run */
+      }
+    }
+    return { text, calls, ...(usage ? { usage } : {}) };
+  }
+}

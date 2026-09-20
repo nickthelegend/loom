@@ -11,6 +11,7 @@
  * yet, it doesn't get a row — a logo is not an integration.
  */
 
+import { listProviders } from "./providers.js";
 import type { AgentConfig } from "../types.js";
 import { agyBin } from "../adapters/antigravity-cli.js";
 import { cliAvailable } from "../adapters/base.js";
@@ -104,6 +105,14 @@ export const ADES: AdeSpec[] = [
       const bin = agyBin();
       return bin ? cliAvailable(bin) : false;
     },
+  },
+  {
+    kind: "model",
+    label: "Model (API)",
+    tier: "adapter",
+    // Nothing to find on PATH — this kind is available when a provider has a
+    // key, which is a question about this machine rather than this project.
+    probe: async () => listProviders().some((p) => p.configured),
   },
   {
     kind: "kiro",

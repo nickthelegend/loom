@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A model agent can read the project
+
+- **`"tools": true`** on a `model` agent gives it `read_file`, `list_files`
+  and `search` — read-only, inside the project, `.git` and `.loom` excluded,
+  every path resolved and proven contained before anything opens it. A
+  reviewer that can't read the file it's reviewing is being asked to guess.
+- Each call appears in the thread as a `tool_call`, like any other agent's
+  work, and the loop is bounded: after eight hops the model is told to answer
+  with what it has rather than being cut off mid-thought.
+- **No writing and no shell.** A model that can write files is exactly as
+  dangerous as a CLI that can, and the right answer is the permission layer
+  Loom already has. That's the rest of #87, and it stays open for it — a free
+  model editing a repository because it felt like it is not a thing to ship
+  quietly.
+
+### Ask several models at once
+
+- **`loom ask --models a,b,c "…"`** sends one prompt to several models at the
+  same time, each in its own thread named after the model, with the project's
+  memory brief attached. `--free` picks the free ones the providers have right
+  now, up to `--limit`. With free quota, asking five models costs what asking
+  one costs — and *which of these is right* is a judgement a person makes in
+  ten seconds and a model makes badly.
+- The agents that run are **transient**: five asks don't leave five agents in
+  your roster. The threads stay, because those are the part worth keeping.
+- One model failing doesn't take the others down — its thread carries the
+  error, the rest carry their answers.
+
+### A thread remembers who answers in it
+
+- **Pin an agent to a thread** and it answers there, whoever holds the baton —
+  so two threads can be talking to two agents at once, which is the point of
+  having agents that cost nothing. Picking an agent for a new chat now pins it
+  instead of handing over the baton, and the sidebar shows which thread is
+  with whom.
+- **It doesn't take the baton.** The baton is the write lock for work on the
+  repository; a conversation doesn't need it, and taking it would stop
+  whatever is actually working.
+- A thread can pin a **model** too, for agents that can change model per turn
+  (the `model` kind). Binding one to an agent that bakes its model into a
+  spawned process is refused where you can fix it, rather than ignored where
+  you'd never notice. The main thread still follows the baton — that's what
+  makes it the main thread — and a thread whose agent has left the roster
+  falls back to the baton rather than becoming one nobody can type in.
+
+### Agents that are models, not CLIs
+
+- **A new agent kind, `model`.** It's an HTTP endpoint rather than a
+  subprocess: OpenAI-compatible chat completions, streamed into the thread as
+  they arrive, with reasoning shown as reasoning and token counts on
+  `run_complete`. Nothing to install. It has no tools yet, so what it's for is
+  the thinking work — planning, reviewing, summarising, answering — which is
+  most of what a fleet does between edits.
+- **Providers, and keys where keys belong.** OpenRouter, AgentRouter, OpenAI,
+  Groq and a local Ollama are known by name; anything else speaking
+  `/v1/chat/completions` works with a base URL. The project config names a
+  *provider*, never a secret: keys live in the environment or in
+  `~/.loom/providers.json` (0600), and no route, log or listing ever returns
+  one — you get the last four characters. `loom providers`,
+  `loom providers:set <id> --key …`.
+- **`loom models`** asks each configured provider what it can run right now,
+  cached for ten minutes and refreshable, with the free ones marked. A model
+  list that's typed out by hand goes stale; one that's asked for doesn't.
+- **Fallbacks that read the answer.** A dry free pool (402) or a rate limit
+  (429) moves to the next model in `fallbacks` and says so once in the thread;
+  a wrong or retired model name (503) stops, because trying something else
+  would hide the typo rather than fix it. Each refusal is explained in its own
+  terms — a rejected *client* is not a rejected key.
+
 ### Retrieval that can follow a synonym
 
 - **A semantic channel for the brain** (`brain.semantic`, or Settings →

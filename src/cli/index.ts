@@ -27,6 +27,14 @@ import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
 import { ensureLoomHome, loomHome } from "../core/registry.js";
 import { VERSION } from "../version.js";
+import {
+  allModels,
+  fetchModels,
+  forgetProvider,
+  listProviders,
+  resolveProvider,
+  setProvider,
+} from "../core/providers.js";
 import { serviceFile, tokenFindings } from "../core/runner-setup.js";
 import { readRunnerConfig, readRunnerToken, scrubEnv, writeRunnerToken } from "../daemon/runner.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
@@ -321,6 +329,91 @@ program
       return;
     }
     for (const a of project.agents) console.log(formatAgentRosterRow(a));
+  });
+
+program
+  .command("providers")
+  .description("where model agents send their turns, and whether each has a key")
+  .action(() => {
+    const rows = listProviders();
+    for (const p of rows) {
+      const mark = p.configured ? pc.green("\u2713") : pc.dim("\u00b7");
+      const key = p.configured ? pc.dim(p.hint ? `${p.hint} (${p.source})` : "no key needed") : pc.dim("not configured");
+      console.log(`${mark} ${pc.bold(p.id.padEnd(13))} ${pc.dim(p.baseUrl.padEnd(34))} ${key}`);
+      if (p.note) console.log(pc.dim(`    ${p.note}`));
+    }
+    console.log(
+      pc.dim("\nkeys live in ~/.loom/providers.json (0600) or the environment \u2014 never in a project"),
+    );
+  });
+
+program
+  .command("providers:set <id>")
+  .description("set a provider's key, base URL or headers (a key is never printed back)")
+  .option("--key <key>", "the API key; prefer the environment on a shared machine")
+  .option("--base-url <url>", "for a custom provider, or to override a known one")
+  .option("--label <label>", "what to call it")
+  .option("--header <kv...>", "extra header, as name=value")
+  .action((id: string, opts: { key?: string; baseUrl?: string; label?: string; header?: string[] }) => {
+    const headers: Record<string, string> = {};
+    for (const kv of opts.header ?? []) {
+      const at = kv.indexOf("=");
+      if (at < 1) fail(`--header wants name=value, not "${kv}"`);
+      headers[kv.slice(0, at).trim()] = kv.slice(at + 1).trim();
+    }
+    try {
+      setProvider(id, {
+        ...(opts.key ? { key: opts.key } : {}),
+        ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+        ...(opts.label ? { label: opts.label } : {}),
+        ...(Object.keys(headers).length ? { headers } : {}),
+      });
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
+    const row = listProviders().find((p) => p.id === id.toLowerCase());
+    console.log(`${pc.green("\u2713")} ${id}: ${row?.baseUrl ?? ""} ${pc.dim(row?.hint ?? "")}`);
+  });
+
+program
+  .command("providers:rm <id>")
+  .description("forget a provider's key and settings")
+  .action((id: string) => {
+    console.log(forgetProvider(id) ? `${pc.red("-")} ${id} forgotten` : pc.dim(`nothing stored for ${id}`));
+  });
+
+program
+  .command("ask <words...>")
+  .description("ask several models the same thing at once, a thread each")
+  .option("--models <list>", "comma-separated model ids (provider/model, or just the model)")
+  .option("--free", "every free model the providers have, up to --limit")
+  .option("--limit <n>", "how many models --free may use", "3")
+  .option("--title <title>", "what to call the threads")
+  .option("--no-briefing", "don't send the project's memory brief with it")
+  .action(async (words: string[], opts: { models?: string; free?: boolean; limit?: string; title?: string; briefing?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let models = (opts.models ?? "").split(",").map((m) => m.trim()).filter(Boolean);
+    if (opts.free) {
+      // The point of --free: spend nothing, and let the providers say what
+      // that means today rather than a list going stale in this file.
+      const { models: all } = await allModels();
+      const limit = Math.max(1, Number(opts.limit) || 3);
+      models = all.filter((m) => m.free).slice(0, limit).map((m) => `${m.provider}/${m.id}`);
+      if (!models.length) fail("no free models — loom models --refresh, or name them with --models");
+    }
+    if (!models.length) fail('which models? e.g. loom ask --models "a,b" "your question"');
+    try {
+      const { asked } = await client.askModels(project.id, words.join(" "), models, {
+        ...(opts.title ? { title: opts.title } : {}),
+        ...(opts.briefing === false ? { briefing: false } : {}),
+      });
+      console.log(pc.cyan(`\u279c asked ${asked.length} model${asked.length === 1 ? "" : "s"}:`));
+      for (const a of asked) console.log(`  ${pc.bold(a.model)} ${pc.dim(a.chat)}`);
+      console.log(pc.dim("answers stream into their own threads \u2014 loom watch, or open the app"));
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
   });
 
 program
@@ -1524,11 +1617,31 @@ program
   .description("add an agent session to this project (repeat for a second session of the same kind)")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
   .option("--role <role>", "what this instance is for, e.g. planner or reviewer")
-  .action(async (kind: string, opts: { as?: string; role?: string }) => {
+  .option("--model <model>", "for --kind model: which model it runs (loom models)")
+  .option("--provider <id>", "for --kind model: which provider (default openrouter)")
+  .option("--tools", "for --kind model: let it read the project (read-only)")
+  .action(
+    async (
+      kind: string,
+      opts: { as?: string; role?: string; model?: string; provider?: string; tools?: boolean },
+    ) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
+    // A model agent with no model refuses every turn, so it's set here rather
+    // than in a second step nobody mentions.
+    const options: Record<string, unknown> = {
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.provider ? { provider: opts.provider } : {}),
+      ...(opts.tools ? { tools: true } : {}),
+    };
+    if (kind === "model" && !opts.model) {
+      fail('a model agent needs a model: --model "<id>" (see loom models)');
+    }
     try {
-      const added = await client.addAgent(project.id, kind, opts);
+      const added = await client.addAgent(project.id, kind, {
+        ...opts,
+        ...(Object.keys(options).length ? { options } : {}),
+      });
       const siblings = project.agents.filter((a) => a.kind === kind).length;
       console.log(
         `${pc.green("+")} ${pc.bold(added.id)} ${pc.dim(`(${added.kind} · ${added.role})`)}` +
@@ -1538,7 +1651,8 @@ program
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
     }
-  });
+  },
+  );
 
 program
   .command("agents:rm <agentId>")
@@ -1576,18 +1690,49 @@ program
   });
 
 program
-  .command("models <agentId>")
-  .description("list the real models reported by an agent")
-  .action(async (agentId: string) => {
-    const client = await ensureDaemon();
-    const project = await currentProject(client);
-    const { kind, models } = await client.models(project.id, agentId);
-    if (!models.length) {
-      console.log(pc.dim(`${agentId} (${kind}) reports no selectable models`));
+  .command("models [agentId]")
+  .description("with an agent: the models it reports. Without: what every configured provider has")
+  .option("--provider <id>", "just this provider")
+  .option("--refresh", "ask again instead of trusting the cache")
+  .option("--free", "only the ones that cost nothing")
+  .action(async (agentId: string | undefined, opts: { provider?: string; refresh?: boolean; free?: boolean }) => {
+    // An agent named means "what can THIS agent run" — a CLI reports its own.
+    if (agentId) {
+      const client = await ensureDaemon();
+      const project = await currentProject(client);
+      const { kind, models } = await client.models(project.id, agentId);
+      if (!models.length) {
+        console.log(pc.dim(`${agentId} (${kind}) reports no selectable models`));
+        return;
+      }
+      console.log(pc.bold(`${agentId} (${kind}) · ${models.length} model${models.length === 1 ? "" : "s"}`));
+      for (const model of models) console.log(model);
       return;
     }
-    console.log(pc.bold(`${agentId} (${kind}) · ${models.length} model${models.length === 1 ? "" : "s"}`));
-    for (const model of models) console.log(model);
+    // No agent: the provider catalogue, which needs no daemon and no project.
+    const refresh = Boolean(opts.refresh);
+    let models;
+    let errors: Array<{ provider: string; error: string }> = [];
+    if (opts.provider) {
+      const p = resolveProvider(opts.provider);
+      if (!p) fail(`no provider "${opts.provider}" — loom providers`);
+      const got = await fetchModels(p!, refresh ? { refresh: true } : {});
+      models = got.models;
+      if (got.error) errors = [{ provider: p!.id, error: got.error }];
+    } else {
+      const got = await allModels(refresh ? { refresh: true } : {});
+      models = got.models;
+      errors = got.errors;
+    }
+    const shown = opts.free ? models.filter((m) => m.free) : models;
+    if (!shown.length) console.log(pc.dim("no models — configure a provider with loom providers:set"));
+    for (const m of shown) {
+      console.log(
+        `${pc.bold(m.id)} ${pc.dim(m.provider)}${m.free ? " " + pc.green("free") : ""}` +
+          (m.endpoints ? pc.dim(`  [${m.endpoints.join(", ")}]`) : ""),
+      );
+    }
+    for (const e of errors) console.log(pc.yellow(`⚠ ${e.provider}: ${e.error}`));
   });
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import { execFile, spawn } from "node:child_process";
 import { VERSION } from "../version.js";
 import crypto from "node:crypto";
 import { repoOf, TeamLink } from "./team.js";
+import { allModels, fetchModels, forgetProvider, listProviders, resolveProvider, setProvider } from "../core/providers.js";
 import type { HubClient } from "../core/team-hub.js";
 import fs from "node:fs";
 import http, { type Server } from "node:http";
@@ -707,6 +708,62 @@ export class LoomDaemon {
      * the two different "updates" that matter: a newer daemon build waiting to be
      * restarted (rev), and newer code waiting to be pulled (behind).
      */
+    /**
+     * Providers: where a model agent's turns go.
+     *
+     * Machine-wide, not per-project, because a key is a property of this
+     * machine. Nothing here returns a key — `hint` is the last four
+     * characters, which tells two keys apart and uses neither.
+     */
+    app.get("/api/providers", (_req, res) => {
+      res.json({ providers: listProviders() });
+    });
+
+    app.post("/api/providers/:id", (req, res) => {
+      const body = (req.body ?? {}) as {
+        key?: string;
+        baseUrl?: string;
+        label?: string;
+        headers?: Record<string, string>;
+      };
+      try {
+        setProvider(String(req.params.id), {
+          ...(typeof body.key === "string" ? { key: body.key } : {}),
+          ...(typeof body.baseUrl === "string" ? { baseUrl: body.baseUrl } : {}),
+          ...(typeof body.label === "string" ? { label: body.label } : {}),
+          ...(body.headers ? { headers: body.headers } : {}),
+        });
+      } catch (err) {
+        return void res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+      res.json({ providers: listProviders() });
+    });
+
+    app.delete("/api/providers/:id", (req, res) => {
+      const forgotten = forgetProvider(String(req.params.id));
+      res.json({ forgotten, providers: listProviders() });
+    });
+
+    /** What every configured provider can run right now. */
+    app.get("/api/models", (req, res) => {
+      void (async () => {
+        const q = req.query as Record<string, string | undefined>;
+        const refresh = q.refresh === "1";
+        if (q.provider) {
+          const p = resolveProvider(q.provider);
+          if (!p) return void res.status(404).json({ error: `no provider "${q.provider}"` });
+          const got = await fetchModels(p, refresh ? { refresh: true } : {});
+          return void res.json({
+            models: got.models,
+            cached: got.cached,
+            errors: got.error ? [{ provider: p.id, error: got.error }] : [],
+          });
+        }
+        const got = await allModels(refresh ? { refresh: true } : {});
+        res.json({ models: got.models, errors: got.errors });
+      })();
+    });
+
     app.get("/api/updates", (req, res) => {
       void (async () => {
         const root = loomRoot();
@@ -2095,8 +2152,82 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/chats",
       withRuntime(async (rt, req, res) => {
-        const { title } = (req.body ?? {}) as { title?: string };
-        res.json({ chat: rt.createChat(String(title ?? "")) });
+        const { title, agentId, model } = (req.body ?? {}) as {
+          title?: string;
+          agentId?: string;
+          model?: string;
+        };
+        try {
+          res.json({
+            chat: rt.createChat(String(title ?? ""), {
+              ...(agentId ? { agentId: String(agentId) } : {}),
+              ...(model ? { model: String(model) } : {}),
+            }),
+          });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    /**
+     * One prompt, several models, a thread each. With free quota this costs
+     * what asking one model costs.
+     */
+    app.post(
+      "/api/projects/:id/ask",
+      withRuntime(async (rt, req, res) => {
+        const { text, models, title, briefing } = (req.body ?? {}) as {
+          text?: string;
+          models?: Array<string | { model: string; provider?: string }>;
+          title?: string;
+          briefing?: boolean;
+        };
+        if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
+        const picks = (models ?? []).map((m) =>
+          typeof m === "string"
+            ? // "provider/vendor/model" — the provider is the first segment
+              // only when it names one we know; otherwise the whole string is
+              // the model, because model ids contain slashes too.
+              (() => {
+                const [head, ...rest] = m.split("/");
+                return head && rest.length && resolveProvider(head)
+                  ? { model: rest.join("/"), provider: head }
+                  : { model: m };
+              })()
+            : { model: String(m.model), ...(m.provider ? { provider: String(m.provider) } : {}) },
+        );
+        try {
+          const asked = await rt.askModels(text, picks, {
+            ...(title ? { title } : {}),
+            ...(briefing === false ? { briefing: false } : {}),
+          });
+          res.json({ asked });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    /**
+     * Who answers in a thread. Null unbinds it, and the thread goes back to
+     * following the baton like the main one.
+     */
+    app.post(
+      "/api/projects/:id/chats/:chatId/agent",
+      withRuntime(async (rt, req, res) => {
+        const { agentId, model } = (req.body ?? {}) as { agentId?: string | null; model?: string };
+        try {
+          const chat = rt.setChatAgent(
+            String(req.params.chatId),
+            agentId ? String(agentId) : null,
+            model ? String(model) : undefined,
+          );
+          if (!chat) return void res.status(404).json({ error: "no such thread" });
+          res.json({ chat });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 
@@ -3287,10 +3418,15 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/agents",
       withRuntime(async (rt, req, res) => {
-        const { kind, id, role } = (req.body ?? {}) as { kind?: string; id?: string; role?: string };
+        const { kind, id, role, options } = (req.body ?? {}) as {
+          kind?: string;
+          id?: string;
+          role?: string;
+          options?: Record<string, unknown>;
+        };
         if (!kind?.trim()) return void res.status(400).json({ error: "missing kind" });
         try {
-          res.json(rt.addAgent(kind.trim(), { id, role }));
+          res.json(rt.addAgent(kind.trim(), { id, role, ...(options ? { options } : {}) }));
         } catch (err) {
           res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }
@@ -4668,7 +4804,7 @@ const CODEX_MODELS = [
 const CLAUDE_MODELS = ["opus", "sonnet", "haiku", "fable"];
 
 /** Where a model list came from, so a caller can say which. */
-export type ModelSource = "cli" | "builtin" | "none";
+export type ModelSource = "cli" | "builtin" | "api" | "none";
 export type ModelList = { models: string[]; source: ModelSource };
 
 const MODEL_LIST_CACHE = new Map<string, { list: ModelList; ts: number }>();
@@ -4818,6 +4954,11 @@ export async function listModelsForKind(kind: string): Promise<ModelList> {
     list = slugs.length ? { models: slugs, source: "cli" } : { models: CODEX_MODELS, source: "builtin" };
   } else if (kind === "claude-code") {
     list = { models: CLAUDE_MODELS, source: "builtin" };
+  } else if (kind === "model") {
+    // Not a CLI to ask and not a list to hardcode: the providers themselves
+    // say what they have, and it changes under you (see #82).
+    const { models } = await allModels();
+    list = { models: models.map((m) => `${m.provider}/${m.id}`), source: "api" };
   }
   MODEL_LIST_CACHE.set(kind, { list, ts: Date.now() });
   return list;

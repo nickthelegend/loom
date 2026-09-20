@@ -103,7 +103,11 @@ import {
 } from "../core/worktree.js";
 import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
 import { SemanticIndex } from "../core/semantic.js";
+import { ModelAdapter } from "../adapters/model.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
+
+/** How many models one ask may go to at once. */
+const MAX_FANOUT = 8;
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
 
@@ -859,7 +863,10 @@ export class ProjectRuntime {
    * The role defaults to the kind, which is a description rather than an
    * opinion: Loom has no basis for deciding Codex is "the reviewer".
    */
-  addAgent(kind: string, opts: { id?: string; role?: string } = {}): AgentConfig {
+  addAgent(
+    kind: string,
+    opts: { id?: string; role?: string; options?: Record<string, unknown> } = {},
+  ): AgentConfig {
     if (!knownAgentKinds().includes(kind)) {
       throw new Error(`unknown agent kind "${kind}" (known: ${knownAgentKinds().join(", ")})`);
     }
@@ -887,7 +894,15 @@ export class ProjectRuntime {
     }
     const id = explicit || this.nextInstanceId(kind);
     if (!id) throw new Error("an agent needs an id");
-    const cfg: AgentConfig = { id, kind, role: (opts.role ?? kind).trim().slice(0, 40) || kind };
+    // A `model` agent with no model is an agent that refuses every turn, so
+    // the options that make it work are settable as it's added rather than in
+    // a second step nobody is told about.
+    const cfg: AgentConfig = {
+      id,
+      kind,
+      role: (opts.role ?? kind).trim().slice(0, 40) || kind,
+      ...(opts.options && Object.keys(opts.options).length ? { options: opts.options } : {}),
+    };
     // Build it before saving. A config entry with no live agent behind it makes
     // status() throw the moment anything asks — this.agent(id) doesn't find it —
     // so the project 500s on every poll and the roster you just changed becomes
@@ -1439,7 +1454,8 @@ export class ProjectRuntime {
     ];
   }
 
-  createChat(title: string): ChatInfo {
+  createChat(title: string, opts: { agentId?: string; model?: string } = {}): ChatInfo {
+    const bound = opts.agentId ? this.bindable(opts.agentId, opts.model) : null;
     const state = readProjectState(this.info.dir);
     const chat: ChatInfo = {
       id: newId(4),
@@ -1447,10 +1463,133 @@ export class ProjectRuntime {
       // sidebar of identical rows tells you nothing
       title: title.trim().slice(0, 60) || `Chat ${(state.chats ?? []).length + 2}`,
       createdAt: Date.now(),
+      ...(bound ? { agentId: bound.agentId } : {}),
+      ...(bound?.model ? { model: bound.model } : {}),
     };
     state.chats = [...(state.chats ?? []), chat];
     writeProjectState(this.info.dir, state);
     return chat;
+  }
+
+  /**
+   * May this thread be bound to this agent (and model)?
+   *
+   * A model bound to an agent that bakes its model into a spawned process
+   * would be a setting that silently did nothing, so it is refused here —
+   * where the person can act on it — rather than dropped at send time.
+   */
+  private bindable(agentId: string, model?: string): { agentId: string; model?: string } {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error(`no agent "${agentId}" in this project`);
+    if (!isAdapter(agent)) throw new Error(`"${agentId}" is a bridge — it can't answer in a thread`);
+    if (model && !this.switchesModelPerTurn(agentId)) {
+      throw new Error(
+        `"${agentId}" can't change model per thread — pin the model on the agent instead (loom model ${agentId} ${model}), or use a "model" agent`,
+      );
+    }
+    return { agentId, ...(model ? { model } : {}) };
+  }
+
+  /** Can this agent be handed a different model for one turn? */
+  private switchesModelPerTurn(agentId: string): boolean {
+    return this.config.agents.find((a) => a.id === agentId)?.kind === "model";
+  }
+
+  /** Bind (or unbind) who answers in a thread. */
+  setChatAgent(id: string, agentId: string | null, model?: string): ChatInfo | null {
+    if (id === MAIN_CHAT) {
+      // Main is where the baton answers; that's what makes it Main.
+      throw new Error("the main thread follows the baton — make a new thread to pin an agent");
+    }
+    const bound = agentId ? this.bindable(agentId, model) : null;
+    const state = readProjectState(this.info.dir);
+    const chat = (state.chats ?? []).find((c) => c.id === id);
+    if (!chat) return null;
+    if (bound) {
+      chat.agentId = bound.agentId;
+      if (bound.model) chat.model = bound.model;
+      else delete chat.model;
+    } else {
+      delete chat.agentId;
+      delete chat.model;
+    }
+    writeProjectState(this.info.dir, state);
+    return chat;
+  }
+
+  /**
+   * Ask several models the same thing at once, each in its own thread.
+   *
+   * With free quota, asking five models costs what asking one costs, and
+   * "which of these is right" is a judgement a person makes in ten seconds.
+   * So: one prompt, one thread per model, all running at the same time.
+   *
+   * The agents are TRANSIENT — built for the ask, not added to the roster.
+   * Adding five agents to .loom/config.json to ask five questions would leave
+   * the project's roster as a record of everything anyone ever compared. What
+   * stays behind is the threads, which are the part worth keeping.
+   */
+  async askModels(
+    text: string,
+    picks: Array<{ model: string; provider?: string }>,
+    opts: { title?: string; briefing?: boolean } = {},
+  ): Promise<Array<{ chat: string; model: string; provider: string; agentId: string }>> {
+    if (!picks.length) throw new Error("name at least one model");
+    if (picks.length > MAX_FANOUT) {
+      throw new Error(`that's ${picks.length} models — ${MAX_FANOUT} at a time is the limit`);
+    }
+    const brief = opts.briefing === false ? "" : await this.brainBriefFor({ query: text, limit: 6 });
+    const started: Array<{ chat: string; model: string; provider: string; agentId: string }> = [];
+
+    for (const pick of picks) {
+      const provider = pick.provider ?? "openrouter";
+      // The model IS the name here: a thread labelled "ask-3" tells you
+      // nothing, and this is a view where which model said what is the point.
+      const short = pick.model.split("/").pop() ?? pick.model;
+      const chat = this.createChat(`${opts.title ?? "ask"} · ${short}`.slice(0, 60));
+      const agentId = `ask:${pick.model}`;
+      this.log.append({
+        kind: "message",
+        chat: chat.id,
+        payload: { text, author: "user", ask: { model: pick.model, provider } },
+      });
+
+      const agent = new ModelAdapter(agentId, this.info.dir, { provider, model: pick.model });
+      // Its events land in the log tagged with its own thread, exactly as a
+      // roster agent's do — which is what makes the answers readable later.
+      const off = agent.onEvent((e) => {
+        this.appendIfOpen({ ...e, agentId, chat: chat.id });
+      });
+      void agent
+        .send({ text, ...(brief ? { briefing: brief } : {}) })
+        .catch((err) => {
+          this.appendIfOpen({
+            kind: "error",
+            agentId,
+            chat: chat.id,
+            payload: { message: String(err instanceof Error ? err.message : err) },
+          });
+        })
+        .finally(() => off());
+      started.push({ chat: chat.id, model: pick.model, provider, agentId });
+    }
+    this.log.append({
+      kind: "status",
+      payload: { state: "asked_models", models: picks.map((p) => p.model), chats: started.map((s) => s.chat) },
+    });
+    return started;
+  }
+
+  /** What a thread has pinned, if anything. */
+  chatBinding(chat?: string): { agentId?: string; model?: string } {
+    if (!chat || chat === MAIN_CHAT) return {};
+    const found = this.chats().find((c) => c.id === chat);
+    if (!found?.agentId) return {};
+    // A thread pinned to an agent that has since left the roster falls back to
+    // the baton rather than failing: the conversation is still readable, and
+    // the alternative is a thread nobody can type in.
+    if (!this.agents.has(found.agentId)) return {};
+    return { agentId: found.agentId, ...(found.model ? { model: found.model } : {}) };
   }
 
   renameChat(id: string, title: string): ChatInfo | null {
@@ -2465,7 +2604,11 @@ export class ProjectRuntime {
   ): Promise<{ agentId: string; queued?: number; queueId?: string }> {
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;
-    let target = agentId ?? this.validHolder() ?? this.defaultAdapterId();
+    // A thread that named an agent answers with that agent, whoever holds the
+    // baton — which is what lets two threads talk to two agents at once. An
+    // explicit target still wins: you asked for that one.
+    const bound = this.chatBinding(chat);
+    let target = agentId ?? bound.agentId ?? this.validHolder() ?? this.defaultAdapterId();
     const agent = this.agent(target);
     if (!isAdapter(agent)) {
       throw new Error(`agent "${target}" is a bridge (read-only) — it cannot take turns`);
@@ -2480,11 +2623,19 @@ export class ProjectRuntime {
       throw new Error(`team policy doesn't allow ${kind} on this repo (loom.team.json)`);
     }
 
-    const holder = this.validHolder();
-    if (holder === null) {
-      this.baton.acquire(target);
-    } else if (holder !== target) {
-      throw new NotHolderError(target, holder);
+    // The baton is the write lock for work that touches the repository. A
+    // thread pinned to an agent doesn't need it to answer a question, and
+    // taking it would stop the agent that IS working — so a pinned thread
+    // leaves it alone, and the thread that isn't pinned behaves as it always
+    // has.
+    const pinned = !agentId && bound.agentId === target;
+    if (!pinned) {
+      const holder = this.validHolder();
+      if (holder === null) {
+        this.baton.acquire(target);
+      } else if (holder !== target) {
+        throw new NotHolderError(target, holder);
+      }
     }
 
     // The agent is mid-turn: queue the prompt, in order, and run it when the
@@ -2528,9 +2679,13 @@ export class ProjectRuntime {
     // adapter's CLI has no flag for it, because an "MCP attached" note on a
     // turn that dropped the config would be the same lie in a new place.
     const mcp = agent.capabilities.mcp ? writeMcpSession(this.healthyMcps()) : null;
+    // The thread's model, only ever to an adapter that can act on it — see
+    // bindable(), which is where a model that couldn't be honoured is refused.
+    const perTurnModel = bound.agentId === target ? bound.model : undefined;
     const input: SendInput = {
       text,
       ...(briefing ? { briefing } : {}),
+      ...(perTurnModel ? { model: perTurnModel } : {}),
       ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),
     };
     if (mcp) {

@@ -631,6 +631,75 @@ projections — they never hold the write lock. That's a design decision, not a 
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
 
+## Asking several models at once
+
+```sh
+loom ask --free --limit 3 "is this migration reversible?"
+loom ask --models "openrouter/qwen/qwen3.8-27b:free,ollama/llama3" "review this approach"
+```
+
+One prompt, one thread per model, all at the same time, each thread named
+after the model that answered in it. With free quota this costs what asking
+one model costs, and picking the good answer takes a person ten seconds.
+
+The agents that run are transient — five asks don't leave five agents in the
+roster — and one model failing leaves its error in its own thread while the
+others carry on.
+
+## Threads, and who answers in them
+
+A thread can name its own agent. It then answers there whatever the baton is
+doing elsewhere, which is what lets two threads talk to two agents at once —
+one planning on a free model, one editing with Claude Code, neither waiting for
+the other.
+
+Pinning does **not** take the baton. The baton is the write lock for work that
+touches the repository; a conversation doesn't need it, and taking it would
+stop whatever is actually working. The main thread still follows the baton,
+because that's what makes it the main thread.
+
+A thread may pin a **model** as well, for agents that can change model per turn
+(the `model` kind). Pinning one to an agent whose model is baked into a spawned
+process is refused at the point of pinning — a setting that silently does
+nothing is worse than an error.
+
+## Agents that are models
+
+Every other agent in Loom wraps a CLI. A `model` agent is an HTTP endpoint:
+
+```sh
+loom providers:set openrouter --key sk-…          # or $OPENROUTER_API_KEY
+loom models --free                                 # what costs nothing today
+loom agents:add model --as cheap --role reviewer \
+  --model "google/gemma-4-31b-it:free" --tools
+```
+
+It streams into the thread like any other agent, shows reasoning as reasoning,
+reports its token counts, and holds the baton. It has **no tools yet**, so it
+is a thinker rather than an editor — planning, reviewing, summarising,
+answering, routing. That is most of what a fleet does between edits, and free
+quota is very happy to pay for it.
+
+**It can read the project, if you let it.** `"tools": true` adds `read_file`,
+`list_files` and `search` — read-only, inside the project, with `.git` and
+`.loom` off limits and every path proven contained before anything opens it.
+Each call shows in the thread, and the loop is bounded. There is deliberately
+**no writing and no shell**: a model that can write files is exactly as
+dangerous as a CLI that can, and that belongs behind the permission layer
+rather than behind a config flag.
+
+**Keys are never project config.** `.loom/config.json` names a provider;
+the key lives in the environment or in `~/.loom/providers.json` (mode 0600),
+and nothing — no route, no log, no listing — hands it back. You get the last
+four characters, which is enough to tell two keys apart.
+
+**Refusals are read, not guessed at.** A dry free pool (402) or a rate limit
+(429) moves to the next model in `fallbacks` and says so once; a model name
+that doesn't exist (503) stops, because falling back would hide the typo. And
+a provider that rejects *Loom* rather than your key says exactly that —
+AgentRouter, for one, only accepts clients it recognises, which is a thing to
+ask them about rather than a key to go and regenerate.
+
 ## The brain, sharpened
 
 Five retrieval behaviours worth knowing, all inspectable with `explain`:

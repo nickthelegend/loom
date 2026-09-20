@@ -141,12 +141,13 @@ export class DaemonClient {
   addAgent(
     id: string,
     kind: string,
-    opts: { as?: string; role?: string } = {},
+    opts: { as?: string; role?: string; options?: Record<string, unknown> } = {},
   ): Promise<AgentConfig> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents`, {
       kind,
       ...(opts.as ? { id: opts.as } : {}),
       ...(opts.role ? { role: opts.role } : {}),
+      ...(opts.options ? { options: opts.options } : {}),
     });
   }
 
@@ -574,6 +575,21 @@ export class DaemonClient {
       ...(spec !== undefined ? { spec } : {}),
       ...(opts.router ? { router: opts.router } : {}),
       ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
+    });
+  }
+
+  /** One prompt, several models, a thread each. */
+  askModels(
+    id: string,
+    text: string,
+    models: string[],
+    opts: { title?: string; briefing?: boolean } = {},
+  ): Promise<{ asked: Array<{ chat: string; model: string; provider: string; agentId: string }> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/ask`, {
+      text,
+      models,
+      ...(opts.title ? { title: opts.title } : {}),
+      ...(opts.briefing === false ? { briefing: false } : {}),
     });
   }
 
