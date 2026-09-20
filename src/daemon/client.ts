@@ -36,6 +36,22 @@ export class DaemonError extends Error {
   }
 }
 
+/** What the daemon says about whether this copy of Loom is current. */
+export interface UpdateStatus {
+  version: string;
+  rev: string;
+  root: string | null;
+  git: { behind: number; ahead: number; branch: string } | null;
+  latest: string | null;
+  release: { version: string; tag: string; url: string; publishedAt: string | null } | null;
+  behindRelease: boolean;
+  install: "git" | "npm-global" | "unknown";
+  canApply: boolean;
+  refusal: string | null;
+  /** Exactly what applying would run, in order. */
+  steps: string[];
+}
+
 /** What the daemon says about a project's prompt queue. */
 export interface QueueView {
   queue: QueueItem[];
@@ -466,6 +482,16 @@ export class DaemonClient {
 
   handoff(id: string, to: string): Promise<{ from: string | null; to: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/handoff`, { to });
+  }
+
+  // ── updates (core/updater.ts) ──
+
+  updates(refresh = false): Promise<UpdateStatus> {
+    return this.request("GET", `/api/updates${refresh ? "?refresh=1" : ""}`);
+  }
+
+  applyUpdate(): Promise<{ started: boolean; steps: string[] }> {
+    return this.request("POST", "/api/updates/apply", {});
   }
 
   interrupt(id: string): Promise<{ interrupted: string | null }> {

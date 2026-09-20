@@ -1,0 +1,17 @@
+{
+  "P1": {
+    "status": "PASS",
+    "evidence": "install=git root=/private/var/folders/tp/gcpvr1451r350sq27v4csrq40000gn/T/loom-e2e-update-s2nsnp/loom steps=[git pull --ff-only && npm install --no-audit --no-fund && npm run build] version=0.2.1",
+    "at": "2026-09-20T04:37:11.898Z"
+  },
+  "P2": {
+    "status": "PASS",
+    "evidence": "dirty checkout → 400 \"this checkout has uncommitted changes — commit or stash them first\"; HEAD unchanged",
+    "at": "2026-09-20T04:37:12.049Z"
+  },
+  "P3": {
+    "status": "PASS",
+    "evidence": "pulled 19f14422 → b7ea39d0, rebuilt, exited, and came back on rev 6c5042d8",
+    "at": "2026-09-20T04:37:20.763Z"
+  }
+}

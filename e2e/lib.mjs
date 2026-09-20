@@ -54,7 +54,9 @@ export class Daemon {
   async start() {
     this.port = this.port ?? (await freePort());
     const out = fs.openSync(this.logFile, "a");
-    this.proc = spawn(process.execPath, [CLI, "daemon", "--port", String(this.port)], { env: this.env, stdio: ["ignore", out, out] });
+    // `entry` lets a test run a DIFFERENT build than this checkout's — the
+    // update run needs a daemon that can replace itself (see run-update.mjs).
+    this.proc = spawn(process.execPath, [this.entry ?? CLI, "daemon", "--port", String(this.port)], { env: this.env, stdio: ["ignore", out, out] });
     this.base = `http://127.0.0.1:${this.port}`;
     await until(async () => (await fetch(`${this.base}/api/health`)).ok, { what: `${this.name} daemon health`, timeoutMs: 40_000 });
     this.admin = JSON.parse(fs.readFileSync(path.join(this.home, "daemon.json"), "utf8")).adminToken;

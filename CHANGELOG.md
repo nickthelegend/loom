@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### An Update button that actually updates
+
+- **Loom says when a newer version is out** — checked against the published
+  release, cached for hours, shown as a pill in the status bar.
+- **One button in Settings → Updates**, which says exactly what it will run
+  before it runs it: a git checkout pulls and rebuilds, a global npm install
+  reinstalls itself, and anything else is pointed at the release rather than
+  having a command guessed at and run over it.
+- **A checkout with uncommitted changes is refused** (modified tracked files —
+  an untracked scratch file doesn't stop a fast-forward).
+- The commands' output streams while they run, then the daemon restarts on the
+  new build and the page reconnects to it.
+- `loom update [--check] [--yes]` does the same from the terminal.
+
 ## [0.2.1] — 2026-09-20
 
 ### The prompt queue
