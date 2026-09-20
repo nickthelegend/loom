@@ -257,3 +257,27 @@ describe("is it usable", () => {
     expect(await new ModelAdapter("a", tmpDir("p"), { provider: id, model: "ghost" }).available()).toBe(false);
   });
 });
+
+describe("adding one from the terminal", () => {
+  it("carries the model into the agent's config, and refuses one without", async () => {
+    process.env.LOOM_HOME = tmpDir("home-model-add");
+    process.env.LOOM_NO_NOTIFY = "1";
+    const { ProjectRuntime } = await import("../src/daemon/runtime.js");
+    const { makeProjectDir } = await import("./helpers.js");
+    const dir = makeProjectDir({ name: "adding", agents: [{ id: "plannerbot", kind: "echo", role: "planner" }] });
+    const rt = await ProjectRuntime.open({ id: `add-${Date.now()}`, name: "adding", dir });
+    try {
+      const cfg = rt.addAgent("model", {
+        id: "cheap",
+        role: "reviewer",
+        options: { provider: "openrouter", model: "a/b:free", tools: true },
+      });
+      // An agent whose options didn't survive being added is an agent that
+      // refuses every turn for a reason nobody can see.
+      expect(cfg.options).toEqual({ provider: "openrouter", model: "a/b:free", tools: true });
+      expect(rt.config.agents.find((a) => a.id === "cheap")!.options).toMatchObject({ model: "a/b:free" });
+    } finally {
+      await rt.close();
+    }
+  });
+});

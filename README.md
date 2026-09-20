@@ -670,7 +670,8 @@ Every other agent in Loom wraps a CLI. A `model` agent is an HTTP endpoint:
 ```sh
 loom providers:set openrouter --key sk-…          # or $OPENROUTER_API_KEY
 loom models --free                                 # what costs nothing today
-loom agents:add cheap --kind model --model "google/gemma-4-31b-it:free"
+loom agents:add model --as cheap --role reviewer \
+  --model "google/gemma-4-31b-it:free" --tools
 ```
 
 It streams into the thread like any other agent, shows reasoning as reasoning,

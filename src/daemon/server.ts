@@ -3418,10 +3418,15 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/agents",
       withRuntime(async (rt, req, res) => {
-        const { kind, id, role } = (req.body ?? {}) as { kind?: string; id?: string; role?: string };
+        const { kind, id, role, options } = (req.body ?? {}) as {
+          kind?: string;
+          id?: string;
+          role?: string;
+          options?: Record<string, unknown>;
+        };
         if (!kind?.trim()) return void res.status(400).json({ error: "missing kind" });
         try {
-          res.json(rt.addAgent(kind.trim(), { id, role }));
+          res.json(rt.addAgent(kind.trim(), { id, role, ...(options ? { options } : {}) }));
         } catch (err) {
           res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
         }

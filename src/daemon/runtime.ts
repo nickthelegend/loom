@@ -863,7 +863,10 @@ export class ProjectRuntime {
    * The role defaults to the kind, which is a description rather than an
    * opinion: Loom has no basis for deciding Codex is "the reviewer".
    */
-  addAgent(kind: string, opts: { id?: string; role?: string } = {}): AgentConfig {
+  addAgent(
+    kind: string,
+    opts: { id?: string; role?: string; options?: Record<string, unknown> } = {},
+  ): AgentConfig {
     if (!knownAgentKinds().includes(kind)) {
       throw new Error(`unknown agent kind "${kind}" (known: ${knownAgentKinds().join(", ")})`);
     }
@@ -891,7 +894,15 @@ export class ProjectRuntime {
     }
     const id = explicit || this.nextInstanceId(kind);
     if (!id) throw new Error("an agent needs an id");
-    const cfg: AgentConfig = { id, kind, role: (opts.role ?? kind).trim().slice(0, 40) || kind };
+    // A `model` agent with no model is an agent that refuses every turn, so
+    // the options that make it work are settable as it's added rather than in
+    // a second step nobody is told about.
+    const cfg: AgentConfig = {
+      id,
+      kind,
+      role: (opts.role ?? kind).trim().slice(0, 40) || kind,
+      ...(opts.options && Object.keys(opts.options).length ? { options: opts.options } : {}),
+    };
     // Build it before saving. A config entry with no live agent behind it makes
     // status() throw the moment anything asks — this.agent(id) doesn't find it —
     // so the project 500s on every poll and the roster you just changed becomes

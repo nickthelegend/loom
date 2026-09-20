@@ -141,12 +141,13 @@ export class DaemonClient {
   addAgent(
     id: string,
     kind: string,
-    opts: { as?: string; role?: string } = {},
+    opts: { as?: string; role?: string; options?: Record<string, unknown> } = {},
   ): Promise<AgentConfig> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents`, {
       kind,
       ...(opts.as ? { id: opts.as } : {}),
       ...(opts.role ? { role: opts.role } : {}),
+      ...(opts.options ? { options: opts.options } : {}),
     });
   }
 

@@ -1617,11 +1617,31 @@ program
   .description("add an agent session to this project (repeat for a second session of the same kind)")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
   .option("--role <role>", "what this instance is for, e.g. planner or reviewer")
-  .action(async (kind: string, opts: { as?: string; role?: string }) => {
+  .option("--model <model>", "for --kind model: which model it runs (loom models)")
+  .option("--provider <id>", "for --kind model: which provider (default openrouter)")
+  .option("--tools", "for --kind model: let it read the project (read-only)")
+  .action(
+    async (
+      kind: string,
+      opts: { as?: string; role?: string; model?: string; provider?: string; tools?: boolean },
+    ) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
+    // A model agent with no model refuses every turn, so it's set here rather
+    // than in a second step nobody mentions.
+    const options: Record<string, unknown> = {
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(opts.provider ? { provider: opts.provider } : {}),
+      ...(opts.tools ? { tools: true } : {}),
+    };
+    if (kind === "model" && !opts.model) {
+      fail('a model agent needs a model: --model "<id>" (see loom models)');
+    }
     try {
-      const added = await client.addAgent(project.id, kind, opts);
+      const added = await client.addAgent(project.id, kind, {
+        ...opts,
+        ...(Object.keys(options).length ? { options } : {}),
+      });
       const siblings = project.agents.filter((a) => a.kind === kind).length;
       console.log(
         `${pc.green("+")} ${pc.bold(added.id)} ${pc.dim(`(${added.kind} · ${added.role})`)}` +
@@ -1631,7 +1651,8 @@ program
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
     }
-  });
+  },
+  );
 
 program
   .command("agents:rm <agentId>")
