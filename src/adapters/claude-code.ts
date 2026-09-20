@@ -38,6 +38,36 @@ interface ClaudeOptions {
   extraArgs?: string[];
 }
 
+/**
+ * Where `claude` lives when it isn't on PATH.
+ *
+ * Anthropic's installer puts it in ~/.local/bin, which is on an interactive
+ * shell's PATH and frequently not on a daemon's — Loom's daemon is spawned
+ * detached, and from the desktop shell it inherits a GUI environment with a
+ * minimal PATH. The result was Setup reporting "Claude Code — not installed"
+ * on a machine where `which claude` answers, which is the worst kind of wrong:
+ * it sends you to reinstall something you already have.
+ *
+ * Codex, Grok and Antigravity each already look in their known locations. This
+ * is the same idea for the one that was missing it. PATH is still the last
+ * word, so a `claude` earlier in PATH wins.
+ */
+export function claudeBin(override?: string): string | null {
+  if (override) return fs.existsSync(override) ? override : null;
+  const home = process.env.HOME ?? "";
+  const known = [
+    `${home}/.local/bin/claude`,
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+    `${home}/.bun/bin/claude`,
+    `${home}/.volta/bin/claude`,
+  ];
+  for (const p of known) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return "claude"; // let PATH resolution (and cliAvailable) decide
+}
+
 export class ClaudeCodeAdapter extends AdapterBase {
   /** `claude --mcp-config <file>` is real, so this adapter accepts SendInput.mcp. */
   override readonly capabilities: AgentCapabilities = { ...ADAPTER_CAPABILITIES, mcp: true };
@@ -67,7 +97,7 @@ export class ClaudeCodeAdapter extends AdapterBase {
   }
 
   private get bin(): string {
-    return this.options.bin ?? "claude";
+    return this.options.bin ?? claudeBin() ?? "claude";
   }
 
   async available(): Promise<boolean> {

@@ -10,6 +10,7 @@
     "url": "https://github.com/nickthelegend/loom.git"
   },
   "scripts": {
+    "prestart": "node scripts/dev-brand.mjs",
     "start": "electron .",
     "stage": "node ../scripts/stage-daemon.mjs",
     "dist": "npm run stage && electron-builder",
@@ -62,6 +63,9 @@
         }
       ],
       "icon": "build/icon.png",
+      "extendInfo": {
+        "CFBundleDisplayName": "Loom"
+      },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",

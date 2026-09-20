@@ -15,6 +15,7 @@ import { listProviders } from "./providers.js";
 import type { AgentConfig } from "../types.js";
 import { agyBin } from "../adapters/antigravity-cli.js";
 import { cliAvailable } from "../adapters/base.js";
+import { claudeBin } from "../adapters/claude-code.js";
 import { codexBin } from "../adapters/codex.js";
 import { grokBin } from "../adapters/grok.js";
 
@@ -69,7 +70,10 @@ export const ADES: AdeSpec[] = [
     kind: "claude-code",
     label: "Claude Code",
     tier: "adapter",
-    probe: () => cliAvailable("claude"),
+    probe: async () => {
+      const bin = claudeBin();
+      return bin ? cliAvailable(bin) : false;
+    },
   },
   {
     kind: "codex",
