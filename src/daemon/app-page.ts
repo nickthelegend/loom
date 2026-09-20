@@ -1169,6 +1169,14 @@ window.__loomPageRev="%%BUILD_REV%%";
   .pgrow.e .lv{color:var(--err)}
   .pgrow.w{color:var(--warn)}
   #pgpick.on{color:var(--accentBlue)}
+  /* is this thread working, finished, or neither */
+  .crow .cstat{width:7px;height:7px;border-radius:99px;flex:none;margin-left:6px;background:var(--muted-foreground)}
+  .crow .cstat.done{background:var(--ok,#3fb950)}
+  .crow .cstat.bad{background:var(--err)}
+  .crow .cstat.wait{background:var(--warn)}
+  .crow .cstat.idle{background:transparent;border:1px solid var(--border)}
+  .crow .cstat.run{background:var(--live);animation:cstatpulse 1.4s ease-in-out infinite}
+  @keyframes cstatpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
   /* which agent (or model) a thread is pinned to */
   .crow .cwho{margin-left:auto;flex:none;font-size:10px;color:var(--muted-foreground);
     max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
@@ -7907,13 +7915,50 @@ ${BRAND_SPRITE}
       drawOrchTabDot(p.orchestra);
       updateModelLabel(); // the picker button reflects whoever's selected now
       if (!desktop) drawChips();
+      // Whose thread is this? A task's worker, or a pinned thread's agent —
+      // null when the thread has no opinion and the baton should answer.
+      function threadAgent(p){
+        // currentChat() belongs to the shell's scope; this render is in
+        // another. state.currentChat is the seam between them — calling the
+        // bare name threw, and a throw in here hid the header entirely.
+        var chat = state.currentChat ? state.currentChat() : null;
+        if (!chat || chat === "main") return null;
+        var agents = (p && p.agents) || [];
+        // A task's agent field is a roster agent id OR a kind, so match either —
+        // an id that isn't in the roster would resolve to nothing and the
+        // header would fall back to the baton, which is the bug being fixed.
+        var resolve = function(want){
+          if (!want) return null;
+          for (var k = 0; k < agents.length; k++) if (agents[k].id === want) return agents[k].id;
+          for (var m = 0; m < agents.length; m++) if (agents[m].kind === want) return agents[m].id;
+          return null;
+        };
+        var run = p && p.orchestra;
+        var tasks = (run && run.threads) || [];
+        for (var i = 0; i < tasks.length; i++) {
+          if (tasks[i] && tasks[i].chat === chat) return resolve(tasks[i].agent);
+        }
+        var chats = (p && p.chats) || [];
+        for (var j = 0; j < chats.length; j++) {
+          if (chats[j].id === chat && chats[j].agentId) return resolve(chats[j].agentId);
+        }
+        return null;
+      }
+
       // agent header block — who the composer talks to, and where
       var ah = document.getElementById("agenthead");
       if (ah) {
         // Resolve over EVERY agent, bridges included — selecting Kiro or
         // Antigravity must show Kiro or Antigravity, not fall through to the
         // first adapter (which read as "the header says Claude").
-        var wanted = state.selected || p.holder;
+        //
+        // The thread you are IN wins over the baton. An orchestra task thread
+        // belongs to the agent doing that task: during a run with four
+        // workers, every task thread used to claim to be whoever held the
+        // project baton, so you could not tell a Codex task from an
+        // Antigravity one by looking at it. A thread pinned to an agent (its
+        // own binding) answers the same way, for the same reason.
+        var wanted = threadAgent(p) || state.selected || p.holder;
         var focus = null;
         (p.agents || []).forEach(function(a){ if (a.id === wanted) focus = a; });
         if (!focus) focus = adapters[0] || (p.agents || [])[0] || null;
@@ -14387,6 +14432,10 @@ ${BRAND_SPRITE}
               '" data-chat="' + esc(c.id) + '"' + (curC ? ' data-current="true"' : "") + ">" +
               '<span class="ci">' + ICONS.chat + "</span>" +
               '<span class="cnm">' + esc(c.title) + "</span>" +
+              // Is it working, did it finish, did it fail — from the run's
+              // own task rows, so this is a fact Loom already had rather than
+              // a guess. A thread that never ran shows nothing at all.
+              chatStatusMark(p, c.id) +
               // Who answers here, when the thread has an opinion — so the
               // shape of what's running is readable without opening anything.
               (c.agentId
@@ -14538,6 +14587,42 @@ ${BRAND_SPRITE}
     }
 
   
+  /**
+   * The dot on a thread row: running, done, failed, waiting — or nothing.
+   *
+   * Every answer comes from something the daemon already reports: an orchestra
+   * task's own status, and the project's needsInput. Nothing here infers
+   * "done" from silence — a thread whose agent went away is not running, and
+   * it is not finished either, so it says nothing rather than something wrong.
+   */
+  function chatStatusMark(p, chatId){
+    var run = p && p.orchestra;
+    var rows = (run && run.threads) || [];
+    var t = null;
+    for (var i = 0; i < rows.length; i++) if (rows[i].chat === chatId) { t = rows[i]; break; }
+    // The run's own thread carries the run's own status.
+    if (!t && run && run.chat === chatId) {
+      if (run.status === "running" || run.status === "planning") {
+        return '<span class="cstat run" title="this goal is running"></span>';
+      }
+      if (run.status === "waiting_human") return '<span class="cstat wait" title="this goal is waiting on you"></span>';
+      if (run.status === "completed") return '<span class="cstat done" title="this goal finished"></span>';
+      if (run.status === "failed" || run.status === "aborted") {
+        return '<span class="cstat bad" title="this goal ' + esc(run.status) + '"></span>';
+      }
+    }
+    if (!t) return "";
+    if (t.status === "running") return '<span class="cstat run" title="' + esc(t.agent) + ' is working on this"></span>';
+    if (t.status === "done") return '<span class="cstat done" title="finished"></span>';
+    if (t.status === "failed" || t.status === "cancelled") {
+      return '<span class="cstat bad" title="' + esc(t.status) + '"></span>';
+    }
+    if (t.status === "blocked" || t.status === "waiting") {
+      return '<span class="cstat wait" title="' + esc(t.status) + '"></span>';
+    }
+    return '<span class="cstat idle" title="not started"></span>';
+  }
+
   /** A little popover of a project's agents, anchored to the New chat row. */
     function openChatAgentPick(anchor, proj, onPick){
       closeAgentPick();

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A thread says who's working in it, and whether it's still going
+
+- **A task thread is labelled with the agent doing that task**, not with
+  whoever holds the project baton. During a run with four workers every task
+  thread used to claim to be the baton holder, so a Codex task and an
+  Antigravity task looked identical. A thread pinned to an agent answers the
+  same way.
+- **Thread rows show status** — a live pulse while a task runs, green when it
+  finishes, red when it fails, amber when it's waiting. Every answer comes
+  from a status the daemon already reports; a thread it can't know about gets
+  no mark rather than a guess.
+- The status payload now carries one row per task (thread, agent, kind,
+  state) instead of only a count, which is what made both of those possible.
+
 ## [0.2.6] — 2026-09-20
 
 ### Right-click, and a composer that fits

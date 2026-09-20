@@ -3616,6 +3616,23 @@ export class ProjectRuntime {
       tasks: run.tasks.length,
       done: run.tasks.filter((t) => t.status === "done").length,
       running: run.tasks.filter((t) => t.status === "running").length,
+      /**
+       * One row per task, small enough to ride on every status poll.
+       *
+       * `tasks` above is a count, which is all the tab dot needed. It left
+       * every other surface unable to answer questions the daemon knows the
+       * answer to: which agent owns this thread (a task thread used to claim
+       * to be whoever held the baton), whether a thread is still running, and
+       * where a task's work went.
+       */
+      threads: run.tasks.map((t) => ({
+        id: t.id,
+        title: t.title,
+        chat: t.chat,
+        agent: t.agent,
+        kind: t.kind,
+        status: t.status,
+      })),
     };
   }
 
