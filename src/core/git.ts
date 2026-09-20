@@ -401,6 +401,24 @@ export async function branches(dir: string): Promise<Branches> {
  * it pointed; this creates only when absent and otherwise just switches, so
  * re-dragging a card to Working is idempotent rather than destructive.
  */
+/**
+ * Run git (or another command) and hand back its output, errors and all.
+ *
+ * For the places that want to *look* — what's on a branch, what a PR would
+ * carry — rather than act, where a non-zero exit is an answer ("no such
+ * branch") and not a failure.
+ */
+export async function readOut(dir: string, args: string[], opts: { cmd?: string; args?: string[] } = {}): Promise<string> {
+  const cmd = opts.cmd ?? "git";
+  const argv = opts.args ?? args;
+  return new Promise((resolve) => {
+    execFile(cmd, argv, { cwd: dir, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err && !String(stdout).trim()) return resolve(String(stderr || "").trim());
+      resolve(String(stdout));
+    });
+  });
+}
+
 export async function ensureBranch(dir: string, name: string): Promise<{ branch: string; created: boolean }> {
   const clean = assertRef(name);
   const existing = await branches(dir);

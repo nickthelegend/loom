@@ -31,7 +31,7 @@ import { compileBrief, retrieve, type RetrieveOpts } from "../core/brain-index.j
 import { extractFromTurn, readExternalContent, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
-import { addWorktree as gitAddWorktree, ensureBranch, push as gitPush, stageAndCommitFiles, worktreePath } from "../core/git.js";
+import { addWorktree as gitAddWorktree, ensureBranch, push as gitPush, readOut, stageAndCommitFiles, worktreePath } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
 import { compileTieredBrief, retrieveTiered, type TieredMemory } from "../core/team-memory.js";
 import { renderProjection } from "../core/distill.js";
@@ -1479,6 +1479,56 @@ export class ProjectRuntime {
   }
 
   /** task/<id>-<slug>: stable id first so a retitle doesn't orphan the branch. */
+  /**
+   * What opening a PR for this card would push, and what it would run.
+   *
+   * Asked before anything happens, because pushing publishes: the person sees
+   * the branch, the commits and the exact command, and only then decides.
+   */
+  async taskPrPlan(id: string): Promise<{ branch: string; base: string; commits: string[]; files: string[]; command: string; ready: boolean; why?: string }> {
+    const task = (readProjectState(this.info.dir).tasks ?? []).find((t) => t.id === id);
+    if (!task) throw new Error(`no card "${id}"`);
+    const branch = this.taskBranchName(task);
+    const base = (await readOut(this.info.dir, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]))
+      .replace(/^origin\//, "")
+      .trim() || "main";
+    const exists = await readOut(this.info.dir, ["rev-parse", "--verify", "--quiet", branch]);
+    if (!exists.trim()) {
+      return { branch, base, commits: [], files: [], command: "", ready: false, why: `there's no ${branch} branch yet` };
+    }
+    const log = await readOut(this.info.dir, ["log", "--oneline", `${base}..${branch}`]);
+    const commits = log.split("\n").map((l) => l.trim()).filter(Boolean);
+    const diff = await readOut(this.info.dir, ["diff", "--name-only", `${base}...${branch}`]);
+    const files = diff.split("\n").map((l) => l.trim()).filter(Boolean);
+    const command = `gh pr create --head ${branch} --base ${base} --title ${JSON.stringify(task.title)} --body ""`;
+    return {
+      branch,
+      base,
+      commits,
+      files,
+      command,
+      ready: commits.length > 0,
+      ...(commits.length ? {} : { why: `${branch} has nothing ${base} doesn't` }),
+    };
+  }
+
+  /** Push the branch and open the PR — only ever from an explicit click. */
+  async openTaskPr(id: string): Promise<{ url: string; branch: string }> {
+    const task = (readProjectState(this.info.dir).tasks ?? []).find((t) => t.id === id);
+    if (!task) throw new Error(`no card "${id}"`);
+    const plan = await this.taskPrPlan(id);
+    if (!plan.ready) throw new Error(plan.why ?? "there's nothing to open a PR for");
+    await readOut(this.info.dir, ["push", "-u", "origin", plan.branch]);
+    const out = await readOut(this.info.dir, [], {
+      cmd: "gh",
+      args: ["pr", "create", "--head", plan.branch, "--base", plan.base, "--title", task.title, "--body", ""],
+    });
+    const url = (out.match(/https:\/\/\S+/) ?? [""])[0];
+    if (!url) throw new Error(out.trim().slice(0, 300) || "gh didn't return a PR url");
+    this.appendIfOpen({ kind: "status", payload: { state: "task_pr", task: task.id, branch: plan.branch, url } });
+    return { url, branch: plan.branch };
+  }
+
   private taskBranchName(task: BoardTask): string {
     const slug = task.title
       .toLowerCase()

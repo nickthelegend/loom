@@ -821,6 +821,14 @@ next to GitHub in the status bar, or `git.delivery` in `.loom/config.json`.
 A failed push never un-finishes a run. The error is shown, and **Retry delivery**
 is one click.
 
+## Opening a PR from a card
+
+With `git.branchPerTask` on, dragging a card to **Working** cuts its branch.
+When it reaches **Review**, the card offers **Open PR** — which first shows
+what would be pushed: the branch, the commits `main` doesn't have, the files
+they touch, and the exact `git push` and `gh pr create` it will run. Asking
+pushes nothing. Publishing happens on the button and nowhere else.
+
 ## While you were away
 
 Come back to a project you haven't looked at in a while and Loom says what

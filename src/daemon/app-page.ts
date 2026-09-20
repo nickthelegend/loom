@@ -1172,6 +1172,13 @@ window.__loomPageRev="%%BUILD_REV%%";
   .browauto input{margin:0;cursor:pointer}
   .browframe.sized{display:flex;justify-content:center;overflow:auto;background:var(--muted)}
   .browframe.sized iframe{border:1px solid var(--border);background:#fff;flex:none}
+  /* what a PR would carry, before it carries it */
+  .modal.prplan{max-width:600px;width:92vw}
+  .prpbody{padding:4px 16px 12px;max-height:60vh;overflow:auto}
+  .prpsub{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin:10px 0 4px}
+  .prplist{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);
+    background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:6px 9px}
+  .prplist div{padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* what happened while you were away */
   .modal.digest{max-width:620px;width:92vw}
   .dgsub{padding:0 16px 10px;font-size:12px;color:var(--muted-foreground)}
@@ -6727,6 +6734,11 @@ ${BRAND_SPRITE}
       } else if (c.issue) {
         acts = '<div class="bca"><button class="btn ghost xs" data-wtissue="' + c.issue.number +
           '" title="cut a fresh branch for this issue in its own worktree">' + ICONS.branch + " Worktree</button></div>";
+      } else if (c.own && c.column === "in-review") {
+        // Your own card, in review, with no PR yet: offer to open one. It shows
+        // what would be pushed first — publishing is never implicit.
+        acts = '<div class="bca"><button class="btn outline xs" data-openpr="' + esc(c.id) +
+          '" title="open a pull request for this card">' + ICONS.branch + " Open PR</button></div>";
       }
       return '<div class="bcard' + (c.own ? " own" : "") + '" draggable="true" data-card="' + esc(c.id) +
         '" data-home="' + esc(c.column) + '"' + (c.own ? ' data-own="1"' : "") + ">" +
@@ -6847,6 +6859,52 @@ ${BRAND_SPRITE}
       Array.prototype.forEach.call(el.querySelectorAll("[data-wtissue]"), function(b){
         b.onclick = function(ev){ ev.stopPropagation(); openWorktree(b, { issue: Number(b.getAttribute("data-wtissue")) }); };
       });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-openpr]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); askOpenPr(b.getAttribute("data-openpr")); };
+      });
+    }
+
+    /**
+     * Open a PR for a card — after showing exactly what would be pushed.
+     *
+     * Pushing publishes, so the order matters: look, then decide, then act.
+     * The plan comes from the daemon (the branch, its commits, its files and
+     * the command), and nothing happens until the button in this dialog.
+     */
+    function askOpenPr(id){
+      if (!id || document.querySelector(".scrim")) return;
+      api("/api/projects/" + state.pid + "/tasks/" + encodeURIComponent(id) + "/pr").then(function(plan){
+        var scrim = document.createElement("div");
+        scrim.className = "scrim";
+        var body = plan.ready
+          ? '<div class="prpsub">' + plan.commits.length + " commit" + (plan.commits.length === 1 ? "" : "s") +
+            " on <code>" + esc(plan.branch) + "</code> that <code>" + esc(plan.base) + "</code> doesn\u2019t have, touching " +
+            plan.files.length + " file" + (plan.files.length === 1 ? "" : "s") + ".</div>" +
+            '<div class="prplist">' + plan.commits.slice(0, 12).map(function(c){ return "<div>" + esc(c) + "</div>"; }).join("") + "</div>" +
+            '<div class="prpsub">Files</div><div class="prplist">' +
+            plan.files.slice(0, 20).map(function(f){ return "<div>" + esc(f) + "</div>"; }).join("") + "</div>" +
+            '<div class="prpsub">This runs</div><code class="scmd">git push -u origin ' + esc(plan.branch) + "\\n" + esc(plan.command) + "</code>"
+          : '<div class="prpsub">' + esc(plan.why || "there\u2019s nothing to open a PR for") + "</div>";
+        scrim.innerHTML = '<div class="modal prplan"><div class="modalhead">Open a pull request' +
+          '<button class="iconbtn" id="prpx" aria-label="close">' + ICONS.x + "</button></div>" +
+          '<div class="prpbody">' + body + "</div>" +
+          '<div class="modalfoot">' +
+          (plan.ready ? '<button class="btn primary" id="prpgo">Push and open the PR</button>' : "") +
+          '<button class="btn ghost" id="prpcancel">Close</button></div></div>';
+        document.body.appendChild(scrim);
+        var close = function(){ scrim.remove(); };
+        scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+        document.getElementById("prpx").onclick = close;
+        document.getElementById("prpcancel").onclick = close;
+        var go = document.getElementById("prpgo");
+        if (go) go.onclick = function(){
+          go.disabled = true;
+          go.textContent = "Opening\\u2026";
+          api("/api/projects/" + state.pid + "/tasks/" + encodeURIComponent(id) + "/pr", { method: "POST", body: "{}" })
+            .then(function(r){ close(); toast("opened " + r.url); loadBoard(); })
+            .catch(function(e){ go.disabled = false; go.textContent = "Push and open the PR"; toast(e.message); });
+        };
+      }).catch(function(e){ toast(e.message); });
     }
 
     /**

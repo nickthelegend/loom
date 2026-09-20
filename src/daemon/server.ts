@@ -1850,6 +1850,32 @@ export class LoomDaemon {
     );
 
     /**
+     * The PR a card would open: the branch, its commits, its files, and the
+     * exact command. Looking, not doing — pushing publishes, so nothing here
+     * happens without the click that follows.
+     */
+    app.get(
+      "/api/projects/:id/tasks/:taskId/pr",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(await rt.taskPrPlan(String(req.params.taskId)));
+        } catch (err) {
+          res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    app.post(
+      "/api/projects/:id/tasks/:taskId/pr",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(await rt.openTaskPr(String(req.params.taskId)));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    /**
      * What happened while you were away.
      *
      * `since` is the client's own idea of when it last looked — the daemon

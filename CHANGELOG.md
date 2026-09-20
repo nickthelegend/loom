@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A pull request you asked for
+
+- **Open PR on a review card.** With branch-per-card on, a card in review shows
+  what a PR would carry — the branch, its commits, its files and the exact
+  command — and opens it only when you press the button. Asking pushes
+  nothing; publishing has never been implicit and still isn't.
+
 ### Coming back to a project
 
 - **A digest of what happened while you were away** — goals, landings,
