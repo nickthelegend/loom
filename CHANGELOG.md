@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holding a port.
 - `loom servers`, `loom servers start|stop|restart <name>`, `loom servers logs
   <name>`.
+- **The preview emulates a width** — Fit / 375 / 768 / 1280, remembered per
+  project and scaled down when the dock is narrower than the page.
+- **It reloads when an agent changes files** (a toggle, on by default), so
+  watching a change land doesn't involve remembering to refresh.
+- **A camera button puts the view into the composer.** The page is another
+  origin and can't photograph itself, so the daemon takes the shot with the
+  project's own Playwright; a project without it is told exactly that.
 
 ### An Update button that actually updates
 

@@ -47,6 +47,7 @@ import { suggestSkill } from "../core/skills.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { defaultExec } from "./landing.js";
 import { suggestServers, type ServerConfig } from "../core/servers.js";
+import { capture } from "../core/preview-shot.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
 import {
   CHECK_TTL_MS,
@@ -3923,6 +3924,42 @@ export class LoomDaemon {
      * out of the way. Name is derived from a content hash, never from the
      * client's — a caller doesn't get to choose where in the tree this lands.
      */
+    /**
+     * A picture of what the preview is showing, as an attachment.
+     *
+     * The frame is someone else's origin, so the page can't photograph it —
+     * the daemon does, with the project's own Playwright (core/preview-shot.ts),
+     * and the file lands beside pasted images so the composer carries it the
+     * same way.
+     */
+    app.post("/api/projects/:id/preview/screenshot", (req, res) => {
+      void (async () => {
+        const dir = projectPath(String(req.params.id), ".");
+        if (!dir) return void res.status(404).json({ error: "not found" });
+        const b = (req.body ?? {}) as { url?: string; width?: number; height?: number; colorScheme?: string; fullPage?: boolean };
+        try {
+          const shot = await capture(dir, {
+            url: String(b.url ?? ""),
+            ...(b.width ? { width: Number(b.width) } : {}),
+            ...(b.height ? { height: Number(b.height) } : {}),
+            colorScheme: b.colorScheme === "dark" ? "dark" : "light",
+            fullPage: Boolean(b.fullPage),
+          });
+          const buf = fs.readFileSync(shot.file);
+          fs.rmSync(path.dirname(shot.file), { recursive: true, force: true });
+          const hash = crypto.createHash("sha1").update(buf).digest("hex").slice(0, 12);
+          const rel = path.join(".loom", "attachments", `preview-${hash}.png`);
+          const abs = projectPath(String(req.params.id), rel);
+          if (!abs) return void res.status(400).json({ error: "bad attachment path" });
+          fs.mkdirSync(path.dirname(abs), { recursive: true });
+          fs.writeFileSync(abs, buf);
+          res.json({ path: rel, bytes: buf.length, width: shot.width, height: shot.height, colorScheme: shot.colorScheme, fullPage: shot.fullPage });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+    });
+
     app.post("/api/projects/:id/attachments", (req, res) => {
       const base = projectPath(String(req.params.id), ".");
       if (!base) return void res.status(404).json({ error: "not found" });

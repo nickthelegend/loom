@@ -209,6 +209,29 @@ describe("web app · dev servers in the Browser tab", () => {
     expect(m.errors).toEqual([]);
   }, 90_000);
 
+  it("emulates a width, and remembers it per project", async () => {
+    const m = mount();
+    await openBrowserTab(m);
+    // point it somewhere so there's a frame to size
+    const url = $(m, "#browurl") as HTMLInputElement;
+    url.value = `http://127.0.0.1:${port}`;
+    click($(m, "#browgo"));
+    await waitUntil(() => !!$(m, "#browframe iframe"), { timeoutMs: 10_000 });
+    const frame = () => $(m, "#browframe iframe") as HTMLIFrameElement;
+    expect(frame().style.width).toBe("100%"); // Fit, by default
+
+    click($(m, '#browsizes [data-w="375"]'));
+    await waitUntil(() => frame().style.width === "375px", { timeoutMs: 10_000 });
+    expect($(m, "#browframe")!.classList.contains("sized")).toBe(true);
+    expect(frame().style.transform).toMatch(/scale\(/); // scaled down to fit the dock
+    expect(m.window.localStorage.getItem(`loomBrowW:${projectId}`)).toBe("375");
+
+    click($(m, '#browsizes [data-w="0"]'));
+    await waitUntil(() => frame().style.width === "100%", { timeoutMs: 10_000 });
+    expect($(m, "#browframe")!.classList.contains("sized")).toBe(false);
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
   it("shows a server's own output, and turns red with the exit code when it dies", async () => {
     const m = mount();
     await openBrowserTab(m);

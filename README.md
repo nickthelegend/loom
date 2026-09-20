@@ -283,6 +283,14 @@ server Loom started is stopped when the daemon goes.
 From the terminal: `loom servers`, `loom servers start|stop|restart <name>`,
 `loom servers logs <name> -n 100`.
 
+**The preview itself** emulates a width (Fit / 375 / 768 / 1280, remembered per
+project, scaled down when the dock is narrower), reloads itself when an agent
+changes files — a toggle, on by default — and has a camera button that puts a
+picture of what you're looking at into the composer. The page is another
+origin, so the browser won't let it photograph itself: the daemon takes the
+shot with the project's own Playwright, and a project without Playwright is
+told exactly that rather than handed an empty file.
+
 ## The workspace
 
 On a wide screen the web app (and the desktop shell around it) is a full workspace for
