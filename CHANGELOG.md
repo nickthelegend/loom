@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A thread remembers who answers in it
+
+- **Pin an agent to a thread** and it answers there, whoever holds the baton —
+  so two threads can be talking to two agents at once, which is the point of
+  having agents that cost nothing. Picking an agent for a new chat now pins it
+  instead of handing over the baton, and the sidebar shows which thread is
+  with whom.
+- **It doesn't take the baton.** The baton is the write lock for work on the
+  repository; a conversation doesn't need it, and taking it would stop
+  whatever is actually working.
+- A thread can pin a **model** too, for agents that can change model per turn
+  (the `model` kind). Binding one to an agent that bakes its model into a
+  spawned process is refused where you can fix it, rather than ignored where
+  you'd never notice. The main thread still follows the baton — that's what
+  makes it the main thread — and a thread whose agent has left the roster
+  falls back to the baton rather than becoming one nobody can type in.
+
 ### Agents that are models, not CLIs
 
 - **A new agent kind, `model`.** It's an HTTP endpoint rather than a

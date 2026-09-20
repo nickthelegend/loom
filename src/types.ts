@@ -84,6 +84,20 @@ export interface ChatInfo {
   id: string;
   title: string;
   createdAt: number;
+  /**
+   * Who answers in this thread, if the thread has an opinion.
+   *
+   * Without it, a chat is a label on events and whoever holds the baton
+   * answers everywhere — which means two threads can't be talking to two
+   * agents. With it, switching threads switches who you're talking to.
+   */
+  agentId?: string;
+  /**
+   * The model for this thread, for agents that can change model per turn.
+   * Only the `model` kind can; binding one to an agent that can't is refused
+   * at the point of binding rather than ignored at the point of sending.
+   */
+  model?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,6 +396,14 @@ export interface SendInput {
   text: string;
   /** One-shot handoff briefing injected alongside this turn. */
   briefing?: string;
+  /**
+   * Use this model for this turn.
+   *
+   * Only set for adapters that can honour it — the runtime checks before it
+   * sends, so an adapter receiving this can act on it rather than wonder. A
+   * CLI that bakes its model into a spawned process is never handed one.
+   */
+  model?: string;
   /**
    * The project's MCP servers, rendered for this turn (see core/mcp.ts). The
    * runtime builds it, the adapters that have a real flag for it pass it to

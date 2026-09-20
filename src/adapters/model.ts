@@ -140,7 +140,9 @@ export class ModelAdapter extends AdapterBase {
     if (!p.key && p.id !== "ollama") {
       throw new Error(`${p.label} has no key — \`loom providers set ${p.id} --key …\``);
     }
-    const chain = this.chain();
+    // A thread can pin a model (types.ts SendInput.model): it takes the place
+    // of the configured one for this turn, and the fallbacks still apply.
+    const chain = input.model ? [input.model, ...this.chain().filter((m) => m !== input.model)] : this.chain();
     if (!chain.length) throw new Error(`agent "${this.id}" has no model set — \`loom model ${this.id} <name>\``);
 
     this._busy = true;

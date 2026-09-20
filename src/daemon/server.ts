@@ -2152,8 +2152,43 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/chats",
       withRuntime(async (rt, req, res) => {
-        const { title } = (req.body ?? {}) as { title?: string };
-        res.json({ chat: rt.createChat(String(title ?? "")) });
+        const { title, agentId, model } = (req.body ?? {}) as {
+          title?: string;
+          agentId?: string;
+          model?: string;
+        };
+        try {
+          res.json({
+            chat: rt.createChat(String(title ?? ""), {
+              ...(agentId ? { agentId: String(agentId) } : {}),
+              ...(model ? { model: String(model) } : {}),
+            }),
+          });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    /**
+     * Who answers in a thread. Null unbinds it, and the thread goes back to
+     * following the baton like the main one.
+     */
+    app.post(
+      "/api/projects/:id/chats/:chatId/agent",
+      withRuntime(async (rt, req, res) => {
+        const { agentId, model } = (req.body ?? {}) as { agentId?: string | null; model?: string };
+        try {
+          const chat = rt.setChatAgent(
+            String(req.params.chatId),
+            agentId ? String(agentId) : null,
+            model ? String(model) : undefined,
+          );
+          if (!chat) return void res.status(404).json({ error: "no such thread" });
+          res.json({ chat });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 

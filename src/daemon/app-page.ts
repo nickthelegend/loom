@@ -1161,6 +1161,10 @@ window.__loomPageRev="%%BUILD_REV%%";
   .pgrow.e .lv{color:var(--err)}
   .pgrow.w{color:var(--warn)}
   #pgpick.on{color:var(--accentBlue)}
+  /* which agent (or model) a thread is pinned to */
+  .crow .cwho{margin-left:auto;flex:none;font-size:10px;color:var(--muted-foreground);
+    max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
+  .crow.cur .cwho{color:var(--foreground)}
   /* preview controls: emulated widths, a camera, auto-reload */
   .browsizes{display:inline-flex;gap:1px;flex:none;margin-left:4px}
   .browsizes button{border:1px solid var(--border);background:transparent;color:var(--muted-foreground);
@@ -14284,6 +14288,12 @@ ${BRAND_SPRITE}
               '" data-chat="' + esc(c.id) + '"' + (curC ? ' data-current="true"' : "") + ">" +
               '<span class="ci">' + ICONS.chat + "</span>" +
               '<span class="cnm">' + esc(c.title) + "</span>" +
+              // Who answers here, when the thread has an opinion — so the
+              // shape of what's running is readable without opening anything.
+              (c.agentId
+                ? '<span class="cwho" title="' + esc(c.agentId + (c.model ? " \u00b7 " + c.model : "")) + '">' +
+                  esc(c.model ? c.model.split("/").pop() : c.agentId) + "</span>"
+                : "") +
               (c.id === "main"
                 ? ""
                 : '<button class="cx iconbtn" data-delchat="' + esc(c.id) +
@@ -14393,24 +14403,27 @@ ${BRAND_SPRITE}
     /**
      * Make a chat and start it on the agent you chose.
      *
-     * The baton is per-project, so "which agent answers this chat" is "who holds
-     * the baton" — picking one hands it over. That's why a new chat used to
-     * always land on opencode: nobody was asked, so it stayed with whoever held
-     * it. A bridge can't hold the baton, so choosing one just aims the composer
-     * at it (pendingSelect), and its own ask-flow does the rest.
+     * It used to mean "hand this agent the baton", because the baton was the
+     * only answer to "who answers here" — which is also why a new chat always
+     * landed on whoever happened to be holding it. A thread can now name its
+     * own agent, so picking one PINS it: the thread answers with that agent
+     * without disturbing whatever is working elsewhere.
      */
     function createChatWith(pidN, agentId){
-      api("/api/projects/" + pidN + "/chats", { method: "POST", body: "{}" })
+      var proj = (state.projects || []).filter(function(p){ return p.id === pidN; })[0];
+      var picked = proj && (proj.agents || []).filter(function(a){ return a.id === agentId; })[0];
+      // An adapter is PINNED to the thread rather than handed the baton: the
+      // thread then answers with it wherever the baton happens to be, which is
+      // what lets two threads talk to two agents at once. A bridge can't take
+      // a turn at all, so the composer is aimed at it and its own ask-flow
+      // does the rest, as before.
+      var pin = picked && picked.tier === "adapter" ? agentId : null;
+      var body = pin ? JSON.stringify({ agentId: pin }) : "{}";
+      api("/api/projects/" + pidN + "/chats", { method: "POST", body: body })
         .then(function(j){
-          var chatId = j.chat.id;
-          var proj = (state.projects || []).filter(function(p){ return p.id === pidN; })[0];
-          var picked = proj && (proj.agents || []).filter(function(a){ return a.id === agentId; })[0];
           state.pendingSelect = agentId || null;
-          var done = function(){ refresh(); setChat(pidN, chatId); };
-          if (picked && picked.tier === "adapter" && proj.holder !== agentId) {
-            api("/api/projects/" + pidN + "/handoff", { method: "POST", body: JSON.stringify({ to: agentId }) })
-              .then(done).catch(function(err){ toast(err.message); done(); });
-          } else { done(); }
+          refresh();
+          setChat(pidN, j.chat.id);
         })
         .catch(function(err){ toast(err.message); });
     }

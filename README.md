@@ -631,6 +631,23 @@ projections — they never hold the write lock. That's a design decision, not a 
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
 
+## Threads, and who answers in them
+
+A thread can name its own agent. It then answers there whatever the baton is
+doing elsewhere, which is what lets two threads talk to two agents at once —
+one planning on a free model, one editing with Claude Code, neither waiting for
+the other.
+
+Pinning does **not** take the baton. The baton is the write lock for work that
+touches the repository; a conversation doesn't need it, and taking it would
+stop whatever is actually working. The main thread still follows the baton,
+because that's what makes it the main thread.
+
+A thread may pin a **model** as well, for agents that can change model per turn
+(the `model` kind). Pinning one to an agent whose model is baked into a spawned
+process is refused at the point of pinning — a setting that silently does
+nothing is worse than an error.
+
 ## Agents that are models
 
 Every other agent in Loom wraps a CLI. A `model` agent is an HTTP endpoint:
