@@ -21,6 +21,19 @@ describe("web app page", () => {
     expect(() => new Function(src)).not.toThrow();
   });
 
+  /**
+   * The one path that crosses the shell/web boundary: the desktop app asking
+   * for a command to be run where a person can watch it. The Electron half is
+   * tested in desktop-updater-mac; this is the half that has to be listening.
+   */
+  it("runs a command the native shell asks it to, in the real terminal", () => {
+    expect(APP_HTML).toContain('item.indexOf("run:")');
+    expect(APP_HTML).toContain("state.termRun(cmd)");
+    // And says something when there's no terminal to run it in, rather than
+    // swallowing it.
+    expect(APP_HTML).toMatch(/if \(!state\.termRun\) \{ toast\(/);
+  });
+
   it("keeps the auth/pairing contract", () => {
     expect(APP_HTML).toContain('id="loom-app"');
     expect(APP_HTML).toContain("/api/pair/claim");
