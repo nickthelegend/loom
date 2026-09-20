@@ -91,6 +91,19 @@ describe("ades · the roster a new project gets", () => {
   });
 
   /**
+   * Found by running `loom init` for real: the `model` kind probes as
+   * available whenever ANY provider has a key, which is a fact about the
+   * machine — but which model is a choice nobody has made yet, and a model
+   * agent without one refuses every turn with "has no model set". A new
+   * project would get an agent in its roster that cannot answer.
+   */
+  it("leaves out the model kind, which can't work until you pick a model", () => {
+    const agents = defaultAgentConfigs({ "claude-code": true, model: true });
+    expect(agents.map((a) => a.kind)).toEqual(["claude-code"]);
+    expect(defaultAgentConfigs({ model: true })).toEqual([]);
+  });
+
+  /**
    * These two used to assert the opposite — that the first three ADEs got
    * planner/executor/reviewer and that a "ship" route was built from them. They
    * passed the whole time, which is the point worth remembering: a test only
