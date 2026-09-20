@@ -30,6 +30,14 @@ import type { EventLog } from "./eventlog.js";
 import { notify } from "./notify.js";
 import { newId, readProjectState, writeProjectState } from "./registry.js";
 import { llmRouter, rulesRouter, type HopDecision, type RouterContext } from "./router.js";
+import {
+  conditionHolds,
+  describeFacts,
+  describeStepCondition,
+  NO_CHANGES,
+  parseStepCondition,
+  type TurnFacts,
+} from "./step-conditions.js";
 
 const DEFAULT_STEP_TIMEOUT_MS = 45 * 60 * 1000;
 const DEFAULT_MAX_HOPS = 8;
@@ -53,6 +61,13 @@ export interface RouteHost {
   isAdapterId(id: string): boolean;
   /** Lifetime project spend (USD) — used to attribute cost to routes. */
   costTotal(): number;
+  /**
+   * What the agent's last turn actually changed, once the runtime has worked
+   * it out. Step conditions read this; a host that can't say returns zeroes,
+   * and every threshold condition then reads false — a route that can't
+   * measure a turn doesn't get to guess about it.
+   */
+  turnFacts(agentId: string): Promise<TurnFacts>;
 }
 
 export interface ResolvedSteps {
@@ -67,10 +82,27 @@ export interface ResolvedSteps {
    * executes" without permanently changing either agent's default role.
    */
   roles: Array<string | null>;
+  /**
+   * Parallel to ids; the condition the previous turn must meet for this step
+   * to run at all, or null when it always runs. Kept as the text that was
+   * written — it was already validated, and the thread quotes it back.
+   */
+  when: Array<string | null>;
+}
+
+/**
+ * A step written inline can carry its condition after a `?`:
+ * `reviewer?lines>200`. That way a saved route — which is a list of strings —
+ * can hold one without anyone hand-editing config.json.
+ */
+function splitInline(step: string): { step: string; when: string | null } {
+  const at = step.indexOf("?");
+  if (at === -1) return { step: step.trim(), when: null };
+  return { step: step.slice(0, at).trim(), when: step.slice(at + 1).trim() || null };
 }
 
 export function stepName(spec: RouteStepSpec): string {
-  return typeof spec === "string" ? spec : spec.step;
+  return splitInline(typeof spec === "string" ? spec : spec.step).step;
 }
 
 /** Resolve step specs (ids/roles, optionally with instructions) to adapter ids. */
@@ -84,8 +116,10 @@ export function resolveSteps(
   const instructions: Array<string | null> = [];
   const roles: Array<string | null> = [];
   const onFail: Array<string | null> = [];
+  const when: Array<string | null> = [];
   for (const entry of spec) {
-    const step = stepName(entry);
+    const inline = splitInline(typeof entry === "string" ? entry : entry.step);
+    const step = inline.step;
     const byId = config.agents.find((a) => a.id === step);
     const byRole = config.agents.find((a) => a.role === step && isAdapterId(a.id));
     const cfg = byId ?? byRole;
@@ -105,6 +139,20 @@ export function resolveSteps(
       typeof entry === "object" && entry.role?.trim() ? entry.role.trim().slice(0, 40) : null,
     );
     onFail.push(typeof entry === "object" && entry.onFail?.trim() ? entry.onFail.trim() : null);
+
+    // A condition is checked here, where the mistake is fixable, rather than
+    // at run time where an unreadable one would quietly never match.
+    const cond =
+      (typeof entry === "object" && entry.when?.trim() ? entry.when.trim() : null) ?? inline.when;
+    if (cond) {
+      parseStepCondition(cond); // throws with what it does understand
+      if (when.length === 0) {
+        throw new Error(
+          `the first step can't be conditional ("${cond}") — there's no turn before it to measure`,
+        );
+      }
+    }
+    when.push(cond);
   }
   // onFail targets resolve the same way steps do, and must point BACKWARD:
   // a forward jump on failure would skip work, and a self-jump is a retry
@@ -123,7 +171,7 @@ export function resolveSteps(
     }
     return targetId;
   });
-  return { ids, instructions, roles, onFail: resolvedOnFail };
+  return { ids, instructions, roles, onFail: resolvedOnFail, when };
 }
 
 const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
@@ -206,6 +254,7 @@ export class RouteEngine {
       ...(resolved.onFail.some(Boolean)
         ? { stepOnFail: resolved.onFail, loops: 0, maxLoops: 3 }
         : {}),
+      ...(resolved.when.some(Boolean) ? { stepWhen: resolved.when } : {}),
       current: 0,
       status: "running",
       mode: "static",
@@ -457,13 +506,55 @@ export class RouteEngine {
       return;
     }
 
+    const finished = r.steps[r.current]!;
     r.current += 1;
+    // Conditional steps are decided here, against the turn that just ended:
+    // the reviewer runs when the change was big, and is skipped — visibly,
+    // with the numbers — when it wasn't.
+    while (r.current < r.steps.length) {
+      const skip = await this.skipReason(r, finished);
+      if (!skip) break;
+      this.host.log.append({
+        kind: "route_step",
+        payload: {
+          routeId: r.id,
+          step: r.current,
+          of: r.steps.length,
+          agent: r.steps[r.current],
+          skipped: true,
+          reason: skip,
+        },
+      });
+      r.current += 1;
+    }
     if (r.current >= r.steps.length) {
       this.complete(r);
       return;
     }
     this.write(r);
     await this.beginStep(r);
+  }
+
+  /**
+   * Why the step at `r.current` shouldn't run, or null if it should.
+   *
+   * The facts come from the agent whose turn just ended, and a host that
+   * can't produce them reports a turn that changed nothing rather than an
+   * error — a route shouldn't die because a diff couldn't be read, and
+   * "nothing changed" is the answer a threshold can still be applied to.
+   */
+  private async skipReason(r: RouteState, finished: string): Promise<string | null> {
+    const raw = r.stepWhen?.[r.current];
+    if (!raw) return null;
+    let cond;
+    try {
+      cond = parseStepCondition(raw);
+    } catch {
+      return null; // validated at start(); an unreadable one never blocks work
+    }
+    const facts = await this.host.turnFacts(finished).catch(() => NO_CHANGES);
+    if (conditionHolds(cond, facts)) return null;
+    return `skipped — needs ${describeStepCondition(cond)}, the turn changed ${describeFacts(facts)}`;
   }
 
   private async beginStep(r: RouteState): Promise<void> {

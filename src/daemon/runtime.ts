@@ -98,8 +98,10 @@ import {
   diffSinceSnapshot,
   porcelainStatus,
   workingTree,
+  type TurnDiff,
   type WorkingTree,
 } from "../core/worktree.js";
+import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
 
@@ -256,6 +258,7 @@ export class ProjectRuntime {
       send: (text, agentId) => this.sendMessage(text, agentId, { source: "route" }),
       interrupt: () => this.interrupt({ source: "route" }),
       costTotal: () => this.costs.totalUsd,
+      turnFacts: (agentId) => this.turnFacts(agentId),
       isAdapterId: (id) => {
         const agent = this.agents.get(id);
         return Boolean(agent && isAdapter(agent));
@@ -1642,16 +1645,38 @@ export class ProjectRuntime {
   /** Pre-turn porcelain snapshots, for per-prompt diff attribution. */
   private preTurnTree = new Map<string, string>();
 
+  /**
+   * The diff of each agent's most recent turn, as a promise.
+   *
+   * A route's step conditions ("run the reviewer if more than 200 lines
+   * changed") are decided the moment the turn completes, which is before the
+   * diff has finished being computed. Keeping the promise lets the route wait
+   * for the real numbers instead of reading the previous turn's.
+   */
+  private lastTurnDiff = new Map<string, Promise<TurnDiff | null>>();
+
+  /** What an agent's last turn changed — for route step conditions. */
+  async turnFacts(agentId: string): Promise<TurnFacts> {
+    const diff = await (this.lastTurnDiff.get(agentId) ?? Promise.resolve(null));
+    if (!diff) return NO_CHANGES;
+    return { files: diff.files.map((f) => f.path), added: diff.added, removed: diff.removed };
+  }
+
   /** After a turn: log which files that prompt changed (turn_diff), then learn. */
   private captureTurnDiff(agentId: string): void {
     const before = this.preTurnTree.get(agentId);
     if (before === undefined) {
       // No snapshot (e.g. a turn with no pre-tree) — still worth reading.
+      // The previous turn's diff goes with it: a route asking what this turn
+      // changed must not be handed the last one's numbers.
+      this.lastTurnDiff.delete(agentId);
       this.extractMemory(agentId, []);
       return;
     }
     this.preTurnTree.delete(agentId);
-    void diffSinceSnapshot(this.agentDir(agentId), before)
+    const pending = diffSinceSnapshot(this.agentDir(agentId), before).catch(() => null);
+    this.lastTurnDiff.set(agentId, pending);
+    void pending
       .then((diff) => {
         if (diff) {
           this.log.append({
@@ -1892,15 +1917,18 @@ export class ProjectRuntime {
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
+    // The turn's diff is started before routing hears the turn ended: a step
+    // condition reads those numbers, and a route that advanced first would
+    // read the turn before this one.
+    if (event.kind === "run_complete" && event.agentId) {
+      this.captureTurnDiff(event.agentId);
+      void this.captureAgentDecisions(event.agentId).catch(() => {});
+    }
     this.routes.handleAgentEvent(event);
     // Accumulate the turn's prose so decisions can be mined when it completes.
     if (event.kind === "message" && event.agentId && !event.payload.reasoning) {
       const prev = this.turnText.get(event.agentId) ?? "";
       this.turnText.set(event.agentId, `${prev}\n${String(event.payload.text ?? "")}`.slice(-8000));
-    }
-    if (event.kind === "run_complete" && event.agentId) {
-      this.captureTurnDiff(event.agentId);
-      void this.captureAgentDecisions(event.agentId).catch(() => {});
     }
     if (event.kind === "needs_input") {
       notify({

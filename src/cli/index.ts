@@ -325,7 +325,11 @@ program
 
 program
   .command("routes:save <name> <steps...>")
-  .description('define a named route, e.g. loom routes:save ship planner executor reviewer')
+  .description(
+    'define a named route, e.g. loom routes:save ship planner executor reviewer\n' +
+      "  a step may carry a condition on the previous turn: 'reviewer?lines>200'\n" +
+      "  (changed>N, changed<N, lines>N, lines<N, touched:<glob>, !touched:<glob>)",
+  )
   .action(async (name: string, steps: string[]) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
@@ -2223,7 +2227,9 @@ program
       }
       if (!spec || !words.length) {
         fail(
-          'usage: loom route <name|steps> "<task>"   e.g. loom route planner,executor "add dark mode"\n  (or: loom route --status / --abort)',
+          'usage: loom route <name|steps> "<task>"   e.g. loom route planner,executor "add dark mode"\n' +
+          "  a step runs only if the previous turn meets its condition: 'planner,executor,reviewer?lines>200'\n" +
+          "  (or: loom route --status / --abort)",
         );
       }
 

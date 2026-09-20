@@ -157,6 +157,14 @@ export type RouteStepSpec =
        * execute" as data. Guarded by RouteState.maxLoops.
        */
       onFail?: string;
+      /**
+       * Run this step only when the previous turn meets this condition:
+       * `changed>10`, `lines>200`, `touched:src/db/**`. Mechanical facts from
+       * the turn's diff, never a judgement — "send big changes to a reviewer
+       * and small ones straight on" without a person deciding each time.
+       * See core/step-conditions.ts. Written inline too: `reviewer?lines>200`.
+       */
+      when?: string;
     };
 
 /** How shared memory is rendered on handoff. */
@@ -331,6 +339,12 @@ export interface RouteState {
   maxLoops?: number;
   /** Parallel to steps: where each step jumps on error (static routes). */
   stepOnFail?: Array<string | null>;
+  /**
+   * Parallel to steps: the condition each step needs from the previous turn,
+   * or null when it always runs. Stored as written so the thread can say why
+   * a step was skipped in the same words the route was defined in.
+   */
+  stepWhen?: Array<string | null>;
   /** Project cost total when the route started (internal baseline). */
   costStartUsd?: number;
   /** Spend attributed to this route (set when it ends). */

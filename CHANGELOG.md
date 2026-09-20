@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Routes: steps that decide whether to run
+
+- **A route step can carry a condition on the previous turn** and is skipped
+  when it doesn't hold: `loom route 'planner,executor,reviewer?lines>200' "…"`,
+  or `{ "step": "reviewer", "when": "lines>200" }` in the project config.
+  Conditions read the turn's own diff — `changed>N`, `changed<N`, `lines>N`,
+  `lines<N`, `touched:<glob>`, `!touched:<glob>` — and nothing else: a
+  condition must be something Loom measured, never a judgement about the work.
+  Unreadable ones are refused when the route is defined rather than quietly
+  never matching, the first step can't be conditional (no turn to measure),
+  and a skipped step appears in the thread with the numbers that decided it.
+  Skipping isn't failing — the route completes.
+
 ### A pull request you asked for
 
 - **Open PR on a review card.** With branch-per-card on, a card in review shows

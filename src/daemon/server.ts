@@ -3501,7 +3501,11 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         const { task, spec, router, maxHops } = (req.body ?? {}) as {
           task?: string;
-          spec?: string | Array<string | { step: string; role?: string; instruction?: string; onFail?: string }>;
+          spec?:
+            | string
+            | Array<
+                string | { step: string; role?: string; instruction?: string; onFail?: string; when?: string }
+              >;
           router?: "rules" | "llm";
           maxHops?: number;
         };

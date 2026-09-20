@@ -1231,7 +1231,7 @@ a policy, not a mechanic:
   re-drag). Reaching Review logs the exact `gh pr create` command instead of
   running it — pushing publishes, and that stays a human act.
 
-## Routes that loop
+## Routes that loop, and steps that skip
 
 A step can carry `onFail` naming an **earlier** step: when it errors, the route
 re-enters there instead of failing — "review fails → back to execute", as data.
@@ -1240,6 +1240,26 @@ Backward-only (a forward jump would skip work), budgeted at three re-entries
 thread as `route_step {loopedFrom, loop}`. Define and keep pipelines with
 `loom routes:save <name> planner executor reviewer` — validated against the
 roster at save, stored in the project config so they travel with the repo.
+
+A step can also carry a **condition on the previous turn**, and runs only when
+it holds:
+
+```bash
+loom route 'planner,executor,reviewer?lines>200' "tighten the tax rules"
+```
+
+Conditions read the turn's own diff and nothing else — `changed>10`,
+`changed<3`, `lines>200`, `lines<20`, `touched:src/db/**`, `!touched:docs/**` —
+so a route can send a big change to the reviewer and let a small one go
+straight on. That bar is deliberate: a condition must be something the daemon
+*measured*, never a judgement about whether the work was any good; judgement
+stays with the LLM router. Anything else is refused when the route is defined,
+not silently never matched at run time, and the first step can't be
+conditional because there's no turn before it. A skipped step says so in the
+thread with the numbers that decided it — *step 3/3 → reviewer skipped — needs
+more than 200 lines changed, the turn changed 1 file, 4 lines* — and skipping
+is not failing: the route completes. In `.loom/config.json` the same thing is
+`{ "step": "reviewer", "when": "lines>200" }`.
 
 ## Security model
 

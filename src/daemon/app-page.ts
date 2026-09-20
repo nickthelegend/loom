@@ -3702,6 +3702,10 @@ ${BRAND_SPRITE}
     }
     if (e.kind === "route_step") {
       var pos = p.of ? "step " + (Number(p.step) + 1) + "/" + Number(p.of) : "hop " + (Number(p.step) + 1);
+      if (p.skipped) {
+        return '<div class="sys" style="opacity:.65">\\u2937 ' + pos + " \\u2192 " + esc(p.agent) +
+          " " + esc(p.reason || "skipped") + "</div>";
+      }
       return '<div class="sys">\\u25b8 ' + pos + " \\u2192 " + esc(p.agent) +
         (p.reason ? ' <span style="opacity:.7">(' + esc(p.reason) + ")</span>" : "") + "</div>";
     }
@@ -6568,7 +6572,7 @@ ${BRAND_SPRITE}
           return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>";
         }).join("") +
         '<option value="__custom">custom steps&hellip;</option></select>' +
-        '<input id="rsteps" placeholder="steps e.g. planner,executor" style="display:none">' +
+        '<input id="rsteps" placeholder="steps e.g. planner,executor,reviewer?lines>200" style="display:none">' +
         '<input id="rtask" placeholder="what should they do?">' +
         '<div class="row"><button class="btn primary" id="rgo">Start route</button></div>';
     }

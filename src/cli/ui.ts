@@ -88,6 +88,11 @@ export function formatEvent(e: LoomEvent): string | null {
       const n = Number(e.payload.step) + 1;
       const of = e.payload.of ? `/${Number(e.payload.of)}` : "";
       const reason = e.payload.reason ? pc.dim(`  (${String(e.payload.reason)})`) : "";
+      // A skipped step is still a step that happened to the route, so it gets
+      // a line — with the numbers that decided it.
+      if (e.payload.skipped) {
+        return pc.dim(`  ⤼ step ${n}${of} → ${String(e.payload.agent)} ${String(e.payload.reason ?? "skipped")}`);
+      }
       return pc.cyan(`  ➤ ${e.payload.of ? "step" : "hop"} ${n}${of} → ${String(e.payload.agent)}`) + reason;
     }
     case "route_paused":
