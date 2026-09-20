@@ -345,3 +345,80 @@ describe("web app · transcript view", () => {
     expect(copyAt).toBeLessThan(cardAt);
   });
 });
+
+/**
+ * Orchestrate could pick who runs the goal but never what they run it on.
+ * The model picker existed — for the one agent the chat composer was aimed
+ * at, which in Orchestrate is nobody.
+ */
+describe("web app · picking models in Orchestrate", () => {
+  it("gives the orchestrator and every worker a model chip", () => {
+    expect(APP_HTML).toContain("function modelBadge(");
+    expect(APP_HTML).toContain('data-modelof="');
+    // On the orchestrator button…
+    expect(APP_HTML).toContain("permBadge(permOf(lead), lead.id) + modelBadge(lead)");
+    // …and on each worker chip.
+    expect(APP_HTML).toContain("permBadge(permOf(a), a.id) + modelBadge(a)");
+    expect(APP_HTML).toContain("function wireModelBadges(");
+    expect(APP_HTML).toContain("wireModelBadges(el);");
+  });
+
+  /**
+   * openModelMenu read state.selected, which Orchestrate deliberately does
+   * not set — it has a cast, not a selection. A chip that opened the wrong
+   * agent's list would be worse than no chip.
+   */
+  it("opens the list for the agent whose chip was clicked", () => {
+    expect(APP_HTML).toContain("function openModelMenu(who){");
+    expect(APP_HTML).toContain("var agentId = who || state.selected;");
+    expect(APP_HTML).toContain("openModelMenu(id);");
+    // Clicking the same chip twice closes it, which needs the menu to
+    // remember whose it is.
+    expect(APP_HTML).toContain('menuState = { kind: "modelmenu", agent: agentId');
+    expect(APP_HTML).toMatch(/menuState\.kind === "modelmenu" && menuState\.agent === id/);
+  });
+
+  /**
+   * A roster of CLIs is whatever you happened to install. An API model is a
+   * name off a list, so there was no way to get one into a run without the
+   * CLI — and the one it lands in, with no model chosen, is the one state it
+   * cannot run in.
+   */
+  it("adds an API model as a worker, and refuses to start one that has none", () => {
+    expect(APP_HTML).toContain('id="cowadd"');
+    expect(APP_HTML).toContain("function addModelWorker(");
+    expect(APP_HTML).toContain('JSON.stringify({ kind: "model" })');
+    // Added, then asked which model — not left as a chip that fails on send.
+    expect(APP_HTML).toContain("if (a && a.id) openModelMenu(a.id);");
+    // The roster is re-read before anything is drawn off it.
+    expect(APP_HTML).toContain("return refresh().then(function(){ return a; });");
+    expect(APP_HTML).toContain('return api("/api/projects/" + pid).then(function(j){');
+    // And the send guard covers the orchestrator as well as the workers.
+    expect(APP_HTML).toContain('return a.kind === "model" && !a.model;');
+    expect(APP_HTML).toContain("cast.concat(lead ? [lead] : [])");
+    expect(APP_HTML).toContain("openModelMenu(blank[0].id);");
+  });
+
+  /** A provider-qualified id is long; the chip shows the part that names it. */
+  it("shortens a long model id without dropping what identifies it", () => {
+    expect(APP_HTML).toContain("function shortModel(");
+    expect(APP_HTML).toContain('var cut = v.lastIndexOf("/");');
+    expect(APP_HTML).toContain("v.length > 24 ?");
+  });
+});
+
+/**
+ * The model list has three sources and the footer named two of them. A
+ * `model` agent's list is asked of the providers, and that case fell through
+ * to "no model list for this agent" — printed directly above 202 of them.
+ */
+describe("web app · what the model list says about itself", () => {
+  it("says the providers were asked, when they were", () => {
+    expect(APP_HTML).toContain('j.source === "api" ? "asked every provider with a key');
+  });
+
+  /** A CLI has a default. A model agent has no such thing to offer. */
+  it("does not offer a model agent a default it cannot have", () => {
+    expect(APP_HTML).toContain('var head = cur.kind === "model" ? []');
+  });
+});

@@ -1880,6 +1880,9 @@ window.__loomPageRev="%%BUILD_REV%%";
   .cowchip.on{color:var(--foreground);border-color:color-mix(in srgb, var(--primary) 30%, transparent);
     background:color-mix(in srgb, var(--primary) 11%, transparent)}
   .cowchip:not(.on) .brand,.cowchip:not(.on) .agmono{opacity:.4;filter:grayscale(1)}
+  .cowchip.cowadd{border-style:dashed;gap:3px}
+  .cowchip.cowadd svg{width:11px;height:11px}
+  .cowchip.cowadd:disabled{opacity:.5;cursor:default}
   .cstep{display:inline-flex;align-items:center;height:24px;border:1px solid var(--border);border-radius:99px;overflow:hidden}
   .cstep button{width:24px;height:22px;border:0;background:transparent;color:var(--muted-foreground);cursor:pointer;
     font:inherit;font-size:13px;line-height:1}
@@ -2091,6 +2094,11 @@ window.__loomPageRev="%%BUILD_REV%%";
     color:var(--muted-foreground);border:1px solid var(--border);background:color-mix(in srgb, var(--muted) 55%, transparent)}
   button.pbdg,.pbdg[data-permof]{cursor:pointer}
   .pbdg[data-permof]:hover{filter:brightness(1.15)}
+  .pbdg[data-modelof]{cursor:pointer;text-transform:none;letter-spacing:0;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pbdg[data-modelof]:hover{filter:brightness(1.15)}
+  /* A model agent with no model can't take a turn. Say so before the run does. */
+  .pbdg.mbdg.needs{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 45%, transparent);
+    background:color-mix(in srgb, var(--warn) 12%, transparent)}
   /* permission menu rows: a title, what it means on this agent, the flags it runs with */
   .cmi.pm{align-items:flex-start;padding:8px 9px}
   .cmi.pm .ic{margin-top:3px}
@@ -8053,7 +8061,9 @@ ${BRAND_SPRITE}
     }
 
     function refresh(){
-      api("/api/projects/" + pid).then(function(j){
+      // Returned, so a caller that changed the roster can wait for the answer
+      // before redrawing off it.
+      return api("/api/projects/" + pid).then(function(j){
         state.project = j.project;
         drawStatus();
       }).catch(function(err){ toast(err.message); });
@@ -8673,13 +8683,15 @@ ${BRAND_SPRITE}
         .catch(function(){ closeMenu(); });
     }
 
-    function openModelMenu(){
-      var agentId = state.selected;
+    function openModelMenu(who){
+      // Orchestrate has no "selected" agent \u2014 it has a cast \u2014 so the caller
+      // names the one it means. Chat still means whoever the composer is aimed at.
+      var agentId = who || state.selected;
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === agentId; })[0];
       if (!cur || cur.tier === "bridge") { toast("pick an adapter first \\u2014 bridges choose their own model"); return; }
       var m = document.getElementById("cmenu"); if (!m) return;
-      menuState = { kind: "modelmenu", at: 0, sel: 0, items: [] };
+      menuState = { kind: "modelmenu", agent: agentId, at: 0, sel: 0, items: [] };
       m.style.display = "block"; m.className = "cmenu";
       m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + '</div>' +
         '<input class="cmsearch" id="cmsearch" placeholder="search real models\\u2026" spellcheck="false" autocomplete="off">' +
@@ -8698,7 +8710,8 @@ ${BRAND_SPRITE}
         var f = (filter || "").trim().toLowerCase();
         var shown = f ? allModels.filter(function(mm){ return mm.toLowerCase().indexOf(f) >= 0; }) : allModels;
         var cap = 200; // don't paint 500 rows — the search narrows it
-        var head = [{ label: "Default", sub: cur.kind + "'s own choice", value: "" }];
+        var head = cur.kind === "model" ? []
+          : [{ label: "Default", sub: cur.kind + "'s own choice", value: "" }];
         if (!f) head.push({ label: "Custom\\u2026", value: "__custom__", plus: true });
         var rows = head.concat(shown.slice(0, cap).map(function(mm){ return { label: mm, value: mm }; }));
         var list = document.getElementById("cmlist"); if (!list) return;
@@ -8720,6 +8733,7 @@ ${BRAND_SPRITE}
         var mn = document.getElementById("cmenu");
         if (mn && j && j.source){
           var note = j.source === "cli" ? "asked " + esc(cur.kind || "the tool")
+            : j.source === "api" ? "asked every provider with a key \\u2014 " + (j.count || 0) + " models"
             : j.source === "builtin" ? esc(cur.kind || "this tool") + " can\\u2019t list models \\u2014 these are its documented aliases"
             : "no model list for this agent";
           var ft = document.createElement("div");
@@ -9603,16 +9617,21 @@ ${BRAND_SPRITE}
         '<span class="colbl">Orchestrator</span>' +
         '<button class="cagent" id="corchpick" type="button" title="who plans the goal and reviews the results">' +
           agentGlyph(lead.kind, lead.id) + '<span class="can">' + esc(agentLabel(lead.kind, lead.id)) + "</span>" +
-          permBadge(permOf(lead), lead.id) +
+          permBadge(permOf(lead), lead.id) + modelBadge(lead) +
           '<span class="cchev">' + ICONS.chevron + "</span></button>" +
         '<span class="colbl">Workers</span>' +
         '<span class="cowk" id="cowk">' + roster.map(function(a){
           var on = !c.off[a.id];
           return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '" title="' +
             esc(a.id + (a.role ? " \\u00b7 " + a.role : "")) + '">' + agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
-            // each worker's mode, and the way to change it without leaving the row
-            permBadge(permOf(a), a.id) + "</button>";
-        }).join("") + "</span>" +
+            // each worker's mode and model, changeable without leaving the row
+            permBadge(permOf(a), a.id) + modelBadge(a) + "</button>";
+        }).join("") +
+          // A roster of CLIs is whatever you happen to have installed. An API
+          // model is a name off a list, so it can be added here, in the row
+          // where you are already deciding who runs the goal.
+          '<button type="button" class="cowchip cowadd" id="cowadd" title="add an API model as a worker">' +
+            ICONS.plus + "model</button>" + "</span>" +
         '<span class="colbl">Parallel</span>' +
         '<span class="cstep" title="how many tasks run at once"><button type="button" data-step="-1" aria-label="fewer in parallel"' + (c.parallel <= 1 ? " disabled" : "") + ">\\u2212</button>" +
           '<span class="cpar" id="cpar">' + c.parallel + "</span>" +
@@ -9630,6 +9649,8 @@ ${BRAND_SPRITE}
           drawOrchControls();
         };
       });
+      var add = document.getElementById("cowadd");
+      if (add) add.onclick = function(){ addModelWorker(add); };
       Array.prototype.forEach.call(el.querySelectorAll("[data-runon]"), function(b){
         b.onclick = function(){ c.runOn = b.getAttribute("data-runon"); drawOrchControls(); };
       });
@@ -9640,6 +9661,25 @@ ${BRAND_SPRITE}
         };
       });
       wirePermBadges(el);
+      wireModelBadges(el);
+    }
+    /**
+     * A model agent joins the cast with no model chosen, which is the one
+     * state it cannot run in \u2014 so adding one opens its model picker
+     * immediately rather than leaving a chip that fails on send.
+     */
+    function addModelWorker(btn){
+      btn.disabled = true;
+      api("/api/projects/" + pid + "/agents", { method: "POST", body: JSON.stringify({ kind: "model" }) })
+        .then(function(a){
+          return refresh().then(function(){ return a; });
+        })
+        .then(function(a){
+          drawOrchControls();
+          if (a && a.id) openModelMenu(a.id);
+        })
+        .catch(function(e){ toast(e.message); })
+        .then(function(){ var b = document.getElementById("cowadd"); if (b) b.disabled = false; });
     }
     /**
      * Phase 5 (D69, D73): where the goal runs \u2014 this machine, or one of the
@@ -9656,6 +9696,18 @@ ${BRAND_SPRITE}
           (r.deviceId ? ' title="' + esc((r.mine ? "your runner" : (r.github || "a teammate") + "\u2019s shared runner") + " \u00b7 " + (r.kinds || []).join(", ")) + '"' : "") + ">" +
           esc(r.deviceId ? runnerName(r) : r.label) + (r.deviceId && !r.mine ? " \u00b7 " + esc(r.github || "") : "") + "</button>";
       }).join("") + "</span>";
+    }
+    /** Likewise for the model chip: it picks that agent's model, not the chip's action. */
+    function wireModelBadges(el){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-modelof]"), function(b){
+        b.onmousedown = function(ev){ ev.stopPropagation(); };
+        b.onclick = function(ev){
+          ev.stopPropagation(); ev.preventDefault();
+          var id = b.getAttribute("data-modelof");
+          if (menuState && menuState.kind === "modelmenu" && menuState.agent === id) { closeMenu(); return; }
+          openModelMenu(id);
+        };
+      });
     }
     /** A mode badge inside a chip opens that agent's permissions, not the chip's own action. */
     function wirePermBadges(el){
@@ -9707,8 +9759,18 @@ ${BRAND_SPRITE}
       var goal = refs.length ? refs.join("\\n") + (text ? "\\n\\n" + text : "") : text;
       var roster = orchRoster(), c = orchCfg();
       if (!roster.length) { toast("no adapters in this project to orchestrate"); return; }
-      var workers = roster.filter(function(a){ return !c.off[a.id]; }).map(function(a){ return a.id; });
+      var cast = roster.filter(function(a){ return !c.off[a.id]; });
+      var workers = cast.map(function(a){ return a.id; });
       if (!workers.length) { toast("pick at least one worker"); return; }
+      // A model agent with no model is a name for nothing. Catch it here, where
+      // the chip that fixes it is on screen, rather than three tasks into a run.
+      var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0];
+      var blank = cast.concat(lead ? [lead] : []).filter(function(a){ return a.kind === "model" && !a.model; });
+      if (blank.length) {
+        toast(blank[0].id + " has no model yet \u2014 click its chip and pick one");
+        openModelMenu(blank[0].id);
+        return;
+      }
       var btn = document.getElementById("orchsend");
       // One goal runs at a time: a second one waits in the queue and starts
       // itself when the first finishes (edit or reorder it while it waits).
@@ -11506,6 +11568,26 @@ ${BRAND_SPRITE}
     return i < 0 ? [label, ""] : [label.slice(0, i), label.slice(i + 3)];
   }
   /** The tiny mode badge. With an agent id it's also the way to change it. */
+  /**
+   * The model an agent will actually run, as a chip you can click. A CLI has
+   * its own default and the chip says so; a model agent has no default at
+   * all \u2014 it is a name off a provider's list \u2014 so until one is picked the
+   * chip says that, loudly, because that agent cannot take a single turn.
+   */
+  function modelBadge(a){
+    var needs = a.kind === "model" && !a.model;
+    var txt = a.model ? shortModel(a.model) : (needs ? "pick a model" : "default");
+    return '<span class="pbdg mbdg' + (needs ? " needs" : "") + '" data-modelof="' + esc(a.id) + '"' +
+      ' title="model: ' + esc(a.model || (needs ? "none chosen \u2014 this agent can\u2019t run yet" : a.kind + "\u2019s own choice")) +
+      ' \u2014 click to change">' + esc(txt) + "</span>";
+  }
+  /** Provider-qualified ids are long; the tail is the part that identifies it. */
+  function shortModel(m){
+    var v = String(m);
+    var cut = v.lastIndexOf("/");
+    if (cut >= 0) v = v.slice(cut + 1);
+    return v.length > 24 ? v.slice(0, 23) + "\u2026" : v;
+  }
   function permBadge(mode, agentId){
     return '<span class="pbdg ' + esc(mode) + '"' + (agentId ? ' data-permof="' + esc(agentId) + '"' : "") +
       ' title="permissions: ' + esc(PERM_NAMES[mode] || mode) + (agentId ? " \\u2014 click to change" : "") + '">' + esc(mode) + "</span>";
