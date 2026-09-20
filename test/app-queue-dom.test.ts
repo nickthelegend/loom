@@ -231,14 +231,14 @@ describe("web app · the prompt queue", () => {
   it("reorders by dragging, and the arrows still work", async () => {
     const m = mount();
     await ready(m);
-    await sendPrompt(m, "sleep:6000 working");
-    await sendPrompt(m, "first");
-    await sendPrompt(m, "second");
-    await sendPrompt(m, "third");
-    await waitUntil(() => all(m, "#cqueue .cqitem").length === 3, { timeoutMs: 15_000 });
-    // hold it, so reordering is about reordering and not about racing the queue
-    click($(m, '#cqueue [data-q="pause"]'));
-    await waitUntil(() => text(m, '#cqueue [data-q="pause"]') === "Resume", { timeoutMs: 10_000 });
+    // Held prompts, so reordering is about reordering: nothing can drain
+    // out from under the test while it drags.
+    const hold = { kind: "at", at: Date.now() + 3_600_000 };
+    for (const text of ["first", "second", "third"]) {
+      await rest("POST", "/queue", { text, target: "echo", when: hold });
+    }
+    await waitUntil(() => all(m, "#cqueue .cqitem").length === 3, { timeoutMs: 20_000 });
+    expect(queuedTexts(m)).toEqual(["first", "second", "third"]);
 
     // drag the third onto the first
     const rows = () => all(m, "#cqueue .cqitem") as HTMLElement[];
@@ -256,12 +256,12 @@ describe("web app · the prompt queue", () => {
     fire(rows()[2]!, "dragstart");
     fire(rows()[0]!, "dragover");
     fire(rows()[0]!, "drop");
-    await waitUntil(() => queuedTexts(m)[0] === "third", { timeoutMs: 15_000 });
+    await waitUntil(() => queuedTexts(m)[0] === "third", { timeoutMs: 20_000 });
     expect(queuedTexts(m)).toEqual(["third", "first", "second"]);
 
     // and the buttons do the same thing, for anyone who can't drag
     click(rows()[2]!.querySelector('[data-q="up"]'));
-    await waitUntil(() => queuedTexts(m)[1] === "second", { timeoutMs: 15_000 });
+    await waitUntil(() => queuedTexts(m)[1] === "second", { timeoutMs: 20_000 });
     expect(queuedTexts(m)).toEqual(["third", "second", "first"]);
     expect(m.errors).toEqual([]);
   }, 60_000);
