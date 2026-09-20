@@ -134,7 +134,12 @@ import {
   writeCloudSettings,
 } from "./relay.js";
 import { packCredentials, toB64, type RelayTransport } from "../core/relay-protocol.js";
-import { approvalEndpoint, setApprovalEndpoint, type ApprovalDecision } from "../core/approvals.js";
+import {
+  approvalEndpoint,
+  setApprovalBroker,
+  setApprovalEndpoint,
+  type ApprovalDecision,
+} from "../core/approvals.js";
 import { PERMISSION_PROFILES } from "../core/permissions.js";
 import { loadPolicy } from "../core/team-policy.js";
 import { parseCondition, parseTarget, QueueItemGone } from "../core/prompt-queue.js";
@@ -395,6 +400,71 @@ export class LoomDaemon {
     }
   >();
 
+  /**
+   * Put a tool use in front of a person and wait.
+   *
+   * One implementation for both callers: a CLI agent asking over HTTP through
+   * the MCP approval server, and a model agent asking from inside this
+   * process (core/approvals.ts registers this as the broker). The card, the
+   * thread entry, the timeout and the audit trail are the same either way,
+   * because "who is asking" should not change what you are shown.
+   */
+  private async askHuman(req: {
+    project: string;
+    agent: string;
+    tool: string;
+    input: unknown;
+    summary?: string;
+  }): Promise<ApprovalDecision> {
+    const rt = await this.runtime(req.project).catch(() => null);
+    if (!rt) return { behavior: "deny", message: "project not open" };
+    const id = crypto.randomBytes(6).toString("hex");
+    const tool = req.tool.slice(0, 120);
+    const preview = (req.summary ?? JSON.stringify(req.input ?? {})).slice(0, 4000);
+    const chat = rt.chatOf(req.agent);
+    rt.log.append({
+      kind: "approval",
+      agentId: req.agent,
+      ...(chat ? { chat } : {}),
+      payload: { phase: "requested", approvalId: id, tool, input: preview },
+    });
+    return new Promise<ApprovalDecision>((resolve) => {
+      const settle = (d: ApprovalDecision) => {
+        clearTimeout(timer);
+        if (!this.approvals.delete(id)) return;
+        rt.log.append({
+          kind: "approval",
+          agentId: req.agent,
+          ...(chat ? { chat } : {}),
+          payload: { phase: "decided", approvalId: id, tool, behavior: d.behavior, ...(d.message ? { message: d.message } : {}) },
+        });
+        resolve(d);
+      };
+      const timer = setTimeout(
+        () => settle({ behavior: "deny", message: "No answer within 30 minutes — denied." }),
+        30 * 60_000,
+      );
+      this.approvals.set(id, {
+        id,
+        projectId: req.project,
+        agent: req.agent,
+        tool,
+        input: req.input ?? {},
+        createdAt: Date.now(),
+        settle,
+      });
+    });
+  }
+
+  /** Deny anything this agent was still waiting on — it has gone away. */
+  private abandonApprovals(projectId: string, agent: string): void {
+    for (const a of [...this.approvals.values()]) {
+      if (a.projectId === projectId && a.agent === agent) {
+        a.settle({ behavior: "deny", message: "The agent stopped waiting." });
+      }
+    }
+  }
+
   /** Loom Cloud relay, when enabled. See daemon/relay.ts. */
   private relay: RelayBridge | null = null;
   private relayError: string | null = null;
@@ -567,39 +637,16 @@ export class LoomDaemon {
       const info = b.project ? findProject(String(b.project)) : undefined;
       if (!info) return void res.status(400).json({ error: "unknown project" });
       void (async () => {
-        const rt = await this.runtime(info.id).catch(() => null);
-        if (!rt) return void res.status(400).json({ error: "project not open" });
-        const id = crypto.randomBytes(6).toString("hex");
-        const agent = String(b.agent ?? "agent");
-        const tool = String(b.tool ?? "tool").slice(0, 120);
-        const preview = JSON.stringify(b.input ?? {}).slice(0, 4000);
-        const chat = rt.chatOf(agent);
-        rt.log.append({
-          kind: "approval",
-          agentId: agent,
-          ...(chat ? { chat } : {}),
-          payload: { phase: "requested", approvalId: id, tool, input: preview },
-        });
-        const decision = await new Promise<ApprovalDecision>((resolve) => {
-          const timer = setTimeout(() => settle({ behavior: "deny", message: "No answer within 30 minutes — denied." }), 30 * 60_000);
-          const settle = (d: ApprovalDecision) => {
-            clearTimeout(timer);
-            if (!this.approvals.delete(id)) return;
-            rt.log.append({
-              kind: "approval",
-              agentId: agent,
-              ...(chat ? { chat } : {}),
-              payload: { phase: "decided", approvalId: id, tool, behavior: d.behavior, ...(d.message ? { message: d.message } : {}) },
-            });
-            resolve(d);
-          };
-          this.approvals.set(id, { id, projectId: info.id, agent, tool, input: b.input ?? {}, createdAt: Date.now(), settle });
-          req.on("close", () => {
-            if (!res.writableEnded) settle({ behavior: "deny", message: "The agent stopped waiting." });
-          });
-        });
-        if (!res.writableEnded) res.json(decision);
+        const pending = await this.askHuman({
+          project: info.id,
+          agent: String(b.agent ?? "agent"),
+          tool: String(b.tool ?? "tool"),
+          input: b.input ?? {},
+        }).catch((err) => ({ behavior: "deny" as const, message: String((err as Error).message) }));
+        if (!res.writableEnded) res.json(pending);
       })();
+      // An agent that hangs up has stopped waiting; don't hold the card open.
+      req.on("close", () => this.abandonApprovals(info.id, String(b.agent ?? "agent")));
     });
 
     // Everything else requires a bearer token.
@@ -4419,6 +4466,8 @@ export class LoomDaemon {
 
     this.wss = this.attachWs(this.server!);
     setApprovalEndpoint(`http://127.0.0.1:${this.port}`);
+    // In-process agents ask the same way, without the HTTP round trip.
+    setApprovalBroker((req) => this.askHuman(req));
 
     // Fan every log record out to connected clients (the Console tab).
     this.unstreamLogs = this.streamLogs();
@@ -4662,6 +4711,12 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    // A broker pointing at a closed daemon would leave the next adapter
+    // waiting on a card nobody will ever see.
+    setApprovalBroker(null);
+    for (const a of [...this.approvals.values()]) {
+      a.settle({ behavior: "deny", message: "the daemon is shutting down" });
+    }
     await this.team.stop().catch(() => {});
     await this.relay?.close().catch(() => {});
     this.relay = null;

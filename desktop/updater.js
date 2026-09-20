@@ -64,6 +64,25 @@ export async function macAssist(opts = {}) {
   const version = opts.version ?? (await electron()).app.getVersion();
   const mac = opts.mac ?? (await import("./updater-mac.js"));
 
+  // Installed by Homebrew? Then Homebrew updates it. Downloading a dmg over a
+  // copy the package manager is tracking is how you end up with brew
+  // reinstalling the old one next week.
+  const brew = opts.brew !== undefined ? opts.brew : (mac.brewCask?.() ?? null);
+  if (brew) {
+    const r = await say.showMessageBox({
+      type: "info",
+      message: `Loom Desktop ${version} was installed with Homebrew`,
+      detail: `Homebrew owns this copy, so it updates it:\n\n    ${brew.command}\n\nLoom won't download over it.`,
+      buttons: ["Copy command", "Close"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (r.response === 0) {
+      await (opts.copy ?? (async (t) => (await electron()).clipboard.writeText(t)))(brew.command);
+    }
+    return { updated: false, reason: "homebrew", command: brew.command };
+  }
+
   let release;
   try {
     release = await mac.latestRelease();

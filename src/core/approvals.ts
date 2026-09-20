@@ -75,3 +75,51 @@ export interface ApprovalDecision {
   updatedInput?: Record<string, unknown>;
   message?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Asking from inside the daemon
+// ---------------------------------------------------------------------------
+//
+// The MCP path above exists because a CLI agent is a separate process: it has
+// to reach the daemon over HTTP to ask anything. A model agent
+// (adapters/model.ts) runs INSIDE the daemon, so it needs the same question
+// answered by the same person in the same place — without the round trip.
+//
+// The daemon registers a broker when it starts listening. Until it does, and
+// in a bare adapter with no daemon at all (a script, a test), there is nobody
+// to ask — and the answer to "may I write this file" with nobody to ask is
+// no. A tool that silently proceeds because the UI wasn't wired up would be
+// the worst failure mode this file could have.
+
+export interface ApprovalRequest {
+  project: string;
+  agent: string;
+  tool: string;
+  input: unknown;
+  /** Shown in the card instead of raw JSON, when the tool can say it better. */
+  summary?: string;
+}
+
+export type ApprovalBroker = (req: ApprovalRequest) => Promise<ApprovalDecision>;
+
+let broker: ApprovalBroker | null = null;
+
+export function setApprovalBroker(fn: ApprovalBroker | null): void {
+  broker = fn;
+}
+
+export function hasApprovalBroker(): boolean {
+  return broker !== null;
+}
+
+/** Ask the human. Denies when there is no human to ask. */
+export async function requestApproval(req: ApprovalRequest): Promise<ApprovalDecision> {
+  if (!broker) {
+    return { behavior: "deny", message: "there's nobody to ask — no daemon is running this project" };
+  }
+  try {
+    return await broker(req);
+  } catch (err) {
+    return { behavior: "deny", message: `the approval didn't complete: ${String((err as Error).message)}` };
+  }
+}

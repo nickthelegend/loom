@@ -32,10 +32,17 @@
 import type { SendInput } from "../types.js";
 import {
   MAX_HOPS,
-  READ_TOOLS,
+  applyRun,
+  applyWrite,
+  describeWrite,
+  isWriteTool,
   runReadTool,
+  toolsFor,
   type ToolCall,
+  type ToolResult,
 } from "../core/model-tools.js";
+import { requestApproval } from "../core/approvals.js";
+import { permissionFor } from "../core/permissions.js";
 import {
   chatUrl,
   explainStatus,
@@ -73,6 +80,25 @@ export interface ModelAdapterOptions {
    * that can read your repository should be a decision, not a default.
    */
   tools?: boolean;
+  /**
+   * Let it write files too. Every write is a card you allow or deny, unless
+   * the agent's permission mode is `bypass`.
+   */
+  write?: boolean;
+  /**
+   * Commands it may run, as prefixes: `["npm test", "npx tsc --noEmit"]`.
+   * Without this there is no `run` tool at all — a shell a model can reach
+   * is not something to have by default, and "allowed: nothing" is a tool
+   * that lies.
+   */
+  run?: string[];
+  /** bypass | auto | ask. See core/permissions.ts. */
+  permissions?: string;
+  /**
+   * Which project this agent belongs to, for the approval card. Set by the
+   * runtime when it builds the agent — the same field every adapter gets.
+   */
+  loomProject?: string;
 }
 
 const DEFAULT_HISTORY = 24;
@@ -138,13 +164,76 @@ export class ModelAdapter extends AdapterBase {
     this.abort?.abort();
   }
 
+  /** The tools this agent may be offered — only ones it can really use. */
+  private tools() {
+    if (!this.opts.tools) return [];
+    return toolsFor({
+      ...(this.opts.write ? { write: true } : {}),
+      ...(this.opts.run?.length ? { run: this.opts.run } : {}),
+    });
+  }
+
+  /**
+   * Run one tool call, asking first when the call changes something.
+   *
+   * `bypass` is the only mode that doesn't ask. `auto` and `ask` both do —
+   * which is stricter than the CLI mapping, where `auto` lets an agent edit
+   * freely, and deliberately so: a CLI in auto is one you installed and
+   * signed into, and this is a model you picked off a list an hour ago.
+   */
+  private async runTool(call: ToolCall): Promise<ToolResult> {
+    if (!isWriteTool(call.name)) return runReadTool(this.projectDir, call);
+
+    const mode = permissionFor("model", this.opts as Record<string, unknown>);
+    if (mode !== "bypass") {
+      const summary =
+        call.name === "write_file"
+          ? describeWrite(this.projectDir, call)
+          : `run ${String(call.args.command ?? "")}`;
+      const decision = await requestApproval({
+        project: this.opts.loomProject ?? "",
+        agent: this.id,
+        tool: call.name,
+        input: call.args,
+        summary,
+      });
+      if (decision.behavior !== "allow") {
+        const why = decision.message ? `: ${decision.message}` : "";
+        return {
+          id: call.id,
+          name: call.name,
+          content: `Denied by the person${why}. Do not try again; say what you would have done instead.`,
+          summary: `${call.name} denied${why}`,
+          ok: false,
+        };
+      }
+    }
+
+    if (call.name === "write_file") {
+      const result = applyWrite(this.projectDir, call);
+      // The same event every other adapter emits when it edits: the turn diff
+      // and the file tree are built from these.
+      if (result.ok) this.emit({ kind: "file_edit", payload: { path: String(call.args.path ?? "") } });
+      return result;
+    }
+    return applyRun(this.projectDir, call, this.opts.run ?? []);
+  }
+
   /** Loom's memory file is the system prompt here — there's nowhere else to put it. */
   private systemPrompt(): string {
     return [
       this.opts.system,
       `You are "${this.id}", one agent in a Loom project.`,
       this.opts.tools
-        ? "You can read this project with read_file, list_files and search. Read before you describe code — a guess about a file you have not opened is worse than saying you have not opened it. You cannot write files or run commands."
+        ? [
+            "You can read this project with read_file, list_files and search. Read before you describe code — a guess about a file you have not opened is worse than saying you have not opened it.",
+            this.opts.write
+              ? "You can write files with write_file. It replaces the whole file, so read it first unless you are creating it, and say in `why` what the change does — a person sees that and decides."
+              : "You cannot write files.",
+            this.opts.run?.length
+              ? `You can run: ${this.opts.run.join(", ")}. Nothing else, and there is no shell.`
+              : "You cannot run commands.",
+          ].join(" ")
         : "",
     ]
       .filter(Boolean)
@@ -243,7 +332,7 @@ export class ModelAdapter extends AdapterBase {
         })),
       });
       for (const call of step.calls) {
-        const result = runReadTool(this.projectDir, call);
+        const result = await this.runTool(call);
         this.emit({
           kind: "tool_call",
           payload: { name: call.name, args: call.args, summary: result.summary, ok: result.ok },
@@ -310,7 +399,7 @@ export class ModelAdapter extends AdapterBase {
           ...(this.opts.temperature !== undefined ? { temperature: this.opts.temperature } : {}),
           // Offered only when the project asked for it, and never past the
           // hop budget — the last request of a turn must be an answer.
-          ...(this.opts.tools && hop < MAX_HOPS ? { tools: READ_TOOLS } : {}),
+          ...(this.tools().length && hop < MAX_HOPS ? { tools: this.tools() } : {}),
         }),
       });
     } catch (err) {

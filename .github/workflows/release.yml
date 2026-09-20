@@ -210,3 +210,36 @@ jobs:
             gh release create "$TAG" out/* --title "Loom $TAG" $NOTES
           fi
           gh release view "$TAG" --json assets --jq '.assets[].name'
+      # The Homebrew cask carries the version and both checksums. Hand-editing
+      # it after each release is a step someone forgets, and a stale sha256 is
+      # an install that fails with a checksum mismatch — so it's derived from
+      # the artifacts that were just published, in the same job that published
+      # them.
+      - name: Update the Homebrew cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          ARM=$(awk '/-arm64\.dmg$/ {print $1}' out/SHA256SUMS.txt)
+          INTEL=$(awk '/-x64\.dmg$/ {print $1}' out/SHA256SUMS.txt)
+          if [ -z "$ARM" ] || [ -z "$INTEL" ]; then
+            echo "no dmg checksums in this release — leaving the cask alone"
+            exit 0
+          fi
+          python3 - "$VERSION" "$ARM" "$INTEL" <<'PY'
+          import re, sys
+          version, arm, intel = sys.argv[1], sys.argv[2], sys.argv[3]
+          p = "Casks/loom-desktop.rb"
+          s = open(p, encoding="utf-8").read()
+          s = re.sub(r'version "[^"]+"', f'version "{version}"', s, count=1)
+          s = re.sub(r'sha256 arm:\s+"[0-9a-f]+",\n(\s+)intel: "[0-9a-f]+"',
+                     lambda m: f'sha256 arm:   "{arm}",\n{m.group(1)}intel: "{intel}"', s, count=1)
+          open(p, "w", encoding="utf-8").write(s)
+          PY
+          git diff --quiet Casks/loom-desktop.rb && { echo "cask already current"; exit 0; }
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/loom-desktop.rb
+          git commit -m "cask: loom-desktop ${VERSION}"
+          git push origin HEAD:main

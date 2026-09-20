@@ -1620,19 +1620,37 @@ program
   .option("--model <model>", "for --kind model: which model it runs (loom models)")
   .option("--provider <id>", "for --kind model: which provider (default openrouter)")
   .option("--tools", "for --kind model: let it read the project (read-only)")
+  .option("--write", "for --kind model: let it write files too (every write asks you first)")
+  .option("--run <list>", 'for --kind model: commands it may run, comma-separated, e.g. "npm test"')
   .action(
     async (
       kind: string,
-      opts: { as?: string; role?: string; model?: string; provider?: string; tools?: boolean },
+      opts: {
+        as?: string;
+        role?: string;
+        model?: string;
+        provider?: string;
+        tools?: boolean;
+        write?: boolean;
+        run?: string;
+      },
     ) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     // A model agent with no model refuses every turn, so it's set here rather
     // than in a second step nobody mentions.
+    const allowed = (opts.run ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+    // Writing and running are read-and-then-some: neither is reachable at all
+    // without --tools, so asking for one without it is a mistake worth naming.
+    if ((opts.write || allowed.length) && !opts.tools) {
+      fail("--write and --run need --tools as well — they're the writing half of it");
+    }
     const options: Record<string, unknown> = {
       ...(opts.model ? { model: opts.model } : {}),
       ...(opts.provider ? { provider: opts.provider } : {}),
       ...(opts.tools ? { tools: true } : {}),
+      ...(opts.write ? { write: true } : {}),
+      ...(allowed.length ? { run: allowed } : {}),
     };
     if (kind === "model" && !opts.model) {
       fail('a model agent needs a model: --model "<id>" (see loom models)');

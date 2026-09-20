@@ -32,6 +32,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+/**
+ * Was this installed by Homebrew?
+ *
+ * The `app` stanza MOVES the bundle to /Applications and leaves a symlink in
+ * the Caskroom, so the install path is indistinguishable from a manual drag.
+ * The receipt is the honest signal. If it's there, the package manager owns
+ * this copy — the same rule the Linux .deb gets — and the right answer is
+ * `brew upgrade --cask`, not a dmg downloaded behind its back.
+ */
+export function brewCask(env = process.env, exists = fs.existsSync) {
+  const prefixes = [env.HOMEBREW_PREFIX, "/opt/homebrew", "/usr/local"].filter(Boolean);
+  for (const prefix of prefixes) {
+    const receipt = path.join(prefix, "Caskroom", "loom-desktop", ".metadata");
+    if (exists(receipt)) return { prefix, command: "brew upgrade --cask loom-desktop" };
+  }
+  return null;
+}
+
 const RELEASES_API = "https://api.github.com/repos/nickthelegend/loom/releases/latest";
 
 /** The newest release, with its assets. */

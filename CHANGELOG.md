@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Install it with Homebrew
+
+- **`brew tap nickthelegend/loom https://github.com/nickthelegend/loom` then
+  `brew install --cask loom-desktop`** — and `brew upgrade --cask` after that,
+  which is a real update path for the macOS build that can't replace itself.
+  The cask carries both architectures and is regenerated from the published
+  checksums by the release job, so it can't go stale.
+- **Check for Updates… recognises a Homebrew install** and hands you the
+  `brew upgrade` command instead of downloading over a copy brew is tracking —
+  the same rule the Linux `.deb` already had.
+- It does **not** get you past Gatekeeper, and doesn't pretend to: brew
+  quarantines cask downloads on purpose. First launch asks once, as it does
+  for a dmg you downloaded yourself. The cask deliberately does not strip the
+  quarantine attribute — that protection exists *because* the app is unsigned.
+
+### A model agent can write, when you say so
+
+- **`--write`** gives a model agent `write_file`, and **`--run "npm test"`**
+  gives it `run` with an allow-list. Every write and every command is a card
+  in the thread that you allow or deny before anything happens — the same
+  approval surface Claude Code's "always ask" already uses, now asked from
+  inside the daemon instead of over MCP.
+- **It asks in `auto` too**, which is stricter than the CLI mapping and
+  deliberately so: a CLI in your roster is one you installed and signed into,
+  and a model agent is a name you picked off a provider's list an hour ago.
+  `bypass` is the only mode that doesn't ask, because that is what bypass
+  means.
+- **The card says what would happen** — *write src/app.ts: 40 lines
+  (replacing 12) — fix the port* — rather than dumping the whole new file at
+  you.
+- The allow-list is a prefix match on whole commands and there is no shell, so
+  `npm test` permits `npm test --watch` and refuses `npm testify`,
+  `npm test; rm -rf ~`, backticks, pipes and redirection. A tool is only
+  offered when it can be used: no allow-list, no `run` tool at all.
+- With nobody to ask — no daemon, a script, a test — the answer is **no**. A
+  tool that proceeded because the UI wasn't wired up would be the worst
+  failure this could have.
+
 ### A model agent can read the project
 
 - **`"tools": true`** on a `model` agent gives it `read_file`, `list_files`

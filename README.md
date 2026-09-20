@@ -680,13 +680,27 @@ is a thinker rather than an editor — planning, reviewing, summarising,
 answering, routing. That is most of what a fleet does between edits, and free
 quota is very happy to pay for it.
 
-**It can read the project, if you let it.** `"tools": true` adds `read_file`,
+**It can read the project, if you let it.** `--tools` adds `read_file`,
 `list_files` and `search` — read-only, inside the project, with `.git` and
 `.loom` off limits and every path proven contained before anything opens it.
-Each call shows in the thread, and the loop is bounded. There is deliberately
-**no writing and no shell**: a model that can write files is exactly as
-dangerous as a CLI that can, and that belongs behind the permission layer
-rather than behind a config flag.
+Each call shows in the thread, and the loop is bounded at eight hops.
+
+**And write, if you say so.** `--write` adds `write_file`; `--run "npm test"`
+adds `run` with that allow-list. Every write and every command is a card you
+allow or deny first:
+
+> **write_file** — write src/app.ts: 40 lines (replacing 12) — fix the port
+> &nbsp;&nbsp;[Allow] [Deny]
+
+It asks in `auto` as well as `ask`, which is stricter than the CLI mapping and
+on purpose: a CLI in your roster is one you installed and signed into, and a
+model agent is a name you picked off a provider's list an hour ago. `bypass`
+is the only mode that doesn't ask. With nobody to ask, the answer is no.
+
+The allow-list is a prefix match on whole commands and there is no shell — so
+`npm test` permits `npm test --watch` and refuses `npm testify`,
+`npm test; rm -rf ~`, backticks, pipes and redirection — and a tool is only
+offered to the model when it can actually be used.
 
 **Keys are never project config.** `.loom/config.json` names a provider;
 the key lives in the environment or in `~/.loom/providers.json` (mode 0600),
@@ -972,7 +986,33 @@ an installed application is not a checkout:
   certificate it already trusts replace itself, and this build is ad-hoc
   signed. Automating the *checking* is the part worth having — the checksums
   have shipped since 0.2.0 and nobody compares them by hand.
-- A **`.deb`** is left to the package manager that owns it.
+- A **`.deb`** is left to the package manager that owns it — and so is a
+  **Homebrew** install: `brew install --cask` means `brew upgrade --cask`, and
+  Loom says so rather than downloading over a copy brew is tracking.
+
+**On a Mac, Homebrew is the easy way in:**
+
+```sh
+brew tap nickthelegend/loom https://github.com/nickthelegend/loom
+brew install --cask loom-desktop
+brew upgrade --cask loom-desktop
+```
+
+The cask lives in this repo because the official tap requires every cask to be
+signed and notarized by Apple, and Loom's macOS build is ad-hoc signed. **There
+is no free Developer ID for open-source projects** — Apple's fee waiver covers
+nonprofits, schools and government entities, and a free Apple ID cannot sign
+for distribution at all — so the honest options are to buy one, to be one of
+those entities, or to ship unsigned and say so.
+
+Installing with Homebrew does **not** get past Gatekeeper: brew applies the
+quarantine attribute to cask downloads deliberately, and removed the flag that
+used to skip it. The first launch asks, exactly as it does for a dmg you
+downloaded yourself — right-click, Open, Open, once. Some taps strip the
+attribute in a postflight; this one doesn't, because quarantine is the
+protection that exists *because* the app is unsigned. What the cask buys is a
+one-line install and a real update path owned by a package manager you already
+trust.
 
 ## More than one goal, when they can't collide
 

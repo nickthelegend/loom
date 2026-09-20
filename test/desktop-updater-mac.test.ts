@@ -14,7 +14,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 // @ts-expect-error — plain ESM JS, no types; the seam loom-app.js uses too
-import { downloadVerified, expectedSum, mb, pickAsset } from "../desktop/updater-mac.js";
+import { brewCask, downloadVerified, expectedSum, mb, pickAsset } from "../desktop/updater-mac.js";
 // @ts-expect-error — same
 import { macAssist } from "../desktop/updater.js";
 import { tmpDir } from "./helpers.js";
@@ -206,5 +206,46 @@ describe("what the person is told", () => {
     expect(r).toMatchObject({ reason: "download-failed" });
     expect(opened).toEqual([]);
     expect(String(shown[1]!.detail)).toContain("checksum");
+  });
+});
+
+describe("installed by Homebrew", () => {
+  const seen = (prefix: string) => (p: string) => p.startsWith(path.join(prefix, "Caskroom", "loom-desktop"));
+
+  it("is recognised by its receipt, not by where the app sits", () => {
+    // The cask MOVES the bundle to /Applications and symlinks it back, so the
+    // install path looks exactly like a manual drag. The receipt is the signal.
+    expect(brewCask({ HOMEBREW_PREFIX: "/opt/homebrew" }, seen("/opt/homebrew"))!.command).toBe(
+      "brew upgrade --cask loom-desktop",
+    );
+    expect(brewCask({}, seen("/usr/local"))!.prefix).toBe("/usr/local");
+    expect(brewCask({}, () => false)).toBeNull();
+  });
+
+  it("hands the update back to the package manager that owns it", async () => {
+    const shown: Array<Record<string, unknown>> = [];
+    const copied: string[] = [];
+    let downloads = 0;
+    const r = await macAssist({
+      version: "0.2.3",
+      brew: { prefix: "/opt/homebrew", command: "brew upgrade --cask loom-desktop" },
+      dialog: {
+        showMessageBox: async (o: Record<string, unknown>) => (shown.push(o), { response: 0 }),
+      },
+      copy: async (t: string) => copied.push(t),
+      mac: {
+        latestRelease: async () => ({ version: "9.9.9", tag: "v9.9.9", assets: ASSETS }),
+        pickAsset,
+        mb,
+        downloadVerified: async () => ((downloads++), { file: "", version: "9.9.9" }),
+      },
+    });
+
+    expect(r).toMatchObject({ reason: "homebrew" });
+    // Even with a newer release out there, it doesn't fetch it — brew would
+    // put the old one back next week.
+    expect(downloads).toBe(0);
+    expect(String(shown[0]!.detail)).toContain("brew upgrade --cask loom-desktop");
+    expect(copied).toEqual(["brew upgrade --cask loom-desktop"]);
   });
 });
