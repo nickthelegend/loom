@@ -28,8 +28,10 @@
     "files": [
       "main.js",
       "loom-app.js",
+      "updater.js",
       "preload.cjs",
-      "package.json"
+      "package.json",
+      "node_modules/**/*"
     ],
     "extraResources": [
       {
@@ -40,7 +42,13 @@
         ]
       }
     ],
-    "publish": null,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "nickthelegend",
+        "repo": "loom"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
@@ -75,6 +83,9 @@
       "maintainer": "nickthelegend"
     },
     "afterPack": "build/adhoc-sign.cjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "optionalDependencies": {
     "dmg-license": "^1.0.11"

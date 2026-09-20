@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, shell } from "electron";
 import { prepareAppUrl } from "./loom-app.js";
+import { checkForUpdates } from "./updater.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 // The Loom mark. The packaged app gets its icon from electron-builder, but in
@@ -162,6 +163,16 @@ function buildMenu() {
       {
         label: "Help",
         submenu: [
+          {
+            // On demand only. A shell that checked on launch and downloaded
+            // by itself would be deciding to replace the thing you are in the
+            // middle of using.
+            label: "Check for Updates…",
+            click: () => {
+              void checkForUpdates().catch(() => {});
+            },
+          },
+          { type: "separator" },
           {
             label: "Loom on GitHub",
             click: () => shell.openExternal("https://github.com/nickthelegend/loom"),
