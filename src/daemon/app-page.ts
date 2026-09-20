@@ -477,6 +477,11 @@ window.__loomPageRev="%%BUILD_REV%%";
   .cqacts button:hover{color:var(--foreground);background:var(--background)}
   .cqacts button:disabled{opacity:.3;cursor:default}
   .cqacts svg{width:12px;height:12px}
+  .cqitem .cqn{cursor:grab}
+  .cqitem.dragging{opacity:.4}
+  .cqitem.over{box-shadow:0 -2px 0 var(--accentBlue) inset}
+  .cqwhen{border:0;background:none;color:var(--warn);cursor:pointer;font:inherit;font-size:10.5px;padding:0 2px}
+  .cqwhen:hover{text-decoration:line-through}
   /* the @ / popover, mounted over the textarea */
   .cmenu{position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);z-index:30;
     background:var(--popover,var(--background));border:1px solid var(--border);border-radius:10px;
@@ -8046,7 +8051,20 @@ ${BRAND_SPRITE}
     // sent: edit the text, change who takes it, reorder it, drop it. The
     // daemon sends the head as soon as nothing is in its way, one at a time.
 
-    var queue = { items: [], paused: false, reason: "", waitingFor: "", editing: null };
+    var queue = { items: [], paused: false, reason: "", waitingFor: "", editing: null, dragging: null };
+
+    /** A held prompt's condition, short enough for the row. */
+    function whenLabel(w){
+      if (!w) return "";
+      if (w.kind === "at") {
+        var d = new Date(w.at);
+        var sameDay = d.toDateString() === new Date().toDateString();
+        return (sameDay ? "" : d.toLocaleDateString() + " ") + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      }
+      if (w.kind === "landed") return "after " + String(w.runId).slice(0, 8) + " lands";
+      if (w.kind === "checks-green") return "when " + String(w.runId).slice(0, 8) + " is green";
+      return Math.round((w.ms || 0) / 60000) + "m quiet";
+    }
 
     function loadQueue(){
       api("/api/projects/" + pid + "/queue").then(applyQueue).catch(function(){});
@@ -8147,8 +8165,8 @@ ${BRAND_SPRITE}
           agents.map(function(a){
             return '<option value="' + esc(a.id) + '"' + (qTargetValue(it.target) === a.id ? " selected" : "") + ">" + esc(labelOf(a.id)) + "</option>";
           }).join("");
-        h += '<div class="cqitem' + (queue.paused ? " paused" : "") + '" data-qid="' + esc(it.id) + '">' +
-          '<span class="cqn">' + (i + 1) + "</span>" +
+        h += '<div class="cqitem' + (queue.paused ? " paused" : "") + '" data-qid="' + esc(it.id) + '" draggable="true">' +
+          '<span class="cqn" title="drag to reorder">' + (i + 1) + "</span>" +
           '<div class="cqbody">' +
           (editing
             ? '<textarea class="cqedit" data-qedit="' + esc(it.id) + '">' + esc(it.text) + "</textarea>" +
@@ -8158,7 +8176,10 @@ ${BRAND_SPRITE}
             : '<div class="cqtext" data-q="edit" title="click to edit">' + esc(it.text) + "</div>" +
               '<div class="cqmeta"><span>to</span><select class="cqto" data-q="target" aria-label="who takes this prompt">' + opts + "</select>" +
               (it.plan ? "<span>· plan mode</span>" : "") +
-              (it.editedAt ? "<span>· edited</span>" : "") + "</div>") +
+              (it.editedAt ? "<span>· edited</span>" : "") +
+              // held for later: what it's waiting for, and a click to release it
+              (it.when ? '<button class="cqwhen" data-q="unhold" title="run as soon as it can">⏱ ' + esc(whenLabel(it.when)) + "</button>" : "") +
+              "</div>") +
           "</div>" +
           '<div class="cqacts">' +
           '<button type="button" data-q="up" title="move up" aria-label="move up"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
@@ -8181,6 +8202,36 @@ ${BRAND_SPRITE}
       Array.prototype.forEach.call(el.querySelectorAll(".cqitem"), function(row){
         var id = row.getAttribute("data-qid");
         var at = queue.items.map(function(x){ return x.id; }).indexOf(id);
+        // Drag to reorder. addEventListener, not ondragstart= : the on* drag
+        // properties aren't universally present, and a reorder that silently
+        // does nothing is the worst kind of broken. The arrows stay — they're
+        // the path for anyone who can't drag.
+        row.addEventListener("dragstart", function(ev){
+          queue.dragging = id;
+          row.classList.add("dragging");
+          try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", id); } catch (e) {}
+        });
+        row.addEventListener("dragend", function(){
+          queue.dragging = null;
+          row.classList.remove("dragging");
+          Array.prototype.forEach.call(el.querySelectorAll(".cqitem"), function(x){ x.classList.remove("over"); });
+        });
+        row.addEventListener("dragover", function(ev){
+          if (!queue.dragging || queue.dragging === id) return;
+          ev.preventDefault();
+          row.classList.add("over");
+        });
+        row.addEventListener("dragleave", function(){ row.classList.remove("over"); });
+        row.addEventListener("drop", function(ev){
+          ev.preventDefault();
+          row.classList.remove("over");
+          var from = queue.dragging;
+          queue.dragging = null;
+          if (!from || from === id) return;
+          var to = queue.items.map(function(x){ return x.id; }).indexOf(id);
+          if (to < 0) return;
+          qAct("/" + encodeURIComponent(from), { method: "PATCH", body: JSON.stringify({ to: to }) });
+        });
         var find = function(sel){ return row.querySelector(sel); };
         var text = find('[data-q="edit"]');
         if (text) text.onclick = function(){ queue.editing = id; drawQueue(); };
@@ -8211,6 +8262,10 @@ ${BRAND_SPRITE}
           qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ to: at + 1 }) });
         };
         find('[data-q="rm"]').onclick = function(){ qAct("/" + encodeURIComponent(id), { method: "DELETE" }); };
+        var unhold = find('[data-q="unhold"]');
+        if (unhold) unhold.onclick = function(){
+          qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ when: null }) });
+        };
       });
     }
 

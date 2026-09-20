@@ -921,6 +921,8 @@ export interface QueuedPrompt {
   plan?: boolean;
   at: number;
   editedAt?: number;
+  /** Held until a time, a goal landing, or its checks going green. */
+  when?: { kind: string; at?: number; runId?: string; ms?: number };
 }
 export interface QueueView {
   queue: QueuedPrompt[];
@@ -934,7 +936,12 @@ export const queueAdd = (c: Creds, id: string, text: string, target?: string, ch
     method: "POST",
     body: JSON.stringify({ text, ...(target ? { target } : {}), ...(chat ? { chat } : {}) }),
   });
-export const queueEdit = (c: Creds, id: string, itemId: string, patch: { text?: string; target?: string; to?: number }) =>
+export const queueEdit = (
+  c: Creds,
+  id: string,
+  itemId: string,
+  patch: { text?: string; target?: string; to?: number; when?: unknown },
+) =>
   api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const queueRemove = (c: Creds, id: string, itemId: string) =>
   api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "DELETE" });

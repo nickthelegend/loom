@@ -512,6 +512,8 @@ detects at least two roles.
 | `loom queue add "<text>" [--to <agent\|orchestrate\|auto>] [--plan]` | Line a prompt up; it goes when nothing is in its way |
 | `loom queue edit / to / move / rm / clear` | Rewrite one, send it to someone else, reorder it, drop it, empty the queue |
 | `loom queue pause` / `loom queue resume` | Hold the queue where it is · let it run again |
+| `loom queue at <when> "<text>"` / `after landed:<run>\|green:<run>` | Queue a prompt for a time, or for a goal landing / going green |
+| `loom queue save <name>` / `run <name>` / `recipes` | Keep a queue as a recipe and replay it on any project |
 | `loom decision <text>` | Record a decision into shared memory |
 | `loom memory [import]` | The unified brain — one memory across every connected ADE |
 | `loom log [-f]` | Show (or follow) the project event log |
@@ -865,6 +867,16 @@ yours until it's sent:
   pause you set yourself stays until you resume it.
 - A prompt enters the conversation when it is actually sent, not when it's
   queued, so the thread stays an honest record of what the agent was asked.
+- **Reorder by dragging** (the arrows stay, for anyone who can't drag).
+- **Queue for later.** A prompt can wait for a time, for a goal to *land*
+  (not merely finish), for that goal's checks to go green, or for the project
+  to be quiet for a while: `loom queue at 03:00 "…"`,
+  `loom queue after landed:<runId> "…"`, `loom queue after green:<runId> "…"`.
+  The row says what it's waiting for, and one click releases it.
+- **Save a queue as a recipe** and run it anywhere: `loom queue save ship`,
+  `loom queue run ship`, `loom queue recipes`. Steps remember who they go to by
+  **role**, so a recipe travels between projects; anything a project can't
+  resolve becomes an Auto prompt rather than a refusal.
 
 It survives a daemon restart (reloaded paused, so an hour-old queue doesn't
 start itself), and lives in the project's `.loom/queue.json`. Over the API:

@@ -67,7 +67,15 @@ import {
 } from "../core/skill-install.js";
 import { resolveSteps, RouteEngine } from "../core/routes.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
-import { PromptQueue, type QueueInput, type QueueItem, type QueueState, type QueueTarget } from "../core/prompt-queue.js";
+import {
+  PromptQueue,
+  describeCondition,
+  type QueueCondition,
+  type QueueInput,
+  type QueueItem,
+  type QueueState,
+  type QueueTarget,
+} from "../core/prompt-queue.js";
 import { Servers, type LogLine, type ServerStatus } from "../core/servers.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
@@ -190,6 +198,9 @@ export type ServerFrame =
   | { kind: "state"; name: string; status: ServerStatus }
   | { kind: "line"; name: string; line: LogLine };
 
+/** How often a time-held prompt checks the clock. */
+export const CLOCK_TICK_MS = 15_000;
+
 export class ProjectRuntime {
   readonly info: ProjectInfo;
   readonly config: ProjectConfig;
@@ -282,6 +293,7 @@ export class ProjectRuntime {
 
     this.queue = new PromptQueue(path.join(projectLoomDir(info.dir), "queue.json"), (q) => {
       for (const cb of this.queueListeners) cb(q);
+      this.watchClockConditions(q);
     });
 
     this.servers = new Servers({
@@ -2113,6 +2125,9 @@ export class ProjectRuntime {
 
   /** Why the head can't go yet, or null when it can. */
   queueBlocker(item: QueueItem): string | null {
+    // A condition comes first: a prompt held for 3am isn't waiting on an agent.
+    const held = item.when ? this.conditionUnmet(item.when) : null;
+    if (held) return held;
     const route = this.routeState();
     const routing = route && (route.status === "running" || route.status === "waiting_human");
     const holder = this.validHolder();
@@ -2124,6 +2139,59 @@ export class ProjectRuntime {
     if (item.target.kind === "agent" && this.busySince.has(item.target.agentId)) return `waiting for ${item.target.agentId} to finish its turn`;
     if (holder && this.busySince.has(holder)) return `waiting for ${holder} to finish its turn`;
     return null;
+  }
+
+  /**
+   * Is a queued prompt's condition still unmet? The reason, or null to go.
+   *
+   * Every branch reads a fact the daemon already has — the clock, a goal's
+   * landing state, its checks — so nothing here can be wrong in an interesting
+   * way. A condition about a goal that no longer exists releases the prompt
+   * rather than holding it for ever.
+   */
+  private conditionUnmet(when: QueueCondition): string | null {
+    if (when.kind === "at") {
+      return Date.now() >= when.at ? null : describeCondition(when);
+    }
+    if (when.kind === "quiet") {
+      const busy = this.busySince.size > 0 || Boolean(this.orchestra.active());
+      if (busy) {
+        this.quietSince = 0;
+        return describeCondition(when);
+      }
+      if (!this.quietSince) this.quietSince = Date.now();
+      return Date.now() - this.quietSince >= when.ms ? null : describeCondition(when);
+    }
+    const run = this.orchestra.get(when.runId);
+    if (!run) return null; // the goal is gone: holding for it for ever helps nobody
+    if (when.kind === "landed") {
+      return run.landing?.state === "merged" ? null : describeCondition(when);
+    }
+    const checks = run.landing?.checks;
+    const green = Boolean(checks && !checks.failing.length && !checks.pending.length && checks.passing > 0);
+    return green ? null : describeCondition(when);
+  }
+
+  /** When the project last went quiet, for a "after N quiet minutes" condition. */
+  private quietSince = 0;
+  private clockTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * A prompt held for an hour needs something to notice the hour arriving.
+   *
+   * Only ticks while such a prompt exists — the queue's other conditions are
+   * woken by the events they wait on (a goal landing, checks going green), and
+   * a timer that runs when nothing needs it is a battery someone else pays for.
+   */
+  private watchClockConditions(q: QueueState): void {
+    const needsClock = q.items.some((i) => i.when && (i.when.kind === "at" || i.when.kind === "quiet"));
+    if (needsClock && !this.clockTimer) {
+      this.clockTimer = setInterval(() => this.kickQueue(), CLOCK_TICK_MS);
+      this.clockTimer.unref?.();
+    } else if (!needsClock && this.clockTimer) {
+      clearInterval(this.clockTimer);
+      this.clockTimer = null;
+    }
   }
 
   /**
@@ -3187,6 +3255,7 @@ export class ProjectRuntime {
     this.startedAgents.clear();
     // A dev server outlives the daemon that started it unless we say otherwise,
     // and an orphan holding port 3000 is a bad thing to leave behind.
+    if (this.clockTimer) { clearInterval(this.clockTimer); this.clockTimer = null; }
     await this.servers.closeAll().catch(() => {});
     for (const proxy of this.proxies.values()) await proxy.close().catch(() => {});
     this.proxies.clear();

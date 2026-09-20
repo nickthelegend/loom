@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### The queue can wait, and can be kept
+
+- **Queue for later**: a prompt can be held for a time, until a goal actually
+  **lands**, until that goal's **checks go green**, or until the project has
+  been quiet for a while. The row says what it's waiting for and a click
+  releases it. (`loom queue at 03:00 …`, `loom queue after green:<runId> …`)
+- **Recipes**: save what's queued and run it on any project. Steps remember
+  their target by **role**, so a recipe travels; anything the project can't
+  resolve becomes an Auto prompt rather than a refusal. (`loom queue save`,
+  `loom queue run`, `loom queue recipes`)
+- **Drag to reorder** in the web app; the arrows stay for anyone who can't
+  drag, and the phone gained up/down controls it never had.
+
 ## [0.2.3] — 2026-09-20
 
 ### The Browser tab knows your dev servers

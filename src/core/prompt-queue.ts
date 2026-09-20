@@ -22,6 +22,24 @@ export type QueueTarget =
   | { kind: "orchestra"; orchestrator?: string; workers?: string[]; maxParallel?: number }
   | { kind: "auto" };
 
+/**
+ * When a queued prompt may go, beyond "when nothing is in the way".
+ *
+ * The queue's default is as soon as it can, which is right for the next thing
+ * you want said. These are for the things you want said *later*: at an hour,
+ * once a goal is really on main rather than merely finished, or once CI has
+ * spoken. Each one is a fact the daemon can check — nothing here guesses.
+ */
+export type QueueCondition =
+  /** Not before this moment (epoch ms). */
+  | { kind: "at"; at: number }
+  /** After the goal that was running when this was queued has LANDED. */
+  | { kind: "landed"; runId: string }
+  /** After that goal's PR checks are green. */
+  | { kind: "checks-green"; runId: string }
+  /** After this many ms with no agent working. */
+  | { kind: "quiet"; ms: number };
+
 export interface QueueItem {
   id: string;
   text: string;
@@ -32,6 +50,41 @@ export interface QueueItem {
   source: "user" | "route";
   at: number;
   editedAt?: number;
+  /** Hold it back until this is true — see QueueCondition. */
+  when?: QueueCondition;
+}
+
+/** A condition from the wire, checked. */
+export function parseCondition(raw: unknown): QueueCondition | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  const c = raw as Record<string, unknown>;
+  if (c.kind === "at") {
+    const at = typeof c.at === "string" ? Date.parse(c.at) : Number(c.at);
+    if (!Number.isFinite(at)) throw new Error("that isn't a time I can read");
+    return { kind: "at", at };
+  }
+  if (c.kind === "landed" || c.kind === "checks-green") {
+    const runId = String(c.runId ?? "").trim();
+    if (!runId) throw new Error(`a "${c.kind}" condition needs the goal it waits for`);
+    return { kind: c.kind, runId };
+  }
+  if (c.kind === "quiet") {
+    const ms = Number(c.ms);
+    if (!Number.isFinite(ms) || ms <= 0) throw new Error("a quiet period needs a duration");
+    return { kind: "quiet", ms: Math.min(ms, 24 * 60 * 60_000) };
+  }
+  throw new Error(`unknown condition "${String(c.kind)}"`);
+}
+
+/** The condition in the words the queue shows. */
+export function describeCondition(c: QueueCondition): string {
+  if (c.kind === "at") {
+    const d = new Date(c.at);
+    return `waiting until ${d.toLocaleString()}`;
+  }
+  if (c.kind === "landed") return `waiting for goal ${c.runId} to land`;
+  if (c.kind === "checks-green") return `waiting for goal ${c.runId}'s checks to go green`;
+  return `waiting for ${Math.round(c.ms / 60_000)} quiet minute${c.ms >= 120_000 ? "s" : ""}`;
 }
 
 export interface QueueState {
@@ -47,6 +100,7 @@ export interface QueueInput {
   chat?: string;
   plan?: boolean;
   source?: "user" | "route";
+  when?: QueueCondition;
 }
 
 export const MAX_QUEUE = 100;
@@ -127,13 +181,14 @@ export class PromptQueue {
       ...(input.plan ? { plan: true } : {}),
       source: input.source ?? "user",
       at: Date.now(),
+      ...(input.when ? { when: input.when } : {}),
     };
     this.state.items.push(item);
     this.changed();
     return item;
   }
 
-  edit(id: string, patch: { text?: string; target?: QueueTarget; plan?: boolean }): QueueItem {
+  edit(id: string, patch: { text?: string; target?: QueueTarget; plan?: boolean; when?: QueueCondition | null }): QueueItem {
     const item = this.must(id);
     if (patch.text !== undefined) {
       const text = patch.text.trim();
@@ -145,6 +200,10 @@ export class PromptQueue {
     if (patch.plan !== undefined) {
       if (patch.plan) item.plan = true;
       else delete item.plan;
+    }
+    if (patch.when !== undefined) {
+      if (patch.when) item.when = patch.when;
+      else delete item.when; // null means "go as soon as you can"
     }
     item.editedAt = Date.now();
     this.changed();

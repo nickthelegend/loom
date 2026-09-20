@@ -1859,6 +1859,27 @@ const queueCmd = program
     console.log(`\n${view.queue.length} queued${view.paused ? pc.yellow(" · paused") : ""} · ${note}`);
   });
 
+/** "15:00", "2026-09-21T03:00", "+90m" — the ways a person says when. */
+function readWhen(when: string): number {
+  const rel = /^\+(\d+)\s*([smhd])$/i.exec(when.trim());
+  if (rel) {
+    const n = Number(rel[1]);
+    const unit = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[rel[2]!.toLowerCase() as "s" | "m" | "h" | "d"];
+    return Date.now() + n * unit;
+  }
+  const clock = /^(\d{1,2}):(\d{2})$/.exec(when.trim());
+  if (clock) {
+    const d = new Date();
+    d.setHours(Number(clock[1]), Number(clock[2]), 0, 0);
+    // a time already past today means tomorrow — nobody queues for the past
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  const parsed = Date.parse(when);
+  if (Number.isFinite(parsed)) return parsed;
+  throw new Error(`I can't read "${when}" as a time — try 15:00, +90m, or 2026-09-21T03:00`);
+}
+
 /** The item you meant: a position from the printed list, or an id. */
 async function queueItemId(client: DaemonClient, projectId: string, which: string): Promise<string> {
   const { queue } = await client.queue(projectId);
@@ -1924,6 +1945,74 @@ queueCmd
     const id = await queueItemId(client, project.id, which);
     const res = await client.queueRemove(project.id, id);
     console.log(pc.dim(`removed ${id} · ${res.queue.length} waiting`));
+  });
+
+queueCmd
+  .command("at <when> <text...>")
+  .description('queue a prompt for later — "15:00", "2026-09-21T03:00", or "+90m"')
+  .option("--to <target>", 'who takes it: an agent id, "orchestrate" or "auto"', "auto")
+  .action(async (when: string, text: string[], opts: { to: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const at = readWhen(when);
+    const res = await client.queueAdd(project.id, {
+      text: text.join(" "),
+      target: opts.to === "orchestrate" ? "orchestra" : opts.to,
+      when: { kind: "at", at },
+    });
+    console.log(pc.dim(`queued ${res.item.id} for ${new Date(at).toLocaleString()}`));
+  });
+
+queueCmd
+  .command("after <what> <text...>")
+  .description('queue a prompt until a goal lands or its checks go green: "landed:<runId>" or "green:<runId>"')
+  .option("--to <target>", "who takes it", "auto")
+  .action(async (what: string, text: string[], opts: { to: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const [kind, runId] = what.split(":");
+    if (!runId || (kind !== "landed" && kind !== "green")) {
+      throw new Error('say landed:<runId> or green:<runId> — loom orchestra lists the runs');
+    }
+    const res = await client.queueAdd(project.id, {
+      text: text.join(" "),
+      target: opts.to === "orchestrate" ? "orchestra" : opts.to,
+      when: { kind: kind === "landed" ? "landed" : "checks-green", runId },
+    });
+    console.log(pc.dim(`queued ${res.item.id}, waiting for ${runId}`));
+  });
+
+queueCmd
+  .command("save <name>")
+  .description("save what's queued as a recipe you can run anywhere")
+  .action(async (name: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { recipe } = await client.saveQueueRecipe(project.id, name);
+    console.log(pc.dim(`saved "${recipe.name}" — ${recipe.steps.length} step(s)`));
+  });
+
+queueCmd
+  .command("run <name>")
+  .description("queue a saved recipe on this project")
+  .action(async (name: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const res = await client.runQueueRecipe(project.id, name);
+    console.log(pc.dim(`queued ${res.added} step(s) — ${res.queue.length} waiting`));
+  });
+
+queueCmd
+  .command("recipes")
+  .description("the recipes saved on this machine")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const { recipes } = await client.recipes();
+    if (!recipes.length) return console.log(pc.dim("none saved — loom queue save <name>"));
+    for (const r of recipes) {
+      console.log(`${pc.cyan(r.name)} ${pc.dim(`${r.steps.length} step(s)${r.fromProject ? ` · from ${r.fromProject}` : ""}`)}`);
+      for (const s of r.steps) console.log(`  ${pc.dim(s.to.padEnd(12))} ${s.text.split("\n")[0]!.slice(0, 80)}`);
+    }
   });
 
 queueCmd
