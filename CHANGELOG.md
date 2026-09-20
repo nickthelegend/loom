@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A model agent can read the project
+
+- **`"tools": true`** on a `model` agent gives it `read_file`, `list_files`
+  and `search` — read-only, inside the project, `.git` and `.loom` excluded,
+  every path resolved and proven contained before anything opens it. A
+  reviewer that can't read the file it's reviewing is being asked to guess.
+- Each call appears in the thread as a `tool_call`, like any other agent's
+  work, and the loop is bounded: after eight hops the model is told to answer
+  with what it has rather than being cut off mid-thought.
+- **No writing and no shell.** A model that can write files is exactly as
+  dangerous as a CLI that can, and the right answer is the permission layer
+  Loom already has. That's the rest of #87, and it stays open for it — a free
+  model editing a repository because it felt like it is not a thing to ship
+  quietly.
+
 ### Ask several models at once
 
 - **`loom ask --models a,b,c "…"`** sends one prompt to several models at the

@@ -31,6 +31,12 @@
 
 import type { SendInput } from "../types.js";
 import {
+  MAX_HOPS,
+  READ_TOOLS,
+  runReadTool,
+  type ToolCall,
+} from "../core/model-tools.js";
+import {
   chatUrl,
   explainStatus,
   isExhausted,
@@ -43,8 +49,12 @@ import { AdapterBase } from "./base.js";
 
 /** One turn of the conversation, as the wire wants it. */
 interface WireMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  /** Set on an assistant turn that asked for tools. */
+  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  /** Set on the answer to one. */
+  tool_call_id?: string;
 }
 
 export interface ModelAdapterOptions {
@@ -57,6 +67,12 @@ export interface ModelAdapterOptions {
   maxTokens?: number;
   /** How much conversation to send back each turn. */
   history?: number;
+  /**
+   * Let it read the project: read_file, list_files, search (core/model-tools).
+   * Read-only, inside the project, bounded. Off unless asked for — a model
+   * that can read your repository should be a decision, not a default.
+   */
+  tools?: boolean;
 }
 
 const DEFAULT_HISTORY = 24;
@@ -124,7 +140,13 @@ export class ModelAdapter extends AdapterBase {
 
   /** Loom's memory file is the system prompt here — there's nowhere else to put it. */
   private systemPrompt(): string {
-    return [this.opts.system, `You are "${this.id}", one agent in a Loom project.`]
+    return [
+      this.opts.system,
+      `You are "${this.id}", one agent in a Loom project.`,
+      this.opts.tools
+        ? "You can read this project with read_file, list_files and search. Read before you describe code — a guess about a file you have not opened is worse than saying you have not opened it. You cannot write files or run commands."
+        : "",
+    ]
       .filter(Boolean)
       .join("\n\n");
   }
@@ -181,15 +203,95 @@ export class ModelAdapter extends AdapterBase {
     }
   }
 
-  /** One attempt at one model. Streams as it goes. */
+  /**
+   * One attempt at one model, including however many tool hops it asks for.
+   *
+   * The loop is bounded: a model that keeps reading and never answers is
+   * spending someone's quota in a circle, so after MAX_HOPS it is told to
+   * answer with what it has rather than being cut off mid-thought.
+   */
   private async turn(
     p: ResolvedProvider,
     model: string,
     started: number,
   ): Promise<{ ok: true } | { ok: false; error: string; retryable: boolean }> {
+    const scratch: WireMessage[] = [];
+    let answered = "";
+    let totals: Record<string, number> | undefined;
+
+    for (let hop = 0; ; hop++) {
+      const step = await this.once(p, model, scratch, hop);
+      if (!step.ok) return step;
+      answered += step.text;
+      if (step.usage) {
+        totals = totals ?? {};
+        for (const [k, v] of Object.entries(step.usage)) {
+          if (typeof v === "number") totals[k] = (totals[k] ?? 0) + v;
+        }
+      }
+      if (!step.calls.length) break;
+
+      // What it asked for, and what it got — in the thread, like any agent's
+      // tool use, because work nobody can see is work nobody can check.
+      scratch.push({
+        role: "assistant",
+        content: step.text,
+        tool_calls: step.calls.map((c) => ({
+          id: c.id,
+          type: "function" as const,
+          function: { name: c.name, arguments: JSON.stringify(c.args) },
+        })),
+      });
+      for (const call of step.calls) {
+        const result = runReadTool(this.projectDir, call);
+        this.emit({
+          kind: "tool_call",
+          payload: { name: call.name, args: call.args, summary: result.summary, ok: result.ok },
+        });
+        scratch.push({ role: "tool", tool_call_id: call.id, content: result.content });
+      }
+      if (hop + 1 >= MAX_HOPS) {
+        scratch.push({
+          role: "user",
+          content: `You have used ${MAX_HOPS} tool calls on this turn. Answer now with what you have.`,
+        });
+      }
+      if (this.interrupted) return { ok: false, error: "interrupted", retryable: false };
+    }
+
+    if (answered.trim()) this.history.push({ role: "assistant", content: answered });
+    this.emit({
+      kind: "run_complete",
+      payload: {
+        durationMs: Date.now() - started,
+        model,
+        provider: p.id,
+        ...(totals
+          ? {
+              inputTokens: totals.prompt_tokens ?? 0,
+              outputTokens: totals.completion_tokens ?? 0,
+              ...(p.free(model) ? { costUsd: 0 } : {}),
+            }
+          : {}),
+      },
+    });
+    return { ok: true };
+  }
+
+  /** One request. Returns what was said and what it asked to run. */
+  private async once(
+    p: ResolvedProvider,
+    model: string,
+    scratch: WireMessage[],
+    hop: number,
+  ): Promise<
+    | { ok: true; text: string; calls: ToolCall[]; usage?: Record<string, number> }
+    | { ok: false; error: string; retryable: boolean }
+  > {
     const messages: WireMessage[] = [
       { role: "system", content: this.systemPrompt() },
       ...this.history.slice(-(this.opts.history ?? DEFAULT_HISTORY)),
+      ...scratch,
     ];
     this.abort = new AbortController();
 
@@ -206,6 +308,9 @@ export class ModelAdapter extends AdapterBase {
           stream_options: { include_usage: true },
           max_tokens: this.opts.maxTokens ?? DEFAULT_MAX_TOKENS,
           ...(this.opts.temperature !== undefined ? { temperature: this.opts.temperature } : {}),
+          // Offered only when the project asked for it, and never past the
+          // hop budget — the last request of a turn must be an answer.
+          ...(this.opts.tools && hop < MAX_HOPS ? { tools: READ_TOOLS } : {}),
         }),
       });
     } catch (err) {
@@ -227,25 +332,7 @@ export class ModelAdapter extends AdapterBase {
     const out = await this.readStream(res.body, model);
     if (this.interrupted) return { ok: false, error: "interrupted", retryable: false };
     if (out.error) return { ok: false, error: out.error, retryable: false };
-
-    if (out.text.trim()) this.history.push({ role: "assistant", content: out.text });
-    this.emit({
-      kind: "run_complete",
-      payload: {
-        durationMs: Date.now() - started,
-        model,
-        provider: p.id,
-        ...(out.usage
-          ? {
-              inputTokens: out.usage.prompt_tokens ?? 0,
-              outputTokens: out.usage.completion_tokens ?? 0,
-              // Free means free: a number Loom didn't measure is worse than none.
-              ...(p.free(model) ? { costUsd: 0 } : {}),
-            }
-          : {}),
-      },
-    });
-    return { ok: true };
+    return { ok: true, text: out.text, calls: out.calls, ...(out.usage ? { usage: out.usage } : {}) };
   }
 
   /**
@@ -258,12 +345,15 @@ export class ModelAdapter extends AdapterBase {
   private async readStream(
     body: ReadableStream<Uint8Array>,
     model: string,
-  ): Promise<{ text: string; usage?: Record<string, number>; error?: string }> {
+  ): Promise<{ text: string; calls: ToolCall[]; usage?: Record<string, number>; error?: string }> {
     const decoder = new TextDecoder();
     let buffer = "";
     let text = "";
     let pending = "";
     let usage: Record<string, number> | undefined;
+    // Tool calls stream in pieces too: the name arrives once, the arguments
+    // in fragments, keyed by index.
+    const partial = new Map<number, { id: string; name: string; args: string }>();
 
     // Emit on sentence-ish boundaries rather than per token: one event per
     // token would be a few hundred rows in the log for one paragraph.
@@ -286,7 +376,17 @@ export class ModelAdapter extends AdapterBase {
           const data = trimmed.slice(5).trim();
           if (!data || data === "[DONE]") continue;
           let frame: {
-            choices?: Array<{ delta?: { content?: string; reasoning_content?: string } }>;
+            choices?: Array<{
+              delta?: {
+                content?: string;
+                reasoning_content?: string;
+                tool_calls?: Array<{
+                  index?: number;
+                  id?: string;
+                  function?: { name?: string; arguments?: string };
+                }>;
+              };
+            }>;
             usage?: Record<string, number>;
             error?: { message?: string };
           };
@@ -295,7 +395,7 @@ export class ModelAdapter extends AdapterBase {
           } catch {
             continue; // a partial frame; the next chunk completes it
           }
-          if (frame.error?.message) return { text, error: frame.error.message };
+          if (frame.error?.message) return { text, calls: [], error: frame.error.message };
           if (frame.usage) usage = frame.usage;
           const delta = frame.choices?.[0]?.delta;
           if (delta?.reasoning_content) {
@@ -308,14 +408,35 @@ export class ModelAdapter extends AdapterBase {
             pending += delta.content;
             flush();
           }
+          for (const tc of delta?.tool_calls ?? []) {
+            const at = tc.index ?? 0;
+            const have = partial.get(at) ?? { id: "", name: "", args: "" };
+            partial.set(at, {
+              id: tc.id ?? have.id,
+              name: tc.function?.name ?? have.name,
+              args: have.args + (tc.function?.arguments ?? ""),
+            });
+          }
         }
       }
     } catch (err) {
       flush(true);
-      if (this.interrupted) return { text };
-      return { text, error: `the stream broke: ${String((err as Error).message)}` };
+      if (this.interrupted) return { text, calls: [] };
+      return { text, calls: [], error: `the stream broke: ${String((err as Error).message)}` };
     }
     flush(true);
-    return { text, ...(usage ? { usage } : {}) };
+    // Arguments that don't parse are a call we can't honestly run, so it is
+    // dropped rather than guessed at — the model gets no result for it and
+    // says what it can.
+    const calls: ToolCall[] = [];
+    for (const [i, c] of partial) {
+      if (!c.name) continue;
+      try {
+        calls.push({ id: c.id || `call_${i}`, name: c.name, args: JSON.parse(c.args || "{}") });
+      } catch {
+        /* unparseable arguments: not a call we can run */
+      }
+    }
+    return { text, calls, ...(usage ? { usage } : {}) };
   }
 }

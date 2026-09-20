@@ -679,6 +679,14 @@ is a thinker rather than an editor — planning, reviewing, summarising,
 answering, routing. That is most of what a fleet does between edits, and free
 quota is very happy to pay for it.
 
+**It can read the project, if you let it.** `"tools": true` adds `read_file`,
+`list_files` and `search` — read-only, inside the project, with `.git` and
+`.loom` off limits and every path proven contained before anything opens it.
+Each call shows in the thread, and the loop is bounded. There is deliberately
+**no writing and no shell**: a model that can write files is exactly as
+dangerous as a CLI that can, and that belongs behind the permission layer
+rather than behind a config flag.
+
 **Keys are never project config.** `.loom/config.json` names a provider;
 the key lives in the environment or in `~/.loom/providers.json` (mode 0600),
 and nothing — no route, no log, no listing — hands it back. You get the last
