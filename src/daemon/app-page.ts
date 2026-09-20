@@ -626,7 +626,15 @@ window.__loomPageRev="%%BUILD_REV%%";
     color:var(--muted-foreground);padding:6px 9px 5px}
   .pickrow{display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;border:0;border-radius:7px;
     background:none;cursor:pointer;font:inherit;font-size:13px;color:var(--foreground);text-align:left}
-  .pickrow:hover{background:var(--sidebar-accent)}
+  .pickrow:hover,.pickrow:focus-visible{background:var(--sidebar-accent);outline:none}
+  /* the shared menu: composer More, and every right click */
+  .menupop{min-width:208px}
+  .menupop .mico{width:15px;height:15px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+    color:var(--muted-foreground)}
+  .menupop .mico svg{width:15px;height:15px}
+  .menupop .pickrow.danger{color:var(--err)}
+  .menupop .pickrow.danger .mico{color:var(--err)}
+  .menusep{height:1px;background:var(--border);margin:4px 6px}
   .pickrow .brand{width:16px;height:16px;flex:none}
   .pickrow .pnm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pickrow .prole{margin-left:auto;flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
@@ -3416,6 +3424,7 @@ ${BRAND_SPRITE}
     team: svg('<path d="M18 21a8 8 0 0 0-16 0"/><circle cx="10" cy="8" r="5"/><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"/>'),
     // lucide key-round — the team key, and rotating it
     key: svg('<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>'),
+    dots: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>',
     copy: svg('<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>'),
     push: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/><path d="M5 21h14"/>'),
     // lucide lock — a hard zone someone else holds
@@ -3988,8 +3997,12 @@ ${BRAND_SPRITE}
       '<button class="cperm" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
       '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.chevron + "</span></button>" +
       '<span class="cdiv"></span>' +
-      '<button class="cslot" id="mcpbtn" type="button" title="connect MCP servers"><span class="cslotico">' + ICONS.plug + '</span><span class="cslotlbl">MCPs</span></button>' +
-      '<button class="cslot" id="skillbtn" type="button" title="enable skills">' + ICONS.spark + '<span class="cslotlbl">Skills</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
+      // MCPs and Skills live behind this rather than beside it: they are
+      // occasional settings, and the row they were on has to hold the model,
+      // the agent, the permission chip, prompts and send — on a narrow window
+      // it wrapped. The count badge stays on the outside, because "two skills
+      // are on" is the part you need without opening anything.
+      '<button class="cslot" id="morebtn" type="button" aria-haspopup="menu" aria-expanded="false" title="MCPs, skills and more"><span class="cslotico">' + ICONS.dots + '</span><span class="cslotlbl">More</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
       '<button class="cslot" id="micbtn" type="button" title="hold to talk \u2014 needs LOOM_STT_CMD on the daemon"><span class="cslotico">' + ICONS.mic + "</span></button>" +
       // Saved and recent prompts, a clipboard manager's worth (⌘⇧V).
       '<button class="cprompt" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \\u2014 saved and recent (' + KMOD + '\\u21e7V)">' +
@@ -8428,7 +8441,13 @@ ${BRAND_SPRITE}
     // token you were typing.
     var menuState = null;
 
-    function closeMenu(){
+    /** "2 on" / "none yet" — what the Skills row says without opening it. */
+  function skillHint(){
+    if (!state.skillsTotal) return "none yet";
+    return state.skillsOn ? state.skillsOn + " on" : "off";
+  }
+
+  function closeMenu(){
       menuState = null;
       document.removeEventListener("mousedown", menuAway);
       // the prompt manager dresses #cmenu up as a bigger glass panel; undress it
@@ -8772,10 +8791,22 @@ ${BRAND_SPRITE}
       drawPlan();
       // the page may be gone by the time profiles arrive (a closed tab, a torn-down test window)
       loadPermProfiles().then(function(){ if (typeof document === "undefined" || !document) return; updateModelLabel(); drawOrchControls(); });
-      var mcpB = document.getElementById("mcpbtn");
-      if (mcpB) mcpB.onclick = function(){ toggleComposerPanel("mcp"); };
-      var skB = document.getElementById("skillbtn");
-      if (skB) skB.onclick = function(){ toggleComposerPanel("skills"); };
+      var moreB = document.getElementById("morebtn");
+      if (moreB) moreB.onclick = function(ev){
+        ev.stopPropagation();
+        if (document.getElementById("loommenu")) { closeMenu(); return; } // click again to close
+        var r = moreB.getBoundingClientRect();
+        var items = [
+          { label: "MCP servers", icon: ICONS.plug, hint: "connect", run: function(){ toggleComposerPanel("mcp"); } },
+          { label: "Skills", icon: ICONS.spark, hint: skillHint(), run: function(){ toggleComposerPanel("skills"); } },
+          { sep: true },
+          { label: "Prompts", icon: ICONS.clipboard, hint: KMOD + "\u21e7V", run: function(){ openPrompts(); } },
+          { label: "Attach a file", icon: ICONS.plus, run: function(){ var a = document.getElementById("attach"); if (a) a.click(); } },
+        ];
+        // The menu opens upward from a button that sits at the bottom of the
+        // window; openMenu flips it, so it is given the button's top edge.
+        openMenu(Math.round(r.left), Math.round(r.top - 4), items);
+      };
       setAuto(state.auto);
       setComposerMode(state.cmode || "chat");
       refreshSkillCount();
@@ -9150,7 +9181,10 @@ ${BRAND_SPRITE}
       api("/api/projects/" + pid + "/skills").then(function(r){
         var skills = r.skills || [], on = skills.filter(function(s){ return s.enabled; }).length;
         var b = document.getElementById("skcount"); if (b){ b.textContent = on; b.style.display = on ? "" : "none"; }
-        var btn = document.getElementById("skillbtn"); if (btn){ btn.classList.toggle("active", on > 0); btn.classList.toggle("empty", !skills.length); }
+        state.skillsOn = on; state.skillsTotal = skills.length;
+        // The button these marked is now a row inside the More menu; the
+        // badge on More carries the same signal.
+        var btn = document.getElementById("morebtn"); if (btn){ btn.classList.toggle("active", on > 0); }
       }).catch(function(){});
     }
     /**
@@ -10783,6 +10817,71 @@ ${BRAND_SPRITE}
         '<button class="iconbtn" type="button" data-thide title="forget this link" aria-label="forget this link">' + ICONS.x + "</button></div>" +
       '<span class="tinvx">they open it in Loom (Settings \\u2192 Team \\u2192 Join), or run <b>loom team join &lt;link&gt;</b></span></div>';
   }
+  /**
+   * One floating menu, for the composer's More button and for every right
+   * click.
+   *
+   * Anchored to a point rather than to an element, because a context menu
+   * belongs where the cursor is; it flips up or left rather than hanging off
+   * the edge of the window; Escape and any click outside close it; and the
+   * first item takes focus so the keyboard can drive it. Items are
+   * {label, icon, hint, run, danger, sep}.
+   */
+  function openMenu(x, y, items){
+    closeMenu();
+    var pop = document.createElement("div");
+    pop.className = "pickpop menupop";
+    pop.id = "loommenu";
+    pop.setAttribute("role", "menu");
+    pop.innerHTML = items.map(function(it, i){
+      if (it.sep) return '<div class="menusep"></div>';
+      if (it.head) return '<div class="pickhead">' + esc(it.head) + "</div>";
+      return '<button class="pickrow' + (it.danger ? " danger" : "") + '" role="menuitem" data-i="' + i + '">' +
+        '<span class="mico">' + (it.icon || "") + "</span>" +
+        '<span class="pnm">' + esc(it.label) + "</span>" +
+        (it.hint ? '<span class="prole">' + esc(it.hint) + "</span>" : "") + "</button>";
+    }).join("");
+    document.body.appendChild(pop);
+    var r = pop.getBoundingClientRect();
+    pop.style.left = Math.max(6, Math.min(x, window.innerWidth - r.width - 6)) + "px";
+    pop.style.top = (y + r.height > window.innerHeight - 6 ? Math.max(6, y - r.height) : y) + "px";
+    Array.prototype.forEach.call(pop.querySelectorAll("[data-i]"), function(b){
+      b.onclick = function(ev){
+        ev.stopPropagation();
+        var it = items[Number(b.getAttribute("data-i"))];
+        closeMenu();
+        if (it && it.run) it.run();
+      };
+    });
+    var first = pop.querySelector("[data-i]");
+    if (first) first.focus();
+    setTimeout(function(){
+      document.addEventListener("mousedown", menuAway);
+      document.addEventListener("keydown", menuKey);
+    }, 0);
+  }
+  function menuAway(ev){
+    var pop = document.getElementById("loommenu");
+    if (pop && !pop.contains(ev.target)) closeMenu();
+  }
+  function menuKey(ev){
+    if (ev.key === "Escape") { ev.preventDefault(); closeMenu(); return; }
+    var pop = document.getElementById("loommenu");
+    if (!pop || (ev.key !== "ArrowDown" && ev.key !== "ArrowUp")) return;
+    ev.preventDefault();
+    var rows = Array.prototype.slice.call(pop.querySelectorAll("[data-i]"));
+    var at = rows.indexOf(document.activeElement);
+    var next = ev.key === "ArrowDown" ? at + 1 : at - 1;
+    (rows[(next + rows.length) % rows.length] || rows[0]).focus();
+  }
+  function closeMenu(){
+    document.removeEventListener("mousedown", menuAway);
+    document.removeEventListener("keydown", menuKey);
+    var pop = document.getElementById("loommenu");
+    if (pop) pop.remove();
+  }
+  state.closeMenu = closeMenu;
+
   function copyText(v){
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(v).then(function(){ toast("copied"); }, function(){ toast("copy failed \\u2014 select the link and copy it"); });
@@ -14310,6 +14409,11 @@ ${BRAND_SPRITE}
 
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
+        row.oncontextmenu = function(ev){
+          ev.preventDefault();
+          ev.stopPropagation();
+          projectMenu(row.getAttribute("data-id"), ev.clientX, ev.clientY);
+        };
       });
       // The gear opens that project's settings without selecting it.
       Array.prototype.forEach.call(el.querySelectorAll("[data-pset]"), function(btn){
@@ -14339,6 +14443,11 @@ ${BRAND_SPRITE}
         row.onclick = function(){
           var pidC = row.getAttribute("data-p"), cid = row.getAttribute("data-chat");
           setChat(pidC, cid);
+        };
+        row.oncontextmenu = function(ev){
+          ev.preventDefault();
+          ev.stopPropagation();
+          chatMenu(row.getAttribute("data-p"), row.getAttribute("data-chat"), ev.clientX, ev.clientY);
         };
       });
       Array.prototype.forEach.call(el.querySelectorAll("[data-delchat]"), function(b){
@@ -14428,7 +14537,8 @@ ${BRAND_SPRITE}
         .catch(function(err){ toast(err.message); });
     }
 
-    /** A little popover of a project's agents, anchored to the New chat row. */
+  
+  /** A little popover of a project's agents, anchored to the New chat row. */
     function openChatAgentPick(anchor, proj, onPick){
       closeAgentPick();
       var agents = (proj && proj.agents) || [];
@@ -14465,6 +14575,118 @@ ${BRAND_SPRITE}
       var pop = document.getElementById("chatpick");
       if (pop) pop.remove();
     }
+    /**
+     * Right-click a project: everything you can do to it, where you clicked.
+     *
+     * These were scattered — settings behind a gear, rename nowhere, and
+     * removing a project only in loom projects --forget. A context menu is
+     * where people look for them, and it costs nothing to put them there.
+     */
+    function projectMenu(pid, x, y){
+      var p = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
+      if (!p) return;
+      openMenu(x, y, [
+        { head: p.name },
+        { label: "Open", icon: ICONS.thread, run: function(){ select(pid); } },
+        { label: "New chat", icon: ICONS.chat, run: function(){
+            var row = document.querySelector('[data-newchat="' + pid + '"]');
+            if (row) row.click(); else { select(pid); toast("open the project to start a chat"); }
+          } },
+        { sep: true },
+        { label: "Project settings\u2026", icon: ICONS.gear, run: function(){ openProjectSettings(pid); } },
+        { label: "Rename\u2026", icon: ICONS.file, run: function(){ renameProject(pid, p.name); } },
+        { label: "Copy path", icon: ICONS.copy, hint: "folder", run: function(){ copyText(p.dir || ""); } },
+        { sep: true },
+        // NOT "Delete": this unregisters the project and leaves every file
+        // where it is. A menu item that says delete and doesn't, or says
+        // delete and does, are both worse than one that says what happens.
+        { label: "Remove from Loom", icon: ICONS.trash, danger: true, run: function(){ forgetProject(pid, p.name); } },
+      ]);
+    }
+
+    /**
+     * Right-click a thread. Double-click already renamed one and the ✕ already
+     * forgot one; this is where you look for them, plus the binding that only
+     * existed when you created the thread.
+     */
+    function chatMenu(pid, cid, x, y){
+      var p = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
+      var c = ((p && p.chats) || []).filter(function(q){ return q.id === cid; })[0] || { id: cid, title: "Main" };
+      var isMain = cid === "main";
+      var items = [
+        { head: c.title },
+        { label: "Open", icon: ICONS.chat, run: function(){ setChat(pid, cid); } },
+        { sep: true },
+        { label: "Answered by\u2026", icon: ICONS.agents, hint: c.agentId || "the baton", run: function(){
+            var row = document.querySelector('.crow[data-chat="' + cid + '"]');
+            openChatAgentPick(row || document.body, p, function(agentId){ bindChat(pid, cid, agentId); });
+          } },
+      ];
+      // Main follows the baton and its name is not yours to change — the menu
+      // says so by not offering, rather than by offering and refusing.
+      if (!isMain) {
+        items.push({ label: "Rename\u2026", icon: ICONS.file, run: function(){ renameChat(pid, cid, c.title); } });
+        items.push({ sep: true });
+        items.push({ label: "Forget this chat", icon: ICONS.trash, danger: true, run: function(){ forgetChat(pid, cid); } });
+      }
+      openMenu(x, y, items);
+    }
+
+    function bindChat(pid, cid, agentId){
+      if (cid === "main") { toast("the main thread follows the baton"); return; }
+      api("/api/projects/" + pid + "/chats/" + cid + "/agent",
+          { method: "POST", body: JSON.stringify({ agentId: agentId || null }) })
+        .then(function(){ refresh(); toast(agentId ? "this thread answers with " + agentId : "back to following the baton"); })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    function renameChat(pid, cid, was){
+      var next = window.prompt("Rename this chat", was || "");
+      if (next === null) return;
+      next = next.trim();
+      if (!next || next === was) return;
+      api("/api/projects/" + pid + "/chats/" + cid + "/rename", { method: "POST", body: JSON.stringify({ title: next }) })
+        .then(function(){ refresh(); })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    function forgetChat(pid, cid){
+      api("/api/projects/" + pid + "/chats/" + cid, { method: "DELETE" })
+        .then(function(){
+          if (currentChat() === cid) setChat(pid, "main");
+          refresh();
+          toast("chat forgotten \u00b7 its history stays in the brain");
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    /** Rename in place, from the menu — the same call the settings pane makes. */
+    function renameProject(pid, was){
+      var next = window.prompt("Rename this project", was || "");
+      if (next === null) return;
+      next = next.trim();
+      if (!next || next === was) return;
+      api("/api/projects/" + pid, { method: "PATCH", body: JSON.stringify({ name: next }) })
+        .then(function(){ refresh(); toast("renamed"); })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    /**
+     * Stop tracking a project. Its directory, its .loom/ and its history stay
+     * exactly where they are — which is why the confirm says so rather than
+     * asking "are you sure?" about something it hasn't described.
+     */
+    function forgetProject(pid, name){
+      if (!window.confirm('Remove "' + name + '" from Loom?\\n\\nIts folder, its history and its .loom directory stay on disk. Add the folder again to bring it back.')) return;
+      api("/api/projects/" + pid, { method: "DELETE" })
+        .then(function(){
+          if (pid === cur) { cur = null; try { localStorage.removeItem("loomProject"); } catch (e) {} }
+          refresh();
+          toast("removed from Loom \u2014 the folder is untouched");
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+
     function select(pid){
       cur = pid;
       wanted = null; // whatever the URL wanted, this is a real choice now
