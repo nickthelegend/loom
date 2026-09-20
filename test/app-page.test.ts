@@ -285,3 +285,63 @@ describe("web app · whose thread is this", () => {
     expect(APP_HTML).toContain('if (!t) return "";');
   });
 });
+
+/**
+ * The transcript used to be one fixed level of detail: reasoning always
+ * folded, tool payloads never shown, and a long block — the orchestrator's
+ * plan, say — clipped inside a scroll box you could not reach the end of.
+ */
+describe("web app · transcript view", () => {
+  it("offers Normal, Thinking and Verbose, and remembers the choice per project", () => {
+    expect(APP_HTML).toContain('var TVIEWS = ["normal", "thinking", "verbose"];');
+    expect(APP_HTML).toContain("function tview(");
+    expect(APP_HTML).toContain("function setTView(");
+    // Per project, not per app: you read one project's run at Verbose without
+    // turning every other project's thread into a wall of JSON.
+    expect(APP_HTML).toContain('localStorage.setItem("loomTView:" + state.pid, v)');
+    // Changing the level re-reads the thread; a level nothing redraws is a
+    // setting that appears not to work.
+    expect(APP_HTML).toContain("if (state.redrawFeed) state.redrawFeed();");
+    expect(APP_HTML).toContain("state.redrawFeed = loadHistory");
+    // …and all three are reachable from More.
+    expect(APP_HTML).toContain('setTView("normal")');
+    expect(APP_HTML).toContain('setTView("thinking")');
+    expect(APP_HTML).toContain('setTView("verbose")');
+    expect(APP_HTML).toContain('{ head: "transcript" }');
+  });
+
+  it("shows more at each level, and only there", () => {
+    // Normal drops reasoning entirely — it is the working out, not the
+    // transcript. Thinking folds it in, Verbose opens it.
+    expect(APP_HTML).toContain('if (tv === "normal") return "";');
+    expect(APP_HTML).toContain('(tv === "verbose" ? " open" : "")');
+    // Raw payloads are Verbose only, on tool calls and on the orchestrator's
+    // brief — the two places a summary is standing in for something bigger.
+    expect(APP_HTML).toContain('tview() === "verbose" ? rawBlock(p) : ""');
+    expect(APP_HTML.match(/tview\(\) === "verbose" \? rawBlock\(p\) : ""/g)?.length).toBe(2);
+  });
+
+  /**
+   * The complaint that opened #97: a block of output you can see the start of
+   * and never the end of. Whatever the level, a long block has to be readable.
+   */
+  it("never hides the end of a block behind a scrollbar", () => {
+    // Code wraps instead of scrolling sideways off the bubble.
+    expect(APP_HTML).toContain("white-space:pre-wrap;overflow-wrap:anywhere");
+    expect(APP_HTML).not.toContain(".md .mdcode code{font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--foreground);\n    white-space:pre}");
+    // And every block carries a copy button, so the part that is too long to
+    // read on screen is still a paste away.
+    expect(APP_HTML).toContain('<div class="mdcodewrap"><button class="mdcopy"');
+    expect(APP_HTML).toContain('<button class="mdcopy" type="button" title="copy">');
+    // Wired: the feed delegates the click, and does it before the turn card
+    // and approval handlers that would otherwise swallow it.
+    expect(APP_HTML).toContain('ev.target.closest(".mdcopy")');
+    expect(APP_HTML).toContain('if (box) copyText(box.textContent || "");');
+    const feed = APP_HTML.indexOf('document.getElementById("feed").addEventListener("click"');
+    expect(feed).toBeGreaterThan(-1);
+    const copyAt = APP_HTML.indexOf('closest(".mdcopy")', feed);
+    const cardAt = APP_HTML.indexOf("if (approvalClick(ev)) return;", feed);
+    expect(copyAt).toBeGreaterThan(feed);
+    expect(copyAt).toBeLessThan(cardAt);
+  });
+});

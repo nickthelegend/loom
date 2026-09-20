@@ -279,8 +279,31 @@ window.__loomPageRev="%%BUILD_REV%%";
   .md a{color:var(--thread,#67e8f9);text-decoration:underline;text-underline-offset:2px}
   .md .mdcode{margin:0 0 8px;background:var(--editor-surface,color-mix(in srgb, var(--foreground) 6%, var(--background)));
     border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto}
-  .md .mdcode code{font-family:var(--font-mono);font-size:12.5px;line-height:1.5;white-space:pre;color:var(--foreground)}
+  .md .mdcode code{font-family:var(--font-mono);font-size:12.5px;line-height:1.5;color:var(--foreground);
+    white-space:pre-wrap;overflow-wrap:anywhere}
+  .md .mdcodewrap{position:relative}
+  .md .mdcodewrap .mdcopy{position:absolute;top:6px;right:6px;width:24px;height:24px;padding:0;
+    display:inline-flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;
+    background:var(--background);border:1px solid var(--border);color:var(--muted-foreground);opacity:0;transition:opacity .12s}
+  .md .mdcodewrap:hover .mdcopy,.md .mdcodewrap .mdcopy:focus-visible{opacity:1}
+  .md .mdcodewrap .mdcopy svg{width:13px;height:13px}
   .md strong{font-weight:650}
+  .rawbox{margin-top:6px;font-size:11.5px}
+  .rawbox summary{cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:10.5px;
+    letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground);opacity:.8}
+  .rawbox summary::-webkit-details-marker{display:none}
+  .rawbox summary::before{content:"\\25b8 ";font-size:9px}
+  .rawbox[open] summary::before{content:"\\25be "}
+  .rawbox .mdcodewrap{position:relative;margin-top:5px}
+  .rawbox pre.mdcode{margin:0;background:var(--editor-surface,color-mix(in srgb, var(--foreground) 6%, var(--background)));
+    border:1px solid var(--border);border-radius:8px;padding:10px 12px;max-height:60vh;overflow:auto}
+  .rawbox pre.mdcode code{font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:var(--foreground);
+    white-space:pre-wrap;overflow-wrap:anywhere}
+  .rawbox .mdcopy{position:absolute;top:6px;right:6px;width:24px;height:24px;padding:0;
+    display:inline-flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;
+    background:var(--background);border:1px solid var(--border);color:var(--muted-foreground);opacity:0;transition:opacity .12s}
+  .rawbox:hover .mdcopy,.rawbox .mdcopy:focus-visible{opacity:1}
+  .rawbox .mdcopy svg{width:13px;height:13px}
   /* --- reasoning / thinking block --- */
   .msg.agent.thinking{align-items:flex-start;margin-bottom:2px}
   .thinktag{font-size:9.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
@@ -3101,7 +3124,12 @@ ${BRAND_SPRITE}
       if (FENCE.test(line)) {
         var code = [], j = i + 1;
         while (j < lines.length && !FENCE_END.test(lines[j])) { code.push(lines[j]); j++; }
-        out.push('<pre class="mdcode"><code>' + code.join("\\n") + "</code></pre>");
+        // A code block used to scroll sideways with no way to reach the end,
+        // which is how an orchestrator's whole plan became unreadable. It
+        // wraps now, and carries a copy button for the times you want it
+        // somewhere else rather than on screen.
+        out.push('<div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
+          '</button><pre class="mdcode"><code>' + code.join("\\n") + "</code></pre></div>");
         i = j + 1; continue;
       }
       var h = line.match(HEAD);
@@ -3675,7 +3703,8 @@ ${BRAND_SPRITE}
         if (p.author === "orchestrator") {
           return '<div class="msg agent"><div class="who" style="color:var(--thread-ink)"><span class="orchmark">' + ICONS.orchestra + "</span>orchestrator" +
             (p.orchestra && p.orchestra.taskId ? '<span class="thinktag">' + esc(p.orchestra.taskId) + "</span>" : "") + "</div>" +
-            '<div class="bubble md" style="border-left-color:var(--thread)">' + mdToHtml(p.text) + "</div></div>";
+            '<div class="bubble md" style="border-left-color:var(--thread)">' + mdToHtml(p.text) +
+            (tview() === "verbose" ? rawBlock(p) : "") + "</div></div>";
         }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
         return '<div class="msg user"><div class="bubble md">' + mdToHtml(p.text) + "</div></div>";
@@ -3685,15 +3714,23 @@ ${BRAND_SPRITE}
       // collapsible block above the reply — dimmed, folded by default, so it's
       // there when you want it and out of the way when you don't.
       if (p.reasoning) {
+        // At Normal the reasoning isn't the transcript — it's the working out.
+        // Thinking folds it in; Verbose opens it.
+        var tv = tview();
+        if (tv === "normal") return "";
         return '<div class="msg agent thinking"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
           brandMark(kindOf(e.agentId)) + esc(e.agentId) + '<span class="thinktag">thinking</span></div>' +
-          '<details class="thinkbox"><summary>reasoning</summary><div class="md">' + mdToHtml(p.text) + "</div></details></div>";
+          '<details class="thinkbox"' + (tv === "verbose" ? " open" : "") + '><summary>reasoning</summary><div class="md">' +
+          mdToHtml(p.text) + "</div></details></div>";
       }
       return '<div class="msg agent"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
         brandMark(kindOf(e.agentId)) + esc(e.agentId) +
         '</div><div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div></div>";
     }
-    if (e.kind === "tool_call") return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool) + "</div>";
+    if (e.kind === "tool_call") {
+      return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool || p.name) +
+        (tview() === "verbose" ? rawBlock(p) : "") + "</div>";
+    }
     if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
@@ -6302,6 +6339,15 @@ ${BRAND_SPRITE}
     // click an Update(…) card in the thread → open its diff on the right
     // (desktop dock); on mobile, expand it inline.
     document.getElementById("feed").addEventListener("click", function(ev){
+      // A code block's copy button. First, because it lives inside cards that
+      // claim clicks of their own (a turn card opens its diff, a details folds).
+      var cp = ev.target.closest && ev.target.closest(".mdcopy");
+      if (cp) {
+        ev.preventDefault(); ev.stopPropagation();
+        var box = cp.parentNode && cp.parentNode.querySelector("code");
+        if (box) copyText(box.textContent || "");
+        return;
+      }
       var ap = ev.target.closest && ev.target.closest("[data-orch-apply]");
       if (ap) { applyOrch(ap.getAttribute("data-orch-apply"), ap); return; }
       var rd = ev.target.closest && ev.target.closest("[data-orch-deliver]");
@@ -8045,9 +8091,20 @@ ${BRAND_SPRITE}
       historyLoaded = true;
       if (pendingWs.length) { append(pendingWs); pendingWs = []; }
     }
-    api("/api/projects/" + pid + "/events?limit=60&chat=" + encodeURIComponent(chatId))
-      .then(function(j){ append(j.events || []); flushPending(); })
-      .catch(function(err){ toast(err.message); flushPending(); });
+    // Reading the thread again from scratch. Changing the transcript level
+    // changes what every past line renders as, so there is nothing to patch —
+    // the whole feed is re-read rather than re-styled.
+    function loadHistory(){
+      var feed = document.getElementById("feed");
+      if (feed) feed.innerHTML = '<div class="loader"></div>';
+      state.lastId = 0;
+      return api("/api/projects/" + pid + "/events?limit=60&chat=" + encodeURIComponent(chatId))
+        .then(function(j){ append(j.events || []); flushPending(); })
+        .catch(function(err){ toast(err.message); flushPending(); });
+    }
+    // The transcript-level menu lives in the shell's scope, and this doesn't.
+    state.redrawFeed = loadHistory;
+    loadHistory();
     refresh();
     state.timers.push(setInterval(refresh, 4000));
     if (desktop) {
@@ -8844,6 +8901,14 @@ ${BRAND_SPRITE}
         var items = [
           { label: "MCP servers", icon: ICONS.plug, hint: "connect", run: function(){ toggleComposerPanel("mcp"); } },
           { label: "Skills", icon: ICONS.spark, hint: skillHint(), run: function(){ toggleComposerPanel("skills"); } },
+          { sep: true },
+          { head: "transcript" },
+          { label: "Normal", icon: tview() === "normal" ? ICONS.check : "", hint: "what it said and did",
+            run: function(){ setTView("normal"); } },
+          { label: "Thinking", icon: tview() === "thinking" ? ICONS.check : "", hint: "+ reasoning",
+            run: function(){ setTView("thinking"); } },
+          { label: "Verbose", icon: tview() === "verbose" ? ICONS.check : "", hint: "+ raw payloads",
+            run: function(){ setTView("verbose"); } },
           { sep: true },
           { label: "Prompts", icon: ICONS.clipboard, hint: KMOD + "\u21e7V", run: function(){ openPrompts(); } },
           { label: "Attach a file", icon: ICONS.plus, run: function(){ var a = document.getElementById("attach"); if (a) a.click(); } },
@@ -10927,10 +10992,65 @@ ${BRAND_SPRITE}
   }
   state.closeMenu = closeMenu;
 
+  /**
+   * How much of a turn the thread shows.
+   *
+   *   normal   — what an agent said and did: prose, edits, one line per tool
+   *   thinking — plus the reasoning it streamed, which Loom already receives
+   *   verbose  — plus the raw material: the full payload behind each tool
+   *              call, and nothing folded
+   *
+   * Per project, because "show me everything" is a thing you want while
+   * reading one project's run and not while reading another's.
+   */
+  var TVIEWS = ["normal", "thinking", "verbose"];
+  function tview(){
+    try {
+      var v = localStorage.getItem("loomTView:" + state.pid);
+      return TVIEWS.indexOf(v) >= 0 ? v : "normal";
+    } catch (e) { return "normal"; }
+  }
+  function setTView(v){
+    if (TVIEWS.indexOf(v) < 0) return;
+    try { localStorage.setItem("loomTView:" + state.pid, v); } catch (e) {}
+    if (state.redrawFeed) state.redrawFeed();
+    toast("transcript: " + v);
+  }
+
+  /** Raw payload, for verbose — the thing the summary was made from. */
+  function rawBlock(payload){
+    var text = "";
+    try { text = JSON.stringify(payload, null, 2); } catch (e) { text = String(payload); }
+    if (!text || text === "{}") return "";
+    return '<details class="rawbox"><summary>raw</summary><div class="mdcodewrap">' +
+      '<button class="mdcopy" type="button" title="copy">' + ICONS.copy + '</button>' +
+      '<pre class="mdcode"><code>' + esc(text) + "</code></pre></div></details>";
+  }
+
+  // The async clipboard is the good path and it is also the one that refuses:
+  // no permission, no user gesture, an insecure origin. Falling back to a
+  // throwaway textarea and execCommand is deprecated and still works
+  // everywhere, which is the whole argument for keeping it.
+  function copyFallback(v){
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = v;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+      document.body.appendChild(ta);
+      ta.select(); ta.setSelectionRange(0, v.length);
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
   function copyText(v){
+    function missed(){
+      toast(copyFallback(v) ? "copied" : "copy failed \\u2014 select it and copy by hand");
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(v).then(function(){ toast("copied"); }, function(){ toast("copy failed \\u2014 select the link and copy it"); });
-    } else toast("copy not available \\u2014 select the link and copy it");
+      navigator.clipboard.writeText(v).then(function(){ toast("copied"); }, missed);
+    } else missed();
   }
   function wireTeamInvites(host, act){
     Array.prototype.forEach.call(host.querySelectorAll("[data-tinvite]"), function(b){
@@ -14838,6 +14958,7 @@ ${BRAND_SPRITE}
     state.openFile = null; state.showTab = null; state.showRail = null; state.teamBrainPing = null;
     state.selectAgent = null; state.termRun = null; state.setChat = null;
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
+    state.redrawFeed = null;
     if (!state.token) return renderPair();
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
