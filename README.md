@@ -300,6 +300,20 @@ origin, so the browser won't let it photograph itself: the daemon takes the
 shot with the project's own Playwright, and a project without Playwright is
 told exactly that rather than handed an empty file.
 
+**Dark mode, on the page being previewed** — Auto / ☀ / ☾, independent of
+Loom's own theme and remembered per project. No API lets one document set
+another's `prefers-color-scheme`; Loom isn't outside the page, though — the
+proxy served it *and* its stylesheets — so the bridge re-points the page's own
+`@media (prefers-color-scheme: …)` rules, sets the UA colour-scheme, and makes
+`matchMedia` answer the way you asked (firing `change`, so an app that themes
+itself in JavaScript re-renders). Every rewritten rule remembers the media text
+it came with, so **Auto is the page exactly as it shipped**; stylesheets Loom
+doesn't serve can't be read and aren't claimed. A page you typed into the
+address bar rather than previewing through Loom says so instead of offering a
+switch that does nothing — and the screenshot drives a real browser, where the
+scheme is honoured either way. Both conditions ride along with what you send:
+*Screenshot taken at 375×812, dark mode*, and an element pick names them too.
+
 ## The workspace
 
 On a wide screen the web app (and the desktop shell around it) is a full workspace for

@@ -4098,6 +4098,13 @@ ${BRAND_SPRITE}
         '<button data-w="768" title="tablet width">768</button>' +
         '<button data-w="1280" title="desktop width">1280</button>' +
         "</span>" +
+        // The other half of "the conditions a bug was seen under": the page's
+        // colour scheme, independent of Loom's own theme.
+        '<span class="browsizes" id="browscheme">' +
+        '<button data-s="" class="on" title="whatever your OS is set to">Auto</button>' +
+        '<button data-s="light" title="preview the page in light mode">\u2600</button>' +
+        '<button data-s="dark" title="preview the page in dark mode">\u263d</button>' +
+        "</span>" +
         '<button id="browshot" class="iconbtn" title="screenshot into the composer">' + ICONS.camera + "</button>" +
         '<button id="browreload" class="iconbtn" title="reload">' + ICONS.refresh + "</button>" +
         '<label class="browauto" title="reload when an agent changes a file this server serves">' +
@@ -11723,7 +11730,7 @@ ${BRAND_SPRITE}
   // A live page and the project's Playwright specs, in the dock beside the
   // terminals. An agent writes a browser test; this is where you watch it run
   // and — when it fails — hand the failure straight back to whoever wrote it.
-  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "", width: 0, relTimer: null, bridged: false };
+  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "", width: 0, scheme: "", relTimer: null, bridged: false };
 
   // ---- dev servers (core/servers.ts) --------------------------------------
   // What this project runs, and what it's doing right now. "running" means a
@@ -12064,7 +12071,7 @@ ${BRAND_SPRITE}
       if (btn) btn.classList.remove("on");
       var box = document.getElementById("box");
       if (box) {
-        var lines = ["About this element on " + (p.url || "the page") + ":",
+        var lines = ["About this element on " + (p.url || "the page") + " (" + conditions() + "):",
           "  selector: " + p.selector,
           "  text: " + (p.text || "(none)"),
           "  box: " + p.rect.w + "×" + p.rect.h + " at " + p.rect.x + "," + p.rect.y,
@@ -12079,6 +12086,9 @@ ${BRAND_SPRITE}
       pg.console = [];
       pg.network = [];
       drawPageLog();
+      // …and a fresh page is the page as it shipped, so the scheme you chose
+      // has to be asked for again. Every reload, every hot rebuild.
+      if (brow.scheme) applyBrowScheme();
     }
   }
   window.addEventListener("message", onPreviewMessage);
@@ -12110,7 +12120,15 @@ ${BRAND_SPRITE}
     if (url) url.onkeydown = function(ev){ if (ev.key === "Enter") { ev.preventDefault(); nav(); } };
 
     // Width presets: "it breaks on mobile" should be reproducible in the pane
-    // where the work happens, not only in another window.
+    // where the work happens, not only in another window. Both the width and
+    // the scheme are read back per project — they were being saved and never
+    // restored, which is the same as not remembering them.
+    try {
+      var savedW = localStorage.getItem("loomBrowW:" + state.pid);
+      if (savedW !== null) brow.width = Number(savedW) || 0;
+      var savedS = localStorage.getItem("loomBrowS:" + state.pid);
+      if (savedS === "dark" || savedS === "light") brow.scheme = savedS;
+    } catch (e) {}
     var sizes = document.getElementById("browsizes");
     if (sizes) Array.prototype.forEach.call(sizes.querySelectorAll("[data-w]"), function(b){
       b.classList.toggle("on", Number(b.getAttribute("data-w")) === (brow.width || 0));
@@ -12121,6 +12139,18 @@ ${BRAND_SPRITE}
           x.classList.toggle("on", Number(x.getAttribute("data-w")) === brow.width);
         });
         applyBrowWidth();
+      };
+    });
+    var schemes = document.getElementById("browscheme");
+    if (schemes) Array.prototype.forEach.call(schemes.querySelectorAll("[data-s]"), function(b){
+      b.classList.toggle("on", b.getAttribute("data-s") === brow.scheme);
+      b.onclick = function(){
+        brow.scheme = b.getAttribute("data-s") || "";
+        try { localStorage.setItem("loomBrowS:" + state.pid, brow.scheme); } catch (e) {}
+        Array.prototype.forEach.call(schemes.querySelectorAll("[data-s]"), function(x){
+          x.classList.toggle("on", (x.getAttribute("data-s") || "") === brow.scheme);
+        });
+        applyBrowScheme();
       };
     });
     var rl = document.getElementById("browreload");
@@ -12168,6 +12198,40 @@ ${BRAND_SPRITE}
     state.timers.push(brow.relTimer);
   }
 
+  /** The conditions the preview is being viewed under, in words. */
+  function conditions(){
+    return (brow.width ? brow.width + "px wide" : "fit to the pane") +
+      ", " + (brow.scheme ? brow.scheme + " mode" : "your OS colour scheme");
+  }
+
+  /** Add a line to the composer without clobbering what's already typed. */
+  function noteConditions(line){
+    var box = document.getElementById("box");
+    if (!box) return;
+    box.value = box.value ? box.value.replace(/\\s*$/, "") + "\\n" + line : line;
+    autosizeBox();
+  }
+
+  /**
+   * Ask the previewed page to render as if the OS were set this way.
+   *
+   * It can only be asked — the bridge inside the page is what re-points its
+   * prefers-color-scheme rules — so a page Loom isn't proxying gets told
+   * that plainly instead of a switch that does nothing. The capture path
+   * (screenshot) drives a real browser and honours it either way.
+   */
+  function applyBrowScheme(){
+    var host = document.getElementById("browframe");
+    var frame = host && host.querySelector("iframe");
+    if (!frame || !frame.contentWindow) return;
+    if (!brow.bridged && brow.scheme) {
+      toast("the shot will be in " + brow.scheme + " mode \u2014 the live frame needs a server previewed through Loom");
+    }
+    try {
+      frame.contentWindow.postMessage({ source: "loom-app", kind: "scheme", value: brow.scheme || null }, "*");
+    } catch (e) {}
+  }
+
   /** The emulated width, scaled down when the pane is narrower than it. */
   function applyBrowWidth(){
     var host = document.getElementById("browframe");
@@ -12204,13 +12268,23 @@ ${BRAND_SPRITE}
     toast("taking a screenshot…");
     api("/api/projects/" + state.pid + "/preview/screenshot", {
       method: "POST",
-      body: JSON.stringify({ url: brow.url, width: w, height: host ? Math.max(400, host.clientHeight) : 800 }),
+      body: JSON.stringify({
+        url: brow.url,
+        width: w,
+        height: host ? Math.max(400, host.clientHeight) : 800,
+        // The capture drives a real browser, so the scheme is truthful here
+        // whether or not the live frame could be asked.
+        colorScheme: brow.scheme === "dark" ? "dark" : "light",
+      }),
     }).then(function(j){
       if (btn) btn.disabled = false;
       // Same path a pasted image takes: a chip in the composer, sent as a path.
       attach.push({ name: "preview.png", kind: "image", uploading: false, thumb: null, path: j.path });
       drawAttach();
-      toast("added to the composer · " + j.width + "×" + j.height);
+      // The conditions ride along with the picture: an agent reading "it looks
+      // wrong" needs to know at what width, in which scheme.
+      noteConditions("Screenshot taken at " + j.width + "\u00d7" + j.height + ", " + j.colorScheme + " mode.");
+      toast("added to the composer \u00b7 " + j.width + "\u00d7" + j.height + " \u00b7 " + j.colorScheme);
     }).catch(function(e){
       if (btn) btn.disabled = false;
       toast(e.message);

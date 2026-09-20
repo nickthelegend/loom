@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Dark mode in the preview
+
+- **Auto / light / dark for the previewed page**, independent of Loom's own
+  theme and remembered per project, alongside the widths. It re-points the
+  page's own `prefers-color-scheme` rules through the proxy bridge and makes
+  `matchMedia` answer to match, so both CSS-themed and JS-themed apps follow;
+  Auto restores every rule exactly as it shipped. Where Loom can't reach the
+  page it says so rather than offering a switch that does nothing, and the
+  screenshot — a real browser — honours the scheme either way.
+- The width you chose is now actually **read back**: it was being saved and
+  never restored, which is the same as not remembering it.
+- A screenshot and an element pick both carry the conditions they were taken
+  under (*375×812, dark mode*) into the prompt.
+
 ### The baton can carry the work
 
 - **`git.mergeOnHandoff`** (with `worktreePerAgent`): handing the baton from A
