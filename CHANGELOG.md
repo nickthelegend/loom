@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### The baton can carry the work
+
+- **`git.mergeOnHandoff`** (with `worktreePerAgent`): handing the baton from A
+  to B merges `agent/A` into B's checkout, so the next agent starts from what
+  the last one finished. It refuses rather than guesses — uncommitted work on
+  either side, or a merge already in progress, is reported instead of merged —
+  and a conflict is left in the tree with the files named, in the briefing and
+  in the handoff event. A conflict stops a route instead of prompting an agent
+  on top of conflict markers.
+
 ### Routes: steps that decide whether to run
 
 - **A route step can carry a condition on the previous turn** and is skipped

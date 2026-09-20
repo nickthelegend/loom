@@ -102,6 +102,7 @@ import {
   type WorkingTree,
 } from "../core/worktree.js";
 import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
+import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
 
@@ -702,7 +703,13 @@ export class ProjectRuntime {
     brain?: { extractor?: "auto" | "off"; model?: string };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
     defaultAgent?: string;
-    git?: { commitPerTurn?: boolean; branchPerTask?: boolean; worktreePerAgent?: boolean; delivery?: string };
+    git?: {
+      commitPerTurn?: boolean;
+      branchPerTask?: boolean;
+      worktreePerAgent?: boolean;
+      mergeOnHandoff?: boolean;
+      delivery?: string;
+    };
     safety?: { snapshotBeforeRoutes?: boolean };
   }): ProjectConfig {
     // Validate everything that can be rejected BEFORE touching this.config, so a
@@ -732,7 +739,12 @@ export class ProjectRuntime {
     }
     if (patch.git) {
       const g = { ...(this.config.git ?? {}) };
-      for (const k of ["commitPerTurn", "branchPerTask", "worktreePerAgent"] as const) {
+      for (const k of [
+        "commitPerTurn",
+        "branchPerTask",
+        "worktreePerAgent",
+        "mergeOnHandoff",
+      ] as const) {
         if (typeof patch.git[k] === "boolean") {
           if (patch.git[k]) g[k] = true;
           else delete g[k];
@@ -771,7 +783,13 @@ export class ProjectRuntime {
     brain: { extractor: "auto" | "off"; model: string };
     projection: { mode: "template" | "llm"; model: string };
     defaultAgent: string;
-    git: { commitPerTurn: boolean; branchPerTask: boolean; worktreePerAgent: boolean; delivery: GitDelivery };
+    git: {
+      commitPerTurn: boolean;
+      branchPerTask: boolean;
+      worktreePerAgent: boolean;
+      mergeOnHandoff: boolean;
+      delivery: GitDelivery;
+    };
     safety: { snapshotBeforeRoutes: boolean };
     agents: Array<{ id: string; kind: string; role?: string }>;
   } {
@@ -788,6 +806,7 @@ export class ProjectRuntime {
         commitPerTurn: Boolean(this.config.git?.commitPerTurn),
         branchPerTask: Boolean(this.config.git?.branchPerTask),
         worktreePerAgent: Boolean(this.config.git?.worktreePerAgent),
+        mergeOnHandoff: Boolean(this.config.git?.mergeOnHandoff),
         delivery: this.config.git?.delivery ?? "none",
       },
       safety: { snapshotBeforeRoutes: Boolean(this.config.safety?.snapshotBeforeRoutes) },
@@ -2872,10 +2891,37 @@ export class ProjectRuntime {
     return { agentId: toAgentId, retried: prompt };
   }
 
+  /**
+   * Carry the outgoing agent's branch into the incoming agent's worktree.
+   *
+   * Only with both `worktreePerAgent` and `mergeOnHandoff` on, only when the
+   * two really are separate checkouts, and never when it would have to guess:
+   * see core/worktree-merge.ts for what it refuses. The outcome is a value so
+   * the handoff event and the briefing can both say what happened.
+   */
+  private async mergeForHandoff(from: string, to: string): Promise<MergeOutcome | null> {
+    if (!this.config.git?.worktreePerAgent || !this.config.git?.mergeOnHandoff) return null;
+    const into = this.agentDir(to);
+    const source = this.agentDir(from);
+    if (into === this.info.dir || source === into) return null;
+    try {
+      return await mergeAgentWork({
+        into,
+        branch: `agent/${from}`,
+        sourceDir: source,
+        message: `Loom: ${from} → ${to}`,
+      });
+    } catch (err) {
+      // A merge that can't run must not take the handoff down with it.
+      logbook.warn("git", `merge on handoff ${from} → ${to} failed`, String(err), this.info.id);
+      return null;
+    }
+  }
+
   async handoff(
     to: string,
     opts: { source?: "user" | "route" } = {},
-  ): Promise<{ from: string | null }> {
+  ): Promise<{ from: string | null; merge?: MergeOutcome }> {
     const target = this.agent(to);
     if (!isAdapter(target)) {
       throw new Error(`cannot hand the baton to "${to}" — bridges are read-only by design`);
@@ -2892,6 +2938,7 @@ export class ProjectRuntime {
     // handoff event, so "who left what uncommitted" is always answerable.
     let handoffMeta: Record<string, unknown> = { projected: true };
     const holder = this.validHolder();
+    let merge: MergeOutcome | null = null;
     if (holder && holder !== to) {
       const current = this.agent(holder);
       if (isAdapter(current)) {
@@ -2899,6 +2946,10 @@ export class ProjectRuntime {
         const diff = await current.diff().catch(() => "");
         if (diff) handoffMeta = { ...handoffMeta, dirty: true, diff: diff.slice(0, 2000) };
       }
+      // After the outgoing agent has stopped (its last commit is in), before
+      // the briefing is written — so the briefing can carry the result.
+      merge = await this.mergeForHandoff(holder, to);
+      if (merge) handoffMeta = { ...handoffMeta, merge };
     }
 
     // Refresh the shared brain from every ADE's native memory before handing
@@ -2936,7 +2987,13 @@ export class ProjectRuntime {
     // adapter actually receives — prepended to its next turn — carries the
     // retrieved brain brief too. Without it, a handoff to codex arrived with
     // the conversation but none of what the project (or team) had learned.
-    this.pendingBriefings.set(to, [buildBriefing(input), brainBrief].filter(Boolean).join("\n\n"));
+    // The merge goes at the TOP of the briefing when it conflicted: an agent
+    // that starts editing a tree full of conflict markers makes it worse.
+    const mergeNote = merge ? describeMerge(merge, holder ?? "the previous agent", to) : "";
+    this.pendingBriefings.set(
+      to,
+      [mergeNote, buildBriefing(input), brainBrief].filter(Boolean).join("\n\n"),
+    );
     if (rendered.mode === "llm") {
       this.log.append({
         kind: "status",
@@ -2962,7 +3019,7 @@ export class ProjectRuntime {
 
     const { from } = this.baton.handoff(to, handoffMeta);
     await this.ensureStarted(to);
-    return { from };
+    return { from, ...(merge ? { merge } : {}) };
   }
 
   async interrupt(

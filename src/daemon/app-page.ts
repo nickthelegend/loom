@@ -13674,7 +13674,8 @@ ${BRAND_SPRITE}
         var POLS = [
           ["git.commitPerTurn", "Commit each turn", "one commit per turn, agent as co-author, staged by the turn\\u2019s own files", (cfg.git || {}).commitPerTurn],
           ["git.branchPerTask", "Branch per card", "dragging a card to Working checks out task/<id>-<slug>", (cfg.git || {}).branchPerTask],
-          ["git.worktreePerAgent", "Worktree per agent", "each agent in its own checkout on agent/<id> \\u2014 applies to agents spawned from now on; merging is manual", (cfg.git || {}).worktreePerAgent],
+          ["git.worktreePerAgent", "Worktree per agent", "each agent in its own checkout on agent/<id> \\u2014 applies to agents spawned from now on", (cfg.git || {}).worktreePerAgent],
+          ["git.mergeOnHandoff", "Merge on handoff", "with worktrees on: the baton carries agent/&lt;from&gt; into the next agent\\u2019s checkout \\u2014 refused when either side has uncommitted work; a conflict stops a route", (cfg.git || {}).mergeOnHandoff],
           ["safety.snapshotBeforeRoutes", "Snapshot before routes", "checkpoint brain+board+config before a fleet runs unattended", (cfg.safety || {}).snapshotBeforeRoutes],
         ];
         host.innerHTML = POLS.map(function(pol){

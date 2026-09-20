@@ -234,10 +234,18 @@ export interface ProjectConfig {
     branchPerTask?: boolean;
     /**
      * Each adapter works in its own worktree on branch agent/<id>, so parallel
-     * edits can't collide in the filesystem. Merging is manual in this
-     * version: `git merge agent/<id>` is the handoff of record.
+     * edits can't collide in the filesystem. Merging is manual unless
+     * `mergeOnHandoff` is on; `git merge agent/<id>` is always available.
      */
     worktreePerAgent?: boolean;
+    /**
+     * With worktrees on: when the baton passes A → B, merge `agent/A` into B's
+     * checkout so the work travels with the baton. Refuses rather than
+     * guesses — uncommitted work on either side, or a merge already in
+     * progress, is reported instead of merged. A conflict is left in the tree
+     * to be resolved and stops a route. See core/worktree-merge.ts.
+     */
+    mergeOnHandoff?: boolean;
     /**
      * What happens to finished work, in one setting (the status-bar toggle):
      *   none   — nothing is committed for you; orchestra work waits on its branch

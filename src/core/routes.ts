@@ -49,13 +49,22 @@ export class RouteActiveError extends Error {
   }
 }
 
+/**
+ * What a handoff reports back. Only the merge matters to a route: with
+ * `git.mergeOnHandoff` on, the baton carries the outgoing agent's branch into
+ * the incoming agent's worktree, and that can conflict.
+ */
+export interface HandoffOutcome {
+  merge?: { state: string; files?: string[] };
+}
+
 /** What the engine needs from the project runtime (avoids a circular import). */
 export interface RouteHost {
   projectName: string;
   projectDir: string;
   config: ProjectConfig;
   log: EventLog;
-  handoff(to: string): Promise<unknown>;
+  handoff(to: string): Promise<HandoffOutcome>;
   send(text: string, agentId: string): Promise<unknown>;
   interrupt(): Promise<unknown>;
   isAdapterId(id: string): boolean;
@@ -573,7 +582,22 @@ export class RouteEngine {
     });
     this.armTimer(r.id, r.current);
     try {
-      await this.host.handoff(agent);
+      const outcome = await this.host.handoff(agent);
+      // A conflicted merge leaves conflict markers in the tree this step was
+      // about to work in. Prompting on top of that produces work nobody can
+      // review, so the route stops here and names the files. The merge is
+      // left in place: those conflicts are the thing to resolve.
+      const conflict = outcome?.merge?.state === "conflict" ? outcome.merge : null;
+      if (conflict) {
+        this.clearTimer();
+        const files = (conflict.files ?? []).join(", ");
+        this.finish(
+          r,
+          "failed",
+          `handing the baton to ${agent} left a merge conflict in ${files || "the working tree"} — resolve it (or "git merge --abort" in that worktree) and start the route again`,
+        );
+        return;
+      }
       await this.host.send(this.instruction(r), agent);
     } catch (err) {
       const fresh = this.read();

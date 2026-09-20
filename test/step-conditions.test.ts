@@ -134,8 +134,11 @@ async function engine(turn: TurnFacts) {
     projectDir: dir,
     config,
     log,
-    handoff: async (to) => sent.push(`handoff:${to}`),
-    send: async (_text, agentId) => sent.push(`send:${agentId}`),
+    handoff: async (to) => {
+      sent.push(`handoff:${to}`);
+      return {};
+    },
+    send: async (_text: string, agentId: string) => sent.push(`send:${agentId}`),
     interrupt: async () => {},
     isAdapterId: isAdapter,
     costTotal: () => 0,

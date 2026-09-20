@@ -1223,9 +1223,18 @@ a policy, not a mechanic:
   wrote this" with the agent, staged by exactly the files that turn touched —
   a bystander's uncommitted mess is never swallowed.
 - **`worktreePerAgent`** — each adapter works in a sibling checkout on branch
-  `agent/<id>`; parallel edits can't collide in the filesystem. Merging is
-  deliberately manual (`git merge agent/<id>`); pair with `commitPerTurn` so
-  the branches actually carry the work.
+  `agent/<id>`; parallel edits can't collide in the filesystem. Pair with
+  `commitPerTurn` so the branches actually carry the work; `git merge
+  agent/<id>` is always available.
+- **`mergeOnHandoff`** — with worktrees on, the baton carries the work: handing
+  from A to B merges `agent/A` into B's checkout, so B starts from what A
+  finished instead of from before A began. It refuses more than it does, and
+  says which: uncommitted work on either side isn't merged (A's isn't on the
+  branch yet; merging onto B's is a state nobody can unpick), and a merge
+  already in progress is never stacked on. A conflict is left in the tree —
+  those files are the thing to resolve — and is named in the incoming
+  briefing, in the handoff event, and stops a route rather than prompting an
+  agent on top of conflict markers.
 - **`branchPerTask`** — dragging a board card to Working checks out
   `task/<id>-<slug>` (id first, so retitles don't orphan it; idempotent on
   re-drag). Reaching Review logs the exact `gh pr create` command instead of

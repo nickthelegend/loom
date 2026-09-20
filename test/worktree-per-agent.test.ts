@@ -100,3 +100,61 @@ describe("isolation", () => {
     expect(fs.readFileSync(path.join(dir, "collide.txt"), "utf8")).toContain("plannerbot");
   });
 });
+
+/**
+ * Merge on handoff (#32): the work travels with the baton.
+ *
+ * Its own project, because the toggle changes what a handoff does and the
+ * isolation tests above rely on it NOT doing that.
+ */
+describe("merge on handoff", () => {
+  let mdir: string;
+  let mrt: ProjectRuntime;
+
+  beforeAll(async () => {
+    mdir = tmpDir("moh");
+    git(mdir, "init", "-q", "-b", "main");
+    git(mdir, "config", "user.email", "t@t");
+    git(mdir, "config", "user.name", "t");
+    fs.writeFileSync(path.join(mdir, "seed.txt"), "seed\n");
+    git(mdir, "add", "-A");
+    git(mdir, "commit", "-qm", "seed");
+    writeProjectConfig(mdir, {
+      name: "moh",
+      agents: [
+        { id: "plannerbot", kind: "echo", role: "planner" },
+        { id: "execbot", kind: "echo", role: "executor" },
+      ],
+      brain: { extractor: "off" },
+      git: { worktreePerAgent: true, commitPerTurn: true, mergeOnHandoff: true },
+    });
+    mrt = await ProjectRuntime.open({ id: "moh", name: "moh", dir: mdir });
+  });
+
+  afterAll(async () => {
+    await mrt.close();
+  });
+
+  it("the next agent's checkout gets what the last one committed", async () => {
+    await mrt.sendMessage("write write:carried.txt", "plannerbot");
+    // The commit has to land before the baton moves, or there's nothing on
+    // the branch to carry — which is the refusal, not the feature.
+    await waitUntil(() => {
+      try {
+        return git(mdir, "log", "--oneline", "agent/plannerbot").includes("carried.txt")
+          || git(mdir, "show", "--stat", "agent/plannerbot").includes("carried.txt");
+      } catch {
+        return false;
+      }
+    });
+
+    const { merge } = await mrt.handoff("execbot");
+    expect(merge?.state).toBe("merged");
+    expect(fs.existsSync(path.join(mrt.agentDir("execbot"), "carried.txt"))).toBe(true);
+
+    // And it's written into the handoff event, so "what crossed" is answerable.
+    const handoffs = mrt.log.list({ kinds: ["handoff"] });
+    const last = handoffs[handoffs.length - 1]!;
+    expect((last.payload.merge as { state?: string })?.state).toBe("merged");
+  });
+});
