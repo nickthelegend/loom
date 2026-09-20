@@ -222,17 +222,17 @@ describe("installed by Homebrew", () => {
     expect(brewCask({}, () => false)).toBeNull();
   });
 
-  it("hands the update back to the package manager that owns it", async () => {
+  const brewAssist = async (response: number) => {
     const shown: Array<Record<string, unknown>> = [];
     const copied: string[] = [];
+    const ran: string[] = [];
     let downloads = 0;
     const r = await macAssist({
       version: "0.2.3",
       brew: { prefix: "/opt/homebrew", command: "brew upgrade --cask loom-desktop" },
-      dialog: {
-        showMessageBox: async (o: Record<string, unknown>) => (shown.push(o), { response: 0 }),
-      },
+      dialog: { showMessageBox: async (o: Record<string, unknown>) => (shown.push(o), { response }) },
       copy: async (t: string) => copied.push(t),
+      runInLoom: async (t: string) => ran.push(t),
       mac: {
         latestRelease: async () => ({ version: "9.9.9", tag: "v9.9.9", assets: ASSETS }),
         pickAsset,
@@ -240,12 +240,28 @@ describe("installed by Homebrew", () => {
         downloadVerified: async () => ((downloads++), { file: "", version: "9.9.9" }),
       },
     });
+    return { r, shown, copied, ran, downloads };
+  };
 
+  it("hands the update back to the package manager that owns it", async () => {
+    const { r, shown, downloads } = await brewAssist(2); // Close
     expect(r).toMatchObject({ reason: "homebrew" });
     // Even with a newer release out there, it doesn't fetch it — brew would
     // put the old one back next week.
     expect(downloads).toBe(0);
     expect(String(shown[0]!.detail)).toContain("brew upgrade --cask loom-desktop");
+  });
+
+  it("runs it in Loom's terminal when asked, where you can watch it", async () => {
+    const { r, ran, copied } = await brewAssist(0);
+    expect(ran).toEqual(["brew upgrade --cask loom-desktop"]);
+    expect(copied).toEqual([]);
+    expect(r).toMatchObject({ ran: true });
+  });
+
+  it("just copies it when that's what you picked", async () => {
+    const { ran, copied } = await brewAssist(1);
     expect(copied).toEqual(["brew upgrade --cask loom-desktop"]);
+    expect(ran).toEqual([]);
   });
 });

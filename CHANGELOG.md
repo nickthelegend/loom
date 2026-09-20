@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checksums by the release job, so it can't go stale.
 - **Check for Updates… recognises a Homebrew install** and hands you the
   `brew upgrade` command instead of downloading over a copy brew is tracking —
-  the same rule the Linux `.deb` already had.
+  the same rule the Linux `.deb` already had. **Run it in Loom** runs it in
+  Loom's own terminal, the one in the dock, so you watch the upgrade rather
+  than having it happen invisibly inside the app.
 - It does **not** get you past Gatekeeper, and doesn't pretend to: brew
   quarantines cask downloads on purpose. First launch asks once, as it does
   for a dmg you downloaded yourself. The cask deliberately does not strip the

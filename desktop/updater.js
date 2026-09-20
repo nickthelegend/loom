@@ -45,6 +45,16 @@ export function refusal(platform, packaged, env = process.env) {
   return null;
 }
 
+/**
+ * Hand a command to the web app's terminal — the one in the dock, in the
+ * project you have open. Same channel the native menu items use.
+ */
+async function runInLoom(command) {
+  const { BrowserWindow } = await electron();
+  const target = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  target?.webContents.send("loom:menu", `run:${command}`);
+}
+
 /** Open the release page — the fallback, and never a silent one. */
 async function openReleases() {
   const { shell } = await electron();
@@ -72,15 +82,20 @@ export async function macAssist(opts = {}) {
     const r = await say.showMessageBox({
       type: "info",
       message: `Loom Desktop ${version} was installed with Homebrew`,
-      detail: `Homebrew owns this copy, so it updates it:\n\n    ${brew.command}\n\nLoom won't download over it.`,
-      buttons: ["Copy command", "Close"],
+      detail: `Homebrew owns this copy, so it updates it:\n\n    ${brew.command}\n\nLoom can run that in its own terminal, where you can watch it — it replaces the app in place, so restart Loom when it finishes. Nothing is downloaded behind Homebrew's back either way.`,
+      buttons: ["Run it in Loom", "Copy command", "Close"],
       defaultId: 0,
-      cancelId: 1,
+      cancelId: 2,
     });
-    if (r.response === 0) {
+    // Running it in Loom's own terminal rather than shelling out ourselves:
+    // you see the command, you see its output, and it's the same terminal you
+    // would have typed it into. An upgrade that happens invisibly inside an
+    // app is an upgrade nobody can check.
+    if (r.response === 0) await (opts.runInLoom ?? runInLoom)(brew.command);
+    if (r.response === 1) {
       await (opts.copy ?? (async (t) => (await electron()).clipboard.writeText(t)))(brew.command);
     }
-    return { updated: false, reason: "homebrew", command: brew.command };
+    return { updated: false, reason: "homebrew", command: brew.command, ran: r.response === 0 };
   }
 
   let release;
