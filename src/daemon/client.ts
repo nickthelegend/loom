@@ -183,7 +183,7 @@ export class DaemonClient {
 
   startOrchestra(
     id: string,
-    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean },
+    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number },
   ): Promise<{ run: OrchestraRun }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, body);
   }
@@ -503,6 +503,10 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/servers/${encodeURIComponent(name)}/log?limit=${limit}`);
   }
 
+  digest(id: string, since: number): Promise<{ since: number; lines: Array<{ at: number; kind: string; text: string; eventId: number; chat?: string }>; turns: number; costUsd: number; waiting: string[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/digest?since=${since}`);
+  }
+
   // ── updates (core/updater.ts) ──
 
   updates(refresh = false): Promise<UpdateStatus> {
@@ -523,11 +527,11 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/queue`);
   }
 
-  queueAdd(id: string, body: { text: string; target?: unknown; chat?: string; plan?: boolean }): Promise<QueueView & { item: QueueItem }> {
+  queueAdd(id: string, body: { text: string; target?: unknown; chat?: string; plan?: boolean; when?: unknown }): Promise<QueueView & { item: QueueItem }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/queue`, body as Record<string, unknown>);
   }
 
-  queueEdit(id: string, itemId: string, patch: { text?: string; target?: unknown; to?: number }): Promise<QueueView> {
+  queueEdit(id: string, itemId: string, patch: { text?: string; target?: unknown; to?: number; when?: unknown }): Promise<QueueView> {
     return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/queue/${encodeURIComponent(itemId)}`, patch as Record<string, unknown>);
   }
 
@@ -537,6 +541,18 @@ export class DaemonClient {
 
   queueClear(id: string): Promise<QueueView & { dropped: number }> {
     return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/queue`);
+  }
+
+  saveQueueRecipe(id: string, name: string): Promise<{ recipe: { name: string; steps: unknown[] } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/queue/save`, { name });
+  }
+
+  runQueueRecipe(id: string, name: string): Promise<QueueView & { added: number }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/queue/recipe`, { name });
+  }
+
+  recipes(): Promise<{ recipes: Array<{ name: string; steps: Array<{ text: string; to: string }>; fromProject?: string }> }> {
+    return this.request("GET", "/api/recipes");
   }
 
   queuePause(id: string, paused: boolean): Promise<QueueView> {

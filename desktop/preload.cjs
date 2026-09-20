@@ -25,4 +25,18 @@ contextBridge.exposeInMainWorld("loomNative", {
       if (typeof action === "string") cb(action);
     });
   },
+  // An agent's question, as a native notification carrying the question
+  // itself. The page decides whether it's worth interrupting for; this only
+  // shows what it was given, and hands back what the person did with it.
+  notify: function (payload) {
+    return ipcRenderer.invoke("loom:notify", payload);
+  },
+  isFocused: function () {
+    return ipcRenderer.invoke("loom:focused");
+  },
+  onNotifyAction: function (cb) {
+    ipcRenderer.on("loom:notify-action", function (_e, action) {
+      if (action && typeof action === "object") cb(action);
+    });
+  },
 });

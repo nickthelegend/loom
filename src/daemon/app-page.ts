@@ -477,6 +477,11 @@ window.__loomPageRev="%%BUILD_REV%%";
   .cqacts button:hover{color:var(--foreground);background:var(--background)}
   .cqacts button:disabled{opacity:.3;cursor:default}
   .cqacts svg{width:12px;height:12px}
+  .cqitem .cqn{cursor:grab}
+  .cqitem.dragging{opacity:.4}
+  .cqitem.over{box-shadow:0 -2px 0 var(--accentBlue) inset}
+  .cqwhen{border:0;background:none;color:var(--warn);cursor:pointer;font:inherit;font-size:10.5px;padding:0 2px}
+  .cqwhen:hover{text-decoration:line-through}
   /* the @ / popover, mounted over the textarea */
   .cmenu{position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);z-index:30;
     background:var(--popover,var(--background));border:1px solid var(--border);border-radius:10px;
@@ -1167,6 +1172,26 @@ window.__loomPageRev="%%BUILD_REV%%";
   .browauto input{margin:0;cursor:pointer}
   .browframe.sized{display:flex;justify-content:center;overflow:auto;background:var(--muted)}
   .browframe.sized iframe{border:1px solid var(--border);background:#fff;flex:none}
+  /* what a PR would carry, before it carries it */
+  .modal.prplan{max-width:600px;width:92vw}
+  .prpbody{padding:4px 16px 12px;max-height:60vh;overflow:auto}
+  .prpsub{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin:10px 0 4px}
+  .prplist{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);
+    background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:6px 9px}
+  .prplist div{padding:1px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* what happened while you were away */
+  .modal.digest{max-width:620px;width:92vw}
+  .dgsub{padding:0 16px 10px;font-size:12px;color:var(--muted-foreground)}
+  .dgsub .warn{color:var(--warn)}
+  .dglist{max-height:60vh;overflow:auto;padding:0 8px 12px}
+  .dgrow{display:flex;gap:10px;align-items:baseline;padding:7px 8px;border-radius:8px;font-size:12.5px}
+  .dgrow[data-dgchat]{cursor:pointer}
+  .dgrow[data-dgchat]:hover{background:var(--sidebar-accent)}
+  .dgrow .dgt{flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+  .dgrow.question{color:var(--warn)}
+  .dgrow.failed,.dgrow.server{color:var(--err)}
+  .dgrow.landed{color:var(--ok)}
+  .dgrow.cost{color:var(--muted-foreground);font-family:var(--font-mono);font-size:11.5px}
   /* dev servers: the rail rows, and a server's output under the page */
   .srvlist{display:flex;flex-direction:column;gap:2px;padding:4px}
   .srvrow{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;font-size:12px}
@@ -3125,6 +3150,26 @@ ${BRAND_SPRITE}
     var q = ev && ev.payload && ev.payload.question ? ev.payload.question : "";
     announce(who + " needs input" + (q ? ": " + q : ""));
     toast("\\u23f8 " + who + " needs you");
+    // The desktop shell can do better than a browser notification: a native
+    // one carrying the question, answerable where the OS allows it. Quiet when
+    // the window is focused and already on that conversation — a notification
+    // about what you are looking at is noise.
+    if (window.loomNative && window.loomNative.notify) {
+      var nchat = (ev && ev.chat) || "main";
+      var here = state.currentChat ? state.currentChat() : "main";
+      if (document.hidden || nchat !== here) {
+        try {
+          window.loomNative.notify({
+            title: who + " needs you",
+            body: q || "Loom \u00b7 an agent is waiting on you",
+            chat: nchat,
+            project: state.pid || null,
+            agentId: (ev && ev.agentId) || null
+          });
+        } catch (e) {}
+      }
+      return;
+    }
     if (document.hidden){
       if (!_titleFlash){ var on = false; _titleFlash = setInterval(function(){
         document.title = (on = !on) ? "\\u23f8 " + who + " needs you" : _baseTitle; }, 1100); }
@@ -3657,6 +3702,10 @@ ${BRAND_SPRITE}
     }
     if (e.kind === "route_step") {
       var pos = p.of ? "step " + (Number(p.step) + 1) + "/" + Number(p.of) : "hop " + (Number(p.step) + 1);
+      if (p.skipped) {
+        return '<div class="sys" style="opacity:.65">\\u2937 ' + pos + " \\u2192 " + esc(p.agent) +
+          " " + esc(p.reason || "skipped") + "</div>";
+      }
       return '<div class="sys">\\u25b8 ' + pos + " \\u2192 " + esc(p.agent) +
         (p.reason ? ' <span style="opacity:.7">(' + esc(p.reason) + ")</span>" : "") + "</div>";
     }
@@ -4048,6 +4097,13 @@ ${BRAND_SPRITE}
         '<button data-w="375" title="phone width">375</button>' +
         '<button data-w="768" title="tablet width">768</button>' +
         '<button data-w="1280" title="desktop width">1280</button>' +
+        "</span>" +
+        // The other half of "the conditions a bug was seen under": the page's
+        // colour scheme, independent of Loom's own theme.
+        '<span class="browsizes" id="browscheme">' +
+        '<button data-s="" class="on" title="whatever your OS is set to">Auto</button>' +
+        '<button data-s="light" title="preview the page in light mode">\u2600</button>' +
+        '<button data-s="dark" title="preview the page in dark mode">\u263d</button>' +
         "</span>" +
         '<button id="browshot" class="iconbtn" title="screenshot into the composer">' + ICONS.camera + "</button>" +
         '<button id="browreload" class="iconbtn" title="reload">' + ICONS.refresh + "</button>" +
@@ -6523,7 +6579,7 @@ ${BRAND_SPRITE}
           return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>";
         }).join("") +
         '<option value="__custom">custom steps&hellip;</option></select>' +
-        '<input id="rsteps" placeholder="steps e.g. planner,executor" style="display:none">' +
+        '<input id="rsteps" placeholder="steps e.g. planner,executor,reviewer?lines>200" style="display:none">' +
         '<input id="rtask" placeholder="what should they do?">' +
         '<div class="row"><button class="btn primary" id="rgo">Start route</button></div>';
     }
@@ -6689,6 +6745,11 @@ ${BRAND_SPRITE}
       } else if (c.issue) {
         acts = '<div class="bca"><button class="btn ghost xs" data-wtissue="' + c.issue.number +
           '" title="cut a fresh branch for this issue in its own worktree">' + ICONS.branch + " Worktree</button></div>";
+      } else if (c.own && c.column === "in-review") {
+        // Your own card, in review, with no PR yet: offer to open one. It shows
+        // what would be pushed first — publishing is never implicit.
+        acts = '<div class="bca"><button class="btn outline xs" data-openpr="' + esc(c.id) +
+          '" title="open a pull request for this card">' + ICONS.branch + " Open PR</button></div>";
       }
       return '<div class="bcard' + (c.own ? " own" : "") + '" draggable="true" data-card="' + esc(c.id) +
         '" data-home="' + esc(c.column) + '"' + (c.own ? ' data-own="1"' : "") + ">" +
@@ -6809,6 +6870,52 @@ ${BRAND_SPRITE}
       Array.prototype.forEach.call(el.querySelectorAll("[data-wtissue]"), function(b){
         b.onclick = function(ev){ ev.stopPropagation(); openWorktree(b, { issue: Number(b.getAttribute("data-wtissue")) }); };
       });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-openpr]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); askOpenPr(b.getAttribute("data-openpr")); };
+      });
+    }
+
+    /**
+     * Open a PR for a card — after showing exactly what would be pushed.
+     *
+     * Pushing publishes, so the order matters: look, then decide, then act.
+     * The plan comes from the daemon (the branch, its commits, its files and
+     * the command), and nothing happens until the button in this dialog.
+     */
+    function askOpenPr(id){
+      if (!id || document.querySelector(".scrim")) return;
+      api("/api/projects/" + state.pid + "/tasks/" + encodeURIComponent(id) + "/pr").then(function(plan){
+        var scrim = document.createElement("div");
+        scrim.className = "scrim";
+        var body = plan.ready
+          ? '<div class="prpsub">' + plan.commits.length + " commit" + (plan.commits.length === 1 ? "" : "s") +
+            " on <code>" + esc(plan.branch) + "</code> that <code>" + esc(plan.base) + "</code> doesn\u2019t have, touching " +
+            plan.files.length + " file" + (plan.files.length === 1 ? "" : "s") + ".</div>" +
+            '<div class="prplist">' + plan.commits.slice(0, 12).map(function(c){ return "<div>" + esc(c) + "</div>"; }).join("") + "</div>" +
+            '<div class="prpsub">Files</div><div class="prplist">' +
+            plan.files.slice(0, 20).map(function(f){ return "<div>" + esc(f) + "</div>"; }).join("") + "</div>" +
+            '<div class="prpsub">This runs</div><code class="scmd">git push -u origin ' + esc(plan.branch) + "\\n" + esc(plan.command) + "</code>"
+          : '<div class="prpsub">' + esc(plan.why || "there\u2019s nothing to open a PR for") + "</div>";
+        scrim.innerHTML = '<div class="modal prplan"><div class="modalhead">Open a pull request' +
+          '<button class="iconbtn" id="prpx" aria-label="close">' + ICONS.x + "</button></div>" +
+          '<div class="prpbody">' + body + "</div>" +
+          '<div class="modalfoot">' +
+          (plan.ready ? '<button class="btn primary" id="prpgo">Push and open the PR</button>' : "") +
+          '<button class="btn ghost" id="prpcancel">Close</button></div></div>';
+        document.body.appendChild(scrim);
+        var close = function(){ scrim.remove(); };
+        scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+        document.getElementById("prpx").onclick = close;
+        document.getElementById("prpcancel").onclick = close;
+        var go = document.getElementById("prpgo");
+        if (go) go.onclick = function(){
+          go.disabled = true;
+          go.textContent = "Opening\\u2026";
+          api("/api/projects/" + state.pid + "/tasks/" + encodeURIComponent(id) + "/pr", { method: "POST", body: "{}" })
+            .then(function(r){ close(); toast("opened " + r.url); loadBoard(); })
+            .catch(function(e){ go.disabled = false; go.textContent = "Push and open the PR"; toast(e.message); });
+        };
+      }).catch(function(e){ toast(e.message); });
     }
 
     /**
@@ -8046,7 +8153,20 @@ ${BRAND_SPRITE}
     // sent: edit the text, change who takes it, reorder it, drop it. The
     // daemon sends the head as soon as nothing is in its way, one at a time.
 
-    var queue = { items: [], paused: false, reason: "", waitingFor: "", editing: null };
+    var queue = { items: [], paused: false, reason: "", waitingFor: "", editing: null, dragging: null };
+
+    /** A held prompt's condition, short enough for the row. */
+    function whenLabel(w){
+      if (!w) return "";
+      if (w.kind === "at") {
+        var d = new Date(w.at);
+        var sameDay = d.toDateString() === new Date().toDateString();
+        return (sameDay ? "" : d.toLocaleDateString() + " ") + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      }
+      if (w.kind === "landed") return "after " + String(w.runId).slice(0, 8) + " lands";
+      if (w.kind === "checks-green") return "when " + String(w.runId).slice(0, 8) + " is green";
+      return Math.round((w.ms || 0) / 60000) + "m quiet";
+    }
 
     function loadQueue(){
       api("/api/projects/" + pid + "/queue").then(applyQueue).catch(function(){});
@@ -8147,8 +8267,8 @@ ${BRAND_SPRITE}
           agents.map(function(a){
             return '<option value="' + esc(a.id) + '"' + (qTargetValue(it.target) === a.id ? " selected" : "") + ">" + esc(labelOf(a.id)) + "</option>";
           }).join("");
-        h += '<div class="cqitem' + (queue.paused ? " paused" : "") + '" data-qid="' + esc(it.id) + '">' +
-          '<span class="cqn">' + (i + 1) + "</span>" +
+        h += '<div class="cqitem' + (queue.paused ? " paused" : "") + '" data-qid="' + esc(it.id) + '" draggable="true">' +
+          '<span class="cqn" title="drag to reorder">' + (i + 1) + "</span>" +
           '<div class="cqbody">' +
           (editing
             ? '<textarea class="cqedit" data-qedit="' + esc(it.id) + '">' + esc(it.text) + "</textarea>" +
@@ -8158,7 +8278,10 @@ ${BRAND_SPRITE}
             : '<div class="cqtext" data-q="edit" title="click to edit">' + esc(it.text) + "</div>" +
               '<div class="cqmeta"><span>to</span><select class="cqto" data-q="target" aria-label="who takes this prompt">' + opts + "</select>" +
               (it.plan ? "<span>· plan mode</span>" : "") +
-              (it.editedAt ? "<span>· edited</span>" : "") + "</div>") +
+              (it.editedAt ? "<span>· edited</span>" : "") +
+              // held for later: what it's waiting for, and a click to release it
+              (it.when ? '<button class="cqwhen" data-q="unhold" title="run as soon as it can">⏱ ' + esc(whenLabel(it.when)) + "</button>" : "") +
+              "</div>") +
           "</div>" +
           '<div class="cqacts">' +
           '<button type="button" data-q="up" title="move up" aria-label="move up"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
@@ -8181,6 +8304,36 @@ ${BRAND_SPRITE}
       Array.prototype.forEach.call(el.querySelectorAll(".cqitem"), function(row){
         var id = row.getAttribute("data-qid");
         var at = queue.items.map(function(x){ return x.id; }).indexOf(id);
+        // Drag to reorder. addEventListener, not ondragstart= : the on* drag
+        // properties aren't universally present, and a reorder that silently
+        // does nothing is the worst kind of broken. The arrows stay — they're
+        // the path for anyone who can't drag.
+        row.addEventListener("dragstart", function(ev){
+          queue.dragging = id;
+          row.classList.add("dragging");
+          try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", id); } catch (e) {}
+        });
+        row.addEventListener("dragend", function(){
+          queue.dragging = null;
+          row.classList.remove("dragging");
+          Array.prototype.forEach.call(el.querySelectorAll(".cqitem"), function(x){ x.classList.remove("over"); });
+        });
+        row.addEventListener("dragover", function(ev){
+          if (!queue.dragging || queue.dragging === id) return;
+          ev.preventDefault();
+          row.classList.add("over");
+        });
+        row.addEventListener("dragleave", function(){ row.classList.remove("over"); });
+        row.addEventListener("drop", function(ev){
+          ev.preventDefault();
+          row.classList.remove("over");
+          var from = queue.dragging;
+          queue.dragging = null;
+          if (!from || from === id) return;
+          var to = queue.items.map(function(x){ return x.id; }).indexOf(id);
+          if (to < 0) return;
+          qAct("/" + encodeURIComponent(from), { method: "PATCH", body: JSON.stringify({ to: to }) });
+        });
         var find = function(sel){ return row.querySelector(sel); };
         var text = find('[data-q="edit"]');
         if (text) text.onclick = function(){ queue.editing = id; drawQueue(); };
@@ -8211,6 +8364,10 @@ ${BRAND_SPRITE}
           qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ to: at + 1 }) });
         };
         find('[data-q="rm"]').onclick = function(){ qAct("/" + encodeURIComponent(id), { method: "DELETE" }); };
+        var unhold = find('[data-q="unhold"]');
+        if (unhold) unhold.onclick = function(){
+          qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ when: null }) });
+        };
       });
     }
 
@@ -10140,6 +10297,58 @@ ${BRAND_SPRITE}
 
     bindComposer();
     loadQueue();
+    maybeDigest(pid);
+  }
+
+  /**
+   * What happened while you were away.
+   *
+   * Only when you've actually been away — coming back to a project you had
+   * open a minute ago doesn't need a summary of the minute. The mark is per
+   * device, because "when did you last look" is a fact about this window and
+   * nowhere else.
+   */
+  function maybeDigest(pid){
+    var key = "loomSeen:" + pid;
+    var since = 0;
+    try { since = Number(localStorage.getItem(key)) || 0; } catch (e) {}
+    var mark = function(){ try { localStorage.setItem(key, String(Date.now())); } catch (e) {} };
+    if (!since || Date.now() - since < 30 * 60000) return mark();
+    api("/api/projects/" + pid + "/digest?since=" + since).then(function(d){
+      mark();
+      if (!d || !d.lines || !d.lines.length) return;
+      showDigest(d, since);
+    }).catch(function(){ mark(); });
+  }
+
+  /** The digest itself: sentences, newest first, each one clickable. */
+  function showDigest(d, since){
+    if (document.querySelector(".scrim")) return;
+    var hours = Math.max(1, Math.round((Date.now() - since) / 3600000));
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    var rows = d.lines.map(function(l){
+      var when = new Date(l.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return '<div class="dgrow ' + esc(l.kind) + '"' + (l.chat ? ' data-dgchat="' + esc(l.chat) + '"' : "") + '>' +
+        '<span class="dgt">' + esc(when) + "</span><span>" + esc(l.text) + "</span></div>";
+    }).join("");
+    scrim.innerHTML = '<div class="modal digest"><div class="modalhead">While you were away' +
+      '<button class="iconbtn" id="dgclose" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="dgsub">the last ' + hours + " hour" + (hours === 1 ? "" : "s") +
+      (d.waiting && d.waiting.length ? ' \u00b7 <b class="warn">waiting on you: ' + esc(d.waiting.join(", ")) + "</b>" : "") + "</div>" +
+      '<div class="dglist">' + rows + "</div></div>";
+    document.body.appendChild(scrim);
+    var close = function(){ scrim.remove(); };
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("dgclose").onclick = close;
+    Array.prototype.forEach.call(scrim.querySelectorAll("[data-dgchat]"), function(row){
+      row.onclick = function(){
+        var chat = row.getAttribute("data-dgchat");
+        close();
+        if (state.setChat) state.setChat(state.pid, chat);
+        if (state.showTab) state.showTab("thread");
+      };
+    });
   }
 
   // ---- Loom Teams, Phase 1: see each other (docs/teams-architecture.md) -----
@@ -11521,7 +11730,7 @@ ${BRAND_SPRITE}
   // A live page and the project's Playwright specs, in the dock beside the
   // terminals. An agent writes a browser test; this is where you watch it run
   // and — when it fails — hand the failure straight back to whoever wrote it.
-  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "", width: 0, relTimer: null, bridged: false };
+  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "", width: 0, scheme: "", relTimer: null, bridged: false };
 
   // ---- dev servers (core/servers.ts) --------------------------------------
   // What this project runs, and what it's doing right now. "running" means a
@@ -11862,7 +12071,7 @@ ${BRAND_SPRITE}
       if (btn) btn.classList.remove("on");
       var box = document.getElementById("box");
       if (box) {
-        var lines = ["About this element on " + (p.url || "the page") + ":",
+        var lines = ["About this element on " + (p.url || "the page") + " (" + conditions() + "):",
           "  selector: " + p.selector,
           "  text: " + (p.text || "(none)"),
           "  box: " + p.rect.w + "×" + p.rect.h + " at " + p.rect.x + "," + p.rect.y,
@@ -11877,6 +12086,9 @@ ${BRAND_SPRITE}
       pg.console = [];
       pg.network = [];
       drawPageLog();
+      // …and a fresh page is the page as it shipped, so the scheme you chose
+      // has to be asked for again. Every reload, every hot rebuild.
+      if (brow.scheme) applyBrowScheme();
     }
   }
   window.addEventListener("message", onPreviewMessage);
@@ -11908,7 +12120,15 @@ ${BRAND_SPRITE}
     if (url) url.onkeydown = function(ev){ if (ev.key === "Enter") { ev.preventDefault(); nav(); } };
 
     // Width presets: "it breaks on mobile" should be reproducible in the pane
-    // where the work happens, not only in another window.
+    // where the work happens, not only in another window. Both the width and
+    // the scheme are read back per project — they were being saved and never
+    // restored, which is the same as not remembering them.
+    try {
+      var savedW = localStorage.getItem("loomBrowW:" + state.pid);
+      if (savedW !== null) brow.width = Number(savedW) || 0;
+      var savedS = localStorage.getItem("loomBrowS:" + state.pid);
+      if (savedS === "dark" || savedS === "light") brow.scheme = savedS;
+    } catch (e) {}
     var sizes = document.getElementById("browsizes");
     if (sizes) Array.prototype.forEach.call(sizes.querySelectorAll("[data-w]"), function(b){
       b.classList.toggle("on", Number(b.getAttribute("data-w")) === (brow.width || 0));
@@ -11919,6 +12139,18 @@ ${BRAND_SPRITE}
           x.classList.toggle("on", Number(x.getAttribute("data-w")) === brow.width);
         });
         applyBrowWidth();
+      };
+    });
+    var schemes = document.getElementById("browscheme");
+    if (schemes) Array.prototype.forEach.call(schemes.querySelectorAll("[data-s]"), function(b){
+      b.classList.toggle("on", b.getAttribute("data-s") === brow.scheme);
+      b.onclick = function(){
+        brow.scheme = b.getAttribute("data-s") || "";
+        try { localStorage.setItem("loomBrowS:" + state.pid, brow.scheme); } catch (e) {}
+        Array.prototype.forEach.call(schemes.querySelectorAll("[data-s]"), function(x){
+          x.classList.toggle("on", (x.getAttribute("data-s") || "") === brow.scheme);
+        });
+        applyBrowScheme();
       };
     });
     var rl = document.getElementById("browreload");
@@ -11966,6 +12198,40 @@ ${BRAND_SPRITE}
     state.timers.push(brow.relTimer);
   }
 
+  /** The conditions the preview is being viewed under, in words. */
+  function conditions(){
+    return (brow.width ? brow.width + "px wide" : "fit to the pane") +
+      ", " + (brow.scheme ? brow.scheme + " mode" : "your OS colour scheme");
+  }
+
+  /** Add a line to the composer without clobbering what's already typed. */
+  function noteConditions(line){
+    var box = document.getElementById("box");
+    if (!box) return;
+    box.value = box.value ? box.value.replace(/\\s*$/, "") + "\\n" + line : line;
+    autosizeBox();
+  }
+
+  /**
+   * Ask the previewed page to render as if the OS were set this way.
+   *
+   * It can only be asked — the bridge inside the page is what re-points its
+   * prefers-color-scheme rules — so a page Loom isn't proxying gets told
+   * that plainly instead of a switch that does nothing. The capture path
+   * (screenshot) drives a real browser and honours it either way.
+   */
+  function applyBrowScheme(){
+    var host = document.getElementById("browframe");
+    var frame = host && host.querySelector("iframe");
+    if (!frame || !frame.contentWindow) return;
+    if (!brow.bridged && brow.scheme) {
+      toast("the shot will be in " + brow.scheme + " mode \u2014 the live frame needs a server previewed through Loom");
+    }
+    try {
+      frame.contentWindow.postMessage({ source: "loom-app", kind: "scheme", value: brow.scheme || null }, "*");
+    } catch (e) {}
+  }
+
   /** The emulated width, scaled down when the pane is narrower than it. */
   function applyBrowWidth(){
     var host = document.getElementById("browframe");
@@ -12002,13 +12268,23 @@ ${BRAND_SPRITE}
     toast("taking a screenshot…");
     api("/api/projects/" + state.pid + "/preview/screenshot", {
       method: "POST",
-      body: JSON.stringify({ url: brow.url, width: w, height: host ? Math.max(400, host.clientHeight) : 800 }),
+      body: JSON.stringify({
+        url: brow.url,
+        width: w,
+        height: host ? Math.max(400, host.clientHeight) : 800,
+        // The capture drives a real browser, so the scheme is truthful here
+        // whether or not the live frame could be asked.
+        colorScheme: brow.scheme === "dark" ? "dark" : "light",
+      }),
     }).then(function(j){
       if (btn) btn.disabled = false;
       // Same path a pasted image takes: a chip in the composer, sent as a path.
       attach.push({ name: "preview.png", kind: "image", uploading: false, thumb: null, path: j.path });
       drawAttach();
-      toast("added to the composer · " + j.width + "×" + j.height);
+      // The conditions ride along with the picture: an agent reading "it looks
+      // wrong" needs to know at what width, in which scheme.
+      noteConditions("Screenshot taken at " + j.width + "\u00d7" + j.height + ", " + j.colorScheme + " mode.");
+      toast("added to the composer \u00b7 " + j.width + "\u00d7" + j.height + " \u00b7 " + j.colorScheme);
     }).catch(function(e){
       if (btn) btn.disabled = false;
       toast(e.message);
@@ -13472,7 +13748,8 @@ ${BRAND_SPRITE}
         var POLS = [
           ["git.commitPerTurn", "Commit each turn", "one commit per turn, agent as co-author, staged by the turn\\u2019s own files", (cfg.git || {}).commitPerTurn],
           ["git.branchPerTask", "Branch per card", "dragging a card to Working checks out task/<id>-<slug>", (cfg.git || {}).branchPerTask],
-          ["git.worktreePerAgent", "Worktree per agent", "each agent in its own checkout on agent/<id> \\u2014 applies to agents spawned from now on; merging is manual", (cfg.git || {}).worktreePerAgent],
+          ["git.worktreePerAgent", "Worktree per agent", "each agent in its own checkout on agent/<id> \\u2014 applies to agents spawned from now on", (cfg.git || {}).worktreePerAgent],
+          ["git.mergeOnHandoff", "Merge on handoff", "with worktrees on: the baton carries agent/&lt;from&gt; into the next agent\\u2019s checkout \\u2014 refused when either side has uncommitted work; a conflict stops a route", (cfg.git || {}).mergeOnHandoff],
           ["safety.snapshotBeforeRoutes", "Snapshot before routes", "checkpoint brain+board+config before a fleet runs unattended", (cfg.safety || {}).snapshotBeforeRoutes],
         ];
         host.innerHTML = POLS.map(function(pol){
@@ -14311,6 +14588,34 @@ ${BRAND_SPRITE}
         state.setComposerMode("orch");
         var box = document.getElementById("box"); if (box) box.focus();
       }
+    });
+  }
+  // What the person did with a notification: opened it, or answered from it.
+  // Answering sends the reply to the agent that asked, in the chat it asked
+  // in — the same call the composer makes, so nothing special happens to it.
+  if (window.loomNative && window.loomNative.onNotifyAction) {
+    window.loomNative.onNotifyAction(function(action){
+      if (!state.token || !action) return;
+      var pid = action.project || state.pid;
+      if (!pid) return;
+      var open = function(){
+        if (state.pid !== pid) location.hash = "#p/" + pid;
+        if (action.chat && state.setChat) state.setChat(pid, action.chat);
+        if (state.showTab) state.showTab("thread");
+      };
+      if (action.kind === "reply" && String(action.text || "").trim()) {
+        api("/api/projects/" + pid + "/messages", {
+          method: "POST",
+          body: JSON.stringify({
+            text: String(action.text).trim(),
+            agentId: action.agentId || undefined,
+            chat: action.chat || undefined
+          })
+        }).then(function(){ open(); refresh(); }).catch(function(e){ open(); toast(e.message); });
+        return;
+      }
+      open();
+      var box = document.getElementById("box"); if (box) box.focus();
     });
   }
   bootstrapAdmin().then(function(){

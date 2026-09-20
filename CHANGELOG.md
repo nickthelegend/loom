@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### The desktop app can update itself, where that's honest
+
+- **Help → Check for Updates…** on **Windows** and the **Linux AppImage**:
+  it asks before downloading, installs on quit, and restarts only when you
+  press Restart. On **macOS** it refuses and says why — the build is ad-hoc
+  signed, and macOS only replaces an app signed by a certificate it already
+  trusts — and opens the releases page instead. A `.deb` install is left to
+  the package manager that owns it. The release now publishes the update feed
+  for those two platforms and deliberately not for macOS: advertising an
+  update the OS will refuse to install is worse than advertising none.
+
+### Dark mode in the preview
+
+- **Auto / light / dark for the previewed page**, independent of Loom's own
+  theme and remembered per project, alongside the widths. It re-points the
+  page's own `prefers-color-scheme` rules through the proxy bridge and makes
+  `matchMedia` answer to match, so both CSS-themed and JS-themed apps follow;
+  Auto restores every rule exactly as it shipped. Where Loom can't reach the
+  page it says so rather than offering a switch that does nothing, and the
+  screenshot — a real browser — honours the scheme either way.
+- The width you chose is now actually **read back**: it was being saved and
+  never restored, which is the same as not remembering it.
+- A screenshot and an element pick both carry the conditions they were taken
+  under (*375×812, dark mode*) into the prompt.
+
+### The baton can carry the work
+
+- **`git.mergeOnHandoff`** (with `worktreePerAgent`): handing the baton from A
+  to B merges `agent/A` into B's checkout, so the next agent starts from what
+  the last one finished. It refuses rather than guesses — uncommitted work on
+  either side, or a merge already in progress, is reported instead of merged —
+  and a conflict is left in the tree with the files named, in the briefing and
+  in the handoff event. A conflict stops a route instead of prompting an agent
+  on top of conflict markers.
+
+### Routes: steps that decide whether to run
+
+- **A route step can carry a condition on the previous turn** and is skipped
+  when it doesn't hold: `loom route 'planner,executor,reviewer?lines>200' "…"`,
+  or `{ "step": "reviewer", "when": "lines>200" }` in the project config.
+  Conditions read the turn's own diff — `changed>N`, `changed<N`, `lines>N`,
+  `lines<N`, `touched:<glob>`, `!touched:<glob>` — and nothing else: a
+  condition must be something Loom measured, never a judgement about the work.
+  Unreadable ones are refused when the route is defined rather than quietly
+  never matching, the first step can't be conditional (no turn to measure),
+  and a skipped step appears in the thread with the numbers that decided it.
+  Skipping isn't failing — the route completes.
+
+### A pull request you asked for
+
+- **Open PR on a review card.** With branch-per-card on, a card in review shows
+  what a PR would carry — the branch, its commits, its files and the exact
+  command — and opens it only when you press the button. Asking pushes
+  nothing; publishing has never been implicit and still isn't.
+
+### Coming back to a project
+
+- **A digest of what happened while you were away** — goals, landings,
+  failures, a dead server, and what's waiting on you, newest first and each
+  line clicking through to the moment it came from. Shown when you've actually
+  been away; `loom digest --since 8` in the terminal.
+- **The desktop app's notifications carry the question itself**, not "an agent
+  needs you", and on macOS you can answer from the notification. Nothing fires
+  while you're looking at that conversation.
+
+### Goals: a spend cap, and more than one at a time
+
+- **`loom orchestrate --max-usd 2`** stops a goal at its cap the way the team
+  budget always did — running work finishes, nothing new starts, and the goal
+  waits for you. A project default lives in `budgets.perGoalUsd`, and a word
+  lands in the thread at 80% rather than the stop being the first you hear.
+- **`maxConcurrentGoals`** lets disjoint goals run side by side. A goal's
+  scope is the `touches` its plan declares; one that hasn't said what it
+  touches counts as everything and waits. Overlaps queue with the collision
+  named. Still one at a time unless you ask for more.
+
+### The queue can wait, and can be kept
+
+- **Queue for later**: a prompt can be held for a time, until a goal actually
+  **lands**, until that goal's **checks go green**, or until the project has
+  been quiet for a while. The row says what it's waiting for and a click
+  releases it. (`loom queue at 03:00 …`, `loom queue after green:<runId> …`)
+- **Recipes**: save what's queued and run it on any project. Steps remember
+  their target by **role**, so a recipe travels; anything the project can't
+  resolve becomes an Auto prompt rather than a refusal. (`loom queue save`,
+  `loom queue run`, `loom queue recipes`)
+- **Drag to reorder** in the web app; the arrows stay for anyone who can't
+  drag, and the phone gained up/down controls it never had.
+
 ## [0.2.3] — 2026-09-20
 
 ### The Browser tab knows your dev servers

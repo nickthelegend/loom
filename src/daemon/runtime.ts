@@ -31,7 +31,7 @@ import { compileBrief, retrieve, type RetrieveOpts } from "../core/brain-index.j
 import { extractFromTurn, readExternalContent, type ExtractEngine } from "../core/brain-extract.js";
 import { claudeText } from "../core/claude-cli.js";
 import { EventLog } from "../core/eventlog.js";
-import { addWorktree as gitAddWorktree, ensureBranch, push as gitPush, stageAndCommitFiles, worktreePath } from "../core/git.js";
+import { addWorktree as gitAddWorktree, ensureBranch, push as gitPush, readOut, stageAndCommitFiles, worktreePath } from "../core/git.js";
 import { logbook } from "../core/logbook.js";
 import { compileTieredBrief, retrieveTiered, type TieredMemory } from "../core/team-memory.js";
 import { renderProjection } from "../core/distill.js";
@@ -67,7 +67,16 @@ import {
 } from "../core/skill-install.js";
 import { resolveSteps, RouteEngine } from "../core/routes.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
-import { PromptQueue, type QueueInput, type QueueItem, type QueueState, type QueueTarget } from "../core/prompt-queue.js";
+import {
+  PromptQueue,
+  describeCondition,
+  type QueueCondition,
+  type QueueInput,
+  type QueueItem,
+  type QueueState,
+  type QueueTarget,
+} from "../core/prompt-queue.js";
+import { blockedBy } from "../core/goal-lanes.js";
 import { Servers, type LogLine, type ServerStatus } from "../core/servers.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
@@ -89,8 +98,11 @@ import {
   diffSinceSnapshot,
   porcelainStatus,
   workingTree,
+  type TurnDiff,
   type WorkingTree,
 } from "../core/worktree.js";
+import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
+import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
 
@@ -190,6 +202,9 @@ export type ServerFrame =
   | { kind: "state"; name: string; status: ServerStatus }
   | { kind: "line"; name: string; line: LogLine };
 
+/** How often a time-held prompt checks the clock. */
+export const CLOCK_TICK_MS = 15_000;
+
 export class ProjectRuntime {
   readonly info: ProjectInfo;
   readonly config: ProjectConfig;
@@ -244,6 +259,7 @@ export class ProjectRuntime {
       send: (text, agentId) => this.sendMessage(text, agentId, { source: "route" }),
       interrupt: () => this.interrupt({ source: "route" }),
       costTotal: () => this.costs.totalUsd,
+      turnFacts: (agentId) => this.turnFacts(agentId),
       isAdapterId: (id) => {
         const agent = this.agents.get(id);
         return Boolean(agent && isAdapter(agent));
@@ -276,12 +292,15 @@ export class ProjectRuntime {
       },
       observe: (event) => this.trackCost(event),
       gitDelivery: () => this.config.git?.delivery ?? "none",
+      goalBudgetUsd: () => this.config.budgets?.perGoalUsd ?? null,
+      maxConcurrentGoals: () => this.config.maxConcurrentGoals ?? null,
       member: () => this.memberLogin,
       coordinator: () => this.coordinator,
     });
 
     this.queue = new PromptQueue(path.join(projectLoomDir(info.dir), "queue.json"), (q) => {
       for (const cb of this.queueListeners) cb(q);
+      this.watchClockConditions(q);
     });
 
     this.servers = new Servers({
@@ -684,7 +703,13 @@ export class ProjectRuntime {
     brain?: { extractor?: "auto" | "off"; model?: string };
     projection?: { mode?: "template" | "llm"; model?: string; timeoutMs?: number };
     defaultAgent?: string;
-    git?: { commitPerTurn?: boolean; branchPerTask?: boolean; worktreePerAgent?: boolean; delivery?: string };
+    git?: {
+      commitPerTurn?: boolean;
+      branchPerTask?: boolean;
+      worktreePerAgent?: boolean;
+      mergeOnHandoff?: boolean;
+      delivery?: string;
+    };
     safety?: { snapshotBeforeRoutes?: boolean };
   }): ProjectConfig {
     // Validate everything that can be rejected BEFORE touching this.config, so a
@@ -714,7 +739,12 @@ export class ProjectRuntime {
     }
     if (patch.git) {
       const g = { ...(this.config.git ?? {}) };
-      for (const k of ["commitPerTurn", "branchPerTask", "worktreePerAgent"] as const) {
+      for (const k of [
+        "commitPerTurn",
+        "branchPerTask",
+        "worktreePerAgent",
+        "mergeOnHandoff",
+      ] as const) {
         if (typeof patch.git[k] === "boolean") {
           if (patch.git[k]) g[k] = true;
           else delete g[k];
@@ -753,7 +783,13 @@ export class ProjectRuntime {
     brain: { extractor: "auto" | "off"; model: string };
     projection: { mode: "template" | "llm"; model: string };
     defaultAgent: string;
-    git: { commitPerTurn: boolean; branchPerTask: boolean; worktreePerAgent: boolean; delivery: GitDelivery };
+    git: {
+      commitPerTurn: boolean;
+      branchPerTask: boolean;
+      worktreePerAgent: boolean;
+      mergeOnHandoff: boolean;
+      delivery: GitDelivery;
+    };
     safety: { snapshotBeforeRoutes: boolean };
     agents: Array<{ id: string; kind: string; role?: string }>;
   } {
@@ -770,6 +806,7 @@ export class ProjectRuntime {
         commitPerTurn: Boolean(this.config.git?.commitPerTurn),
         branchPerTask: Boolean(this.config.git?.branchPerTask),
         worktreePerAgent: Boolean(this.config.git?.worktreePerAgent),
+        mergeOnHandoff: Boolean(this.config.git?.mergeOnHandoff),
         delivery: this.config.git?.delivery ?? "none",
       },
       safety: { snapshotBeforeRoutes: Boolean(this.config.safety?.snapshotBeforeRoutes) },
@@ -1464,6 +1501,56 @@ export class ProjectRuntime {
   }
 
   /** task/<id>-<slug>: stable id first so a retitle doesn't orphan the branch. */
+  /**
+   * What opening a PR for this card would push, and what it would run.
+   *
+   * Asked before anything happens, because pushing publishes: the person sees
+   * the branch, the commits and the exact command, and only then decides.
+   */
+  async taskPrPlan(id: string): Promise<{ branch: string; base: string; commits: string[]; files: string[]; command: string; ready: boolean; why?: string }> {
+    const task = (readProjectState(this.info.dir).tasks ?? []).find((t) => t.id === id);
+    if (!task) throw new Error(`no card "${id}"`);
+    const branch = this.taskBranchName(task);
+    const base = (await readOut(this.info.dir, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]))
+      .replace(/^origin\//, "")
+      .trim() || "main";
+    const exists = await readOut(this.info.dir, ["rev-parse", "--verify", "--quiet", branch]);
+    if (!exists.trim()) {
+      return { branch, base, commits: [], files: [], command: "", ready: false, why: `there's no ${branch} branch yet` };
+    }
+    const log = await readOut(this.info.dir, ["log", "--oneline", `${base}..${branch}`]);
+    const commits = log.split("\n").map((l) => l.trim()).filter(Boolean);
+    const diff = await readOut(this.info.dir, ["diff", "--name-only", `${base}...${branch}`]);
+    const files = diff.split("\n").map((l) => l.trim()).filter(Boolean);
+    const command = `gh pr create --head ${branch} --base ${base} --title ${JSON.stringify(task.title)} --body ""`;
+    return {
+      branch,
+      base,
+      commits,
+      files,
+      command,
+      ready: commits.length > 0,
+      ...(commits.length ? {} : { why: `${branch} has nothing ${base} doesn't` }),
+    };
+  }
+
+  /** Push the branch and open the PR — only ever from an explicit click. */
+  async openTaskPr(id: string): Promise<{ url: string; branch: string }> {
+    const task = (readProjectState(this.info.dir).tasks ?? []).find((t) => t.id === id);
+    if (!task) throw new Error(`no card "${id}"`);
+    const plan = await this.taskPrPlan(id);
+    if (!plan.ready) throw new Error(plan.why ?? "there's nothing to open a PR for");
+    await readOut(this.info.dir, ["push", "-u", "origin", plan.branch]);
+    const out = await readOut(this.info.dir, [], {
+      cmd: "gh",
+      args: ["pr", "create", "--head", plan.branch, "--base", plan.base, "--title", task.title, "--body", ""],
+    });
+    const url = (out.match(/https:\/\/\S+/) ?? [""])[0];
+    if (!url) throw new Error(out.trim().slice(0, 300) || "gh didn't return a PR url");
+    this.appendIfOpen({ kind: "status", payload: { state: "task_pr", task: task.id, branch: plan.branch, url } });
+    return { url, branch: plan.branch };
+  }
+
   private taskBranchName(task: BoardTask): string {
     const slug = task.title
       .toLowerCase()
@@ -1577,16 +1664,38 @@ export class ProjectRuntime {
   /** Pre-turn porcelain snapshots, for per-prompt diff attribution. */
   private preTurnTree = new Map<string, string>();
 
+  /**
+   * The diff of each agent's most recent turn, as a promise.
+   *
+   * A route's step conditions ("run the reviewer if more than 200 lines
+   * changed") are decided the moment the turn completes, which is before the
+   * diff has finished being computed. Keeping the promise lets the route wait
+   * for the real numbers instead of reading the previous turn's.
+   */
+  private lastTurnDiff = new Map<string, Promise<TurnDiff | null>>();
+
+  /** What an agent's last turn changed — for route step conditions. */
+  async turnFacts(agentId: string): Promise<TurnFacts> {
+    const diff = await (this.lastTurnDiff.get(agentId) ?? Promise.resolve(null));
+    if (!diff) return NO_CHANGES;
+    return { files: diff.files.map((f) => f.path), added: diff.added, removed: diff.removed };
+  }
+
   /** After a turn: log which files that prompt changed (turn_diff), then learn. */
   private captureTurnDiff(agentId: string): void {
     const before = this.preTurnTree.get(agentId);
     if (before === undefined) {
       // No snapshot (e.g. a turn with no pre-tree) — still worth reading.
+      // The previous turn's diff goes with it: a route asking what this turn
+      // changed must not be handed the last one's numbers.
+      this.lastTurnDiff.delete(agentId);
       this.extractMemory(agentId, []);
       return;
     }
     this.preTurnTree.delete(agentId);
-    void diffSinceSnapshot(this.agentDir(agentId), before)
+    const pending = diffSinceSnapshot(this.agentDir(agentId), before).catch(() => null);
+    this.lastTurnDiff.set(agentId, pending);
+    void pending
       .then((diff) => {
         if (diff) {
           this.log.append({
@@ -1827,15 +1936,18 @@ export class ProjectRuntime {
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
+    // The turn's diff is started before routing hears the turn ended: a step
+    // condition reads those numbers, and a route that advanced first would
+    // read the turn before this one.
+    if (event.kind === "run_complete" && event.agentId) {
+      this.captureTurnDiff(event.agentId);
+      void this.captureAgentDecisions(event.agentId).catch(() => {});
+    }
     this.routes.handleAgentEvent(event);
     // Accumulate the turn's prose so decisions can be mined when it completes.
     if (event.kind === "message" && event.agentId && !event.payload.reasoning) {
       const prev = this.turnText.get(event.agentId) ?? "";
       this.turnText.set(event.agentId, `${prev}\n${String(event.payload.text ?? "")}`.slice(-8000));
-    }
-    if (event.kind === "run_complete" && event.agentId) {
-      this.captureTurnDiff(event.agentId);
-      void this.captureAgentDecisions(event.agentId).catch(() => {});
     }
     if (event.kind === "needs_input") {
       notify({
@@ -2113,17 +2225,78 @@ export class ProjectRuntime {
 
   /** Why the head can't go yet, or null when it can. */
   queueBlocker(item: QueueItem): string | null {
+    // A condition comes first: a prompt held for 3am isn't waiting on an agent.
+    const held = item.when ? this.conditionUnmet(item.when) : null;
+    if (held) return held;
     const route = this.routeState();
     const routing = route && (route.status === "running" || route.status === "waiting_human");
     const holder = this.validHolder();
     if (item.target.kind === "orchestra") {
-      const run = this.orchestra.active();
-      return run ? `waiting for the goal "${run.goal.slice(0, 60)}" to finish` : null;
+      const running = this.orchestra.runningScopes();
+      if (!running.length) return null;
+      const allowed = Math.max(1, this.config.maxConcurrentGoals ?? 1);
+      // With lanes on, a queued goal that can't collide with what's running
+      // starts beside it; the rest wait, with the overlap named.
+      return blockedBy({ runId: "queued", goal: item.text, paths: [] }, running, allowed)
+        ?? null;
     }
     if (routing) return "waiting for the running route";
     if (item.target.kind === "agent" && this.busySince.has(item.target.agentId)) return `waiting for ${item.target.agentId} to finish its turn`;
     if (holder && this.busySince.has(holder)) return `waiting for ${holder} to finish its turn`;
     return null;
+  }
+
+  /**
+   * Is a queued prompt's condition still unmet? The reason, or null to go.
+   *
+   * Every branch reads a fact the daemon already has — the clock, a goal's
+   * landing state, its checks — so nothing here can be wrong in an interesting
+   * way. A condition about a goal that no longer exists releases the prompt
+   * rather than holding it for ever.
+   */
+  private conditionUnmet(when: QueueCondition): string | null {
+    if (when.kind === "at") {
+      return Date.now() >= when.at ? null : describeCondition(when);
+    }
+    if (when.kind === "quiet") {
+      const busy = this.busySince.size > 0 || Boolean(this.orchestra.active());
+      if (busy) {
+        this.quietSince = 0;
+        return describeCondition(when);
+      }
+      if (!this.quietSince) this.quietSince = Date.now();
+      return Date.now() - this.quietSince >= when.ms ? null : describeCondition(when);
+    }
+    const run = this.orchestra.get(when.runId);
+    if (!run) return null; // the goal is gone: holding for it for ever helps nobody
+    if (when.kind === "landed") {
+      return run.landing?.state === "merged" ? null : describeCondition(when);
+    }
+    const checks = run.landing?.checks;
+    const green = Boolean(checks && !checks.failing.length && !checks.pending.length && checks.passing > 0);
+    return green ? null : describeCondition(when);
+  }
+
+  /** When the project last went quiet, for a "after N quiet minutes" condition. */
+  private quietSince = 0;
+  private clockTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * A prompt held for an hour needs something to notice the hour arriving.
+   *
+   * Only ticks while such a prompt exists — the queue's other conditions are
+   * woken by the events they wait on (a goal landing, checks going green), and
+   * a timer that runs when nothing needs it is a battery someone else pays for.
+   */
+  private watchClockConditions(q: QueueState): void {
+    const needsClock = q.items.some((i) => i.when && (i.when.kind === "at" || i.when.kind === "quiet"));
+    if (needsClock && !this.clockTimer) {
+      this.clockTimer = setInterval(() => this.kickQueue(), CLOCK_TICK_MS);
+      this.clockTimer.unref?.();
+    } else if (!needsClock && this.clockTimer) {
+      clearInterval(this.clockTimer);
+      this.clockTimer = null;
+    }
   }
 
   /**
@@ -2194,6 +2367,7 @@ export class ProjectRuntime {
         ...(t.orchestrator ? { orchestrator: t.orchestrator } : {}),
         ...(t.workers?.length ? { workers: t.workers } : {}),
         ...(t.maxParallel ? { maxParallel: t.maxParallel } : {}),
+        ...(t.maxUsd ? { maxUsd: t.maxUsd } : {}),
         ...(item.plan ? { plan: true } : {}),
       });
       return;
@@ -2717,10 +2891,37 @@ export class ProjectRuntime {
     return { agentId: toAgentId, retried: prompt };
   }
 
+  /**
+   * Carry the outgoing agent's branch into the incoming agent's worktree.
+   *
+   * Only with both `worktreePerAgent` and `mergeOnHandoff` on, only when the
+   * two really are separate checkouts, and never when it would have to guess:
+   * see core/worktree-merge.ts for what it refuses. The outcome is a value so
+   * the handoff event and the briefing can both say what happened.
+   */
+  private async mergeForHandoff(from: string, to: string): Promise<MergeOutcome | null> {
+    if (!this.config.git?.worktreePerAgent || !this.config.git?.mergeOnHandoff) return null;
+    const into = this.agentDir(to);
+    const source = this.agentDir(from);
+    if (into === this.info.dir || source === into) return null;
+    try {
+      return await mergeAgentWork({
+        into,
+        branch: `agent/${from}`,
+        sourceDir: source,
+        message: `Loom: ${from} → ${to}`,
+      });
+    } catch (err) {
+      // A merge that can't run must not take the handoff down with it.
+      logbook.warn("git", `merge on handoff ${from} → ${to} failed`, String(err), this.info.id);
+      return null;
+    }
+  }
+
   async handoff(
     to: string,
     opts: { source?: "user" | "route" } = {},
-  ): Promise<{ from: string | null }> {
+  ): Promise<{ from: string | null; merge?: MergeOutcome }> {
     const target = this.agent(to);
     if (!isAdapter(target)) {
       throw new Error(`cannot hand the baton to "${to}" — bridges are read-only by design`);
@@ -2737,6 +2938,7 @@ export class ProjectRuntime {
     // handoff event, so "who left what uncommitted" is always answerable.
     let handoffMeta: Record<string, unknown> = { projected: true };
     const holder = this.validHolder();
+    let merge: MergeOutcome | null = null;
     if (holder && holder !== to) {
       const current = this.agent(holder);
       if (isAdapter(current)) {
@@ -2744,6 +2946,10 @@ export class ProjectRuntime {
         const diff = await current.diff().catch(() => "");
         if (diff) handoffMeta = { ...handoffMeta, dirty: true, diff: diff.slice(0, 2000) };
       }
+      // After the outgoing agent has stopped (its last commit is in), before
+      // the briefing is written — so the briefing can carry the result.
+      merge = await this.mergeForHandoff(holder, to);
+      if (merge) handoffMeta = { ...handoffMeta, merge };
     }
 
     // Refresh the shared brain from every ADE's native memory before handing
@@ -2781,7 +2987,13 @@ export class ProjectRuntime {
     // adapter actually receives — prepended to its next turn — carries the
     // retrieved brain brief too. Without it, a handoff to codex arrived with
     // the conversation but none of what the project (or team) had learned.
-    this.pendingBriefings.set(to, [buildBriefing(input), brainBrief].filter(Boolean).join("\n\n"));
+    // The merge goes at the TOP of the briefing when it conflicted: an agent
+    // that starts editing a tree full of conflict markers makes it worse.
+    const mergeNote = merge ? describeMerge(merge, holder ?? "the previous agent", to) : "";
+    this.pendingBriefings.set(
+      to,
+      [mergeNote, buildBriefing(input), brainBrief].filter(Boolean).join("\n\n"),
+    );
     if (rendered.mode === "llm") {
       this.log.append({
         kind: "status",
@@ -2807,7 +3019,7 @@ export class ProjectRuntime {
 
     const { from } = this.baton.handoff(to, handoffMeta);
     await this.ensureStarted(to);
-    return { from };
+    return { from, ...(merge ? { merge } : {}) };
   }
 
   async interrupt(
@@ -3187,6 +3399,7 @@ export class ProjectRuntime {
     this.startedAgents.clear();
     // A dev server outlives the daemon that started it unless we say otherwise,
     // and an orphan holding port 3000 is a bad thing to leave behind.
+    if (this.clockTimer) { clearInterval(this.clockTimer); this.clockTimer = null; }
     await this.servers.closeAll().catch(() => {});
     for (const proxy of this.proxies.values()) await proxy.close().catch(() => {});
     this.proxies.clear();

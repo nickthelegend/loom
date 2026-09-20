@@ -4,6 +4,7 @@
  * yield to manual control.
  */
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -301,5 +302,52 @@ describe("routes end-to-end", () => {
     expect(String(loomMessages[0]!.payload.text)).toContain("step 1/2 (planner)");
     expect(String(loomMessages[0]!.payload.text)).toContain("Task: tiny task");
     expect(String(loomMessages[1]!.payload.text)).toContain("step 2/2 (executor)");
+  });
+});
+
+describe("route steps with conditions, over a real diff", () => {
+  /** A project whose turns can actually be measured: git, with a HEAD. */
+  async function gitProject() {
+    const dir = makeProjectDir();
+    const run = (...args: string[]) =>
+      execFileSync("git", args, { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    run("init", "-q", "-b", "main");
+    run("config", "user.email", "t@t");
+    run("config", "user.name", "t");
+    fs.writeFileSync(path.join(dir, ".gitignore"), ".loom/\n");
+    run("add", "-A");
+    run("commit", "-qm", "seed");
+    const res = await client.addProject(dir);
+    return { dir, id: res.project.id };
+  }
+
+  it("runs the conditional step when the previous turn really changed a file", async () => {
+    const { id } = await gitProject();
+    await client.startRoute(id, "add a file", [
+      "plannerbot",
+      { step: "execbot", instruction: "write:src/new.ts" },
+      { step: "plannerbot", role: "reviewer", when: "changed>0" },
+    ]);
+    await waitUntil(async () => (await events(id, "route_completed")).length === 1);
+    const steps = await events(id, "route_step");
+    expect(steps.filter((e) => e.payload.skipped)).toHaveLength(0);
+    expect(steps).toHaveLength(3); // the reviewer ran, because the diff was real
+  });
+
+  it("skips it when the turn changed nothing — measured, not assumed", async () => {
+    const { id } = await gitProject();
+    // plannerbot only talks; nothing lands in the working tree.
+    await client.startRoute(id, "just think about it", [
+      "plannerbot",
+      "execbot?changed>0",
+    ]);
+    await waitUntil(async () => (await events(id, "route_completed")).length === 1);
+    const skipped = (await events(id, "route_step")).filter((e) => e.payload.skipped);
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]!.payload.agent).toBe("execbot");
+    expect(String(skipped[0]!.payload.reason)).toContain("0 files");
+    // and the skipped agent was never sent anything
+    const loom = (await events(id, "message")).filter((m) => m.payload.author === "loom");
+    expect(loom).toHaveLength(1);
   });
 });

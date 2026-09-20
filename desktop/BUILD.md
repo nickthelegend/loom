@@ -31,10 +31,23 @@ Its `node_modules` must be readable the ordinary way too — the daemon serves
 `@xterm/*` to the browser straight off disk, because the web app has no build
 step and no CDN.
 
-**`publish: null`.** Otherwise electron-builder tries to compute update channels
-for a repository it has no credentials to publish to and throws `Cannot read
-properties of null (reading 'channel')` — *after* writing a perfectly good DMG,
-which makes a green artifact look like a failed build.
+**`publish` names the repository explicitly.** It used to be `null`, because
+electron-builder tried to *infer* the channel for a repository it had no
+credentials for and threw `Cannot read properties of null (reading 'channel')`
+— after writing a perfectly good DMG, which makes a green artifact look like a
+failed build. Naming the provider, owner and repo gives it the answer it was
+looking for, and `--publish never` still means nothing is uploaded from the
+build job. What it buys: electron-builder writes `latest.yml` /
+`latest-linux.yml` / `latest-mac.yml` beside the installers, which is the feed
+electron-updater reads.
+
+**The feed is published for Windows and the Linux AppImage only.** The release
+workflow collects `latest.yml` and `latest-linux.yml` and deliberately leaves
+`latest-mac.yml` behind: macOS will only replace an app signed by a certificate
+it already trusts, and this build is ad-hoc signed. Advertising an update that
+the OS will refuse to install is worse than advertising none — see
+`desktop/updater.js`, which refuses on macOS in the same words and opens the
+releases page instead.
 
 **The entitlements are load-bearing.** Loom's job is spawning other people's
 agents (`claude`, `codex`, `grok`) and a shell for the terminal pane. Under the

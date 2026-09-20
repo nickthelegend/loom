@@ -245,6 +245,38 @@ describe("web app · dev servers in the Browser tab", () => {
     expect(m.errors).toEqual([]);
   }, 60_000);
 
+  it("remembers the width and the scheme, and reads them back next time", async () => {
+    const m = mount();
+    await openBrowserTab(m);
+    const url = $(m, "#browurl") as HTMLInputElement;
+    url.value = `http://127.0.0.1:${port}`;
+    click($(m, "#browgo"));
+    await waitUntil(() => !!$(m, "#browframe iframe"), { timeoutMs: 10_000 });
+
+    click($(m, '#browsizes [data-w="768"]'));
+    click($(m, '#browscheme [data-s="dark"]'));
+    await waitUntil(() => m.window.localStorage.getItem(`loomBrowS:${projectId}`) === "dark", {
+      timeoutMs: 10_000,
+    });
+    expect($(m, '#browscheme [data-s="dark"]')!.classList.contains("on")).toBe(true);
+    expect($(m, '#browscheme [data-s=""]')!.classList.contains("on")).toBe(false);
+
+    // A second window carrying the same stored preferences: both come back.
+    // (They were being saved and never read, which is the same as not
+    // remembering them. jsdom gives each window its own storage, so the
+    // saved values are handed over explicitly.)
+    const again = mount();
+    again.window.localStorage.setItem(`loomBrowW:${projectId}`, "768");
+    again.window.localStorage.setItem(`loomBrowS:${projectId}`, "dark");
+    await openBrowserTab(again);
+    await waitUntil(() => !!$(again, '#browscheme [data-s="dark"]'), { timeoutMs: 10_000 });
+    expect($(again, '#browscheme [data-s="dark"]')!.classList.contains("on")).toBe(true);
+    expect($(again, '#browsizes [data-w="768"]')!.classList.contains("on")).toBe(true);
+    expect(again.errors).toEqual([]);
+
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
   it("shows a server's own output, and turns red with the exit code when it dies", async () => {
     const m = mount();
     await openBrowserTab(m);

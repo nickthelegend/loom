@@ -325,7 +325,11 @@ program
 
 program
   .command("routes:save <name> <steps...>")
-  .description('define a named route, e.g. loom routes:save ship planner executor reviewer')
+  .description(
+    'define a named route, e.g. loom routes:save ship planner executor reviewer\n' +
+      "  a step may carry a condition on the previous turn: 'reviewer?lines>200'\n" +
+      "  (changed>N, changed<N, lines>N, lines<N, touched:<glob>, !touched:<glob>)",
+  )
   .action(async (name: string, steps: string[]) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
@@ -915,8 +919,9 @@ program
   .option("-p, --parallel <n>", "tasks running at once (1-12, default 4)")
   .option("--rounds <n>", "orchestrator review rounds before giving up (default 10)")
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
+  .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -927,6 +932,7 @@ program
         ...(opts.parallel ? { maxParallel: Number(opts.parallel) } : {}),
         ...(opts.rounds ? { maxRounds: Number(opts.rounds) } : {}),
         ...(opts.plan ? { plan: true } : {}),
+        ...(opts.maxUsd ? { maxUsd: Number(opts.maxUsd) } : {}),
       });
       console.log(
         `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +
@@ -1731,6 +1737,35 @@ program
     console.log(pc.dim(interrupted ? `interrupted ${interrupted}` : "nothing running"));
   });
 
+program
+  .command("digest")
+  .description("what happened in this project while you were away")
+  .option("--since <hours>", "how far back to look, in hours", "12")
+  .action(async (opts: { since: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const hours = Math.max(0.1, Number(opts.since) || 12);
+    const d = await client.digest(project.id, Date.now() - hours * 3_600_000);
+    if (!d.lines.length) {
+      console.log(pc.dim(`nothing in the last ${hours} hour${hours === 1 ? "" : "s"}`));
+      return;
+    }
+    const paint: Record<string, (s: string) => string> = {
+      question: pc.yellow,
+      failed: pc.red,
+      landed: pc.green,
+      goal: pc.cyan,
+      server: pc.red,
+      cost: pc.dim,
+      turn: pc.dim,
+    };
+    for (const line of d.lines) {
+      const when = new Date(line.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      console.log(`${pc.dim(when)}  ${(paint[line.kind] ?? ((x: string) => x))(line.text)}`);
+    }
+    if (d.waiting.length) console.log(pc.yellow(`\nwaiting on you: ${d.waiting.join(", ")}`));
+  });
+
 /**
  * The project's dev servers — the thing the Browser tab previews.
  *
@@ -1859,6 +1894,27 @@ const queueCmd = program
     console.log(`\n${view.queue.length} queued${view.paused ? pc.yellow(" · paused") : ""} · ${note}`);
   });
 
+/** "15:00", "2026-09-21T03:00", "+90m" — the ways a person says when. */
+function readWhen(when: string): number {
+  const rel = /^\+(\d+)\s*([smhd])$/i.exec(when.trim());
+  if (rel) {
+    const n = Number(rel[1]);
+    const unit = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[rel[2]!.toLowerCase() as "s" | "m" | "h" | "d"];
+    return Date.now() + n * unit;
+  }
+  const clock = /^(\d{1,2}):(\d{2})$/.exec(when.trim());
+  if (clock) {
+    const d = new Date();
+    d.setHours(Number(clock[1]), Number(clock[2]), 0, 0);
+    // a time already past today means tomorrow — nobody queues for the past
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  const parsed = Date.parse(when);
+  if (Number.isFinite(parsed)) return parsed;
+  throw new Error(`I can't read "${when}" as a time — try 15:00, +90m, or 2026-09-21T03:00`);
+}
+
 /** The item you meant: a position from the printed list, or an id. */
 async function queueItemId(client: DaemonClient, projectId: string, which: string): Promise<string> {
   const { queue } = await client.queue(projectId);
@@ -1924,6 +1980,74 @@ queueCmd
     const id = await queueItemId(client, project.id, which);
     const res = await client.queueRemove(project.id, id);
     console.log(pc.dim(`removed ${id} · ${res.queue.length} waiting`));
+  });
+
+queueCmd
+  .command("at <when> <text...>")
+  .description('queue a prompt for later — "15:00", "2026-09-21T03:00", or "+90m"')
+  .option("--to <target>", 'who takes it: an agent id, "orchestrate" or "auto"', "auto")
+  .action(async (when: string, text: string[], opts: { to: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const at = readWhen(when);
+    const res = await client.queueAdd(project.id, {
+      text: text.join(" "),
+      target: opts.to === "orchestrate" ? "orchestra" : opts.to,
+      when: { kind: "at", at },
+    });
+    console.log(pc.dim(`queued ${res.item.id} for ${new Date(at).toLocaleString()}`));
+  });
+
+queueCmd
+  .command("after <what> <text...>")
+  .description('queue a prompt until a goal lands or its checks go green: "landed:<runId>" or "green:<runId>"')
+  .option("--to <target>", "who takes it", "auto")
+  .action(async (what: string, text: string[], opts: { to: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const [kind, runId] = what.split(":");
+    if (!runId || (kind !== "landed" && kind !== "green")) {
+      throw new Error('say landed:<runId> or green:<runId> — loom orchestra lists the runs');
+    }
+    const res = await client.queueAdd(project.id, {
+      text: text.join(" "),
+      target: opts.to === "orchestrate" ? "orchestra" : opts.to,
+      when: { kind: kind === "landed" ? "landed" : "checks-green", runId },
+    });
+    console.log(pc.dim(`queued ${res.item.id}, waiting for ${runId}`));
+  });
+
+queueCmd
+  .command("save <name>")
+  .description("save what's queued as a recipe you can run anywhere")
+  .action(async (name: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { recipe } = await client.saveQueueRecipe(project.id, name);
+    console.log(pc.dim(`saved "${recipe.name}" — ${recipe.steps.length} step(s)`));
+  });
+
+queueCmd
+  .command("run <name>")
+  .description("queue a saved recipe on this project")
+  .action(async (name: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const res = await client.runQueueRecipe(project.id, name);
+    console.log(pc.dim(`queued ${res.added} step(s) — ${res.queue.length} waiting`));
+  });
+
+queueCmd
+  .command("recipes")
+  .description("the recipes saved on this machine")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const { recipes } = await client.recipes();
+    if (!recipes.length) return console.log(pc.dim("none saved — loom queue save <name>"));
+    for (const r of recipes) {
+      console.log(`${pc.cyan(r.name)} ${pc.dim(`${r.steps.length} step(s)${r.fromProject ? ` · from ${r.fromProject}` : ""}`)}`);
+      for (const s of r.steps) console.log(`  ${pc.dim(s.to.padEnd(12))} ${s.text.split("\n")[0]!.slice(0, 80)}`);
+    }
   });
 
 queueCmd
@@ -2103,7 +2227,9 @@ program
       }
       if (!spec || !words.length) {
         fail(
-          'usage: loom route <name|steps> "<task>"   e.g. loom route planner,executor "add dark mode"\n  (or: loom route --status / --abort)',
+          'usage: loom route <name|steps> "<task>"   e.g. loom route planner,executor "add dark mode"\n' +
+          "  a step runs only if the previous turn meets its condition: 'planner,executor,reviewer?lines>200'\n" +
+          "  (or: loom route --status / --abort)",
         );
       }
 

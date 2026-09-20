@@ -1253,7 +1253,38 @@ export function ProjectScreen(props: {
                         paddingVertical: 6,
                       }}
                     >
-                      <Text style={{ color: T.faint, fontFamily: T.mono, fontSize: 11 }}>{i + 1}</Text>
+                      {/*
+                        Reorder without dragging: a phone-sized queue is short,
+                        and two taps beat a long-press gesture people have to
+                        discover. Up is disabled at the top, down at the bottom.
+                      */}
+                      <View style={{ alignItems: "center" }}>
+                        <TouchableOpacity
+                          disabled={i === 0}
+                          onPress={() => {
+                            void queueEdit(creds, project.id, item.id, { to: i - 1 })
+                              .then(setQueue)
+                              .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+                          }}
+                          accessibilityLabel="move this prompt up"
+                          hitSlop={{ top: 6, bottom: 2, left: 8, right: 8 }}
+                        >
+                          <Text style={{ color: i === 0 ? T.line : T.dim, fontSize: 11 }}>▲</Text>
+                        </TouchableOpacity>
+                        <Text style={{ color: T.faint, fontFamily: T.mono, fontSize: 10 }}>{i + 1}</Text>
+                        <TouchableOpacity
+                          disabled={i === queue.queue.length - 1}
+                          onPress={() => {
+                            void queueEdit(creds, project.id, item.id, { to: i + 1 })
+                              .then(setQueue)
+                              .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+                          }}
+                          accessibilityLabel="move this prompt down"
+                          hitSlop={{ top: 2, bottom: 6, left: 8, right: 8 }}
+                        >
+                          <Text style={{ color: i === queue.queue.length - 1 ? T.line : T.dim, fontSize: 11 }}>▼</Text>
+                        </TouchableOpacity>
+                      </View>
                       {editing ? (
                         <>
                           <TextInput
@@ -1286,7 +1317,9 @@ export function ProjectScreen(props: {
                               {item.text}
                             </Text>
                             <Text style={{ color: T.faint, fontSize: 10, fontFamily: T.mono, marginTop: 2 }}>
-                              {`to ${who}${item.editedAt ? " · edited" : ""}${item.plan ? " · plan" : ""}`}
+                              {`to ${who}${item.editedAt ? " · edited" : ""}${item.plan ? " · plan" : ""}${
+                                item.when ? " · held" : ""
+                              }`}
                             </Text>
                           </TouchableOpacity>
                           <TouchableOpacity

@@ -78,6 +78,12 @@ jobs:
             desktop/dist/*.exe
             desktop/dist/*.AppImage
             desktop/dist/*.deb
+            # The update feed electron-updater reads. Windows and the Linux
+            # AppImage can replace themselves; macOS can't until the build is
+            # signed by a certificate the OS trusts, so latest-mac.yml is
+            # deliberately NOT collected below — advertising an update an app
+            # will refuse to install is worse than not advertising it.
+            desktop/dist/latest*.yml
 
   android:
     name: android · apk
@@ -175,12 +181,21 @@ jobs:
           find artifacts -type f \
             \( -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.apk" \) \
             -exec cp {} out/ \;
+          # The feed, for the platforms whose app may replace itself.
+          find artifacts -type f \
+            \( -name "latest.yml" -o -name "latest-linux.yml" \) \
+            -exec cp {} out/ \;
           cd out
           ls -la
           test -n "$(ls -A)" || { echo "nothing to publish"; exit 1; }
           # The release is unsigned; saying so with numbers a person can verify
-          # beats saying nothing.
-          sha256sum * > SHA256SUMS.txt
+          # beats saying nothing. The feed files carry their own hashes and are
+          # read by machines, so they stay out of the human checksum list.
+          # A loop, not `sha256sum $(ls …)`: installer names contain spaces.
+          for f in *; do
+            case "$f" in latest*.yml) continue ;; esac
+            sha256sum "$f"
+          done > SHA256SUMS.txt
           cat SHA256SUMS.txt
       - name: Publish
         env:

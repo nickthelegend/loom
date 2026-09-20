@@ -228,6 +228,60 @@ describe("web app · the prompt queue", () => {
     expect(m.errors).toEqual([]);
   }, 60_000);
 
+  it("reorders by dragging, and the arrows still work", async () => {
+    const m = mount();
+    await ready(m);
+    // Held prompts, so reordering is about reordering: nothing can drain
+    // out from under the test while it drags.
+    const hold = { kind: "at", at: Date.now() + 3_600_000 };
+    for (const text of ["first", "second", "third"]) {
+      await rest("POST", "/queue", { text, target: "echo", when: hold });
+    }
+    await waitUntil(() => all(m, "#cqueue .cqitem").length === 3, { timeoutMs: 20_000 });
+    expect(queuedTexts(m)).toEqual(["first", "second", "third"]);
+
+    // drag the third onto the first
+    const rows = () => all(m, "#cqueue .cqitem") as HTMLElement[];
+    const data = new Map<string, string>();
+    const dt = {
+      effectAllowed: "",
+      setData: (k: string, v: string) => data.set(k, v),
+      getData: (k: string) => data.get(k) ?? "",
+    };
+    const fire = (el: HTMLElement, type: string) => {
+      const ev = new m.window.Event(type, { bubbles: true, cancelable: true }) as Event & { dataTransfer?: unknown };
+      ev.dataTransfer = dt;
+      el.dispatchEvent(ev);
+    };
+    fire(rows()[2]!, "dragstart");
+    fire(rows()[0]!, "dragover");
+    fire(rows()[0]!, "drop");
+    await waitUntil(() => queuedTexts(m)[0] === "third", { timeoutMs: 20_000 });
+    expect(queuedTexts(m)).toEqual(["third", "first", "second"]);
+
+    // and the buttons do the same thing, for anyone who can't drag
+    click(rows()[2]!.querySelector('[data-q="up"]'));
+    await waitUntil(() => queuedTexts(m)[1] === "second", { timeoutMs: 20_000 });
+    expect(queuedTexts(m)).toEqual(["third", "second", "first"]);
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
+  it("shows a prompt held for later, and releases it on a click", async () => {
+    const m = mount();
+    await ready(m);
+    // queued straight through the API, the way `loom queue at 03:00 …` does
+    await rest("POST", "/queue", { text: "much later", target: "echo", when: { kind: "at", at: Date.now() + 3_600_000 } });
+    await waitUntil(() => all(m, "#cqueue .cqitem").length === 1, { timeoutMs: 15_000 });
+    await waitUntil(() => !!$(m, "#cqueue .cqwhen"), { timeoutMs: 15_000 });
+    expect(text(m, "#cqueue .cqwhen")).toMatch(/\d/); // the time it waits for
+    expect(text(m, "#cqueue .cqhead")).toMatch(/waiting until/);
+
+    click($(m, "#cqueue .cqwhen"));
+    // released: it runs, and the queue empties itself
+    await waitUntil(() => all(m, "#cqueue .cqitem").length === 0, { timeoutMs: 30_000 });
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
   it("holds the queue when the agent asks, and lets you answer past it", async () => {
     const m = mount();
     await ready(m);

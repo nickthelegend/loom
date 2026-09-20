@@ -5,8 +5,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, shell } from "electron";
 import { prepareAppUrl } from "./loom-app.js";
+import { checkForUpdates } from "./updater.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 // The Loom mark. The packaged app gets its icon from electron-builder, but in
@@ -163,6 +164,16 @@ function buildMenu() {
         label: "Help",
         submenu: [
           {
+            // On demand only. A shell that checked on launch and downloaded
+            // by itself would be deciding to replace the thing you are in the
+            // middle of using.
+            label: "Check for Updates…",
+            click: () => {
+              void checkForUpdates().catch(() => {});
+            },
+          },
+          { type: "separator" },
+          {
             label: "Loom on GitHub",
             click: () => shell.openExternal("https://github.com/nickthelegend/loom"),
           },
@@ -181,6 +192,57 @@ ipcMain.handle("loom:pick-folder", async () => {
     ? await dialog.showOpenDialog(parent, opts)
     : await dialog.showOpenDialog(opts);
   return r.canceled || !r.filePaths.length ? null : r.filePaths[0];
+});
+
+/**
+ * An agent asked you something.
+ *
+ * The web build raises a browser notification, which the desktop shell can do
+ * better: a native one that carries the question itself, and clicking it puts
+ * that conversation in front of you. Nothing fires while the window is focused
+ * and already showing that chat — the page decides that and only calls here
+ * when it's worth interrupting for.
+ */
+ipcMain.handle("loom:notify", (_e, payload) => {
+  if (!Notification.isSupported()) return false;
+  const p = payload && typeof payload === "object" ? payload : {};
+  const title = String(p.title ?? "An agent needs you").slice(0, 120);
+  const body = String(p.body ?? "").slice(0, 400);
+  const note = new Notification({
+    title,
+    body,
+    // The reply arrives back through the same channel the page listens on.
+    hasReply: process.platform === "darwin" && p.canReply !== false,
+    replyPlaceholder: "Answer\u2026",
+    silent: false,
+  });
+  note.on("click", () => {
+    const target = BrowserWindow.getAllWindows()[0] ?? win;
+    if (!target) return;
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+    target.webContents.send("loom:notify-action", { kind: "open", chat: p.chat ?? null, project: p.project ?? null });
+  });
+  note.on("reply", (_ev, reply) => {
+    const target = BrowserWindow.getAllWindows()[0] ?? win;
+    if (!target) return;
+    target.webContents.send("loom:notify-action", {
+      kind: "reply",
+      text: String(reply ?? ""),
+      chat: p.chat ?? null,
+      project: p.project ?? null,
+      agentId: p.agentId ?? null,
+    });
+  });
+  note.show();
+  return true;
+});
+
+/** Does the shell's window have focus? The page asks before deciding to notify. */
+ipcMain.handle("loom:focused", () => {
+  const target = BrowserWindow.getAllWindows()[0] ?? win;
+  return Boolean(target && target.isFocused() && target.isVisible());
 });
 
 app.whenReady().then(() => {

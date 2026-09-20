@@ -300,6 +300,20 @@ origin, so the browser won't let it photograph itself: the daemon takes the
 shot with the project's own Playwright, and a project without Playwright is
 told exactly that rather than handed an empty file.
 
+**Dark mode, on the page being previewed** — Auto / ☀ / ☾, independent of
+Loom's own theme and remembered per project. No API lets one document set
+another's `prefers-color-scheme`; Loom isn't outside the page, though — the
+proxy served it *and* its stylesheets — so the bridge re-points the page's own
+`@media (prefers-color-scheme: …)` rules, sets the UA colour-scheme, and makes
+`matchMedia` answer the way you asked (firing `change`, so an app that themes
+itself in JavaScript re-renders). Every rewritten rule remembers the media text
+it came with, so **Auto is the page exactly as it shipped**; stylesheets Loom
+doesn't serve can't be read and aren't claimed. A page you typed into the
+address bar rather than previewing through Loom says so instead of offering a
+switch that does nothing — and the screenshot drives a real browser, where the
+scheme is honoured either way. Both conditions ride along with what you send:
+*Screenshot taken at 375×812, dark mode*, and an element pick names them too.
+
 ## The workspace
 
 On a wide screen the web app (and the desktop shell around it) is a full workspace for
@@ -512,6 +526,9 @@ detects at least two roles.
 | `loom queue add "<text>" [--to <agent\|orchestrate\|auto>] [--plan]` | Line a prompt up; it goes when nothing is in its way |
 | `loom queue edit / to / move / rm / clear` | Rewrite one, send it to someone else, reorder it, drop it, empty the queue |
 | `loom queue pause` / `loom queue resume` | Hold the queue where it is · let it run again |
+| `loom queue at <when> "<text>"` / `after landed:<run>\|green:<run>` | Queue a prompt for a time, or for a goal landing / going green |
+| `loom queue save <name>` / `run <name>` / `recipes` | Keep a queue as a recipe and replay it on any project |
+| `loom digest [--since <hours>]` | What happened in this project while you were away |
 | `loom decision <text>` | Record a decision into shared memory |
 | `loom memory [import]` | The unified brain — one memory across every connected ADE |
 | `loom log [-f]` | Show (or follow) the project event log |
@@ -818,6 +835,25 @@ next to GitHub in the status bar, or `git.delivery` in `.loom/config.json`.
 A failed push never un-finishes a run. The error is shown, and **Retry delivery**
 is one click.
 
+## Opening a PR from a card
+
+With `git.branchPerTask` on, dragging a card to **Working** cuts its branch.
+When it reaches **Review**, the card offers **Open PR** — which first shows
+what would be pushed: the branch, the commits `main` doesn't have, the files
+they touch, and the exact `git push` and `gh pr create` it will run. Asking
+pushes nothing. Publishing happens on the button and nowhere else.
+
+## While you were away
+
+Come back to a project you haven't looked at in a while and Loom says what
+happened: goals started and finished, what landed, what failed, what a server
+did, and what is waiting on you — newest first, each line clicking through to
+the moment it came from. It says what happened and never guesses at why; a
+line without an event behind it doesn't get written.
+
+The mark is per device, because "when did you last look" is a fact about this
+window. From the terminal: `loom digest --since 8`.
+
 ## Fleet: what every agent is doing
 
 The **Fleet** tab (and the phone's Fleet screen) shows every agent in every open
@@ -845,6 +881,26 @@ with the page reconnecting to it.
 
 From the terminal: `loom update --check` to look, `loom update` to do it.
 
+## More than one goal, when they can't collide
+
+One orchestra goal at a time is the default, and for good reason: two goals
+editing the same files is a merge nobody can explain. Set
+`maxConcurrentGoals` in `.loom/config.json` and Loom will start a second one —
+but only when the paths can't collide. A goal's scope is the `touches` its
+plan declares; a goal that hasn't said what it touches counts as touching
+everything, and waits. Anything overlapping queues as it always did, with the
+overlap named: *waiting for "rework billing" — both touch src/billing/\*\* and
+src/billing/tax.ts*.
+
+## What a goal may spend
+
+`loom orchestrate --max-usd 2 "…"` stops that goal at $2: running work
+finishes its turn, nothing new starts, and the goal goes to **needs you** with
+what it spent. Replying allows one more budget's worth. A project default
+lives in `.loom/config.json` as `budgets.perGoalUsd`, and there's a word in the
+thread at 80% — hearing about a budget for the first time when the goal halts
+is a bad way to learn it exists.
+
 ## The prompt queue — line up the next ones
 
 Type while an agent is mid-turn, or while a goal is still running, and the
@@ -865,6 +921,16 @@ yours until it's sent:
   pause you set yourself stays until you resume it.
 - A prompt enters the conversation when it is actually sent, not when it's
   queued, so the thread stays an honest record of what the agent was asked.
+- **Reorder by dragging** (the arrows stay, for anyone who can't drag).
+- **Queue for later.** A prompt can wait for a time, for a goal to *land*
+  (not merely finish), for that goal's checks to go green, or for the project
+  to be quiet for a while: `loom queue at 03:00 "…"`,
+  `loom queue after landed:<runId> "…"`, `loom queue after green:<runId> "…"`.
+  The row says what it's waiting for, and one click releases it.
+- **Save a queue as a recipe** and run it anywhere: `loom queue save ship`,
+  `loom queue run ship`, `loom queue recipes`. Steps remember who they go to by
+  **role**, so a recipe travels between projects; anything a project can't
+  resolve becomes an Auto prompt rather than a refusal.
 
 It survives a daemon restart (reloaded paused, so an hour-old queue doesn't
 start itself), and lives in the project's `.loom/queue.json`. Over the API:
@@ -1171,15 +1237,24 @@ a policy, not a mechanic:
   wrote this" with the agent, staged by exactly the files that turn touched —
   a bystander's uncommitted mess is never swallowed.
 - **`worktreePerAgent`** — each adapter works in a sibling checkout on branch
-  `agent/<id>`; parallel edits can't collide in the filesystem. Merging is
-  deliberately manual (`git merge agent/<id>`); pair with `commitPerTurn` so
-  the branches actually carry the work.
+  `agent/<id>`; parallel edits can't collide in the filesystem. Pair with
+  `commitPerTurn` so the branches actually carry the work; `git merge
+  agent/<id>` is always available.
+- **`mergeOnHandoff`** — with worktrees on, the baton carries the work: handing
+  from A to B merges `agent/A` into B's checkout, so B starts from what A
+  finished instead of from before A began. It refuses more than it does, and
+  says which: uncommitted work on either side isn't merged (A's isn't on the
+  branch yet; merging onto B's is a state nobody can unpick), and a merge
+  already in progress is never stacked on. A conflict is left in the tree —
+  those files are the thing to resolve — and is named in the incoming
+  briefing, in the handoff event, and stops a route rather than prompting an
+  agent on top of conflict markers.
 - **`branchPerTask`** — dragging a board card to Working checks out
   `task/<id>-<slug>` (id first, so retitles don't orphan it; idempotent on
   re-drag). Reaching Review logs the exact `gh pr create` command instead of
   running it — pushing publishes, and that stays a human act.
 
-## Routes that loop
+## Routes that loop, and steps that skip
 
 A step can carry `onFail` naming an **earlier** step: when it errors, the route
 re-enters there instead of failing — "review fails → back to execute", as data.
@@ -1188,6 +1263,26 @@ Backward-only (a forward jump would skip work), budgeted at three re-entries
 thread as `route_step {loopedFrom, loop}`. Define and keep pipelines with
 `loom routes:save <name> planner executor reviewer` — validated against the
 roster at save, stored in the project config so they travel with the repo.
+
+A step can also carry a **condition on the previous turn**, and runs only when
+it holds:
+
+```bash
+loom route 'planner,executor,reviewer?lines>200' "tighten the tax rules"
+```
+
+Conditions read the turn's own diff and nothing else — `changed>10`,
+`changed<3`, `lines>200`, `lines<20`, `touched:src/db/**`, `!touched:docs/**` —
+so a route can send a big change to the reviewer and let a small one go
+straight on. That bar is deliberate: a condition must be something the daemon
+*measured*, never a judgement about whether the work was any good; judgement
+stays with the LLM router. Anything else is refused when the route is defined,
+not silently never matched at run time, and the first step can't be
+conditional because there's no turn before it. A skipped step says so in the
+thread with the numbers that decided it — *step 3/3 → reviewer skipped — needs
+more than 200 lines changed, the turn changed 1 file, 4 lines* — and skipping
+is not failing: the route completes. In `.loom/config.json` the same thing is
+`{ "step": "reviewer", "when": "lines>200" }`.
 
 ## Security model
 

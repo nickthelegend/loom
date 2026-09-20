@@ -157,6 +157,14 @@ export type RouteStepSpec =
        * execute" as data. Guarded by RouteState.maxLoops.
        */
       onFail?: string;
+      /**
+       * Run this step only when the previous turn meets this condition:
+       * `changed>10`, `lines>200`, `touched:src/db/**`. Mechanical facts from
+       * the turn's diff, never a judgement — "send big changes to a reviewer
+       * and small ones straight on" without a person deciding each time.
+       * See core/step-conditions.ts. Written inline too: `reviewer?lines>200`.
+       */
+      when?: string;
     };
 
 /** How shared memory is rendered on handoff. */
@@ -200,6 +208,19 @@ export interface ProjectConfig {
    * nothing starts on its own. See core/servers.ts.
    */
   servers?: ServerConfig[];
+  /**
+   * Spend caps for this project. Daily per-agent budgets live in the daemon's
+   * own config; this is the one a single goal may spend before it stops and
+   * says so.
+   */
+  budgets?: { perGoalUsd?: number };
+  /**
+   * How many orchestra goals may run at once. One by default — two goals
+   * editing the same files is a merge nobody can explain. Above one, a goal
+   * starts only when its paths can't collide with what's running
+   * (core/goal-lanes.ts).
+   */
+  maxConcurrentGoals?: number;
   /** Safety nets. Off by default. */
   safety?: {
     /** Checkpoint brain+board+config to .loom/snapshots before every route. */
@@ -213,10 +234,18 @@ export interface ProjectConfig {
     branchPerTask?: boolean;
     /**
      * Each adapter works in its own worktree on branch agent/<id>, so parallel
-     * edits can't collide in the filesystem. Merging is manual in this
-     * version: `git merge agent/<id>` is the handoff of record.
+     * edits can't collide in the filesystem. Merging is manual unless
+     * `mergeOnHandoff` is on; `git merge agent/<id>` is always available.
      */
     worktreePerAgent?: boolean;
+    /**
+     * With worktrees on: when the baton passes A → B, merge `agent/A` into B's
+     * checkout so the work travels with the baton. Refuses rather than
+     * guesses — uncommitted work on either side, or a merge already in
+     * progress, is reported instead of merged. A conflict is left in the tree
+     * to be resolved and stops a route. See core/worktree-merge.ts.
+     */
+    mergeOnHandoff?: boolean;
     /**
      * What happens to finished work, in one setting (the status-bar toggle):
      *   none   — nothing is committed for you; orchestra work waits on its branch
@@ -318,6 +347,12 @@ export interface RouteState {
   maxLoops?: number;
   /** Parallel to steps: where each step jumps on error (static routes). */
   stepOnFail?: Array<string | null>;
+  /**
+   * Parallel to steps: the condition each step needs from the previous turn,
+   * or null when it always runs. Stored as written so the thread can say why
+   * a step was skipped in the same words the route was defined in.
+   */
+  stepWhen?: Array<string | null>;
   /** Project cost total when the route started (internal baseline). */
   costStartUsd?: number;
   /** Spend attributed to this route (set when it ends). */

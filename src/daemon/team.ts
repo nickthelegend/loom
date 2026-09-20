@@ -1069,7 +1069,13 @@ export class TeamLink {
       }
     }
     teamId ??= this.defaultTeam();
-    const repos = this.views.get(teamId)?.repos ?? (await this.hub().repos(teamId));
+    // An empty cached view is not evidence that the team shares nothing — it
+    // is usually a view fetched before the share landed. Only a view that
+    // actually lists repos may answer; otherwise ask the hub, which knows.
+    // (A stale empty view made this warn "acme/app isn't shared with this
+    // team" about a repo that was, which reads as a refusal.)
+    const cached = this.views.get(teamId)?.repos;
+    const repos = cached?.length ? cached : await this.hub().repos(teamId);
     if (!repo && repos.length === 1) repo = repos[0]!;
     const { secret } = await this.hub().webhookSecret(teamId, Boolean(opts.rotate));
     const url = this.webhookUrl(teamId);

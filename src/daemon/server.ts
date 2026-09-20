@@ -48,6 +48,7 @@ import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../co
 import { defaultExec } from "./landing.js";
 import { suggestServers, urlFor, type ServerConfig } from "../core/servers.js";
 import { capture } from "../core/preview-shot.js";
+import { digest } from "../core/digest.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
 import {
   CHECK_TTL_MS,
@@ -135,7 +136,8 @@ import { packCredentials, toB64, type RelayTransport } from "../core/relay-proto
 import { approvalEndpoint, setApprovalEndpoint, type ApprovalDecision } from "../core/approvals.js";
 import { PERMISSION_PROFILES } from "../core/permissions.js";
 import { loadPolicy } from "../core/team-policy.js";
-import { parseTarget, QueueItemGone } from "../core/prompt-queue.js";
+import { parseCondition, parseTarget, QueueItemGone } from "../core/prompt-queue.js";
+import { deleteRecipe, getRecipe, listRecipes, roleToTarget, saveRecipe, targetToRole } from "../core/recipes.js";
 import { clearRecent, deletePrompt, listPrompts, recordRecent, savePrompt, updatePrompt } from "../core/prompts.js";
 
 export interface DaemonOptions {
@@ -1847,6 +1849,48 @@ export class LoomDaemon {
       }),
     );
 
+    /**
+     * The PR a card would open: the branch, its commits, its files, and the
+     * exact command. Looking, not doing — pushing publishes, so nothing here
+     * happens without the click that follows.
+     */
+    app.get(
+      "/api/projects/:id/tasks/:taskId/pr",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(await rt.taskPrPlan(String(req.params.taskId)));
+        } catch (err) {
+          res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    app.post(
+      "/api/projects/:id/tasks/:taskId/pr",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json(await rt.openTaskPr(String(req.params.taskId)));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    /**
+     * What happened while you were away.
+     *
+     * `since` is the client's own idea of when it last looked — the daemon
+     * doesn't track attention, and guessing at it would be worse than asking.
+     */
+    app.get(
+      "/api/projects/:id/digest",
+      withRuntime(async (rt, req, res) => {
+        const since = req.query.since ? Number(req.query.since) : Date.now() - 12 * 3_600_000;
+        const events = rt.log.list({ limit: 4000 });
+        const label = (id: string) => rt.config.agents.find((a) => a.id === id)?.role ?? id;
+        res.json(digest(events, Number.isFinite(since) ? since : 0, label));
+      }),
+    );
+
     /** The queue as clients read it: the items, plus why the head is waiting. */
     const queueView = (rt: ProjectRuntime) => {
       const q = rt.queue.snapshot();
@@ -1874,7 +1918,7 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/queue",
       withRuntime(async (rt, req, res) => {
-        const b = (req.body ?? {}) as { text?: string; target?: unknown; chat?: string; plan?: boolean };
+        const b = (req.body ?? {}) as { text?: string; target?: unknown; chat?: string; plan?: boolean; when?: unknown };
         if (!b.text?.trim()) return void res.status(400).json({ error: "missing text" });
         try {
           const item = rt.enqueue({
@@ -1882,6 +1926,7 @@ export class LoomDaemon {
             target: parseTarget(b.target),
             ...(b.chat ? { chat: b.chat } : {}),
             ...(b.plan ? { plan: true } : {}),
+            ...(parseCondition(b.when) ? { when: parseCondition(b.when)! } : {}),
           });
           recordRecent(b.text, { project: rt.info.name, mode: item.target.kind === "orchestra" ? "orchestrate" : "chat" });
           res.json({ item, ...queueView(rt) });
@@ -1893,13 +1938,15 @@ export class LoomDaemon {
     app.patch(
       "/api/projects/:id/queue/:itemId",
       withRuntime(async (rt, req, res) => {
-        const b = (req.body ?? {}) as { text?: string; target?: unknown; plan?: boolean; to?: number };
+        const b = (req.body ?? {}) as { text?: string; target?: unknown; plan?: boolean; to?: number; when?: unknown };
         try {
-          if (b.text !== undefined || b.target !== undefined || b.plan !== undefined) {
+          if (b.text !== undefined || b.target !== undefined || b.plan !== undefined || b.when !== undefined) {
             rt.editQueued(String(req.params.itemId), {
               ...(b.text !== undefined ? { text: String(b.text) } : {}),
               ...(b.target !== undefined ? { target: parseTarget(b.target) } : {}),
               ...(b.plan !== undefined ? { plan: Boolean(b.plan) } : {}),
+              // null clears it: "go as soon as you can"
+              ...(b.when !== undefined ? { when: b.when === null ? null : parseCondition(b.when) ?? null } : {}),
             });
           }
           if (b.to !== undefined) rt.queue.move(String(req.params.itemId), Number(b.to));
@@ -1929,6 +1976,60 @@ export class LoomDaemon {
         res.json({ dropped, ...queueView(rt) });
       }),
     );
+    /**
+     * Recipes: a queue worth keeping, replayed on any project.
+     *
+     * Saved by role rather than by agent id, because an id from one project
+     * means nothing in another (core/recipes.ts).
+     */
+    app.get("/api/recipes", (_req, res) => {
+      res.json({ recipes: listRecipes() });
+    });
+    app.post(
+      "/api/projects/:id/queue/save",
+      withRuntime(async (rt, req, res) => {
+        const name = String((req.body ?? {}).name ?? "").trim();
+        const items = rt.queue.snapshot().items;
+        if (!items.length) return void res.status(400).json({ error: "there's nothing queued to save" });
+        try {
+          const roleOf = (agentId: string) => rt.config.agents.find((a) => a.id === agentId)?.role ?? rt.config.agents.find((a) => a.id === agentId)?.kind;
+          const recipe = saveRecipe({
+            name,
+            fromProject: rt.info.name,
+            steps: items.map((i) => ({ text: i.text, to: targetToRole(i.target, roleOf), ...(i.plan ? { plan: true } : {}) })),
+          });
+          res.json({ recipe });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    app.post(
+      "/api/projects/:id/queue/recipe",
+      withRuntime(async (rt, req, res) => {
+        const name = String((req.body ?? {}).name ?? "").trim();
+        const recipe = getRecipe(name);
+        if (!recipe) return void res.status(404).json({ error: `no recipe called "${name}"` });
+        try {
+          for (const step of recipe.steps) {
+            rt.enqueue({
+              text: step.text,
+              target: roleToTarget(step.to, rt.config.agents),
+              ...(step.plan ? { plan: true } : {}),
+            });
+          }
+          res.json({ added: recipe.steps.length, ...queueView(rt) });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+    app.delete("/api/recipes/:name", (req, res) => {
+      const gone = deleteRecipe(String(req.params.name));
+      if (!gone) return void res.status(404).json({ error: "no such recipe" });
+      res.json({ deleted: true });
+    });
+
     /** Hold the queue where it is, or let it run again. */
     app.post(
       "/api/projects/:id/queue/pause",
@@ -3105,6 +3206,7 @@ export class LoomDaemon {
           maxParallel?: number;
           maxRounds?: number;
           plan?: boolean;
+          maxUsd?: number;
         };
         if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
         const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
@@ -3116,6 +3218,7 @@ export class LoomDaemon {
             ...(b.maxParallel ? { maxParallel: Number(b.maxParallel) } : {}),
             ...(b.maxRounds ? { maxRounds: Number(b.maxRounds) } : {}),
             ...(b.plan ? { plan: true } : {}),
+            ...(Number(b.maxUsd) > 0 ? { maxUsd: Number(b.maxUsd) } : {}),
           });
           recordRecent(b.goal, { project: rt.info.name, mode: "orchestrate" });
           res.json({ run });
@@ -3398,7 +3501,11 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         const { task, spec, router, maxHops } = (req.body ?? {}) as {
           task?: string;
-          spec?: string | Array<string | { step: string; role?: string; instruction?: string; onFail?: string }>;
+          spec?:
+            | string
+            | Array<
+                string | { step: string; role?: string; instruction?: string; onFail?: string; when?: string }
+              >;
           router?: "rules" | "llm";
           maxHops?: number;
         };

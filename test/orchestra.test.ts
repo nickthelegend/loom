@@ -444,6 +444,39 @@ describe("orchestra runs", () => {
     expect(rt.queue.paused).toBe(false);
   });
 
+  it("runs two goals at once when their paths can't collide, and refuses when they can", async () => {
+    await openProject();
+    // the project opts in; one at a time is still the default everywhere else.
+    // Three, so the third goal is refused by the OVERLAP rule rather than by
+    // the cap — that's the rule being tested.
+    rt.config.maxConcurrentGoals = 3;
+    script = [
+      loom([{ type: "spawn", id: "t1", title: "auth", agent: "alpha", prompt: "sleep:1500 write:auth.txt", touches: ["src/auth/**"] }]),
+      loom([{ type: "spawn", id: "t2", title: "billing", agent: "beta", prompt: "sleep:1500 write:billing.txt", touches: ["src/billing/**"] }]),
+      loom([{ type: "done", summary: "auth done" }]),
+      loom([{ type: "done", summary: "billing done" }]),
+    ];
+    const first = await rt.orchestra.start({ goal: "rework auth", orchestrator: "conductor", workers: ["alpha", "beta"] });
+    await waitUntil(() => (rt.orchestra.get(first.id)?.tasks.length ?? 0) > 0, { timeoutMs: 20_000 });
+
+    // disjoint: it starts beside the first rather than queueing
+    const second = await rt.orchestra.start({
+      goal: "rework billing",
+      orchestrator: "conductor",
+      workers: ["alpha", "beta"],
+      touches: ["src/billing/**"],
+    });
+    expect(rt.orchestra.runningScopes().map((r) => r.runId).sort()).toEqual([first.id, second.id].sort());
+
+    // overlapping: refused, and says what it collides with
+    await expect(
+      rt.orchestra.start({ goal: "auth again", orchestrator: "conductor", touches: ["src/auth/login.ts"] }),
+    ).rejects.toThrow(/both touch/);
+
+    await settle(first.id);
+    await settle(second.id);
+  }, 120_000);
+
   it("emits orchestra events that clients can render from, and shows in status", async () => {
     await openProject();
     script = [loom([{ type: "spawn", title: "one", agent: "alpha", prompt: "write:o.txt" }]), loom([{ type: "done", summary: "ok" }])];

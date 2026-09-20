@@ -8,9 +8,12 @@
  * HTML responses. That script reports what the page logs, what it fetches and
  * what it threw, by postMessage, which crosses origins by design.
  *
- * What it never does: change the page. The injection is additive, it runs
- * before the app's own code only so it can see the first errors, and nothing
- * else about the response is rewritten.
+ * What it never does on its own: change the page. The injection is additive,
+ * it runs before the app's own code only so it can see the first errors, and
+ * nothing else about the response is rewritten. The one thing that does alter
+ * the page is the colour-scheme toggle, and only while you hold it: it
+ * re-points the page's own `prefers-color-scheme` rules and puts every one of
+ * them back, exactly as it found them, when you go back to Auto.
  */
 
 import http from "node:http";
@@ -149,6 +152,92 @@ export function bridgeScript(): string {
     document.removeEventListener("mousemove", onMove, true);
     document.removeEventListener("click", onClick, true);
   };
+  // ---- colour scheme -------------------------------------------------
+  // No API lets a parent document set another page's prefers-color-scheme.
+  // But Loom is not outside this page: the proxy served it AND its
+  // stylesheets, so the rules are readable and the media queries can be
+  // re-pointed. Pages theme in three ways, so forcing is three things:
+  // the UA's own colour-scheme, the @media rules in the CSS, and the
+  // matchMedia() a script asked. Reverting is exact — every rule remembers
+  // the media text it came with, so "auto" is the page as it shipped.
+  var forced = null;
+  var mqls = [];
+  var saved = [];
+  var reading = 0;
+  var unreadable = 0;
+  var mmReal = window.matchMedia && window.matchMedia.bind(window);
+  var wants = function(q){ return /dark/i.test(String(q)) ? "dark" : /light/i.test(String(q)) ? "light" : ""; };
+  var forceMql = function(mql, q){
+    var side = wants(q);
+    try {
+      if (forced === null || !side) { delete mql.matches; return; }
+      var v = side === forced;
+      Object.defineProperty(mql, "matches", { configurable: true, get: function(){ return v; } });
+    } catch (e) {}
+  };
+  var fire = function(mql){
+    try {
+      var ev;
+      try { ev = new MediaQueryListEvent("change", { matches: mql.matches, media: mql.media }); }
+      catch (e) { ev = new Event("change"); }
+      mql.dispatchEvent(ev);
+    } catch (e) {}
+  };
+  if (mmReal) {
+    window.matchMedia = function(q){
+      var mql = mmReal(q);
+      if (/prefers-color-scheme/i.test(String(q))) {
+        mqls.push({ mql: mql, q: q });
+        forceMql(mql, q);
+      }
+      return mql;
+    };
+  }
+  var walk = function(rules, depth){
+    if (!rules || depth > 4) return;
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      var media = rule.media && rule.media.mediaText;
+      if (media && /prefers-color-scheme/i.test(media)) {
+        saved.push({ rule: rule, text: media });
+        try { rule.media.mediaText = wants(media) === forced ? "all" : "not all"; }
+        catch (e) { unreadable++; }
+      }
+      if (rule.cssRules) walk(rule.cssRules, depth + 1);
+    }
+  };
+  var applyScheme = function(){
+    reading = 0; unreadable = 0;
+    // Always put the page back first, then force. A forced rule reads "all",
+    // which no longer mentions prefers-color-scheme — so a rule rewritten once
+    // can never be found again, and dark → light would have been a one-way
+    // door if this went straight to forcing.
+    for (var r = 0; r < saved.length; r++) {
+      try { saved[r].rule.media.mediaText = saved[r].text; } catch (e) { unreadable++; }
+    }
+    saved = [];
+    if (forced !== null) {
+      var sheets = document.styleSheets || [];
+      for (var i = 0; i < sheets.length; i++) {
+        try { walk(sheets[i].cssRules, 0); reading++; }
+        catch (e) { unreadable++; } // a stylesheet from somewhere Loom doesn't serve
+      }
+    }
+    try {
+      document.documentElement.style.colorScheme = forced || "";
+    } catch (e) {}
+    for (var m = 0; m < mqls.length; m++) { forceMql(mqls[m].mql, mqls[m].q); fire(mqls[m].mql); }
+    send("scheme", { scheme: forced, sheets: reading, unreadable: unreadable });
+  };
+  // A framework that hot-reloads adds stylesheets after we've forced them.
+  try {
+    var pending = null;
+    new MutationObserver(function(){
+      if (forced === null || pending) return;
+      pending = setTimeout(function(){ pending = null; applyScheme(); }, 120);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  } catch (e) {}
+
   window.addEventListener("message", function(e){
     var d = e.data || {};
     if (d.source !== "loom-app") return;
@@ -158,6 +247,9 @@ export function bridgeScript(): string {
       document.addEventListener("click", onClick, true);
     } else if (d.kind === "cancel-pick") {
       stopPicking();
+    } else if (d.kind === "scheme") {
+      forced = d.value === "dark" ? "dark" : d.value === "light" ? "light" : null;
+      applyScheme();
     }
   });
   send("ready", { url: location.href, title: document.title });
