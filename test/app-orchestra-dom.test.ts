@@ -281,8 +281,17 @@ describe("web app · composer modes", () => {
     // no claude-code on this roster, so the first adapter conducts
     expect(text(m, "#corchpick")).toContain("plannerbot");
     // every adapter works by default, the orchestrator included
-    const chips = [...m.window.document.querySelectorAll("#cowk .cowchip")];
+    // The workers are the chips that name one; the row also carries the
+    // dashed "+ model" chip, which is an action rather than a worker.
+    const chips = [...m.window.document.querySelectorAll("#cowk [data-wk]")];
     expect(chips.map((c) => c.getAttribute("data-wk"))).toEqual(["plannerbot", "execbot"]);
+    expect($(m, "#cowadd")?.classList.contains("cowadd")).toBe(true);
+    // Each chip says which model it will run, and so does the orchestrator.
+    expect(chips.map((c) => c.querySelector("[data-modelof]")?.getAttribute("data-modelof"))).toEqual([
+      "plannerbot",
+      "execbot",
+    ]);
+    expect($(m, "#corchpick [data-modelof]")?.getAttribute("data-modelof")).toBe("plannerbot");
     expect(chips[0].textContent).toContain("plannerbot");
     expect(chips.every((c) => c.classList.contains("on"))).toBe(true);
     expect(text(m, "#cpar")).toBe("4");

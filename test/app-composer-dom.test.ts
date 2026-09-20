@@ -411,9 +411,11 @@ describe("web app · permissions", () => {
 
     // Orchestrate: each worker chip wears its mode, and the badge opens the same menu
     click($(m, '#cmode [data-cmode="orch"]'));
-    await waitUntil(() => $$(m, "#cowk .cowchip .pbdg").length === 2);
+    // .pbdg is now worn by the mode badge and the model badge alike; this
+    // test is about the mode one.
+    await waitUntil(() => $$(m, "#cowk .cowchip .pbdg[data-permof]").length === 2);
     expect(shown($(m, "#cperm"))).toBe(false);
-    const badge = $(m, '#cowk [data-wk="execbot"] .pbdg')!;
+    const badge = $(m, '#cowk [data-wk="execbot"] .pbdg[data-permof]')!;
     expect(badge.textContent).toBe("auto");
     click(badge);
     await waitUntil(() => $$(m, "#cmenu [data-pm]").length === 3);
@@ -421,7 +423,7 @@ describe("web app · permissions", () => {
     // opening the badge didn't toggle the worker off
     expect($(m, '#cowk [data-wk="execbot"]')?.classList.contains("on")).toBe(true);
     mousedown(m, $(m, '#cmenu [data-pm="ask"]'));
-    await waitUntil(() => $(m, '#cowk [data-wk="execbot"] .pbdg')?.textContent === "ask");
+    await waitUntil(() => $(m, '#cowk [data-wk="execbot"] .pbdg[data-permof]')?.textContent === "ask");
     await waitUntil(async () =>
       (await rest<{ project: { agents: Array<{ id: string; permissions: string }> } }>("GET", "")).project.agents.find(
         (a) => a.id === "execbot",
