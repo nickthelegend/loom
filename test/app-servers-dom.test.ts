@@ -48,7 +48,12 @@ beforeAll(async () => {
   writeProjectConfig(dir, {
     ...JSON.parse(fs.readFileSync(path.join(dir, ".loom", "config.json"), "utf8")),
     servers: [
-      { name: "web", command: `node -e "console.log('serving'); require('net').createServer().listen(${port}); setInterval(()=>{},1000)"`, port },
+      {
+        name: "web",
+        // a real page, so previewing it means something
+        command: `node -e "console.log('serving'); require('http').createServer((q,s)=>{s.setHeader('content-type','text/html');s.end('<html><head></head><body><h1>served</h1></body></html>')}).listen(${port})"`,
+        port,
+      },
       { name: "doomed", command: `node -e "console.error('nope'); process.exit(7)"` },
     ],
   });
@@ -199,10 +204,18 @@ describe("web app · dev servers in the Browser tab", () => {
     });
     expect(listening, "the port really answers").toBe(true);
 
-    // clicking the row points the preview at it
+    // Clicking the row previews it — through Loom's own proxy, so the page can
+    // report its console back. The address bar still shows the server's own
+    // url, because that's the one a person thinks in.
     click(row(m, "web"));
     await waitUntil(() => (($(m, "#browurl") as HTMLInputElement | null)?.value ?? "").includes(String(port)), { timeoutMs: 10_000 });
-    expect(($(m, "#browframe iframe") as HTMLIFrameElement).src).toContain(String(port));
+    await waitUntil(() => !!$(m, "#browframe iframe"), { timeoutMs: 15_000 });
+    const src = ($(m, "#browframe iframe") as HTMLIFrameElement).src;
+    expect(src).toMatch(/^http:\/\/127\.0\.0\.1:\d+/);
+    expect(src).not.toContain(String(port)); // the proxy's port, not the server's
+    // and what it serves really is the page, with the bridge added
+    const served = await (await fetch(src)).text();
+    expect(served).toContain("loom-preview-bridge");
 
     click(row(m, "web")!.querySelector('[data-act="stop"]'));
     await waitUntil(() => text(m, '.srvrow[data-srv="web"]').includes("stopped"), { timeoutMs: 30_000 });

@@ -46,7 +46,7 @@ import { authorSkill, SkillInstallError } from "../core/skill-install.js";
 import { suggestSkill } from "../core/skills.js";
 import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../core/ades.js";
 import { defaultExec } from "./landing.js";
-import { suggestServers, type ServerConfig } from "../core/servers.js";
+import { suggestServers, urlFor, type ServerConfig } from "../core/servers.js";
 import { capture } from "../core/preview-shot.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
 import {
@@ -1810,6 +1810,29 @@ export class LoomDaemon {
         }),
       );
     }
+    /**
+     * Preview a server through Loom, so the page can report back.
+     *
+     * A dev server is a different origin, and one origin can't read another's
+     * console. Loom stands in front of it instead (core/preview-proxy.ts) and
+     * injects a script that posts what the page logs, fetches and throws. Each
+     * server gets one proxy, started when first asked for.
+     */
+    app.post(
+      "/api/projects/:id/servers/:name/preview",
+      withRuntime(async (rt, req, res) => {
+        try {
+          const cfg = rt.servers.mustConfig(String(req.params.name));
+          const target = urlFor(cfg);
+          if (!target) return void res.status(400).json({ error: `server "${cfg.name}" has no port or url to preview` });
+          const proxy = await rt.previewProxy(cfg.name, target);
+          res.json({ url: `http://127.0.0.1:${proxy.port}`, target, bridged: true });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     /** A server's recent output — the log pane, and what an agent reads. */
     app.get(
       "/api/projects/:id/servers/:name/log",

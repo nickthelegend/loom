@@ -69,6 +69,7 @@ import { resolveSteps, RouteEngine } from "../core/routes.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
 import { PromptQueue, type QueueInput, type QueueItem, type QueueState, type QueueTarget } from "../core/prompt-queue.js";
 import { Servers, type LogLine, type ServerStatus } from "../core/servers.js";
+import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { detectAdes } from "../core/ades.js";
@@ -214,6 +215,8 @@ export class ProjectRuntime {
   readonly queue: PromptQueue;
   /** This project's dev servers — see core/servers.ts. */
   readonly servers: Servers;
+  /** One preview proxy per server — see core/preview-proxy.ts. */
+  private proxies = new Map<string, PreviewProxy>();
   private serverListeners = new Set<(f: ServerFrame) => void>();
   private queueListeners = new Set<(s: QueueState) => void>();
   private draining = false;
@@ -2055,6 +2058,22 @@ export class ProjectRuntime {
 
   // ── the prompt queue (core/prompt-queue.ts) ──
 
+  /**
+   * A proxy in front of one server, so its page can talk to the app.
+   *
+   * One per server, reused while it points at the same place — restarting a
+   * dev server on the same port keeps the preview URL stable, which matters
+   * because the iframe is pointed at it.
+   */
+  async previewProxy(name: string, target: string): Promise<PreviewProxy> {
+    const live = this.proxies.get(name);
+    if (live && live.target === target) return live;
+    if (live) await live.close().catch(() => {});
+    const proxy = await startPreviewProxy(target);
+    this.proxies.set(name, proxy);
+    return proxy;
+  }
+
   /** Live server state and output, for the socket. Returns unsubscribe. */
   onServerEvent(cb: (f: ServerFrame) => void): () => void {
     this.serverListeners.add(cb);
@@ -3169,6 +3188,8 @@ export class ProjectRuntime {
     // A dev server outlives the daemon that started it unless we say otherwise,
     // and an orphan holding port 3000 is a bad thing to leave behind.
     await this.servers.closeAll().catch(() => {});
+    for (const proxy of this.proxies.values()) await proxy.close().catch(() => {});
+    this.proxies.clear();
     this.brain.close(); // unsubscribes before the log drops its listeners
     this.log.close();
   }

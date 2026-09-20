@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project and scaled down when the dock is narrower than the page.
 - **It reloads when an agent changes files** (a toggle, on by default), so
   watching a change land doesn't involve remembering to refresh.
+- **The previewed page reports back.** Loom previews a server through its own
+  proxy — forwarding everything, including the hot-reload socket — and injects
+  one script. The **Page** pane shows the page's console and its requests,
+  live, and a click puts a line into the composer as context.
+- **An element picker.** Click the thing that's wrong in the preview and its
+  selector, text, box and markup land in the composer.
 - **A camera button puts the view into the composer.** The page is another
   origin and can't photograph itself, so the daemon takes the shot with the
   project's own Playwright; a project without it is told exactly that.

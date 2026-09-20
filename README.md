@@ -283,6 +283,15 @@ server Loom started is stopped when the daemon goes.
 From the terminal: `loom servers`, `loom servers start|stop|restart <name>`,
 `loom servers logs <name> -n 100`.
 
+**The page can talk back.** Click a server and Loom previews it through its
+own proxy, which forwards everything (including the socket hot reload rides on)
+and injects one small script. The **Page** pane then shows what that page
+logged and what it fetched, live — and a click puts any line into the composer
+as context, which is the whole point: the loop used to be *see the error,
+select it, retype it*. **Pick** turns the cursor into an element picker: click
+the thing that's wrong and its selector, text, size and markup land in the
+composer. Nothing about the page is rewritten; the script only reports.
+
 **The preview itself** emulates a width (Fit / 375 / 768 / 1280, remembered per
 project, scaled down when the dock is narrower), reloads itself when an agent
 changes files — a toggle, on by default — and has a camera button that puts a

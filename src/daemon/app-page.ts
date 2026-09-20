@@ -1141,6 +1141,21 @@ window.__loomPageRev="%%BUILD_REV%%";
     background:var(--danger,#e5484d);display:none;box-shadow:0 0 0 1.5px var(--card)}
   .errdot.on{display:block}
   #consolebtn{position:relative}
+  /* what the previewed page said */
+  .pglog{display:none;flex-direction:column;border-top:1px solid var(--border);max-height:42%;min-height:120px}
+  .pgtabs{display:inline-flex;gap:1px;margin-left:6px}
+  .pgtabs button{border:0;background:none;color:var(--muted-foreground);font:inherit;font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.06em;padding:2px 6px;border-radius:5px;cursor:pointer}
+  .pgtabs button.on{color:var(--foreground);background:var(--sidebar-accent)}
+  .pgcount{font-size:10.5px;color:var(--muted-foreground);text-transform:none;letter-spacing:0}
+  .pgrow{display:flex;gap:8px;align-items:baseline;padding:3px 4px;border-radius:5px;cursor:pointer}
+  .pgrow:hover{background:var(--sidebar-accent)}
+  .pgrow .lv{flex:none;min-width:44px;font-size:10px;text-transform:uppercase;color:var(--muted-foreground)}
+  .pgrow .ms{margin-left:auto;flex:none;color:var(--muted-foreground);font-size:10.5px}
+  .pgrow.e{color:var(--err)}
+  .pgrow.e .lv{color:var(--err)}
+  .pgrow.w{color:var(--warn)}
+  #pgpick.on{color:var(--accentBlue)}
   /* preview controls: emulated widths, a camera, auto-reload */
   .browsizes{display:inline-flex;gap:1px;flex:none;margin-left:4px}
   .browsizes button{border:1px solid var(--border);background:transparent;color:var(--muted-foreground);
@@ -3310,6 +3325,7 @@ ${BRAND_SPRITE}
     panelRight: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>'),
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     // lines of output with one flagged — the Console
+    target: svg('<circle cx="12" cy="12" r="8"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="2.5"/>'),
     camera: svg('<path d="M14.5 4h-5L8 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-4l-1.5-2Z"/><circle cx="12" cy="13" r="3.5"/>'),
     console: svg('<path d="M4 6h16"/><path d="M4 11h9"/><path d="M4 16h6"/><circle cx="18" cy="15.5" r="2.5"/>'),
     // lucide globe — the Browser tab: a live page and the project's specs
@@ -4048,6 +4064,17 @@ ${BRAND_SPRITE}
         '<span class="lbl" id="srvlogname"></span><span class="spacer" style="flex:1"></span>' +
         '<button id="srvlogclose" class="iconbtn xs" title="hide">' + ICONS.x + "</button></div>" +
         '<div class="srvloglines" id="srvloglines"></div></div>' +
+        // What the previewed page itself said: its console and its requests,
+        // each one a click away from being the next prompt's context.
+        '<div class="pglog" id="pglog" style="display:none"><div class="srvlogbar">' +
+        '<span class="lbl">Page</span>' +
+        '<span class="pgtabs" id="pgtabs"><button data-pg="console" class="on">Console</button>' +
+        '<button data-pg="network">Network</button></span>' +
+        '<span class="spacer" style="flex:1"></span>' +
+        '<span class="pgcount" id="pgcount"></span>' +
+        '<button id="pgpick" class="iconbtn xs" title="pick an element on the page">' + ICONS.target + "</button>" +
+        '<button id="pgclear" class="iconbtn xs" title="clear">' + ICONS.x + "</button></div>" +
+        '<div class="srvloglines" id="pglines"></div></div>' +
         "</div>" +
         "</div></div>" +
         '<form class="terminput" id="termform" style="display:none"><span class="pr">&#10095;</span>' +
@@ -11494,7 +11521,7 @@ ${BRAND_SPRITE}
   // A live page and the project's Playwright specs, in the dock beside the
   // terminals. An agent writes a browser test; this is where you watch it run
   // and — when it fails — hand the failure straight back to whoever wrote it.
-  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "", width: 0, relTimer: null };
+  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "", width: 0, relTimer: null, bridged: false };
 
   // ---- dev servers (core/servers.ts) --------------------------------------
   // What this project runs, and what it's doing right now. "running" means a
@@ -11569,7 +11596,12 @@ ${BRAND_SPRITE}
         if (!url) return toast(name + " has no port or url to preview");
         var input = document.getElementById("browurl");
         if (input) input.value = url;
-        browseTo(url);
+        // Through Loom's own proxy: same page, plus a script that reports what
+        // it logs and fetches. Falling back to the plain URL keeps the preview
+        // working even when the proxy can't start.
+        api("/api/projects/" + state.pid + "/servers/" + encodeURIComponent(name) + "/preview", { method: "POST", body: "{}" })
+          .then(function(j){ brow.bridged = true; browseTo(j.url); })
+          .catch(function(){ brow.bridged = false; browseTo(url); });
       };
       Array.prototype.forEach.call(row.querySelectorAll("[data-act]"), function(b){
         b.onclick = function(ev){
@@ -11733,6 +11765,122 @@ ${BRAND_SPRITE}
     }
   }
 
+  // ---- what the previewed page says (core/preview-proxy.ts) ---------------
+  // The page is another origin, so it can't be read — it reports instead, over
+  // postMessage, from the script Loom's proxy injects. Everything it sends is
+  // one shape, so this is one reader.
+  var pg = { tab: "console", console: [], network: [], picking: false };
+
+  function pageLogTab(which){
+    pg.tab = which;
+    var tabs = document.getElementById("pgtabs");
+    if (tabs) Array.prototype.forEach.call(tabs.querySelectorAll("[data-pg]"), function(b){
+      b.classList.toggle("on", b.getAttribute("data-pg") === which);
+    });
+    drawPageLog();
+  }
+
+  function drawPageLog(){
+    var el = document.getElementById("pglines"); if (!el) return;
+    var wrap = document.getElementById("pglog");
+    var rows = pg.tab === "console" ? pg.console : pg.network;
+    if (wrap && rows.length && wrap.style.display === "none") wrap.style.display = "flex";
+    var count = document.getElementById("pgcount");
+    if (count) {
+      var errs = pg.console.filter(function(r){ return r.level === "error"; }).length;
+      count.textContent = pg.console.length + " log" + (pg.console.length === 1 ? "" : "s") +
+        (errs ? " · " + errs + " error" + (errs === 1 ? "" : "s") : "") + " · " + pg.network.length + " request" + (pg.network.length === 1 ? "" : "s");
+    }
+    if (!rows.length) {
+      el.innerHTML = '<div class="specempty">' +
+        (pg.tab === "console" ? "Nothing logged yet." : "No requests yet.") +
+        "<br>Click a line to put it in the composer.</div>";
+      return;
+    }
+    var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = rows.map(function(r, i){
+      if (pg.tab === "console") {
+        return '<div class="pgrow ' + (r.level === "error" ? "e" : r.level === "warn" ? "w" : "") + '" data-pgi="' + i + '" title="click to put this in the composer">' +
+          '<span class="lv">' + esc(r.level) + "</span>" + esc(String(r.text || "").slice(0, 500)) + "</div>";
+      }
+      var bad = !r.status || r.status >= 400;
+      return '<div class="pgrow ' + (bad ? "e" : "") + '" data-pgi="' + i + '" title="click to put this in the composer">' +
+        '<span class="lv">' + esc(String(r.status || "—")) + "</span>" +
+        esc(r.method + " " + String(r.url || "").slice(0, 200)) + '<span class="ms">' + (r.ms || 0) + "ms</span></div>";
+    }).join("");
+    Array.prototype.forEach.call(el.querySelectorAll("[data-pgi]"), function(row){
+      row.onclick = function(){ pageLineToComposer(rows[Number(row.getAttribute("data-pgi"))]); };
+    });
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  /** The line, as the context an agent needs — the whole point of the pane. */
+  function pageLineToComposer(r){
+    if (!r) return;
+    var box = document.getElementById("box"); if (!box) return;
+    var text;
+    if (pg.tab === "console") {
+      text = "From the page console (" + r.level + "):\\n" + String(r.text || "") + (r.stack ? "\\n" + r.stack : "");
+    } else {
+      text = "From the page's network: " + r.method + " " + r.url + " → " + (r.status || "failed") +
+        " in " + (r.ms || 0) + "ms" + (r.error ? "\\n" + r.error : "");
+    }
+    box.value = box.value ? box.value.replace(/\\s*$/, "") + "\\n\\n" + text : text;
+    autosizeBox();
+    box.focus();
+    toast("added to the composer");
+  }
+
+  /** Ask the page which element you mean, and take its answer. */
+  function togglePick(){
+    var frame = document.querySelector("#browframe iframe");
+    if (!frame || !frame.contentWindow) return toast("open a preview first");
+    if (!brow.bridged) return toast("pick works on a server previewed through Loom — click a server row");
+    pg.picking = !pg.picking;
+    var btn = document.getElementById("pgpick");
+    if (btn) btn.classList.toggle("on", pg.picking);
+    frame.contentWindow.postMessage({ source: "loom-app", kind: pg.picking ? "pick" : "cancel-pick" }, "*");
+    if (pg.picking) toast("click the element you mean");
+  }
+
+  /** One reader for everything the injected bridge sends. */
+  function onPreviewMessage(ev){
+    var d = ev && ev.data;
+    if (!d || d.source !== "loom-preview") return;
+    var p = d.payload || {};
+    if (d.kind === "console") {
+      pg.console.push(p);
+      if (pg.console.length > 300) pg.console.shift();
+      drawPageLog();
+    } else if (d.kind === "network") {
+      pg.network.push(p);
+      if (pg.network.length > 300) pg.network.shift();
+      drawPageLog();
+    } else if (d.kind === "picked") {
+      pg.picking = false;
+      var btn = document.getElementById("pgpick");
+      if (btn) btn.classList.remove("on");
+      var box = document.getElementById("box");
+      if (box) {
+        var lines = ["About this element on " + (p.url || "the page") + ":",
+          "  selector: " + p.selector,
+          "  text: " + (p.text || "(none)"),
+          "  box: " + p.rect.w + "×" + p.rect.h + " at " + p.rect.x + "," + p.rect.y,
+          "  html: " + String(p.html || "").slice(0, 400)].join("\\n");
+        box.value = box.value ? box.value.replace(/\\s*$/, "") + "\\n\\n" + lines : lines;
+        autosizeBox();
+        box.focus();
+      }
+      toast("element added to the composer");
+    } else if (d.kind === "ready") {
+      // a fresh page: its old lines belong to the page that's gone
+      pg.console = [];
+      pg.network = [];
+      drawPageLog();
+    }
+  }
+  window.addEventListener("message", onPreviewMessage);
+
   /** Point the preview at a URL — the address bar, or a server row. */
   function browseTo(u){
     if (!u) return;
@@ -11782,6 +11930,15 @@ ${BRAND_SPRITE}
     }
     var shot = document.getElementById("browshot");
     if (shot) shot.onclick = shootPreview;
+    var tabs = document.getElementById("pgtabs");
+    if (tabs) Array.prototype.forEach.call(tabs.querySelectorAll("[data-pg]"), function(b){
+      b.onclick = function(){ pageLogTab(b.getAttribute("data-pg")); };
+    });
+    var pgc = document.getElementById("pgclear");
+    if (pgc) pgc.onclick = function(){ pg.console = []; pg.network = []; drawPageLog(); };
+    var pick = document.getElementById("pgpick");
+    if (pick) pick.onclick = togglePick;
+    drawPageLog();
     drawBrowser();
   }
 

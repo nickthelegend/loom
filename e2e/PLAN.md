@@ -148,6 +148,16 @@ report.
 - **O5 — `loom queue` from the terminal.** add / list / edit / move / to / rm / clear / pause / resume all drive the same queue the app shows · PASS.
 - **O6 — One orchestrator, two vendors in parallel.** A goal whose two tasks go to different agents (opencode and codex): both run in their own worktrees, and both files land on the integration branch · PASS.
 
+## Q. Updating, and the Browser tab (real servers, real pages)
+
+- **Q1 — What this copy is.** `/api/updates` on a git clone: install kind, whether it can update itself, and the exact commands · PASS (e2e/run-update.mjs P1).
+- **Q2 — Uncommitted work is refused.** An edited tracked file → 400 with the reason, and the checkout doesn't move · PASS (P2).
+- **Q3 — It really updates.** A clone one commit behind pulls, reinstalls, rebuilds, exits, and comes back on the new build · PASS (P3).
+- **Q4 — Dev servers.** Real processes and ports: *starting* until the port answers, *crashed* with the exit code, both output streams, restart, group kill · PASS (test/servers.test.ts, app-servers-dom).
+- **Q5 — Preview through Loom.** The proxy forwards assets byte for byte, drops framing headers, answers 502/504 rather than hanging, and forwards the hot-reload socket · PASS (test/preview-proxy.test.ts).
+- **Q6 — The page reports back.** Console, network and a picked element from the real injected bridge · PASS (test/app-page-console-dom.test.ts); console and network also confirmed by hand in the app against a live dev server.
+- **Q7 — A screenshot of the preview.** A real capture of a running page at the previewed width; a project without Playwright is told exactly that · PASS (verified by hand + test/preview-shot.test.ts).
+
 ## Added during testing
 
 (Discovered gaps become tests here: DEFINE → FAIL → FIX → VERIFY.)
@@ -160,3 +170,8 @@ report.
 - **X6 — Queued prompts were invisible** (found while testing the queue by hand): a prompt sent to a busy agent was logged into the thread as if sent, couldn't be seen, edited or reordered, and Stop dropped it. → the prompt queue (area O).
 - **X7 — A question's hold stranded the next prompt** (found by the full suite, three hung tests in app-dom): with the queue held so an agent's question couldn't be answered by what you queued behind it, anything typed to that busy agent joined a paused queue nothing would resume. → answering the agent that asked lifts that hold; a pause you set yourself, or Stop's, stays.
 - **X8 — An overridden review left its status pending** (found while rewriting the override test): when a review came back to a commit the owner had already overridden, the decision was kept in the goal but nothing was posted, leaving the "reviewing…" status that same review had posted on its way in — a required `loom/review` would wait for ever. → it re-posts the owner's success, with their reason.
+- **X9 — A preview that hangs for ever** (found writing Q5): a dev server that accepts the connection and never answers held the preview open indefinitely. → a timeout, and a 504 that says what happened.
+- **X10 — The hot-reload socket's first message vanished** (found writing Q5): the bytes arriving with the 101 were pushed into the client socket as if the client had sent them. → written out instead.
+- **X11 — A buffered page with two framings** (found writing Q5): injecting the bridge kept the upstream's chunked header beside our content-length, which browsers reject. → the framing is ours once we buffer.
+- **X12 — innerText is undefined on SVG** (found writing Q6): picking an icon answered with no text at all. → falls back to textContent.
+- **X13 — The Browser pane restored from a session never loaded** (found writing Q4): its rail spun for ever. → the pane loads whenever it becomes visible.
