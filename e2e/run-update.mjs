@@ -29,8 +29,12 @@ function cloneBehind() {
   sh("git", ["switch", "--quiet", "-c", "behind"], repo);
   sh("git", ["branch", "--set-upstream-to=origin/HEAD", "behind"], repo);
   // node_modules is the slow part and identical to this checkout's: share it,
-  // so `npm install` in the update has almost nothing to do.
+  // so `npm install` in the update has almost nothing to do. The symlink is
+  // excluded locally (.gitignore's `node_modules/` matches a directory, not a
+  // link), so the clone reads as clean — the test is about updating, not about
+  // how this machine arranged its dependencies.
   fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(repo, "node_modules"), "dir");
+  fs.appendFileSync(path.join(repo, ".git", "info", "exclude"), "\nnode_modules\n");
   sh("npm", ["run", "build"], repo);
   return repo;
 }

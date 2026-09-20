@@ -477,6 +477,7 @@ detects at least two roles.
 | `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
 | `loom routes` | List named pipelines defined for this project |
 | `loom interrupt` | Stop the current holder's turn (cancels an active route) |
+| `loom update [--check] [--yes]` | Is there a newer Loom — and install it, in the commands it prints first |
 | `loom queue` | What's lined up behind the running turn — position, who takes it, why it's waiting |
 | `loom queue add "<text>" [--to <agent\|orchestrate\|auto>] [--plan]` | Line a prompt up; it goes when nothing is in its way |
 | `loom queue edit / to / move / rm / clear` | Rewrite one, send it to someone else, reorder it, drop it, empty the queue |
@@ -798,6 +799,21 @@ project, updated live:
 
 Orchestra tasks are listed too, each with a link to its thread.
 `GET /api/activity` serves the same data.
+
+## Updating
+
+Loom tells you when a newer version is published — a quiet pill in the status
+bar, never a banner — and **Settings → Updates** has the button.
+
+It says what it will do before it does it, because that depends on how you
+installed it: a **git checkout** pulls, installs and rebuilds; a **global npm
+install** reinstalls itself; anything else is pointed at the release rather
+than having a command guessed at and run over it. A checkout with uncommitted
+changes is refused — that tree is yours. The commands are shown in full, their
+output streams while they run, and the daemon restarts itself on the new build
+with the page reconnecting to it.
+
+From the terminal: `loom update --check` to look, `loom update` to do it.
 
 ## The prompt queue — line up the next ones
 
