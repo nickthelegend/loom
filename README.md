@@ -187,7 +187,7 @@ agents' **memory together** so work *continues* across them instead of forking.
 - **One brain across every ADE** — Loom imports each agent's native memory
   (`CLAUDE.md`, `AGENTS.md`, …) into a unified store, merges it with your decisions and
   the shared thread, and hands the whole thing to whoever picks up next. `loom memory`.
-- **The baton** — exactly one agent works at a time; passing it *carries the context*
+- **The baton** — exactly one agent may *write* at a time; passing it *carries the context*
   (interrupt-safe, memory projected, briefing armed). Not isolation — continuation.
 - **Routes** — let Loom drive the chain: `loom route ship "add dark mode"` runs
   plan → execute → review as one command, the brain flowing hop to hop; or `loom route
@@ -421,7 +421,7 @@ form — the same bet the agent adapters make by shelling out to the CLIs you al
 
 ```bash
 cd your-project
-loom init          # detects installed agents (claude, opencode), assigns roles
+loom init          # detects the agents installed on this machine, assigns roles
 loom               # opens the TUI — a tabbed workspace (Thread · Board · Brain · Diff)
 ```
 
@@ -490,7 +490,11 @@ What happens per hop: interrupt-safe **handoff** → shared-memory **projection*
 - the agent asks a question → the route **pauses** (`waiting_human`), you get a
   notification, `loom route --status` and the board show the question; you answer in
   the shared thread (`loom send "…"`) and the route **resumes by itself**;
-- an agent errors or a step times out (45 min default) → the route fails loudly;
+- an agent errors or a step times out (45 min default) → the route fails loudly —
+  unless the step carries an [`onFail`](#routes-that-loop-and-steps-that-skip), which
+  sends it back to an earlier step instead;
+- a step carrying a [condition](#routes-that-loop-and-steps-that-skip) the previous turn
+  didn't meet (`reviewer?lines>200`) is **skipped**, with the numbers that decided it;
 - **you always outrank the route**: any manual `handoff`/`interrupt` cancels it, and
   `loom route --abort` stops it and interrupts the in-flight turn.
 
@@ -507,13 +511,15 @@ step can carry its own focus:
   "api-only": [
     { "step": "planner",  "instruction": "design the endpoint contract only" },
     { "step": "executor", "instruction": "only touch src/api — no schema changes" },
-    "reviewer"
+    { "step": "reviewer", "when": "lines>200", "onFail": "executor" }
   ]
 }
 ```
 
 Per-step instructions are appended to the role guidance for exactly that step — the
-next hop never sees them. `loom init` seeds a `ship` route automatically when it
+next hop never sees them. `when` runs a step only if the previous turn met a condition
+Loom measured, and `onFail` sends a failing step back to an earlier one; both are
+[explained here](#routes-that-loop-and-steps-that-skip). `loom init` seeds a `ship` route automatically when it
 detects at least two roles.
 
 ## Commands
@@ -568,7 +574,9 @@ detects at least two roles.
 | `loom watch [--all] [--json]` | Tail a project's events live — turns, handoffs, memory, subtasks |
 | `loom retry <agentId>` | Re-run the last failed turn on a different agent, failure attached |
 | `loom stale` / `loom reap <agentId>` | Sessions that look hung · respawn one fresh (baton released) |
-| `loom budgets` / `loom budget <id> <usd>` | Daily USD caps: measured spend vs cap · set or clear one |
+| `loom budgets` / `loom budget <id> [usd]` | Daily USD caps: measured spend vs cap · set or clear one |
+| `loom brain:search "<query>" [--explain]` | Retrieval exactly as a briefing sees it — the score, and the arithmetic behind it |
+| `loom brain:forget <memoryId>` | Drop one unit from the project's memory |
 | `loom brain:export [file]` / `brain:import <file>` | The project's memory as a portable file — import dedupes |
 | `loom brain:conflicts` | Units that likely contradict each other, with the signal that tripped each |
 | `loom snapshot [file]` / `loom restore <file>` | Checkpoint brain+board+config · bring one back (brain merges) |
@@ -577,6 +585,7 @@ detects at least two roles.
 | `loom specs` / `loom specs:run <file>` | The project's Playwright specs · run one through the daemon |
 | `loom mcp:health` | Each MCP server's live state from the background poll |
 | `loom costs --series [days]` | The spend ledger day by day, per agent |
+| `loom open` / `loom version` | Open this project in the web app · what's installed |
 | `loom rename <name>` / `loom find <query>` | Rename the project (id never moves) · search the thread |
 
 ## Supported agents
@@ -593,7 +602,7 @@ detects at least two roles.
 | Echo | adapter (demo/tests) | in-process | ✅ |
 | Kiro | **bridge** (driveable) | Chromium debug port — types into the real chat panel and reads the panel back | 🔶 mechanism verified; its selectors are not (see below) |
 
-Three of those need their asterisks spelled out, because the table row is
+Four of those need their asterisks spelled out, because the table row is
 shorter than the truth:
 
 **Codex reports tokens, never money.** Its `turn.completed` carries
@@ -668,8 +677,10 @@ happy to pay for — and it becomes an editor only when you say so, below.
 `.loom` off limits and every path proven contained before anything opens it.
 Each call shows in the thread, and the loop is bounded at eight hops.
 
-**And write, if you say so.** `--write` adds `write_file`; `--run "npm test"`
-adds `run` with that allow-list. Every write and every command is a card you
+**And write, if you say so.** With `--tools` already on, `--write` adds
+`write_file` and `--run "npm test"` adds `run` with that allow-list. (Either
+without `--tools` is refused — they're the writing half of it, not a
+replacement for it.) Every write and every command is a card you
 allow or deny first:
 
 > **write_file** — write src/app.ts: 40 lines (replacing 12) — fix the port
@@ -803,7 +814,7 @@ Getting it into the model's context is a different problem, and it depends on th
 
 So: the **summary always lands**; the **full brain is an invitation**. An agent that
 ignores the pointer works from the summary alone. If you need something remembered for
-certain, put it in a decision (`loom decide`) — decisions ride in the briefing itself.
+certain, put it in a decision (`loom decision`) — decisions ride in the briefing itself.
 There's an opt-in eval (`LOOM_TEST_REAL=1`) that checks a real model actually *uses* an
 injected brief, and declines rather than invents when the brief is silent.
 
@@ -819,9 +830,10 @@ convention, a fact, a failure — reconciled on write (add / update / forget, ne
 growing blob), the approach [mem0](https://github.com/mem0ai/mem0) pioneered, adapted to
 Loom's event log. Every unit's evidence is verified against the turn before it's kept, so
 the brain doesn't remember things that were never said. Retrieval is hybrid too — exact
-entity matches (file paths, symbols, error codes) unioned with BM25 over the text, no
-embedding model to ship — with failures and constraints biased to the top of the brief,
-because getting burned twice is worse than missing a detail.
+entity matches (file paths, symbols, error codes) unioned with BM25 over the text and a
+trigram channel for typos and word forms, and [a real embedding
+channel](#the-brain-sharpened) if you turn one on — with failures and constraints biased
+to the top of the brief, because getting burned twice is worse than missing a detail.
 
 The brain is the **project's**, not each agent's: a fact one agent learns is scoped to the
 chat, not walled off to whoever happened to learn it, so it reaches whichever agent takes
@@ -858,7 +870,7 @@ the extractor off per project in Settings.
 - **Unified memory ("multiple memory in one")** — each connected ADE keeps its own
   native memory (`CLAUDE.md`, `AGENTS.md`, …). Loom imports them all into one brain
   (`memory_import` events, content-hash deduped), merges them with the project's
-  decisions and shared thread, and projects the union into whoever holds the baton.
+  decisions and shared thread, and projects the union into whoever is taking the turn.
   Connect a new agent → its knowledge joins the brain, and everything the others learned
   flows into it. `loom memory` shows the merged brain; it refreshes on open and on every
   handoff. This is the seam an isolation-first tool (separate worktrees) can't own.
@@ -1408,8 +1420,9 @@ your own stack by implementing one message handler.
 
 ## Git policies (all opt-in)
 
-Three flags in `.loom/config.json → git`, off by default because committing is
-a policy, not a mechanic:
+Four flags in `.loom/config.json → git`, off by default because committing is
+a policy, not a mechanic (a fifth key, `delivery`, is
+[its own setting](#git-delivery-commit-push-or-open-a-pr)):
 
 - **`commitPerTurn`** — each turn's changes become one commit as they land:
   subject from the prompt, `Co-Authored-By: <agent>` so blame answers "who
@@ -1551,10 +1564,32 @@ with its why: [ARCHITECTURE.md](ARCHITECTURE.md).
 }
 ```
 
-Roles: `planner` · `executor` · `reviewer` · `general`. Claude Code options:
-`permissionMode` (default `acceptEdits`), `model`. OpenCode options:
+Roles are free text — `planner` · `executor` · `reviewer` · `general` are the ones
+Loom suggests and routes understand, and your project may invent others. Claude Code
+options: `permissionMode` (default `acceptEdits`), `model`. OpenCode options:
 `model` (`"providerID/modelID"`, e.g. `"opencode/minimax-m2.5"` — **set this**: headless
 sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running server.
+A `model` agent's options are [over here](#agents-that-are-models).
+
+**Everything else the file can hold**, each explained where it belongs — nothing is
+required, and the defaults are the behaviour Loom had before the key existed:
+
+| key | what it turns on |
+|---|---|
+| [`git.commitPerTurn` · `worktreePerAgent` · `mergeOnHandoff` · `branchPerTask`](#git-policies-all-opt-in) | committing, isolation, carrying work across the baton, branch per card |
+| [`git.delivery`](#git-delivery-commit-push-or-open-a-pr) | what happens to finished work: nothing, commit, push, or a PR |
+| [`brain.extractor` · `brain.model`](#the-brain-sharpened) | who reads finished turns for memory |
+| [`brain.semantic`](#the-brain-sharpened) | the embedding channel — the one that follows a synonym |
+| [`budgets.perGoalUsd`](#what-a-goal-may-spend) | what one orchestra goal may spend |
+| [`maxConcurrentGoals`](#more-than-one-goal-when-they-cant-collide) | goals side by side, when their paths can't collide |
+| [`safety.snapshotBeforeRoutes`](#routing--multi-hop-pipelines) | checkpoint brain+board+config before a fleet runs unattended |
+| [`servers`](#the-browser-tab) | the dev servers Loom may run and preview |
+| [`mcps`](#odds-and-ends-that-pull-their-weight) | MCP servers offered to the agents whose CLI takes them |
+| [`skills`](#odds-and-ends-that-pull-their-weight) | which `SKILL.md` skills ride along in every briefing |
+| [`team`](#teams--see-each-others-agents) | which team this project publishes to |
+
+Keys are **never** in here: a provider's API key lives in `~/.loom/providers.json`
+(mode 0600) or the environment, because this file is committed.
 
 ## Odds and ends that pull their weight
 
@@ -1583,7 +1618,7 @@ sessions don't inherit your TUI default), `agent`, `baseUrl` to reuse a running 
 ## Development
 
 ```bash
-npm test          # 179 tests: unit + full HTTP/WS end-to-end
+npm test          # the whole suite (~1,300): unit + full HTTP/WS end-to-end
 npm run build     # tsc → dist/
 npm run dev       # run the CLI from source (tsx)
 ```
