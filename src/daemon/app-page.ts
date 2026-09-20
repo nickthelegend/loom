@@ -13207,6 +13207,9 @@ ${BRAND_SPRITE}
         hh += '<div class="prow"><div class="pl"><div class="pt">Memory extractor</div>' +
           '<div class="pd">After each turn a small Claude reads what changed and files what\\u2019s worth keeping. Off means the brain holds only what you write by hand.</div></div>' +
           '<div class="pc">' + seg("extractor", [{ v: "auto", l: "Auto" }, { v: "off", l: "Off" }], cfg.brain.extractor) + "</div></div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">Semantic retrieval</div>' +
+          '<div class="pd">Finds memories that mean the same thing in different words \u2014 \u201chow does login work\u201d reaching a note about JWKS. Needs a local model runtime Loom doesn\u2019t ship: <code>npm i -g @huggingface/transformers</code> (~470MB once), then a 23MB model downloads on first use. Without it, retrieval is the three lexical channels it has always been.</div></div>' +
+          '<div class="pc">' + seg("semantic", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], cfg.brain.semantic ? "on" : "off") + "</div></div>";
         hh += '<div class="sgrouph">Handoffs</div>';
         hh += '<div class="prow"><div class="pl"><div class="pt">Brief style</div>' +
           '<div class="pd">How the baton note is written when one agent hands to the next. Template is instant and free; LLM distills it with a small Claude.</div></div>' +
@@ -13219,6 +13222,10 @@ ${BRAND_SPRITE}
           "</select></div></div>";
         pp.innerHTML = hh;
         bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
+        bindSeg("semantic", function(v){
+          patchCfg({ brain: { semantic: v === "on" } },
+            v === "on" ? "Semantic retrieval on \u2014 it warms up in the background" : "Semantic retrieval off");
+        });
         bindSeg("projection", function(v){ patchCfg({ projection: { mode: v } }, "Briefs: " + v); });
         document.getElementById("defagent").onchange = function(){ patchCfg({ defaultAgent: this.value }, "Default agent saved"); };
       }).catch(function(e){ pp.innerHTML = '<div class="snote">' + esc(e.message) + "</div>"; });

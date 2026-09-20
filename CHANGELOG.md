@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Retrieval that can follow a synonym
+
+- **A semantic channel for the brain** (`brain.semantic`, or Settings →
+  Brain): all-MiniLM-L6-v2 embeddings unioned with the three lexical channels,
+  so *how does login work* reaches a note about Supabase JWKS. Measured on the
+  recall set that shipped with 0.2.4: recall@5 **0.50 → 1.00** on synonyms,
+  **0.80 → 1.00** across word forms, unchanged at **1.00** on literal queries.
+  Warm cost is about a millisecond a query.
+- It is **not** a dependency and never will be: the model is 23MB but its ONNX
+  runtime is ~470MB, so Loom asks you to install that yourself
+  (`npm i -g @huggingface/transformers`) and behaves exactly as before when
+  it's missing — a channel that can be absent must fail into the old answer,
+  not into an error. Vectors are cached per memory hash beside the brain, and
+  the model stays offline after its first download.
+
 ### macOS gets the update too
 
 - **Help → Check for Updates… on macOS** now finds the build for your

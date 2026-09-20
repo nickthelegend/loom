@@ -60,7 +60,32 @@ export function recencyFactor(updatedAt: number, now = Date.now()): number {
   return DECAY_FLOOR + (1 - DECAY_FLOOR) * Math.pow(0.5, age / HALF_LIFE_MS);
 }
 
-/** Fixed, so scores mean the same thing across queries. */
+/**
+ * The dense channel (core/semantic.ts), when a project has turned it on.
+ *
+ * Weighted below BM25 on purpose. It is the only channel that can follow a
+ * synonym, and the only one that can be confidently wrong about a sentence it
+ * has never seen — so it earns candidates and nudges rank, rather than
+ * deciding it.
+ *
+ * Scored RELATIVE to the best dense hit in the same query, exactly as BM25 is
+ * a few lines down, and for the same reason. The absolute numbers this model
+ * returns are not a scale you can put a meaningful threshold on: measured over
+ * the recall set, a query's true match sits anywhere from 0.19 to 0.52 while
+ * noise reaches 0.19 — the RANKING is near-perfect and the magnitude means
+ * almost nothing. A fixed threshold on it therefore throws away most of what
+ * the channel knows (it did: at 0.35 the gap it was built to close stayed
+ * half open). The absolute floor that remains is only there to keep a query
+ * that matches nothing from promoting its least-bad noise.
+ */
+export const DENSE_WEIGHT = 0.6;
+export const DENSE_FLOOR = 0.15;
+
+/**
+ * Fixed, so scores mean the same thing across queries — and widened only when
+ * the dense channel is actually in play, so turning it on doesn't silently
+ * rescale every score in a project that never asked for it.
+ */
 const MAX_SCORE = 1 + ENTITY_WEIGHT;
 
 /**
@@ -91,6 +116,13 @@ export interface RetrieveOpts {
   minConfidence?: number;
   /** Show the arithmetic. For tests and for the Brain tab. */
   explain?: boolean;
+  /**
+   * Embeddings, when the project has a model. The caller does the embedding —
+   * it's async and this isn't — and hands the vectors in: the query's, and one
+   * per memory id for whatever has been embedded so far. Absent or empty and
+   * retrieval is exactly what it was before the channel existed.
+   */
+  dense?: { query: Float32Array; byId: Map<string, Float32Array> };
 }
 
 export interface ScoreDetail {
@@ -98,6 +130,8 @@ export interface ScoreDetail {
   entity: number;
   /** Trigram-cosine channel, already weighted. Morphology and typos, not synonymy. */
   fuzzy: number;
+  /** Embedding-cosine channel, already weighted. Synonymy — and only when on. */
+  dense?: number;
   kindBias: number;
   /** 1.0 fresh → 0.55 floor with age; multiplies the match, not the bias. */
   recency: number;
@@ -149,6 +183,14 @@ export function trigramVector(text: string): Float32Array {
   norm = Math.sqrt(norm) || 1;
   for (let i = 0; i < TRIGRAM_DIMS; i++) v[i]! /= norm;
   return v;
+}
+
+/** Cosine of two ALREADY-normalised vectors — which is just a dot product. */
+export function dot(a: Float32Array, b: Float32Array): number {
+  let sum = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) sum += a[i]! * b[i]!;
+  return sum;
 }
 
 export function cosine(a: Float32Array, b: Float32Array): number {
@@ -354,8 +396,32 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
     }
   }
 
+  // The dense channel: cosine against the embeddings the caller brought.
+  // Same shape as the others — a threshold, then union — because the point of
+  // the union is that no channel gets a veto over the candidate set.
+  const dn = new Map<string, number>();
+  if (opts.dense?.query && opts.dense.byId.size) {
+    let best = 0;
+    for (const m of live) {
+      const v = opts.dense.byId.get(m.id);
+      if (!v) continue; // not embedded yet; the other channels still see it
+      const sim = dot(opts.dense.query, v);
+      if (sim >= DENSE_FLOOR) {
+        dn.set(m.id, sim);
+        if (sim > best) best = sim;
+      }
+    }
+    for (const [id, sim] of dn) dn.set(id, sim / best); // relative to the best
+  }
+
+  // The axis widens only when the channel can actually contribute to it:
+  // a project with the channel on but nothing embedded yet — the first
+  // seconds after a cold start — must score exactly as it did before, not
+  // shrink everything by a third while it warms up.
+  const maxScore = MAX_SCORE + (opts.dense?.byId.size ? DENSE_WEIGHT : 0);
+
   // The union. Any channel alone is enough to be a candidate.
-  const ids = new Set<string>([...bm.keys(), ...eh.keys(), ...fz.keys()]);
+  const ids = new Set<string>([...bm.keys(), ...eh.keys(), ...fz.keys(), ...dn.keys()]);
   if (!ids.size) return [];
 
   // BM25 is unbounded, so normalise against the best hit in this query to get
@@ -373,11 +439,12 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
     const ent = eh.get(id);
     const bias = KIND_BIAS[memory.kind] ?? 0;
     const fuzzy = (fz.get(id) ?? 0) * FUZZY_WEIGHT;
-    const raw = bmNorm + (ent?.score ?? 0) + fuzzy;
+    const dense = (dn.get(id) ?? 0) * DENSE_WEIGHT;
+    const raw = bmNorm + (ent?.score ?? 0) + fuzzy + dense;
     // Decay multiplies the match, not the bias: how well it matches fades with
     // age; what KIND of thing it is doesn't.
     const recency = recencyFactor(memory.updatedAt, now);
-    const final = Math.min(1, (raw / MAX_SCORE) * recency + bias);
+    const final = Math.min(1, (raw / maxScore) * recency + bias);
     hits.push({
       memory,
       score: final,
@@ -387,6 +454,7 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
               bm25: round(bmNorm),
               entity: round(ent?.score ?? 0),
               fuzzy: round(fuzzy),
+              ...(opts.dense ? { dense: round(dense) } : {}),
               kindBias: bias,
               recency: round(recency),
               matchedEntities: ent?.matched ?? [],
