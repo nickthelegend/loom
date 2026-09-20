@@ -12,6 +12,7 @@
  * quietly undo it.
  */
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -102,6 +103,14 @@ describe("packaging · the desktop app", () => {
     expect(cask).toMatch(/sha256 arm:\s+"[0-9a-f]{64}",/);
     expect(cask).toMatch(/intel: "[0-9a-f]{64}"/);
     expect(cask).toContain("Loom-Desktop-#{version}-#{arch}.dmg");
+  });
+
+  it("is valid Ruby, so `brew tap` doesn't fail on it", () => {
+    // A syntax error here breaks the tap for everyone who runs the install
+    // line in the README, and nothing else in this repo would catch it.
+    const r = spawnSync("ruby", ["-c", path.join(root, "Casks/loom-desktop.rb")], { encoding: "utf8" });
+    if (r.error) return; // no ruby on this machine; CI's macOS runner has one
+    expect(r.stdout.trim(), r.stderr).toBe("Syntax OK");
   });
 
   it("does not turn Gatekeeper off on the user's behalf", () => {
