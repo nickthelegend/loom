@@ -103,7 +103,11 @@ import {
 } from "../core/worktree.js";
 import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
 import { SemanticIndex } from "../core/semantic.js";
+import { ModelAdapter } from "../adapters/model.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
+
+/** How many models one ask may go to at once. */
+const MAX_FANOUT = 8;
 
 const PROJECTION_WINDOW = 400; // recent events distilled on handoff
 
@@ -1500,6 +1504,69 @@ export class ProjectRuntime {
     }
     writeProjectState(this.info.dir, state);
     return chat;
+  }
+
+  /**
+   * Ask several models the same thing at once, each in its own thread.
+   *
+   * With free quota, asking five models costs what asking one costs, and
+   * "which of these is right" is a judgement a person makes in ten seconds.
+   * So: one prompt, one thread per model, all running at the same time.
+   *
+   * The agents are TRANSIENT — built for the ask, not added to the roster.
+   * Adding five agents to .loom/config.json to ask five questions would leave
+   * the project's roster as a record of everything anyone ever compared. What
+   * stays behind is the threads, which are the part worth keeping.
+   */
+  async askModels(
+    text: string,
+    picks: Array<{ model: string; provider?: string }>,
+    opts: { title?: string; briefing?: boolean } = {},
+  ): Promise<Array<{ chat: string; model: string; provider: string; agentId: string }>> {
+    if (!picks.length) throw new Error("name at least one model");
+    if (picks.length > MAX_FANOUT) {
+      throw new Error(`that's ${picks.length} models — ${MAX_FANOUT} at a time is the limit`);
+    }
+    const brief = opts.briefing === false ? "" : await this.brainBriefFor({ query: text, limit: 6 });
+    const started: Array<{ chat: string; model: string; provider: string; agentId: string }> = [];
+
+    for (const pick of picks) {
+      const provider = pick.provider ?? "openrouter";
+      // The model IS the name here: a thread labelled "ask-3" tells you
+      // nothing, and this is a view where which model said what is the point.
+      const short = pick.model.split("/").pop() ?? pick.model;
+      const chat = this.createChat(`${opts.title ?? "ask"} · ${short}`.slice(0, 60));
+      const agentId = `ask:${pick.model}`;
+      this.log.append({
+        kind: "message",
+        chat: chat.id,
+        payload: { text, author: "user", ask: { model: pick.model, provider } },
+      });
+
+      const agent = new ModelAdapter(agentId, this.info.dir, { provider, model: pick.model });
+      // Its events land in the log tagged with its own thread, exactly as a
+      // roster agent's do — which is what makes the answers readable later.
+      const off = agent.onEvent((e) => {
+        this.appendIfOpen({ ...e, agentId, chat: chat.id });
+      });
+      void agent
+        .send({ text, ...(brief ? { briefing: brief } : {}) })
+        .catch((err) => {
+          this.appendIfOpen({
+            kind: "error",
+            agentId,
+            chat: chat.id,
+            payload: { message: String(err instanceof Error ? err.message : err) },
+          });
+        })
+        .finally(() => off());
+      started.push({ chat: chat.id, model: pick.model, provider, agentId });
+    }
+    this.log.append({
+      kind: "status",
+      payload: { state: "asked_models", models: picks.map((p) => p.model), chats: started.map((s) => s.chat) },
+    });
+    return started;
   }
 
   /** What a thread has pinned, if anything. */

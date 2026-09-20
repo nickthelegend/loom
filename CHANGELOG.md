@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Ask several models at once
+
+- **`loom ask --models a,b,c "…"`** sends one prompt to several models at the
+  same time, each in its own thread named after the model, with the project's
+  memory brief attached. `--free` picks the free ones the providers have right
+  now, up to `--limit`. With free quota, asking five models costs what asking
+  one costs — and *which of these is right* is a judgement a person makes in
+  ten seconds and a model makes badly.
+- The agents that run are **transient**: five asks don't leave five agents in
+  your roster. The threads stay, because those are the part worth keeping.
+- One model failing doesn't take the others down — its thread carries the
+  error, the rest carry their answers.
+
 ### A thread remembers who answers in it
 
 - **Pin an agent to a thread** and it answers there, whoever holds the baton —

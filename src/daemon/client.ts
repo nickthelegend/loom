@@ -577,6 +577,21 @@ export class DaemonClient {
     });
   }
 
+  /** One prompt, several models, a thread each. */
+  askModels(
+    id: string,
+    text: string,
+    models: string[],
+    opts: { title?: string; briefing?: boolean } = {},
+  ): Promise<{ asked: Array<{ chat: string; model: string; provider: string; agentId: string }> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/ask`, {
+      text,
+      models,
+      ...(opts.title ? { title: opts.title } : {}),
+      ...(opts.briefing === false ? { briefing: false } : {}),
+    });
+  }
+
   routeState(id: string): Promise<{ route: RouteState | null }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/route`);
   }

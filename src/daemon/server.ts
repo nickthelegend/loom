@@ -2171,6 +2171,45 @@ export class LoomDaemon {
     );
 
     /**
+     * One prompt, several models, a thread each. With free quota this costs
+     * what asking one model costs.
+     */
+    app.post(
+      "/api/projects/:id/ask",
+      withRuntime(async (rt, req, res) => {
+        const { text, models, title, briefing } = (req.body ?? {}) as {
+          text?: string;
+          models?: Array<string | { model: string; provider?: string }>;
+          title?: string;
+          briefing?: boolean;
+        };
+        if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
+        const picks = (models ?? []).map((m) =>
+          typeof m === "string"
+            ? // "provider/vendor/model" — the provider is the first segment
+              // only when it names one we know; otherwise the whole string is
+              // the model, because model ids contain slashes too.
+              (() => {
+                const [head, ...rest] = m.split("/");
+                return head && rest.length && resolveProvider(head)
+                  ? { model: rest.join("/"), provider: head }
+                  : { model: m };
+              })()
+            : { model: String(m.model), ...(m.provider ? { provider: String(m.provider) } : {}) },
+        );
+        try {
+          const asked = await rt.askModels(text, picks, {
+            ...(title ? { title } : {}),
+            ...(briefing === false ? { briefing: false } : {}),
+          });
+          res.json({ asked });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    /**
      * Who answers in a thread. Null unbinds it, and the thread goes back to
      * following the baton like the main one.
      */

@@ -383,6 +383,40 @@ program
   });
 
 program
+  .command("ask <words...>")
+  .description("ask several models the same thing at once, a thread each")
+  .option("--models <list>", "comma-separated model ids (provider/model, or just the model)")
+  .option("--free", "every free model the providers have, up to --limit")
+  .option("--limit <n>", "how many models --free may use", "3")
+  .option("--title <title>", "what to call the threads")
+  .option("--no-briefing", "don't send the project's memory brief with it")
+  .action(async (words: string[], opts: { models?: string; free?: boolean; limit?: string; title?: string; briefing?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let models = (opts.models ?? "").split(",").map((m) => m.trim()).filter(Boolean);
+    if (opts.free) {
+      // The point of --free: spend nothing, and let the providers say what
+      // that means today rather than a list going stale in this file.
+      const { models: all } = await allModels();
+      const limit = Math.max(1, Number(opts.limit) || 3);
+      models = all.filter((m) => m.free).slice(0, limit).map((m) => `${m.provider}/${m.id}`);
+      if (!models.length) fail("no free models — loom models --refresh, or name them with --models");
+    }
+    if (!models.length) fail('which models? e.g. loom ask --models "a,b" "your question"');
+    try {
+      const { asked } = await client.askModels(project.id, words.join(" "), models, {
+        ...(opts.title ? { title: opts.title } : {}),
+        ...(opts.briefing === false ? { briefing: false } : {}),
+      });
+      console.log(pc.cyan(`\u279c asked ${asked.length} model${asked.length === 1 ? "" : "s"}:`));
+      for (const a of asked) console.log(`  ${pc.bold(a.model)} ${pc.dim(a.chat)}`);
+      console.log(pc.dim("answers stream into their own threads \u2014 loom watch, or open the app"));
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
+  });
+
+program
   .command("routes:save <name> <steps...>")
   .description(
     'define a named route, e.g. loom routes:save ship planner executor reviewer\n' +

@@ -631,6 +631,21 @@ projections — they never hold the write lock. That's a design decision, not a 
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
 
+## Asking several models at once
+
+```sh
+loom ask --free --limit 3 "is this migration reversible?"
+loom ask --models "openrouter/qwen/qwen3.8-27b:free,ollama/llama3" "review this approach"
+```
+
+One prompt, one thread per model, all at the same time, each thread named
+after the model that answered in it. With free quota this costs what asking
+one model costs, and picking the good answer takes a person ten seconds.
+
+The agents that run are transient — five asks don't leave five agents in the
+roster — and one model failing leaves its error in its own thread while the
+others carry on.
+
 ## Threads, and who answers in them
 
 A thread can name its own agent. It then answers there whatever the baton is
