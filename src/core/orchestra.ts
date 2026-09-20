@@ -344,6 +344,40 @@ export type OrchestraAction =
  * drift, and a plan lost to a fence label is a wasted round. Returns null when
  * nothing parses, so the caller can ask again rather than guess.
  */
+/**
+ * How much of an agent's turn is kept in memory, and why cutting it is delicate.
+ *
+ * The orchestrator's answer is parsed from this text, and the part that matters
+ * — the ```loom block — sits at the END of a reply whose prose can be long. The
+ * old cap kept the last 20,000 characters, which on any real plan threw away
+ * the OPENING fence while keeping the closing one. The parser then saw an
+ * unterminated block, reported that the reply had no actions, and the whole
+ * plan was silently discarded (#104). Measured on one real run: seven
+ * consecutive plans of 6, 5, 5, 5, 5, 8 and 8 tasks, every one of them parsed
+ * perfectly from the logged event and every one destroyed by the cap. The
+ * better the orchestrator planned, the more certainly its plan was binned.
+ *
+ * So two changes. The budget is large enough that no plausible reply reaches
+ * it — a turn is bounded by the model's own output limit long before this.
+ * And when it IS reached, the cut is made at the start of the last actions
+ * block rather than blindly at a character offset, so the payload can never be
+ * decapitated by the thing that is meant to be protecting memory.
+ */
+export const TURN_TEXT_LIMIT = 400_000;
+
+export function capTurnText(text: string, limit = TURN_TEXT_LIMIT): string {
+  if (text.length <= limit) return text;
+  // Where the parseable payload begins. Keeping from here guarantees the
+  // opening fence survives, whatever that costs us in preceding prose.
+  const starts = [text.lastIndexOf("```loom"), text.lastIndexOf('{"actions"')].filter((i) => i >= 0);
+  const keepFrom = starts.length ? Math.min(...starts) : -1;
+  // Only honour it when it actually saves the block: a payload so large it
+  // exceeds the budget on its own is already lost, and falling back to the
+  // plain tail at least bounds memory rather than keeping everything.
+  if (keepFrom >= 0 && text.length - keepFrom <= limit) return text.slice(keepFrom);
+  return text.slice(-limit);
+}
+
 export function parseOrchestraActions(text: string): OrchestraAction[] | null {
   const fences = [...text.matchAll(/```([a-zA-Z-]*)\s*\n([\s\S]*?)```/g)];
   const candidates: string[] = [];
@@ -1965,7 +1999,7 @@ export class OrchestraEngine {
       const p = e.payload as Record<string, unknown>;
       if (e.kind === "message" && !p.reasoning && p.role !== "user") {
         const prev = this.turnText.get(key) ?? "";
-        this.turnText.set(key, `${prev}\n${String(p.text ?? "")}`.slice(-20_000));
+        this.turnText.set(key, capTurnText(`${prev}\n${String(p.text ?? "")}`));
       }
       if (e.kind === "error") this.lastError.set(key, String(p.message ?? "error"));
       // A worker that stops mid-turn to ask (opencode's question tool, a CLI's

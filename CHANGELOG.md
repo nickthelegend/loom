@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-09-21
+
+### Orchestra spawns its workers again
+
+- **An orchestrator's plan was being thrown away before it ran.** Every run
+  planned tasks and started none: the Fleet sat idle, no task threads appeared,
+  and the thread said *"your reply had no ```loom actions block"* directly
+  underneath a reply that plainly contained one.
+- The engine parses accumulated turn text, and that text was capped to its
+  **last** 20,000 characters. A plan's block sits at the END of a long reply,
+  so the cap kept the closing fence and threw away the opening one; the parser
+  saw an unterminated block and reported nothing to run. **The better the
+  orchestrator planned, the more certainly its plan was binned.** Measured on a
+  real run: seven consecutive plans of 6, 5, 5, 5, 5, 8 and 8 tasks, every one
+  parseable from the log and every one destroyed.
+- The budget is now far clear of any plausible reply, and when it is reached
+  the cut is made at the start of the actions block rather than at a blind
+  character offset — so what protects memory can never decapitate the payload.
+
+### Answer an agent where it asked
+
+- **An agent's question is now a card you can answer in the thread.** It was a
+  line of text with nothing to click, which made the one moment Loom exists to
+  surface — an agent blocked on a human — the worst affordance in the app.
+- The answer goes to **the agent that asked**, taken from the card. Through the
+  composer it went to `state.selected`, which in an orchestra thread is the
+  orchestrator — so answering a worker sent the answer to the wrong agent.
+- A question that plainly offers a choice becomes buttons. Anything ambiguous
+  falls back to the text box, because a wrong guess puts words in your mouth
+  and sends them to an agent.
+
+### A giant icon no longer eats the Board
+
+- Board → GitHub rendered a single enormous ⓘ filling the pane whenever `gh`
+  couldn't list pull requests, pushing the columns out of view.
+- `svg()` emitted no width or height, so an icon in a container that forgot its
+  CSS rule stretched to fill the line — and `.bnote` was such a container.
+  Icons now carry an intrinsic size, so a **future** icon dropped somewhere
+  unstyled looks slightly wrong instead of covering the screen.
+
 ## [1.0.0] — 2026-09-21
 
 ### Rewind — put the work back the way it was
