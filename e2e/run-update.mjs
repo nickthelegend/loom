@@ -50,16 +50,20 @@ await check(rec, "P1", async () => {
   expect(u.canApply === true, "and says it can update itself");
   expect(u.steps.join(" | ") === "git pull --ff-only | npm install --no-audit --no-fund | npm run build",
     `the plan is the commands themselves, got ${JSON.stringify(u.steps)}`);
-  expect(u.root && u.root.startsWith(path.dirname(repo)), `rooted at the clone, got ${u.root}`);
+  expect(u.root && path.basename(u.root) === "loom" && u.root.includes("loom-e2e-update-"), `rooted at the clone, got ${u.root}`);
   expect(typeof u.behindRelease === "boolean", "and answers the release question with a boolean");
   return `install=${u.install} root=${u.root} steps=[${u.steps.join(" && ")}] version=${u.version}`;
 });
 
 await check(rec, "P2", async () => {
-  // Uncommitted work is yours: the update refuses rather than rebasing over it.
-  fs.writeFileSync(path.join(repo, "SCRATCH.md"), "mine\n");
+  // Edited tracked files are yours: the update refuses rather than moving over
+  // them. (An untracked file — this clone's symlinked node_modules — doesn't
+  // stop a fast-forward, and doesn't stop the update either.)
+  const readme = path.join(repo, "README.md");
+  const original = fs.readFileSync(readme, "utf8");
+  fs.writeFileSync(readme, original + "\nmine\n");
   const refused = await d.post("/api/updates/apply", {});
-  fs.rmSync(path.join(repo, "SCRATCH.md"));
+  fs.writeFileSync(readme, original);
   expect(refused.status === 400, `refused, got ${refused.status} ${refused.text.slice(0, 200)}`);
   expect(/uncommitted/.test(refused.body?.error ?? ""), `and says why, got ${refused.text.slice(0, 200)}`);
   expect(sh("git", ["rev-parse", "HEAD"], repo) === before, "the checkout didn't move");

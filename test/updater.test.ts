@@ -74,9 +74,12 @@ describe("what this copy is", () => {
     expect(unknown.refusal).toMatch(/download the release/);
   });
 
-  it("won't rebase over your uncommitted work", () => {
-    expect(refuseDirtyCheckout(" M src/core/updater.ts\n")).toMatch(/uncommitted/);
+  it("won't move over your uncommitted work, and doesn't mind untracked files", () => {
+    expect(refuseDirtyCheckout(" M src/core/updater.ts\n")).toMatch(/uncommitted changes to 1 file/);
+    expect(refuseDirtyCheckout(" M a.ts\nM  b.ts\n")).toMatch(/2 files/);
     expect(refuseDirtyCheckout("")).toBeNull();
+    // a scratch file or a symlinked node_modules doesn't stop a fast-forward
+    expect(refuseDirtyCheckout("?? SCRATCH.md\n?? node_modules\n")).toBeNull();
   });
 });
 

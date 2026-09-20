@@ -154,7 +154,19 @@ export function plan(install: { kind: InstallKind; cwd: string | null; spec?: st
   };
 }
 
-/** A git checkout with uncommitted work is yours, not ours to rebase. */
+/**
+ * A git checkout with uncommitted work is yours, not ours to move.
+ *
+ * Modified tracked files only. Untracked ones don't stop a fast-forward —
+ * refusing over a stray scratch file or a symlinked node_modules would block
+ * the update for something git is perfectly happy with. (If an untracked file
+ * would actually be overwritten, git itself refuses and that error is shown.)
+ */
 export function refuseDirtyCheckout(status: string): string | null {
-  return status.trim() ? "this checkout has uncommitted changes — commit or stash them first" : null;
+  const tracked = status
+    .split("\n")
+    .filter((l) => l.trim() && !l.startsWith("??"));
+  return tracked.length
+    ? `this checkout has uncommitted changes to ${tracked.length} file${tracked.length === 1 ? "" : "s"} — commit or stash them first`
+    : null;
 }
