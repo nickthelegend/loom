@@ -126,6 +126,17 @@ describe("standing in front of a dev server", () => {
     expect(res.body).toContain("loom preview");
   });
 
+  it("answers when the server accepts the connection and then says nothing", async () => {
+    // the worst kind of broken server: the socket opens, the page never comes
+    const target = await serve(() => {
+      /* deliberately no response */
+    });
+    proxy = await startPreviewProxy(target);
+    const res = await get(`http://127.0.0.1:${proxy.port}/`);
+    expect(res.status).toBe(504);
+    expect(res.body).toContain("never answered");
+  }, 60_000);
+
   it("forwards the socket hot reload rides on", async () => {
     const target = await serve((_req, res) => res.end("ok"));
     // a bare-bones upgrade handshake, the way a dev server answers one

@@ -17,6 +17,9 @@ import http from "node:http";
 import net from "node:net";
 import { Readable } from "node:stream";
 
+/** How long to wait for a dev server that accepted the connection to answer. */
+export const UPSTREAM_TIMEOUT_MS = 20_000;
+
 /** Marker so an injected page is obvious in view-source. */
 export const BRIDGE_MARK = "loom-preview-bridge";
 
@@ -229,8 +232,17 @@ export async function startPreviewProxy(target: string, host = "127.0.0.1"): Pro
       },
     );
     upstream.on("error", (err) => {
+      if (res.headersSent) return void res.end();
       res.writeHead(502, { "content-type": "text/plain" });
       res.end(`loom preview: the server didn't answer (${err.message})`);
+    });
+    // A server that accepts the connection and then says nothing would hold
+    // the preview open for ever. Say so instead.
+    upstream.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+      upstream.destroy();
+      if (res.headersSent) return void res.end();
+      res.writeHead(504, { "content-type": "text/plain" });
+      res.end("loom preview: the server accepted the connection but never answered");
     });
     Readable.from(req).pipe(upstream);
   });
