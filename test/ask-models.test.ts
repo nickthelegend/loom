@@ -26,8 +26,21 @@ afterEach(async () => {
   server = null;
 });
 
-/** A provider that answers in each model's own voice, and can refuse one. */
-async function provider(opts: { failing?: string; delayMs?: number } = {}) {
+/**
+ * A provider that answers in each model's own voice, and can refuse one.
+ *
+ * `barrier: n` holds every response until n requests are in flight at once.
+ * That turns "are these concurrent?" into a question with a yes/no answer
+ * instead of a stopwatch: serial code never reaches n and the test times out.
+ */
+async function provider(opts: { failing?: string; delayMs?: number; barrier?: number } = {}) {
+  let inFlight = 0;
+  let release: (() => void) | null = null;
+  const gate = opts.barrier
+    ? new Promise<void>((r) => {
+        release = r;
+      })
+    : null;
   const asked: string[] = [];
   server = http.createServer((req, res) => {
     if (req.url?.endsWith("/v1/models")) {
@@ -44,6 +57,11 @@ async function provider(opts: { failing?: string; delayMs?: number } = {}) {
         res.writeHead(503, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: { message: "no available channel" } }));
         return;
+      }
+      if (gate) {
+        inFlight++;
+        if (inFlight >= (opts.barrier ?? 0)) release?.();
+        await gate;
       }
       if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -111,18 +129,21 @@ describe("asking several models at once", () => {
 
   it("asks them at the same time, not one after another", async () => {
     const r = await project();
-    const { id } = await provider({ delayMs: 250 });
-    const started = Date.now();
+    // Nothing is answered until all three requests are in flight together.
+    // Serial code would never get past the first, so this fails by timing out
+    // rather than by a stopwatch reading — the first version of this test
+    // compared elapsed time to a hand-picked 650ms and flaked on a loaded CI
+    // runner at 775ms, where serial is 750ms. A bound that close to the thing
+    // it's distinguishing from isn't measuring anything.
+    const { id } = await provider({ barrier: 3 });
     const asked = await r.askModels("q", [
       { model: "alpha", provider: id },
       { model: "beta", provider: id },
       { model: "gamma", provider: id },
     ]);
-    await waitUntil(async () => asked.every((a) => textIn(r, a.chat).length > 0));
-    // Serial would be 750ms+. Generous bound: this is about concurrency, not
-    // about how fast a laptop is.
-    expect(Date.now() - started).toBeLessThan(650);
-  });
+    await waitUntil(async () => asked.every((a) => textIn(r, a.chat).length > 0), { timeoutMs: 15_000 });
+    for (const a of asked) expect(textIn(r, a.chat)).toBe(`${a.model} says hello.`);
+  }, 30_000);
 
   it("leaves the roster alone — five asks aren't five agents", async () => {
     const r = await project();
