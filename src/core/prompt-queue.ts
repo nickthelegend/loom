@@ -19,7 +19,7 @@ import path from "node:path";
 
 export type QueueTarget =
   | { kind: "agent"; agentId: string }
-  | { kind: "orchestra"; orchestrator?: string; workers?: string[]; maxParallel?: number }
+  | { kind: "orchestra"; orchestrator?: string; workers?: string[]; maxParallel?: number; maxUsd?: number }
   | { kind: "auto" };
 
 /**
@@ -126,6 +126,7 @@ export function parseTarget(raw: unknown): QueueTarget {
       ...(typeof t.orchestrator === "string" && t.orchestrator ? { orchestrator: t.orchestrator } : {}),
       ...(workers?.length ? { workers } : {}),
       ...(Number.isFinite(maxParallel) && maxParallel > 0 ? { maxParallel: Math.floor(maxParallel) } : {}),
+      ...(Number.isFinite(Number(t.maxUsd)) && Number(t.maxUsd) > 0 ? { maxUsd: Number(t.maxUsd) } : {}),
     };
   }
   throw new Error(`unknown target kind "${String(t.kind)}"`);

@@ -915,8 +915,9 @@ program
   .option("-p, --parallel <n>", "tasks running at once (1-12, default 4)")
   .option("--rounds <n>", "orchestrator review rounds before giving up (default 10)")
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
+  .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -927,6 +928,7 @@ program
         ...(opts.parallel ? { maxParallel: Number(opts.parallel) } : {}),
         ...(opts.rounds ? { maxRounds: Number(opts.rounds) } : {}),
         ...(opts.plan ? { plan: true } : {}),
+        ...(opts.maxUsd ? { maxUsd: Number(opts.maxUsd) } : {}),
       });
       console.log(
         `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +

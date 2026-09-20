@@ -3163,6 +3163,7 @@ export class LoomDaemon {
           maxParallel?: number;
           maxRounds?: number;
           plan?: boolean;
+          maxUsd?: number;
         };
         if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
         const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
@@ -3174,6 +3175,7 @@ export class LoomDaemon {
             ...(b.maxParallel ? { maxParallel: Number(b.maxParallel) } : {}),
             ...(b.maxRounds ? { maxRounds: Number(b.maxRounds) } : {}),
             ...(b.plan ? { plan: true } : {}),
+            ...(Number(b.maxUsd) > 0 ? { maxUsd: Number(b.maxUsd) } : {}),
           });
           recordRecent(b.goal, { project: rt.info.name, mode: "orchestrate" });
           res.json({ run });

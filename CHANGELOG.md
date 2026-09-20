@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Goals: a spend cap, and more than one at a time
+
+- **`loom orchestrate --max-usd 2`** stops a goal at its cap the way the team
+  budget always did — running work finishes, nothing new starts, and the goal
+  waits for you. A project default lives in `budgets.perGoalUsd`, and a word
+  lands in the thread at 80% rather than the stop being the first you hear.
+- **`maxConcurrentGoals`** lets disjoint goals run side by side. A goal's
+  scope is the `touches` its plan declares; one that hasn't said what it
+  touches counts as everything and waits. Overlaps queue with the collision
+  named. Still one at a time unless you ask for more.
+
 ### The queue can wait, and can be kept
 
 - **Queue for later**: a prompt can be held for a time, until a goal actually

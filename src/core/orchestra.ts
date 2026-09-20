@@ -35,6 +35,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { loomHome } from "./registry.js";
+import { blockedBy, type GoalScope } from "./goal-lanes.js";
 import { cutStack, type MergedTask } from "./team-landing.js";
 import type { Adapter, AgentConfig, ChatInfo, EventKind, GitDelivery, LoomEvent, SendInput } from "../types.js";
 
@@ -154,6 +155,8 @@ export interface OrchestraRun {
   from?: { branch: string; pr: number; url: string; ownerRunId?: string; owner?: string };
   /** This goal's spending cap in USD (D64), raised each time a human says continue. */
   budgetUsd?: number;
+  /** So the 80% word is said once, not once a turn. */
+  budgetWarned?: boolean;
   /** Phase 5: set while the goal is being handed to another machine; nothing new starts. */
   moving?: boolean;
   /** Where the goal went (D75). */
@@ -214,6 +217,9 @@ export interface LandingState {
   updatedAt: number;
 }
 
+/** How much of a goal's budget may go before it says something. */
+export const BUDGET_WARN_AT = 0.8;
+
 export interface OrchestraStartOptions {
   goal: string;
   /** Roster id (or kind) of the orchestrator. Defaults to the host's pick. */
@@ -226,6 +232,10 @@ export interface OrchestraStartOptions {
   plan?: boolean;
   /** Adopt (D63): start from a teammate's PR branch and push back to it. */
   from?: OrchestraRun["from"];
+  /** Stop this goal when it has spent this much, and say so. */
+  maxUsd?: number;
+  /** The paths this goal expects to touch, when the caller already knows. */
+  touches?: string[];
 }
 
 /** What orchestra needs from the project that owns it. */
@@ -249,6 +259,10 @@ export interface OrchestraHost {
   observe(event: LoomEvent): void;
   /** The project's git delivery policy, read when a run completes. */
   gitDelivery?(): GitDelivery;
+  /** The project's own per-goal spend cap, when it sets one (.loom/config.json). */
+  goalBudgetUsd?(): number | null;
+  /** How many goals may run at once when their paths don't collide (default 1). */
+  maxConcurrentGoals?(): number | null;
   /** The GitHub login of the member running this daemon, when on a team (commit trailers). */
   member?(): string | null;
   /** The team coordinator for this project, when it's shared with a team (Phase 2). */
@@ -270,6 +284,8 @@ export interface OrchestraCoordinator {
   onRunEnd?(run: OrchestraRun): void;
   /** Policy cap on tasks at once for this member (D38). */
   maxParallel?(): number | null;
+  /** The project's own per-goal cap, when it has one (.loom/config.json). */
+  goalBudgetUsd?(): number | null;
   /** Protected branches only receive PRs (D38). */
   isProtected?(branch: string): boolean;
   /** Why this member can't start a goal right now (D64: over the daily budget), or null. */
@@ -772,6 +788,19 @@ export class OrchestraEngine {
     return this.list().find((r) => !isTerminal(r.status));
   }
 
+  /** Every goal in flight, with the paths it expects to touch. */
+  runningScopes(): GoalScope[] {
+    return this.list()
+      .filter((r) => !isTerminal(r.status))
+      .map((r) => ({
+        runId: r.id,
+        goal: r.goal,
+        // A goal's scope is what it said it would touch, once it has planned.
+        // Before that it's unknown, which counts as everything.
+        paths: r.tasks.flatMap((t) => t.touches ?? []),
+      }));
+  }
+
   private emit(run: OrchestraRun, phase: string, extra: Record<string, unknown> = {}, chat?: string): void {
     this.host.append({
       kind: "orchestra",
@@ -811,8 +840,21 @@ export class OrchestraEngine {
   async start(opts: OrchestraStartOptions): Promise<OrchestraRun> {
     const goal = opts.goal?.trim();
     if (!goal) throw new Error("an orchestra run needs a goal");
-    const busy = this.active();
-    if (busy) throw new Error(`orchestra run ${busy.id} is still ${busy.status} — abort it or wait`);
+    // One goal at a time unless the project says otherwise — and then only
+    // when the paths can't collide (core/goal-lanes.ts, D-lanes locally).
+    const running = this.runningScopes();
+    const allowed = Math.max(1, this.host.maxConcurrentGoals?.() ?? 1);
+    if (running.length) {
+      const blocked = blockedBy({ runId: "new", goal, paths: opts.touches ?? [] }, running, allowed);
+      if (blocked) {
+        const busy = this.active()!;
+        throw new Error(
+          allowed === 1
+            ? `orchestra run ${busy.id} is still ${busy.status} — abort it or wait`
+            : blocked,
+        );
+      }
+    }
 
     const roster = this.host.roster();
     const orchCfg = opts.orchestrator
@@ -884,6 +926,8 @@ export class OrchestraEngine {
       ),
       ...(opts.plan ? { plan: true } : {}),
       ...(opts.from ? { from: opts.from, landing: newLanding(opts.from.pr, opts.from.url) } : {}),
+      // A cap for this goal: what was asked for, else the project's default.
+      ...(opts.maxUsd && opts.maxUsd > 0 ? { budgetUsd: opts.maxUsd } : {}),
       costUsd: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1179,16 +1223,35 @@ export class OrchestraEngine {
   }
 
   private goalCap(run: OrchestraRun): number | null {
-    return run.budgetUsd ?? this.host.coordinator?.()?.goalBudgetUsd?.() ?? null;
+    return run.budgetUsd ?? this.host.goalBudgetUsd?.() ?? this.host.coordinator?.()?.goalBudgetUsd?.() ?? null;
+  }
+
+  /**
+   * A word before the stop.
+   *
+   * Hearing about a budget for the first time when the goal halts is a bad way
+   * to learn it exists — especially now that a queue can start goals while
+   * you're elsewhere. Said once per goal.
+   */
+  private warnNearBudget(run: OrchestraRun): void {
+    const cap = this.goalCap(run);
+    if (cap === null || run.budgetWarned || run.costUsd < cap * BUDGET_WARN_AT) return;
+    run.budgetWarned = true;
+    this.save(run);
+    this.emit(run, "alert", {
+      text: `this goal has spent $${run.costUsd.toFixed(2)} of its $${cap.toFixed(2)} budget`,
+      budget: { spent: run.costUsd, cap },
+    });
   }
 
   /** D64: a goal over its cap stops asking for more work until a human says continue. */
   private overBudget(run: OrchestraRun): boolean {
     const cap = this.goalCap(run);
+    this.warnNearBudget(run);
     if (cap === null || run.costUsd < cap) return false;
     run.status = "waiting_human";
     run.question =
-      `This goal has spent $${run.costUsd.toFixed(2)} of its $${cap.toFixed(2)} budget (loom.team.json budgets.perGoalUsd). ` +
+      `This goal has spent $${run.costUsd.toFixed(2)} of its $${cap.toFixed(2)} budget. ` +
       "Running work finishes its turn; nothing new starts. Reply to continue — that allows one more budget's worth.";
     this.save(run);
     this.emit(run, "waiting", { question: run.question, budget: { spent: run.costUsd, cap } });

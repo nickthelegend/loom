@@ -76,6 +76,7 @@ import {
   type QueueState,
   type QueueTarget,
 } from "../core/prompt-queue.js";
+import { blockedBy } from "../core/goal-lanes.js";
 import { Servers, type LogLine, type ServerStatus } from "../core/servers.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import { agentAllowed, cappedPermission, type TeamPolicy } from "../core/team-policy.js";
@@ -287,6 +288,8 @@ export class ProjectRuntime {
       },
       observe: (event) => this.trackCost(event),
       gitDelivery: () => this.config.git?.delivery ?? "none",
+      goalBudgetUsd: () => this.config.budgets?.perGoalUsd ?? null,
+      maxConcurrentGoals: () => this.config.maxConcurrentGoals ?? null,
       member: () => this.memberLogin,
       coordinator: () => this.coordinator,
     });
@@ -2132,8 +2135,13 @@ export class ProjectRuntime {
     const routing = route && (route.status === "running" || route.status === "waiting_human");
     const holder = this.validHolder();
     if (item.target.kind === "orchestra") {
-      const run = this.orchestra.active();
-      return run ? `waiting for the goal "${run.goal.slice(0, 60)}" to finish` : null;
+      const running = this.orchestra.runningScopes();
+      if (!running.length) return null;
+      const allowed = Math.max(1, this.config.maxConcurrentGoals ?? 1);
+      // With lanes on, a queued goal that can't collide with what's running
+      // starts beside it; the rest wait, with the overlap named.
+      return blockedBy({ runId: "queued", goal: item.text, paths: [] }, running, allowed)
+        ?? null;
     }
     if (routing) return "waiting for the running route";
     if (item.target.kind === "agent" && this.busySince.has(item.target.agentId)) return `waiting for ${item.target.agentId} to finish its turn`;
@@ -2262,6 +2270,7 @@ export class ProjectRuntime {
         ...(t.orchestrator ? { orchestrator: t.orchestrator } : {}),
         ...(t.workers?.length ? { workers: t.workers } : {}),
         ...(t.maxParallel ? { maxParallel: t.maxParallel } : {}),
+        ...(t.maxUsd ? { maxUsd: t.maxUsd } : {}),
         ...(item.plan ? { plan: true } : {}),
       });
       return;

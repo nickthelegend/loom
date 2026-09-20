@@ -847,6 +847,26 @@ with the page reconnecting to it.
 
 From the terminal: `loom update --check` to look, `loom update` to do it.
 
+## More than one goal, when they can't collide
+
+One orchestra goal at a time is the default, and for good reason: two goals
+editing the same files is a merge nobody can explain. Set
+`maxConcurrentGoals` in `.loom/config.json` and Loom will start a second one —
+but only when the paths can't collide. A goal's scope is the `touches` its
+plan declares; a goal that hasn't said what it touches counts as touching
+everything, and waits. Anything overlapping queues as it always did, with the
+overlap named: *waiting for "rework billing" — both touch src/billing/\*\* and
+src/billing/tax.ts*.
+
+## What a goal may spend
+
+`loom orchestrate --max-usd 2 "…"` stops that goal at $2: running work
+finishes its turn, nothing new starts, and the goal goes to **needs you** with
+what it spent. Replying allows one more budget's worth. A project default
+lives in `.loom/config.json` as `budgets.perGoalUsd`, and there's a word in the
+thread at 80% — hearing about a budget for the first time when the goal halts
+is a bad way to learn it exists.
+
 ## The prompt queue — line up the next ones
 
 Type while an agent is mid-turn, or while a goal is still running, and the

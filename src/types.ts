@@ -200,6 +200,19 @@ export interface ProjectConfig {
    * nothing starts on its own. See core/servers.ts.
    */
   servers?: ServerConfig[];
+  /**
+   * Spend caps for this project. Daily per-agent budgets live in the daemon's
+   * own config; this is the one a single goal may spend before it stops and
+   * says so.
+   */
+  budgets?: { perGoalUsd?: number };
+  /**
+   * How many orchestra goals may run at once. One by default — two goals
+   * editing the same files is a merge nobody can explain. Above one, a goal
+   * starts only when its paths can't collide with what's running
+   * (core/goal-lanes.ts).
+   */
+  maxConcurrentGoals?: number;
   /** Safety nets. Off by default. */
   safety?: {
     /** Checkpoint brain+board+config to .loom/snapshots before every route. */
