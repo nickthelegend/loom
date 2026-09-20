@@ -20,6 +20,7 @@ import { agyBin } from "../adapters/antigravity-cli.js";
 import { codexBin } from "../adapters/codex.js";
 import { profileFor } from "../adapters/bridges/profiles.js";
 import { ADES, detectAdes } from "./ades.js";
+import { listProviders } from "./providers.js";
 
 export type Platform = "darwin" | "win32" | "linux";
 
@@ -84,6 +85,8 @@ const INSTALL: Record<string, string> = {
   opencode: "curl -fsSL https://opencode.ai/install | bash",
   "grok-code": "install the grok CLI from docs.x.ai",
   "antigravity-cli": "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+  // Nothing to install for this one — what it needs is a provider with a key.
+  model: "loom providers:set openrouter --key <your key>",
 };
 
 const AUTH: Record<string, string> = {
@@ -91,6 +94,7 @@ const AUTH: Record<string, string> = {
   codex: "codex login",
   opencode: "opencode auth login",
   "grok-code": "run `grok` once and sign in",
+  model: "loom providers:set <provider> --key <your key>",
   "antigravity-cli": "run `agy` once and sign in with Google",
 };
 
@@ -176,6 +180,15 @@ async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail
       if (entries.some((e) => typeof e?.refresh_token === "string" && e.refresh_token.length > 0)) return { authed: true };
       if (entries.some((e) => typeof e?.key === "string" && e.key.length > 0)) return { authed: true };
       return { authed: false, detail: "grok's auth file has no session" };
+    }
+    if (kind === "model") {
+      // There is nothing to log in to: a model agent is usable when some
+      // provider on this machine has a key. Saying "couldn't confirm it's
+      // signed in" about an HTTP endpoint — and then printing a blank command
+      // to fix it — is two kinds of wrong in one row.
+      const ready = listProviders().filter((p) => p.configured);
+      if (!ready.length) return { authed: false, detail: "no provider has a key yet" };
+      return { authed: true, detail: `${ready.map((p) => p.id).join(", ")} configured` };
     }
     if (kind === "antigravity-cli") {
       // agy has no status command. Listing models needs the account, so a signed-

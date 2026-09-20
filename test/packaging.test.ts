@@ -115,6 +115,25 @@ describe("packaging · the desktop app", () => {
     expect(cask).toContain("Loom-Desktop-#{version}-#{arch}.dmg");
   });
 
+  /**
+   * The menu bar said "Electron". macOS takes that title from the running
+   * BUNDLE's Info.plist, not from app.setName() — which is why setting the
+   * name in main.js never fixed it. CFBundleDisplayName is the lever, and it
+   * leaves the .app filename alone, so the Homebrew cask's `app` stanza and
+   * the zap paths keep working.
+   */
+  it("calls itself Loom in the menu bar, without renaming the bundle", () => {
+    expect(build.mac.extendInfo?.CFBundleDisplayName).toBe("Loom");
+    // The file stays "Loom Desktop.app" — the cask names it, and renaming it
+    // would break every install that already has one.
+    expect(build.productName).toBe("Loom Desktop");
+    const cask = fs.readFileSync(path.join(root, "Casks/loom-desktop.rb"), "utf8");
+    expect(cask).toContain(`app "${build.productName}.app"`);
+    // …and a dev run gets the same name, which is the whole point of prestart.
+    expect(pkg.scripts.prestart).toContain("dev-brand");
+    expect(fs.existsSync(path.join(root, "desktop/scripts/dev-brand.mjs"))).toBe(true);
+  });
+
   it("is valid Ruby, so `brew tap` doesn't fail on it", () => {
     // A syntax error here breaks the tap for everyone who runs the install
     // line in the README, and nothing else in this repo would catch it.

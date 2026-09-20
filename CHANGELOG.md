@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Setup tells the truth about this machine
+
+- **Claude Code showed "not installed" on machines where it is.** Anthropic's
+  installer puts the binary in `~/.local/bin`, and Loom trusted `PATH` alone —
+  which an interactive shell has and a detached daemon may not. Codex, Grok
+  and Antigravity already looked in their known locations; claude-code was the
+  one still guessing. Telling someone to reinstall software they already have
+  is the worst kind of wrong answer.
+- **The Model (API) row said "couldn't confirm it's signed in" and printed a
+  blank command.** There is nothing to sign in to: a model agent is usable
+  when a provider has a key, so it says which providers are configured, and
+  when none is, it gives you `loom providers:set …` instead of an empty box.
+- **The desktop app says Loom in the menu bar**, in a dev run as well as a
+  packaged one. macOS takes that title from the running bundle, not from
+  `app.setName()` — which is why setting the name in code never fixed it. The
+  `.app` filename is unchanged, so the Homebrew cask keeps working.
+
 ## [0.2.5] — 2026-09-20
 
 ### Install it with Homebrew

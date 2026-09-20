@@ -240,3 +240,48 @@ describe("tier for kinds the ADES catalog omits", () => {
     expect(tierForKind("not-a-real-kind")).toBeNull();
   });
 });
+
+/**
+ * Claude Code said "not installed" on a machine where `which claude` answers.
+ *
+ * Anthropic's installer puts the binary in ~/.local/bin. Codex, Grok and
+ * Antigravity all already looked in their known locations; claude-code was the
+ * one still trusting PATH alone, and the daemon's PATH is not an interactive
+ * shell's. Telling someone to reinstall software they already have is the
+ * worst kind of wrong answer.
+ */
+describe("ades · finding claude when it isn't on PATH", () => {
+  it("looks where the installer actually puts it", async () => {
+    const { claudeBin } = await import("../src/adapters/claude-code.js");
+    const fakeHome = tmpDir("home-claude");
+    fs.mkdirSync(path.join(fakeHome, ".local", "bin"), { recursive: true });
+    const installed = path.join(fakeHome, ".local", "bin", "claude");
+    fs.writeFileSync(installed, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+    const realHome = process.env.HOME;
+    try {
+      process.env.HOME = fakeHome;
+      expect(claudeBin()).toBe(installed);
+
+      // With nothing in HOME it never claims claude is missing: it either
+      // names a real file somewhere else on this machine, or falls back to
+      // the bare name and lets PATH decide. (Asserting a literal "claude"
+      // here would depend on whether the machine running the test happens to
+      // have one in /opt/homebrew — which is how this test failed first.)
+      process.env.HOME = tmpDir("home-empty");
+      const fallback = claudeBin()!;
+      expect(fallback === "claude" || fs.existsSync(fallback)).toBe(true);
+    } finally {
+      process.env.HOME = realHome;
+    }
+  });
+
+  it("honours an explicit bin, and refuses one that isn't there", async () => {
+    const { claudeBin } = await import("../src/adapters/claude-code.js");
+    const dir = tmpDir("claude-override");
+    const real = path.join(dir, "claude");
+    fs.writeFileSync(real, "", { mode: 0o755 });
+    expect(claudeBin(real)).toBe(real);
+    expect(claudeBin(path.join(dir, "nope"))).toBeNull();
+  });
+});
