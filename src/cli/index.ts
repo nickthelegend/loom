@@ -1732,6 +1732,66 @@ program
   });
 
 /**
+ * The project's dev servers — the thing the Browser tab previews.
+ *
+ * `loom servers` says what each one is doing, and "running" means a port
+ * answered rather than a process existing. Starting and stopping are explicit:
+ * nothing here runs a command because it guessed you wanted it.
+ */
+const serversCmd = program
+  .command("servers")
+  .description("this project's dev servers: what they are and what they're doing")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { servers, suggested } = await client.servers(project.id);
+    if (!servers.length) {
+      console.log(pc.dim("no servers configured for this project"));
+      if (suggested.length) {
+        console.log(pc.dim("package.json suggests:"));
+        for (const s of suggested) console.log(`  ${pc.cyan(s.name.padEnd(10))} ${s.command}${s.port ? pc.dim(`  :${s.port}`) : ""}`);
+        console.log(pc.dim('add them under "servers" in .loom/config.json'));
+      }
+      return;
+    }
+    const paint = (s: { state: string }) =>
+      s.state === "running" ? pc.green("running") : s.state === "starting" ? pc.yellow("starting") : s.state === "crashed" ? pc.red("crashed") : pc.dim("stopped");
+    for (const s of servers) {
+      const up = s.startedAt ? pc.dim(` up ${Math.max(1, Math.round((Date.now() - s.startedAt) / 1000))}s`) : "";
+      const why = s.state === "crashed" && s.exitCode !== null ? pc.dim(` (exit ${s.exitCode})`) : "";
+      console.log(`${pc.cyan(s.name.padEnd(12))} ${paint(s).padEnd(18)} ${s.port ? pc.dim(":" + s.port) : ""}${up}${why}`);
+      console.log(`${" ".repeat(13)}${pc.dim(s.command)}`);
+    }
+  });
+
+for (const action of ["start", "stop", "restart"] as const) {
+  serversCmd
+    .command(`${action} <name>`)
+    .description(`${action} a dev server`)
+    .action(async (name: string) => {
+      const client = await ensureDaemon();
+      const project = await currentProject(client);
+      const { server } = await client.serverAction(project.id, name, action);
+      console.log(pc.dim(`${server.name}: ${server.state}${server.port ? ` on :${server.port}` : ""}`));
+    });
+}
+
+serversCmd
+  .command("logs <name>")
+  .description("a dev server's recent output")
+  .option("-n, --lines <n>", "how many lines", "80")
+  .action(async (name: string, opts: { lines: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { lines } = await client.serverLog(project.id, name, Math.max(1, Number(opts.lines) || 80));
+    for (const l of lines) {
+      const mark = l.stream === "err" ? pc.red("!") : l.stream === "loom" ? pc.dim("\u00b7") : " ";
+      console.log(`${mark} ${l.text}`);
+    }
+    if (!lines.length) console.log(pc.dim("nothing yet"));
+  });
+
+/**
  * Is there a newer Loom, and fetch it.
  *
  * `--check` only looks. Without it, the update runs the same commands the

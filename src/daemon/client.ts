@@ -17,6 +17,7 @@ import type {
 } from "../types.js";
 import type { OrchestraRun } from "../core/orchestra.js";
 import type { QueueItem } from "../core/prompt-queue.js";
+import type { LogLine, ServerConfig, ServerStatus } from "../core/servers.js";
 import {
   readDaemonConfig,
   type DaemonConfig,
@@ -482,6 +483,24 @@ export class DaemonClient {
 
   handoff(id: string, to: string): Promise<{ from: string | null; to: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/handoff`, { to });
+  }
+
+  // ── dev servers (core/servers.ts) ──
+
+  servers(id: string): Promise<{ servers: ServerStatus[]; suggested: ServerConfig[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/servers`);
+  }
+
+  setServers(id: string, servers: ServerConfig[]): Promise<{ servers: ServerStatus[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/servers`, { servers });
+  }
+
+  serverAction(id: string, name: string, action: "start" | "stop" | "restart"): Promise<{ server: ServerStatus }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/servers/${encodeURIComponent(name)}/${action}`, {});
+  }
+
+  serverLog(id: string, name: string, limit = 200): Promise<{ lines: LogLine[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/servers/${encodeURIComponent(name)}/log?limit=${limit}`);
   }
 
   // ── updates (core/updater.ts) ──

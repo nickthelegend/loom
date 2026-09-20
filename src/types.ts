@@ -179,6 +179,8 @@ export interface BrainConfig {
   model?: string;
 }
 
+import type { ServerConfig } from "./core/servers.js";
+
 export interface ProjectConfig {
   name: string;
   agents: AgentConfig[];
@@ -192,6 +194,12 @@ export interface ProjectConfig {
   skills?: Record<string, boolean>;
   /** MCP servers this project can offer agents (mirrors the Anthropic API shape). */
   mcps?: McpServerConfig[];
+  /**
+   * Dev servers Loom can run for this project — the thing the Browser tab
+   * previews. Suggested from package.json on init, confirmed by a person;
+   * nothing starts on its own. See core/servers.ts.
+   */
+  servers?: ServerConfig[];
   /** Safety nets. Off by default. */
   safety?: {
     /** Checkpoint brain+board+config to .loom/snapshots before every route. */
