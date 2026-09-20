@@ -103,6 +103,23 @@ export const PERMISSION_PROFILES: Record<string, PermissionProfile> = {
       },
     },
   },
+  /**
+   * A model agent (adapters/model.ts) has no CLI flags — Loom runs its tool
+   * loop itself, so these say what Loom does rather than what a command line
+   * says. It defaults to ASK, unlike every CLI here, and the reason is the
+   * asymmetry: a CLI in your roster is one you installed and signed into,
+   * while a model agent is a name you picked off a provider's list an hour
+   * ago. Reading is never gated; writing and running always are unless you
+   * chose bypass.
+   */
+  model: {
+    default: "ask",
+    modes: {
+      bypass: { flags: "", label: "Bypass — writes and runs without asking" },
+      auto: { flags: "", label: "Auto — still asks before it writes or runs", ask: "approvals" },
+      ask: { flags: "", label: "Always ask — every write and every command waits for you", ask: "approvals" },
+    },
+  },
 };
 
 export function isPermissionMode(v: unknown): v is PermissionMode {

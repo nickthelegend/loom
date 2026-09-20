@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A model agent can write, when you say so
+
+- **`--write`** gives a model agent `write_file`, and **`--run "npm test"`**
+  gives it `run` with an allow-list. Every write and every command is a card
+  in the thread that you allow or deny before anything happens — the same
+  approval surface Claude Code's "always ask" already uses, now asked from
+  inside the daemon instead of over MCP.
+- **It asks in `auto` too**, which is stricter than the CLI mapping and
+  deliberately so: a CLI in your roster is one you installed and signed into,
+  and a model agent is a name you picked off a provider's list an hour ago.
+  `bypass` is the only mode that doesn't ask, because that is what bypass
+  means.
+- **The card says what would happen** — *write src/app.ts: 40 lines
+  (replacing 12) — fix the port* — rather than dumping the whole new file at
+  you.
+- The allow-list is a prefix match on whole commands and there is no shell, so
+  `npm test` permits `npm test --watch` and refuses `npm testify`,
+  `npm test; rm -rf ~`, backticks, pipes and redirection. A tool is only
+  offered when it can be used: no allow-list, no `run` tool at all.
+- With nobody to ask — no daemon, a script, a test — the answer is **no**. A
+  tool that proceeded because the UI wasn't wired up would be the worst
+  failure this could have.
+
 ### A model agent can read the project
 
 - **`"tools": true`** on a `model` agent gives it `read_file`, `list_files`

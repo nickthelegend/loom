@@ -204,3 +204,249 @@ describe("a model that reads before it answers", () => {
     expect(events.filter((e) => e.kind === "run_complete")).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The tools that change something.
+// ---------------------------------------------------------------------------
+
+import {
+  allowsCommand,
+  applyRun,
+  applyWrite,
+  describeWrite,
+  toolsFor,
+} from "../src/core/model-tools.js";
+import { setApprovalBroker } from "../src/core/approvals.js";
+
+describe("what a model is offered", () => {
+  it("is only what it can actually use", () => {
+    const names = (t: ReturnType<typeof toolsFor>) => t.map((x) => x.function.name);
+    expect(names(toolsFor({}))).toEqual(["read_file", "list_files", "search"]);
+    expect(names(toolsFor({ write: true }))).toContain("write_file");
+    expect(names(toolsFor({ write: true }))).not.toContain("run");
+    // No allow-list, no `run` — a tool that always refuses is a tool that lies.
+    expect(names(toolsFor({ run: [] }))).not.toContain("run");
+    expect(names(toolsFor({ run: ["npm test"] }))).toContain("run");
+    expect(toolsFor({ run: ["npm test"] }).at(-1)!.function.description).toContain("npm test");
+  });
+});
+
+describe("writing a file", () => {
+  it("writes it, and says what it did", () => {
+    const dir = project();
+    const r = applyWrite(dir, call("write_file", { path: "src/new.ts", content: "export const a = 1;\n" }));
+    expect(r.ok).toBe(true);
+    expect(fs.readFileSync(path.join(dir, "src/new.ts"), "utf8")).toBe("export const a = 1;\n");
+    expect(r.summary).toMatch(/wrote src\/new\.ts/);
+  });
+
+  it("obeys the same fence as reading", () => {
+    const dir = project();
+    for (const bad of ["../escape.ts", "/etc/hosts", ".git/config", ".loom/state.json"]) {
+      expect(applyWrite(dir, call("write_file", { path: bad, content: "x" })).ok, bad).toBe(false);
+    }
+    expect(fs.existsSync(path.join(path.dirname(dir), "escape.ts"))).toBe(false);
+  });
+
+  it("refuses a call that isn't a write", () => {
+    const dir = project();
+    expect(applyWrite(dir, call("write_file", { content: "x" })).content).toMatch(/needs a path/);
+    expect(applyWrite(dir, call("write_file", { path: "a.ts" })).content).toMatch(/needs content/);
+    expect(applyWrite(dir, call("write_file", { path: "src", content: "x" })).content).toMatch(/directory/);
+  });
+
+  it("describes the change in the sentence that would stop a bad one", () => {
+    const dir = project();
+    const said = describeWrite(dir, call("write_file", { path: "README.md", content: "x\n", why: "trim it" }));
+    expect(said).toContain("README.md");
+    expect(said).toContain("replacing 4 lines");
+    expect(said).toContain("trim it");
+    expect(describeWrite(dir, call("write_file", { path: "brand/new.ts", content: "x" }))).toContain("new file");
+  });
+});
+
+describe("the allow-list", () => {
+  it("matches whole commands and their arguments, and nothing else", () => {
+    const allowed = ["npm test", "npx tsc --noEmit"];
+    expect(allowsCommand(allowed, "npm test")).toBe(true);
+    expect(allowsCommand(allowed, "npm test --watch")).toBe(true);
+    expect(allowsCommand(allowed, "npx tsc --noEmit -p .")).toBe(true);
+    expect(allowsCommand(allowed, "npm testify")).toBe(false); // not a prefix of a word
+    expect(allowsCommand(allowed, "npm run deploy")).toBe(false);
+    expect(allowsCommand(allowed, "rm -rf /")).toBe(false);
+    expect(allowsCommand([], "npm test")).toBe(false);
+  });
+
+  it("refuses anything a shell would read as more than one command", () => {
+    const allowed = ["echo"];
+    for (const nasty of [
+      "echo hi; rm -rf ~",
+      "echo hi && curl evil.example",
+      "echo hi | sh",
+      "echo `whoami`",
+      "echo $(whoami)",
+      "echo hi > /etc/hosts",
+      "echo hi\nrm -rf ~",
+    ]) {
+      expect(allowsCommand(allowed, nasty), nasty).toBe(false);
+    }
+  });
+
+  it("runs an allowed command and brings back what it said", async () => {
+    const dir = project();
+    const r = await applyRun(dir, call("run", { command: "echo hello" }), ["echo"]);
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain("hello");
+    expect(r.content).toContain("exit 0");
+  });
+
+  it("treats a failing command as an answer, not a tool failure", async () => {
+    const dir = project();
+    // `ls` on something that isn't there exits non-zero — which is the thing
+    // the model asked to find out.
+    const r = await applyRun(dir, call("run", { command: "ls no-such-file" }), ["ls"]);
+    expect(r.ok).toBe(true);
+    expect(r.content).toMatch(/exit [1-9]/);
+  });
+
+  it("refuses what isn't on the list, and says what is", async () => {
+    const r = await applyRun(project(), call("run", { command: "rm -rf /" }), ["npm test"]);
+    expect(r.ok).toBe(false);
+    expect(r.content).toContain("npm test");
+  });
+});
+
+describe("asking before it writes", () => {
+  afterEach(() => setApprovalBroker(null));
+
+  const writingProvider = async () => {
+    server = http.createServer((req, res) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const body = JSON.parse(raw || "{}") as { messages: Array<{ role: string; content: string }> };
+        const answered = body.messages.some((m) => m.role === "tool");
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        if (!answered) {
+          res.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "w1",
+                        function: {
+                          name: "write_file",
+                          arguments: JSON.stringify({ path: "note.md", content: "hi\n", why: "add a note" }),
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            })}\n\n`,
+          );
+        } else {
+          const saw = body.messages.filter((m) => m.role === "tool").map((m) => m.content).join("");
+          res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `done: ${saw.slice(0, 60)}` } }] })}\n\n`);
+        }
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    const port = await new Promise<number>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve((server!.address() as net.AddressInfo).port));
+    });
+    const id = `w-${port}`;
+    setProvider(id, { baseUrl: `http://127.0.0.1:${port}`, key: "k", label: "W" });
+    return id;
+  };
+
+  it("writes nothing when the person says no", async () => {
+    process.env.LOOM_HOME = tmpDir("home-write-deny");
+    const dir = project();
+    const id = await writingProvider();
+    const asked: string[] = [];
+    setApprovalBroker(async (r) => {
+      asked.push(String(r.summary));
+      return { behavior: "deny", message: "not that file" };
+    });
+
+    const agent = new ModelAdapter("w", dir, { provider: id, model: "m", tools: true, write: true });
+    const events: AdapterEvent[] = [];
+    agent.onEvent((e) => events.push(e));
+    await agent.send({ text: "add a note" });
+
+    expect(fs.existsSync(path.join(dir, "note.md"))).toBe(false);
+    expect(asked[0]).toContain("write note.md");
+    expect(asked[0]).toContain("add a note"); // the reason reaches the card
+    expect(say(events)).toContain("Denied by the person");
+    expect(events.some((e) => e.kind === "file_edit")).toBe(false);
+  });
+
+  it("writes it when the person says yes, and says so like any other agent", async () => {
+    process.env.LOOM_HOME = tmpDir("home-write-allow");
+    const dir = project();
+    const id = await writingProvider();
+    setApprovalBroker(async () => ({ behavior: "allow" }));
+
+    const agent = new ModelAdapter("w", dir, { provider: id, model: "m", tools: true, write: true });
+    const events: AdapterEvent[] = [];
+    agent.onEvent((e) => events.push(e));
+    await agent.send({ text: "add a note" });
+
+    expect(fs.readFileSync(path.join(dir, "note.md"), "utf8")).toBe("hi\n");
+    expect(events.find((e) => e.kind === "file_edit")!.payload.path).toBe("note.md");
+    expect(say(events)).toContain("done:");
+  });
+
+  it("denies when there is nobody to ask", async () => {
+    process.env.LOOM_HOME = tmpDir("home-write-nobody");
+    const dir = project();
+    const id = await writingProvider();
+    setApprovalBroker(null); // no daemon, no person
+
+    const agent = new ModelAdapter("w", dir, { provider: id, model: "m", tools: true, write: true });
+    await agent.send({ text: "add a note" });
+    expect(fs.existsSync(path.join(dir, "note.md"))).toBe(false);
+  });
+
+  it("asks in auto as well — a model off a list isn't a CLI you installed", async () => {
+    process.env.LOOM_HOME = tmpDir("home-write-auto");
+    const dir = project();
+    const id = await writingProvider();
+    let asked = 0;
+    setApprovalBroker(async () => ((asked++), { behavior: "allow" as const }));
+
+    const agent = new ModelAdapter("w", dir, {
+      provider: id,
+      model: "m",
+      tools: true,
+      write: true,
+      permissions: "auto",
+    });
+    await agent.send({ text: "add a note" });
+    expect(asked).toBe(1);
+  });
+
+  it("doesn't ask in bypass, because that is what bypass means", async () => {
+    process.env.LOOM_HOME = tmpDir("home-write-bypass");
+    const dir = project();
+    const id = await writingProvider();
+    let asked = 0;
+    setApprovalBroker(async () => ((asked++), { behavior: "allow" as const }));
+
+    const agent = new ModelAdapter("w", dir, {
+      provider: id,
+      model: "m",
+      tools: true,
+      write: true,
+      permissions: "bypass",
+    });
+    await agent.send({ text: "add a note" });
+    expect(asked).toBe(0);
+    expect(fs.readFileSync(path.join(dir, "note.md"), "utf8")).toBe("hi\n");
+  });
+});
