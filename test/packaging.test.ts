@@ -71,8 +71,29 @@ describe("packaging · the desktop app", () => {
     expect(xml).toContain("com.apple.security.inherit");
   });
 
-  it("doesn't try to publish, which used to fail the build after it succeeded", () => {
-    expect(build.publish).toBeNull();
+  /**
+   * `publish` was null because electron-builder threw trying to INFER a
+   * channel for a repository it had no credentials for — after writing a
+   * perfectly good DMG. Naming the repository is the answer it wanted, and
+   * `--publish never` in the release job still uploads nothing from the build.
+   * What it buys is the latest*.yml feed electron-updater reads.
+   */
+  it("names the repository it publishes to, so the update feed gets written", () => {
+    expect(Array.isArray(build.publish)).toBe(true);
+    expect(build.publish[0]).toMatchObject({ provider: "github", repo: "loom" });
+    // and the shell that reads that feed has to actually ship inside the app
+    expect(build.files).toContain("updater.js");
+    expect(build.files).toContain("node_modules/**/*");
+    expect(pkg.dependencies["electron-updater"]).toBeTruthy();
+  });
+
+  it("publishes the feed only for the platforms that can use it", () => {
+    // macOS is ad-hoc signed and will refuse the swap; advertising an update
+    // it can't install is worse than advertising none.
+    const wf = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+    expect(wf).toContain('-name "latest.yml"');
+    expect(wf).toContain('-name "latest-linux.yml"');
+    expect(wf).not.toContain('-name "latest-mac.yml"');
   });
 });
 
