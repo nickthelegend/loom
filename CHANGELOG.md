@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Agents that are models, not CLIs
+
+- **A new agent kind, `model`.** It's an HTTP endpoint rather than a
+  subprocess: OpenAI-compatible chat completions, streamed into the thread as
+  they arrive, with reasoning shown as reasoning and token counts on
+  `run_complete`. Nothing to install. It has no tools yet, so what it's for is
+  the thinking work — planning, reviewing, summarising, answering — which is
+  most of what a fleet does between edits.
+- **Providers, and keys where keys belong.** OpenRouter, AgentRouter, OpenAI,
+  Groq and a local Ollama are known by name; anything else speaking
+  `/v1/chat/completions` works with a base URL. The project config names a
+  *provider*, never a secret: keys live in the environment or in
+  `~/.loom/providers.json` (0600), and no route, log or listing ever returns
+  one — you get the last four characters. `loom providers`,
+  `loom providers:set <id> --key …`.
+- **`loom models`** asks each configured provider what it can run right now,
+  cached for ten minutes and refreshable, with the free ones marked. A model
+  list that's typed out by hand goes stale; one that's asked for doesn't.
+- **Fallbacks that read the answer.** A dry free pool (402) or a rate limit
+  (429) moves to the next model in `fallbacks` and says so once in the thread;
+  a wrong or retired model name (503) stops, because trying something else
+  would hide the typo rather than fix it. Each refusal is explained in its own
+  terms — a rejected *client* is not a rejected key.
+
 ### Retrieval that can follow a synonym
 
 - **A semantic channel for the brain** (`brain.semantic`, or Settings →

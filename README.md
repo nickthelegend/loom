@@ -631,6 +631,34 @@ projections — they never hold the write lock. That's a design decision, not a 
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
 
+## Agents that are models
+
+Every other agent in Loom wraps a CLI. A `model` agent is an HTTP endpoint:
+
+```sh
+loom providers:set openrouter --key sk-…          # or $OPENROUTER_API_KEY
+loom models --free                                 # what costs nothing today
+loom agents:add cheap --kind model --model "google/gemma-4-31b-it:free"
+```
+
+It streams into the thread like any other agent, shows reasoning as reasoning,
+reports its token counts, and holds the baton. It has **no tools yet**, so it
+is a thinker rather than an editor — planning, reviewing, summarising,
+answering, routing. That is most of what a fleet does between edits, and free
+quota is very happy to pay for it.
+
+**Keys are never project config.** `.loom/config.json` names a provider;
+the key lives in the environment or in `~/.loom/providers.json` (mode 0600),
+and nothing — no route, no log, no listing — hands it back. You get the last
+four characters, which is enough to tell two keys apart.
+
+**Refusals are read, not guessed at.** A dry free pool (402) or a rate limit
+(429) moves to the next model in `fallbacks` and says so once; a model name
+that doesn't exist (503) stops, because falling back would hide the typo. And
+a provider that rejects *Loom* rather than your key says exactly that —
+AgentRouter, for one, only accepts clients it recognises, which is a thing to
+ask them about rather than a key to go and regenerate.
+
 ## The brain, sharpened
 
 Five retrieval behaviours worth knowing, all inspectable with `explain`:
