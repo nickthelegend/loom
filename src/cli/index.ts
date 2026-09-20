@@ -1732,6 +1732,44 @@ program
   });
 
 /**
+ * Is there a newer Loom, and fetch it.
+ *
+ * `--check` only looks. Without it, the update runs the same commands the
+ * daemon would print: a checkout pulls and rebuilds, a global install
+ * reinstalls itself, and anything else is told where the release is rather
+ * than having a command guessed at and run over it.
+ */
+program
+  .command("update")
+  .description("check for a newer Loom and install it")
+  .option("--check", "only say whether an update exists")
+  .option("--yes", "don't ask before updating")
+  .action(async (opts: { check?: boolean; yes?: boolean }) => {
+    const client = await ensureDaemon();
+    const u = await client.updates(true);
+    console.log(`installed ${u.version}${u.latest ? `   latest ${u.latest}` : ""}   ${pc.dim(u.install)}`);
+    if (!u.behindRelease) {
+      console.log(pc.dim(u.latest ? "up to date" : "no published release to compare with"));
+      if (u.git?.behind) console.log(pc.yellow(`the checkout is ${u.git.behind} commit(s) behind ${u.git.branch}`));
+      return;
+    }
+    console.log(pc.yellow(`Loom ${u.latest} is out`) + (u.release?.url ? pc.dim(`  ${u.release.url}`) : ""));
+    if (opts.check) return;
+    if (!u.canApply) {
+      console.log(pc.dim(u.refusal ?? "this install can't update itself"));
+      return;
+    }
+    console.log("this will run:");
+    for (const step of u.steps) console.log(`  ${pc.cyan(step)}`);
+    if (!opts.yes) {
+      const ok = await confirm("update now?");
+      if (!ok) return console.log(pc.dim("left as it is"));
+    }
+    await client.applyUpdate();
+    console.log(pc.dim("updating — the daemon restarts on the new build when it finishes (loom log -f to watch)"));
+  });
+
+/**
  * The prompt queue: what you've lined up for this project, run one at a time.
  *
  * `loom queue` shows it; `loom queue add` puts one at the back; the rest edit

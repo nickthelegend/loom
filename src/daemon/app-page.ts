@@ -2855,6 +2855,12 @@ window.__loomPageRev="%%BUILD_REV%%";
   .updpill{font-size:11px;font-weight:600;border-radius:999px;padding:2px 10px;line-height:18px}
   .updpill.ok{color:var(--ok);background:color-mix(in srgb, var(--ok) 14%, transparent)}
   .updpill.warn{color:var(--warn);background:color-mix(in srgb, var(--warn) 16%, transparent)}
+  .sit.updready{color:var(--warn);cursor:pointer;border:0;background:none;font:inherit;display:inline-flex;align-items:center;gap:5px}
+  .sit.updready:hover{color:var(--foreground)}
+  .sit.updready svg{width:12px;height:12px}
+  /* what the update is doing, while it does it */
+  .updlog{margin-top:10px;font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);
+    background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:8px 10px;white-space:pre-wrap}
   /* agent multi-select chips (one ADE, or several in sequence) */
   .agsel{display:flex;flex-wrap:wrap;gap:6px}
   .agchip{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:999px;
@@ -11200,12 +11206,19 @@ ${BRAND_SPRITE}
           })()
         : "") +
       '<span class="spacer"></span>' +
+      // A newer Loom is worth one quiet pill, not a banner: it opens the
+      // Updates section, where the button says exactly what it will run.
+      (state.update && state.update.behindRelease
+        ? '<button class="sit updready" id="updready" title="Loom ' + esc(state.update.latest) + ' is out \u2014 open Updates">' + ICONS.up + " " + esc(state.update.latest) + "</button>"
+        : "") +
       lpSeg +
       gdSeg +
       ghSeg +
       (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
       '<span class="sit">' + (state.projects || []).length + " project" + ((state.projects || []).length === 1 ? "" : "s") + "</span>" +
       (total > 0 ? '<span class="sit">\\u03a3 ' + money(total) + "</span>" : "");
+    var ur = document.getElementById("updready");
+    if (ur) ur.onclick = function(){ openSettingsModal("updates"); };
     var gc = document.getElementById("ghconnect");
     if (gc) gc.onclick = connectGithub;
     var lpp = document.getElementById("lppill");
@@ -11231,6 +11244,16 @@ ${BRAND_SPRITE}
       .catch(function(){ state.loompad = { up:false }; drawStatusbar(); });
   }
   if (!window.__loompadPoll){ window.__loompadPoll = setInterval(function(){ loadLoomPad(); }, 5000); }
+  // Is there a newer Loom? The daemon caches the answer for hours, so asking on
+  // open and once an hour costs nothing and means the pill is there when it
+  // matters. Never acts on what it finds — that's a button, and a confirm.
+  function loadUpdate(){
+    if (!state.token) return;
+    api("/api/updates")
+      .then(function(u){ state.update = u; drawStatusbar(); })
+      .catch(function(){});
+  }
+  if (!window.__updatePoll){ window.__updatePoll = setInterval(function(){ loadUpdate(); }, 60 * 60000); }
   // Click the $ pill: a usage breakdown — this project's share and every
   // project's spend against the running total.
   function openUsage(){
@@ -12443,36 +12466,97 @@ ${BRAND_SPRITE}
       }).catch(function(e){ pp.innerHTML = '<div class="snote">' + esc(e.message) + "</div>"; });
     }
 
-    // ---- Updates: is this build current -------------------------------------
-    function renderUpdates(){
+    // ---- Updates: is this Loom current, and bring it up to date -------------
+    // Two different questions, and the answers come from different places: a
+    // published release (every install has one to compare against) and, for a
+    // checkout, how far its own tree is behind its remote.
+    function renderUpdates(refresh){
       busy();
-      sapi("/api/updates").then(function(u){
+      sapi("/api/updates" + (refresh ? "?refresh=1" : "")).then(function(u){
         var g = u.git;
         var behind = g && g.behind ? g.behind : 0;
         var shortRev = (u.rev || "").slice(0, 7);
         var h = '<div class="setphead">Updates</div>' +
-          '<div class="setpsub">Whether this Loom is current \\u2014 the running build, and the code on disk.</div>';
+          '<div class="setpsub">Whether this Loom is current — the published release, the running build, and the code on disk.</div>';
         h += '<div class="pillrow">';
-        if (u.root && behind > 0) h += '<span class="updpill warn">' + behind + " commit" + (behind > 1 ? "s" : "") + " behind</span>";
-        else if (u.root && g && g.hasUpstream) h += '<span class="updpill ok">Up to date</span>';
+        if (u.behindRelease) h += '<span class="updpill warn">Loom ' + esc(u.latest) + " is out</span>";
+        else if (u.latest) h += '<span class="updpill ok">Up to date</span>';
         else h += '<span class="updpill ok">Build ' + esc(shortRev || "unknown") + "</span>";
-        h += '<button class="btn ghost sm" id="updcheck">Check again</button></div>';
+        if (u.root && behind > 0) h += '<span class="updpill warn">' + behind + " commit" + (behind > 1 ? "s" : "") + " behind</span>";
+        h += '<button class="btn ghost sm" id="updcheck">Check again</button>';
+        if (u.behindRelease && u.canApply) h += '<button class="btn primary sm" id="updnow">Update to ' + esc(u.latest) + "</button>";
+        h += "</div>";
         h += '<dl class="abgrid"><dt>Version</dt><dd>' + esc(u.version) + "</dd>" +
-          "<dt>Build</dt><dd>" + esc(shortRev || "\\u2014") + "</dd>";
+          "<dt>Build</dt><dd>" + esc(shortRev || "—") + "</dd>" +
+          "<dt>Installed</dt><dd>" + esc(u.install === "git" ? "git checkout" : u.install === "npm-global" ? "npm (global)" : "unknown") + "</dd>";
+        if (u.latest) h += "<dt>Latest</dt><dd>" + esc(u.latest) + (u.release && u.release.url ? ' · <a href="' + esc(u.release.url) + '" target="_blank" rel="noopener">release notes</a>' : "") + "</dd>";
         if (u.root) h += "<dt>Source</dt><dd>" + esc(u.root) + "</dd>";
         if (g && g.branch) h += "<dt>Branch</dt><dd>" + esc(g.branch) + (g.ahead ? " (+" + g.ahead + " local)" : "") + "</dd>";
         h += "</dl>";
-        if (u.root && behind > 0) {
-          h += '<div class="snote">A newer version is on your remote. Update in place, then restart the daemon:</div>';
+        if (u.behindRelease && u.canApply) {
+          h += '<div class="snote">Update runs this, then restarts the daemon on the new build:</div>';
+          h += '<code class="scmd">' + esc((u.steps || []).join("\\n")) + "</code>";
+        } else if (u.behindRelease && !u.canApply) {
+          h += '<div class="snote">' + esc(u.refusal || "this install can’t update itself") + "</div>";
+          if (u.release && u.release.url) h += '<code class="scmd">' + esc(u.release.url) + "</code>";
+        } else if (u.root && behind > 0) {
+          h += '<div class="snote">Your checkout is behind its remote, though the release matches. Pull and rebuild:</div>';
           h += '<code class="scmd">cd ' + esc(u.root) + " && git pull --ff-only && npm install && npm run build\\nloom up --restart</code>";
-        } else if (u.root && g && g.hasUpstream) {
-          h += '<div class="snote">Your checkout matches its remote. If you just rebuilt, restart to pick it up:</div><code class="scmd">loom up --restart</code>';
-        } else if (!u.root) {
-          h += '<div class="snote">This Loom isn\\u2019t a git checkout, so there\\u2019s nothing to pull \\u2014 update it the way you installed it (npm, or the desktop app\\u2019s own updater).</div>';
         }
+        h += '<div class="updlog" id="updlog" style="display:none"></div>';
         pane.innerHTML = h;
-        document.getElementById("updcheck").onclick = renderUpdates;
+        document.getElementById("updcheck").onclick = function(){ renderUpdates(true); };
+        var go = document.getElementById("updnow");
+        if (go) go.onclick = function(){ startUpdate(go, u); };
       }).catch(fail);
+    }
+
+    /**
+     * Run the update, and stay useful while it runs: the daemon's own log
+     * records already stream to every client, so the update's output is shown
+     * where it happens. When the daemon goes down to come back on the new
+     * build, the page waits for it and reloads itself.
+     */
+    function startUpdate(btn, u){
+      if (!window.confirm("Update Loom to " + u.latest + "?\\n\\nThis runs:\\n" + (u.steps || []).join("\\n") + "\\n\\nThe daemon restarts when it finishes.")) return;
+      btn.disabled = true;
+      btn.textContent = "Updating…";
+      var log = document.getElementById("updlog");
+      if (log) { log.style.display = "block"; log.textContent = "starting…"; }
+      state.updating = true;
+      sapi("/api/updates/apply", { method: "POST", body: "{}" }).then(function(){
+        if (log) log.textContent = "running " + (u.steps || []).join(" && ") + "…";
+        waitForNewBuild();
+      }).catch(function(e){
+        state.updating = false;
+        btn.disabled = false;
+        btn.textContent = "Update to " + u.latest;
+        if (log) log.textContent = e.message;
+        toast(e.message);
+      });
+    }
+
+    /** Poll /api/health until the daemon answers again, then reload onto it. */
+    function waitForNewBuild(){
+      var log = document.getElementById("updlog");
+      var deadline = Date.now() + 15 * 60000;
+      var wentDown = false;
+      var t = setInterval(function(){
+        fetch("/api/health").then(function(r){ return r.json(); }).then(function(h){
+          if (!wentDown) return; // still the old daemon; wait for it to go
+          clearInterval(t);
+          if (log) log.textContent = "back on build " + String(h.rev || "").slice(0, 7) + " — reloading";
+          setTimeout(function(){ location.reload(); }, 600);
+        }).catch(function(){
+          wentDown = true;
+          if (log) log.textContent = "the daemon is restarting on the new build…";
+        });
+        if (Date.now() > deadline) {
+          clearInterval(t);
+          if (log) log.textContent = "the update is taking longer than expected — see the Console, or run loom up --restart";
+        }
+      }, 1500);
+      state.timers.push(t);
     }
 
     // ---- Devices: paired clients, revoke, add -------------------------------
@@ -13649,6 +13733,7 @@ ${BRAND_SPRITE}
     drawStatusbar();
     refresh();
     loadGithub(); // fills the status-bar GitHub badge
+    loadUpdate(); // and whether a newer Loom is published
     loadLoomPad(); // fills the status-bar LoomPad connectivity pill
     state.shellTimer = setInterval(refresh, 5000);
   }
