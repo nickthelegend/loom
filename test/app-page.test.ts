@@ -34,6 +34,41 @@ describe("web app page", () => {
     expect(APP_HTML).toMatch(/if \(!state\.termRun\) \{ toast\(/);
   });
 
+  /**
+   * The composer row had to hold the model, the agent, a permission chip,
+   * MCPs, Skills, a mic, Prompts, Plan and send — and wrapped on a narrow
+   * window. MCPs and Skills moved behind More; the count badge did not, since
+   * "two skills are on" is the part you need without opening anything.
+   */
+  it("puts MCPs and Skills behind More, and keeps the badge outside", () => {
+    expect(APP_HTML).toContain('id="morebtn"');
+    expect(APP_HTML).toContain('id="skcount"'); // still on the button itself
+    // The old buttons are gone, not merely hidden.
+    expect(APP_HTML).not.toContain('id="mcpbtn"');
+    expect(APP_HTML).not.toContain('id="skillbtn"');
+    // …and More still reaches both panels.
+    expect(APP_HTML).toContain('toggleComposerPanel("mcp")');
+    expect(APP_HTML).toContain('toggleComposerPanel("skills")');
+  });
+
+  /**
+   * Right-click was dead everywhere. These are the actions that had no home:
+   * removing a project lived only in `loom projects --forget`, and renaming
+   * one had no UI at all.
+   */
+  it("gives projects and threads a right-click menu", () => {
+    expect(APP_HTML).toContain("function openMenu(");
+    expect(APP_HTML).toContain("function projectMenu(");
+    expect(APP_HTML).toContain("function chatMenu(");
+    expect(APP_HTML).toMatch(/row\.oncontextmenu = function/);
+    // The destructive one says what it does — it unregisters, it doesn't delete.
+    expect(APP_HTML).toContain("Remove from Loom");
+    expect(APP_HTML).not.toContain("Delete project");
+    expect(APP_HTML).toContain("stay on disk");
+    // Escape closes it; a menu you can't dismiss with the keyboard is a trap.
+    expect(APP_HTML).toContain("function menuKey(");
+  });
+
   it("keeps the auth/pairing contract", () => {
     expect(APP_HTML).toContain('id="loom-app"');
     expect(APP_HTML).toContain("/api/pair/claim");

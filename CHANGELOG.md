@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Right-click, and a composer that fits
+
+- **Right-click a project** for everything you can do to it: open, new chat,
+  settings, **rename**, copy path, and **Remove from Loom**. Those were
+  scattered — settings behind a gear, rename nowhere at all, and removing a
+  project only in `loom projects --forget`.
+- It says **Remove from Loom**, not Delete, and the confirm says the folder,
+  the history and `.loom/` stay on disk. A menu item that says delete and
+  doesn't is as bad as one that says delete and does.
+- **Right-click a thread** to open it, rename it, pin which agent answers in
+  it, or forget it. The main thread offers only what applies to it, rather
+  than offering everything and refusing half.
+- Escape and any click outside close the menu, arrow keys walk it, and it
+  flips rather than hanging off the edge of the window.
+- **MCPs and Skills moved into a More menu** in the composer, which also
+  reaches Prompts and Attach. That row was holding the model, the agent, a
+  permission chip, five buttons and send, and wrapped on a narrow window. The
+  count badge stayed outside — *two skills are on* is the part you need
+  without opening anything.
+
 ### Setup tells the truth about this machine
 
 - **Claude Code showed "not installed" on machines where it is.** Anthropic's
