@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### The desktop app can update itself, where that's honest
+
+- **Help → Check for Updates…** on **Windows** and the **Linux AppImage**:
+  it asks before downloading, installs on quit, and restarts only when you
+  press Restart. On **macOS** it refuses and says why — the build is ad-hoc
+  signed, and macOS only replaces an app signed by a certificate it already
+  trusts — and opens the releases page instead. A `.deb` install is left to
+  the package manager that owns it. The release now publishes the update feed
+  for those two platforms and deliberately not for macOS: advertising an
+  update the OS will refuse to install is worse than advertising none.
+
 ### Dark mode in the preview
 
 - **Auto / light / dark for the previewed page**, independent of Loom's own

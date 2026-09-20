@@ -360,6 +360,9 @@ describe("web app · orchestra", () => {
     // A reply goes to the orchestrator, which turns another round. The view
     // redraws on every event the run emits, so the box can be replaced between
     // finding it and using it: fill and send inside one render, and retry.
+    // 60s, like the waits either side of it: what this is waiting for is a
+    // real orchestrator round, and on a saturated runner a round takes longer
+    // than thirty seconds. (It failed here once on CI and nowhere else.)
     await waitUntil(() => {
       const box = $(m, "#oreply") as HTMLTextAreaElement | null;
       const send = $(m, "#oreplybtn");
@@ -367,7 +370,7 @@ describe("web app · orchestra", () => {
       box.value = "just stop after one task";
       click(send);
       return true;
-    }, { timeoutMs: 30_000 });
+    }, { timeoutMs: 60_000 });
     await waitUntil(async () => {
       const r = await runStatus(run.id);
       return r.status === "waiting_human" && (await rest<{ events: Array<{ kind: string; payload: { phase?: string } }> }>(
