@@ -1141,6 +1141,17 @@ window.__loomPageRev="%%BUILD_REV%%";
     background:var(--danger,#e5484d);display:none;box-shadow:0 0 0 1.5px var(--card)}
   .errdot.on{display:block}
   #consolebtn{position:relative}
+  /* preview controls: emulated widths, a camera, auto-reload */
+  .browsizes{display:inline-flex;gap:1px;flex:none;margin-left:4px}
+  .browsizes button{border:1px solid var(--border);background:transparent;color:var(--muted-foreground);
+    font:inherit;font-size:10.5px;height:24px;padding:0 7px;cursor:pointer}
+  .browsizes button:first-child{border-radius:6px 0 0 6px}
+  .browsizes button:last-child{border-radius:0 6px 6px 0}
+  .browsizes button.on{color:var(--foreground);background:var(--sidebar-accent);border-color:var(--ring)}
+  .browauto{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--muted-foreground);flex:none;cursor:pointer}
+  .browauto input{margin:0;cursor:pointer}
+  .browframe.sized{display:flex;justify-content:center;overflow:auto;background:var(--muted)}
+  .browframe.sized iframe{border:1px solid var(--border);background:#fff;flex:none}
   /* dev servers: the rail rows, and a server's output under the page */
   .srvlist{display:flex;flex-direction:column;gap:2px;padding:4px}
   .srvrow{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;font-size:12px}
@@ -3299,6 +3310,7 @@ ${BRAND_SPRITE}
     panelRight: svg('<rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M15 4.5v15"/>'),
     terminal: svg('<path d="m5 8 4 4-4 4"/><path d="M12 16h6"/>'),
     // lines of output with one flagged — the Console
+    camera: svg('<path d="M14.5 4h-5L8 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-4l-1.5-2Z"/><circle cx="12" cy="13" r="3.5"/>'),
     console: svg('<path d="M4 6h16"/><path d="M4 11h9"/><path d="M4 16h6"/><circle cx="18" cy="15.5" r="2.5"/>'),
     // lucide globe — the Browser tab: a live page and the project's specs
     globe: svg('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>'),
@@ -4013,6 +4025,18 @@ ${BRAND_SPRITE}
         '<div class="browurl">' +
         '<input id="browurl" placeholder="http://localhost:3000 \\u2014 preview a dev server" autocomplete="off" spellcheck="false">' +
         '<button id="browgo" class="iconbtn" title="open">' + ICONS.play + "</button>" +
+        // The conditions a bug was seen under, and a way to carry the view
+        // into the next prompt.
+        '<span class="browsizes" id="browsizes">' +
+        '<button data-w="0" class="on" title="fit the pane">Fit</button>' +
+        '<button data-w="375" title="phone width">375</button>' +
+        '<button data-w="768" title="tablet width">768</button>' +
+        '<button data-w="1280" title="desktop width">1280</button>' +
+        "</span>" +
+        '<button id="browshot" class="iconbtn" title="screenshot into the composer">' + ICONS.camera + "</button>" +
+        '<button id="browreload" class="iconbtn" title="reload">' + ICONS.refresh + "</button>" +
+        '<label class="browauto" title="reload when an agent changes a file this server serves">' +
+        '<input type="checkbox" id="browautorel" checked><span>auto</span></label>' +
         "</div>" +
         '<div class="browframe" id="browframe">' +
         '<div class="browhint">Point this at a running dev server to see the page beside its tests.<br>' +
@@ -7868,6 +7892,8 @@ ${BRAND_SPRITE}
           if (frame.type === "queue") { onQueueFrame(frame); return; }
           // a dev server started, stopped, crashed, or printed a line
           if (frame.type === "server") { onServerFrame(frame); return; }
+          // an agent changed files while a preview is open: show the new page
+          if (frame.type === "event" && frame.event && frame.event.kind === "turn_diff") maybeReloadPreview();
           if (frame.type === "event" && frame.event) {
             // "an agent needs you" is the whole reason Loom exists, so it must
             // reach you even when this isn't the chat you're looking at, or the
@@ -11468,7 +11494,7 @@ ${BRAND_SPRITE}
   // A live page and the project's Playwright specs, in the dock beside the
   // terminals. An agent writes a browser test; this is where you watch it run
   // and — when it fails — hand the failure straight back to whoever wrote it.
-  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "" };
+  var brow = { present: false, specs: null, running: null, out: [], lastFail: null, url: "", width: 0, relTimer: null };
 
   // ---- dev servers (core/servers.ts) --------------------------------------
   // What this project runs, and what it's doing right now. "running" means a
@@ -11713,7 +11739,10 @@ ${BRAND_SPRITE}
     if (!/^https?:\\/\\//.test(u)) u = "http://" + u;
     brow.url = u;
     var host = document.getElementById("browframe");
-    if (host) host.innerHTML = '<iframe src="' + esc(u) + '" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>';
+    if (host) {
+      host.innerHTML = '<iframe src="' + esc(u) + '" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>';
+      applyBrowWidth();
+    }
   }
 
   /** Load and wire whatever the Browser pane is showing right now. */
@@ -11729,7 +11758,104 @@ ${BRAND_SPRITE}
     var nav = function(){ browseTo((url && url.value || "").trim()); };
     if (go) go.onclick = nav;
     if (url) url.onkeydown = function(ev){ if (ev.key === "Enter") { ev.preventDefault(); nav(); } };
+
+    // Width presets: "it breaks on mobile" should be reproducible in the pane
+    // where the work happens, not only in another window.
+    var sizes = document.getElementById("browsizes");
+    if (sizes) Array.prototype.forEach.call(sizes.querySelectorAll("[data-w]"), function(b){
+      b.classList.toggle("on", Number(b.getAttribute("data-w")) === (brow.width || 0));
+      b.onclick = function(){
+        brow.width = Number(b.getAttribute("data-w")) || 0;
+        try { localStorage.setItem("loomBrowW:" + state.pid, String(brow.width)); } catch (e) {}
+        Array.prototype.forEach.call(sizes.querySelectorAll("[data-w]"), function(x){
+          x.classList.toggle("on", Number(x.getAttribute("data-w")) === brow.width);
+        });
+        applyBrowWidth();
+      };
+    });
+    var rl = document.getElementById("browreload");
+    if (rl) rl.onclick = function(){ if (brow.url) browseTo(brow.url); };
+    var auto = document.getElementById("browautorel");
+    if (auto) {
+      try { auto.checked = localStorage.getItem("loomBrowAuto") !== "0"; } catch (e) {}
+      auto.onchange = function(){ try { localStorage.setItem("loomBrowAuto", auto.checked ? "1" : "0"); } catch (e) {} };
+    }
+    var shot = document.getElementById("browshot");
+    if (shot) shot.onclick = shootPreview;
     drawBrowser();
+  }
+
+  /**
+   * Reload the preview after an agent's turn changed files.
+   *
+   * Coalesced, because a turn lands its diff once but a rebuild takes a moment
+   * — and skipped when the page updates itself (a framework with HMR gets
+   * there first, and a hard reload would throw away its state).
+   */
+  function maybeReloadPreview(){
+    if (!brow.present || !brow.url) return;
+    var auto = document.getElementById("browautorel");
+    if (auto && !auto.checked) return;
+    if (brow.relTimer) clearTimeout(brow.relTimer);
+    brow.relTimer = setTimeout(function(){
+      brow.relTimer = null;
+      var host = document.getElementById("browframe");
+      var frame = host && host.querySelector("iframe");
+      if (!frame) return;
+      // Re-point rather than frame.contentWindow.location.reload(): the page is
+      // another origin, and touching its window from here throws.
+      frame.src = frame.src;
+    }, 900);
+    state.timers.push(brow.relTimer);
+  }
+
+  /** The emulated width, scaled down when the pane is narrower than it. */
+  function applyBrowWidth(){
+    var host = document.getElementById("browframe");
+    var frame = host && host.querySelector("iframe");
+    if (!frame) return;
+    if (!brow.width) {
+      frame.style.width = "100%";
+      frame.style.height = "100%";
+      frame.style.transform = "";
+      host.classList.remove("sized");
+      return;
+    }
+    host.classList.add("sized");
+    var avail = host.clientWidth - 16;
+    var scale = Math.min(1, avail / brow.width);
+    frame.style.width = brow.width + "px";
+    frame.style.height = Math.round(host.clientHeight / scale) + "px";
+    frame.style.transformOrigin = "top center";
+    frame.style.transform = "scale(" + scale.toFixed(3) + ")";
+  }
+
+  /**
+   * A picture of what's on screen, into the composer.
+   *
+   * The frame is another origin, so the page can't photograph it — the daemon
+   * does, with the project's own Playwright, at the width being previewed.
+   */
+  function shootPreview(){
+    if (!brow.url) return toast("point the preview at something first");
+    var btn = document.getElementById("browshot");
+    if (btn) btn.disabled = true;
+    var host = document.getElementById("browframe");
+    var w = brow.width || (host ? Math.max(320, host.clientWidth) : 1280);
+    toast("taking a screenshot…");
+    api("/api/projects/" + state.pid + "/preview/screenshot", {
+      method: "POST",
+      body: JSON.stringify({ url: brow.url, width: w, height: host ? Math.max(400, host.clientHeight) : 800 }),
+    }).then(function(j){
+      if (btn) btn.disabled = false;
+      // Same path a pasted image takes: a chip in the composer, sent as a path.
+      attach.push({ name: "preview.png", kind: "image", uploading: false, thumb: null, path: j.path });
+      drawAttach();
+      toast("added to the composer · " + j.width + "×" + j.height);
+    }).catch(function(e){
+      if (btn) btn.disabled = false;
+      toast(e.message);
+    });
   }
 
   function openBrowser(){
