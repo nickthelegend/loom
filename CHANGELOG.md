@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Coming back to a project
+
+- **A digest of what happened while you were away** — goals, landings,
+  failures, a dead server, and what's waiting on you, newest first and each
+  line clicking through to the moment it came from. Shown when you've actually
+  been away; `loom digest --since 8` in the terminal.
+- **The desktop app's notifications carry the question itself**, not "an agent
+  needs you", and on macOS you can answer from the notification. Nothing fires
+  while you're looking at that conversation.
+
 ### Goals: a spend cap, and more than one at a time
 
 - **`loom orchestrate --max-usd 2`** stops a goal at its cap the way the team

@@ -514,6 +514,7 @@ detects at least two roles.
 | `loom queue pause` / `loom queue resume` | Hold the queue where it is · let it run again |
 | `loom queue at <when> "<text>"` / `after landed:<run>\|green:<run>` | Queue a prompt for a time, or for a goal landing / going green |
 | `loom queue save <name>` / `run <name>` / `recipes` | Keep a queue as a recipe and replay it on any project |
+| `loom digest [--since <hours>]` | What happened in this project while you were away |
 | `loom decision <text>` | Record a decision into shared memory |
 | `loom memory [import]` | The unified brain — one memory across every connected ADE |
 | `loom log [-f]` | Show (or follow) the project event log |
@@ -819,6 +820,17 @@ next to GitHub in the status bar, or `git.delivery` in `.loom/config.json`.
 
 A failed push never un-finishes a run. The error is shown, and **Retry delivery**
 is one click.
+
+## While you were away
+
+Come back to a project you haven't looked at in a while and Loom says what
+happened: goals started and finished, what landed, what failed, what a server
+did, and what is waiting on you — newest first, each line clicking through to
+the moment it came from. It says what happened and never guesses at why; a
+line without an event behind it doesn't get written.
+
+The mark is per device, because "when did you last look" is a fact about this
+window. From the terminal: `loom digest --since 8`.
 
 ## Fleet: what every agent is doing
 

@@ -1733,6 +1733,35 @@ program
     console.log(pc.dim(interrupted ? `interrupted ${interrupted}` : "nothing running"));
   });
 
+program
+  .command("digest")
+  .description("what happened in this project while you were away")
+  .option("--since <hours>", "how far back to look, in hours", "12")
+  .action(async (opts: { since: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const hours = Math.max(0.1, Number(opts.since) || 12);
+    const d = await client.digest(project.id, Date.now() - hours * 3_600_000);
+    if (!d.lines.length) {
+      console.log(pc.dim(`nothing in the last ${hours} hour${hours === 1 ? "" : "s"}`));
+      return;
+    }
+    const paint: Record<string, (s: string) => string> = {
+      question: pc.yellow,
+      failed: pc.red,
+      landed: pc.green,
+      goal: pc.cyan,
+      server: pc.red,
+      cost: pc.dim,
+      turn: pc.dim,
+    };
+    for (const line of d.lines) {
+      const when = new Date(line.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      console.log(`${pc.dim(when)}  ${(paint[line.kind] ?? ((x: string) => x))(line.text)}`);
+    }
+    if (d.waiting.length) console.log(pc.yellow(`\nwaiting on you: ${d.waiting.join(", ")}`));
+  });
+
 /**
  * The project's dev servers — the thing the Browser tab previews.
  *

@@ -48,6 +48,7 @@ import { ADES, buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../co
 import { defaultExec } from "./landing.js";
 import { suggestServers, urlFor, type ServerConfig } from "../core/servers.js";
 import { capture } from "../core/preview-shot.js";
+import { digest } from "../core/digest.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
 import {
   CHECK_TTL_MS,
@@ -1845,6 +1846,22 @@ export class LoomDaemon {
         } catch (err) {
           res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
         }
+      }),
+    );
+
+    /**
+     * What happened while you were away.
+     *
+     * `since` is the client's own idea of when it last looked — the daemon
+     * doesn't track attention, and guessing at it would be worse than asking.
+     */
+    app.get(
+      "/api/projects/:id/digest",
+      withRuntime(async (rt, req, res) => {
+        const since = req.query.since ? Number(req.query.since) : Date.now() - 12 * 3_600_000;
+        const events = rt.log.list({ limit: 4000 });
+        const label = (id: string) => rt.config.agents.find((a) => a.id === id)?.role ?? id;
+        res.json(digest(events, Number.isFinite(since) ? since : 0, label));
       }),
     );
 

@@ -1172,6 +1172,19 @@ window.__loomPageRev="%%BUILD_REV%%";
   .browauto input{margin:0;cursor:pointer}
   .browframe.sized{display:flex;justify-content:center;overflow:auto;background:var(--muted)}
   .browframe.sized iframe{border:1px solid var(--border);background:#fff;flex:none}
+  /* what happened while you were away */
+  .modal.digest{max-width:620px;width:92vw}
+  .dgsub{padding:0 16px 10px;font-size:12px;color:var(--muted-foreground)}
+  .dgsub .warn{color:var(--warn)}
+  .dglist{max-height:60vh;overflow:auto;padding:0 8px 12px}
+  .dgrow{display:flex;gap:10px;align-items:baseline;padding:7px 8px;border-radius:8px;font-size:12.5px}
+  .dgrow[data-dgchat]{cursor:pointer}
+  .dgrow[data-dgchat]:hover{background:var(--sidebar-accent)}
+  .dgrow .dgt{flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+  .dgrow.question{color:var(--warn)}
+  .dgrow.failed,.dgrow.server{color:var(--err)}
+  .dgrow.landed{color:var(--ok)}
+  .dgrow.cost{color:var(--muted-foreground);font-family:var(--font-mono);font-size:11.5px}
   /* dev servers: the rail rows, and a server's output under the page */
   .srvlist{display:flex;flex-direction:column;gap:2px;padding:4px}
   .srvrow{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;font-size:12px}
@@ -3130,6 +3143,26 @@ ${BRAND_SPRITE}
     var q = ev && ev.payload && ev.payload.question ? ev.payload.question : "";
     announce(who + " needs input" + (q ? ": " + q : ""));
     toast("\\u23f8 " + who + " needs you");
+    // The desktop shell can do better than a browser notification: a native
+    // one carrying the question, answerable where the OS allows it. Quiet when
+    // the window is focused and already on that conversation — a notification
+    // about what you are looking at is noise.
+    if (window.loomNative && window.loomNative.notify) {
+      var nchat = (ev && ev.chat) || "main";
+      var here = state.currentChat ? state.currentChat() : "main";
+      if (document.hidden || nchat !== here) {
+        try {
+          window.loomNative.notify({
+            title: who + " needs you",
+            body: q || "Loom \u00b7 an agent is waiting on you",
+            chat: nchat,
+            project: state.pid || null,
+            agentId: (ev && ev.agentId) || null
+          });
+        } catch (e) {}
+      }
+      return;
+    }
     if (document.hidden){
       if (!_titleFlash){ var on = false; _titleFlash = setInterval(function(){
         document.title = (on = !on) ? "\\u23f8 " + who + " needs you" : _baseTitle; }, 1100); }
@@ -10195,6 +10228,58 @@ ${BRAND_SPRITE}
 
     bindComposer();
     loadQueue();
+    maybeDigest(pid);
+  }
+
+  /**
+   * What happened while you were away.
+   *
+   * Only when you've actually been away — coming back to a project you had
+   * open a minute ago doesn't need a summary of the minute. The mark is per
+   * device, because "when did you last look" is a fact about this window and
+   * nowhere else.
+   */
+  function maybeDigest(pid){
+    var key = "loomSeen:" + pid;
+    var since = 0;
+    try { since = Number(localStorage.getItem(key)) || 0; } catch (e) {}
+    var mark = function(){ try { localStorage.setItem(key, String(Date.now())); } catch (e) {} };
+    if (!since || Date.now() - since < 30 * 60000) return mark();
+    api("/api/projects/" + pid + "/digest?since=" + since).then(function(d){
+      mark();
+      if (!d || !d.lines || !d.lines.length) return;
+      showDigest(d, since);
+    }).catch(function(){ mark(); });
+  }
+
+  /** The digest itself: sentences, newest first, each one clickable. */
+  function showDigest(d, since){
+    if (document.querySelector(".scrim")) return;
+    var hours = Math.max(1, Math.round((Date.now() - since) / 3600000));
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    var rows = d.lines.map(function(l){
+      var when = new Date(l.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return '<div class="dgrow ' + esc(l.kind) + '"' + (l.chat ? ' data-dgchat="' + esc(l.chat) + '"' : "") + '>' +
+        '<span class="dgt">' + esc(when) + "</span><span>" + esc(l.text) + "</span></div>";
+    }).join("");
+    scrim.innerHTML = '<div class="modal digest"><div class="modalhead">While you were away' +
+      '<button class="iconbtn" id="dgclose" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="dgsub">the last ' + hours + " hour" + (hours === 1 ? "" : "s") +
+      (d.waiting && d.waiting.length ? ' \u00b7 <b class="warn">waiting on you: ' + esc(d.waiting.join(", ")) + "</b>" : "") + "</div>" +
+      '<div class="dglist">' + rows + "</div></div>";
+    document.body.appendChild(scrim);
+    var close = function(){ scrim.remove(); };
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("dgclose").onclick = close;
+    Array.prototype.forEach.call(scrim.querySelectorAll("[data-dgchat]"), function(row){
+      row.onclick = function(){
+        var chat = row.getAttribute("data-dgchat");
+        close();
+        if (state.setChat) state.setChat(state.pid, chat);
+        if (state.showTab) state.showTab("thread");
+      };
+    });
   }
 
   // ---- Loom Teams, Phase 1: see each other (docs/teams-architecture.md) -----
@@ -14366,6 +14451,34 @@ ${BRAND_SPRITE}
         state.setComposerMode("orch");
         var box = document.getElementById("box"); if (box) box.focus();
       }
+    });
+  }
+  // What the person did with a notification: opened it, or answered from it.
+  // Answering sends the reply to the agent that asked, in the chat it asked
+  // in — the same call the composer makes, so nothing special happens to it.
+  if (window.loomNative && window.loomNative.onNotifyAction) {
+    window.loomNative.onNotifyAction(function(action){
+      if (!state.token || !action) return;
+      var pid = action.project || state.pid;
+      if (!pid) return;
+      var open = function(){
+        if (state.pid !== pid) location.hash = "#p/" + pid;
+        if (action.chat && state.setChat) state.setChat(pid, action.chat);
+        if (state.showTab) state.showTab("thread");
+      };
+      if (action.kind === "reply" && String(action.text || "").trim()) {
+        api("/api/projects/" + pid + "/messages", {
+          method: "POST",
+          body: JSON.stringify({
+            text: String(action.text).trim(),
+            agentId: action.agentId || undefined,
+            chat: action.chat || undefined
+          })
+        }).then(function(){ open(); refresh(); }).catch(function(e){ open(); toast(e.message); });
+        return;
+      }
+      open();
+      var box = document.getElementById("box"); if (box) box.focus();
     });
   }
   bootstrapAdmin().then(function(){

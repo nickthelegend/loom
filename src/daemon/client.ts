@@ -503,6 +503,10 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/servers/${encodeURIComponent(name)}/log?limit=${limit}`);
   }
 
+  digest(id: string, since: number): Promise<{ since: number; lines: Array<{ at: number; kind: string; text: string; eventId: number; chat?: string }>; turns: number; costUsd: number; waiting: string[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/digest?since=${since}`);
+  }
+
   // ── updates (core/updater.ts) ──
 
   updates(refresh = false): Promise<UpdateStatus> {
