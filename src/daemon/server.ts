@@ -3385,12 +3385,15 @@ export class LoomDaemon {
           maxRounds?: number;
           plan?: boolean;
           maxUsd?: number;
+          /** The thread the goal was typed in; the orchestrator answers there. */
+          chat?: string;
         };
         if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
         const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
         try {
           const run = await rt.orchestra.start({
             goal: b.goal,
+            ...(b.chat ? { chat: String(b.chat) } : {}),
             ...(b.orchestrator ? { orchestrator: String(b.orchestrator) } : {}),
             ...(workers?.length ? { workers } : {}),
             ...(b.maxParallel ? { maxParallel: Number(b.maxParallel) } : {}),

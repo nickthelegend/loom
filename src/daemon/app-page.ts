@@ -288,6 +288,14 @@ window.__loomPageRev="%%BUILD_REV%%";
   .md .mdcodewrap:hover .mdcopy,.md .mdcodewrap .mdcopy:focus-visible{opacity:1}
   .md .mdcodewrap .mdcopy svg{width:13px;height:13px}
   .md strong{font-weight:650}
+  /* An orchestra task row that opens its own thread. It has to read as the
+     same line it always was, with the affordance only on hover. */
+  .sys.orch .tlink{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:0;border:0;background:none;
+    font:inherit;color:inherit;text-align:left;cursor:pointer;border-radius:5px}
+  .sys.orch .tlink:hover{color:var(--foreground);text-decoration:underline;text-underline-offset:2px}
+  .sys.orch .tlink .tlinkgo{display:inline-flex;width:12px;height:12px;opacity:0;transition:opacity .12s}
+  .sys.orch .tlink .tlinkgo svg{width:12px;height:12px}
+  .sys.orch .tlink:hover .tlinkgo,.sys.orch .tlink:focus-visible .tlinkgo{opacity:.8}
   .rawbox{margin-top:6px;font-size:11.5px}
   .rawbox summary{cursor:pointer;list-style:none;font-family:var(--font-mono);font-size:10.5px;
     letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground);opacity:.8}
@@ -3833,8 +3841,15 @@ ${BRAND_SPRITE}
     }
     if (ph === "task" && p.task) {
       var t = p.task, st = ORCH_TASK_ST[t.status] || [t.status || "", "off"];
-      return row(tone[st[1]] || "", esc(t.id) + " \\u00b7 " + esc(String(t.title || "").slice(0, 80)) + " \\u2192 " +
-        agentGlyph(t.kind, t.agent) + esc(agentLabel(t.kind, t.agent)) + " \\u00b7 " + esc(st[0]));
+      // Each task runs in its own thread. The row that announces it is the
+      // way in \u2014 otherwise the orchestrator names threads you can only find
+      // by hunting the sidebar for a title you half remember (#100).
+      var inner = esc(t.id) + " \\u00b7 " + esc(String(t.title || "").slice(0, 80)) + " \\u2192 " +
+        agentGlyph(t.kind, t.agent) + esc(agentLabel(t.kind, t.agent)) + " \\u00b7 " + esc(st[0]);
+      return row(tone[st[1]] || "", t.chat
+        ? '<button class="tlink" type="button" data-gochat="' + esc(t.chat) + '" title="open ' + esc(t.id) + '\\u2019s thread">' +
+            inner + '<span class="tlinkgo">' + ICONS.thread + "</span></button>"
+        : inner);
     }
     if (ph === "task_started") return row("", "\\u25b8 " + esc(p.taskId) + " started \\u2014 " + esc(String(p.title || "").slice(0, 90)) + (p.agent ? " \\u00b7 " + esc(labelOf(p.agent)) : ""));
     if (ph === "task_finished") {
@@ -6349,6 +6364,8 @@ ${BRAND_SPRITE}
     document.getElementById("feed").addEventListener("click", function(ev){
       // A code block's copy button. First, because it lives inside cards that
       // claim clicks of their own (a turn card opens its diff, a details folds).
+      var go = ev.target.closest && ev.target.closest("[data-gochat]");
+      if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
       var cp = ev.target.closest && ev.target.closest(".mdcopy");
       if (cp) {
         ev.preventDefault(); ev.stopPropagation();
@@ -9573,11 +9590,19 @@ ${BRAND_SPRITE}
     function orchTerminal(st){ return st === "completed" || st === "failed" || st === "aborted" || st === "moved"; }
     function findOrchRun(id){ return (orch.runs || []).filter(function(r){ return r.id === id; })[0] || null; }
     /** The run whose orchestrator thread this chat is, if it is one. */
+    /**
+     * The run this thread answers for, if any. A thread the run opened is the
+     * run's for good \u2014 replying there always steers it, even after it
+     * finishes. A thread the run borrowed (you orchestrated from Main) is only
+     * its while it is live; when it ends, Main goes back to being Main rather
+     * than forwarding every message you ever send to a finished run (#100).
+     */
+    function owns(r){ return r && r.chat === chatId && (!r.inPlace || !orchTerminal(r.status)); }
     function orchRunForChat(){
-      var hit = (orch.runs || []).filter(function(r){ return r.chat === chatId; })[0];
+      var hit = (orch.runs || []).filter(owns)[0];
       if (hit) return hit;
       var s = state.project && state.project.orchestra;
-      return s && s.chat === chatId ? { id: s.id, status: s.status, chat: s.chat } : null;
+      return owns(s) ? { id: s.id, status: s.status, chat: s.chat, inPlace: s.inPlace } : null;
     }
     function mergeOrchRun(run){
       if (!run || !run.id) return;
@@ -9794,6 +9819,10 @@ ${BRAND_SPRITE}
       api("/api/projects/" + pid + "/orchestra", { method: "POST", body: JSON.stringify({
         goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, maxParallel: c.parallel,
         plan: planState || undefined,
+        // Orchestrate here, answer here. Without this the run opened a thread
+        // of its own and walked you into it, leaving the goal you typed behind
+        // in a thread that then said nothing at all (#100).
+        chat: chatId,
       }) }).then(function(j){
         // Only now is the goal gone from the box: a refused run (no git repo,
         // one already running) leaves what you wrote where you wrote it.
@@ -9819,7 +9848,11 @@ ${BRAND_SPRITE}
         return;
       }
       setComposerMode(state.cmode || "chat");
-      if (desktop) showTab("orchestra"); else openOrchSheet();
+      // The run's thread is this one, so the thread is what to look at. Jumping
+      // to the board would hide the summary in the place it was asked for.
+      if (!desktop) openOrchSheet();
+      else if (run.chat === chatId) showTab("thread");
+      else showTab("orchestra");
     }
     function openOrchChat(chat){
       if (!chat) return;

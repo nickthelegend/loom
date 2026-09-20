@@ -381,6 +381,10 @@ describe("web app · plan mode", () => {
     await waitUntil(async () => (await rest<{ runs: Run[] }>("GET", "/orchestra")).runs.some((r) => r.goal === goal));
     const run = (await rest<{ runs: Run[] }>("GET", "/orchestra")).runs.find((r) => r.goal === goal)!;
     expect(run.plan).toBe(true);
+    // The run answers in the thread it was asked in (#100), so the board is
+    // somewhere you go rather than somewhere you're put.
+    expect(run.chat).toBe("main");
+    click($(m, '.tab[data-tab="orchestra"]'));
     // the run view says where the plan lives
     await waitUntil(() => text(m, "#pane-orchestra .oline.plan").includes(`plans/${run.id}/PLAN.md`));
     expect(text(m, "#pane-orchestra .oline.plan")).toContain("loom/");

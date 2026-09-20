@@ -310,6 +310,9 @@ export class ProjectRuntime {
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       createChat: (title) => this.createChat(title),
+      // Asked before a run is told to answer in a thread: an id from a client
+      // is a claim about this machine, and Main is real without being stored.
+      chatExists: (id) => this.chats().some((c) => c.id === id),
       briefingFor: async (query, agentId, files) =>
         [
           this.activeSkillsBlock(),
@@ -2578,6 +2581,9 @@ export class ProjectRuntime {
     if (t.kind === "orchestra") {
       await this.orchestra.start({
         goal: item.text,
+        // A queued goal remembers the thread it was typed in. sendMessage
+        // below always honoured that; this branch dropped it (#100).
+        ...(item.chat ? { chat: item.chat } : {}),
         ...(t.orchestrator ? { orchestrator: t.orchestrator } : {}),
         ...(t.workers?.length ? { workers: t.workers } : {}),
         ...(t.maxParallel ? { maxParallel: t.maxParallel } : {}),
@@ -3612,6 +3618,9 @@ export class ProjectRuntime {
       goal: run.goal,
       status: run.status,
       chat: run.chat,
+      // Whether that thread is the run's own or one it borrowed \u2014 a borrowed
+      // one stops answering for the run when the run ends.
+      ...(run.inPlace ? { inPlace: true } : {}),
       orchestrator: run.orchestrator.agent,
       tasks: run.tasks.length,
       done: run.tasks.filter((t) => t.status === "done").length,

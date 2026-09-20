@@ -422,3 +422,44 @@ describe("web app · what the model list says about itself", () => {
     expect(APP_HTML).toContain('var head = cur.kind === "model" ? []');
   });
 });
+
+/**
+ * Orchestrating from Main opened a thread of its own and walked you into it,
+ * so the goal you typed and every word of its answer lived somewhere you
+ * hadn't asked for — and the task threads it spawned were findable only by
+ * hunting the sidebar for a title you half remembered.
+ */
+describe("web app · orchestrating where you asked", () => {
+  it("tells the run which thread the goal was given in", () => {
+    expect(APP_HTML).toContain("chat: chatId,");
+    // Queued goals already carried it; both paths now agree.
+    expect(APP_HTML).toContain("var body = { text: text, target: queueTarget(), chat: chatId };");
+  });
+
+  it("stays on the thread when the run is this thread", () => {
+    // The old code always jumped: to the run's new chat, then to the board.
+    expect(APP_HTML).toContain("else if (run.chat === chatId) showTab(\"thread\");");
+    expect(APP_HTML).toContain('if (desktop && state.setChat && run.chat && run.chat !== chatId)');
+  });
+
+  /**
+   * The dangerous half. A thread the run opened is the run's for good, so
+   * replying there steers it. Main is not the run's — if it kept forwarding
+   * after the run finished, every message you ever sent in Main would go to a
+   * dead run instead of your agent.
+   */
+  it("gives a borrowed thread back when the run ends", () => {
+    expect(APP_HTML).toContain("function owns(r){ return r && r.chat === chatId && (!r.inPlace || !orchTerminal(r.status)); }");
+    expect(APP_HTML).toContain("var hit = (orch.runs || []).filter(owns)[0];");
+    expect(APP_HTML).toContain("return owns(s) ?");
+  });
+
+  it("makes each task row open that task's thread", () => {
+    expect(APP_HTML).toContain('data-gochat="');
+    expect(APP_HTML).toContain('ev.target.closest("[data-gochat]")');
+    expect(APP_HTML).toContain('openOrchChat(go.getAttribute("data-gochat"))');
+    // A task with no chat still renders as the line it always was.
+    expect(APP_HTML).toContain("return row(tone[st[1]] || \"\", t.chat");
+    expect(APP_HTML).toContain(".sys.orch .tlink{");
+  });
+});
