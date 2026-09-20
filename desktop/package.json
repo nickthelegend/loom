@@ -29,6 +29,7 @@
       "main.js",
       "loom-app.js",
       "updater.js",
+      "updater-mac.js",
       "preload.cjs",
       "package.json",
       "node_modules/**/*"

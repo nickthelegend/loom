@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### macOS gets the update too
+
+- **Help → Check for Updates… on macOS** now finds the build for your
+  architecture, downloads it, and **verifies its SHA-256** against the
+  checksums the release publishes — a file that doesn't match is deleted
+  rather than opened — then opens the disk image for you to drag across. The
+  drag stays yours: macOS only lets an app signed by a certificate it trusts
+  replace itself, and this build is ad-hoc signed. The checking is the part
+  worth having; the checksums have shipped since 0.2.0 and nobody compares
+  them by hand.
+
 ## [0.2.4] — 2026-09-20
 
 ### The desktop app can update itself, where that's honest

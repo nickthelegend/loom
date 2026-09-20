@@ -881,6 +881,20 @@ with the page reconnecting to it.
 
 From the terminal: `loom update --check` to look, `loom update` to do it.
 
+**The desktop app** has its own, under **Help → Check for Updates…**, because
+an installed application is not a checkout:
+
+- **Windows** and the **Linux AppImage** update themselves — it asks before
+  downloading, installs on quit, and restarts only when you press Restart.
+- **macOS** finds the build for your architecture, downloads it, and
+  **verifies its SHA-256** against the checksums the release publishes (a file
+  that doesn't match is deleted, not opened), then opens the disk image for
+  you to drag across. The drag stays yours: macOS only lets an app signed by a
+  certificate it already trusts replace itself, and this build is ad-hoc
+  signed. Automating the *checking* is the part worth having — the checksums
+  have shipped since 0.2.0 and nobody compares them by hand.
+- A **`.deb`** is left to the package manager that owns it.
+
 ## More than one goal, when they can't collide
 
 One orchestra goal at a time is the default, and for good reason: two goals
