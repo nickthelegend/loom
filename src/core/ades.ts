@@ -189,7 +189,16 @@ export function buildDefaultRoutes(agents: AgentConfig[]): Record<string, string
  * POST /api/projects/:id/agents/:agentId/role.
  */
 export function defaultAgentConfigs(availability: Record<string, boolean>): AgentConfig[] {
-  return adapterKinds()
-    .filter((kind) => availability[kind])
-    .map((kind) => ({ id: defaultIdFor(kind), kind, role: defaultIdFor(kind) }));
+  return (
+    adapterKinds()
+      .filter((kind) => availability[kind])
+      // `model` is available the moment any provider has a key, which is a
+      // fact about this machine — but WHICH model is a choice nobody has made
+      // yet, and a model agent without one refuses every turn it is given.
+      // An agent that can't work is worse in a new roster than an agent that
+      // isn't there: `loom agents:add model --model …` is one line, and
+      // `loom models` is how you pick.
+      .filter((kind) => kind !== "model")
+      .map((kind) => ({ id: defaultIdFor(kind), kind, role: defaultIdFor(kind) }))
+  );
 }
