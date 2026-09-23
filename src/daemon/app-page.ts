@@ -3090,6 +3090,332 @@ window.__loomPageRev="%%BUILD_REV%%";
     .srow .badge{font-size:10px;padding:0 7px}
   }
   .dshell.railopen .rail{display:flex}
+  /* ══ Loom 1.1 design layer ═══════════════════════════════════════════════
+     Everything above is the working system; this is the finish on top of it.
+     One reading column, prose in Geist (mono only for code and paths), a byline
+     per reply instead of a bubble, tool use folded into activity lines, live
+     typing, and one composer card that says who and on what in one control.
+     Later rules win by order; the tokens they use are the same ones. */
+  :root{--ease-out:cubic-bezier(.23,1,.32,1);--ease-io:cubic-bezier(.77,0,.175,1);
+    --measure:760px;--gutter:28px;
+    --hl-k:#7c3aed;--hl-s:#15803d;--hl-n:#b45309;--hl-f:#1d4ed8;--hl-c:#8a8a8a;--hl-a:#15803d;--hl-d:#b91c1c;
+    --shadow-float:0 18px 48px -14px rgb(0 0 0 / .28),0 0 0 1px rgb(0 0 0 / .04)}
+  .dark{--sidebar:#0f0f10;--card:#141416;--popover:#18181b;--secondary:#1d1d20;--muted:#1d1d20;--accent:#26262a;
+    --editor-surface:#111113;--border:rgb(255 255 255 / .075);--input:rgb(255 255 255 / .13);
+    --hl-k:#c4a7ff;--hl-s:#a7d7a0;--hl-n:#f5c27a;--hl-f:#8ab4ff;--hl-c:#6f6f78;--hl-a:#7ee2a0;--hl-d:#ff8f8f;
+    --shadow-float:0 22px 56px -14px rgb(0 0 0 / .7),0 0 0 1px rgb(255 255 255 / .04)}
+  body{font-size:14px;letter-spacing:0}
+  /* ── the reading column ── */
+  .dmain #pane-thread.pane{padding:0 0 4px}
+  #pane-thread > #feed,#pane-thread > #feedlive,#pane-thread > #routebar,#pane-thread > .agenthead{
+    max-width:calc(var(--measure) + var(--gutter) * 2);margin-inline:auto;padding-inline:var(--gutter)}
+  #pane-thread > #feed{padding-top:18px}
+  #pane-thread > #feedlive{padding-bottom:26px}
+  #pane-thread > .agenthead{display:none!important}
+  /* ── messages ── */
+  .av{width:22px;height:22px;border-radius:7px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+    background:var(--secondary);box-shadow:inset 0 0 0 1px var(--border);color:var(--foreground);font-size:11px;font-weight:700}
+  .av svg,.av .brand{width:14px;height:14px}
+  .av.orch{color:var(--thread-ink)}
+  .msg{margin:26px 0 0}
+  .msg .who{font-family:var(--font-sans);font-size:13px;letter-spacing:0;color:var(--foreground);gap:8px;margin:0 0 7px;min-width:0}
+  .msg .who .wn{font-weight:600;white-space:nowrap}
+  .msg .who .wm{font-size:11px;color:var(--muted-foreground);padding:1px 7px;border-radius:99px;background:var(--secondary);white-space:nowrap}
+  .msg .who .wt,.msg .mt{font-size:11px;color:var(--muted-foreground);opacity:0;transition:opacity .15s ease;font-variant-numeric:tabular-nums}
+  .msg:hover .who .wt,.msg:hover .mt{opacity:1}
+  .msg .who .thinktag{text-transform:none;letter-spacing:0;font-size:11px;font-weight:500}
+  .msg.agent .bubble,.dmain .msg.agent .bubble{max-width:none;background:none;border:0;box-shadow:none;border-radius:0;
+    padding:0 0 0 30px;font-size:14.5px;line-height:1.72;color:var(--foreground)}
+  .msg.agent.cont{margin-top:12px}
+  .msg.agent.cont > .who{display:none}
+  .msg.user{margin-top:30px}
+  .msg.user .bubble,.dmain .msg.user .bubble{max-width:min(80%,620px);background:var(--secondary);border:0;
+    border-radius:18px 18px 6px 18px;padding:10px 15px;font-size:14.5px;line-height:1.62}
+  .msg.user .mt{margin:5px 6px 0}
+  .msg.orchbriefmsg .bubble{color:var(--muted-foreground)}
+  /* ── prose ── */
+  .md .mdp{margin:0 0 12px}
+  .md .mdh{letter-spacing:-.01em;margin:22px 0 8px}
+  .md .mdh1{font-size:20px}.md .mdh2{font-size:17px}.md .mdh3{font-size:15px}
+  .md .mdlist{margin:0 0 12px;padding-left:22px}
+  .md .mdlist li{margin:5px 0;line-height:1.65}
+  .md .mdlist li::marker{color:var(--muted-foreground)}
+  .md .mdq{border-left:3px solid color-mix(in srgb,var(--foreground) 14%,transparent);padding-left:14px;margin:0 0 12px}
+  .md .mdi{font-size:.86em;padding:1.5px 6px;border-radius:6px;background:color-mix(in srgb,var(--foreground) 7%,transparent);
+    border:1px solid color-mix(in srgb,var(--foreground) 7%,transparent)}
+  .md a{color:var(--thread-ink);text-decoration-color:color-mix(in srgb,var(--thread-ink) 40%,transparent)}
+  .md .mdcodewrap{margin:6px 0 16px;border:1px solid var(--border);border-radius:12px;background:var(--editor-surface);overflow:hidden}
+  .md .mdcode,.rawbox pre.mdcode{margin:0;border:0;border-radius:0;background:transparent;padding:14px 16px}
+  .md .mdcode code{font-size:12.5px;line-height:1.7}
+  .md .mdcodewrap .mdcopy{top:8px;right:8px;width:26px;height:26px;border-radius:7px;background:var(--card)}
+  .mdlang{position:absolute;top:12px;right:44px;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);
+    opacity:.8;pointer-events:none;transition:opacity .12s}
+  .mdcodewrap:hover .mdlang{opacity:0}
+  .hk{color:var(--hl-k)}.hs{color:var(--hl-s)}.hn{color:var(--hl-n)}.hf{color:var(--hl-f)}.hc{color:var(--hl-c);font-style:italic}
+  .ha{color:var(--hl-a)}.hd{color:var(--hl-d)}
+  .mdtablewrap{margin:6px 0 16px;overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+  .mdtable{border-collapse:collapse;width:100%;font-size:13px;line-height:1.5}
+  .mdtable th{text-align:left;font-weight:600;background:color-mix(in srgb,var(--secondary) 70%,transparent)}
+  .mdtable th,.mdtable td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  .mdtable tr:last-child td{border-bottom:0}
+  /* ── thinking ── */
+  .msg.agent.thinking{margin:14px 0 0 30px}
+  .thinkbox{max-width:none;background:none;border:0;padding:0;font-size:13px}
+  .thinkbox summary{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-sans);font-size:12.5px;
+    letter-spacing:0;color:var(--muted-foreground);opacity:1}
+  .thinkbox summary::before{content:none}
+  .thinkbox summary svg{width:13px;height:13px}
+  .thinkbox .md{margin-top:8px;padding-left:12px;border-left:2px solid var(--border);color:var(--muted-foreground);font-size:13px}
+  /* ── tool activity ── */
+  .tool{display:flex;align-items:center;gap:8px;margin:6px 0 0 30px;font-family:var(--font-sans);font-size:12.5px;
+    color:var(--muted-foreground);white-space:nowrap;overflow:hidden;min-width:0}
+  .tool .ti{display:inline-flex;flex:none;opacity:.7}
+  .tool .ti svg{width:13px;height:13px}
+  .tool .tx{overflow:hidden;text-overflow:ellipsis;font-family:var(--font-mono);font-size:11.5px}
+  .tool .tbad{color:var(--err);font-size:11px;flex:none}
+  .tool .rawbox{white-space:normal}
+  .acts{margin:10px 0 0 30px}
+  .acts > summary{list-style:none;display:inline-flex;align-items:center;gap:8px;max-width:100%;cursor:pointer;user-select:none;
+    font-size:12.5px;color:var(--muted-foreground);padding:4px 11px 4px 8px;border-radius:9px;border:1px solid var(--border);
+    background:color-mix(in srgb,var(--secondary) 45%,transparent);transition:background .15s ease,border-color .15s ease}
+  .acts > summary:hover{background:var(--secondary)}
+  .acts > summary::-webkit-details-marker{display:none}
+  .acts .ai{display:inline-flex}
+  .acts .ai svg{width:12px;height:12px;transition:transform .18s var(--ease-out)}
+  .acts[open] .ai svg{transform:rotate(90deg)}
+  .acts .as{color:var(--foreground);font-weight:500;white-space:nowrap}
+  .acts .al{font-family:var(--font-mono);font-size:11px;opacity:.65;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .acts[open] .al{display:none}
+  .acts .actlist{margin:6px 0 2px 7px;padding:2px 0 2px 2px;border-left:1px solid var(--border)}
+  .acts .actlist .tool{margin:5px 0 0 12px}
+  .turnend{display:flex;align-items:center;gap:6px;margin:12px 0 0 30px;font-size:11.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .turnend svg{width:12px;height:12px;color:var(--ok);flex:none}
+  .turncard{font-family:var(--font-sans);margin:12px 0 0 30px;max-width:calc(100% - 30px);border-radius:12px}
+  /* ── live: typing and working ── */
+  .livebox.bar{display:flex;align-items:center;gap:10px;margin:22px 0 0;font-size:13px;color:var(--muted-foreground);min-width:0;
+    animation:fadeup .22s var(--ease-out)}
+  .livebox .lav{position:relative;display:inline-flex;flex:none}
+  .lring{position:absolute;inset:-3px;border-radius:9px;border:1.5px solid transparent;border-top-color:var(--thread);border-right-color:color-mix(in srgb,var(--thread) 40%,transparent);animation:spin .9s linear infinite}
+  .livebox .lname{color:var(--foreground);font-weight:600;flex:none}
+  .lstate{display:inline-flex;align-items:baseline;min-width:0;overflow:hidden;white-space:nowrap}
+  .lstate .shimmer{overflow:hidden;text-overflow:ellipsis}
+  .shimmer{background:linear-gradient(90deg,var(--muted-foreground) 0%,var(--muted-foreground) 35%,var(--foreground) 50%,var(--muted-foreground) 65%,var(--muted-foreground) 100%);
+    background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim 1.8s linear infinite}
+  @keyframes shim{from{background-position:100% 0}to{background-position:-150% 0}}
+  .lsecs{margin-left:8px;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums}
+  .msg.agent.live .who .lstate{margin-left:2px;font-size:12px;font-weight:400}
+  .caret{display:inline-block;width:7px;height:1.05em;vertical-align:-.16em;margin-left:3px;border-radius:2px;
+    background:var(--thread);animation:blink 1.05s steps(2,start) infinite}
+  @keyframes blink{to{visibility:hidden}}
+  @keyframes fadeup{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .jumpnew{position:sticky;bottom:14px;z-index:4;display:flex;align-items:center;gap:6px;width:max-content;height:30px;
+    margin:-30px auto 0;padding:0 12px 0 10px;border-radius:99px;background:var(--popover);border:1px solid var(--border);
+    box-shadow:var(--shadow-float);font-size:12.5px;font-weight:500;color:var(--foreground);
+    opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .18s var(--ease-out),transform .18s var(--ease-out)}
+  .jumpnew.show{opacity:1;transform:none;pointer-events:auto}
+  .jumpnew svg{width:13px;height:13px}
+  .loadearlier{display:block;margin:6px auto 10px;height:28px;padding:0 13px;border-radius:99px;border:1px solid var(--border);
+    font-size:12px;color:var(--muted-foreground);background:transparent;transition:background .15s ease,color .15s ease}
+  .loadearlier:hover{background:var(--secondary);color:var(--foreground)}
+  /* ── the empty thread ── */
+  .threadempty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:13vh 8px 24px;animation:fadeup .35s var(--ease-out)}
+  .threadempty .av{width:46px;height:46px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--border),0 10px 30px -10px rgb(0 0 0 / .5)}
+  .threadempty .av svg,.threadempty .av .brand{width:24px;height:24px}
+  .tet{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:18px}
+  .tes{color:var(--muted-foreground);font-size:13.5px;line-height:1.6;margin-top:6px;max-width:440px}
+  .tes b{color:var(--foreground);font-weight:600}
+  .tesug{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:24px;max-width:560px}
+  .tesb{height:32px;padding:0 14px;border-radius:99px;border:1px solid var(--border);font-size:13px;color:var(--foreground);
+    background:var(--card);transition:background .15s ease,border-color .15s ease,transform .12s var(--ease-out)}
+  .tesb:hover{background:var(--secondary);border-color:color-mix(in srgb,var(--foreground) 16%,transparent)}
+  .tesb:active{transform:scale(.97)}
+  /* ── system lines ── */
+  .sys{font-family:var(--font-sans);font-size:12.5px;letter-spacing:0;line-height:1.55;margin:12px auto}
+  .sys.orch{display:flex;justify-content:flex-start;align-items:flex-start;text-align:left;gap:8px;max-width:none;margin:8px 0 0}
+  .sys.orch > svg{width:14px;height:14px;flex:none;margin-top:2px}
+  .sys.orch.start{margin-top:20px;color:var(--foreground);font-weight:500;padding:10px 13px;border:1px solid var(--border);
+    border-radius:12px;background:color-mix(in srgb,var(--thread) 5%,var(--card))}
+  .sys.orch.start > svg{color:var(--thread-ink)}
+  .sys.orch .tlink{gap:7px}
+  .sys.orch .tlink .brand,.sys.orch .agmono{width:14px;height:14px}
+  .handoff{font-family:var(--font-sans);font-size:12.5px;margin:26px 0}
+  details.orchbrief{margin:12px 0 0;font-family:var(--font-sans)}
+  /* ── floating menus (chat pick, context menus) ── */
+  .pickpop{border-radius:14px;padding:6px;background:var(--popover);border:1px solid var(--glass-border);box-shadow:var(--shadow-float);
+    animation:menuin .16s var(--ease-out);transform-origin:top left}
+  .pickhead{text-transform:none;letter-spacing:0;font-size:12px;font-family:var(--font-sans);font-weight:600;padding:8px 10px 6px}
+  .pickhead::first-letter{text-transform:uppercase}
+  .pickrow{border-radius:9px;padding:7px 10px;font-size:13px}
+  #chatpick{min-width:250px;max-width:320px}
+  #chatpick .pickrow{align-items:center;gap:10px;text-align:left}
+  #chatpick .pic{display:inline-flex;flex:none}
+  #chatpick .pic .brand,#chatpick .pic .agmono{width:18px;height:18px}
+  #chatpick .pnm{display:flex;gap:8px;align-items:baseline;font-weight:500;color:var(--foreground)}
+  #chatpick .prole{margin:0;font-family:var(--font-sans);font-size:11.5px}
+  /* ── error cards ── */
+  .sys.errcard{display:block;text-align:left;max-width:none;margin:14px 0 0 30px;padding:10px 13px;border-radius:12px;
+    border:1px solid color-mix(in srgb,var(--err) 28%,transparent);background:color-mix(in srgb,var(--err) 7%,transparent);color:var(--foreground)}
+  .errh{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.5}
+  .errh svg{width:14px;height:14px;color:var(--err);flex:none;margin-top:3px}
+  .errh b{font-weight:600}
+  .errd{margin-top:6px}
+  .errd summary{cursor:pointer;font-size:11.5px;color:var(--muted-foreground);list-style:none}
+  .errd summary::-webkit-details-marker{display:none}
+  .errd pre{margin:6px 0 0;padding:8px 10px;border-radius:8px;background:var(--editor-surface);border:1px solid var(--border);
+    font-family:var(--font-mono);font-size:11px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted-foreground);max-height:240px;overflow:auto}
+  /* ── plan cards ── */
+  .plancard{margin:8px 0 16px;border:1px solid var(--border);border-radius:14px;background:var(--card);overflow:hidden;line-height:1.5}
+  .pch{display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);
+    background:color-mix(in srgb,var(--thread) 5%,transparent)}
+  .pch svg{width:14px;height:14px;color:var(--thread-ink);flex:none}
+  .pcn{margin-left:auto;font-weight:500;color:var(--muted-foreground);font-size:12px}
+  .pclist{list-style:none;margin:0;padding:6px}
+  .pcrow{display:flex;align-items:flex-start;gap:10px;padding:8px;border-radius:9px;transition:background .12s ease}
+  .pcrow:hover{background:var(--secondary)}
+  .pcid{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);background:var(--secondary);border-radius:6px;padding:1px 6px;margin-top:2px;flex:none}
+  .pcbody{flex:1;min-width:0}
+  .pct{font-size:13.5px;font-weight:500}
+  .pcmeta{font-size:12px;color:var(--muted-foreground);margin-top:2px;overflow-wrap:anywhere}
+  .pctouch{font-family:var(--font-mono);font-size:11px}
+  .pcag{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted-foreground);white-space:nowrap;flex:none;margin-top:2px}
+  .pcag .brand,.pcag .agmono{width:14px;height:14px}
+  .pcask,.pcdone{display:flex;gap:8px;align-items:flex-start;padding:8px;font-size:13px}
+  .pcask svg,.pcdone svg{width:14px;height:14px;flex:none;margin-top:3px}
+  .pcask svg{color:var(--warn)}.pcdone svg{color:var(--ok)}
+  .pcraw{border-top:1px solid var(--border);padding:7px 14px 9px}
+  .pcraw summary{cursor:pointer;color:var(--muted-foreground);font-size:11.5px;list-style:none}
+  .pcraw summary::-webkit-details-marker{display:none}
+  .pcraw .mdcodewrap{margin:8px 0 2px}
+  .plancard.bad .pch{background:color-mix(in srgb,var(--warn) 7%,transparent)}
+  .sys.orch.bump{animation:bump .6s var(--ease-out)}
+  @keyframes bump{from{background:color-mix(in srgb,var(--thread) 14%,transparent)}to{background:transparent}}
+  .sys.orch[data-otask]{border-radius:6px;padding:1px 4px;margin-left:-4px}
+  .sys.orch.odone{display:block;margin:18px 0 6px;padding:12px 14px;border-radius:14px;border:1px solid color-mix(in srgb,var(--ok) 30%,transparent);
+    background:color-mix(in srgb,var(--ok) 6%,var(--card));color:var(--foreground)}
+  .odh{display:flex;align-items:center;gap:8px;font-size:13.5px;flex-wrap:wrap}
+  .odh svg{width:15px;height:15px;color:var(--ok);flex:none}
+  .odm{font-size:12px;color:var(--muted-foreground)}
+  .odm .obr{font-family:var(--font-mono);font-size:11px;padding:1px 6px;border-radius:5px;background:var(--secondary)}
+  .ods{margin-top:6px;font-size:13px;line-height:1.6;color:var(--muted-foreground)}
+  .oda{margin-top:10px}
+  .thinktag.stopped{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+  .chip{font-family:var(--font-sans);font-size:12.5px}
+  .chip .agmono,.agchip .agmono{width:14px;height:14px}
+  .askpick .cwon{margin-right:2px}
+  .askpick .cmi.cur .cwon{background:var(--foreground);color:var(--background);border-color:transparent}
+  .askfoot{position:sticky;bottom:-6px;display:flex;align-items:center;gap:10px;margin:6px -6px -6px;padding:9px 12px;
+    border-top:1px solid var(--border);background:var(--popover);border-radius:0 0 14px 14px}
+  .askn{font-size:12px;color:var(--muted-foreground);flex:1}
+  .planquiet{display:flex;align-items:center;gap:7px;margin:6px 0 12px;font-size:12.5px;color:var(--muted-foreground)}
+  .planquiet svg{width:13px;height:13px}
+  /* ── the composer ── */
+  .dmain .composer{background:transparent;border-top:0;backdrop-filter:none;-webkit-backdrop-filter:none;padding:0 var(--gutter) 14px}
+  .dmain .composer .cbox{max-width:var(--measure)}
+  .cbox{border-radius:20px;background:var(--card);border:1px solid color-mix(in srgb,var(--foreground) 11%,transparent);
+    box-shadow:0 1px 0 rgb(255 255 255 / .03) inset,0 14px 36px -16px rgb(0 0 0 / .55);padding:12px 12px 10px;
+    transition:border-color .18s ease,box-shadow .18s ease}
+  .dark .cbox{background:var(--card)}
+  .cbox:focus-within{border-color:color-mix(in srgb,var(--foreground) 20%,transparent);
+    box-shadow:0 1px 0 rgb(255 255 255 / .03) inset,0 14px 36px -16px rgb(0 0 0 / .55),0 0 0 4px color-mix(in srgb,var(--thread) 9%,transparent)}
+  .cinput{font-size:14.5px;line-height:1.6;padding:2px 6px}
+  .cbox .crow{gap:5px;padding-top:10px}
+  .cmode{height:28px;border-radius:9px;background:var(--secondary);padding:2px}
+  .cmode button{border-radius:7px;font-size:12.5px;padding:0 10px}
+  .cpick{display:inline-flex;align-items:stretch;height:28px;border-radius:9px;border:1px solid var(--border);overflow:hidden;flex:none;min-width:0;max-width:340px;
+    transition:border-color .15s ease}
+  .cpick:hover{border-color:color-mix(in srgb,var(--foreground) 16%,transparent)}
+  .cpick .cagent{height:auto;border:0;border-radius:0;background:transparent;padding:0 7px 0 9px;font-size:12.5px;max-width:190px}
+  .cpick .cagent:hover{background:var(--secondary)}
+  .cpick .cagent .cchev{display:none}
+  .cpick .cagent.auto{background:color-mix(in srgb,var(--accentBlue) 12%,transparent)}
+  .cpick #modelpick{height:auto;border:0;border-left:1px solid var(--border);border-radius:0;padding:0 7px 0 9px;background:transparent;gap:4px}
+  .cpick #modelpick:hover{background:var(--secondary);color:var(--foreground)}
+  .cpick .cmodel{font-family:var(--font-sans);font-size:12px;font-weight:500;max-width:150px}
+  .cpick .cchev svg{width:12px;height:12px}
+  .cperm{height:28px;border-radius:9px}
+  .cslot{height:28px;border-radius:9px;border:1px solid transparent;padding:0 7px}
+  .cslot:hover{background:var(--secondary);border-color:transparent}
+  #morebtn .cslotlbl{display:none}
+  .cprompt{height:28px;border-radius:9px}
+  .cprompt .cslotlbl,.cprompt kbd{display:none}
+  .ctool.iconly{width:28px;height:28px;border-radius:9px}
+  .sendbtn{width:32px;height:32px;border-radius:11px;transition:transform .12s var(--ease-out),opacity .15s ease}
+  .sendbtn:active{transform:scale(.94)}
+  .sendbtn.orchsend{width:auto;padding:0 14px;gap:7px;font-size:13px;font-weight:600}
+  .stopbtn::after{border-radius:14px}
+  .hint{font-family:var(--font-sans);font-size:12px;letter-spacing:0;margin-top:8px}
+  .hint:empty{display:none}
+  /* ── pickers ── */
+  .cmenu{border-radius:14px;padding:6px;background:var(--popover);border:1px solid var(--glass-border);
+    box-shadow:var(--shadow-float);animation:menuin .16s var(--ease-out);transform-origin:bottom left}
+  @keyframes menuin{from{opacity:0;transform:translateY(4px) scale(.985)}to{opacity:1;transform:none}}
+  .cmenu.picker{right:auto;width:min(400px,calc(100% - 16px));max-height:440px}
+  .cmenu .cmhead{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:12px;font-weight:600;padding:8px 10px 6px}
+  .cmenu .cmhead .brand,.cmenu .cmhead .agmono{width:14px;height:14px}
+  .cmi{border-radius:9px;padding:7px 10px;gap:10px;transition:background .08s ease}
+  .cmi.arow2,.cmi.mrow{align-items:center}
+  .cmi.arow2 .ic .brand{width:18px;height:18px}
+  .cmi .agmono{width:18px;height:18px}
+  .mtx{display:flex;flex-direction:column;min-width:0;flex:1;gap:1px}
+  .cmlist .cmi.mrow span,.cmenu .cmi.arow2 span{font-family:var(--font-sans)}
+  .cinput:focus-visible,.cinput:focus{border-color:transparent!important;box-shadow:none!important;outline:none}
+  .corch .colbl,.cbox .colbl{text-transform:none!important;letter-spacing:0!important;font-family:var(--font-sans)!important;font-size:12px!important}
+  .mnm{font-size:13px;font-weight:500;color:var(--foreground);display:flex;align-items:baseline;gap:8px;min-width:0;overflow:hidden;white-space:nowrap}
+  .mfrom{font-size:11px;font-weight:400;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis}
+  .mbl{font-size:11.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cmi .tick{margin-left:auto;color:var(--foreground);display:inline-flex}
+  .cmi .tick svg{width:14px;height:14px}
+  .cmi.cur{background:color-mix(in srgb,var(--secondary) 55%,transparent)}
+  .cmi.sel,.cmi:hover{background:var(--secondary)}
+  .mdot{width:6px;height:6px;border-radius:50%;background:color-mix(in srgb,var(--muted-foreground) 45%,transparent);display:inline-block}
+  .cmi.mrow.cur .mdot{background:var(--thread)}
+  .cmi .ic svg{width:14px;height:14px}
+  .cmsearchwrap{position:sticky;top:-6px;z-index:2;display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:0 10px;height:36px;
+    border:1px solid var(--border);border-radius:10px;background:var(--background)}
+  .cmsearchwrap:focus-within{border-color:var(--ring)}
+  .cmenu .cmsearchwrap .cmsearch:focus,.cmenu .cmsearchwrap .cmsearch:focus-visible{border:0!important;box-shadow:none!important;outline:none}
+  .cmsearchwrap svg{width:14px;height:14px;color:var(--muted-foreground);flex:none}
+  .cmenu .cmsearchwrap .cmsearch{position:static;border:0;margin:0;padding:0;background:transparent;height:34px;font-family:var(--font-sans);font-size:13px;flex:1;min-width:0}
+  .cmgroup{font-size:11px;font-weight:600;color:var(--muted-foreground);padding:10px 10px 4px}
+  .cmenu .cmfoot{font-size:11px;padding:8px 10px 4px;margin-top:4px}
+  .cmenu .cmsep{margin:5px 4px}
+  /* ── orchestrate: the cast ── */
+  .corch{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 14px;align-items:center;margin:10px 2px 2px;padding:12px 2px 2px;border-top:1px solid var(--border)}
+  .colbl{font-family:var(--font-sans);font-size:12px;font-weight:500;color:var(--muted-foreground);text-transform:none;letter-spacing:0;white-space:nowrap}
+  .corch #corchpick{justify-self:start;height:30px;border-radius:10px;padding:0 8px 0 9px;gap:7px;max-width:100%;
+    background:var(--secondary);border:1px solid color-mix(in srgb,var(--foreground) 12%,transparent);font-size:12.5px}
+  .corch #corchpick .pbdg{margin:0}
+  .cowk{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+  .cowchip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 5px 0 7px;border-radius:10px;border:1px solid var(--border);
+    background:transparent;font-size:12.5px;color:var(--muted-foreground);transition:background .15s ease,border-color .15s ease,color .15s ease,opacity .15s ease}
+  .cowchip:not(.on){opacity:.7}
+  .cowchip:hover{border-color:color-mix(in srgb,var(--foreground) 18%,transparent);opacity:1}
+  .cowchip.on{color:var(--foreground);background:var(--secondary);border-color:color-mix(in srgb,var(--foreground) 13%,transparent)}
+  .cowchip .brand,.cowchip .agmono{width:14px;height:14px}
+  .cwon{width:15px;height:15px;border-radius:5px;border:1px solid color-mix(in srgb,var(--foreground) 22%,transparent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+  .cowchip.on .cwon{background:var(--foreground);color:var(--background);border-color:transparent}
+  .cwon svg{width:10px;height:10px;stroke-width:3}
+  .cwset{display:inline-flex;align-items:center;gap:4px;margin-left:2px;padding-left:6px;border-left:1px solid var(--border);height:18px}
+  .cowchip .pbdg,.corch .pbdg{height:20px;border-radius:6px;font-size:10.5px}
+  .cowchip.cowadd{border-style:dashed;padding:0 10px;opacity:1;gap:5px}
+  .cowchip.cowadd svg{width:12px;height:12px}
+  .cstep{justify-self:start;height:30px;border-radius:10px}
+  /* ── chrome: quieter meta, sans labels ── */
+  .sidebar .stitle,.srow .m,.statusbar,.dempty,.rhead,.rsec{font-family:var(--font-sans);letter-spacing:0}
+  .sidebar .stitle{text-transform:none;font-size:12px}
+  .slist .crow{height:30px;border-radius:8px;font-size:13px}
+  .tab{font-size:13px}
+  .statusbar{font-size:11.5px}
+  /* ── orchestra view ── */
+  .ogoal{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;font-size:15px;line-height:1.45;letter-spacing:-.005em}
+  .ogoal.full{display:block;-webkit-line-clamp:unset}
+  .onote{font-family:var(--font-sans)!important;font-size:13px;line-height:1.6}
+  .orun .ogl,.orun .ogoal{letter-spacing:0}
+  @media (max-width:899px){
+    .msg.agent .bubble{padding-left:0}
+    .tool,.acts,.turnend,.turncard,.msg.agent.thinking{margin-left:0}
+    #pane-thread > #feed,#pane-thread > #feedlive{padding-inline:14px}
+  }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -3167,18 +3493,40 @@ ${BRAND_SPRITE}
     var FENCE = /^\\s*\\x60\\x60\\x60(.*)$/, FENCE_END = /^\\s*\\x60\\x60\\x60\\s*$/;
     var HEAD = /^(#{1,6})\\s+(.*)$/, QUOTE = /^\\s*&gt;\\s?/, RULE = /^\\s*(?:---|\\*\\*\\*|___)\\s*$/;
     var ULI = /^\\s*[-*+]\\s+/, OLI = /^\\s*\\d+\\.\\s+/;
+    var TROW = /^\\s*\\|.*\\|\\s*$/, TSEP = /^\\s*\\|?\\s*:?-{2,}:?\\s*(\\|\\s*:?-{2,}:?\\s*)*\\|?\\s*$/;
     while (i < lines.length) {
       var line = lines[i];
-      if (FENCE.test(line)) {
+      var fm = line.match(FENCE);
+      if (fm) {
         var code = [], j = i + 1;
+        var lang = String(fm[1] || "").trim().toLowerCase().split(/\\s+/)[0].replace(/[^a-z0-9+#_-]/g, "");
         while (j < lines.length && !FENCE_END.test(lines[j])) { code.push(lines[j]); j++; }
+        var body = code.join("\\n");
+        // An orchestrator's plan: a card of tasks, not a page of JSON.
+        if (lang === "loom" || (lang === "json" && /&quot;actions&quot;\\s*:/.test(body) &&
+            /&quot;type&quot;\\s*:\\s*&quot;(?:spawn|ask|done|send|cancel)&quot;/.test(body))) {
+          out.push(planCardHtml(body));
+          i = j + 1; continue;
+        }
         // A code block used to scroll sideways with no way to reach the end,
         // which is how an orchestrator's whole plan became unreadable. It
         // wraps now, and carries a copy button for the times you want it
         // somewhere else rather than on screen.
         out.push('<div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
-          '</button><pre class="mdcode"><code>' + code.join("\\n") + "</code></pre></div>");
+          "</button>" + (lang ? '<span class="mdlang">' + lang + "</span>" : "") +
+          '<pre class="mdcode"><code>' + hlCode(body, lang) + "</code></pre></div>");
         i = j + 1; continue;
+      }
+      // A table: a header row, a --- row, then body rows.
+      if (TROW.test(line) && i + 1 < lines.length && TSEP.test(lines[i + 1])) {
+        var cells = function(l){ return l.trim().replace(/^\\|/, "").replace(/\\|$/, "").split("|").map(function(c){ return mdInline(c.trim()); }); };
+        var head = cells(line), trs = [];
+        i += 2;
+        while (i < lines.length && TROW.test(lines[i])) { trs.push(cells(lines[i])); i++; }
+        out.push('<div class="mdtablewrap"><table class="mdtable"><thead><tr>' + head.map(function(c){ return "<th>" + c + "</th>"; }).join("") +
+          "</tr></thead><tbody>" + trs.map(function(r){ return "<tr>" + r.map(function(c){ return "<td>" + c + "</td>"; }).join("") + "</tr>"; }).join("") +
+          "</tbody></table></div>");
+        continue;
       }
       var h = line.match(HEAD);
       if (h) { out.push('<div class="mdh mdh' + Math.min(6, h[1].length) + '">' + mdInline(h[2]) + "</div>"); i++; continue; }
@@ -3206,6 +3554,55 @@ ${BRAND_SPRITE}
     return out.join("");
   }
   /**
+   * Just enough syntax colour to read code at a glance: comments, strings,
+   * numbers, keywords and calls. A tokenizer, not a parser — it walks the
+   * UNescaped text and escapes every piece on the way out, so nothing in the
+   * code can become markup. Plain text and unknown fences pass through.
+   */
+  var HL_KW = /^(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|this|null|undefined|true|false|def|self|None|True|False|elif|pass|lambda|with|as|yield|fn|pub|impl|struct|enum|use|mod|match|mut|func|package|type|interface|public|private|protected|static|void|readonly|echo|then|fi|esac|local|export)$/;
+  function hlCode(escaped, lang){
+    if (!lang || /^(text|txt|plain|md|markdown|log|output|console|none)$/.test(lang)) return escaped;
+    var src = unesc(escaped);
+    if (lang === "diff" || lang === "patch") {
+      return src.split("\\n").map(function(l){
+        var c = l.charAt(0) === "+" ? "ha" : l.charAt(0) === "-" ? "hd" : l.indexOf("@@") === 0 ? "hc" : "";
+        return c ? '<span class="' + c + '">' + esc(l) + "</span>" : esc(l);
+      }).join("\\n");
+    }
+    var hashC = /^(py|python|sh|bash|zsh|shell|yaml|yml|toml|rb|ruby|r|perl|make|makefile|dockerfile|ini|conf|env)$/.test(lang);
+    var out = "", i = 0, n = src.length;
+    while (i < n) {
+      var c = src.charAt(i);
+      if ((c === "/" && src.charAt(i + 1) === "/" && !hashC) || (c === "#" && hashC)) {
+        var e1 = src.indexOf("\\n", i); if (e1 < 0) e1 = n;
+        out += '<span class="hc">' + esc(src.slice(i, e1)) + "</span>"; i = e1; continue;
+      }
+      if (c === "/" && src.charAt(i + 1) === "*") {
+        var e2 = src.indexOf("*/", i + 2); e2 = e2 < 0 ? n : e2 + 2;
+        out += '<span class="hc">' + esc(src.slice(i, e2)) + "</span>"; i = e2; continue;
+      }
+      if (c === '"' || c === "'" || c === "\\x60") {
+        var j = i + 1;
+        while (j < n && src.charAt(j) !== c && (src.charAt(j) !== "\\n" || c === "\\x60")) { if (src.charAt(j) === "\\\\") j++; j++; }
+        j = Math.min(n, j + 1);
+        out += '<span class="hs">' + esc(src.slice(i, j)) + "</span>"; i = j; continue;
+      }
+      if (/[0-9]/.test(c) && !/[A-Za-z0-9_$]/.test(src.charAt(i - 1))) {
+        var num = src.slice(i).match(/^(?:0x[0-9a-fA-F]+|[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/);
+        if (num) { out += '<span class="hn">' + esc(num[0]) + "</span>"; i += num[0].length; continue; }
+      }
+      if (/[A-Za-z_$]/.test(c)) {
+        var w = src.slice(i).match(/^[A-Za-z_$][A-Za-z0-9_$]*/)[0];
+        if (HL_KW.test(w)) out += '<span class="hk">' + esc(w) + "</span>";
+        else if (src.charAt(i + w.length) === "(") out += '<span class="hf">' + esc(w) + "</span>";
+        else out += esc(w);
+        i += w.length; continue;
+      }
+      out += esc(c); i++;
+    }
+    return out;
+  }
+  /**
    * Mark the match inside a line.
    *
    * Module scope, not inside a render function: the code search (renderProject)
@@ -3229,6 +3626,16 @@ ${BRAND_SPRITE}
   }
 
   // a request that fails after the page is gone (a closed tab, a torn-down test window) has no one to tell
+  /**
+   * A composer menu opens upward from the card. With the Orchestrate cast
+   * showing, the card is tall enough that a 440px menu ran off the top of the
+   * window — cap it to the room actually above the card.
+   */
+  function fitMenu(m){
+    if (!m || !m.parentNode || !m.parentNode.getBoundingClientRect) return;
+    var top = m.parentNode.getBoundingClientRect().top;
+    if (top > 0) m.style.maxHeight = Math.max(180, Math.min(460, Math.floor(top - 16))) + "px";
+  }
   function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return; t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   /** Assertive screen-reader announcement for high-stakes moments (an agent
@@ -3363,9 +3770,28 @@ ${BRAND_SPRITE}
    */
   var AGENT_LABELS = { "codex": "Codex (ChatGPT)", "antigravity-cli": "Antigravity", "antigravity": "Antigravity",
     "claude-code": "Claude Code", "grok-code": "Grok", "opencode": "OpenCode" };
-  function agentLabel(kind, id){ return (kind && AGENT_LABELS[kind]) || id || kind || "agent"; }
-  /** A roster id's label, resolving its kind from the open project. */
-  function labelOf(id){ return agentLabel(kindOf(id), id); }
+  function agentLabel(kind, id){
+    // A model agent left with its generic id ("model", "model-2") is better
+    // named by the model it runs: "gemma-4-31b-it" says which one it is.
+    if (kind === "model" && /^model(-\\d+)?$/.test(String(id || ""))) {
+      var list = (state.project && state.project.agents) || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id && list[i].model) return shortModel(list[i].model).replace(/:free$/, "");
+      }
+    }
+    return (kind && AGENT_LABELS[kind]) || id || kind || "agent";
+  }
+  /**
+   * A roster id's label, resolving its kind from the open project. Before the
+   * project has loaded, an id that IS a kind (the default roster's are) still
+   * reads as its product, rather than flashing "claude-code" for a beat.
+   */
+  function labelOf(id){
+    var s = String(id || "");
+    // an ask-several thread's agent is the model it asked
+    if (s.indexOf("ask:") === 0) return shortModel(s.slice(4));
+    return agentLabel(kindOf(id) || (AGENT_LABELS[s] ? s : null), id);
+  }
   /** The quiet second line of a picker row: id and role, each only if it adds something. */
   function agentSub(a, lbl){
     var bits = [];
@@ -3515,6 +3941,11 @@ ${BRAND_SPRITE}
     clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
     trash: svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
     check: svg('<path d="M20 6 9 17l-5-5"/>'),
+    // lucide pencil / arrow-down / sparkles / chevrons-up-down
+    pencil: svg('<path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>'),
+    arrowDown: svg('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>'),
+    sparkles: svg('<path d="M9.94 14.06 7 21l-2.94-6.94L-2 11l6.94-2.94L7 1l2.94 7.06L17 11z" transform="translate(4 1) scale(.8)"/><path d="M20 3v4"/><path d="M22 5h-4"/>'),
+    updown: svg('<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>'),
     // a plan: a document with a checklist
     plan: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/><path d="m9 13 1.5 1.5L13 12"/><path d="M9 18h6"/>'),
     // lucide activity — Fleet, the pulse of every agent at once
@@ -3750,6 +4181,119 @@ ${BRAND_SPRITE}
   }
 
   // ---- event rendering -----------------------------------------------------
+  // ---- thread presentation ------------------------------------------------
+  // A reply reads like a document with a byline, not a chat bubble: who wrote
+  // it (their mark, their name, the model), when, then the words at full
+  // measure. Tool use folds into one quiet "activity" line per stretch, and a
+  // turn ends on a footer that says how long it took and what it cost.
+  function clock(ts){
+    var d = new Date(Number(ts) || Date.now());
+    var h = d.getHours(), m = d.getMinutes();
+    return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+  }
+  function durfmt(ms){
+    ms = Number(ms) || 0;
+    if (ms < 1000) return Math.max(0, Math.round(ms)) + "ms";
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + "s";
+    var m = Math.floor(s / 60);
+    return m + "m" + (s % 60 ? " " + (s % 60) + "s" : "");
+  }
+  /** The agent's mark in a small tile — its logo, or a monogram in its hue. */
+  function avatarFor(id){
+    var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
+    if (s.indexOf("ask:") === 0) k = "model";
+    if (hasBrand(k)) return '<span class="av">' + brandMark(k) + "</span>";
+    var h = hue(s);
+    return '<span class="av mono" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 22%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +
+      esc(labelOf(s).replace(/[^A-Za-z0-9]/g, "").slice(0, 1).toUpperCase() || "?") + "</span>";
+  }
+  function whoHtml(e, extra){
+    var p = e.payload || {};
+    return '<div class="who">' + avatarFor(e.agentId) + '<span class="wn">' + esc(labelOf(e.agentId)) + "</span>" +
+      (p.model ? '<span class="wm">' + esc(shortModel(p.model)) + "</span>" : "") + (extra || "") +
+      '<span class="wt" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + clock(e.ts) + "</span></div>";
+  }
+  /** Which icon a tool call gets, and which bucket it counts in. */
+  function toolKind(p){
+    var t = String(p.tool || p.name || "").toLowerCase(), s = String(p.summary || "").toLowerCase();
+    if (/bash|shell|exec|command|terminal|run_|^run/.test(t) || /^(shell|bash|\\$)[: ]/.test(s)) return "run";
+    if (/edit|write|patch|apply|notebook|create_file|str_replace/.test(t)) return "edit";
+    if (/grep|glob|search|find|ls$|list/.test(t)) return "search";
+    if (/web|fetch|browse|url/.test(t)) return "web";
+    if (/read|view|open|cat/.test(t)) return "read";
+    if (/task|agent/.test(t)) return "agent";
+    return "tool";
+  }
+  var TOOL_ICON = { run: "terminal", edit: "pencil", search: "search", web: "globe", read: "file", agent: "agents", tool: "gear" };
+  /** "Ran 2 commands, read 3 files" — what a folded stretch of tool use did. */
+  function actSummary(rows){
+    var n = { run: 0, edit: 0, search: 0, web: 0, read: 0, agent: 0, tool: 0 };
+    rows.forEach(function(r){ var k = r.getAttribute("data-tk") || "tool"; n[k] = (n[k] || 0) + 1; });
+    var out = [];
+    function one(k, verb, noun){ if (n[k]) out.push(verb + " " + n[k] + " " + noun + (n[k] === 1 ? "" : "s")); }
+    one("run", "ran", "command"); one("read", "read", "file"); one("edit", "edited", "file");
+    one("search", "searched", "time"); one("web", "fetched", "page"); one("agent", "started", "sub-agent"); one("tool", "used", "tool");
+    var s = out.join(", ");
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : rows.length + " actions";
+  }
+
+  /**
+   * An orchestrator's plan block as a plan, not a page of JSON.
+   *
+   * The engine reads the "loom" fence; people shouldn't have to. Parsed here
+   * from the already-escaped text (so it's unescaped first, then every field
+   * is escaped again on the way out). A fence that doesn't parse — a reply cut
+   * off mid-block — keeps its raw form, folded, rather than vanishing.
+   */
+  function unesc(s){
+    return String(s).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  }
+  /** A message as one line of plain words: no heading marks, fences or runs of space. */
+  function plainPreview(s, max){
+    var t = String(s || "").replace(/\\x60{3}[\\s\\S]*?(\\x60{3}|$)/g, " ").replace(/^\\s*#{1,6}\\s*/gm, "").replace(/[*_\\x60]+/g, "").replace(/\\s+/g, " ").trim();
+    return t.length > max ? t.slice(0, max - 1) + "\u2026" : t;
+  }
+  function planCardHtml(escapedCode){
+    var raw = unesc(escapedCode), data = null;
+    try { data = JSON.parse(raw); } catch (e) { data = null; }
+    var acts = data && (Array.isArray(data) ? data : data.actions);
+    var rawFold = '<details class="pcraw"><summary>Raw plan</summary><div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
+      '</button><pre class="mdcode"><code>' + escapedCode + "</code></pre></div></details>";
+    if (!Array.isArray(acts)) {
+      return '<div class="plancard bad"><div class="pch">' + ICONS.orchestra + "<span>Plan block that didn\\u2019t parse</span></div>" + rawFold + "</div>";
+    }
+    // A round with nothing in it is legal — the orchestrator is still reading.
+    if (!acts.length) return '<div class="planquiet">' + ICONS.orchestra + "<span>No tasks this round \\u2014 still looking</span></div>";
+    var spawns = [], rows = [];
+    acts.forEach(function(a){ if (a && a.type === "spawn") spawns.push(a); });
+    acts.forEach(function(a){
+      if (!a || typeof a !== "object") return;
+      if (a.type === "spawn") {
+        var meta = [];
+        if (a.dependsOn && a.dependsOn.length) meta.push("after " + a.dependsOn.map(esc).join(", "));
+        if (a.touches && a.touches.length) meta.push('<span class="pctouch">' + a.touches.slice(0, 4).map(esc).join(" \\u00b7 ") + (a.touches.length > 4 ? " \\u2026" : "") + "</span>");
+        rows.push('<li class="pcrow"><span class="pcid">' + esc(a.id || "task") + '</span><div class="pcbody"><div class="pct">' + esc(a.title || "untitled task") + "</div>" +
+          (meta.length ? '<div class="pcmeta">' + meta.join(" \\u00b7 ") + "</div>" : "") + "</div>" +
+          '<span class="pcag">' + agentGlyph(kindOf(a.agent) || (AGENT_LABELS[a.agent] ? a.agent : null), a.agent) + esc(labelOf(a.agent)) + "</span></li>");
+      } else if (a.type === "send") {
+        rows.push('<li class="pcrow note"><span class="pcid">' + esc(a.task || "") + '</span><div class="pcbody"><div class="pct">Follow-up</div><div class="pcmeta">' +
+          esc(plainPreview(a.message, 220)) + "</div></div></li>");
+      } else if (a.type === "cancel") {
+        rows.push('<li class="pcrow note"><span class="pcid">' + esc(a.task || "") + '</span><div class="pcbody"><div class="pct">Cancelled</div></div></li>');
+      } else if (a.type === "ask") {
+        rows.push('<li class="pcask">' + ICONS.help + "<span>" + esc(a.question || "") + "</span></li>");
+      } else if (a.type === "done") {
+        rows.push('<li class="pcdone">' + ICONS.check + "<span>" + esc(a.summary || "Done") + "</span></li>");
+      }
+    });
+    var head = spawns.length ? spawns.length + " task" + (spawns.length === 1 ? "" : "s") :
+      acts.some(function(a){ return a && a.type === "done"; }) ? "Wrapping up" :
+      acts.some(function(a){ return a && a.type === "ask"; }) ? "A question for you" : "Next steps";
+    return '<div class="plancard"><div class="pch">' + ICONS.orchestra + '<span>Plan</span><span class="pcn">' + esc(head) + "</span></div>" +
+      '<ol class="pclist">' + rows.join("") + "</ol>" + rawFold + "</div>";
+  }
+
   function lineFor(e){
     var p = e.payload || {};
     if (e.kind === "message") {
@@ -3764,13 +4308,15 @@ ${BRAND_SPRITE}
         // The orchestrator's brief to a worker opens every task thread. It is
         // not yours, so it must not wear your bubble.
         if (p.author === "orchestrator") {
-          return '<div class="msg agent"><div class="who" style="color:var(--thread-ink)"><span class="orchmark">' + ICONS.orchestra + "</span>orchestrator" +
-            (p.orchestra && p.orchestra.taskId ? '<span class="thinktag">' + esc(p.orchestra.taskId) + "</span>" : "") + "</div>" +
+          return '<div class="msg agent orchbriefmsg"><div class="who"><span class="av orch">' + ICONS.orchestra + '</span><span class="wn">Orchestrator</span>' +
+            (p.orchestra && p.orchestra.taskId ? '<span class="thinktag">brief \\u00b7 ' + esc(p.orchestra.taskId) + "</span>" : "") +
+            '<span class="wt">' + clock(e.ts) + "</span></div>" +
             '<div class="bubble md" style="border-left-color:var(--thread)">' + mdToHtml(p.text) +
             (tview() === "verbose" ? rawBlock(p) : "") + "</div></div>";
         }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
-        return '<div class="msg user"><div class="bubble md">' + mdToHtml(p.text) + "</div></div>";
+        return '<div class="msg user" data-ts="' + Number(e.ts || 0) + '"><div class="bubble md">' + mdToHtml(p.text) + "</div>" +
+          '<div class="mt">' + clock(e.ts) + "</div></div>";
       }
       var h = hue(e.agentId);
       // Reasoning / thinking (codex, grok, and now claude) renders as a distinct
@@ -3781,20 +4327,24 @@ ${BRAND_SPRITE}
         // Thinking folds it in; Verbose opens it.
         var tv = tview();
         if (tv === "normal") return "";
-        return '<div class="msg agent thinking"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
-          brandMark(kindOf(e.agentId)) + esc(e.agentId) + '<span class="thinktag">thinking</span></div>' +
-          '<details class="thinkbox"' + (tv === "verbose" ? " open" : "") + '><summary>reasoning</summary><div class="md">' +
+        return '<div class="msg agent thinking" data-agent="' + esc(e.agentId) + '">' +
+          '<details class="thinkbox"' + (tv === "verbose" ? " open" : "") + "><summary>" + ICONS.spark + "Thought for a moment</summary><div class=\\"md\\">" +
           mdToHtml(p.text) + "</div></details></div>";
       }
-      return '<div class="msg agent"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
-        brandMark(kindOf(e.agentId)) + esc(e.agentId) +
-        '</div><div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div></div>";
+      return '<div class="msg agent' + (p.partial ? " partial" : "") + '" data-agent="' + esc(e.agentId) + '">' +
+        whoHtml(e, p.partial ? '<span class="thinktag stopped">stopped</span>' : "") +
+        '<div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div></div>";
     }
     if (e.kind === "tool_call") {
-      return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool || p.name) +
+      var tk = toolKind(p);
+      return '<div class="tool" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + (ICONS[TOOL_ICON[tk]] || ICONS.gear) + "</span>" +
+        '<span class="tx">' + esc(p.summary || p.tool || p.name) + "</span>" +
+        (p.ok === false ? '<span class="tbad">failed</span>' : "") +
         (tview() === "verbose" ? rawBlock(p) : "") + "</div>";
     }
-    if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";
+    if (e.kind === "file_edit") {
+      return '<div class="tool" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span></div>";
+    }
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
       var enc = p.patch ? encodeURIComponent(String(p.patch)) : "";
@@ -3842,7 +4392,19 @@ ${BRAND_SPRITE}
     }
     if (e.kind === "decision") return '<div class="sys">\\u2605 ' + esc(p.text) + "</div>";
     if (e.kind === "memory_import") return '<div class="sys" style="color:var(--thread-ink)">\\u25c8 imported ' + esc(p.file) + " into the shared brain</div>";
-    if (e.kind === "error") return '<div class="sys err">\\u2717 ' + esc(p.message) + "</div>";
+    if (e.kind === "error") {
+      // An error is a card: what happened in words, who it happened to, and
+      // the provider's raw payload folded underneath — not a red wall of JSON.
+      var msg = String(p.message || "something went wrong");
+      var cutAt = msg.search(/[\\[{]/);
+      var head = (cutAt > 12 ? msg.slice(0, cutAt) : msg).replace(/[\\s:\\-\u2014(]+$/, "");
+      var rest = cutAt > 12 ? msg.slice(cutAt) : "";
+      if (head.length > 240) { rest = head.slice(240) + rest; head = head.slice(0, 240) + "\\u2026"; }
+      var detail = rest || (p.stderr ? String(p.stderr) : "");
+      return '<div class="sys err errcard"' + (e.agentId ? ' data-agent="' + esc(e.agentId) + '"' : "") + ">" +
+        '<div class="errh">' + ICONS.alert + "<span>" + (e.agentId ? "<b>" + esc(labelOf(e.agentId)) + "</b> \\u00b7 " : "") + esc(head) + "</span></div>" +
+        (detail ? '<details class="errd"><summary>Details</summary><pre>' + esc(detail.slice(0, 4000)) + "</pre></details>" : "") + "</div>";
+    }
     if (e.kind === "route_started") {
       if (p.mode === "dynamic") return '<div class="sys">\\u25b8 route "auto" started \\u2014 ' + esc(p.router) + " picks each hop</div>";
       return '<div class="sys">\\u25b8 route started: ' + esc((p.steps || []).join(" \\u2192 ")) + "</div>";
@@ -3860,7 +4422,17 @@ ${BRAND_SPRITE}
     if (e.kind === "route_resumed") return '<div class="sys">\\u25b8 route resumed</div>';
     if (e.kind === "route_completed") return '<div class="sys ok">\\u2713 route completed</div>';
     if (e.kind === "route_failed") return '<div class="sys ' + (p.aborted ? "warn" : "err") + '">\\u2298 ' + esc(p.reason || "route ended") + "</div>";
-    if (e.kind === "run_complete") return '<div class="tool">\\u2713 ' + esc(e.agentId) + " done</div>";
+    if (e.kind === "run_complete") {
+      // The end of a turn: how long it took, what it ran on, what it cost —
+      // the three things you'd otherwise go to the Observatory to find out.
+      var bits = [esc(labelOf(e.agentId))];
+      if (p.durationMs) bits.push(durfmt(p.durationMs));
+      if (p.model) bits.push(esc(shortModel(p.model)));
+      if (p.costUsd) bits.push(money(p.costUsd));
+      var tokens = Number(p.outputTokens || 0);
+      if (tokens) bits.push(tokens >= 1000 ? (tokens / 1000).toFixed(1) + "k tokens out" : tokens + " tokens out");
+      return '<div class="turnend" data-agent="' + esc(e.agentId || "") + '">' + ICONS.check + "<span>" + bits.join(" \\u00b7 ") + "</span></div>";
+    }
     if (e.kind === "orchestra") return orchLine(p);
     // An agent in "always ask" waiting on you: a card with the two answers.
     // Its answer arrives as a second event, which folds the card (append()),
@@ -3892,11 +4464,11 @@ ${BRAND_SPRITE}
   function orchLine(p){
     var ph = p.phase;
     var tone = { ok: " ok", warn: " warn", err: " err" };
-    function row(cls, html){ return '<div class="sys orch' + (cls || "") + '">' + html + "</div>"; }
+    function row(cls, html, attrs){ return '<div class="sys orch' + (cls || "") + '"' + (attrs || "") + ">" + html + "</div>"; }
     function names(list){ return (list || []).map(function(id){ return esc(labelOf(id)); }).join(", "); }
     if (ph === "started") {
       var o = p.orchestrator || {};
-      return row("", "\\ud83c\\udfbc Orchestra started \\u2014 " + esc(agentLabel(o.kind, o.agent)) + " is orchestrating " +
+      return row(" start", ICONS.orchestra + "Orchestra started \\u2014 " + esc(agentLabel(o.kind, o.agent)) + " is orchestrating " +
         (names(p.workers) || "its workers") + (p.maxParallel ? " (" + Number(p.maxParallel) + " in parallel)" : "")) +
         (p.note ? row(" warn", "\\u26a0 " + esc(p.note)) : "");
     }
@@ -3922,7 +4494,7 @@ ${BRAND_SPRITE}
       return row(tone[st[1]] || "", t.chat
         ? '<button class="tlink" type="button" data-gochat="' + esc(t.chat) + '" title="open ' + esc(t.id) + '\\u2019s thread">' +
             inner + '<span class="tlinkgo">' + ICONS.thread + "</span></button>"
-        : inner);
+        : inner, ' data-otask="' + esc((p.runId || "") + "/" + t.id) + '"');
     }
     if (ph === "task_started") return row("", "\\u25b8 " + esc(p.taskId) + " started \\u2014 " + esc(String(p.title || "").slice(0, 90)) + (p.agent ? " \\u00b7 " + esc(labelOf(p.agent)) : ""));
     if (ph === "task_finished") {
@@ -3933,11 +4505,16 @@ ${BRAND_SPRITE}
     if (ph === "reviewing") return row("", "Round " + Number(p.round || 1) + ": orchestrator reviewing results");
     if (ph === "waiting") return row(" warn", "\\u23f8 Orchestrator asks: " + esc(p.question || "what next?"));
     if (ph === "completed") {
+      // The end of a run is a result, not a status line: what it did, what it
+      // cost, where it is, and the one button that matters next.
       var n = (p.tasks || []).length;
-      return row(" ok", "\\u2713 Orchestra complete" + (p.summary ? " \\u2014 " + esc(String(p.summary).slice(0, 200)) : "") +
-        " \\u00b7 " + n + " task" + (n === 1 ? "" : "s") + " \\u00b7 " + money(p.costUsd) +
-        (p.branch ? " \\u00b7 branch " + esc(p.branch) : "") +
-        (p.runId ? ' <button class="btn xs outline" type="button" data-orch-apply="' + esc(p.runId) + '">Apply</button>' : ""));
+      var meta = [n + " task" + (n === 1 ? "" : "s"), money(p.costUsd)];
+      if (p.branch) meta.push('<code class="obr">' + esc(p.branch) + "</code>");
+      return '<div class="sys orch ok odone">' +
+        '<div class="odh">' + ICONS.check + '<b>Orchestra complete</b><span class="odm">' + meta.join(" \\u00b7 ") + "</span></div>" +
+        (p.summary ? '<div class="ods">' + esc(plainPreview(p.summary, 600)) + "</div>" : "") +
+        (p.runId ? '<div class="oda"><button class="btn xs primary" type="button" data-orch-apply="' + esc(p.runId) + '">Apply to your branch</button></div>' : "") +
+        "</div>";
     }
     if (ph === "failed") return row(" err", "\\u2717 Orchestra failed \\u2014 " + esc(p.error || "stopped") +
       (p.runId ? ' <button class="btn xs outline" type="button" data-orch-apply="' + esc(p.runId) + '">Apply what finished</button>' : ""));
@@ -3982,7 +4559,7 @@ ${BRAND_SPRITE}
       (p.from === "push" ? "merging and pushing" : "merging"));
     if (ph === "delivery_failed") return row(" err", "\\u2717 Delivery (" + esc(p.mode || "git") + ") failed \\u2014 " + esc(String(p.error || "").slice(0, 200)) +
       (p.runId ? ' <button class="btn xs outline" type="button" data-orch-deliver="' + esc(p.runId) + '">Retry delivery</button>' : ""));
-    return row("", "\\ud83c\\udfbc Orchestra \\u00b7 " + esc(String(ph || "update").replace(/_/g, " ")));
+    return row("", ICONS.orchestra + "Orchestra \\u00b7 " + esc(String(ph || "update").replace(/_/g, " ")));
   }
 
   // ---- diff parsing (changes pane + rail) ---------------------------------
@@ -4133,11 +4710,15 @@ ${BRAND_SPRITE}
       '<button type="button" role="tab" data-cmode="chat" title="talk to one agent">Chat</button>' +
       '<button type="button" role="tab" data-cmode="orch" title="one agent plans, many work in parallel">Orchestrate</button></div>' +
       '<button class="ctool iconly" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.plus + '</button>' +
+      // Who and on what, as one joined control: the agent half opens the
+      // agent picker, the model half the model picker. Two pills side by side
+      // used to read as two unrelated settings.
+      '<span class="cpick" id="cpick">' +
       '<button class="cagent" id="cagent" type="button" title="who runs this turn \\u2014 AUTO routes it, or pick an agent" aria-label="who runs this turn"><span class="cadot" id="cadot"></span><span class="can">agent</span><span class="cchev">' + ICONS.chevron + "</span></button>" +
+      '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.updown + "</span></button>" +
+      "</span>" +
       // What the chosen agent may do without asking. Drawn by drawPermChip().
       '<button class="cperm" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
-      '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.chevron + "</span></button>" +
-      '<span class="cdiv"></span>' +
       // MCPs and Skills live behind this rather than beside it: they are
       // occasional settings, and the row they were on has to hold the model,
       // the agent, the permission chip, prompts and send — on a narrow window
@@ -4196,7 +4777,8 @@ ${BRAND_SPRITE}
         "</div>" +
         '<div class="paneswrap">' +
         '<div class="mainpane" id="mainpane">' +
-        '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
+        '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
+        '<button type="button" class="jumpnew" id="jumpnew">' + ICONS.arrowDown + "Latest</button></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-observatory" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-board" style="display:none"></div>' +
@@ -4303,7 +4885,8 @@ ${BRAND_SPRITE}
         '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
         '<span class="spacer"></span>' + headerActions + "</header>" +
         '<div class="chips" id="chips"></div>' +
-        '<div class="scroll" id="pane-thread"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
+        '<div class="scroll" id="pane-thread"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
+        '<button type="button" class="jumpnew" id="jumpnew">' + ICONS.arrowDown + "Latest</button></div>" +
         composerHtml +
         "</div>";
     }
@@ -8020,21 +8603,35 @@ ${BRAND_SPRITE}
       var chips = document.getElementById("chips");
       if (!chips) return;
       var adapters = p.agents.filter(function(a){ return a.tier === "adapter"; });
-      if (state.selected === null) state.selected = p.holder || (adapters[0] && adapters[0].id) || null;
-      chips.innerHTML = adapters.map(function(a){
-        var sel = a.id === state.selected;
+      pickDefaultAgent(p, adapters);
+      chips.innerHTML = adapters.filter(function(a){ return a.enabled !== false; }).map(function(a){
+        var sel = a.id === state.selected, lbl = agentLabel(a.kind, a.id);
+        // the role only when it says something the name doesn't
+        var role = a.role && a.role !== a.id && a.role !== a.kind ? a.role : "";
         return '<button class="chip' + (sel ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
-          brandMark(a.kind) + esc(a.id) + ' <span class="role">' + esc(a.role) + (a.id === p.holder ? " \\u2190" : "") + "</span>" +
+          agentGlyph(a.kind, a.id) + esc(lbl) + (role || a.id === p.holder ? ' <span class="role">' + esc(role) + (a.id === p.holder ? " \\u2190" : "") + "</span>" : "") +
           (a.busy ? ' <span class="busy"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(chips.querySelectorAll(".chip"), function(chip){
         chip.onclick = function(){ state.selected = chip.getAttribute("data-id"); drawStatus(); };
       });
     }
+    /**
+     * Aim at the baton holder by default — unless that agent is switched off
+     * for this project, which would make the first send a refusal.
+     */
+    function pickDefaultAgent(p, adapters){
+      var usable = adapters.filter(function(a){ return a.enabled !== false; });
+      var ok = function(id){ return usable.some(function(a){ return a.id === id; }); };
+      var off = (p.agents || []).some(function(a){ return a.id === state.selected && a.enabled === false; });
+      if (state.selected === null || off) {
+        state.selected = (ok(p.holder) ? p.holder : (usable[0] && usable[0].id)) || p.holder || (adapters[0] && adapters[0].id) || null;
+      }
+    }
     function drawStatus(){
       var p = state.project; if (!p) return;
       var adapters = p.agents.filter(function(a){ return a.tier === "adapter"; });
-      if (state.selected === null) state.selected = p.holder || (adapters[0] && adapters[0].id) || null;
+      pickDefaultAgent(p, adapters);
       var nm = document.getElementById("pname"); if (nm) nm.textContent = p.name;
       var stat = document.getElementById("pstat");
       if (stat) stat.textContent = p.needsInput ? "needs input" : p.costUsd > 0 ? money(p.costUsd) : "";
@@ -8066,9 +8663,10 @@ ${BRAND_SPRITE}
         ? "this orchestra has finished \\u00b7 sending reopens it with its orchestrator"
         : planState
         ? "plan mode \\u00b7 agent writes a plan to plans/\\u2026, no code changes"
-        : state.selected && state.selected !== p.holder
-        ? "send will shift the baton to " + labelOf(state.selected)
-        : (desktop ? "click the agent to switch \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
+        // The resting state says nothing: who you're talking to is on the
+        // composer's own button, and repeating it underneath was noise.
+        : "";
+      reconcileLive(p);
       drawOrchTabDot(p.orchestra);
       updateModelLabel(); // the picker button reflects whoever's selected now
       if (!desktop) drawChips();
@@ -8173,28 +8771,283 @@ ${BRAND_SPRITE}
     }
 
     // ---- feed + live websocket ----------------------------------------------
+    // ---- scrolling ------------------------------------------------------------
+    // New content pulls the view down only if you were already at the bottom.
+    // Someone scrolled up to read shouldn't be yanked away mid-sentence; they
+    // get a "new messages" pill instead. Your own send always goes to the end.
+    var forceScroll = false;
+    function threadScroller(){ var f = document.getElementById("feed"); return f ? f.parentNode : null; }
+    function nearBottom(){
+      var sc = threadScroller();
+      return !sc || !sc.scrollHeight || sc.scrollHeight - sc.scrollTop - sc.clientHeight < 140;
+    }
+    function toBottom(){
+      var sc = threadScroller();
+      if (sc && sc.scrollHeight) sc.scrollTop = sc.scrollHeight;
+      var j = document.getElementById("jumpnew"); if (j) j.classList.remove("show");
+    }
+    function stickOrFlag(wasNear){
+      if (wasNear || forceScroll) { forceScroll = false; toBottom(); return; }
+      var j = document.getElementById("jumpnew"); if (j) j.classList.add("show");
+    }
+
+    // ---- the feed -------------------------------------------------------------
+    /** Who wrote the last thing in the feed, if it was an agent still mid-turn. */
+    function lastAuthor(feed){
+      for (var n = feed.lastElementChild; n; n = n.previousElementSibling) {
+        var c = n.classList;
+        if (c.contains("tool") || c.contains("acts") || c.contains("thinking") || c.contains("turncard")) continue;
+        if (c.contains("msg") && c.contains("agent")) return n.getAttribute("data-agent");
+        return null;
+      }
+      return null;
+    }
+    function updateActs(g){
+      var rows = g.querySelectorAll(".actlist > .tool");
+      var s = g.querySelector(".as"), l = g.querySelector(".al");
+      if (s) s.textContent = actSummary(Array.prototype.slice.call(rows));
+      var last = rows[rows.length - 1];
+      if (l) l.textContent = last ? (last.querySelector(".tx") || last).textContent : "";
+    }
+    /**
+     * Put one rendered line into the feed. Two things happen on the way in: a
+     * run of tool rows folds into one "activity" line you can open, and an
+     * agent continuing its own turn doesn't get a second byline.
+     */
+    function placeLine(feed, html, before){
+      var tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      Array.prototype.slice.call(tmp.children).forEach(function(n){
+        var last = before ? before.previousElementSibling : feed.lastElementChild;
+        if (n.classList.contains("tool")) {
+          if (last && last.classList.contains("acts")) {
+            last.querySelector(".actlist").appendChild(n); updateActs(last); return;
+          }
+          if (last && last.classList.contains("tool")) {
+            var g = document.createElement("details");
+            g.className = "acts";
+            g.innerHTML = '<summary><span class="ai">' + ICONS.chevron + '</span><span class="as"></span><span class="al"></span></summary><div class="actlist"></div>';
+            feed.insertBefore(g, last);
+            g.querySelector(".actlist").appendChild(last);
+            g.querySelector(".actlist").appendChild(n);
+            updateActs(g);
+            return;
+          }
+        }
+        // A task's status line updates where the task first appeared, rather
+        // than adding a line per state (pending, running, done…) — three rows
+        // per task read as noise, one row that changes reads as progress.
+        var tk = !before && n.getAttribute && n.getAttribute("data-otask");
+        if (tk) {
+          var olds = feed.querySelectorAll('[data-otask="' + tk.replace(/"/g, "") + '"]');
+          if (olds.length) {
+            var old = olds[olds.length - 1];
+            old.parentNode.replaceChild(n, old);
+            n.classList.add("bump");
+            return;
+          }
+        }
+        if (n.classList.contains("msg") && n.classList.contains("agent") && !n.classList.contains("thinking")) {
+          var who = n.getAttribute("data-agent");
+          var prev = before ? null : lastAuthor(feed);
+          if (who && prev === who) n.classList.add("cont");
+        }
+        if (before) feed.insertBefore(n, before); else feed.appendChild(n);
+      });
+    }
     function append(events){
       var feed = document.getElementById("feed"); if (!feed) return;
       // only the loading placeholder gets cleared — never real history
       if (feed.firstChild && feed.firstChild.className === "loader") feed.innerHTML = "";
-      var html = "", added = false;
+      var wasNear = nearBottom(), added = false;
       events.forEach(function(e){
         if (e.id <= state.lastId) return;
         state.lastId = e.id;
+        if (!state.firstId || e.id < state.firstId) state.firstId = e.id;
         if (e.kind === "needs_input" && e.payload) state.lastQuestion = e.payload.question || null;
         // An answered approval folds the card it answers. Only when that card
-        // is out of the loaded window does it need a line of its own — and
-        // the card may be in the html not yet inserted, so flush first.
+        // is out of the loaded window does it need a line of its own.
         if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
-          if (html) { feed.insertAdjacentHTML("beforeend", html); html = ""; added = true; }
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
         }
-        html += lineFor(e);
+        noteLive(e);
+        var html = lineFor(e);
+        if (!html) return;
+        placeLine(feed, html);
+        added = true;
       });
-      if (html || added) { if (html) feed.insertAdjacentHTML("beforeend", html);
-        var sc = feed.parentNode;
-        if (sc && sc.scrollHeight) sc.scrollTop = sc.scrollHeight;
-        else window.scrollTo(0, document.body.scrollHeight); }
+      drawEmpty();
+      if (added) stickOrFlag(wasNear);
+    }
+
+    // ---- live: a reply being written, and who is working ----------------------
+    // The daemon streams replies as they're typed (a "stream" frame, never
+    // logged) and the finished message lands as an event afterwards. Between
+    // your send and that message, the thread shows who's on it, for how long,
+    // and what they're doing — instead of fifteen seconds of nothing.
+    var live = {};
+    var TERMINAL = { run_complete: 1, error: 1 };
+    function liveHost(){ return document.getElementById("feedlive"); }
+    function liveFor(agentId){
+      var L = live[agentId];
+      if (L && L.el && L.el.parentNode) return L;
+      var host = liveHost(); if (!host) return null;
+      var el = document.createElement("div");
+      el.className = "livebox";
+      el.setAttribute("data-live", agentId);
+      host.appendChild(el);
+      L = live[agentId] = { el: el, text: "", think: "", act: "", since: Date.now(), touched: Date.now(), raf: 0 };
+      paintLive(agentId);
+      return L;
+    }
+    function endLive(agentId){
+      var L = live[agentId];
+      if (L) { if (L.el && L.el.parentNode) L.el.parentNode.removeChild(L.el); if (L.raf) cancelAnimationFrame(L.raf); }
+      delete live[agentId];
+    }
+    function clearLive(){ Object.keys(live).forEach(endLive); var h = liveHost(); if (h) h.innerHTML = ""; }
+    function paintLiveState(agentId){
+      var L = live[agentId]; if (!L) return;
+      var st = L.el.querySelector(".lstate"); if (!st) return;
+      var secs = Math.floor((Date.now() - L.since) / 1000);
+      var what = L.text ? "Writing" : L.think ? "Thinking" : L.act ? L.act : "Working";
+      st.innerHTML = '<span class="shimmer">' + esc(what) + "</span>" + (secs >= 1 ? '<span class="lsecs">' + durfmt(secs * 1000) + "</span>" : "");
+    }
+    function paintLive(agentId){
+      var L = live[agentId]; if (!L) return;
+      var feed = document.getElementById("feed");
+      if (!L.text) {
+        // Nothing written yet: one quiet line, not an empty message.
+        if (L.el.className !== "livebox bar") {
+          L.el.className = "livebox bar";
+          L.el.innerHTML = '<span class="lav">' + avatarFor(agentId) + '<i class="lring"></i></span><span class="lname">' + esc(labelOf(agentId)) + '</span><span class="lstate"></span>';
+        }
+        paintLiveState(agentId);
+        return;
+      }
+      if (L.el.className.indexOf("livebox msgmode") !== 0) {
+        L.el.className = "livebox msgmode";
+        L.el.innerHTML = '<div class="msg agent live' + (feed && lastAuthor(feed) === agentId ? " cont" : "") + '" data-agent="' + esc(agentId) + '">' +
+          whoHtml({ agentId: agentId, ts: Date.now(), payload: {} }, '<span class="lstate"></span>') +
+          '<div class="bubble md lbody"></div></div>';
+      }
+      var body = L.el.querySelector(".lbody");
+      body.innerHTML = mdToHtml(L.text);
+      // the caret sits at the end of the last line written, not below it
+      var tail = body;
+      while (tail.lastElementChild && !/^(PRE|CODE|TABLE|svg)$/.test(tail.lastElementChild.tagName)) tail = tail.lastElementChild;
+      tail.insertAdjacentHTML("beforeend", '<span class="caret"></span>');
+      paintLiveState(agentId);
+    }
+    function schedulePaint(agentId, wasNear){
+      var L = live[agentId]; if (!L || L.raf) return;
+      L.raf = requestAnimationFrame(function(){ L.raf = 0; paintLive(agentId); stickOrFlag(wasNear); });
+    }
+    /** Keep the live view in step with the logged events as they arrive. */
+    // Turns the history replay saw start and not end. Replay never draws a
+    // live line itself: whether a turn is STILL running is a question for the
+    // agent's busy flag (or the run's state), answered once replay is done.
+    var openTurns = {};
+    function noteLive(e){
+      if (!e.agentId) return;
+      var p = e.payload || {}, id = e.agentId;
+      var ends = TERMINAL[e.kind] || e.kind === "needs_input" || (e.kind === "status" && (p.state === "interrupted" || p.state === "stopped"));
+      var starts = (e.kind === "status" && p.state === "turn_started") || e.kind === "tool_call" || e.kind === "file_edit" || e.kind === "message";
+      if (!historyLoaded) {
+        if (ends) delete openTurns[id];
+        else if (starts) openTurns[id] = { since: Number(e.ts) || Date.now(), act: e.kind === "tool_call" ? String(p.summary || p.tool || "") : "" };
+        return;
+      }
+      if (ends) {
+        endLive(id);
+        // Stop turns back into Send the moment the turn ends, not a poll later.
+        clearTimeout(state.endRefresh);
+        state.endRefresh = setTimeout(function(){ if (state.pid === pid) refresh(); }, 150);
+        return;
+      }
+      if (!starts) return;
+      var L = liveFor(id); if (!L) return;
+      L.touched = Date.now();
+      if (e.kind === "message") { if (p.reasoning) L.think = ""; else L.text = ""; }
+      if (e.kind === "tool_call") L.act = String(p.summary || p.tool || p.name || "Working").replace(/\\s+/g, " ").slice(0, 80);
+      if (e.kind === "file_edit") L.act = "Editing " + String(p.path || "").split("/").pop();
+      paintLive(id);
+    }
+    function onStreamFrame(f){
+      if ((f.chat || "main") !== chatId || !f.agentId || !f.text) return;
+      var wasNear = nearBottom();
+      var L = liveFor(f.agentId); if (!L) return;
+      if (f.reasoning) L.think += f.text; else L.text += f.text;
+      L.touched = Date.now();
+      schedulePaint(f.agentId, wasNear);
+    }
+    /**
+     * Drop live lines the log will never close: an agent that died with the
+     * daemon, or a turn whose end arrived while this view was elsewhere. Only
+     * for plain threads — an orchestra worker runs as a copy of its roster
+     * agent, so the roster's busy flag says nothing about it.
+     */
+    /**
+     * Is this thread an orchestra's, and is its work going right now? The
+     * run's own thread is going while the orchestrator plans or reviews; a
+     * task thread while its task runs. null: not an orchestra thread at all.
+     */
+    function orchThreadGoing(p){
+      var s = p && p.orchestra;
+      if (!s) return null;
+      if (s.chat === chatId) return /^(starting|planning|reviewing|running)$/.test(String(s.status || ""));
+      var t = (s.threads || []).filter(function(x){ return x && x.chat === chatId; })[0];
+      return t ? t.status === "running" : null;
+    }
+    function reconcileLive(p){
+      var now = Date.now(), agents = (p && p.agents) || [];
+      var og = orchThreadGoing(p), orchThread = og !== null;
+      // Turns the replay left open become live lines only if they really are
+      // still going: the agent says it's busy, or this thread's run is live.
+      Object.keys(openTurns).forEach(function(id){
+        var a = agents.filter(function(x){ return x.id === id; })[0];
+        var going = orchThread ? og : !!(a && a.busy);
+        if (going && !live[id]) {
+          var L = liveFor(id);
+          if (L) { L.since = openTurns[id].since; L.act = openTurns[id].act.slice(0, 80); paintLive(id); }
+        }
+        delete openTurns[id];
+      });
+      Object.keys(live).forEach(function(id){
+        var L = live[id], a = agents.filter(function(x){ return x.id === id; })[0];
+        if (orchThread ? (og === false && now - L.touched > 6000) : (a && !a.busy && now - L.touched > 6000)) endLive(id);
+        else if (now - L.touched > 20 * 60 * 1000) endLive(id);
+      });
+    }
+    state.timers.push(setInterval(function(){ Object.keys(live).forEach(paintLiveState); }, 1000));
+
+    // ---- empty thread ---------------------------------------------------------
+    var SUGGEST = [
+      ["Explain this codebase", "Give me a tour of this codebase: what it does, how it\\u2019s organised, and where the important parts live."],
+      ["Find a bug", "Look through the code for a real bug, explain it, and fix it with a test."],
+      ["Write tests", "Find the least-tested important code and write good tests for it."],
+      ["Review my changes", "Review the uncommitted changes in this project and tell me what you\\u2019d change."],
+    ];
+    function drawEmpty(){
+      var feed = document.getElementById("feed"); if (!feed) return;
+      var has = feed.querySelector(".msg,.sys,.tool,.acts,.turncard,.nicard,.apcard,.handoff,.turnend,.orchbrief,.plancard");
+      var hero = document.getElementById("threadempty");
+      if (has || (feed.firstChild && feed.firstChild.className === "loader") || Object.keys(live).length) { if (hero) hero.remove(); return; }
+      if (hero) return;
+      var p = state.project || {};
+      var who = state.selected || p.holder || "";
+      feed.insertAdjacentHTML("beforeend",
+        '<div class="threadempty" id="threadempty"><div class="teav">' + (who ? avatarFor(who) : '<span class="av">' + ICONS.chat + "</span>") + "</div>" +
+        '<div class="tet">What should we work on?</div>' +
+        '<div class="tes">' + (who ? esc(labelOf(who)) + " is ready in " : "Ready in ") + "<b>" + esc(p.name || "this project") + "</b>. Every agent here shares one memory.</div>" +
+        '<div class="tesug">' + SUGGEST.map(function(s, i){ return '<button type="button" class="tesb" data-sug="' + i + '">' + esc(s[0]) + "</button>"; }).join("") + "</div></div>");
+      Array.prototype.forEach.call(feed.querySelectorAll("[data-sug]"), function(b){
+        b.onclick = function(){
+          var box = document.getElementById("box"); if (!box) return;
+          box.value = SUGGEST[Number(b.getAttribute("data-sug"))][1];
+          autosizeBox(); box.focus();
+        };
+      });
     }
 
     // Live frames that race the history fetch wait their turn, so an early
@@ -8204,20 +9057,69 @@ ${BRAND_SPRITE}
       historyLoaded = true;
       if (pendingWs.length) { append(pendingWs); pendingWs = []; }
     }
+    var PAGE = 80;
+    function drawEarlier(more){
+      var feed = document.getElementById("feed"); if (!feed) return;
+      var old = document.getElementById("loadearlier"); if (old) old.remove();
+      if (!more) return;
+      feed.insertAdjacentHTML("afterbegin", '<button type="button" class="loadearlier" id="loadearlier">Load earlier messages</button>');
+      document.getElementById("loadearlier").onclick = loadEarlier;
+    }
+    /** Page the thread backwards, keeping what you were looking at in place. */
+    function loadEarlier(){
+      var feed = document.getElementById("feed"), btn = document.getElementById("loadearlier");
+      if (!feed || !state.firstId) return;
+      if (btn) { btn.disabled = true; btn.textContent = "Loading\\u2026"; }
+      api("/api/projects/" + pid + "/events?limit=" + PAGE + "&before=" + state.firstId + "&chat=" + encodeURIComponent(chatId))
+        .then(function(j){
+          var evs = j.events || [], sc = threadScroller();
+          var fromBottom = sc ? sc.scrollHeight - sc.scrollTop : 0;
+          var anchor = btn ? btn.nextElementSibling : feed.firstElementChild;
+          var hero = document.getElementById("threadempty"); if (hero) hero.remove();
+          evs.forEach(function(e){
+            if (!state.firstId || e.id < state.firstId) state.firstId = e.id;
+            var html = lineFor(e);
+            if (html) placeLine(feed, html, anchor);
+          });
+          drawEarlier(evs.length >= PAGE);
+          if (sc) sc.scrollTop = sc.scrollHeight - fromBottom;
+        })
+        .catch(function(err){ toast(err.message); if (btn) { btn.disabled = false; btn.textContent = "Load earlier messages"; } });
+    }
     // Reading the thread again from scratch. Changing the transcript level
     // changes what every past line renders as, so there is nothing to patch —
     // the whole feed is re-read rather than re-styled.
     function loadHistory(){
       var feed = document.getElementById("feed");
       if (feed) feed.innerHTML = '<div class="loader"></div>';
-      state.lastId = 0;
-      return api("/api/projects/" + pid + "/events?limit=60&chat=" + encodeURIComponent(chatId))
-        .then(function(j){ append(j.events || []); flushPending(); })
+      state.lastId = 0; state.firstId = 0;
+      clearLive();
+      openTurns = {};
+      historyLoaded = false;
+      return api("/api/projects/" + pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(chatId))
+        .then(function(j){
+          var evs = j.events || [];
+          forceScroll = true;
+          append(evs);
+          if (!evs.length) { var f = document.getElementById("feed"); if (f && f.firstChild && f.firstChild.className === "loader") f.innerHTML = ""; drawEmpty(); }
+          drawEarlier(evs.length >= PAGE);
+          flushPending();
+          if (state.project) reconcileLive(state.project);
+          toBottom();
+        })
         .catch(function(err){ toast(err.message); flushPending(); });
     }
     // The transcript-level menu lives in the shell's scope, and this doesn't.
     state.redrawFeed = loadHistory;
     loadHistory();
+    (function(){
+      var j = document.getElementById("jumpnew"), sc = threadScroller();
+      if (j) j.onclick = toBottom;
+      if (sc) sc.addEventListener("scroll", function(){
+        if (!nearBottom()) return;
+        var jj = document.getElementById("jumpnew"); if (jj) jj.classList.remove("show");
+      }, { passive: true });
+    })();
     refresh();
     state.timers.push(setInterval(refresh, 4000));
     if (desktop) {
@@ -8256,6 +9158,8 @@ ${BRAND_SPRITE}
           if (frame.type === "team") { onTeamFrame(frame); return; }
           // the prompt queue changed \u2014 sent, edited, reordered, paused
           if (frame.type === "queue") { onQueueFrame(frame); return; }
+          // a reply as it's being written (not logged; the message follows)
+          if (frame.type === "stream") { if (historyLoaded) onStreamFrame(frame); return; }
           // a dev server started, stopped, crashed, or printed a line
           if (frame.type === "server") { onServerFrame(frame); return; }
           // an agent changed files while a preview is open: show the new page
@@ -8312,6 +9216,9 @@ ${BRAND_SPRITE}
       box.value = ""; autosizeBox(); attach = []; drawAttach();
       var p = state.project || {};
       var plan = planState;
+      // what you just sent should be on screen, wherever you'd scrolled to
+      forceScroll = true;
+      var hero = document.getElementById("threadempty"); if (hero) hero.remove();
 
       // An orchestra's own thread talks to its orchestrator: a reply answers
       // its question, or steers the run mid-flight (and reopens a finished
@@ -8377,7 +9284,13 @@ ${BRAND_SPRITE}
         // into the chat you're looking at — the agent's reply comes back here
         return api("/api/projects/" + pid + "/messages", { method: "POST",
           body: JSON.stringify({ text: full, agentId: (state.auto ? undefined : state.selected) || undefined, chat: chatId, plan: plan || undefined }) });
-      }).then(refresh).catch(function(err){ toast(err.message); });
+      }).then(function(){
+        // Show who's on it straight away; the first thing the agent logs or
+        // types takes the line over from here.
+        var who = (!state.auto && state.selected) || (state.project && state.project.holder) || p.holder;
+        if (who && historyLoaded) { liveFor(who); drawEmpty(); stickOrFlag(true); }
+        return refresh();
+      }).catch(function(err){ toast(err.message); });
     }
 
     // ---- the prompt queue --------------------------------------------------
@@ -8684,7 +9597,7 @@ ${BRAND_SPRITE}
       if (!items.length) { closeMenu(); return; }
       menuState.items = items; if (menuState.sel == null) menuState.sel = 0;
       if (menuState.sel >= items.length) menuState.sel = items.length - 1;
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu";
       m.innerHTML = (head ? '<div class="cmhead">' + esc(head) + "</div>" : "") +
         items.map(function(it, i){
           return '<div class="cmi' + (i === menuState.sel ? " sel" : "") + '" data-i="' + i + '">' +
@@ -8786,8 +9699,30 @@ ${BRAND_SPRITE}
         .catch(function(){ closeMenu(); });
     }
 
+    /**
+     * What a model is for, in a few words — the pickers used to be a column of
+     * bare slugs, and "which one do I want" was left to memory. Only claims we
+     * can stand behind: the families' published positioning, nothing measured.
+     */
+    function modelBlurb(m){
+      var s = String(m || "").toLowerCase();
+      if (/opus/.test(s)) return "most capable \\u00b7 deepest reasoning";
+      if (/sonnet/.test(s)) return "balanced \\u00b7 fast and capable";
+      if (/haiku/.test(s)) return "fastest \\u00b7 lightest";
+      if (/fable/.test(s)) return "frontier \\u00b7 long, hard tasks";
+      if (/mini|flash|lite|nano|small/.test(s)) return "fast \\u00b7 inexpensive";
+      if (/:free$/.test(s)) return "free tier";
+      if (/codex/.test(s)) return "tuned for coding";
+      if (/pro|max|large|ultra/.test(s)) return "high capability";
+      return "";
+    }
+    /** "anthropic/claude-sonnet-4" → name "claude-sonnet-4", from "anthropic". */
+    function modelParts(m){
+      var v = String(m || ""), cut = v.lastIndexOf("/");
+      return cut > 0 ? { name: v.slice(cut + 1), from: v.slice(0, cut) } : { name: v, from: "" };
+    }
     function openModelMenu(who){
-      // Orchestrate has no "selected" agent \u2014 it has a cast \u2014 so the caller
+      // Orchestrate has no "selected" agent — it has a cast — so the caller
       // names the one it means. Chat still means whoever the composer is aimed at.
       var agentId = who || state.selected;
       var p = state.project || {};
@@ -8795,17 +9730,30 @@ ${BRAND_SPRITE}
       if (!cur || cur.tier === "bridge") { toast("pick an adapter first \\u2014 bridges choose their own model"); return; }
       var m = document.getElementById("cmenu"); if (!m) return;
       menuState = { kind: "modelmenu", agent: agentId, at: 0, sel: 0, items: [] };
-      m.style.display = "block"; m.className = "cmenu";
-      m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + '</div>' +
-        '<input class="cmsearch" id="cmsearch" placeholder="search real models\\u2026" spellcheck="false" autocomplete="off">' +
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu picker";
+      m.innerHTML = '<div class="cmhead">' + agentGlyph(cur.kind, cur.id) + "<span>Model for " + esc(agentLabel(cur.kind, cur.id)) + "</span></div>" +
+        '<div class="cmsearchwrap">' + ICONS.search + '<input class="cmsearch" id="cmsearch" placeholder="Search models\\u2026" spellcheck="false" autocomplete="off"></div>' +
         '<div class="cmlist" id="cmlist">' + LOADER + '</div>';
       setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
       var active = cur.model || "";
-      var allModels = [];
+      var allModels = [], rowsNow = [], hi = 0;
       function choose(val){
         if (val === "__custom__"){ closeMenu(); var typed = window.prompt("Model for " + cur.id + " (blank = default):", active); if (typed === null) return; val = typed.trim(); }
         else closeMenu();
+        if (val === active || (cur.kind === "model" && active && val.slice(val.indexOf("/") + 1) === active)) return;
+        // A model agent's list spans every provider, each id led by the one
+        // it's from; send that apart, so the provider gets a name it knows.
+        if (cur.kind === "model" && allModels.indexOf(val) >= 0 && val.indexOf("/") > 0) {
+          setModel(agentId, val.slice(val.indexOf("/") + 1), val.slice(0, val.indexOf("/")));
+          return;
+        }
         setModel(agentId, val);
+      }
+      function mark(){
+        var list = document.getElementById("cmlist"); if (!list) return;
+        Array.prototype.forEach.call(list.querySelectorAll("[data-mv]"), function(r, i){ r.classList.toggle("sel", i === hi); });
+        var on = list.querySelectorAll("[data-mv]")[hi];
+        if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
       }
       // The real models the tool itself reports (opencode ~500 across providers,
       // grok its own); codex/claude are their shipped sets.
@@ -8814,20 +9762,40 @@ ${BRAND_SPRITE}
         var shown = f ? allModels.filter(function(mm){ return mm.toLowerCase().indexOf(f) >= 0; }) : allModels;
         var cap = 200; // don't paint 500 rows — the search narrows it
         var head = cur.kind === "model" ? []
-          : [{ label: "Default", sub: cur.kind + "'s own choice", value: "" }];
-        if (!f) head.push({ label: "Custom\\u2026", value: "__custom__", plus: true });
-        var rows = head.concat(shown.slice(0, cap).map(function(mm){ return { label: mm, value: mm }; }));
+          : [{ label: "Default", sub: "whatever " + agentLabel(cur.kind, cur.id) + " picks", value: "" }];
+        // Free models first: on a provider's free tier they cost nothing, and
+        // "which of these 300 is free" shouldn't take a search to answer.
+        var free = shown.filter(function(mm){ return /:free$/.test(mm); });
+        var paid = shown.filter(function(mm){ return !/:free$/.test(mm); });
+        var ordered = free.concat(paid).slice(0, cap);
+        rowsNow = head.concat(ordered.map(function(mm){ return { label: mm, value: mm, group: /:free$/.test(mm) ? "Free" : (free.length ? "Paid" : "") }; }));
+        if (!f) rowsNow.push({ label: "Custom model\\u2026", value: "__custom__", plus: true });
+        // A model agent stores "vendor/model" apart from its provider, while
+        // the list leads with the provider: match either way.
+        var isCur = function(v){ return !!v && (v === active || (cur.kind === "model" && !!active && v.slice(v.indexOf("/") + 1) === active)); };
+        hi = Math.max(0, rowsNow.map(function(r){ return isCur(r.value) || (r.value === "" && active === ""); }).indexOf(true));
+        if (f) hi = 0;
         var list = document.getElementById("cmlist"); if (!list) return;
-        list.innerHTML = rows.map(function(it){
-          var tick = it.value === active;
-          return '<div class="cmi" data-mv="' + esc(String(it.value)) + '"><span class="ic">' + (it.plus ? ICONS.plus : ICONS.gear) + '</span><span>' +
-            esc(it.label) + '</span>' + (tick ? '<span class="tick">' + ICONS.info + '</span>' : (it.sub ? '<span class="sub">' + esc(it.sub) + '</span>' : '')) + '</div>';
+        var lastGroup = "";
+        list.innerHTML = rowsNow.map(function(it){
+          var tick = !it.plus && (isCur(it.value) || (it.value === "" && active === ""));
+          var gh = it.group && it.group !== lastGroup ? '<div class="cmgroup">' + esc(it.group) + "</div>" : "";
+          if (it.group) lastGroup = it.group;
+          var parts = it.plus || it.value === "" ? { name: it.label, from: "" } : modelParts(it.label);
+          var blurb = it.sub || (it.plus ? "type any id the tool accepts" : modelBlurb(it.value));
+          return gh + '<div class="cmi mrow' + (tick ? " cur" : "") + '" data-mv="' + esc(String(it.value)) + '">' +
+            '<span class="ic">' + (it.plus ? ICONS.plus : it.value === "" ? ICONS.sparkles : '<span class="mdot"></span>') + "</span>" +
+            '<span class="mtx"><span class="mnm">' + esc(parts.name) + (parts.from ? '<span class="mfrom">' + esc(parts.from) + "</span>" : "") + "</span>" +
+            (blurb ? '<span class="mbl">' + esc(blurb) + "</span>" : "") + "</span>" +
+            (tick ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</div>";
         }).join("") +
           (shown.length > cap ? '<div class="cmmore">' + (shown.length - cap) + ' more \\u2014 keep typing to narrow</div>' : "") +
-          (f && !shown.length ? '<div class="cmmore">no match \\u00b7 Enter to use \\u201c' + esc(filter) + '\\u201d</div>' : "");
-        Array.prototype.forEach.call(list.querySelectorAll("[data-mv]"), function(row){
+          (f && !shown.length ? '<div class="cmmore">No match \\u00b7 Enter uses \\u201c' + esc(filter) + '\\u201d as typed</div>' : "");
+        Array.prototype.forEach.call(list.querySelectorAll("[data-mv]"), function(row, i){
           row.onmousedown = function(ev){ ev.preventDefault(); choose(row.getAttribute("data-mv")); };
+          row.onmousemove = function(){ if (hi !== i) { hi = i; mark(); } };
         });
+        mark();
       }
       api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agentId) + "/models").then(function(j){
         allModels = (j && j.models) || [];
@@ -8835,34 +9803,123 @@ ${BRAND_SPRITE}
         // ship" are different claims, and only one of them goes stale silently.
         var mn = document.getElementById("cmenu");
         if (mn && j && j.source){
-          var note = j.source === "cli" ? "asked " + esc(cur.kind || "the tool")
-            : j.source === "api" ? "asked every provider with a key \\u2014 " + (j.count || 0) + " models"
-            : j.source === "builtin" ? esc(cur.kind || "this tool") + " can\\u2019t list models \\u2014 these are its documented aliases"
-            : "no model list for this agent";
+          var note = j.source === "cli" ? "Listed by " + esc(agentLabel(cur.kind, cur.id)) + " itself"
+            : j.source === "api" ? "From every provider with a key \\u00b7 " + (j.count || 0) + " models"
+            : j.source === "builtin" ? esc(agentLabel(cur.kind, cur.id)) + " can\\u2019t list its models \\u2014 these are its documented aliases"
+            : "No model list for this agent";
           var ft = document.createElement("div");
           ft.className = "cmfoot"; ft.textContent = note;
           mn.appendChild(ft);
         }
         var sb = document.getElementById("cmsearch");
         if (sb){
-          var head0 = document.getElementById("cmlist");
           sb.oninput = function(){ render(sb.value); };
-          sb.onkeydown = function(e){ if (e.key === "Enter"){ var v = sb.value.trim(); if (v) choose(v); } if (e.key === "Escape"){ closeMenu(); } };
+          sb.onkeydown = function(e){
+            if (e.key === "ArrowDown") { e.preventDefault(); hi = Math.min(rowsNow.length - 1, hi + 1); mark(); return; }
+            if (e.key === "ArrowUp") { e.preventDefault(); hi = Math.max(0, hi - 1); mark(); return; }
+            if (e.key === "Enter"){
+              e.preventDefault();
+              var v = sb.value.trim();
+              var match = rowsNow[hi];
+              if (match && (!v || rowsNow.length)) choose(match.value);
+              else if (v) choose(v);
+              return;
+            }
+            if (e.key === "Escape"){ e.preventDefault(); closeMenu(); var box = document.getElementById("box"); if (box) box.focus(); }
+          };
           sb.focus();
         }
         render("");
       }).catch(function(err){
-        var list = document.getElementById("cmlist"); if (list) list.innerHTML = '<div class="cmmore">could not list models</div>';
+        var list = document.getElementById("cmlist"); if (list) list.innerHTML = '<div class="cmmore">Couldn\\u2019t list models \\u2014 ' + esc(err && err.message || "") + "</div>";
         clog("error", "models", "list failed: " + (err && err.message), err && err.stack);
       });
     }
 
     /**
-     * Who this chat talks to. The agent chip in the composer was a dead label —
-     * you could see "opencode" but not change it without hunting the sidebar.
-     * Now it's a real picker: every agent in the project, brand mark and role,
-     * the current one ticked. Selecting one aims the composer (state.selected);
-     * send then hands it the baton.
+     * Ask several models the same thing, and read the answers side by side —
+     * a thread each (POST /ask). It lived only in the CLI; this is the same
+     * call from the composer: tick the models, and what's in the box goes to
+     * all of them. Free models first, and the ticks are remembered.
+     */
+    function openAskSeveral(){
+      var m = document.getElementById("cmenu"); if (!m) return;
+      menuState = { kind: "askmenu", at: 0, sel: 0, items: [] };
+      var picked = state.askPicked || (state.askPicked = {});
+      m.style.display = "block"; m.className = "cmenu picker askpick"; fitMenu(m);
+      m.innerHTML = '<div class="cmhead">' + ICONS.sparkles + "<span>Ask several models</span></div>" +
+        '<div class="cmsearchwrap">' + ICONS.search + '<input class="cmsearch" id="asksearch" placeholder="Search models\u2026" spellcheck="false" autocomplete="off"></div>' +
+        '<div class="cmlist" id="asklist">' + LOADER + "</div>" +
+        '<div class="askfoot"><span id="askn" class="askn"></span><button class="btn xs primary" id="askgo" type="button" disabled>Ask</button></div>';
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      var all = [];
+      function count(){ return Object.keys(picked).filter(function(k){ return picked[k]; }).length; }
+      function foot(){
+        var n = count(), go = document.getElementById("askgo"), nn = document.getElementById("askn");
+        if (nn) nn.textContent = n ? n + " model" + (n === 1 ? "" : "s") + " \u00b7 one thread each" : "Tick the models to ask";
+        if (go) { go.disabled = !n; go.textContent = n ? "Ask " + n : "Ask"; }
+      }
+      function render(f){
+        f = String(f || "").trim().toLowerCase();
+        var shown = all.filter(function(x){ return !f || x.key.toLowerCase().indexOf(f) >= 0; });
+        shown.sort(function(a, b){ return (b.free - a.free) || (picked[b.key] ? 1 : 0) - (picked[a.key] ? 1 : 0); });
+        var list = document.getElementById("asklist"); if (!list) return;
+        var cap = 150, lastG = "";
+        list.innerHTML = shown.slice(0, cap).map(function(x){
+          var g = x.free ? "Free" : "Paid", gh = g !== lastG ? '<div class="cmgroup">' + g + "</div>" : "";
+          lastG = g;
+          return gh + '<div class="cmi mrow askrow' + (picked[x.key] ? " cur" : "") + '" data-ak="' + esc(x.key) + '">' +
+            '<span class="cwon">' + (picked[x.key] ? ICONS.check : "") + "</span>" +
+            '<span class="mtx"><span class="mnm">' + esc(x.id.split("/").pop()) + '<span class="mfrom">' + esc(x.provider + (x.id.indexOf("/") > 0 ? " \u00b7 " + x.id.split("/")[0] : "")) + "</span></span>" +
+            (modelBlurb(x.id) ? '<span class="mbl">' + esc(modelBlurb(x.id)) + "</span>" : "") + "</span></div>";
+        }).join("") + (shown.length > cap ? '<div class="cmmore">' + (shown.length - cap) + " more \u2014 keep typing to narrow</div>" : "") +
+          (!shown.length ? '<div class="cmmore">' + (all.length ? "No match" : "No provider has a key yet \u2014 add one in Settings") + "</div>" : "");
+        Array.prototype.forEach.call(list.querySelectorAll("[data-ak]"), function(r){
+          r.onmousedown = function(ev){
+            ev.preventDefault();
+            var k = r.getAttribute("data-ak");
+            picked[k] = !picked[k];
+            r.classList.toggle("cur", !!picked[k]);
+            r.querySelector(".cwon").innerHTML = picked[k] ? ICONS.check : "";
+            foot();
+          };
+        });
+        foot();
+      }
+      var go = document.getElementById("askgo");
+      if (go) go.onmousedown = function(ev){
+        ev.preventDefault();
+        var box = document.getElementById("box");
+        var text = box ? box.value.trim() : "";
+        var keys = Object.keys(picked).filter(function(k){ return picked[k]; });
+        if (!text) { toast("type the question first, then pick the models"); if (box) box.focus(); return; }
+        if (!keys.length) return;
+        go.disabled = true; go.textContent = "Asking\u2026";
+        api("/api/projects/" + pid + "/ask", { method: "POST", body: JSON.stringify({ text: text, models: keys }) })
+          .then(function(j){
+            closeMenu();
+            if (box) { box.value = ""; autosizeBox(); }
+            var asked = (j && j.asked) || [];
+            toast("asked " + asked.length + " model" + (asked.length === 1 ? "" : "s") + " \u2014 a thread each");
+            if (state.refreshShell) state.refreshShell();
+            if (asked[0] && asked[0].chat && state.setChat) state.setChat(pid, asked[0].chat);
+          })
+          .catch(function(err){ toast(err.message); go.disabled = false; foot(); });
+      };
+      api("/api/models").then(function(j){
+        all = ((j && j.models) || []).map(function(x){ return { key: x.provider + "/" + x.id, id: x.id, provider: x.provider, free: x.free ? 1 : 0 }; });
+        var sb = document.getElementById("asksearch");
+        if (sb) { sb.oninput = function(){ render(sb.value); }; sb.focus(); }
+        render("");
+      }).catch(function(err){
+        var list = document.getElementById("asklist"); if (list) list.innerHTML = '<div class="cmmore">Couldn\u2019t list models \u2014 ' + esc(err.message || "") + "</div>";
+      });
+    }
+
+    /**
+     * Who this chat talks to: every agent in the project with its mark, the
+     * model it's on and what it may do, the current one ticked. Selecting one
+     * aims the composer (state.selected); send then hands it the baton.
      */
     function openAgentMenu(){
       var p = state.project || {};
@@ -8870,31 +9927,44 @@ ${BRAND_SPRITE}
       if (!agents.length) { toast("no agents in this project yet"); return; }
       menuState = { kind: "agentmenu", at: 0, sel: 0, items: [] };
       var m = document.getElementById("cmenu"); if (!m) return;
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu picker";
+      function row(a, i){
+        var tick = !state.auto && a.id === state.selected;
+        var lbl = agentLabel(a.kind, a.id);
+        var bits = [];
+        // the roster id, only when it tells two agents apart ("antigravity"
+        // for kind "antigravity-cli" doesn't)
+        if (a.id !== lbl && a.id !== a.kind && String(a.kind || "").indexOf(a.id) !== 0) bits.push(a.id);
+        if (a.tier === "bridge") bits.push("drives its own window");
+        else {
+          bits.push(a.model ? shortModel(a.model) : (a.kind === "model" ? "no model yet" : "default model"));
+          var pm = permOf(a); if (pm) bits.push(PERM_NAMES[pm] || pm);
+        }
+        return '<div class="cmi arow2' + (tick ? " cur" : "") + '" data-ai="' + i + '"><span class="ic">' + agentGlyph(a.kind, a.id, "brand lg") + "</span>" +
+          '<span class="mtx"><span class="mnm">' + esc(lbl) + (a.id === p.holder ? '<span class="mfrom">baton</span>' : "") + '</span><span class="mbl">' + esc(bits.join(" \\u00b7 ")) + "</span></span>" +
+          (a.busy ? '<span class="cmbusy">working</span>' : "") +
+          (tick ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</div>";
+      }
+      var live = agents.map(function(a, i){ return { a: a, i: i }; }).filter(function(x){ return x.a.enabled !== false; });
+      var adapters = live.filter(function(x){ return x.a.tier !== "bridge"; });
+      var bridges = live.filter(function(x){ return x.a.tier === "bridge"; });
       // AUTO leads the list — it's the "let the system choose" option, not an agent.
-      m.innerHTML = '<div class="cmhead">who runs this turn</div>' +
-        '<div class="cmi cmauto' + (state.auto ? " on" : "") + '" data-auto="1"><span class="ic"><span class="autodot"></span></span><span>AUTO</span>' +
-          (state.auto ? '<span class="tick">' + ICONS.info + "</span>" : '<span class="sub">smart routing</span>') + "</div>" +
-        agents.map(function(a, i){
-          var tick = !state.auto && a.id === state.selected;
-          var lbl = agentLabel(a.kind, a.id);
-          // the product name leads; the roster id follows when it says more
-          // (two Claude Codes with different roles are told apart by it)
-          var sub = agentSub(a, lbl);
-          return '<div class="cmi" data-ai="' + i + '"><span class="ic">' + agentGlyph(a.kind, a.id) + "</span><span>" + esc(lbl) + "</span>" +
-            (a.busy ? '<span class="cmbusy">working</span>' : "") +
-            (tick ? '<span class="tick"' + (a.busy ? ' style="margin-left:6px"' : "") + ">" + ICONS.info + "</span>"
-              : (sub && !a.busy ? '<span class="sub">' + esc(sub) + "</span>" : "")) + "</div>";
-        }).join("") +
+      m.innerHTML = '<div class="cmhead"><span>Who takes this turn</span></div>' +
+        '<div class="cmi arow2 cmauto' + (state.auto ? " on cur" : "") + '" data-auto="1"><span class="ic"><span class="autodot"></span></span>' +
+          '<span class="mtx"><span class="mnm">Auto</span><span class="mbl">Loom routes each turn to the right agent</span></span>' +
+          (state.auto ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</div>" +
+        '<div class="cmsep"></div>' +
+        adapters.map(function(x){ return row(x.a, x.i); }).join("") +
+        (bridges.length ? '<div class="cmgroup">Windows Loom drives</div>' + bridges.map(function(x){ return row(x.a, x.i); }).join("") : "") +
         // Cursor is on its way; listing it (inert) says so where you'd look for it.
         '<div class="cmsep"></div><div class="cmi soon" aria-disabled="true"><span class="ic">' + agentGlyph("", "cursor") +
           '</span><span>Cursor</span><span class="sub">coming soon</span></div>';
       var auto = m.querySelector("[data-auto]");
       if (auto) auto.onmousedown = function(ev){ ev.preventDefault(); closeMenu(); setAuto(true); var box = document.getElementById("box"); if (box) box.focus(); };
-      Array.prototype.forEach.call(m.querySelectorAll("[data-ai]"), function(row){
-        row.onmousedown = function(ev){
+      Array.prototype.forEach.call(m.querySelectorAll("[data-ai]"), function(r){
+        r.onmousedown = function(ev){
           ev.preventDefault();
-          var a = agents[Number(row.getAttribute("data-ai"))];
+          var a = agents[Number(r.getAttribute("data-ai"))];
           closeMenu();
           if (!a) return;
           if (a.id === state.selected && !state.auto) return;
@@ -8907,12 +9977,14 @@ ${BRAND_SPRITE}
       setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
     }
 
-    function setModel(agentId, model){
+    function setModel(agentId, model, provider){
       api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agentId) + "/model", {
-        method: "POST", body: JSON.stringify({ model: model }),
+        method: "POST", body: JSON.stringify(provider ? { model: model, provider: provider } : { model: model }),
       }).then(function(){
-        toast(model ? (agentId + " \\u2192 " + model) : (agentId + " \\u2192 default model"));
-        refresh();
+        toast(model ? (agentId + " \\u2192 " + shortModel(model)) : (agentId + " \\u2192 default model"));
+        // The Orchestrate cast wears each agent's model on its chip; the
+        // status poll doesn't redraw it, so a pick looked like it hadn't taken.
+        return refresh().then(function(){ drawOrchControls(); updateModelLabel(); });
       }).catch(function(err){ toast(err.message); });
     }
 
@@ -8970,6 +10042,20 @@ ${BRAND_SPRITE}
       box.addEventListener("blur", function(){ setTimeout(function(){ if (menuState && (menuState.kind === "file" || menuState.kind === "cmd")) closeMenu(); }, 120); });
 
       form.addEventListener("submit", function(ev){ ev.preventDefault(); send(); });
+      // Escape closes whichever picker is open, wherever focus is — the
+      // permission and agent menus have no input of their own to catch it.
+      // One document listener for the page's life; each project view points
+      // it at its own menu (a listener per view would pile up).
+      state.escMenu = function(){ if (!menuState) return false; closeMenu(); return true; };
+      if (!state.escBound) {
+        state.escBound = true;
+        document.addEventListener("keydown", function(ev){
+          if (ev.key !== "Escape" || !state.escMenu) return;
+          var mm = document.getElementById("cmenu");
+          if (!mm || mm.style.display === "none") return;
+          if (state.escMenu()) { ev.preventDefault(); var bx = document.getElementById("box"); if (bx) bx.focus(); }
+        });
+      }
 
       var attachBtn = document.getElementById("attach");
       var fileInput = document.getElementById("cfile");
@@ -9026,6 +10112,8 @@ ${BRAND_SPRITE}
             run: function(){ setTView("thinking"); } },
           { label: "Verbose", icon: tview() === "verbose" ? ICONS.check : "", hint: "+ raw payloads",
             run: function(){ setTView("verbose"); } },
+          { sep: true },
+          { label: "Ask several models\u2026", icon: ICONS.sparkles, hint: "a thread each", run: function(){ openAskSeveral(); } },
           { sep: true },
           { label: "Rewind\u2026", icon: ICONS.rewind, hint: "put the files back", run: function(){ openRewindMenu(); } },
           { sep: true },
@@ -9109,7 +10197,7 @@ ${BRAND_SPRITE}
       var lbl = document.getElementById("cmodellabel");
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
-      if (lbl) lbl.textContent = (cur && cur.model) ? cur.model : "model";
+      if (lbl) lbl.textContent = (cur && cur.model) ? shortModel(cur.model) : (cur && cur.kind === "model" ? "Pick a model" : "Default");
       var mp = document.getElementById("modelpick");
       if (mp) mp.style.display = state.auto || state.cmode === "orch" ? "none" : "";
       var chip = document.getElementById("cagent");
@@ -9164,7 +10252,7 @@ ${BRAND_SPRITE}
       function paint(){
         var prof = permProfile(a.kind), cur = permOf(a), lbl = agentLabel(a.kind, a.id);
         var askCell = prof.modes.ask || {};
-        m.style.display = "block"; m.className = "cmenu";
+        m.style.display = "block"; fitMenu(m); m.className = "cmenu";
         m.innerHTML = '<div class="cmhead">permissions \\u00b7 ' + esc(lbl) + (a.id !== lbl ? " (" + esc(a.id) + ")" : "") + "</div>" +
           PERM_MODES.map(function(mode){
             var cell = prof.modes[mode] || {}, parts = permSplit(cell.label), off = !!cell.unsupported;
@@ -9727,25 +10815,26 @@ ${BRAND_SPRITE}
       }
       var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0] || roster[0];
       el.innerHTML =
-        '<span class="colbl">Orchestrator</span>' +
+        '<span class="colbl" title="plans the goal, splits it into tasks, reviews the results">Lead</span>' +
         '<button class="cagent" id="corchpick" type="button" title="who plans the goal and reviews the results">' +
           agentGlyph(lead.kind, lead.id) + '<span class="can">' + esc(agentLabel(lead.kind, lead.id)) + "</span>" +
           permBadge(permOf(lead), lead.id) + modelBadge(lead) +
           '<span class="cchev">' + ICONS.chevron + "</span></button>" +
-        '<span class="colbl">Workers</span>' +
+        '<span class="colbl" title="who can be given tasks \\u2014 click to include or leave out">Team</span>' +
         '<span class="cowk" id="cowk">' + roster.map(function(a){
           var on = !c.off[a.id];
           return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '" title="' +
-            esc(a.id + (a.role ? " \\u00b7 " + a.role : "")) + '">' + agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
-            // each worker's mode and model, changeable without leaving the row
-            permBadge(permOf(a), a.id) + modelBadge(a) + "</button>";
+            esc((on ? "included \\u2014 click to leave out" : "left out \\u2014 click to include") + " \\u00b7 " + a.id) + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
+            agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + "</span>" +
+            // each worker's model and mode, in their own zone of the chip
+            '<span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id) + "</span></button>";
         }).join("") +
           // A roster of CLIs is whatever you happen to have installed. An API
           // model is a name off a list, so it can be added here, in the row
           // where you are already deciding who runs the goal.
           '<button type="button" class="cowchip cowadd" id="cowadd" title="add an API model as a worker">' +
             ICONS.plus + "model</button>" + "</span>" +
-        '<span class="colbl">Parallel</span>' +
+        '<span class="colbl" title="how many tasks run at the same time">At once</span>' +
         '<span class="cstep" title="how many tasks run at once"><button type="button" data-step="-1" aria-label="fewer in parallel"' + (c.parallel <= 1 ? " disabled" : "") + ">\\u2212</button>" +
           '<span class="cpar" id="cpar">' + c.parallel + "</span>" +
           '<button type="button" data-step="1" aria-label="more in parallel"' + (c.parallel >= 12 ? " disabled" : "") + ">+</button></span>" +
@@ -9839,7 +10928,7 @@ ${BRAND_SPRITE}
       var roster = orchRoster(), c = orchCfg();
       var m = document.getElementById("cmenu"); if (!m || !roster.length) return;
       menuState = { kind: "orchmenu", at: 0, sel: 0, items: [] };
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu";
       m.innerHTML = '<div class="cmhead">who orchestrates</div>' + roster.map(function(a, i){
         var lbl = agentLabel(a.kind, a.id);
         var sub = agentSub(a, lbl);
@@ -10012,7 +11101,7 @@ ${BRAND_SPRITE}
     function openRewindMenu(){
       var m = document.getElementById("cmenu"); if (!m) return;
       menuState = { kind: "rewindmenu", at: 0, sel: 0, items: [] };
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu";
       m.innerHTML = '<div class="cmhead">put the files back to\\u2026</div><div class="cmlist" id="cmlist">' + LOADER + "</div>";
       setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
       api("/api/projects/" + pid + "/checkpoints").then(function(j){
@@ -10430,6 +11519,10 @@ ${BRAND_SPRITE}
         row.onclick = function(){ orch.sel = row.getAttribute("data-run"); orch.pinned = true; drawOrch(); };
       });
       var th = el.querySelector("#othread"); if (th) th.onclick = function(){ openOrchChat(run.chat); };
+      // a long goal is clamped to four lines; clicking it reads the rest
+      var og = el.querySelector(".ogoal");
+      if (og) { og.title = "click to " + (orch.goalOpen ? "fold" : "read the whole goal"); if (orch.goalOpen) og.classList.add("full");
+        og.onclick = function(){ orch.goalOpen = !orch.goalOpen; og.classList.toggle("full", orch.goalOpen); }; }
       var ab = el.querySelector("#oabort");
       if (ab) ab.onclick = function(){
         if (!window.confirm("Abort this orchestra run? Running workers are stopped; finished work stays on " + run.branch + ".")) return;
@@ -10534,6 +11627,10 @@ ${BRAND_SPRITE}
     // the other projects' sockets aren't this view's to hold — and nudged
     // sooner by this project's own events.
     function fleetEl(){
+      // A team frame can land after the window is torn down (a closed tab, a
+      // finished test); there's no fleet to draw into then, and throwing here
+      // surfaced as an unhandled rejection.
+      if (pageGone()) return null;
       if (desktop) return state.tab === "fleet" ? document.getElementById("pane-fleet") : null;
       return document.getElementById("fleetsheet");
     }
@@ -10577,7 +11674,17 @@ ${BRAND_SPRITE}
       // this project first; the rest as the daemon lists them
       projects.sort(function(a, b){ return ((b.project || {}).id === pid) - ((a.project || {}).id === pid); });
       var agentsN = 0, busyN = 0;
-      projects.forEach(function(pr){ (pr.agents || []).forEach(function(a){ agentsN++; if (a.busy) busyN++; }); });
+      projects.forEach(function(pr){
+        (pr.agents || []).forEach(function(a){ agentsN++; if (a.busy) busyN++; });
+        // An orchestra's workers run as copies of the roster, so the roster
+        // reads idle while they work — the header said "no agents running"
+        // above a run with three tasks in flight. Count what's really going.
+        var o = pr.orchestra;
+        if (o && !orchTerminal(o.status)) {
+          (o.tasks || []).forEach(function(t){ if (t.status === "running") busyN++; });
+          if (/^(planning|reviewing|starting)$/.test(String(o.status))) busyN++;
+        }
+      });
       var head = '<div class="ohead"><span class="ot">Fleet</span>' +
         '<span class="os">What every agent in every open project is doing, right now.</span><span class="spacer"></span>' +
         (d ? '<span class="fsum"><span class="fchip' + (busyN ? " live" : "") + '">' + busyN + " working</span>" +
@@ -13288,7 +14395,9 @@ ${BRAND_SPRITE}
   }
 
   var RAIL_KEY = "loomRail";
-  function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? true : v === "1"; }
+  // Open by default only where there's room for it beside a readable thread;
+  // on a laptop the chat is the point, and the panel is one click away.
+  function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? (window.innerWidth || 0) >= 1440 : v === "1"; }
   function applyRail(){
     var shell = document.querySelector(".dshell");
     if (shell) shell.classList.toggle("railopen", railOpen());
@@ -13394,8 +14503,8 @@ ${BRAND_SPRITE}
         var order = picked.indexOf(a.id);
         return '<button type="button" class="agchip' + (order >= 0 ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
           '<span class="num">' + (order >= 0 ? order + 1 : "") + "</span>" +
-          brandMark(a.kind) + esc(a.id) +
-          '<span class="role">' + esc(a.role) + "</span></button>";
+          agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
+          (a.role && a.role !== a.id && a.role !== a.kind ? '<span class="role">' + esc(a.role) + "</span>" : "") + "</button>";
       }).join("") || '<span class="hintx">no agents configured for this project</span>';
       Array.prototype.forEach.call(box.querySelectorAll(".agchip"), function(ch){
         ch.onclick = function(){
@@ -13565,7 +14674,8 @@ ${BRAND_SPRITE}
       box.innerHTML = adapters.length
         ? adapters.map(function(a){
             return '<button type="button" class="agchip' + (picked === a.id ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
-              brandMark(a.kind) + esc(a.id) + '<span class="role">' + esc(a.role || "") + "</span></button>";
+              agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
+              (a.role && a.role !== a.id && a.role !== a.kind ? '<span class="role">' + esc(a.role) + "</span>" : "") + "</button>";
           }).join("")
         : '<span class="hintx">no agents configured for this project</span>';
       Array.prototype.forEach.call(box.querySelectorAll(".agchip"), function(ch){
@@ -14665,7 +15775,8 @@ ${BRAND_SPRITE}
     clearTimers();
     clearShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
-    var cur = m ? m[1] : null;
+    // No project in the URL: reopen the one you were last in, not the first.
+    var cur = m ? m[1] : (function(){ try { return localStorage.getItem("loomProject"); } catch (e) { return null; } })();
     // The project the URL asked for, kept separately from the one on screen so
     // a deep link that loses the race with the first /api/projects can still be
     // honoured when it arrives. select() clears it — see refresh().
@@ -14856,6 +15967,7 @@ ${BRAND_SPRITE}
     function drawList(){
       var el = document.getElementById("slist"); if (!el) return;
       if (!state.projects.length) {
+        el._drawn = null;
         el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span></div>';
         return;
       }
@@ -14868,11 +15980,12 @@ ${BRAND_SPRITE}
         // start of one. The early return here meant the chat hits below never
         // rendered in the exact case you were searching for a message rather than
         // a project, which is the common case.
+        el._drawn = null;
         el.innerHTML = '<div class="sys" style="padding:16px 8px">no project called \u201c' + esc(filter) + '\u201d</div>';
         drawChatHits(el);
         return;
       }
-      el.innerHTML = shown.map(function(p){
+      var listHtml = shown.map(function(p){
         var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
         var adapters = (p.agents || []).filter(function(a){ return a.tier === "adapter"; });
         var sel = p.id === cur;
@@ -14919,6 +16032,12 @@ ${BRAND_SPRITE}
         }
         return '<div class="sgroup">' + rows + "</div>";
       }).join("");
+      // The list is redrawn on every poll; rebuilding identical rows threw
+      // away hover and focus under the pointer every five seconds (and made
+      // a click on a row land on a node that no longer existed).
+      if (!filter && el._drawn === listHtml) return;
+      el._drawn = filter ? null : listHtml;
+      el.innerHTML = listHtml;
 
       drawChatHits(el);
 
@@ -15096,12 +16215,17 @@ ${BRAND_SPRITE}
       if (!agents.length) { onPick(null); return; } // nothing to choose — just make it
       var pop = document.createElement("div");
       pop.className = "pickpop"; pop.id = "chatpick";
+      // Switched-off agents can't answer, so they aren't offered.
+      var usable = agents.filter(function(a){ return a.enabled !== false; });
+      if (!usable.length) usable = agents;
       pop.innerHTML = '<div class="pickhead">start this chat with</div>' +
-        agents.map(function(a){
-          var bridge = a.tier === "bridge";
+        usable.map(function(a){
+          var bridge = a.tier === "bridge", lbl = agentLabel(a.kind, a.id);
+          var sub = bridge ? "drives its own window" : a.model ? shortModel(a.model) : a.kind === "model" ? "no model yet" : "default model";
           return '<button class="pickrow" data-pick="' + esc(a.id) + '">' +
-            brandMark(a.kind) + '<span class="pnm">' + esc(a.id) + "</span>" +
-            '<span class="prole">' + esc(bridge ? "bridge" : a.role) + "</span></button>";
+            '<span class="pic">' + agentGlyph(a.kind, a.id, "brand lg") + "</span>" +
+            '<span class="mtx"><span class="pnm">' + esc(lbl) + (a.id !== lbl && a.id !== a.kind && String(a.kind || "").indexOf(a.id) !== 0 ? '<span class="mfrom">' + esc(a.id) + "</span>" : "") + "</span>" +
+            '<span class="prole">' + esc(sub) + "</span></span></button>";
         }).join("");
       document.body.appendChild(pop);
       var r = anchor.getBoundingClientRect();
@@ -15240,6 +16364,7 @@ ${BRAND_SPRITE}
 
     function select(pid){
       cur = pid;
+      try { localStorage.setItem("loomProject", pid); } catch (e) {}
       wanted = null; // whatever the URL wanted, this is a real choice now
       history.replaceState(null, "", "#p/" + pid);
       renderProject(pid, dmain, true);
@@ -15260,6 +16385,8 @@ ${BRAND_SPRITE}
       drawList();
     }
     state.currentChat = currentChat;
+    // so a view can ask the sidebar to re-read (new threads from Ask several)
+    state.refreshShell = function(){ refresh(); };
     function refresh(){
       api("/api/projects").then(function(j){
         state.projects = j.projects || [];

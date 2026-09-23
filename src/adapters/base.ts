@@ -11,16 +11,19 @@ import type {
   AgentCapabilities,
   Bridge,
   SendInput,
+  StreamDelta,
 } from "../types.js";
 import { writeMemoryFile } from "../core/registry.js";
 
 type EventCb = (e: AdapterEvent) => void;
+type StreamCb = (d: StreamDelta) => void;
 
 export abstract class AgentBase {
   readonly id: string;
   readonly kind: string;
   protected projectDir: string;
   private listeners = new Set<EventCb>();
+  private streamers = new Set<StreamCb>();
 
   constructor(id: string, kind: string, projectDir: string) {
     this.id = id;
@@ -39,6 +42,27 @@ export abstract class AgentBase {
         cb(e);
       } catch {
         // A broken subscriber must not break the stream.
+      }
+    }
+  }
+
+  onStream(cb: StreamCb): () => void {
+    this.streamers.add(cb);
+    return () => this.streamers.delete(cb);
+  }
+
+  /**
+   * Part of a reply, as it arrives. Not an event: nothing is logged, and the
+   * finished `message` the adapter emits afterwards is what the thread keeps.
+   */
+  protected streamText(text: string, reasoning = false): void {
+    if (!text) return;
+    const d: StreamDelta = reasoning ? { text, reasoning: true } : { text };
+    for (const cb of this.streamers) {
+      try {
+        cb(d);
+      } catch {
+        // A broken viewer must not break the turn.
       }
     }
   }

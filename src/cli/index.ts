@@ -188,7 +188,10 @@ program
       console.log(pc.dim("bound to the tailnet — pair your phone with `loom pair`"));
     }
     const shutdown = () => {
-      void daemon.close().then(() => process.exit(0));
+      // A shutdown that can't finish in a few seconds is stuck on something it
+      // shouldn't wait for; leave rather than linger as a headless daemon.
+      setTimeout(() => process.exit(0), 5000).unref();
+      void daemon.close().then(() => process.exit(0), () => process.exit(1));
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);

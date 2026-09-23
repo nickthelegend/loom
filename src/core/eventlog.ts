@@ -13,6 +13,8 @@ import { MAIN_CHAT } from "../types.js";
 
 export interface ListOpts {
   since?: number; // exclusive event id
+  /** Only events older than this id (exclusive) — paging a thread backwards. */
+  before?: number;
   limit?: number;
   kinds?: EventKind[];
   /**
@@ -97,6 +99,10 @@ class SqliteStore implements EventStore {
     if (opts.since !== undefined) {
       clauses.push("id > ?");
       params.push(opts.since);
+    }
+    if (opts.before !== undefined) {
+      clauses.push("id < ?");
+      params.push(opts.before);
     }
     if (opts.kinds?.length) {
       clauses.push(`kind IN (${opts.kinds.map(() => "?").join(",")})`);
@@ -189,6 +195,7 @@ class JsonlStore implements EventStore {
   list(opts: ListOpts = {}): LoomEvent[] {
     let out = this.cache;
     if (opts.since !== undefined) out = out.filter((e) => e.id > opts.since!);
+    if (opts.before !== undefined) out = out.filter((e) => e.id < opts.before!);
     if (opts.kinds?.length) out = out.filter((e) => opts.kinds!.includes(e.kind));
     // must match SqliteStore exactly: an event with no chat is main's
     if (opts.chat !== undefined) {

@@ -13,6 +13,7 @@ import type {
   AnyAgent,
   ChatInfo,
   CostSummary,
+  LiveText,
   LoomEvent,
   McpServerConfig,
   ProjectConfig,
@@ -240,6 +241,7 @@ export class ProjectRuntime {
   private proxies = new Map<string, PreviewProxy>();
   private serverListeners = new Set<(f: ServerFrame) => void>();
   private queueListeners = new Set<(s: QueueState) => void>();
+  private streamListeners = new Set<(f: LiveText) => void>();
   private draining = false;
 
   /**
@@ -327,6 +329,7 @@ export class ProjectRuntime {
         this.enforceBudget(agentId);
       },
       observe: (event) => this.trackCost(event),
+      stream: (f) => this.liveText(f),
       gitDelivery: () => this.config.git?.delivery ?? "none",
       goalBudgetUsd: () => this.config.budgets?.perGoalUsd ?? null,
       maxConcurrentGoals: () => this.config.maxConcurrentGoals ?? null,
@@ -1004,8 +1007,23 @@ export class ProjectRuntime {
       this.agentDir(cfg.id),
     );
     this.agents.set(cfg.id, agent);
+    // What this turn has typed since its last finished message. A turn that
+    // is stopped (or dies) mid-reply never sends that message, and the words
+    // you watched arrive would vanish — so they're kept, marked partial.
+    let typed = "";
+    agent.onStream?.((d) => {
+      if (!d.reasoning) typed += d.text;
+      this.liveText({ agentId: agent.id, chat: this.turnChat.get(agent.id) ?? MAIN_CHAT, ...d });
+    });
     agent.onEvent((e) => {
       const chat = this.turnChat.get(agent.id);
+      const ep = e.payload as Record<string, unknown>;
+      if (e.kind === "message" && !ep.reasoning) typed = "";
+      const ending = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && ep.state === "interrupted");
+      if (ending && typed.trim()) {
+        this.log.append({ kind: "message", agentId: agent.id, ...(chat ? { chat } : {}), payload: { text: typed, partial: true } });
+        typed = "";
+      } else if (ending) typed = "";
       let payload = e.payload;
       // Enrich the completed turn so its gen_ai span carries system + model +
       // cost (adapters only put tokens on run_complete). The kind is known
@@ -1094,17 +1112,21 @@ export class ProjectRuntime {
    * An empty model clears the override, so the CLI falls back to its own default
    * — the honest "Default" the picker offers.
    */
-  setAgentModel(agentId: string, model: string): AgentConfig {
+  setAgentModel(agentId: string, model: string, provider?: string): AgentConfig {
     const cfg = this.config.agents.find((a) => a.id === agentId);
     if (!cfg) throw new Error(`unknown agent "${agentId}"`);
     const live = this.agents.get(agentId);
     if (live && isAdapter(live) && live.busy()) {
       throw new Error(`"${agentId}" is mid-turn — wait for it to finish, then switch models`);
     }
-    const next = model.trim().slice(0, 80);
+    // OpenRouter ids run long ("provider/family-size-variant:free"); 80 cut
+    // real ones off mid-name.
+    const next = model.trim().slice(0, 200);
     const options = { ...(cfg.options ?? {}) } as Record<string, unknown>;
     if (next) options.model = next;
     else delete options.model;
+    // A model agent's pick names its provider too (the list spans them all).
+    if (cfg.kind === "model" && provider?.trim()) options.provider = provider.trim().toLowerCase();
     cfg.options = options;
 
     // Rebuild so the new model actually takes: stop the old process, spawn a
@@ -1561,9 +1583,14 @@ export class ProjectRuntime {
       const agent = new ModelAdapter(agentId, this.info.dir, { provider, model: pick.model });
       // Its events land in the log tagged with its own thread, exactly as a
       // roster agent's do — which is what makes the answers readable later.
-      const off = agent.onEvent((e) => {
+      const offLive = agent.onStream((d) => this.liveText({ agentId, chat: chat.id, ...d }));
+      const offLog = agent.onEvent((e) => {
         this.appendIfOpen({ ...e, agentId, chat: chat.id });
       });
+      const off = () => {
+        offLive();
+        offLog();
+      };
       void agent
         .send({ text, ...(brief ? { briefing: brief } : {}) })
         .catch((err) => {
@@ -2485,6 +2512,23 @@ export class ProjectRuntime {
   onQueueChange(cb: (q: QueueState) => void): () => void {
     this.queueListeners.add(cb);
     return () => this.queueListeners.delete(cb);
+  }
+
+  /** Replies as they're written, for the socket. Returns unsubscribe. */
+  onStream(cb: (f: LiveText) => void): () => void {
+    this.streamListeners.add(cb);
+    return () => this.streamListeners.delete(cb);
+  }
+
+  private liveText(f: LiveText): void {
+    if (this.closed) return;
+    for (const cb of this.streamListeners) {
+      try {
+        cb(f);
+      } catch {
+        // a viewer that breaks must not break the turn
+      }
+    }
   }
 
   /** Line a prompt up; it goes as soon as nothing ahead of it is in the way. */

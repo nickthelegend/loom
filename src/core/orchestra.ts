@@ -277,6 +277,8 @@ export interface OrchestraHost {
   gate(agentId: string): void;
   /** Cost/metrics bookkeeping for a worker event. */
   observe(event: LoomEvent): void;
+  /** A reply as it's written, for the live view (never logged — see StreamDelta). */
+  stream?(f: { agentId: string; chat: string; text: string; reasoning?: boolean }): void;
   /** The project's git delivery policy, read when a run completes. */
   gitDelivery?(): GitDelivery;
   /** The project's own per-goal spend cap, when it sets one (.loom/config.json). */
@@ -948,7 +950,10 @@ export class OrchestraEngine {
       baseCommit = (await git(["rev-parse", `origin/${opts.from.branch}`], dir)).trim();
       baseBranch = null;
     }
-    const dirty = (await git(["status", "--porcelain"], dir)).trim().length > 0;
+    // Loom's own state (.loom/: the log, the brain, run files) changes on every
+    // turn and is never the user's work; counting it warned "uncommitted
+    // changes" on every run in a project that doesn't gitignore it.
+    const dirty = (await git(["status", "--porcelain", "--", ".", ":(exclude).loom"], dir)).trim().length > 0;
 
     const id = `o${Date.now().toString(36)}`;
     // Integration and task branches are siblings under one prefix: git can't
@@ -1995,6 +2000,7 @@ export class OrchestraEngine {
   // ── event wiring ──
 
   private wire(run: OrchestraRun, agent: Adapter, agentId: string, chat: string, key: string): void {
+    agent.onStream?.((d) => this.host.stream?.({ agentId, chat, ...d }));
     agent.onEvent((e) => {
       const p = e.payload as Record<string, unknown>;
       if (e.kind === "message" && !p.reasoning && p.role !== "user") {
