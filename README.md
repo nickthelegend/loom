@@ -755,6 +755,9 @@ loom ask --free --limit 3 "is this migration reversible?"
 loom ask --models "openrouter/qwen/qwen3.8-27b:free,ollama/llama3" "review this approach"
 ```
 
+In the app it's **More → Ask several models…** in the composer: tick the
+models (free ones are listed first), and what's in the box goes to each.
+
 One prompt, one thread per model, all at the same time, each thread named
 after the model that answered in it. With free quota this costs what asking
 one model costs, and picking the good answer takes a person ten seconds.
@@ -1689,6 +1692,12 @@ color reserved for state (thread cyan = live, shuttle magenta = the baton).
 Adapted from the [Orca](https://github.com/stablyai/orca) design system (MIT,
 © Lovecast Inc.); the Geist typeface is © Vercel under the SIL Open Font
 License 1.1. Tokens and rules: [docs/design-system.md](docs/design-system.md).
+
+The thread is a reading column: replies stream in as they're written (Claude
+Code, OpenCode, model agents, and every orchestra worker in its task thread),
+each under a byline with the agent, model and time; tool use folds into one
+activity line; a turn ends on a footer with its duration and cost; and an
+orchestrator's plan is a card, not JSON.
 
 ## Credits
 
