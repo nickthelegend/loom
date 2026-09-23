@@ -312,7 +312,17 @@ export class ProjectRuntime {
         return agent;
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
-      createChat: (title) => this.createChat(title),
+      // A task thread is pinned to its worker, so the sidebar says who it is
+      // and a reply there reaches that agent. A worker that can't be pinned
+      // (none can't, today — but a roster can change mid-run) still gets its
+      // thread, just unpinned.
+      createChat: (title, opts) => {
+        try {
+          return this.createChat(title, opts?.agentId ? { agentId: opts.agentId } : {});
+        } catch {
+          return this.createChat(title);
+        }
+      },
       // Asked before a run is told to answer in a thread: an id from a client
       // is a claim about this machine, and Main is real without being stored.
       chatExists: (id) => this.chats().some((c) => c.id === id),

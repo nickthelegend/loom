@@ -3252,6 +3252,42 @@ window.__loomPageRev="%%BUILD_REV%%";
   #chatpick .pic .brand,#chatpick .pic .agmono{width:18px;height:18px}
   #chatpick .pnm{display:flex;gap:8px;align-items:baseline;font-weight:500;color:var(--foreground)}
   #chatpick .prole{margin:0;font-family:var(--font-sans);font-size:11.5px}
+  /* ── an agent that needs you ── */
+  .nicard{max-width:none;margin:14px 0 0 30px;padding:13px 15px;border-radius:14px;
+    border:1px solid color-mix(in srgb,var(--warn) 34%,transparent);background:color-mix(in srgb,var(--warn) 6%,var(--card));
+    box-shadow:0 10px 30px -18px rgb(0 0 0 / .6)}
+  .nicard .nih{font-size:13px;font-weight:600;gap:8px}
+  .nicard .nih .brand{width:15px;height:15px}
+  .nicard .nitag{font-family:var(--font-sans);font-size:11px;letter-spacing:0;text-transform:none;font-weight:600;
+    color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent);border:0;border-radius:99px;padding:1px 8px}
+  .nicard .niq{font-size:14px;line-height:1.6;margin:8px 0 12px}
+  .nicard .niopts{gap:7px;margin-bottom:12px}
+  .nicard .nio{padding:6px 12px;border-radius:10px;font-size:13px;background:var(--card);border:1px solid var(--border);
+    transition:background .15s ease,border-color .15s ease,transform .12s var(--ease-out)}
+  .nicard .nio:hover{background:var(--secondary);border-color:color-mix(in srgb,var(--foreground) 18%,transparent)}
+  .nicard .nio:active{transform:scale(.97)}
+  .nicard .nitext{height:34px;border-radius:10px;font-size:13px;padding:0 12px;background:var(--background);border:1px solid var(--border)}
+  .nicard .nisend{height:34px;border-radius:10px;padding:0 14px}
+  .nicard.done{margin-left:30px;padding:4px 11px;border-radius:9px;background:transparent;box-shadow:none;border-color:var(--border)}
+  .nicard .nidone{font-family:var(--font-sans);font-size:12.5px}
+  .apcard{max-width:none;margin:14px 0 0 30px;border-radius:14px;padding:13px 15px;box-shadow:0 10px 30px -18px rgb(0 0 0 / .6)}
+  .aph{font-size:13px}
+  .aph .apk{font-size:11px;letter-spacing:0;text-transform:none}
+  .aph .aprel{font-family:var(--font-sans);font-size:11.5px}
+  .apin summary{font-family:var(--font-sans);font-size:12px}
+  .apact input{height:34px;border-radius:10px;font-size:13px}
+  .apact .btn{height:34px;border-radius:10px;font-size:13px;padding:0 14px}
+  /* ── in-app confirm ── */
+  .cfscrim{z-index:120;animation:cffade .14s ease}
+  @keyframes cffade{from{opacity:0}to{opacity:1}}
+  .cfmodal{max-width:420px;padding:20px 20px 16px;border-radius:16px;border:1px solid var(--glass-border);box-shadow:var(--shadow-float);
+    animation:cfpop .18s var(--ease-out)}
+  @keyframes cfpop{from{opacity:0;transform:scale(.97) translateY(4px)}to{opacity:1;transform:none}}
+  .cft{font-size:15px;font-weight:600;line-height:1.4;letter-spacing:-.01em}
+  .cfb{margin-top:8px;font-size:13px;line-height:1.6;color:var(--muted-foreground);white-space:normal}
+  .cfa{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .btn.cfdanger{background:var(--destructive);color:#fff}
+  .btn.cfdanger:hover{background:color-mix(in srgb,var(--destructive) 88%,#000)}
   /* ── error cards ── */
   .sys.errcard{display:block;text-align:left;max-width:none;margin:14px 0 0 30px;padding:10px 13px;border-radius:12px;
     border:1px solid color-mix(in srgb,var(--err) 28%,transparent);background:color-mix(in srgb,var(--err) 7%,transparent);color:var(--foreground)}
@@ -3306,6 +3342,8 @@ window.__loomPageRev="%%BUILD_REV%%";
   .askfoot{position:sticky;bottom:-6px;display:flex;align-items:center;gap:10px;margin:6px -6px -6px;padding:9px 12px;
     border-top:1px solid var(--border);background:var(--popover);border-radius:0 0 14px 14px}
   .askn{font-size:12px;color:var(--muted-foreground);flex:1}
+  .slist .crow.more{color:var(--muted-foreground);font-size:12.5px}
+  .slist .crow.more:hover{color:var(--foreground)}
   .planquiet{display:flex;align-items:center;gap:7px;margin:6px 0 12px;font-size:12.5px;color:var(--muted-foreground)}
   .planquiet svg{width:13px;height:13px}
   /* ── the composer ── */
@@ -3635,6 +3673,46 @@ ${BRAND_SPRITE}
     if (!m || !m.parentNode || !m.parentNode.getBoundingClientRect) return;
     var top = m.parentNode.getBoundingClientRect().top;
     if (top > 0) m.style.maxHeight = Math.max(180, Math.min(460, Math.floor(top - 16))) + "px";
+  }
+  /**
+   * An in-app confirm instead of the browser's own dialog. That one reads
+   * "127.0.0.1 says…" in the desktop app, blocks the whole page, and some
+   * embedders dismiss it unseen — the click on Abort simply did nothing.
+   * Resolves true or false. A page that installed its own window.confirm (an
+   * embedder, a test harness) is honoured as-is.
+   */
+  function askConfirm(message, opts){
+    opts = opts || {};
+    try {
+      if (typeof window.confirm === "function" && String(window.confirm).indexOf("[native code]") < 0) {
+        return Promise.resolve(!!window.confirm(message));
+      }
+    } catch (e) {}
+    return new Promise(function(resolve){
+      var text = String(message || "");
+      var cut = text.indexOf("\\n\\n");
+      var q = text.indexOf("?");
+      var head = cut > 0 ? text.slice(0, cut) : (q > 0 && q < 140 ? text.slice(0, q + 1) : text);
+      var body = cut > 0 ? text.slice(cut + 2) : (q > 0 && q < 140 ? text.slice(q + 1).trim() : "");
+      var scrim = document.createElement("div");
+      scrim.className = "scrim cfscrim";
+      scrim.innerHTML = '<div class="modal cfmodal" role="alertdialog" aria-modal="true">' +
+        '<div class="cft">' + esc(head) + "</div>" +
+        (body ? '<div class="cfb">' + esc(body).replace(/\\n/g, "<br>") + "</div>" : "") +
+        '<div class="cfa"><button type="button" class="btn sm ghost" data-cf="0">Cancel</button>' +
+        '<button type="button" class="btn sm ' + (opts.danger ? "cfdanger" : "primary") + '" data-cf="1">' + esc(opts.ok || "Continue") + "</button></div></div>";
+      document.body.appendChild(scrim);
+      function done(v){ document.removeEventListener("keydown", key, true); if (scrim.parentNode) scrim.parentNode.removeChild(scrim); resolve(v); }
+      function key(e){
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(false); }
+        else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(true); }
+      }
+      document.addEventListener("keydown", key, true);
+      scrim.onmousedown = function(e){ if (e.target === scrim) done(false); };
+      scrim.querySelector('[data-cf="1"]').onclick = function(){ done(true); };
+      scrim.querySelector('[data-cf="0"]').onclick = function(){ done(false); };
+      setTimeout(function(){ var b = scrim.querySelector('[data-cf="1"]'); if (b) b.focus(); }, 0);
+    });
   }
   function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return; t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
@@ -8625,8 +8703,28 @@ ${BRAND_SPRITE}
       var ok = function(id){ return usable.some(function(a){ return a.id === id; }); };
       var off = (p.agents || []).some(function(a){ return a.id === state.selected && a.enabled === false; });
       if (state.selected === null || off) {
-        state.selected = (ok(p.holder) ? p.holder : (usable[0] && usable[0].id)) || p.holder || (adapters[0] && adapters[0].id) || null;
+        // A thread with an agent of its own (pinned when it was made, or a
+        // task's worker) is talked to through that agent — not whoever the
+        // last thread you were in happened to be aimed at.
+        var own = chatOwnAgent(p);
+        state.selected = (own && ok(own) ? own : null) ||
+          (ok(p.holder) ? p.holder : (usable[0] && usable[0].id)) || p.holder || (adapters[0] && adapters[0].id) || null;
       }
+    }
+    function chatOwnAgent(p){
+      if (!chatId || chatId === "main") return null;
+      var agents = (p && p.agents) || [];
+      var resolve = function(want){
+        if (!want) return null;
+        for (var k = 0; k < agents.length; k++) if (agents[k].id === want) return agents[k].id;
+        for (var m = 0; m < agents.length; m++) if (agents[m].kind === want) return agents[m].id;
+        return null;
+      };
+      var threads = (p && p.orchestra && p.orchestra.threads) || [];
+      for (var i = 0; i < threads.length; i++) if (threads[i] && threads[i].chat === chatId) return resolve(threads[i].agent);
+      var chats = (p && p.chats) || [];
+      for (var j = 0; j < chats.length; j++) if (chats[j].id === chatId && chats[j].agentId) return resolve(chats[j].agentId);
+      return null;
     }
     function drawStatus(){
       var p = state.project; if (!p) return;
@@ -9443,8 +9541,8 @@ ${BRAND_SPRITE}
         qAct("/pause", { method: "POST", body: JSON.stringify({ paused: !queue.paused }) });
       };
       el.querySelector('[data-q="clear"]').onclick = function(){
-        if (queue.items.length > 1 && !window.confirm("Drop all " + queue.items.length + " queued prompts?")) return;
-        qAct("", { method: "DELETE" });
+        (queue.items.length > 1 ? askConfirm("Drop all " + queue.items.length + " queued prompts?", { ok: "Drop them", danger: true }) : Promise.resolve(true))
+          .then(function(ok){ if (ok) qAct("", { method: "DELETE" }); });
       };
       Array.prototype.forEach.call(el.querySelectorAll(".cqitem"), function(row){
         var id = row.getAttribute("data-qid");
@@ -10425,8 +10523,10 @@ ${BRAND_SPRITE}
       var clr = list.querySelector("[data-pmclear]");
       if (clr) clr.onmousedown = function(ev){
         ev.preventDefault();
-        if (!window.confirm("Forget every prompt you've sent? Saved prompts stay.")) return;
-        api("/api/prompts/recent", { method: "DELETE" }).then(function(){ prompts.recent = []; drawPrompts(); }).catch(function(err){ toast(err.message); });
+        askConfirm("Forget every prompt you've sent? Saved prompts stay.", { ok: "Forget them", danger: true }).then(function(ok){
+          if (!ok) return;
+          api("/api/prompts/recent", { method: "DELETE" }).then(function(){ prompts.recent = []; drawPrompts(); }).catch(function(err){ toast(err.message); });
+        });
       };
       var sv = document.getElementById("pmsave"), bx = document.getElementById("box");
       if (sv) sv.disabled = !(bx && bx.value.trim());
@@ -10751,9 +10851,21 @@ ${BRAND_SPRITE}
       var p = state.project || {};
       return (p.agents || []).filter(function(a){ return a.tier === "adapter" && a.enabled !== false; });
     }
+    // The cast is remembered per project: a reload used to reset it to "every
+    // agent", and the next Orchestrate quietly ran agents you'd left out.
+    var ORCH_KEY = "loomOrch:" + pid;
+    function saveOrchCfg(c){
+      try { localStorage.setItem(ORCH_KEY, JSON.stringify({ orchestrator: c.orchestrator, off: c.off, parallel: c.parallel })); } catch (e) {}
+    }
     function orchCfg(){
       var roster = orchRoster();
-      var c = state.orchCfg || (state.orchCfg = { orchestrator: null, off: {}, parallel: 4 });
+      if (!state.orchCfg || state.orchCfg.pid !== pid) {
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem(ORCH_KEY) || "null"); } catch (e) { saved = null; }
+        state.orchCfg = { pid: pid, orchestrator: (saved && saved.orchestrator) || null, off: (saved && saved.off) || {},
+          parallel: Math.max(1, Math.min(12, Number(saved && saved.parallel) || 4)) };
+      }
+      var c = state.orchCfg;
       var ids = roster.map(function(a){ return a.id; });
       // Claude Code conducts by default when it's here; otherwise whoever's first.
       if (!c.orchestrator || ids.indexOf(c.orchestrator) < 0) {
@@ -10809,6 +10921,7 @@ ${BRAND_SPRITE}
     function drawOrchControls(){
       var el = document.getElementById("corch"); if (!el || state.cmode !== "orch") return;
       var roster = orchRoster(), c = orchCfg();
+      saveOrchCfg(c); // every change to the cast ends in a redraw, so this keeps it
       if (!roster.length) {
         el.innerHTML = '<span class="colbl">No adapters in this project \\u2014 add an agent to orchestrate</span>';
         return;
@@ -11257,7 +11370,9 @@ ${BRAND_SPRITE}
         '<div class="oacts">' +
           (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + "Orchestrator thread</button>" : "") +
           (!terminal ? '<button class="btn outline sm prdanger" id="oabort">' + ICONS.stop + "Abort</button>" : "") +
-          (terminal && !moved && !run.applied ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
+          // Apply only when something finished: a run that ended before any task
+          // merged has nothing on its branch to bring over.
+          (terminal && !moved && !run.applied && (run.tasks || []).some(function(t){ return t.status === "done"; }) ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
           (terminal && !moved ? '<button class="btn ghost sm" id="oclean" title="remove this run\\u2019s worktrees (the branch stays)">Clean up</button>' : "") +
           (canMove ? '<button class="btn outline sm" type="button" id="orunner" title="move it to your runner; it carries on there">' + ICONS.orchestra + "Continue on runner</button>" : "") +
         "</div>" + orchMovedHtml(run) + orchOutcome(run) + orchLandingHtml(run) + "</div>";
@@ -11525,8 +11640,8 @@ ${BRAND_SPRITE}
         og.onclick = function(){ orch.goalOpen = !orch.goalOpen; og.classList.toggle("full", orch.goalOpen); }; }
       var ab = el.querySelector("#oabort");
       if (ab) ab.onclick = function(){
-        if (!window.confirm("Abort this orchestra run? Running workers are stopped; finished work stays on " + run.branch + ".")) return;
-        orchAction(run, "abort", {}, ab, function(){ toast("orchestra aborted"); });
+        askConfirm("Abort this orchestra run? Running workers are stopped; finished work stays on " + run.branch + ".", { ok: "Abort run", danger: true })
+          .then(function(ok){ if (ok) orchAction(run, "abort", {}, ab, function(){ toast("orchestra aborted"); }); });
       };
       var apb = el.querySelector("#oapply"); if (apb) apb.onclick = function(){ applyOrch(run.id, apb); };
       var rdb = el.querySelector("#oredeliver"); if (rdb) rdb.onclick = function(){ redeliverOrch(run.id, rdb); };
@@ -11560,12 +11675,14 @@ ${BRAND_SPRITE}
           var tid = b.getAttribute("data-ostopwait");
           var t = (run.tasks || []).filter(function(x){ return x.id === tid; })[0];
           var g = teamGoalOf(t && t.hold && t.hold.runId);
-          if (!window.confirm("Stop waiting? " + tid + " starts now, alongside " + (g.goal ? "\\u2018" + g.goal + "\\u2019" : "the other goal") +
-            " instead of after its PR merges \\u2014 you may have a conflict to resolve when both land.")) return;
-          b.disabled = true;
-          api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/tasks/" + encodeURIComponent(tid) + "/stop-waiting", { method: "POST", body: "{}" })
-            .then(function(){ toast(tid + " stopped waiting"); loadOrch(); })
-            .catch(function(err){ b.disabled = false; toast(err.message); });
+          askConfirm("Stop waiting? " + tid + " starts now, alongside " + (g.goal ? "\\u2018" + g.goal + "\\u2019" : "the other goal") +
+            " instead of after its PR merges \\u2014 you may have a conflict to resolve when both land.", { ok: "Start it now" }).then(function(ok){
+            if (!ok) return;
+            b.disabled = true;
+            api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/tasks/" + encodeURIComponent(tid) + "/stop-waiting", { method: "POST", body: "{}" })
+              .then(function(){ toast(tid + " stopped waiting"); loadOrch(); })
+              .catch(function(err){ b.disabled = false; toast(err.message); });
+          });
         };
       });
       var rb = el.querySelector("#oreplybtn"), rt = el.querySelector("#oreply");
@@ -12434,6 +12551,9 @@ ${BRAND_SPRITE}
     // "I found three failing tests." glued to the front of the first option.
     var ask = text.split(/(?<=[.?!])\\s+/).filter(Boolean).pop() || text;
     if (ask.indexOf("?") < 0) return [];
+    // "Pick one — A or B?" / "Which is it: A or B?": the lead-in before a
+    // dash or colon is the question, not part of the first answer.
+    ask = ask.replace(/^[^?]{0,60}?(?:\\s[\\u2014\\u2013-]\\s|:\\s)(?=[^?]*\\bor\\b)/i, "");
     var parts = ask.replace(/\\?+\\s*$/, "").split(/,\\s+or\\s+|\\s+or\\s+/i);
     if (parts.length < 2 || parts.length > 3) return [];
     var out = [];
@@ -15007,7 +15127,10 @@ ${BRAND_SPRITE}
      * build, the page waits for it and reloads itself.
      */
     function startUpdate(btn, u){
-      if (!window.confirm("Update Loom to " + u.latest + "?\\n\\nThis runs:\\n" + (u.steps || []).join("\\n") + "\\n\\nThe daemon restarts when it finishes.")) return;
+      askConfirm("Update Loom to " + u.latest + "?\\n\\nThis runs:\\n" + (u.steps || []).join("\\n") + "\\n\\nThe daemon restarts when it finishes.", { ok: "Update" })
+        .then(function(ok){ if (ok) runUpdate(btn, u); });
+    }
+    function runUpdate(btn, u){
       btn.disabled = true;
       btn.textContent = "Updating…";
       var log = document.getElementById("updlog");
@@ -16004,7 +16127,20 @@ ${BRAND_SPRITE}
         if (open) {
           // A project holds conversations. The agents that work them live in
           // the rail's roster — they belong to the project, not to one chat.
-          var chats = p.chats || [{ id: "main", title: "Main", createdAt: 0 }];
+          var chats = (p.chats || [{ id: "main", title: "Main", createdAt: 0 }]).slice();
+          // Main first, then newest first; past a handful the older threads
+          // fold behind a "show more" row — an afternoon of orchestra runs
+          // otherwise buries the sidebar in t1/t2/t3 rows. The open thread is
+          // always shown, wherever it falls.
+          var here = currentChat(), SHOW = 8;
+          var mainC = chats.filter(function(c){ return c.id === "main"; });
+          var rest = chats.filter(function(c){ return c.id !== "main"; }).sort(function(a, b){ return (b.createdAt || 0) - (a.createdAt || 0); });
+          var moreOpen = !!(state.chatsMore && state.chatsMore[p.id]);
+          var older = moreOpen ? 0 : Math.max(0, rest.length - SHOW);
+          var visible = moreOpen ? rest : rest.slice(0, SHOW).concat(rest.slice(SHOW).filter(function(c){ return sel && c.id === here; }));
+          if (!moreOpen && sel && rest.slice(SHOW).some(function(c){ return c.id === here; })) older--;
+          chats = mainC.concat(visible);
+          var byId = {}; (p.agents || []).forEach(function(a){ byId[a.id] = a; });
           rows += chats.map(function(c){
             var curC = c.id === currentChat();
             return '<div class="crow' + (curC ? " cur" : "") + '" data-p="' + esc(p.id) +
@@ -16019,7 +16155,7 @@ ${BRAND_SPRITE}
               // shape of what's running is readable without opening anything.
               (c.agentId
                 ? '<span class="cwho" title="' + esc(c.agentId + (c.model ? " \u00b7 " + c.model : "")) + '">' +
-                  esc(c.model ? c.model.split("/").pop() : c.agentId) + "</span>"
+                  esc(c.model ? c.model.split("/").pop() : byId[c.agentId] ? agentLabel(byId[c.agentId].kind, c.agentId) : c.agentId) + "</span>"
                 : "") +
               (c.id === "main"
                 ? ""
@@ -16027,6 +16163,10 @@ ${BRAND_SPRITE}
                   '" title="forget this chat" aria-label="forget chat ' + esc(c.title) + '">' + ICONS.x + "</button>") +
               "</div>";
           }).join("");
+          if (older > 0 || moreOpen && rest.length > SHOW) {
+            rows += '<div class="crow more" data-chatsmore="' + esc(p.id) + '"><span class="ci">' + ICONS.dots + '</span><span class="cnm">' +
+              (moreOpen ? "Show fewer" : "Show " + older + " older") + "</span></div>";
+          }
           rows += '<div class="crow add" data-newchat="' + esc(p.id) + '">' +
             '<span class="ci">' + ICONS.plus + '</span><span class="cnm">New chat</span></div>';
         }
@@ -16041,6 +16181,15 @@ ${BRAND_SPRITE}
 
       drawChatHits(el);
 
+      Array.prototype.forEach.call(el.querySelectorAll("[data-chatsmore]"), function(row){
+        row.onclick = function(ev){
+          ev.stopPropagation();
+          var id = row.getAttribute("data-chatsmore");
+          state.chatsMore = state.chatsMore || {};
+          state.chatsMore[id] = !state.chatsMore[id];
+          drawList();
+        };
+      });
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
         row.oncontextmenu = function(ev){
@@ -16352,14 +16501,16 @@ ${BRAND_SPRITE}
      * asking "are you sure?" about something it hasn't described.
      */
     function forgetProject(pid, name){
-      if (!window.confirm('Remove "' + name + '" from Loom?\\n\\nIts folder, its history and its .loom directory stay on disk. Add the folder again to bring it back.')) return;
-      api("/api/projects/" + pid, { method: "DELETE" })
-        .then(function(){
-          if (pid === cur) { cur = null; try { localStorage.removeItem("loomProject"); } catch (e) {} }
-          refresh();
-          toast("removed from Loom \u2014 the folder is untouched");
-        })
-        .catch(function(err){ toast(err.message); });
+      askConfirm('Remove "' + name + '" from Loom?\\n\\nIts folder, its history and its .loom directory stay on disk. Add the folder again to bring it back.', { ok: "Remove", danger: true }).then(function(ok){
+        if (!ok) return;
+        api("/api/projects/" + pid, { method: "DELETE" })
+          .then(function(){
+            if (pid === cur) { cur = null; try { localStorage.removeItem("loomProject"); } catch (e) {} }
+            refresh();
+            toast("removed from Loom \u2014 the folder is untouched");
+          })
+          .catch(function(err){ toast(err.message); });
+      });
     }
 
     function select(pid){

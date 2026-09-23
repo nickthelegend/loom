@@ -407,9 +407,10 @@ describe("web app · orchestra", () => {
     click($(m, "#oabort"));
     await waitUntil(() => text(m, "#pane-orchestra .opill") === "aborted");
     expect((await runStatus(run.id)).status).toBe("aborted");
-    // a finished run offers Apply and Clean up, and no longer Abort
+    // a finished run no longer offers Abort; this one ended before any task
+    // finished, so there is nothing on its branch to Apply — only Clean up
     expect($(m, "#oabort")).toBeFalsy();
-    expect(text(m, "#oapply")).toMatch(/^Apply to /);
+    expect($(m, "#oapply")).toBeFalsy();
     expect($(m, "#oclean")).toBeTruthy();
     expect(text(m, "#pane-orchestra .oruns")).toContain(goal.slice(0, 20));
     expect(m.errors.join("\n")).toBe("");
