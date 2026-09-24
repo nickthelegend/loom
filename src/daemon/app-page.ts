@@ -3807,6 +3807,13 @@ window.__loomPageRev="%%BUILD_REV%%";
   .racecard .rpicked{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ok)}
   .racecard .rpicked svg{width:12px;height:12px}
   .omv svg{width:11px;height:11px;vertical-align:-1px}
+  .slist .crow.fold{color:var(--muted-foreground);font-size:12.5px;font-weight:500}
+  .slist .crow.fold:hover{color:var(--foreground)}
+  .slist .crow.fold .fcar svg{transition:transform .15s ease}
+  .slist .crow.fold.open .fcar svg{transform:rotate(90deg)}
+  .slist .crow.fold .fg .agmono,.slist .crow.fold .fg img,.slist .crow.fold .fg svg{width:13px;height:13px;font-size:8px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
+  .slist .crow .fcnt{margin-left:auto;font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .slist .crow.infold{padding-left:38px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -5276,6 +5283,8 @@ ${BRAND_SPRITE}
     function names(list){ return (list || []).map(function(id){ return esc(labelOf(id)); }).join(", "); }
     if (ph === "started") {
       var o = p.orchestrator || {};
+      if (p.race) return row(" start", ICONS.play + "Race started \\u2014 " + (names(p.workers) || "every agent") + " each take the same goal, side by side") +
+        (p.note ? row(" warn", "\\u26a0 " + esc(p.note)) : "");
       return row(" start", ICONS.orchestra + "Orchestra started \\u2014 " + esc(agentLabel(o.kind, o.agent)) + " is orchestrating " +
         (names(p.workers) || "its workers") + (p.maxParallel ? " (" + Number(p.maxParallel) + " in parallel)" : "")) +
         (p.note ? row(" warn", "\\u26a0 " + esc(p.note)) : "");
@@ -5335,7 +5344,7 @@ ${BRAND_SPRITE}
     if (ph === "aborted") return row(" warn", "⊘ Orchestra aborted" + (p.reason ? " — " + esc(p.reason) : "") +
       (p.runId && /restart|shutdown/i.test(String(p.reason || "")) ? ' <button class="btn xs primary" type="button" data-orch-resume="' + esc(p.runId) + '">Resume</button>' : ""));
     if (ph === "resumed") return row(" start", ICONS.play + "Orchestra resumed" + (p.tasks ? " — " + Number(p.tasks) + " interrupted task" + (Number(p.tasks) === 1 ? "" : "s") + " picking up where " + (Number(p.tasks) === 1 ? "it" : "they") + " left off" : " — the orchestrator reviews where things stand"));
-    if (ph === "applied") return row(" ok", "\\u2713 Orchestra merged into " + esc(p.into || "your branch"));
+    if (ph === "applied") return row(" ok", "\\u2713 " + (p.agent ? esc(labelOf(p.agent)) + "\\u2019s take merged into " : "Orchestra merged into ") + esc(p.into || "your branch"));
     if (ph === "cleaned") return row("", "Orchestra worktrees cleaned up");
     // Plan mode: the orchestrator's plan, on the run's branch, as files.
     if (ph === "plan_written") {
@@ -18415,13 +18424,29 @@ ${BRAND_SPRITE}
             // pinned threads first, then newest first
             return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.createdAt || 0) - (a.createdAt || 0);
           });
+          // Filed threads live under their folder; with "group by agent" on,
+          // the loose ones gather under whoever answers them. Groups are never
+          // cut by "show older" — you folded them yourself if they're long.
+          var byAgent = devicePref("chatsByAgent", false);
+          var groups = [], gIndex = {};
+          var byIdG = {}; (p.agents || []).forEach(function(a){ byIdG[a.id] = a; });
+          rest = rest.filter(function(c){
+            var key = c.folder ? "f:" + c.folder : byAgent ? "a:" + (c.agentId || "") : "";
+            if (!key) return true;
+            if (!gIndex[key]) {
+              gIndex[key] = { key: key, folder: !!c.folder, name: c.folder || (c.agentId ? (byIdG[c.agentId] ? agentLabel(byIdG[c.agentId].kind, c.agentId) : c.agentId) : "Follows the baton"), agentId: c.folder ? "" : c.agentId || "", chats: [] };
+              groups.push(gIndex[key]);
+            }
+            gIndex[key].chats.push(c);
+            return false;
+          });
+          groups.sort(function(a, b){ return (b.folder ? 1 : 0) - (a.folder ? 1 : 0) || (a.folder || a.agentId ? 0 : 1) - (b.folder || b.agentId ? 0 : 1) || a.name.localeCompare(b.name); });
           var moreOpen = !!(state.chatsMore && state.chatsMore[p.id]);
           var older = moreOpen ? 0 : Math.max(0, rest.length - SHOW);
           var visible = moreOpen ? rest : rest.slice(0, SHOW).concat(rest.slice(SHOW).filter(function(c){ return (sel && c.id === here) || c.pinned; }));
           if (!moreOpen && sel && rest.slice(SHOW).some(function(c){ return c.id === here; })) older--;
-          chats = mainC.concat(visible);
           var byId = {}; (p.agents || []).forEach(function(a){ byId[a.id] = a; });
-          rows += chats.map(function(c){
+          var chatRowHtml = function(c){
             var curC = c.id === currentChat();
             return '<div class="crow' + (curC ? " cur" : "") + '" data-p="' + esc(p.id) +
               '" data-chat="' + esc(c.id) + '"' + (curC ? ' data-current="true"' : "") + ">" +
@@ -18443,7 +18468,20 @@ ${BRAND_SPRITE}
                 : '<button class="cx iconbtn" data-delchat="' + esc(c.id) +
                   '" title="forget this chat" aria-label="forget chat ' + esc(c.title) + '">' + ICONS.x + "</button>") +
               "</div>";
-          }).join("");
+          };
+          rows += mainC.map(chatRowHtml).join("");
+          groups.forEach(function(g){
+            var fkey = p.id + "|" + g.key, shut = foldShut(fkey);
+            var unread = g.chats.some(function(c){ return c.id !== currentChat() && isUnread(p.id, c); });
+            rows += '<div class="crow fold' + (shut ? "" : " open") + '" data-fold="' + esc(fkey) + '"' + (g.folder ? ' data-folder="' + esc(g.name) + '" data-p="' + esc(p.id) + '"' : "") + ' role="button" aria-expanded="' + (shut ? "false" : "true") + '">' +
+              '<span class="ci fcar">' + ICONS.chevron + "</span>" +
+              (g.folder ? '<span class="ci">' + ICONS.folder + "</span>" : '<span class="ci fg">' + (g.agentId ? agentGlyph((byId[g.agentId] || {}).kind, g.agentId) : ICONS.agents) + "</span>") +
+              '<span class="cnm">' + esc(g.name) + "</span>" +
+              (shut && unread ? '<span class="udot" aria-label="unread inside"></span>' : "") +
+              '<span class="fcnt">' + g.chats.length + "</span></div>";
+            rows += g.chats.filter(function(c){ return !shut || (sel && c.id === here); }).map(function(c){ return chatRowHtml(c).replace('class="crow', 'class="crow infold'); }).join("");
+          });
+          rows += visible.map(chatRowHtml).join("");
           if (older > 0 || moreOpen && rest.length > SHOW) {
             rows += '<div class="crow more" data-chatsmore="' + esc(p.id) + '"><span class="ci">' + ICONS.dots + '</span><span class="cnm">' +
               (moreOpen ? "Show fewer" : "Show " + older + " older") + "</span></div>";
@@ -18473,6 +18511,13 @@ ${BRAND_SPRITE}
           state.chatsArchived = state.chatsArchived || {};
           state.chatsArchived[id] = !state.chatsArchived[id];
           drawList();
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-fold]"), function(row){
+        row.onclick = function(ev){ ev.stopPropagation(); setFoldShut(row.getAttribute("data-fold"), !foldShut(row.getAttribute("data-fold"))); drawList(); };
+        if (row.getAttribute("data-folder")) row.oncontextmenu = function(ev){
+          ev.preventDefault(); ev.stopPropagation();
+          folderMenu(row.getAttribute("data-p"), row.getAttribute("data-folder"), ev.clientX, ev.clientY);
         };
       });
       Array.prototype.forEach.call(el.querySelectorAll("[data-chatsmore]"), function(row){
@@ -18745,7 +18790,12 @@ ${BRAND_SPRITE}
       if (!isMain) {
         items.push({ label: c.pinned ? "Unpin" : "Pin to top", icon: ICONS.pin, run: function(){ flagChat(pid, cid, { pinned: !c.pinned }); } });
         items.push({ label: c.archived ? "Unarchive" : "Archive", icon: ICONS.archive, hint: c.archived ? "" : "hide, keep history", run: function(){ flagChat(pid, cid, { archived: !c.archived }); } });
+        items.push({ label: "Move to folder…", icon: ICONS.folder, hint: c.folder || "", run: function(){ moveToFolder(p, c); } });
+        if (c.folder) items.push({ label: "Take out of " + c.folder, icon: ICONS.folder, run: function(){ flagChat(pid, cid, { folder: null }); } });
       }
+      items.push({ label: devicePref("chatsByAgent", false) ? "Stop grouping by agent" : "Group chats by agent", icon: ICONS.agents, run: function(){
+        setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
+      } });
       items.push({ label: "Export as Markdown", icon: ICONS.download, run: function(){
         if (pid === cur && currentChat() === cid && state.exportThread) { state.exportThread(); return; }
         setChat(pid, cid);
@@ -18759,12 +18809,56 @@ ${BRAND_SPRITE}
       openMenu(x, y, items);
     }
 
+    /** Which sidebar groups you folded, kept on this device. */
+    function foldShut(key){
+      try { return !!JSON.parse(localStorage.getItem("loomFolds") || "{}")[key]; } catch (e) { return false; }
+    }
+    function setFoldShut(key, shut){
+      try {
+        var m = JSON.parse(localStorage.getItem("loomFolds") || "{}");
+        if (shut) m[key] = 1; else delete m[key];
+        localStorage.setItem("loomFolds", JSON.stringify(m));
+      } catch (e) {}
+    }
+    function moveToFolder(p, c){
+      var names = [];
+      (p.chats || []).forEach(function(x){ if (x.folder && names.indexOf(x.folder) < 0) names.push(x.folder); });
+      askText("Move “" + c.title + "” to a folder", {
+        value: c.folder || "", ok: "Move", required: true, placeholder: "folder name",
+        note: names.length ? "Folders here: " + names.join(", ") + ". A new name makes a new folder." : "A folder exists while something is in it.",
+      }).then(function(name){
+        if (name === null || !name.trim() || name.trim() === c.folder) return;
+        flagChat(p.id, c.id, { folder: name.trim() });
+      });
+    }
+    /** Right-click a folder: rename it (every thread in it moves), or empty it. */
+    function folderMenu(pid, name, x, y){
+      var p = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
+      if (!p) return;
+      var inside = (p.chats || []).filter(function(c){ return c.folder === name; });
+      var each = function(folder, done){
+        Promise.all(inside.map(function(c){
+          return api("/api/projects/" + pid + "/chats/" + encodeURIComponent(c.id), { method: "PATCH", body: JSON.stringify({ folder: folder }) });
+        })).then(function(){ refresh(); toast(done); }).catch(function(err){ toast(err.message); });
+      };
+      openMenu(x, y, [
+        { head: name + " · " + inside.length },
+        { label: "Rename folder…", icon: ICONS.file, run: function(){
+            askText("Rename folder", { value: name, ok: "Rename", required: true }).then(function(next){
+              if (next === null || !next.trim() || next.trim() === name) return;
+              each(next.trim(), "renamed to " + next.trim());
+            });
+          } },
+        { label: "Ungroup", icon: ICONS.folder, hint: "threads stay", run: function(){ each(null, "folder removed · its threads are back in the list"); } },
+      ]);
+    }
+
     function flagChat(pid, cid, flags){
       api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid), { method: "PATCH", body: JSON.stringify(flags) })
         .then(function(){
           if (flags.archived && currentChat() === cid) setChat(pid, "main");
           refresh();
-          toast(flags.pinned ? "pinned to the top" : flags.pinned === false ? "unpinned" : flags.archived ? "archived · under Archived in the sidebar" : "back in the list");
+          toast(flags.folder ? "moved to " + flags.folder : flags.folder === null ? "out of the folder" : flags.pinned ? "pinned to the top" : flags.pinned === false ? "unpinned" : flags.archived ? "archived · under Archived in the sidebar" : "back in the list");
         })
         .catch(function(err){ toast(err.message); });
     }

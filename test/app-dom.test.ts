@@ -581,6 +581,48 @@ describe("web app · chats", () => {
   });
 });
 
+describe("web app · chat folders and agent groups", () => {
+  it("files threads under a folder that folds, and groups the rest by agent on request", async () => {
+    const call = async (method: string, p: string, body?: unknown) => {
+      const r = await fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+        method,
+        headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      return (await r.json()) as { chat: { id: string } };
+    };
+    const a = (await call("POST", "/chats", { title: "folder one", agentId: "plannerbot" })).chat.id;
+    const b = (await call("POST", "/chats", { title: "folder two", agentId: "plannerbot" })).chat.id;
+    const loose = (await call("POST", "/chats", { title: "loose", agentId: "execbot" })).chat.id;
+    await call("PATCH", `/chats/${a}`, { folder: "Specs" });
+    await call("PATCH", `/chats/${b}`, { folder: "Specs" });
+
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '.crow.fold[data-folder="Specs"]'));
+    const fold = $(m, '.crow.fold[data-folder="Specs"]')!;
+    expect(fold.textContent).toContain("2");
+    expect($(m, `.crow.infold[data-chat="${a}"]`)).toBeTruthy();
+    expect($(m, `.crow.infold[data-chat="${loose}"]`)).toBeNull();
+    // folding hides what's inside, and is remembered on this device
+    click(fold);
+    await waitUntil(() => !$(m, `.crow[data-chat="${a}"]`));
+    expect(JSON.parse(m.window.localStorage.getItem("loomFolds") || "{}")[`${projectId}|f:Specs`]).toBe(1);
+    click($(m, '.crow.fold[data-folder="Specs"]'));
+    await waitUntil(() => !!$(m, `.crow[data-chat="${a}"]`));
+
+    // grouping by agent gathers the loose threads under whoever answers them
+    m.window.localStorage.setItem("loomPref:chatsByAgent", "1");
+    click($(m, `.crow[data-chat="${a}"]`));
+    await waitUntil(() => !!$(m, `.crow.infold[data-chat="${loose}"]`));
+    const heads = [...m.window.document.querySelectorAll(".crow.fold")].map((e) => e.textContent ?? "");
+    expect(heads[0]).toContain("Specs");
+    expect(heads.some((h) => h.includes("execbot"))).toBe(true);
+    m.window.localStorage.removeItem("loomPref:chatsByAgent");
+    for (const id of [a, b, loose]) await fetch(`${baseUrl}/api/projects/${projectId}/chats/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · the sidebar collapses", () => {
   it("gives each project a caret that hides and shows its chats, and remembers", async () => {
     const m = mount({ hash: `#p/${projectId}` });

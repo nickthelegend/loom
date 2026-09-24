@@ -60,6 +60,17 @@ describe("chat flags, stars and unread", () => {
     expect((await call("PATCH", `/chats/${id}`, {})).status).toBe(400);
   });
 
+  it("files a thread in a folder, tidies the name, and takes it out again", async () => {
+    const id = ((await call("POST", "/chats", { title: "filed" })).json.chat as { id: string }).id;
+    expect((await call("PATCH", `/chats/${id}`, { folder: "  Bugs   and fixes " })).json.chat).toMatchObject({ folder: "Bugs and fixes" });
+    const listed = () => ((call("GET", "/chats")).then((r) => (r.json.chats as Array<{ id: string; folder?: string }>).find((c) => c.id === id)!));
+    expect((await listed()).folder).toBe("Bugs and fixes");
+    expect((await call("PATCH", `/chats/${id}`, { folder: 7 })).status).toBe(400);
+    expect((await call("PATCH", "/chats/main", { folder: "x" })).status).toBe(400);
+    await call("PATCH", `/chats/${id}`, { folder: null });
+    expect((await listed()).folder).toBeUndefined();
+  });
+
   it("stars messages in Main too, and reports each thread's newest reply", async () => {
     await client.send(projectId, "hello there", "plannerbot");
     let replyId = 0;

@@ -2421,17 +2421,22 @@ export class LoomDaemon {
       }),
     );
 
-    // Pin a thread to the top of the sidebar, or archive it out of the way.
+    // Pin a thread to the top of the sidebar, archive it out of the way, or
+    // file it in a folder ("" or null takes it out).
     app.patch(
       "/api/projects/:id/chats/:chatId",
       withRuntime(async (rt, req, res) => {
-        const body = (req.body ?? {}) as { pinned?: unknown; archived?: unknown };
-        const flags: { pinned?: boolean; archived?: boolean } = {};
+        const body = (req.body ?? {}) as { pinned?: unknown; archived?: unknown; folder?: unknown };
+        const flags: { pinned?: boolean; archived?: boolean; folder?: string | null } = {};
         if (body.pinned !== undefined) flags.pinned = body.pinned === true;
         if (body.archived !== undefined) flags.archived = body.archived === true;
-        if (!Object.keys(flags).length) return void res.status(400).json({ error: "nothing to change: send pinned or archived" });
+        if (body.folder !== undefined) {
+          if (body.folder !== null && typeof body.folder !== "string") return void res.status(400).json({ error: "folder is a name, or null to take it out" });
+          flags.folder = body.folder as string | null;
+        }
+        if (!Object.keys(flags).length) return void res.status(400).json({ error: "nothing to change: send pinned, archived or folder" });
         if (String(req.params.chatId) === "main") {
-          return void res.status(400).json({ error: "Main is always first and always there, so it can't be pinned or archived" });
+          return void res.status(400).json({ error: "Main is always first and always there, so it can't be pinned, archived or filed" });
         }
         const chat = rt.setChatFlags(String(req.params.chatId), flags);
         if (!chat) return void res.status(404).json({ error: "no such thread" });

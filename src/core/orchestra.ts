@@ -1025,6 +1025,7 @@ export class OrchestraEngine {
       workers: run.workers,
       branch,
       maxParallel: run.maxParallel,
+      ...(run.race ? { race: true } : {}),
       ...(dirty ? { note: "uncommitted changes in the project are not visible to workers — they start from the last commit" } : {}),
     });
 

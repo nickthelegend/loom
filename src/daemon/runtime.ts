@@ -1618,7 +1618,7 @@ export class ProjectRuntime {
   }
 
   /** Pin or archive a thread. Main is always first and always there. */
-  setChatFlags(id: string, flags: { pinned?: boolean; archived?: boolean }): ChatInfo | null {
+  setChatFlags(id: string, flags: { pinned?: boolean; archived?: boolean; folder?: string | null }): ChatInfo | null {
     if (id === MAIN_CHAT) return null;
     const state = readProjectState(this.info.dir);
     const chat = (state.chats ?? []).find((c) => c.id === id);
@@ -1627,6 +1627,11 @@ export class ProjectRuntime {
       if (flags[k] === undefined) continue;
       if (flags[k]) chat[k] = true;
       else delete chat[k];
+    }
+    if (flags.folder !== undefined) {
+      const name = String(flags.folder ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+      if (name) chat.folder = name;
+      else delete chat.folder;
     }
     writeProjectState(this.info.dir, state);
     return chat;

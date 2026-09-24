@@ -105,6 +105,8 @@ export interface ChatInfo {
   pinned?: boolean;
   /** Out of the sidebar, not forgotten: its history stays in the log. */
   archived?: boolean;
+  /** A sidebar folder this thread is filed under (a plain name; folders exist while a thread is in them). */
+  folder?: string;
   /** Event ids marked as worth coming back to (newest last, capped). */
   starred?: number[];
   /** Your verdict on replies: event id → up (1) or down (-1), with who wrote it. */
