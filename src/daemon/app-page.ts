@@ -3788,6 +3788,25 @@ window.__loomPageRev="%%BUILD_REV%%";
   .av.pic img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
   .psinstr .psav{width:14px;height:14px;border-radius:4px;margin-right:5px;object-fit:cover}
   img.agpic{width:16px;height:16px;border-radius:5px;object-fit:cover;flex:none;vertical-align:-3px}
+  /* race */
+  .corace{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:9px;margin-right:8px}
+  .corace button{border:0;background:none;color:var(--muted-foreground);font:inherit;font-size:12px;padding:3px 10px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .corace button svg{width:11px;height:11px}
+  .corace button.on{background:var(--secondary);color:var(--foreground)}
+  .raceboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:6px}
+  .racecard{border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--card);display:flex;flex-direction:column;gap:8px}
+  .racecard.picked{border-color:var(--ok);box-shadow:0 0 0 1px color-mix(in srgb,var(--ok) 40%,transparent)}
+  .racecard .rch{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .racecard .rch .opill{margin-left:auto}
+  .racecard .rfast{font-size:10.5px;padding:1px 7px;border-radius:99px;background:color-mix(in srgb,var(--live) 20%,transparent);color:var(--live)}
+  .racecard .rcm{display:flex;gap:10px;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .racecard .rcr{font-size:12.5px;line-height:1.5;color:var(--muted-foreground)}
+  .racecard .rcr.err{color:var(--err)}
+  .racecard .rca{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:auto}
+  .racecard .rca .btn svg{width:12px;height:12px;margin-right:4px}
+  .racecard .rpicked{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ok)}
+  .racecard .rpicked svg{width:12px;height:12px}
+  .omv svg{width:11px;height:11px;vertical-align:-1px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -5293,6 +5312,12 @@ ${BRAND_SPRITE}
     }
     if (ph === "reviewing") return row("", "Round " + Number(p.round || 1) + ": orchestrator reviewing results");
     if (ph === "waiting") return row(" warn", "\\u23f8 Orchestrator asks: " + esc(p.question || "what next?"));
+    if (ph === "completed" && p.race) {
+      var rn = (p.tasks || []).length;
+      return '<div class="sys orch ok odone">' +
+        '<div class="odh">' + ICONS.check + '<b>Race finished</b><span class="odm">' + rn + " entrant" + (rn === 1 ? "" : "s") + " · " + money(p.costUsd) + "</span></div>" +
+        '<div class="oda"><button class="btn xs primary" type="button" data-orch-compare="' + esc(p.runId) + '">Compare &amp; pick</button></div></div>';
+    }
     if (ph === "completed") {
       // The end of a run is a result, not a status line: what it did, what it
       // cost, where it is, and the one button that matters next.
@@ -8095,6 +8120,8 @@ ${BRAND_SPRITE}
       }
       var ap = ev.target.closest && ev.target.closest("[data-orch-apply]");
       if (ap) { applyOrch(ap.getAttribute("data-orch-apply"), ap); return; }
+      var cmp = ev.target.closest && ev.target.closest("[data-orch-compare]");
+      if (cmp) { ev.preventDefault(); orch.sel = cmp.getAttribute("data-orch-compare"); showTab("orchestra"); return; }
       var rsm = ev.target.closest && ev.target.closest("[data-orch-resume]");
       if (rsm) {
         rsm.disabled = true;
@@ -12627,7 +12654,7 @@ ${BRAND_SPRITE}
     // agent", and the next Orchestrate quietly ran agents you'd left out.
     var ORCH_KEY = "loomOrch:" + pid;
     function saveOrchCfg(c){
-      try { localStorage.setItem(ORCH_KEY, JSON.stringify({ orchestrator: c.orchestrator, off: c.off, parallel: c.parallel })); } catch (e) {}
+      try { localStorage.setItem(ORCH_KEY, JSON.stringify({ orchestrator: c.orchestrator, off: c.off, parallel: c.parallel, race: !!c.race })); } catch (e) {}
     }
     function orchCfg(){
       var roster = orchRoster();
@@ -12635,7 +12662,7 @@ ${BRAND_SPRITE}
         var saved = null;
         try { saved = JSON.parse(localStorage.getItem(ORCH_KEY) || "null"); } catch (e) { saved = null; }
         state.orchCfg = { pid: pid, orchestrator: (saved && saved.orchestrator) || null, off: (saved && saved.off) || {},
-          parallel: Math.max(1, Math.min(12, Number(saved && saved.parallel) || 4)) };
+          parallel: Math.max(1, Math.min(12, Number(saved && saved.parallel) || 4)), race: !!(saved && saved.race) };
       }
       var c = state.orchCfg;
       var ids = roster.map(function(a){ return a.id; });
@@ -12699,7 +12726,28 @@ ${BRAND_SPRITE}
         return;
       }
       var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0] || roster[0];
-      el.innerHTML =
+      var modeSeg = '<span class="corace" role="group" aria-label="how to run the goal">' +
+        '<button type="button" data-omode="plan" class="' + (c.race ? "" : "on") + '" title="one agent plans the goal and the team works it">Plan &amp; split</button>' +
+        '<button type="button" data-omode="race" class="' + (c.race ? "on" : "") + '" title="every checked agent gets the same prompt in its own worktree — you compare and pick one">' + ICONS.play + "Race</button></span>";
+      if (c.race) {
+        el.innerHTML = modeSeg +
+          '<span class="colbl" title="each gets the same prompt, in its own worktree">Racers</span>' +
+          '<span class="cowk" id="cowk">' + roster.map(function(a){
+            var on = !c.off[a.id];
+            return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
+              agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + '</span><span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id) + "</span></button>";
+          }).join("") + "</span>";
+        Array.prototype.forEach.call(el.querySelectorAll("[data-wk]"), function(b){
+          b.onclick = function(){ var id = b.getAttribute("data-wk"); c.off[id] = !c.off[id]; drawOrchControls(); };
+        });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-omode]"), function(b){
+          b.onclick = function(){ c.race = b.getAttribute("data-omode") === "race"; drawOrchControls(); };
+        });
+        wirePermBadges(el); wireModelBadges(el);
+        var osb = document.getElementById("orchsend"); if (osb) osb.title = "start the race";
+        return;
+      }
+      el.innerHTML = modeSeg +
         '<span class="colbl" title="plans the goal, splits it into tasks, reviews the results">Lead</span>' +
         '<button class="cagent" id="corchpick" type="button" title="who plans the goal and reviews the results">' +
           agentGlyph(lead.kind, lead.id) + '<span class="can">' + esc(agentLabel(lead.kind, lead.id)) + "</span>" +
@@ -12746,6 +12794,9 @@ ${BRAND_SPRITE}
           c.parallel = Math.max(1, Math.min(12, c.parallel + Number(b.getAttribute("data-step"))));
           drawOrchControls();
         };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-omode]"), function(b){
+        b.onclick = function(){ c.race = b.getAttribute("data-omode") === "race"; drawOrchControls(); };
       });
       wirePermBadges(el);
       wireModelBadges(el);
@@ -12849,6 +12900,7 @@ ${BRAND_SPRITE}
       var cast = roster.filter(function(a){ return !c.off[a.id]; });
       var workers = cast.map(function(a){ return a.id; });
       if (!workers.length) { toast("pick at least one worker"); return; }
+      if (c.race && workers.length < 2) { toast("a race needs at least two agents — check another"); return; }
       // A model agent with no model is a name for nothing. Catch it here, where
       // the chip that fixes it is on screen, rather than three tasks into a run.
       var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0];
@@ -12880,7 +12932,7 @@ ${BRAND_SPRITE}
       }
       api("/api/projects/" + pid + "/orchestra", { method: "POST", body: JSON.stringify({
         goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, maxParallel: c.parallel,
-        plan: planState || undefined,
+        plan: planState || undefined, race: c.race || undefined,
         // Orchestrate here, answer here. Without this the run opened a thread
         // of its own and walked you into it, leaving the goal you typed behind
         // in a thread that then said nothing at all (#100).
@@ -13117,6 +13169,30 @@ ${BRAND_SPRITE}
       wireOrchHead();
       wireOrchDetail(el, run);
     }
+    /** A race's entrants side by side: how each did, what it changed, and the one to keep. */
+    function raceBoard(run){
+      var tasks = run.tasks || [], picked = run.applied && run.applied.task;
+      var fastest = null;
+      tasks.forEach(function(t){ if (t.status === "done" && t.startedAt && t.finishedAt && (!fastest || t.finishedAt - t.startedAt < fastest.finishedAt - fastest.startedAt)) fastest = t; });
+      return '<div class="raceboard">' + tasks.map(function(t){
+        var s = ORCH_TASK_ST[t.status] || [t.status, "off"];
+        var dur = t.startedAt ? durfmt((t.finishedAt || Date.now()) - t.startedAt) : "—";
+        var files = (t.files || []).length;
+        return '<div class="racecard' + (picked === t.id ? " picked" : "") + '">' +
+          '<div class="rch">' + agentGlyph(t.kind, t.agent) + '<b>' + esc(agentLabel(t.kind, t.agent)) + "</b>" +
+            '<span class="opill ' + s[1] + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span>" +
+            (fastest && fastest.id === t.id && tasks.length > 1 ? '<span class="rfast" title="finished first">fastest</span>' : "") + "</div>" +
+          '<div class="rcm"><span>' + esc(dur) + "</span><span>" + files + " file" + (files === 1 ? "" : "s") + "</span><span>" + Number(t.lines || 0) + " lines</span>" +
+            (t.costUsd ? "<span>" + money(t.costUsd) + "</span>" : "") + "</div>" +
+          (t.result ? '<div class="rcr">' + esc(plainPreview(t.result, 260)) + "</div>" : t.error ? '<div class="rcr err">' + esc(t.error.slice(0, 200)) + "</div>" : "") +
+          '<div class="rca">' +
+            (t.status === "done" ? '<button type="button" class="btn xs outline" data-racediff="' + esc(t.id) + '">' + ICONS.tree + "Diff</button>" : "") +
+            '<button type="button" class="btn xs ghost" data-racechat="' + esc(t.chat) + '">' + ICONS.thread + "Thread</button>" +
+            (picked === t.id ? '<span class="rpicked">' + ICONS.check + "applied to " + esc(run.applied.into) + "</span>"
+              : !picked && t.status === "done" && orchTerminal(run.status) ? '<button type="button" class="btn xs primary" data-racepick="' + esc(t.id) + '">Pick this one</button>' : "") +
+          "</div></div>";
+      }).join("") + "</div>";
+    }
     /**
      * The plan as a graph: each task a node, each dependsOn an arrow, left to
      * right in the order they can run. Colours are the task's live status.
@@ -13195,6 +13271,7 @@ ${BRAND_SPRITE}
       var ws = (run.workers || []).filter(function(w){ return ids.indexOf(w) >= 0; });
       if (ws.length) { var off = {}; ids.forEach(function(id){ if (ws.indexOf(id) < 0) off[id] = true; }); c.off = off; }
       if (run.maxParallel) c.parallel = Math.max(1, Math.min(12, Number(run.maxParallel)));
+      c.race = !!run.race;
       saveOrchCfg(c);
       if (owns(run) || orchRunForChat()) {
         // this thread steers its run; a new goal starts from Main
@@ -13222,9 +13299,10 @@ ${BRAND_SPRITE}
       var h = '<div class="ocard">' +
         '<div class="ogoal">' + esc(run.goal) + "</div>" +
         '<div class="ometa">' + orchPill(run.status) +
-          '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>" +
+          (run.race ? '<span class="omi"><span class="omk">Mode</span><span class="omv">' + ICONS.play + " Race</span></span>"
+            : '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>") +
           '<span class="omi"><span class="omk">Workers</span><span class="omv">' + (run.workers || []).map(function(w){ return agentGlyph(kindOf(w), w) + esc(labelOf(w)); }).join(", ") + "</span></span>" +
-          '<span class="omi"><span class="omk">Round</span><span class="omv">' + Number(run.round || 0) + "/" + Number(run.maxRounds || 0) + "</span></span>" +
+          (run.race ? "" : '<span class="omi"><span class="omk">Round</span><span class="omv">' + Number(run.round || 0) + "/" + Number(run.maxRounds || 0) + "</span></span>") +
           '<span class="omi"><span class="omk">Parallel</span><span class="omv">' + Number(run.maxParallel || 0) + "</span></span>" +
           '<span class="omi"><span class="omk">Cost</span><span class="omv">' + money(run.costUsd) + "</span></span>" +
           '<span class="omi"><span class="omk">Elapsed</span><span class="omv"' + (terminal ? "" : ' data-oel="' + Number(run.createdAt || 0) + '"') + ">" +
@@ -13234,12 +13312,12 @@ ${BRAND_SPRITE}
         '<div class="oprog"><div class="obar" title="' + done + " done, " + running + ' running"><i style="width:' + pct + '%"></i><i class="run" style="width:' + rpct + '%"></i></div>' +
           '<span class="opn">' + done + "/" + tasks.length + " done</span></div>" +
         '<div class="oacts">' +
-          (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + "Orchestrator thread</button>" : "") +
+          (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + (run.race ? "Thread" : "Orchestrator thread") + "</button>" : "") +
           (!terminal ? '<button class="btn outline sm prdanger" id="oabort">' + ICONS.stop + "Abort</button>" : "") +
           (run.status === "aborted" && run.interrupted ? '<button class="btn primary sm" type="button" id="oresume" title="Loom stopped this run by restarting — carry it on: the tasks that were in flight pick up in the worktrees they left">' + ICONS.play + "Resume</button>" : "") +
           // Apply only when something finished: a run that ended before any task
           // merged has nothing on its branch to bring over.
-          (terminal && !moved && !run.applied && (run.tasks || []).some(function(t){ return t.status === "done"; }) ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
+          (!run.race && terminal && !moved && !run.applied && (run.tasks || []).some(function(t){ return t.status === "done"; }) ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
           (terminal && !moved ? '<button class="btn ghost sm" id="oclean" title="remove this run’s worktrees (the branch stays)">Clean up</button>' : "") +
           (terminal ? '<button class="btn outline sm" type="button" id="oagain" title="put this goal back in the composer with the same lead, team and parallelism">' + ICONS.refresh + "Run again</button>" : "") +
           (canMove ? '<button class="btn outline sm" type="button" id="orunner" title="move it to your runner; it carries on there">' + ICONS.orchestra + "Continue on runner</button>" : "") +
@@ -13264,6 +13342,7 @@ ${BRAND_SPRITE}
           : "The orchestrator is planning\\u2026 tasks appear here as it spawns them.") + "</div>";
         return h;
       }
+      if (run.race) return h + raceBoard(run);
       if (tasks.length > 1) h += orchGraph(tasks);
       if (tasks.some(function(t){ return t.startedAt; })) h += orchTimeline(run, tasks);
       // What needs you first, then what's moving, then what's settled.
@@ -13501,6 +13580,35 @@ ${BRAND_SPRITE}
       orchAction(run, "apply", {}, btn, function(j){ toast("merged into " + ((j && j.into) || "your branch")); refreshTree(true); if (state.refreshExplorer) state.refreshExplorer(); });
     }
     function wireOrchDetail(el, run){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-racediff]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var tid = b.getAttribute("data-racediff"), t = (run.tasks || []).filter(function(x){ return x.id === tid; })[0];
+          api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/tasks/" + encodeURIComponent(tid) + "/diff")
+            .then(function(j){
+              if (!j.patch) { toast("no changes on " + tid); return; }
+              if (desktop) openPatchDock(j.patch, (t ? agentLabel(t.kind, t.agent) + "’s take" : tid));
+              else toast("open this on the desktop to read the diff");
+            })
+            .catch(function(err){ toast(err.message); });
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-racechat]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); openOrchChat(b.getAttribute("data-racechat")); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-racepick]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var tid = b.getAttribute("data-racepick"), t = (run.tasks || []).filter(function(x){ return x.id === tid; })[0];
+          askConfirm("Apply " + (t ? agentLabel(t.kind, t.agent) + "’s take" : tid) + " to your branch?\\n\\nIts changes merge into the branch you’re on. The other entrants stay on their own branches.", { ok: "Pick this one" }).then(function(yes){
+            if (!yes) return;
+            b.disabled = true;
+            api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/apply", { method: "POST", body: JSON.stringify({ task: tid }) })
+              .then(function(r){ toast("merged " + r.merged + " into " + r.into); loadOrch(); if (state.loadGitStat) state.loadGitStat(); })
+              .catch(function(err){ b.disabled = false; toast(err.message); });
+          });
+        };
+      });
       var ag = document.getElementById("oagain");
       if (ag) ag.onclick = function(){ runAgain(run); };
       var rs = document.getElementById("oresume");

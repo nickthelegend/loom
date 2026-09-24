@@ -405,6 +405,32 @@ describe("orchestra runs", () => {
     await expect(rt.orchestra.resume(run.id)).rejects.toThrow(/wasn't stopped by a restart/);
   });
 
+  it("a race gives every entrant the same prompt, finishes without a reviewer, and applies only the one you pick", async () => {
+    await openProject();
+    await expect(rt.orchestra.start({ goal: "solo", orchestrator: "conductor", workers: ["alpha"], race: true })).rejects.toThrow(/at least two/);
+    const run = await rt.orchestra.start({ goal: "write:entry.txt", orchestrator: "conductor", workers: ["alpha", "beta"], race: true });
+    expect(run.race).toBe(true);
+    await settle(run.id);
+    const done = rt.orchestra.get(run.id)!;
+    expect(done.status).toBe("completed");
+    expect(done.tasks.map((t) => t.id).sort()).toEqual(["race-alpha", "race-beta"]);
+    expect(done.tasks.every((t) => t.status === "done" && t.prompt === "write:entry.txt")).toBe(true);
+    // nobody orchestrated it: the conductor was never asked anything
+    expect(seen.length).toBe(0);
+    // and nothing landed on the project's branch before a pick
+    expect(fs.existsSync(path.join(dir, "entry.txt"))).toBe(false);
+
+    const patch = await rt.orchestra.taskDiff(run.id, "race-beta");
+    expect(patch).toContain("entry.txt");
+    await expect(rt.orchestra.apply(run.id)).rejects.toThrow(/pick an entrant/);
+    const res = await rt.orchestra.apply(run.id, "race-beta");
+    expect(res.into).toBe("main");
+    expect(fs.existsSync(path.join(dir, "entry.txt"))).toBe(true);
+    expect(git(dir, "log", "-1", "--format=%s")).toMatch(/^Race .*beta's take/);
+    expect(rt.orchestra.get(run.id)!.applied?.task).toBe("race-beta");
+    await expect(rt.orchestra.apply(run.id, "race-alpha")).rejects.toThrow(/already applied/);
+  });
+
   it("rejects work for agents outside the run's workers, and tells the orchestrator", async () => {
     await openProject();
     script = [

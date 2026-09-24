@@ -144,7 +144,7 @@ export interface OrchestraRun {
   question?: string;
   error?: string;
   /** Set when the integration branch was merged back into the project. */
-  applied?: { at: number; into: string };
+  applied?: { at: number; into: string; task?: string };
   /**
    * Plan mode: the plan is written as markdown specs under plans/<run>/ on the
    * integration branch — PLAN.md plus one self-contained file per task — so
@@ -174,6 +174,8 @@ export interface OrchestraRun {
    * the worktrees they left.
    */
   interrupted?: { at: number; tasks: string[]; phase: OrchestraStatus };
+  /** A race (see OrchestraStartOptions.race); applied.task names the entrant you picked. */
+  race?: boolean;
   costUsd: number;
   createdAt: number;
   updatedAt: number;
@@ -247,6 +249,11 @@ export interface OrchestraStartOptions {
   from?: OrchestraRun["from"];
   /** Stop this goal when it has spent this much, and say so. */
   maxUsd?: number;
+  /**
+   * A race: every worker gets the same prompt in its own worktree, nobody
+   * plans and nothing merges — you compare what came back and pick one.
+   */
+  race?: boolean;
   /** The paths this goal expects to touch, when the caller already knows. */
   touches?: string[];
   /**
@@ -933,6 +940,7 @@ export class OrchestraEngine {
       if (!workers.some((x) => x.id === cfg.id)) workers.push(cfg);
     }
     if (!workers.length) throw new Error("an orchestra needs at least one worker agent");
+    if (opts.race && workers.length < 2) throw new Error("a race needs at least two agents");
     this.host.gate(orchCfg.id);
     const blocked = this.host.coordinator?.()?.canStart?.();
     if (blocked) throw new Error(blocked);
@@ -1000,6 +1008,7 @@ export class OrchestraEngine {
       ...(opts.from ? { from: opts.from, landing: newLanding(opts.from.pr, opts.from.url) } : {}),
       // A cap for this goal: what was asked for, else the project's default.
       ...(opts.maxUsd && opts.maxUsd > 0 ? { budgetUsd: opts.maxUsd } : {}),
+      ...(opts.race ? { race: true } : {}),
       costUsd: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1019,6 +1028,33 @@ export class OrchestraEngine {
       ...(dirty ? { note: "uncommitted changes in the project are not visible to workers — they start from the last commit" } : {}),
     });
 
+    if (run.race) {
+      // No plan and no orchestrator: every entrant gets the goal as it was
+      // typed, in its own worktree off the same commit, all at once.
+      run.maxParallel = Math.max(run.maxParallel, workers.length);
+      for (const w of workers) {
+        const id = `race-${w.id}`.replace(/[^\w-]+/g, "-").slice(0, 40);
+        const chatInfo = this.host.createChat(`🏁 ${w.id} · ${goal}`.slice(0, 60), { agentId: w.id });
+        const task: OrchestraTask = {
+          id,
+          title: `${w.id}'s take`,
+          prompt: goal,
+          agent: w.id,
+          kind: w.kind,
+          dependsOn: [],
+          status: "pending",
+          chat: chatInfo.id,
+          attempts: 0,
+          queued: [],
+        };
+        run.tasks.push(task);
+        this.emit(run, "task", { task: taskSummary(task) });
+      }
+      run.status = "running";
+      this.save(run);
+      this.schedule(run);
+      return run;
+    }
     const briefing = orchestratorBriefing({
       project: this.host.projectName,
       goal,
@@ -1338,13 +1374,35 @@ export class OrchestraEngine {
    * Explicit, never automatic: the run's work lands on its own branch, and the
    * human decides when it reaches theirs.
    */
-  async apply(runId: string): Promise<{ merged: string; into: string }> {
+  async apply(runId: string, taskId?: string): Promise<{ merged: string; into: string }> {
     const run = this.mustGet(runId);
     if (run.status !== "completed" && run.status !== "waiting_human" && run.status !== "failed" && run.status !== "aborted") {
       throw new Error(`run ${run.id} is still ${run.status} — wait for it to finish`);
     }
     const dir = this.host.projectDir;
     const into = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir)).trim();
+    if (run.race) {
+      // A race applies the one entrant you picked, never all of them.
+      const pick = run.tasks.find((t) => t.id === taskId);
+      if (!pick) throw new Error(`pick an entrant to apply: ${run.tasks.map((t) => t.id).join(", ")}`);
+      if (pick.status !== "done" || !pick.branch) throw new Error(`${pick.id} didn't finish, so there's nothing of it to apply`);
+      if (run.applied) throw new Error(`${run.applied.task ?? "an entrant"} was already applied from this race`);
+      await this.gitLock.run(async () => {
+        try {
+          await git(
+            ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `Race ${run.id}: ${pick.agent}'s take on ${run.goal.slice(0, 50)}`, pick.branch!],
+            dir,
+          );
+        } catch (err) {
+          await git(["merge", "--abort"], dir).catch(() => {});
+          throw new Error(`merge into ${into} failed — ${(err as Error).message}`);
+        }
+      });
+      run.applied = { at: Date.now(), into, task: pick.id };
+      this.save(run);
+      this.emit(run, "applied", { into, task: pick.id, agent: pick.agent });
+      return { merged: pick.branch!, into };
+    }
     await this.gitLock.run(async () => {
       await commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false);
       try {
@@ -1361,6 +1419,16 @@ export class OrchestraEngine {
     this.save(run);
     this.emit(run, "applied", { into });
     return { merged: run.branch, into };
+  }
+
+  /** What one task changed on its branch since the run began — a race entrant's diff. */
+  async taskDiff(runId: string, taskId: string): Promise<string> {
+    const run = this.mustGet(runId);
+    const task = run.tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`no task "${taskId}" in run ${run.id}`);
+    if (!task.branch) return "";
+    const patch = await git(["diff", `${run.baseCommit}...${task.branch}`], this.host.projectDir).catch(() => "");
+    return patch.length > 400_000 ? `${patch.slice(0, 400_000)}\n… (truncated)` : patch;
   }
 
   /** Remove a finished run's worktrees (the branch stays for the record). */
@@ -1844,6 +1912,13 @@ export class OrchestraEngine {
   private maybeReview(run: OrchestraRun): void {
     if (run.status !== "running" || this.orchestratorBusy.has(run.id)) return;
     if (run.tasks.some((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`))) return;
+    if (run.race) {
+      // A race has no reviewer: it's over when every entrant has finished.
+      if (run.tasks.some((t) => t.status === "pending")) return;
+      const done = run.tasks.filter((t) => t.status === "done").length;
+      void this.finish(run, "completed", undefined, `${done} of ${run.tasks.length} finished — compare them and pick one to apply.`);
+      return;
+    }
     const ready = (t: OrchestraTask) =>
       t.status === "pending" && t.dependsOn.every((d) => run.tasks.find((x) => x.id === d)?.status === "done");
     if (run.tasks.some((t) => ready(t) && !t.hold)) return;
@@ -2034,6 +2109,17 @@ export class OrchestraEngine {
 
   private async integrate(run: OrchestraRun, task: OrchestraTask): Promise<void> {
     const dir = task.dir!;
+    if (run.race) {
+      // An entrant's work stays on its own branch, to be compared, not merged.
+      await this.gitLock.run(async () => {
+        await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
+        task.files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => "")).split("\n").filter(Boolean);
+        const stat = await git(["diff", "--shortstat", `${run.baseCommit}...HEAD`], dir).catch(() => "");
+        task.lines = [...stat.matchAll(/(\d+) (?:insertion|deletion)/g)].reduce((n, m) => n + Number(m[1]), 0);
+        task.status = "done";
+      });
+      return;
+    }
     await this.gitLock.run(async () => {
       await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
       const files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => ""))
@@ -2130,8 +2216,16 @@ export class OrchestraEngine {
       commits: Number(commits.trim()) || 0,
       tasks: run.tasks.map(taskSummary),
       costUsd: run.costUsd,
+      ...(run.race ? { race: true } : {}),
     });
-    if (summary) {
+    if (summary && run.race) {
+      // nobody led a race, so Loom says how it ended
+      this.host.append({
+        kind: "message",
+        chat: run.chat,
+        payload: { text: `🏁 Race finished — ${summary} They're side by side in the Orchestra tab.`, author: "loom", orchestra: { runId: run.id, role: "summary" } },
+      });
+    } else if (summary) {
       this.host.append({
         kind: "message",
         agentId: run.orchestrator.agent,
@@ -2141,7 +2235,8 @@ export class OrchestraEngine {
     }
     this.host.coordinator?.()?.onRunEnd?.(run);
     // A goal that already has a PR (a fix round, an adopted goal) always goes back to that PR.
-    if (status === "completed") await this.deliver(run, run.from || run.delivered?.prUrl ? "pr" : undefined);
+    // A race's integration branch is empty until you pick an entrant.
+    if (status === "completed" && !run.race) await this.deliver(run, run.from || run.delivered?.prUrl ? "pr" : undefined);
   }
 
   /**

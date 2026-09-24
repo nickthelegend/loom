@@ -3642,6 +3642,8 @@ export class LoomDaemon {
           maxUsd?: number;
           /** The thread the goal was typed in; the orchestrator answers there. */
           chat?: string;
+          /** Every worker gets the same prompt; you pick the best. */
+          race?: boolean;
         };
         if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
         const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
@@ -3655,9 +3657,20 @@ export class LoomDaemon {
             ...(b.maxRounds ? { maxRounds: Number(b.maxRounds) } : {}),
             ...(b.plan ? { plan: true } : {}),
             ...(Number(b.maxUsd) > 0 ? { maxUsd: Number(b.maxUsd) } : {}),
+            ...(b.race ? { race: true } : {}),
           });
           recordRecent(b.goal, { project: rt.info.name, mode: "orchestrate" });
           res.json({ run });
+        } catch (err) {
+          orchestraError(res, err);
+        }
+      }),
+    );
+    app.get(
+      "/api/projects/:id/orchestra/:runId/tasks/:taskId/diff",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json({ patch: await rt.orchestra.taskDiff(String(req.params.runId), String(req.params.taskId)) });
         } catch (err) {
           orchestraError(res, err);
         }
@@ -3707,7 +3720,10 @@ export class LoomDaemon {
             else if (action === "reply") {
               const text = String((req.body as { text?: string } | undefined)?.text ?? "");
               res.json({ run: await rt.orchestra.reply(runId, text) });
-            } else if (action === "apply") res.json(await rt.orchestra.apply(runId));
+            } else if (action === "apply") {
+              const task = (req.body as { task?: unknown } | undefined)?.task;
+              res.json(await rt.orchestra.apply(runId, task ? String(task) : undefined));
+            }
             else {
               await rt.orchestra.cleanup(runId);
               res.json({ ok: true });

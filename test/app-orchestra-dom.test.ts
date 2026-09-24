@@ -419,6 +419,37 @@ describe("web app · orchestra", () => {
     // for "something is broken", not for "the machine is busy".
   }, 150_000);
 
+  it("a race shows its entrants side by side, and Pick this one applies just that one", async () => {
+    const { run } = await rest<{ run: Run }>("POST", "/orchestra", {
+      goal: "write:raced.txt",
+      race: true,
+      workers: ["plannerbot", "execbot"],
+    });
+    await waitUntil(async () => (await runStatus(run.id)).status === "completed", { timeoutMs: 60_000 });
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    await ready(m, '.tab[data-tab="orchestra"]');
+    click($(m, '.tab[data-tab="orchestra"]'));
+    await waitUntil(() => {
+      const row = Array.prototype.find.call(m.window.document.querySelectorAll(".orun"), (e: Element) => (e.textContent ?? "").includes("write:raced.txt"));
+      if (row && !$(m, "#pane-orchestra .raceboard")) click(row);
+      return !!$(m, "#pane-orchestra .raceboard");
+    });
+    expect(m.window.document.querySelectorAll("#pane-orchestra .racecard").length).toBe(2);
+    // a race has no orchestrator, rounds, or whole-run Apply — you pick an entrant
+    expect(text(m, "#pane-orchestra .ometa")).toContain("Race");
+    expect(text(m, "#pane-orchestra .ometa")).not.toMatch(/Round|Orchestrator/);
+    expect($(m, "#oapply")).toBeFalsy();
+    expect(m.window.document.querySelectorAll("[data-racepick]").length).toBe(2);
+
+    // (the mount answers confirm() with yes)
+    click($(m, "[data-racepick]"));
+    await waitUntil(() => !!$(m, "#pane-orchestra .racecard.picked .rpicked"));
+    expect($(m, "[data-racepick]")).toBeFalsy();
+    expect((await runStatus(run.id)) as Run & { applied?: { task?: string } }).toMatchObject({ applied: { task: expect.stringMatching(/^race-/) } });
+    expect(m.errors.join("\n")).toBe("");
+  }, 90_000);
+
   it("renders orchestra events in the thread as sentences, not JSON", async () => {
     const goal = `thread rows ${Date.now()}`;
     const { run } = await rest<{ run: Run }>("POST", "/orchestra", { goal, maxParallel: 3 });
