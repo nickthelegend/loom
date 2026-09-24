@@ -41,6 +41,8 @@ import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
 import { ensureLoomHome, loomHome } from "../core/registry.js";
 import { VERSION } from "../version.js";
+import { makeBackup } from "../core/backup.js";
+import { threadMarkdown } from "../core/thread-md.js";
 import {
   allModels,
   fetchModels,
@@ -2632,10 +2634,13 @@ program
       );
       process.exit(1);
     }
-    const { token, expiresAt, url } = await client.newPairingToken();
+    const minted = await client.newPairingToken();
+    const { token, expiresAt, url } = minted;
     // Deep link: scanning with any camera opens the phone app, which claims
     // the (single-use, 10-min) token from the URL fragment and pairs itself.
-    const link = `${url}/app#pair=${token}`;
+    // The daemon's own link carries the Loom Cloud route when Cloud is on, so
+    // a phone paired from the terminal can reach home from any network too.
+    const link = minted.link ?? `${url}/app#pair=${token}`;
     qrcode.generate(link, { small: true }, (qr) => console.log(qr));
     console.log(pc.bold(`  ${link}`));
     console.log(
@@ -2644,6 +2649,90 @@ program
       ),
     );
     console.log(pc.dim(`  (manual claim: POST ${url}/api/pair/claim {"token":"${token.slice(0, 6)}…"})`));
+  });
+
+program
+  .command("backup")
+  .description("everything Loom knows — settings, pairings, prompts, every project's log and brain — in one .tar.gz")
+  .option("--out <file>", "where to write it (default: ~/loom-backup-<time>.tar.gz)")
+  .action((opts: { out?: string }) => {
+    const r = makeBackup(opts.out);
+    const mb = (r.bytes / 1024 / 1024).toFixed(1);
+    console.log(pc.green(`✓ backed up ${r.projects} project${r.projects === 1 ? "" : "s"} and ~/.loom → ${r.file} (${mb} MB)`));
+    console.log(pc.dim("  left out: orchestra worktrees (their branches are in your repos) and the model cache"));
+    console.log(pc.yellow("  it holds your pairing tokens and cloud keys — keep it somewhere private"));
+  });
+
+program
+  .command("export")
+  .description("write a chat as Markdown — prompts, replies, what was done, what changed")
+  .option("--chat <chat>", "the chat's id or title (default: main)", "main")
+  .option("--out <file>", "write to a file instead of printing")
+  .action(async (opts: { chat: string; out?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const want = opts.chat.trim().toLowerCase();
+    const chat = chats.find((c) => c.id === opts.chat) ?? chats.find((c) => c.title.toLowerCase() === want);
+    if (!chat) fail(`no chat "${opts.chat}" in ${project.name} — try one of: ${chats.map((c) => c.title).join(", ")}`);
+    let events: LoomEvent[] = [];
+    let before: number | undefined;
+    for (let page = 0; page < 20; page++) {
+      const { events: evs } = await client.chatEvents(project.id, chat!.id, { ...(before ? { before } : {}), limit: 500 });
+      events = [...evs, ...events];
+      if (evs.length < 500) break;
+      before = evs[0]!.id;
+    }
+    const md = threadMarkdown(events, `${project.name} — ${chat!.title}`);
+    if (!opts.out) return void process.stdout.write(md);
+    fs.writeFileSync(opts.out, md);
+    console.error(pc.green(`✓ ${events.length} events → ${opts.out}`));
+  });
+
+program
+  .command("stats")
+  .description("today across every project: turns, how many finished cleanly, spend, busiest agent")
+  .option("--days <n>", "look back this many days instead of just today", "1")
+  .action(async (opts: { days: string }) => {
+    const client = await ensureDaemon();
+    const days = Math.max(1, Math.min(90, Number(opts.days) || 1));
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    since.setDate(since.getDate() - (days - 1));
+    const { projects } = await client.listProjects();
+    let turns = 0, errors = 0, cost = 0;
+    const byAgent = new Map<string, number>();
+    const rows: string[] = [];
+    for (const p of projects) {
+      const t = await client.turnStats(p.id, { since: since.getTime(), days: 7 }).catch(() => null);
+      if (!t) continue;
+      const pt = t.leaderboard.reduce((a, x) => a + x.turns, 0);
+      if (!pt) continue;
+      const pe = t.leaderboard.reduce((a, x) => a + x.errors, 0);
+      const pc$ = t.leaderboard.reduce((a, x) => a + x.totalCostUsd, 0);
+      turns += pt; errors += pe; cost += pc$;
+      for (const x of t.leaderboard) byAgent.set(x.agentId, (byAgent.get(x.agentId) ?? 0) + x.turns);
+      rows.push(`  ${pc.bold(p.name.padEnd(18))} ${String(pt).padStart(4)} turns  ${pe ? pc.red(`${pe} failed`) : pc.green("all clean")}  ${fmtUsd(pc$)}`);
+    }
+    const label = days === 1 ? "today" : `the last ${days} days`;
+    if (!turns) return void console.log(pc.dim(`no turns ${label}`));
+    const busiest = [...byAgent.entries()].sort((a, b) => b[1] - a[1])[0]!;
+    const clean = Math.round(((turns - errors) / turns) * 100);
+    console.log(pc.bold(`${label}: ${turns} turn${turns === 1 ? "" : "s"} · ${clean}% finished cleanly · ${fmtUsd(cost)} · busiest ${busiest[0]} (${busiest[1]})`));
+    for (const r of rows) console.log(r);
+  });
+
+program
+  .command("completion")
+  .description("print a shell completion script: loom completion zsh >> ~/.zshrc (or bash >> ~/.bashrc)")
+  .argument("<shell>", "zsh or bash")
+  .action((shell: string) => {
+    const names = program.commands.map((c) => c.name()).filter((n) => n && n !== "completion").sort();
+    if (shell === "bash") {
+      console.log(`complete -W "${names.join(" ")} completion" loom`);
+    } else if (shell === "zsh") {
+      console.log(`_loom() { compadd -- ${names.join(" ")} completion; }\ncompdef _loom loom 2>/dev/null || { autoload -Uz compinit && compinit && compdef _loom loom; }`);
+    } else fail(`unknown shell "${shell}" — zsh or bash`);
   });
 
 program.parseAsync().catch((err) => {

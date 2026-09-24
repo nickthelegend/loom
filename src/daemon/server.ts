@@ -1799,7 +1799,10 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         const days = Math.min(366, Math.max(7, Number(req.query.days) || 84));
         const rows = turnRows(rt.log.list({ kinds: ["run_complete", "error"], limit: 50_000 }));
-        res.json({ leaderboard: leaderboard(rows), days: perDay(rows, days), total: rows.length });
+        // ?since= (ms) narrows the leaderboard to a window — "today", for loom stats
+        const since = Number(req.query.since) || 0;
+        const board = leaderboard(since ? rows.filter((r) => r.ts >= since) : rows);
+        res.json({ leaderboard: board, days: perDay(rows, days), total: rows.length });
       }),
     );
     app.get(
