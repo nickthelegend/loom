@@ -3691,6 +3691,15 @@ window.__loomPageRev="%%BUILD_REV%%";
   .heldnote{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:7px 12px;border-radius:10px;font-size:12.5px;
     border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);background:color-mix(in srgb,var(--warn) 8%,var(--card))}
   .heldnote .linkbtn{margin-left:auto}
+  /* first-run tour */
+  .tourshade{position:fixed;z-index:190;border-radius:12px;pointer-events:none;
+    box-shadow:0 0 0 9999px rgb(0 0 0 / .55),0 0 0 2px var(--thread);transition:all .25s cubic-bezier(.2,.8,.2,1)}
+  .tourcard{position:fixed;z-index:191;width:min(340px,calc(100vw - 16px));padding:14px 16px;border-radius:14px;
+    background:var(--popover);border:1px solid var(--border);box-shadow:var(--shadow-float);animation:fadeup .2s ease-out}
+  .tourstep{font-size:11px;color:var(--muted-foreground);letter-spacing:.04em;text-transform:uppercase}
+  .tourt{font-size:15px;font-weight:600;margin:4px 0 6px}
+  .tourb{font-size:13px;line-height:1.55;color:var(--muted-foreground)}
+  .toura{display:flex;justify-content:space-between;margin-top:12px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -11578,6 +11587,7 @@ ${BRAND_SPRITE}
         openMenu(Math.round(r.left), Math.round(r.top - 4), items);
       };
       setAuto(state.auto);
+      if (desktop) setTimeout(function(){ if (!pageGone() && state.startTour) state.startTour(false); }, 1200);
       // "Run again" from a run's own thread lands here, in Main, ready to orchestrate
       try { if (chatId === "main" && localStorage.getItem("loomOrchNext:" + pid)) { localStorage.removeItem("loomOrchNext:" + pid); state.cmode = "orch"; } } catch (e) {}
       setComposerMode(state.cmode || "chat");
@@ -18331,14 +18341,70 @@ ${BRAND_SPRITE}
         return '<div class="kbsec"><div class="kbh">' + esc(g[0]) + "</div>" + g[1].map(function(r){
           return '<div class="kbrow"><span class="kbd">' + esc(r[0]) + "</span><span>" + esc(r[1]) + "</span></div>";
         }).join("") + "</div>";
-      }).join("") + "</div></div>";
+      }).join("") + '</div><div class="modalfoot"><span class="spacer"></span><button type="button" class="btn xs outline" id="kbtour">Take the tour again</button></div></div>';
     document.body.appendChild(scrim);
     function close(){ scrim.remove(); document.removeEventListener("keydown", onKey, true); }
+    document.getElementById("kbtour").onclick = function(){ close(); setTimeout(function(){ startTour(true); }, 50); };
     function onKey(e){ if (e.key === "Escape" || e.key === "?") { e.preventDefault(); e.stopPropagation(); close(); } }
     document.addEventListener("keydown", onKey, true);
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("kbx").onclick = close;
   }
+  /**
+   * The first-run tour: a spotlight on the three things that make Loom Loom,
+   * one at a time. Shown once per device, when a project is open; replayable
+   * from the shortcut sheet. Steps whose target isn't on screen are skipped.
+   */
+  var TOUR = [
+    { sel: "#box", title: "Say what you want done", body: "Type here and press Enter. The reply streams in live, and every agent in the project shares one memory — what one learns, the next one knows." },
+    { sel: "#cagent", title: "Pick who answers", body: "Claude Code, Codex, OpenCode, a model… or Auto, and Loom routes each turn. Switch any time; the baton carries the context over." },
+    { sel: '#cmode [data-cmode="orch"]', title: "Or hand it to a team", body: "Orchestrate: one agent plans the goal, the rest work it in parallel, each in its own worktree — and you watch the plan as a graph." },
+    { sel: "#palettebtn", title: "Everything is a keystroke away", body: "⌘K searches files, chats and commands. Press ? any time for every shortcut." },
+  ];
+  function startTour(force){
+    try { if (!force && localStorage.getItem("loomTourDone")) return; } catch (e) {}
+    if (document.querySelector(".scrim") || document.getElementById("tourcard")) return;
+    var steps = TOUR.filter(function(s){ var el = document.querySelector(s.sel); return el && el.getBoundingClientRect().width > 0; });
+    if (!steps.length) return;
+    var i = 0;
+    var shade = document.createElement("div"); shade.className = "tourshade"; shade.id = "tourshade";
+    var card = document.createElement("div"); card.className = "tourcard"; card.id = "tourcard"; card.setAttribute("role", "dialog"); card.setAttribute("aria-live", "polite");
+    document.body.appendChild(shade); document.body.appendChild(card);
+    function done(){
+      try { localStorage.setItem("loomTourDone", "1"); } catch (e) {}
+      shade.remove(); card.remove(); document.removeEventListener("keydown", key, true); window.removeEventListener("resize", place);
+    }
+    function key(e){
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); }
+      else if ((e.key === "Enter" || e.key === "ArrowRight") && card.contains(document.activeElement)) { e.preventDefault(); e.stopPropagation(); next(); }
+    }
+    function next(){ if (++i >= steps.length) done(); else show(); }
+    function place(){
+      var el = document.querySelector(steps[i].sel); if (!el) return next();
+      var r = el.getBoundingClientRect(), pad = 6;
+      shade.style.left = (r.left - pad) + "px"; shade.style.top = (r.top - pad) + "px";
+      shade.style.width = (r.width + pad * 2) + "px"; shade.style.height = (r.height + pad * 2) + "px";
+      var cw = card.offsetWidth, ch = card.offsetHeight;
+      var top = r.top - ch - 16 > 8 ? r.top - ch - 16 : Math.min(window.innerHeight - ch - 8, r.bottom + 16);
+      card.style.left = Math.max(8, Math.min(window.innerWidth - cw - 8, r.left + r.width / 2 - cw / 2)) + "px";
+      card.style.top = top + "px";
+    }
+    function show(){
+      var s = steps[i];
+      card.innerHTML = '<div class="tourstep">' + (i + 1) + " of " + steps.length + "</div>" +
+        '<div class="tourt">' + esc(s.title) + '</div><div class="tourb">' + esc(s.body) + "</div>" +
+        '<div class="toura"><button type="button" class="btn xs ghost" id="tourskip">Skip tour</button>' +
+        '<button type="button" class="btn xs primary" id="tournext">' + (i === steps.length - 1 ? "Start building" : "Next") + "</button></div>";
+      document.getElementById("tourskip").onclick = done;
+      document.getElementById("tournext").onclick = next;
+      place();
+      document.getElementById("tournext").focus();
+    }
+    document.addEventListener("keydown", key, true);
+    window.addEventListener("resize", place);
+    show();
+  }
+  state.startTour = startTour;
   state.openShortcuts = openShortcuts;
   function setFocusMode(on){
     document.documentElement.classList.toggle("focusmode", on);
