@@ -5,7 +5,7 @@
     "version": "1.0.1",
     "scheme": "loom",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#111111",
     "icon": "./assets/icon.png",
     "splash": {

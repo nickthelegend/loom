@@ -160,21 +160,51 @@ function sentence(e: TeamFeedEvent): string {
 }
 
 const FEED_COLOR: Record<string, string> = {
-  pr_merged: T.shuttle,
-  pr_closed: T.err,
-  check_failed: T.err,
-  check_passed: T.ok,
-  goal_started: T.thread,
-  goal_finished: T.ok,
-  lease_released: T.dim,
-  overlap_decided: T.thread,
-  drift: T.warn,
-  zone_waiting: T.warn,
-  conflict_predicted: T.warn,
-  goal_moved: T.thread,
-  deploy_started: T.thread,
-  deploy_succeeded: T.ok,
-  deploy_failed: T.err,
+  get pr_merged() {
+    return T.shuttle;
+  },
+  get pr_closed() {
+    return T.err;
+  },
+  get check_failed() {
+    return T.err;
+  },
+  get check_passed() {
+    return T.ok;
+  },
+  get goal_started() {
+    return T.thread;
+  },
+  get goal_finished() {
+    return T.ok;
+  },
+  get lease_released() {
+    return T.dim;
+  },
+  get overlap_decided() {
+    return T.thread;
+  },
+  get drift() {
+    return T.warn;
+  },
+  get zone_waiting() {
+    return T.warn;
+  },
+  get conflict_predicted() {
+    return T.warn;
+  },
+  get goal_moved() {
+    return T.thread;
+  },
+  get deploy_started() {
+    return T.thread;
+  },
+  get deploy_succeeded() {
+    return T.ok;
+  },
+  get deploy_failed() {
+    return T.err;
+  },
 };
 
 /** Feed rows that warn: a merge conflict is coming if nobody acts. */

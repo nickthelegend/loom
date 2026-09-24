@@ -131,6 +131,10 @@ export interface Chat {
   id: string;
   title: string;
   createdAt: number;
+  /** Newest agent reply in the chat (unread dots). */
+  lastReplyId?: number;
+  pinned?: boolean;
+  archived?: boolean;
 }
 
 /** Per-agent cost + token rollup from the daemon's /metrics endpoint. */

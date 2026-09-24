@@ -49,12 +49,24 @@ function statusOf(e: unknown): number | undefined {
 }
 
 export const TONE: Record<Tone, string> = {
-  ok: T.ok,
-  warn: T.warn,
-  err: T.err,
-  live: T.thread,
-  merged: T.primary,
-  dim: T.dim,
+  get ok() {
+    return T.ok;
+  },
+  get warn() {
+    return T.warn;
+  },
+  get err() {
+    return T.err;
+  },
+  get live() {
+    return T.thread;
+  },
+  get merged() {
+    return T.primary;
+  },
+  get dim() {
+    return T.dim;
+  },
 };
 
 const open = (url: string | null) => {
@@ -79,7 +91,13 @@ function PrLink(props: { pr: number; url: string }) {
   );
 }
 
-const meta = { color: T.faint, fontSize: 11, fontFamily: T.mono } as const;
+const meta = {
+  get color() {
+    return T.faint;
+  },
+  fontSize: 11,
+  fontFamily: T.mono,
+};
 
 function GoalCard(props: {
   g: LandingGoal;

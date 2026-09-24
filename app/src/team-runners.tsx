@@ -57,7 +57,13 @@ function statusOf(e: unknown): number | undefined {
   return typeof s === "number" ? s : undefined;
 }
 
-const meta = { color: T.faint, fontSize: 11, fontFamily: T.mono } as const;
+const meta = {
+  get color() {
+    return T.faint;
+  },
+  fontSize: 11,
+  fontFamily: T.mono,
+};
 const when = (ms: number | undefined) => (ms ? ago(new Date(ms).toISOString()) : "");
 
 const LAND_TEXT = "The runner holding it brings in fresh main, runs the team's fast tests, pushes, and merges once GitHub's rules pass.";

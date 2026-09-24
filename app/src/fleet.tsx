@@ -23,13 +23,27 @@ import { T, radii, spacing } from "./theme";
 const POLL_MS = 3000;
 
 const TASK_COLOR: Record<string, string> = {
-  pending: T.faint,
-  running: T.thread,
-  done: T.ok,
-  conflict: T.warn,
-  needs_input: T.warn,
-  failed: T.err,
-  cancelled: T.faint,
+  get pending() {
+    return T.faint;
+  },
+  get running() {
+    return T.thread;
+  },
+  get done() {
+    return T.ok;
+  },
+  get conflict() {
+    return T.warn;
+  },
+  get needs_input() {
+    return T.warn;
+  },
+  get failed() {
+    return T.err;
+  },
+  get cancelled() {
+    return T.faint;
+  },
 };
 
 function sinceText(ts: number | null | undefined, now: number): string {

@@ -96,7 +96,7 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
           <RadialGradient id="glow" cx="50%" cy="34%" rx="70%" ry="45%">
             <Stop offset="0" stopColor="#E8A87C" stopOpacity={0.1} />
             <Stop offset="0.55" stopColor="#E8A87C" stopOpacity={0.025} />
-            <Stop offset="1" stopColor="#111111" stopOpacity={0} />
+            <Stop offset="1" stopColor={T.bg} stopOpacity={0} />
           </RadialGradient>
         </Defs>
         <Rect x="0" y="0" width="100%" height="100%" fill="url(#glow)" />
@@ -178,7 +178,7 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
                 style={{
                   borderWidth: 1,
                   borderColor: T.line,
-                  backgroundColor: "rgba(26,26,26,0.7)",
+                  backgroundColor: T.panel,
                   borderRadius: 999,
                   paddingHorizontal: 10,
                   paddingVertical: 4,

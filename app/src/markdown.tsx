@@ -1,6 +1,9 @@
 /** An agent's reply on a phone: the blocks markdown-model.ts parses, drawn. */
 
-import { Linking, ScrollView, Text, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { useState } from "react";
+import { Linking, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { haptic } from "./haptics";
 import { type Block, type Inline, parse } from "./markdown-model";
 import { T, radii } from "./theme";
 
@@ -84,13 +87,32 @@ function BlockView(props: { b: Block }) {
       </View>
     );
   // code
+  return <CodeBlock lang={b.lang} code={b.s} />;
+}
+
+function CodeBlock(props: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
   return (
     <View style={{ backgroundColor: T.editor, borderRadius: radii.row, borderWidth: 1, borderColor: T.line, overflow: "hidden" }}>
-      {!!b.lang && (
-        <Text style={{ color: T.faint, fontSize: 10, fontFamily: T.mono, paddingHorizontal: 10, paddingTop: 6 }}>{b.lang}</Text>
-      )}
+      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingTop: 5 }}>
+        <Text style={{ color: T.faint, fontSize: 10, fontFamily: T.mono, flex: 1 }}>{props.lang}</Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="copy code"
+          hitSlop={10}
+          onPress={() => {
+            void Clipboard.setStringAsync(props.code).then(() => {
+              haptic.tap();
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1400);
+            });
+          }}
+        >
+          <Text style={{ color: copied ? T.gitAdd : T.dim, fontSize: 11, fontWeight: "600" }}>{copied ? "Copied" : "Copy"}</Text>
+        </TouchableOpacity>
+      </View>
       <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false}>
-        <Text style={{ color: T.text, fontFamily: T.mono, fontSize: 12, lineHeight: 18, padding: 10 }}>{b.s}</Text>
+        <Text selectable style={{ color: T.text, fontFamily: T.mono, fontSize: 12, lineHeight: 18, padding: 10, paddingTop: 6 }}>{props.code}</Text>
       </ScrollView>
     </View>
   );

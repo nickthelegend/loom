@@ -57,9 +57,12 @@ import {
   type TaskItem,
   type TaskResult,
   type WorkingTree,
+  kv,
 } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
+import { haptic } from "./haptics";
+import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
 import { AgentPicker } from "./agents";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
@@ -346,7 +349,7 @@ function StatTile(props: { value: string; label: string }) {
     <View
       style={{
         flex: 1,
-        backgroundColor: "rgba(26,26,26,0.6)",
+        backgroundColor: T.panel,
         borderColor: T.line,
         borderWidth: 1,
         borderRadius: 10,
@@ -799,6 +802,24 @@ export function ProjectScreen(props: {
   // was slow): say so and try again, rather than showing an empty thread.
   const [historyErr, setHistoryErr] = useState<string | null>(null);
   const [historyTry, setHistoryTry] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  // What this phone has read, per chat (the chips' unread dots).
+  const seenKey = `loomSeen:${project.id}`;
+  const [seen, setSeen] = useState<SeenMap>({});
+  useEffect(() => {
+    void kv.get(seenKey).then((v) => {
+      try {
+        setSeen(v ? (JSON.parse(v) as SeenMap) : {});
+      } catch {
+        setSeen({});
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
+  const saveSeen = (next: SeenMap) => {
+    setSeen(next);
+    void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
+  };
   const [tree, setTree] = useState<WorkingTree | null>(null);
   const [tasks, setTasks] = useState<TaskResult | null>(null);
   const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
@@ -860,9 +881,17 @@ export function ProjectScreen(props: {
         setEvents(events);
         setLive((m) => seed(m, typing, chatId));
         setHistoryErr(null);
+        setRefreshing(false);
+        const newest = events[events.length - 1]?.id ?? 0;
+        if (newest) setSeen((s) => {
+          const next = markRead(s, chatId, newest);
+          if (next !== s) void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
+          return next;
+        });
       })
       .catch((e: unknown) => {
         if (!live) return;
+        setRefreshing(false);
         setHistoryErr(e instanceof Error ? e.message : String(e));
         retryHistory = setTimeout(() => setHistoryTry((n) => n + 1), 4000);
       });
@@ -896,6 +925,14 @@ export function ProjectScreen(props: {
       if (ev.chat && ev.chat !== chatId) return; // a different chat
       lastId.current = ev.id;
       setEvents((prev) => [...prev, ev]);
+      if (ev.kind === "message" && ev.agentId && !ev.payload?.reasoning) {
+        haptic.success(); // a reply landed where you're looking
+        setSeen((s) => {
+          const next = markRead(s, chatId, ev.id);
+          if (next !== s) void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
+          return next;
+        });
+      }
     });
     return () => {
       live = false;
@@ -914,6 +951,10 @@ export function ProjectScreen(props: {
       loadPending();
       void getQueue(creds, project.id)
         .then(setQueue)
+        .catch(() => {});
+      // chats carry their newest reply id: the chips' unread dots
+      void getChats(creds, project.id)
+        .then(({ chats }) => setChats(chats))
         .catch(() => {});
       if (tab === "changes") {
         void getTree(creds, project.id)
@@ -1011,6 +1052,7 @@ export function ProjectScreen(props: {
     if (stt.listening) void stt.toggle(); // stop dictation on send
     const message = text.trim();
     if (!message) return;
+    haptic.tap();
     setText("");
     sttBase.current = "";
     setErr(null);
@@ -1189,7 +1231,14 @@ export function ProjectScreen(props: {
               style={{ maxHeight: 46, flexGrow: 0, backgroundColor: T.panel, borderBottomWidth: 1, borderBottomColor: T.line }}
               contentContainerStyle={{ paddingHorizontal: spacing.md, paddingVertical: 8, gap: spacing.sm, alignItems: "center" }}
             >
-              {[...chats, ...(extraChat && !chats.some((c) => c.id === extraChat.id) ? [extraChat] : [])].map((c) => {
+              {(() => {
+                const shown = [...chats, ...(extraChat && !chats.some((c) => c.id === extraChat.id) ? [extraChat] : [])]
+                  .filter((c) => !c.archived || c.id === chatId)
+                  .sort((a, b) => (a.id === "main" ? -1 : b.id === "main" ? 1 : (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)));
+                const { unread, seen: based } = unreadChats(shown, seen, chatId);
+                if (Object.keys(based).length !== Object.keys(seen).length) setTimeout(() => saveSeen(based), 0);
+                return shown.map((c) => ({ c, dot: unread.has(c.id) }));
+              })().map(({ c, dot }) => {
                 const on = c.id === chatId;
                 return (
                   <TouchableOpacity
@@ -1207,9 +1256,11 @@ export function ProjectScreen(props: {
                       borderColor: on ? T.line : "transparent",
                     }}
                   >
-                    <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600" }}>
-                      {c.title}
-                    </Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      {c.pinned ? <Text style={{ color: T.faint, fontSize: 10 }}>📌</Text> : null}
+                      <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600" }}>{c.title}</Text>
+                      {dot ? <View accessibilityLabel="unread" style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.thread }} /> : null}
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -1240,6 +1291,18 @@ export function ProjectScreen(props: {
               ) : null
             }
             ListFooterComponent={<LiveReplies live={live} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => {
+                  setRefreshing(true);
+                  setHistoryTry((n) => n + 1);
+                }}
+                tintColor={T.dim}
+                colors={[T.thread]}
+                progressBackgroundColor={T.panel}
+              />
+            }
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
             style={{ flex: 1 }}
