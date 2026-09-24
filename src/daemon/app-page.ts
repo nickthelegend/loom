@@ -2960,7 +2960,7 @@ window.__loomPageRev="%%BUILD_REV%%";
     padding:1px 5px;border-radius:4px;color:var(--foreground)}
   .phmsg .btn{margin-top:14px}
   .phlinkrow{display:flex;gap:6px;align-items:center}
-  .phlinkrow #phlink{flex:1;min-width:0;font-family:var(--font-mono);font-size:11.5px;
+  .phlinkrow input{flex:1;min-width:0;font-family:var(--font-mono);font-size:11.5px;
     padding:7px 9px;border:1px solid var(--border);border-radius:7px;
     background:var(--input,var(--muted));color:var(--foreground)}
   .phhint{font-size:11.5px;color:var(--muted-foreground);line-height:1.5;text-align:center}

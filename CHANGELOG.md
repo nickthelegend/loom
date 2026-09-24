@@ -109,6 +109,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   some embedders, so Abort simply did nothing.
 - Escape closes any composer menu; the right panel opens by default only on
   wide windows; a reload reopens the project you were in.
+- **Reload mid-reply and the reply is still there.** A thread's first page
+  carries what agents are typing in it right now, and stream frames carry their
+  offset, so a window opened mid-answer shows the whole reply so far and keeps
+  going without repeating or dropping words.
+- When the daemon stops answering, one banner says so and how to start it,
+  instead of a "Failed to fetch" toast every few seconds; it clears itself and
+  the views refresh when the daemon is back.
+- Terminals stopped stacking a "restored scrollback" divider and prompt for
+  every restart nobody typed through.
+
+### On the phone
+
+- Replies stream in live, over the LAN, the tailnet or Loom Cloud, and render
+  as markdown — code blocks, lists, bold, inline code. The orchestrator's plan
+  reads as a plan card, not a JSON dump, and the Fleet previews drop the marks.
+- The Pair screen's second button said "Paste link instead" and actually
+  submitted the fields. It now says Connect when something's typed (Enter works
+  too) and pastes from the clipboard when nothing is.
+- A thread that can't load (the route still settling, the daemon down) says so
+  and retries until it does, instead of sitting blank; "Network request failed"
+  became a sentence that says what to check.
 
 ## [1.0.1] — 2026-09-21
 
