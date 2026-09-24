@@ -3761,6 +3761,7 @@ window.__loomPageRev="%%BUILD_REV%%";
   .bcol.over{box-shadow:inset 0 2px 0 var(--warn)}
   .bmmeta{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .bmmeta select,.bmmeta input{width:100%}
+  .pmfoot .pmvars{flex-basis:100%;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);opacity:.8}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -12070,6 +12071,8 @@ ${BRAND_SPRITE}
     }
     function openPrompts(){
       if (menuState && menuState.kind === "prompts") { closeMenu(); var bx = document.getElementById("box"); if (bx) bx.focus(); return; }
+      // what's selected in the thread now, before focus moves into the search box
+      try { state.promptSel = String(window.getSelection ? window.getSelection() : "").trim(); } catch (e) { state.promptSel = ""; }
       if (desktop && state.tab !== "thread") showTab("thread"); // the composer lives under Thread
       var m = document.getElementById("cmenu"); if (!m) return;
       closeMenu();
@@ -12082,7 +12085,8 @@ ${BRAND_SPRITE}
           '<button type="button" class="pmsave" id="pmsave" title="save what\\u2019s in the composer">' + ICONS.bookmark + "Save current</button></div>" +
         '<div class="pmlist" id="pmlist" role="listbox" aria-label="prompts">' + (prompts.loaded ? "" : LOADER) + "</div>" +
         '<div class="pmfoot"><span><kbd>\\u2191</kbd><kbd>\\u2193</kbd> move</span><span><kbd>\\u21b5</kbd> insert</span>' +
-          "<span><kbd>" + KMOD + "\\u21b5</kbd> insert &amp; send</span><span><kbd>esc</kbd> close</span></div>";
+          "<span><kbd>" + KMOD + "↵</kbd> insert &amp; send</span><span><kbd>esc</kbd> close</span>" +
+          '<span class="pmvars" title="write these in a saved prompt and they fill in when you insert it">{{selection}} {{date}} {{project}} {{branch}} {{chat}} {{agent}} {{last_reply}} {{file}}</span></div>';
       var pb = document.getElementById("promptbtn"); if (pb) pb.classList.add("on");
       var q = document.getElementById("pmq");
       q.oninput = function(){ prompts.q = q.value; prompts.sel = 0; drawPrompts(); };
@@ -12179,10 +12183,38 @@ ${BRAND_SPRITE}
       if (e.key === "Escape") { e.preventDefault(); closeMenu(); var bx = document.getElementById("box"); if (bx) bx.focus(); }
     }
     /** Put a prompt in the composer: into an empty box whole, else at the caret. */
+    /**
+     * A saved prompt's {{variables}}, filled from where you are: the selection
+     * you made in the thread, today's date, this project, branch, chat and
+     * agent, the last reply, the file open beside the thread. Anything it
+     * doesn't know stays as written, for you to fill in.
+     */
+    function fillPromptVars(text){
+      var now = new Date(), pad = function(n){ return (n < 10 ? "0" : "") + n; };
+      var chat = ((state.project && state.project.chats) || []).filter(function(c){ return c.id === chatId; })[0];
+      var replies = document.querySelectorAll("#feed .msg.agent:not(.thinking) .bubble");
+      var dockOpen = document.querySelector("#dockpane.open");
+      var vars = {
+        selection: state.promptSel || "",
+        date: now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()),
+        time: pad(now.getHours()) + ":" + pad(now.getMinutes()),
+        project: (state.project && state.project.name) || "",
+        branch: (state.gitStat && state.gitStat.pid === pid && state.gitStat.branch) || "",
+        chat: (chat && chat.title) || "Main",
+        agent: state.selected ? labelOf(state.selected) : "",
+        last_reply: replies.length ? (replies[replies.length - 1].innerText || "").trim().slice(0, 4000) : "",
+        file: dockOpen ? ((document.getElementById("dockpath") || {}).textContent || "") : "",
+      };
+      return String(text).replace(/\\{\\{\\s*([a-z_]+)\\s*\\}\\}/gi, function(m, k){
+        var v = vars[k.toLowerCase()];
+        return v ? v : m;
+      });
+    }
     function insertPrompt(i, andSend){
       var r = prompts.rows[i]; if (!r) return;
       var box = document.getElementById("box"); if (!box) return;
-      var text = String(r.p.text || "");
+      var text = fillPromptVars(String(r.p.text || ""));
+      var left = text.match(/\\{\\{\\s*[a-z_]+\\s*\\}\\}/i);
       closeMenu();
       var v = box.value;
       if (!v.trim()) { box.value = text; box.setSelectionRange(text.length, text.length); }
@@ -12198,6 +12230,13 @@ ${BRAND_SPRITE}
       if (r.kind === "saved") {
         r.p.uses = (r.p.uses || 0) + 1; // it floats up next time, as it will on the daemon
         api("/api/prompts/" + encodeURIComponent(r.p.id), { method: "PATCH", body: JSON.stringify({ used: true }) }).catch(function(){});
+      }
+      // a blank left to fill: select it, don't send a prompt with a hole in it
+      if (left) {
+        var at = box.value.indexOf(left[0]);
+        if (at >= 0) box.setSelectionRange(at, at + left[0].length);
+        toast("fill in " + left[0] + " — it’s selected");
+        return;
       }
       if (andSend) send();
     }
