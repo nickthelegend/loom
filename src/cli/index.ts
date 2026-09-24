@@ -15,6 +15,20 @@ import { Command } from "commander";
 import pc from "picocolors";
 import qrcode from "qrcode-terminal";
 import type { LoomEvent, ProjectStatus } from "../types.js";
+
+// package.json says node >=22.5, but npm doesn't enforce engines at run time.
+// Below that there is no node:sqlite, so every project's history would read
+// as empty — say so up front instead of looking like the data is gone.
+{
+  const [maj, min] = process.versions.node.split(".").map(Number);
+  if (maj! < 22 || (maj === 22 && min! < 5)) {
+    console.error(
+      `loom needs Node 22.5 or newer — this is Node ${process.versions.node} (${process.execPath}).\n` +
+        `If you use nvm, \`nvm use 22\` (or newer) — or put a newer node first on your PATH.`,
+    );
+    process.exit(1);
+  }
+}
 import type { QueueItem } from "../core/prompt-queue.js";
 import {
   DaemonClient,
@@ -27,6 +41,8 @@ import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
 import { ensureLoomHome, loomHome } from "../core/registry.js";
 import { VERSION } from "../version.js";
+import { makeBackup } from "../core/backup.js";
+import { threadMarkdown } from "../core/thread-md.js";
 import {
   allModels,
   fetchModels,
@@ -188,7 +204,10 @@ program
       console.log(pc.dim("bound to the tailnet — pair your phone with `loom pair`"));
     }
     const shutdown = () => {
-      void daemon.close().then(() => process.exit(0));
+      // A shutdown that can't finish in a few seconds is stuck on something it
+      // shouldn't wait for; leave rather than linger as a headless daemon.
+      setTimeout(() => process.exit(0), 5000).unref();
+      void daemon.close().then(() => process.exit(0), () => process.exit(1));
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
@@ -1012,11 +1031,14 @@ const TASK_COLOR: Record<string, (s: string) => string> = {
 function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   const done = run.tasks.filter((t) => t.status === "done").length;
   console.log(
-    `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(run.status)}  ${done}/${run.tasks.length} tasks · ` +
-      `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
+    run.race
+      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(run.status)}  race · ${done}/${run.tasks.length} finished · ${fmtUsd(run.costUsd)}`
+      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(run.status)}  ${done}/${run.tasks.length} tasks · ` +
+          `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
-  console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.join(", ")}`);
+  if (run.race) console.log(`   ${pc.dim("entrants")} ${run.workers.join(", ")}`);
+  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.join(", ")}`);
   for (const t of run.tasks) {
     const color = TASK_COLOR[t.status] ?? ((x: string) => x);
     const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
@@ -1028,7 +1050,13 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   if (run.question) console.log(`   ${pc.yellow("asks:")} ${run.question}  ${pc.dim(`(loom orchestra:reply ${run.id} "…")`)}`);
   if (run.summary) console.log(`   ${pc.green("summary:")} ${run.summary}`);
   if (run.error) console.log(`   ${pc.red("error:")} ${run.error}`);
-  if (run.status === "completed" && !run.applied) console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
+  if (run.status === "completed" && !run.applied) {
+    if (run.race) {
+      const ok = run.tasks.filter((t) => t.status === "done").map((t) => t.id);
+      if (ok.length) console.log(pc.dim(`   keep one: loom orchestra:apply ${run.id} --task ${ok.join(" | ")}`));
+    } else console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
+  }
+  if (run.race && run.applied?.task) console.log(`   ${pc.green("kept:")} ${run.applied.task} → ${run.applied.into}`);
 }
 
 async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string): Promise<void> {
@@ -1063,8 +1091,9 @@ program
   .option("--rounds <n>", "orchestrator review rounds before giving up (default 10)")
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
   .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
+  .option("--race", "race: every worker takes the whole goal in its own worktree; pick one with orchestra:apply <run> --task race-<agent>")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1076,10 +1105,13 @@ program
         ...(opts.rounds ? { maxRounds: Number(opts.rounds) } : {}),
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.maxUsd ? { maxUsd: Number(opts.maxUsd) } : {}),
+        ...(opts.race ? { race: true } : {}),
       });
       console.log(
-        `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +
-          `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
+        run.race
+          ? `${pc.magenta("🏁")} ${pc.bold(run.id)} started — ${run.workers.join(", ")} racing on the same goal`
+          : `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +
+              `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
       );
       if (opts.watch) await watchRun(client, project.id, run.id);
       else console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
@@ -1116,20 +1148,22 @@ program
     }
   });
 
-for (const action of ["abort", "apply", "cleanup"] as const) {
+for (const action of ["abort", "apply", "cleanup", "resume"] as const) {
   const blurb = {
     abort: "stop a run — every worker is interrupted",
-    apply: "merge a run's integration branch into your current branch",
+    resume: "carry on a run Loom stopped by restarting — its interrupted tasks pick up where they left off",
+    apply: "merge a run's integration branch into your current branch (a race: --task <entrant>)",
     cleanup: "remove a finished run's worktrees (its branch stays)",
   }[action];
   program
     .command(`orchestra:${action} <runId>`)
     .description(blurb)
-    .action(async (runId: string) => {
+    .option("--task <id>", "apply: which race entrant to keep (race-<agent>)")
+    .action(async (runId: string, opts: { task?: string }) => {
       const client = await ensureDaemon();
       const project = await currentProject(client);
       try {
-        const out = await client.orchestraAction(project.id, runId, action);
+        const out = await client.orchestraAction(project.id, runId, action, action === "apply" && opts.task ? { task: opts.task } : undefined);
         if (action === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(String(out.merged))} into ${pc.bold(String(out.into))}`);
         else console.log(`${pc.green("✓")} ${action} ${runId}`);
       } catch (err) {
@@ -2615,10 +2649,13 @@ program
       );
       process.exit(1);
     }
-    const { token, expiresAt, url } = await client.newPairingToken();
+    const minted = await client.newPairingToken();
+    const { token, expiresAt, url } = minted;
     // Deep link: scanning with any camera opens the phone app, which claims
     // the (single-use, 10-min) token from the URL fragment and pairs itself.
-    const link = `${url}/app#pair=${token}`;
+    // The daemon's own link carries the Loom Cloud route when Cloud is on, so
+    // a phone paired from the terminal can reach home from any network too.
+    const link = minted.link ?? `${url}/app#pair=${token}`;
     qrcode.generate(link, { small: true }, (qr) => console.log(qr));
     console.log(pc.bold(`  ${link}`));
     console.log(
@@ -2627,6 +2664,90 @@ program
       ),
     );
     console.log(pc.dim(`  (manual claim: POST ${url}/api/pair/claim {"token":"${token.slice(0, 6)}…"})`));
+  });
+
+program
+  .command("backup")
+  .description("everything Loom knows — settings, pairings, prompts, every project's log and brain — in one .tar.gz")
+  .option("--out <file>", "where to write it (default: ~/loom-backup-<time>.tar.gz)")
+  .action((opts: { out?: string }) => {
+    const r = makeBackup(opts.out);
+    const mb = (r.bytes / 1024 / 1024).toFixed(1);
+    console.log(pc.green(`✓ backed up ${r.projects} project${r.projects === 1 ? "" : "s"} and ~/.loom → ${r.file} (${mb} MB)`));
+    console.log(pc.dim("  left out: orchestra worktrees (their branches are in your repos) and the model cache"));
+    console.log(pc.yellow("  it holds your pairing tokens and cloud keys — keep it somewhere private"));
+  });
+
+program
+  .command("export")
+  .description("write a chat as Markdown — prompts, replies, what was done, what changed")
+  .option("--chat <chat>", "the chat's id or title (default: main)", "main")
+  .option("--out <file>", "write to a file instead of printing")
+  .action(async (opts: { chat: string; out?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const want = opts.chat.trim().toLowerCase();
+    const chat = chats.find((c) => c.id === opts.chat) ?? chats.find((c) => c.title.toLowerCase() === want);
+    if (!chat) fail(`no chat "${opts.chat}" in ${project.name} — try one of: ${chats.map((c) => c.title).join(", ")}`);
+    let events: LoomEvent[] = [];
+    let before: number | undefined;
+    for (let page = 0; page < 20; page++) {
+      const { events: evs } = await client.chatEvents(project.id, chat!.id, { ...(before ? { before } : {}), limit: 500 });
+      events = [...evs, ...events];
+      if (evs.length < 500) break;
+      before = evs[0]!.id;
+    }
+    const md = threadMarkdown(events, `${project.name} — ${chat!.title}`);
+    if (!opts.out) return void process.stdout.write(md);
+    fs.writeFileSync(opts.out, md);
+    console.error(pc.green(`✓ ${events.length} events → ${opts.out}`));
+  });
+
+program
+  .command("stats")
+  .description("today across every project: turns, how many finished cleanly, spend, busiest agent")
+  .option("--days <n>", "look back this many days instead of just today", "1")
+  .action(async (opts: { days: string }) => {
+    const client = await ensureDaemon();
+    const days = Math.max(1, Math.min(90, Number(opts.days) || 1));
+    const since = new Date();
+    since.setHours(0, 0, 0, 0);
+    since.setDate(since.getDate() - (days - 1));
+    const { projects } = await client.listProjects();
+    let turns = 0, errors = 0, cost = 0;
+    const byAgent = new Map<string, number>();
+    const rows: string[] = [];
+    for (const p of projects) {
+      const t = await client.turnStats(p.id, { since: since.getTime(), days: 7 }).catch(() => null);
+      if (!t) continue;
+      const pt = t.leaderboard.reduce((a, x) => a + x.turns, 0);
+      if (!pt) continue;
+      const pe = t.leaderboard.reduce((a, x) => a + x.errors, 0);
+      const pc$ = t.leaderboard.reduce((a, x) => a + x.totalCostUsd, 0);
+      turns += pt; errors += pe; cost += pc$;
+      for (const x of t.leaderboard) byAgent.set(x.agentId, (byAgent.get(x.agentId) ?? 0) + x.turns);
+      rows.push(`  ${pc.bold(p.name.padEnd(18))} ${String(pt).padStart(4)} turns  ${pe ? pc.red(`${pe} failed`) : pc.green("all clean")}  ${fmtUsd(pc$)}`);
+    }
+    const label = days === 1 ? "today" : `the last ${days} days`;
+    if (!turns) return void console.log(pc.dim(`no turns ${label}`));
+    const busiest = [...byAgent.entries()].sort((a, b) => b[1] - a[1])[0]!;
+    const clean = Math.round(((turns - errors) / turns) * 100);
+    console.log(pc.bold(`${label}: ${turns} turn${turns === 1 ? "" : "s"} · ${clean}% finished cleanly · ${fmtUsd(cost)} · busiest ${busiest[0]} (${busiest[1]})`));
+    for (const r of rows) console.log(r);
+  });
+
+program
+  .command("completion")
+  .description("print a shell completion script: loom completion zsh >> ~/.zshrc (or bash >> ~/.bashrc)")
+  .argument("<shell>", "zsh or bash")
+  .action((shell: string) => {
+    const names = program.commands.map((c) => c.name()).filter((n) => n && n !== "completion").sort();
+    if (shell === "bash") {
+      console.log(`complete -W "${names.join(" ")} completion" loom`);
+    } else if (shell === "zsh") {
+      console.log(`_loom() { compadd -- ${names.join(" ")} completion; }\ncompdef _loom loom 2>/dev/null || { autoload -Uz compinit && compinit && compdef _loom loom; }`);
+    } else fail(`unknown shell "${shell}" — zsh or bash`);
   });
 
 program.parseAsync().catch((err) => {

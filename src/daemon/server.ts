@@ -4,6 +4,7 @@
  * event stream.
  */
 
+import { hostedTarget } from "../core/hosted.js";
 import { execFile, spawn } from "node:child_process";
 import { VERSION } from "../version.js";
 import crypto from "node:crypto";
@@ -51,6 +52,7 @@ import { suggestServers, urlFor, type ServerConfig } from "../core/servers.js";
 import { capture } from "../core/preview-shot.js";
 import { digest } from "../core/digest.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
+import { leaderboard, perDay, turnRows, turnsCsv } from "../core/turn-stats.js";
 import {
   CHECK_TTL_MS,
   detectInstall,
@@ -90,6 +92,7 @@ import {
   projectLoomDir,
   readProjectConfig,
   readProjectState,
+  writeProjectState,
   registerProject,
   renameProject,
   unregisterProject,
@@ -355,6 +358,8 @@ export class LoomDaemon {
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
   private auth: AuthManager;
+  /** Wrong pairing codes per address, for throttling guesses at /api/pair/claim. */
+  private claimTries = new Map<string, { fails: number; until: number }>();
   private runtimes = new Map<string, ProjectRuntime>();
   private sockets = new Map<WebSocket, { project?: string; scope?: string[] }>();
   /** In-flight self-heal recheck timers, cleared on close. */
@@ -507,6 +512,22 @@ export class LoomDaemon {
 
   private routes(): void {
     const app = this.app;
+    app.disable("x-powered-by");
+    // Headers every response carries. No full CSP: the app shell is one
+    // inline document by design. What it does get: no MIME sniffing, no
+    // referrer leaking a token-bearing URL to a site you click through to,
+    // and only Loom itself may frame the app (the Browser tab's previews
+    // are same-origin, so they keep working).
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("Permissions-Policy", "geolocation=(), payment=(), usb=(), serial=(), bluetooth=()");
+      if (req.path === "/app" || req.path === "/") {
+        res.setHeader("X-Frame-Options", "SAMEORIGIN");
+        res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+      }
+      next();
+    });
     app.use(express.json({ limit: "2mb" }));
 
     // CORS for same-machine browser origins only (the Expo web dev server running
@@ -591,14 +612,33 @@ export class LoomDaemon {
         version: VERSION,
         rev: BUILD_REV,
         terminal: this.terminals.mode,
+        // a transcriber is configured: the mic records and the daemon transcribes
+        stt: !!process.env.LOOM_STT_CMD,
       });
     });
 
     app.post("/api/pair/claim", (req, res) => {
       const { token, name } = (req.body ?? {}) as { token?: string; name?: string };
       if (!token) return void res.status(400).json({ error: "missing token" });
+      // A pairing token is the only credential this route takes, so guessing
+      // is throttled: ten wrong ones from one address and it waits.
+      const who = String(req.headers["x-loom-via"] ? "relay" : req.socket.remoteAddress ?? "?");
+      const now = Date.now();
+      const tries = this.claimTries.get(who);
+      if (tries && tries.until > now && tries.fails >= 10) {
+        const mins = Math.ceil((tries.until - now) / 60_000);
+        res.setHeader("Retry-After", String(Math.ceil((tries.until - now) / 1000)));
+        return void res.status(429).json({ error: `too many wrong pairing codes from here — try again in ${mins} minute${mins === 1 ? "" : "s"}` });
+      }
       const claimed = this.auth.claim(token, name ?? "device");
-      if (!claimed) return void res.status(403).json({ error: "invalid or expired pairing token" });
+      if (!claimed) {
+        const t = tries && tries.until > now ? tries : { fails: 0, until: now + 10 * 60_000 };
+        t.fails++;
+        this.claimTries.set(who, t);
+        if (this.claimTries.size > 1000) this.claimTries.clear(); // bounded, whatever happens
+        return void res.status(403).json({ error: "invalid or expired pairing token" });
+      }
+      this.claimTries.delete(who);
       res.json(claimed);
     });
 
@@ -1153,6 +1193,56 @@ export class LoomDaemon {
       }
       res.json(this.team.status());
     });
+    /**
+     * Sign in to the hosted Team Hub with GitHub, from the app.
+     *
+     * It only existed in the CLI, so the app's Team screen offered a
+     * self-hosted form and nothing for the hub most people use. The daemon runs
+     * the same loopback sign-in the CLI does and answers with GitHub's
+     * authorize URL for the app to open; when GitHub sends the browser back,
+     * the session lands here and the team connects. The app watches /api/team.
+     */
+    let hostedPending: { startedAt: number; error?: string } | null = null;
+    app.post("/api/team/hosted-signin", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void (async () => {
+        try {
+          const { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+          const { hostedSignIn } = await import("../hub/supabase-client.js");
+          const supabaseUrl = hostedSupabaseUrl("hosted");
+          if (!supabaseUrl) throw new Error("no hosted hub is configured for this build");
+          let answered = false;
+          hostedPending = { startedAt: Date.now() };
+          const done = hostedSignIn({
+            supabaseUrl,
+            publishableKey: publishableKeyFor(supabaseUrl),
+            timeoutMs: 10 * 60 * 1000,
+            openBrowser: (url) => {
+              answered = true;
+              res.json({ url });
+            },
+          });
+          done
+            .then(async (session) => {
+              await this.team.signIn(hostedHubUrl(supabaseUrl), { token: session.refreshToken });
+              await this.team.connect();
+              hostedPending = null;
+            })
+            .catch((err: Error) => {
+              hostedPending = { startedAt: Date.now(), error: err.message };
+              if (!answered) res.status(400).json({ error: err.message });
+            });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      })();
+    });
+    app.get("/api/team/hosted-signin", (_req, res) => {
+      res.json({ pending: Boolean(hostedPending && !hostedPending.error), error: hostedPending?.error ?? null });
+    });
+
     app.post("/api/team/:action", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
         return void res.status(403).json({ error: "admin only" });
@@ -1331,6 +1421,7 @@ export class LoomDaemon {
               lastEvent: null,
               needsInput: false,
               error: String(err instanceof Error ? err.message : err),
+              ...(fs.existsSync(info.dir) ? {} : { missing: true }),
             });
           }
         }
@@ -1705,6 +1796,32 @@ export class LoomDaemon {
         res.json({ burn: series, budgets: rt.budgets(), budgetStatus: rt.budgetStatus() });
       }),
     );
+    // Turns off the log: the agent leaderboard, a per-day count for the
+    // activity heatmap, and every turn as CSV.
+    app.get(
+      "/api/projects/:id/insights/turns",
+      withRuntime(async (rt, req, res) => {
+        const days = Math.min(366, Math.max(7, Number(req.query.days) || 84));
+        const rows = turnRows(rt.log.list({ kinds: ["run_complete", "error"], limit: 50_000 }));
+        // ?since= (ms) narrows the leaderboard to a window — "today", for loom stats
+        const since = Number(req.query.since) || 0;
+        const board = leaderboard(since ? rows.filter((r) => r.ts >= since) : rows);
+        // your 👍/👎, beside what the log says
+        const rated = rt.ratingsByAgent();
+        res.json({ leaderboard: board.map((a) => (rated[a.agentId] ? { ...a, rated: rated[a.agentId] } : a)), days: perDay(rows, days), total: rows.length });
+      }),
+    );
+    app.get(
+      "/api/projects/:id/insights/turns.csv",
+      withRuntime(async (rt, _req, res) => {
+        const rows = turnRows(rt.log.list({ kinds: ["run_complete", "error"], limit: 50_000 }));
+        const safe = rt.info.name.replace(/[^\w.-]+/g, "-");
+        res
+          .type("text/csv")
+          .setHeader("Content-Disposition", `attachment; filename="${safe}-turns.csv"`)
+          .send(turnsCsv(rows));
+      }),
+    );
     app.get(
       "/api/projects/:id/insights/health",
       withRuntime(async (rt, req, res) => {
@@ -1852,25 +1969,41 @@ export class LoomDaemon {
       "/api/projects/:id/events",
       withRuntime(async (rt, req, res) => {
         const since = req.query.since ? Number(req.query.since) : undefined;
+        // ?before= pages backwards: the thread's "earlier messages"
+        const before = req.query.before ? Number(req.query.before) : undefined;
         const limit = req.query.limit ? Number(req.query.limit) : 200;
         // no ?chat= means the whole project — old clients keep seeing the
         // whole thread, which is what they've always shown
         const chat = req.query.chat ? String(req.query.chat) : undefined;
-        res.json({ events: rt.log.list({ since, limit, ...(chat ? { chat } : {}) }) });
+        const events = rt.log.list({
+          since,
+          limit,
+          ...(before !== undefined && Number.isFinite(before) ? { before } : {}),
+          ...(chat ? { chat } : {}),
+        });
+        // A thread's first page also carries the replies being typed in it
+        // right now: reload mid-reply and you see the reply so far.
+        const opening = chat && since === undefined && before === undefined;
+        res.json({ events, ...(opening ? { live: rt.liveNow(chat) } : {}) });
       }),
     );
 
     app.post(
       "/api/projects/:id/messages",
       withRuntime(async (rt, req, res) => {
-        const { text, agentId, chat, plan } = (req.body ?? {}) as {
+        const { text, agentId, chat, plan, length } = (req.body ?? {}) as {
           text?: string;
           agentId?: string;
           chat?: string;
           plan?: boolean;
+          length?: string;
         };
         if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
-        const result = await rt.sendMessage(text, agentId, { ...(chat ? { chat } : {}), ...(plan ? { plan: true } : {}) });
+        const result = await rt.sendMessage(text, agentId, {
+          ...(chat ? { chat } : {}),
+          ...(plan ? { plan: true } : {}),
+          ...(length === "brief" || length === "detailed" ? { length } : {}),
+        });
         recordRecent(text, { project: rt.info.name, mode: plan ? "plan" : "chat" });
         res.json(result);
       }),
@@ -1929,7 +2062,8 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         try {
           const cfg = rt.servers.mustConfig(String(req.params.name));
-          const target = urlFor(cfg);
+          // configured, or else what the running server announced it's on
+          const target = urlFor(cfg) ?? rt.servers.status(cfg).url ?? null;
           if (!target) return void res.status(400).json({ error: `server "${cfg.name}" has no port or url to preview` });
           const proxy = await rt.previewProxy(cfg.name, target);
           res.json({ url: `http://127.0.0.1:${proxy.port}`, target, bridged: true });
@@ -2289,6 +2423,51 @@ export class LoomDaemon {
       }),
     );
 
+    // Pin a thread to the top of the sidebar, archive it out of the way, or
+    // file it in a folder ("" or null takes it out).
+    app.patch(
+      "/api/projects/:id/chats/:chatId",
+      withRuntime(async (rt, req, res) => {
+        const body = (req.body ?? {}) as { pinned?: unknown; archived?: unknown; folder?: unknown };
+        const flags: { pinned?: boolean; archived?: boolean; folder?: string | null } = {};
+        if (body.pinned !== undefined) flags.pinned = body.pinned === true;
+        if (body.archived !== undefined) flags.archived = body.archived === true;
+        if (body.folder !== undefined) {
+          if (body.folder !== null && typeof body.folder !== "string") return void res.status(400).json({ error: "folder is a name, or null to take it out" });
+          flags.folder = body.folder as string | null;
+        }
+        if (!Object.keys(flags).length) return void res.status(400).json({ error: "nothing to change: send pinned, archived or folder" });
+        if (String(req.params.chatId) === "main") {
+          return void res.status(400).json({ error: "Main is always first and always there, so it can't be pinned, archived or filed" });
+        }
+        const chat = rt.setChatFlags(String(req.params.chatId), flags);
+        if (!chat) return void res.status(404).json({ error: "no such thread" });
+        res.json({ chat });
+      }),
+    );
+
+    // Rate a reply: { eventId, agentId, value: 1 | -1 | 0 }.
+    app.post(
+      "/api/projects/:id/chats/:chatId/rate",
+      withRuntime(async (rt, req, res) => {
+        const { eventId, agentId, value } = (req.body ?? {}) as { eventId?: unknown; agentId?: unknown; value?: unknown };
+        const ratings = rt.rateMessage(String(req.params.chatId), Number(eventId), String(agentId ?? ""), Number(value));
+        if (!ratings) return void res.status(400).json({ error: "no such thread, message or agent" });
+        res.json({ ratings });
+      }),
+    );
+
+    // Star a message worth coming back to.
+    app.post(
+      "/api/projects/:id/chats/:chatId/star",
+      withRuntime(async (rt, req, res) => {
+        const { eventId, on } = (req.body ?? {}) as { eventId?: unknown; on?: unknown };
+        const starred = rt.starMessage(String(req.params.chatId), Number(eventId), on !== false);
+        if (!starred) return void res.status(400).json({ error: "no such thread or message" });
+        res.json({ starred });
+      }),
+    );
+
     app.delete(
       "/api/projects/:id/chats/:chatId",
       withRuntime(async (rt, req, res) => {
@@ -2309,6 +2488,58 @@ export class LoomDaemon {
         const clean = role.trim().slice(0, 40);
         if (!clean) return void res.status(400).json({ error: "role cannot be empty" });
         const updated = rt.setAgentRole(String(req.params.agentId), clean);
+        if (!updated) return void res.status(404).json({ error: "unknown agent" });
+        res.json(updated);
+      }),
+    );
+
+    // An agent's picture ({ avatar: data URL | null }).
+    app.put(
+      "/api/projects/:id/agents/:agentId/avatar",
+      withRuntime(async (rt, req, res) => {
+        const { avatar } = (req.body ?? {}) as { avatar?: unknown };
+        try {
+          const out = rt.setAgentAvatar(String(req.params.agentId), avatar === null || avatar === undefined ? null : String(avatar));
+          if (!out) return void res.status(404).json({ error: "unknown agent" });
+          res.json(out);
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    // A model agent's sampling: temperature and max tokens (null clears).
+    app.put(
+      "/api/projects/:id/agents/:agentId/sampling",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as { temperature?: unknown; maxTokens?: unknown };
+        const num = (v: unknown): number | null | undefined => (v === undefined ? undefined : v === null || v === "" ? null : Number(v));
+        try {
+          const cfg = rt.setAgentSampling(String(req.params.agentId), { temperature: num(b.temperature), maxTokens: num(b.maxTokens) });
+          res.json({ id: cfg.id, options: cfg.options });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
+    // Is this agent ready? Installed, signed in, model listed — no prompt sent.
+    app.post(
+      "/api/projects/:id/agents/:agentId/check",
+      withRuntime(async (rt, req, res) => {
+        const out = await rt.checkAgent(String(req.params.agentId));
+        if (!out) return void res.status(404).json({ error: "no such agent" });
+        res.json(out);
+      }),
+    );
+
+    // Standing instructions for one agent, sent ahead of every turn it takes.
+    app.put(
+      "/api/projects/:id/agents/:agentId/instructions",
+      withRuntime(async (rt, req, res) => {
+        const { instructions } = (req.body ?? {}) as { instructions?: unknown };
+        if (typeof instructions !== "string") return void res.status(400).json({ error: "instructions must be text (empty clears them)" });
+        const updated = rt.setAgentInstructions(String(req.params.agentId), instructions);
         if (!updated) return void res.status(404).json({ error: "unknown agent" });
         res.json(updated);
       }),
@@ -3043,6 +3274,20 @@ export class LoomDaemon {
       }),
     );
 
+    // One file from a checkpoint: { path }.
+    app.post(
+      "/api/projects/:id/checkpoints/:cpId/rewind-file",
+      withRuntime(async (rt, req, res) => {
+        const file = String((req.body as { path?: unknown } | undefined)?.path ?? "").trim();
+        if (!file) return void res.status(400).json({ error: "which file? send { path }" });
+        try {
+          res.json(await rt.rewindFile(String(req.params.cpId), file));
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     app.post(
       "/api/projects/:id/checkpoints/:cpId/rewind",
       withRuntime(async (rt, req, res) => {
@@ -3414,6 +3659,8 @@ export class LoomDaemon {
           maxUsd?: number;
           /** The thread the goal was typed in; the orchestrator answers there. */
           chat?: string;
+          /** Every worker gets the same prompt; you pick the best. */
+          race?: boolean;
         };
         if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
         const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
@@ -3427,9 +3674,20 @@ export class LoomDaemon {
             ...(b.maxRounds ? { maxRounds: Number(b.maxRounds) } : {}),
             ...(b.plan ? { plan: true } : {}),
             ...(Number(b.maxUsd) > 0 ? { maxUsd: Number(b.maxUsd) } : {}),
+            ...(b.race ? { race: true } : {}),
           });
           recordRecent(b.goal, { project: rt.info.name, mode: "orchestrate" });
           res.json({ run });
+        } catch (err) {
+          orchestraError(res, err);
+        }
+      }),
+    );
+    app.get(
+      "/api/projects/:id/orchestra/:runId/tasks/:taskId/diff",
+      withRuntime(async (rt, req, res) => {
+        try {
+          res.json({ patch: await rt.orchestra.taskDiff(String(req.params.runId), String(req.params.taskId)) });
         } catch (err) {
           orchestraError(res, err);
         }
@@ -3468,17 +3726,21 @@ export class LoomDaemon {
         res.json({ run });
       }),
     );
-    for (const action of ["abort", "reply", "apply", "cleanup"] as const) {
+    for (const action of ["abort", "reply", "apply", "cleanup", "resume"] as const) {
       app.post(
         `/api/projects/:id/orchestra/:runId/${action}`,
         withRuntime(async (rt, req, res) => {
           const runId = String(req.params.runId);
           try {
             if (action === "abort") res.json({ run: await rt.orchestra.abort(runId) });
+            else if (action === "resume") res.json({ run: await rt.orchestra.resume(runId) });
             else if (action === "reply") {
               const text = String((req.body as { text?: string } | undefined)?.text ?? "");
               res.json({ run: await rt.orchestra.reply(runId, text) });
-            } else if (action === "apply") res.json(await rt.orchestra.apply(runId));
+            } else if (action === "apply") {
+              const task = (req.body as { task?: unknown } | undefined)?.task;
+              res.json(await rt.orchestra.apply(runId, task ? String(task) : undefined));
+            }
             else {
               await rt.orchestra.cleanup(runId);
               res.json({ ok: true });
@@ -3525,9 +3787,9 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/agents/:agentId/model",
       withRuntime(async (rt, req, res) => {
-        const { model } = (req.body ?? {}) as { model?: string };
+        const { model, provider } = (req.body ?? {}) as { model?: string; provider?: string };
         try {
-          const cfg = rt.setAgentModel(String(req.params.agentId), model ?? "");
+          const cfg = rt.setAgentModel(String(req.params.agentId), model ?? "", provider);
           res.json({ agent: cfg });
         } catch (err) {
           res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
@@ -3648,6 +3910,34 @@ export class LoomDaemon {
 
     // Likely contradictions between units, heuristically flagged for a human
     // to resolve — each flag names the signal that tripped it.
+    // The event log on disk: how big, and a VACUUM to give back free pages.
+    app.get(
+      "/api/projects/:id/log/size",
+      withRuntime(async (rt, _req, res) => {
+        res.json(rt.log.size());
+      }),
+    );
+    app.post(
+      "/api/projects/:id/log/compact",
+      withRuntime(async (rt, _req, res) => {
+        const before = rt.log.size();
+        try {
+          rt.log.compact();
+        } catch (err) {
+          return void res.status(409).json({ error: `couldn't compact the log right now: ${err instanceof Error ? err.message : String(err)}` });
+        }
+        res.json({ before, after: rt.log.size() });
+      }),
+    );
+
+    // How often each memory reached an agent's prompt.
+    app.get(
+      "/api/projects/:id/brain/usage",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ usage: rt.memoryUsage() });
+      }),
+    );
+
     app.get(
       "/api/projects/:id/brain/conflicts",
       withRuntime(async (rt, _req, res) => {
@@ -3884,16 +4174,36 @@ export class LoomDaemon {
         const status = await rt.status();
         const blocked = status.blockedAgent ? [status.blockedAgent] : [];
         const search = req.query.search ? String(req.query.search) : undefined;
-        res.json(
-          await buildBoard(info.dir, status.agents, blocked, {
+        res.json({
+          ...(await buildBoard(info.dir, status.agents, blocked, {
             tasks: rt.boardTasks(),
             ...(search ? { search } : {}),
-          }),
-        );
+          })),
+          limits: readProjectState(info.dir).boardLimits ?? {},
+        });
       } catch (err) {
         res.status(500).json({ error: (err as Error).message });
       }
     });
+
+    // Work-in-progress limit for one board column ({ column, limit }; 0/null clears).
+    app.put(
+      "/api/projects/:id/board/limits",
+      withRuntime(async (rt, req, res) => {
+        const { column, limit } = (req.body ?? {}) as { column?: unknown; limit?: unknown };
+        const col = String(column ?? "");
+        if (!["working", "needs-you", "in-review", "ready"].includes(col)) return void res.status(400).json({ error: "column is working, needs-you, in-review or ready" });
+        const n = limit === null || limit === "" || limit === undefined ? 0 : Number(limit);
+        if (!Number.isInteger(n) || n < 0 || n > 99) return void res.status(400).json({ error: "a limit is a whole number from 1 to 99 (0 clears it)" });
+        const state = readProjectState(rt.info.dir);
+        const limits = { ...(state.boardLimits ?? {}) };
+        if (n) limits[col] = n;
+        else delete limits[col];
+        state.boardLimits = limits;
+        writeProjectState(rt.info.dir, state);
+        res.json({ limits });
+      }),
+    );
 
     // Cards you write yourself. Unlike an agent or a PR, these are ours, so a
     // drag really moves them — the column IS the state.
@@ -3910,32 +4220,42 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/board/tasks",
       withRuntime(async (rt, req, res) => {
-        const { title, column, agent, blockedBy } = (req.body ?? {}) as {
+        const { title, column, agent, blockedBy, priority, due } = (req.body ?? {}) as {
           title?: string;
           column?: string;
           agent?: string;
           blockedBy?: string[];
+          priority?: string | null;
+          due?: string | null;
         };
         if (!title?.trim()) return void res.status(400).json({ error: "missing title" });
-        res.json({
-          task: rt.createTask({
-            title,
-            ...(column ? { column } : {}),
-            ...(agent ? { agent } : {}),
-            ...(Array.isArray(blockedBy) ? { blockedBy } : {}),
-          }),
-        });
+        try {
+          res.json({
+            task: rt.createTask({
+              title,
+              ...(column ? { column } : {}),
+              ...(agent ? { agent } : {}),
+              ...(Array.isArray(blockedBy) ? { blockedBy } : {}),
+              ...(priority !== undefined ? { priority } : {}),
+              ...(due !== undefined ? { due } : {}),
+            }),
+          });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 
     app.post(
       "/api/projects/:id/board/tasks/:taskId",
       withRuntime(async (rt, req, res) => {
-        const { title, column, agent, blockedBy } = (req.body ?? {}) as {
+        const { title, column, agent, blockedBy, priority, due } = (req.body ?? {}) as {
           title?: string;
           column?: string;
           agent?: string;
           blockedBy?: string[];
+          priority?: string | null;
+          due?: string | null;
         };
         try {
           const task = rt.updateTask(String(req.params.taskId), {
@@ -3943,6 +4263,8 @@ export class LoomDaemon {
             ...(column !== undefined ? { column } : {}),
             ...(agent !== undefined ? { agent } : {}),
             ...(blockedBy !== undefined ? { blockedBy } : {}),
+            ...(priority !== undefined ? { priority } : {}),
+            ...(due !== undefined ? { due } : {}),
           });
           if (!task) return void res.status(404).json({ error: "unknown task" });
           res.json({ task });
@@ -4332,6 +4654,23 @@ export class LoomDaemon {
       }
       res.json({ path: rel, bytes: buf.length, mime });
     });
+
+    // Anything under /api nobody answered: JSON, like every other API reply,
+    // not Express's HTML page.
+    app.use("/api", (_req: Request, res: Response) => {
+      res.status(404).json({ error: "no such endpoint" });
+    });
+    // Errors that escaped a route, and bodies that never parsed. Express's
+    // default answers these with an HTML page carrying a stack trace.
+    app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+      if (res.headersSent) return void next(err);
+      const e = (err ?? {}) as { type?: string; status?: number; message?: string };
+      if (e.type === "entity.too.large") return void res.status(413).json({ error: "that request is too large (the limit is 2 MB)" });
+      if (e.type === "entity.parse.failed") return void res.status(400).json({ error: "that request body isn't valid JSON" });
+      logbook.error("daemon", `request failed: ${e.message ?? String(err)}`, err);
+      const status = typeof e.status === "number" && e.status >= 400 && e.status < 600 ? e.status : 500;
+      res.status(status).json({ error: status >= 500 ? "something went wrong in the daemon — the Console has the details" : e.message || "bad request" });
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -4367,7 +4706,39 @@ export class LoomDaemon {
         ...(waitingFor ? { waitingFor } : {}),
       }, info.id);
     });
+    // Replies as they're written. Deltas are coalesced per agent for a frame
+    // (~40ms), so a fast model is a few dozen socket frames a second at most,
+    // not one per token. Never logged: the finished message is the record.
+    const live = new Map<string, { chat: string; text: string; reasoning: boolean; off?: number }>();
+    let liveTimer: NodeJS.Timeout | null = null;
+    const flushLive = () => {
+      liveTimer = null;
+      for (const [agentId, f] of live) {
+        this.broadcastFrame({
+          type: "stream", projectId: info.id, agentId, chat: f.chat, text: f.text,
+          ...(f.reasoning ? { reasoning: true } : {}),
+          ...(f.off !== undefined ? { off: f.off } : {}),
+        }, info.id);
+      }
+      live.clear();
+    };
+    rt.onStream((f) => {
+      const key = f.agentId;
+      const have = live.get(key);
+      // A switch between thinking and answering (or thread) is a new piece.
+      if (have && (have.reasoning !== Boolean(f.reasoning) || have.chat !== f.chat)) flushLive();
+      const cur = live.get(key);
+      if (cur) cur.text += f.text;
+      else live.set(key, { chat: f.chat, text: f.text, reasoning: Boolean(f.reasoning), ...(f.off !== undefined ? { off: f.off } : {}) });
+      if (!liveTimer) liveTimer = setTimeout(flushLive, 40);
+    });
     rt.log.onEvent((e) => {
+      // A finished message supersedes its typing: send what's buffered first
+      // so the last few characters can't land after the message they belong to.
+      if (e.kind === "message" && e.agentId && live.has(e.agentId)) {
+        if (liveTimer) clearTimeout(liveTimer);
+        flushLive();
+      }
       this.broadcast(info.id, e);
       // The single central hook for live events — agent turns as well as
       // API-driven handoffs, routes and memory folds. Rehydration reads through
@@ -4679,6 +5050,7 @@ export class LoomDaemon {
       clients: this.relay?.clientCount() ?? 0,
       stats: this.relay?.stats ?? null,
       supabaseUrl: target?.url ?? null,
+      hostedUrl: hostedTarget().supabaseUrl,
       error: this.relayError,
     };
   }
@@ -4763,10 +5135,16 @@ export class LoomDaemon {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     this.extra.clear();
+    // Close the live sockets too. wss.close() stops new connections but leaves
+    // open ones open, and server.close() waits for every keep-alive socket a
+    // browser holds — so a restart used to leave the old daemon alive forever,
+    // its port freed but the process (and everything it held) still running.
+    for (const ws of this.wss?.clients ?? []) ws.terminate();
     this.wss?.close();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());
+      this.server.closeAllConnections?.();
     });
     const cfg = readDaemonConfig();
     if (cfg && cfg.pid === process.pid) {

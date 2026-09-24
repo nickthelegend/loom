@@ -45,18 +45,36 @@ function statusOf(e: unknown): number | undefined {
 }
 
 export const TIER_TINT: Record<BrainTier, string> = {
-  canon: T.ok,
-  confirmed: T.thread,
-  own: T.primary,
-  proposed: T.dim,
+  get canon() {
+    return T.ok;
+  },
+  get confirmed() {
+    return T.thread;
+  },
+  get own() {
+    return T.primary;
+  },
+  get proposed() {
+    return T.dim;
+  },
 };
 
 const INBOX_TINT: Record<BrainInboxItem["type"], string> = {
-  correction: T.warn,
-  contradiction: T.err,
-  duplicate: T.dim,
-  untrusted: T.warn,
-  promote: T.ok,
+  get correction() {
+    return T.warn;
+  },
+  get contradiction() {
+    return T.err;
+  },
+  get duplicate() {
+    return T.dim;
+  },
+  get untrusted() {
+    return T.warn;
+  },
+  get promote() {
+    return T.ok;
+  },
 };
 
 function TierChip(props: { tier: BrainTier }) {

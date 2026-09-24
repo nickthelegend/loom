@@ -43,6 +43,7 @@ export const APP_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="icon" id="favicon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0a0a'/%3E%3Ctext x='50' y='60' font-size='36' text-anchor='middle' fill='%23fafafa' font-family='-apple-system,Segoe UI,sans-serif' font-weight='600'%3Elo%3C/text%3E%3Crect x='32' y='70' width='36' height='4' rx='2' fill='%2367e8f9'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/app/vendor/xterm.css">
 <title>Loom</title>
 <script>
@@ -2950,6 +2951,8 @@ window.__loomPageRev="%%BUILD_REV%%";
   .phseg .pho.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgba(0,0,0,.12)}
   .phseg .pho.dim{opacity:.5}
   .phstage{min-height:232px;display:flex;align-items:center;justify-content:center;padding:6px 2px}
+  /* the pad's dialog has no QR to hold room for: just the words */
+  .lpmodal .phstage{min-height:0;padding:14px 2px 10px}
   .phqrcard{background:#fff;padding:12px;border-radius:12px;line-height:0;box-shadow:0 1px 3px rgba(0,0,0,.14)}
   .phqrcard svg{width:208px;height:208px;display:block}
   .phmsg{text-align:center;font-size:13px;color:var(--foreground);line-height:1.5;max-width:308px}
@@ -2958,7 +2961,7 @@ window.__loomPageRev="%%BUILD_REV%%";
     padding:1px 5px;border-radius:4px;color:var(--foreground)}
   .phmsg .btn{margin-top:14px}
   .phlinkrow{display:flex;gap:6px;align-items:center}
-  .phlinkrow #phlink{flex:1;min-width:0;font-family:var(--font-mono);font-size:11.5px;
+  .phlinkrow input{flex:1;min-width:0;font-family:var(--font-mono);font-size:11.5px;
     padding:7px 9px;border:1px solid var(--border);border-radius:7px;
     background:var(--input,var(--muted));color:var(--foreground)}
   .phhint{font-size:11.5px;color:var(--muted-foreground);line-height:1.5;text-align:center}
@@ -3083,6 +3086,7 @@ window.__loomPageRev="%%BUILD_REV%%";
   html[data-electron="darwin"] header.appbar{padding-left:88px}
   html[data-electron="darwin"] #root > .panel > header{padding-left:88px}
   /* on wide screens the app-shell fills the window and owns the height */
+  html.desk #root{max-width:none;height:100dvh;display:block}
   @media (min-width:900px){
     #root{max-width:none;height:100dvh;display:block}
     .dmain .composer .inner{max-width:840px}
@@ -3090,7 +3094,827 @@ window.__loomPageRev="%%BUILD_REV%%";
     .srow .badge{font-size:10px;padding:0 7px}
   }
   .dshell.railopen .rail{display:flex}
+  /* ══ Loom 1.1 design layer ═══════════════════════════════════════════════
+     Everything above is the working system; this is the finish on top of it.
+     One reading column, prose in Geist (mono only for code and paths), a byline
+     per reply instead of a bubble, tool use folded into activity lines, live
+     typing, and one composer card that says who and on what in one control.
+     Later rules win by order; the tokens they use are the same ones. */
+  :root{--ease-out:cubic-bezier(.23,1,.32,1);--ease-io:cubic-bezier(.77,0,.175,1);
+    --measure:760px;--gutter:28px;
+    --hl-k:#7c3aed;--hl-s:#15803d;--hl-n:#b45309;--hl-f:#1d4ed8;--hl-c:#8a8a8a;--hl-a:#15803d;--hl-d:#b91c1c;
+    --shadow-float:0 18px 48px -14px rgb(0 0 0 / .28),0 0 0 1px rgb(0 0 0 / .04)}
+  .dark{--sidebar:#0f0f10;--card:#141416;--popover:#18181b;--secondary:#1d1d20;--muted:#1d1d20;--accent:#26262a;
+    --editor-surface:#111113;--border:rgb(255 255 255 / .075);--input:rgb(255 255 255 / .13);
+    --hl-k:#c4a7ff;--hl-s:#a7d7a0;--hl-n:#f5c27a;--hl-f:#8ab4ff;--hl-c:#6f6f78;--hl-a:#7ee2a0;--hl-d:#ff8f8f;
+    --shadow-float:0 22px 56px -14px rgb(0 0 0 / .7),0 0 0 1px rgb(255 255 255 / .04)}
+  body{font-size:14px;letter-spacing:0}
+  /* ── the reading column ── */
+  .dmain #pane-thread.pane{padding:0 0 4px}
+  #pane-thread > #feed,#pane-thread > #feedlive,#pane-thread > #routebar,#pane-thread > .agenthead{
+    max-width:calc(var(--measure) + var(--gutter) * 2);margin-inline:auto;padding-inline:var(--gutter)}
+  #pane-thread > #feed{padding-top:18px}
+  #pane-thread > #feedlive{padding-bottom:26px}
+  #pane-thread > .agenthead{display:none!important}
+  /* ── messages ── */
+  .av{width:22px;height:22px;border-radius:7px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+    background:var(--secondary);box-shadow:inset 0 0 0 1px var(--border);color:var(--foreground);font-size:11px;font-weight:700}
+  .av svg,.av .brand{width:14px;height:14px}
+  .av.orch{color:var(--thread-ink)}
+  .msg{margin:26px 0 0}
+  .msg .who{font-family:var(--font-sans);font-size:13px;letter-spacing:0;color:var(--foreground);gap:8px;margin:0 0 7px;min-width:0}
+  .msg .who .wn{font-weight:600;white-space:nowrap}
+  .msg .who .wm{font-size:11px;color:var(--muted-foreground);padding:1px 7px;border-radius:99px;background:var(--secondary);white-space:nowrap}
+  .msg .who .wt,.msg .mt{font-size:11px;color:var(--muted-foreground);opacity:0;transition:opacity .15s ease;font-variant-numeric:tabular-nums}
+  .msg:hover .who .wt,.msg:hover .mt{opacity:1}
+  .msg .who .thinktag{text-transform:none;letter-spacing:0;font-size:11px;font-weight:500}
+  .msg.agent .bubble,.dmain .msg.agent .bubble{max-width:none;background:none;border:0;box-shadow:none;border-radius:0;
+    padding:0 0 0 30px;font-size:14.5px;line-height:1.72;color:var(--foreground)}
+  .msg.agent.cont{margin-top:12px}
+  .msg.agent.cont > .who{display:none}
+  .msg.user{margin-top:30px}
+  .msg.user .bubble,.dmain .msg.user .bubble{max-width:min(80%,620px);background:var(--secondary);border:0;
+    border-radius:18px 18px 6px 18px;padding:10px 15px;font-size:14.5px;line-height:1.62}
+  .msg.user .mt{margin:5px 6px 0}
+  .msg.orchbriefmsg .bubble{color:var(--muted-foreground)}
+  /* ── prose ── */
+  .md .mdp{margin:0 0 12px}
+  .md .mdh{letter-spacing:-.01em;margin:22px 0 8px}
+  .md .mdh1{font-size:20px}.md .mdh2{font-size:17px}.md .mdh3{font-size:15px}
+  .md .mdlist{margin:0 0 12px;padding-left:22px}
+  .md .mdlist li{margin:5px 0;line-height:1.65}
+  .md .mdlist li::marker{color:var(--muted-foreground)}
+  .md .mdq{border-left:3px solid color-mix(in srgb,var(--foreground) 14%,transparent);padding-left:14px;margin:0 0 12px}
+  .md .mdi{font-size:.86em;padding:1.5px 6px;border-radius:6px;background:color-mix(in srgb,var(--foreground) 7%,transparent);
+    border:1px solid color-mix(in srgb,var(--foreground) 7%,transparent)}
+  .md a{color:var(--thread-ink);text-decoration-color:color-mix(in srgb,var(--thread-ink) 40%,transparent)}
+  .md .mdcodewrap{margin:6px 0 16px;border:1px solid var(--border);border-radius:12px;background:var(--editor-surface);overflow:hidden}
+  .md .mdcode,.rawbox pre.mdcode{margin:0;border:0;border-radius:0;background:transparent;padding:14px 16px}
+  .md .mdcode code{font-size:12.5px;line-height:1.7}
+  .md .mdcodewrap .mdcopy{top:8px;right:8px;width:26px;height:26px;border-radius:7px;background:var(--card)}
+  .mdlang{position:absolute;top:12px;right:44px;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);
+    opacity:.8;pointer-events:none;transition:opacity .12s}
+  .mdcodewrap:hover .mdlang{opacity:0}
+  .hk{color:var(--hl-k)}.hs{color:var(--hl-s)}.hn{color:var(--hl-n)}.hf{color:var(--hl-f)}.hc{color:var(--hl-c);font-style:italic}
+  .ha{color:var(--hl-a)}.hd{color:var(--hl-d)}
+  .mdtablewrap{margin:6px 0 16px;overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+  .mdtable{border-collapse:collapse;width:100%;font-size:13px;line-height:1.5}
+  .mdtable th{text-align:left;font-weight:600;background:color-mix(in srgb,var(--secondary) 70%,transparent)}
+  .mdtable th,.mdtable td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  .mdtable tr:last-child td{border-bottom:0}
+  /* ── thinking ── */
+  .msg.agent.thinking{margin:14px 0 0 30px}
+  .thinkbox{max-width:none;background:none;border:0;padding:0;font-size:13px}
+  .thinkbox summary{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-sans);font-size:12.5px;
+    letter-spacing:0;color:var(--muted-foreground);opacity:1}
+  .thinkbox summary::before{content:none}
+  .thinkbox summary svg{width:13px;height:13px}
+  .thinkbox .md{margin-top:8px;padding-left:12px;border-left:2px solid var(--border);color:var(--muted-foreground);font-size:13px}
+  /* ── tool activity ── */
+  .tool{display:flex;align-items:center;gap:8px;margin:6px 0 0 30px;font-family:var(--font-sans);font-size:12.5px;
+    color:var(--muted-foreground);white-space:nowrap;overflow:hidden;min-width:0}
+  .tool .ti{display:inline-flex;flex:none;opacity:.7}
+  .tool .ti svg{width:13px;height:13px}
+  .tool .tx{overflow:hidden;text-overflow:ellipsis;font-family:var(--font-mono);font-size:11.5px}
+  .tool .tbad{color:var(--err);font-size:11px;flex:none}
+  .tool .rawbox{white-space:normal}
+  .acts{margin:10px 0 0 30px}
+  .acts > summary{list-style:none;display:inline-flex;align-items:center;gap:8px;max-width:100%;cursor:pointer;user-select:none;
+    font-size:12.5px;color:var(--muted-foreground);padding:4px 11px 4px 8px;border-radius:9px;border:1px solid var(--border);
+    background:color-mix(in srgb,var(--secondary) 45%,transparent);transition:background .15s ease,border-color .15s ease}
+  .acts > summary:hover{background:var(--secondary)}
+  .acts > summary::-webkit-details-marker{display:none}
+  .acts .ai{display:inline-flex}
+  .acts .ai svg{width:12px;height:12px;transition:transform .18s var(--ease-out)}
+  .acts[open] .ai svg{transform:rotate(90deg)}
+  .acts .as{color:var(--foreground);font-weight:500;white-space:nowrap}
+  .acts .al{font-family:var(--font-mono);font-size:11px;opacity:.65;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .acts[open] .al{display:none}
+  .acts .actlist{margin:6px 0 2px 7px;padding:2px 0 2px 2px;border-left:1px solid var(--border)}
+  .acts .actlist .tool{margin:5px 0 0 12px}
+  .turnend{display:flex;align-items:center;gap:6px;margin:12px 0 0 30px;font-size:11.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .turnend svg{width:12px;height:12px;color:var(--ok);flex:none}
+  .turncard{font-family:var(--font-sans);margin:12px 0 0 30px;max-width:calc(100% - 30px);border-radius:12px}
+  /* ── live: typing and working ── */
+  .livebox.bar{display:flex;align-items:center;gap:10px;margin:22px 0 0;font-size:13px;color:var(--muted-foreground);min-width:0;
+    animation:fadeup .22s var(--ease-out)}
+  .livebox .lav{position:relative;display:inline-flex;flex:none}
+  .lring{position:absolute;inset:-3px;border-radius:9px;border:1.5px solid transparent;border-top-color:var(--thread);border-right-color:color-mix(in srgb,var(--thread) 40%,transparent);animation:spin .9s linear infinite}
+  .livebox .lname{color:var(--foreground);font-weight:600;flex:none}
+  .lstate{display:inline-flex;align-items:baseline;min-width:0;overflow:hidden;white-space:nowrap}
+  .lstate .shimmer{overflow:hidden;text-overflow:ellipsis}
+  .shimmer{background:linear-gradient(90deg,var(--muted-foreground) 0%,var(--muted-foreground) 35%,var(--foreground) 50%,var(--muted-foreground) 65%,var(--muted-foreground) 100%);
+    background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim 1.8s linear infinite}
+  @keyframes shim{from{background-position:100% 0}to{background-position:-150% 0}}
+  .lsecs{margin-left:8px;font-size:11.5px;opacity:.65;font-variant-numeric:tabular-nums}
+  .msg.agent.live .who .lstate{margin-left:2px;font-size:12px;font-weight:400}
+  .caret{display:inline-block;width:7px;height:1.05em;vertical-align:-.16em;margin-left:3px;border-radius:2px;
+    background:var(--thread);animation:blink 1.05s steps(2,start) infinite}
+  @keyframes blink{to{visibility:hidden}}
+  @keyframes fadeup{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .jumpnew{position:sticky;bottom:14px;z-index:4;display:flex;align-items:center;gap:6px;width:max-content;height:30px;
+    margin:-30px auto 0;padding:0 12px 0 10px;border-radius:99px;background:var(--popover);border:1px solid var(--border);
+    box-shadow:var(--shadow-float);font-size:12.5px;font-weight:500;color:var(--foreground);
+    opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .18s var(--ease-out),transform .18s var(--ease-out)}
+  .jumpnew.show{opacity:1;transform:none;pointer-events:auto}
+  .jumpnew svg{width:13px;height:13px}
+  .loadearlier{display:block;margin:6px auto 10px;height:28px;padding:0 13px;border-radius:99px;border:1px solid var(--border);
+    font-size:12px;color:var(--muted-foreground);background:transparent;transition:background .15s ease,color .15s ease}
+  .loadearlier:hover{background:var(--secondary);color:var(--foreground)}
+  /* ── the empty thread ── */
+  .threadempty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:13vh 8px 24px;animation:fadeup .35s var(--ease-out)}
+  .threadempty .av{width:46px;height:46px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--border),0 10px 30px -10px rgb(0 0 0 / .5)}
+  .threadempty .av svg,.threadempty .av .brand{width:24px;height:24px}
+  .tet{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:18px}
+  .tes{color:var(--muted-foreground);font-size:13.5px;line-height:1.6;margin-top:6px;max-width:440px}
+  .tes b{color:var(--foreground);font-weight:600}
+  .tesug{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:24px;max-width:560px}
+  .tesb{height:32px;padding:0 14px;border-radius:99px;border:1px solid var(--border);font-size:13px;color:var(--foreground);
+    background:var(--card);transition:background .15s ease,border-color .15s ease,transform .12s var(--ease-out)}
+  .tesb:hover{background:var(--secondary);border-color:color-mix(in srgb,var(--foreground) 16%,transparent)}
+  .tesb:active{transform:scale(.97)}
+  /* ── system lines ── */
+  .sys{font-family:var(--font-sans);font-size:12.5px;letter-spacing:0;line-height:1.55;margin:12px auto}
+  .sys.orch{display:flex;justify-content:flex-start;align-items:flex-start;text-align:left;gap:8px;max-width:none;margin:8px 0 0}
+  .sys.orch > svg{width:14px;height:14px;flex:none;margin-top:2px}
+  .sys.orch.start{margin-top:20px;color:var(--foreground);font-weight:500;padding:10px 13px;border:1px solid var(--border);
+    border-radius:12px;background:color-mix(in srgb,var(--thread) 5%,var(--card))}
+  .sys.orch.start > svg{color:var(--thread-ink)}
+  .sys.orch .tlink{gap:7px}
+  .sys.orch .tlink .brand,.sys.orch .agmono{width:14px;height:14px}
+  .handoff{font-family:var(--font-sans);font-size:12.5px;margin:26px 0}
+  details.orchbrief{margin:12px 0 0;font-family:var(--font-sans)}
+  /* ── floating menus (chat pick, context menus) ── */
+  .pickpop{border-radius:14px;padding:6px;background:var(--popover);border:1px solid var(--glass-border);box-shadow:var(--shadow-float);
+    animation:menuin .16s var(--ease-out);transform-origin:top left}
+  .pickhead{text-transform:none;letter-spacing:0;font-size:12px;font-family:var(--font-sans);font-weight:600;padding:8px 10px 6px}
+  .pickhead::first-letter{text-transform:uppercase}
+  .pickrow{border-radius:9px;padding:7px 10px;font-size:13px}
+  #chatpick{min-width:250px;max-width:320px}
+  #chatpick .pickrow{align-items:center;gap:10px;text-align:left}
+  #chatpick .pic{display:inline-flex;flex:none}
+  #chatpick .pic .brand,#chatpick .pic .agmono{width:18px;height:18px}
+  #chatpick .pnm{display:flex;gap:8px;align-items:baseline;font-weight:500;color:var(--foreground)}
+  #chatpick .prole{margin:0;font-family:var(--font-sans);font-size:11.5px}
+  /* ── an agent that needs you ── */
+  .nicard{max-width:none;margin:14px 0 0 30px;padding:13px 15px;border-radius:14px;
+    border:1px solid color-mix(in srgb,var(--warn) 34%,transparent);background:color-mix(in srgb,var(--warn) 6%,var(--card));
+    box-shadow:0 10px 30px -18px rgb(0 0 0 / .6)}
+  .nicard .nih{font-size:13px;font-weight:600;gap:8px}
+  .nicard .nih .brand{width:15px;height:15px}
+  .nicard .nitag{font-family:var(--font-sans);font-size:11px;letter-spacing:0;text-transform:none;font-weight:600;
+    color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent);border:0;border-radius:99px;padding:1px 8px}
+  .nicard .niq{font-size:14px;line-height:1.6;margin:8px 0 12px}
+  .nicard .niopts{gap:7px;margin-bottom:12px}
+  .nicard .nio{padding:6px 12px;border-radius:10px;font-size:13px;background:var(--card);border:1px solid var(--border);
+    transition:background .15s ease,border-color .15s ease,transform .12s var(--ease-out)}
+  .nicard .nio:hover{background:var(--secondary);border-color:color-mix(in srgb,var(--foreground) 18%,transparent)}
+  .nicard .nio:active{transform:scale(.97)}
+  .nicard .nitext{height:34px;border-radius:10px;font-size:13px;padding:0 12px;background:var(--background);border:1px solid var(--border)}
+  .nicard .nisend{height:34px;border-radius:10px;padding:0 14px}
+  .nicard.done{margin-left:30px;padding:4px 11px;border-radius:9px;background:transparent;box-shadow:none;border-color:var(--border)}
+  .nicard .nidone{font-family:var(--font-sans);font-size:12.5px}
+  .apcard{max-width:none;margin:14px 0 0 30px;border-radius:14px;padding:13px 15px;box-shadow:0 10px 30px -18px rgb(0 0 0 / .6)}
+  .aph{font-size:13px}
+  .aph .apk{font-size:11px;letter-spacing:0;text-transform:none}
+  .aph .aprel{font-family:var(--font-sans);font-size:11.5px}
+  .apin summary{font-family:var(--font-sans);font-size:12px}
+  .apact input{height:34px;border-radius:10px;font-size:13px}
+  .apact .btn{height:34px;border-radius:10px;font-size:13px;padding:0 14px}
+  /* ── in-app confirm ── */
+  .cfscrim{z-index:120;animation:cffade .14s ease}
+  @keyframes cffade{from{opacity:0}to{opacity:1}}
+  .cfmodal{max-width:420px;padding:20px 20px 16px;border-radius:16px;border:1px solid var(--glass-border);box-shadow:var(--shadow-float);
+    animation:cfpop .18s var(--ease-out)}
+  @keyframes cfpop{from{opacity:0;transform:scale(.97) translateY(4px)}to{opacity:1;transform:none}}
+  .cft{font-size:15px;font-weight:600;line-height:1.4;letter-spacing:-.01em}
+  .cfb{margin-top:8px;font-size:13px;line-height:1.6;color:var(--muted-foreground);white-space:normal}
+  .cfa{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+  .btn.cfdanger{background:var(--destructive);color:#fff}
+  .btn.cfdanger:hover{background:color-mix(in srgb,var(--destructive) 88%,#000)}
+  /* ── error cards ── */
+  .sys.errcard{display:block;text-align:left;max-width:none;margin:14px 0 0 30px;padding:10px 13px;border-radius:12px;
+    border:1px solid color-mix(in srgb,var(--err) 28%,transparent);background:color-mix(in srgb,var(--err) 7%,transparent);color:var(--foreground)}
+  .errh{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.5}
+  .errh svg{width:14px;height:14px;color:var(--err);flex:none;margin-top:3px}
+  .errh b{font-weight:600}
+  .errd{margin-top:6px}
+  .errd summary{cursor:pointer;font-size:11.5px;color:var(--muted-foreground);list-style:none}
+  .errd summary::-webkit-details-marker{display:none}
+  .errd pre{margin:6px 0 0;padding:8px 10px;border-radius:8px;background:var(--editor-surface);border:1px solid var(--border);
+    font-family:var(--font-mono);font-size:11px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted-foreground);max-height:240px;overflow:auto}
+  /* ── plan cards ── */
+  .plancard{margin:8px 0 16px;border:1px solid var(--border);border-radius:14px;background:var(--card);overflow:hidden;line-height:1.5}
+  .pch{display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);
+    background:color-mix(in srgb,var(--thread) 5%,transparent)}
+  .pch svg{width:14px;height:14px;color:var(--thread-ink);flex:none}
+  .pcn{margin-left:auto;font-weight:500;color:var(--muted-foreground);font-size:12px}
+  .pclist{list-style:none;margin:0;padding:6px}
+  .pcrow{display:flex;align-items:flex-start;gap:10px;padding:8px;border-radius:9px;transition:background .12s ease}
+  .pcrow:hover{background:var(--secondary)}
+  .pcid{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);background:var(--secondary);border-radius:6px;padding:1px 6px;margin-top:2px;flex:none}
+  .pcbody{flex:1;min-width:0}
+  .pct{font-size:13.5px;font-weight:500}
+  .pcmeta{font-size:12px;color:var(--muted-foreground);margin-top:2px;overflow-wrap:anywhere}
+  .pctouch{font-family:var(--font-mono);font-size:11px}
+  .pcag{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted-foreground);white-space:nowrap;flex:none;margin-top:2px}
+  .pcag .brand,.pcag .agmono{width:14px;height:14px}
+  .pcask,.pcdone{display:flex;gap:8px;align-items:flex-start;padding:8px;font-size:13px}
+  .pcask svg,.pcdone svg{width:14px;height:14px;flex:none;margin-top:3px}
+  .pcask svg{color:var(--warn)}.pcdone svg{color:var(--ok)}
+  .pcraw{border-top:1px solid var(--border);padding:7px 14px 9px}
+  .pcraw summary{cursor:pointer;color:var(--muted-foreground);font-size:11.5px;list-style:none}
+  .pcraw summary::-webkit-details-marker{display:none}
+  .pcraw .mdcodewrap{margin:8px 0 2px}
+  .plancard.bad .pch{background:color-mix(in srgb,var(--warn) 7%,transparent)}
+  .sys.orch.bump{animation:bump .6s var(--ease-out)}
+  @keyframes bump{from{background:color-mix(in srgb,var(--thread) 14%,transparent)}to{background:transparent}}
+  .sys.orch[data-otask]{border-radius:6px;padding:1px 4px;margin-left:-4px}
+  .sys.orch.odone{display:block;margin:18px 0 6px;padding:12px 14px;border-radius:14px;border:1px solid color-mix(in srgb,var(--ok) 30%,transparent);
+    background:color-mix(in srgb,var(--ok) 6%,var(--card));color:var(--foreground)}
+  .odh{display:flex;align-items:center;gap:8px;font-size:13.5px;flex-wrap:wrap}
+  .odh svg{width:15px;height:15px;color:var(--ok);flex:none}
+  .odm{font-size:12px;color:var(--muted-foreground)}
+  .odm .obr{font-family:var(--font-mono);font-size:11px;padding:1px 6px;border-radius:5px;background:var(--secondary)}
+  .ods{margin-top:6px;font-size:13px;line-height:1.6;color:var(--muted-foreground)}
+  .oda{margin-top:10px}
+  .thinktag.stopped{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+  .chip{font-family:var(--font-sans);font-size:12.5px}
+  .chip .agmono,.agchip .agmono{width:14px;height:14px}
+  .askpick .cwon{margin-right:2px}
+  .askpick .cmi.cur .cwon{background:var(--foreground);color:var(--background);border-color:transparent}
+  .askfoot{position:sticky;bottom:-6px;display:flex;align-items:center;gap:10px;margin:6px -6px -6px;padding:9px 12px;
+    border-top:1px solid var(--border);background:var(--popover);border-radius:0 0 14px 14px}
+  .askn{font-size:12px;color:var(--muted-foreground);flex:1}
+  .slist .crow.more{color:var(--muted-foreground);font-size:12.5px}
+  .slist .crow.more:hover{color:var(--foreground)}
+  .ferr{display:block;min-height:0;font-size:12.5px;color:var(--err);margin:6px 0 2px}
+  .ferr:empty{display:none}
+  input.bad{border-color:color-mix(in srgb,var(--err) 60%,transparent)!important}
+  .mferr{margin-right:auto;font-size:12.5px;color:var(--err);align-self:center}
+  .mferr:empty{display:none}
+  .dev.stale{opacity:.6}
+  #tghsign{gap:7px}
+  #tghsign svg{width:14px;height:14px}
+  .cloudadv{margin:12px 0 4px}
+  .cloudadv summary{cursor:pointer;font-size:12.5px;color:var(--muted-foreground)}
+  .cloudadv[open] summary{margin-bottom:8px}
+  #offbanner{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:10px;
+    padding:9px 14px;border-radius:12px;background:var(--popover);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);
+    box-shadow:var(--shadow-float);font-size:13px;color:var(--foreground);animation:fadeup .2s var(--ease-out);max-width:calc(100vw - 32px)}
+  #offbanner code{font-family:var(--font-mono);font-size:12px;padding:1px 6px;border-radius:5px;background:var(--secondary)}
+  .obspin{width:12px;height:12px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--warn) 30%,transparent);border-top-color:var(--warn);animation:spin .9s linear infinite;flex:none}
+  .planquiet{display:flex;align-items:center;gap:7px;margin:6px 0 12px;font-size:12.5px;color:var(--muted-foreground)}
+  .planquiet svg{width:13px;height:13px}
+  /* ── the composer ── */
+  .dmain .composer{background:transparent;border-top:0;backdrop-filter:none;-webkit-backdrop-filter:none;padding:0 var(--gutter) 14px}
+  .dmain .composer .cbox{max-width:var(--measure)}
+  .cbox{border-radius:20px;background:var(--card);border:1px solid color-mix(in srgb,var(--foreground) 11%,transparent);
+    box-shadow:0 1px 0 rgb(255 255 255 / .03) inset,0 14px 36px -16px rgb(0 0 0 / .55);padding:12px 12px 10px;
+    transition:border-color .18s ease,box-shadow .18s ease}
+  .dark .cbox{background:var(--card)}
+  .cbox:focus-within{border-color:color-mix(in srgb,var(--foreground) 20%,transparent);
+    box-shadow:0 1px 0 rgb(255 255 255 / .03) inset,0 14px 36px -16px rgb(0 0 0 / .55),0 0 0 4px color-mix(in srgb,var(--thread) 9%,transparent)}
+  .cinput{font-size:14.5px;line-height:1.6;padding:2px 6px}
+  .cbox .crow{gap:5px;padding-top:10px}
+  .cmode{height:28px;border-radius:9px;background:var(--secondary);padding:2px}
+  .cmode button{border-radius:7px;font-size:12.5px;padding:0 10px}
+  .cpick{display:inline-flex;align-items:stretch;height:28px;border-radius:9px;border:1px solid var(--border);overflow:hidden;flex:none;min-width:0;max-width:340px;
+    transition:border-color .15s ease}
+  .cpick:hover{border-color:color-mix(in srgb,var(--foreground) 16%,transparent)}
+  .cpick .cagent{height:auto;border:0;border-radius:0;background:transparent;padding:0 7px 0 9px;font-size:12.5px;max-width:190px}
+  .cpick .cagent:hover{background:var(--secondary)}
+  .cpick .cagent .cchev{display:none}
+  .cpick .cagent.auto{background:color-mix(in srgb,var(--accentBlue) 12%,transparent)}
+  .cpick #modelpick{height:auto;border:0;border-left:1px solid var(--border);border-radius:0;padding:0 7px 0 9px;background:transparent;gap:4px}
+  .cpick #modelpick:hover{background:var(--secondary);color:var(--foreground)}
+  .cpick .cmodel{font-family:var(--font-sans);font-size:12px;font-weight:500;max-width:150px}
+  .cpick .cchev svg{width:12px;height:12px}
+  .cperm{height:28px;border-radius:9px}
+  .cslot{height:28px;border-radius:9px;border:1px solid transparent;padding:0 7px}
+  .cslot:hover{background:var(--secondary);border-color:transparent}
+  #morebtn .cslotlbl{display:none}
+  .cprompt{height:28px;border-radius:9px}
+  .cprompt .cslotlbl,.cprompt kbd{display:none}
+  .ctool.iconly{width:28px;height:28px;border-radius:9px}
+  .sendbtn{width:32px;height:32px;border-radius:11px;transition:transform .12s var(--ease-out),opacity .15s ease}
+  .sendbtn:active{transform:scale(.94)}
+  .sendbtn.orchsend{width:auto;padding:0 14px;gap:7px;font-size:13px;font-weight:600}
+  .stopbtn::after{border-radius:14px}
+  .hint{font-family:var(--font-sans);font-size:12px;letter-spacing:0;margin-top:8px}
+  .hint:empty{display:none}
+  /* ── pickers ── */
+  .cmenu{border-radius:14px;padding:6px;background:var(--popover);border:1px solid var(--glass-border);
+    box-shadow:var(--shadow-float);animation:menuin .16s var(--ease-out);transform-origin:bottom left}
+  @keyframes menuin{from{opacity:0;transform:translateY(4px) scale(.985)}to{opacity:1;transform:none}}
+  .cmenu.picker{right:auto;width:min(400px,calc(100% - 16px));max-height:440px}
+  .cmenu .cmhead{display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:12px;font-weight:600;padding:8px 10px 6px}
+  .cmenu .cmhead .brand,.cmenu .cmhead .agmono{width:14px;height:14px}
+  .cmi{border-radius:9px;padding:7px 10px;gap:10px;transition:background .08s ease}
+  .cmi.arow2,.cmi.mrow{align-items:center}
+  .cmi.arow2 .ic .brand{width:18px;height:18px}
+  .cmi .agmono{width:18px;height:18px}
+  .mtx{display:flex;flex-direction:column;min-width:0;flex:1;gap:1px}
+  .cmlist .cmi.mrow span,.cmenu .cmi.arow2 span{font-family:var(--font-sans)}
+  .cinput:focus-visible,.cinput:focus{border-color:transparent!important;box-shadow:none!important;outline:none}
+  .corch .colbl,.cbox .colbl{text-transform:none!important;letter-spacing:0!important;font-family:var(--font-sans)!important;font-size:12px!important}
+  .mnm{font-size:13px;font-weight:500;color:var(--foreground);display:flex;align-items:baseline;gap:8px;min-width:0;overflow:hidden;white-space:nowrap}
+  .mfrom{font-size:11px;font-weight:400;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis}
+  .mbl{font-size:11.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cmi .tick{margin-left:auto;color:var(--foreground);display:inline-flex}
+  .cmi .tick svg{width:14px;height:14px}
+  .cmi.cur{background:color-mix(in srgb,var(--secondary) 55%,transparent)}
+  .cmi.sel,.cmi:hover{background:var(--secondary)}
+  .mdot{width:6px;height:6px;border-radius:50%;background:color-mix(in srgb,var(--muted-foreground) 45%,transparent);display:inline-block}
+  .cmi.mrow.cur .mdot{background:var(--thread)}
+  .cmi .ic svg{width:14px;height:14px}
+  .cmsearchwrap{position:sticky;top:-6px;z-index:2;display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:0 10px;height:36px;
+    border:1px solid var(--border);border-radius:10px;background:var(--background)}
+  .cmsearchwrap:focus-within{border-color:var(--ring)}
+  .cmenu .cmsearchwrap .cmsearch:focus,.cmenu .cmsearchwrap .cmsearch:focus-visible{border:0!important;box-shadow:none!important;outline:none}
+  .cmsearchwrap svg{width:14px;height:14px;color:var(--muted-foreground);flex:none}
+  .cmenu .cmsearchwrap .cmsearch{position:static;border:0;margin:0;padding:0;background:transparent;height:34px;font-family:var(--font-sans);font-size:13px;flex:1;min-width:0}
+  .cmgroup{font-size:11px;font-weight:600;color:var(--muted-foreground);padding:10px 10px 4px}
+  .cmenu .cmfoot{font-size:11px;padding:8px 10px 4px;margin-top:4px}
+  .cmenu .cmsep{margin:5px 4px}
+  /* ── orchestrate: the cast ── */
+  .corch{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 14px;align-items:center;margin:10px 2px 2px;padding:12px 2px 2px;border-top:1px solid var(--border)}
+  .colbl{font-family:var(--font-sans);font-size:12px;font-weight:500;color:var(--muted-foreground);text-transform:none;letter-spacing:0;white-space:nowrap}
+  .corch #corchpick{justify-self:start;height:30px;border-radius:10px;padding:0 8px 0 9px;gap:7px;max-width:100%;
+    background:var(--secondary);border:1px solid color-mix(in srgb,var(--foreground) 12%,transparent);font-size:12.5px}
+  .corch #corchpick .pbdg{margin:0}
+  .cowk{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+  .cowchip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 5px 0 7px;border-radius:10px;border:1px solid var(--border);
+    background:transparent;font-size:12.5px;color:var(--muted-foreground);transition:background .15s ease,border-color .15s ease,color .15s ease,opacity .15s ease}
+  .cowchip:not(.on){opacity:.7}
+  .cowchip:hover{border-color:color-mix(in srgb,var(--foreground) 18%,transparent);opacity:1}
+  .cowchip.on{color:var(--foreground);background:var(--secondary);border-color:color-mix(in srgb,var(--foreground) 13%,transparent)}
+  .cowchip .brand,.cowchip .agmono{width:14px;height:14px}
+  .cwon{width:15px;height:15px;border-radius:5px;border:1px solid color-mix(in srgb,var(--foreground) 22%,transparent);display:inline-flex;align-items:center;justify-content:center;flex:none}
+  .cowchip.on .cwon{background:var(--foreground);color:var(--background);border-color:transparent}
+  .cwon svg{width:10px;height:10px;stroke-width:3}
+  .cwset{display:inline-flex;align-items:center;gap:4px;margin-left:2px;padding-left:6px;border-left:1px solid var(--border);height:18px}
+  .cowchip .pbdg,.corch .pbdg{height:20px;border-radius:6px;font-size:10.5px}
+  .cowchip.cowadd{border-style:dashed;padding:0 10px;opacity:1;gap:5px}
+  .cowchip.cowadd svg{width:12px;height:12px}
+  .cstep{justify-self:start;height:30px;border-radius:10px}
+  /* ── chrome: quieter meta, sans labels ── */
+  .sidebar .stitle,.srow .m,.statusbar,.dempty,.rhead,.rsec{font-family:var(--font-sans);letter-spacing:0}
+  .sidebar .stitle{text-transform:none;font-size:12px}
+  .slist .crow{height:30px;border-radius:8px;font-size:13px}
+  .tab{font-size:13px}
+  .statusbar{font-size:11.5px}
+  /* ── orchestra view ── */
+  .ogoal{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;font-size:15px;line-height:1.45;letter-spacing:-.005em}
+  .ogoal.full{display:block;-webkit-line-clamp:unset}
+  .onote{font-family:var(--font-sans)!important;font-size:13px;line-height:1.6}
+  .orun .ogl,.orun .ogoal{letter-spacing:0}
+  @media (max-width:899px){
+    .msg.agent .bubble{padding-left:0}
+    .tool,.acts,.turnend,.turncard,.msg.agent.thinking{margin-left:0}
+    #pane-thread > #feed,#pane-thread > #feedlive{padding-inline:14px}
+  }
+  /* ══ Agentic IDE finish ═══════════════════════════════════════════════════
+     Each turn is a timeline: the agent's mark at the top, a hairline running
+     down through its tool steps, and a node where the turn ends. Your prompt
+     is the card that opens a turn. The composer is the instrument panel. */
+  /* ── your prompt: the card that opens a turn ── */
+  .msg.user{align-items:stretch;margin-top:34px}
+  .msg.user .bubble,.dmain .msg.user .bubble{max-width:none;border-radius:14px;padding:12px 16px 13px;
+    background:color-mix(in srgb,var(--secondary) 72%,transparent);border:1px solid var(--border);
+    box-shadow:0 1px 0 rgb(255 255 255 / .025) inset}
+  .msg.user .mt{align-self:flex-end}
+  /* ── the agent's byline ── */
+  .av{width:24px;height:24px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--border),0 0 0 3px var(--background)}
+  .msg .who{position:relative;z-index:1}
+  .msg .who .msgcopy{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+    border-radius:7px;color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease}
+  .msg .who .msgcopy svg{width:13px;height:13px}
+  .msg:hover .who .msgcopy{opacity:1}
+  .msg .who .msgcopy:hover{background:var(--secondary);color:var(--foreground)}
+  .msg .who .wt{margin-left:4px}
+  .msg.agent .bubble,.dmain .msg.agent .bubble{padding-left:34px}
+  /* ── the turn timeline ── */
+  .msg.agent:not(.thinking) .bubble{position:relative}
+  .msg.agent:not(.thinking) .bubble::before{content:"";position:absolute;left:11.5px;top:-6px;bottom:-14px;width:1px;
+    background:color-mix(in srgb,var(--foreground) 13%,transparent)}
+  .msg.agent.cont .bubble::before{top:-16px}
+  .acts,.tool,.turnend,.msg.agent.thinking,.nicard,.apcard,.sys.errcard,.turncard{position:relative;margin-left:34px}
+  .acts::before,.tool::before,.turnend::before,.msg.agent.thinking::before,.turncard::before,.nicard::before,.apcard::before,.sys.errcard::before{
+    content:"";position:absolute;left:-22.5px;top:-12px;bottom:-12px;width:1px;background:color-mix(in srgb,var(--foreground) 13%,transparent)}
+  .acts .actlist .tool::before{display:none}
+  .acts .actlist .tool{margin-left:12px}
+  .turnend::before{bottom:50%}
+  .turnend svg{position:absolute;left:-29px;top:50%;margin-top:-7px;width:14px;height:14px;padding:2px;border-radius:50%;
+    background:var(--background);box-shadow:0 0 0 1px color-mix(in srgb,var(--ok) 45%,transparent)}
+  .turnend{min-height:18px}
+  .acts::after{content:"";position:absolute;left:-26px;top:11px;width:8px;height:8px;border-radius:50%;
+    background:var(--background);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--muted-foreground) 70%,transparent)}
+  .tool::after{content:"";position:absolute;left:-25px;top:50%;margin-top:-3px;width:6px;height:6px;border-radius:50%;
+    background:color-mix(in srgb,var(--muted-foreground) 55%,transparent)}
+  .acts .actlist .tool::after{display:none}
+  .livebox.bar{margin-left:0}
+  /* ── code: an editor pane, not a box ── */
+  .md .mdcodewrap{padding-top:34px;border-radius:12px;background:var(--editor-surface);box-shadow:0 1px 0 rgb(255 255 255 / .02) inset}
+  .md .mdcodewrap::before{content:"";position:absolute;left:0;right:0;top:0;height:34px;border-bottom:1px solid var(--border);
+    background:color-mix(in srgb,var(--secondary) 55%,transparent)}
+  .md .mdcodewrap .mdlang{top:10px;left:14px;right:auto;opacity:1;color:var(--muted-foreground);font-size:11px}
+  .mdcodewrap:hover .mdlang{opacity:1}
+  .md .mdcodewrap .mdcopy{top:4px;right:6px;opacity:1;background:transparent;border-color:transparent}
+  .md .mdcodewrap .mdcopy:hover{background:var(--secondary)}
+  .md .mdcodewrap:not(:has(.mdlang))::after{content:"code";position:absolute;top:10px;left:14px;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+  /* ── file changes: a review card ── */
+  .turncard{max-width:none;border-radius:12px;padding:10px 12px;background:var(--card)}
+  .turncard .tch{display:flex;align-items:center;gap:8px;font-family:var(--font-sans);font-size:13px;font-weight:500}
+  .turncard .tci{display:inline-flex;color:var(--muted-foreground)}
+  .turncard .tci svg{width:14px;height:14px}
+  .turncard .tca{color:var(--ok);font-family:var(--font-mono);font-size:12px}
+  .turncard .tcd{color:var(--err);font-family:var(--font-mono);font-size:12px}
+  .turncard .tcf{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);margin-top:5px}
+  /* ── the composer: the instrument panel ── */
+  .cbox{background:linear-gradient(var(--card),var(--card)) padding-box,
+      linear-gradient(135deg,color-mix(in srgb,var(--foreground) 14%,transparent),color-mix(in srgb,var(--foreground) 7%,transparent)) border-box;
+    border:1px solid transparent}
+  .cbox:focus-within{background:linear-gradient(var(--card),var(--card)) padding-box,
+      linear-gradient(120deg,color-mix(in srgb,var(--thread) 70%,transparent),color-mix(in srgb,var(--shuttle) 55%,transparent)) border-box;
+    box-shadow:0 1px 0 rgb(255 255 255 / .03) inset,0 18px 44px -18px rgb(0 0 0 / .6),0 0 0 4px color-mix(in srgb,var(--thread) 7%,transparent)}
+  .cmode button{display:inline-flex;align-items:center;gap:6px}
+  .cmode button svg{width:13px;height:13px;opacity:.8}
+  .ckhint{display:none!important}
+  @media (min-width:1500px){ .dshell:not(.railopen) .ckhint{display:inline-flex!important} }
+  .ckhint{font-size:11px;color:var(--muted-foreground);opacity:.75;white-space:nowrap;margin-right:6px;display:inline-flex;align-items:center;gap:4px}
+  .ckhint kbd{font-family:var(--font-sans);font-size:10.5px;padding:0 5px;border-radius:5px;border:1px solid var(--border);background:var(--background);line-height:16px}
+  .cbox #send{transition:transform .12s var(--ease-out),opacity .15s ease,background .15s ease}
+  .cbox:not(.hastext) #send{opacity:.38}
+  .cbox.hastext #send{box-shadow:0 6px 16px -6px color-mix(in srgb,var(--foreground) 45%,transparent)}
+  /* ── one workspace at every width ── */
+  .sbbtn{display:none}
+  .sbbtn svg{transform:scaleX(-1)}
+  @media (max-width:1180px){ html.desk .dshell{--sbw:228px!important} }
+  @media (max-width:1040px){
+    .tab .tl{display:none}
+    .tab{padding:0 11px}
+    .ckhint{display:none}
+    .cmode button{font-size:0;gap:0;padding:0 9px}
+    .cmode button svg{width:14px;height:14px;opacity:1}
+    .cpick .cmodel{max-width:96px}
+    .cpick .cagent{max-width:150px}
+    #pane-thread > #feed,#pane-thread > #feedlive,.dmain .composer{--gutter:20px}
+  }
+  @media (max-width:780px){
+    html.desk .dshell,html.desk .dshell.railopen{grid-template-columns:minmax(0,1fr)!important}
+    html.desk .dshell .dmain{grid-column:1}
+    html.desk .dshell .rail{display:none!important}
+    html.desk .dshell .sidebar{position:fixed;left:0;top:0;bottom:25px;width:min(290px,86vw);z-index:45;
+      transform:translateX(-104%);transition:transform .22s var(--ease-out);box-shadow:var(--shadow-float)}
+    html.desk .dshell.sbopen .sidebar{transform:none}
+    html.desk .sbbtn{display:inline-flex;align-self:center;margin-right:4px}
+    html.desk .dockpane.open{position:absolute;inset:0;width:auto!important;z-index:30}
+    .statusbar > :nth-child(n+4){display:none}
+  }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  .errcard .erra{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .errcard .erra .btn svg{width:12px;height:12px;margin-right:5px}
+  .errcard .erra [data-errwait].armed{border-color:var(--live);color:var(--live)}
+  .msg.clamped .bubble{max-height:540px;overflow:hidden;-webkit-mask-image:linear-gradient(#000 78%,transparent);mask-image:linear-gradient(#000 78%,transparent)}
+  .msg .showmore{margin:6px 0 0 34px;border:1px solid var(--border);background:var(--secondary);color:var(--foreground);
+    font:inherit;font-size:12px;padding:4px 12px;border-radius:999px;cursor:pointer}
+  .msg .showmore:hover{background:color-mix(in srgb,var(--secondary) 70%,var(--foreground) 8%)}
+  .lstate .lpace{margin-left:8px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;font-size:11.5px}
+  /* leaderboard + heatmap */
+  #obboard{min-height:0;margin-top:18px}
+  .lbhead{display:flex;align-items:center}
+  .lbhead .btn svg{width:12px;height:12px;margin-right:5px}
+  .lbwrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+  .lbtable{width:100%;border-collapse:collapse;font-size:13px}
+  .lbtable th{text-align:left;font-weight:500;font-size:11px;color:var(--muted-foreground);padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+  .lbtable td{padding:9px 12px;border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent);white-space:nowrap}
+  .lbtable tr:last-child td{border-bottom:0}
+  .lbtable .num{text-align:right;font-variant-numeric:tabular-nums}
+  .lbtable td .num{margin-left:8px}
+  .lbrank{color:var(--muted-foreground);width:24px}
+  .lbwho{display:inline-flex;align-items:center;gap:8px}
+  .lbwho .av{width:20px;height:20px;border-radius:6px}
+  .lbbar{display:inline-block;width:90px;height:6px;border-radius:99px;background:var(--secondary);vertical-align:middle;overflow:hidden}
+  .lbbar i{display:block;height:100%;border-radius:99px;background:var(--ok)}
+  .lbbar.warn i{background:var(--warn)} .lbbar.bad i{background:var(--err)}
+  .lbempty{color:var(--muted-foreground);text-align:center;padding:18px!important}
+  .hmsum{margin-left:10px;text-transform:none;letter-spacing:0;color:var(--muted-foreground)}
+  .hmgrid{display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;overflow-x:auto;padding-bottom:4px}
+  .hm{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--secondary)}
+  .hm.pad{background:transparent}
+  .hm.l1{background:color-mix(in srgb,var(--thread,#67e8f9) 28%,var(--secondary))}
+  .hm.l2{background:color-mix(in srgb,var(--thread,#67e8f9) 50%,var(--secondary))}
+  .hm.l3{background:color-mix(in srgb,var(--thread,#67e8f9) 72%,var(--secondary))}
+  .hm.l4{background:var(--thread,#67e8f9)}
+  .hm.err{box-shadow:inset 0 0 0 1.5px var(--err)}
+  .hmkey{display:flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;color:var(--muted-foreground)}
+  .hmkey .hm{width:10px;height:10px}
+  /* orchestra plan graph */
+  .ograph{margin:4px 0 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+  .ograph > summary{cursor:pointer;padding:9px 12px;font-size:12px;font-weight:600;color:var(--muted-foreground);list-style:none;display:flex;gap:8px;align-items:center}
+  .ograph > summary::-webkit-details-marker{display:none}
+  .ograph .ogs{font-weight:400}
+  .ogscroll{overflow-x:auto;padding:0 8px 10px}
+  .ograph svg{display:block;color:var(--muted-foreground)}
+  .oge{fill:none;stroke:var(--border);stroke-width:1.6}
+  .oge.done{stroke:color-mix(in srgb,var(--ok) 60%,var(--border))}
+  .ogn rect{fill:var(--secondary);stroke:var(--border)}
+  .ogn .ogd{fill:var(--muted-foreground)}
+  .ogn.live rect{stroke:var(--live)} .ogn.live .ogd{fill:var(--live);animation:ogpulse 1.4s ease-in-out infinite}
+  .ogn.ok rect{stroke:color-mix(in srgb,var(--ok) 55%,var(--border))} .ogn.ok .ogd{fill:var(--ok)}
+  .ogn.warn rect{stroke:var(--warn)} .ogn.warn .ogd{fill:var(--warn)}
+  .ogn.err rect{stroke:var(--err)} .ogn.err .ogd{fill:var(--err)}
+  .ogn .ogid{font-size:10.5px;fill:var(--muted-foreground);font-family:var(--font-mono)}
+  .ogn .ogt{font-size:12px;fill:var(--foreground)}
+  .ogn{cursor:pointer}
+  @keyframes ogpulse{50%{opacity:.35}}
+  /* orchestra complete: a moment, once */
+  @keyframes odpop{0%{transform:scale(.97);opacity:0}60%{transform:scale(1.01);opacity:1}100%{transform:none}}
+  @keyframes odglow{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 45%,transparent)}100%{box-shadow:0 0 0 18px transparent}}
+  @keyframes odcheck{from{stroke-dashoffset:24}to{stroke-dashoffset:0}}
+  .sys.orch.odone.celebrate{animation:odpop .45s cubic-bezier(.2,.9,.3,1.2),odglow 1.1s ease-out .2s}
+  .sys.orch.odone.celebrate .odh svg{stroke-dasharray:24;animation:odcheck .5s ease-out .15s both}
+  @media (prefers-reduced-motion: reduce){.sys.orch.odone.celebrate,.sys.orch.odone.celebrate .odh svg,.ogn.live .ogd{animation:none}}
+  /* appearance */
+  .accents{display:flex;gap:8px}
+  .accentsw{width:22px;height:22px;border-radius:50%;border:2px solid var(--background);background:var(--sw);
+    box-shadow:0 0 0 1px var(--border);cursor:pointer;padding:0}
+  .accentsw.on{box-shadow:0 0 0 2px var(--foreground)}
+  html.compact .msg{margin-top:14px}
+  html.compact .msg.user{margin-top:20px}
+  html.compact .msg.user .bubble{padding:8px 12px 9px}
+  html.compact .daysep{margin:16px 0 4px}
+  html.compact .acts,html.compact .tool{margin-top:2px;margin-bottom:2px}
+  /* diagnostics: what's running */
+  .dsys{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0 14px}
+  .dsc{border:1px solid var(--border);border-radius:9px;padding:8px 10px;background:var(--card);display:flex;flex-direction:column;gap:2px}
+  .dsc span{font-size:11px;color:var(--muted-foreground)}
+  .dsc b{font-size:12.5px;font-weight:600;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dshell{zoom:var(--tz,1);height:calc(100dvh / var(--tz,1))}
+  .bhead .bio{display:flex;gap:4px;margin-left:auto}
+  .bhead .bio .btn svg{width:12px;height:12px;margin-right:4px}
+  .bmrow .bedit{opacity:0;transition:opacity .15s}
+  .bmem:hover .bedit,.bmrow .bedit:focus-visible{opacity:1}
+  /* tool groups open smoothly where the browser can animate to auto height */
+  :root{interpolate-size:allow-keywords}
+  details.acts::details-content{height:0;overflow:clip;transition:height .22s ease,content-visibility .22s allow-discrete}
+  details.acts[open]::details-content{height:auto}
+  .ctok{font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;margin-right:8px;white-space:nowrap}
+  /* one switch for everything that moves */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  }
+  .statusbar .branchpill{display:inline-flex;align-items:center;gap:5px}
+  .statusbar .branchpill svg{width:12px;height:12px}
+  .statusbar .branchpill .bpn{font-size:10.5px;padding:0 6px;border-radius:99px;background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
+  /* the thread's first load: the shape of a conversation, not a blank pane */
+  #feed > .loader:empty{--sk:color-mix(in srgb,var(--muted-foreground) 13%,transparent);display:block;position:relative;overflow:hidden;
+    height:290px;margin-top:34px;padding:0;border-radius:14px;
+    background-image:linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),
+      linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0);
+    background-repeat:no-repeat;
+    background-size:100% 56px,24px 24px,96px 11px,calc(92% - 34px) 10px,calc(80% - 34px) 10px,calc(56% - 34px) 10px,100% 46px;
+    background-position:0 0,0 96px,34px 102px,34px 138px,34px 160px,34px 182px,0 236px}
+  #feed > .loader:empty::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 20%,color-mix(in srgb,var(--foreground) 6%,transparent) 50%,transparent 80%);
+    transform:translateX(-100%);animation:skim 1.3s ease-in-out infinite}
+  @keyframes skim{to{transform:translateX(100%)}}
+  .psrolewrap .psinstr{margin-left:6px}
+  .psrolewrap .psinstr svg{width:11px;height:11px;margin-right:4px}
+  .psrolewrap .psinstr.on{border-color:color-mix(in srgb,var(--thread) 45%,var(--border))}
+  .bsort{display:flex;align-items:center;gap:4px;margin:8px 0 2px;font-size:11.5px;color:var(--muted-foreground)}
+  .bsort button{border:1px solid transparent;background:none;color:var(--muted-foreground);font:inherit;padding:2px 9px;border-radius:99px;cursor:pointer}
+  .bsort button.on{border-color:var(--border);background:var(--secondary);color:var(--foreground)}
+  .bused{margin-left:6px;font-size:11px;padding:0 7px;border-radius:99px;background:color-mix(in srgb,var(--thread) 16%,transparent);color:var(--thread-ink,var(--foreground))}
+  .monthstats{margin-bottom:16px}
+  .heldnote{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:7px 12px;border-radius:10px;font-size:12.5px;
+    border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);background:color-mix(in srgb,var(--warn) 8%,var(--card))}
+  .heldnote .linkbtn{margin-left:auto}
+  /* first-run tour */
+  .tourshade{position:fixed;z-index:190;border-radius:12px;pointer-events:none;
+    box-shadow:0 0 0 9999px rgb(0 0 0 / .55),0 0 0 2px var(--thread);transition:all .25s cubic-bezier(.2,.8,.2,1)}
+  .tourcard{position:fixed;z-index:191;width:min(340px,calc(100vw - 16px));padding:14px 16px;border-radius:14px;
+    background:var(--popover);border:1px solid var(--border);box-shadow:var(--shadow-float);animation:fadeup .2s ease-out}
+  .tourstep{font-size:11px;color:var(--muted-foreground);letter-spacing:.04em;text-transform:uppercase}
+  .tourt{font-size:15px;font-weight:600;margin:4px 0 6px}
+  .tourb{font-size:13px;line-height:1.55;color:var(--muted-foreground)}
+  .toura{display:flex;justify-content:space-between;margin-top:12px}
+  /* view transitions */
+  ::view-transition-old(root),::view-transition-new(root){animation-duration:.14s}
+  /* outline */
+  .olhead{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground);margin:2px 0 8px}
+  .olrow{display:flex;align-items:flex-start;gap:8px;width:100%;text-align:left;border:0;background:none;color:var(--foreground);
+    font:inherit;font-size:12.5px;padding:7px 8px;border-radius:8px;cursor:pointer}
+  .olrow:hover{background:var(--secondary)}
+  .olrow .oln{flex:none;width:18px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .olrow .olt{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
+  .olrow .olw{flex:none;font-size:11px;color:var(--muted-foreground)}
+  .olmore{margin-top:8px;border:1px dashed var(--border);background:none;color:var(--muted-foreground);font:inherit;font-size:12px;padding:6px;border-radius:8px;width:100%;cursor:pointer}
+  .olempty{font-size:12.5px;color:var(--muted-foreground);padding:8px 2px}
+  /* terminal find */
+  .termfind{display:inline-flex;align-items:center;gap:6px;margin-right:4px}
+  .termfind[hidden]{display:none}
+  .termfind input{width:150px;height:22px;border:1px solid var(--border);border-radius:6px;background:var(--input,var(--muted));color:var(--foreground);font:inherit;font-size:12px;padding:0 7px}
+  .termqn{font-size:11px;color:var(--muted-foreground);min-width:34px}
+  /* orchestra timeline */
+  .otlbody{padding:2px 12px 10px}
+  .otlrow{display:grid;grid-template-columns:34px 1fr 64px;align-items:center;gap:8px;height:22px;cursor:pointer}
+  .otlid{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+  .otltrack{position:relative;height:8px;border-radius:99px;background:var(--secondary)}
+  .otlbar{position:absolute;top:0;height:100%;border-radius:99px;background:var(--muted-foreground)}
+  .otlbar.live{background:var(--live)} .otlbar.ok{background:var(--ok)} .otlbar.warn{background:var(--warn)} .otlbar.err{background:var(--err)}
+  .otld{font-size:11px;color:var(--muted-foreground);text-align:right;font-variant-numeric:tabular-nums}
+  .otlaxis{display:flex;justify-content:space-between;margin:4px 72px 0 42px;font-size:10.5px;color:var(--muted-foreground)}
+  .cfmodal .cflab{display:block;font-size:13px;margin-top:12px}
+  .cfmodal .cflab span{color:var(--muted-foreground);font-size:11.5px;margin-left:6px}
+  .cfmodal .cflab .cfin{margin-top:6px}
+  .cfmodal .mferr{color:var(--err);font-size:12.5px;margin-top:10px}
+  /* diff layout toggle + side by side */
+  .dvtoggle{display:inline-flex;gap:2px;margin:8px 10px 0;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
+  .dvtoggle button{border:0;background:none;color:var(--muted-foreground);font:inherit;font-size:11.5px;padding:3px 10px;border-radius:6px;cursor:pointer}
+  .dvtoggle button.on{background:var(--secondary);color:var(--foreground)}
+  .dsplit{font-family:var(--font-mono);font-size:12px;line-height:1.55;min-width:max-content}
+  .dsplit .sl{display:grid;grid-template-columns:40px minmax(280px,1fr) 40px minmax(280px,1fr)}
+  .dsplit .sl.hunk,.dsplit .sl.meta{display:block;padding:2px 10px;color:var(--muted-foreground);background:color-mix(in srgb,var(--secondary) 60%,transparent)}
+  .dsplit .ln{color:var(--muted-foreground);text-align:right;padding-right:8px;user-select:none;opacity:.7}
+  .dsplit .sc{white-space:pre;padding:0 10px;border-left:1px solid color-mix(in srgb,var(--border) 60%,transparent)}
+  .dsplit .sc.del{background:color-mix(in srgb,var(--err) 13%,transparent)}
+  .dsplit .sc.add{background:color-mix(in srgb,var(--ok) 13%,transparent)}
+  .dsplit .sc.empty{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--border) 45%,transparent) 6px 7px)}
+  .dfh .dfrevert{margin-left:auto}
+  .dfh .dfrevert svg{width:11px;height:11px;margin-right:4px}
+  .dfh .dfrevert.done{color:var(--ok)}
+  /* card priority / due, column limits */
+  .bmeta{display:inline-flex;gap:4px;margin-right:6px;flex-wrap:wrap}
+  .bmchip{border:1px solid var(--border);background:none;color:var(--muted-foreground);font:inherit;font-size:10.5px;padding:1px 7px;border-radius:99px;cursor:pointer;text-transform:lowercase}
+  .bmchip.none{opacity:0;transition:opacity .15s}
+  .bcard:hover .bmchip.none,.bmchip.none:focus-visible{opacity:1}
+  .bmchip.prio.high{border-color:color-mix(in srgb,var(--err) 50%,transparent);color:var(--err)}
+  .bmchip.prio.medium{border-color:color-mix(in srgb,var(--warn) 50%,transparent);color:var(--warn)}
+  .bmchip.prio.low{color:var(--muted-foreground)}
+  .bmchip.due.soon{border-color:color-mix(in srgb,var(--warn) 50%,transparent);color:var(--warn)}
+  .bmchip.due.late{border-color:var(--err);background:color-mix(in srgb,var(--err) 12%,transparent);color:var(--err)}
+  .bch .bwip{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:1px 6px;border-radius:6px}
+  .bch .bwip:hover{background:var(--secondary)}
+  .bcol.over .bch .bwip{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+  .bcol.over{box-shadow:inset 0 2px 0 var(--warn)}
+  .bmmeta{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .bmmeta select,.bmmeta input{width:100%}
+  .pmfoot .pmvars{flex-basis:100%;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);opacity:.8}
+  .msg .who .msgrate{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
+    color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease}
+  .msg .who .msgrate svg{width:13px;height:13px}
+  .msg:hover .who .msgrate,.msg .who .msgrate.on,.msg .who .msgrate:focus-visible{opacity:1}
+  .msg .who .msgrate:hover{background:var(--secondary);color:var(--foreground)}
+  .msg .who .msgrate.on{color:var(--ok)} .msg .who .msgrate.on.down{color:var(--err)}
+  .msg .who .msgrate.on svg{fill:color-mix(in srgb,currentColor 22%,transparent)}
+  .lbrated .up{color:var(--ok)} .lbrated .dn{color:var(--err)}
+  .lenpill{border:1px solid color-mix(in srgb,var(--thread) 45%,var(--border));background:color-mix(in srgb,var(--thread) 10%,transparent);
+    color:var(--foreground);font:inherit;font-size:11.5px;padding:2px 9px;border-radius:99px;cursor:pointer;margin-right:6px}
+  .emptyart{display:block;width:136px;height:100px;margin:6px auto 14px;color:var(--muted-foreground)}
+  .emptyart .eaglow{stroke-dasharray:180;stroke-dashoffset:180;animation:eadraw 1.4s .2s cubic-bezier(.3,.7,.2,1) forwards}
+  @keyframes eadraw{to{stroke-dashoffset:0}}
+  .unavail{max-width:520px;margin:12vh auto 0;padding:0 24px;text-align:center}
+  .unavail .uat{font-size:18px;font-weight:600;margin-bottom:8px}
+  .unavail .uab{font-size:13.5px;line-height:1.6;color:var(--muted-foreground)}
+  .unavail .uab code,.unavail .uaa code{font-family:var(--font-mono);font-size:12px;padding:1px 6px;border-radius:5px;background:var(--secondary)}
+  .unavail .uaa{display:flex;gap:8px;justify-content:center;margin:18px 0 10px}
+  .unavail .uaa .btn svg{width:13px;height:13px;margin-right:6px}
+  .unavail .uah{font-size:12px;color:var(--muted-foreground)}
+  .srow .m.merr{color:var(--warn);display:flex;align-items:center;gap:4px}
+  .srow .m.merr svg{width:11px;height:11px}
+  .av.pic{padding:0;overflow:hidden}
+  .av.pic img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
+  .psinstr .psav{width:14px;height:14px;border-radius:4px;margin-right:5px;object-fit:cover}
+  img.agpic{width:16px;height:16px;border-radius:5px;object-fit:cover;flex:none;vertical-align:-3px}
+  /* race */
+  .corace{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:9px;margin-right:8px}
+  .corace button{border:0;background:none;color:var(--muted-foreground);font:inherit;font-size:12px;padding:3px 10px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .corace button svg{width:11px;height:11px}
+  .corace button.on{background:var(--secondary);color:var(--foreground)}
+  .raceboard{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:6px}
+  .racecard{border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--card);display:flex;flex-direction:column;gap:8px}
+  .racecard.picked{border-color:var(--ok);box-shadow:0 0 0 1px color-mix(in srgb,var(--ok) 40%,transparent)}
+  .racecard .rch{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .racecard .rch .opill{margin-left:auto}
+  .racecard .rfast{font-size:10.5px;padding:1px 7px;border-radius:99px;background:color-mix(in srgb,var(--live) 20%,transparent);color:var(--live)}
+  .racecard .rcm{display:flex;gap:10px;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .racecard .rcr{font-size:12.5px;line-height:1.5;color:var(--muted-foreground)}
+  .racecard .rcr.err{color:var(--err)}
+  .racecard .rca{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:auto}
+  .racecard .rca .btn svg{width:12px;height:12px;margin-right:4px}
+  .racecard .rpicked{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--ok)}
+  .racecard .rpicked svg{width:12px;height:12px}
+  .omv svg{width:11px;height:11px;vertical-align:-1px}
+  .slist .crow.fold{color:var(--muted-foreground);font-size:12.5px;font-weight:500}
+  .slist .crow.fold:hover{color:var(--foreground)}
+  .slist .crow.fold .fcar svg{transition:transform .15s ease}
+  .slist .crow.fold.open .fcar svg{transform:rotate(90deg)}
+  .slist .crow.fold .fg .agmono,.slist .crow.fold .fg img,.slist .crow.fold .fg svg{width:13px;height:13px;font-size:8px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
+  .slist .crow .fcnt{margin-left:auto;font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .slist .crow.infold{padding-left:38px}
+  .bgraph{margin:10px 0 14px;border:1px solid var(--border);border-radius:10px;background:var(--card);padding:10px}
+  .bgcap{font-size:12px;color:var(--muted-foreground);margin-bottom:6px}
+  .bgsvg{width:100%;height:auto;max-height:520px;display:block}
+  .bgsvg .bgl{stroke:var(--border);stroke-width:1}
+  .bgsvg .bgm circle{fill:currentColor;fill-opacity:.85;stroke:var(--card);stroke-width:1.5;cursor:pointer}
+  .bgsvg .bgm.bk-fact{color:var(--muted-foreground)}
+  .bgsvg .bge rect{fill:var(--muted-foreground);cursor:pointer}
+  .bgsvg .bge text{font-size:9px;fill:var(--muted-foreground);font-family:var(--mono, ui-monospace, monospace);cursor:pointer}
+  .bgsvg .bgm:focus,.bgsvg .bge:focus{outline:none}
+  .bgsvg .bgm:focus circle{stroke:var(--foreground)}
+  .bgsvg.focus [data-i]:not(.near){opacity:.18}
+  .bgsvg.focus .bgl:not(.near){opacity:.12}
+  .bgsvg .bgl.near{stroke:var(--foreground);stroke-opacity:.5}
+  .bgsvg .bge.near text{fill:var(--foreground)}
+  .bgpick{font-size:12.5px;line-height:1.5;margin-top:6px}
+  .bgpick:empty{display:none}
+  .bgpick ul{margin:6px 0 0;padding-left:16px}
+  .bgpick li{margin:3px 0}
+  @media (prefers-reduced-motion: no-preference){ .bgsvg [data-i], .bgsvg .bgl{transition:opacity .15s ease} }
+  .pscheck:empty{display:none}
+  .pscheck{margin:-2px 0 8px 52px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:12px;line-height:1.55}
+  .pschkhead{display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:3px}
+  .pschkhead svg{width:13px;height:13px}
+  .pschkhead.ok{color:var(--ok, #22c55e)}
+  .pschkhead.bad{color:var(--err)}
+  .pschk{color:var(--muted-foreground)}
+  .pschk .pschkn{display:inline-block;min-width:88px;color:var(--foreground)}
+  .pschk.bad .pschkn{color:var(--err)}
+  .md .mdcodewrap .mddraw{position:absolute;top:6px;right:36px;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--foreground);font:inherit;font-size:11.5px;cursor:pointer}
+  .md .mdcodewrap .mddraw svg{width:12px;height:12px}
+  .md .mdcodewrap .mddraw:disabled{opacity:.6;cursor:progress}
+  .md .mdcodewrap .mmout{padding:34px 10px 10px;overflow:auto;text-align:center}
+  .md .mdcodewrap .mmout svg{max-width:100%;height:auto}
+  .recap{display:flex;align-items:center;gap:8px;margin:10px 16px 0;padding:8px 10px 8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);font-size:12.5px}
+  .recap .recapi{display:inline-flex;color:var(--muted-foreground)}
+  .recap .recapi svg{width:14px;height:14px}
+  .recap .recapt{flex:1;min-width:0}
+  .recap .recaperr{color:var(--err)}
+  /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
+  /* message actions */
+  .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
+    color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease}
+  .msg .who .msgmore svg{width:14px;height:14px}
+  .msg:hover .who .msgmore,.msg .who .msgmore:focus-visible{opacity:1}
+  .msg .who .msgmore:hover{background:var(--secondary);color:var(--foreground)}
+  .wstar{display:inline-flex;color:#f5b301;margin-left:6px}
+  .wstar svg{width:12px;height:12px;fill:currentColor}
+  .msg.user .mt{display:flex;align-items:center;gap:2px}
+  .msg.user .mt .uact{display:inline-flex;align-items:center;justify-content:center;width:24px;height:22px;border-radius:6px;
+    color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease;margin-right:1px}
+  .msg.user .mt .uact svg{width:12.5px;height:12.5px}
+  .msg.user:hover .mt .uact,.msg.user .mt .uact:focus-visible{opacity:1}
+  .msg.user .mt .uact:hover{background:var(--secondary);color:var(--foreground)}
+  .msg.user .mt .wstar{margin:0 6px 0 2px}
+  .msgfoot{display:flex;align-items:center;gap:10px;margin:8px 0 0 34px}
+  .msgfoot .btn svg{width:12px;height:12px;margin-right:4px}
+  .msgfoot .mfh{font-size:12px;color:var(--muted-foreground)}
+  @keyframes msgflash{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--live) 55%,transparent)}100%{box-shadow:0 0 0 14px transparent}}
+  .msg.flash{animation:msgflash .9s var(--ease-out,ease-out) 2;border-radius:12px}
+  /* find in thread */
+  .findbar{position:absolute;top:10px;right:18px;z-index:30;display:flex;align-items:center;gap:4px;padding:5px 6px 5px 10px;
+    border-radius:12px;background:var(--popover);border:1px solid var(--border);box-shadow:var(--shadow-float);animation:fadeup .15s ease-out}
+  .findbar > svg{width:14px;height:14px;color:var(--muted-foreground)}
+  .findbar input{width:200px;border:0;background:transparent;color:var(--foreground);font:inherit;font-size:13px;outline:none;padding:4px 2px}
+  .findbar input:focus,.findbar input:focus-visible{outline:none;box-shadow:none;border:0}
+  .findbar .findcount{font-size:12px;color:var(--muted-foreground);min-width:62px;text-align:right;white-space:nowrap}
+  .findbar .iconbtn{width:26px;height:26px}
+  mark.fhit{background:color-mix(in srgb,#f5b301 38%,transparent);color:inherit;border-radius:3px;padding:0 1px}
+  mark.fhit.cur{background:#f5b301;color:#111;box-shadow:0 0 0 2px color-mix(in srgb,#f5b301 40%,transparent)}
+  /* day separators */
+  .daysep{display:flex;align-items:center;gap:12px;margin:26px 0 6px;color:var(--muted-foreground);font-size:11.5px;
+    font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .daysep::before,.daysep::after{content:"";flex:1;height:1px;background:var(--border)}
+  .daysep + .msg.user{margin-top:14px}
+  /* sidebar */
+  .crow .udot{width:7px;height:7px;border-radius:50%;background:var(--thread,#67e8f9);flex:none;margin-left:6px;
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--thread,#67e8f9) 22%,transparent)}
+  .crow .ci svg{width:13px;height:13px}
+  /* shortcut sheet */
+  .kbmodal{width:min(640px,calc(100vw - 32px))}
+  .kbmodal .modalhead svg{width:16px;height:16px;margin-right:6px;vertical-align:-3px}
+  .kbgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px 26px}
+  .kbh{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:8px}
+  .kbrow{display:flex;align-items:center;gap:12px;font-size:13px;padding:5px 0;border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent)}
+  .kbrow .kbd{min-width:84px;display:inline-flex;justify-content:center;font-family:var(--font-mono);font-size:11.5px;padding:2px 7px;
+    border-radius:6px;background:var(--secondary);border:1px solid var(--border);color:var(--foreground)}
+  /* in-app text prompt */
+  .cfmodal .cfin{width:100%;margin:12px 0 2px;padding:9px 11px;border-radius:9px;border:1px solid var(--border);
+    background:var(--input,var(--muted));color:var(--foreground);font:inherit;font-size:14px;resize:vertical;box-sizing:border-box}
+  .cfmodal .cfin:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 25%,transparent)}
+  .cfmodal .cfin.bad{border-color:var(--err)}
+  /* focus mode: the thread and nothing else */
+  html.focusmode .dshell,html.focusmode .dshell.railopen{grid-template-columns:minmax(0,1fr)!important}
+  html.focusmode .dshell > .sidebar,html.focusmode .dshell > .rail{display:none!important}
+  html.focusmode .dshell .dmain{grid-column:1}
+  /* quote a selection */
+  .quotebtn{position:fixed;z-index:60;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:9px;
+    background:var(--popover);border:1px solid var(--border);box-shadow:var(--shadow-float);font-size:12.5px;color:var(--foreground);
+    cursor:pointer;animation:fadeup .12s ease-out}
+  .quotebtn svg{width:13px;height:13px}
+  @media (prefers-reduced-motion: reduce){.msg.flash,.findbar,.quotebtn{animation:none}}
 </style>
 </head>
 <body id="loom-app">
@@ -3167,18 +3991,41 @@ ${BRAND_SPRITE}
     var FENCE = /^\\s*\\x60\\x60\\x60(.*)$/, FENCE_END = /^\\s*\\x60\\x60\\x60\\s*$/;
     var HEAD = /^(#{1,6})\\s+(.*)$/, QUOTE = /^\\s*&gt;\\s?/, RULE = /^\\s*(?:---|\\*\\*\\*|___)\\s*$/;
     var ULI = /^\\s*[-*+]\\s+/, OLI = /^\\s*\\d+\\.\\s+/;
+    var TROW = /^\\s*\\|.*\\|\\s*$/, TSEP = /^\\s*\\|?\\s*:?-{2,}:?\\s*(\\|\\s*:?-{2,}:?\\s*)*\\|?\\s*$/;
     while (i < lines.length) {
       var line = lines[i];
-      if (FENCE.test(line)) {
+      var fm = line.match(FENCE);
+      if (fm) {
         var code = [], j = i + 1;
+        var lang = String(fm[1] || "").trim().toLowerCase().split(/\\s+/)[0].replace(/[^a-z0-9+#_-]/g, "");
         while (j < lines.length && !FENCE_END.test(lines[j])) { code.push(lines[j]); j++; }
+        var body = code.join("\\n");
+        // An orchestrator's plan: a card of tasks, not a page of JSON.
+        if (lang === "loom" || (lang === "json" && /&quot;actions&quot;\\s*:/.test(body) &&
+            /&quot;type&quot;\\s*:\\s*&quot;(?:spawn|ask|done|send|cancel)&quot;/.test(body))) {
+          out.push(planCardHtml(body));
+          i = j + 1; continue;
+        }
         // A code block used to scroll sideways with no way to reach the end,
         // which is how an orchestrator's whole plan became unreadable. It
         // wraps now, and carries a copy button for the times you want it
         // somewhere else rather than on screen.
         out.push('<div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
-          '</button><pre class="mdcode"><code>' + code.join("\\n") + "</code></pre></div>");
+          "</button>" + (lang ? '<span class="mdlang">' + lang + "</span>" : "") +
+          (lang === "mermaid" ? '<button class="mddraw" type="button" title="draw it — fetches the Mermaid renderer from jsdelivr the first time">' + ICONS.tree + "Draw diagram</button>" : "") +
+          '<pre class="mdcode"><code>' + hlCode(body, lang) + "</code></pre></div>");
         i = j + 1; continue;
+      }
+      // A table: a header row, a --- row, then body rows.
+      if (TROW.test(line) && i + 1 < lines.length && TSEP.test(lines[i + 1])) {
+        var cells = function(l){ return l.trim().replace(/^\\|/, "").replace(/\\|$/, "").split("|").map(function(c){ return mdInline(c.trim()); }); };
+        var head = cells(line), trs = [];
+        i += 2;
+        while (i < lines.length && TROW.test(lines[i])) { trs.push(cells(lines[i])); i++; }
+        out.push('<div class="mdtablewrap"><table class="mdtable"><thead><tr>' + head.map(function(c){ return "<th>" + c + "</th>"; }).join("") +
+          "</tr></thead><tbody>" + trs.map(function(r){ return "<tr>" + r.map(function(c){ return "<td>" + c + "</td>"; }).join("") + "</tr>"; }).join("") +
+          "</tbody></table></div>");
+        continue;
       }
       var h = line.match(HEAD);
       if (h) { out.push('<div class="mdh mdh' + Math.min(6, h[1].length) + '">' + mdInline(h[2]) + "</div>"); i++; continue; }
@@ -3206,6 +4053,107 @@ ${BRAND_SPRITE}
     return out.join("");
   }
   /**
+   * A mermaid code block, drawn on request. The renderer (about 3 MB) comes from
+   * jsdelivr the first time you ask and never before — Loom doesn't phone out
+   * to draw a diagram you didn't ask to see. Strict mode: labels are text,
+   * never markup or script. "Code" flips back to the source.
+   */
+  var mermaidLoad = null;
+  function loadMermaid(){
+    if (window.mermaid) return Promise.resolve(window.mermaid);
+    if (mermaidLoad) return mermaidLoad;
+    mermaidLoad = new Promise(function(resolve, reject){
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js";
+      s.async = true;
+      s.onload = function(){ window.mermaid ? resolve(window.mermaid) : reject(new Error("the renderer loaded but didn’t start")); };
+      s.onerror = function(){ mermaidLoad = null; reject(new Error("couldn’t fetch the diagram renderer — it needs the internet once")); };
+      document.head.appendChild(s);
+    });
+    return mermaidLoad;
+  }
+  var mermaidN = 0;
+  function drawMermaid(wrap, btn){
+    if (!wrap) return;
+    var shown = wrap.querySelector(".mmout");
+    if (shown) {
+      var codeOn = shown.style.display === "none";
+      shown.style.display = codeOn ? "" : "none";
+      wrap.querySelector(".mdcode").style.display = codeOn ? "none" : "";
+      btn.lastChild.textContent = codeOn ? "Code" : "Diagram";
+      return;
+    }
+    var src = (wrap.querySelector("code") || {}).textContent || "";
+    btn.disabled = true;
+    btn.lastChild.textContent = "Drawing…";
+    loadMermaid().then(function(mm){
+      var bg = getComputedStyle(document.body).backgroundColor.match(/\\d+/g) || [255, 255, 255];
+      var dark = (Number(bg[0]) + Number(bg[1]) + Number(bg[2])) / 3 < 128;
+      mm.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default", fontFamily: "inherit" });
+      return mm.render("loommm" + (++mermaidN), src);
+    }).then(function(r){
+      var out = document.createElement("div");
+      out.className = "mmout";
+      out.innerHTML = r.svg;
+      wrap.insertBefore(out, wrap.querySelector(".mdcode"));
+      wrap.querySelector(".mdcode").style.display = "none";
+      btn.lastChild.textContent = "Code";
+    }).catch(function(err){
+      btn.lastChild.textContent = "Draw diagram";
+      toast(/fetch|internet/.test(String(err && err.message)) ? err.message : "that diagram doesn’t parse — " + String((err && err.message) || err).split("\\n")[0].slice(0, 120));
+    }).then(function(){ btn.disabled = false; });
+  }
+
+  /**
+   * Just enough syntax colour to read code at a glance: comments, strings,
+   * numbers, keywords and calls. A tokenizer, not a parser — it walks the
+   * UNescaped text and escapes every piece on the way out, so nothing in the
+   * code can become markup. Plain text and unknown fences pass through.
+   */
+  var HL_KW = /^(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|this|null|undefined|true|false|def|self|None|True|False|elif|pass|lambda|with|as|yield|fn|pub|impl|struct|enum|use|mod|match|mut|func|package|type|interface|public|private|protected|static|void|readonly|echo|then|fi|esac|local|export)$/;
+  function hlCode(escaped, lang){
+    if (!lang || /^(text|txt|plain|md|markdown|log|output|console|none)$/.test(lang)) return escaped;
+    var src = unesc(escaped);
+    if (lang === "diff" || lang === "patch") {
+      return src.split("\\n").map(function(l){
+        var c = l.charAt(0) === "+" ? "ha" : l.charAt(0) === "-" ? "hd" : l.indexOf("@@") === 0 ? "hc" : "";
+        return c ? '<span class="' + c + '">' + esc(l) + "</span>" : esc(l);
+      }).join("\\n");
+    }
+    var hashC = /^(py|python|sh|bash|zsh|shell|yaml|yml|toml|rb|ruby|r|perl|make|makefile|dockerfile|ini|conf|env)$/.test(lang);
+    var out = "", i = 0, n = src.length;
+    while (i < n) {
+      var c = src.charAt(i);
+      if ((c === "/" && src.charAt(i + 1) === "/" && !hashC) || (c === "#" && hashC)) {
+        var e1 = src.indexOf("\\n", i); if (e1 < 0) e1 = n;
+        out += '<span class="hc">' + esc(src.slice(i, e1)) + "</span>"; i = e1; continue;
+      }
+      if (c === "/" && src.charAt(i + 1) === "*") {
+        var e2 = src.indexOf("*/", i + 2); e2 = e2 < 0 ? n : e2 + 2;
+        out += '<span class="hc">' + esc(src.slice(i, e2)) + "</span>"; i = e2; continue;
+      }
+      if (c === '"' || c === "'" || c === "\\x60") {
+        var j = i + 1;
+        while (j < n && src.charAt(j) !== c && (src.charAt(j) !== "\\n" || c === "\\x60")) { if (src.charAt(j) === "\\\\") j++; j++; }
+        j = Math.min(n, j + 1);
+        out += '<span class="hs">' + esc(src.slice(i, j)) + "</span>"; i = j; continue;
+      }
+      if (/[0-9]/.test(c) && !/[A-Za-z0-9_$]/.test(src.charAt(i - 1))) {
+        var num = src.slice(i).match(/^(?:0x[0-9a-fA-F]+|[0-9][0-9_]*(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/);
+        if (num) { out += '<span class="hn">' + esc(num[0]) + "</span>"; i += num[0].length; continue; }
+      }
+      if (/[A-Za-z_$]/.test(c)) {
+        var w = src.slice(i).match(/^[A-Za-z_$][A-Za-z0-9_$]*/)[0];
+        if (HL_KW.test(w)) out += '<span class="hk">' + esc(w) + "</span>";
+        else if (src.charAt(i + w.length) === "(") out += '<span class="hf">' + esc(w) + "</span>";
+        else out += esc(w);
+        i += w.length; continue;
+      }
+      out += esc(c); i++;
+    }
+    return out;
+  }
+  /**
    * Mark the match inside a line.
    *
    * Module scope, not inside a render function: the code search (renderProject)
@@ -3229,7 +4177,120 @@ ${BRAND_SPRITE}
   }
 
   // a request that fails after the page is gone (a closed tab, a torn-down test window) has no one to tell
-  function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return; t.textContent = msg;
+  /**
+   * A composer menu opens upward from the card. With the Orchestrate cast
+   * showing, the card is tall enough that a 440px menu ran off the top of the
+   * window — cap it to the room actually above the card.
+   */
+  function fitMenu(m){
+    if (!m || !m.parentNode || !m.parentNode.getBoundingClientRect) return;
+    var top = m.parentNode.getBoundingClientRect().top;
+    if (top > 0) m.style.maxHeight = Math.max(180, Math.min(460, Math.floor(top - 16))) + "px";
+  }
+  /**
+   * An in-app confirm instead of the browser's own dialog. That one reads
+   * "127.0.0.1 says…" in the desktop app, blocks the whole page, and some
+   * embedders dismiss it unseen — the click on Abort simply did nothing.
+   * Resolves true or false. A page that installed its own window.confirm (an
+   * embedder, a test harness) is honoured as-is.
+   */
+  /**
+   * Say what's wrong inside the dialog that's wrong, beside its buttons — a
+   * toast lands behind the dialog, at the bottom of the window, where nobody
+   * is looking while they fill a form in. Empty message clears it.
+   */
+  function modalErr(root, msg, focusEl){
+    if (!root) return;
+    var foot = root.querySelector(".modalfoot"); if (!foot) { if (msg) toast(msg); return; }
+    var e = foot.querySelector(".mferr");
+    if (!e) { e = document.createElement("span"); e.className = "mferr"; e.setAttribute("role", "alert"); foot.insertBefore(e, foot.firstChild); }
+    e.textContent = msg || "";
+    if (msg && focusEl && focusEl.focus) focusEl.focus();
+  }
+  function askConfirm(message, opts){
+    opts = opts || {};
+    try {
+      if (typeof window.confirm === "function" && String(window.confirm).indexOf("[native code]") < 0) {
+        return Promise.resolve(!!window.confirm(message));
+      }
+    } catch (e) {}
+    return new Promise(function(resolve){
+      var text = String(message || "");
+      var cut = text.indexOf("\\n\\n");
+      var q = text.indexOf("?");
+      var head = cut > 0 ? text.slice(0, cut) : (q > 0 && q < 140 ? text.slice(0, q + 1) : text);
+      var body = cut > 0 ? text.slice(cut + 2) : (q > 0 && q < 140 ? text.slice(q + 1).trim() : "");
+      var scrim = document.createElement("div");
+      scrim.className = "scrim cfscrim";
+      scrim.innerHTML = '<div class="modal cfmodal" role="alertdialog" aria-modal="true">' +
+        '<div class="cft">' + esc(head) + "</div>" +
+        (body ? '<div class="cfb">' + esc(body).replace(/\\n/g, "<br>") + "</div>" : "") +
+        '<div class="cfa"><button type="button" class="btn sm ghost" data-cf="0">Cancel</button>' +
+        '<button type="button" class="btn sm ' + (opts.danger ? "cfdanger" : "primary") + '" data-cf="1">' + esc(opts.ok || "Continue") + "</button></div></div>";
+      document.body.appendChild(scrim);
+      function done(v){ document.removeEventListener("keydown", key, true); if (scrim.parentNode) scrim.parentNode.removeChild(scrim); resolve(v); }
+      function key(e){
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(false); }
+        else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(true); }
+      }
+      document.addEventListener("keydown", key, true);
+      scrim.onmousedown = function(e){ if (e.target === scrim) done(false); };
+      scrim.querySelector('[data-cf="1"]').onclick = function(){ done(true); };
+      scrim.querySelector('[data-cf="0"]').onclick = function(){ done(false); };
+      setTimeout(function(){ var b = scrim.querySelector('[data-cf="1"]'); if (b) b.focus(); }, 0);
+    });
+  }
+  /**
+   * An in-app text prompt. The desktop shell (Electron) has no window.prompt
+   * at all — it returns nothing — so every "Rename…" and "why?" that used it
+   * silently did nothing there. Resolves the text, or null when cancelled. A
+   * page that installed its own window.prompt (a test harness) is honoured.
+   */
+  function askText(message, opts){
+    opts = opts || {};
+    try {
+      if (typeof window.prompt === "function" && String(window.prompt).indexOf("[native code]") < 0) {
+        var v = window.prompt(message, opts.value || "");
+        return Promise.resolve(v === undefined ? null : v);
+      }
+    } catch (e) {}
+    return new Promise(function(resolve){
+      var scrim = document.createElement("div");
+      scrim.className = "scrim cfscrim";
+      var multi = !!opts.multiline;
+      scrim.innerHTML = '<div class="modal cfmodal" role="dialog" aria-modal="true">' +
+        '<div class="cft">' + esc(String(message || "")) + "</div>" +
+        (opts.note ? '<div class="cfb">' + esc(opts.note) + "</div>" : "") +
+        (multi
+          ? '<textarea class="cfin" rows="4" spellcheck="true"></textarea>'
+          : '<input class="cfin" type="text" spellcheck="false" autocomplete="off">') +
+        '<div class="cfa"><button type="button" class="btn sm ghost" data-cf="0">Cancel</button>' +
+        '<button type="button" class="btn sm primary" data-cf="1">' + esc(opts.ok || "OK") + "</button></div></div>";
+      document.body.appendChild(scrim);
+      var input = scrim.querySelector(".cfin");
+      input.value = opts.value || "";
+      if (opts.placeholder) input.placeholder = opts.placeholder;
+      function done(v){ document.removeEventListener("keydown", key, true); if (scrim.parentNode) scrim.parentNode.removeChild(scrim); resolve(v); }
+      function ok(){
+        var v = input.value;
+        if (opts.required && !v.trim()) { input.focus(); input.classList.add("bad"); return; }
+        done(v);
+      }
+      function key(e){
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); }
+        else if (e.key === "Enter" && (!multi || e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); ok(); }
+      }
+      document.addEventListener("keydown", key, true);
+      scrim.onmousedown = function(e){ if (e.target === scrim) done(null); };
+      scrim.querySelector('[data-cf="1"]').onclick = ok;
+      scrim.querySelector('[data-cf="0"]').onclick = function(){ done(null); };
+      setTimeout(function(){ input.focus(); input.select(); }, 0);
+    });
+  }
+  function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return;
+    // while the daemon is down the banner says so once; polls don't each toast it
+    if (state.daemonUp === false && /Can\u2019t reach Loom|Failed to fetch|Load failed|NetworkError/i.test(String(msg))) return;
+    t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   /** Assertive screen-reader announcement for high-stakes moments (an agent
    *  needs you). Cleared then re-set so repeats are re-announced. */
@@ -3277,6 +4338,100 @@ ${BRAND_SPRITE}
         }
       } catch (e) {}
     }
+  }
+  /**
+   * The tab you're not looking at: its title says how many agents are
+   * working, and its icon carries the count (or an amber "!" when one is
+   * waiting on you). Redrawn only when something changed.
+   */
+  var _ambient = "";
+  function updateAmbient(busy, needs){
+    var name = state.project && state.project.name;
+    _baseTitle = (needs ? "⏸ " : busy ? "● " + busy + " working · " : "") + (name ? name + " · " : "") + "Loom";
+    if (!_titleFlash) document.title = _baseTitle;
+    var key = busy + "|" + (needs ? 1 : 0);
+    if (key === _ambient) return;
+    _ambient = key;
+    var link = document.getElementById("favicon");
+    // jsdom (the test DOM) has no canvas and says so loudly; a real browser does
+    if (!link || /jsdom/i.test(navigator.userAgent || "")) return;
+    try {
+      var c = document.createElement("canvas"); c.width = 64; c.height = 64;
+      var g = c.getContext("2d");
+      g.fillStyle = "#0a0a0a";
+      g.beginPath();
+      if (g.roundRect) g.roundRect(0, 0, 64, 64, 14); else g.rect(0, 0, 64, 64);
+      g.fill();
+      g.fillStyle = "#fafafa"; g.font = "600 24px -apple-system,Segoe UI,sans-serif"; g.textAlign = "center";
+      g.fillText("lo", 32, 38);
+      g.fillStyle = "#67e8f9"; g.fillRect(20, 45, 24, 3);
+      if (needs || busy) {
+        g.beginPath(); g.arc(48, 16, 15, 0, Math.PI * 2);
+        g.fillStyle = needs ? "#f59e0b" : "#eab308"; g.fill();
+        g.lineWidth = 3; g.strokeStyle = "#0a0a0a"; g.stroke();
+        g.fillStyle = "#0a0a0a"; g.font = "800 19px -apple-system,Segoe UI,sans-serif";
+        g.fillText(needs ? "!" : busy > 9 ? "9+" : String(busy), 48, 23);
+      }
+      link.type = "image/png";
+      link.href = c.toDataURL("image/png");
+    } catch (e) {}
+  }
+  /**
+   * Has a thread got replies this device hasn't seen? A thread never opened
+   * here takes its current newest reply as the baseline — a first launch
+   * shouldn't light up every chat you ever had.
+   */
+  function isUnread(pid, c){
+    if (!c || !c.lastReplyId) return false;
+    var m = {};
+    try { m = JSON.parse(localStorage.getItem("loomSeen") || "{}") || {}; } catch (e) { return false; }
+    var k = pid + ":" + c.id;
+    if (m[k] === undefined) {
+      m[k] = c.lastReplyId;
+      try { localStorage.setItem("loomSeen", JSON.stringify(m)); } catch (e) {}
+      return false;
+    }
+    return c.lastReplyId > m[k];
+  }
+  /** Preferences that belong to this device (how it should get your attention). */
+  function devicePref(name, fallback){
+    try { var v = localStorage.getItem("loomPref:" + name); return v === null ? fallback : v === "1"; } catch (e) { return fallback; }
+  }
+  function setDevicePref(name, on){ try { localStorage.setItem("loomPref:" + name, on ? "1" : "0"); } catch (e) {} }
+  /** A soft two-note chime, made on the spot: no audio file to ship or fetch. */
+  function chime(){
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      var ctx = chime.ctx || (chime.ctx = new AC());
+      [[660, 0], [880, 0.12]].forEach(function(n){
+        var o = ctx.createOscillator(), v = ctx.createGain(), t = ctx.currentTime + n[1];
+        o.type = "sine"; o.frequency.value = n[0];
+        v.gain.setValueAtTime(0.0001, t); v.gain.exponentialRampToValueAtTime(0.12, t + 0.02); v.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+        o.connect(v); v.connect(ctx.destination); o.start(t); o.stop(t + 0.4);
+      });
+    } catch (e) {}
+  }
+  /**
+   * A long turn finished while you were in another window: say who, and the
+   * first line of what they said. Short turns don't — you were still here.
+   */
+  function notifyDone(ev, projectName){
+    var p = (ev && ev.payload) || {};
+    if (!document.hidden || !devicePref("notifyDone", true)) return;
+    if (Number(p.durationMs || 0) < 20000) return;
+    var who = labelOf((ev && ev.agentId) || "agent");
+    var last = document.querySelectorAll('#feed .msg.agent[data-agent="' + String(ev.agentId || "").replace(/"/g, "") + '"] .bubble');
+    var line = last.length ? (last[last.length - 1].innerText || "").trim().split("\\n")[0].slice(0, 140) : "";
+    var title = who + " finished" + (projectName ? " · " + projectName : "");
+    var body = line || ("after " + durfmt(Number(p.durationMs || 0)));
+    if (devicePref("chime", false)) chime();
+    if (window.loomNative && window.loomNative.notify) {
+      try { window.loomNative.notify({ title: title, body: body, chat: (ev && ev.chat) || "main", project: state.pid || null, agentId: (ev && ev.agentId) || null }); } catch (e) {}
+      return;
+    }
+    try {
+      if (window.Notification && Notification.permission === "granted") new Notification(title, { body: body, tag: "loom-done-" + (ev.agentId || "") });
+    } catch (e) {}
   }
   document.addEventListener("visibilitychange", function(){ if (!document.hidden) stopTitleFlash(); });
   /** Keyboard access for the row/card controls that are <div>s driven by event
@@ -3363,9 +4518,28 @@ ${BRAND_SPRITE}
    */
   var AGENT_LABELS = { "codex": "Codex (ChatGPT)", "antigravity-cli": "Antigravity", "antigravity": "Antigravity",
     "claude-code": "Claude Code", "grok-code": "Grok", "opencode": "OpenCode" };
-  function agentLabel(kind, id){ return (kind && AGENT_LABELS[kind]) || id || kind || "agent"; }
-  /** A roster id's label, resolving its kind from the open project. */
-  function labelOf(id){ return agentLabel(kindOf(id), id); }
+  function agentLabel(kind, id){
+    // A model agent left with its generic id ("model", "model-2") is better
+    // named by the model it runs: "gemma-4-31b-it" says which one it is.
+    if (kind === "model" && /^model(-\\d+)?$/.test(String(id || ""))) {
+      var list = (state.project && state.project.agents) || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id && list[i].model) return shortModel(list[i].model).replace(/:free$/, "");
+      }
+    }
+    return (kind && AGENT_LABELS[kind]) || id || kind || "agent";
+  }
+  /**
+   * A roster id's label, resolving its kind from the open project. Before the
+   * project has loaded, an id that IS a kind (the default roster's are) still
+   * reads as its product, rather than flashing "claude-code" for a beat.
+   */
+  function labelOf(id){
+    var s = String(id || "");
+    // an ask-several thread's agent is the model it asked
+    if (s.indexOf("ask:") === 0) return shortModel(s.slice(4));
+    return agentLabel(kindOf(id) || (AGENT_LABELS[s] ? s : null), id);
+  }
   /** The quiet second line of a picker row: id and role, each only if it adds something. */
   function agentSub(a, lbl){
     var bits = [];
@@ -3376,6 +4550,8 @@ ${BRAND_SPRITE}
   }
   /** The brand mark, or a hue monogram for a kind that has none — never blank. */
   function agentGlyph(kind, id, cls){
+    var pic = id && state.project && (state.project.agents || []).filter(function(a){ return a.id === id && a.avatar; })[0];
+    if (pic && /^data:image\\/(png|jpeg|webp);base64,/.test(pic.avatar)) return '<img class="agpic' + (cls ? " " + cls : "") + '" src="' + pic.avatar + '" alt="">';
     if (hasBrand(kind)) return brandMark(kind, cls);
     var h = hue(String(id || kind || "?"));
     return '<span class="agmono" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 20%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +
@@ -3512,9 +4688,22 @@ ${BRAND_SPRITE}
     shield: svg('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'),
     pin: svg('<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>'),
     bookmark: svg('<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>'),
+    thumbsUp: svg('<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>'),
+    thumbsDown: svg('<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>'),
+    star: svg('<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>'),
+    link: svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+    archive: svg('<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>'),
+    download: svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'),
+    keyboard: svg('<path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>'),
+    quote: svg('<path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/>'),
     clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
     trash: svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
     check: svg('<path d="M20 6 9 17l-5-5"/>'),
+    // lucide pencil / arrow-down / sparkles / chevrons-up-down
+    pencil: svg('<path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>'),
+    arrowDown: svg('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>'),
+    sparkles: svg('<path d="M9.94 14.06 7 21l-2.94-6.94L-2 11l6.94-2.94L7 1l2.94 7.06L17 11z" transform="translate(4 1) scale(.8)"/><path d="M20 3v4"/><path d="M22 5h-4"/>'),
+    updown: svg('<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>'),
     // a plan: a document with a checklist
     plan: svg('<path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5"/><path d="m9 13 1.5 1.5L13 12"/><path d="M9 18h6"/>'),
     // lucide activity — Fleet, the pulse of every agent at once
@@ -3565,9 +4754,40 @@ ${BRAND_SPRITE}
   }).observe(document.documentElement, { childList: true, subtree: true });
 
   function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
+  /**
+   * Text size, density and accent — this device's, remembered here. Zoom
+   * scales the whole app (every size in it is in px); density tightens the
+   * thread; the accent is the thread colour, a lighter tint for dark and a
+   * deeper one for light so it keeps its contrast.
+   */
+  var ACCENTS = {
+    cyan: ["#67e8f9", "#0e7490"], violet: ["#c4b5fd", "#6d28d9"], emerald: ["#6ee7b7", "#047857"],
+    amber: ["#fcd34d", "#b45309"], rose: ["#fda4af", "#be123c"], blue: ["#93c5fd", "#1d4ed8"]
+  };
+  var TEXT_SIZES = { s: 0.92, m: 1, l: 1.08, xl: 1.16 };
+  function appearancePref(name, fallback){ try { return localStorage.getItem("loomPref:" + name) || fallback; } catch (e) { return fallback; } }
+  function applyAppearance(){
+    var root = document.documentElement;
+    // The workspace is scaled, not the page: menus and dialogs live on <body>
+    // and place themselves from the workspace's on-screen boxes, which are
+    // right only if <body> itself isn't zoomed.
+    var z = TEXT_SIZES[appearancePref("textsize", "m")] || 1;
+    if (z === 1) root.style.removeProperty("--tz"); else root.style.setProperty("--tz", String(z));
+    root.classList.toggle("compact", appearancePref("density", "comfy") === "compact");
+    var a = ACCENTS[appearancePref("accent", "cyan")] || ACCENTS.cyan;
+    var dark = themeNow() !== "light";
+    if (appearancePref("accent", "cyan") === "cyan") {
+      root.style.removeProperty("--thread"); root.style.removeProperty("--thread-ink"); root.style.removeProperty("--accentBlue");
+    } else {
+      root.style.setProperty("--thread", a[0]);
+      root.style.setProperty("--thread-ink", dark ? a[0] : a[1]);
+      root.style.setProperty("--accentBlue", dark ? a[0] : a[1]);
+    }
+  }
   function applyTheme(){
     var t = themeNow();
     document.documentElement.classList.toggle("dark", t !== "light");
+    applyAppearance();
     var m = document.querySelector('meta[name="theme-color"]');
     if (m) m.setAttribute("content", t === "light" ? "#ffffff" : "#0a0a0a");
     var tb = document.getElementById("themebtn");
@@ -3594,6 +4814,7 @@ ${BRAND_SPRITE}
    */
   function checkBuild(){
     fetch("/api/health").then(function(r){ return r.json(); }).then(function(h){
+      if (h && typeof h.stt === "boolean") state.stt = h.stt;
       if (!h.rev || h.rev === window.__loomPageRev) return;
       if (document.getElementById("revbanner")) return;
       var b = document.createElement("div");
@@ -3645,7 +4866,13 @@ ${BRAND_SPRITE}
     opts.headers = opts.headers || {};
     opts.headers["Authorization"] = "Bearer " + state.token;
     if (opts.body) opts.headers["Content-Type"] = "application/json";
-    return fetch(path, opts).catch(function(err){ daemonReached(false); throw err; }).then(function(r){
+    return fetch(path, opts).catch(function(err){
+      daemonReached(false);
+      // "Failed to fetch" is the browser's words, not ours: say what happened.
+      var e = new Error("Can\u2019t reach Loom \u2014 is the daemon running? (loom up)");
+      e.offline = true; e.cause = err;
+      throw e;
+    }).then(function(r){
       daemonReached(true);
       if (r.status === 401 && !retried) {
         return reauth().then(function(ok){
@@ -3663,8 +4890,32 @@ ${BRAND_SPRITE}
   /** Whether the daemon answered the last request — the status bar's "live" when no project socket is open. */
   function daemonReached(up){
     if (state.daemonUp === up) return;
+    var wasDown = state.daemonUp === false;
     state.daemonUp = up;
     if (typeof drawStatusbar === "function") drawStatusbar();
+    offlineBanner(!up);
+    // Back after an outage: re-read what the view missed while it was gone,
+    // and send whatever was typed while it was down.
+    if (up && wasDown) {
+      if (state.refreshShell) state.refreshShell();
+      if (state.redrawFeed) state.redrawFeed();
+      if (state.onReconnect) state.onReconnect();
+    }
+  }
+  /**
+   * One calm line when the daemon stops answering, instead of a toast per
+   * failed poll ("Failed to fetch", every few seconds, for as long as it's
+   * down). It goes away on its own when the daemon is back.
+   */
+  function offlineBanner(show){
+    if (pageGone()) return;
+    var b = document.getElementById("offbanner");
+    if (!show) { if (b) b.remove(); return; }
+    if (b) return;
+    b = document.createElement("div");
+    b.id = "offbanner"; b.setAttribute("role", "status");
+    b.innerHTML = '<span class="obspin"></span><span><b>Loom isn\u2019t answering</b> \u2014 reconnecting\u2026 If it doesn\u2019t come back, run <code>loom up</code>.</span>';
+    document.body.appendChild(b);
   }
   function logout(){ state.token = ""; state.clientId = ""; localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CLIENT_ID_KEY); route(); }
 
@@ -3750,6 +5001,190 @@ ${BRAND_SPRITE}
   }
 
   // ---- event rendering -----------------------------------------------------
+  // ---- thread presentation ------------------------------------------------
+  // A reply reads like a document with a byline, not a chat bubble: who wrote
+  // it (their mark, their name, the model), when, then the words at full
+  // measure. Tool use folds into one quiet "activity" line per stretch, and a
+  // turn ends on a footer that says how long it took and what it cost.
+  /** "just now", "12m ago" for the last hour; the clock after that. */
+  function relClock(ts){
+    var t = Number(ts) || Date.now(), s = (Date.now() - t) / 1000;
+    if (s < 45) return "just now";
+    if (s < 3600) return Math.max(1, Math.round(s / 60)) + "m ago";
+    return clock(t);
+  }
+  function clock(ts){
+    var d = new Date(Number(ts) || Date.now());
+    var h = d.getHours(), m = d.getMinutes();
+    return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m;
+  }
+  function durfmt(ms){
+    ms = Number(ms) || 0;
+    if (ms < 1000) return Math.max(0, Math.round(ms)) + "ms";
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + "s";
+    var m = Math.floor(s / 60);
+    return m + "m" + (s % 60 ? " " + (s % 60) + "s" : "");
+  }
+  /** The agent's mark in a small tile — its logo, or a monogram in its hue. */
+  function avatarFor(id){
+    var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
+    // a picture you gave this agent wins over its brand mark
+    var mine = state.project && (state.project.agents || []).filter(function(a){ return a.id === s && a.avatar; })[0];
+    if (mine && /^data:image\\/(png|jpeg|webp);base64,/.test(mine.avatar)) return '<span class="av pic"><img src="' + mine.avatar + '" alt=""></span>';
+    if (s.indexOf("ask:") === 0) k = "model";
+    if (hasBrand(k)) return '<span class="av">' + brandMark(k) + "</span>";
+    var h = hue(s);
+    return '<span class="av mono" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 22%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +
+      esc(labelOf(s).replace(/[^A-Za-z0-9]/g, "").slice(0, 1).toUpperCase() || "?") + "</span>";
+  }
+  function whoHtml(e, extra){
+    var p = e.payload || {};
+    return '<div class="who">' + avatarFor(e.agentId) + '<span class="wn">' + esc(labelOf(e.agentId)) + "</span>" +
+      (p.model ? '<span class="wm">' + esc(shortModel(p.model)) + "</span>" : "") + (extra || "") +
+      '<span class="wt"' + (e.id ? ' data-rel="' + Number(e.ts || 0) + '"' : "") + ' title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + (e.id ? relClock(e.ts) : clock(e.ts)) + "</span>" +
+      (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
+      (e.id ? (function(){
+        var rv = state.rateMap && state.rateMap[e.id] ? state.rateMap[e.id].v : 0;
+        return '<button type="button" class="msgrate' + (rv === 1 ? " on" : "") + '" data-rate="1" title="Good reply — counts on the Insights leaderboard" aria-label="good reply" aria-pressed="' + (rv === 1) + '">' + ICONS.thumbsUp + "</button>" +
+          '<button type="button" class="msgrate' + (rv === -1 ? " on down" : "") + '" data-rate="-1" title="Bad reply" aria-label="bad reply" aria-pressed="' + (rv === -1) + '">' + ICONS.thumbsDown + "</button>";
+      })() : "") +
+      '<button type="button" class="msgcopy" title="copy this reply" aria-label="copy this reply">' + ICONS.copy + "</button>" +
+      (e.id ? '<button type="button" class="msgmore" title="More: retry, star, quote, make a card, link" aria-label="more actions">' + ICONS.dots + "</button>" : "") +
+      "</div>";
+  }
+  /** Which icon a tool call gets, and which bucket it counts in. */
+  function toolKind(p){
+    var t = String(p.tool || p.name || "").toLowerCase(), s = String(p.summary || "").toLowerCase();
+    if (/bash|shell|exec|command|terminal|run_|^run/.test(t) || /^(shell|bash|\\$)[: ]/.test(s)) return "run";
+    if (/edit|write|patch|apply|notebook|create_file|str_replace/.test(t)) return "edit";
+    if (/grep|glob|search|find|ls$|list/.test(t)) return "search";
+    if (/web|fetch|browse|url/.test(t)) return "web";
+    if (/read|view|open|cat/.test(t)) return "read";
+    if (/task|agent/.test(t)) return "agent";
+    return "tool";
+  }
+  var TOOL_ICON = { run: "terminal", edit: "pencil", search: "search", web: "globe", read: "file", agent: "agents", tool: "gear" };
+  /** "Ran 2 commands, read 3 files" — what a folded stretch of tool use did. */
+  function actSummary(rows){
+    var n = { run: 0, edit: 0, search: 0, web: 0, read: 0, agent: 0, tool: 0 };
+    rows.forEach(function(r){ var k = r.getAttribute("data-tk") || "tool"; n[k] = (n[k] || 0) + 1; });
+    var out = [];
+    function one(k, verb, noun){ if (n[k]) out.push(verb + " " + n[k] + " " + noun + (n[k] === 1 ? "" : "s")); }
+    one("run", "ran", "command"); one("read", "read", "file"); one("edit", "edited", "file");
+    one("search", "searched", "time"); one("web", "fetched", "page"); one("agent", "started", "sub-agent"); one("tool", "used", "tool");
+    var s = out.join(", ");
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : rows.length + " actions";
+  }
+
+  /**
+   * An orchestrator's plan block as a plan, not a page of JSON.
+   *
+   * The engine reads the "loom" fence; people shouldn't have to. Parsed here
+   * from the already-escaped text (so it's unescaped first, then every field
+   * is escaped again on the way out). A fence that doesn't parse — a reply cut
+   * off mid-block — keeps its raw form, folded, rather than vanishing.
+   */
+  function unesc(s){
+    return String(s).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  }
+  /** A message as one line of plain words: no heading marks, fences or runs of space. */
+  function plainPreview(s, max){
+    var t = String(s || "").replace(/\\x60{3}[\\s\\S]*?(\\x60{3}|$)/g, " ").replace(/^\\s*#{1,6}\\s*/gm, "").replace(/[*_\\x60]+/g, "").replace(/\\s+/g, " ").trim();
+    return t.length > max ? t.slice(0, max - 1) + "\u2026" : t;
+  }
+  function planCardHtml(escapedCode){
+    var raw = unesc(escapedCode), data = null;
+    try { data = JSON.parse(raw); } catch (e) { data = null; }
+    var acts = data && (Array.isArray(data) ? data : data.actions);
+    var rawFold = '<details class="pcraw"><summary>Raw plan</summary><div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
+      '</button><pre class="mdcode"><code>' + escapedCode + "</code></pre></div></details>";
+    if (!Array.isArray(acts)) {
+      return '<div class="plancard bad"><div class="pch">' + ICONS.orchestra + "<span>Plan block that didn\\u2019t parse</span></div>" + rawFold + "</div>";
+    }
+    // A round with nothing in it is legal — the orchestrator is still reading.
+    if (!acts.length) return '<div class="planquiet">' + ICONS.orchestra + "<span>No tasks this round \\u2014 still looking</span></div>";
+    var spawns = [], rows = [];
+    acts.forEach(function(a){ if (a && a.type === "spawn") spawns.push(a); });
+    acts.forEach(function(a){
+      if (!a || typeof a !== "object") return;
+      if (a.type === "spawn") {
+        var meta = [];
+        if (a.dependsOn && a.dependsOn.length) meta.push("after " + a.dependsOn.map(esc).join(", "));
+        if (a.touches && a.touches.length) meta.push('<span class="pctouch">' + a.touches.slice(0, 4).map(esc).join(" \\u00b7 ") + (a.touches.length > 4 ? " \\u2026" : "") + "</span>");
+        rows.push('<li class="pcrow"><span class="pcid">' + esc(a.id || "task") + '</span><div class="pcbody"><div class="pct">' + esc(a.title || "untitled task") + "</div>" +
+          (meta.length ? '<div class="pcmeta">' + meta.join(" \\u00b7 ") + "</div>" : "") + "</div>" +
+          '<span class="pcag">' + agentGlyph(kindOf(a.agent) || (AGENT_LABELS[a.agent] ? a.agent : null), a.agent) + esc(labelOf(a.agent)) + "</span></li>");
+      } else if (a.type === "send") {
+        rows.push('<li class="pcrow note"><span class="pcid">' + esc(a.task || "") + '</span><div class="pcbody"><div class="pct">Follow-up</div><div class="pcmeta">' +
+          esc(plainPreview(a.message, 220)) + "</div></div></li>");
+      } else if (a.type === "cancel") {
+        rows.push('<li class="pcrow note"><span class="pcid">' + esc(a.task || "") + '</span><div class="pcbody"><div class="pct">Cancelled</div></div></li>');
+      } else if (a.type === "ask") {
+        rows.push('<li class="pcask">' + ICONS.help + "<span>" + esc(a.question || "") + "</span></li>");
+      } else if (a.type === "done") {
+        rows.push('<li class="pcdone">' + ICONS.check + "<span>" + esc(a.summary || "Done") + "</span></li>");
+      }
+    });
+    var head = spawns.length ? spawns.length + " task" + (spawns.length === 1 ? "" : "s") :
+      acts.some(function(a){ return a && a.type === "done"; }) ? "Wrapping up" :
+      acts.some(function(a){ return a && a.type === "ask"; }) ? "A question for you" : "Next steps";
+    return '<div class="plancard"><div class="pch">' + ICONS.orchestra + '<span>Plan</span><span class="pcn">' + esc(head) + "</span></div>" +
+      '<ol class="pclist">' + rows.join("") + "</ol>" + rawFold + "</div>";
+  }
+
+  /**
+   * How long a provider says to wait, from its own words: "try again in 23s",
+   * "retry after 2 minutes", "Retry-After: 60", "resets in 1h 5m". 0 when it
+   * doesn't say — no guessing a countdown.
+   */
+  function retryUntil(text, at){
+    var ms = retryAfterMs(text);
+    if (ms) return at + ms;
+    // OpenRouter and friends say when, not how long: X-RateLimit-Reset (epoch s or ms)
+    var m = String(text || "").match(/ratelimit-reset["':\\s]+(\\d{10,13})/i);
+    if (!m) return 0;
+    var n = Number(m[1]); if (n < 1e12) n *= 1000;
+    return n > at && n - at < 48 * 3600000 ? n : 0;
+  }
+  function retryAfterMs(text){
+    var t = String(text || "");
+    var m = t.match(/retry-after["':\\s]+(\\d{1,6})/i);
+    if (m) return Number(m[1]) * 1000;
+    m = t.match(/(?:try again|retry|resets?|available again)[^0-9]{0,24}(\\d+(?:\\.\\d+)?)\\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\\b(?:\\s*(\\d+)\\s*(m|mins?|minutes?|s|secs?|seconds?)\\b)?/i);
+    if (!m) return 0;
+    function unit(n, u){
+      u = u.toLowerCase();
+      if (/^ms|^milli/.test(u)) return n;
+      if (/^s/.test(u)) return n * 1000;
+      if (/^m/.test(u)) return n * 60000;
+      return n * 3600000;
+    }
+    var ms = unit(Number(m[1]), m[2]) + (m[3] ? unit(Number(m[3]), m[4]) : 0);
+    return ms > 0 && ms < 48 * 3600000 ? ms : 0;
+  }
+  function untilText(until){
+    var s = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+    if (s <= 0) return "Retry now";
+    var h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+    return "Retry in " + (h ? h + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0");
+  }
+  /**
+   * The empty-state mark: threads on a loom, warp and weft, with one bright
+   * thread for the thing that isn't there yet. Drawn, not an image, so it
+   * follows the theme.
+   */
+  function emptyArt(tone){
+    var c = tone === "brain" ? "var(--shuttle)" : "var(--thread)";
+    var warp = "", weft = "";
+    for (var i = 0; i < 7; i++) warp += '<line x1="' + (20 + i * 16) + '" y1="14" x2="' + (20 + i * 16) + '" y2="86" stroke="currentColor" stroke-opacity=".22" stroke-width="2" stroke-linecap="round"/>';
+    for (var j = 0; j < 4; j++) {
+      var y = 26 + j * 16, d = "M12 " + y;
+      for (var k = 0; k < 7; k++) d += " Q" + (20 + k * 16) + " " + (y + (k % 2 === j % 2 ? -5 : 5)) + " " + (28 + k * 16) + " " + y;
+      weft += '<path d="' + d + '" fill="none" stroke="' + (j === 2 ? c : "currentColor") + '" stroke-opacity="' + (j === 2 ? "1" : ".32") + '" stroke-width="' + (j === 2 ? "2.6" : "2") + '" stroke-linecap="round"' + (j === 2 ? ' class="eaglow"' : "") + "/>";
+    }
+    return '<svg class="emptyart" viewBox="0 0 136 100" aria-hidden="true">' + warp + weft + "</svg>";
+  }
   function lineFor(e){
     var p = e.payload || {};
     if (e.kind === "message") {
@@ -3764,13 +5199,20 @@ ${BRAND_SPRITE}
         // The orchestrator's brief to a worker opens every task thread. It is
         // not yours, so it must not wear your bubble.
         if (p.author === "orchestrator") {
-          return '<div class="msg agent"><div class="who" style="color:var(--thread-ink)"><span class="orchmark">' + ICONS.orchestra + "</span>orchestrator" +
-            (p.orchestra && p.orchestra.taskId ? '<span class="thinktag">' + esc(p.orchestra.taskId) + "</span>" : "") + "</div>" +
+          return '<div class="msg agent orchbriefmsg"><div class="who"><span class="av orch">' + ICONS.orchestra + '</span><span class="wn">Orchestrator</span>' +
+            (p.orchestra && p.orchestra.taskId ? '<span class="thinktag">brief \\u00b7 ' + esc(p.orchestra.taskId) + "</span>" : "") +
+            '<span class="wt">' + clock(e.ts) + "</span></div>" +
             '<div class="bubble md" style="border-left-color:var(--thread)">' + mdToHtml(p.text) +
             (tview() === "verbose" ? rawBlock(p) : "") + "</div></div>";
         }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
-        return '<div class="msg user"><div class="bubble md">' + mdToHtml(p.text) + "</div></div>";
+        return '<div class="msg user" data-id="' + Number(e.id || 0) + '" data-ts="' + Number(e.ts || 0) + '" data-raw="' + esc(encodeURIComponent(String(p.text || ""))) + '">' +
+          '<div class="bubble md">' + mdToHtml(p.text) + "</div>" +
+          '<div class="mt"><button type="button" class="uact uedit" title="Edit and send again" aria-label="edit and send again">' + ICONS.pencil + "</button>" +
+          '<button type="button" class="uact ucopy" title="Copy" aria-label="copy your message">' + ICONS.copy + "</button>" +
+          (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
+          '<button type="button" class="uact ustar" title="Star" aria-label="star your message">' + ICONS.star + "</button>" +
+          '<span class="wt" data-rel="' + Number(e.ts || 0) + '" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + relClock(e.ts) + "</span></div></div>";
       }
       var h = hue(e.agentId);
       // Reasoning / thinking (codex, grok, and now claude) renders as a distinct
@@ -3781,26 +5223,33 @@ ${BRAND_SPRITE}
         // Thinking folds it in; Verbose opens it.
         var tv = tview();
         if (tv === "normal") return "";
-        return '<div class="msg agent thinking"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
-          brandMark(kindOf(e.agentId)) + esc(e.agentId) + '<span class="thinktag">thinking</span></div>' +
-          '<details class="thinkbox"' + (tv === "verbose" ? " open" : "") + '><summary>reasoning</summary><div class="md">' +
+        return '<div class="msg agent thinking" data-agent="' + esc(e.agentId) + '">' +
+          '<details class="thinkbox"' + (tv === "verbose" ? " open" : "") + "><summary>" + ICONS.spark + "Thought for a moment</summary><div class=\\"md\\">" +
           mdToHtml(p.text) + "</div></details></div>";
       }
-      return '<div class="msg agent"><div class="who" style="color:hsl(' + h + ',60%,var(--agent-l))">' +
-        brandMark(kindOf(e.agentId)) + esc(e.agentId) +
-        '</div><div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div></div>";
+      return '<div class="msg agent' + (p.partial ? " partial" : "") + '" data-agent="' + esc(e.agentId) + '" data-id="' + Number(e.id || 0) + '" data-ts="' + Number(e.ts || 0) + '">' +
+        whoHtml(e, p.partial ? '<span class="thinktag stopped">stopped</span>' : "") +
+        '<div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div>" +
+        (p.partial ? '<div class="msgfoot"><button type="button" class="btn xs outline" data-continue="' + esc(e.agentId) + '">' + ICONS.play + "Continue</button>" +
+          '<span class="mfh">ask ' + esc(labelOf(e.agentId)) + " to pick up where it stopped</span></div>" : "") +
+        "</div>";
     }
     if (e.kind === "tool_call") {
-      return '<div class="tool">\\u2699 ' + esc(p.summary || p.tool || p.name) +
+      var tk = toolKind(p);
+      return '<div class="tool" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + (ICONS[TOOL_ICON[tk]] || ICONS.gear) + "</span>" +
+        '<span class="tx">' + esc(p.summary || p.tool || p.name) + "</span>" +
+        (p.ok === false ? '<span class="tbad">failed</span>' : "") +
         (tview() === "verbose" ? rawBlock(p) : "") + "</div>";
     }
-    if (e.kind === "file_edit") return '<div class="tool">\\u270e ' + esc(p.path) + "</div>";
+    if (e.kind === "file_edit") {
+      return '<div class="tool" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span></div>";
+    }
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
       var enc = p.patch ? encodeURIComponent(String(p.patch)) : "";
-      var lbl = "Update(" + fl.length + " file" + (fl.length === 1 ? "" : "s") + ")";
+      var lbl = "Edited " + fl.length + " file" + (fl.length === 1 ? "" : "s");
       return '<div class="turncard" data-patch="' + enc + '" data-label="' + esc(lbl) + '">' +
-        '<div class="tch"><span>\\u270e ' + lbl + "</span>" +
+        '<div class="tch"><span class="tci">' + ICONS.pencil + "</span><span>" + lbl + "</span>" +
         '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\\u2212' + Number(p.removed || 0) + "</span>" +
         (p.checkpoint ? '<button class="tcrw" type="button" data-rewind="' + esc(p.checkpoint) +
             '" title="put these files back the way they were before this turn">' + ICONS.rewind + "Rewind</button>" : "") +
@@ -3842,7 +5291,27 @@ ${BRAND_SPRITE}
     }
     if (e.kind === "decision") return '<div class="sys">\\u2605 ' + esc(p.text) + "</div>";
     if (e.kind === "memory_import") return '<div class="sys" style="color:var(--thread-ink)">\\u25c8 imported ' + esc(p.file) + " into the shared brain</div>";
-    if (e.kind === "error") return '<div class="sys err">\\u2717 ' + esc(p.message) + "</div>";
+    if (e.kind === "error") {
+      // An error is a card: what happened in words, who it happened to, and
+      // the provider's raw payload folded underneath — not a red wall of JSON.
+      var msg = String(p.message || "something went wrong");
+      var cutAt = msg.search(/[\\[{]/);
+      var head = (cutAt > 12 ? msg.slice(0, cutAt) : msg).replace(/[\\s:\\-\u2014(]+$/, "");
+      var rest = cutAt > 12 ? msg.slice(cutAt) : "";
+      if (head.length > 240) { rest = head.slice(240) + rest; head = head.slice(0, 240) + "\\u2026"; }
+      var detail = rest || (p.stderr ? String(p.stderr) : "");
+      // A limit that says when it lifts gets a countdown and a retry that waits for it.
+      var until = retryUntil(msg + " " + detail, Number(e.ts || Date.now()));
+      var limited = /quota|rate.?limit|429|too many requests|credit|insufficient|billing|exceeded/i.test(msg);
+      return '<div class="sys err errcard"' + (e.agentId ? ' data-agent="' + esc(e.agentId) + '"' : "") + ' data-ts="' + Number(e.ts || 0) + '">' +
+        '<div class="errh">' + ICONS.alert + "<span>" + (e.agentId ? "<b>" + esc(labelOf(e.agentId)) + "</b> · " : "") + esc(head) + "</span></div>" +
+        (detail ? '<details class="errd"><summary>Details</summary><pre>' + esc(detail.slice(0, 4000)) + "</pre></details>" : "") +
+        '<div class="erra">' +
+          (e.agentId ? '<button type="button" class="btn xs' + (limited ? " primary" : " outline") + '" data-errother="' + esc(e.agentId) + '">' + ICONS.agents + "Send to another agent</button>" : "") +
+          (until && until > Date.now() ? '<button type="button" class="btn xs outline" data-errwait="' + esc(e.agentId || "") + '" data-until="' + until + '">' + ICONS.clock + '<span class="errcd" data-until="' + until + '">' + untilText(until) + "</span></button>" : "") +
+          '<button type="button" class="btn xs ghost" data-errcopy="1">' + ICONS.copy + "Copy details</button>" +
+        "</div></div>";
+    }
     if (e.kind === "route_started") {
       if (p.mode === "dynamic") return '<div class="sys">\\u25b8 route "auto" started \\u2014 ' + esc(p.router) + " picks each hop</div>";
       return '<div class="sys">\\u25b8 route started: ' + esc((p.steps || []).join(" \\u2192 ")) + "</div>";
@@ -3860,7 +5329,17 @@ ${BRAND_SPRITE}
     if (e.kind === "route_resumed") return '<div class="sys">\\u25b8 route resumed</div>';
     if (e.kind === "route_completed") return '<div class="sys ok">\\u2713 route completed</div>';
     if (e.kind === "route_failed") return '<div class="sys ' + (p.aborted ? "warn" : "err") + '">\\u2298 ' + esc(p.reason || "route ended") + "</div>";
-    if (e.kind === "run_complete") return '<div class="tool">\\u2713 ' + esc(e.agentId) + " done</div>";
+    if (e.kind === "run_complete") {
+      // The end of a turn: how long it took, what it ran on, what it cost —
+      // the three things you'd otherwise go to the Observatory to find out.
+      var bits = [esc(labelOf(e.agentId))];
+      if (p.durationMs) bits.push(durfmt(p.durationMs));
+      if (p.model) bits.push(esc(shortModel(p.model)));
+      if (p.costUsd) bits.push(money(p.costUsd));
+      var tokens = Number(p.outputTokens || 0);
+      if (tokens) bits.push(tokens >= 1000 ? (tokens / 1000).toFixed(1) + "k tokens out" : tokens + " tokens out");
+      return '<div class="turnend" data-agent="' + esc(e.agentId || "") + '">' + ICONS.check + "<span>" + bits.join(" \\u00b7 ") + "</span></div>";
+    }
     if (e.kind === "orchestra") return orchLine(p);
     // An agent in "always ask" waiting on you: a card with the two answers.
     // Its answer arrives as a second event, which folds the card (append()),
@@ -3892,11 +5371,13 @@ ${BRAND_SPRITE}
   function orchLine(p){
     var ph = p.phase;
     var tone = { ok: " ok", warn: " warn", err: " err" };
-    function row(cls, html){ return '<div class="sys orch' + (cls || "") + '">' + html + "</div>"; }
+    function row(cls, html, attrs){ return '<div class="sys orch' + (cls || "") + '"' + (attrs || "") + ">" + html + "</div>"; }
     function names(list){ return (list || []).map(function(id){ return esc(labelOf(id)); }).join(", "); }
     if (ph === "started") {
       var o = p.orchestrator || {};
-      return row("", "\\ud83c\\udfbc Orchestra started \\u2014 " + esc(agentLabel(o.kind, o.agent)) + " is orchestrating " +
+      if (p.race) return row(" start", ICONS.play + "Race started \\u2014 " + (names(p.workers) || "every agent") + " each take the same goal, side by side") +
+        (p.note ? row(" warn", "\\u26a0 " + esc(p.note)) : "");
+      return row(" start", ICONS.orchestra + "Orchestra started \\u2014 " + esc(agentLabel(o.kind, o.agent)) + " is orchestrating " +
         (names(p.workers) || "its workers") + (p.maxParallel ? " (" + Number(p.maxParallel) + " in parallel)" : "")) +
         (p.note ? row(" warn", "\\u26a0 " + esc(p.note)) : "");
     }
@@ -3922,7 +5403,7 @@ ${BRAND_SPRITE}
       return row(tone[st[1]] || "", t.chat
         ? '<button class="tlink" type="button" data-gochat="' + esc(t.chat) + '" title="open ' + esc(t.id) + '\\u2019s thread">' +
             inner + '<span class="tlinkgo">' + ICONS.thread + "</span></button>"
-        : inner);
+        : inner, ' data-otask="' + esc((p.runId || "") + "/" + t.id) + '"');
     }
     if (ph === "task_started") return row("", "\\u25b8 " + esc(p.taskId) + " started \\u2014 " + esc(String(p.title || "").slice(0, 90)) + (p.agent ? " \\u00b7 " + esc(labelOf(p.agent)) : ""));
     if (ph === "task_finished") {
@@ -3932,17 +5413,30 @@ ${BRAND_SPRITE}
     }
     if (ph === "reviewing") return row("", "Round " + Number(p.round || 1) + ": orchestrator reviewing results");
     if (ph === "waiting") return row(" warn", "\\u23f8 Orchestrator asks: " + esc(p.question || "what next?"));
+    if (ph === "completed" && p.race) {
+      var rn = (p.tasks || []).length;
+      return '<div class="sys orch ok odone">' +
+        '<div class="odh">' + ICONS.check + '<b>Race finished</b><span class="odm">' + rn + " entrant" + (rn === 1 ? "" : "s") + " · " + money(p.costUsd) + "</span></div>" +
+        '<div class="oda"><button class="btn xs primary" type="button" data-orch-compare="' + esc(p.runId) + '">Compare &amp; pick</button></div></div>';
+    }
     if (ph === "completed") {
+      // The end of a run is a result, not a status line: what it did, what it
+      // cost, where it is, and the one button that matters next.
       var n = (p.tasks || []).length;
-      return row(" ok", "\\u2713 Orchestra complete" + (p.summary ? " \\u2014 " + esc(String(p.summary).slice(0, 200)) : "") +
-        " \\u00b7 " + n + " task" + (n === 1 ? "" : "s") + " \\u00b7 " + money(p.costUsd) +
-        (p.branch ? " \\u00b7 branch " + esc(p.branch) : "") +
-        (p.runId ? ' <button class="btn xs outline" type="button" data-orch-apply="' + esc(p.runId) + '">Apply</button>' : ""));
+      var meta = [n + " task" + (n === 1 ? "" : "s"), money(p.costUsd)];
+      if (p.branch) meta.push('<code class="obr">' + esc(p.branch) + "</code>");
+      return '<div class="sys orch ok odone">' +
+        '<div class="odh">' + ICONS.check + '<b>Orchestra complete</b><span class="odm">' + meta.join(" \\u00b7 ") + "</span></div>" +
+        (p.summary ? '<div class="ods">' + esc(plainPreview(p.summary, 600)) + "</div>" : "") +
+        (p.runId ? '<div class="oda"><button class="btn xs primary" type="button" data-orch-apply="' + esc(p.runId) + '">Apply to your branch</button></div>' : "") +
+        "</div>";
     }
     if (ph === "failed") return row(" err", "\\u2717 Orchestra failed \\u2014 " + esc(p.error || "stopped") +
       (p.runId ? ' <button class="btn xs outline" type="button" data-orch-apply="' + esc(p.runId) + '">Apply what finished</button>' : ""));
-    if (ph === "aborted") return row(" warn", "\\u2298 Orchestra aborted" + (p.reason ? " \\u2014 " + esc(p.reason) : ""));
-    if (ph === "applied") return row(" ok", "\\u2713 Orchestra merged into " + esc(p.into || "your branch"));
+    if (ph === "aborted") return row(" warn", "⊘ Orchestra aborted" + (p.reason ? " — " + esc(p.reason) : "") +
+      (p.runId && /restart|shutdown/i.test(String(p.reason || "")) ? ' <button class="btn xs primary" type="button" data-orch-resume="' + esc(p.runId) + '">Resume</button>' : ""));
+    if (ph === "resumed") return row(" start", ICONS.play + "Orchestra resumed" + (p.tasks ? " — " + Number(p.tasks) + " interrupted task" + (Number(p.tasks) === 1 ? "" : "s") + " picking up where " + (Number(p.tasks) === 1 ? "it" : "they") + " left off" : " — the orchestrator reviews where things stand"));
+    if (ph === "applied") return row(" ok", "\\u2713 " + (p.agent ? esc(labelOf(p.agent)) + "\\u2019s take merged into " : "Orchestra merged into ") + esc(p.into || "your branch"));
     if (ph === "cleaned") return row("", "Orchestra worktrees cleaned up");
     // Plan mode: the orchestrator's plan, on the run's branch, as files.
     if (ph === "plan_written") {
@@ -3982,7 +5476,7 @@ ${BRAND_SPRITE}
       (p.from === "push" ? "merging and pushing" : "merging"));
     if (ph === "delivery_failed") return row(" err", "\\u2717 Delivery (" + esc(p.mode || "git") + ") failed \\u2014 " + esc(String(p.error || "").slice(0, 200)) +
       (p.runId ? ' <button class="btn xs outline" type="button" data-orch-deliver="' + esc(p.runId) + '">Retry delivery</button>' : ""));
-    return row("", "\\ud83c\\udfbc Orchestra \\u00b7 " + esc(String(ph || "update").replace(/_/g, " ")));
+    return row("", ICONS.orchestra + "Orchestra \\u00b7 " + esc(String(ph || "update").replace(/_/g, " ")));
   }
 
   // ---- diff parsing (changes pane + rail) ---------------------------------
@@ -3995,6 +5489,9 @@ ${BRAND_SPRITE}
     String(patch || "").split("\\n").forEach(function(line){
       var m = line.match(/^diff --git a\\/(.+) b\\/(.+)$/);
       if (m) { cur = { path: m[2], lines: [], add: 0, del: 0 }; parts.push(cur); return; }
+      // a file the turn created, reported without a git diff of its own
+      var nf = line.match(/^\\?\\? new file: (.+)$/);
+      if (nf) { cur = { path: nf[1], lines: [line], add: 0, del: 0, created: true }; parts.push(cur); return; }
       if (!cur) { cur = { path: "", lines: [], add: 0, del: 0 }; parts.push(cur); }
       cur.lines.push(line);
       if (line.charAt(0) === "+" && line.slice(0, 3) !== "+++") cur.add++;
@@ -4041,6 +5538,39 @@ ${BRAND_SPRITE}
     });
     return out;
   }
+  /** Old on the left, new on the right: removals and additions paired row by row within a hunk. */
+  function renderSplitLines(lines){
+    var oldN = 0, newN = 0, out = "", dels = [], adds = [];
+    function cell(n, text, cls){ return '<span class="ln">' + (n || "") + '</span><span class="sc' + (cls ? " " + cls : "") + '">' + (text === null ? "" : (esc(text) || " ")) + "</span>"; }
+    function flush(){
+      var n = Math.max(dels.length, adds.length);
+      for (var i = 0; i < n; i++) {
+        var d = dels[i], a = adds[i];
+        out += '<div class="sl">' + (d ? cell(d[0], d[1], "del") : cell("", null, "empty")) + (a ? cell(a[0], a[1], "add") : cell("", null, "empty")) + "</div>";
+      }
+      dels = []; adds = [];
+    }
+    lines.forEach(function(line){
+      var m = line.match(/^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
+      if (m) { flush(); oldN = Number(m[1]); newN = Number(m[2]); out += '<div class="sl hunk">' + esc(line) + "</div>"; return; }
+      var c = diffLineClass(line);
+      if (c === "meta" || (!oldN && !newN && line.charAt(0) !== "+" && line.charAt(0) !== "-")) { flush(); if (line) out += '<div class="sl meta">' + esc(line) + "</div>"; return; }
+      var body = /^[+\\- ]/.test(line) ? line.slice(1) : line;
+      if (c === "del") { dels.push([oldN++, body]); return; }
+      if (c === "add") { adds.push([newN++, body]); return; }
+      flush();
+      out += '<div class="sl">' + cell(oldN++, body, "") + cell(newN++, body, "") + "</div>";
+    });
+    flush();
+    return out;
+  }
+  function diffView(){ try { return localStorage.getItem("loomDiffView") === "split" ? "split" : "unified"; } catch (e) { return "unified"; } }
+  function diffBody(lines, path){ return diffView() === "split" ? '<div class="dsplit">' + renderSplitLines(lines) + "</div>" : renderDiffLines(lines, path); }
+  function diffToggle(){
+    var v = diffView();
+    return '<div class="dvtoggle" role="group" aria-label="diff layout"><button type="button" data-dv="unified" class="' + (v === "unified" ? "on" : "") + '">Unified</button>' +
+      '<button type="button" data-dv="split" class="' + (v === "split" ? "on" : "") + '">Side by side</button></div>';
+  }
   function renderDiffFiles(tree){
     var files = splitPatch(tree.patch).filter(function(f){ return !isLoomInternal(f.path); });
     files.forEach(function(f){
@@ -4052,7 +5582,7 @@ ${BRAND_SPRITE}
       return '<div class="dfile" id="df-' + i + '">' +
         '<div class="dfh">' + ICONS.tree + '<span class="p">' + esc(f.path || "patch") + "</span>" +
         '<span class="cadd">+' + f.add + "</span><span class=\\"cdel\\">\\u2212" + f.del + "</span></div>" +
-        '<div class="dcode">' + renderDiffLines(f.lines, f.path) + "</div></div>";
+        '<div class="dcode">' + diffBody(f.lines, f.path) + "</div></div>";
     }).join("");
   }
 
@@ -4130,27 +5660,33 @@ ${BRAND_SPRITE}
       '<div class="corch" id="corch" style="display:none"></div>' +
       '<div class="crow">' +
       '<div class="cmode" id="cmode" role="tablist" aria-label="composer mode">' +
-      '<button type="button" role="tab" data-cmode="chat" title="talk to one agent">Chat</button>' +
-      '<button type="button" role="tab" data-cmode="orch" title="one agent plans, many work in parallel">Orchestrate</button></div>' +
+      '<button type="button" role="tab" data-cmode="chat" title="talk to one agent">' + ICONS.chat + "Chat</button>" +
+      '<button type="button" role="tab" data-cmode="orch" title="one agent plans, many work in parallel">' + ICONS.orchestra + "Orchestrate</button></div>" +
       '<button class="ctool iconly" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.plus + '</button>' +
+      // Who and on what, as one joined control: the agent half opens the
+      // agent picker, the model half the model picker. Two pills side by side
+      // used to read as two unrelated settings.
+      '<span class="cpick" id="cpick">' +
       '<button class="cagent" id="cagent" type="button" title="who runs this turn \\u2014 AUTO routes it, or pick an agent" aria-label="who runs this turn"><span class="cadot" id="cadot"></span><span class="can">agent</span><span class="cchev">' + ICONS.chevron + "</span></button>" +
+      '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.updown + "</span></button>" +
+      "</span>" +
       // What the chosen agent may do without asking. Drawn by drawPermChip().
       '<button class="cperm" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
-      '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.chevron + "</span></button>" +
-      '<span class="cdiv"></span>' +
       // MCPs and Skills live behind this rather than beside it: they are
       // occasional settings, and the row they were on has to hold the model,
       // the agent, the permission chip, prompts and send — on a narrow window
       // it wrapped. The count badge stays on the outside, because "two skills
       // are on" is the part you need without opening anything.
       '<button class="cslot" id="morebtn" type="button" aria-haspopup="menu" aria-expanded="false" title="MCPs, skills and more"><span class="cslotico">' + ICONS.dots + '</span><span class="cslotlbl">More</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
-      '<button class="cslot" id="micbtn" type="button" title="hold to talk \u2014 needs LOOM_STT_CMD on the daemon"><span class="cslotico">' + ICONS.mic + "</span></button>" +
+      '<button class="cslot" id="micbtn" type="button" title="hold to talk — transcribed by LOOM_STT_CMD on the daemon, or by this browser when that isn’t set"><span class="cslotico">' + ICONS.mic + "</span></button>" +
       // Saved and recent prompts, a clipboard manager's worth (⌘⇧V).
       '<button class="cprompt" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \\u2014 saved and recent (' + KMOD + '\\u21e7V)">' +
         ICONS.clipboard + '<span class="cslotlbl">Prompts</span><kbd>' + KMOD + "\\u21e7V</kbd></button>" +
       '<span style="flex:1"></span>' +
       // Plan and send travel together: when a narrow row wraps, the switch that
       // changes what send does never ends up a line away from send.
+      '<span class="ctok" id="ctok" aria-live="off"></span>' +
+      '<span class="ckhint" aria-hidden="true"><kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> new line</span>' +
       '<span class="csend">' +
       // Plan: a switch, not a mode tab — it changes what either send does.
       '<button class="cplan" id="planbtn" type="button" role="switch" aria-checked="false" title="plan mode \\u2014 write a plan, change no code">' +
@@ -4168,7 +5704,10 @@ ${BRAND_SPRITE}
       mount.innerHTML =
         '<div class="panel">' +
         // Orca chrome: the strip is the window top — context, tabs, actions.
-        '<div class="tabstrip" id="tabstrip">' +
+          '<div class="tabstrip" id="tabstrip">' +
+        // Only shown on a narrow window, where the sidebar slides in instead
+        // of taking a third of the width.
+        '<button id="sbbtn" class="iconbtn sbbtn" type="button" title="projects and threads" aria-label="show projects and threads">' + ICONS.panelRight + "</button>" +
         // No project title here. The sidebar already names every project and
         // highlights the open one, so this printed it a second time three
         // inches away — and for a project called "loom" that's the word "loom"
@@ -4196,7 +5735,8 @@ ${BRAND_SPRITE}
         "</div>" +
         '<div class="paneswrap">' +
         '<div class="mainpane" id="mainpane">' +
-        '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
+        '<div class="pane scroll" id="pane-thread"><div id="agenthead" class="agenthead" style="display:none"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
+        '<button type="button" class="jumpnew" id="jumpnew">' + ICONS.arrowDown + "Latest</button></div>" +
         '<div class="pane scroll" id="pane-brain" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-observatory" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-board" style="display:none"></div>' +
@@ -4217,6 +5757,9 @@ ${BRAND_SPRITE}
         '<div class="termtabs"><span id="termtabs" style="display:contents"></span>' +
         '<button id="termadd" class="iconbtn" title="new terminal">' + ICONS.plus + "</button>" +
         '<span class="spacer"></span>' +
+        '<span class="termfind" id="termfind" hidden><input id="termq" placeholder="Find in terminal" spellcheck="false" autocomplete="off" aria-label="find in terminal"><span id="termqn" class="termqn"></span></span>' +
+        '<button id="termsearch" class="iconbtn" title="Find in this terminal">' + ICONS.search + "</button>" +
+        '<button id="termclear" class="iconbtn" title="Clear this terminal">' + ICONS.trash + "</button>" +
         '<button id="termhide" class="iconbtn" title="hide terminal">' + ICONS.x + "</button></div>" +
         '<div class="termpanes" id="termpanes">' +
         '<div class="conwrap" id="conwrap">' +
@@ -4303,7 +5846,8 @@ ${BRAND_SPRITE}
         '<div class="ptitle"><span class="nm" id="pname">&hellip;</span><span class="st" id="pstat"></span></div>' +
         '<span class="spacer"></span>' + headerActions + "</header>" +
         '<div class="chips" id="chips"></div>' +
-        '<div class="scroll" id="pane-thread"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + "</div></div>" +
+        '<div class="scroll" id="pane-thread"><div id="routesheet"></div><div id="routebar"></div><div id="feed">' + LOADER + '</div><div id="feedlive" aria-live="polite"></div>' +
+        '<button type="button" class="jumpnew" id="jumpnew">' + ICONS.arrowDown + "Latest</button></div>" +
         composerHtml +
         "</div>";
     }
@@ -4331,17 +5875,43 @@ ${BRAND_SPRITE}
       // asked of every agent in every open project, not one run's workers.
       tabs.splice(2, 0, "fleet");
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
-      var LBL = { thread: [ICONS.thread, "Thread"], orchestra: [ICONS.orchestra, "Orchestra"], fleet: [ICONS.fleet, "Fleet"], board: [ICONS.board, "Board"],
-                  brain: [ICONS.memory, "Brain"], observatory: [ICONS.telescope, "Observatory"] };
+      // Plain words, each with a line saying what's behind it: "Brain",
+      // "Fleet" and "Observatory" were names you had to learn before you
+      // could guess what they did.
+      var LBL = { thread: [ICONS.thread, "Chat", "talk to an agent in this thread"],
+                  orchestra: [ICONS.orchestra, "Orchestra", "one agent plans, a team builds in parallel"],
+                  fleet: [ICONS.fleet, "Agents", "what every agent is doing right now"],
+                  board: [ICONS.board, "Board", "issues, PRs and tasks"],
+                  brain: [ICONS.memory, "Memory", "what every agent here remembers"],
+                  observatory: [ICONS.telescope, "Insights", "time, tokens and cost"] };
       box.innerHTML = tabs.map(function(tb){
-        return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
-          LBL[tb][0] + LBL[tb][1] + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") + "</button>";
+        return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '" title="' + LBL[tb][1] + " \u2014 " + LBL[tb][2] + '">' +
+          LBL[tb][0] + '<span class="tl">' + LBL[tb][1] + "</span>" + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".tab"), function(tb){
         tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
       });
     }
     function showTab(name){
+      // a quick crossfade between workspace tabs, where the browser can
+      var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (document.startViewTransition && state.tab && state.tab !== name && !still && !showTab.inTransition) {
+        showTab.inTransition = true;
+        try {
+          var vt = document.startViewTransition(function(){ showTabNow(name); });
+          // A transition skipped (hidden tab, a second one on top) rejects
+          // ready and updateCallbackDone too; the tab still switches, so
+          // those are nothing to report.
+          var quiet = function(){};
+          if (vt.ready) vt.ready.catch(quiet);
+          if (vt.updateCallbackDone) vt.updateCallbackDone.catch(quiet);
+          vt.finished.then(function(){ showTab.inTransition = false; }, function(){ showTab.inTransition = false; });
+          return;
+        } catch (e) { showTab.inTransition = false; }
+      }
+      showTabNow(name);
+    }
+    function showTabNow(name){
       state.tab = name;
       ["thread", "orchestra", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
@@ -4678,6 +6248,7 @@ ${BRAND_SPRITE}
         // nobody asked separately from "what is this costing me".
         body = renderKairoMetrics(state.obKairo || {}) + obCharts(p, events, byAgent) +
           observatoryMetricsDetail(p, events, byAgent, state.obHealth || {}) +
+          '<div id="obboard" class="obasync">' + LOADER + "</div>" +
           '<div id="obburn" class="obasync">' + LOADER + "</div>" +
           '<div id="obmex" class="obasync">' + LOADER + "</div>";
       else if (state.obView === "decisions") body = '<div id="obdecisions" class="obasync">' + LOADER + "</div>";
@@ -4760,7 +6331,7 @@ ${BRAND_SPRITE}
       if (askBtn) askBtn.onclick = function(){ state.obAsk.open = !state.obAsk.open; renderAskPanel(); };
       renderAskPanel();
       if (state.obView === "canvas" || state.obView === "graph") wireObservatoryDrag(el);
-      if (state.obView === "metrics") observatoryBurn(p);
+      if (state.obView === "metrics") { observatoryBoard(p); observatoryBurn(p); }
       if (state.obView === "metrics") observatoryMetricExplorer(p);
       if (state.obView === "decisions") observatoryDecisions(p);
       if (state.obView === "logs") observatoryLogs(p);
@@ -4837,6 +6408,68 @@ ${BRAND_SPRITE}
     function traceUiLink(){
       var b = backendBase();
       return b ? '<a class="obtraceui" href="' + b + '" target="_blank" rel="noreferrer">' + ICONS.route + " View traces</a>" : "";
+    }
+    // LEADERBOARD + HEATMAP: every turn off the log — who finishes, how fast,
+    // what a turn costs — and twelve weeks of activity, a square a day.
+    function observatoryBoard(p){
+      var host = document.getElementById("obboard"); if (!host) return;
+      api("/api/projects/" + p.id + "/insights/turns?days=84").then(function(r){
+        if (!document.getElementById("obboard")) return;
+        var lb = r.leaderboard || [], days = r.days || [];
+        var rows = lb.length ? lb.map(function(a, i){
+          var pct = Math.round((a.successRate || 0) * 100);
+          var tone = pct >= 90 ? "ok" : pct >= 70 ? "warn" : "bad";
+          return '<tr><td class="lbrank">' + (i + 1) + '</td><td><span class="lbwho">' + avatarFor(a.agentId) + esc(labelOf(a.agentId)) + "</span></td>" +
+            '<td class="num">' + a.turns + '</td><td><span class="lbbar ' + tone + '"><i style="width:' + pct + '%"></i></span><span class="num">' + pct + "%</span></td>" +
+            '<td class="num">' + (a.medianMs != null ? durfmt(a.medianMs) : "—") + "</td>" +
+            '<td class="num">' + (a.avgCostUsd != null ? money(a.avgCostUsd) : "—") + '</td><td class="num">' + money(a.totalCostUsd || 0) + "</td>" +
+            '<td class="num lbrated">' + (a.rated ? '<span class="up">' + a.rated.up + '</span> · <span class="dn">' + a.rated.down + "</span>" : "—") + "</td></tr>";
+        }).join("") : '<tr><td colspan="8" class="lbempty">No finished turns yet — the table fills in as agents work.</td></tr>';
+        // the heatmap: weeks as columns, Monday on top
+        var max = 1; days.forEach(function(d){ if (d.turns > max) max = d.turns; });
+        var first = days.length ? new Date(days[0].date + "T00:00:00") : new Date();
+        var pad = (first.getDay() + 6) % 7, cells = [];
+        for (var k = 0; k < pad; k++) cells.push('<i class="hm pad"></i>');
+        days.forEach(function(d){
+          var lvl = d.turns ? Math.min(4, 1 + Math.floor((d.turns / max) * 3.999)) : 0;
+          cells.push('<i class="hm l' + lvl + (d.errors ? " err" : "") + '" title="' + esc(new Date(d.date + "T00:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) +
+            " · " + d.turns + " turn" + (d.turns === 1 ? "" : "s") + (d.errors ? " (" + d.errors + " failed)" : "") + (d.costUsd ? " · " + money(d.costUsd) : "")) + '"></i>');
+        });
+        var active = days.filter(function(d){ return d.turns; }).length;
+        // this month so far, and where this month's pace ends up
+        var now = new Date(), ym = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+        var month = days.filter(function(d){ return d.date.slice(0, 7) === ym; });
+        var spent = month.reduce(function(a, d){ return a + (d.costUsd || 0); }, 0);
+        var dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), dayN = now.getDate();
+        var pace = dayN ? spent / dayN : 0, forecast = spent + pace * (dim - dayN);
+        host.innerHTML =
+          '<div class="burnstats monthstats">' +
+            '<div class="obminicard"><div class="obcl">This month so far</div><div class="obcv sm">' + money(spent) + "</div></div>" +
+            '<div class="obminicard"><div class="obcl">Daily average</div><div class="obcv sm">' + money(pace) + "</div></div>" +
+            '<div class="obminicard" title="this month’s spend so far, plus the daily average for the days left"><div class="obcl">Month-end at this pace</div><div class="obcv sm">' + money(forecast) + "</div></div></div>" +
+          '<div class="obmlabel lbhead">Agent leaderboard<span class="spacer"></span>' +
+            '<button type="button" class="btn xs outline" id="turnscsv">' + ICONS.download + "Export turns (CSV)</button></div>" +
+          '<div class="lbwrap"><table class="lbtable"><thead><tr><th>#</th><th>Agent</th><th class="num">Turns</th><th>Finished cleanly</th><th class="num">Median time</th><th class="num">Per turn</th><th class="num">Total</th><th class="num" title="your thumbs up and down on its replies">You rated</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+          '<div class="obmlabel" style="margin-top:18px">Activity · last 12 weeks<span class="hmsum">' + (r.total || 0) + " turns · active " + active + " of " + days.length + " days</span></div>" +
+          '<div class="hmgrid" role="img" aria-label="turns per day for twelve weeks">' + cells.join("") + "</div>" +
+          '<div class="hmkey">Less <i class="hm l0"></i><i class="hm l1"></i><i class="hm l2"></i><i class="hm l3"></i><i class="hm l4"></i> More<span class="spacer"></span><i class="hm l2 err"></i> a day with a failed turn</div>';
+        var csv = document.getElementById("turnscsv");
+        if (csv) csv.onclick = function(){
+          csv.disabled = true;
+          fetch("/api/projects/" + p.id + "/insights/turns.csv", { headers: { Authorization: "Bearer " + state.token } })
+            .then(function(res){ if (!res.ok) throw new Error("export failed (" + res.status + ")"); return res.blob(); })
+            .then(function(blob){
+              var a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = String(p.name || "loom").replace(/[^\\w.-]+/g, "-") + "-turns.csv";
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+              toast("exported " + a.download);
+            })
+            .catch(function(err){ toast(err.message); })
+            .then(function(){ csv.disabled = false; });
+        };
+      }).catch(function(err){ if (host) host.innerHTML = '<div class="obnote">Couldn’t read turns: ' + esc(err.message) + "</div>"; });
     }
     // BURN: per-agent cost over time (real ClickHouse), linear projection, budgets.
     function observatoryBurn(p){
@@ -5830,19 +7463,36 @@ ${BRAND_SPRITE}
       else { document.getElementById("pane-changes").innerHTML = LOADER; api("/api/projects/" + pid + "/tree").then(function(j){ state.tree = j.tree || {}; render(); drawRail(); }).catch(function(){}); }
     }
     // Show a turn's combined patch (from a turn_diff card in the thread).
-    function openPatchDock(patch, label){
+    function openPatchDock(patch, label, cp){
       openDock();
       dockTitle(ICONS.tree, label || "changes");
       var el = document.getElementById("pane-changes");
       var files = splitPatch(patch);
-      el.innerHTML = '<div class="diffwrap">' + (files.length
+      el.innerHTML = diffToggle() + '<div class="diffwrap">' + (files.length
         ? files.map(function(f, i){
             return '<div class="dfile" id="df-' + i + '"><div class="dfh">' + ICONS.tree +
               '<span class="p">' + esc(f.path || "patch") + "</span>" +
-              '<span class="cadd">+' + f.add + '</span><span class="cdel">\\u2212' + f.del + "</span></div>" +
-              '<div class="dcode">' + renderDiffLines(f.lines, f.path) + "</div></div>";
+              '<span class="cadd">+' + f.add + '</span><span class="cdel">−' + f.del + "</span>" +
+              (cp && f.path ? '<button type="button" class="btn xs ghost dfrevert" data-rvfile="' + esc(f.path) + '" title="put just this file back the way it was before this turn">' + ICONS.rewind + "Revert file</button>" : "") +
+              "</div>" +
+              '<div class="dcode">' + diffBody(f.lines, f.path) + "</div></div>";
           }).join("")
-        : '<div class="dcode">' + renderDiffLines(String(patch).split("\\n")) + "</div>") + "</div>";
+        : '<div class="dcode">' + diffBody(String(patch).split("\\n")) + "</div>") + "</div>";
+      Array.prototype.forEach.call(el.querySelectorAll("[data-dv]"), function(b){
+        b.onclick = function(){ try { localStorage.setItem("loomDiffView", b.getAttribute("data-dv")); } catch (e) {} openPatchDock(patch, label, cp); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-rvfile]"), function(b){
+        b.onclick = function(){
+          var file = b.getAttribute("data-rvfile");
+          askConfirm("Put " + file + " back the way it was before this turn?\\n\\nOnly this file changes. The version it replaces is saved first, so this can be undone from Rewind.", { ok: "Revert file" }).then(function(yes){
+            if (!yes) return;
+            b.disabled = true;
+            api("/api/projects/" + pid + "/checkpoints/" + encodeURIComponent(cp) + "/rewind-file", { method: "POST", body: JSON.stringify({ path: file }) })
+              .then(function(r){ b.textContent = r.removed ? "Removed" : "Reverted"; b.classList.add("done"); toast(file + (r.removed ? " removed — this turn created it" : " is back to how it was before this turn")); if (state.loadGitStat) state.loadGitStat(); })
+              .catch(function(err){ b.disabled = false; toast(err.message); });
+          });
+        };
+      });
       var sc = el; if (sc) sc.scrollTop = 0;
     }
     // Show a read-only file preview (from Explorer clicks).
@@ -5861,6 +7511,17 @@ ${BRAND_SPRITE}
     if (desktop) {
       document.getElementById("dockclose").onclick = closeDock;
       document.getElementById("railbtn").onclick = toggleRail;
+      // Narrow window: the sidebar slides in over the thread, and goes away
+      // again on a pick (this view is re-rendered then) or a click outside it.
+      var shellEl = document.querySelector(".dshell");
+      if (shellEl) shellEl.classList.remove("sbopen");
+      var sbb = document.getElementById("sbbtn");
+      if (sbb) sbb.onclick = function(ev){ ev.stopPropagation(); var sh = document.querySelector(".dshell"); if (sh) sh.classList.toggle("sbopen"); };
+      var dm = document.getElementById("dmain");
+      if (dm && !dm._sbClose) {
+        dm._sbClose = true;
+        dm.addEventListener("mousedown", function(){ var sh = document.querySelector(".dshell"); if (sh) sh.classList.remove("sbopen"); });
+      }
       // The terminal button wants the terminal. If the console tab is the active
       // pane, switch to a terminal rather than closing the dock out from under it.
       document.getElementById("termbtn").onclick = function(){
@@ -6344,6 +8005,38 @@ ${BRAND_SPRITE}
     if (desktop) {
       document.getElementById("termhide").onclick = function(){ localStorage.setItem(TERM_KEY, "0"); applyTerm(); };
       document.getElementById("termadd").onclick = function(){ addTerm(); };
+      var tclr = document.getElementById("termclear");
+      if (tclr) tclr.onclick = function(){ var t = curTerm(); if (t && t.xterm) { t.xterm.clear(); focusTerm(); } else toast("open a terminal first"); };
+      var tsr = document.getElementById("termsearch"), tf = document.getElementById("termfind"), tq = document.getElementById("termq");
+      if (tsr && tf && tq) {
+        var tfind = { q: "", at: -1 };
+        tsr.onclick = function(){ tf.hidden = !tf.hidden; if (!tf.hidden) { tq.focus(); tq.select(); } };
+        // no search addon ships: read the buffer, newest match first, and select it
+        var termFind = function(dir){
+          var t = curTerm(), n = document.getElementById("termqn");
+          if (!t || !t.xterm) { if (n) n.textContent = ""; return; }
+          var q = tq.value.trim().toLowerCase(), buf = t.xterm.buffer.active;
+          if (!q) { t.xterm.clearSelection(); if (n) n.textContent = ""; return; }
+          var hits = [];
+          for (var y = 0; y < buf.length; y++) {
+            var line = buf.getLine(y); if (!line) continue;
+            var s = line.translateToString(true).toLowerCase(), k = -1;
+            while ((k = s.indexOf(q, k + 1)) >= 0) hits.push([y, k]);
+          }
+          if (!hits.length) { t.xterm.clearSelection(); if (n) n.textContent = "no match"; return; }
+          if (q !== tfind.q) { tfind.q = q; tfind.at = hits.length; }
+          tfind.at = (tfind.at + dir + hits.length) % hits.length;
+          var h = hits[tfind.at];
+          t.xterm.select(h[1], h[0], q.length);
+          t.xterm.scrollToLine(Math.max(0, h[0] - Math.floor(t.xterm.rows / 2)));
+          if (n) n.textContent = (tfind.at + 1) + "/" + hits.length;
+        };
+        tq.addEventListener("keydown", function(e){
+          if (e.key === "Enter") { e.preventDefault(); termFind(e.shiftKey ? 1 : -1); }
+          else if (e.key === "Escape") { e.preventDefault(); tf.hidden = true; var t = curTerm(); if (t && t.xterm) t.xterm.clearSelection(); focusTerm(); }
+        });
+        tq.addEventListener("input", function(){ tfind.q = ""; termFind(-1); });
+      }
       var tin = document.getElementById("terminput");
       tin.addEventListener("keydown", function(e){
         var t = curTerm(); if (!t) return;
@@ -6446,6 +8139,88 @@ ${BRAND_SPRITE}
       if (rw) { ev.preventDefault(); ev.stopPropagation(); askRewind(rw.getAttribute("data-rewind"), rw); return; }
       var go = ev.target.closest && ev.target.closest("[data-gochat]");
       if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
+      // A message's own actions: the ⋯ menu, your prompt's edit/copy/star,
+      // and Continue on a reply you stopped.
+      var rb = ev.target.closest && ev.target.closest(".msgrate");
+      if (rb) {
+        ev.preventDefault(); ev.stopPropagation();
+        var rmsg = rb.closest(".msg"), rid = Number(rmsg.getAttribute("data-id")) || 0, ragent = rmsg.getAttribute("data-agent");
+        var want = Number(rb.getAttribute("data-rate")), had = state.rateMap && state.rateMap[rid] ? state.rateMap[rid].v : 0;
+        var val = had === want ? 0 : want;
+        api("/api/projects/" + pid + "/chats/" + encodeURIComponent(chatId) + "/rate", { method: "POST", body: JSON.stringify({ eventId: rid, agentId: ragent, value: val }) })
+          .then(function(j){
+            state.rateMap = j.ratings || {};
+            Array.prototype.forEach.call(rmsg.querySelectorAll(".msgrate"), function(x){
+              var on = Number(x.getAttribute("data-rate")) === val;
+              x.classList.toggle("on", on); x.classList.toggle("down", on && val === -1); x.setAttribute("aria-pressed", on ? "true" : "false");
+            });
+            toast(val === 1 ? "noted — a good one from " + labelOf(ragent) : val === -1 ? "noted — " + labelOf(ragent) + " missed on this one" : "rating cleared");
+          })
+          .catch(function(err){ toast(err.message); });
+        return;
+      }
+      var mm = ev.target.closest && ev.target.closest(".msgmore");
+      if (mm) { ev.preventDefault(); ev.stopPropagation(); msgMenu(mm.closest(".msg"), mm); return; }
+      var ua = ev.target.closest && ev.target.closest(".uact");
+      if (ua) {
+        ev.preventDefault(); ev.stopPropagation();
+        var um = ua.closest(".msg"), raw = decodeURIComponent((um && um.getAttribute("data-raw")) || "");
+        if (ua.classList.contains("uedit")) composeFor(raw, null, false);
+        else if (ua.classList.contains("ucopy")) copyText(raw);
+        else if (ua.classList.contains("ustar")) toggleStar(Number(um.getAttribute("data-id")) || 0);
+        return;
+      }
+      var eo = ev.target.closest && ev.target.closest("[data-errother]");
+      if (eo) {
+        ev.preventDefault(); ev.stopPropagation();
+        var card = eo.closest(".errcard"), failed = eo.getAttribute("data-errother");
+        var ask = promptFor(card);
+        if (!ask) { toast("couldn’t find the prompt this error answered — scroll up and use Retry on it"); return; }
+        var alts = ((state.project && state.project.agents) || []).filter(function(a){ return a.tier === "adapter" && a.enabled !== false && a.id !== failed; });
+        if (!alts.length) { toast("no other agent is switched on in this project"); return; }
+        var rr = eo.getBoundingClientRect();
+        openMenu(Math.round(rr.left), Math.round(rr.bottom + 4), [{ head: "Send the same prompt to" }].concat(alts.map(function(a){
+          return { label: agentLabel(a.kind, a.id), icon: agentGlyph(a.kind, a.id), hint: a.busy ? "busy" : "", run: function(){ composeFor(ask, a.id, true); } };
+        })));
+        return;
+      }
+      var ew = ev.target.closest && ev.target.closest("[data-errwait]");
+      if (ew) {
+        ev.preventDefault(); ev.stopPropagation();
+        var wcard = ew.closest(".errcard"), wprompt = promptFor(wcard), wagent = ew.getAttribute("data-errwait");
+        var wuntil = Number(ew.getAttribute("data-until")) || 0;
+        if (!wprompt) { toast("couldn’t find the prompt this error answered"); return; }
+        if (wuntil <= Date.now()) { composeFor(wprompt, wagent, true); return; }
+        if (ew.getAttribute("data-armed")) { ew.removeAttribute("data-armed"); clearTimeout(ew._t); toast("won’t retry"); ew.classList.remove("armed"); return; }
+        ew.setAttribute("data-armed", "1"); ew.classList.add("armed");
+        toast("will retry when the limit lifts — click again to cancel");
+        ew._t = setTimeout(function(){ if (!pageGone() && ew.getAttribute("data-armed")) composeFor(wprompt, wagent, true); }, wuntil - Date.now() + 500);
+        return;
+      }
+      var ec = ev.target.closest && ev.target.closest("[data-errcopy]");
+      if (ec) {
+        ev.preventDefault(); ev.stopPropagation();
+        var ecard = ec.closest(".errcard");
+        var head = ecard.querySelector(".errh") ? ecard.querySelector(".errh").innerText.trim() : "";
+        var det = ecard.querySelector(".errd pre") ? ecard.querySelector(".errd pre").textContent : "";
+        var when = new Date(Number(ecard.getAttribute("data-ts")) || Date.now()).toISOString();
+        copyText(["Loom error", "project: " + ((state.project && state.project.name) || pid), "chat: " + chatId,
+          "agent: " + (ecard.getAttribute("data-agent") || "loom"), "at: " + when, "", head, det ? "\\n" + det : ""].join("\\n").trim());
+        return;
+      }
+      var cn = ev.target.closest && ev.target.closest("[data-continue]");
+      if (cn) { ev.preventDefault(); ev.stopPropagation(); composeFor("Continue from exactly where you stopped.", cn.getAttribute("data-continue"), true); return; }
+      // Copy a whole reply — the words, not the markup around them.
+      var mc = ev.target.closest && ev.target.closest(".msgcopy");
+      if (mc) {
+        ev.preventDefault(); ev.stopPropagation();
+        var mb = mc.closest(".msg"); var body = mb && mb.querySelector(".bubble");
+        var txt = body ? body.innerText : "";
+        if (navigator.clipboard && txt) navigator.clipboard.writeText(txt).then(function(){ toast("copied"); }, function(){ toast("couldn\u2019t copy"); });
+        return;
+      }
+      var dr = ev.target.closest && ev.target.closest(".mddraw");
+      if (dr) { ev.preventDefault(); ev.stopPropagation(); drawMermaid(dr.parentNode, dr); return; }
       var cp = ev.target.closest && ev.target.closest(".mdcopy");
       if (cp) {
         ev.preventDefault(); ev.stopPropagation();
@@ -6455,6 +8230,16 @@ ${BRAND_SPRITE}
       }
       var ap = ev.target.closest && ev.target.closest("[data-orch-apply]");
       if (ap) { applyOrch(ap.getAttribute("data-orch-apply"), ap); return; }
+      var cmp = ev.target.closest && ev.target.closest("[data-orch-compare]");
+      if (cmp) { ev.preventDefault(); orch.sel = cmp.getAttribute("data-orch-compare"); showTab("orchestra"); return; }
+      var rsm = ev.target.closest && ev.target.closest("[data-orch-resume]");
+      if (rsm) {
+        rsm.disabled = true;
+        api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(rsm.getAttribute("data-orch-resume")) + "/resume", { method: "POST", body: "{}" })
+          .then(function(j){ if (j && j.run) mergeOrchRun(j.run); rsm.remove(); })
+          .catch(function(err){ toast(err.message); rsm.disabled = false; });
+        return;
+      }
       var rd = ev.target.closest && ev.target.closest("[data-orch-deliver]");
       if (rd) { redeliverOrch(rd.getAttribute("data-orch-deliver"), rd); return; }
       if (approvalClick(ev)) return;
@@ -6465,7 +8250,7 @@ ${BRAND_SPRITE}
       if (ev.target.closest && ev.target.closest(".tcdiff")) return; // let diff text select/scroll
       var enc = t.getAttribute("data-patch"); if (!enc) return;
       var patch = decodeURIComponent(enc);
-      if (desktop) { openPatchDock(patch, t.getAttribute("data-label") || "changes"); return; }
+      if (desktop) { var rwb = t.querySelector("[data-rewind]"); openPatchDock(patch, t.getAttribute("data-label") || "changes", rwb ? rwb.getAttribute("data-rewind") : null); return; }
       var d = t.querySelector(".tcdiff"); if (!d) return;
       var open = d.style.display !== "none" && d.innerHTML;
       if (open) { d.style.display = "none"; }
@@ -6497,6 +8282,101 @@ ${BRAND_SPRITE}
     var brainKind = "";
     var BRAIN_KINDS = ["constraint", "failure", "decision", "convention", "fact", "task"];
 
+    /**
+     * What this project knows, as a map: each memory a dot (coloured by kind,
+     * bigger the more it's been used), joined to the files and symbols it's
+     * about. Only entities two or more memories share get a node — the rest
+     * connect nothing. Laid out once with a small force simulation, seeded by
+     * id so the same brain draws the same way every time.
+     */
+    function drawMemGraph(host, mems, usage){
+      if (!host) return;
+      mems = mems.slice(0, 150);
+      var count = {};
+      mems.forEach(function(m){ (m.entities || []).forEach(function(e){ count[e] = (count[e] || 0) + 1; }); });
+      var ents = Object.keys(count).filter(function(e){ return count[e] > 1; })
+        .sort(function(a, b){ return count[b] - count[a]; }).slice(0, 60);
+      var eset = {}; ents.forEach(function(e){ eset[e] = 1; });
+      var nodes = [], idx = {}, links = [];
+      function seed(s){ var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
+      function add(id, kind, data){
+        var h = seed(id);
+        idx[id] = nodes.length;
+        nodes.push({ id: id, t: kind, d: data, x: (h % 400) / 2, y: ((h >> 9) % 400) / 2, vx: 0, vy: 0 });
+      }
+      mems.forEach(function(m){ add("m:" + m.id, "m", m); });
+      ents.forEach(function(e){ add("e:" + e, "e", e); });
+      mems.forEach(function(m){ (m.entities || []).forEach(function(e){ if (eset[e]) links.push([idx["m:" + m.id], idx["e:" + e]]); }); });
+      var n = nodes.length;
+      for (var it = 0; it < 260; it++) {
+        var alpha = 1 - it / 260;
+        for (var i = 0; i < n; i++) {
+          var a = nodes[i];
+          for (var j = i + 1; j < n; j++) {
+            var b = nodes[j], dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy + 0.01;
+            if (d2 > 40000) continue;
+            var f = 260 / d2;
+            a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
+          }
+          a.vx -= a.x * 0.012; a.vy -= a.y * 0.012;
+        }
+        links.forEach(function(l){
+          var a = nodes[l[0]], b = nodes[l[1]], dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+          var f = (d - 46) * 0.05 / d;
+          a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
+        });
+        nodes.forEach(function(o){
+          o.vx = Math.max(-12, Math.min(12, o.vx)); o.vy = Math.max(-12, Math.min(12, o.vy));
+          o.x += o.vx * alpha; o.y += o.vy * alpha; o.vx *= 0.6; o.vy *= 0.6;
+        });
+      }
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      nodes.forEach(function(o){ x0 = Math.min(x0, o.x); y0 = Math.min(y0, o.y); x1 = Math.max(x1, o.x); y1 = Math.max(y1, o.y); });
+      var pad = 40, w = Math.max(200, x1 - x0 + pad * 2), h = Math.max(160, y1 - y0 + pad * 2);
+      var svg = '<svg class="bgsvg" viewBox="' + (x0 - pad) + " " + (y0 - pad) + " " + w + " " + h + '" role="img" aria-label="memory graph">' +
+        links.map(function(l, k){
+          var a = nodes[l[0]], b = nodes[l[1]];
+          return '<line class="bgl" data-a="' + l[0] + '" data-b="' + l[1] + '" x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '"/>';
+        }).join("") +
+        nodes.map(function(o, i){
+          if (o.t === "e") {
+            var label = o.d.length > 22 ? "…" + o.d.slice(-21) : o.d;
+            return '<g class="bge" data-i="' + i + '" tabindex="0"><title>' + esc(o.d) + " · " + count[o.d] + " memories</title>" +
+              '<rect x="' + (o.x - 3).toFixed(1) + '" y="' + (o.y - 3).toFixed(1) + '" width="6" height="6" rx="1.5"/>' +
+              '<text x="' + (o.x + 6).toFixed(1) + '" y="' + (o.y + 3).toFixed(1) + '">' + esc(label) + "</text></g>";
+          }
+          var used = (usage[o.d.id] || {}).n || 0;
+          var r = 4.5 + Math.min(6, Math.sqrt(used) * 1.5);
+          return '<g class="bgm bk-' + esc(o.d.kind) + '" data-i="' + i + '" tabindex="0"><title>' + esc(o.d.kind + ": " + o.d.text) + "</title>" +
+            '<circle cx="' + o.x.toFixed(1) + '" cy="' + o.y.toFixed(1) + '" r="' + r.toFixed(1) + '"/></g>';
+        }).join("") + "</svg>";
+      var lonely = mems.filter(function(m){ return !(m.entities || []).some(function(e){ return eset[e]; }); }).length;
+      host.innerHTML = '<div class="bgcap">' + mems.length + " memor" + (mems.length === 1 ? "y" : "ies") + " · " + ents.length + " shared file" + (ents.length === 1 ? "" : "s") + " or symbol" + (ents.length === 1 ? "" : "s") + " joining them" +
+        (lonely ? " · " + lonely + " stand alone" : "") + '<span class="dim"> · click a dot or a name</span></div>' + svg + '<div class="bgpick" id="bgpick"></div>';
+      var svgEl = host.querySelector("svg"), pick = host.querySelector("#bgpick");
+      function focus(i){
+        var near = {}; near[i] = 1;
+        links.forEach(function(l){ if (l[0] === i) near[l[1]] = 1; if (l[1] === i) near[l[0]] = 1; });
+        svgEl.classList.add("focus");
+        Array.prototype.forEach.call(svgEl.querySelectorAll("[data-i]"), function(g){ g.classList.toggle("near", !!near[+g.getAttribute("data-i")]); });
+        Array.prototype.forEach.call(svgEl.querySelectorAll(".bgl"), function(l){ l.classList.toggle("near", +l.getAttribute("data-a") === i || +l.getAttribute("data-b") === i); });
+        var o = nodes[i];
+        if (o.t === "m") {
+          pick.innerHTML = '<span class="bbadge bk-' + esc(o.d.kind) + '">' + esc(o.d.kind) + "</span> " + esc(o.d.text) +
+            ((o.d.entities || []).length ? '<div class="bents">' + o.d.entities.slice(0, 8).map(function(e){ return '<span class="bent">' + esc(e) + "</span>"; }).join("") + "</div>" : "");
+        } else {
+          var about = mems.filter(function(m){ return (m.entities || []).indexOf(o.d) >= 0; });
+          pick.innerHTML = '<b class="mono">' + esc(o.d) + "</b> · " + about.length + " memor" + (about.length === 1 ? "y" : "ies") + "<ul>" +
+            about.slice(0, 8).map(function(m){ return '<li><span class="bbadge bk-' + esc(m.kind) + '">' + esc(m.kind) + "</span> " + esc(m.text) + "</li>"; }).join("") + "</ul>";
+        }
+      }
+      Array.prototype.forEach.call(svgEl.querySelectorAll("[data-i]"), function(g){
+        g.onclick = function(ev){ ev.stopPropagation(); focus(+g.getAttribute("data-i")); };
+        g.onkeydown = function(ev){ if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); focus(+g.getAttribute("data-i")); } };
+      });
+      svgEl.onclick = function(){ svgEl.classList.remove("focus"); pick.innerHTML = ""; };
+    }
+
     function refreshBrain(){
       if (brainView === "team") return refreshTeamBrain();
       var el = document.getElementById("pane-brain"); if (!el) return;
@@ -6506,7 +8386,9 @@ ${BRAND_SPRITE}
       Promise.all([
         api("/api/projects/" + pid + "/brain?limit=200"),
         api("/api/projects/" + pid + "/memory").catch(function(){ return { memory: {} }; }),
+        api("/api/projects/" + pid + "/brain/usage").catch(function(){ return { usage: {} }; }),
       ]).then(function(r){
+        var usage = (r[2] && r[2].usage) || {};
         el = document.getElementById("pane-brain"); if (!el || brainView !== "mine") return;
         var memories = (r[0] && r[0].memories) || [];
         var stats = (r[0] && r[0].stats) || { total: 0, byKind: {} };
@@ -6520,15 +8402,27 @@ ${BRAND_SPRITE}
           if (!n && brainKind !== k) return; // hide empty kinds unless selected
           chips += '<button class="bkind bk-' + k + (brainKind === k ? " on" : "") + '" data-kind="' + k + '">' + k + ' <span class="kn">' + n + "</span></button>";
         });
-        var head = '<div class="bhead">' + brainSwitchHtml() + '<div class="bkinds">' + chips + "</div></div>";
+        var head = '<div class="bhead">' + brainSwitchHtml() + '<div class="bkinds">' + chips + "</div>" +
+          '<div class="bio"><button type="button" class="btn xs ghost" id="bexport" title="download what this project knows, as JSON">' + ICONS.download + "Export</button>" +
+          '<button type="button" class="btn xs ghost" id="bimport" title="bring in a brain exported from Loom (duplicates are skipped)">' + ICONS.plus + "Import</button>" +
+          '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>' +
+          '<div class="bsort"><span>Sort</span><button type="button" data-bsort="new" class="' + (state.brainSort !== "used" ? "on" : "") + '">Newest</button>' +
+          '<button type="button" data-bsort="used" class="' + (state.brainSort === "used" ? "on" : "") + '" title="how often each memory reached an agent’s prompt">Most used</button>' +
+          '<span style="margin-left:auto">View</span><button type="button" data-bgv="list" class="' + (!state.brainGraph ? "on" : "") + '">List</button>' +
+          '<button type="button" data-bgv="graph" class="' + (state.brainGraph ? "on" : "") + '" title="memories joined by the files and symbols they share">Graph</button></div>';
 
         // The memory list — the learned units. This is what phase 2 fills.
         var shown = brainKind ? memories.filter(function(x){ return x.kind === brainKind; }) : memories;
+        if (state.brainSort === "used") {
+          shown = shown.slice().sort(function(a, b){ return ((usage[b.id] || {}).n || 0) - ((usage[a.id] || {}).n || 0); });
+        }
         var list;
         if (!shown.length) {
-          list = '<div class="bempty">' + (memories.length
+          list = '<div class="bempty">' + (memories.length ? "" : emptyArt("brain")) + (memories.length
             ? "No " + esc(brainKind) + " memories yet."
             : "Nothing learned yet. As agents finish turns, Loom reads each one and records what's worth keeping — constraints, decisions, and the failures worth not repeating. Add a decision below to seed it, or let an agent take a turn.") + "</div>";
+        } else if (state.brainGraph) {
+          list = '<div class="bgraph" id="bgraph"></div>';
         } else {
           list = '<div class="bmems">' + shown.map(function(x){
             var ents = (x.entities || []).slice(0, 6).map(function(e){ return '<span class="bent">' + esc(e) + "</span>"; }).join("");
@@ -6539,11 +8433,13 @@ ${BRAND_SPRITE}
             return '<div class="bmem' + (low ? " low" : "") + '" data-mid="' + esc(x.id) + '">' +
               '<div class="bmrow"><span class="bbadge bk-' + esc(x.kind) + '">' + esc(x.kind) + "</span>" +
               '<span class="bmtext">' + esc(x.text) + "</span>" +
+              '<button class="bedit iconbtn xs" data-medit="' + esc(x.id) + '" title="correct this" aria-label="edit this memory">' + ICONS.pencil + "</button>" +
               '<button class="bforget iconbtn xs" data-forget="' + esc(x.id) + '" title="forget this" aria-label="forget this memory">' + ICONS.x + "</button></div>" +
               (ents ? '<div class="bents">' + ents + "</div>" : "") +
               '<div class="bmmeta">' + brandMark(kindOf(who)) + esc(who) +
               (when ? ' <span class="dim">\\u00b7 ' + esc(when) + "</span>" : "") +
-              (low ? ' <span class="dim">\\u00b7 ' + conf + '% \\u2014 shown, not injected</span>' : "") +
+              (low ? ' <span class="dim">· ' + conf + '% — shown, not injected</span>' : "") +
+              (usage[x.id] ? ' <span class="bused" title="reached an agent’s prompt ' + usage[x.id].n + " time" + (usage[x.id].n === 1 ? "" : "s") + ", last " + esc(rel(usage[x.id].at)) + '">used ' + usage[x.id].n + "×</span>" : "") +
               "</div></div>";
           }).join("") + "</div>";
         }
@@ -6568,6 +8464,10 @@ ${BRAND_SPRITE}
 
         el.innerHTML = '<div class="pane-inner brain">' + head + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
         wireBrainSwitch(el);
+        if (state.brainGraph && shown.length) drawMemGraph(document.getElementById("bgraph"), shown, usage);
+        Array.prototype.forEach.call(el.querySelectorAll("[data-bgv]"), function(b){
+          b.onclick = function(){ state.brainGraph = b.getAttribute("data-bgv") === "graph"; refreshBrain(); };
+        });
 
         // Contradictions, above the units: two memories that likely disagree
         // are worth more attention than either alone. Quiet when clean.
@@ -6587,15 +8487,61 @@ ${BRAND_SPRITE}
         Array.prototype.forEach.call(el.querySelectorAll(".bkind"), function(b){
           b.onclick = function(){ brainKind = b.getAttribute("data-kind"); refreshBrain(); };
         });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-bsort]"), function(b){
+          b.onclick = function(){ state.brainSort = b.getAttribute("data-bsort"); refreshBrain(); };
+        });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-medit]"), function(b){
+          b.onclick = function(ev){
+            ev.stopPropagation();
+            var id = b.getAttribute("data-medit");
+            var cur = memories.filter(function(m){ return m.id === id; })[0];
+            if (!cur) return;
+            askText("Correct this memory", { value: cur.text, multiline: true, required: true, note: "Agents get the new wording from their next turn. The old one stays in its history.", ok: "Save" }).then(function(text){
+              if (text === null || !text.trim() || text.trim() === cur.text) return;
+              api("/api/projects/" + pid + "/brain/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ text: text.trim() }) })
+                .then(function(){ toast("updated · the old wording stays in its history"); refreshBrain(); })
+                .catch(function(err){ toast(err.message); });
+            });
+          };
+        });
+        var bex = document.getElementById("bexport");
+        if (bex) bex.onclick = function(){
+          api("/api/projects/" + pid + "/brain/export").then(function(dump){
+            var blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = String((state.project && state.project.name) || "loom").replace(/[^\\w.-]+/g, "-") + "-brain.json";
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+            toast("exported " + ((dump && dump.memories && dump.memories.length) || 0) + " memories");
+          }).catch(function(err){ toast(err.message); });
+        };
+        var bim = document.getElementById("bimport"), bif = document.getElementById("bimportf");
+        if (bim && bif) {
+          bim.onclick = function(){ bif.value = ""; bif.click(); };
+          bif.onchange = function(){
+            var f = bif.files && bif.files[0]; if (!f) return;
+            if (f.size > 1900000) { toast("that file is over 2 MB — too big to import in one go"); return; }
+            f.text().then(function(txt){
+              var body;
+              try { body = JSON.parse(txt); } catch (e) { throw new Error("that isn’t a JSON file"); }
+              return api("/api/projects/" + pid + "/brain/import", { method: "POST", body: JSON.stringify(body) });
+            }).then(function(r){
+              toast("imported " + (r.added || 0) + " new · " + (r.known || 0) + " already known");
+              refreshBrain();
+            }).catch(function(err){ toast(err.message); });
+          };
+        }
         Array.prototype.forEach.call(el.querySelectorAll("[data-forget]"), function(b){
           b.onclick = function(ev){
             ev.stopPropagation();
             var id = b.getAttribute("data-forget");
-            var reason = window.prompt("Forget this memory — why? (kept in history)", "no longer true");
-            if (reason === null) return;
-            api("/api/projects/" + pid + "/brain/" + id + "?reason=" + encodeURIComponent(reason.trim() || "forgotten"), { method: "DELETE" })
-              .then(function(){ toast("forgotten \\u00b7 its history stays"); refreshBrain(); })
-              .catch(function(err){ toast(err.message); });
+            askText("Forget this memory — why?", { value: "no longer true", note: "It leaves the brain; its history stays.", ok: "Forget" }).then(function(reason){
+              if (reason === null) return;
+              api("/api/projects/" + pid + "/brain/" + id + "?reason=" + encodeURIComponent(reason.trim() || "forgotten"), { method: "DELETE" })
+                .then(function(){ toast("forgotten · its history stays"); refreshBrain(); })
+                .catch(function(err){ toast(err.message); });
+            });
           };
         });
         var reimp = document.getElementById("reimport");
@@ -6604,14 +8550,22 @@ ${BRAND_SPRITE}
             .then(function(rr){ toast(rr.imported ? "imported " + rr.imported + " source(s)" : "already current"); refreshBrain(); })
             .catch(function(err){ toast(err.message); });
         };
+        // Add is live only when there's something to add — an Add that did
+        // nothing on an empty box looked broken.
+        var decBtn = document.querySelector("#decform button[type=submit]");
+        var decBox = document.getElementById("decbox");
+        var decSync = function(){ if (decBtn) decBtn.disabled = !(decBox.value || "").trim(); };
+        decBox.addEventListener("input", decSync); decSync();
         document.getElementById("decform").onsubmit = function(ev){
           ev.preventDefault();
-          var box = document.getElementById("decbox");
+          var box = decBox;
           var text = (box.value || "").trim();
-          if (!text) return;
+          if (!text || (decBtn && decBtn.getAttribute("data-busy"))) return;
+          if (decBtn) { decBtn.setAttribute("data-busy", "1"); decBtn.disabled = true; }
           api("/api/projects/" + pid + "/decisions", { method: "POST", body: JSON.stringify({ text: text }) })
-            .then(function(){ box.value = ""; refreshBrain(); })
-            .catch(function(err){ toast(err.message); });
+            .then(function(){ box.value = ""; toast("saved to memory"); refreshBrain(); })
+            .catch(function(err){ toast(err.message); })
+            .then(function(){ if (decBtn) decBtn.removeAttribute("data-busy"); decSync(); });
         };
       }).catch(function(err){ toast(err.message); });
     }
@@ -6727,13 +8681,19 @@ ${BRAND_SPRITE}
           var action = b.getAttribute("data-tbact"), body = JSON.parse(b.getAttribute("data-tbbody") || "{}");
           if (action === "correct") {
             var cur = mems.filter(function(m){ return m.id === body.id; })[0];
-            var text = window.prompt("Correct this memory \\u2014 what\\u2019s true instead? (theirs stays in history)", cur ? cur.text : "");
-            if (text === null || !text.trim()) return;
-            body.text = text.trim();
+            askText("Correct this memory — what’s true instead?", { value: cur ? cur.text : "", note: "Theirs stays in history.", multiline: true, required: true, ok: "Correct" }).then(function(text){
+              if (text === null || !text.trim()) return;
+              body.text = text.trim();
+              teamBrainAct(action, body, b);
+            });
+            return;
           } else if (action === "resolve") {
-            var why = window.prompt("Why keep this one? (the other stays in history)", "");
-            if (why === null) return;
-            body.reason = why.trim();
+            askText("Why keep this one?", { note: "The other stays in history.", ok: "Keep this one" }).then(function(why){
+              if (why === null) return;
+              body.reason = why.trim();
+              teamBrainAct(action, body, b);
+            });
+            return;
           }
           teamBrainAct(action, body, b);
         };
@@ -6894,9 +8854,12 @@ ${BRAND_SPRITE}
       var cols = BCOLS.map(function(col){
         var key = col[0];
         var mine = cards.filter(function(c){ return c.shown === key; });
-        return '<div class="bcol" data-col="' + key + '">' +
+        var lim = (d.limits || {})[key];
+        var over = lim && mine.length > lim;
+        return '<div class="bcol' + (over ? " over" : "") + '" data-col="' + key + '">' +
           '<div class="bch"><span class="bdot" style="background:' + col[2] + '"></span>' + esc(col[1]) +
-            '<span class="bn">' + mine.length + "</span></div>" +
+            '<button type="button" class="bn bwip" data-wip="' + key + '" title="' + (lim ? "limit " + lim + (over ? " — over it" : "") + " · click to change" : "set a work-in-progress limit") + '">' +
+              mine.length + (lim ? " / " + lim : "") + "</button></div>" +
           '<div class="bcb" data-drop="' + key + '">' +
             (mine.length ? mine.map(boardCard).join("") : '<div class="bempty">nothing here</div>') +
             '<button class="badd" data-add="' + key + '" title="add a card here">+</button>' +
@@ -6912,6 +8875,7 @@ ${BRAND_SPRITE}
       wireBoardHead();
       wireBoardDnd();
       wireBoardTasks(el);
+      wireCardMeta(el);
     }
     function boardCard(c){
       var st = BSTATES[c.state] || [c.state, "var(--muted-foreground)"];
@@ -6943,7 +8907,7 @@ ${BRAND_SPRITE}
         (c.branch ? '<div class="bcbr">' + esc(c.branch) + "</div>" : "") +
         '<div class="bcf">' +
           (c.own
-            ? (c.blocked ? '<span class="bblocked" title="waiting on ' + c.blocked + ' other card' + (c.blocked === 1 ? "" : "s") + '">\\u26d4 ' + c.blocked + "</span> yours" : "yours")
+            ? cardMeta(c) + (c.blocked ? '<span class="bblocked" title="waiting on ' + c.blocked + ' other card' + (c.blocked === 1 ? "" : "s") + '">⛔ ' + c.blocked + "</span> yours" : "yours")
             : c.pr
               ? '<a href="' + esc(c.pr.url) + '" target="_blank" rel="noreferrer">PR #' + c.pr.number + "</a> \\u00b7 " +
                 esc(c.pr.draft ? "draft" : c.pr.state)
@@ -6958,6 +8922,61 @@ ${BRAND_SPRITE}
               ? '<span class="bpin" data-unpin="' + esc(c.id) + '" title="you moved this card \\u2014 click to let its real state place it">pinned</span>'
               : "") +
         "</div>" + acts + "</div>";
+    }
+    /** A card's priority and due date, each a chip you can click to change. */
+    function cardMeta(c){
+      var pr = c.priority ? '<button type="button" class="bmchip prio ' + esc(c.priority) + '" data-prio="' + esc(c.id) + '" title="priority — click to change">' + esc(c.priority) + "</button>"
+        : '<button type="button" class="bmchip prio none" data-prio="' + esc(c.id) + '" title="set a priority">+ priority</button>';
+      var due = "";
+      if (c.due) {
+        var d = new Date(c.due + "T00:00:00"), t = new Date(); t.setHours(0, 0, 0, 0);
+        var days = Math.round((d - t) / 86400000);
+        var label = days === 0 ? "due today" : days === 1 ? "due tomorrow" : days === -1 ? "due yesterday" : days < 0 ? Math.abs(days) + "d overdue" : days < 7 ? "due " + d.toLocaleDateString([], { weekday: "short" }) : "due " + d.toLocaleDateString([], { month: "short", day: "numeric" });
+        due = '<button type="button" class="bmchip due' + (days < 0 && c.column !== "ready" ? " late" : days <= 1 ? " soon" : "") + '" data-due="' + esc(c.id) + '" title="' + esc(c.due) + ' — click to change">' + esc(label) + "</button>";
+      } else due = '<button type="button" class="bmchip due none" data-due="' + esc(c.id) + '" title="set a due date">+ due</button>';
+      return '<span class="bmeta">' + pr + due + "</span>";
+    }
+    function patchCard(id, body){
+      // the board names your cards task-<id>; the task itself is just <id>
+      return api("/api/projects/" + pid + "/board/tasks/" + encodeURIComponent(String(id).replace(/^task-/, "")), { method: "POST", body: JSON.stringify(body) })
+        .then(function(){ loadBoard(); })
+        .catch(function(err){ toast(err.message); });
+    }
+    function wireCardMeta(el){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-prio]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var id = b.getAttribute("data-prio"), r = b.getBoundingClientRect();
+          openMenu(Math.round(r.left), Math.round(r.bottom + 4), [{ head: "Priority" }].concat(["high", "medium", "low"].map(function(v){
+            return { label: v.charAt(0).toUpperCase() + v.slice(1), run: function(){ patchCard(id, { priority: v }); } };
+          })).concat([{ sep: true }, { label: "None", run: function(){ patchCard(id, { priority: null }); } }]));
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-due]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var id = b.getAttribute("data-due");
+          var cur = ((board.data && board.data.cards) || []).filter(function(c){ return c.id === id; })[0] || {};
+          askText("When is it due?", { value: cur.due || new Date(Date.now() + 86400000).toISOString().slice(0, 10), placeholder: "YYYY-MM-DD — blank clears it", ok: "Set" }).then(function(v){
+            if (v === null) return;
+            v = v.trim();
+            if (v && !/^\\d{4}-\\d{2}-\\d{2}$/.test(v)) { toast("a date looks like 2026-10-01"); return; }
+            patchCard(id, { due: v || null });
+          });
+        };
+      });
+      // a column's limit: click its count
+      Array.prototype.forEach.call(el.querySelectorAll("[data-wip]"), function(b){
+        b.onclick = function(){
+          var col = b.getAttribute("data-wip"), lim = ((board.data && board.data.limits) || {})[col];
+          askText("Work-in-progress limit for this column", { value: lim ? String(lim) : "", placeholder: "e.g. 3 — blank for none", note: "The column warns when it holds more than this.", ok: "Set" }).then(function(v){
+            if (v === null) return;
+            api("/api/projects/" + pid + "/board/limits", { method: "PUT", body: JSON.stringify({ column: col, limit: v.trim() === "" ? 0 : Number(v) }) })
+              .then(function(){ loadBoard(); })
+              .catch(function(err){ toast(err.message); });
+          });
+        };
+      });
     }
     function wireBoardHead(){
       wireSourceBar();
@@ -7240,11 +9259,11 @@ ${BRAND_SPRITE}
         var teamId = document.getElementById("lteam").value;
         var title = (document.getElementById("ltitle").value || "").trim();
         var desc = (document.getElementById("ldesc").value || "").trim();
-        if (!title) return toast("give the issue a title");
+        if (!title) return modalErr(scrim, "Give the issue a title.", document.getElementById("ltitle"));
         var btn = this; btn.disabled = true;
         api("/api/projects/" + pid + "/linear/issues", { method: "POST", body: JSON.stringify({ teamId: teamId, title: title, description: desc }) })
           .then(function(r){ close(); toast("created " + (r.issue ? r.issue.identifier : "issue")); loadLinear(); })
-          .catch(function(err){ btn.disabled = false; toast(err.message); });
+          .catch(function(err){ btn.disabled = false; modalErr(scrim, err.message); });
       };
     }
 
@@ -7458,7 +9477,28 @@ ${BRAND_SPRITE}
       if (state.railView === "search") return drawSearch(el);
       if (state.railView === "scm") return drawScm(el);
       if (state.railView === "tasks") return drawAgentsView(el);
+      if (state.railView === "outline") return drawOutline(el);
       return drawExplorer(el);
+    }
+    /** The chat at a glance: each of your prompts, click to go there. */
+    function drawOutline(el){
+      railTitle('<span class="b">Outline</span>');
+      var mine = Array.prototype.slice.call(document.querySelectorAll("#feed > .msg.user[data-raw]"));
+      var more = !!document.getElementById("loadearlier");
+      if (!mine.length) { el.innerHTML = '<div class="olempty">Nothing asked in this chat yet — your prompts will line up here.</div>'; return; }
+      el.innerHTML = '<div class="olhead">This chat · ' + mine.length + " prompt" + (mine.length === 1 ? "" : "s") + (more ? " loaded" : "") + "</div>" +
+        mine.map(function(n, i){
+          var t = decodeURIComponent(n.getAttribute("data-raw") || "").replace(/\\s+/g, " ").trim();
+          var ts = Number(n.getAttribute("data-ts")) || 0;
+          return '<button type="button" class="olrow" data-olid="' + esc(n.getAttribute("data-id") || "") + '"><span class="oln">' + (i + 1) + "</span>" +
+            '<span class="olt">' + esc(t.slice(0, 140) || "(attachment)") + '</span><span class="olw">' + (ts ? esc(relClock(ts)) : "") + "</span></button>";
+        }).join("") +
+        (more ? '<button type="button" class="olmore" id="olmore">Load earlier prompts</button>' : "");
+      Array.prototype.forEach.call(el.querySelectorAll("[data-olid]"), function(b){
+        b.onclick = function(){ jumpToMessage(Number(b.getAttribute("data-olid"))); };
+      });
+      var om = document.getElementById("olmore");
+      if (om) om.onclick = function(){ loadEarlier().then(function(){ drawRail(); }); };
     }
     function renderTreeLevel(rel, depth){
       var kids = expl.kids[rel]; if (!kids) return "";
@@ -8020,21 +10060,55 @@ ${BRAND_SPRITE}
       var chips = document.getElementById("chips");
       if (!chips) return;
       var adapters = p.agents.filter(function(a){ return a.tier === "adapter"; });
-      if (state.selected === null) state.selected = p.holder || (adapters[0] && adapters[0].id) || null;
-      chips.innerHTML = adapters.map(function(a){
-        var sel = a.id === state.selected;
+      pickDefaultAgent(p, adapters);
+      chips.innerHTML = adapters.filter(function(a){ return a.enabled !== false; }).map(function(a){
+        var sel = a.id === state.selected, lbl = agentLabel(a.kind, a.id);
+        // the role only when it says something the name doesn't
+        var role = a.role && a.role !== a.id && a.role !== a.kind ? a.role : "";
         return '<button class="chip' + (sel ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
-          brandMark(a.kind) + esc(a.id) + ' <span class="role">' + esc(a.role) + (a.id === p.holder ? " \\u2190" : "") + "</span>" +
+          agentGlyph(a.kind, a.id) + esc(lbl) + (role || a.id === p.holder ? ' <span class="role">' + esc(role) + (a.id === p.holder ? " \\u2190" : "") + "</span>" : "") +
           (a.busy ? ' <span class="busy"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(chips.querySelectorAll(".chip"), function(chip){
         chip.onclick = function(){ state.selected = chip.getAttribute("data-id"); drawStatus(); };
       });
     }
+    /**
+     * Aim at the baton holder by default — unless that agent is switched off
+     * for this project, which would make the first send a refusal.
+     */
+    function pickDefaultAgent(p, adapters){
+      var usable = adapters.filter(function(a){ return a.enabled !== false; });
+      var ok = function(id){ return usable.some(function(a){ return a.id === id; }); };
+      var off = (p.agents || []).some(function(a){ return a.id === state.selected && a.enabled === false; });
+      if (state.selected === null || off) {
+        // A thread with an agent of its own (pinned when it was made, or a
+        // task's worker) is talked to through that agent — not whoever the
+        // last thread you were in happened to be aimed at.
+        var own = chatOwnAgent(p);
+        state.selected = (own && ok(own) ? own : null) ||
+          (ok(p.holder) ? p.holder : (usable[0] && usable[0].id)) || p.holder || (adapters[0] && adapters[0].id) || null;
+      }
+    }
+    function chatOwnAgent(p){
+      if (!chatId || chatId === "main") return null;
+      var agents = (p && p.agents) || [];
+      var resolve = function(want){
+        if (!want) return null;
+        for (var k = 0; k < agents.length; k++) if (agents[k].id === want) return agents[k].id;
+        for (var m = 0; m < agents.length; m++) if (agents[m].kind === want) return agents[m].id;
+        return null;
+      };
+      var threads = (p && p.orchestra && p.orchestra.threads) || [];
+      for (var i = 0; i < threads.length; i++) if (threads[i] && threads[i].chat === chatId) return resolve(threads[i].agent);
+      var chats = (p && p.chats) || [];
+      for (var j = 0; j < chats.length; j++) if (chats[j].id === chatId && chats[j].agentId) return resolve(chats[j].agentId);
+      return null;
+    }
     function drawStatus(){
       var p = state.project; if (!p) return;
       var adapters = p.agents.filter(function(a){ return a.tier === "adapter"; });
-      if (state.selected === null) state.selected = p.holder || (adapters[0] && adapters[0].id) || null;
+      pickDefaultAgent(p, adapters);
       var nm = document.getElementById("pname"); if (nm) nm.textContent = p.name;
       var stat = document.getElementById("pstat");
       if (stat) stat.textContent = p.needsInput ? "needs input" : p.costUsd > 0 ? money(p.costUsd) : "";
@@ -8066,9 +10140,10 @@ ${BRAND_SPRITE}
         ? "this orchestra has finished \\u00b7 sending reopens it with its orchestrator"
         : planState
         ? "plan mode \\u00b7 agent writes a plan to plans/\\u2026, no code changes"
-        : state.selected && state.selected !== p.holder
-        ? "send will shift the baton to " + labelOf(state.selected)
-        : (desktop ? "click the agent to switch \\u00b7 baton: " : "tap a chip to shift agents \\u00b7 baton: ") + (p.holder || "\\u2014");
+        // The resting state says nothing: who you're talking to is on the
+        // composer's own button, and repeating it underneath was noise.
+        : "";
+      reconcileLive(p);
       drawOrchTabDot(p.orchestra);
       updateModelLabel(); // the picker button reflects whoever's selected now
       if (!desktop) drawChips();
@@ -8167,42 +10242,389 @@ ${BRAND_SPRITE}
       // Returned, so a caller that changed the roster can wait for the answer
       // before redrawing off it.
       return api("/api/projects/" + pid).then(function(j){
+        var first = !state.project || !state.project.agents;
         state.project = j.project;
+        syncStars();
+        // the empty thread drew before the project arrived ("Ready in this
+        // project", no agent) — draw it again now that it knows both
         drawStatus();
+        if (first) { var h = document.getElementById("threadempty"); if (h) { h.remove(); drawEmpty(); } }
       }).catch(function(err){ toast(err.message); });
     }
 
     // ---- feed + live websocket ----------------------------------------------
+    // ---- scrolling ------------------------------------------------------------
+    // New content pulls the view down only if you were already at the bottom.
+    // Someone scrolled up to read shouldn't be yanked away mid-sentence; they
+    // get a "new messages" pill instead. Your own send always goes to the end.
+    var forceScroll = false;
+    function threadScroller(){ var f = document.getElementById("feed"); return f ? f.parentNode : null; }
+    function nearBottom(){
+      var sc = threadScroller();
+      return !sc || !sc.scrollHeight || sc.scrollHeight - sc.scrollTop - sc.clientHeight < 140;
+    }
+    function toBottom(){
+      var sc = threadScroller();
+      if (sc && sc.scrollHeight) sc.scrollTop = sc.scrollHeight;
+      var j = document.getElementById("jumpnew"); if (j) j.classList.remove("show");
+    }
+    function stickOrFlag(wasNear){
+      if (wasNear || forceScroll) { forceScroll = false; toBottom(); return; }
+      var j = document.getElementById("jumpnew"); if (j) j.classList.add("show");
+    }
+
+    // ---- the feed -------------------------------------------------------------
+    /** Who wrote the last thing in the feed, if it was an agent still mid-turn. */
+    function lastAuthor(feed){
+      for (var n = feed.lastElementChild; n; n = n.previousElementSibling) {
+        var c = n.classList;
+        if (c.contains("tool") || c.contains("acts") || c.contains("thinking") || c.contains("turncard")) continue;
+        if (c.contains("msg") && c.contains("agent")) return n.getAttribute("data-agent");
+        return null;
+      }
+      return null;
+    }
+    function updateActs(g){
+      var rows = g.querySelectorAll(".actlist > .tool");
+      var s = g.querySelector(".as"), l = g.querySelector(".al");
+      if (s) s.textContent = actSummary(Array.prototype.slice.call(rows));
+      var last = rows[rows.length - 1];
+      if (l) l.textContent = last ? (last.querySelector(".tx") || last).textContent : "";
+    }
+    /**
+     * Put one rendered line into the feed. Two things happen on the way in: a
+     * run of tool rows folds into one "activity" line you can open, and an
+     * agent continuing its own turn doesn't get a second byline.
+     */
+    function placeLine(feed, html, before){
+      var tmp = document.createElement("div");
+      tmp.innerHTML = html;
+      Array.prototype.slice.call(tmp.children).forEach(function(n){
+        var last = before ? before.previousElementSibling : feed.lastElementChild;
+        if (n.classList.contains("tool")) {
+          if (last && last.classList.contains("acts")) {
+            last.querySelector(".actlist").appendChild(n); updateActs(last); return;
+          }
+          if (last && last.classList.contains("tool")) {
+            var g = document.createElement("details");
+            g.className = "acts";
+            g.innerHTML = '<summary><span class="ai">' + ICONS.chevron + '</span><span class="as"></span><span class="al"></span></summary><div class="actlist"></div>';
+            feed.insertBefore(g, last);
+            g.querySelector(".actlist").appendChild(last);
+            g.querySelector(".actlist").appendChild(n);
+            updateActs(g);
+            return;
+          }
+        }
+        // A task's status line updates where the task first appeared, rather
+        // than adding a line per state (pending, running, done…) — three rows
+        // per task read as noise, one row that changes reads as progress.
+        var tk = !before && n.getAttribute && n.getAttribute("data-otask");
+        if (tk) {
+          var olds = feed.querySelectorAll('[data-otask="' + tk.replace(/"/g, "") + '"]');
+          if (olds.length) {
+            var old = olds[olds.length - 1];
+            old.parentNode.replaceChild(n, old);
+            n.classList.add("bump");
+            return;
+          }
+        }
+        if (n.classList.contains("msg") && n.classList.contains("agent") && !n.classList.contains("thinking")) {
+          var who = n.getAttribute("data-agent");
+          var prev = before ? null : lastAuthor(feed);
+          if (who && prev === who) n.classList.add("cont");
+        }
+        if (before) feed.insertBefore(n, before); else feed.appendChild(n);
+      });
+    }
     function append(events){
       var feed = document.getElementById("feed"); if (!feed) return;
       // only the loading placeholder gets cleared — never real history
       if (feed.firstChild && feed.firstChild.className === "loader") feed.innerHTML = "";
-      var html = "", added = false;
+      var wasNear = nearBottom(), added = false;
       events.forEach(function(e){
         if (e.id <= state.lastId) return;
         state.lastId = e.id;
+        if (!state.firstId || e.id < state.firstId) state.firstId = e.id;
         if (e.kind === "needs_input" && e.payload) state.lastQuestion = e.payload.question || null;
         // An answered approval folds the card it answers. Only when that card
-        // is out of the loaded window does it need a line of its own — and
-        // the card may be in the html not yet inserted, so flush first.
+        // is out of the loaded window does it need a line of its own.
         if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
-          if (html) { feed.insertAdjacentHTML("beforeend", html); html = ""; added = true; }
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
         }
-        html += lineFor(e);
+        noteLive(e);
+        var html = lineFor(e);
+        if (!html) return;
+        placeLine(feed, html);
+        added = true;
       });
-      if (html || added) { if (html) feed.insertAdjacentHTML("beforeend", html);
-        var sc = feed.parentNode;
-        if (sc && sc.scrollHeight) sc.scrollTop = sc.scrollHeight;
-        else window.scrollTo(0, document.body.scrollHeight); }
+      drawEmpty();
+      if (added) { markDays(); markSeen(); if (state.railView === "outline") drawRail(); }
+      if (added) stickOrFlag(wasNear);
+      // A day-long live session piles thousands of nodes into one page. Once
+      // it's that big and you're reading the newest part, start again from the
+      // newest page — Load earlier still reaches everything, and a reply being
+      // written carries on from the snapshot.
+      if (added && historyLoaded && !trimQueued && feed.childElementCount > 1200 && nearBottom()) {
+        trimQueued = true;
+        setTimeout(function(){ if (!pageGone()) loadHistory().then(function(){ trimQueued = false; }, function(){ trimQueued = false; }); }, 0);
+      }
+    }
+    var trimQueued = false;
+    /** What this device has read in this chat — the sidebar's unread dots. */
+    function markSeen(){
+      var m = {};
+      try { m = JSON.parse(localStorage.getItem("loomSeen") || "{}") || {}; } catch (e) {}
+      var k = pid + ":" + chatId;
+      if ((m[k] || 0) >= state.lastId) return;
+      m[k] = state.lastId;
+      try { localStorage.setItem("loomSeen", JSON.stringify(m)); } catch (e) {}
+    }
+
+    // ---- live: a reply being written, and who is working ----------------------
+    // The daemon streams replies as they're typed (a "stream" frame, never
+    // logged) and the finished message lands as an event afterwards. Between
+    // your send and that message, the thread shows who's on it, for how long,
+    // and what they're doing — instead of fifteen seconds of nothing.
+    var live = {};
+    var TERMINAL = { run_complete: 1, error: 1 };
+    function liveHost(){ return document.getElementById("feedlive"); }
+    function liveFor(agentId){
+      var L = live[agentId];
+      if (L && L.el && L.el.parentNode) return L;
+      var host = liveHost(); if (!host) return null;
+      var el = document.createElement("div");
+      el.className = "livebox";
+      el.setAttribute("data-live", agentId);
+      host.appendChild(el);
+      L = live[agentId] = { el: el, text: "", think: "", act: "", since: Date.now(), touched: Date.now(), raf: 0 };
+      paintLive(agentId);
+      return L;
+    }
+    function endLive(agentId){
+      var L = live[agentId];
+      if (L) { if (L.el && L.el.parentNode) L.el.parentNode.removeChild(L.el); if (L.raf) cancelAnimationFrame(L.raf); }
+      delete live[agentId];
+    }
+    function clearLive(){ Object.keys(live).forEach(endLive); var h = liveHost(); if (h) h.innerHTML = ""; }
+    function paintLiveState(agentId){
+      var L = live[agentId]; if (!L) return;
+      var st = L.el.querySelector(".lstate"); if (!st) return;
+      var secs = Math.floor((Date.now() - L.since) / 1000);
+      var what = L.text ? "Writing" : L.think ? "Thinking" : L.act ? L.act : "Working";
+      // how fast it's coming: words so far, and words a second since the first one
+      var pace = "";
+      if (L.text && L.firstTextAt) {
+        var words = (L.text.match(/\\S+/g) || []).length;
+        var dt = (Date.now() - L.firstTextAt) / 1000;
+        pace = '<span class="lpace">' + words + " word" + (words === 1 ? "" : "s") + (dt >= 1.5 ? " · " + (words / dt).toFixed(1) + " w/s" : "") + "</span>";
+      }
+      st.innerHTML = '<span class="shimmer">' + esc(what) + "</span>" + (secs >= 1 ? '<span class="lsecs">' + durfmt(secs * 1000) + "</span>" : "") + pace;
+    }
+    function paintLive(agentId){
+      var L = live[agentId]; if (!L) return;
+      var feed = document.getElementById("feed");
+      if (!L.text) {
+        // Nothing written yet: one quiet line, not an empty message.
+        if (L.el.className !== "livebox bar") {
+          L.el.className = "livebox bar";
+          L.el.innerHTML = '<span class="lav">' + avatarFor(agentId) + '<i class="lring"></i></span><span class="lname">' + esc(labelOf(agentId)) + '</span><span class="lstate"></span>';
+        }
+        paintLiveState(agentId);
+        return;
+      }
+      if (L.el.className.indexOf("livebox msgmode") !== 0) {
+        L.el.className = "livebox msgmode";
+        L.el.innerHTML = '<div class="msg agent live' + (feed && lastAuthor(feed) === agentId ? " cont" : "") + '" data-agent="' + esc(agentId) + '">' +
+          whoHtml({ agentId: agentId, ts: Date.now(), payload: {} }, '<span class="lstate"></span>') +
+          '<div class="bubble md lbody"></div></div>';
+      }
+      var body = L.el.querySelector(".lbody");
+      body.innerHTML = mdToHtml(L.text);
+      // the caret sits at the end of the last line written, not below it
+      var tail = body;
+      while (tail.lastElementChild && !/^(PRE|CODE|TABLE|svg)$/.test(tail.lastElementChild.tagName)) tail = tail.lastElementChild;
+      tail.insertAdjacentHTML("beforeend", '<span class="caret"></span>');
+      paintLiveState(agentId);
+    }
+    function schedulePaint(agentId, wasNear){
+      var L = live[agentId]; if (!L || L.raf) return;
+      L.raf = requestAnimationFrame(function(){ L.raf = 0; paintLive(agentId); stickOrFlag(wasNear); });
+    }
+    /** Keep the live view in step with the logged events as they arrive. */
+    // Turns the history replay saw start and not end. Replay never draws a
+    // live line itself: whether a turn is STILL running is a question for the
+    // agent's busy flag (or the run's state), answered once replay is done.
+    var openTurns = {};
+    function noteLive(e){
+      if (!e.agentId) return;
+      var p = e.payload || {}, id = e.agentId;
+      var ends = TERMINAL[e.kind] || e.kind === "needs_input" || (e.kind === "status" && (p.state === "interrupted" || p.state === "stopped"));
+      var starts = (e.kind === "status" && p.state === "turn_started") || e.kind === "tool_call" || e.kind === "file_edit" || e.kind === "message";
+      if (!historyLoaded) {
+        if (ends) delete openTurns[id];
+        else if (starts) openTurns[id] = { since: Number(e.ts) || Date.now(), act: e.kind === "tool_call" ? String(p.summary || p.tool || "") : "" };
+        return;
+      }
+      if (ends) {
+        endLive(id);
+        // Stop turns back into Send the moment the turn ends, not a poll later.
+        clearTimeout(state.endRefresh);
+        state.endRefresh = setTimeout(function(){ if (state.pid === pid) refresh(); }, 150);
+        return;
+      }
+      if (!starts) return;
+      var L = liveFor(id); if (!L) return;
+      L.touched = Date.now();
+      if (e.kind === "message") { if (p.reasoning) L.think = ""; else L.text = ""; L.synced = false; }
+      if (e.kind === "tool_call") L.act = String(p.summary || p.tool || p.name || "Working").replace(/\\s+/g, " ").slice(0, 80);
+      if (e.kind === "file_edit") L.act = "Editing " + String(p.path || "").split("/").pop();
+      paintLive(id);
+    }
+    function onStreamFrame(f){
+      if ((f.chat || "main") !== chatId || !f.agentId || !f.text) return;
+      var wasNear = nearBottom();
+      var L = liveFor(f.agentId); if (!L) return;
+      var key = f.reasoning ? "think" : "text", have = L[key];
+      if (key === "text" && !L.firstTextAt) L.firstTextAt = Date.now();
+      // Seeded from the snapshot of a reply already under way, pieces carry
+      // their offset: skip what the snapshot already had, stitch the rest.
+      if (L.synced && typeof f.off === "number") {
+        if (f.off + f.text.length <= have.length) return;
+        L[key] = have + (f.off <= have.length ? f.text.slice(have.length - f.off) : f.text);
+      } else L[key] = have + f.text;
+      L.touched = Date.now();
+      schedulePaint(f.agentId, wasNear);
+    }
+    /**
+     * Drop live lines the log will never close: an agent that died with the
+     * daemon, or a turn whose end arrived while this view was elsewhere. Only
+     * for plain threads — an orchestra worker runs as a copy of its roster
+     * agent, so the roster's busy flag says nothing about it.
+     */
+    /**
+     * Is this thread an orchestra's, and is its work going right now? The
+     * run's own thread is going while the orchestrator plans or reviews; a
+     * task thread while its task runs. null: not an orchestra thread at all.
+     */
+    function orchThreadGoing(p){
+      var s = p && p.orchestra;
+      if (!s) return null;
+      if (s.chat === chatId) return /^(starting|planning|reviewing|running)$/.test(String(s.status || ""));
+      var t = (s.threads || []).filter(function(x){ return x && x.chat === chatId; })[0];
+      return t ? t.status === "running" : null;
+    }
+    function reconcileLive(p){
+      var now = Date.now(), agents = (p && p.agents) || [];
+      var og = orchThreadGoing(p), orchThread = og !== null;
+      // Turns the replay left open become live lines only if they really are
+      // still going: the agent says it's busy, or this thread's run is live.
+      Object.keys(openTurns).forEach(function(id){
+        var a = agents.filter(function(x){ return x.id === id; })[0];
+        var going = orchThread ? og : !!(a && a.busy);
+        if (going && !live[id]) {
+          var L = liveFor(id);
+          if (L) { L.since = openTurns[id].since; L.act = openTurns[id].act.slice(0, 80); paintLive(id); }
+        }
+        delete openTurns[id];
+      });
+      Object.keys(live).forEach(function(id){
+        var L = live[id], a = agents.filter(function(x){ return x.id === id; })[0];
+        if (orchThread ? (og === false && now - L.touched > 6000) : (a && !a.busy && now - L.touched > 6000)) endLive(id);
+        else if (now - L.touched > 20 * 60 * 1000) endLive(id);
+      });
+    }
+    state.timers.push(setInterval(function(){
+      Object.keys(live).forEach(paintLiveState);
+      Array.prototype.forEach.call(document.querySelectorAll("#feed .errcd[data-until]"), function(n){ n.textContent = untilText(Number(n.getAttribute("data-until"))); });
+      Array.prototype.forEach.call(document.querySelectorAll("[data-oel]"), function(n){ n.textContent = durfmt(Math.max(0, Date.now() - Number(n.getAttribute("data-oel")))); });
+      // "just now" → "3m ago" → the clock: once every ~30s is plenty
+      if (Date.now() - (state.relTick || 0) > 30000) {
+        state.relTick = Date.now();
+        Array.prototype.forEach.call(document.querySelectorAll("#feed .wt[data-rel]"), function(n){
+          var t = Number(n.getAttribute("data-rel")); if (!t) return;
+          var v = relClock(t); if (n.textContent !== v) n.textContent = v;
+          if (Date.now() - t > 3600000) n.removeAttribute("data-rel"); // settled: it's a clock now
+        });
+      }
+    }, 1000));
+
+    // ---- empty thread ---------------------------------------------------------
+    var SUGGEST = [
+      ["Explain this codebase", "Give me a tour of this codebase: what it does, how it\\u2019s organised, and where the important parts live."],
+      ["Find a bug", "Look through the code for a real bug, explain it, and fix it with a test."],
+      ["Write tests", "Find the least-tested important code and write good tests for it."],
+      ["Review my changes", "Review the uncommitted changes in this project and tell me what you\\u2019d change."],
+    ];
+    function drawEmpty(){
+      var feed = document.getElementById("feed"); if (!feed) return;
+      var has = feed.querySelector(".msg,.sys,.tool,.acts,.turncard,.nicard,.apcard,.handoff,.turnend,.orchbrief,.plancard");
+      var hero = document.getElementById("threadempty");
+      if (has || (feed.firstChild && feed.firstChild.className === "loader") || Object.keys(live).length) { if (hero) hero.remove(); return; }
+      if (hero) return;
+      var p = state.project || {};
+      var who = state.selected || p.holder || "";
+      feed.insertAdjacentHTML("beforeend",
+        '<div class="threadempty" id="threadempty"><div class="teav">' + (who ? avatarFor(who) : '<span class="av">' + ICONS.chat + "</span>") + "</div>" +
+        '<div class="tet">What should we work on?</div>' +
+        '<div class="tes">' + (who ? esc(labelOf(who)) + " is ready in " : "Ready in ") + "<b>" + esc(p.name || "this project") + "</b>. Every agent here shares one memory.</div>" +
+        '<div class="tesug">' + SUGGEST.map(function(s, i){ return '<button type="button" class="tesb" data-sug="' + i + '">' + esc(s[0]) + "</button>"; }).join("") + "</div></div>");
+      Array.prototype.forEach.call(feed.querySelectorAll("[data-sug]"), function(b){
+        b.onclick = function(){
+          var box = document.getElementById("box"); if (!box) return;
+          box.value = SUGGEST[Number(b.getAttribute("data-sug"))][1];
+          autosizeBox(); box.focus();
+        };
+      });
     }
 
     // Live frames that race the history fetch wait their turn, so an early
     // WS event can't outrun (and id-mask) the backlog.
-    var historyLoaded = false, pendingWs = [];
-    function flushPending(){
+    var historyLoaded = false, pendingWs = [], pendingStream = [];
+    function flushPending(snap){
       historyLoaded = true;
       if (pendingWs.length) { append(pendingWs); pendingWs = []; }
+      // A reply already being typed when this thread opened (a reload
+      // mid-answer): show what it has said so far, then the pieces that came
+      // in while the history loaded, deduped by offset.
+      (snap || []).forEach(function(x){
+        if (!x || !x.agentId || (x.chat || "main") !== chatId) return;
+        var L = liveFor(x.agentId); if (!L) return;
+        L.text = String(x.text || ""); L.think = String(x.think || ""); L.synced = true;
+        L.touched = Date.now(); paintLive(x.agentId);
+      });
+      var q = pendingStream; pendingStream = [];
+      q.forEach(onStreamFrame);
+    }
+    var PAGE = 80;
+    function drawEarlier(more){
+      var feed = document.getElementById("feed"); if (!feed) return;
+      var old = document.getElementById("loadearlier"); if (old) old.remove();
+      if (!more) return;
+      feed.insertAdjacentHTML("afterbegin", '<button type="button" class="loadearlier" id="loadearlier">Load earlier messages</button>');
+      document.getElementById("loadearlier").onclick = loadEarlier;
+    }
+    /** Page the thread backwards, keeping what you were looking at in place. */
+    function loadEarlier(){
+      var feed = document.getElementById("feed"), btn = document.getElementById("loadearlier");
+      if (!feed || !state.firstId) return Promise.resolve();
+      if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+      return api("/api/projects/" + pid + "/events?limit=" + PAGE + "&before=" + state.firstId + "&chat=" + encodeURIComponent(chatId))
+        .then(function(j){
+          var evs = j.events || [], sc = threadScroller();
+          var fromBottom = sc ? sc.scrollHeight - sc.scrollTop : 0;
+          var anchor = btn ? btn.nextElementSibling : feed.firstElementChild;
+          var hero = document.getElementById("threadempty"); if (hero) hero.remove();
+          evs.forEach(function(e){
+            if (!state.firstId || e.id < state.firstId) state.firstId = e.id;
+            var html = lineFor(e);
+            if (html) placeLine(feed, html, anchor);
+          });
+          drawEarlier(evs.length >= PAGE);
+          markDays();
+          if (sc) sc.scrollTop = sc.scrollHeight - fromBottom;
+        })
+        .catch(function(err){ toast(err.message); if (btn) { btn.disabled = false; btn.textContent = "Load earlier messages"; } });
     }
     // Reading the thread again from scratch. Changing the transcript level
     // changes what every past line renders as, so there is nothing to patch —
@@ -8210,14 +10632,83 @@ ${BRAND_SPRITE}
     function loadHistory(){
       var feed = document.getElementById("feed");
       if (feed) feed.innerHTML = '<div class="loader"></div>';
-      state.lastId = 0;
-      return api("/api/projects/" + pid + "/events?limit=60&chat=" + encodeURIComponent(chatId))
-        .then(function(j){ append(j.events || []); flushPending(); })
+      state.lastId = 0; state.firstId = 0;
+      clearLive();
+      openTurns = {};
+      historyLoaded = false; pendingStream = [];
+      syncStars();
+      if (state.loadGitStat && (!state.gitStat || state.gitStat.pid !== pid)) setTimeout(function(){ if (!pageGone() && state.loadGitStat) state.loadGitStat(); }, 300);
+      return api("/api/projects/" + pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(chatId))
+        .then(function(j){
+          var evs = j.events || [];
+          forceScroll = true;
+          append(evs);
+          if (!evs.length) { var f = document.getElementById("feed"); if (f && f.firstChild && f.firstChild.className === "loader") f.innerHTML = ""; drawEmpty(); }
+          drawEarlier(evs.length >= PAGE);
+          flushPending(j.live);
+          markDays(); markSeen();
+          var go = state.pendingGo;
+          if (go && go.pid === pid && go.chat === chatId) { state.pendingGo = null; setTimeout(function(){ if (!pageGone()) jumpToMessage(go.id); }, 60); }
+          if (state.project) reconcileLive(state.project);
+          toBottom();
+        })
         .catch(function(err){ toast(err.message); flushPending(); });
     }
     // The transcript-level menu lives in the shell's scope, and this doesn't.
     state.redrawFeed = loadHistory;
     loadHistory();
+    if (chatId === "main") showRecap();
+
+    /**
+     * Back after a while (a new day, or eight hours on): what happened while
+     * you were away, in one strip over Main — turns, who took them, what
+     * failed, what it cost. From the log's own turn rows; shown once per
+     * return, gone when you close it.
+     */
+    function showRecap(){
+      var key = "loomLastVisit:" + pid, now = Date.now(), last = 0;
+      try { last = Number(localStorage.getItem(key)) || 0; localStorage.setItem(key, String(now)); } catch (e) { return; }
+      if (!last) return;
+      var away = now - last, newDay = new Date(last).toDateString() !== new Date(now).toDateString();
+      if (away < 8 * 3600 * 1000 && !newDay) return;
+      if (away < 20 * 60 * 1000) return;
+      api("/api/projects/" + pid + "/insights/turns?since=" + last).then(function(j){
+        var rows = (j && j.leaderboard) || [];
+        var turns = 0, errs = 0, cost = 0;
+        rows.forEach(function(a){ turns += a.turns || 0; errs += a.errors || 0; cost += a.totalCostUsd || 0; });
+        if (!turns || pageGone()) return;
+        var host = document.getElementById("pane-thread"), feed = document.getElementById("feed");
+        if (!host || !feed || document.getElementById("recap")) return;
+        var who = rows.slice().sort(function(a, b){ return b.turns - a.turns; }).slice(0, 3).map(function(a){ return esc(labelOf(a.agentId)) + " " + a.turns; }).join(", ");
+        var el = document.createElement("div");
+        el.id = "recap";
+        el.className = "recap";
+        el.setAttribute("role", "status");
+        el.innerHTML = '<span class="recapi">' + ICONS.clock + "</span>" +
+          '<span class="recapt"><b>Since you were here</b> <span class="dim">' + esc(newDay ? relDay(last) : rel(last)) + "</span> · " +
+          turns + " turn" + (turns === 1 ? "" : "s") + " (" + who + ")" +
+          (errs ? ' · <span class="recaperr">' + errs + " failed</span>" : "") +
+          (cost > 0 ? " · " + money(cost) : "") + "</span>" +
+          '<button type="button" class="btn xs ghost" id="recapgo">Insights</button>' +
+          '<button type="button" class="iconbtn xs" id="recapx" aria-label="dismiss" title="dismiss">' + ICONS.x + "</button>";
+        host.insertBefore(el, feed);
+        el.querySelector("#recapx").onclick = function(){ el.remove(); };
+        el.querySelector("#recapgo").onclick = function(){ el.remove(); showTab("observatory"); };
+      }).catch(function(){});
+    }
+    function relDay(ts){
+      var d = new Date(ts), y = new Date(); y.setDate(y.getDate() - 1);
+      var hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return (d.toDateString() === y.toDateString() ? "yesterday " : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + " ") + hm;
+    }
+    (function(){
+      var j = document.getElementById("jumpnew"), sc = threadScroller();
+      if (j) j.onclick = toBottom;
+      if (sc) sc.addEventListener("scroll", function(){
+        if (!nearBottom()) return;
+        var jj = document.getElementById("jumpnew"); if (jj) jj.classList.remove("show");
+      }, { passive: true });
+    })();
     refresh();
     state.timers.push(setInterval(refresh, 4000));
     if (desktop) {
@@ -8256,10 +10747,12 @@ ${BRAND_SPRITE}
           if (frame.type === "team") { onTeamFrame(frame); return; }
           // the prompt queue changed \u2014 sent, edited, reordered, paused
           if (frame.type === "queue") { onQueueFrame(frame); return; }
+          // a reply as it's being written (not logged; the message follows)
+          if (frame.type === "stream") { if (historyLoaded) onStreamFrame(frame); else if (pendingStream.length < 2000) pendingStream.push(frame); return; }
           // a dev server started, stopped, crashed, or printed a line
           if (frame.type === "server") { onServerFrame(frame); return; }
           // an agent changed files while a preview is open: show the new page
-          if (frame.type === "event" && frame.event && frame.event.kind === "turn_diff") maybeReloadPreview();
+          if (frame.type === "event" && frame.event && frame.event.kind === "turn_diff") { maybeReloadPreview(); if (state.loadGitStat) state.loadGitStat(); }
           if (frame.type === "event" && frame.event) {
             // "an agent needs you" is the whole reason Loom exists, so it must
             // reach you even when this isn't the chat you're looking at, or the
@@ -8267,6 +10760,7 @@ ${BRAND_SPRITE}
             // permitted) raise an OS notification. Deliberately above the
             // per-chat filter below, which would otherwise swallow it.
             if (frame.event.kind === "needs_input") notifyNeedsInput(frame.event);
+            if (frame.event.kind === "run_complete") notifyDone(frame.event, state.project && state.project.name);
             // An orchestra spans many chats — its run's and one per task — so
             // the view listens above the per-chat filter too.
             onOrchEvent(frame.event);
@@ -8279,6 +10773,9 @@ ${BRAND_SPRITE}
             if ((frame.event.chat || "main") !== chatId) return;
             if (historyLoaded) append([frame.event]);
             else pendingWs.push(frame.event);
+            if (historyLoaded && frame.event.kind === "orchestra" && frame.event.payload && frame.event.payload.phase === "completed") {
+              var dn = document.querySelectorAll("#feed .odone"); if (dn.length) dn[dn.length - 1].classList.add("celebrate");
+            }
           }
         } catch (e) {}
       };
@@ -8295,6 +10792,435 @@ ${BRAND_SPRITE}
     // the attachment. Cleared after each send.
     var attach = [];
 
+    // ---- message actions ------------------------------------------------------
+    /** The prompt behind an agent's reply: the nearest of your messages above it. */
+    function promptFor(msgEl){
+      for (var n = msgEl && msgEl.previousElementSibling; n; n = n.previousElementSibling) {
+        if (n.classList && n.classList.contains("msg") && n.classList.contains("user")) return decodeURIComponent(n.getAttribute("data-raw") || "");
+      }
+      return "";
+    }
+    function bubbleText(msgEl){
+      var b = msgEl && msgEl.querySelector(".bubble");
+      return b ? (b.innerText || b.textContent || "").trim() : "";
+    }
+    /**
+     * Put text in the composer, for an agent, and send it — or leave it there
+     * to edit. The one path Retry, Edit, Continue and Quote all take, so a
+     * resend follows every rule a typed prompt does (the queue, plan mode,
+     * the handoff to a different agent).
+     */
+    function composeFor(text, agentId, go){
+      var box = document.getElementById("box"); if (!box) return;
+      if (state.cmode === "orch" && !orchRunForChat()) setComposerMode("chat");
+      var roster = (state.project && state.project.agents) || [];
+      if (agentId && roster.some(function(a){ return a.id === agentId; })) { state.auto = false; state.selected = agentId; drawStatus(); }
+      box.value = text; autosizeBox(); saveDraft();
+      var form = document.getElementById("cform"); if (form) form.classList.toggle("hastext", !!box.value.trim());
+      if (go) { send(); return; }
+      box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+    }
+    function quoteIntoComposer(text){
+      var box = document.getElementById("box"); if (!box || !text) return;
+      var q = String(text).trim().split("\\n").slice(0, 12).map(function(l){ return "> " + l; }).join("\\n");
+      var cur = box.value.replace(/\\s+$/, "");
+      box.value = (cur ? cur + "\\n\\n" : "") + q + "\\n\\n";
+      autosizeBox(); saveDraft(); box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+      var form = document.getElementById("cform"); if (form) form.classList.add("hastext");
+    }
+    function msgMenu(msgEl, anchor){
+      if (!msgEl) return;
+      var id = Number(msgEl.getAttribute("data-id")) || 0, agentId = msgEl.getAttribute("data-agent");
+      var prompt = promptFor(msgEl);
+      var others = ((state.project && state.project.agents) || []).filter(function(a){
+        return a.tier === "adapter" && a.enabled !== false && a.id !== agentId;
+      });
+      var starred = !!(state.starSet && state.starSet[id]);
+      var r = anchor.getBoundingClientRect();
+      var items = [{ head: agentId ? labelOf(agentId) : "Message" }];
+      if (prompt) {
+        items.push({ label: "Retry", icon: ICONS.refresh, hint: "same prompt", run: function(){ composeFor(prompt, agentId, true); } });
+        if (others.length) items.push({ label: "Retry with\\u2026", icon: ICONS.agents, hint: others.length + " agents", run: function(){
+          openMenu(Math.round(r.left), Math.round(r.bottom + 4), [{ head: "Send the same prompt to" }].concat(others.map(function(a){
+            return { label: agentLabel(a.kind, a.id), icon: agentGlyph(a.kind, a.id), hint: a.busy ? "busy" : "", run: function(){ composeFor(prompt, a.id, true); } };
+          })));
+        } });
+        items.push({ sep: true });
+      }
+      items.push({ label: starred ? "Unstar" : "Star", icon: ICONS.star, run: function(){ toggleStar(id); } });
+      items.push({ label: "Quote in reply", icon: ICONS.quote, run: function(){ quoteIntoComposer(bubbleText(msgEl)); } });
+      items.push({ label: "Make a card", icon: ICONS.board, hint: "on the board", run: function(){
+        openBoardTaskModal(pid, "working", function(){ if (state.reloadBoard) state.reloadBoard(); }, bubbleText(msgEl).split("\\n")[0].slice(0, 200));
+      } });
+      items.push({ label: "Copy link", icon: ICONS.link, run: function(){ copyText(messageLink(id)); } });
+      if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+        var reading = window.speechSynthesis.speaking;
+        items.push({ label: reading ? "Stop reading" : "Read aloud", icon: ICONS.play, run: function(){
+          window.speechSynthesis.cancel();
+          if (reading) return;
+          var u = new SpeechSynthesisUtterance(bubbleText(msgEl).replace(/\\s+/g, " ").slice(0, 8000));
+          u.rate = 1.05;
+          window.speechSynthesis.speak(u);
+        } });
+      }
+      items.push({ label: "Branch from here", icon: ICONS.branch, hint: "new chat", run: function(){ branchFrom(msgEl); } });
+      openMenu(Math.round(r.right - 220), Math.round(r.bottom + 4), items);
+    }
+    /** A link that opens this project, this chat, this message. */
+    function messageLink(id){
+      return location.origin + location.pathname + "#p/" + encodeURIComponent(pid) + "/c/" + encodeURIComponent(chatId) + "/m/" + id;
+    }
+    /** Stars live with the chat on the daemon, so every device sees them. */
+    function syncStars(){
+      var c = ((state.project && state.project.chats) || []).filter(function(q){ return q.id === chatId; })[0];
+      var set = {};
+      ((c && c.starred) || []).forEach(function(n){ set[n] = true; });
+      state.starSet = set;
+      state.rateMap = (c && c.ratings) || {};
+    }
+    function toggleStar(id){
+      if (!id) return;
+      var on = !(state.starSet && state.starSet[id]);
+      api("/api/projects/" + pid + "/chats/" + encodeURIComponent(chatId) + "/star", { method: "POST", body: JSON.stringify({ eventId: id, on: on }) })
+        .then(function(j){
+          var set = {}; (j.starred || []).forEach(function(n){ set[n] = true; }); state.starSet = set;
+          var el = document.querySelector('#feed .msg[data-id="' + id + '"]');
+          if (el) {
+            var old = el.querySelector(".wstar"); if (old) old.remove();
+            if (on) {
+              var host = el.querySelector(".who .msgcopy") || el.querySelector(".mt .ustar");
+              if (host) host.insertAdjacentHTML("beforebegin", '<span class="wstar" title="starred">' + ICONS.star + "</span>");
+              el.classList.add("flash"); setTimeout(function(){ el.classList.remove("flash"); }, 900);
+            }
+          }
+          toast(on ? "starred · ⋯ beside the composer → Starred messages" : "unstarred");
+          if (state.refreshShell) state.refreshShell();
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+    state.showStarred = function(){
+      var ids = Object.keys(state.starSet || {}).map(Number).sort(function(a, b){ return b - a; });
+      if (!ids.length) { toast("nothing starred in this chat yet \\u2014 \\u22ef on a message \\u2192 Star"); return; }
+      var items = [{ head: "Starred in this chat" }].concat(ids.slice(0, 30).map(function(id){
+        var el = document.querySelector('#feed .msg[data-id="' + id + '"]');
+        var t = el ? bubbleText(el).split("\\n")[0].slice(0, 70) : "message #" + id + " (earlier \\u2014 load earlier messages)";
+        return { label: t || "message #" + id, icon: ICONS.star, run: function(){ jumpToMessage(id); } };
+      }));
+      openMenu(Math.round(window.innerWidth / 2 - 180), 90, items);
+    };
+    /** Scroll to a message and flash it; page back for it when it's older than what's loaded. */
+    function jumpToMessage(id, tries){
+      var el = document.querySelector('#feed .msg[data-id="' + id + '"]');
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("flash"); setTimeout(function(){ el.classList.remove("flash"); }, 1600);
+        return;
+      }
+      tries = tries || 0;
+      if (tries < 8 && document.getElementById("loadearlier") && state.firstId && id < state.firstId) {
+        loadEarlier().then(function(){ jumpToMessage(id, tries + 1); });
+        return;
+      }
+      toast("that message isn\\u2019t in this chat any more");
+    }
+    state.jumpToMessage = jumpToMessage;
+    /**
+     * Start a new chat that carries this one up to a message — for trying a
+     * different direction without losing the one you're on.
+     */
+    function branchFrom(msgEl){
+      var feed = document.getElementById("feed"); if (!feed || !msgEl) return;
+      var lines = [], budget = 6000;
+      var all = Array.prototype.slice.call(feed.querySelectorAll(":scope > .msg:not(.thinking)"));
+      var upto = all.indexOf(msgEl);
+      all.slice(0, upto + 1).reverse().some(function(n){
+        var who = n.classList.contains("user") ? "Me" : labelOf(n.getAttribute("data-agent") || "agent");
+        var t = n.classList.contains("user") ? decodeURIComponent(n.getAttribute("data-raw") || "") : bubbleText(n);
+        var chunk = who + ": " + t.trim();
+        if (chunk.length > budget) chunk = chunk.slice(0, budget) + "\\u2026";
+        lines.unshift(chunk); budget -= chunk.length;
+        return budget <= 0;
+      });
+      var c = ((state.project && state.project.chats) || []).filter(function(q){ return q.id === chatId; })[0];
+      var title = "Branch of " + ((c && c.title) || "Main");
+      api("/api/projects/" + pid + "/chats", { method: "POST", body: JSON.stringify({ title: title.slice(0, 60) }) })
+        .then(function(j){
+          var draft = "Earlier, in \\u201c" + ((c && c.title) || "Main") + "\\u201d:\\n\\n" + lines.map(function(l){ return l.split("\\n").map(function(x){ return "> " + x; }).join("\\n"); }).join("\\n>\\n") + "\\n\\n";
+          try { localStorage.setItem(draftKey(j.chat.id), draft); } catch (e) {}
+          if (state.setChat) state.setChat(pid, j.chat.id);
+          toast("branched \\u2014 the conversation so far is in the composer; add where to go next");
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    // ---- drafts and recall ------------------------------------------------------
+    function draftKey(cid){ return "loomDraft:" + pid + ":" + (cid || chatId); }
+    var draftTimer = null;
+    function saveDraft(){
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(function(){
+        if (pageGone()) return;
+        var box = document.getElementById("box"); if (!box) return;
+        try {
+          if (box.value.trim()) localStorage.setItem(draftKey(), box.value);
+          else localStorage.removeItem(draftKey());
+        } catch (e) {}
+      }, 250);
+    }
+    function clearDraft(){ clearTimeout(draftTimer); try { localStorage.removeItem(draftKey()); } catch (e) {} }
+    function restoreDraft(){
+      var box = document.getElementById("box"); if (!box || box.value) return;
+      var d = null;
+      try { d = localStorage.getItem(draftKey()); } catch (e) {}
+      if (!d) return;
+      box.value = d; autosizeBox();
+      var form = document.getElementById("cform"); if (form) form.classList.toggle("hastext", !!d.trim());
+    }
+    var recall = { i: -1, shown: "" };
+    function myPrompts(){
+      return Array.prototype.map.call(document.querySelectorAll("#feed .msg.user[data-raw]"), function(n){
+        return decodeURIComponent(n.getAttribute("data-raw") || "");
+      }).filter(function(t, i, all){ return t.trim() && t !== all[i + 1]; }).reverse();
+    }
+
+    // ---- find in thread --------------------------------------------------------
+    var find = { hits: [], i: -1, q: "" };
+    function clearFind(){
+      Array.prototype.forEach.call(document.querySelectorAll("#feed mark.fhit"), function(m){
+        var parent = m.parentNode; if (!parent) return;
+        parent.replaceChild(document.createTextNode(m.textContent), m);
+        parent.normalize();
+      });
+      find.hits = []; find.i = -1;
+    }
+    function runFind(q){
+      clearFind(); find.q = q;
+      var feed = document.getElementById("feed");
+      if (!q || !feed) return drawFindCount();
+      var ql = q.toLowerCase(), nodes = [];
+      Array.prototype.forEach.call(feed.querySelectorAll(".bubble, .sys, .tool .tx, .turncard .tcf, .plancard"), function(root){
+        var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+        for (var t = w.nextNode(); t; t = w.nextNode()) if (t.nodeValue && t.nodeValue.toLowerCase().indexOf(ql) >= 0) nodes.push(t);
+      });
+      var total = 0;
+      nodes.forEach(function(t){
+        if (total >= 500) return;
+        var text = t.nodeValue.toLowerCase(), at = [], from = 0, k;
+        while ((k = text.indexOf(ql, from)) >= 0 && total + at.length < 500) { at.push(k); from = k + ql.length; }
+        for (var j = at.length - 1; j >= 0; j--) {
+          var mid = t.splitText(at[j]); mid.splitText(q.length);
+          var m = document.createElement("mark"); m.className = "fhit";
+          mid.parentNode.replaceChild(m, mid); m.appendChild(mid);
+        }
+        total += at.length;
+      });
+      find.hits = Array.prototype.slice.call(feed.querySelectorAll("mark.fhit"));
+      find.i = find.hits.length ? find.hits.length - 1 : -1; // newest first: you usually want the latest
+      showFindHit();
+    }
+    function showFindHit(){
+      find.hits.forEach(function(m, i){ m.classList.toggle("cur", i === find.i); });
+      var m = find.hits[find.i];
+      if (m) {
+        for (var d = m.parentNode; d && d.id !== "feed"; d = d.parentNode) {
+          if (d.tagName === "DETAILS") d.open = true;
+          if (d.classList && d.classList.contains("clamped")) { d.classList.remove("clamped"); var sm = d.querySelector(".showmore"); if (sm) sm.textContent = "Show less"; }
+        }
+        m.scrollIntoView({ block: "center" });
+      }
+      drawFindCount();
+    }
+    function drawFindCount(){
+      var c = document.getElementById("findcount"); if (!c) return;
+      var more = document.getElementById("loadearlier");
+      c.innerHTML = !find.q ? "" : find.hits.length
+        ? (find.i + 1) + " of " + find.hits.length + (find.hits.length >= 500 ? "+" : "")
+        : "No matches" + (more ? ' \\u00b7 <button type="button" class="linkbtn" id="findearlier">search earlier</button>' : "");
+      var fe = document.getElementById("findearlier");
+      if (fe) fe.onclick = function(){ loadEarlier().then(function(){ runFind(find.q); }); };
+    }
+    function stepFind(dir){
+      if (!find.hits.length) return;
+      find.i = (find.i + dir + find.hits.length) % find.hits.length;
+      showFindHit();
+    }
+    function closeFind(){
+      clearFind(); find.q = "";
+      var b = document.getElementById("findbar"); if (b) b.remove();
+    }
+    function openFind(){
+      if (state.showTab) state.showTab("thread");
+      var sc = threadScroller(); if (!sc || !sc.parentNode) return;
+      var bar = document.getElementById("findbar");
+      if (!bar) {
+        var host = sc.parentNode;
+        if (getComputedStyle(host).position === "static") host.style.position = "relative";
+        bar = document.createElement("div");
+        bar.id = "findbar"; bar.className = "findbar"; bar.setAttribute("role", "search");
+        bar.innerHTML = ICONS.search + '<input id="findq" placeholder="Find in this chat" spellcheck="false" autocomplete="off" aria-label="find in this chat">' +
+          '<span class="findcount" id="findcount" aria-live="polite"></span>' +
+          '<button type="button" class="iconbtn" id="findprev" title="Previous (\\u21e7Enter)" aria-label="previous match">' + ICONS.up + "</button>" +
+          '<button type="button" class="iconbtn" id="findnext" title="Next (Enter)" aria-label="next match">' + ICONS.arrowDown + "</button>" +
+          '<button type="button" class="iconbtn" id="findx" title="Close (Esc)" aria-label="close find">' + ICONS.x + "</button>";
+        host.appendChild(bar);
+        var qi = document.getElementById("findq"), t = null;
+        qi.addEventListener("input", function(){ clearTimeout(t); var v = qi.value; t = setTimeout(function(){ runFind(v.trim()); }, 120); });
+        qi.addEventListener("keydown", function(e){
+          if (e.key === "Enter") { e.preventDefault(); stepFind(e.shiftKey ? 1 : -1); }
+          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); var bx = document.getElementById("box"); if (bx) bx.focus(); }
+        });
+        document.getElementById("findprev").onclick = function(){ stepFind(-1); };
+        document.getElementById("findnext").onclick = function(){ stepFind(1); };
+        document.getElementById("findx").onclick = closeFind;
+      }
+      var inp = document.getElementById("findq");
+      var sel = String(window.getSelection ? window.getSelection() : "").trim();
+      if (sel && sel.length < 80 && sel.indexOf("\\n") < 0) { inp.value = sel; runFind(sel); }
+      inp.focus(); inp.select();
+    }
+    state.openFind = openFind;
+    /** [ and ]: to your previous or next prompt in this chat. */
+    state.jumpPrompt = function(dir){
+      var sc = threadScroller(); if (!sc) return;
+      var top = sc.getBoundingClientRect().top;
+      var mine = Array.prototype.slice.call(document.querySelectorAll("#feed > .msg.user"));
+      if (!mine.length) return;
+      var pick = null;
+      if (dir < 0) { for (var i = mine.length - 1; i >= 0; i--) if (mine[i].getBoundingClientRect().top < top - 6) { pick = mine[i]; break; } }
+      else { for (var j = 0; j < mine.length; j++) if (mine[j].getBoundingClientRect().top > top + 24) { pick = mine[j]; break; } }
+      if (!pick) { toast(dir < 0 ? "that’s your first prompt here" : "that’s your last prompt here"); return; }
+      sc.scrollTop += pick.getBoundingClientRect().top - top - 12;
+      pick.classList.add("flash"); setTimeout(function(){ pick.classList.remove("flash"); }, 900);
+    };
+
+    // Select words in a reply → a small Quote button beside them.
+    (function(){
+      var feed = document.getElementById("feed"); if (!feed) return;
+      function hide(){ var q = document.getElementById("quotebtn"); if (q) q.remove(); }
+      feed.addEventListener("mouseup", function(){
+        setTimeout(function(){
+          if (pageGone()) return;
+          hide();
+          var sel = window.getSelection && window.getSelection();
+          var text = sel ? String(sel).trim() : "";
+          if (!text || !sel.rangeCount) return;
+          var a = sel.anchorNode, host = a && (a.nodeType === 1 ? a : a.parentNode);
+          if (!host || !host.closest || !host.closest("#feed .bubble")) return;
+          var r = sel.getRangeAt(0).getBoundingClientRect();
+          var b = document.createElement("button");
+          b.type = "button"; b.id = "quotebtn"; b.className = "quotebtn";
+          b.innerHTML = ICONS.quote + "Quote";
+          b.style.left = Math.max(8, Math.min(window.innerWidth - 100, r.left + r.width / 2 - 38)) + "px";
+          b.style.top = Math.max(8, r.top - 38) + "px";
+          b.onmousedown = function(ev){ ev.preventDefault(); };
+          b.onclick = function(){ quoteIntoComposer(text); hide(); if (sel.removeAllRanges) sel.removeAllRanges(); };
+          document.body.appendChild(b);
+        }, 0);
+      });
+      if (!state.quoteHideBound) {
+        state.quoteHideBound = true;
+        document.addEventListener("mousedown", function(ev){ if (!ev.target.closest || !ev.target.closest("#quotebtn")) { var q = document.getElementById("quotebtn"); if (q) q.remove(); } }, true);
+      }
+      var sc = threadScroller(); if (sc) sc.addEventListener("scroll", hide, { passive: true });
+    })();
+
+    // ---- day separators ----------------------------------------------------------
+    function dayLabel(ts){
+      var d = new Date(ts), t = new Date();
+      var d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      var t0 = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+      var diff = Math.round((t0 - d0) / 86400000);
+      if (diff === 0) return "Today";
+      if (diff === 1) return "Yesterday";
+      if (diff > 1 && diff < 7) return d.toLocaleDateString([], { weekday: "long" });
+      var o = { weekday: "short", month: "short", day: "numeric" };
+      if (d.getFullYear() !== t.getFullYear()) o.year = "numeric";
+      return d.toLocaleDateString([], o);
+    }
+    var daysQueued = false;
+    function markDays(){
+      if (daysQueued) return;
+      daysQueued = true;
+      setTimeout(function(){
+        daysQueued = false;
+        if (pageGone()) return;
+        var feed = document.getElementById("feed"); if (!feed) return;
+        Array.prototype.forEach.call(feed.querySelectorAll(":scope > .daysep"), function(n){ n.remove(); });
+        var last = "";
+        Array.prototype.forEach.call(feed.querySelectorAll(":scope > .msg[data-ts]"), function(n){
+          var ts = Number(n.getAttribute("data-ts")); if (!ts) return;
+          var key = new Date(ts).toDateString();
+          if (key === last) return;
+          last = key;
+          var sep = document.createElement("div");
+          sep.className = "daysep"; sep.setAttribute("role", "separator");
+          sep.innerHTML = "<span>" + esc(dayLabel(ts)) + "</span>";
+          feed.insertBefore(sep, n);
+          n.classList.remove("cont"); // a new day gets its byline back
+        });
+        clampLong(feed);
+      }, 0);
+    }
+    /** A reply taller than a screen folds behind Show more. */
+    function clampLong(feed){
+      Array.prototype.forEach.call(feed.querySelectorAll(":scope > .msg.agent:not(.live):not([data-ck])"), function(m){
+        m.setAttribute("data-ck", "1");
+        var b = m.querySelector(".bubble");
+        if (!b || b.scrollHeight < 760) return;
+        m.classList.add("clamped");
+        var btn = document.createElement("button");
+        btn.type = "button"; btn.className = "showmore";
+        btn.textContent = "Show more";
+        btn.onclick = function(ev){
+          ev.stopPropagation();
+          var open = m.classList.toggle("clamped");
+          btn.textContent = open ? "Show more" : "Show less";
+          if (open) m.scrollIntoView({ block: "nearest" });
+        };
+        b.insertAdjacentElement("afterend", btn);
+      });
+    }
+
+    // ---- export ----------------------------------------------------------------
+    /** The whole chat as Markdown: prompts, replies, what was done, what changed. */
+    function exportThread(){
+      toast("gathering the whole chat\\u2026");
+      var all = [], pages = 0;
+      function page(before){
+        return api("/api/projects/" + pid + "/events?limit=500&chat=" + encodeURIComponent(chatId) + (before ? "&before=" + before : ""))
+          .then(function(j){
+            var evs = j.events || [];
+            all = evs.concat(all); pages++;
+            if (evs.length >= 500 && pages < 20) return page(evs[0].id);
+          });
+      }
+      return page(0).then(function(){
+        var c = ((state.project && state.project.chats) || []).filter(function(q){ return q.id === chatId; })[0];
+        var title = ((state.project && state.project.name) || "Loom") + " \\u2014 " + ((c && c.title) || "Main");
+        var out = ["# " + title, "", "_Exported from Loom " + new Date().toLocaleString() + " \\u00b7 " + all.length + " events_", ""];
+        var day = "";
+        all.forEach(function(e){
+          var p = e.payload || {}, when = new Date(Number(e.ts) || 0);
+          var d = when.toDateString(); if (d !== day) { day = d; out.push("", "---", "", "*" + dayLabel(Number(e.ts)) + "*", ""); }
+          var hm = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          if (e.kind === "message" && !e.agentId && p.author !== "loom") out.push("", "### You \\u00b7 " + hm, "", String(p.text || ""));
+          else if (e.kind === "message" && e.agentId && !p.reasoning) out.push("", "### " + labelOf(e.agentId) + (p.model ? " (" + p.model + ")" : "") + " \\u00b7 " + hm + (p.partial ? " \\u00b7 stopped" : ""), "", String(p.text || ""));
+          else if (e.kind === "tool_call") out.push("- \\u2699 " + String(p.summary || p.tool || p.name || "tool").split("\\n")[0]);
+          else if (e.kind === "turn_diff") out.push("", "> Edited " + (p.files || []).length + " file(s) \\u00b7 +" + Number(p.added || 0) + " \\u2212" + Number(p.removed || 0) + ": " + (p.files || []).map(function(f){ return f.path; }).slice(0, 12).join(", "));
+          else if (e.kind === "error") out.push("", "> **Error** (" + (e.agentId || "loom") + "): " + String(p.message || p.error || "").split("\\n")[0]);
+          else if (e.kind === "run_complete") out.push("", "_" + (e.agentId || "agent") + " finished" + (p.durationMs ? " in " + durfmt(p.durationMs) : "") + (p.costUsd ? " \\u00b7 $" + Number(p.costUsd).toFixed(4) : "") + "_");
+        });
+        var blob = new Blob([out.join("\\n") + "\\n"], { type: "text/markdown" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = title.replace(/[^\\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase() + ".md";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+        toast("exported " + a.download);
+      }).catch(function(err){ toast(err.message); });
+    }
+    state.exportThread = exportThread;
+
     function send(){
       if (state.cmode === "orch") return sendOrchestra();
       var box = document.getElementById("box");
@@ -8309,9 +11235,16 @@ ${BRAND_SPRITE}
       });
       var full = refs.length ? refs.join("\\n") + (text ? "\\n\\n" + text : "") : text;
 
-      box.value = ""; autosizeBox(); attach = []; drawAttach();
+      // Loom isn't answering: keep the words and send them when it's back,
+      // rather than clearing the box for a request that can't land.
+      if (state.daemonUp === false) { holdForReconnect(full); return; }
+
+      box.value = ""; autosizeBox(); attach = []; drawAttach(); clearDraft(); recall.i = -1;
       var p = state.project || {};
       var plan = planState;
+      // what you just sent should be on screen, wherever you'd scrolled to
+      forceScroll = true;
+      var hero = document.getElementById("threadempty"); if (hero) hero.remove();
 
       // An orchestra's own thread talks to its orchestrator: a reply answers
       // its question, or steers the run mid-flight (and reopens a finished
@@ -8364,7 +11297,7 @@ ${BRAND_SPRITE}
       if (wouldQueue()) {
         queueFromComposer(full, plan).catch(function(err){
           toast(err.message);
-          box.value = full; autosizeBox(); // a refused queue leaves what you wrote where you wrote it
+          box.value = full; autosizeBox(); saveDraft(); // a refused queue leaves what you wrote where you wrote it
         });
         return;
       }
@@ -8376,9 +11309,54 @@ ${BRAND_SPRITE}
       chain.then(function(){
         // into the chat you're looking at — the agent's reply comes back here
         return api("/api/projects/" + pid + "/messages", { method: "POST",
-          body: JSON.stringify({ text: full, agentId: (state.auto ? undefined : state.selected) || undefined, chat: chatId, plan: plan || undefined }) });
-      }).then(refresh).catch(function(err){ toast(err.message); });
+          body: JSON.stringify({ text: full, agentId: (state.auto ? undefined : state.selected) || undefined, chat: chatId, plan: plan || undefined, length: replyLength() || undefined }) });
+      }).then(function(){
+        // Show who's on it straight away; the first thing the agent logs or
+        // types takes the line over from here.
+        var who = (!state.auto && state.selected) || (state.project && state.project.holder) || p.holder;
+        if (who && historyLoaded) { liveFor(who); drawEmpty(); stickOrFlag(true); }
+        return refresh();
+      }).catch(function(err){
+        if (err && err.offline) { var bx = document.getElementById("box"); if (bx && !bx.value) { bx.value = full; autosizeBox(); } holdForReconnect(full); return; }
+        toast(err.message);
+      });
     }
+    /** Brief / Normal / Detailed — how long replies should be, per project, on this device. */
+    function replyLength(){ try { var v = localStorage.getItem("loomLength:" + pid); return v === "brief" || v === "detailed" ? v : ""; } catch (e) { return ""; } }
+    function setReplyLength(v){
+      try { if (v) localStorage.setItem("loomLength:" + pid, v); else localStorage.removeItem("loomLength:" + pid); } catch (e) {}
+      drawLengthPill();
+      toast(v === "brief" ? "replies will be brief" : v === "detailed" ? "replies will be detailed" : "replies back to normal length");
+    }
+    function drawLengthPill(){
+      var old = document.getElementById("lenpill"); if (old) old.remove();
+      var v = replyLength(); if (!v) return;
+      var plan = document.getElementById("planbtn"); if (!plan || !plan.parentNode) return;
+      var b = document.createElement("button");
+      b.type = "button"; b.id = "lenpill"; b.className = "lenpill";
+      b.title = "reply length for this project — click for normal";
+      b.textContent = v === "brief" ? "Brief" : "Detailed";
+      b.onclick = function(){ setReplyLength(""); };
+      plan.parentNode.insertBefore(b, plan);
+    }
+    /** A prompt waiting for the daemon to come back, shown above the composer. */
+    function holdForReconnect(full){
+      state.heldSend = { pid: pid, chat: chatId, text: full, agent: (!state.auto && state.selected) || null };
+      saveDraft();
+      var old = document.getElementById("heldnote"); if (old) old.remove();
+      var form = document.getElementById("cform"); if (!form) return;
+      var n = document.createElement("div");
+      n.id = "heldnote"; n.className = "heldnote"; n.setAttribute("role", "status");
+      n.innerHTML = '<span class="obspin"></span><span>Loom isn’t answering — this sends as soon as it’s back.</span><button type="button" class="linkbtn" id="heldcancel">Don’t send</button>';
+      form.parentNode.insertBefore(n, form);
+      document.getElementById("heldcancel").onclick = function(){ state.heldSend = null; n.remove(); toast("kept in the composer — it won’t send by itself"); };
+    }
+    state.onReconnect = function(){
+      var h = state.heldSend; if (!h || h.pid !== pid || h.chat !== chatId) return;
+      state.heldSend = null;
+      var n = document.getElementById("heldnote"); if (n) n.remove();
+      setTimeout(function(){ if (!pageGone()) { composeFor(h.text, h.agent, true); toast("sent — Loom is back"); } }, 700);
+    };
 
     // ---- the prompt queue --------------------------------------------------
     // What you've lined up while something else is running. Yours until it's
@@ -8530,8 +11508,8 @@ ${BRAND_SPRITE}
         qAct("/pause", { method: "POST", body: JSON.stringify({ paused: !queue.paused }) });
       };
       el.querySelector('[data-q="clear"]').onclick = function(){
-        if (queue.items.length > 1 && !window.confirm("Drop all " + queue.items.length + " queued prompts?")) return;
-        qAct("", { method: "DELETE" });
+        (queue.items.length > 1 ? askConfirm("Drop all " + queue.items.length + " queued prompts?", { ok: "Drop them", danger: true }) : Promise.resolve(true))
+          .then(function(ok){ if (ok) qAct("", { method: "DELETE" }); });
       };
       Array.prototype.forEach.call(el.querySelectorAll(".cqitem"), function(row){
         var id = row.getAttribute("data-qid");
@@ -8610,6 +11588,15 @@ ${BRAND_SPRITE}
       box.style.height = "auto";
       // floor at two lines (48px), grow to a cap, then let it scroll
       box.style.height = Math.max(48, Math.min(200, box.scrollHeight)) + "px";
+      // send lights up only when there's something to send
+      var cf = document.getElementById("cform"); if (cf) cf.classList.toggle("hastext", !!box.value.trim());
+      // a long prompt says roughly how long (about four characters a token)
+      var ct = document.getElementById("ctok");
+      if (ct) {
+        var n = Math.round(box.value.length / 4);
+        ct.textContent = n >= 250 ? "~" + (n >= 1000 ? (n / 1000).toFixed(1) + "k" : n) + " tokens" : "";
+        ct.title = n >= 250 ? "a rough count: about four characters a token" : "";
+      }
     }
 
     function drawAttach(){
@@ -8684,7 +11671,7 @@ ${BRAND_SPRITE}
       if (!items.length) { closeMenu(); return; }
       menuState.items = items; if (menuState.sel == null) menuState.sel = 0;
       if (menuState.sel >= items.length) menuState.sel = items.length - 1;
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu";
       m.innerHTML = (head ? '<div class="cmhead">' + esc(head) + "</div>" : "") +
         items.map(function(it, i){
           return '<div class="cmi' + (i === menuState.sel ? " sel" : "") + '" data-i="' + i + '">' +
@@ -8786,8 +11773,30 @@ ${BRAND_SPRITE}
         .catch(function(){ closeMenu(); });
     }
 
+    /**
+     * What a model is for, in a few words — the pickers used to be a column of
+     * bare slugs, and "which one do I want" was left to memory. Only claims we
+     * can stand behind: the families' published positioning, nothing measured.
+     */
+    function modelBlurb(m){
+      var s = String(m || "").toLowerCase();
+      if (/opus/.test(s)) return "most capable \\u00b7 deepest reasoning";
+      if (/sonnet/.test(s)) return "balanced \\u00b7 fast and capable";
+      if (/haiku/.test(s)) return "fastest \\u00b7 lightest";
+      if (/fable/.test(s)) return "frontier \\u00b7 long, hard tasks";
+      if (/mini|flash|lite|nano|small/.test(s)) return "fast \\u00b7 inexpensive";
+      if (/:free$/.test(s)) return "free tier";
+      if (/codex/.test(s)) return "tuned for coding";
+      if (/pro|max|large|ultra/.test(s)) return "high capability";
+      return "";
+    }
+    /** "anthropic/claude-sonnet-4" → name "claude-sonnet-4", from "anthropic". */
+    function modelParts(m){
+      var v = String(m || ""), cut = v.lastIndexOf("/");
+      return cut > 0 ? { name: v.slice(cut + 1), from: v.slice(0, cut) } : { name: v, from: "" };
+    }
     function openModelMenu(who){
-      // Orchestrate has no "selected" agent \u2014 it has a cast \u2014 so the caller
+      // Orchestrate has no "selected" agent — it has a cast — so the caller
       // names the one it means. Chat still means whoever the composer is aimed at.
       var agentId = who || state.selected;
       var p = state.project || {};
@@ -8795,17 +11804,37 @@ ${BRAND_SPRITE}
       if (!cur || cur.tier === "bridge") { toast("pick an adapter first \\u2014 bridges choose their own model"); return; }
       var m = document.getElementById("cmenu"); if (!m) return;
       menuState = { kind: "modelmenu", agent: agentId, at: 0, sel: 0, items: [] };
-      m.style.display = "block"; m.className = "cmenu";
-      m.innerHTML = '<div class="cmhead">model \\u00b7 ' + esc(cur.id) + '</div>' +
-        '<input class="cmsearch" id="cmsearch" placeholder="search real models\\u2026" spellcheck="false" autocomplete="off">' +
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu picker";
+      m.innerHTML = '<div class="cmhead">' + agentGlyph(cur.kind, cur.id) + "<span>Model for " + esc(agentLabel(cur.kind, cur.id)) + "</span></div>" +
+        '<div class="cmsearchwrap">' + ICONS.search + '<input class="cmsearch" id="cmsearch" placeholder="Search models\\u2026" spellcheck="false" autocomplete="off"></div>' +
         '<div class="cmlist" id="cmlist">' + LOADER + '</div>';
       setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
       var active = cur.model || "";
-      var allModels = [];
+      var allModels = [], rowsNow = [], hi = 0;
       function choose(val){
-        if (val === "__custom__"){ closeMenu(); var typed = window.prompt("Model for " + cur.id + " (blank = default):", active); if (typed === null) return; val = typed.trim(); }
+        if (val === "__custom__"){
+          closeMenu();
+          askText("Model for " + cur.id, { value: active, placeholder: "blank = the agent’s default", ok: "Use this model" }).then(function(typed){
+            if (typed === null) return;
+            choose(typed.trim() || "");
+          });
+          return;
+        }
         else closeMenu();
+        if (val === active || (cur.kind === "model" && active && val.slice(val.indexOf("/") + 1) === active)) return;
+        // A model agent's list spans every provider, each id led by the one
+        // it's from; send that apart, so the provider gets a name it knows.
+        if (cur.kind === "model" && allModels.indexOf(val) >= 0 && val.indexOf("/") > 0) {
+          setModel(agentId, val.slice(val.indexOf("/") + 1), val.slice(0, val.indexOf("/")));
+          return;
+        }
         setModel(agentId, val);
+      }
+      function mark(){
+        var list = document.getElementById("cmlist"); if (!list) return;
+        Array.prototype.forEach.call(list.querySelectorAll("[data-mv]"), function(r, i){ r.classList.toggle("sel", i === hi); });
+        var on = list.querySelectorAll("[data-mv]")[hi];
+        if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
       }
       // The real models the tool itself reports (opencode ~500 across providers,
       // grok its own); codex/claude are their shipped sets.
@@ -8814,20 +11843,40 @@ ${BRAND_SPRITE}
         var shown = f ? allModels.filter(function(mm){ return mm.toLowerCase().indexOf(f) >= 0; }) : allModels;
         var cap = 200; // don't paint 500 rows — the search narrows it
         var head = cur.kind === "model" ? []
-          : [{ label: "Default", sub: cur.kind + "'s own choice", value: "" }];
-        if (!f) head.push({ label: "Custom\\u2026", value: "__custom__", plus: true });
-        var rows = head.concat(shown.slice(0, cap).map(function(mm){ return { label: mm, value: mm }; }));
+          : [{ label: "Default", sub: "whatever " + agentLabel(cur.kind, cur.id) + " picks", value: "" }];
+        // Free models first: on a provider's free tier they cost nothing, and
+        // "which of these 300 is free" shouldn't take a search to answer.
+        var free = shown.filter(function(mm){ return /:free$/.test(mm); });
+        var paid = shown.filter(function(mm){ return !/:free$/.test(mm); });
+        var ordered = free.concat(paid).slice(0, cap);
+        rowsNow = head.concat(ordered.map(function(mm){ return { label: mm, value: mm, group: /:free$/.test(mm) ? "Free" : (free.length ? "Paid" : "") }; }));
+        if (!f) rowsNow.push({ label: "Custom model\\u2026", value: "__custom__", plus: true });
+        // A model agent stores "vendor/model" apart from its provider, while
+        // the list leads with the provider: match either way.
+        var isCur = function(v){ return !!v && (v === active || (cur.kind === "model" && !!active && v.slice(v.indexOf("/") + 1) === active)); };
+        hi = Math.max(0, rowsNow.map(function(r){ return isCur(r.value) || (r.value === "" && active === ""); }).indexOf(true));
+        if (f) hi = 0;
         var list = document.getElementById("cmlist"); if (!list) return;
-        list.innerHTML = rows.map(function(it){
-          var tick = it.value === active;
-          return '<div class="cmi" data-mv="' + esc(String(it.value)) + '"><span class="ic">' + (it.plus ? ICONS.plus : ICONS.gear) + '</span><span>' +
-            esc(it.label) + '</span>' + (tick ? '<span class="tick">' + ICONS.info + '</span>' : (it.sub ? '<span class="sub">' + esc(it.sub) + '</span>' : '')) + '</div>';
+        var lastGroup = "";
+        list.innerHTML = rowsNow.map(function(it){
+          var tick = !it.plus && (isCur(it.value) || (it.value === "" && active === ""));
+          var gh = it.group && it.group !== lastGroup ? '<div class="cmgroup">' + esc(it.group) + "</div>" : "";
+          if (it.group) lastGroup = it.group;
+          var parts = it.plus || it.value === "" ? { name: it.label, from: "" } : modelParts(it.label);
+          var blurb = it.sub || (it.plus ? "type any id the tool accepts" : modelBlurb(it.value));
+          return gh + '<div class="cmi mrow' + (tick ? " cur" : "") + '" data-mv="' + esc(String(it.value)) + '">' +
+            '<span class="ic">' + (it.plus ? ICONS.plus : it.value === "" ? ICONS.sparkles : '<span class="mdot"></span>') + "</span>" +
+            '<span class="mtx"><span class="mnm">' + esc(parts.name) + (parts.from ? '<span class="mfrom">' + esc(parts.from) + "</span>" : "") + "</span>" +
+            (blurb ? '<span class="mbl">' + esc(blurb) + "</span>" : "") + "</span>" +
+            (tick ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</div>";
         }).join("") +
           (shown.length > cap ? '<div class="cmmore">' + (shown.length - cap) + ' more \\u2014 keep typing to narrow</div>' : "") +
-          (f && !shown.length ? '<div class="cmmore">no match \\u00b7 Enter to use \\u201c' + esc(filter) + '\\u201d</div>' : "");
-        Array.prototype.forEach.call(list.querySelectorAll("[data-mv]"), function(row){
+          (f && !shown.length ? '<div class="cmmore">No match \\u00b7 Enter uses \\u201c' + esc(filter) + '\\u201d as typed</div>' : "");
+        Array.prototype.forEach.call(list.querySelectorAll("[data-mv]"), function(row, i){
           row.onmousedown = function(ev){ ev.preventDefault(); choose(row.getAttribute("data-mv")); };
+          row.onmousemove = function(){ if (hi !== i) { hi = i; mark(); } };
         });
+        mark();
       }
       api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agentId) + "/models").then(function(j){
         allModels = (j && j.models) || [];
@@ -8835,34 +11884,123 @@ ${BRAND_SPRITE}
         // ship" are different claims, and only one of them goes stale silently.
         var mn = document.getElementById("cmenu");
         if (mn && j && j.source){
-          var note = j.source === "cli" ? "asked " + esc(cur.kind || "the tool")
-            : j.source === "api" ? "asked every provider with a key \\u2014 " + (j.count || 0) + " models"
-            : j.source === "builtin" ? esc(cur.kind || "this tool") + " can\\u2019t list models \\u2014 these are its documented aliases"
-            : "no model list for this agent";
+          var note = j.source === "cli" ? "Listed by " + esc(agentLabel(cur.kind, cur.id)) + " itself"
+            : j.source === "api" ? "From every provider with a key \\u00b7 " + (j.count || 0) + " models"
+            : j.source === "builtin" ? esc(agentLabel(cur.kind, cur.id)) + " can\\u2019t list its models \\u2014 these are its documented aliases"
+            : "No model list for this agent";
           var ft = document.createElement("div");
           ft.className = "cmfoot"; ft.textContent = note;
           mn.appendChild(ft);
         }
         var sb = document.getElementById("cmsearch");
         if (sb){
-          var head0 = document.getElementById("cmlist");
           sb.oninput = function(){ render(sb.value); };
-          sb.onkeydown = function(e){ if (e.key === "Enter"){ var v = sb.value.trim(); if (v) choose(v); } if (e.key === "Escape"){ closeMenu(); } };
+          sb.onkeydown = function(e){
+            if (e.key === "ArrowDown") { e.preventDefault(); hi = Math.min(rowsNow.length - 1, hi + 1); mark(); return; }
+            if (e.key === "ArrowUp") { e.preventDefault(); hi = Math.max(0, hi - 1); mark(); return; }
+            if (e.key === "Enter"){
+              e.preventDefault();
+              var v = sb.value.trim();
+              var match = rowsNow[hi];
+              if (match && (!v || rowsNow.length)) choose(match.value);
+              else if (v) choose(v);
+              return;
+            }
+            if (e.key === "Escape"){ e.preventDefault(); closeMenu(); var box = document.getElementById("box"); if (box) box.focus(); }
+          };
           sb.focus();
         }
         render("");
       }).catch(function(err){
-        var list = document.getElementById("cmlist"); if (list) list.innerHTML = '<div class="cmmore">could not list models</div>';
+        var list = document.getElementById("cmlist"); if (list) list.innerHTML = '<div class="cmmore">Couldn\\u2019t list models \\u2014 ' + esc(err && err.message || "") + "</div>";
         clog("error", "models", "list failed: " + (err && err.message), err && err.stack);
       });
     }
 
     /**
-     * Who this chat talks to. The agent chip in the composer was a dead label —
-     * you could see "opencode" but not change it without hunting the sidebar.
-     * Now it's a real picker: every agent in the project, brand mark and role,
-     * the current one ticked. Selecting one aims the composer (state.selected);
-     * send then hands it the baton.
+     * Ask several models the same thing, and read the answers side by side —
+     * a thread each (POST /ask). It lived only in the CLI; this is the same
+     * call from the composer: tick the models, and what's in the box goes to
+     * all of them. Free models first, and the ticks are remembered.
+     */
+    function openAskSeveral(){
+      var m = document.getElementById("cmenu"); if (!m) return;
+      menuState = { kind: "askmenu", at: 0, sel: 0, items: [] };
+      var picked = state.askPicked || (state.askPicked = {});
+      m.style.display = "block"; m.className = "cmenu picker askpick"; fitMenu(m);
+      m.innerHTML = '<div class="cmhead">' + ICONS.sparkles + "<span>Ask several models</span></div>" +
+        '<div class="cmsearchwrap">' + ICONS.search + '<input class="cmsearch" id="asksearch" placeholder="Search models\u2026" spellcheck="false" autocomplete="off"></div>' +
+        '<div class="cmlist" id="asklist">' + LOADER + "</div>" +
+        '<div class="askfoot"><span id="askn" class="askn"></span><button class="btn xs primary" id="askgo" type="button" disabled>Ask</button></div>';
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      var all = [];
+      function count(){ return Object.keys(picked).filter(function(k){ return picked[k]; }).length; }
+      function foot(){
+        var n = count(), go = document.getElementById("askgo"), nn = document.getElementById("askn");
+        if (nn) nn.textContent = n ? n + " model" + (n === 1 ? "" : "s") + " \u00b7 one thread each" : "Tick the models to ask";
+        if (go) { go.disabled = !n; go.textContent = n ? "Ask " + n : "Ask"; }
+      }
+      function render(f){
+        f = String(f || "").trim().toLowerCase();
+        var shown = all.filter(function(x){ return !f || x.key.toLowerCase().indexOf(f) >= 0; });
+        shown.sort(function(a, b){ return (b.free - a.free) || (picked[b.key] ? 1 : 0) - (picked[a.key] ? 1 : 0); });
+        var list = document.getElementById("asklist"); if (!list) return;
+        var cap = 150, lastG = "";
+        list.innerHTML = shown.slice(0, cap).map(function(x){
+          var g = x.free ? "Free" : "Paid", gh = g !== lastG ? '<div class="cmgroup">' + g + "</div>" : "";
+          lastG = g;
+          return gh + '<div class="cmi mrow askrow' + (picked[x.key] ? " cur" : "") + '" data-ak="' + esc(x.key) + '">' +
+            '<span class="cwon">' + (picked[x.key] ? ICONS.check : "") + "</span>" +
+            '<span class="mtx"><span class="mnm">' + esc(x.id.split("/").pop()) + '<span class="mfrom">' + esc(x.provider + (x.id.indexOf("/") > 0 ? " \u00b7 " + x.id.split("/")[0] : "")) + "</span></span>" +
+            (modelBlurb(x.id) ? '<span class="mbl">' + esc(modelBlurb(x.id)) + "</span>" : "") + "</span></div>";
+        }).join("") + (shown.length > cap ? '<div class="cmmore">' + (shown.length - cap) + " more \u2014 keep typing to narrow</div>" : "") +
+          (!shown.length ? '<div class="cmmore">' + (all.length ? "No match" : "No provider has a key yet \u2014 add one in Settings") + "</div>" : "");
+        Array.prototype.forEach.call(list.querySelectorAll("[data-ak]"), function(r){
+          r.onmousedown = function(ev){
+            ev.preventDefault();
+            var k = r.getAttribute("data-ak");
+            picked[k] = !picked[k];
+            r.classList.toggle("cur", !!picked[k]);
+            r.querySelector(".cwon").innerHTML = picked[k] ? ICONS.check : "";
+            foot();
+          };
+        });
+        foot();
+      }
+      var go = document.getElementById("askgo");
+      if (go) go.onmousedown = function(ev){
+        ev.preventDefault();
+        var box = document.getElementById("box");
+        var text = box ? box.value.trim() : "";
+        var keys = Object.keys(picked).filter(function(k){ return picked[k]; });
+        if (!text) { toast("type the question first, then pick the models"); if (box) box.focus(); return; }
+        if (!keys.length) return;
+        go.disabled = true; go.textContent = "Asking\u2026";
+        api("/api/projects/" + pid + "/ask", { method: "POST", body: JSON.stringify({ text: text, models: keys }) })
+          .then(function(j){
+            closeMenu();
+            if (box) { box.value = ""; autosizeBox(); }
+            var asked = (j && j.asked) || [];
+            toast("asked " + asked.length + " model" + (asked.length === 1 ? "" : "s") + " \u2014 a thread each");
+            if (state.refreshShell) state.refreshShell();
+            if (asked[0] && asked[0].chat && state.setChat) state.setChat(pid, asked[0].chat);
+          })
+          .catch(function(err){ toast(err.message); go.disabled = false; foot(); });
+      };
+      api("/api/models").then(function(j){
+        all = ((j && j.models) || []).map(function(x){ return { key: x.provider + "/" + x.id, id: x.id, provider: x.provider, free: x.free ? 1 : 0 }; });
+        var sb = document.getElementById("asksearch");
+        if (sb) { sb.oninput = function(){ render(sb.value); }; sb.focus(); }
+        render("");
+      }).catch(function(err){
+        var list = document.getElementById("asklist"); if (list) list.innerHTML = '<div class="cmmore">Couldn\u2019t list models \u2014 ' + esc(err.message || "") + "</div>";
+      });
+    }
+
+    /**
+     * Who this chat talks to: every agent in the project with its mark, the
+     * model it's on and what it may do, the current one ticked. Selecting one
+     * aims the composer (state.selected); send then hands it the baton.
      */
     function openAgentMenu(){
       var p = state.project || {};
@@ -8870,31 +12008,44 @@ ${BRAND_SPRITE}
       if (!agents.length) { toast("no agents in this project yet"); return; }
       menuState = { kind: "agentmenu", at: 0, sel: 0, items: [] };
       var m = document.getElementById("cmenu"); if (!m) return;
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu picker";
+      function row(a, i){
+        var tick = !state.auto && a.id === state.selected;
+        var lbl = agentLabel(a.kind, a.id);
+        var bits = [];
+        // the roster id, only when it tells two agents apart ("antigravity"
+        // for kind "antigravity-cli" doesn't)
+        if (a.id !== lbl && a.id !== a.kind && String(a.kind || "").indexOf(a.id) !== 0) bits.push(a.id);
+        if (a.tier === "bridge") bits.push("drives its own window");
+        else {
+          bits.push(a.model ? shortModel(a.model) : (a.kind === "model" ? "no model yet" : "default model"));
+          var pm = permOf(a); if (pm) bits.push(PERM_NAMES[pm] || pm);
+        }
+        return '<div class="cmi arow2' + (tick ? " cur" : "") + '" data-ai="' + i + '"><span class="ic">' + agentGlyph(a.kind, a.id, "brand lg") + "</span>" +
+          '<span class="mtx"><span class="mnm">' + esc(lbl) + (a.id === p.holder ? '<span class="mfrom">baton</span>' : "") + '</span><span class="mbl">' + esc(bits.join(" \\u00b7 ")) + "</span></span>" +
+          (a.busy ? '<span class="cmbusy">working</span>' : "") +
+          (tick ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</div>";
+      }
+      var live = agents.map(function(a, i){ return { a: a, i: i }; }).filter(function(x){ return x.a.enabled !== false; });
+      var adapters = live.filter(function(x){ return x.a.tier !== "bridge"; });
+      var bridges = live.filter(function(x){ return x.a.tier === "bridge"; });
       // AUTO leads the list — it's the "let the system choose" option, not an agent.
-      m.innerHTML = '<div class="cmhead">who runs this turn</div>' +
-        '<div class="cmi cmauto' + (state.auto ? " on" : "") + '" data-auto="1"><span class="ic"><span class="autodot"></span></span><span>AUTO</span>' +
-          (state.auto ? '<span class="tick">' + ICONS.info + "</span>" : '<span class="sub">smart routing</span>') + "</div>" +
-        agents.map(function(a, i){
-          var tick = !state.auto && a.id === state.selected;
-          var lbl = agentLabel(a.kind, a.id);
-          // the product name leads; the roster id follows when it says more
-          // (two Claude Codes with different roles are told apart by it)
-          var sub = agentSub(a, lbl);
-          return '<div class="cmi" data-ai="' + i + '"><span class="ic">' + agentGlyph(a.kind, a.id) + "</span><span>" + esc(lbl) + "</span>" +
-            (a.busy ? '<span class="cmbusy">working</span>' : "") +
-            (tick ? '<span class="tick"' + (a.busy ? ' style="margin-left:6px"' : "") + ">" + ICONS.info + "</span>"
-              : (sub && !a.busy ? '<span class="sub">' + esc(sub) + "</span>" : "")) + "</div>";
-        }).join("") +
+      m.innerHTML = '<div class="cmhead"><span>Who takes this turn</span></div>' +
+        '<div class="cmi arow2 cmauto' + (state.auto ? " on cur" : "") + '" data-auto="1"><span class="ic"><span class="autodot"></span></span>' +
+          '<span class="mtx"><span class="mnm">Auto</span><span class="mbl">Loom routes each turn to the right agent</span></span>' +
+          (state.auto ? '<span class="tick">' + ICONS.check + "</span>" : "") + "</div>" +
+        '<div class="cmsep"></div>' +
+        adapters.map(function(x){ return row(x.a, x.i); }).join("") +
+        (bridges.length ? '<div class="cmgroup">Windows Loom drives</div>' + bridges.map(function(x){ return row(x.a, x.i); }).join("") : "") +
         // Cursor is on its way; listing it (inert) says so where you'd look for it.
         '<div class="cmsep"></div><div class="cmi soon" aria-disabled="true"><span class="ic">' + agentGlyph("", "cursor") +
           '</span><span>Cursor</span><span class="sub">coming soon</span></div>';
       var auto = m.querySelector("[data-auto]");
       if (auto) auto.onmousedown = function(ev){ ev.preventDefault(); closeMenu(); setAuto(true); var box = document.getElementById("box"); if (box) box.focus(); };
-      Array.prototype.forEach.call(m.querySelectorAll("[data-ai]"), function(row){
-        row.onmousedown = function(ev){
+      Array.prototype.forEach.call(m.querySelectorAll("[data-ai]"), function(r){
+        r.onmousedown = function(ev){
           ev.preventDefault();
-          var a = agents[Number(row.getAttribute("data-ai"))];
+          var a = agents[Number(r.getAttribute("data-ai"))];
           closeMenu();
           if (!a) return;
           if (a.id === state.selected && !state.auto) return;
@@ -8907,12 +12058,14 @@ ${BRAND_SPRITE}
       setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
     }
 
-    function setModel(agentId, model){
+    function setModel(agentId, model, provider){
       api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agentId) + "/model", {
-        method: "POST", body: JSON.stringify({ model: model }),
+        method: "POST", body: JSON.stringify(provider ? { model: model, provider: provider } : { model: model }),
       }).then(function(){
-        toast(model ? (agentId + " \\u2192 " + model) : (agentId + " \\u2192 default model"));
-        refresh();
+        toast(model ? (agentId + " \\u2192 " + shortModel(model)) : (agentId + " \\u2192 default model"));
+        // The Orchestrate cast wears each agent's model on its chip; the
+        // status poll doesn't redraw it, so a pick looked like it hadn't taken.
+        return refresh().then(function(){ drawOrchControls(); updateModelLabel(); });
       }).catch(function(err){ toast(err.message); });
     }
 
@@ -8941,7 +12094,8 @@ ${BRAND_SPRITE}
       box.setAttribute("data-bound", "1");
       autosizeBox();
 
-      box.addEventListener("input", function(){ autosizeBox(); scanTrigger(); scheduleSkillSuggest(box.value); });
+      box.addEventListener("input", function(){ autosizeBox(); scanTrigger(); scheduleSkillSuggest(box.value); form.classList.toggle("hastext", !!box.value.trim()); saveDraft(); recall.i = -1; });
+      restoreDraft();
       loadSkillCache();
       box.addEventListener("keydown", function(e){
         // Menu open: arrows move, Enter/Tab accept, Esc closes.
@@ -8950,6 +12104,20 @@ ${BRAND_SPRITE}
           if (e.key === "ArrowUp") { e.preventDefault(); menuState.sel = (menuState.sel - 1 + menuState.items.length) % menuState.items.length; renderMenu(menuState.items, menuState.kind === "cmd" ? "actions" : "files"); return; }
           if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); acceptMenu(menuState.sel); return; }
           if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
+        }
+        // ↑/↓ in an empty composer walk back through what you sent here.
+        if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+          var untouched = box.value === "" || (recall.i >= 0 && box.value === recall.shown);
+          var mine = untouched ? myPrompts() : [];
+          if (mine.length && (e.key === "ArrowUp" ? recall.i < mine.length - 1 : recall.i >= 0)) {
+            e.preventDefault();
+            recall.i += e.key === "ArrowUp" ? 1 : -1;
+            recall.shown = recall.i >= 0 ? mine[recall.i] : "";
+            box.value = recall.shown; autosizeBox();
+            box.setSelectionRange(box.value.length, box.value.length);
+            form.classList.toggle("hastext", !!box.value.trim());
+            return;
+          }
         }
         // Enter sends; Shift+Enter is a newline.
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
@@ -8970,6 +12138,20 @@ ${BRAND_SPRITE}
       box.addEventListener("blur", function(){ setTimeout(function(){ if (menuState && (menuState.kind === "file" || menuState.kind === "cmd")) closeMenu(); }, 120); });
 
       form.addEventListener("submit", function(ev){ ev.preventDefault(); send(); });
+      // Escape closes whichever picker is open, wherever focus is — the
+      // permission and agent menus have no input of their own to catch it.
+      // One document listener for the page's life; each project view points
+      // it at its own menu (a listener per view would pile up).
+      state.escMenu = function(){ if (!menuState) return false; closeMenu(); return true; };
+      if (!state.escBound) {
+        state.escBound = true;
+        document.addEventListener("keydown", function(ev){
+          if (ev.key !== "Escape" || !state.escMenu) return;
+          var mm = document.getElementById("cmenu");
+          if (!mm || mm.style.display === "none") return;
+          if (state.escMenu()) { ev.preventDefault(); var bx = document.getElementById("box"); if (bx) bx.focus(); }
+        });
+      }
 
       var attachBtn = document.getElementById("attach");
       var fileInput = document.getElementById("cfile");
@@ -9008,6 +12190,7 @@ ${BRAND_SPRITE}
       var plb = document.getElementById("planbtn");
       if (plb) plb.onclick = function(){ setPlan(!planState); var bx = document.getElementById("box"); if (bx) bx.focus(); };
       drawPlan();
+      drawLengthPill();
       // the page may be gone by the time profiles arrive (a closed tab, a torn-down test window)
       loadPermProfiles().then(function(){ if (typeof document === "undefined" || !document) return; updateModelLabel(); drawOrchControls(); });
       var moreB = document.getElementById("morebtn");
@@ -9027,6 +12210,17 @@ ${BRAND_SPRITE}
           { label: "Verbose", icon: tview() === "verbose" ? ICONS.check : "", hint: "+ raw payloads",
             run: function(){ setTView("verbose"); } },
           { sep: true },
+          { label: "Ask several models…", icon: ICONS.sparkles, hint: "a thread each", run: function(){ openAskSeveral(); } },
+          { sep: true },
+          { label: "Find in this chat", icon: ICONS.search, hint: KMOD + "F", run: function(){ openFind(); } },
+          { head: "reply length" },
+          { label: "Brief", icon: replyLength() === "brief" ? ICONS.check : "", hint: "the answer first", run: function(){ setReplyLength("brief"); } },
+          { label: "Normal", icon: !replyLength() ? ICONS.check : "", run: function(){ setReplyLength(""); } },
+          { label: "Detailed", icon: replyLength() === "detailed" ? ICONS.check : "", hint: "reasoning, trade-offs", run: function(){ setReplyLength("detailed"); } },
+          { sep: true },
+          { label: "Starred messages", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
+          { label: "Export as Markdown", icon: ICONS.download, hint: ".md", run: function(){ exportThread(); } },
+          { sep: true },
           { label: "Rewind\u2026", icon: ICONS.rewind, hint: "put the files back", run: function(){ openRewindMenu(); } },
           { sep: true },
           { label: "Prompts", icon: ICONS.clipboard, hint: KMOD + "\u21e7V", run: function(){ openPrompts(); } },
@@ -9037,6 +12231,9 @@ ${BRAND_SPRITE}
         openMenu(Math.round(r.left), Math.round(r.top - 4), items);
       };
       setAuto(state.auto);
+      if (desktop) setTimeout(function(){ if (!pageGone() && state.startTour) state.startTour(false); }, 1200);
+      // "Run again" from a run's own thread lands here, in Main, ready to orchestrate
+      try { if (chatId === "main" && localStorage.getItem("loomOrchNext:" + pid)) { localStorage.removeItem("loomOrchNext:" + pid); state.cmode = "orch"; } } catch (e) {}
       setComposerMode(state.cmode || "chat");
       refreshSkillCount();
 
@@ -9050,11 +12247,45 @@ ${BRAND_SPRITE}
       if (micB && navigator.mediaDevices && window.MediaRecorder) {
         var rec = null, chunks = [];
         var stopRec = function(){
+          if (recog) { try { recog.stop(); } catch (e) {} return; }
           if (rec && rec.state !== "inactive") rec.stop();
           micB.classList.remove("active");
         };
+        // No transcriber on the daemon: the browser's own speech recognition
+        // (Chrome, Edge, Safari) types a live transcript instead. It is the
+        // browser vendor's service, so it's only used when nothing local is set.
+        var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        var recog = null;
+        var startSpeech = function(){
+          if (recog) return;
+          var box = document.getElementById("box"); if (!box) return;
+          var base = box.value ? box.value.replace(/\\s+$/, "") + " " : "";
+          var finals = "";
+          recog = new SR();
+          recog.continuous = true;
+          recog.interimResults = true;
+          recog.lang = navigator.language || "en-US";
+          recog.onresult = function(e){
+            var interim = "";
+            for (var i = e.resultIndex; i < e.results.length; i++) {
+              if (e.results[i].isFinal) finals += e.results[i][0].transcript;
+              else interim += e.results[i][0].transcript;
+            }
+            box.value = base + (finals + interim).replace(/^\\s+/, "");
+            box.dispatchEvent(new Event("input", { bubbles: true }));
+          };
+          recog.onerror = function(e){
+            var why = e && e.error;
+            toast(why === "not-allowed" || why === "service-not-allowed" ? "microphone permission refused"
+              : why === "network" ? "this browser’s speech service can’t be reached — set LOOM_STT_CMD on the daemon to transcribe locally"
+              : why === "no-speech" ? "didn’t hear anything" : "voice input stopped" + (why ? " (" + why + ")" : ""));
+          };
+          recog.onend = function(){ recog = null; micB.classList.remove("active"); box.focus(); };
+          try { recog.start(); micB.classList.add("active"); } catch (err) { recog = null; }
+        };
         var startRec = function(ev){
           ev.preventDefault();
+          if (state.stt === false && SR) { startSpeech(); return; }
           if (rec && rec.state === "recording") return;
           navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
             chunks = [];
@@ -9109,7 +12340,14 @@ ${BRAND_SPRITE}
       var lbl = document.getElementById("cmodellabel");
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
-      if (lbl) lbl.textContent = (cur && cur.model) ? cur.model : "model";
+      if (lbl) {
+        var mtxt = (cur && cur.model) ? shortModel(cur.model) : (cur && cur.kind === "model" ? "Pick a model" : "Default");
+        // A model agent already wears its model as its name; don't say it twice.
+        if (cur && cur.kind === "model" && cur.model && agentLabel(cur.kind, cur.id) === mtxt.replace(/:free$/, "")) {
+          mtxt = /:free$/.test(cur.model) ? "free" : "model";
+        }
+        lbl.textContent = mtxt;
+      }
       var mp = document.getElementById("modelpick");
       if (mp) mp.style.display = state.auto || state.cmode === "orch" ? "none" : "";
       var chip = document.getElementById("cagent");
@@ -9164,7 +12402,7 @@ ${BRAND_SPRITE}
       function paint(){
         var prof = permProfile(a.kind), cur = permOf(a), lbl = agentLabel(a.kind, a.id);
         var askCell = prof.modes.ask || {};
-        m.style.display = "block"; m.className = "cmenu";
+        m.style.display = "block"; fitMenu(m); m.className = "cmenu";
         m.innerHTML = '<div class="cmhead">permissions \\u00b7 ' + esc(lbl) + (a.id !== lbl ? " (" + esc(a.id) + ")" : "") + "</div>" +
           PERM_MODES.map(function(mode){
             var cell = prof.modes[mode] || {}, parts = permSplit(cell.label), off = !!cell.unsupported;
@@ -9249,6 +12487,8 @@ ${BRAND_SPRITE}
     }
     function openPrompts(){
       if (menuState && menuState.kind === "prompts") { closeMenu(); var bx = document.getElementById("box"); if (bx) bx.focus(); return; }
+      // what's selected in the thread now, before focus moves into the search box
+      try { state.promptSel = String(window.getSelection ? window.getSelection() : "").trim(); } catch (e) { state.promptSel = ""; }
       if (desktop && state.tab !== "thread") showTab("thread"); // the composer lives under Thread
       var m = document.getElementById("cmenu"); if (!m) return;
       closeMenu();
@@ -9261,7 +12501,8 @@ ${BRAND_SPRITE}
           '<button type="button" class="pmsave" id="pmsave" title="save what\\u2019s in the composer">' + ICONS.bookmark + "Save current</button></div>" +
         '<div class="pmlist" id="pmlist" role="listbox" aria-label="prompts">' + (prompts.loaded ? "" : LOADER) + "</div>" +
         '<div class="pmfoot"><span><kbd>\\u2191</kbd><kbd>\\u2193</kbd> move</span><span><kbd>\\u21b5</kbd> insert</span>' +
-          "<span><kbd>" + KMOD + "\\u21b5</kbd> insert &amp; send</span><span><kbd>esc</kbd> close</span></div>";
+          "<span><kbd>" + KMOD + "↵</kbd> insert &amp; send</span><span><kbd>esc</kbd> close</span>" +
+          '<span class="pmvars" title="write these in a saved prompt and they fill in when you insert it">{{selection}} {{date}} {{project}} {{branch}} {{chat}} {{agent}} {{last_reply}} {{file}}</span></div>';
       var pb = document.getElementById("promptbtn"); if (pb) pb.classList.add("on");
       var q = document.getElementById("pmq");
       q.oninput = function(){ prompts.q = q.value; prompts.sel = 0; drawPrompts(); };
@@ -9337,8 +12578,10 @@ ${BRAND_SPRITE}
       var clr = list.querySelector("[data-pmclear]");
       if (clr) clr.onmousedown = function(ev){
         ev.preventDefault();
-        if (!window.confirm("Forget every prompt you've sent? Saved prompts stay.")) return;
-        api("/api/prompts/recent", { method: "DELETE" }).then(function(){ prompts.recent = []; drawPrompts(); }).catch(function(err){ toast(err.message); });
+        askConfirm("Forget every prompt you've sent? Saved prompts stay.", { ok: "Forget them", danger: true }).then(function(ok){
+          if (!ok) return;
+          api("/api/prompts/recent", { method: "DELETE" }).then(function(){ prompts.recent = []; drawPrompts(); }).catch(function(err){ toast(err.message); });
+        });
       };
       var sv = document.getElementById("pmsave"), bx = document.getElementById("box");
       if (sv) sv.disabled = !(bx && bx.value.trim());
@@ -9356,10 +12599,38 @@ ${BRAND_SPRITE}
       if (e.key === "Escape") { e.preventDefault(); closeMenu(); var bx = document.getElementById("box"); if (bx) bx.focus(); }
     }
     /** Put a prompt in the composer: into an empty box whole, else at the caret. */
+    /**
+     * A saved prompt's {{variables}}, filled from where you are: the selection
+     * you made in the thread, today's date, this project, branch, chat and
+     * agent, the last reply, the file open beside the thread. Anything it
+     * doesn't know stays as written, for you to fill in.
+     */
+    function fillPromptVars(text){
+      var now = new Date(), pad = function(n){ return (n < 10 ? "0" : "") + n; };
+      var chat = ((state.project && state.project.chats) || []).filter(function(c){ return c.id === chatId; })[0];
+      var replies = document.querySelectorAll("#feed .msg.agent:not(.thinking) .bubble");
+      var dockOpen = document.querySelector("#dockpane.open");
+      var vars = {
+        selection: state.promptSel || "",
+        date: now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate()),
+        time: pad(now.getHours()) + ":" + pad(now.getMinutes()),
+        project: (state.project && state.project.name) || "",
+        branch: (state.gitStat && state.gitStat.pid === pid && state.gitStat.branch) || "",
+        chat: (chat && chat.title) || "Main",
+        agent: state.selected ? labelOf(state.selected) : "",
+        last_reply: replies.length ? (replies[replies.length - 1].innerText || "").trim().slice(0, 4000) : "",
+        file: dockOpen ? ((document.getElementById("dockpath") || {}).textContent || "") : "",
+      };
+      return String(text).replace(/\\{\\{\\s*([a-z_]+)\\s*\\}\\}/gi, function(m, k){
+        var v = vars[k.toLowerCase()];
+        return v ? v : m;
+      });
+    }
     function insertPrompt(i, andSend){
       var r = prompts.rows[i]; if (!r) return;
       var box = document.getElementById("box"); if (!box) return;
-      var text = String(r.p.text || "");
+      var text = fillPromptVars(String(r.p.text || ""));
+      var left = text.match(/\\{\\{\\s*[a-z_]+\\s*\\}\\}/i);
       closeMenu();
       var v = box.value;
       if (!v.trim()) { box.value = text; box.setSelectionRange(text.length, text.length); }
@@ -9375,6 +12646,13 @@ ${BRAND_SPRITE}
       if (r.kind === "saved") {
         r.p.uses = (r.p.uses || 0) + 1; // it floats up next time, as it will on the daemon
         api("/api/prompts/" + encodeURIComponent(r.p.id), { method: "PATCH", body: JSON.stringify({ used: true }) }).catch(function(){});
+      }
+      // a blank left to fill: select it, don't send a prompt with a hole in it
+      if (left) {
+        var at = box.value.indexOf(left[0]);
+        if (at >= 0) box.setSelectionRange(at, at + left[0].length);
+        toast("fill in " + left[0] + " — it’s selected");
+        return;
       }
       if (andSend) send();
     }
@@ -9663,9 +12941,21 @@ ${BRAND_SPRITE}
       var p = state.project || {};
       return (p.agents || []).filter(function(a){ return a.tier === "adapter" && a.enabled !== false; });
     }
+    // The cast is remembered per project: a reload used to reset it to "every
+    // agent", and the next Orchestrate quietly ran agents you'd left out.
+    var ORCH_KEY = "loomOrch:" + pid;
+    function saveOrchCfg(c){
+      try { localStorage.setItem(ORCH_KEY, JSON.stringify({ orchestrator: c.orchestrator, off: c.off, parallel: c.parallel, race: !!c.race })); } catch (e) {}
+    }
     function orchCfg(){
       var roster = orchRoster();
-      var c = state.orchCfg || (state.orchCfg = { orchestrator: null, off: {}, parallel: 4 });
+      if (!state.orchCfg || state.orchCfg.pid !== pid) {
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem(ORCH_KEY) || "null"); } catch (e) { saved = null; }
+        state.orchCfg = { pid: pid, orchestrator: (saved && saved.orchestrator) || null, off: (saved && saved.off) || {},
+          parallel: Math.max(1, Math.min(12, Number(saved && saved.parallel) || 4)), race: !!(saved && saved.race) };
+      }
+      var c = state.orchCfg;
       var ids = roster.map(function(a){ return a.id; });
       // Claude Code conducts by default when it's here; otherwise whoever's first.
       if (!c.orchestrator || ids.indexOf(c.orchestrator) < 0) {
@@ -9721,31 +13011,54 @@ ${BRAND_SPRITE}
     function drawOrchControls(){
       var el = document.getElementById("corch"); if (!el || state.cmode !== "orch") return;
       var roster = orchRoster(), c = orchCfg();
+      saveOrchCfg(c); // every change to the cast ends in a redraw, so this keeps it
       if (!roster.length) {
         el.innerHTML = '<span class="colbl">No adapters in this project \\u2014 add an agent to orchestrate</span>';
         return;
       }
       var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0] || roster[0];
-      el.innerHTML =
-        '<span class="colbl">Orchestrator</span>' +
+      var modeSeg = '<span class="corace" role="group" aria-label="how to run the goal">' +
+        '<button type="button" data-omode="plan" class="' + (c.race ? "" : "on") + '" title="one agent plans the goal and the team works it">Plan &amp; split</button>' +
+        '<button type="button" data-omode="race" class="' + (c.race ? "on" : "") + '" title="every checked agent gets the same prompt in its own worktree — you compare and pick one">' + ICONS.play + "Race</button></span>";
+      if (c.race) {
+        el.innerHTML = modeSeg +
+          '<span class="colbl" title="each gets the same prompt, in its own worktree">Racers</span>' +
+          '<span class="cowk" id="cowk">' + roster.map(function(a){
+            var on = !c.off[a.id];
+            return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
+              agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + '</span><span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id) + "</span></button>";
+          }).join("") + "</span>";
+        Array.prototype.forEach.call(el.querySelectorAll("[data-wk]"), function(b){
+          b.onclick = function(){ var id = b.getAttribute("data-wk"); c.off[id] = !c.off[id]; drawOrchControls(); };
+        });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-omode]"), function(b){
+          b.onclick = function(){ c.race = b.getAttribute("data-omode") === "race"; drawOrchControls(); };
+        });
+        wirePermBadges(el); wireModelBadges(el);
+        var osb = document.getElementById("orchsend"); if (osb) osb.title = "start the race";
+        return;
+      }
+      el.innerHTML = modeSeg +
+        '<span class="colbl" title="plans the goal, splits it into tasks, reviews the results">Lead</span>' +
         '<button class="cagent" id="corchpick" type="button" title="who plans the goal and reviews the results">' +
           agentGlyph(lead.kind, lead.id) + '<span class="can">' + esc(agentLabel(lead.kind, lead.id)) + "</span>" +
           permBadge(permOf(lead), lead.id) + modelBadge(lead) +
           '<span class="cchev">' + ICONS.chevron + "</span></button>" +
-        '<span class="colbl">Workers</span>' +
+        '<span class="colbl" title="who can be given tasks \\u2014 click to include or leave out">Team</span>' +
         '<span class="cowk" id="cowk">' + roster.map(function(a){
           var on = !c.off[a.id];
           return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '" title="' +
-            esc(a.id + (a.role ? " \\u00b7 " + a.role : "")) + '">' + agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
-            // each worker's mode and model, changeable without leaving the row
-            permBadge(permOf(a), a.id) + modelBadge(a) + "</button>";
+            esc((on ? "included \\u2014 click to leave out" : "left out \\u2014 click to include") + " \\u00b7 " + a.id) + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
+            agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + "</span>" +
+            // each worker's model and mode, in their own zone of the chip
+            '<span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id) + "</span></button>";
         }).join("") +
           // A roster of CLIs is whatever you happen to have installed. An API
           // model is a name off a list, so it can be added here, in the row
           // where you are already deciding who runs the goal.
           '<button type="button" class="cowchip cowadd" id="cowadd" title="add an API model as a worker">' +
             ICONS.plus + "model</button>" + "</span>" +
-        '<span class="colbl">Parallel</span>' +
+        '<span class="colbl" title="how many tasks run at the same time">At once</span>' +
         '<span class="cstep" title="how many tasks run at once"><button type="button" data-step="-1" aria-label="fewer in parallel"' + (c.parallel <= 1 ? " disabled" : "") + ">\\u2212</button>" +
           '<span class="cpar" id="cpar">' + c.parallel + "</span>" +
           '<button type="button" data-step="1" aria-label="more in parallel"' + (c.parallel >= 12 ? " disabled" : "") + ">+</button></span>" +
@@ -9772,6 +13085,9 @@ ${BRAND_SPRITE}
           c.parallel = Math.max(1, Math.min(12, c.parallel + Number(b.getAttribute("data-step"))));
           drawOrchControls();
         };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-omode]"), function(b){
+        b.onclick = function(){ c.race = b.getAttribute("data-omode") === "race"; drawOrchControls(); };
       });
       wirePermBadges(el);
       wireModelBadges(el);
@@ -9839,7 +13155,7 @@ ${BRAND_SPRITE}
       var roster = orchRoster(), c = orchCfg();
       var m = document.getElementById("cmenu"); if (!m || !roster.length) return;
       menuState = { kind: "orchmenu", at: 0, sel: 0, items: [] };
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu";
       m.innerHTML = '<div class="cmhead">who orchestrates</div>' + roster.map(function(a, i){
         var lbl = agentLabel(a.kind, a.id);
         var sub = agentSub(a, lbl);
@@ -9875,6 +13191,7 @@ ${BRAND_SPRITE}
       var cast = roster.filter(function(a){ return !c.off[a.id]; });
       var workers = cast.map(function(a){ return a.id; });
       if (!workers.length) { toast("pick at least one worker"); return; }
+      if (c.race && workers.length < 2) { toast("a race needs at least two agents — check another"); return; }
       // A model agent with no model is a name for nothing. Catch it here, where
       // the chip that fixes it is on screen, rather than three tasks into a run.
       var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0];
@@ -9906,7 +13223,7 @@ ${BRAND_SPRITE}
       }
       api("/api/projects/" + pid + "/orchestra", { method: "POST", body: JSON.stringify({
         goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, maxParallel: c.parallel,
-        plan: planState || undefined,
+        plan: planState || undefined, race: c.race || undefined,
         // Orchestrate here, answer here. Without this the run opened a thread
         // of its own and walked you into it, leaving the goal you typed behind
         // in a thread that then said nothing at all (#100).
@@ -10012,7 +13329,7 @@ ${BRAND_SPRITE}
     function openRewindMenu(){
       var m = document.getElementById("cmenu"); if (!m) return;
       menuState = { kind: "rewindmenu", at: 0, sel: 0, items: [] };
-      m.style.display = "block"; m.className = "cmenu";
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu";
       m.innerHTML = '<div class="cmhead">put the files back to\\u2026</div><div class="cmlist" id="cmlist">' + LOADER + "</div>";
       setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
       api("/api/projects/" + pid + "/checkpoints").then(function(j){
@@ -10119,7 +13436,7 @@ ${BRAND_SPRITE}
         '<span class="spacer"></span><button class="iconbtn" id="orefresh" title="refresh">' + ICONS.refresh + "</button></div>";
       if (orch.runs === null) { el.innerHTML = '<div class="orchview">' + head + (orch.err ? '<div class="onote err">' + esc(orch.err) + "</div>" : LOADER) + "</div>"; wireOrchHead(); return; }
       if (!orch.runs.length) {
-        el.innerHTML = '<div class="orchview">' + head + '<div class="oempty"><b>No orchestra runs yet.</b><br>' +
+        el.innerHTML = '<div class="orchview">' + head + '<div class="oempty">' + emptyArt("orch") + '<b>No orchestra runs yet.</b><br>' +
           "Switch the composer to <b>Orchestrate</b>, describe a goal, and pick who plans and who works.<br>" +
           '<button class="btn outline sm" id="ostart" style="margin-top:14px">' + ICONS.orchestra + "Start one</button></div></div>";
         wireOrchHead();
@@ -10143,6 +13460,123 @@ ${BRAND_SPRITE}
       wireOrchHead();
       wireOrchDetail(el, run);
     }
+    /** A race's entrants side by side: how each did, what it changed, and the one to keep. */
+    function raceBoard(run){
+      var tasks = run.tasks || [], picked = run.applied && run.applied.task;
+      var fastest = null;
+      tasks.forEach(function(t){ if (t.status === "done" && t.startedAt && t.finishedAt && (!fastest || t.finishedAt - t.startedAt < fastest.finishedAt - fastest.startedAt)) fastest = t; });
+      return '<div class="raceboard">' + tasks.map(function(t){
+        var s = ORCH_TASK_ST[t.status] || [t.status, "off"];
+        var dur = t.startedAt ? durfmt((t.finishedAt || Date.now()) - t.startedAt) : "—";
+        var files = (t.files || []).length;
+        return '<div class="racecard' + (picked === t.id ? " picked" : "") + '">' +
+          '<div class="rch">' + agentGlyph(t.kind, t.agent) + '<b>' + esc(agentLabel(t.kind, t.agent)) + "</b>" +
+            '<span class="opill ' + s[1] + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span>" +
+            (fastest && fastest.id === t.id && tasks.length > 1 ? '<span class="rfast" title="finished first">fastest</span>' : "") + "</div>" +
+          '<div class="rcm"><span>' + esc(dur) + "</span><span>" + files + " file" + (files === 1 ? "" : "s") + "</span><span>" + Number(t.lines || 0) + " lines</span>" +
+            (t.costUsd ? "<span>" + money(t.costUsd) + "</span>" : "") + "</div>" +
+          (t.result ? '<div class="rcr">' + esc(plainPreview(t.result, 260)) + "</div>" : t.error ? '<div class="rcr err">' + esc(t.error.slice(0, 200)) + "</div>" : "") +
+          '<div class="rca">' +
+            (t.status === "done" ? '<button type="button" class="btn xs outline" data-racediff="' + esc(t.id) + '">' + ICONS.tree + "Diff</button>" : "") +
+            '<button type="button" class="btn xs ghost" data-racechat="' + esc(t.chat) + '">' + ICONS.thread + "Thread</button>" +
+            (picked === t.id ? '<span class="rpicked">' + ICONS.check + "applied to " + esc(run.applied.into) + "</span>"
+              : !picked && t.status === "done" && orchTerminal(run.status) ? '<button type="button" class="btn xs primary" data-racepick="' + esc(t.id) + '">Pick this one</button>' : "") +
+          "</div></div>";
+      }).join("") + "</div>";
+    }
+    /**
+     * The plan as a graph: each task a node, each dependsOn an arrow, left to
+     * right in the order they can run. Colours are the task's live status.
+     */
+    function orchGraph(tasks){
+      var byId = {}; tasks.forEach(function(t){ byId[t.id] = t; });
+      var level = {}, seen = {};
+      function lv(t){
+        if (level[t.id] != null) return level[t.id];
+        if (seen[t.id]) return 0; // a cycle the orchestrator shouldn't have made: flatten it
+        seen[t.id] = true;
+        var deps = (t.dependsOn || []).filter(function(d){ return byId[d]; });
+        level[t.id] = deps.length ? 1 + Math.max.apply(null, deps.map(function(d){ return lv(byId[d]); })) : 0;
+        return level[t.id];
+      }
+      tasks.forEach(lv);
+      var cols = [];
+      tasks.forEach(function(t){ (cols[level[t.id]] = cols[level[t.id]] || []).push(t); });
+      var NW = 168, NH = 44, GX = 58, GY = 14, PAD = 10;
+      var rows = Math.max.apply(null, cols.map(function(c){ return c.length; }));
+      var W = PAD * 2 + cols.length * NW + (cols.length - 1) * GX, H = PAD * 2 + rows * NH + (rows - 1) * GY;
+      var pos = {};
+      cols.forEach(function(c, ci){
+        var off = (H - (c.length * NH + (c.length - 1) * GY)) / 2;
+        c.forEach(function(t, ri){ pos[t.id] = { x: PAD + ci * (NW + GX), y: off + ri * (NH + GY) }; });
+      });
+      var edges = "";
+      tasks.forEach(function(t){
+        (t.dependsOn || []).forEach(function(d){
+          if (!pos[d]) return;
+          var a = pos[d], b = pos[t.id], x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
+          var done = byId[d].status === "done";
+          edges += '<path class="oge' + (done ? " done" : "") + '" d="M' + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + (x2 - 4) + " " + y2 + '" marker-end="url(#ogarrow)"/>';
+        });
+      });
+      var nodes = tasks.map(function(t){
+        var s = ORCH_TASK_ST[t.status] || [t.status, "off"], q = pos[t.id];
+        var title = String(t.title || t.id);
+        return '<g class="ogn ' + s[1] + '" data-otask="' + esc(t.id) + '" transform="translate(' + q.x + " " + q.y + ')"><title>' + esc(t.id + " · " + title + " · " + s[0]) + "</title>" +
+          '<rect width="' + NW + '" height="' + NH + '" rx="10"/>' +
+          '<circle cx="14" cy="15" r="4" class="ogd"/>' +
+          '<text x="24" y="19" class="ogid">' + esc(t.id) + " · " + esc(labelOf(t.agent)) + "</text>" +
+          '<text x="12" y="34" class="ogt">' + esc(title.length > 24 ? title.slice(0, 23) + "…" : title) + "</text></g>";
+      }).join("");
+      return '<details class="ograph" open><summary>Plan graph<span class="ogs">' + tasks.length + " tasks · " + cols.length + " stage" + (cols.length === 1 ? "" : "s") + "</span></summary>" +
+        '<div class="ogscroll"><svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="task dependency graph">' +
+        '<defs><marker id="ogarrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="currentColor"/></marker></defs>' +
+        edges + nodes + "</svg></div></details>";
+    }
+    /**
+     * When each task actually ran, on one time axis from the run's start:
+     * where the parallelism was, and what everything waited on.
+     */
+    function orchTimeline(run, tasks){
+      var t0 = Number(run.createdAt) || Math.min.apply(null, tasks.map(function(t){ return t.startedAt || Infinity; }));
+      var now = Date.now();
+      var end = Math.max.apply(null, tasks.map(function(t){ return t.finishedAt || (t.status === "running" ? now : t.startedAt || t0); }).concat([orchTerminal(run.status) ? Number(run.updatedAt) || t0 : now]));
+      var span = Math.max(1000, end - t0);
+      var rows = tasks.filter(function(t){ return t.startedAt; }).sort(function(a, b){ return a.startedAt - b.startedAt; }).map(function(t){
+        var s = ORCH_TASK_ST[t.status] || [t.status, "off"];
+        var a = (t.startedAt - t0) / span * 100;
+        var b = ((t.finishedAt || (t.status === "running" ? now : t.startedAt)) - t0) / span * 100;
+        var dur = (t.finishedAt || now) - t.startedAt;
+        return '<div class="otlrow" data-otask="' + esc(t.id) + '" title="' + esc(t.id + " · " + (t.title || "") + " · " + s[0] + " · " + durfmt(dur)) + '">' +
+          '<span class="otlid">' + esc(t.id) + '</span><span class="otltrack"><i class="otlbar ' + s[1] + '" style="left:' + a.toFixed(2) + "%;width:" + Math.max(0.8, b - a).toFixed(2) + '%"></i></span>' +
+          '<span class="otld">' + esc(durfmt(dur)) + "</span></div>";
+      }).join("");
+      return '<details class="ograph otl" open><summary>Timeline<span class="ogs">' + esc(durfmt(span)) + " from start" + (orchTerminal(run.status) ? " to finish" : " so far") + "</span></summary>" +
+        '<div class="otlbody">' + rows + '<div class="otlaxis"><span>0</span><span>' + esc(durfmt(span / 2)) + "</span><span>" + esc(durfmt(span)) + "</span></div></div></details>";
+    }
+    /** Put a finished goal back in the composer, cast and all. */
+    function runAgain(run){
+      var c = orchCfg(), roster = orchRoster(), ids = roster.map(function(a){ return a.id; });
+      var lead = run.orchestrator && run.orchestrator.agent;
+      if (lead && ids.indexOf(lead) >= 0) c.orchestrator = lead;
+      var ws = (run.workers || []).filter(function(w){ return ids.indexOf(w) >= 0; });
+      if (ws.length) { var off = {}; ids.forEach(function(id){ if (ws.indexOf(id) < 0) off[id] = true; }); c.off = off; }
+      if (run.maxParallel) c.parallel = Math.max(1, Math.min(12, Number(run.maxParallel)));
+      c.race = !!run.race;
+      saveOrchCfg(c);
+      if (owns(run) || orchRunForChat()) {
+        // this thread steers its run; a new goal starts from Main
+        try { localStorage.setItem(draftKey("main"), run.goal); localStorage.setItem("loomOrchNext:" + pid, "1"); } catch (e) {}
+        if (state.setChat) state.setChat(pid, "main");
+        return;
+      }
+      if (desktop) showTab("thread"); else closeOrchSheet();
+      setComposerMode("orch");
+      var box = document.getElementById("box");
+      if (box) { box.value = run.goal; autosizeBox(); saveDraft(); box.focus(); }
+      drawOrchControls();
+      toast("the goal is back in the composer — same lead and team; edit it or press Enter");
+    }
     function orchDetail(run){
       var tasks = run.tasks || [];
       var done = tasks.filter(function(t){ return t.status === "done"; }).length;
@@ -10156,20 +13590,27 @@ ${BRAND_SPRITE}
       var h = '<div class="ocard">' +
         '<div class="ogoal">' + esc(run.goal) + "</div>" +
         '<div class="ometa">' + orchPill(run.status) +
-          '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>" +
+          (run.race ? '<span class="omi"><span class="omk">Mode</span><span class="omv">' + ICONS.play + " Race</span></span>"
+            : '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>") +
           '<span class="omi"><span class="omk">Workers</span><span class="omv">' + (run.workers || []).map(function(w){ return agentGlyph(kindOf(w), w) + esc(labelOf(w)); }).join(", ") + "</span></span>" +
-          '<span class="omi"><span class="omk">Round</span><span class="omv">' + Number(run.round || 0) + "/" + Number(run.maxRounds || 0) + "</span></span>" +
+          (run.race ? "" : '<span class="omi"><span class="omk">Round</span><span class="omv">' + Number(run.round || 0) + "/" + Number(run.maxRounds || 0) + "</span></span>") +
           '<span class="omi"><span class="omk">Parallel</span><span class="omv">' + Number(run.maxParallel || 0) + "</span></span>" +
           '<span class="omi"><span class="omk">Cost</span><span class="omv">' + money(run.costUsd) + "</span></span>" +
+          '<span class="omi"><span class="omk">Elapsed</span><span class="omv"' + (terminal ? "" : ' data-oel="' + Number(run.createdAt || 0) + '"') + ">" +
+            durfmt(Math.max(0, (terminal ? Number(run.updatedAt || run.createdAt) : Date.now()) - Number(run.createdAt || 0))) + "</span></span>" +
           '<span class="omi"><span class="omk">Branch</span><code>' + esc(run.branch || "\\u2014") + "</code></span>" +
         "</div>" +
         '<div class="oprog"><div class="obar" title="' + done + " done, " + running + ' running"><i style="width:' + pct + '%"></i><i class="run" style="width:' + rpct + '%"></i></div>' +
           '<span class="opn">' + done + "/" + tasks.length + " done</span></div>" +
         '<div class="oacts">' +
-          (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + "Orchestrator thread</button>" : "") +
+          (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + (run.race ? "Thread" : "Orchestrator thread") + "</button>" : "") +
           (!terminal ? '<button class="btn outline sm prdanger" id="oabort">' + ICONS.stop + "Abort</button>" : "") +
-          (terminal && !moved && !run.applied ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
-          (terminal && !moved ? '<button class="btn ghost sm" id="oclean" title="remove this run\\u2019s worktrees (the branch stays)">Clean up</button>' : "") +
+          (run.status === "aborted" && run.interrupted ? '<button class="btn primary sm" type="button" id="oresume" title="Loom stopped this run by restarting — carry it on: the tasks that were in flight pick up in the worktrees they left">' + ICONS.play + "Resume</button>" : "") +
+          // Apply only when something finished: a run that ended before any task
+          // merged has nothing on its branch to bring over.
+          (!run.race && terminal && !moved && !run.applied && (run.tasks || []).some(function(t){ return t.status === "done"; }) ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
+          (terminal && !moved ? '<button class="btn ghost sm" id="oclean" title="remove this run’s worktrees (the branch stays)">Clean up</button>' : "") +
+          (terminal ? '<button class="btn outline sm" type="button" id="oagain" title="put this goal back in the composer with the same lead, team and parallelism">' + ICONS.refresh + "Run again</button>" : "") +
           (canMove ? '<button class="btn outline sm" type="button" id="orunner" title="move it to your runner; it carries on there">' + ICONS.orchestra + "Continue on runner</button>" : "") +
         "</div>" + orchMovedHtml(run) + orchOutcome(run) + orchLandingHtml(run) + "</div>";
       if (run.status === "waiting_human") {
@@ -10192,6 +13633,9 @@ ${BRAND_SPRITE}
           : "The orchestrator is planning\\u2026 tasks appear here as it spawns them.") + "</div>";
         return h;
       }
+      if (run.race) return h + raceBoard(run);
+      if (tasks.length > 1) h += orchGraph(tasks);
+      if (tasks.some(function(t){ return t.startedAt; })) h += orchTimeline(run, tasks);
       // What needs you first, then what's moving, then what's settled.
       var ORDER = ["needs_input", "conflict", "running", "pending", "failed", "done", "cancelled"];
       ORDER.forEach(function(stName){
@@ -10324,9 +13768,10 @@ ${BRAND_SPRITE}
           } else if (act === "review") {
             landAct("review", { runId: run.id }, b, function(){ toast("review requested"); });
           } else if (act === "override") {
-            var why = window.prompt("Override loom/review on PR #" + l.pr + "? Say why \\u2014 it goes on the PR.");
-            if (!why || !why.trim()) return;
-            landAct("override", { runId: run.id, reason: why.trim() }, b, function(){ toast("review overridden"); });
+            askText("Override loom/review on PR #" + l.pr + "?", { note: "Say why — it goes on the PR.", multiline: true, required: true, ok: "Override" }).then(function(why){
+              if (!why || !why.trim()) return;
+              landAct("override", { runId: run.id, reason: why.trim() }, b, function(){ toast("review overridden"); });
+            });
           }
         };
       });
@@ -10426,14 +13871,56 @@ ${BRAND_SPRITE}
       orchAction(run, "apply", {}, btn, function(j){ toast("merged into " + ((j && j.into) || "your branch")); refreshTree(true); if (state.refreshExplorer) state.refreshExplorer(); });
     }
     function wireOrchDetail(el, run){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-racediff]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var tid = b.getAttribute("data-racediff"), t = (run.tasks || []).filter(function(x){ return x.id === tid; })[0];
+          api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/tasks/" + encodeURIComponent(tid) + "/diff")
+            .then(function(j){
+              if (!j.patch) { toast("no changes on " + tid); return; }
+              if (desktop) openPatchDock(j.patch, (t ? agentLabel(t.kind, t.agent) + "’s take" : tid));
+              else toast("open this on the desktop to read the diff");
+            })
+            .catch(function(err){ toast(err.message); });
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-racechat]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); openOrchChat(b.getAttribute("data-racechat")); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-racepick]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var tid = b.getAttribute("data-racepick"), t = (run.tasks || []).filter(function(x){ return x.id === tid; })[0];
+          askConfirm("Apply " + (t ? agentLabel(t.kind, t.agent) + "’s take" : tid) + " to your branch?\\n\\nIts changes merge into the branch you’re on. The other entrants stay on their own branches.", { ok: "Pick this one" }).then(function(yes){
+            if (!yes) return;
+            b.disabled = true;
+            api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/apply", { method: "POST", body: JSON.stringify({ task: tid }) })
+              .then(function(r){ toast("merged " + r.merged + " into " + r.into); loadOrch(); if (state.loadGitStat) state.loadGitStat(); })
+              .catch(function(err){ b.disabled = false; toast(err.message); });
+          });
+        };
+      });
+      var ag = document.getElementById("oagain");
+      if (ag) ag.onclick = function(){ runAgain(run); };
+      var rs = document.getElementById("oresume");
+      if (rs) rs.onclick = function(){
+        rs.disabled = true; rs.textContent = "Resuming…";
+        api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/resume", { method: "POST", body: "{}" })
+          .then(function(j){ if (j && j.run) mergeOrchRun(j.run); toast("resumed — the interrupted tasks are picking up where they left off"); })
+          .catch(function(err){ toast(err.message); rs.disabled = false; rs.textContent = "Resume"; });
+      };
       Array.prototype.forEach.call(el.querySelectorAll("[data-run]"), function(row){
         row.onclick = function(){ orch.sel = row.getAttribute("data-run"); orch.pinned = true; drawOrch(); };
       });
       var th = el.querySelector("#othread"); if (th) th.onclick = function(){ openOrchChat(run.chat); };
+      // a long goal is clamped to four lines; clicking it reads the rest
+      var og = el.querySelector(".ogoal");
+      if (og) { og.title = "click to " + (orch.goalOpen ? "fold" : "read the whole goal"); if (orch.goalOpen) og.classList.add("full");
+        og.onclick = function(){ orch.goalOpen = !orch.goalOpen; og.classList.toggle("full", orch.goalOpen); }; }
       var ab = el.querySelector("#oabort");
       if (ab) ab.onclick = function(){
-        if (!window.confirm("Abort this orchestra run? Running workers are stopped; finished work stays on " + run.branch + ".")) return;
-        orchAction(run, "abort", {}, ab, function(){ toast("orchestra aborted"); });
+        askConfirm("Abort this orchestra run? Running workers are stopped; finished work stays on " + run.branch + ".", { ok: "Abort run", danger: true })
+          .then(function(ok){ if (ok) orchAction(run, "abort", {}, ab, function(){ toast("orchestra aborted"); }); });
       };
       var apb = el.querySelector("#oapply"); if (apb) apb.onclick = function(){ applyOrch(run.id, apb); };
       var rdb = el.querySelector("#oredeliver"); if (rdb) rdb.onclick = function(){ redeliverOrch(run.id, rdb); };
@@ -10467,12 +13954,14 @@ ${BRAND_SPRITE}
           var tid = b.getAttribute("data-ostopwait");
           var t = (run.tasks || []).filter(function(x){ return x.id === tid; })[0];
           var g = teamGoalOf(t && t.hold && t.hold.runId);
-          if (!window.confirm("Stop waiting? " + tid + " starts now, alongside " + (g.goal ? "\\u2018" + g.goal + "\\u2019" : "the other goal") +
-            " instead of after its PR merges \\u2014 you may have a conflict to resolve when both land.")) return;
-          b.disabled = true;
-          api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/tasks/" + encodeURIComponent(tid) + "/stop-waiting", { method: "POST", body: "{}" })
-            .then(function(){ toast(tid + " stopped waiting"); loadOrch(); })
-            .catch(function(err){ b.disabled = false; toast(err.message); });
+          askConfirm("Stop waiting? " + tid + " starts now, alongside " + (g.goal ? "\\u2018" + g.goal + "\\u2019" : "the other goal") +
+            " instead of after its PR merges \\u2014 you may have a conflict to resolve when both land.", { ok: "Start it now" }).then(function(ok){
+            if (!ok) return;
+            b.disabled = true;
+            api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/tasks/" + encodeURIComponent(tid) + "/stop-waiting", { method: "POST", body: "{}" })
+              .then(function(){ toast(tid + " stopped waiting"); loadOrch(); })
+              .catch(function(err){ b.disabled = false; toast(err.message); });
+          });
         };
       });
       var rb = el.querySelector("#oreplybtn"), rt = el.querySelector("#oreply");
@@ -10534,6 +14023,10 @@ ${BRAND_SPRITE}
     // the other projects' sockets aren't this view's to hold — and nudged
     // sooner by this project's own events.
     function fleetEl(){
+      // A team frame can land after the window is torn down (a closed tab, a
+      // finished test); there's no fleet to draw into then, and throwing here
+      // surfaced as an unhandled rejection.
+      if (pageGone()) return null;
       if (desktop) return state.tab === "fleet" ? document.getElementById("pane-fleet") : null;
       return document.getElementById("fleetsheet");
     }
@@ -10577,7 +14070,17 @@ ${BRAND_SPRITE}
       // this project first; the rest as the daemon lists them
       projects.sort(function(a, b){ return ((b.project || {}).id === pid) - ((a.project || {}).id === pid); });
       var agentsN = 0, busyN = 0;
-      projects.forEach(function(pr){ (pr.agents || []).forEach(function(a){ agentsN++; if (a.busy) busyN++; }); });
+      projects.forEach(function(pr){
+        (pr.agents || []).forEach(function(a){ agentsN++; if (a.busy) busyN++; });
+        // An orchestra's workers run as copies of the roster, so the roster
+        // reads idle while they work — the header said "no agents running"
+        // above a run with three tasks in flight. Count what's really going.
+        var o = pr.orchestra;
+        if (o && !orchTerminal(o.status)) {
+          (o.tasks || []).forEach(function(t){ if (t.status === "running") busyN++; });
+          if (/^(planning|reviewing|starting)$/.test(String(o.status))) busyN++;
+        }
+      });
       var head = '<div class="ohead"><span class="ot">Fleet</span>' +
         '<span class="os">What every agent in every open project is doing, right now.</span><span class="spacer"></span>' +
         (d ? '<span class="fsum"><span class="fchip' + (busyN ? " live" : "") + '">' + busyN + " working</span>" +
@@ -11327,6 +14830,9 @@ ${BRAND_SPRITE}
     // "I found three failing tests." glued to the front of the first option.
     var ask = text.split(/(?<=[.?!])\\s+/).filter(Boolean).pop() || text;
     if (ask.indexOf("?") < 0) return [];
+    // "Pick one — A or B?" / "Which is it: A or B?": the lead-in before a
+    // dash or colon is the question, not part of the first answer.
+    ask = ask.replace(/^[^?]{0,60}?(?:\\s[\\u2014\\u2013-]\\s|:\\s)(?=[^?]*\\bor\\b)/i, "");
     var parts = ask.replace(/\\?+\\s*$/, "").split(/,\\s+or\\s+|\\s+or\\s+/i);
     if (parts.length < 2 || parts.length > 3) return [];
     var out = [];
@@ -12094,6 +15600,7 @@ ${BRAND_SPRITE}
       total += pr.costUsd > 0 ? pr.costUsd : 0;
       (pr.agents || []).forEach(function(a){ if (a.busy) busy++; });
     });
+    updateAmbient(busy, (state.projects || []).some(function(pr){ return pr.needsInput; }));
     var share = p && p.costUsd > 0 && total > 0 ? Math.min(100, Math.round((p.costUsd / total) * 100)) : 0;
     // GitHub connection — the whole PR/Projects/review half rides on gh being
     // logged in, so it lives in the corner you glance at, with a one-click
@@ -12145,6 +15652,7 @@ ${BRAND_SPRITE}
         ? '<button class="sit updready" id="updready" title="Loom ' + esc(state.update.latest) + ' is out \u2014 open Updates">' + ICONS.up + " " + esc(state.update.latest) + "</button>"
         : "") +
       lpSeg +
+      branchSeg() +
       gdSeg +
       ghSeg +
       (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
@@ -12160,7 +15668,39 @@ ${BRAND_SPRITE}
     if (upill) upill.onclick = openUsage;
     var gdb = document.getElementById("gitdel");
     if (gdb) gdb.onclick = function(){ openGitDeliveryMenu(gdb); };
+    var brb = document.getElementById("branchpill");
+    if (brb) brb.onclick = function(){
+      if (!state.showRail) { toast("open a project to see its changes"); return; }
+      if (!railOpen()) toggleRail(); // the panel is closed on laptop widths: open it
+      state.showRail("scm");
+    };
   }
+  /**
+   * The open project's branch, where it stands against its upstream, and how
+   * many files are changed — Loom's own .loom/ bookkeeping not counted.
+   * Polled gently (git status in a big repo isn't free) and after each turn.
+   */
+  function branchSeg(){
+    var g = state.gitStat, p = state.project;
+    if (!g || !p || g.pid !== p.id || !g.branch) return "";
+    var bits = (g.ahead ? " ↑" + g.ahead : "") + (g.behind ? " ↓" + g.behind : "");
+    return '<button class="sit branchpill' + (g.changed ? " dirty" : "") + '" id="branchpill" type="button" title="' +
+      esc(g.branch + (g.changed ? " · " + g.changed + " changed file" + (g.changed === 1 ? "" : "s") : " · clean") + (g.upstream ? " · tracking " + g.upstream : "") + " — open Source Control") + '">' +
+      ICONS.branch + esc(g.branch) + esc(bits) + (g.changed ? '<span class="bpn">' + g.changed + "</span>" : "") + "</button>";
+  }
+  function loadGitStat(){
+    var p = state.project; if (!state.token || !p || !p.id) return;
+    var pid = p.id;
+    api("/api/projects/" + pid + "/git/status").then(function(s){
+      var mine = function(f){ var n = typeof f === "string" ? f : (f && (f.path || f.file)) || ""; return n.indexOf(".loom/") !== 0; };
+      var changed = (s.staged || []).concat(s.unstaged || [], s.untracked || []).filter(mine);
+      var seen = {}; changed.forEach(function(f){ seen[typeof f === "string" ? f : (f.path || f.file)] = 1; });
+      state.gitStat = { pid: pid, branch: s.branch || "", ahead: s.ahead || 0, behind: s.behind || 0, upstream: s.upstream || null, changed: Object.keys(seen).length };
+      drawStatusbar();
+    }).catch(function(){ state.gitStat = { pid: pid, branch: "" }; drawStatusbar(); });
+  }
+  state.loadGitStat = loadGitStat;
+  if (!window.__gitPoll) window.__gitPoll = setInterval(function(){ if (!document.hidden) loadGitStat(); }, 15000);
 
   // GitHub connection, fetched once and after a connect. Machine-wide (gh auth
   // is per-host), so it's cached on state and shown in the status bar.
@@ -13288,7 +16828,9 @@ ${BRAND_SPRITE}
   }
 
   var RAIL_KEY = "loomRail";
-  function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? true : v === "1"; }
+  // Open by default only where there's room for it beside a readable thread;
+  // on a laptop the chat is the point, and the panel is one click away.
+  function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? (window.innerWidth || 0) >= 1440 : v === "1"; }
   function applyRail(){
     var shell = document.querySelector(".dshell");
     if (shell) shell.classList.toggle("railopen", railOpen());
@@ -13355,7 +16897,8 @@ ${BRAND_SPRITE}
     var pid = prefillPid || state.pid || projects[0].id;
     var picked = (prefillAgents || []).slice();
     function proj(id){ for (var i = 0; i < projects.length; i++) if (projects[i].id === id) return projects[i]; return null; }
-    function agentsFor(id){ var p = proj(id); return p ? p.agents.filter(function(a){ return a.tier === "adapter"; }) : []; }
+    // switched-off agents can't take a task, so they aren't offered one
+    function agentsFor(id){ var p = proj(id); return p ? p.agents.filter(function(a){ return a.tier === "adapter" && a.enabled !== false; }) : []; }
     function routesFor(id){ var p = proj(id); return (p && p.routeNames) || ["auto"]; }
     function projOpts(){ return projects.map(function(p){ return '<option value="' + esc(p.id) + '"' + (p.id === pid ? " selected" : "") + ">" + esc(p.name) + "</option>"; }).join(""); }
     function routeOpts(id){ return '<option value="">\\u2014 use the agents above \\u2014</option>' + routesFor(id).map(function(n){ return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>"; }).join(""); }
@@ -13394,8 +16937,8 @@ ${BRAND_SPRITE}
         var order = picked.indexOf(a.id);
         return '<button type="button" class="agchip' + (order >= 0 ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
           '<span class="num">' + (order >= 0 ? order + 1 : "") + "</span>" +
-          brandMark(a.kind) + esc(a.id) +
-          '<span class="role">' + esc(a.role) + "</span></button>";
+          agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
+          (a.role && a.role !== a.id && a.role !== a.kind ? '<span class="role">' + esc(a.role) + "</span>" : "") + "</button>";
       }).join("") || '<span class="hintx">no agents configured for this project</span>';
       Array.prototype.forEach.call(box.querySelectorAll(".agchip"), function(ch){
         ch.onclick = function(){
@@ -13410,8 +16953,8 @@ ${BRAND_SPRITE}
       if (hint) hint.textContent = picked.length > 1
         ? "runs as a pipeline: " + picked.join(" \\u2192 ")
         : picked.length === 1
-          ? "one ADE runs the whole task"
-          : "pick one ADE \\u2014 or several to run them in order";
+          ? "one agent runs the whole task"
+          : "pick one agent \\u2014 or several to run them in order";
     }
     // The roles you can hand out. Only the first three carry distinct prompt
     // behaviour today (plan / execute / review); the rest are honest labels the
@@ -13471,9 +17014,13 @@ ${BRAND_SPRITE}
       var mproj = document.getElementById("mproj").value;
       var task = (document.getElementById("mtask").value || "").trim();
       var pipeline = document.getElementById("mroute").value;
-      if (!task) return toast("describe the task first");
-      if (!pipeline && !picked.length) return toast("pick at least one agent");
-      var btn = document.getElementById("mcreate"); btn.disabled = true;
+      if (!task) return modalErr(scrim, "Describe the task first.", document.getElementById("mtask"));
+      if (!pipeline && !picked.length) return modalErr(scrim, "Pick at least one agent.");
+      modalErr(scrim, "");
+      var btn = document.getElementById("mcreate");
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var btnWas = btn.innerHTML; btn.textContent = "Starting\\u2026";
       var work, note;
       // The spec carries each step's assigned role, so a route can say "this one
       // plans, that one executes" without touching either agent's own role.
@@ -13512,7 +17059,7 @@ ${BRAND_SPRITE}
         toast(note);
         if (state.selectProject) state.selectProject(mproj);
         else location.hash = "#p/" + mproj;
-      }).catch(function(err){ btn.disabled = false; toast(err.message); });
+      }).catch(function(err){ btn.disabled = false; btn.innerHTML = btnWas; modalErr(scrim, err.message); });
     }
     document.getElementById("mcreate").onclick = create;
     function onKey(e){
@@ -13528,7 +17075,7 @@ ${BRAND_SPRITE}
    * "Create & start" hands the text to the agent and drops the card in
    * Working, which is where that work actually is.
    */
-  function openBoardTaskModal(pid, column, onDone){
+  function openBoardTaskModal(pid, column, onDone, prefill){
     if (document.querySelector(".scrim")) return;
     var p = state.project;
     var adapters = (p && p.agents ? p.agents : []).filter(function(a){ return a.tier === "adapter"; });
@@ -13546,6 +17093,8 @@ ${BRAND_SPRITE}
           cols.map(function(c){
             return '<option value="' + c[0] + '"' + (c[0] === column ? " selected" : "") + ">" + c[1] + "</option>";
           }).join("") + "</select></div>" +
+        '<div class="field bmmeta"><div><label>Priority <span class="opt">optional</span></label><select id="bmprio"><option value="">None</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>' +
+          '<div><label>Due <span class="opt">optional</span></label><input type="date" id="bmdue"></div></div>' +
         '<div class="field"><label>For <span class="opt">optional</span></label>' +
           '<div class="agsel" id="bmagsel"></div>' +
           '<span class="hintx" id="bmhint">just a note to yourself unless you pick someone</span></div>' +
@@ -13559,13 +17108,15 @@ ${BRAND_SPRITE}
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("bmclose").onclick = close;
     document.getElementById("bmcancel").onclick = close;
+    if (prefill) { var bmt = document.getElementById("bmtitle"); if (bmt) bmt.value = prefill; }
 
     function drawChips(){
       var box = document.getElementById("bmagsel"); if (!box) return;
       box.innerHTML = adapters.length
         ? adapters.map(function(a){
             return '<button type="button" class="agchip' + (picked === a.id ? " sel" : "") + '" data-id="' + esc(a.id) + '">' +
-              brandMark(a.kind) + esc(a.id) + '<span class="role">' + esc(a.role || "") + "</span></button>";
+              agentGlyph(a.kind, a.id) + esc(agentLabel(a.kind, a.id)) +
+              (a.role && a.role !== a.id && a.role !== a.kind ? '<span class="role">' + esc(a.role) + "</span>" : "") + "</button>";
           }).join("")
         : '<span class="hintx">no agents configured for this project</span>';
       Array.prototype.forEach.call(box.querySelectorAll(".agchip"), function(ch){
@@ -13587,11 +17138,14 @@ ${BRAND_SPRITE}
 
     function create(alsoStart){
       var title = (document.getElementById("bmtitle").value || "").trim();
-      if (!title) return toast("what needs doing?");
+      if (!title) return modalErr(document.querySelector(".scrim"), "Say what needs doing.", document.getElementById("bmtitle"));
       var col = document.getElementById("bmcol").value;
       // starting it means an agent is on it now, so the card belongs in Working
       var body = { title: title, column: alsoStart ? "working" : col };
       if (picked) body.agent = picked;
+      var bprio = document.getElementById("bmprio"), bdue = document.getElementById("bmdue");
+      if (bprio && bprio.value) body.priority = bprio.value;
+      if (bdue && bdue.value) body.due = bdue.value;
       document.getElementById("bmcreate").disabled = true;
       api("/api/projects/" + pid + "/board/tasks", { method: "POST", body: JSON.stringify(body) })
         .then(function(){
@@ -13782,6 +17336,7 @@ ${BRAND_SPRITE}
         if (!bad && !warn) h += '<span class="updpill ok">All ' + checks.length + " checks pass</span>";
         else h += '<span class="updpill warn">' + (bad ? bad + " failing" : "") + (bad && warn ? " \\u00b7 " : "") + (warn ? warn + " warning" + (warn > 1 ? "s" : "") : "") + "</span>";
         h += '<button class="btn ghost sm" id="diagrerun">Re-run</button></div>';
+        h += '<div class="dsys" id="dsys"></div>';
         checks.forEach(function(c){
           var st = c.status === "ok" ? "ok" : c.status === "warn" ? "warn" : "bad";
           h += '<div class="dchk"><span class="sdot ' + st + '" style="margin-top:5px"></span>' +
@@ -13790,6 +17345,14 @@ ${BRAND_SPRITE}
         });
         pane.innerHTML = h;
         document.getElementById("diagrerun").onclick = renderDiag;
+        // what is actually running, beside what it checked
+        Promise.all([sapi("/api/health"), sapi("/api/version")]).then(function(r){
+          var hh = r[0] || {}, v = r[1] || {}, box = document.getElementById("dsys"); if (!box) return;
+          var up = Number(v.uptimeSec || 0);
+          var cells = [["Loom", (hh.version || "?") + " · " + String(hh.rev || v.rev || "").slice(0, 8)], ["Node", v.node || "?"],
+            ["Platform", v.platform || "?"], ["Up for", durfmt(up * 1000)], ["Process", "pid " + (v.pid || "?")], ["Terminal", hh.terminal || "?"]];
+          box.innerHTML = cells.map(function(c){ return '<div class="dsc"><span>' + esc(c[0]) + "</span><b>" + esc(c[1]) + "</b></div>"; }).join("");
+        }).catch(function(){});
       }).catch(fail);
     }
 
@@ -13805,8 +17368,44 @@ ${BRAND_SPRITE}
       h += '<div class="prow"><div class="pl"><div class="pt">Theme</div>' +
         '<div class="pd">Light or dark. Open terminals repaint to match.</div></div>' +
         '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }], themeNow()) + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Text size</div>' +
+        '<div class="pd">Scales the whole app on this device.</div></div>' +
+        '<div class="pc">' + seg("textsize", [{ v: "s", l: "S" }, { v: "m", l: "M" }, { v: "l", l: "L" }, { v: "xl", l: "XL" }], appearancePref("textsize", "m")) + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Density</div>' +
+        '<div class="pd">Compact fits more of a conversation on screen.</div></div>' +
+        '<div class="pc">' + seg("density", [{ v: "comfy", l: "Comfortable" }, { v: "compact", l: "Compact" }], appearancePref("density", "comfy")) + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Accent</div>' +
+        '<div class="pd">The thread colour: live replies, links, unread dots, the heatmap.</div></div>' +
+        '<div class="pc"><div class="accents" role="group" aria-label="accent colour">' + Object.keys(ACCENTS).map(function(k){
+          var on = appearancePref("accent", "cyan") === k;
+          return '<button type="button" class="accentsw' + (on ? " on" : "") + '" data-accent="' + k + '" aria-pressed="' + on + '" title="' + k + '" style="--sw:' + ACCENTS[k][0] + '"></button>';
+        }).join("") + "</div></div></div>";
+      h += '<div class="sgrouph">Notifications · this device</div>';
+      h += '<div class="prow"><div class="pl"><div class="pt">When a long turn finishes</div>' +
+        '<div class="pd">A notification when an agent finishes something that took more than 20 seconds, while Loom is in the background.</div></div>' +
+        '<div class="pc">' + seg("notifydone", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("notifyDone", true) ? "on" : "off") + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Chime</div>' +
+        '<div class="pd">A soft two-note sound with it.</div></div>' +
+        '<div class="pc">' + seg("chime", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("chime", false) ? "on" : "off") + "</div></div>";
       h += '<div id="projprefs"></div>';
       pane.innerHTML = h;
+      bindSeg("notifydone", function(v){
+        setDevicePref("notifyDone", v === "on");
+        if (v === "on" && !window.loomNative && window.Notification && Notification.permission === "default") {
+          try { Notification.requestPermission(); } catch (e) {}
+        }
+        toast(v === "on" ? "you’ll hear when long turns finish" : "finish notifications off");
+      });
+      bindSeg("chime", function(v){ setDevicePref("chime", v === "on"); if (v === "on") chime(); });
+      bindSeg("textsize", function(v){ try { localStorage.setItem("loomPref:textsize", v); } catch (e) {} applyAppearance(); });
+      bindSeg("density", function(v){ try { localStorage.setItem("loomPref:density", v); } catch (e) {} applyAppearance(); });
+      Array.prototype.forEach.call(pane.querySelectorAll("[data-accent]"), function(b){
+        b.onclick = function(){
+          try { localStorage.setItem("loomPref:accent", b.getAttribute("data-accent")); } catch (e) {}
+          Array.prototype.forEach.call(pane.querySelectorAll("[data-accent]"), function(x){ x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+          applyAppearance();
+        };
+      });
       bindSeg("theme", function(v){
         localStorage.setItem(THEME_KEY, v === "light" ? "light" : "dark");
         applyTheme();
@@ -13897,7 +17496,10 @@ ${BRAND_SPRITE}
      * build, the page waits for it and reloads itself.
      */
     function startUpdate(btn, u){
-      if (!window.confirm("Update Loom to " + u.latest + "?\\n\\nThis runs:\\n" + (u.steps || []).join("\\n") + "\\n\\nThe daemon restarts when it finishes.")) return;
+      askConfirm("Update Loom to " + u.latest + "?\\n\\nThis runs:\\n" + (u.steps || []).join("\\n") + "\\n\\nThe daemon restarts when it finishes.", { ok: "Update" })
+        .then(function(ok){ if (ok) runUpdate(btn, u); });
+    }
+    function runUpdate(btn, u){
       btn.disabled = true;
       btn.textContent = "Updating…";
       var log = document.getElementById("updlog");
@@ -13961,31 +17563,54 @@ ${BRAND_SPRITE}
     }
     function revokeDevice(id){
       var me = id === state.clientId;
-      if (!window.confirm(me ? "Revoke THIS device? You\\u2019ll be signed out and have to pair again."
-        : "Revoke this device? Its token stops working immediately.")) return;
-      sapi("/api/pair/clients/" + encodeURIComponent(id), { method: "DELETE" }).then(function(){
-        if (me) { close(); logout(); return; }
-        toast("device revoked");
-        renderDevices();
-      }).catch(function(e){ toast(e.message); });
+      askConfirm(me ? "Revoke THIS device? You\\u2019ll be signed out and have to pair again."
+        : "Revoke this device? Its token stops working immediately.", { ok: "Revoke", danger: true }).then(function(ok){
+        if (!ok) return;
+        sapi("/api/pair/clients/" + encodeURIComponent(id), { method: "DELETE" }).then(function(){
+          if (me) { close(); logout(); return; }
+          toast("device revoked");
+          renderDevices();
+        }).catch(function(e){ toast(e.message); });
+      });
+    }
+    // Unused: not seen for 30 days, or never used a week after pairing. Every
+    // re-pair mints a new entry, so these pile up; never this device.
+    var DAY = 24 * 3600 * 1000;
+    function isStale(c){
+      if (c.id === state.clientId) return false;
+      if (c.lastSeen) return Date.now() - c.lastSeen > 30 * DAY;
+      return Date.now() - Number(c.createdAt || 0) > 7 * DAY;
+    }
+    function removeStale(list){
+      askConfirm("Remove " + list.length + " unused device" + (list.length === 1 ? "" : "s") + "?\\n\\nTheir tokens stop working. Anything you still use can pair again in a minute.", { ok: "Remove them", danger: true })
+        .then(function(ok){
+          if (!ok) return;
+          return Promise.all(list.map(function(c){ return sapi("/api/pair/clients/" + encodeURIComponent(c.id), { method: "DELETE" }).catch(function(){ return null; }); }))
+            .then(function(){ toast("removed " + list.length + " unused device" + (list.length === 1 ? "" : "s")); renderDevices(); });
+        });
     }
     function renderDevices(){
       busy();
       sapi("/api/pair/clients").then(function(d){
-        var clients = d.clients || [];
+        var clients = (d.clients || []).slice().sort(function(a, b){
+          return (Number(b.lastSeen) || Number(b.createdAt) || 0) - (Number(a.lastSeen) || Number(a.createdAt) || 0);
+        });
+        var stale = clients.filter(isStale);
         var h = '<div class="setphead">Devices</div>' +
           '<div class="setpsub">Every client paired to this Loom. Revoke one and its token stops working at once.</div>';
-        h += '<div class="pillrow"><button class="btn primary sm" id="devpair">Pair a new device</button></div><div id="devpairout"></div>';
+        h += '<div class="pillrow"><button class="btn primary sm" id="devpair">Pair a new device</button>' +
+          (stale.length ? '<button class="btn ghost sm" id="devstale">Remove ' + stale.length + " unused</button>" : "") + '</div><div id="devpairout"></div>';
         if (!clients.length) h += '<div class="snote">No devices paired yet.</div>';
         clients.forEach(function(c){
           var me = c.id === state.clientId;
-          h += '<div class="dev"><div class="di">' + ICONS.agents + "</div>" +
+          h += '<div class="dev' + (isStale(c) ? " stale" : "") + '"><div class="di">' + ICONS.agents + "</div>" +
             '<div class="dn"><div class="dnt">' + esc(c.name || "device") + (me ? ' <span class="devme">this device</span>' : "") + "</div>" +
-            '<div class="dnd">paired ' + rel(c.createdAt) + (c.push ? " \\u00b7 push on" : "") + "</div></div>" +
+            '<div class="dnd">' + (c.lastSeen ? "last used " + rel(c.lastSeen) : "not used since pairing") + " \\u00b7 paired " + rel(c.createdAt) + (c.push ? " \\u00b7 push on" : "") + "</div></div>" +
             '<button class="btn ghost sm" data-revoke="' + esc(c.id) + '">Revoke</button></div>';
         });
         pane.innerHTML = h;
         document.getElementById("devpair").onclick = pairNewDevice;
+        var ds = document.getElementById("devstale"); if (ds) ds.onclick = function(){ removeStale(stale); };
         Array.prototype.forEach.call(pane.querySelectorAll("[data-revoke]"), function(b){
           b.onclick = function(){ revokeDevice(b.getAttribute("data-revoke")); };
         });
@@ -14018,13 +17643,16 @@ ${BRAND_SPRITE}
           "<dt>Frames</dt><dd>" + Number(c.stats.frames || 0) + "</dd>" +
           "<dt>Rejected</dt><dd>" + Number(c.stats.rejected || 0) + "</dd></dl>";
       }
-      h += '<div class="sgrouph">Supabase project</div>';
+      // Loom's own relay project is the default, so there's nothing to fill
+      // in; your own Supabase project is an option, not a prerequisite.
+      var own = !!(c.supabaseUrl && c.supabaseUrl !== c.hostedUrl && c.hostedUrl);
+      h += '<details class="cloudadv"' + (own ? " open" : "") + '><summary>Use your own Supabase project\u2026</summary>';
       h += '<div class="cloudin">' +
         '<div class="field"><label for="cloudurl">Supabase URL</label>' +
         '<input id="cloudurl" placeholder="https://your-project.supabase.co" autocomplete="off" spellcheck="false" value="' + esc(c.supabaseUrl || "") + '"></div>' +
         '<div class="field"><label for="cloudkey">Anon key <span class="opt">' + (c.configured ? "\\u2014 blank keeps the saved one" : "") + "</span></label>" +
         '<input id="cloudkey" type="password" placeholder="' + (c.configured ? "\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022 saved" : "eyJhbGciOi\\u2026") + '" autocomplete="off" spellcheck="false"></div>' +
-        "</div>";
+        "</div></details>";
       h += '<div class="pillrow">' +
         '<button class="btn primary sm" id="cloudon">' + (c.enabled ? "Save & reconnect" : "Enable") + "</button>" +
         (c.enabled ? '<button class="btn ghost sm" id="cloudoff">Disable</button>' : "") +
@@ -14233,7 +17861,12 @@ ${BRAND_SPRITE}
       if (t.signedIn) h += runnerPanelHtml();
       // your teams first; then making or joining another
       if (!t.signedIn) {
-        h += '<div class="sgrouph">Sign in to a hub</div><div class="cloudin">' +
+        // The hosted hub first: one button, your GitHub account. The form
+        // below is for teams running their own loom hub.
+        h += '<div class="sgrouph">Sign in</div>' +
+          '<div class="pillrow"><button class="btn primary sm" type="button" id="tghsign">' + ICONS.github + "Sign in with GitHub</button>" +
+          '<span class="hintx" id="tghnote">Uses the hosted Loom Team Hub. Only titles you share are sent, encrypted.</span></div>' +
+          '<div class="sgrouph">Or use your own hub</div><div class="cloudin">' +
           teamField("Hub URL", "hub", 'class="mono" placeholder="https://hub.example.com"') +
           teamField('GitHub login <span class="opt">\\u2014 blank uses the gh CLI\\u2019s</span>', "cgh", 'placeholder="your GitHub username"') +
           teamField('Join secret <span class="opt">if the hub has one</span>', "csec", 'type="password"') + "</div>" +
@@ -14248,6 +17881,35 @@ ${BRAND_SPRITE}
         '<div class="pillrow"><button class="btn outline sm" type="button" data-tjoin>Join team</button>' +
         '<span class="hintx">' + (t.signedIn ? "The link names its hub; you join as " + esc(t.github) + "." : "Signs in to the link\\u2019s hub with the login and secret above.") + "</span></div>";
       pane.innerHTML = h;
+      var ghb = document.getElementById("tghsign");
+      if (ghb) ghb.onclick = function(){
+        var note = document.getElementById("tghnote");
+        ghb.disabled = true;
+        // Open the tab now, inside the click: a window opened after the
+        // request comes back is a popup, and browsers block it silently.
+        // (The desktop app hands every outside link to your real browser and
+        // blocks nothing, so there it opens the URL itself once it has it.)
+        var electron = isElectron();
+        var win = null;
+        if (!electron) { try { win = window.open("about:blank", "_blank"); } catch (e) { win = null; } }
+        sapi("/api/team/hosted-signin", { method: "POST", body: "{}" }).then(function(j){
+          if (j && j.url) {
+            if (electron) window.open(j.url, "_blank");
+            else if (win && !win.closed) { try { win.opener = null; } catch (e) {} win.location.href = j.url; }
+            else if (note) { note.innerHTML = 'Your browser blocked the sign-in window \u2014 <a href="' + esc(j.url) + '" target="_blank" rel="noopener">open it here</a>.'; return; }
+          }
+          if (note) note.textContent = "Finish signing in with GitHub in the browser tab that opened \u2014 this page updates on its own.";
+          // wait for the session to land (the daemon holds the callback)
+          var tries = 0;
+          var iv = setInterval(function(){
+            if (++tries > 300 || !document.getElementById("tghsign")) { clearInterval(iv); return; }
+            sapi("/api/team/hosted-signin").then(function(st){
+              if (st && st.error) { clearInterval(iv); ghb.disabled = false; if (note) note.textContent = "Sign-in didn\u2019t finish: " + st.error; return; }
+              return sapi("/api/team").then(function(tt){ if (tt && tt.signedIn) { clearInterval(iv); state.team = tt; toast("signed in as " + (tt.github || "you")); renderTeam(); } });
+            }).catch(function(){});
+          }, 2000);
+        }).catch(function(e){ if (win && !win.closed) win.close(); ghb.disabled = false; if (note) note.textContent = e.message; });
+      };
       wireTeamForms(pane, teamSact);
       wireTeamInvites(pane, teamSact);
       wireDoctor();
@@ -14354,15 +18016,28 @@ ${BRAND_SPRITE}
         return '<div class="psrow' + (on ? "" : " off") + '">' +
           '<label class="psswitch" aria-label="toggle ' + esc(a.id) + '"><input type="checkbox" class="psen" data-agent="' + esc(a.id) + '"' + (on ? " checked" : "") + (a.holdsBaton ? " disabled" : "") + '><span class="pssl"></span></label>' +
           '<div class="psinfo"><div class="psname">' + esc(a.id) + (a.holdsBaton ? ' <span class="psbaton">baton</span>' : "") + '</div><div class="pskind">' + esc(a.kind) + (a.model ? " \\u00b7 " + esc(a.model) : "") + "</div></div>" +
-          '<div class="psrolewrap"><span class="pslabel">role</span>' + roleSel + "</div></div>";
+          '<div class="psrolewrap"><span class="pslabel">role</span>' + roleSel +
+          '<button type="button" class="btn xs ' + (a.instructions ? "outline psinstr on" : "ghost psinstr") + '" data-instr="' + esc(a.id) + '" title="' +
+            esc(a.instructions ? "Standing instructions: " + a.instructions.slice(0, 160) : "Add standing instructions this agent gets before every turn") + '">' +
+            ICONS.pencil + (a.instructions ? "Instructions" : "Instruct") + "</button>" +
+          '<button type="button" class="btn xs ghost psinstr" data-avatar="' + esc(a.id) + '" title="' + (a.avatar ? "change its picture" : "give this agent a picture") + '">' +
+            (a.avatar ? '<img class="psav" src="' + a.avatar + '" alt="">' : ICONS.camera) + (a.avatar ? "Picture" : "Picture") + "</button>" +
+          (a.avatar ? '<button type="button" class="btn xs ghost" data-avatarx="' + esc(a.id) + '" title="remove its picture" aria-label="remove picture">' + ICONS.x + "</button>" : "") +
+          (a.kind === "model" ? '<button type="button" class="btn xs ghost psinstr" data-sampling="' + esc(a.id) + '" title="' +
+            esc("Temperature " + (a.sampling && a.sampling.temperature != null ? a.sampling.temperature : "default") + " · max tokens " + (a.sampling && a.sampling.maxTokens ? a.sampling.maxTokens : "default")) + '">' +
+            ICONS.gear + "Sampling</button>" : "") +
+          '<button type="button" class="btn xs ghost psinstr" data-check="' + esc(a.id) + '" title="is it installed, signed in, and is its model there? No prompt is sent">' + ICONS.check + "Check</button>" +
+          "</div></div>" + '<div class="pscheck" data-chkout="' + esc(a.id) + '"></div>';
       }).join("");
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \\u00b7 baton " + esc(p.holder || "\\u2014") + "</div></div>" +
         '<div class="pssec">Agents \\u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
         '<div class="pshint">Off agents stay in the roster but can\\u2019t take turns or hold the baton. Changes land on the next turn \\u2014 no restart. You can\\u2019t switch off the baton holder; hand it off first.</div>' +
         '<div class="pssec" style="margin-top:14px">Policies \\u2014 all off by default</div>' +
         '<div class="psrows" id="pspolicies"><div class="loader"><i></i><i></i><i></i><i></i></div></div>' +
-        '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>";
+        '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>" +
+        '<div class="pssec" style="margin-top:14px">Storage</div><div id="psstore" class="psstore">' + LOADER + "</div>";
       if (state.team) drawPsTeam(); else loadTeam().then(drawPsTeam);
+      drawPsStore();
       // The policy toggles, from the same settings the CLI and config file use.
       api("/api/projects/" + pid + "/config").then(function(cfg){
         var host = document.getElementById("pspolicies"); if (!host) return;
@@ -14397,6 +18072,112 @@ ${BRAND_SPRITE}
             .then(afterChange).catch(function(err){ toast(err.message || "could not toggle"); cb.checked = !cb.checked; });
         };
       });
+      /** Crop to a square and shrink to 96px on the device; only that small PNG is sent. */
+      function pictureFrom(file){
+        return new Promise(function(resolve, reject){
+          if (!/^image\\//.test(file.type)) return reject(new Error("that isn’t an image"));
+          var url = URL.createObjectURL(file), img = new Image();
+          img.onload = function(){
+            var side = Math.min(img.width, img.height), c = document.createElement("canvas");
+            c.width = c.height = 96;
+            c.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 96, 96);
+            URL.revokeObjectURL(url);
+            resolve(c.toDataURL("image/png"));
+          };
+          img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error("couldn’t read that image")); };
+          img.src = url;
+        });
+      }
+      Array.prototype.forEach.call(body.querySelectorAll("[data-avatar]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-avatar");
+          var inp = document.createElement("input");
+          inp.type = "file"; inp.accept = "image/png,image/jpeg,image/webp";
+          inp.onchange = function(){
+            var f = inp.files && inp.files[0]; if (!f) return;
+            pictureFrom(f).then(function(dataUrl){
+              return api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/avatar", { method: "PUT", body: JSON.stringify({ avatar: dataUrl }) });
+            }).then(function(){ toast(agent + " has a picture now"); afterChange(); }).catch(function(err){ toast(err.message); });
+          };
+          inp.click();
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-check]"), function(b){
+        b.onclick = function(){
+          var id = b.getAttribute("data-check");
+          var out = body.querySelector('[data-chkout="' + id + '"]');
+          if (!out) return;
+          b.disabled = true;
+          out.innerHTML = '<div class="pschk dim">checking ' + esc(id) + "…</div>";
+          api("/api/projects/" + pid + "/agents/" + encodeURIComponent(id) + "/check", { method: "POST", body: "{}" }).then(function(r){
+            out.innerHTML = '<div class="pschkhead ' + (r.ok ? "ok" : "bad") + '">' + (r.ok ? ICONS.check + esc(id) + " is ready" : ICONS.alert + esc(id) + " isn’t ready") +
+              '<span class="dim"> · ' + (r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s") + "</span></div>" +
+              (r.checks || []).map(function(c){
+                return '<div class="pschk ' + (c.ok ? "ok" : "bad") + '"><span class="pschkn">' + (c.ok ? "✓ " : "✗ ") + esc(c.name) + "</span>" + esc(c.detail) + "</div>";
+              }).join("");
+          }).catch(function(err){
+            out.innerHTML = '<div class="pschk bad">' + esc(err.message) + "</div>";
+          }).then(function(){ b.disabled = false; });
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-avatarx]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-avatarx");
+          api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/avatar", { method: "PUT", body: JSON.stringify({ avatar: null }) })
+            .then(function(){ toast(agent + "’s picture removed"); afterChange(); }).catch(function(err){ toast(err.message); });
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-sampling]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-sampling");
+          var a = (p.agents || []).filter(function(x){ return x.id === agent; })[0] || {};
+          var cur = a.sampling || {};
+          var sc = document.createElement("div");
+          sc.className = "scrim cfscrim";
+          sc.innerHTML = '<div class="modal cfmodal" role="dialog" aria-modal="true"><div class="cft">Sampling for ' + esc(agent) + "</div>" +
+            '<div class="cfb">How ' + esc(agent) + ' writes. Leave a field blank for the provider’s default.</div>' +
+            '<label class="cflab">Temperature <span>0 is steady, 1 is lively, up to 2</span><input class="cfin" id="smtemp" type="number" min="0" max="2" step="0.1" placeholder="default"></label>' +
+            '<label class="cflab">Max tokens per reply <span>16 to 200000</span><input class="cfin" id="smmax" type="number" min="16" max="200000" step="1" placeholder="default"></label>' +
+            '<div class="cfa"><button type="button" class="btn sm ghost" id="smcancel">Cancel</button><button type="button" class="btn sm primary" id="smsave">Save</button></div></div>';
+          document.body.appendChild(sc);
+          var t = document.getElementById("smtemp"), m = document.getElementById("smmax");
+          if (cur.temperature != null) t.value = cur.temperature;
+          if (cur.maxTokens) m.value = cur.maxTokens;
+          function done(){ sc.remove(); document.removeEventListener("keydown", key, true); }
+          function key(e){ if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } }
+          document.addEventListener("keydown", key, true);
+          sc.onmousedown = function(e){ if (e.target === sc) done(); };
+          document.getElementById("smcancel").onclick = done;
+          document.getElementById("smsave").onclick = function(){
+            var body2 = { temperature: t.value === "" ? null : Number(t.value), maxTokens: m.value === "" ? null : Number(m.value) };
+            api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/sampling", { method: "PUT", body: JSON.stringify(body2) })
+              .then(function(){ done(); toast(agent + " sampling saved — it takes on the next turn"); afterChange(); })
+              .catch(function(err){
+                var e = sc.querySelector(".mferr");
+                if (!e) { e = document.createElement("div"); e.className = "mferr"; e.setAttribute("role", "alert"); sc.querySelector(".cfa").insertAdjacentElement("beforebegin", e); }
+                e.textContent = err.message;
+              });
+          };
+          setTimeout(function(){ t.focus(); }, 0);
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-instr]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-instr");
+          var a = (p.agents || []).filter(function(x){ return x.id === agent; })[0] || {};
+          askText("Standing instructions for " + agent, {
+            value: a.instructions || "", multiline: true,
+            placeholder: "e.g. Use pnpm, never npm. Don’t touch db/migrations. Keep replies short.",
+            note: "Sent ahead of every turn " + agent + " takes in this project. Empty clears them.",
+            ok: "Save",
+          }).then(function(text){
+            if (text === null) return;
+            api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/instructions", { method: "PUT", body: JSON.stringify({ instructions: text }) })
+              .then(function(r){ toast(r.instructions ? agent + " will get these before every turn" : agent + "’s instructions cleared"); afterChange(); })
+              .catch(function(err){ toast(err.message); });
+          });
+        };
+      });
       Array.prototype.forEach.call(body.querySelectorAll(".psrole"), function(sel){
         sel.onchange = function(){
           var agent = sel.getAttribute("data-agent");
@@ -14405,7 +18186,25 @@ ${BRAND_SPRITE}
         };
       });
     }
-    // Sharing with the team (D8) \u2014 only when this machine is on one.
+    function kb(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+    /** The event log on disk, and a button that gives back its free pages. */
+    function drawPsStore(){
+      var host = document.getElementById("psstore"); if (!host) return;
+      api("/api/projects/" + pid + "/log/size").then(function(s){
+        host.innerHTML = '<div class="psrow"><div class="psinfo"><div class="psname">Event log</div>' +
+          '<div class="pskind">' + kb(s.bytes) + " · " + Number(s.events).toLocaleString() + " events — the whole history of this project’s threads</div></div>" +
+          '<button type="button" class="btn xs outline" id="pscompact" title="reclaim space the log no longer uses (SQLite VACUUM) — nothing is deleted">Compact</button></div>';
+        document.getElementById("pscompact").onclick = function(){
+          var b = this; b.disabled = true; b.textContent = "Compacting…";
+          api("/api/projects/" + pid + "/log/compact", { method: "POST", body: "{}" }).then(function(r){
+            var saved = r.before.bytes - r.after.bytes;
+            toast(saved > 0 ? "compacted — " + kb(saved) + " back, every event kept" : "already compact — every event kept");
+            drawPsStore();
+          }).catch(function(err){ toast(err.message); b.disabled = false; b.textContent = "Compact"; });
+        };
+      }).catch(function(){ host.innerHTML = '<div class="pshint" style="margin-top:0">Couldn’t read the log size.</div>'; });
+    }
+    // Sharing with the team (D8) — only when this machine is on one.
     function drawPsTeam(){
       var host = document.getElementById("psteam"); if (!host) return;
       var t = state.team, teams = (t && t.teams) || [];
@@ -14441,6 +18240,7 @@ ${BRAND_SPRITE}
           '<div class="pickrow"><input id="pdir" spellcheck="false" autocomplete="off" placeholder="' +
             (native ? "choose a folder\\u2026" : "/path/to/repo on the daemon host") + '">' +
             (native ? '<button class="btn outline" id="pbrowse">Choose\\u2026</button>' : "") + "</div>" +
+          '<span class="ferr" id="perr" role="alert"></span>' +
           '<span class="hintx">Loom writes a <code>.loom/</code> folder here and leaves the rest of the repo alone.</span></div>' +
         '<div class="field"><label>Name <span class="opt">optional</span></label>' +
           '<input id="pname" spellcheck="false" autocomplete="off" placeholder="defaults to the folder name"></div>' +
@@ -14463,11 +18263,22 @@ ${BRAND_SPRITE}
       }).catch(function(err){ toast(String(err.message || err)); });
     };
     setTimeout(function(){ dirEl.focus(); }, 30);
+    // Errors belong under the field they're about, not in a toast behind the
+    // dialog where your eyes aren't.
+    function fieldErr(msg){
+      var e = document.getElementById("perr"); if (e) e.textContent = msg || "";
+      dirEl.classList.toggle("bad", !!msg);
+      if (msg) dirEl.focus();
+    }
+    dirEl.addEventListener("input", function(){ fieldErr(""); });
     function create(){
       var dir = (dirEl.value || "").trim();
-      if (!dir) return toast(native ? "choose a folder first" : "enter a directory path");
+      if (!dir) return fieldErr(native ? "Choose a folder first." : "Enter the path to a folder on this machine.");
       var name = (document.getElementById("pname").value || "").trim();
-      var btn = document.getElementById("pcreate"); btn.disabled = true;
+      var btn = document.getElementById("pcreate");
+      if (btn.disabled) return; // a double-click is one project, not two requests
+      btn.disabled = true;
+      var was = btn.innerHTML; btn.textContent = "Creating\u2026";
       api("/api/projects", {
         method: "POST",
         body: JSON.stringify(name ? { dir: dir, name: name } : { dir: dir }),
@@ -14475,18 +18286,21 @@ ${BRAND_SPRITE}
         close();
         var p = j.project || {};
         // say what was actually detected rather than a bare "added"
-        var found = ((j.config && j.config.agents) || []).filter(function(a){ return a.tier === "adapter"; });
+        // (The config carries kinds, not tiers — filtering on tier counted
+        // zero and told you no agents were found beside a roster of five.)
+        var found = (j.config && j.config.agents) || [];
         toast(found.length
-          ? p.name + " \\u00b7 " + found.length + (found.length === 1 ? " ADE" : " ADEs") + ": " + found.map(function(a){ return a.id; }).join(", ")
-          : p.name + " added \\u00b7 no ADE CLIs detected on this host");
+          ? p.name + " added \\u00b7 " + found.length + " agent" + (found.length === 1 ? "" : "s") + ": " + found.map(function(a){ return agentLabel(a.kind, a.id); }).join(", ")
+          : p.name + " added \\u00b7 no agent CLIs found on this machine \\u2014 install one, or add a model agent");
         if (state.refreshProjects) state.refreshProjects();
         if (p.id) { if (state.selectProject) state.selectProject(p.id); else location.hash = "#p/" + p.id; }
-      }).catch(function(err){ btn.disabled = false; toast(err.message); });
+      }).catch(function(err){ btn.disabled = false; btn.innerHTML = was; fieldErr(String(err.message || err).replace(/^./, function(c){ return c.toUpperCase(); })); });
     }
     document.getElementById("pcreate").onclick = create;
     function onKey(e){
       if (e.key === "Escape") { e.preventDefault(); close(); }
-      else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); create(); }
+      // Enter in a one-line field submits, as it does everywhere else
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.target === dirEl || (e.target && e.target.id === "pname"))) { e.preventDefault(); create(); }
     }
     document.addEventListener("keydown", onKey);
   }
@@ -14656,7 +18470,10 @@ ${BRAND_SPRITE}
   }
 
   // ---- router ----------------------------------------------------------
-  var mq = window.matchMedia("(min-width:900px)");
+  // The workspace on anything with a mouse, at any width: narrowing a desktop
+  // window used to swap in the phone layout and take the sidebar, the tabs and
+  // the panels away. The single column is for touch phones only.
+  var mq = window.matchMedia("(min-width:900px), (hover:hover) and (pointer:fine)");
   function isDesktop(){ return mq.matches; }
   function clearShell(){ if (state.shellTimer) { clearInterval(state.shellTimer); state.shellTimer = null; } }
 
@@ -14665,7 +18482,8 @@ ${BRAND_SPRITE}
     clearTimers();
     clearShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
-    var cur = m ? m[1] : null;
+    // No project in the URL: reopen the one you were last in, not the first.
+    var cur = m ? m[1] : (function(){ try { return localStorage.getItem("loomProject"); } catch (e) { return null; } })();
     // The project the URL asked for, kept separately from the one on screen so
     // a deep link that loses the race with the first /api/projects can still be
     // honoured when it arrives. select() clears it — see refresh().
@@ -14696,6 +18514,7 @@ ${BRAND_SPRITE}
           '<button class="iconbtn rvbtn" data-view="search" title="Search">' + ICONS.search + "</button>" +
           '<button class="iconbtn rvbtn" data-view="scm" title="Source Control">' + ICONS.branch + "</button>" +
           '<button class="iconbtn rvbtn" data-view="tasks" title="Agents" aria-label="Agents">' + ICONS.agents + "</button>" +
+          '<button class="iconbtn rvbtn" data-view="outline" title="Outline: your prompts in this chat" aria-label="Outline">' + ICONS.clipboard + "</button>" +
           '<span class="spacer"></span>' +
           '<button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button>" +
           // No second panel toggle. #railbtn in the tab strip is the one control
@@ -14856,6 +18675,7 @@ ${BRAND_SPRITE}
     function drawList(){
       var el = document.getElementById("slist"); if (!el) return;
       if (!state.projects.length) {
+        el._drawn = null;
         el.innerHTML = '<div class="sys" style="padding:24px 8px;line-height:1.7">no projects yet<br><span style="opacity:.75">run <b class="mono" style="font-weight:500">loom init</b></span></div>';
         return;
       }
@@ -14868,11 +18688,12 @@ ${BRAND_SPRITE}
         // start of one. The early return here meant the chat hits below never
         // rendered in the exact case you were searching for a message rather than
         // a project, which is the common case.
+        el._drawn = null;
         el.innerHTML = '<div class="sys" style="padding:16px 8px">no project called \u201c' + esc(filter) + '\u201d</div>';
         drawChatHits(el);
         return;
       }
-      el.innerHTML = shown.map(function(p){
+      var listHtml = shown.map(function(p){
         var r = p.route, act = r && (r.status === "running" || r.status === "waiting_human");
         var adapters = (p.agents || []).filter(function(a){ return a.tier === "adapter"; });
         var sel = p.id === cur;
@@ -14886,18 +18707,54 @@ ${BRAND_SPRITE}
           // margin-left:auto — .cnt's rule loses to the badge's inline style.
           (act ? '<span class="badge live" style="margin-left:auto">' + (r.current + 1) + "/" + r.steps.length + "</span>" : '<span class="cnt" style="margin-left:auto">' + adapters.length + "</span>") +
           '<button class="psetbtn" data-pset="' + esc(p.id) + '" title="project settings" aria-label="settings for ' + esc(p.name) + '">' + ICONS.gear + "</button></div>" +
-          '<div class="m">baton ' + esc(p.holder || "\\u2014") +
-          (p.costUsd > 0 ? " \\u00b7 " + money(p.costUsd) : "") + "</div></div>";
-        if (open) {
+          (p.error
+            ? '<div class="m merr">' + ICONS.alert + (p.missing ? "folder missing" : "needs loom init") + "</div></div>"
+            : '<div class="m">baton ' + esc(p.holder || "—") + (p.costUsd > 0 ? " · " + money(p.costUsd) : "") + "</div></div>");
+        if (open && !p.error) {
           // A project holds conversations. The agents that work them live in
           // the rail's roster — they belong to the project, not to one chat.
-          var chats = p.chats || [{ id: "main", title: "Main", createdAt: 0 }];
-          rows += chats.map(function(c){
+          var chats = (p.chats || [{ id: "main", title: "Main", createdAt: 0 }]).slice();
+          // Main first, then newest first; past a handful the older threads
+          // fold behind a "show more" row — an afternoon of orchestra runs
+          // otherwise buries the sidebar in t1/t2/t3 rows. The open thread is
+          // always shown, wherever it falls.
+          var here = currentChat(), SHOW = 8;
+          var mainC = chats.filter(function(c){ return c.id === "main"; });
+          var archOpen = !!(state.chatsArchived && state.chatsArchived[p.id]);
+          var archived = chats.filter(function(c){ return c.id !== "main" && c.archived; });
+          var rest = chats.filter(function(c){ return c.id !== "main" && (!c.archived || archOpen || (sel && c.id === here)); }).sort(function(a, b){
+            // pinned threads first, then newest first
+            return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.createdAt || 0) - (a.createdAt || 0);
+          });
+          // Filed threads live under their folder; with "group by agent" on,
+          // the loose ones gather under whoever answers them. Groups are never
+          // cut by "show older" — you folded them yourself if they're long.
+          var byAgent = devicePref("chatsByAgent", false);
+          var groups = [], gIndex = {};
+          var byIdG = {}; (p.agents || []).forEach(function(a){ byIdG[a.id] = a; });
+          rest = rest.filter(function(c){
+            var key = c.folder ? "f:" + c.folder : byAgent ? "a:" + (c.agentId || "") : "";
+            if (!key) return true;
+            if (!gIndex[key]) {
+              gIndex[key] = { key: key, folder: !!c.folder, name: c.folder || (c.agentId ? (byIdG[c.agentId] ? agentLabel(byIdG[c.agentId].kind, c.agentId) : c.agentId) : "Follows the baton"), agentId: c.folder ? "" : c.agentId || "", chats: [] };
+              groups.push(gIndex[key]);
+            }
+            gIndex[key].chats.push(c);
+            return false;
+          });
+          groups.sort(function(a, b){ return (b.folder ? 1 : 0) - (a.folder ? 1 : 0) || (a.folder || a.agentId ? 0 : 1) - (b.folder || b.agentId ? 0 : 1) || a.name.localeCompare(b.name); });
+          var moreOpen = !!(state.chatsMore && state.chatsMore[p.id]);
+          var older = moreOpen ? 0 : Math.max(0, rest.length - SHOW);
+          var visible = moreOpen ? rest : rest.slice(0, SHOW).concat(rest.slice(SHOW).filter(function(c){ return (sel && c.id === here) || c.pinned; }));
+          if (!moreOpen && sel && rest.slice(SHOW).some(function(c){ return c.id === here; })) older--;
+          var byId = {}; (p.agents || []).forEach(function(a){ byId[a.id] = a; });
+          var chatRowHtml = function(c){
             var curC = c.id === currentChat();
             return '<div class="crow' + (curC ? " cur" : "") + '" data-p="' + esc(p.id) +
               '" data-chat="' + esc(c.id) + '"' + (curC ? ' data-current="true"' : "") + ">" +
-              '<span class="ci">' + ICONS.chat + "</span>" +
+              '<span class="ci">' + (c.pinned ? ICONS.pin : c.archived ? ICONS.archive : ICONS.chat) + "</span>" +
               '<span class="cnm">' + esc(c.title) + "</span>" +
+              (!curC && isUnread(p.id, c) ? '<span class="udot" title="new replies since you last looked" aria-label="unread"></span>' : "") +
               // Is it working, did it finish, did it fail — from the run's
               // own task rows, so this is a fact Loom already had rather than
               // a guess. A thread that never ran shows nothing at all.
@@ -14906,22 +18763,74 @@ ${BRAND_SPRITE}
               // shape of what's running is readable without opening anything.
               (c.agentId
                 ? '<span class="cwho" title="' + esc(c.agentId + (c.model ? " \u00b7 " + c.model : "")) + '">' +
-                  esc(c.model ? c.model.split("/").pop() : c.agentId) + "</span>"
+                  esc(c.model ? c.model.split("/").pop() : byId[c.agentId] ? agentLabel(byId[c.agentId].kind, c.agentId) : c.agentId) + "</span>"
                 : "") +
               (c.id === "main"
                 ? ""
                 : '<button class="cx iconbtn" data-delchat="' + esc(c.id) +
                   '" title="forget this chat" aria-label="forget chat ' + esc(c.title) + '">' + ICONS.x + "</button>") +
               "</div>";
-          }).join("");
+          };
+          rows += mainC.map(chatRowHtml).join("");
+          groups.forEach(function(g){
+            var fkey = p.id + "|" + g.key, shut = foldShut(fkey);
+            var unread = g.chats.some(function(c){ return c.id !== currentChat() && isUnread(p.id, c); });
+            rows += '<div class="crow fold' + (shut ? "" : " open") + '" data-fold="' + esc(fkey) + '"' + (g.folder ? ' data-folder="' + esc(g.name) + '" data-p="' + esc(p.id) + '"' : "") + ' role="button" aria-expanded="' + (shut ? "false" : "true") + '">' +
+              '<span class="ci fcar">' + ICONS.chevron + "</span>" +
+              (g.folder ? '<span class="ci">' + ICONS.folder + "</span>" : '<span class="ci fg">' + (g.agentId ? agentGlyph((byId[g.agentId] || {}).kind, g.agentId) : ICONS.agents) + "</span>") +
+              '<span class="cnm">' + esc(g.name) + "</span>" +
+              (shut && unread ? '<span class="udot" aria-label="unread inside"></span>' : "") +
+              '<span class="fcnt">' + g.chats.length + "</span></div>";
+            rows += g.chats.filter(function(c){ return !shut || (sel && c.id === here); }).map(function(c){ return chatRowHtml(c).replace('class="crow', 'class="crow infold'); }).join("");
+          });
+          rows += visible.map(chatRowHtml).join("");
+          if (older > 0 || moreOpen && rest.length > SHOW) {
+            rows += '<div class="crow more" data-chatsmore="' + esc(p.id) + '"><span class="ci">' + ICONS.dots + '</span><span class="cnm">' +
+              (moreOpen ? "Show fewer" : "Show " + older + " older") + "</span></div>";
+          }
+          if (archived.length) {
+            rows += '<div class="crow more" data-chatsarch="' + esc(p.id) + '"><span class="ci">' + ICONS.archive + '</span><span class="cnm">' +
+              (archOpen ? "Hide archived" : "Archived · " + archived.length) + "</span></div>";
+          }
           rows += '<div class="crow add" data-newchat="' + esc(p.id) + '">' +
             '<span class="ci">' + ICONS.plus + '</span><span class="cnm">New chat</span></div>';
         }
         return '<div class="sgroup">' + rows + "</div>";
       }).join("");
+      // The list is redrawn on every poll; rebuilding identical rows threw
+      // away hover and focus under the pointer every five seconds (and made
+      // a click on a row land on a node that no longer existed).
+      if (!filter && el._drawn === listHtml) return;
+      el._drawn = filter ? null : listHtml;
+      el.innerHTML = listHtml;
 
       drawChatHits(el);
 
+      Array.prototype.forEach.call(el.querySelectorAll("[data-chatsarch]"), function(row){
+        row.onclick = function(ev){
+          ev.stopPropagation();
+          var id = row.getAttribute("data-chatsarch");
+          state.chatsArchived = state.chatsArchived || {};
+          state.chatsArchived[id] = !state.chatsArchived[id];
+          drawList();
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-fold]"), function(row){
+        row.onclick = function(ev){ ev.stopPropagation(); setFoldShut(row.getAttribute("data-fold"), !foldShut(row.getAttribute("data-fold"))); drawList(); };
+        if (row.getAttribute("data-folder")) row.oncontextmenu = function(ev){
+          ev.preventDefault(); ev.stopPropagation();
+          folderMenu(row.getAttribute("data-p"), row.getAttribute("data-folder"), ev.clientX, ev.clientY);
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-chatsmore]"), function(row){
+        row.onclick = function(ev){
+          ev.stopPropagation();
+          var id = row.getAttribute("data-chatsmore");
+          state.chatsMore = state.chatsMore || {};
+          state.chatsMore[id] = !state.chatsMore[id];
+          drawList();
+        };
+      });
       Array.prototype.forEach.call(el.querySelectorAll(".srow"), function(row){
         row.onclick = function(){ select(row.getAttribute("data-id")); };
         row.oncontextmenu = function(ev){
@@ -15096,12 +19005,17 @@ ${BRAND_SPRITE}
       if (!agents.length) { onPick(null); return; } // nothing to choose — just make it
       var pop = document.createElement("div");
       pop.className = "pickpop"; pop.id = "chatpick";
+      // Switched-off agents can't answer, so they aren't offered.
+      var usable = agents.filter(function(a){ return a.enabled !== false; });
+      if (!usable.length) usable = agents;
       pop.innerHTML = '<div class="pickhead">start this chat with</div>' +
-        agents.map(function(a){
-          var bridge = a.tier === "bridge";
+        usable.map(function(a){
+          var bridge = a.tier === "bridge", lbl = agentLabel(a.kind, a.id);
+          var sub = bridge ? "drives its own window" : a.model ? shortModel(a.model) : a.kind === "model" ? "no model yet" : "default model";
           return '<button class="pickrow" data-pick="' + esc(a.id) + '">' +
-            brandMark(a.kind) + '<span class="pnm">' + esc(a.id) + "</span>" +
-            '<span class="prole">' + esc(bridge ? "bridge" : a.role) + "</span></button>";
+            '<span class="pic">' + agentGlyph(a.kind, a.id, "brand lg") + "</span>" +
+            '<span class="mtx"><span class="pnm">' + esc(lbl) + (a.id !== lbl && a.id !== a.kind && String(a.kind || "").indexOf(a.id) !== 0 ? '<span class="mfrom">' + esc(a.id) + "</span>" : "") + "</span>" +
+            '<span class="prole">' + esc(sub) + "</span></span></button>";
         }).join("");
       document.body.appendChild(pop);
       var r = anchor.getBoundingClientRect();
@@ -15176,11 +19090,79 @@ ${BRAND_SPRITE}
       // Main follows the baton and its name is not yours to change — the menu
       // says so by not offering, rather than by offering and refusing.
       if (!isMain) {
-        items.push({ label: "Rename\u2026", icon: ICONS.file, run: function(){ renameChat(pid, cid, c.title); } });
+        items.push({ label: c.pinned ? "Unpin" : "Pin to top", icon: ICONS.pin, run: function(){ flagChat(pid, cid, { pinned: !c.pinned }); } });
+        items.push({ label: c.archived ? "Unarchive" : "Archive", icon: ICONS.archive, hint: c.archived ? "" : "hide, keep history", run: function(){ flagChat(pid, cid, { archived: !c.archived }); } });
+        items.push({ label: "Move to folder…", icon: ICONS.folder, hint: c.folder || "", run: function(){ moveToFolder(p, c); } });
+        if (c.folder) items.push({ label: "Take out of " + c.folder, icon: ICONS.folder, run: function(){ flagChat(pid, cid, { folder: null }); } });
+      }
+      items.push({ label: devicePref("chatsByAgent", false) ? "Stop grouping by agent" : "Group chats by agent", icon: ICONS.agents, run: function(){
+        setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
+      } });
+      items.push({ label: "Export as Markdown", icon: ICONS.download, run: function(){
+        if (pid === cur && currentChat() === cid && state.exportThread) { state.exportThread(); return; }
+        setChat(pid, cid);
+        setTimeout(function(){ if (state.exportThread) state.exportThread(); }, 600);
+      } });
+      if (!isMain) {
+        items.push({ label: "Rename…", icon: ICONS.file, run: function(){ renameChat(pid, cid, c.title); } });
         items.push({ sep: true });
         items.push({ label: "Forget this chat", icon: ICONS.trash, danger: true, run: function(){ forgetChat(pid, cid); } });
       }
       openMenu(x, y, items);
+    }
+
+    /** Which sidebar groups you folded, kept on this device. */
+    function foldShut(key){
+      try { return !!JSON.parse(localStorage.getItem("loomFolds") || "{}")[key]; } catch (e) { return false; }
+    }
+    function setFoldShut(key, shut){
+      try {
+        var m = JSON.parse(localStorage.getItem("loomFolds") || "{}");
+        if (shut) m[key] = 1; else delete m[key];
+        localStorage.setItem("loomFolds", JSON.stringify(m));
+      } catch (e) {}
+    }
+    function moveToFolder(p, c){
+      var names = [];
+      (p.chats || []).forEach(function(x){ if (x.folder && names.indexOf(x.folder) < 0) names.push(x.folder); });
+      askText("Move “" + c.title + "” to a folder", {
+        value: c.folder || "", ok: "Move", required: true, placeholder: "folder name",
+        note: names.length ? "Folders here: " + names.join(", ") + ". A new name makes a new folder." : "A folder exists while something is in it.",
+      }).then(function(name){
+        if (name === null || !name.trim() || name.trim() === c.folder) return;
+        flagChat(p.id, c.id, { folder: name.trim() });
+      });
+    }
+    /** Right-click a folder: rename it (every thread in it moves), or empty it. */
+    function folderMenu(pid, name, x, y){
+      var p = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
+      if (!p) return;
+      var inside = (p.chats || []).filter(function(c){ return c.folder === name; });
+      var each = function(folder, done){
+        Promise.all(inside.map(function(c){
+          return api("/api/projects/" + pid + "/chats/" + encodeURIComponent(c.id), { method: "PATCH", body: JSON.stringify({ folder: folder }) });
+        })).then(function(){ refresh(); toast(done); }).catch(function(err){ toast(err.message); });
+      };
+      openMenu(x, y, [
+        { head: name + " · " + inside.length },
+        { label: "Rename folder…", icon: ICONS.file, run: function(){
+            askText("Rename folder", { value: name, ok: "Rename", required: true }).then(function(next){
+              if (next === null || !next.trim() || next.trim() === name) return;
+              each(next.trim(), "renamed to " + next.trim());
+            });
+          } },
+        { label: "Ungroup", icon: ICONS.folder, hint: "threads stay", run: function(){ each(null, "folder removed · its threads are back in the list"); } },
+      ]);
+    }
+
+    function flagChat(pid, cid, flags){
+      api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid), { method: "PATCH", body: JSON.stringify(flags) })
+        .then(function(){
+          if (flags.archived && currentChat() === cid) setChat(pid, "main");
+          refresh();
+          toast(flags.folder ? "moved to " + flags.folder : flags.folder === null ? "out of the folder" : flags.pinned ? "pinned to the top" : flags.pinned === false ? "unpinned" : flags.archived ? "archived · under Archived in the sidebar" : "back in the list");
+        })
+        .catch(function(err){ toast(err.message); });
     }
 
     function bindChat(pid, cid, agentId){
@@ -15192,13 +19174,14 @@ ${BRAND_SPRITE}
     }
 
     function renameChat(pid, cid, was){
-      var next = window.prompt("Rename this chat", was || "");
-      if (next === null) return;
-      next = next.trim();
-      if (!next || next === was) return;
-      api("/api/projects/" + pid + "/chats/" + cid + "/rename", { method: "POST", body: JSON.stringify({ title: next }) })
-        .then(function(){ refresh(); })
-        .catch(function(err){ toast(err.message); });
+      askText("Rename this chat", { value: was || "", ok: "Rename" }).then(function(next){
+        if (next === null) return;
+        next = next.trim();
+        if (!next || next === was) return;
+        api("/api/projects/" + pid + "/chats/" + cid + "/rename", { method: "POST", body: JSON.stringify({ title: next }) })
+          .then(function(){ refresh(); })
+          .catch(function(err){ toast(err.message); });
+      });
     }
 
     function forgetChat(pid, cid){
@@ -15213,13 +19196,14 @@ ${BRAND_SPRITE}
 
     /** Rename in place, from the menu — the same call the settings pane makes. */
     function renameProject(pid, was){
-      var next = window.prompt("Rename this project", was || "");
-      if (next === null) return;
-      next = next.trim();
-      if (!next || next === was) return;
-      api("/api/projects/" + pid, { method: "PATCH", body: JSON.stringify({ name: next }) })
-        .then(function(){ refresh(); toast("renamed"); })
-        .catch(function(err){ toast(err.message); });
+      askText("Rename this project", { value: was || "", ok: "Rename" }).then(function(next){
+        if (next === null) return;
+        next = next.trim();
+        if (!next || next === was) return;
+        api("/api/projects/" + pid, { method: "PATCH", body: JSON.stringify({ name: next }) })
+          .then(function(){ refresh(); toast("renamed"); })
+          .catch(function(err){ toast(err.message); });
+      });
     }
 
     /**
@@ -15228,22 +19212,50 @@ ${BRAND_SPRITE}
      * asking "are you sure?" about something it hasn't described.
      */
     function forgetProject(pid, name){
-      if (!window.confirm('Remove "' + name + '" from Loom?\\n\\nIts folder, its history and its .loom directory stay on disk. Add the folder again to bring it back.')) return;
-      api("/api/projects/" + pid, { method: "DELETE" })
-        .then(function(){
-          if (pid === cur) { cur = null; try { localStorage.removeItem("loomProject"); } catch (e) {} }
-          refresh();
-          toast("removed from Loom \u2014 the folder is untouched");
-        })
-        .catch(function(err){ toast(err.message); });
+      askConfirm('Remove "' + name + '" from Loom?\\n\\nIts folder, its history and its .loom directory stay on disk. Add the folder again to bring it back.', { ok: "Remove", danger: true }).then(function(ok){
+        if (!ok) return;
+        api("/api/projects/" + pid, { method: "DELETE" })
+          .then(function(){
+            if (pid === cur) { cur = null; try { localStorage.removeItem("loomProject"); } catch (e) {} }
+            refresh();
+            toast("removed from Loom \u2014 the folder is untouched");
+          })
+          .catch(function(err){ toast(err.message); });
+      });
     }
 
     function select(pid){
       cur = pid;
+      try { localStorage.setItem("loomProject", pid); } catch (e) {}
       wanted = null; // whatever the URL wanted, this is a real choice now
       history.replaceState(null, "", "#p/" + pid);
+      var info = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
+      if (info && info.error) { drawUnavailable(info); drawList(); return; }
       renderProject(pid, dmain, true);
       drawList();
+    }
+    /**
+     * A project Loom can't open — its folder gone, or never initialised — is
+     * one clear page with the way out, not an error in every tab.
+     */
+    function drawUnavailable(info){
+      clearTimers();
+      state.project = null;
+      dmain.innerHTML = '<div class="unavail">' + emptyArt("orch") +
+        '<div class="uat">' + (info.missing ? "This project’s folder is gone" : "Loom can’t open this project") + "</div>" +
+        '<div class="uab">' + (info.missing
+          ? "<code>" + esc(info.dir) + "</code> doesn’t exist any more — it was moved, deleted, or it was a temporary folder a restart cleared. Its history went with it."
+          : esc(info.error || "") + ".") + "</div>" +
+        '<div class="uaa">' +
+          '<button type="button" class="btn primary" id="uaforget">' + ICONS.trash + "Remove from Loom</button>" +
+          (info.missing ? "" : '<button type="button" class="btn outline" id="uacopy">' + ICONS.copy + "Copy <code>loom init</code></button>") +
+        "</div>" +
+        '<div class="uah">' + (info.missing ? "Moved it? Remove it here, then add the folder where it lives now with New project." : "Run it in that folder, then come back — the project opens as usual.") + "</div></div>";
+      var f = document.getElementById("uaforget");
+      if (f) f.onclick = function(){ forgetProject(info.id, info.name); };
+      var c = document.getElementById("uacopy");
+      if (c) c.onclick = function(){ copyText("cd " + JSON.stringify(info.dir) + " && loom init"); };
+      drawStatusbar();
     }
     state.selectProject = select;
     state.setChat = setChat; // the palette jumps to a conversation by id
@@ -15260,6 +19272,8 @@ ${BRAND_SPRITE}
       drawList();
     }
     state.currentChat = currentChat;
+    // so a view can ask the sidebar to re-read (new threads from Ask several)
+    state.refreshShell = function(){ refresh(); };
     function refresh(){
       api("/api/projects").then(function(j){
         state.projects = j.projects || [];
@@ -15306,12 +19320,30 @@ ${BRAND_SPRITE}
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     state.redrawFeed = null;
     if (!state.token) return renderPair();
+    takePermalink();
+    document.documentElement.classList.toggle("desk", isDesktop());
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
     if (m) return renderProject(m[1], root, false);
     renderBoard();
   }
+  /**
+   * A message permalink: open that project and chat, then scroll to the
+   * message once its history loads. The address settles back to #p/<pid>,
+   * which is what the rest of the app routes on.
+   */
+  function takePermalink(){
+    var m = location.hash.match(/^#p\\/([^\\/]+)\\/c\\/([^\\/]+)\\/m\\/(\\d+)$/);
+    if (!m) return null;
+    var go = { pid: decodeURIComponent(m[1]), chat: decodeURIComponent(m[2]), id: Number(m[3]) };
+    try { localStorage.setItem("loomChat:" + go.pid, go.chat); } catch (e) {}
+    state.pendingGo = go;
+    history.replaceState(null, "", "#p/" + go.pid);
+    return go;
+  }
   window.addEventListener("hashchange", function(){
+    var go = takePermalink();
+    if (go && state.setChat && isDesktop()) { state.setChat(go.pid, go.chat); return; }
     if (!isDesktop()) return route();
     // The desktop shell navigates with replaceState, so this only fires for a
     // hash someone typed or pasted — honour it instead of ignoring the URL.
@@ -15321,6 +19353,105 @@ ${BRAND_SPRITE}
     if (known) state.selectProject(m[1]);
   });
   mq.addEventListener("change", function(){ clearShell(); route(); });
+  /** Every key Loom listens for, on one sheet (press ?). */
+  function openShortcuts(){
+    if (document.querySelector(".scrim")) return;
+    var K = KMOD;
+    var rows = [
+      ["Anywhere", [
+        [K + "K", "Search everything — files, chats, commands"],
+        [K + "F", "Find in this chat"],
+        [K + ".", "Focus mode: hide the sidebar and panel"],
+        [K + "⇧V", "Prompts you’ve saved"],
+        ["Ctrl+\\u0060", "Show or hide the terminal"],
+        ["N", "New task"], ["P", "New project"], ["[ / ]", "Your previous / next prompt in this chat"],
+        ["?", "This sheet"], ["Esc", "Close a menu, dialog or find"],
+      ]],
+      ["In the composer", [
+        ["Enter", "Send"], ["⇧Enter", "New line"],
+        ["↑ / ↓", "Walk through what you sent here (empty box)"],
+        ["@", "Mention a file"], ["/", "Actions"],
+      ]],
+      ["Find", [["Enter / ⇧Enter", "Previous / next match"]]],
+    ];
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal kbmodal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">' +
+      '<div class="modalhead">' + ICONS.keyboard + ' Keyboard shortcuts<button class="iconbtn" id="kbx" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="modalbody kbgrid">' + rows.map(function(g){
+        return '<div class="kbsec"><div class="kbh">' + esc(g[0]) + "</div>" + g[1].map(function(r){
+          return '<div class="kbrow"><span class="kbd">' + esc(r[0]) + "</span><span>" + esc(r[1]) + "</span></div>";
+        }).join("") + "</div>";
+      }).join("") + '</div><div class="modalfoot"><span class="spacer"></span><button type="button" class="btn xs outline" id="kbtour">Take the tour again</button></div></div>';
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey, true); }
+    document.getElementById("kbtour").onclick = function(){ close(); setTimeout(function(){ startTour(true); }, 50); };
+    function onKey(e){ if (e.key === "Escape" || e.key === "?") { e.preventDefault(); e.stopPropagation(); close(); } }
+    document.addEventListener("keydown", onKey, true);
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("kbx").onclick = close;
+  }
+  /**
+   * The first-run tour: a spotlight on the three things that make Loom Loom,
+   * one at a time. Shown once per device, when a project is open; replayable
+   * from the shortcut sheet. Steps whose target isn't on screen are skipped.
+   */
+  var TOUR = [
+    { sel: "#box", title: "Say what you want done", body: "Type here and press Enter. The reply streams in live, and every agent in the project shares one memory — what one learns, the next one knows." },
+    { sel: "#cagent", title: "Pick who answers", body: "Claude Code, Codex, OpenCode, a model… or Auto, and Loom routes each turn. Switch any time; the baton carries the context over." },
+    { sel: '#cmode [data-cmode="orch"]', title: "Or hand it to a team", body: "Orchestrate: one agent plans the goal, the rest work it in parallel, each in its own worktree — and you watch the plan as a graph." },
+    { sel: "#palettebtn", title: "Everything is a keystroke away", body: "⌘K searches files, chats and commands. Press ? any time for every shortcut." },
+  ];
+  function startTour(force){
+    try { if (!force && localStorage.getItem("loomTourDone")) return; } catch (e) {}
+    if (document.querySelector(".scrim") || document.getElementById("tourcard")) return;
+    var steps = TOUR.filter(function(s){ var el = document.querySelector(s.sel); return el && el.getBoundingClientRect().width > 0; });
+    if (!steps.length) return;
+    var i = 0;
+    var shade = document.createElement("div"); shade.className = "tourshade"; shade.id = "tourshade";
+    var card = document.createElement("div"); card.className = "tourcard"; card.id = "tourcard"; card.setAttribute("role", "dialog"); card.setAttribute("aria-live", "polite");
+    document.body.appendChild(shade); document.body.appendChild(card);
+    function done(){
+      try { localStorage.setItem("loomTourDone", "1"); } catch (e) {}
+      shade.remove(); card.remove(); document.removeEventListener("keydown", key, true); window.removeEventListener("resize", place);
+    }
+    function key(e){
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); }
+      else if ((e.key === "Enter" || e.key === "ArrowRight") && card.contains(document.activeElement)) { e.preventDefault(); e.stopPropagation(); next(); }
+    }
+    function next(){ if (++i >= steps.length) done(); else show(); }
+    function place(){
+      var el = document.querySelector(steps[i].sel); if (!el) return next();
+      var r = el.getBoundingClientRect(), pad = 6;
+      shade.style.left = (r.left - pad) + "px"; shade.style.top = (r.top - pad) + "px";
+      shade.style.width = (r.width + pad * 2) + "px"; shade.style.height = (r.height + pad * 2) + "px";
+      var cw = card.offsetWidth, ch = card.offsetHeight;
+      var top = r.top - ch - 16 > 8 ? r.top - ch - 16 : Math.min(window.innerHeight - ch - 8, r.bottom + 16);
+      card.style.left = Math.max(8, Math.min(window.innerWidth - cw - 8, r.left + r.width / 2 - cw / 2)) + "px";
+      card.style.top = top + "px";
+    }
+    function show(){
+      var s = steps[i];
+      card.innerHTML = '<div class="tourstep">' + (i + 1) + " of " + steps.length + "</div>" +
+        '<div class="tourt">' + esc(s.title) + '</div><div class="tourb">' + esc(s.body) + "</div>" +
+        '<div class="toura"><button type="button" class="btn xs ghost" id="tourskip">Skip tour</button>' +
+        '<button type="button" class="btn xs primary" id="tournext">' + (i === steps.length - 1 ? "Start building" : "Next") + "</button></div>";
+      document.getElementById("tourskip").onclick = done;
+      document.getElementById("tournext").onclick = next;
+      place();
+      document.getElementById("tournext").focus();
+    }
+    document.addEventListener("keydown", key, true);
+    window.addEventListener("resize", place);
+    show();
+  }
+  state.startTour = startTour;
+  state.openShortcuts = openShortcuts;
+  function setFocusMode(on){
+    document.documentElement.classList.toggle("focusmode", on);
+    try { localStorage.setItem("loomFocus", on ? "1" : "0"); } catch (e) {}
+  }
+  try { if (localStorage.getItem("loomFocus") === "1") document.documentElement.classList.add("focusmode"); } catch (e) {}
   // Global shortcuts: Ctrl+backtick toggles the terminal; "n" opens New task
   // (both only while a desktop workspace is mounted, never while typing).
   function typingInField(t){
@@ -15333,6 +19464,22 @@ ${BRAND_SPRITE}
     if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "k" || e.key === "K")) {
       if (state.token && !document.querySelector(".scrim")) { e.preventDefault(); openPalette(); }
       return;
+    }
+    // ⌘F — find in this chat (the browser's own find can't see folded tool groups)
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "f" || e.key === "F")) {
+      if (state.openFind && state.token && !document.querySelector(".scrim")) { e.preventDefault(); state.openFind(); }
+      return;
+    }
+    // ⌘. — focus mode
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ".") {
+      if (state.token && isDesktop()) { e.preventDefault(); setFocusMode(!document.documentElement.classList.contains("focusmode")); }
+      return;
+    }
+    if ((e.key === "[" || e.key === "]") && !e.metaKey && !e.ctrlKey && !e.altKey && state.jumpPrompt && !typingInField(e.target) && !document.querySelector(".scrim")) {
+      e.preventDefault(); state.jumpPrompt(e.key === "[" ? -1 : 1); return;
+    }
+    if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey && state.token && !typingInField(e.target) && !document.querySelector(".scrim")) {
+      e.preventDefault(); openShortcuts(); return;
     }
     // ⌘⇧V / Ctrl+Shift+V — the prompt manager, even mid-type (that's when you want it)
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === "v" || e.key === "V")) {

@@ -95,6 +95,14 @@ loom orchestrate "add OAuth login with tests" -o claude-code -w codex,antigravit
   sits in its own thread. The project's budgets, quarantine and shared brain apply
   to every worker.
 
+- **Race instead of plan.** `--race` (or the Race switch in Orchestrate) gives
+  every worker the whole goal in its own worktree, with no orchestrator. The
+  entrants finish side by side, each with its diff, and you keep one:
+  **Pick this one** in the app, or `loom orchestra:apply <run> --task race-<agent>`.
+- **A restart doesn't lose the run.** If Loom stops mid-run, the run says it
+  was interrupted. **Resume** (or `loom orchestra:resume <run>`) picks up the
+  tasks that were running and briefs the orchestrator again.
+
 Under the hood: [`src/core/orchestra.ts`](src/core/orchestra.ts).
 `node scripts/verify-orchestra.mjs` runs a real orchestra against your installed
 CLIs and checks the result on disk.
@@ -560,7 +568,13 @@ detects at least two roles.
 | `loom orchestrate "<goal>"` | One orchestrator plans, many workers build in parallel worktrees (`-o`, `-w`, `-p`, `--no-watch`) |
 | `loom orchestrate --plan "<goal>"` | Plan mode: the plan and each task's spec land as markdown under `plans/<run>/` for any agent to pick up |
 | `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |
-| `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch · stop it · remove its worktrees |
+| `loom orchestra:reply / :apply / :abort / :cleanup <run>` | Answer or steer the orchestrator · merge the run into your branch (a race: `--task <entrant>`) · stop it · remove its worktrees |
+| `loom orchestrate --race "<goal>" -w a,b` | Race: each agent takes the whole goal in its own worktree, and you keep the one you like |
+| `loom orchestra:resume <run>` | Carry on a run Loom stopped by restarting |
+| `loom stats` | Today across every project: turns, how many failed, the time and the spend |
+| `loom export [--chat <id\|title>] [--out file]` | A chat as Markdown: prompts, replies, tool summaries and turn footers |
+| `loom backup [--out file]` | Everything Loom knows in one archive: `~/.loom` and every project's `.loom` (logs copied as consistent snapshots) |
+| `loom completion zsh\|bash` | Shell completion: `loom completion zsh >> ~/.zshrc` |
 | `loom hub [--host --port --secret]` | Run a self-hosted Team Hub for your team |
 | `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|landing\|doctor\|adopt\|deploys\|release-notes\|webhook\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; landing goal PRs; GitHub webhooks; membership and key rotation |
 | `loom land [runId]` | Land a goal's PR: fresh main in, fast tests, push, merge when GitHub's rules pass |
@@ -754,6 +768,9 @@ nothing is worse than an error.
 loom ask --free --limit 3 "is this migration reversible?"
 loom ask --models "openrouter/qwen/qwen3.8-27b:free,ollama/llama3" "review this approach"
 ```
+
+In the app it's **More → Ask several models…** in the composer: tick the
+models (free ones are listed first), and what's in the box goes to each.
 
 One prompt, one thread per model, all at the same time, each thread named
 after the model that answered in it. With free quota this costs what asking
@@ -1689,6 +1706,12 @@ color reserved for state (thread cyan = live, shuttle magenta = the baton).
 Adapted from the [Orca](https://github.com/stablyai/orca) design system (MIT,
 © Lovecast Inc.); the Geist typeface is © Vercel under the SIL Open Font
 License 1.1. Tokens and rules: [docs/design-system.md](docs/design-system.md).
+
+The thread is a reading column: replies stream in as they're written (Claude
+Code, OpenCode, model agents, and every orchestra worker in its task thread),
+each under a byline with the agent, model and time; tool use folds into one
+activity line; a turn ends on a footer with its duration and cost; and an
+orchestrator's plan is a card, not JSON.
 
 ## Credits
 

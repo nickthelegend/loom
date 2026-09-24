@@ -57,8 +57,12 @@ import {
   type TaskItem,
   type TaskResult,
   type WorkingTree,
+  kv,
 } from "./api";
-import { Btn, DiffView, EventLine, Sys, TaskRow, field } from "./components";
+import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, field } from "./components";
+import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
+import { haptic } from "./haptics";
+import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
 import { AgentPicker } from "./agents";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
@@ -66,7 +70,10 @@ import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
 import { notifyApproval } from "./push";
-import { ConnectionBadge } from "./brand";
+import { ConnectionBadge, useConnRoute } from "./brand";
+import { describeLink, linkQuality, pushSample, sparkBars, type LinkSample } from "./link-model";
+import { clearCache, loadProjects, loadThread, saveProjects, saveThread } from "./cache";
+import { savedAgo } from "./cache-model";
 import { OrchestraView } from "./orchestra";
 import { ObservatoryView } from "./observatory";
 import { ToolsView } from "./tools";
@@ -161,6 +168,9 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
   };
 
   const go = () => void pairFrom(`${url} ${token}`);
+  // Something typed (or pasted by hand) into the fields: the button connects
+  // with it. Nothing typed: it reads the link off the clipboard instead.
+  const typed = token.trim().length > 0 || url.trim().replace(/^https?:\/\/$/, "").length > 0;
 
   const startScan = async () => {
     setErr(null);
@@ -250,10 +260,21 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         placeholder="pairing token or whole link"
         placeholderTextColor={T.faint}
         selectionColor={T.accentBlue}
+        returnKeyType="go"
+        onSubmitEditing={go}
       />
       {err && <Text style={{ color: T.err, fontSize: 13, textAlign: "center" }}>{err}</Text>}
-      <Btn label="⚌  Scan QR code" primary onPress={startScan} />
-      <Btn label="Paste link instead" onPress={go} />
+      {typed ? (
+        <>
+          <Btn label="Connect" primary onPress={go} />
+          <Btn label="⚌  Scan QR code instead" onPress={startScan} />
+        </>
+      ) : (
+        <>
+          <Btn label="⚌  Scan QR code" primary onPress={startScan} />
+          <Btn label="Paste link from clipboard" onPress={() => void pairFromClipboard()} />
+        </>
+      )}
 
       <Modal visible={scanning} animationType="slide" onRequestClose={() => setScanning(false)}>
         <View style={{ flex: 1, backgroundColor: "#000" }}>
@@ -284,7 +305,7 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
             }}
           />
           <View style={{ position: "absolute", bottom: 48, left: 24, right: 24, gap: 10 }}>
-            <Btn label="Copy pairing link" onPress={() => void pairFromClipboard()} />
+            <Btn label="Paste link from clipboard" onPress={() => void pairFromClipboard()} />
             <Btn label="Cancel" onPress={() => setScanning(false)} />
           </View>
         </View>
@@ -331,7 +352,7 @@ function StatTile(props: { value: string; label: string }) {
     <View
       style={{
         flex: 1,
-        backgroundColor: "rgba(26,26,26,0.6)",
+        backgroundColor: T.panel,
         borderColor: T.line,
         borderWidth: 1,
         borderRadius: 10,
@@ -422,6 +443,19 @@ export function BoardScreen(props: {
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [daemon, setDaemon] = useState<DaemonReachability | null>(null);
+  // The last two minutes of health pings: how the link has been, not just now.
+  const [link, setLink] = useState<LinkSample[]>([]);
+  const route = useConnRoute();
+  // When the list on screen is the phone's saved copy, this is when it was saved.
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
+  const gotLive = useRef(false);
+  useEffect(() => {
+    void loadProjects<Project>(props.creds.url).then((c) => {
+      if (!c || gotLive.current) return;
+      setProjects(c.data);
+      setCachedAt(c.at);
+    });
+  }, [props.creds.url]);
   // Pending approvals across every open project (from /api/activity); null = unknown.
   const [approvals, setApprovals] = useState<number | null>(null);
   const [approvalsOpen, setApprovalsOpen] = useState(false);
@@ -442,12 +476,17 @@ export function BoardScreen(props: {
       .catch(() => {});
     try {
       setErr(null);
-      setProjects((await getProjects(props.creds)).projects);
+      const fresh = (await getProjects(props.creds)).projects;
+      gotLive.current = true;
+      setProjects(fresh);
+      setCachedAt(null);
+      void saveProjects(props.creds.url, fresh);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       const next = await probe;
       setDaemon((current) => ({ ...next, name: next.name ?? current?.name }));
+      setLink((w) => pushSample(w, next.reachable ? (next.latencyMs ?? 0) : null));
     }
   }, [props.creds]);
 
@@ -542,7 +581,7 @@ export function BoardScreen(props: {
 
         <ApprovalBanner count={approvals ?? 0} onPress={() => setApprovalsOpen(true)} />
 
-        {err && <Sys color={T.err} text={err} />}
+        {err && <Sys color={T.err} text={cachedAt ? `${err} Showing this phone's copy, ${savedAgo(cachedAt)}.` : err} />}
 
         {/* the machine you're paired to — Orca calls this Desktops */}
         <View>
@@ -581,6 +620,7 @@ export function BoardScreen(props: {
                   {working ? ` · ${working} active` : ""}
                 </Text>
               </View>
+              <LinkStrip samples={link} via={route === "cloud" ? "Loom Cloud" : route === "direct" ? "direct" : ""} />
             </View>
           </View>
         </View>
@@ -778,6 +818,33 @@ export function ProjectScreen(props: {
   // Bumped on every `orchestra` event so the Orchestra tab refetches that run.
   const [orchPulse, setOrchPulse] = useState<{ n: number; runId: string | null }>({ n: 0, runId: null });
   const [events, setEvents] = useState<LoomEvent[]>([]);
+  // What agents are typing in this chat right now, before it's a message.
+  const [live, setLive] = useState<LiveMap>({});
+  // The thread's first page didn't come (the route was flipping, the relay
+  // was slow): say so and try again, rather than showing an empty thread.
+  const [historyErr, setHistoryErr] = useState<string | null>(null);
+  const [historyTry, setHistoryTry] = useState(0);
+  // The thread on screen is the phone's saved copy (the daemon hasn't answered yet).
+  const [threadCachedAt, setThreadCachedAt] = useState<number | null>(null);
+  const threadFresh = useRef(false);
+  const [refreshing, setRefreshing] = useState(false);
+  // What this phone has read, per chat (the chips' unread dots).
+  const seenKey = `loomSeen:${project.id}`;
+  const [seen, setSeen] = useState<SeenMap>({});
+  useEffect(() => {
+    void kv.get(seenKey).then((v) => {
+      try {
+        setSeen(v ? (JSON.parse(v) as SeenMap) : {});
+      } catch {
+        setSeen({});
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
+  const saveSeen = (next: SeenMap) => {
+    setSeen(next);
+    void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
+  };
   const [tree, setTree] = useState<WorkingTree | null>(null);
   const [tasks, setTasks] = useState<TaskResult | null>(null);
   const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
@@ -791,6 +858,12 @@ export function ProjectScreen(props: {
   const [editingQueued, setEditingQueued] = useState<{ id: string; text: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const lastId = useRef(0);
+  // Keep the phone's copy of this thread current, a beat after it settles.
+  useEffect(() => {
+    if (!threadFresh.current || !events.length) return;
+    const t = setTimeout(() => void saveThread(creds.url, project.id, chatId, events), 1500);
+    return () => clearTimeout(t);
+  }, [events, creds.url, project.id, chatId]);
   // Loom Teams Phase 3: the team brain's inbox count, for the tab badge.
   const brain = useBrainSummary(creds, props.project.id);
   // Phase 4: goal PRs that need you + teammates' goals that need someone.
@@ -828,19 +901,53 @@ export function ProjectScreen(props: {
   // Loom Cloud relay — and reopens itself when that route changes.
   useEffect(() => {
     let live = true;
+    let retryHistory: ReturnType<typeof setTimeout> | undefined;
     setEvents([]); // clear the old chat's thread while the new one loads
+    setLive({});
     lastId.current = 0;
+    threadFresh.current = false;
+    setThreadCachedAt(null);
+    // Show the saved copy at once; the daemon's answer replaces it.
+    void loadThread<LoomEvent>(creds.url, project.id, chatId).then((c) => {
+      if (!live || !c || threadFresh.current || !c.data.length) return;
+      setEvents(c.data);
+      setThreadCachedAt(c.at);
+    });
     void getEvents(creds, project.id, chatId)
-      .then(({ events }) => {
+      .then(({ events, live: typing }) => {
         if (!live) return;
+        threadFresh.current = true;
+        setThreadCachedAt(null);
         lastId.current = Math.max(lastId.current, events[events.length - 1]?.id ?? 0);
         setEvents(events);
+        setLive((m) => seed(m, typing, chatId));
+        setHistoryErr(null);
+        setRefreshing(false);
+        const newest = events[events.length - 1]?.id ?? 0;
+        if (newest) setSeen((s) => {
+          const next = markRead(s, chatId, newest);
+          if (next !== s) void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
+          return next;
+        });
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (!live) return;
+        setRefreshing(false);
+        setHistoryErr(e instanceof Error ? e.message : String(e));
+        retryHistory = setTimeout(() => setHistoryTry((n) => n + 1), 4000);
+      });
     const close = openLiveStream(creds, project.id, (raw) => {
-      const frame = raw as { type?: string; event?: LoomEvent };
+      const frame = raw as { type?: string; event?: LoomEvent; chat?: string } & Partial<StreamFrame>;
+      if (frame?.type === "stream") {
+        if ((frame.chat || "main") === chatId && frame.agentId && frame.text) {
+          const f = frame as StreamFrame;
+          setLive((m) => applyStream(m, f));
+        }
+        return;
+      }
       if (frame?.type !== "event" || !frame.event) return;
       const ev = frame.event;
+      setLive((m) => applyEvent(m, ev));
       // Orchestra steps land in task chats; the tab wants them whichever chat is open.
       if (ev.kind === "orchestra") {
         const runId = typeof ev.payload?.runId === "string" ? ev.payload.runId : null;
@@ -859,13 +966,22 @@ export function ProjectScreen(props: {
       if (ev.chat && ev.chat !== chatId) return; // a different chat
       lastId.current = ev.id;
       setEvents((prev) => [...prev, ev]);
+      if (ev.kind === "message" && ev.agentId && !ev.payload?.reasoning) {
+        haptic.success(); // a reply landed where you're looking
+        setSeen((s) => {
+          const next = markRead(s, chatId, ev.id);
+          if (next !== s) void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
+          return next;
+        });
+      }
     });
     return () => {
       live = false;
+      if (retryHistory) clearTimeout(retryHistory);
       close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, chatId]);
+  }, [project.id, chatId, historyTry]);
 
   // Status poll + changes tab refresh.
   useEffect(() => {
@@ -876,6 +992,10 @@ export function ProjectScreen(props: {
       loadPending();
       void getQueue(creds, project.id)
         .then(setQueue)
+        .catch(() => {});
+      // chats carry their newest reply id: the chips' unread dots
+      void getChats(creds, project.id)
+        .then(({ chats }) => setChats(chats))
         .catch(() => {});
       if (tab === "changes") {
         void getTree(creds, project.id)
@@ -973,6 +1093,7 @@ export function ProjectScreen(props: {
     if (stt.listening) void stt.toggle(); // stop dictation on send
     const message = text.trim();
     if (!message) return;
+    haptic.tap();
     setText("");
     sttBase.current = "";
     setErr(null);
@@ -1151,7 +1272,14 @@ export function ProjectScreen(props: {
               style={{ maxHeight: 46, flexGrow: 0, backgroundColor: T.panel, borderBottomWidth: 1, borderBottomColor: T.line }}
               contentContainerStyle={{ paddingHorizontal: spacing.md, paddingVertical: 8, gap: spacing.sm, alignItems: "center" }}
             >
-              {[...chats, ...(extraChat && !chats.some((c) => c.id === extraChat.id) ? [extraChat] : [])].map((c) => {
+              {(() => {
+                const shown = [...chats, ...(extraChat && !chats.some((c) => c.id === extraChat.id) ? [extraChat] : [])]
+                  .filter((c) => !c.archived || c.id === chatId)
+                  .sort((a, b) => (a.id === "main" ? -1 : b.id === "main" ? 1 : (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)));
+                const { unread, seen: based } = unreadChats(shown, seen, chatId);
+                if (Object.keys(based).length !== Object.keys(seen).length) setTimeout(() => saveSeen(based), 0);
+                return shown.map((c) => ({ c, dot: unread.has(c.id) }));
+              })().map(({ c, dot }) => {
                 const on = c.id === chatId;
                 return (
                   <TouchableOpacity
@@ -1169,14 +1297,26 @@ export function ProjectScreen(props: {
                       borderColor: on ? T.line : "transparent",
                     }}
                   >
-                    <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600" }}>
-                      {c.title}
-                    </Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      {c.pinned ? <Text style={{ color: T.faint, fontSize: 10 }}>📌</Text> : null}
+                      <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600" }}>{c.title}</Text>
+                      {dot ? <View accessibilityLabel="unread" style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: T.thread }} /> : null}
+                    </View>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
           )}
+          {threadCachedAt ? (
+            <View
+              accessibilityRole="text"
+              style={{ paddingHorizontal: spacing.lg, paddingVertical: 6, backgroundColor: T.raised, borderBottomWidth: 1, borderBottomColor: T.line }}
+            >
+              <Text style={{ color: T.warn, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>
+                {historyErr ? "Offline" : "Catching up"} · this phone's copy, {savedAgo(threadCachedAt)}
+              </Text>
+            </View>
+          ) : null}
           <FlatList
             ref={listRef}
             data={events}
@@ -1195,6 +1335,24 @@ export function ProjectScreen(props: {
               ) : (
                 <EventLine e={item} />
               )
+            }
+            ListHeaderComponent={
+              historyErr && !events.length ? (
+                <Sys color={T.warn} text={`Couldn't load this thread. ${historyErr} Trying again…`} />
+              ) : null
+            }
+            ListFooterComponent={<LiveReplies live={live} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => {
+                  setRefreshing(true);
+                  setHistoryTry((n) => n + 1);
+                }}
+                tintColor={T.dim}
+                colors={[T.thread]}
+                progressBackgroundColor={T.panel}
+              />
             }
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
@@ -1642,4 +1800,38 @@ export function ProjectScreen(props: {
 
 export async function unpair(): Promise<void> {
   await clearCreds();
+  await clearCache();
+}
+
+/** Two minutes of pings as a row of bars, and what they add up to. */
+function LinkStrip(props: { samples: LinkSample[]; via: string }) {
+  const q = linkQuality(props.samples);
+  if (q.samples < 2) return null;
+  const color = q.grade === "good" ? T.ok : q.grade === "fair" ? T.warn : T.err;
+  return (
+    <View
+      style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}
+      accessible
+      accessibilityLabel={`Link ${describeLink(q)}${props.via ? `, via ${props.via}` : ""}, over the last ${q.samples} checks`}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 1.5, height: 14 }}>
+        {sparkBars(props.samples).map((h, i) => (
+          <View
+            key={i}
+            style={{
+              width: 3,
+              height: h < 0 ? 14 : Math.max(2, Math.round(h * 14)),
+              borderRadius: 1,
+              backgroundColor: h < 0 ? T.err : color,
+              opacity: h < 0 ? 0.9 : 0.55 + 0.45 * (i / props.samples.length),
+            }}
+          />
+        ))}
+      </View>
+      <Text style={{ color: T.dim, fontSize: 11, fontFamily: T.mono }} numberOfLines={1}>
+        {describeLink(q)}
+        {props.via ? ` · ${props.via}` : ""}
+      </Text>
+    </View>
+  );
 }

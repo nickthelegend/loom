@@ -7,6 +7,7 @@
  *   - text containing "sleep:<ms>"   → stays busy that long (interrupt testing)
  *   - text containing "ask: <q>"     → asks the human (needs_input; route pausing)
  *   - text containing "write:<path>" → writes a small file (turn_diff testing)
+ *   - text containing "stream:<ms>"  → types the reply out word by word first
  */
 
 import fs from "node:fs";
@@ -72,6 +73,22 @@ export class EchoAdapter extends AdapterBase {
       const text = /make a plan/i.test(input.text)
         ? `Here is the approach. 1) analyze 2) implement 3) verify. The plan is complete and ready to execute.${briefingNote}`
         : `echo(${this.id}): ${input.text}${briefingNote}`;
+      // stream:<ms> — type the reply out in pieces first, that far apart, the
+      // way a real model streams, so the live view is testable end to end.
+      const streamMatch = input.text.match(/stream:(\d+)/);
+      if (streamMatch) {
+        const gap = Math.min(Number(streamMatch[1]), 2000);
+        const words = text.split(/(?<=\s)/);
+        for (const w of words) {
+          if (this.aborted) break;
+          this.streamText(w);
+          await new Promise((r) => setTimeout(r, gap));
+        }
+        if (this.aborted) {
+          this.emit({ kind: "status", payload: { state: "interrupted" } });
+          return;
+        }
+      }
       this.emit({ kind: "message", payload: { text } });
       // Lookbehind so "Task:" (…t-ask:) doesn't read as a question.
       const askMatch = input.text.match(/(?<![a-z])ask:\s*([^\n]+)/i);

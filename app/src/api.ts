@@ -5,6 +5,7 @@
 
 import * as SecureStore from "expo-secure-store";
 import { AppState, Platform, type AppStateStatus } from "react-native";
+import type { LiveSnapshot } from "./live-model";
 import { RelayClient, parseCloudFragment } from "./relay-client";
 import { unpackCredentials, type RelayCredentials } from "./relay-protocol";
 import { supabaseRelayTransport } from "./relay-transport";
@@ -130,6 +131,10 @@ export interface Chat {
   id: string;
   title: string;
   createdAt: number;
+  /** Newest agent reply in the chat (unread dots). */
+  lastReplyId?: number;
+  pinned?: boolean;
+  archived?: boolean;
 }
 
 /** Per-agent cost + token rollup from the daemon's /metrics endpoint. */
@@ -798,6 +803,14 @@ export async function api<T>(
       route = await connection.directFailed(creds);
       if (route === "cloud") return viaRelay<T>(creds, path, init, timeoutMs);
     }
+    // "Network request failed" is React Native's words for every one of these.
+    if (e instanceof TypeError) {
+      throw new Error(
+        creds.relay
+          ? "Can't reach your computer, directly or through Loom Cloud. Is Loom running there (loom up)?"
+          : "Can't reach your computer. Is Loom running there (loom up), and is this phone on the same network?",
+      );
+    }
     throw e;
   } finally {
     if (timer) clearTimeout(timer);
@@ -874,7 +887,8 @@ export async function pingDaemon(c: Creds): Promise<DaemonReachability> {
 export const getProject = (c: Creds, id: string) =>
   api<{ project: Project }>(c, `/api/projects/${id}`);
 export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
-  api<{ events: LoomEvent[] }>(
+  // `live`: replies being typed in this chat right now (newer daemons only)
+  api<{ events: LoomEvent[]; live?: LiveSnapshot[] }>(
     c,
     `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}`,
   );

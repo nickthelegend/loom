@@ -61,6 +61,8 @@ export interface BoardCard {
    * truth and can only be pinned.
    */
   own?: boolean;
+  priority?: "high" | "medium" | "low";
+  due?: string;
 }
 
 export interface BoardData {
@@ -199,6 +201,8 @@ export async function buildBoard(
       column,
       own: true,
       ...(blocked ? { blocked } : {}),
+      ...(t.priority ? { priority: t.priority } : {}),
+      ...(t.due ? { due: t.due } : {}),
     });
   }
 

@@ -11,16 +11,19 @@ import type {
   AgentCapabilities,
   Bridge,
   SendInput,
+  StreamDelta,
 } from "../types.js";
 import { writeMemoryFile } from "../core/registry.js";
 
 type EventCb = (e: AdapterEvent) => void;
+type StreamCb = (d: StreamDelta) => void;
 
 export abstract class AgentBase {
   readonly id: string;
   readonly kind: string;
   protected projectDir: string;
   private listeners = new Set<EventCb>();
+  private streamers = new Set<StreamCb>();
 
   constructor(id: string, kind: string, projectDir: string) {
     this.id = id;
@@ -43,6 +46,27 @@ export abstract class AgentBase {
     }
   }
 
+  onStream(cb: StreamCb): () => void {
+    this.streamers.add(cb);
+    return () => this.streamers.delete(cb);
+  }
+
+  /**
+   * Part of a reply, as it arrives. Not an event: nothing is logged, and the
+   * finished `message` the adapter emits afterwards is what the thread keeps.
+   */
+  protected streamText(text: string, reasoning = false): void {
+    if (!text) return;
+    const d: StreamDelta = reasoning ? { text, reasoning: true } : { text };
+    for (const cb of this.streamers) {
+      try {
+        cb(d);
+      } catch {
+        // A broken viewer must not break the turn.
+      }
+    }
+  }
+
   async injectMemory(projection: string): Promise<void> {
     writeMemoryFile(this.projectDir, this.id, projection);
   }
@@ -59,12 +83,30 @@ export const ADAPTER_CAPABILITIES: AgentCapabilities = {
   mcp: false,
 };
 
+/** One line of an agent's self-check: what was asked, and what came back. */
+export interface AgentCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
 export abstract class AdapterBase extends AgentBase implements Adapter {
   readonly capabilities: AgentCapabilities = { ...ADAPTER_CAPABILITIES };
   protected _busy = false;
 
   busy(): boolean {
     return this._busy;
+  }
+
+  /**
+   * Is this agent ready to take a turn? Only the questions that cost nothing:
+   * is it installed, is it signed in, does the provider list the model. It
+   * never sends a prompt — a test that spends quota to say "yes" is one
+   * nobody runs twice. Adapters with more to say override it.
+   */
+  async selfCheck(): Promise<AgentCheck[]> {
+    const ok = await this.available();
+    return [{ name: "installed", ok, detail: ok ? "found, and it answers" : "not found on this machine — install it, or set its path" }];
   }
 
   abstract available(): Promise<boolean>;
@@ -154,6 +196,32 @@ export function agentEnv(): NodeJS.ProcessEnv {
   }
   return env;
 }
+
+/** A CLI's exit code and output (stdout, then stderr), or null when it couldn't be run. Bounded like cliAvailable. */
+export function cliOutput(cmd: string, args: string[], timeoutMs = 8_000): Promise<{ code: number | null; out: string } | null> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
+      let out = "";
+      let err = "";
+      child.stdout?.on("data", (d: Buffer) => { if (out.length < 20_000) out += d.toString(); });
+      child.stderr?.on("data", (d: Buffer) => { if (err.length < 20_000) err += d.toString(); });
+      const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(null); }, timeoutMs);
+      timer.unref();
+      child.on("close", (code) => { clearTimeout(timer); resolve({ code, out: stripAnsi(out.trim() ? out : err) }); });
+      child.on("error", () => { clearTimeout(timer); resolve(null); });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+export function stripAnsi(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
+}
+
+export const firstLine = (s: string): string => (s.split("\n").map((l) => l.trim()).find(Boolean) ?? "").slice(0, 160);
 
 /**
  * Is a CLI on PATH (exit 0 for `--version`)?

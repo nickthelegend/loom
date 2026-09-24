@@ -373,6 +373,64 @@ describe("orchestra runs", () => {
     }
   });
 
+  it("a run Loom stopped by restarting resumes: the interrupted task carries on and the orchestrator is briefed again", async () => {
+    await openProject();
+    script = [
+      loom([{ type: "spawn", id: "t1", title: "slow one", agent: "alpha", prompt: "sleep:1500 write:slow.txt" }]),
+      loom([{ type: "done", summary: "carried on" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "survive a restart", orchestrator: "conductor" });
+    await waitUntil(() => rt.orchestra.get(run.id)!.tasks.some((t) => t.status === "running"));
+    await rt.orchestra.shutdown();
+    const stopped = rt.orchestra.get(run.id)!;
+    expect(stopped.status).toBe("aborted");
+    expect(stopped.interrupted?.tasks).toEqual(["t1"]);
+    // a run you aborted yourself isn't resumable
+    await expect(rt.orchestra.resume("nope")).rejects.toThrow();
+
+    const briefedBefore = seen.filter((i) => i.briefing).length;
+    const resumed = await rt.orchestra.resume(run.id);
+    expect(resumed.status).toBe("running");
+    await settle(run.id);
+    const done = rt.orchestra.get(run.id)!;
+    expect(done.status).toBe("completed");
+    expect(done.tasks[0]!.attempts).toBe(2);
+    expect(done.interrupted).toBeUndefined();
+    // the task was told why it's back, and given the task again
+    const msgs = rt.log.list({ chat: done.tasks[0]!.chat }).filter((e) => e.kind === "message").map((e) => String(e.payload.text));
+    expect(msgs.some((t) => t.startsWith("Loom was restarted while you were on this task") && t.includes("sleep:1500"))).toBe(true);
+    // the orchestrator's first turn after the restart carried its instructions again
+    expect(seen.filter((i) => i.briefing).length).toBeGreaterThan(briefedBefore);
+    // and a finished run can't be resumed
+    await expect(rt.orchestra.resume(run.id)).rejects.toThrow(/wasn't stopped by a restart/);
+  });
+
+  it("a race gives every entrant the same prompt, finishes without a reviewer, and applies only the one you pick", async () => {
+    await openProject();
+    await expect(rt.orchestra.start({ goal: "solo", orchestrator: "conductor", workers: ["alpha"], race: true })).rejects.toThrow(/at least two/);
+    const run = await rt.orchestra.start({ goal: "write:entry.txt", orchestrator: "conductor", workers: ["alpha", "beta"], race: true });
+    expect(run.race).toBe(true);
+    await settle(run.id);
+    const done = rt.orchestra.get(run.id)!;
+    expect(done.status).toBe("completed");
+    expect(done.tasks.map((t) => t.id).sort()).toEqual(["race-alpha", "race-beta"]);
+    expect(done.tasks.every((t) => t.status === "done" && t.prompt === "write:entry.txt")).toBe(true);
+    // nobody orchestrated it: the conductor was never asked anything
+    expect(seen.length).toBe(0);
+    // and nothing landed on the project's branch before a pick
+    expect(fs.existsSync(path.join(dir, "entry.txt"))).toBe(false);
+
+    const patch = await rt.orchestra.taskDiff(run.id, "race-beta");
+    expect(patch).toContain("entry.txt");
+    await expect(rt.orchestra.apply(run.id)).rejects.toThrow(/pick an entrant/);
+    const res = await rt.orchestra.apply(run.id, "race-beta");
+    expect(res.into).toBe("main");
+    expect(fs.existsSync(path.join(dir, "entry.txt"))).toBe(true);
+    expect(git(dir, "log", "-1", "--format=%s")).toMatch(/^Race .*beta's take/);
+    expect(rt.orchestra.get(run.id)!.applied?.task).toBe("race-beta");
+    await expect(rt.orchestra.apply(run.id, "race-alpha")).rejects.toThrow(/already applied/);
+  });
+
   it("rejects work for agents outside the run's workers, and tells the orchestrator", async () => {
     await openProject();
     script = [

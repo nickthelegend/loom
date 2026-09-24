@@ -25,7 +25,17 @@ import { Sheet } from "./observatory";
 import { T, radii } from "./theme";
 
 const MODE_NAME: Record<PermissionMode, string> = { bypass: "Bypass", auto: "Auto", ask: "Always ask" };
-const MODE_COLOR: Record<PermissionMode, string> = { bypass: T.warn, auto: T.dim, ask: T.thread };
+const MODE_COLOR: Record<PermissionMode, string> = {
+  get bypass() {
+    return T.warn;
+  },
+  get auto() {
+    return T.dim;
+  },
+  get ask() {
+    return T.thread;
+  },
+};
 
 /** The profile table is the same for every project on a daemon: fetch it once. */
 let cache: { url: string; p: Promise<Record<string, PermissionProfile>> } | null = null;

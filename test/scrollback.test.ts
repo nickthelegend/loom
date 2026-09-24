@@ -60,6 +60,25 @@ describe("scrollback survives the daemon", () => {
     expect(s2.scrollback()).toContain("new shell");
   });
 
+  it("restarts nobody typed through don't stack a divider each", async () => {
+    const work = tmpDir("term-work-idle");
+    const m1 = manager();
+    const s1 = m1.open("proj", "t9", work);
+    s1.write("echo idle-probe-7\n");
+    await waitUntil(() => s1.scrollback().includes("idle-probe-7"));
+    m1.closeAll();
+    // three restarts in a row, nothing typed in between
+    for (let i = 0; i < 3; i++) {
+      const m = manager();
+      m.open("proj", "t9", work);
+      await new Promise((r) => setTimeout(r, 300)); // the new shell prints its prompt
+      m.closeAll();
+    }
+    const last = manager().open("proj", "t9", work);
+    expect(last.scrollback()).toContain("idle-probe-7");
+    expect(last.scrollback().split("restored scrollback").length - 1).toBe(1);
+  });
+
   it("a deliberate close forgets — no haunting", async () => {
     const work = tmpDir("term-work2");
     const m1 = manager();

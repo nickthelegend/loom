@@ -137,6 +137,49 @@ describe("Loom Cloud relay", () => {
     await phone.close();
   });
 
+  it("a request captured off the relay can't be run again, or sent late", async () => {
+    const key = fromB64(creds.key);
+    const phone = new RelayClient(bus.connect(), creds);
+    const pairToken = new URLSearchParams(((await post("/api/pair/new")).link as string).split("#")[1]).get("pair")!;
+    const claim = await phone.request("POST", "/api/pair/claim", { body: { token: pairToken, name: "replay phone" } });
+    const auth = `Bearer ${String((claim.body as { clientToken: string }).clientToken)}`;
+    const said = `replay me ${Date.now()}`;
+    const count = async () =>
+      (await admin.events(projectId, 0, 500)).events.filter(
+        (e) => e.kind === "message" && e.payload.text === said,
+      ).length;
+    const from = bus.wire.length;
+    expect((await phone.request("POST", `/api/projects/${projectId}/messages`, { auth, body: { text: said } })).status).toBe(200);
+    await waitUntil(async () => (await count()) === 1);
+
+    // what an eavesdropper on the relay captured: the sealed request, as-is
+    const captured = bus.wire.slice(from).filter((env) => {
+      const m = new RelayDecoder(key, "c").push(JSON.parse(JSON.stringify(env))) as { t?: string; path?: string } | null;
+      return m?.t === "req" && String(m.path).endsWith("/messages");
+    });
+    expect(captured.length).toBe(1);
+    const attacker = bus.connect();
+    const answers: unknown[] = [];
+    const back = new RelayDecoder(key, "d");
+    attacker.onEnvelope((env) => {
+      const m = back.push(env);
+      if (m) answers.push(m);
+    });
+    await attacker.send(captured[0] as never);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await count()).toBe(1);
+    expect(answers.filter((m) => (m as { t: string }).t === "res")).toEqual([]);
+
+    // and a request stamped an hour ago is refused, whatever its id
+    for (const env of encodeMessage(key, "c", {
+      t: "req", id: "late-1", from: "late-phone", method: "POST", path: `/api/projects/${projectId}/messages`,
+      auth, body: { text: said }, ts: Date.now() - 3_600_000,
+    })) await attacker.send(env as never);
+    await waitUntil(() => answers.some((m) => (m as { id?: string }).id === "late-1"));
+    expect(answers.find((m) => (m as { id?: string }).id === "late-1")).toMatchObject({ status: 408 });
+    expect(await count()).toBe(1);
+  });
+
   it("the relay operator sees only ciphertext", () => {
     const wire = JSON.stringify(bus.wire);
     expect(bus.wire.length).toBeGreaterThan(5);

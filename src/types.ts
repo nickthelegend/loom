@@ -101,6 +101,22 @@ export interface ChatInfo {
    * at the point of binding rather than ignored at the point of sending.
    */
   model?: string;
+  /** Kept at the top of the sidebar, under Main. */
+  pinned?: boolean;
+  /** Out of the sidebar, not forgotten: its history stays in the log. */
+  archived?: boolean;
+  /** A sidebar folder this thread is filed under (a plain name; folders exist while a thread is in them). */
+  folder?: string;
+  /** Event ids marked as worth coming back to (newest last, capped). */
+  starred?: number[];
+  /** Your verdict on replies: event id → up (1) or down (-1), with who wrote it. */
+  ratings?: Record<string, { v: 1 | -1; agent: string }>;
+  /**
+   * The id of the newest agent reply in this thread. Computed from the log on
+   * read, never stored: a client compares it with what it last saw to show
+   * an unread dot.
+   */
+  lastReplyId?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +152,13 @@ export interface AgentConfig {
   memoryFiles?: string[];
   /** Off agents stay in the roster but aren't spawned and can't hold the baton. Default on. */
   enabled?: boolean;
+  /**
+   * Standing instructions for this agent in this project ("prefer pnpm",
+   * "never touch migrations"), sent ahead of every turn it takes.
+   */
+  instructions?: string;
+  /** A picture for this agent, as a small image data URL (≤ ~96px). */
+  avatar?: string;
 }
 
 /** One ADE's native memory pulled into the unified brain. */
@@ -448,6 +471,33 @@ export interface AdapterEvent {
   payload: Record<string, unknown>;
 }
 
+/**
+ * A piece of a reply that is still being written.
+ *
+ * Shown live and never logged: the finished `message` event is the record,
+ * and this is only the view of it arriving. Logging every token would put a
+ * few hundred rows in the event log for one paragraph, and a reader who opens
+ * the thread later wants the paragraph, not its typing.
+ */
+export interface StreamDelta {
+  text: string;
+  /** The model's working-out rather than its answer. */
+  reasoning?: boolean;
+}
+
+/** A StreamDelta placed: which agent is writing it, in which thread. */
+export interface LiveText extends StreamDelta {
+  agentId: string;
+  chat: string;
+  /**
+   * Where this piece starts in what the agent has typed since its last
+   * finished message (of the same kind). A window that opens mid-reply gets
+   * the text so far from the log route and uses this to stitch on without
+   * repeating or dropping characters.
+   */
+  off?: number;
+}
+
 export interface AgentCapabilities {
   tier: AgentTier;
   /**
@@ -473,6 +523,8 @@ export interface BaseAgent {
   injectMemory(projection: string): Promise<void>;
   /** Subscribe to live events; returns unsubscribe. */
   onEvent(cb: (e: AdapterEvent) => void): () => void;
+  /** Subscribe to a reply as it's written (see StreamDelta); returns unsubscribe. */
+  onStream?(cb: (d: StreamDelta) => void): () => void;
 }
 
 /** Full-duplex adapter — may hold the baton. */
@@ -511,6 +563,12 @@ export interface AgentStatus {
   enabled?: boolean;
   /** Permission mode in effect: bypass | auto | ask. See core/permissions.ts. */
   permissions?: string;
+  /** Standing instructions sent ahead of every turn (see AgentConfig). */
+  instructions?: string;
+  /** Model agents: sampling overrides (absent = the provider's default). */
+  sampling?: { temperature?: number; maxTokens?: number };
+  /** The agent's own picture, when one was set. */
+  avatar?: string;
 }
 
 export interface ProjectStatus {
@@ -541,6 +599,8 @@ export interface ProjectStatus {
   quarantine?: Record<string, { reason: string; since: number; displaced: boolean }>;
   /** The live or latest orchestra run, compact. See core/orchestra.ts. */
   orchestra?: Record<string, unknown> | null;
+  /** The project's folder no longer exists (moved or deleted). */
+  missing?: boolean;
 }
 
 // ---------------------------------------------------------------------------

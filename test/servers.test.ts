@@ -169,3 +169,20 @@ describe("running one", () => {
     expect(b.pid).toBe(a.pid);
   }, 30_000);
 });
+
+describe("servers · the address a server announces", () => {
+  it("takes a loopback URL with a port from a line of output", async () => {
+    const { urlFromOutput } = await import("../src/core/servers.js");
+    expect(urlFromOutput("listening on http://localhost:4321")).toBe("http://localhost:4321");
+    expect(urlFromOutput("  ➜  Local:   http://127.0.0.1:5173/")).toBe("http://localhost:5173");
+    expect(urlFromOutput("ready - started server on 0.0.0.0:3000, url: http://0.0.0.0:3000")).toBe("http://localhost:3000");
+    expect(urlFromOutput("https://localhost:8443 (secure)")).toBe("https://localhost:8443");
+  });
+
+  it("ignores lines that only mention some other URL, or no port", async () => {
+    const { urlFromOutput } = await import("../src/core/servers.js");
+    expect(urlFromOutput("docs: https://vitejs.dev/config")).toBeNull();
+    expect(urlFromOutput("see http://localhost for details")).toBeNull();
+    expect(urlFromOutput("compiled in 120ms")).toBeNull();
+  });
+});

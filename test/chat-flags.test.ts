@@ -1,0 +1,187 @@
+/**
+ * Threads you can pin, archive and star, and the newest-reply id a client
+ * compares against to show an unread dot. All of it lives with the project
+ * on the daemon, so every device sees the same sidebar.
+ */
+
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readDaemonConfig } from "../src/core/registry.js";
+import { DaemonClient } from "../src/daemon/client.js";
+import { LoomDaemon } from "../src/daemon/server.js";
+import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
+
+describe("chat flags, stars and unread", () => {
+  let daemon: LoomDaemon;
+  let client: DaemonClient;
+  let projectId: string;
+  let auth: Record<string, string>;
+  const call = async (method: string, p: string, body?: unknown) => {
+    const r = await fetch(`${client.baseUrl}/api/projects/${projectId}${p}`, {
+      method,
+      headers: { ...auth, "content-type": "application/json" },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    return { status: r.status, json: (await r.json()) as Record<string, unknown> };
+  };
+
+  beforeAll(async () => {
+    process.env.LOOM_HOME = tmpDir("home-chatflags");
+    process.env.LOOM_NO_NOTIFY = "1";
+    daemon = new LoomDaemon({ host: "127.0.0.1", port: 0 });
+    await daemon.listen();
+    const cfg = readDaemonConfig()!;
+    client = new DaemonClient(cfg);
+    auth = { authorization: `Bearer ${cfg.adminToken}` };
+    const dir = makeProjectDir({ name: "flags" });
+    fs.writeFileSync(path.join(dir, "README.md"), "# flags\n");
+    // a repository, so turns have diffs to file
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "t"], ["add", "-A"], ["commit", "-qm", "seed"]]) {
+      execFileSync("git", args, { cwd: dir });
+    }
+    projectId = (await client.addProject(dir)).project.id;
+  });
+  afterAll(async () => {
+    await daemon?.close();
+  });
+
+  it("pins and archives a thread, and refuses Main", async () => {
+    const made = await call("POST", "/chats", { title: "side quest" });
+    const id = (made.json.chat as { id: string }).id;
+    expect((await call("PATCH", `/chats/${id}`, { pinned: true })).json.chat).toMatchObject({ id, pinned: true });
+    expect((await call("PATCH", `/chats/${id}`, { archived: true, pinned: false })).json.chat).toMatchObject({ archived: true });
+    const listed = ((await call("GET", "/chats")).json.chats as Array<{ id: string; pinned?: boolean; archived?: boolean }>).find((c) => c.id === id)!;
+    expect(listed.pinned).toBeUndefined();
+    expect(listed.archived).toBe(true);
+    expect((await call("PATCH", "/chats/main", { pinned: true })).status).toBe(400);
+    expect((await call("PATCH", "/chats/nope", { pinned: true })).status).toBe(404);
+    expect((await call("PATCH", `/chats/${id}`, {})).status).toBe(400);
+  });
+
+  it("checks an agent without sending it a prompt", async () => {
+    const before = ((await call("GET", "/events?limit=500")).json.events as unknown[]).length;
+    const r = await call("POST", "/agents/plannerbot/check", {});
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true });
+    expect((r.json.checks as Array<{ name: string; ok: boolean }>)[0]).toMatchObject({ name: "installed", ok: true });
+    // nothing reached the thread
+    expect(((await call("GET", "/events?limit=500")).json.events as unknown[]).length).toBe(before);
+    expect((await call("POST", "/agents/nobody/check", {})).status).toBe(404);
+  });
+
+  it("files a thread in a folder, tidies the name, and takes it out again", async () => {
+    const id = ((await call("POST", "/chats", { title: "filed" })).json.chat as { id: string }).id;
+    expect((await call("PATCH", `/chats/${id}`, { folder: "  Bugs   and fixes " })).json.chat).toMatchObject({ folder: "Bugs and fixes" });
+    const listed = () => ((call("GET", "/chats")).then((r) => (r.json.chats as Array<{ id: string; folder?: string }>).find((c) => c.id === id)!));
+    expect((await listed()).folder).toBe("Bugs and fixes");
+    expect((await call("PATCH", `/chats/${id}`, { folder: 7 })).status).toBe(400);
+    expect((await call("PATCH", "/chats/main", { folder: "x" })).status).toBe(400);
+    await call("PATCH", `/chats/${id}`, { folder: null });
+    expect((await listed()).folder).toBeUndefined();
+  });
+
+  it("stars messages in Main too, and reports each thread's newest reply", async () => {
+    await client.send(projectId, "hello there", "plannerbot");
+    let replyId = 0;
+    await waitUntil(async () => {
+      const chats = (await call("GET", "/chats")).json.chats as Array<{ id: string; lastReplyId?: number }>;
+      replyId = chats.find((c) => c.id === "main")?.lastReplyId ?? 0;
+      return replyId > 0;
+    });
+    const starred = await call("POST", "/chats/main/star", { eventId: replyId });
+    expect(starred.json.starred).toEqual([replyId]);
+    const main = ((await call("GET", "/chats")).json.chats as Array<{ id: string; starred?: number[] }>).find((c) => c.id === "main")!;
+    expect(main.starred).toEqual([replyId]);
+    expect((await call("POST", "/chats/main/star", { eventId: replyId, on: false })).json.starred).toEqual([]);
+    expect((await call("POST", "/chats/main/star", { eventId: "x" })).status).toBe(400);
+  });
+
+  it("reports the log's size and compacts it without losing an event", async () => {
+    const before = (await call("GET", "/log/size")).json as { bytes: number; events: number };
+    expect(before.events).toBeGreaterThan(0);
+    const r = (await call("POST", "/log/compact")).json as { before: { events: number }; after: { events: number } };
+    expect(r.after.events).toBe(r.before.events);
+  });
+
+  it("files a turn's changes in the chat the turn ran in, not Main", async () => {
+    const made = await call("POST", "/chats", { title: "side work" });
+    const chat = (made.json.chat as { id: string }).id;
+    await call("POST", "/messages", { text: "write:side-note.txt", agentId: "plannerbot", chat });
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 100);
+      return events.some((e) => e.kind === "turn_diff" && e.chat === chat);
+    });
+  });
+
+  it("rates replies up or down, clears a rating, and counts them per agent on the leaderboard", async () => {
+    await call("POST", "/messages", { text: "rate me", agentId: "plannerbot" });
+    let reply = 0;
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 100);
+      reply = events.filter((e) => e.kind === "message" && e.agentId === "plannerbot").at(-1)?.id ?? 0;
+      return reply > 0;
+    });
+    expect((await call("POST", "/chats/main/rate", { eventId: reply, agentId: "plannerbot", value: 1 })).json.ratings).toEqual({ [String(reply)]: { v: 1, agent: "plannerbot" } });
+    const board = (await call("GET", "/insights/turns")).json.leaderboard as Array<{ agentId: string; rated?: { up: number; down: number } }>;
+    expect(board.find((a) => a.agentId === "plannerbot")?.rated).toEqual({ up: 1, down: 0 });
+    expect((await call("POST", "/chats/main/rate", { eventId: reply, agentId: "plannerbot", value: 0 })).json.ratings).toEqual({});
+    expect((await call("POST", "/chats/main/rate", { eventId: reply, value: 1 })).status).toBe(400);
+  });
+
+  it("asks for a brief (or detailed) reply ahead of the turn, and only when asked", async () => {
+    await call("POST", "/messages", { text: "short please", agentId: "plannerbot", length: "brief" });
+    await call("POST", "/messages", { text: "normal please", agentId: "plannerbot", length: "sideways" });
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 200);
+      const said = events.filter((e) => e.kind === "message" && e.agentId === "plannerbot").map((e) => String(e.payload.text));
+      return said.some((t) => t.startsWith("echo(plannerbot): short please (briefed:")) && said.some((t) => t === "echo(plannerbot): normal please");
+    });
+  });
+
+  it("gives cards a priority and a due date, and columns a work-in-progress limit", async () => {
+    const made = (await call("POST", "/board/tasks", { title: "ship it", priority: "high", due: "2026-10-01" })).json.task as { id: string };
+    expect(made).toMatchObject({ priority: "high", due: "2026-10-01" });
+    expect((await call("POST", `/board/tasks/${made.id}`, { priority: null, due: "2026-10-02" })).json.task).toMatchObject({ due: "2026-10-02" });
+    expect((await call("POST", `/board/tasks/${made.id}`, { priority: "urgent" })).status).toBe(400);
+    expect((await call("POST", `/board/tasks/${made.id}`, { due: "next week" })).status).toBe(400);
+    expect((await call("PUT", "/board/limits", { column: "working", limit: 2 })).json.limits).toEqual({ working: 2 });
+    expect(((await call("GET", "/board")).json as { limits: Record<string, number> }).limits).toEqual({ working: 2 });
+    expect((await call("PUT", "/board/limits", { column: "working", limit: 0 })).json.limits).toEqual({});
+    expect((await call("PUT", "/board/limits", { column: "nope", limit: 2 })).status).toBe(400);
+  });
+
+  it("keeps a small picture per agent, refuses what isn't an image, and clears it", async () => {
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: png })).json).toEqual({ id: "plannerbot", avatar: png });
+    const status = (await call("GET", "")).json.project as { agents: Array<{ id: string; avatar?: string }> };
+    expect(status.agents.find((a) => a.id === "plannerbot")?.avatar).toBe(png);
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: "javascript:alert(1)" })).status).toBe(400);
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: "data:image/png;base64," + "A".repeat(130_000) })).status).toBe(400);
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: null })).json.avatar).toBeNull();
+  });
+
+  it("refuses sampling for an agent that isn't a model agent, in words", async () => {
+    const r = await call("PUT", "/agents/plannerbot/sampling", { temperature: 0.5 });
+    expect(r.status).toBe(400);
+    expect(String(r.json.error)).toMatch(/sampling is set in its own CLI/);
+  });
+
+  it("sends an agent's standing instructions ahead of every turn it takes", async () => {
+    expect((await call("PUT", "/agents/plannerbot/instructions", { instructions: "Answer in one line." })).json).toEqual({
+      id: "plannerbot",
+      instructions: "Answer in one line.",
+    });
+    const status = (await call("GET", "")).json.project as { agents: Array<{ id: string; instructions?: string }> };
+    expect(status.agents.find((a) => a.id === "plannerbot")?.instructions).toBe("Answer in one line.");
+    await client.send(projectId, "brief me", "plannerbot");
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 50);
+      return events.some((e) => e.kind === "message" && e.agentId === "plannerbot" && String(e.payload.text).includes("brief me (briefed:"));
+    });
+    expect((await call("PUT", "/agents/plannerbot/instructions", { instructions: "" })).json.instructions).toBe("");
+    expect((await call("PUT", "/agents/nobody/instructions", { instructions: "x" })).status).toBe(404);
+    expect((await call("PUT", "/agents/plannerbot/instructions", {})).status).toBe(400);
+  });
+});

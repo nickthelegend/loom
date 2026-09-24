@@ -144,7 +144,7 @@ export interface OrchestraRun {
   question?: string;
   error?: string;
   /** Set when the integration branch was merged back into the project. */
-  applied?: { at: number; into: string };
+  applied?: { at: number; into: string; task?: string };
   /**
    * Plan mode: the plan is written as markdown specs under plans/<run>/ on the
    * integration branch — PLAN.md plus one self-contained file per task — so
@@ -168,6 +168,14 @@ export interface OrchestraRun {
   moving?: boolean;
   /** Where the goal went (D75). */
   movedTo?: { where: string; at: number };
+  /**
+   * Set when Loom itself stopped the run (a restart or shutdown), not you:
+   * which tasks were in flight, so Resume can pick exactly those back up in
+   * the worktrees they left.
+   */
+  interrupted?: { at: number; tasks: string[]; phase: OrchestraStatus };
+  /** A race (see OrchestraStartOptions.race); applied.task names the entrant you picked. */
+  race?: boolean;
   costUsd: number;
   createdAt: number;
   updatedAt: number;
@@ -241,6 +249,11 @@ export interface OrchestraStartOptions {
   from?: OrchestraRun["from"];
   /** Stop this goal when it has spent this much, and say so. */
   maxUsd?: number;
+  /**
+   * A race: every worker gets the same prompt in its own worktree, nobody
+   * plans and nothing merges — you compare what came back and pick one.
+   */
+  race?: boolean;
   /** The paths this goal expects to touch, when the caller already knows. */
   touches?: string[];
   /**
@@ -263,7 +276,8 @@ export interface OrchestraHost {
   /** Build a fresh adapter instance for `cfg`, working in `dir`. */
   makeAgent(cfg: AgentConfig, dir: string): Adapter;
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
-  createChat(title: string): ChatInfo;
+  /** agentId pins who answers there — a task thread is its worker's. */
+  createChat(title: string, opts?: { agentId?: string }): ChatInfo;
   /** Does this thread exist? Asked before a run is told to answer in one. */
   chatExists?(id: string): boolean;
   /** Skills + retrieved memories for a task, or "" — the project brain (and the team's, when shared). */
@@ -277,6 +291,8 @@ export interface OrchestraHost {
   gate(agentId: string): void;
   /** Cost/metrics bookkeeping for a worker event. */
   observe(event: LoomEvent): void;
+  /** A reply as it's written, for the live view (never logged — see StreamDelta). */
+  stream?(f: { agentId: string; chat: string; text: string; reasoning?: boolean }): void;
   /** The project's git delivery policy, read when a run completes. */
   gitDelivery?(): GitDelivery;
   /** The project's own per-goal spend cap, when it sets one (.loom/config.json). */
@@ -924,6 +940,7 @@ export class OrchestraEngine {
       if (!workers.some((x) => x.id === cfg.id)) workers.push(cfg);
     }
     if (!workers.length) throw new Error("an orchestra needs at least one worker agent");
+    if (opts.race && workers.length < 2) throw new Error("a race needs at least two agents");
     this.host.gate(orchCfg.id);
     const blocked = this.host.coordinator?.()?.canStart?.();
     if (blocked) throw new Error(blocked);
@@ -948,7 +965,10 @@ export class OrchestraEngine {
       baseCommit = (await git(["rev-parse", `origin/${opts.from.branch}`], dir)).trim();
       baseBranch = null;
     }
-    const dirty = (await git(["status", "--porcelain"], dir)).trim().length > 0;
+    // Loom's own state (.loom/: the log, the brain, run files) changes on every
+    // turn and is never the user's work; counting it warned "uncommitted
+    // changes" on every run in a project that doesn't gitignore it.
+    const dirty = (await git(["status", "--porcelain", "--", ".", ":(exclude).loom"], dir)).trim().length > 0;
 
     const id = `o${Date.now().toString(36)}`;
     // Integration and task branches are siblings under one prefix: git can't
@@ -988,6 +1008,7 @@ export class OrchestraEngine {
       ...(opts.from ? { from: opts.from, landing: newLanding(opts.from.pr, opts.from.url) } : {}),
       // A cap for this goal: what was asked for, else the project's default.
       ...(opts.maxUsd && opts.maxUsd > 0 ? { budgetUsd: opts.maxUsd } : {}),
+      ...(opts.race ? { race: true } : {}),
       costUsd: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1004,9 +1025,37 @@ export class OrchestraEngine {
       workers: run.workers,
       branch,
       maxParallel: run.maxParallel,
+      ...(run.race ? { race: true } : {}),
       ...(dirty ? { note: "uncommitted changes in the project are not visible to workers — they start from the last commit" } : {}),
     });
 
+    if (run.race) {
+      // No plan and no orchestrator: every entrant gets the goal as it was
+      // typed, in its own worktree off the same commit, all at once.
+      run.maxParallel = Math.max(run.maxParallel, workers.length);
+      for (const w of workers) {
+        const id = `race-${w.id}`.replace(/[^\w-]+/g, "-").slice(0, 40);
+        const chatInfo = this.host.createChat(`🏁 ${w.id} · ${goal}`.slice(0, 60), { agentId: w.id });
+        const task: OrchestraTask = {
+          id,
+          title: `${w.id}'s take`,
+          prompt: goal,
+          agent: w.id,
+          kind: w.kind,
+          dependsOn: [],
+          status: "pending",
+          chat: chatInfo.id,
+          attempts: 0,
+          queued: [],
+        };
+        run.tasks.push(task);
+        this.emit(run, "task", { task: taskSummary(task) });
+      }
+      run.status = "running";
+      this.save(run);
+      this.schedule(run);
+      return run;
+    }
     const briefing = orchestratorBriefing({
       project: this.host.projectName,
       goal,
@@ -1326,13 +1375,35 @@ export class OrchestraEngine {
    * Explicit, never automatic: the run's work lands on its own branch, and the
    * human decides when it reaches theirs.
    */
-  async apply(runId: string): Promise<{ merged: string; into: string }> {
+  async apply(runId: string, taskId?: string): Promise<{ merged: string; into: string }> {
     const run = this.mustGet(runId);
     if (run.status !== "completed" && run.status !== "waiting_human" && run.status !== "failed" && run.status !== "aborted") {
       throw new Error(`run ${run.id} is still ${run.status} — wait for it to finish`);
     }
     const dir = this.host.projectDir;
     const into = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir)).trim();
+    if (run.race) {
+      // A race applies the one entrant you picked, never all of them.
+      const pick = run.tasks.find((t) => t.id === taskId);
+      if (!pick) throw new Error(`pick an entrant to apply: ${run.tasks.map((t) => t.id).join(", ")}`);
+      if (pick.status !== "done" || !pick.branch) throw new Error(`${pick.id} didn't finish, so there's nothing of it to apply`);
+      if (run.applied) throw new Error(`${run.applied.task ?? "an entrant"} was already applied from this race`);
+      await this.gitLock.run(async () => {
+        try {
+          await git(
+            ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `Race ${run.id}: ${pick.agent}'s take on ${run.goal.slice(0, 50)}`, pick.branch!],
+            dir,
+          );
+        } catch (err) {
+          await git(["merge", "--abort"], dir).catch(() => {});
+          throw new Error(`merge into ${into} failed — ${(err as Error).message}`);
+        }
+      });
+      run.applied = { at: Date.now(), into, task: pick.id };
+      this.save(run);
+      this.emit(run, "applied", { into, task: pick.id, agent: pick.agent });
+      return { merged: pick.branch!, into };
+    }
     await this.gitLock.run(async () => {
       await commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false);
       try {
@@ -1351,6 +1422,16 @@ export class OrchestraEngine {
     return { merged: run.branch, into };
   }
 
+  /** What one task changed on its branch since the run began — a race entrant's diff. */
+  async taskDiff(runId: string, taskId: string): Promise<string> {
+    const run = this.mustGet(runId);
+    const task = run.tasks.find((t) => t.id === taskId);
+    if (!task) throw new Error(`no task "${taskId}" in run ${run.id}`);
+    if (!task.branch) return "";
+    const patch = await git(["diff", `${run.baseCommit}...${task.branch}`], this.host.projectDir).catch(() => "");
+    return patch.length > 400_000 ? `${patch.slice(0, 400_000)}\n… (truncated)` : patch;
+  }
+
   /** Remove a finished run's worktrees (the branch stays for the record). */
   async cleanup(runId: string): Promise<void> {
     const run = this.mustGet(runId);
@@ -1366,9 +1447,57 @@ export class OrchestraEngine {
 
   async shutdown(): Promise<void> {
     for (const run of this.runs.values()) {
-      if (!isTerminal(run.status)) await this.abort(run.id, "the project was closed");
+      if (isTerminal(run.status)) continue;
+      run.interrupted = {
+        at: Date.now(),
+        tasks: run.tasks.filter((t) => t.status === "running" || t.status === "pending").map((t) => t.id),
+        phase: run.status,
+      };
+      await this.abort(run.id, "Loom stopped while this run was going (a restart or shutdown) — what finished is on its branch, and Resume carries on from there");
     }
   }
+
+  /**
+   * Carry on a run Loom stopped by restarting. The tasks that were in flight
+   * go back to pending in the worktrees they left (their work so far is
+   * there); the orchestrator — a fresh session, so it's briefed again —
+   * picks up at review when nothing was in flight.
+   */
+  async resume(runId: string): Promise<OrchestraRun> {
+    const run = this.mustGet(runId);
+    if (run.status !== "aborted" || !run.interrupted) {
+      throw new Error(`run ${run.id} wasn't stopped by a restart — start the goal again instead`);
+    }
+    if (!run.dir || !fs.existsSync(run.dir)) throw new Error("its worktrees were cleaned up — start the goal again");
+    const again = new Set(run.interrupted.tasks);
+    let pending = 0;
+    for (const t of run.tasks) {
+      if (!again.has(t.id) || t.status !== "cancelled") continue;
+      t.status = "pending";
+      delete t.error;
+      t.reported = false;
+      pending++;
+    }
+    delete run.interrupted;
+    delete run.error;
+    run.maxRounds = Math.max(run.maxRounds, run.round + 10);
+    run.updatedAt = Date.now();
+    this.rebrief.add(run.id);
+    this.emit(run, "resumed", { tasks: pending });
+    if (pending) {
+      run.status = "running";
+      this.save(run);
+      this.schedule(run);
+    } else {
+      run.status = "reviewing";
+      this.save(run);
+      void this.orchestratorTurn(run, `Loom restarted while this run was going, and it's carrying on now.\n\n${this.statusReport(run)}`);
+    }
+    return run;
+  }
+
+  /** Runs whose orchestrator restarts as a fresh session (resume) and needs its brief again. */
+  private rebrief = new Set<string>();
 
   private mustGet(id: string): OrchestraRun {
     const run = this.runs.get(id);
@@ -1404,6 +1533,8 @@ export class OrchestraEngine {
 
   private async orchestratorTurn(run: OrchestraRun, text: string, briefing?: string, retry = 0): Promise<void> {
     if (isTerminal(run.status) || run.moving) return;
+    // a resumed run's orchestrator is a fresh session: its first turn carries the instructions again
+    if (!briefing && this.rebrief.delete(run.id)) briefing = this.briefingOf(run);
     if (this.overBudget(run)) return;
     if (run.round >= run.maxRounds) {
       return this.finish(run, "failed", `stopped after ${run.maxRounds} orchestrator rounds without "done"`);
@@ -1573,7 +1704,7 @@ export class OrchestraEngine {
     if (!id || run.tasks.some((t) => t.id === id)) id = `t${run.tasks.length + 1}`;
     while (run.tasks.some((t) => t.id === id)) id = `${id}x`;
     const deps = (a.dependsOn ?? []).filter((d) => run.tasks.some((t) => t.id === d));
-    const chat = this.host.createChat(`${id} · ${a.title}`.slice(0, 60));
+    const chat = this.host.createChat(`${id} · ${a.title}`.slice(0, 60), { agentId: cfg.id });
     const task: OrchestraTask = {
       id,
       title: a.title.slice(0, 120),
@@ -1782,6 +1913,13 @@ export class OrchestraEngine {
   private maybeReview(run: OrchestraRun): void {
     if (run.status !== "running" || this.orchestratorBusy.has(run.id)) return;
     if (run.tasks.some((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`))) return;
+    if (run.race) {
+      // A race has no reviewer: it's over when every entrant has finished.
+      if (run.tasks.some((t) => t.status === "pending")) return;
+      const done = run.tasks.filter((t) => t.status === "done").length;
+      void this.finish(run, "completed", undefined, `${done} of ${run.tasks.length} finished — compare them and pick one to apply.`);
+      return;
+    }
     const ready = (t: OrchestraTask) =>
       t.status === "pending" && t.dependsOn.every((d) => run.tasks.find((x) => x.id === d)?.status === "done");
     if (run.tasks.some((t) => ready(t) && !t.hold)) return;
@@ -1871,6 +2009,7 @@ export class OrchestraEngine {
         this.save(run);
       }
       let agent = this.live.get(key);
+      const freshSession = !agent;
       if (!agent) {
         const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
         agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
@@ -1882,14 +2021,24 @@ export class OrchestraEngine {
       // The first attempt always sends the task itself — a follow-up the
       // orchestrator queued in the same breath waits its turn behind it.
       const first = task.attempts === 1;
-      const text = first ? task.prompt : task.queued.shift()!;
+      // A later attempt sends the orchestrator's next follow-up. With none
+      // queued, this is a task picking back up after Loom restarted (resume,
+      // or a goal moved here): say so, and give it the task again — its
+      // session is new, its worktree still has everything it did.
+      const followUp = first ? undefined : task.queued.shift();
+      const text =
+        first
+          ? task.prompt
+          : (followUp ??
+            `Loom was restarted while you were on this task (${task.title}). Everything you'd done is still in this worktree. ` +
+              `Check where it stands, finish the task, and report back.\n\nThe task, again:\n${task.prompt}`);
       this.host.append({
         kind: "message",
         chat: task.chat,
         payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
       });
       this.turnText.set(key, "");
-      const briefing = first
+      const briefing = first || freshSession
         ? workerBriefing({
             project: this.host.projectName,
             runGoal: run.goal,
@@ -1961,6 +2110,17 @@ export class OrchestraEngine {
 
   private async integrate(run: OrchestraRun, task: OrchestraTask): Promise<void> {
     const dir = task.dir!;
+    if (run.race) {
+      // An entrant's work stays on its own branch, to be compared, not merged.
+      await this.gitLock.run(async () => {
+        await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
+        task.files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => "")).split("\n").filter(Boolean);
+        const stat = await git(["diff", "--shortstat", `${run.baseCommit}...HEAD`], dir).catch(() => "");
+        task.lines = [...stat.matchAll(/(\d+) (?:insertion|deletion)/g)].reduce((n, m) => n + Number(m[1]), 0);
+        task.status = "done";
+      });
+      return;
+    }
     await this.gitLock.run(async () => {
       await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
       const files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => ""))
@@ -1995,6 +2155,7 @@ export class OrchestraEngine {
   // ── event wiring ──
 
   private wire(run: OrchestraRun, agent: Adapter, agentId: string, chat: string, key: string): void {
+    agent.onStream?.((d) => this.host.stream?.({ agentId, chat, ...d }));
     agent.onEvent((e) => {
       const p = e.payload as Record<string, unknown>;
       if (e.kind === "message" && !p.reasoning && p.role !== "user") {
@@ -2056,8 +2217,16 @@ export class OrchestraEngine {
       commits: Number(commits.trim()) || 0,
       tasks: run.tasks.map(taskSummary),
       costUsd: run.costUsd,
+      ...(run.race ? { race: true } : {}),
     });
-    if (summary) {
+    if (summary && run.race) {
+      // nobody led a race, so Loom says how it ended
+      this.host.append({
+        kind: "message",
+        chat: run.chat,
+        payload: { text: `🏁 Race finished — ${summary} They're side by side in the Orchestra tab.`, author: "loom", orchestra: { runId: run.id, role: "summary" } },
+      });
+    } else if (summary) {
       this.host.append({
         kind: "message",
         agentId: run.orchestrator.agent,
@@ -2067,7 +2236,8 @@ export class OrchestraEngine {
     }
     this.host.coordinator?.()?.onRunEnd?.(run);
     // A goal that already has a PR (a fix round, an adopted goal) always goes back to that PR.
-    if (status === "completed") await this.deliver(run, run.from || run.delivered?.prUrl ? "pr" : undefined);
+    // A race's integration branch is empty until you pick an entrant.
+    if (status === "completed" && !run.race) await this.deliver(run, run.from || run.delivered?.prUrl ? "pr" : undefined);
   }
 
   /**

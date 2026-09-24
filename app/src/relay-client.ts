@@ -114,6 +114,7 @@ export class RelayClient {
         from: this.id,
         method,
         path,
+        ts: Date.now(),
         ...(opts.auth ? { auth: opts.auth } : {}),
         ...(opts.body !== undefined ? { body: opts.body } : {}),
       }).catch((err) => {

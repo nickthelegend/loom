@@ -476,8 +476,9 @@ describe("web app · board task modal", () => {
     await waitUntil(() => !!$(m, "#bmtitle"));
 
     click($(m, "#bmcreate"));
-    await waitUntil(() => !!$(m, "#toast.show"));
-    expect(text(m, "#toast")).toContain("what needs doing");
+    // said inside the dialog, beside its buttons — not in a toast behind it
+    await waitUntil(() => text(m, ".scrim .mferr").length > 0);
+    expect(text(m, ".scrim .mferr")).toContain("what needs doing");
     expect($(m, ".scrim")).toBeTruthy(); // still open, nothing created
     expect(m.errors.join("\n")).toBe("");
   });
@@ -576,6 +577,48 @@ describe("web app · chats", () => {
     const picks = [...m.window.document.querySelectorAll("#chatpick [data-pick]")];
     expect(picks.length).toBeGreaterThanOrEqual(2);
     expect(text(m, "#chatpick .pickhead").toLowerCase()).toContain("start this chat with");
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+describe("web app · chat folders and agent groups", () => {
+  it("files threads under a folder that folds, and groups the rest by agent on request", async () => {
+    const call = async (method: string, p: string, body?: unknown) => {
+      const r = await fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+        method,
+        headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      return (await r.json()) as { chat: { id: string } };
+    };
+    const a = (await call("POST", "/chats", { title: "folder one", agentId: "plannerbot" })).chat.id;
+    const b = (await call("POST", "/chats", { title: "folder two", agentId: "plannerbot" })).chat.id;
+    const loose = (await call("POST", "/chats", { title: "loose", agentId: "execbot" })).chat.id;
+    await call("PATCH", `/chats/${a}`, { folder: "Specs" });
+    await call("PATCH", `/chats/${b}`, { folder: "Specs" });
+
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '.crow.fold[data-folder="Specs"]'));
+    const fold = $(m, '.crow.fold[data-folder="Specs"]')!;
+    expect(fold.textContent).toContain("2");
+    expect($(m, `.crow.infold[data-chat="${a}"]`)).toBeTruthy();
+    expect($(m, `.crow.infold[data-chat="${loose}"]`)).toBeNull();
+    // folding hides what's inside, and is remembered on this device
+    click(fold);
+    await waitUntil(() => !$(m, `.crow[data-chat="${a}"]`));
+    expect(JSON.parse(m.window.localStorage.getItem("loomFolds") || "{}")[`${projectId}|f:Specs`]).toBe(1);
+    click($(m, '.crow.fold[data-folder="Specs"]'));
+    await waitUntil(() => !!$(m, `.crow[data-chat="${a}"]`));
+
+    // grouping by agent gathers the loose threads under whoever answers them
+    m.window.localStorage.setItem("loomPref:chatsByAgent", "1");
+    click($(m, `.crow[data-chat="${a}"]`));
+    await waitUntil(() => !!$(m, `.crow.infold[data-chat="${loose}"]`));
+    const heads = [...m.window.document.querySelectorAll(".crow.fold")].map((e) => e.textContent ?? "");
+    expect(heads[0]).toContain("Specs");
+    expect(heads.some((h) => h.includes("execbot"))).toBe(true);
+    m.window.localStorage.removeItem("loomPref:chatsByAgent");
+    for (const id of [a, b, loose]) await fetch(`${baseUrl}/api/projects/${projectId}/chats/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
     expect(m.errors.join("\n")).toBe("");
   });
 });
@@ -1323,6 +1366,37 @@ describe("web app · the brain", () => {
     expect(card).toContain("template literal");
     expect($(m, ".bmem .bbadge")?.textContent?.toLowerCase()).toContain("constraint");
     expect($(m, ".bmem [data-forget]"), "each memory can be forgotten").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
+
+  it("draws the brain as a graph: memories joined by the files they share", async () => {
+    for (const [kind, text, entities] of [
+      ["constraint", "graph: the router reads routes.ts at boot", ["src/routes.ts"]],
+      ["decision", "graph: routes.ts owns every URL, nothing else registers one", ["src/routes.ts", "registerRoute"]],
+      ["fact", "graph: registerRoute is called once per route", ["registerRoute"]],
+    ] as const) {
+      await fetch(`${baseUrl}/api/projects/${projectId}/brain`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${clientToken}` },
+        body: JSON.stringify({ kind, text, entities }),
+      });
+    }
+    const m = await openBrain();
+    await ready(m, '[data-bgv="graph"]');
+    click($(m, '[data-bgv="graph"]'));
+    await waitUntil(() => !!$(m, "#bgraph svg"));
+    const names = [...m.window.document.querySelectorAll("#bgraph .bge title")].map((t) => t.textContent ?? "");
+    expect(names.some((n) => n.startsWith("src/routes.ts"))).toBe(true);
+    expect(names.some((n) => n.startsWith("registerRoute"))).toBe(true);
+    expect(m.window.document.querySelectorAll("#bgraph .bgl").length).toBeGreaterThanOrEqual(4);
+    // a shared file lists the memories about it, and dims the rest
+    const routes = [...m.window.document.querySelectorAll("#bgraph .bge")].find((g) => (g.querySelector("title")?.textContent ?? "").startsWith("src/routes.ts"))!;
+    click(routes);
+    expect(text(m, "#bgpick")).toContain("2 memories");
+    expect(text(m, "#bgpick")).toContain("owns every URL");
+    expect($(m, "#bgraph svg")?.classList.contains("focus")).toBe(true);
+    click($(m, '[data-bgv="list"]'));
+    await waitUntil(() => !!$(m, ".bmems"));
     expect(m.errors.join("\n")).toBe("");
   }, 20_000);
 });

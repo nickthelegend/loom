@@ -15,6 +15,7 @@ import { AgentIcon, agentLabel } from "./agents";
 import { ApprovalBanner, ApprovalsSheet } from "./approvals";
 import { ConnectionBadge } from "./brand";
 import { Empty, SectionLabel, TAP, Unreachable, dur } from "./components";
+import { plainText } from "./markdown-model";
 import { PermissionTag } from "./permissions";
 import { TeamSection } from "./team";
 import { T, radii, spacing } from "./theme";
@@ -22,13 +23,27 @@ import { T, radii, spacing } from "./theme";
 const POLL_MS = 3000;
 
 const TASK_COLOR: Record<string, string> = {
-  pending: T.faint,
-  running: T.thread,
-  done: T.ok,
-  conflict: T.warn,
-  needs_input: T.warn,
-  failed: T.err,
-  cancelled: T.faint,
+  get pending() {
+    return T.faint;
+  },
+  get running() {
+    return T.thread;
+  },
+  get done() {
+    return T.ok;
+  },
+  get conflict() {
+    return T.warn;
+  },
+  get needs_input() {
+    return T.warn;
+  },
+  get failed() {
+    return T.err;
+  },
+  get cancelled() {
+    return T.faint;
+  },
 };
 
 function sinceText(ts: number | null | undefined, now: number): string {
@@ -73,7 +88,7 @@ function AgentRow(props: { a: ActivityAgent; now: number; onPress: () => void })
         </Text>
         {a.last?.line ? (
           <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono, lineHeight: 17 }} numberOfLines={2}>
-            {a.last.line}
+            {plainText(a.last.line)}
           </Text>
         ) : null}
       </View>

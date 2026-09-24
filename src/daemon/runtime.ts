@@ -13,6 +13,7 @@ import type {
   AnyAgent,
   ChatInfo,
   CostSummary,
+  LiveText,
   LoomEvent,
   McpServerConfig,
   ProjectConfig,
@@ -105,6 +106,7 @@ import {
 import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
 import { SemanticIndex } from "../core/semantic.js";
 import { ModelAdapter } from "../adapters/model.js";
+import { AdapterBase, type AgentCheck } from "../adapters/base.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 
 /** How many models one ask may go to at once. */
@@ -211,6 +213,33 @@ export type ServerFrame =
 /** How often a time-held prompt checks the clock. */
 export const CLOCK_TICK_MS = 15_000;
 
+/**
+ * Priority and due date on a card: set when given, cleared by null, refused
+ * in words when they don't make sense.
+ */
+function applyCardMeta(task: BoardTask, p: { priority?: string | null; due?: string | null }): void {
+  if (p.priority !== undefined) {
+    if (p.priority === null || p.priority === "") delete task.priority;
+    else if (p.priority === "high" || p.priority === "medium" || p.priority === "low") task.priority = p.priority;
+    else throw new Error("priority is high, medium or low");
+  }
+  if (p.due !== undefined) {
+    if (p.due === null || p.due === "") delete task.due;
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(p.due) && !Number.isNaN(new Date(`${p.due}T00:00:00`).getTime())) task.due = p.due;
+    else throw new Error("due is a date: YYYY-MM-DD");
+  }
+}
+
+/** A model agent's sampling settings, for its status (empty for everything else). */
+function sampling(cfg: AgentConfig): { sampling?: { temperature?: number; maxTokens?: number } } {
+  if (cfg.kind !== "model") return {};
+  const o = (cfg.options ?? {}) as { temperature?: unknown; maxTokens?: unknown };
+  const out: { temperature?: number; maxTokens?: number } = {};
+  if (typeof o.temperature === "number") out.temperature = o.temperature;
+  if (typeof o.maxTokens === "number") out.maxTokens = o.maxTokens;
+  return { sampling: out };
+}
+
 export class ProjectRuntime {
   readonly info: ProjectInfo;
   readonly config: ProjectConfig;
@@ -240,6 +269,7 @@ export class ProjectRuntime {
   private proxies = new Map<string, PreviewProxy>();
   private serverListeners = new Set<(f: ServerFrame) => void>();
   private queueListeners = new Set<(s: QueueState) => void>();
+  private streamListeners = new Set<(f: LiveText) => void>();
   private draining = false;
 
   /**
@@ -257,6 +287,24 @@ export class ProjectRuntime {
     this.info = info;
     this.config = config;
     this.log = log;
+    // What each agent has typed since its last finished message, so a window
+    // opened (or reloaded) mid-reply can show the reply so far, not just the
+    // words that arrive after it. A finished message supersedes its typing;
+    // a turn's end drops it.
+    log.onEvent((e) => {
+      const s = e.agentId ? this.liveSoFar.get(e.agentId) : undefined;
+      if (!s || !e.agentId) return;
+      const p = e.payload as { reasoning?: unknown; state?: unknown };
+      if (e.kind === "message") {
+        if (p.reasoning) s.think = "";
+        else s.text = "";
+      } else if (
+        e.kind === "run_complete" || e.kind === "error" || e.kind === "needs_input" ||
+        (e.kind === "status" && (p.state === "interrupted" || p.state === "stopped"))
+      ) {
+        this.liveSoFar.delete(e.agentId);
+      }
+    });
     this.baton = new BatonManager(info.dir, log);
     if (config.brain?.semantic) {
       const index = new SemanticIndex(path.join(info.dir, ".loom"));
@@ -310,7 +358,17 @@ export class ProjectRuntime {
         return agent;
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
-      createChat: (title) => this.createChat(title),
+      // A task thread is pinned to its worker, so the sidebar says who it is
+      // and a reply there reaches that agent. A worker that can't be pinned
+      // (none can't, today — but a roster can change mid-run) still gets its
+      // thread, just unpinned.
+      createChat: (title, opts) => {
+        try {
+          return this.createChat(title, opts?.agentId ? { agentId: opts.agentId } : {});
+        } catch {
+          return this.createChat(title);
+        }
+      },
       // Asked before a run is told to answer in a thread: an id from a client
       // is a claim about this machine, and Main is real without being stored.
       chatExists: (id) => this.chats().some((c) => c.id === id),
@@ -327,6 +385,7 @@ export class ProjectRuntime {
         this.enforceBudget(agentId);
       },
       observe: (event) => this.trackCost(event),
+      stream: (f) => this.liveText(f),
       gitDelivery: () => this.config.git?.delivery ?? "none",
       goalBudgetUsd: () => this.config.budgets?.perGoalUsd ?? null,
       maxConcurrentGoals: () => this.config.maxConcurrentGoals ?? null,
@@ -365,7 +424,12 @@ export class ProjectRuntime {
 
   static async open(info: ProjectInfo): Promise<ProjectRuntime> {
     const config = readProjectConfig(info.dir);
-    if (!config) throw new Error(`project at ${info.dir} has no .loom/config.json — run loom init`);
+    if (!config) {
+      // Say which: a folder that's gone (moved, deleted, a temp dir a reboot
+      // cleared) is a different fix from a folder that was never initialised.
+      if (!fs.existsSync(info.dir)) throw new Error(`this project's folder is gone: ${info.dir} — it was moved or deleted`);
+      throw new Error(`project at ${info.dir} has no .loom/config.json — run loom init`);
+    }
     const log = await EventLog.open(projectLoomDir(info.dir));
     const rt = new ProjectRuntime(info, config, log);
     rt.configMtime = configMtimeOf(info.dir);
@@ -720,6 +784,56 @@ export class ProjectRuntime {
    * on an agent's turn to finish. Nothing is torn down: a role is a name, not
    * a capability, so no adapter needs restarting.
    */
+  /** An agent's picture: a small PNG/JPEG/WebP data URL, or null to clear. */
+  setAgentAvatar(agentId: string, dataUrl: string | null): { id: string; avatar: string | null } | null {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) return null;
+    if (dataUrl === null || dataUrl === "") delete cfg.avatar;
+    else {
+      if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new Error("a picture is a PNG, JPEG or WebP image");
+      if (dataUrl.length > 120_000) throw new Error("that picture is too big — Loom keeps them small (about 96px)");
+      cfg.avatar = dataUrl;
+    }
+    this.saveConfig();
+    return { id: agentId, avatar: cfg.avatar ?? null };
+  }
+
+  /**
+   * Ask an agent whether it's ready — installed, signed in, model listed —
+   * without sending it a prompt (see AdapterBase.selfCheck).
+   */
+  async checkAgent(agentId: string): Promise<{ ok: boolean; ms: number; checks: AgentCheck[] } | null> {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) return null;
+    const started = Date.now();
+    if (cfg.enabled === false) return { ok: false, ms: 0, checks: [{ name: "switched on", ok: false, detail: "this agent is switched off in the roster" }] };
+    const live = this.agents.get(agentId);
+    let checks: AgentCheck[];
+    if (live && live instanceof AdapterBase) checks = await live.selfCheck();
+    else if (live) {
+      const ok = await live.available();
+      checks = [{ name: "available", ok, detail: ok ? "running" : "not available on this machine" }];
+    } else checks = [{ name: "loaded", ok: false, detail: "Loom hasn't loaded this agent — is its CLI installed?" }];
+    return { ok: checks.every((c) => c.ok), ms: Date.now() - started, checks };
+  }
+
+  /** Standing instructions for an agent; empty clears them. */
+  setAgentInstructions(agentId: string, text: string): { id: string; instructions: string } | null {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) return null;
+    const clean = text.trim().slice(0, 4000);
+    if (clean) cfg.instructions = clean;
+    else delete cfg.instructions;
+    this.saveConfig();
+    return { id: agentId, instructions: clean };
+  }
+
+  /** The block an agent's standing instructions ride in, ahead of its turn. */
+  private agentInstructions(agentId: string): string {
+    const text = this.config.agents.find((a) => a.id === agentId)?.instructions?.trim();
+    return text ? `Standing instructions for you in this project, from the person you work for:\n${text}\n` : "";
+  }
+
   setAgentRole(agentId: string, role: string): { id: string; role: string } | null {
     const cfg = this.config.agents.find((a) => a.id === agentId);
     if (!cfg) return null;
@@ -1004,8 +1118,23 @@ export class ProjectRuntime {
       this.agentDir(cfg.id),
     );
     this.agents.set(cfg.id, agent);
+    // What this turn has typed since its last finished message. A turn that
+    // is stopped (or dies) mid-reply never sends that message, and the words
+    // you watched arrive would vanish — so they're kept, marked partial.
+    let typed = "";
+    agent.onStream?.((d) => {
+      if (!d.reasoning) typed += d.text;
+      this.liveText({ agentId: agent.id, chat: this.turnChat.get(agent.id) ?? MAIN_CHAT, ...d });
+    });
     agent.onEvent((e) => {
       const chat = this.turnChat.get(agent.id);
+      const ep = e.payload as Record<string, unknown>;
+      if (e.kind === "message" && !ep.reasoning) typed = "";
+      const ending = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && ep.state === "interrupted");
+      if (ending && typed.trim()) {
+        this.log.append({ kind: "message", agentId: agent.id, ...(chat ? { chat } : {}), payload: { text: typed, partial: true } });
+        typed = "";
+      } else if (ending) typed = "";
       let payload = e.payload;
       // Enrich the completed turn so its gen_ai span carries system + model +
       // cost (adapters only put tokens on run_complete). The kind is known
@@ -1094,21 +1223,57 @@ export class ProjectRuntime {
    * An empty model clears the override, so the CLI falls back to its own default
    * — the honest "Default" the picker offers.
    */
-  setAgentModel(agentId: string, model: string): AgentConfig {
+  setAgentModel(agentId: string, model: string, provider?: string): AgentConfig {
     const cfg = this.config.agents.find((a) => a.id === agentId);
     if (!cfg) throw new Error(`unknown agent "${agentId}"`);
     const live = this.agents.get(agentId);
     if (live && isAdapter(live) && live.busy()) {
       throw new Error(`"${agentId}" is mid-turn — wait for it to finish, then switch models`);
     }
-    const next = model.trim().slice(0, 80);
+    // OpenRouter ids run long ("provider/family-size-variant:free"); 80 cut
+    // real ones off mid-name.
+    const next = model.trim().slice(0, 200);
     const options = { ...(cfg.options ?? {}) } as Record<string, unknown>;
     if (next) options.model = next;
     else delete options.model;
+    // A model agent's pick names its provider too (the list spans them all).
+    if (cfg.kind === "model" && provider?.trim()) options.provider = provider.trim().toLowerCase();
     cfg.options = options;
 
     // Rebuild so the new model actually takes: stop the old process, spawn a
     // replacement subscribed exactly as the constructor's loop does.
+    if (live) {
+      void Promise.resolve(live.stop()).catch(() => {});
+      this.agents.delete(agentId);
+    }
+    this.spawnAgent(cfg);
+    this.saveConfig();
+    return cfg;
+  }
+
+  /**
+   * A model agent's sampling: temperature (0–2) and the reply's token cap.
+   * Null clears one back to the provider's default. Rebuilt like a model
+   * switch, because the adapter reads them when it's built.
+   */
+  setAgentSampling(agentId: string, s: { temperature?: number | null; maxTokens?: number | null }): AgentConfig {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    if (cfg.kind !== "model") throw new Error(`"${agentId}" is a ${cfg.kind} — sampling is set in its own CLI, not here`);
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live) && live.busy()) throw new Error(`"${agentId}" is mid-turn — wait for it to finish`);
+    const options = { ...(cfg.options ?? {}) } as Record<string, unknown>;
+    if (s.temperature !== undefined) {
+      if (s.temperature === null) delete options.temperature;
+      else if (!Number.isFinite(s.temperature) || s.temperature < 0 || s.temperature > 2) throw new Error("temperature must be between 0 and 2");
+      else options.temperature = Math.round(s.temperature * 100) / 100;
+    }
+    if (s.maxTokens !== undefined) {
+      if (s.maxTokens === null) delete options.maxTokens;
+      else if (!Number.isInteger(s.maxTokens) || s.maxTokens < 16 || s.maxTokens > 200_000) throw new Error("max tokens must be a whole number from 16 to 200000");
+      else options.maxTokens = s.maxTokens;
+    }
+    cfg.options = options;
     if (live) {
       void Promise.resolve(live.stop()).catch(() => {});
       this.agents.delete(agentId);
@@ -1452,10 +1617,99 @@ export class ProjectRuntime {
    */
   chats(): ChatInfo[] {
     const stored = readProjectState(this.info.dir).chats ?? [];
+    let last: Map<string, number>;
+    try {
+      last = this.log.lastReplyIds();
+    } catch {
+      last = new Map(); // an unread dot is a nicety; the list must still load
+    }
+    const withLast = (c: ChatInfo): ChatInfo => (last.has(c.id) ? { ...c, lastReplyId: last.get(c.id)! } : c);
     return [
-      { id: MAIN_CHAT, title: "Main", createdAt: 0 },
-      ...stored.filter((c) => c.id !== MAIN_CHAT),
+      withLast({
+        id: MAIN_CHAT,
+        title: "Main",
+        createdAt: 0,
+        // main is stored only once it has stars or ratings to keep
+        ...(stored.find((c) => c.id === MAIN_CHAT)?.starred ? { starred: stored.find((c) => c.id === MAIN_CHAT)!.starred! } : {}),
+        ...(stored.find((c) => c.id === MAIN_CHAT)?.ratings ? { ratings: stored.find((c) => c.id === MAIN_CHAT)!.ratings! } : {}),
+      }),
+      ...stored.filter((c) => c.id !== MAIN_CHAT).map(withLast),
     ];
+  }
+
+  /** Pin or archive a thread. Main is always first and always there. */
+  setChatFlags(id: string, flags: { pinned?: boolean; archived?: boolean; folder?: string | null }): ChatInfo | null {
+    if (id === MAIN_CHAT) return null;
+    const state = readProjectState(this.info.dir);
+    const chat = (state.chats ?? []).find((c) => c.id === id);
+    if (!chat) return null;
+    for (const k of ["pinned", "archived"] as const) {
+      if (flags[k] === undefined) continue;
+      if (flags[k]) chat[k] = true;
+      else delete chat[k];
+    }
+    if (flags.folder !== undefined) {
+      const name = String(flags.folder ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+      if (name) chat.folder = name;
+      else delete chat.folder;
+    }
+    writeProjectState(this.info.dir, state);
+    return chat;
+  }
+
+  /** Rate a reply up or down (0 clears). Main included. */
+  rateMessage(chatId: string, eventId: number, agent: string, v: number): Record<string, { v: 1 | -1; agent: string }> | null {
+    if (!Number.isInteger(eventId) || eventId <= 0 || !agent) return null;
+    const state = readProjectState(this.info.dir);
+    state.chats = state.chats ?? [];
+    let chat = state.chats.find((c) => c.id === chatId);
+    if (!chat) {
+      if (chatId !== MAIN_CHAT) return null;
+      chat = { id: MAIN_CHAT, title: "Main", createdAt: 0 };
+      state.chats.push(chat);
+    }
+    const ratings = { ...(chat.ratings ?? {}) };
+    if (v === 1 || v === -1) ratings[String(eventId)] = { v, agent };
+    else delete ratings[String(eventId)];
+    const keys = Object.keys(ratings);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 500))) delete ratings[k]; // bounded
+    if (Object.keys(ratings).length) chat.ratings = ratings;
+    else delete chat.ratings;
+    writeProjectState(this.info.dir, state);
+    return chat.ratings ?? {};
+  }
+
+  /** Every rating in every thread, per agent: how many up, how many down. */
+  ratingsByAgent(): Record<string, { up: number; down: number }> {
+    const out: Record<string, { up: number; down: number }> = {};
+    for (const c of readProjectState(this.info.dir).chats ?? []) {
+      for (const r of Object.values(c.ratings ?? {})) {
+        const a = (out[r.agent] ??= { up: 0, down: 0 });
+        if (r.v === 1) a.up++;
+        else a.down++;
+      }
+    }
+    return out;
+  }
+
+  /** Star or unstar a message in a thread (main included). */
+  starMessage(chatId: string, eventId: number, on: boolean): number[] | null {
+    if (!Number.isInteger(eventId) || eventId <= 0) return null;
+    const state = readProjectState(this.info.dir);
+    state.chats = state.chats ?? [];
+    let chat = state.chats.find((c) => c.id === chatId);
+    if (!chat) {
+      if (chatId !== MAIN_CHAT) return null;
+      // Main isn't stored until it has something to remember
+      chat = { id: MAIN_CHAT, title: "Main", createdAt: 0 };
+      state.chats.push(chat);
+    }
+    const set = (chat.starred ?? []).filter((n) => n !== eventId);
+    if (on) set.push(eventId);
+    chat.starred = set.slice(-200);
+    if (!chat.starred.length) delete chat.starred;
+    writeProjectState(this.info.dir, state);
+    return chat.starred ?? [];
   }
 
   createChat(title: string, opts: { agentId?: string; model?: string } = {}): ChatInfo {
@@ -1561,9 +1815,14 @@ export class ProjectRuntime {
       const agent = new ModelAdapter(agentId, this.info.dir, { provider, model: pick.model });
       // Its events land in the log tagged with its own thread, exactly as a
       // roster agent's do — which is what makes the answers readable later.
-      const off = agent.onEvent((e) => {
+      const offLive = agent.onStream((d) => this.liveText({ agentId, chat: chat.id, ...d }));
+      const offLog = agent.onEvent((e) => {
         this.appendIfOpen({ ...e, agentId, chat: chat.id });
       });
+      const off = () => {
+        offLive();
+        offLog();
+      };
       void agent
         .send({ text, ...(brief ? { briefing: brief } : {}) })
         .catch((err) => {
@@ -1635,6 +1894,8 @@ export class ProjectRuntime {
     column?: string;
     agent?: string;
     blockedBy?: string[];
+    priority?: string | null;
+    due?: string | null;
   }): BoardTask {
     const state = readProjectState(this.info.dir);
     const blockedBy = this.validBlockers(state.tasks ?? [], input.blockedBy);
@@ -1646,6 +1907,7 @@ export class ProjectRuntime {
       ...(blockedBy.length ? { blockedBy } : {}),
       createdAt: Date.now(),
     };
+    applyCardMeta(task, input);
     state.tasks = [...(state.tasks ?? []), task];
     writeProjectState(this.info.dir, state);
     return task;
@@ -1739,11 +2001,12 @@ export class ProjectRuntime {
   /** Move or retitle a card. Yours, so this is the real state — not a hint. */
   updateTask(
     id: string,
-    patch: { title?: string; column?: string; agent?: string; blockedBy?: string[] },
+    patch: { title?: string; column?: string; agent?: string; blockedBy?: string[]; priority?: string | null; due?: string | null },
   ): BoardTask | null {
     const state = readProjectState(this.info.dir);
     const task = (state.tasks ?? []).find((t) => t.id === id);
     if (!task) return null;
+    applyCardMeta(task, patch);
     // Opt-in: dragging a card to Working checks out its branch; reaching
     // Review logs the PR command rather than running it — pushing publishes,
     // and publishing implicitly is a line Loom doesn't cross even under a
@@ -1906,6 +2169,20 @@ export class ProjectRuntime {
     return out;
   }
 
+  /** Put one file back as a checkpoint had it (see checkpoints.restoreFile). */
+  async rewindFile(id: string, file: string): Promise<Awaited<ReturnType<typeof checkpoints.restoreFile>>> {
+    const busy = [...this.busySince.keys()];
+    if (busy.length) {
+      throw new Error(`${busy.join(", ")} ${busy.length === 1 ? "is" : "are"} mid-turn — stop the turn first, or the file changes underneath it`);
+    }
+    const out = await checkpoints.restoreFile(this.info.dir, id, file);
+    this.log.append({
+      kind: "checkpoint",
+      payload: { id: out.restored.id, label: `${out.path} only`, at: Date.now(), reason: "rewound", files: 1, undo: out.undo.id, path: out.path },
+    });
+    return out;
+  }
+
   /**
    * The diff of each agent's most recent turn, as a promise.
    *
@@ -1937,6 +2214,10 @@ export class ProjectRuntime {
     this.preTurnTree.delete(agentId);
     const checkpoint = this.turnCheckpoint.get(agentId);
     this.turnCheckpoint.delete(agentId);
+    // The chat the turn ran in, read now: by the time the diff is computed the
+    // agent may already be on its next turn somewhere else. Without it, every
+    // "changed N files" card landed in Main whatever thread asked.
+    const turnChat = this.turnChat.get(agentId);
     const pending = diffSinceSnapshot(this.agentDir(agentId), before).catch(() => null);
     this.lastTurnDiff.set(agentId, pending);
     void pending
@@ -1945,6 +2226,7 @@ export class ProjectRuntime {
           this.log.append({
             kind: "turn_diff",
             agentId,
+            ...(turnChat && turnChat !== MAIN_CHAT ? { chat: turnChat } : {}),
             payload: {
               files: diff.files,
               added: diff.added,
@@ -2150,8 +2432,50 @@ export class ProjectRuntime {
    */
   private brainBrief(opts: RetrieveOpts): string {
     const pool = this.teamBrain?.pool(this.brain.all());
-    if (!pool) return compileBrief(retrieve(this.brain, opts).map((h) => h.memory));
-    return compileTieredBrief(retrieveTiered(pool, opts));
+    if (!pool) {
+      const hits = retrieve(this.brain, opts);
+      this.noteMemoriesUsed(hits.map((h) => h.memory.id));
+      return compileBrief(hits.map((h) => h.memory));
+    }
+    const tiered = retrieveTiered(pool, opts);
+    this.noteMemoriesUsed(tiered.map((h) => h.memory.id));
+    return compileTieredBrief(tiered);
+  }
+
+  // How often each memory made it into a prompt — the Brain tab's "most
+  // used". Counted where briefs are compiled, so it's what agents actually
+  // got, not what a search happened to return. Written at most every few
+  // seconds; a lost count on a crash costs nothing.
+  private memoryUse: Record<string, { n: number; at: number }> | null = null;
+  private memoryUseTimer: NodeJS.Timeout | null = null;
+  private memoryUseFile(): string {
+    return path.join(this.info.dir, ".loom", "memory-usage.json");
+  }
+  memoryUsage(): Record<string, { n: number; at: number }> {
+    if (!this.memoryUse) {
+      try {
+        this.memoryUse = JSON.parse(fs.readFileSync(this.memoryUseFile(), "utf8")) as Record<string, { n: number; at: number }>;
+      } catch {
+        this.memoryUse = {};
+      }
+    }
+    return this.memoryUse;
+  }
+  private noteMemoriesUsed(ids: string[]): void {
+    if (!ids.length) return;
+    const use = this.memoryUsage();
+    const now = Date.now();
+    for (const id of new Set(ids)) use[id] = { n: (use[id]?.n ?? 0) + 1, at: now };
+    if (this.memoryUseTimer) return;
+    this.memoryUseTimer = setTimeout(() => {
+      this.memoryUseTimer = null;
+      try {
+        fs.writeFileSync(this.memoryUseFile(), JSON.stringify(this.memoryUse));
+      } catch {
+        /* a count that didn't save is not worth a failed turn */
+      }
+    }, 3000);
+    this.memoryUseTimer.unref?.();
   }
 
   /**
@@ -2487,6 +2811,44 @@ export class ProjectRuntime {
     return () => this.queueListeners.delete(cb);
   }
 
+  /** Replies as they're written, for the socket. Returns unsubscribe. */
+  onStream(cb: (f: LiveText) => void): () => void {
+    this.streamListeners.add(cb);
+    return () => this.streamListeners.delete(cb);
+  }
+
+  /** The replies being typed right now in one thread (or all of them). */
+  liveNow(chat?: string): { agentId: string; chat: string; text: string; think: string }[] {
+    const out: { agentId: string; chat: string; text: string; think: string }[] = [];
+    for (const [agentId, s] of this.liveSoFar) {
+      if (chat !== undefined && s.chat !== chat) continue;
+      if (s.text || s.think) out.push({ agentId, ...s });
+    }
+    return out;
+  }
+
+  private liveSoFar = new Map<string, { chat: string; text: string; think: string }>();
+
+  private liveText(f: LiveText): void {
+    if (this.closed) return;
+    let s = this.liveSoFar.get(f.agentId);
+    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "" }));
+    const off = f.reasoning ? s.think.length : s.text.length;
+    if (f.reasoning) s.think += f.text;
+    else s.text += f.text;
+    // a runaway reply can't grow the buffer without bound
+    if (s.text.length > 400_000) s.text = "";
+    if (s.think.length > 400_000) s.think = "";
+    const framed: LiveText = { ...f, off };
+    for (const cb of this.streamListeners) {
+      try {
+        cb(framed);
+      } catch {
+        // a viewer that breaks must not break the turn
+      }
+    }
+  }
+
   /** Line a prompt up; it goes as soon as nothing ahead of it is in the way. */
   enqueue(input: QueueInput): QueueItem {
     const t = input.target ?? { kind: "auto" as const };
@@ -2672,13 +3034,19 @@ export class ProjectRuntime {
     const to = t.kind === "agent" ? t.agentId : undefined;
     const holder = this.validHolder();
     if (to && holder && holder !== to) await this.handoff(to, { source: item.source });
-    await this.sendMessage(item.text, to, { source: item.source, chat: item.chat, fromQueue: true, ...(item.plan ? { plan: true } : {}) });
+    await this.sendMessage(item.text, to, {
+      source: item.source,
+      chat: item.chat,
+      fromQueue: true,
+      ...(item.plan ? { plan: true } : {}),
+      ...(item.length ? { length: item.length } : {}),
+    });
   }
 
   async sendMessage(
     text: string,
     agentId?: string,
-    opts: { source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean } = {},
+    opts: { source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean; length?: "brief" | "detailed" } = {},
   ): Promise<{ agentId: string; queued?: number; queueId?: string }> {
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;
@@ -2723,7 +3091,14 @@ export class ProjectRuntime {
     if (source === "user") this.releaseQuestionHold(target);
     // It shows in the queue, editable, and enters the thread when it's sent.
     if (!opts.fromQueue && this.busySince.has(target)) {
-      const item = this.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source, ...(opts.plan ? { plan: true } : {}) });
+      const item = this.queue.add({
+        text,
+        target: { kind: "agent", agentId: target },
+        chat,
+        source,
+        ...(opts.plan ? { plan: true } : {}),
+        ...(opts.length ? { length: opts.length } : {}),
+      });
       return { agentId: target, queued: this.queue.length, queueId: item.id };
     }
 
@@ -2748,7 +3123,18 @@ export class ProjectRuntime {
     // Prepend the enabled skills so every turn carries them, alongside any
     // one-shot handoff briefing. Empty when no skills are on.
     const briefing =
-      [this.activeSkillsBlock(), pendingBriefing, opts.plan ? planModeBriefing(text) : ""]
+      [
+        this.agentInstructions(target),
+        this.activeSkillsBlock(),
+        pendingBriefing,
+        opts.plan ? planModeBriefing(text) : "",
+        // how long you asked the answer to be, this once
+        opts.length === "brief"
+          ? "Keep this reply brief: the answer first, a few sentences at most, no preamble."
+          : opts.length === "detailed"
+            ? "Give a detailed reply this time: explain your reasoning and the trade-offs, with examples where they help."
+            : "",
+      ]
         .filter(Boolean)
         .join("\n")
         .trim() || undefined;
@@ -3476,6 +3862,9 @@ export class ProjectRuntime {
             holdsBaton: false,
             model,
             permissions: permissionFor(cfg.kind, cfg.options),
+            ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
+            ...sampling(cfg),
+            ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
             // "not spawned" is not "switched off". An agent whose CLI is missing
             // is still enabled in config, and reporting it as disabled made the
             // project-settings toggle render off — clicking it then wrote the
@@ -3494,6 +3883,9 @@ export class ProjectRuntime {
           model,
           permissions: permissionFor(cfg.kind, cfg.options),
           enabled: true,
+          ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
+          ...sampling(cfg),
+          ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
         };
       }),
     );

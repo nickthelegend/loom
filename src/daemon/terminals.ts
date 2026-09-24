@@ -29,6 +29,9 @@ export const TERM_MARK = "__LOOM_END__";
 const isWin = process.platform === "win32";
 /** Keep the last of a session's output for replay after a client reload. */
 const SCROLLBACK_MAX = 256 * 1024;
+/** The line between a restored scrollback and the new shell under it. */
+const RESTORED =
+  "\r\n\u001b[2m\u2500\u2500 restored scrollback \u00b7 the daemon restarted, this is a new shell \u2500\u2500\u001b[0m\r\n";
 /** Per-command output budget in pipe mode (a pty is interactive, so unbounded). */
 const PIPE_OUTPUT_MAX = 2_000_000;
 
@@ -426,12 +429,19 @@ export class TerminalManager {
     const file = this.fileFor(projectId, termId);
     if (!file) return "";
     try {
-      const prev = fs.readFileSync(file, "utf8");
+      let prev = fs.readFileSync(file, "utf8");
+      // A shell nobody typed in since the last restart saved nothing but the
+      // last banner and a prompt. Drop those, or every restart stacks one
+      // more "restored scrollback" line and prompt onto the terminal.
+      for (;;) {
+        const at = prev.lastIndexOf(RESTORED);
+        if (at < 0) break;
+        const after = prev.slice(at + RESTORED.length).replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/g, "");
+        if (after.split(/\r?\n/).filter((l) => l.trim()).length > 1) break;
+        prev = prev.slice(0, at);
+      }
       if (!prev.trim()) return "";
-      return (
-        prev +
-        "\r\n\u001b[2m\u2500\u2500 restored scrollback \u00b7 the daemon restarted, this is a new shell \u2500\u2500\u001b[0m\r\n"
-      );
+      return prev + RESTORED;
     } catch {
       return "";
     }

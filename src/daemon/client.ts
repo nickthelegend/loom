@@ -105,6 +105,29 @@ export class DaemonClient {
     return json as T;
   }
 
+  /** The leaderboard (optionally since a time) and per-day turn counts. */
+  turnStats(id: string, opts: { days?: number; since?: number } = {}): Promise<{
+    leaderboard: Array<{ agentId: string; turns: number; ok: number; errors: number; totalCostUsd: number; medianMs: number | null }>;
+    days: Array<{ date: string; turns: number; errors: number; costUsd: number }>;
+    total: number;
+  }> {
+    const q = new URLSearchParams();
+    if (opts.days) q.set("days", String(opts.days));
+    if (opts.since) q.set("since", String(opts.since));
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/turns?${q}`);
+  }
+
+  chats(id: string): Promise<{ chats: Array<{ id: string; title: string }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats`);
+  }
+
+  /** One page of a chat's events, newest `limit`, before an id when paging back. */
+  chatEvents(id: string, chat: string, opts: { before?: number; limit?: number } = {}): Promise<{ events: LoomEvent[] }> {
+    const q = new URLSearchParams({ chat, limit: String(opts.limit ?? 500) });
+    if (opts.before) q.set("before", String(opts.before));
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/events?${q}`);
+  }
+
   health(): Promise<{ ok: boolean }> {
     return this.request("GET", "/api/health");
   }
@@ -185,7 +208,7 @@ export class DaemonClient {
 
   startOrchestra(
     id: string,
-    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number },
+    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean },
   ): Promise<{ run: OrchestraRun }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, body);
   }
@@ -193,7 +216,7 @@ export class DaemonClient {
   orchestraAction(
     id: string,
     runId: string,
-    action: "abort" | "reply" | "apply" | "cleanup",
+    action: "abort" | "reply" | "apply" | "cleanup" | "resume",
     body?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     return this.request(
@@ -655,7 +678,7 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/tree`);
   }
 
-  newPairingToken(): Promise<{ token: string; expiresAt: number; url: string }> {
+  newPairingToken(): Promise<{ token: string; expiresAt: number; url: string; link?: string }> {
     return this.request("POST", "/api/pair/new", {});
   }
 

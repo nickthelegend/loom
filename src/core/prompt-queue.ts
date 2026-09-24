@@ -47,6 +47,8 @@ export interface QueueItem {
   /** The chat it was typed in — an agent's reply comes back there. */
   chat: string;
   plan?: boolean;
+  /** The reply length it was sent with (brief / detailed). */
+  length?: "brief" | "detailed";
   source: "user" | "route";
   at: number;
   editedAt?: number;
@@ -99,6 +101,7 @@ export interface QueueInput {
   target?: QueueTarget;
   chat?: string;
   plan?: boolean;
+  length?: "brief" | "detailed";
   source?: "user" | "route";
   when?: QueueCondition;
 }
@@ -180,6 +183,7 @@ export class PromptQueue {
       target: input.target ?? { kind: "auto" },
       chat: input.chat ?? "main",
       ...(input.plan ? { plan: true } : {}),
+      ...(input.length ? { length: input.length } : {}),
       source: input.source ?? "user",
       at: Date.now(),
       ...(input.when ? { when: input.when } : {}),

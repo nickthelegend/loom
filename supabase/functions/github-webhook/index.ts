@@ -32,5 +32,10 @@ Deno.serve((req) =>
       if (error) throw new Error(error.message);
       return Number(data ?? 0);
     },
-  }).catch((e) => new Response(JSON.stringify({ error: String((e as Error).message ?? e) }), { status: 500, headers: { "content-type": "application/json" } })),
+  }).catch((e) => {
+    // The detail goes to the function's log, not to whoever sent the request:
+    // a database error message says more about the schema than a caller needs.
+    console.error("github-webhook failed:", (e as Error)?.message ?? e);
+    return new Response(JSON.stringify({ error: "the webhook couldn't be recorded" }), { status: 500, headers: { "content-type": "application/json" } });
+  }),
 );

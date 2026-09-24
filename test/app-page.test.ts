@@ -357,8 +357,8 @@ describe("web app · picking models in Orchestrate", () => {
     expect(APP_HTML).toContain('data-modelof="');
     // On the orchestrator button…
     expect(APP_HTML).toContain("permBadge(permOf(lead), lead.id) + modelBadge(lead)");
-    // …and on each worker chip.
-    expect(APP_HTML).toContain("permBadge(permOf(a), a.id) + modelBadge(a)");
+    // …and on each worker chip, in the chip's own settings zone.
+    expect(APP_HTML).toContain('<span class="cwset">\' + modelBadge(a) + permBadge(permOf(a), a.id)');
     expect(APP_HTML).toContain("function wireModelBadges(");
     expect(APP_HTML).toContain("wireModelBadges(el);");
   });
@@ -414,7 +414,7 @@ describe("web app · picking models in Orchestrate", () => {
  */
 describe("web app · what the model list says about itself", () => {
   it("says the providers were asked, when they were", () => {
-    expect(APP_HTML).toContain('j.source === "api" ? "asked every provider with a key');
+    expect(APP_HTML).toContain('j.source === "api" ? "From every provider with a key');
   });
 
   /** A CLI has a default. A model agent has no such thing to offer. */
@@ -624,5 +624,22 @@ describe("web app · answering an agent in the thread", () => {
     expect(choices("Continue?")).toEqual([]);
     expect(choices("The build is broken in two places. Want me to keep going?")).toEqual([]);
     expect(choices("")).toEqual([]);
+  });
+});
+
+/**
+ * The page is one template literal, and a template literal eats a backslash
+ * it doesn't recognise: `\s` in the source arrives in the browser as a plain
+ * "s". That turned a whitespace-collapsing regex into one that deleted every
+ * letter s from an orchestra's summary ("pa ed acro 31 call "). Every regex
+ * escape inside the page has to be written doubled.
+ */
+describe("web app · regex escapes survive the template literal", () => {
+  it("has no single-backslash \\s \\d \\w \\b escapes in the page source", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync(new URL("../src/daemon/app-page.ts", import.meta.url), "utf8");
+    const body = src.slice(src.indexOf("export const APP_HTML = `"), src.indexOf("</html>`;"));
+    const bad = body.split("\n").filter((l) => /(?<!\\)\\[sSdDwWbB]/.test(l));
+    expect(bad).toEqual([]);
   });
 });

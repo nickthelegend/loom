@@ -138,6 +138,9 @@ export class ClaudeCodeAdapter extends AdapterBase {
       "--output-format",
       "stream-json",
       "--verbose",
+      // Token deltas as stream_event lines, so the thread can show the reply
+      // being written instead of a blank wait and then a wall of text.
+      "--include-partial-messages",
       "--permission-mode",
       claudeMode,
     ];
@@ -232,6 +235,15 @@ export class ClaudeCodeAdapter extends AdapterBase {
     setLastText: (t: string) => void,
   ): void {
     const type = evt.type as string;
+    if (type === "stream_event") {
+      // A sub-agent's own typing (parent_tool_use_id set) isn't this reply.
+      if (evt.parent_tool_use_id) return;
+      const inner = (evt.event ?? {}) as { type?: string; delta?: { type?: string; text?: string; thinking?: string } };
+      if (inner.type !== "content_block_delta" || !inner.delta) return;
+      if (inner.delta.type === "text_delta") this.streamText(String(inner.delta.text ?? ""));
+      else if (inner.delta.type === "thinking_delta") this.streamText(String(inner.delta.thinking ?? ""), true);
+      return;
+    }
     if (type === "system" && (evt as { subtype?: string }).subtype === "init") {
       const sid = evt.session_id as string | undefined;
       if (sid) this.sessionId = sid;

@@ -13,6 +13,8 @@ import { MAIN_CHAT } from "../types.js";
 
 export interface ListOpts {
   since?: number; // exclusive event id
+  /** Only events older than this id (exclusive) — paging a thread backwards. */
+  before?: number;
   limit?: number;
   kinds?: EventKind[];
   /**
@@ -32,6 +34,12 @@ export interface EventStore {
   ): LoomEvent;
   list(opts?: ListOpts): LoomEvent[];
   lastId(): number;
+  /** The newest agent message id per chat (a missing chat is main's). */
+  lastReplyIds(): Map<string, number>;
+  /** Bytes on disk and events held. */
+  size(): { bytes: number; events: number };
+  /** Reclaim free space (SQLite VACUUM). Never drops an event. */
+  compact(): void;
   close(): void;
 }
 
@@ -43,8 +51,10 @@ type SqliteModule = typeof import("node:sqlite");
 
 class SqliteStore implements EventStore {
   private db: InstanceType<SqliteModule["DatabaseSync"]>;
+  private file: string;
 
   constructor(sqlite: SqliteModule, file: string) {
+    this.file = file;
     this.db = new sqlite.DatabaseSync(file);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
@@ -98,6 +108,10 @@ class SqliteStore implements EventStore {
       clauses.push("id > ?");
       params.push(opts.since);
     }
+    if (opts.before !== undefined) {
+      clauses.push("id < ?");
+      params.push(opts.before);
+    }
     if (opts.kinds?.length) {
       clauses.push(`kind IN (${opts.kinds.map(() => "?").join(",")})`);
       params.push(...opts.kinds);
@@ -133,6 +147,32 @@ class SqliteStore implements EventStore {
       ...(r.chat ? { chat: r.chat } : {}),
       payload: JSON.parse(r.payload) as Record<string, unknown>,
     }));
+  }
+
+  size(): { bytes: number; events: number } {
+    const n = this.db.prepare("SELECT COUNT(*) AS n FROM events").get() as { n: number | bigint };
+    let bytes = 0;
+    for (const f of [this.file, `${this.file}-wal`]) {
+      try {
+        bytes += fs.statSync(f).size;
+      } catch {
+        /* no wal file is fine */
+      }
+    }
+    return { bytes, events: Number(n.n) };
+  }
+
+  compact(): void {
+    this.db.exec("VACUUM");
+  }
+
+  lastReplyIds(): Map<string, number> {
+    const rows = this.db
+      .prepare(
+        "SELECT COALESCE(chat, ?) AS c, MAX(id) AS m FROM events WHERE kind = 'message' AND agent_id IS NOT NULL GROUP BY COALESCE(chat, ?)",
+      )
+      .all(MAIN_CHAT, MAIN_CHAT) as Array<{ c: string; m: number | bigint }>;
+    return new Map(rows.map((r) => [r.c, Number(r.m)]));
   }
 
   lastId(): number {
@@ -189,6 +229,7 @@ class JsonlStore implements EventStore {
   list(opts: ListOpts = {}): LoomEvent[] {
     let out = this.cache;
     if (opts.since !== undefined) out = out.filter((e) => e.id > opts.since!);
+    if (opts.before !== undefined) out = out.filter((e) => e.id < opts.before!);
     if (opts.kinds?.length) out = out.filter((e) => opts.kinds!.includes(e.kind));
     // must match SqliteStore exactly: an event with no chat is main's
     if (opts.chat !== undefined) {
@@ -202,6 +243,26 @@ class JsonlStore implements EventStore {
 
   lastId(): number {
     return this.cache[this.cache.length - 1]?.id ?? 0;
+  }
+
+  size(): { bytes: number; events: number } {
+    let bytes = 0;
+    try {
+      bytes = fs.statSync(this.file).size;
+    } catch {
+      /* not written yet */
+    }
+    return { bytes, events: this.cache.length };
+  }
+
+  compact(): void {
+    // an append-only text log has no free pages to reclaim
+  }
+
+  lastReplyIds(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const e of this.cache) if (e.kind === "message" && e.agentId) out.set(e.chat ?? MAIN_CHAT, e.id);
+    return out;
   }
 
   close(): void {}
@@ -229,7 +290,16 @@ export class EventLog {
         sqlite = await import("node:sqlite");
       } catch {
         // No node:sqlite in this runtime — the JSONL store is the whole point
-        // of the fallback. This is the ONLY thing it catches.
+        // of the fallback. This is the ONLY thing it catches. But not beside a
+        // log.db: an older Node (a shell that put nvm's 20 first after a
+        // reboot) opened an EMPTY jsonl log next to the real history, and the
+        // app showed every thread blank, which reads exactly like data loss.
+        if (fs.existsSync(path.join(loomDir, "log.db"))) {
+          throw new Error(
+            `this project's history is in ${path.join(loomDir, "log.db")}, which needs node:sqlite — ` +
+              `run Loom on Node 22.5 or newer (this is Node ${process.versions.node})`,
+          );
+        }
         return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")));
       }
       // Deliberately outside the catch. If node:sqlite exists but the log won't
@@ -260,6 +330,18 @@ export class EventLog {
 
   lastId(): number {
     return this.store.lastId();
+  }
+
+  lastReplyIds(): Map<string, number> {
+    return this.store.lastReplyIds();
+  }
+
+  size(): { bytes: number; events: number } {
+    return this.store.size();
+  }
+
+  compact(): void {
+    this.store.compact();
   }
 
   /** Live subscription to appended events; returns unsubscribe. */

@@ -35,7 +35,7 @@ import readline from "node:readline";
 import type { AgentCapabilities, SendInput } from "../types.js";
 import { codexMcpArgs } from "../core/mcp.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, ADAPTER_CAPABILITIES, agentEnv, cliAvailable, frameBriefing } from "./base.js";
+import { AdapterBase, ADAPTER_CAPABILITIES, agentEnv, cliAvailable, cliOutput, firstLine, frameBriefing, type AgentCheck } from "./base.js";
 import { permissionFor } from "../core/permissions.js";
 
 interface CodexOptions {
@@ -108,6 +108,22 @@ export class CodexAdapter extends AdapterBase {
     const bin = codexBin(this.options.bin);
     if (!bin) return false;
     return cliAvailable(bin);
+  }
+
+  async selfCheck(): Promise<AgentCheck[]> {
+    const bin = codexBin(this.options.bin);
+    if (!bin) return [{ name: "installed", ok: false, detail: "codex CLI not found — install it or open Codex.app once" }];
+    const v = await cliOutput(bin, ["--version"]);
+    const checks: AgentCheck[] = [
+      { name: "installed", ok: v?.code === 0, detail: v?.code === 0 ? firstLine(v.out) || bin : "codex didn't answer --version" },
+    ];
+    const s = await cliOutput(bin, ["login", "status"]);
+    checks.push({
+      name: "signed in",
+      ok: s?.code === 0,
+      detail: s ? firstLine(s.out) || (s.code === 0 ? "signed in" : "not signed in — run: codex login") : "couldn't ask codex",
+    });
+    return checks;
   }
 
   async start(): Promise<void> {

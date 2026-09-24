@@ -14,7 +14,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, agentEnv, cliAvailable, fetchJson, frameBriefing, freePort, waitFor } from "./base.js";
+import { AdapterBase, agentEnv, cliAvailable, cliOutput, fetchJson, firstLine, frameBriefing, freePort, waitFor, type AgentCheck } from "./base.js";
 import { permissionFor } from "../core/permissions.js";
 
 interface OpenCodeOptions {
@@ -106,6 +106,28 @@ export class OpenCodeAdapter extends AdapterBase {
     return cliAvailable("opencode");
   }
 
+  async selfCheck(): Promise<AgentCheck[]> {
+    if (this.options.baseUrl) return [{ name: "server", ok: true, detail: `uses the opencode server at ${this.options.baseUrl}` }];
+    const v = await cliOutput("opencode", ["--version"]);
+    if (v?.code !== 0) return [{ name: "installed", ok: false, detail: "opencode not found on this machine — install it" }];
+    const checks: AgentCheck[] = [{ name: "installed", ok: true, detail: `opencode ${firstLine(v.out)}` }];
+    const a = await cliOutput("opencode", ["auth", "list"]);
+    const providers = (a?.out ?? "")
+      .split("\n")
+      .map((l) => /[●•]\s+(.+?)(?:\s{2,}|\s+(?:api|oauth|wellknown)\s*$|$)/.exec(l)?.[1]?.trim())
+      .filter((x): x is string => !!x)
+      // the environment section names the variable too ("OpenRouter OPENROUTER_API_KEY")
+      .map((x) => x.replace(/\s+[A-Z][A-Z0-9_]{2,}$/, ""))
+      .filter((x, i, all) => all.indexOf(x) === i);
+    checks.push({
+      name: "providers",
+      // opencode's own free models need no sign-in, so none is a note, not a failure
+      ok: true,
+      detail: providers.length ? `signed in to ${providers.join(", ")}` : "no providers signed in — its free models still work",
+    });
+    return checks;
+  }
+
   /** Kill a serve child left behind by a previous daemon (verified by cmdline). */
   private async reapOrphanServe(): Promise<void> {
     const state = readProjectState(this.projectDir);
@@ -149,11 +171,17 @@ export class OpenCodeAdapter extends AdapterBase {
       );
       this.child = child;
       this.recordServePid(child.pid);
-      child.on("close", (code) => {
-        if (this.started) {
-          this.emit({ kind: "error", payload: { message: `opencode serve exited (${code})` } });
-          this.started = false;
+      child.on("close", (code, signal) => {
+        if (!this.started) return;
+        this.started = false;
+        // Killed by a signal with no turn running is the daemon shutting down
+        // (or restarting) around it — not a failure, and not worth a red card
+        // in the thread. The next send starts a fresh server either way.
+        if (code === null && !this._busy) {
+          this.emit({ kind: "status", payload: { state: "stopped", signal: signal ?? null } });
+          return;
         }
+        this.emit({ kind: "error", payload: { message: `opencode serve exited (${code ?? signal})` } });
       });
     }
     await waitFor(async () => {
@@ -281,6 +309,14 @@ export class OpenCodeAdapter extends AdapterBase {
     const props = (evt.properties ?? evt.data ?? evt) as Json;
     const mySession = this.sessionId;
 
+    // opencode 1.18+ streams the reply as session.next.{text,reasoning}.delta,
+    // one fragment each; the finished message still arrives the usual way.
+    if (/^session\.next\.(text|reasoning)\.delta$/.test(type)) {
+      if (props.sessionID && props.sessionID !== mySession) return;
+      if (typeof props.delta === "string") this.streamText(props.delta, type.includes("reasoning"));
+      return;
+    }
+
     if (type === "message.part.updated") {
       const part = (props.part ?? {}) as Json;
       if (part.sessionID && part.sessionID !== mySession) return;
@@ -288,7 +324,17 @@ export class OpenCodeAdapter extends AdapterBase {
       const messageID = String(part.messageID ?? "");
       if (partType === "text" && typeof part.text === "string") {
         if (!this.textParts.has(messageID)) this.textParts.set(messageID, new Map());
-        this.textParts.get(messageID)!.set(String(part.id ?? "p"), part.text);
+        const parts = this.textParts.get(messageID)!;
+        const partId = String(part.id ?? "p");
+        const prev = parts.get(partId) ?? "";
+        parts.set(partId, part.text);
+        // The reply as it grows. Each update carries the part's whole text so
+        // far (newer builds add the delta too); only the assistant's, never
+        // the echo of your own prompt, which arrives as a text part as well.
+        if (this.roles.get(messageID) === "assistant") {
+          const delta = typeof props.delta === "string" ? props.delta : part.text.startsWith(prev) ? part.text.slice(prev.length) : "";
+          if (delta) this.streamText(delta);
+        }
       } else if (partType === "tool") {
         const state = (part.state ?? {}) as Json;
         if (String(state.status ?? "") === "completed") {

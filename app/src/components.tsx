@@ -1,21 +1,32 @@
 /** Shared UI atoms: event lines, diff viewer, buttons — quiet graphite. */
 
 import { useState } from "react";
-import { ScrollView, Text, TouchableOpacity, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { Alert, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
+import { haptic } from "./haptics";
 import type { LoomEvent, TaskItem } from "./api";
-import { T, hue, radii, selvage, spacing } from "./theme";
+import type { LiveMap } from "./live-model";
+import { Markdown } from "./markdown";
+import { T, hue, onScheme, radii, selvage, spacing } from "./theme";
 
 /** The one text-input style the whole app uses. */
 export const field = {
-  backgroundColor: T.raised,
-  borderColor: T.line,
+  backgroundColor: T.raised as string,
+  borderColor: T.line as string,
   borderWidth: 1,
   borderRadius: radii.input,
-  color: T.text,
+  color: T.text as string,
   paddingHorizontal: 12,
   paddingVertical: 12,
   fontSize: 15,
-} as const;
+};
+// Plain values (spread into styles everywhere), re-filled when the phone
+// switches between light and dark.
+onScheme(() => {
+  field.backgroundColor = T.raised;
+  field.borderColor = T.line;
+  field.color = T.text;
+});
 
 /**
  * 44pt is the floor for anything you tap. Every control in the new panels
@@ -354,6 +365,59 @@ export function DiffView(props: { patch: string; maxHeight?: number }) {
   );
 }
 
+/**
+ * Replies being typed right now, under the thread: the agent's words as they
+ * arrive (or "thinking" before the first), until the finished message lands
+ * in the list and takes their place.
+ */
+export function LiveReplies(props: { live: LiveMap }) {
+  const ids = Object.keys(props.live).filter((id) => props.live[id]!.text || props.live[id]!.thinking);
+  if (!ids.length) return null;
+  return (
+    <View>
+      {ids.map((id) => {
+        const l = props.live[id]!;
+        return (
+          <View key={id} style={{ alignItems: "flex-start", marginVertical: 5 }}>
+            <Text style={{ color: hue(id), fontSize: 11, fontFamily: T.mono, marginBottom: 3, marginHorizontal: 4, letterSpacing: 0.4 }}>
+              {id}
+              <Text style={{ color: T.faint }}>{l.text ? "  writing…" : "  thinking…"}</Text>
+            </Text>
+            {!!l.text && (
+              <View
+                style={{
+                  maxWidth: "88%",
+                  backgroundColor: T.panel,
+                  borderColor: T.line,
+                  borderWidth: 1,
+                  borderLeftWidth: 2,
+                  borderLeftColor: selvage(id),
+                  borderRadius: radii.card,
+                  borderBottomLeftRadius: 4,
+                  paddingVertical: 9,
+                  paddingHorizontal: 13,
+                }}
+              >
+                <Markdown text={l.text + " ▍"} />
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Long-press a message: copy it, or hand it to another app. */
+function messageActions(text: string, who: string): void {
+  haptic.tap();
+  Alert.alert(who, text.length > 140 ? text.slice(0, 140) + "…" : text, [
+    { text: "Copy", onPress: () => void Clipboard.setStringAsync(text) },
+    { text: "Share…", onPress: () => void Share.share({ message: text }).catch(() => {}) },
+    { text: "Cancel", style: "cancel" },
+  ]);
+}
+
 /** One event in the thread. turn_diff renders as an expandable change card. */
 export function EventLine(props: { e: LoomEvent }) {
   const { e } = props;
@@ -382,7 +446,10 @@ export function EventLine(props: { e: LoomEvent }) {
             {author}
           </Text>
         )}
-        <View
+        <Pressable
+          delayLongPress={350}
+          onLongPress={() => messageActions(String(p.text ?? ""), mine ? "Your message" : author)}
+          accessibilityHint="long-press to copy or share"
           style={{
             maxWidth: "88%",
             backgroundColor: mine ? T.raised : T.panel,
@@ -398,10 +465,15 @@ export function EventLine(props: { e: LoomEvent }) {
             paddingHorizontal: 13,
           }}
         >
-          <Text style={{ color: T.text, fontSize: 14, lineHeight: 21 }}>
-            {String(p.text ?? "")}
-          </Text>
-        </View>
+          {mine ? (
+            <Text style={{ color: T.text, fontSize: 14, lineHeight: 21 }}>{String(p.text ?? "")}</Text>
+          ) : (
+            <Markdown text={String(p.text ?? "")} />
+          )}
+          {p.partial === true && (
+            <Text style={{ color: T.faint, fontSize: 11, marginTop: 6 }}>stopped — this is what it had written</Text>
+          )}
+        </Pressable>
       </View>
     );
   }
@@ -482,10 +554,18 @@ export function ago(iso: string): string {
 // the only colour in a task row is state — shuttle magenta for merged, the
 // same token the baton uses everywhere else
 const STATE_COLOR: Record<string, string> = {
-  open: T.ok,
-  closed: T.err,
-  merged: T.shuttle,
-  draft: T.dim,
+  get open() {
+    return T.ok;
+  },
+  get closed() {
+    return T.err;
+  },
+  get merged() {
+    return T.shuttle;
+  },
+  get draft() {
+    return T.dim;
+  },
 };
 
 /**

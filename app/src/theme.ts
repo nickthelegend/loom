@@ -8,7 +8,8 @@
 
 import { Platform } from "react-native";
 
-export const T = {
+/** Dark: the design these tokens were drawn for. */
+const DARK = {
   // surfaces
   bg: "#111111", // canvas
   panel: "#1a1a1a", // cards, bars
@@ -46,7 +47,66 @@ export const T = {
   accent: "#67e8f9",
   accentDark: "#111111",
   mag: "#e879f9",
-} as const;
+};
+
+/**
+ * Light: the same roles, re-drawn for a white canvas — the loud primary
+ * action flips to near-black, and every state colour steps down to a shade
+ * that keeps its contrast on white.
+ */
+const LIGHT: typeof DARK = {
+  bg: "#f7f7f5",
+  panel: "#ffffff",
+  raised: "#efefec",
+  editor: "#f4f4f1",
+  line: "#e3e3de",
+  line2: "#d0d0ca",
+  text: "#1b1b1a",
+  dim: "#62625e",
+  faint: "#9a9a94",
+  bright: "#151515",
+  onBright: "#fafafa",
+  primary: "#6d28d9",
+  primaryDim: "#ede9fe",
+  thread: "#0e7490",
+  threadDim: "#cffafe",
+  shuttle: "#a21caf",
+  ok: "#15803d",
+  warn: "#b45309",
+  err: "#dc2626",
+  accentBlue: "#1d4ed8",
+  gitAdd: "#2f7d3a",
+  gitDel: "#b3261e",
+  diffAddBg: "rgba(47, 125, 58, 0.1)",
+  diffDelBg: "rgba(179, 38, 30, 0.09)",
+  mono: DARK.mono,
+  ink2: "#f4f4f1",
+  panel2: "#efefec",
+  accent: "#0e7490",
+  accentDark: "#f7f7f5",
+  mag: "#a21caf",
+};
+
+/**
+ * The tokens every screen reads. Mutable on purpose: setScheme swaps the
+ * palette in place and the app remounts its tree, so the hundreds of inline
+ * styles that read T.x pick the new values up without each one subscribing.
+ */
+export const T: typeof DARK = { ...DARK };
+export let scheme: "dark" | "light" = "dark";
+const schemeListeners: Array<() => void> = [];
+/** For style objects built once at module level: re-fill them on a switch. */
+export function onScheme(fn: () => void): void {
+  schemeListeners.push(fn);
+  fn();
+}
+export function setScheme(next: "dark" | "light"): boolean {
+  if (next === scheme) return false;
+  Object.assign(T, next === "light" ? LIGHT : DARK);
+  scheme = next;
+  for (const fn of schemeListeners) fn();
+  return true;
+}
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24 } as const;
 
@@ -55,14 +115,14 @@ export const radii = { row: 6, key: 6, input: 6, card: 14, pill: 999 } as const;
 export function hue(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return `hsl(${h}, 60%, 70%)`;
+  return `hsl(${h}, 60%, ${scheme === "light" ? 36 : 70}%)`;
 }
 
 /** A dimmer variant of an agent's thread color, for selvage edges. */
 export function selvage(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return `hsl(${h}, 50%, 52%)`;
+  return `hsl(${h}, 50%, ${scheme === "light" ? 45 : 52}%)`;
 }
 
 export function usd(n?: number): string {

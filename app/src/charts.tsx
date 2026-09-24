@@ -239,9 +239,15 @@ export function LineChart(props: {
 }
 
 const GRADE_COLOR: Record<string, string> = {
-  healthy: T.ok,
-  degraded: T.warn,
-  unhealthy: T.err,
+  get healthy() {
+    return T.ok;
+  },
+  get degraded() {
+    return T.warn;
+  },
+  get unhealthy() {
+    return T.err;
+  },
 };
 
 export function gradeColor(grade?: string): string {

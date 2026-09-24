@@ -328,6 +328,102 @@ describe("web app · prompt manager", () => {
   });
 });
 
+describe("web app · voice input without a transcriber", () => {
+  it("falls back to the browser's speech recognition and types a live transcript", async () => {
+    const m = mount({ hash: `#p/${projectId}`, pid: projectId });
+    // before the composer is wired: a recorder exists, and so does a recogniser
+    const w = m.window as unknown as Record<string, unknown>;
+    Object.defineProperty(m.window.navigator, "mediaDevices", { value: { getUserMedia: () => Promise.reject(new Error("no mic in jsdom")) }, configurable: true });
+    w.MediaRecorder = class {};
+    const made: Array<{ onresult?: (e: unknown) => void; onend?: () => void; started: boolean; stopped: boolean; lang?: string }> = [];
+    w.webkitSpeechRecognition = class {
+      started = false;
+      stopped = false;
+      onresult?: (e: unknown) => void;
+      onend?: () => void;
+      constructor() { made.push(this); }
+      start() { this.started = true; }
+      stop() { this.stopped = true; this.onend?.(); }
+    };
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    box(m).value = "fix the";
+    const mic = $(m, "#micbtn")!;
+    // the daemon says it has no transcriber once its socket says hello
+    await waitUntil(() => {
+      if (!made.length) mousedown(m, mic);
+      return made.length > 0;
+    });
+    const r = made[0]!;
+    expect(r.started).toBe(true);
+    expect(mic.classList.contains("active")).toBe(true);
+    const res = (items: Array<[string, boolean]>) => ({
+      resultIndex: 0,
+      results: items.map(([t, fin]) => Object.assign([{ transcript: t }], { isFinal: fin })),
+    });
+    r.onresult!(res([["login bug", false]]));
+    expect(box(m).value).toBe("fix the login bug");
+    r.onresult!(res([["login bug", true], [" on mobile", false]]));
+    expect(box(m).value).toBe("fix the login bug on mobile");
+    mic.dispatchEvent(new m.window.MouseEvent("mouseup", { bubbles: true }));
+    expect(r.stopped).toBe(true);
+    expect(mic.classList.contains("active")).toBe(false);
+    // it filled the box; it didn't send anything
+    expect(m.sent.some((x) => x.method === "POST" && /\/messages$/.test(x.path))).toBe(false);
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+describe("web app · since you were here", () => {
+  it("sums up the turns taken while you were away, once, over Main", async () => {
+    // a turn to report on
+    const first = await opened();
+    await sendFromComposer(first, "recap me");
+    await waitUntil(() => text(first, "#feed").includes("echo("), { timeoutMs: 20_000 });
+    first.close();
+
+    const m = mount({ hash: `#p/${projectId}`, pid: projectId });
+    m.window.localStorage.setItem(`loomLastVisit:${projectId}`, String(Date.now() - 2 * 86_400_000));
+    await waitUntil(() => !!$(m, "#recap"), { timeoutMs: 15_000 });
+    expect(text(m, "#recap")).toMatch(/Since you were here.*\d+ turns?/);
+    click($(m, "#recapx"));
+    expect($(m, "#recap")).toBeNull();
+    // and it doesn't come back on the next visit a minute later
+    const again = mount({ hash: `#p/${projectId}`, pid: projectId });
+    await waitUntil(() => !!$(again, '#box[data-bound="1"]'));
+    await new Promise((r) => setTimeout(r, 400));
+    expect($(again, "#recap")).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  }, 40_000);
+});
+
+describe("web app · mermaid diagrams", () => {
+  it("draws a mermaid block only when asked, and flips back to the code", async () => {
+    const m = await opened();
+    let rendered = "";
+    // stand in for the renderer, so the test needs no network
+    (m.window as unknown as Record<string, unknown>).mermaid = {
+      initialize() {},
+      render: async (_id: string, src: string) => {
+        rendered = src;
+        return { svg: '<svg class="fakemm"><g class="node"></g></svg>' };
+      },
+    };
+    await sendFromComposer(m, "sketch\n```mermaid\ngraph LR\n  A --> B\n```");
+    await waitUntil(() => $$(m, "#feed .mddraw").length >= 1);
+    // nothing is drawn (or fetched) until you ask
+    expect($(m, "#feed .mmout")).toBeNull();
+    const btn = $$(m, "#feed .mddraw").pop()!;
+    click(btn);
+    await waitUntil(() => !!btn.parentElement?.querySelector(".mmout svg.fakemm"));
+    expect(rendered).toContain("A --> B");
+    const code = btn.parentElement!.querySelector(".mdcode") as HTMLElement;
+    expect(code.style.display).toBe("none");
+    click(btn);
+    expect(code.style.display).toBe("");
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · plan mode", () => {
   it("is a real switch, remembered per project, and sends a chat turn with plan: true", async () => {
     const m = await opened();

@@ -260,6 +260,30 @@ export async function restore(dir: string, id: string): Promise<RestoreResult> {
   return { restored: target, undo, changed };
 }
 
+/**
+ * Put one file back the way a checkpoint had it — or remove it, when the
+ * checkpoint didn't have it (the turn created it). Everything else is left
+ * alone. Like a full rewind, it takes an undo checkpoint first.
+ */
+export async function restoreFile(dir: string, id: string, file: string): Promise<{ restored: Checkpoint; undo: Checkpoint; path: string; removed: boolean }> {
+  const target = await find(dir, id);
+  if (!target) throw new GitError(`no checkpoint "${id}" in this project`, "");
+  const rel = file.replace(/^\.?\/+/, "");
+  if (!rel || rel.split("/").includes("..")) throw new GitError(`"${file}" isn't a path inside this project`, "");
+  const undo = await capture(dir, `before putting back ${rel.slice(0, 80)}`);
+  if (!undo) throw new GitError("couldn't save the current files first — nothing was changed", "");
+  const existed = (await quiet(["cat-file", "-t", `${target.commit}:${rel}`], dir)) === "blob";
+  if (existed) {
+    await run(["checkout", target.commit, "--", rel], dir);
+  } else {
+    await quiet(["rm", "-q", "--cached", "--ignore-unmatch", "--", rel], dir);
+    await fs.promises.rm(`${dir.replace(/\/+$/, "")}/${rel}`, { force: true });
+  }
+  // checkout staged it; leave it reading as a plain edit, like a rewind does
+  await quiet(["reset", "-q", "HEAD", "--", rel], dir);
+  return { restored: target, undo, path: rel, removed: !existed };
+}
+
 /** Drop all but the newest `keep`. The commits become unreferenced. */
 export async function prune(dir: string, keep = KEEP_CHECKPOINTS): Promise<number> {
   const all = await list(dir);
