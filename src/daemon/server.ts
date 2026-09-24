@@ -92,6 +92,7 @@ import {
   projectLoomDir,
   readProjectConfig,
   readProjectState,
+  writeProjectState,
   registerProject,
   renameProject,
   unregisterProject,
@@ -4106,16 +4107,36 @@ export class LoomDaemon {
         const status = await rt.status();
         const blocked = status.blockedAgent ? [status.blockedAgent] : [];
         const search = req.query.search ? String(req.query.search) : undefined;
-        res.json(
-          await buildBoard(info.dir, status.agents, blocked, {
+        res.json({
+          ...(await buildBoard(info.dir, status.agents, blocked, {
             tasks: rt.boardTasks(),
             ...(search ? { search } : {}),
-          }),
-        );
+          })),
+          limits: readProjectState(info.dir).boardLimits ?? {},
+        });
       } catch (err) {
         res.status(500).json({ error: (err as Error).message });
       }
     });
+
+    // Work-in-progress limit for one board column ({ column, limit }; 0/null clears).
+    app.put(
+      "/api/projects/:id/board/limits",
+      withRuntime(async (rt, req, res) => {
+        const { column, limit } = (req.body ?? {}) as { column?: unknown; limit?: unknown };
+        const col = String(column ?? "");
+        if (!["working", "needs-you", "in-review", "ready"].includes(col)) return void res.status(400).json({ error: "column is working, needs-you, in-review or ready" });
+        const n = limit === null || limit === "" || limit === undefined ? 0 : Number(limit);
+        if (!Number.isInteger(n) || n < 0 || n > 99) return void res.status(400).json({ error: "a limit is a whole number from 1 to 99 (0 clears it)" });
+        const state = readProjectState(rt.info.dir);
+        const limits = { ...(state.boardLimits ?? {}) };
+        if (n) limits[col] = n;
+        else delete limits[col];
+        state.boardLimits = limits;
+        writeProjectState(rt.info.dir, state);
+        res.json({ limits });
+      }),
+    );
 
     // Cards you write yourself. Unlike an agent or a PR, these are ours, so a
     // drag really moves them — the column IS the state.
@@ -4132,32 +4153,42 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/board/tasks",
       withRuntime(async (rt, req, res) => {
-        const { title, column, agent, blockedBy } = (req.body ?? {}) as {
+        const { title, column, agent, blockedBy, priority, due } = (req.body ?? {}) as {
           title?: string;
           column?: string;
           agent?: string;
           blockedBy?: string[];
+          priority?: string | null;
+          due?: string | null;
         };
         if (!title?.trim()) return void res.status(400).json({ error: "missing title" });
-        res.json({
-          task: rt.createTask({
-            title,
-            ...(column ? { column } : {}),
-            ...(agent ? { agent } : {}),
-            ...(Array.isArray(blockedBy) ? { blockedBy } : {}),
-          }),
-        });
+        try {
+          res.json({
+            task: rt.createTask({
+              title,
+              ...(column ? { column } : {}),
+              ...(agent ? { agent } : {}),
+              ...(Array.isArray(blockedBy) ? { blockedBy } : {}),
+              ...(priority !== undefined ? { priority } : {}),
+              ...(due !== undefined ? { due } : {}),
+            }),
+          });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
       }),
     );
 
     app.post(
       "/api/projects/:id/board/tasks/:taskId",
       withRuntime(async (rt, req, res) => {
-        const { title, column, agent, blockedBy } = (req.body ?? {}) as {
+        const { title, column, agent, blockedBy, priority, due } = (req.body ?? {}) as {
           title?: string;
           column?: string;
           agent?: string;
           blockedBy?: string[];
+          priority?: string | null;
+          due?: string | null;
         };
         try {
           const task = rt.updateTask(String(req.params.taskId), {
@@ -4165,6 +4196,8 @@ export class LoomDaemon {
             ...(column !== undefined ? { column } : {}),
             ...(agent !== undefined ? { agent } : {}),
             ...(blockedBy !== undefined ? { blockedBy } : {}),
+            ...(priority !== undefined ? { priority } : {}),
+            ...(due !== undefined ? { due } : {}),
           });
           if (!task) return void res.status(404).json({ error: "unknown task" });
           res.json({ task });

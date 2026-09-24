@@ -212,6 +212,23 @@ export type ServerFrame =
 /** How often a time-held prompt checks the clock. */
 export const CLOCK_TICK_MS = 15_000;
 
+/**
+ * Priority and due date on a card: set when given, cleared by null, refused
+ * in words when they don't make sense.
+ */
+function applyCardMeta(task: BoardTask, p: { priority?: string | null; due?: string | null }): void {
+  if (p.priority !== undefined) {
+    if (p.priority === null || p.priority === "") delete task.priority;
+    else if (p.priority === "high" || p.priority === "medium" || p.priority === "low") task.priority = p.priority;
+    else throw new Error("priority is high, medium or low");
+  }
+  if (p.due !== undefined) {
+    if (p.due === null || p.due === "") delete task.due;
+    else if (/^\d{4}-\d{2}-\d{2}$/.test(p.due) && !Number.isNaN(new Date(`${p.due}T00:00:00`).getTime())) task.due = p.due;
+    else throw new Error("due is a date: YYYY-MM-DD");
+  }
+}
+
 /** A model agent's sampling settings, for its status (empty for everything else). */
 function sampling(cfg: AgentConfig): { sampling?: { temperature?: number; maxTokens?: number } } {
   if (cfg.kind !== "model") return {};
@@ -1797,6 +1814,8 @@ export class ProjectRuntime {
     column?: string;
     agent?: string;
     blockedBy?: string[];
+    priority?: string | null;
+    due?: string | null;
   }): BoardTask {
     const state = readProjectState(this.info.dir);
     const blockedBy = this.validBlockers(state.tasks ?? [], input.blockedBy);
@@ -1808,6 +1827,7 @@ export class ProjectRuntime {
       ...(blockedBy.length ? { blockedBy } : {}),
       createdAt: Date.now(),
     };
+    applyCardMeta(task, input);
     state.tasks = [...(state.tasks ?? []), task];
     writeProjectState(this.info.dir, state);
     return task;
@@ -1901,11 +1921,12 @@ export class ProjectRuntime {
   /** Move or retitle a card. Yours, so this is the real state — not a hint. */
   updateTask(
     id: string,
-    patch: { title?: string; column?: string; agent?: string; blockedBy?: string[] },
+    patch: { title?: string; column?: string; agent?: string; blockedBy?: string[]; priority?: string | null; due?: string | null },
   ): BoardTask | null {
     const state = readProjectState(this.info.dir);
     const task = (state.tasks ?? []).find((t) => t.id === id);
     if (!task) return null;
+    applyCardMeta(task, patch);
     // Opt-in: dragging a card to Working checks out its branch; reaching
     // Review logs the PR command rather than running it — pushing publishes,
     // and publishing implicitly is a line Loom doesn't cross even under a

@@ -93,6 +93,18 @@ describe("chat flags, stars and unread", () => {
     });
   });
 
+  it("gives cards a priority and a due date, and columns a work-in-progress limit", async () => {
+    const made = (await call("POST", "/board/tasks", { title: "ship it", priority: "high", due: "2026-10-01" })).json.task as { id: string };
+    expect(made).toMatchObject({ priority: "high", due: "2026-10-01" });
+    expect((await call("POST", `/board/tasks/${made.id}`, { priority: null, due: "2026-10-02" })).json.task).toMatchObject({ due: "2026-10-02" });
+    expect((await call("POST", `/board/tasks/${made.id}`, { priority: "urgent" })).status).toBe(400);
+    expect((await call("POST", `/board/tasks/${made.id}`, { due: "next week" })).status).toBe(400);
+    expect((await call("PUT", "/board/limits", { column: "working", limit: 2 })).json.limits).toEqual({ working: 2 });
+    expect(((await call("GET", "/board")).json as { limits: Record<string, number> }).limits).toEqual({ working: 2 });
+    expect((await call("PUT", "/board/limits", { column: "working", limit: 0 })).json.limits).toEqual({});
+    expect((await call("PUT", "/board/limits", { column: "nope", limit: 2 })).status).toBe(400);
+  });
+
   it("refuses sampling for an agent that isn't a model agent, in words", async () => {
     const r = await call("PUT", "/agents/plannerbot/sampling", { temperature: 0.5 });
     expect(r.status).toBe(400);

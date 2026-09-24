@@ -3745,6 +3745,22 @@ window.__loomPageRev="%%BUILD_REV%%";
   .dfh .dfrevert{margin-left:auto}
   .dfh .dfrevert svg{width:11px;height:11px;margin-right:4px}
   .dfh .dfrevert.done{color:var(--ok)}
+  /* card priority / due, column limits */
+  .bmeta{display:inline-flex;gap:4px;margin-right:6px;flex-wrap:wrap}
+  .bmchip{border:1px solid var(--border);background:none;color:var(--muted-foreground);font:inherit;font-size:10.5px;padding:1px 7px;border-radius:99px;cursor:pointer;text-transform:lowercase}
+  .bmchip.none{opacity:0;transition:opacity .15s}
+  .bcard:hover .bmchip.none,.bmchip.none:focus-visible{opacity:1}
+  .bmchip.prio.high{border-color:color-mix(in srgb,var(--err) 50%,transparent);color:var(--err)}
+  .bmchip.prio.medium{border-color:color-mix(in srgb,var(--warn) 50%,transparent);color:var(--warn)}
+  .bmchip.prio.low{color:var(--muted-foreground)}
+  .bmchip.due.soon{border-color:color-mix(in srgb,var(--warn) 50%,transparent);color:var(--warn)}
+  .bmchip.due.late{border-color:var(--err);background:color-mix(in srgb,var(--err) 12%,transparent);color:var(--err)}
+  .bch .bwip{border:0;background:none;color:inherit;font:inherit;cursor:pointer;padding:1px 6px;border-radius:6px}
+  .bch .bwip:hover{background:var(--secondary)}
+  .bcol.over .bch .bwip{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+  .bcol.over{box-shadow:inset 0 2px 0 var(--warn)}
+  .bmmeta{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .bmmeta select,.bmmeta input{width:100%}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -8524,9 +8540,12 @@ ${BRAND_SPRITE}
       var cols = BCOLS.map(function(col){
         var key = col[0];
         var mine = cards.filter(function(c){ return c.shown === key; });
-        return '<div class="bcol" data-col="' + key + '">' +
+        var lim = (d.limits || {})[key];
+        var over = lim && mine.length > lim;
+        return '<div class="bcol' + (over ? " over" : "") + '" data-col="' + key + '">' +
           '<div class="bch"><span class="bdot" style="background:' + col[2] + '"></span>' + esc(col[1]) +
-            '<span class="bn">' + mine.length + "</span></div>" +
+            '<button type="button" class="bn bwip" data-wip="' + key + '" title="' + (lim ? "limit " + lim + (over ? " — over it" : "") + " · click to change" : "set a work-in-progress limit") + '">' +
+              mine.length + (lim ? " / " + lim : "") + "</button></div>" +
           '<div class="bcb" data-drop="' + key + '">' +
             (mine.length ? mine.map(boardCard).join("") : '<div class="bempty">nothing here</div>') +
             '<button class="badd" data-add="' + key + '" title="add a card here">+</button>' +
@@ -8542,6 +8561,7 @@ ${BRAND_SPRITE}
       wireBoardHead();
       wireBoardDnd();
       wireBoardTasks(el);
+      wireCardMeta(el);
     }
     function boardCard(c){
       var st = BSTATES[c.state] || [c.state, "var(--muted-foreground)"];
@@ -8573,7 +8593,7 @@ ${BRAND_SPRITE}
         (c.branch ? '<div class="bcbr">' + esc(c.branch) + "</div>" : "") +
         '<div class="bcf">' +
           (c.own
-            ? (c.blocked ? '<span class="bblocked" title="waiting on ' + c.blocked + ' other card' + (c.blocked === 1 ? "" : "s") + '">\\u26d4 ' + c.blocked + "</span> yours" : "yours")
+            ? cardMeta(c) + (c.blocked ? '<span class="bblocked" title="waiting on ' + c.blocked + ' other card' + (c.blocked === 1 ? "" : "s") + '">⛔ ' + c.blocked + "</span> yours" : "yours")
             : c.pr
               ? '<a href="' + esc(c.pr.url) + '" target="_blank" rel="noreferrer">PR #' + c.pr.number + "</a> \\u00b7 " +
                 esc(c.pr.draft ? "draft" : c.pr.state)
@@ -8588,6 +8608,61 @@ ${BRAND_SPRITE}
               ? '<span class="bpin" data-unpin="' + esc(c.id) + '" title="you moved this card \\u2014 click to let its real state place it">pinned</span>'
               : "") +
         "</div>" + acts + "</div>";
+    }
+    /** A card's priority and due date, each a chip you can click to change. */
+    function cardMeta(c){
+      var pr = c.priority ? '<button type="button" class="bmchip prio ' + esc(c.priority) + '" data-prio="' + esc(c.id) + '" title="priority — click to change">' + esc(c.priority) + "</button>"
+        : '<button type="button" class="bmchip prio none" data-prio="' + esc(c.id) + '" title="set a priority">+ priority</button>';
+      var due = "";
+      if (c.due) {
+        var d = new Date(c.due + "T00:00:00"), t = new Date(); t.setHours(0, 0, 0, 0);
+        var days = Math.round((d - t) / 86400000);
+        var label = days === 0 ? "due today" : days === 1 ? "due tomorrow" : days === -1 ? "due yesterday" : days < 0 ? Math.abs(days) + "d overdue" : days < 7 ? "due " + d.toLocaleDateString([], { weekday: "short" }) : "due " + d.toLocaleDateString([], { month: "short", day: "numeric" });
+        due = '<button type="button" class="bmchip due' + (days < 0 && c.column !== "ready" ? " late" : days <= 1 ? " soon" : "") + '" data-due="' + esc(c.id) + '" title="' + esc(c.due) + ' — click to change">' + esc(label) + "</button>";
+      } else due = '<button type="button" class="bmchip due none" data-due="' + esc(c.id) + '" title="set a due date">+ due</button>';
+      return '<span class="bmeta">' + pr + due + "</span>";
+    }
+    function patchCard(id, body){
+      // the board names your cards task-<id>; the task itself is just <id>
+      return api("/api/projects/" + pid + "/board/tasks/" + encodeURIComponent(String(id).replace(/^task-/, "")), { method: "POST", body: JSON.stringify(body) })
+        .then(function(){ loadBoard(); })
+        .catch(function(err){ toast(err.message); });
+    }
+    function wireCardMeta(el){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-prio]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var id = b.getAttribute("data-prio"), r = b.getBoundingClientRect();
+          openMenu(Math.round(r.left), Math.round(r.bottom + 4), [{ head: "Priority" }].concat(["high", "medium", "low"].map(function(v){
+            return { label: v.charAt(0).toUpperCase() + v.slice(1), run: function(){ patchCard(id, { priority: v }); } };
+          })).concat([{ sep: true }, { label: "None", run: function(){ patchCard(id, { priority: null }); } }]));
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-due]"), function(b){
+        b.onclick = function(ev){
+          ev.stopPropagation();
+          var id = b.getAttribute("data-due");
+          var cur = ((board.data && board.data.cards) || []).filter(function(c){ return c.id === id; })[0] || {};
+          askText("When is it due?", { value: cur.due || new Date(Date.now() + 86400000).toISOString().slice(0, 10), placeholder: "YYYY-MM-DD — blank clears it", ok: "Set" }).then(function(v){
+            if (v === null) return;
+            v = v.trim();
+            if (v && !/^\\d{4}-\\d{2}-\\d{2}$/.test(v)) { toast("a date looks like 2026-10-01"); return; }
+            patchCard(id, { due: v || null });
+          });
+        };
+      });
+      // a column's limit: click its count
+      Array.prototype.forEach.call(el.querySelectorAll("[data-wip]"), function(b){
+        b.onclick = function(){
+          var col = b.getAttribute("data-wip"), lim = ((board.data && board.data.limits) || {})[col];
+          askText("Work-in-progress limit for this column", { value: lim ? String(lim) : "", placeholder: "e.g. 3 — blank for none", note: "The column warns when it holds more than this.", ok: "Set" }).then(function(v){
+            if (v === null) return;
+            api("/api/projects/" + pid + "/board/limits", { method: "PUT", body: JSON.stringify({ column: col, limit: v.trim() === "" ? 0 : Number(v) }) })
+              .then(function(){ loadBoard(); })
+              .catch(function(err){ toast(err.message); });
+          });
+        };
+      });
     }
     function wireBoardHead(){
       wireSourceBar();
@@ -16482,6 +16557,8 @@ ${BRAND_SPRITE}
           cols.map(function(c){
             return '<option value="' + c[0] + '"' + (c[0] === column ? " selected" : "") + ">" + c[1] + "</option>";
           }).join("") + "</select></div>" +
+        '<div class="field bmmeta"><div><label>Priority <span class="opt">optional</span></label><select id="bmprio"><option value="">None</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>' +
+          '<div><label>Due <span class="opt">optional</span></label><input type="date" id="bmdue"></div></div>' +
         '<div class="field"><label>For <span class="opt">optional</span></label>' +
           '<div class="agsel" id="bmagsel"></div>' +
           '<span class="hintx" id="bmhint">just a note to yourself unless you pick someone</span></div>' +
@@ -16530,6 +16607,9 @@ ${BRAND_SPRITE}
       // starting it means an agent is on it now, so the card belongs in Working
       var body = { title: title, column: alsoStart ? "working" : col };
       if (picked) body.agent = picked;
+      var bprio = document.getElementById("bmprio"), bdue = document.getElementById("bmdue");
+      if (bprio && bprio.value) body.priority = bprio.value;
+      if (bdue && bdue.value) body.due = bdue.value;
       document.getElementById("bmcreate").disabled = true;
       api("/api/projects/" + pid + "/board/tasks", { method: "POST", body: JSON.stringify(body) })
         .then(function(){
