@@ -3668,6 +3668,18 @@ window.__loomPageRev="%%BUILD_REV%%";
   .statusbar .branchpill{display:inline-flex;align-items:center;gap:5px}
   .statusbar .branchpill svg{width:12px;height:12px}
   .statusbar .branchpill .bpn{font-size:10.5px;padding:0 6px;border-radius:99px;background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
+  /* the thread's first load: the shape of a conversation, not a blank pane */
+  #feed > .loader:empty{--sk:color-mix(in srgb,var(--muted-foreground) 13%,transparent);display:block;position:relative;overflow:hidden;
+    height:290px;margin-top:34px;padding:0;border-radius:14px;
+    background-image:linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),
+      linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0),linear-gradient(var(--sk) 0 0);
+    background-repeat:no-repeat;
+    background-size:100% 56px,24px 24px,96px 11px,calc(92% - 34px) 10px,calc(80% - 34px) 10px,calc(56% - 34px) 10px,100% 46px;
+    background-position:0 0,0 96px,34px 102px,34px 138px,34px 160px,34px 182px,0 236px}
+  #feed > .loader:empty::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(100deg,transparent 20%,color-mix(in srgb,var(--foreground) 6%,transparent) 50%,transparent 80%);
+    transform:translateX(-100%);animation:skim 1.3s ease-in-out infinite}
+  @keyframes skim{to{transform:translateX(100%)}}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
