@@ -1382,8 +1382,8 @@ describe("web app · the brain", () => {
       });
     }
     const m = await openBrain();
-    await ready(m, '[data-bview="graph"]');
-    click($(m, '[data-bview="graph"]'));
+    await ready(m, '[data-bgv="graph"]');
+    click($(m, '[data-bgv="graph"]'));
     await waitUntil(() => !!$(m, "#bgraph svg"));
     const names = [...m.window.document.querySelectorAll("#bgraph .bge title")].map((t) => t.textContent ?? "");
     expect(names.some((n) => n.startsWith("src/routes.ts"))).toBe(true);
@@ -1395,7 +1395,7 @@ describe("web app · the brain", () => {
     expect(text(m, "#bgpick")).toContain("2 memories");
     expect(text(m, "#bgpick")).toContain("owns every URL");
     expect($(m, "#bgraph svg")?.classList.contains("focus")).toBe(true);
-    click($(m, '[data-bview="list"]'));
+    click($(m, '[data-bgv="list"]'));
     await waitUntil(() => !!$(m, ".bmems"));
     expect(m.errors.join("\n")).toBe("");
   }, 20_000);

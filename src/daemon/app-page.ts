@@ -8401,8 +8401,8 @@ ${BRAND_SPRITE}
           '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>' +
           '<div class="bsort"><span>Sort</span><button type="button" data-bsort="new" class="' + (state.brainSort !== "used" ? "on" : "") + '">Newest</button>' +
           '<button type="button" data-bsort="used" class="' + (state.brainSort === "used" ? "on" : "") + '" title="how often each memory reached an agent’s prompt">Most used</button>' +
-          '<span style="margin-left:auto">View</span><button type="button" data-bview="list" class="' + (!state.brainGraph ? "on" : "") + '">List</button>' +
-          '<button type="button" data-bview="graph" class="' + (state.brainGraph ? "on" : "") + '" title="memories joined by the files and symbols they share">Graph</button></div>';
+          '<span style="margin-left:auto">View</span><button type="button" data-bgv="list" class="' + (!state.brainGraph ? "on" : "") + '">List</button>' +
+          '<button type="button" data-bgv="graph" class="' + (state.brainGraph ? "on" : "") + '" title="memories joined by the files and symbols they share">Graph</button></div>';
 
         // The memory list — the learned units. This is what phase 2 fills.
         var shown = brainKind ? memories.filter(function(x){ return x.kind === brainKind; }) : memories;
@@ -8458,8 +8458,8 @@ ${BRAND_SPRITE}
         el.innerHTML = '<div class="pane-inner brain">' + head + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
         wireBrainSwitch(el);
         if (state.brainGraph && shown.length) drawMemGraph(document.getElementById("bgraph"), shown, usage);
-        Array.prototype.forEach.call(el.querySelectorAll("[data-bview]"), function(b){
-          b.onclick = function(){ state.brainGraph = b.getAttribute("data-bview") === "graph"; refreshBrain(); };
+        Array.prototype.forEach.call(el.querySelectorAll("[data-bgv]"), function(b){
+          b.onclick = function(){ state.brainGraph = b.getAttribute("data-bgv") === "graph"; refreshBrain(); };
         });
 
         // Contradictions, above the units: two memories that likely disagree
