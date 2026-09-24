@@ -17154,8 +17154,10 @@ ${BRAND_SPRITE}
         '<div class="pshint">Off agents stay in the roster but can\\u2019t take turns or hold the baton. Changes land on the next turn \\u2014 no restart. You can\\u2019t switch off the baton holder; hand it off first.</div>' +
         '<div class="pssec" style="margin-top:14px">Policies \\u2014 all off by default</div>' +
         '<div class="psrows" id="pspolicies"><div class="loader"><i></i><i></i><i></i><i></i></div></div>' +
-        '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>";
+        '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>" +
+        '<div class="pssec" style="margin-top:14px">Storage</div><div id="psstore" class="psstore">' + LOADER + "</div>";
       if (state.team) drawPsTeam(); else loadTeam().then(drawPsTeam);
+      drawPsStore();
       // The policy toggles, from the same settings the CLI and config file use.
       api("/api/projects/" + pid + "/config").then(function(cfg){
         var host = document.getElementById("pspolicies"); if (!host) return;
@@ -17215,7 +17217,25 @@ ${BRAND_SPRITE}
         };
       });
     }
-    // Sharing with the team (D8) \u2014 only when this machine is on one.
+    function kb(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+    /** The event log on disk, and a button that gives back its free pages. */
+    function drawPsStore(){
+      var host = document.getElementById("psstore"); if (!host) return;
+      api("/api/projects/" + pid + "/log/size").then(function(s){
+        host.innerHTML = '<div class="psrow"><div class="psinfo"><div class="psname">Event log</div>' +
+          '<div class="pskind">' + kb(s.bytes) + " · " + Number(s.events).toLocaleString() + " events — the whole history of this project’s threads</div></div>" +
+          '<button type="button" class="btn xs outline" id="pscompact" title="reclaim space the log no longer uses (SQLite VACUUM) — nothing is deleted">Compact</button></div>';
+        document.getElementById("pscompact").onclick = function(){
+          var b = this; b.disabled = true; b.textContent = "Compacting…";
+          api("/api/projects/" + pid + "/log/compact", { method: "POST", body: "{}" }).then(function(r){
+            var saved = r.before.bytes - r.after.bytes;
+            toast(saved > 0 ? "compacted — " + kb(saved) + " back, every event kept" : "already compact — every event kept");
+            drawPsStore();
+          }).catch(function(err){ toast(err.message); b.disabled = false; b.textContent = "Compact"; });
+        };
+      }).catch(function(){ host.innerHTML = '<div class="pshint" style="margin-top:0">Couldn’t read the log size.</div>'; });
+    }
+    // Sharing with the team (D8) — only when this machine is on one.
     function drawPsTeam(){
       var host = document.getElementById("psteam"); if (!host) return;
       var t = state.team, teams = (t && t.teams) || [];

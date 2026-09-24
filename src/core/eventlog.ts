@@ -36,6 +36,10 @@ export interface EventStore {
   lastId(): number;
   /** The newest agent message id per chat (a missing chat is main's). */
   lastReplyIds(): Map<string, number>;
+  /** Bytes on disk and events held. */
+  size(): { bytes: number; events: number };
+  /** Reclaim free space (SQLite VACUUM). Never drops an event. */
+  compact(): void;
   close(): void;
 }
 
@@ -47,8 +51,10 @@ type SqliteModule = typeof import("node:sqlite");
 
 class SqliteStore implements EventStore {
   private db: InstanceType<SqliteModule["DatabaseSync"]>;
+  private file: string;
 
   constructor(sqlite: SqliteModule, file: string) {
+    this.file = file;
     this.db = new sqlite.DatabaseSync(file);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events (
@@ -143,6 +149,23 @@ class SqliteStore implements EventStore {
     }));
   }
 
+  size(): { bytes: number; events: number } {
+    const n = this.db.prepare("SELECT COUNT(*) AS n FROM events").get() as { n: number | bigint };
+    let bytes = 0;
+    for (const f of [this.file, `${this.file}-wal`]) {
+      try {
+        bytes += fs.statSync(f).size;
+      } catch {
+        /* no wal file is fine */
+      }
+    }
+    return { bytes, events: Number(n.n) };
+  }
+
+  compact(): void {
+    this.db.exec("VACUUM");
+  }
+
   lastReplyIds(): Map<string, number> {
     const rows = this.db
       .prepare(
@@ -222,6 +245,20 @@ class JsonlStore implements EventStore {
     return this.cache[this.cache.length - 1]?.id ?? 0;
   }
 
+  size(): { bytes: number; events: number } {
+    let bytes = 0;
+    try {
+      bytes = fs.statSync(this.file).size;
+    } catch {
+      /* not written yet */
+    }
+    return { bytes, events: this.cache.length };
+  }
+
+  compact(): void {
+    // an append-only text log has no free pages to reclaim
+  }
+
   lastReplyIds(): Map<string, number> {
     const out = new Map<string, number>();
     for (const e of this.cache) if (e.kind === "message" && e.agentId) out.set(e.chat ?? MAIN_CHAT, e.id);
@@ -297,6 +334,14 @@ export class EventLog {
 
   lastReplyIds(): Map<string, number> {
     return this.store.lastReplyIds();
+  }
+
+  size(): { bytes: number; events: number } {
+    return this.store.size();
+  }
+
+  compact(): void {
+    this.store.compact();
   }
 
   /** Live subscription to appended events; returns unsubscribe. */

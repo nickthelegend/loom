@@ -71,6 +71,13 @@ describe("chat flags, stars and unread", () => {
     expect((await call("POST", "/chats/main/star", { eventId: "x" })).status).toBe(400);
   });
 
+  it("reports the log's size and compacts it without losing an event", async () => {
+    const before = (await call("GET", "/log/size")).json as { bytes: number; events: number };
+    expect(before.events).toBeGreaterThan(0);
+    const r = (await call("POST", "/log/compact")).json as { before: { events: number }; after: { events: number } };
+    expect(r.after.events).toBe(r.before.events);
+  });
+
   it("sends an agent's standing instructions ahead of every turn it takes", async () => {
     expect((await call("PUT", "/agents/plannerbot/instructions", { instructions: "Answer in one line." })).json).toEqual({
       id: "plannerbot",
