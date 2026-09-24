@@ -3656,6 +3656,15 @@ window.__loomPageRev="%%BUILD_REV%%";
   .bhead .bio .btn svg{width:12px;height:12px;margin-right:4px}
   .bmrow .bedit{opacity:0;transition:opacity .15s}
   .bmem:hover .bedit,.bmrow .bedit:focus-visible{opacity:1}
+  /* tool groups open smoothly where the browser can animate to auto height */
+  :root{interpolate-size:allow-keywords}
+  details.acts::details-content{height:0;overflow:clip;transition:height .22s ease,content-visibility .22s allow-discrete}
+  details.acts[open]::details-content{height:auto}
+  .ctok{font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;margin-right:8px;white-space:nowrap}
+  /* one switch for everything that moves */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
+  }
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -4750,6 +4759,13 @@ ${BRAND_SPRITE}
   // it (their mark, their name, the model), when, then the words at full
   // measure. Tool use folds into one quiet "activity" line per stretch, and a
   // turn ends on a footer that says how long it took and what it cost.
+  /** "just now", "12m ago" for the last hour; the clock after that. */
+  function relClock(ts){
+    var t = Number(ts) || Date.now(), s = (Date.now() - t) / 1000;
+    if (s < 45) return "just now";
+    if (s < 3600) return Math.max(1, Math.round(s / 60)) + "m ago";
+    return clock(t);
+  }
   function clock(ts){
     var d = new Date(Number(ts) || Date.now());
     var h = d.getHours(), m = d.getMinutes();
@@ -4776,7 +4792,7 @@ ${BRAND_SPRITE}
     var p = e.payload || {};
     return '<div class="who">' + avatarFor(e.agentId) + '<span class="wn">' + esc(labelOf(e.agentId)) + "</span>" +
       (p.model ? '<span class="wm">' + esc(shortModel(p.model)) + "</span>" : "") + (extra || "") +
-      '<span class="wt" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + clock(e.ts) + "</span>" +
+      '<span class="wt"' + (e.id ? ' data-rel="' + Number(e.ts || 0) + '"' : "") + ' title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + (e.id ? relClock(e.ts) : clock(e.ts)) + "</span>" +
       (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
       '<button type="button" class="msgcopy" title="copy this reply" aria-label="copy this reply">' + ICONS.copy + "</button>" +
       (e.id ? '<button type="button" class="msgmore" title="More: retry, star, quote, make a card, link" aria-label="more actions">' + ICONS.dots + "</button>" : "") +
@@ -4925,7 +4941,7 @@ ${BRAND_SPRITE}
           '<button type="button" class="uact ucopy" title="Copy" aria-label="copy your message">' + ICONS.copy + "</button>" +
           (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
           '<button type="button" class="uact ustar" title="Star" aria-label="star your message">' + ICONS.star + "</button>" +
-          clock(e.ts) + "</div></div>";
+          '<span class="wt" data-rel="' + Number(e.ts || 0) + '" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + relClock(e.ts) + "</span></div></div>";
       }
       var h = hue(e.agentId);
       // Reasoning / thinking (codex, grok, and now claude) renders as a distinct
@@ -5352,7 +5368,8 @@ ${BRAND_SPRITE}
       '<span style="flex:1"></span>' +
       // Plan and send travel together: when a narrow row wraps, the switch that
       // changes what send does never ends up a line away from send.
-      '<span class="ckhint" aria-hidden="true"><kbd>\\u23ce</kbd> send \\u00b7 <kbd>\\u21e7\\u23ce</kbd> new line</span>' +
+      '<span class="ctok" id="ctok" aria-live="off"></span>' +
+      '<span class="ckhint" aria-hidden="true"><kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> new line</span>' +
       '<span class="csend">' +
       // Plan: a switch, not a mode tab — it changes what either send does.
       '<button class="cplan" id="planbtn" type="button" role="switch" aria-checked="false" title="plan mode \\u2014 write a plan, change no code">' +
@@ -9889,6 +9906,15 @@ ${BRAND_SPRITE}
       Object.keys(live).forEach(paintLiveState);
       Array.prototype.forEach.call(document.querySelectorAll("#feed .errcd[data-until]"), function(n){ n.textContent = untilText(Number(n.getAttribute("data-until"))); });
       Array.prototype.forEach.call(document.querySelectorAll("[data-oel]"), function(n){ n.textContent = durfmt(Math.max(0, Date.now() - Number(n.getAttribute("data-oel")))); });
+      // "just now" → "3m ago" → the clock: once every ~30s is plenty
+      if (Date.now() - (state.relTick || 0) > 30000) {
+        state.relTick = Date.now();
+        Array.prototype.forEach.call(document.querySelectorAll("#feed .wt[data-rel]"), function(n){
+          var t = Number(n.getAttribute("data-rel")); if (!t) return;
+          var v = relClock(t); if (n.textContent !== v) n.textContent = v;
+          if (Date.now() - t > 3600000) n.removeAttribute("data-rel"); // settled: it's a clock now
+        });
+      }
     }, 1000));
 
     // ---- empty thread ---------------------------------------------------------
@@ -10365,6 +10391,19 @@ ${BRAND_SPRITE}
       inp.focus(); inp.select();
     }
     state.openFind = openFind;
+    /** [ and ]: to your previous or next prompt in this chat. */
+    state.jumpPrompt = function(dir){
+      var sc = threadScroller(); if (!sc) return;
+      var top = sc.getBoundingClientRect().top;
+      var mine = Array.prototype.slice.call(document.querySelectorAll("#feed > .msg.user"));
+      if (!mine.length) return;
+      var pick = null;
+      if (dir < 0) { for (var i = mine.length - 1; i >= 0; i--) if (mine[i].getBoundingClientRect().top < top - 6) { pick = mine[i]; break; } }
+      else { for (var j = 0; j < mine.length; j++) if (mine[j].getBoundingClientRect().top > top + 24) { pick = mine[j]; break; } }
+      if (!pick) { toast(dir < 0 ? "that’s your first prompt here" : "that’s your last prompt here"); return; }
+      sc.scrollTop += pick.getBoundingClientRect().top - top - 12;
+      pick.classList.add("flash"); setTimeout(function(){ pick.classList.remove("flash"); }, 900);
+    };
 
     // Select words in a reply → a small Quote button beside them.
     (function(){
@@ -10820,6 +10859,13 @@ ${BRAND_SPRITE}
       box.style.height = Math.max(48, Math.min(200, box.scrollHeight)) + "px";
       // send lights up only when there's something to send
       var cf = document.getElementById("cform"); if (cf) cf.classList.toggle("hastext", !!box.value.trim());
+      // a long prompt says roughly how long (about four characters a token)
+      var ct = document.getElementById("ctok");
+      if (ct) {
+        var n = Math.round(box.value.length / 4);
+        ct.textContent = n >= 250 ? "~" + (n >= 1000 ? (n / 1000).toFixed(1) + "k" : n) + " tokens" : "";
+        ct.title = n >= 250 ? "a rough count: about four characters a token" : "";
+      }
     }
 
     function drawAttach(){
@@ -18110,7 +18156,7 @@ ${BRAND_SPRITE}
         [K + ".", "Focus mode: hide the sidebar and panel"],
         [K + "⇧V", "Prompts you’ve saved"],
         ["Ctrl+\\u0060", "Show or hide the terminal"],
-        ["N", "New task"], ["P", "New project"],
+        ["N", "New task"], ["P", "New project"], ["[ / ]", "Your previous / next prompt in this chat"],
         ["?", "This sheet"], ["Esc", "Close a menu, dialog or find"],
       ]],
       ["In the composer", [
@@ -18164,6 +18210,9 @@ ${BRAND_SPRITE}
     if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ".") {
       if (state.token && isDesktop()) { e.preventDefault(); setFocusMode(!document.documentElement.classList.contains("focusmode")); }
       return;
+    }
+    if ((e.key === "[" || e.key === "]") && !e.metaKey && !e.ctrlKey && !e.altKey && state.jumpPrompt && !typingInField(e.target) && !document.querySelector(".scrim")) {
+      e.preventDefault(); state.jumpPrompt(e.key === "[" ? -1 : 1); return;
     }
     if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey && state.token && !typingInField(e.target) && !document.querySelector(".scrim")) {
       e.preventDefault(); openShortcuts(); return;
