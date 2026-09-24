@@ -259,6 +259,24 @@ export class ProjectRuntime {
     this.info = info;
     this.config = config;
     this.log = log;
+    // What each agent has typed since its last finished message, so a window
+    // opened (or reloaded) mid-reply can show the reply so far, not just the
+    // words that arrive after it. A finished message supersedes its typing;
+    // a turn's end drops it.
+    log.onEvent((e) => {
+      const s = e.agentId ? this.liveSoFar.get(e.agentId) : undefined;
+      if (!s || !e.agentId) return;
+      const p = e.payload as { reasoning?: unknown; state?: unknown };
+      if (e.kind === "message") {
+        if (p.reasoning) s.think = "";
+        else s.text = "";
+      } else if (
+        e.kind === "run_complete" || e.kind === "error" || e.kind === "needs_input" ||
+        (e.kind === "status" && (p.state === "interrupted" || p.state === "stopped"))
+      ) {
+        this.liveSoFar.delete(e.agentId);
+      }
+    });
     this.baton = new BatonManager(info.dir, log);
     if (config.brain?.semantic) {
       const index = new SemanticIndex(path.join(info.dir, ".loom"));
@@ -2530,11 +2548,32 @@ export class ProjectRuntime {
     return () => this.streamListeners.delete(cb);
   }
 
+  /** The replies being typed right now in one thread (or all of them). */
+  liveNow(chat?: string): { agentId: string; chat: string; text: string; think: string }[] {
+    const out: { agentId: string; chat: string; text: string; think: string }[] = [];
+    for (const [agentId, s] of this.liveSoFar) {
+      if (chat !== undefined && s.chat !== chat) continue;
+      if (s.text || s.think) out.push({ agentId, ...s });
+    }
+    return out;
+  }
+
+  private liveSoFar = new Map<string, { chat: string; text: string; think: string }>();
+
   private liveText(f: LiveText): void {
     if (this.closed) return;
+    let s = this.liveSoFar.get(f.agentId);
+    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "" }));
+    const off = f.reasoning ? s.think.length : s.text.length;
+    if (f.reasoning) s.think += f.text;
+    else s.text += f.text;
+    // a runaway reply can't grow the buffer without bound
+    if (s.text.length > 400_000) s.text = "";
+    if (s.think.length > 400_000) s.think = "";
+    const framed: LiveText = { ...f, off };
     for (const cb of this.streamListeners) {
       try {
-        cb(f);
+        cb(framed);
       } catch {
         // a viewer that breaks must not break the turn
       }

@@ -164,4 +164,28 @@ describe("the daemon puts a reply on the wire as it's written", () => {
     expect(kept[0]!.payload.text).toBe(typed);
     expect(typed.length).toBeGreaterThan(0);
   });
+  it("hands a thread opened mid-reply the reply so far, and frames that stitch onto it", async () => {
+    const before = frames.length;
+    await client.send(projectId, "stream:80 alpha beta gamma delta epsilon zeta eta theta", "plannerbot");
+    await waitUntil(() => frames.slice(before).filter((f) => f.type === "stream" && f.agentId === "plannerbot").length >= 3);
+    const auth = { authorization: `Bearer ${readDaemonConfig()!.adminToken}` };
+    const opened = await (await fetch(`${client.baseUrl}/api/projects/${projectId}/events?limit=20&chat=main`, { headers: auth })).json() as
+      { live?: Array<{ agentId: string; chat: string; text: string }> };
+    const mine = (opened.live ?? []).find((x) => x.agentId === "plannerbot");
+    expect(mine?.chat).toBe("main");
+    const typedSoFar = frames.slice(before).filter((f) => f.type === "stream" && f.agentId === "plannerbot").map((f) => String(f.text)).join("");
+    // the snapshot starts at the reply's first character, and every frame says where it goes
+    expect(typedSoFar.startsWith(mine!.text.slice(0, 5)) || mine!.text.startsWith(typedSoFar.slice(0, 5))).toBe(true);
+    await waitUntil(() => frames.slice(before).some((f) => f.type === "event" && (f.event as { kind?: string }).kind === "run_complete"));
+    const streams = frames.slice(before).filter((f) => f.type === "stream" && f.agentId === "plannerbot");
+    let at = 0;
+    for (const f of streams) {
+      expect(f.off).toBe(at);
+      at += String(f.text).length;
+    }
+    // once the reply is done there is nothing in flight to hand over
+    const later = await (await fetch(`${client.baseUrl}/api/projects/${projectId}/events?limit=20&chat=main`, { headers: auth })).json() as
+      { live?: unknown[] };
+    expect(later.live).toEqual([]);
+  });
 });

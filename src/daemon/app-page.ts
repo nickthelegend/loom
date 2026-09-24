@@ -3356,6 +3356,11 @@ window.__loomPageRev="%%BUILD_REV%%";
   .cloudadv{margin:12px 0 4px}
   .cloudadv summary{cursor:pointer;font-size:12.5px;color:var(--muted-foreground)}
   .cloudadv[open] summary{margin-bottom:8px}
+  #offbanner{position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:200;display:flex;align-items:center;gap:10px;
+    padding:9px 14px;border-radius:12px;background:var(--popover);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);
+    box-shadow:var(--shadow-float);font-size:13px;color:var(--foreground);animation:fadeup .2s var(--ease-out);max-width:calc(100vw - 32px)}
+  #offbanner code{font-family:var(--font-mono);font-size:12px;padding:1px 6px;border-radius:5px;background:var(--secondary)}
+  .obspin{width:12px;height:12px;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--warn) 30%,transparent);border-top-color:var(--warn);animation:spin .9s linear infinite;flex:none}
   .planquiet{display:flex;align-items:center;gap:7px;margin:6px 0 12px;font-size:12.5px;color:var(--muted-foreground)}
   .planquiet svg{width:13px;height:13px}
   /* ── the composer ── */
@@ -3837,7 +3842,10 @@ ${BRAND_SPRITE}
       setTimeout(function(){ var b = scrim.querySelector('[data-cf="1"]'); if (b) b.focus(); }, 0);
     });
   }
-  function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return; t.textContent = msg;
+  function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return;
+    // while the daemon is down the banner says so once; polls don't each toast it
+    if (state.daemonUp === false && /Can\u2019t reach Loom|Failed to fetch|Load failed|NetworkError/i.test(String(msg))) return;
+    t.textContent = msg;
     t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(function(){ t.classList.remove("show"); }, 2600); }
   /** Assertive screen-reader announcement for high-stakes moments (an agent
    *  needs you). Cleared then re-set so repeats are re-announced. */
@@ -4277,7 +4285,13 @@ ${BRAND_SPRITE}
     opts.headers = opts.headers || {};
     opts.headers["Authorization"] = "Bearer " + state.token;
     if (opts.body) opts.headers["Content-Type"] = "application/json";
-    return fetch(path, opts).catch(function(err){ daemonReached(false); throw err; }).then(function(r){
+    return fetch(path, opts).catch(function(err){
+      daemonReached(false);
+      // "Failed to fetch" is the browser's words, not ours: say what happened.
+      var e = new Error("Can\u2019t reach Loom \u2014 is the daemon running? (loom up)");
+      e.offline = true; e.cause = err;
+      throw e;
+    }).then(function(r){
       daemonReached(true);
       if (r.status === 401 && !retried) {
         return reauth().then(function(ok){
@@ -4295,8 +4309,30 @@ ${BRAND_SPRITE}
   /** Whether the daemon answered the last request — the status bar's "live" when no project socket is open. */
   function daemonReached(up){
     if (state.daemonUp === up) return;
+    var wasDown = state.daemonUp === false;
     state.daemonUp = up;
     if (typeof drawStatusbar === "function") drawStatusbar();
+    offlineBanner(!up);
+    // Back after an outage: re-read what the view missed while it was gone.
+    if (up && wasDown) {
+      if (state.refreshShell) state.refreshShell();
+      if (state.redrawFeed) state.redrawFeed();
+    }
+  }
+  /**
+   * One calm line when the daemon stops answering, instead of a toast per
+   * failed poll ("Failed to fetch", every few seconds, for as long as it's
+   * down). It goes away on its own when the daemon is back.
+   */
+  function offlineBanner(show){
+    if (pageGone()) return;
+    var b = document.getElementById("offbanner");
+    if (!show) { if (b) b.remove(); return; }
+    if (b) return;
+    b = document.createElement("div");
+    b.id = "offbanner"; b.setAttribute("role", "status");
+    b.innerHTML = '<span class="obspin"></span><span><b>Loom isn\u2019t answering</b> \u2014 reconnecting\u2026 If it doesn\u2019t come back, run <code>loom up</code>.</span>';
+    document.body.appendChild(b);
   }
   function logout(){ state.token = ""; state.clientId = ""; localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(CLIENT_ID_KEY); route(); }
 
@@ -9233,7 +9269,7 @@ ${BRAND_SPRITE}
       if (!starts) return;
       var L = liveFor(id); if (!L) return;
       L.touched = Date.now();
-      if (e.kind === "message") { if (p.reasoning) L.think = ""; else L.text = ""; }
+      if (e.kind === "message") { if (p.reasoning) L.think = ""; else L.text = ""; L.synced = false; }
       if (e.kind === "tool_call") L.act = String(p.summary || p.tool || p.name || "Working").replace(/\\s+/g, " ").slice(0, 80);
       if (e.kind === "file_edit") L.act = "Editing " + String(p.path || "").split("/").pop();
       paintLive(id);
@@ -9242,7 +9278,13 @@ ${BRAND_SPRITE}
       if ((f.chat || "main") !== chatId || !f.agentId || !f.text) return;
       var wasNear = nearBottom();
       var L = liveFor(f.agentId); if (!L) return;
-      if (f.reasoning) L.think += f.text; else L.text += f.text;
+      var key = f.reasoning ? "think" : "text", have = L[key];
+      // Seeded from the snapshot of a reply already under way, pieces carry
+      // their offset: skip what the snapshot already had, stitch the rest.
+      if (L.synced && typeof f.off === "number") {
+        if (f.off + f.text.length <= have.length) return;
+        L[key] = have + (f.off <= have.length ? f.text.slice(have.length - f.off) : f.text);
+      } else L[key] = have + f.text;
       L.touched = Date.now();
       schedulePaint(f.agentId, wasNear);
     }
@@ -9317,10 +9359,21 @@ ${BRAND_SPRITE}
 
     // Live frames that race the history fetch wait their turn, so an early
     // WS event can't outrun (and id-mask) the backlog.
-    var historyLoaded = false, pendingWs = [];
-    function flushPending(){
+    var historyLoaded = false, pendingWs = [], pendingStream = [];
+    function flushPending(snap){
       historyLoaded = true;
       if (pendingWs.length) { append(pendingWs); pendingWs = []; }
+      // A reply already being typed when this thread opened (a reload
+      // mid-answer): show what it has said so far, then the pieces that came
+      // in while the history loaded, deduped by offset.
+      (snap || []).forEach(function(x){
+        if (!x || !x.agentId || (x.chat || "main") !== chatId) return;
+        var L = liveFor(x.agentId); if (!L) return;
+        L.text = String(x.text || ""); L.think = String(x.think || ""); L.synced = true;
+        L.touched = Date.now(); paintLive(x.agentId);
+      });
+      var q = pendingStream; pendingStream = [];
+      q.forEach(onStreamFrame);
     }
     var PAGE = 80;
     function drawEarlier(more){
@@ -9360,7 +9413,7 @@ ${BRAND_SPRITE}
       state.lastId = 0; state.firstId = 0;
       clearLive();
       openTurns = {};
-      historyLoaded = false;
+      historyLoaded = false; pendingStream = [];
       return api("/api/projects/" + pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(chatId))
         .then(function(j){
           var evs = j.events || [];
@@ -9368,7 +9421,7 @@ ${BRAND_SPRITE}
           append(evs);
           if (!evs.length) { var f = document.getElementById("feed"); if (f && f.firstChild && f.firstChild.className === "loader") f.innerHTML = ""; drawEmpty(); }
           drawEarlier(evs.length >= PAGE);
-          flushPending();
+          flushPending(j.live);
           if (state.project) reconcileLive(state.project);
           toBottom();
         })
@@ -9424,7 +9477,7 @@ ${BRAND_SPRITE}
           // the prompt queue changed \u2014 sent, edited, reordered, paused
           if (frame.type === "queue") { onQueueFrame(frame); return; }
           // a reply as it's being written (not logged; the message follows)
-          if (frame.type === "stream") { if (historyLoaded) onStreamFrame(frame); return; }
+          if (frame.type === "stream") { if (historyLoaded) onStreamFrame(frame); else if (pendingStream.length < 2000) pendingStream.push(frame); return; }
           // a dev server started, stopped, crashed, or printed a line
           if (frame.type === "server") { onServerFrame(frame); return; }
           // an agent changed files while a preview is open: show the new page

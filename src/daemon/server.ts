@@ -1909,14 +1909,16 @@ export class LoomDaemon {
         // no ?chat= means the whole project — old clients keep seeing the
         // whole thread, which is what they've always shown
         const chat = req.query.chat ? String(req.query.chat) : undefined;
-        res.json({
-          events: rt.log.list({
-            since,
-            limit,
-            ...(before !== undefined && Number.isFinite(before) ? { before } : {}),
-            ...(chat ? { chat } : {}),
-          }),
+        const events = rt.log.list({
+          since,
+          limit,
+          ...(before !== undefined && Number.isFinite(before) ? { before } : {}),
+          ...(chat ? { chat } : {}),
         });
+        // A thread's first page also carries the replies being typed in it
+        // right now: reload mid-reply and you see the reply so far.
+        const opening = chat && since === undefined && before === undefined;
+        res.json({ events, ...(opening ? { live: rt.liveNow(chat) } : {}) });
       }),
     );
 
@@ -4431,12 +4433,16 @@ export class LoomDaemon {
     // Replies as they're written. Deltas are coalesced per agent for a frame
     // (~40ms), so a fast model is a few dozen socket frames a second at most,
     // not one per token. Never logged: the finished message is the record.
-    const live = new Map<string, { chat: string; text: string; reasoning: boolean }>();
+    const live = new Map<string, { chat: string; text: string; reasoning: boolean; off?: number }>();
     let liveTimer: NodeJS.Timeout | null = null;
     const flushLive = () => {
       liveTimer = null;
       for (const [agentId, f] of live) {
-        this.broadcastFrame({ type: "stream", projectId: info.id, agentId, chat: f.chat, text: f.text, ...(f.reasoning ? { reasoning: true } : {}) }, info.id);
+        this.broadcastFrame({
+          type: "stream", projectId: info.id, agentId, chat: f.chat, text: f.text,
+          ...(f.reasoning ? { reasoning: true } : {}),
+          ...(f.off !== undefined ? { off: f.off } : {}),
+        }, info.id);
       }
       live.clear();
     };
@@ -4447,7 +4453,7 @@ export class LoomDaemon {
       if (have && (have.reasoning !== Boolean(f.reasoning) || have.chat !== f.chat)) flushLive();
       const cur = live.get(key);
       if (cur) cur.text += f.text;
-      else live.set(key, { chat: f.chat, text: f.text, reasoning: Boolean(f.reasoning) });
+      else live.set(key, { chat: f.chat, text: f.text, reasoning: Boolean(f.reasoning), ...(f.off !== undefined ? { off: f.off } : {}) });
       if (!liveTimer) liveTimer = setTimeout(flushLive, 40);
     });
     rt.log.onEvent((e) => {

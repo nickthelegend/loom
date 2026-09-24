@@ -466,6 +466,13 @@ export interface StreamDelta {
 export interface LiveText extends StreamDelta {
   agentId: string;
   chat: string;
+  /**
+   * Where this piece starts in what the agent has typed since its last
+   * finished message (of the same kind). A window that opens mid-reply gets
+   * the text so far from the log route and uses this to stitch on without
+   * repeating or dropping characters.
+   */
+  off?: number;
 }
 
 export interface AgentCapabilities {
