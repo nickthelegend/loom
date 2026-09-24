@@ -799,6 +799,14 @@ export async function api<T>(
       route = await connection.directFailed(creds);
       if (route === "cloud") return viaRelay<T>(creds, path, init, timeoutMs);
     }
+    // "Network request failed" is React Native's words for every one of these.
+    if (e instanceof TypeError) {
+      throw new Error(
+        creds.relay
+          ? "Can't reach your computer, directly or through Loom Cloud. Is Loom running there (loom up)?"
+          : "Can't reach your computer. Is Loom running there (loom up), and is this phone on the same network?",
+      );
+    }
     throw e;
   } finally {
     if (timer) clearTimeout(timer);

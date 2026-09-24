@@ -795,6 +795,10 @@ export function ProjectScreen(props: {
   const [events, setEvents] = useState<LoomEvent[]>([]);
   // What agents are typing in this chat right now, before it's a message.
   const [live, setLive] = useState<LiveMap>({});
+  // The thread's first page didn't come (the route was flipping, the relay
+  // was slow): say so and try again, rather than showing an empty thread.
+  const [historyErr, setHistoryErr] = useState<string | null>(null);
+  const [historyTry, setHistoryTry] = useState(0);
   const [tree, setTree] = useState<WorkingTree | null>(null);
   const [tasks, setTasks] = useState<TaskResult | null>(null);
   const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
@@ -845,6 +849,7 @@ export function ProjectScreen(props: {
   // Loom Cloud relay — and reopens itself when that route changes.
   useEffect(() => {
     let live = true;
+    let retryHistory: ReturnType<typeof setTimeout> | undefined;
     setEvents([]); // clear the old chat's thread while the new one loads
     setLive({});
     lastId.current = 0;
@@ -854,8 +859,13 @@ export function ProjectScreen(props: {
         lastId.current = Math.max(lastId.current, events[events.length - 1]?.id ?? 0);
         setEvents(events);
         setLive((m) => seed(m, typing, chatId));
+        setHistoryErr(null);
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (!live) return;
+        setHistoryErr(e instanceof Error ? e.message : String(e));
+        retryHistory = setTimeout(() => setHistoryTry((n) => n + 1), 4000);
+      });
     const close = openLiveStream(creds, project.id, (raw) => {
       const frame = raw as { type?: string; event?: LoomEvent; chat?: string } & Partial<StreamFrame>;
       if (frame?.type === "stream") {
@@ -889,10 +899,11 @@ export function ProjectScreen(props: {
     });
     return () => {
       live = false;
+      if (retryHistory) clearTimeout(retryHistory);
       close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id, chatId]);
+  }, [project.id, chatId, historyTry]);
 
   // Status poll + changes tab refresh.
   useEffect(() => {
@@ -1222,6 +1233,11 @@ export function ProjectScreen(props: {
               ) : (
                 <EventLine e={item} />
               )
+            }
+            ListHeaderComponent={
+              historyErr && !events.length ? (
+                <Sys color={T.warn} text={`Couldn't load this thread. ${historyErr} Trying again…`} />
+              ) : null
             }
             ListFooterComponent={<LiveReplies live={live} />}
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
