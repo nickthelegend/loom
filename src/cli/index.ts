@@ -1031,11 +1031,14 @@ const TASK_COLOR: Record<string, (s: string) => string> = {
 function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   const done = run.tasks.filter((t) => t.status === "done").length;
   console.log(
-    `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(run.status)}  ${done}/${run.tasks.length} tasks · ` +
-      `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
+    run.race
+      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(run.status)}  race · ${done}/${run.tasks.length} finished · ${fmtUsd(run.costUsd)}`
+      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(run.status)}  ${done}/${run.tasks.length} tasks · ` +
+          `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
-  console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.join(", ")}`);
+  if (run.race) console.log(`   ${pc.dim("entrants")} ${run.workers.join(", ")}`);
+  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.join(", ")}`);
   for (const t of run.tasks) {
     const color = TASK_COLOR[t.status] ?? ((x: string) => x);
     const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
@@ -1047,7 +1050,13 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   if (run.question) console.log(`   ${pc.yellow("asks:")} ${run.question}  ${pc.dim(`(loom orchestra:reply ${run.id} "…")`)}`);
   if (run.summary) console.log(`   ${pc.green("summary:")} ${run.summary}`);
   if (run.error) console.log(`   ${pc.red("error:")} ${run.error}`);
-  if (run.status === "completed" && !run.applied) console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
+  if (run.status === "completed" && !run.applied) {
+    if (run.race) {
+      const ok = run.tasks.filter((t) => t.status === "done").map((t) => t.id);
+      if (ok.length) console.log(pc.dim(`   keep one: loom orchestra:apply ${run.id} --task ${ok.join(" | ")}`));
+    } else console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
+  }
+  if (run.race && run.applied?.task) console.log(`   ${pc.green("kept:")} ${run.applied.task} → ${run.applied.into}`);
 }
 
 async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string): Promise<void> {
@@ -1082,8 +1091,9 @@ program
   .option("--rounds <n>", "orchestrator review rounds before giving up (default 10)")
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
   .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
+  .option("--race", "race: every worker takes the whole goal in its own worktree; pick one with orchestra:apply <run> --task race-<agent>")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1095,10 +1105,13 @@ program
         ...(opts.rounds ? { maxRounds: Number(opts.rounds) } : {}),
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.maxUsd ? { maxUsd: Number(opts.maxUsd) } : {}),
+        ...(opts.race ? { race: true } : {}),
       });
       console.log(
-        `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +
-          `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
+        run.race
+          ? `${pc.magenta("🏁")} ${pc.bold(run.id)} started — ${run.workers.join(", ")} racing on the same goal`
+          : `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +
+              `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
       );
       if (opts.watch) await watchRun(client, project.id, run.id);
       else console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
@@ -1139,17 +1152,18 @@ for (const action of ["abort", "apply", "cleanup", "resume"] as const) {
   const blurb = {
     abort: "stop a run — every worker is interrupted",
     resume: "carry on a run Loom stopped by restarting — its interrupted tasks pick up where they left off",
-    apply: "merge a run's integration branch into your current branch",
+    apply: "merge a run's integration branch into your current branch (a race: --task <entrant>)",
     cleanup: "remove a finished run's worktrees (its branch stays)",
   }[action];
   program
     .command(`orchestra:${action} <runId>`)
     .description(blurb)
-    .action(async (runId: string) => {
+    .option("--task <id>", "apply: which race entrant to keep (race-<agent>)")
+    .action(async (runId: string, opts: { task?: string }) => {
       const client = await ensureDaemon();
       const project = await currentProject(client);
       try {
-        const out = await client.orchestraAction(project.id, runId, action);
+        const out = await client.orchestraAction(project.id, runId, action, action === "apply" && opts.task ? { task: opts.task } : undefined);
         if (action === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(String(out.merged))} into ${pc.bold(String(out.into))}`);
         else console.log(`${pc.green("✓")} ${action} ${runId}`);
       } catch (err) {
