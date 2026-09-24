@@ -3700,6 +3700,23 @@ window.__loomPageRev="%%BUILD_REV%%";
   .tourt{font-size:15px;font-weight:600;margin:4px 0 6px}
   .tourb{font-size:13px;line-height:1.55;color:var(--muted-foreground)}
   .toura{display:flex;justify-content:space-between;margin-top:12px}
+  /* view transitions */
+  ::view-transition-old(root),::view-transition-new(root){animation-duration:.14s}
+  /* outline */
+  .olhead{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground);margin:2px 0 8px}
+  .olrow{display:flex;align-items:flex-start;gap:8px;width:100%;text-align:left;border:0;background:none;color:var(--foreground);
+    font:inherit;font-size:12.5px;padding:7px 8px;border-radius:8px;cursor:pointer}
+  .olrow:hover{background:var(--secondary)}
+  .olrow .oln{flex:none;width:18px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+  .olrow .olt{flex:1;min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
+  .olrow .olw{flex:none;font-size:11px;color:var(--muted-foreground)}
+  .olmore{margin-top:8px;border:1px dashed var(--border);background:none;color:var(--muted-foreground);font:inherit;font-size:12px;padding:6px;border-radius:8px;width:100%;cursor:pointer}
+  .olempty{font-size:12.5px;color:var(--muted-foreground);padding:8px 2px}
+  /* terminal find */
+  .termfind{display:inline-flex;align-items:center;gap:6px;margin-right:4px}
+  .termfind[hidden]{display:none}
+  .termfind input{width:150px;height:22px;border:1px solid var(--border);border-radius:6px;background:var(--input,var(--muted));color:var(--foreground);font:inherit;font-size:12px;padding:0 7px}
+  .termqn{font-size:11px;color:var(--muted-foreground);min-width:34px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -5477,6 +5494,9 @@ ${BRAND_SPRITE}
         '<div class="termtabs"><span id="termtabs" style="display:contents"></span>' +
         '<button id="termadd" class="iconbtn" title="new terminal">' + ICONS.plus + "</button>" +
         '<span class="spacer"></span>' +
+        '<span class="termfind" id="termfind" hidden><input id="termq" placeholder="Find in terminal" spellcheck="false" autocomplete="off" aria-label="find in terminal"><span id="termqn" class="termqn"></span></span>' +
+        '<button id="termsearch" class="iconbtn" title="Find in this terminal">' + ICONS.search + "</button>" +
+        '<button id="termclear" class="iconbtn" title="Clear this terminal">' + ICONS.trash + "</button>" +
         '<button id="termhide" class="iconbtn" title="hide terminal">' + ICONS.x + "</button></div>" +
         '<div class="termpanes" id="termpanes">' +
         '<div class="conwrap" id="conwrap">' +
@@ -5610,6 +5630,18 @@ ${BRAND_SPRITE}
       });
     }
     function showTab(name){
+      // a quick crossfade between workspace tabs, where the browser can
+      var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (document.startViewTransition && state.tab && state.tab !== name && !still && !showTab.inTransition) {
+        showTab.inTransition = true;
+        try {
+          document.startViewTransition(function(){ showTabNow(name); }).finished.then(function(){ showTab.inTransition = false; }, function(){ showTab.inTransition = false; });
+          return;
+        } catch (e) { showTab.inTransition = false; }
+      }
+      showTabNow(name);
+    }
+    function showTabNow(name){
       state.tab = name;
       ["thread", "orchestra", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
@@ -7685,6 +7717,38 @@ ${BRAND_SPRITE}
     if (desktop) {
       document.getElementById("termhide").onclick = function(){ localStorage.setItem(TERM_KEY, "0"); applyTerm(); };
       document.getElementById("termadd").onclick = function(){ addTerm(); };
+      var tclr = document.getElementById("termclear");
+      if (tclr) tclr.onclick = function(){ var t = curTerm(); if (t && t.xterm) { t.xterm.clear(); focusTerm(); } else toast("open a terminal first"); };
+      var tsr = document.getElementById("termsearch"), tf = document.getElementById("termfind"), tq = document.getElementById("termq");
+      if (tsr && tf && tq) {
+        var tfind = { q: "", at: -1 };
+        tsr.onclick = function(){ tf.hidden = !tf.hidden; if (!tf.hidden) { tq.focus(); tq.select(); } };
+        // no search addon ships: read the buffer, newest match first, and select it
+        var termFind = function(dir){
+          var t = curTerm(), n = document.getElementById("termqn");
+          if (!t || !t.xterm) { if (n) n.textContent = ""; return; }
+          var q = tq.value.trim().toLowerCase(), buf = t.xterm.buffer.active;
+          if (!q) { t.xterm.clearSelection(); if (n) n.textContent = ""; return; }
+          var hits = [];
+          for (var y = 0; y < buf.length; y++) {
+            var line = buf.getLine(y); if (!line) continue;
+            var s = line.translateToString(true).toLowerCase(), k = -1;
+            while ((k = s.indexOf(q, k + 1)) >= 0) hits.push([y, k]);
+          }
+          if (!hits.length) { t.xterm.clearSelection(); if (n) n.textContent = "no match"; return; }
+          if (q !== tfind.q) { tfind.q = q; tfind.at = hits.length; }
+          tfind.at = (tfind.at + dir + hits.length) % hits.length;
+          var h = hits[tfind.at];
+          t.xterm.select(h[1], h[0], q.length);
+          t.xterm.scrollToLine(Math.max(0, h[0] - Math.floor(t.xterm.rows / 2)));
+          if (n) n.textContent = (tfind.at + 1) + "/" + hits.length;
+        };
+        tq.addEventListener("keydown", function(e){
+          if (e.key === "Enter") { e.preventDefault(); termFind(e.shiftKey ? 1 : -1); }
+          else if (e.key === "Escape") { e.preventDefault(); tf.hidden = true; var t = curTerm(); if (t && t.xterm) t.xterm.clearSelection(); focusTerm(); }
+        });
+        tq.addEventListener("input", function(){ tfind.q = ""; termFind(-1); });
+      }
       var tin = document.getElementById("terminput");
       tin.addEventListener("keydown", function(e){
         var t = curTerm(); if (!t) return;
@@ -8933,7 +8997,27 @@ ${BRAND_SPRITE}
       if (state.railView === "search") return drawSearch(el);
       if (state.railView === "scm") return drawScm(el);
       if (state.railView === "tasks") return drawAgentsView(el);
+      if (state.railView === "outline") return drawOutline(el);
       return drawExplorer(el);
+    }
+    /** The chat at a glance: each of your prompts, click to go there. */
+    function drawOutline(el){
+      var mine = Array.prototype.slice.call(document.querySelectorAll("#feed > .msg.user[data-raw]"));
+      var more = !!document.getElementById("loadearlier");
+      if (!mine.length) { el.innerHTML = '<div class="olempty">Nothing asked in this chat yet — your prompts will line up here.</div>'; return; }
+      el.innerHTML = '<div class="olhead">This chat · ' + mine.length + " prompt" + (mine.length === 1 ? "" : "s") + (more ? " loaded" : "") + "</div>" +
+        mine.map(function(n, i){
+          var t = decodeURIComponent(n.getAttribute("data-raw") || "").replace(/\\s+/g, " ").trim();
+          var ts = Number(n.getAttribute("data-ts")) || 0;
+          return '<button type="button" class="olrow" data-olid="' + esc(n.getAttribute("data-id") || "") + '"><span class="oln">' + (i + 1) + "</span>" +
+            '<span class="olt">' + esc(t.slice(0, 140) || "(attachment)") + '</span><span class="olw">' + (ts ? esc(relClock(ts)) : "") + "</span></button>";
+        }).join("") +
+        (more ? '<button type="button" class="olmore" id="olmore">Load earlier prompts</button>' : "");
+      Array.prototype.forEach.call(el.querySelectorAll("[data-olid]"), function(b){
+        b.onclick = function(){ jumpToMessage(Number(b.getAttribute("data-olid"))); };
+      });
+      var om = document.getElementById("olmore");
+      if (om) om.onclick = function(){ loadEarlier().then(function(){ drawRail(); }); };
     }
     function renderTreeLevel(rel, depth){
       var kids = expl.kids[rel]; if (!kids) return "";
@@ -9794,7 +9878,7 @@ ${BRAND_SPRITE}
         added = true;
       });
       drawEmpty();
-      if (added) { markDays(); markSeen(); }
+      if (added) { markDays(); markSeen(); if (state.railView === "outline") drawRail(); }
       if (added) stickOrFlag(wasNear);
       // A day-long live session piles thousands of nodes into one page. Once
       // it's that big and you're reading the newest part, start again from the
@@ -10244,6 +10328,16 @@ ${BRAND_SPRITE}
         openBoardTaskModal(pid, "working", function(){ if (state.reloadBoard) state.reloadBoard(); }, bubbleText(msgEl).split("\\n")[0].slice(0, 200));
       } });
       items.push({ label: "Copy link", icon: ICONS.link, run: function(){ copyText(messageLink(id)); } });
+      if (window.speechSynthesis && window.SpeechSynthesisUtterance) {
+        var reading = window.speechSynthesis.speaking;
+        items.push({ label: reading ? "Stop reading" : "Read aloud", icon: ICONS.play, run: function(){
+          window.speechSynthesis.cancel();
+          if (reading) return;
+          var u = new SpeechSynthesisUtterance(bubbleText(msgEl).replace(/\\s+/g, " ").slice(0, 8000));
+          u.rate = 1.05;
+          window.speechSynthesis.speak(u);
+        } });
+      }
       items.push({ label: "Branch from here", icon: ICONS.branch, hint: "new chat", run: function(){ branchFrom(msgEl); } });
       openMenu(Math.round(r.right - 220), Math.round(r.bottom + 4), items);
     }
@@ -17585,6 +17679,7 @@ ${BRAND_SPRITE}
           '<button class="iconbtn rvbtn" data-view="search" title="Search">' + ICONS.search + "</button>" +
           '<button class="iconbtn rvbtn" data-view="scm" title="Source Control">' + ICONS.branch + "</button>" +
           '<button class="iconbtn rvbtn" data-view="tasks" title="Agents" aria-label="Agents">' + ICONS.agents + "</button>" +
+          '<button class="iconbtn rvbtn" data-view="outline" title="Outline: your prompts in this chat" aria-label="Outline">' + ICONS.clipboard + "</button>" +
           '<span class="spacer"></span>' +
           '<button id="railrefresh" class="iconbtn" title="refresh">' + ICONS.refresh + "</button>" +
           // No second panel toggle. #railbtn in the tab strip is the one control
