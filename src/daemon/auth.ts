@@ -16,6 +16,8 @@ import type { DaemonConfig } from "../core/registry.js";
 import { readDaemonConfig, writeDaemonConfig } from "../core/registry.js";
 
 const PAIR_TTL_MS = 10 * 60 * 1000;
+/** How often a device's last-used time is written to disk, at most. */
+const SEEN_WRITE_MS = 10 * 60 * 1000;
 
 interface PendingPair {
   projects?: string[];
@@ -26,6 +28,7 @@ interface PendingPair {
 export class AuthManager {
   private config: DaemonConfig;
   private pending = new Map<string, PendingPair>();
+  private seenWritten = new Map<string, number>();
 
   constructor(config: DaemonConfig) {
     this.config = config;
@@ -35,7 +38,34 @@ export class AuthManager {
   isAuthorized(token: string | undefined): boolean {
     if (!token) return false;
     if (timingSafeEqualStr(token, this.config.adminToken)) return true;
-    return this.config.clients.some((c) => timingSafeEqualStr(token, c.token));
+    const client = this.config.clients.find((c) => timingSafeEqualStr(token, c.token));
+    if (client) this.touch(client.id);
+    return Boolean(client);
+  }
+
+  /**
+   * Note that a device was just used. Every re-pair mints a new client and
+   * nothing retired the old ones — 49 "phone" entries piled up on one machine
+   * with no way to tell the live one from the dead. Kept in memory on every
+   * request, written through at most every ten minutes per device.
+   */
+  private touch(clientId: string): void {
+    const now = Date.now();
+    const mem = this.config.clients.find((c) => c.id === clientId);
+    if (mem) mem.lastSeen = now;
+    const last = this.seenWritten.get(clientId) ?? 0;
+    if (now - last < SEEN_WRITE_MS) return;
+    this.seenWritten.set(clientId, now);
+    try {
+      this.reload();
+      const c = this.config.clients.find((x) => x.id === clientId);
+      if (c) {
+        c.lastSeen = now;
+        writeDaemonConfig(this.config);
+      }
+    } catch {
+      // a failed bookkeeping write must never fail the request it rode on
+    }
   }
 
   isAdmin(token: string | undefined): boolean {
@@ -99,11 +129,12 @@ export class AuthManager {
     return false;
   }
 
-  clients(): Array<{ id: string; name: string; createdAt: number; push: boolean }> {
-    return this.config.clients.map(({ id, name, createdAt, pushToken }) => ({
+  clients(): Array<{ id: string; name: string; createdAt: number; lastSeen: number | null; push: boolean }> {
+    return this.config.clients.map(({ id, name, createdAt, lastSeen, pushToken }) => ({
       id,
       name,
       createdAt,
+      lastSeen: lastSeen ?? null,
       push: Boolean(pushToken),
     }));
   }

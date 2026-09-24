@@ -108,6 +108,20 @@ export function portFromScript(script: string): number | undefined {
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
 }
 
+/**
+ * The address a server announces for itself, from one line of its output:
+ * "listening on http://localhost:4321", "Local: http://127.0.0.1:5173/". Only
+ * loopback addresses, so a line that merely mentions some URL isn't taken.
+ */
+export function urlFromOutput(line: string): string | null {
+  const m = /\bhttps?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?\/?/i.exec(line);
+  if (!m || !m[2]) return null;
+  const port = Number(m[2]);
+  if (!(port > 0 && port < 65536)) return null;
+  const scheme = line.slice(m.index, m.index + 5).toLowerCase() === "https" ? "https" : "http";
+  return `${scheme}://localhost:${port}`;
+}
+
 /** Where the preview should point for a configured server. */
 export function urlFor(cfg: ServerConfig): string | null {
   if (cfg.url) return cfg.url;
@@ -131,6 +145,8 @@ export class Servers {
   private live = new Map<string, Running>();
   private logs = new Map<string, LogLine[]>();
   private state = new Map<string, { state: ServerState; exitCode: number | null }>();
+  /** URLs servers announced in their output, for configs that name no port. */
+  private announced = new Map<string, string>();
 
   constructor(
     private deps: {
@@ -150,8 +166,13 @@ export class Servers {
   status(cfg: ServerConfig): ServerStatus {
     const run = this.live.get(cfg.name);
     const known = this.state.get(cfg.name);
+    // A server added from package.json names no port; the address it printed
+    // is the one to preview. Only while it runs — a stopped server's old URL
+    // is a claim about a process that no longer exists.
+    const seen = run && !cfg.url && !cfg.port ? this.announced.get(cfg.name) : undefined;
     return {
       ...cfg,
+      ...(seen ? { url: seen } : {}),
       state: run ? known?.state ?? "starting" : known?.state ?? "stopped",
       pid: run?.child.pid ?? null,
       startedAt: run?.startedAt ?? null,
@@ -190,6 +211,7 @@ export class Servers {
     });
     const run: Running = { child, startedAt: Date.now(), poll: null };
     this.live.set(name, run);
+    this.announced.delete(name);
     this.setState(cfg, "starting", null);
     this.append(name, { at: Date.now(), stream: "loom", text: `$ ${cfg.command}` });
 
@@ -274,6 +296,14 @@ export class Servers {
     for (const text of String(chunk).split("\n")) {
       if (!text.trim()) continue;
       this.append(name, { at: Date.now(), stream, text: text.replace(/\r$/, "") });
+      if (!this.announced.has(name)) {
+        const cfg = this.deps.configs().find((c) => c.name === name);
+        const url = cfg && !cfg.url && !cfg.port ? urlFromOutput(text) : null;
+        if (url && cfg) {
+          this.announced.set(name, url);
+          this.deps.onChange(name, this.status(cfg));
+        }
+      }
     }
   }
 

@@ -92,7 +92,11 @@ export function projectChecks(dir: string): Check[] {
     }
   }
   if (!checks.some((c) => c.name === "agents" && c.status === "fail")) {
-    checks.push(ok("agents", `${config.agents.length} configured, ${adapterIds.size} can hold the baton`));
+    // A switched-off agent is configured but can't take a turn; counting it
+    // as able to hold the baton overstated what this project can run.
+    const off = config.agents.filter((a) => a.enabled === false).map((a) => a.id);
+    for (const id of off) adapterIds.delete(id);
+    checks.push(ok("agents", `${config.agents.length} configured, ${adapterIds.size} can hold the baton${off.length ? ` (${off.join(", ")} switched off)` : ""}`));
   }
   if (!adapterIds.size) {
     checks.push(fail("agents", "no full-duplex adapters — nothing can take a turn"));

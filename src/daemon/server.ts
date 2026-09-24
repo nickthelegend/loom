@@ -4,6 +4,7 @@
  * event stream.
  */
 
+import { hostedTarget } from "../core/hosted.js";
 import { execFile, spawn } from "node:child_process";
 import { VERSION } from "../version.js";
 import crypto from "node:crypto";
@@ -1153,6 +1154,56 @@ export class LoomDaemon {
       }
       res.json(this.team.status());
     });
+    /**
+     * Sign in to the hosted Team Hub with GitHub, from the app.
+     *
+     * It only existed in the CLI, so the app's Team screen offered a
+     * self-hosted form and nothing for the hub most people use. The daemon runs
+     * the same loopback sign-in the CLI does and answers with GitHub's
+     * authorize URL for the app to open; when GitHub sends the browser back,
+     * the session lands here and the team connects. The app watches /api/team.
+     */
+    let hostedPending: { startedAt: number; error?: string } | null = null;
+    app.post("/api/team/hosted-signin", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void (async () => {
+        try {
+          const { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+          const { hostedSignIn } = await import("../hub/supabase-client.js");
+          const supabaseUrl = hostedSupabaseUrl("hosted");
+          if (!supabaseUrl) throw new Error("no hosted hub is configured for this build");
+          let answered = false;
+          hostedPending = { startedAt: Date.now() };
+          const done = hostedSignIn({
+            supabaseUrl,
+            publishableKey: publishableKeyFor(supabaseUrl),
+            timeoutMs: 10 * 60 * 1000,
+            openBrowser: (url) => {
+              answered = true;
+              res.json({ url });
+            },
+          });
+          done
+            .then(async (session) => {
+              await this.team.signIn(hostedHubUrl(supabaseUrl), { token: session.refreshToken });
+              await this.team.connect();
+              hostedPending = null;
+            })
+            .catch((err: Error) => {
+              hostedPending = { startedAt: Date.now(), error: err.message };
+              if (!answered) res.status(400).json({ error: err.message });
+            });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      })();
+    });
+    app.get("/api/team/hosted-signin", (_req, res) => {
+      res.json({ pending: Boolean(hostedPending && !hostedPending.error), error: hostedPending?.error ?? null });
+    });
+
     app.post("/api/team/:action", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
         return void res.status(403).json({ error: "admin only" });
@@ -1938,7 +1989,8 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         try {
           const cfg = rt.servers.mustConfig(String(req.params.name));
-          const target = urlFor(cfg);
+          // configured, or else what the running server announced it's on
+          const target = urlFor(cfg) ?? rt.servers.status(cfg).url ?? null;
           if (!target) return void res.status(400).json({ error: `server "${cfg.name}" has no port or url to preview` });
           const proxy = await rt.previewProxy(cfg.name, target);
           res.json({ url: `http://127.0.0.1:${proxy.port}`, target, bridged: true });
@@ -4716,6 +4768,7 @@ export class LoomDaemon {
       clients: this.relay?.clientCount() ?? 0,
       stats: this.relay?.stats ?? null,
       supabaseUrl: target?.url ?? null,
+      hostedUrl: hostedTarget().supabaseUrl,
       error: this.relayError,
     };
   }

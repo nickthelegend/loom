@@ -3345,6 +3345,17 @@ window.__loomPageRev="%%BUILD_REV%%";
   .askn{font-size:12px;color:var(--muted-foreground);flex:1}
   .slist .crow.more{color:var(--muted-foreground);font-size:12.5px}
   .slist .crow.more:hover{color:var(--foreground)}
+  .ferr{display:block;min-height:0;font-size:12.5px;color:var(--err);margin:6px 0 2px}
+  .ferr:empty{display:none}
+  input.bad{border-color:color-mix(in srgb,var(--err) 60%,transparent)!important}
+  .mferr{margin-right:auto;font-size:12.5px;color:var(--err);align-self:center}
+  .mferr:empty{display:none}
+  .dev.stale{opacity:.6}
+  #tghsign{gap:7px}
+  #tghsign svg{width:14px;height:14px}
+  .cloudadv{margin:12px 0 4px}
+  .cloudadv summary{cursor:pointer;font-size:12.5px;color:var(--muted-foreground)}
+  .cloudadv[open] summary{margin-bottom:8px}
   .planquiet{display:flex;align-items:center;gap:7px;margin:6px 0 12px;font-size:12.5px;color:var(--muted-foreground)}
   .planquiet svg{width:13px;height:13px}
   /* ── the composer ── */
@@ -3780,6 +3791,19 @@ ${BRAND_SPRITE}
    * Resolves true or false. A page that installed its own window.confirm (an
    * embedder, a test harness) is honoured as-is.
    */
+  /**
+   * Say what's wrong inside the dialog that's wrong, beside its buttons — a
+   * toast lands behind the dialog, at the bottom of the window, where nobody
+   * is looking while they fill a form in. Empty message clears it.
+   */
+  function modalErr(root, msg, focusEl){
+    if (!root) return;
+    var foot = root.querySelector(".modalfoot"); if (!foot) { if (msg) toast(msg); return; }
+    var e = foot.querySelector(".mferr");
+    if (!e) { e = document.createElement("span"); e.className = "mferr"; e.setAttribute("role", "alert"); foot.insertBefore(e, foot.firstChild); }
+    e.textContent = msg || "";
+    if (msg && focusEl && focusEl.focus) focusEl.focus();
+  }
   function askConfirm(message, opts){
     opts = opts || {};
     try {
@@ -7396,14 +7420,22 @@ ${BRAND_SPRITE}
             .then(function(rr){ toast(rr.imported ? "imported " + rr.imported + " source(s)" : "already current"); refreshBrain(); })
             .catch(function(err){ toast(err.message); });
         };
+        // Add is live only when there's something to add — an Add that did
+        // nothing on an empty box looked broken.
+        var decBtn = document.querySelector("#decform button[type=submit]");
+        var decBox = document.getElementById("decbox");
+        var decSync = function(){ if (decBtn) decBtn.disabled = !(decBox.value || "").trim(); };
+        decBox.addEventListener("input", decSync); decSync();
         document.getElementById("decform").onsubmit = function(ev){
           ev.preventDefault();
-          var box = document.getElementById("decbox");
+          var box = decBox;
           var text = (box.value || "").trim();
-          if (!text) return;
+          if (!text || (decBtn && decBtn.getAttribute("data-busy"))) return;
+          if (decBtn) { decBtn.setAttribute("data-busy", "1"); decBtn.disabled = true; }
           api("/api/projects/" + pid + "/decisions", { method: "POST", body: JSON.stringify({ text: text }) })
-            .then(function(){ box.value = ""; refreshBrain(); })
-            .catch(function(err){ toast(err.message); });
+            .then(function(){ box.value = ""; toast("saved to memory"); refreshBrain(); })
+            .catch(function(err){ toast(err.message); })
+            .then(function(){ if (decBtn) decBtn.removeAttribute("data-busy"); decSync(); });
         };
       }).catch(function(err){ toast(err.message); });
     }
@@ -8032,11 +8064,11 @@ ${BRAND_SPRITE}
         var teamId = document.getElementById("lteam").value;
         var title = (document.getElementById("ltitle").value || "").trim();
         var desc = (document.getElementById("ldesc").value || "").trim();
-        if (!title) return toast("give the issue a title");
+        if (!title) return modalErr(scrim, "Give the issue a title.", document.getElementById("ltitle"));
         var btn = this; btn.disabled = true;
         api("/api/projects/" + pid + "/linear/issues", { method: "POST", body: JSON.stringify({ teamId: teamId, title: title, description: desc }) })
           .then(function(r){ close(); toast("created " + (r.issue ? r.issue.identifier : "issue")); loadLinear(); })
-          .catch(function(err){ btn.disabled = false; toast(err.message); });
+          .catch(function(err){ btn.disabled = false; modalErr(scrim, err.message); });
       };
     }
 
@@ -8994,8 +9026,12 @@ ${BRAND_SPRITE}
       // Returned, so a caller that changed the roster can wait for the answer
       // before redrawing off it.
       return api("/api/projects/" + pid).then(function(j){
+        var first = !state.project || !state.project.agents;
         state.project = j.project;
+        // the empty thread drew before the project arrived ("Ready in this
+        // project", no agent) — draw it again now that it knows both
         drawStatus();
+        if (first) { var h = document.getElementById("threadempty"); if (h) { h.remove(); drawEmpty(); } }
       }).catch(function(err){ toast(err.message); });
     }
 
@@ -14724,7 +14760,8 @@ ${BRAND_SPRITE}
     var pid = prefillPid || state.pid || projects[0].id;
     var picked = (prefillAgents || []).slice();
     function proj(id){ for (var i = 0; i < projects.length; i++) if (projects[i].id === id) return projects[i]; return null; }
-    function agentsFor(id){ var p = proj(id); return p ? p.agents.filter(function(a){ return a.tier === "adapter"; }) : []; }
+    // switched-off agents can't take a task, so they aren't offered one
+    function agentsFor(id){ var p = proj(id); return p ? p.agents.filter(function(a){ return a.tier === "adapter" && a.enabled !== false; }) : []; }
     function routesFor(id){ var p = proj(id); return (p && p.routeNames) || ["auto"]; }
     function projOpts(){ return projects.map(function(p){ return '<option value="' + esc(p.id) + '"' + (p.id === pid ? " selected" : "") + ">" + esc(p.name) + "</option>"; }).join(""); }
     function routeOpts(id){ return '<option value="">\\u2014 use the agents above \\u2014</option>' + routesFor(id).map(function(n){ return '<option value="' + esc(n) + '">' + esc(n === "auto" ? "auto \\u2014 LLM picks each hop" : n) + "</option>"; }).join(""); }
@@ -14779,8 +14816,8 @@ ${BRAND_SPRITE}
       if (hint) hint.textContent = picked.length > 1
         ? "runs as a pipeline: " + picked.join(" \\u2192 ")
         : picked.length === 1
-          ? "one ADE runs the whole task"
-          : "pick one ADE \\u2014 or several to run them in order";
+          ? "one agent runs the whole task"
+          : "pick one agent \\u2014 or several to run them in order";
     }
     // The roles you can hand out. Only the first three carry distinct prompt
     // behaviour today (plan / execute / review); the rest are honest labels the
@@ -14840,9 +14877,13 @@ ${BRAND_SPRITE}
       var mproj = document.getElementById("mproj").value;
       var task = (document.getElementById("mtask").value || "").trim();
       var pipeline = document.getElementById("mroute").value;
-      if (!task) return toast("describe the task first");
-      if (!pipeline && !picked.length) return toast("pick at least one agent");
-      var btn = document.getElementById("mcreate"); btn.disabled = true;
+      if (!task) return modalErr(scrim, "Describe the task first.", document.getElementById("mtask"));
+      if (!pipeline && !picked.length) return modalErr(scrim, "Pick at least one agent.");
+      modalErr(scrim, "");
+      var btn = document.getElementById("mcreate");
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var btnWas = btn.innerHTML; btn.textContent = "Starting\\u2026";
       var work, note;
       // The spec carries each step's assigned role, so a route can say "this one
       // plans, that one executes" without touching either agent's own role.
@@ -14881,7 +14922,7 @@ ${BRAND_SPRITE}
         toast(note);
         if (state.selectProject) state.selectProject(mproj);
         else location.hash = "#p/" + mproj;
-      }).catch(function(err){ btn.disabled = false; toast(err.message); });
+      }).catch(function(err){ btn.disabled = false; btn.innerHTML = btnWas; modalErr(scrim, err.message); });
     }
     document.getElementById("mcreate").onclick = create;
     function onKey(e){
@@ -14957,7 +14998,7 @@ ${BRAND_SPRITE}
 
     function create(alsoStart){
       var title = (document.getElementById("bmtitle").value || "").trim();
-      if (!title) return toast("what needs doing?");
+      if (!title) return modalErr(document.querySelector(".scrim"), "Say what needs doing.", document.getElementById("bmtitle"));
       var col = document.getElementById("bmcol").value;
       // starting it means an agent is on it now, so the card belongs in Working
       var body = { title: title, column: alsoStart ? "working" : col };
@@ -15334,31 +15375,54 @@ ${BRAND_SPRITE}
     }
     function revokeDevice(id){
       var me = id === state.clientId;
-      if (!window.confirm(me ? "Revoke THIS device? You\\u2019ll be signed out and have to pair again."
-        : "Revoke this device? Its token stops working immediately.")) return;
-      sapi("/api/pair/clients/" + encodeURIComponent(id), { method: "DELETE" }).then(function(){
-        if (me) { close(); logout(); return; }
-        toast("device revoked");
-        renderDevices();
-      }).catch(function(e){ toast(e.message); });
+      askConfirm(me ? "Revoke THIS device? You\\u2019ll be signed out and have to pair again."
+        : "Revoke this device? Its token stops working immediately.", { ok: "Revoke", danger: true }).then(function(ok){
+        if (!ok) return;
+        sapi("/api/pair/clients/" + encodeURIComponent(id), { method: "DELETE" }).then(function(){
+          if (me) { close(); logout(); return; }
+          toast("device revoked");
+          renderDevices();
+        }).catch(function(e){ toast(e.message); });
+      });
+    }
+    // Unused: not seen for 30 days, or never used a week after pairing. Every
+    // re-pair mints a new entry, so these pile up; never this device.
+    var DAY = 24 * 3600 * 1000;
+    function isStale(c){
+      if (c.id === state.clientId) return false;
+      if (c.lastSeen) return Date.now() - c.lastSeen > 30 * DAY;
+      return Date.now() - Number(c.createdAt || 0) > 7 * DAY;
+    }
+    function removeStale(list){
+      askConfirm("Remove " + list.length + " unused device" + (list.length === 1 ? "" : "s") + "?\\n\\nTheir tokens stop working. Anything you still use can pair again in a minute.", { ok: "Remove them", danger: true })
+        .then(function(ok){
+          if (!ok) return;
+          return Promise.all(list.map(function(c){ return sapi("/api/pair/clients/" + encodeURIComponent(c.id), { method: "DELETE" }).catch(function(){ return null; }); }))
+            .then(function(){ toast("removed " + list.length + " unused device" + (list.length === 1 ? "" : "s")); renderDevices(); });
+        });
     }
     function renderDevices(){
       busy();
       sapi("/api/pair/clients").then(function(d){
-        var clients = d.clients || [];
+        var clients = (d.clients || []).slice().sort(function(a, b){
+          return (Number(b.lastSeen) || Number(b.createdAt) || 0) - (Number(a.lastSeen) || Number(a.createdAt) || 0);
+        });
+        var stale = clients.filter(isStale);
         var h = '<div class="setphead">Devices</div>' +
           '<div class="setpsub">Every client paired to this Loom. Revoke one and its token stops working at once.</div>';
-        h += '<div class="pillrow"><button class="btn primary sm" id="devpair">Pair a new device</button></div><div id="devpairout"></div>';
+        h += '<div class="pillrow"><button class="btn primary sm" id="devpair">Pair a new device</button>' +
+          (stale.length ? '<button class="btn ghost sm" id="devstale">Remove ' + stale.length + " unused</button>" : "") + '</div><div id="devpairout"></div>';
         if (!clients.length) h += '<div class="snote">No devices paired yet.</div>';
         clients.forEach(function(c){
           var me = c.id === state.clientId;
-          h += '<div class="dev"><div class="di">' + ICONS.agents + "</div>" +
+          h += '<div class="dev' + (isStale(c) ? " stale" : "") + '"><div class="di">' + ICONS.agents + "</div>" +
             '<div class="dn"><div class="dnt">' + esc(c.name || "device") + (me ? ' <span class="devme">this device</span>' : "") + "</div>" +
-            '<div class="dnd">paired ' + rel(c.createdAt) + (c.push ? " \\u00b7 push on" : "") + "</div></div>" +
+            '<div class="dnd">' + (c.lastSeen ? "last used " + rel(c.lastSeen) : "not used since pairing") + " \\u00b7 paired " + rel(c.createdAt) + (c.push ? " \\u00b7 push on" : "") + "</div></div>" +
             '<button class="btn ghost sm" data-revoke="' + esc(c.id) + '">Revoke</button></div>';
         });
         pane.innerHTML = h;
         document.getElementById("devpair").onclick = pairNewDevice;
+        var ds = document.getElementById("devstale"); if (ds) ds.onclick = function(){ removeStale(stale); };
         Array.prototype.forEach.call(pane.querySelectorAll("[data-revoke]"), function(b){
           b.onclick = function(){ revokeDevice(b.getAttribute("data-revoke")); };
         });
@@ -15391,13 +15455,16 @@ ${BRAND_SPRITE}
           "<dt>Frames</dt><dd>" + Number(c.stats.frames || 0) + "</dd>" +
           "<dt>Rejected</dt><dd>" + Number(c.stats.rejected || 0) + "</dd></dl>";
       }
-      h += '<div class="sgrouph">Supabase project</div>';
+      // Loom's own relay project is the default, so there's nothing to fill
+      // in; your own Supabase project is an option, not a prerequisite.
+      var own = !!(c.supabaseUrl && c.supabaseUrl !== c.hostedUrl && c.hostedUrl);
+      h += '<details class="cloudadv"' + (own ? " open" : "") + '><summary>Use your own Supabase project\u2026</summary>';
       h += '<div class="cloudin">' +
         '<div class="field"><label for="cloudurl">Supabase URL</label>' +
         '<input id="cloudurl" placeholder="https://your-project.supabase.co" autocomplete="off" spellcheck="false" value="' + esc(c.supabaseUrl || "") + '"></div>' +
         '<div class="field"><label for="cloudkey">Anon key <span class="opt">' + (c.configured ? "\\u2014 blank keeps the saved one" : "") + "</span></label>" +
         '<input id="cloudkey" type="password" placeholder="' + (c.configured ? "\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022 saved" : "eyJhbGciOi\\u2026") + '" autocomplete="off" spellcheck="false"></div>' +
-        "</div>";
+        "</div></details>";
       h += '<div class="pillrow">' +
         '<button class="btn primary sm" id="cloudon">' + (c.enabled ? "Save & reconnect" : "Enable") + "</button>" +
         (c.enabled ? '<button class="btn ghost sm" id="cloudoff">Disable</button>' : "") +
@@ -15606,7 +15673,12 @@ ${BRAND_SPRITE}
       if (t.signedIn) h += runnerPanelHtml();
       // your teams first; then making or joining another
       if (!t.signedIn) {
-        h += '<div class="sgrouph">Sign in to a hub</div><div class="cloudin">' +
+        // The hosted hub first: one button, your GitHub account. The form
+        // below is for teams running their own loom hub.
+        h += '<div class="sgrouph">Sign in</div>' +
+          '<div class="pillrow"><button class="btn primary sm" type="button" id="tghsign">' + ICONS.github + "Sign in with GitHub</button>" +
+          '<span class="hintx" id="tghnote">Uses the hosted Loom Team Hub. Only titles you share are sent, encrypted.</span></div>' +
+          '<div class="sgrouph">Or use your own hub</div><div class="cloudin">' +
           teamField("Hub URL", "hub", 'class="mono" placeholder="https://hub.example.com"') +
           teamField('GitHub login <span class="opt">\\u2014 blank uses the gh CLI\\u2019s</span>', "cgh", 'placeholder="your GitHub username"') +
           teamField('Join secret <span class="opt">if the hub has one</span>', "csec", 'type="password"') + "</div>" +
@@ -15621,6 +15693,35 @@ ${BRAND_SPRITE}
         '<div class="pillrow"><button class="btn outline sm" type="button" data-tjoin>Join team</button>' +
         '<span class="hintx">' + (t.signedIn ? "The link names its hub; you join as " + esc(t.github) + "." : "Signs in to the link\\u2019s hub with the login and secret above.") + "</span></div>";
       pane.innerHTML = h;
+      var ghb = document.getElementById("tghsign");
+      if (ghb) ghb.onclick = function(){
+        var note = document.getElementById("tghnote");
+        ghb.disabled = true;
+        // Open the tab now, inside the click: a window opened after the
+        // request comes back is a popup, and browsers block it silently.
+        // (The desktop app hands every outside link to your real browser and
+        // blocks nothing, so there it opens the URL itself once it has it.)
+        var electron = isElectron();
+        var win = null;
+        if (!electron) { try { win = window.open("about:blank", "_blank"); } catch (e) { win = null; } }
+        sapi("/api/team/hosted-signin", { method: "POST", body: "{}" }).then(function(j){
+          if (j && j.url) {
+            if (electron) window.open(j.url, "_blank");
+            else if (win && !win.closed) { try { win.opener = null; } catch (e) {} win.location.href = j.url; }
+            else if (note) { note.innerHTML = 'Your browser blocked the sign-in window \u2014 <a href="' + esc(j.url) + '" target="_blank" rel="noopener">open it here</a>.'; return; }
+          }
+          if (note) note.textContent = "Finish signing in with GitHub in the browser tab that opened \u2014 this page updates on its own.";
+          // wait for the session to land (the daemon holds the callback)
+          var tries = 0;
+          var iv = setInterval(function(){
+            if (++tries > 300 || !document.getElementById("tghsign")) { clearInterval(iv); return; }
+            sapi("/api/team/hosted-signin").then(function(st){
+              if (st && st.error) { clearInterval(iv); ghb.disabled = false; if (note) note.textContent = "Sign-in didn\u2019t finish: " + st.error; return; }
+              return sapi("/api/team").then(function(tt){ if (tt && tt.signedIn) { clearInterval(iv); state.team = tt; toast("signed in as " + (tt.github || "you")); renderTeam(); } });
+            }).catch(function(){});
+          }, 2000);
+        }).catch(function(e){ if (win && !win.closed) win.close(); ghb.disabled = false; if (note) note.textContent = e.message; });
+      };
       wireTeamForms(pane, teamSact);
       wireTeamInvites(pane, teamSact);
       wireDoctor();
@@ -15814,6 +15915,7 @@ ${BRAND_SPRITE}
           '<div class="pickrow"><input id="pdir" spellcheck="false" autocomplete="off" placeholder="' +
             (native ? "choose a folder\\u2026" : "/path/to/repo on the daemon host") + '">' +
             (native ? '<button class="btn outline" id="pbrowse">Choose\\u2026</button>' : "") + "</div>" +
+          '<span class="ferr" id="perr" role="alert"></span>' +
           '<span class="hintx">Loom writes a <code>.loom/</code> folder here and leaves the rest of the repo alone.</span></div>' +
         '<div class="field"><label>Name <span class="opt">optional</span></label>' +
           '<input id="pname" spellcheck="false" autocomplete="off" placeholder="defaults to the folder name"></div>' +
@@ -15836,11 +15938,22 @@ ${BRAND_SPRITE}
       }).catch(function(err){ toast(String(err.message || err)); });
     };
     setTimeout(function(){ dirEl.focus(); }, 30);
+    // Errors belong under the field they're about, not in a toast behind the
+    // dialog where your eyes aren't.
+    function fieldErr(msg){
+      var e = document.getElementById("perr"); if (e) e.textContent = msg || "";
+      dirEl.classList.toggle("bad", !!msg);
+      if (msg) dirEl.focus();
+    }
+    dirEl.addEventListener("input", function(){ fieldErr(""); });
     function create(){
       var dir = (dirEl.value || "").trim();
-      if (!dir) return toast(native ? "choose a folder first" : "enter a directory path");
+      if (!dir) return fieldErr(native ? "Choose a folder first." : "Enter the path to a folder on this machine.");
       var name = (document.getElementById("pname").value || "").trim();
-      var btn = document.getElementById("pcreate"); btn.disabled = true;
+      var btn = document.getElementById("pcreate");
+      if (btn.disabled) return; // a double-click is one project, not two requests
+      btn.disabled = true;
+      var was = btn.innerHTML; btn.textContent = "Creating\u2026";
       api("/api/projects", {
         method: "POST",
         body: JSON.stringify(name ? { dir: dir, name: name } : { dir: dir }),
@@ -15848,18 +15961,21 @@ ${BRAND_SPRITE}
         close();
         var p = j.project || {};
         // say what was actually detected rather than a bare "added"
-        var found = ((j.config && j.config.agents) || []).filter(function(a){ return a.tier === "adapter"; });
+        // (The config carries kinds, not tiers — filtering on tier counted
+        // zero and told you no agents were found beside a roster of five.)
+        var found = (j.config && j.config.agents) || [];
         toast(found.length
-          ? p.name + " \\u00b7 " + found.length + (found.length === 1 ? " ADE" : " ADEs") + ": " + found.map(function(a){ return a.id; }).join(", ")
-          : p.name + " added \\u00b7 no ADE CLIs detected on this host");
+          ? p.name + " added \\u00b7 " + found.length + " agent" + (found.length === 1 ? "" : "s") + ": " + found.map(function(a){ return agentLabel(a.kind, a.id); }).join(", ")
+          : p.name + " added \\u00b7 no agent CLIs found on this machine \\u2014 install one, or add a model agent");
         if (state.refreshProjects) state.refreshProjects();
         if (p.id) { if (state.selectProject) state.selectProject(p.id); else location.hash = "#p/" + p.id; }
-      }).catch(function(err){ btn.disabled = false; toast(err.message); });
+      }).catch(function(err){ btn.disabled = false; btn.innerHTML = was; fieldErr(String(err.message || err).replace(/^./, function(c){ return c.toUpperCase(); })); });
     }
     document.getElementById("pcreate").onclick = create;
     function onKey(e){
       if (e.key === "Escape") { e.preventDefault(); close(); }
-      else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); create(); }
+      // Enter in a one-line field submits, as it does everywhere else
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.target === dirEl || (e.target && e.target.id === "pname"))) { e.preventDefault(); create(); }
     }
     document.addEventListener("keydown", onKey);
   }

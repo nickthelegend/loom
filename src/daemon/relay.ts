@@ -13,6 +13,7 @@
  * every future endpoint behave identically over the relay and over the LAN.
  */
 
+import { hostedTarget } from "../core/hosted.js";
 import fs from "node:fs";
 import path from "node:path";
 import WebSocket from "ws";
@@ -63,8 +64,13 @@ export function writeCloudSettings(s: CloudSettings): void {
 
 /** The Supabase project in effect: env first, then saved settings. */
 export function supabaseTarget(s: CloudSettings = readCloudSettings()): { url: string; anonKey: string } | null {
-  const url = process.env.LOOM_SUPABASE_URL || s.supabaseUrl || "";
-  const anonKey = process.env.LOOM_SUPABASE_ANON_KEY || s.anonKey || "";
+  // Your own project when you've named one; otherwise Loom's hosted project —
+  // the same one the Team Hub uses. Asking every user to paste a Supabase URL
+  // and key before "reach this computer from your phone" works made the one
+  // switch a setup chore. The relay only ever carries ciphertext either way.
+  const hosted = hostedTarget();
+  const url = process.env.LOOM_SUPABASE_URL || s.supabaseUrl || hosted.supabaseUrl || "";
+  const anonKey = process.env.LOOM_SUPABASE_ANON_KEY || s.anonKey || (url === hosted.supabaseUrl ? hosted.publishableKey : "") || "";
   return url && anonKey ? { url, anonKey } : null;
 }
 
