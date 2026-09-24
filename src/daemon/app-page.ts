@@ -9756,7 +9756,16 @@ ${BRAND_SPRITE}
       drawEmpty();
       if (added) { markDays(); markSeen(); }
       if (added) stickOrFlag(wasNear);
+      // A day-long live session piles thousands of nodes into one page. Once
+      // it's that big and you're reading the newest part, start again from the
+      // newest page — Load earlier still reaches everything, and a reply being
+      // written carries on from the snapshot.
+      if (added && historyLoaded && !trimQueued && feed.childElementCount > 1200 && nearBottom()) {
+        trimQueued = true;
+        setTimeout(function(){ if (!pageGone()) loadHistory().then(function(){ trimQueued = false; }, function(){ trimQueued = false; }); }, 0);
+      }
     }
+    var trimQueued = false;
     /** What this device has read in this chat — the sidebar's unread dots. */
     function markSeen(){
       var m = {};
