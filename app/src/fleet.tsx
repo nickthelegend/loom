@@ -15,6 +15,7 @@ import { AgentIcon, agentLabel } from "./agents";
 import { ApprovalBanner, ApprovalsSheet } from "./approvals";
 import { ConnectionBadge } from "./brand";
 import { Empty, SectionLabel, TAP, Unreachable, dur } from "./components";
+import { plainText } from "./markdown-model";
 import { PermissionTag } from "./permissions";
 import { TeamSection } from "./team";
 import { T, radii, spacing } from "./theme";
@@ -73,7 +74,7 @@ function AgentRow(props: { a: ActivityAgent; now: number; onPress: () => void })
         </Text>
         {a.last?.line ? (
           <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono, lineHeight: 17 }} numberOfLines={2}>
-            {a.last.line}
+            {plainText(a.last.line)}
           </Text>
         ) : null}
       </View>

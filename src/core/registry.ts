@@ -246,6 +246,8 @@ export interface PairedClient {
   name: string;
   token: string;
   createdAt: number;
+  /** When this device last made a request (written at most every 10 min). */
+  lastSeen?: number;
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
   platform?: string;

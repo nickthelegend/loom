@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import type { LoomEvent, TaskItem } from "./api";
+import type { LiveMap } from "./live-model";
+import { Markdown } from "./markdown";
 import { T, hue, radii, selvage, spacing } from "./theme";
 
 /** The one text-input style the whole app uses. */
@@ -354,6 +356,49 @@ export function DiffView(props: { patch: string; maxHeight?: number }) {
   );
 }
 
+/**
+ * Replies being typed right now, under the thread: the agent's words as they
+ * arrive (or "thinking" before the first), until the finished message lands
+ * in the list and takes their place.
+ */
+export function LiveReplies(props: { live: LiveMap }) {
+  const ids = Object.keys(props.live).filter((id) => props.live[id]!.text || props.live[id]!.thinking);
+  if (!ids.length) return null;
+  return (
+    <View>
+      {ids.map((id) => {
+        const l = props.live[id]!;
+        return (
+          <View key={id} style={{ alignItems: "flex-start", marginVertical: 5 }}>
+            <Text style={{ color: hue(id), fontSize: 11, fontFamily: T.mono, marginBottom: 3, marginHorizontal: 4, letterSpacing: 0.4 }}>
+              {id}
+              <Text style={{ color: T.faint }}>{l.text ? "  writing…" : "  thinking…"}</Text>
+            </Text>
+            {!!l.text && (
+              <View
+                style={{
+                  maxWidth: "88%",
+                  backgroundColor: T.panel,
+                  borderColor: T.line,
+                  borderWidth: 1,
+                  borderLeftWidth: 2,
+                  borderLeftColor: selvage(id),
+                  borderRadius: radii.card,
+                  borderBottomLeftRadius: 4,
+                  paddingVertical: 9,
+                  paddingHorizontal: 13,
+                }}
+              >
+                <Markdown text={l.text + " ▍"} />
+              </View>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 /** One event in the thread. turn_diff renders as an expandable change card. */
 export function EventLine(props: { e: LoomEvent }) {
   const { e } = props;
@@ -398,9 +443,14 @@ export function EventLine(props: { e: LoomEvent }) {
             paddingHorizontal: 13,
           }}
         >
-          <Text style={{ color: T.text, fontSize: 14, lineHeight: 21 }}>
-            {String(p.text ?? "")}
-          </Text>
+          {mine ? (
+            <Text style={{ color: T.text, fontSize: 14, lineHeight: 21 }}>{String(p.text ?? "")}</Text>
+          ) : (
+            <Markdown text={String(p.text ?? "")} />
+          )}
+          {p.partial === true && (
+            <Text style={{ color: T.faint, fontSize: 11, marginTop: 6 }}>stopped — this is what it had written</Text>
+          )}
         </View>
       </View>
     );

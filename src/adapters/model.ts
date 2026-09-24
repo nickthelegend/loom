@@ -50,6 +50,7 @@ import {
   modelsUrl,
   requestHeaders,
   resolveProvider,
+  specFor,
   type ResolvedProvider,
 } from "../core/providers.js";
 import { AdapterBase } from "./base.js";
@@ -101,6 +102,28 @@ export interface ModelAdapterOptions {
   loomProject?: string;
 }
 
+/**
+ * "openrouter/google/gemma-4-31b-it:free" → provider "openrouter", model
+ * "google/gemma-4-31b-it:free".
+ *
+ * The model pickers list every provider's models in one list, so each id there
+ * carries its provider in front. Stored as-is, that whole string went to the
+ * provider as the model name — which no provider has — and the agent reported
+ * itself unavailable. Only a prefix that IS a provider is split off: model
+ * ids have slashes of their own ("google/…"), and those stay.
+ */
+export function splitQualifiedModel<T extends { model?: string; provider?: string }>(opts: T): T {
+  const m = opts.model?.trim();
+  if (!m || opts.provider) return opts;
+  const cut = m.indexOf("/");
+  if (cut <= 0) return opts;
+  const head = m.slice(0, cut).toLowerCase();
+  // "openai/…" is also how OpenRouter names OpenAI's models, so a bare
+  // "openai/gpt-4o" means that model on the default provider — never split it.
+  if (head === "openai" || !specFor(head)) return opts;
+  return { ...opts, provider: head, model: m.slice(cut + 1) };
+}
+
 const DEFAULT_HISTORY = 24;
 const DEFAULT_MAX_TOKENS = 4096;
 
@@ -113,7 +136,7 @@ export class ModelAdapter extends AdapterBase {
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "model", projectDir);
-    this.opts = options as ModelAdapterOptions;
+    this.opts = splitQualifiedModel(options as ModelAdapterOptions);
   }
 
   private provider(): ResolvedProvider | null {
@@ -438,20 +461,19 @@ export class ModelAdapter extends AdapterBase {
     const decoder = new TextDecoder();
     let buffer = "";
     let text = "";
-    let pending = "";
+    let thought = "";
     let usage: Record<string, number> | undefined;
     // Tool calls stream in pieces too: the name arrives once, the arguments
     // in fragments, keyed by index.
     const partial = new Map<number, { id: string; name: string; args: string }>();
 
-    // Emit on sentence-ish boundaries rather than per token: one event per
-    // token would be a few hundred rows in the log for one paragraph.
-    const flush = (force = false) => {
-      if (!pending) return;
-      if (!force && pending.length < 80 && !/[.!?\n]\s*$/.test(pending)) return;
-      this.emit({ kind: "message", payload: { text: pending, model } });
-      text += pending;
-      pending = "";
+    // Every token goes to the live view as it lands; the log gets the reply
+    // once, whole. It used to log a message per sentence, which read in the
+    // thread as a reply chopped into a stack of separate bubbles.
+    const flush = () => {
+      if (thought.trim()) this.emit({ kind: "message", payload: { text: thought, reasoning: true, model } });
+      if (text.trim()) this.emit({ kind: "message", payload: { text, model } });
+      thought = "";
     };
 
     try {
@@ -484,18 +506,19 @@ export class ModelAdapter extends AdapterBase {
           } catch {
             continue; // a partial frame; the next chunk completes it
           }
-          if (frame.error?.message) return { text, calls: [], error: frame.error.message };
+          if (frame.error?.message) {
+            flush();
+            return { text, calls: [], error: frame.error.message };
+          }
           if (frame.usage) usage = frame.usage;
           const delta = frame.choices?.[0]?.delta;
           if (delta?.reasoning_content) {
-            this.emit({
-              kind: "message",
-              payload: { text: delta.reasoning_content, reasoning: true, model },
-            });
+            thought += delta.reasoning_content;
+            this.streamText(delta.reasoning_content, true);
           }
           if (delta?.content) {
-            pending += delta.content;
-            flush();
+            text += delta.content;
+            this.streamText(delta.content);
           }
           for (const tc of delta?.tool_calls ?? []) {
             const at = tc.index ?? 0;
@@ -509,11 +532,11 @@ export class ModelAdapter extends AdapterBase {
         }
       }
     } catch (err) {
-      flush(true);
+      flush();
       if (this.interrupted) return { text, calls: [] };
       return { text, calls: [], error: `the stream broke: ${String((err as Error).message)}` };
     }
-    flush(true);
+    flush();
     // Arguments that don't parse are a call we can't honestly run, so it is
     // dropped rather than guessed at — the model gets no result for it and
     // says what it can.

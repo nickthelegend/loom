@@ -476,8 +476,9 @@ describe("web app · board task modal", () => {
     await waitUntil(() => !!$(m, "#bmtitle"));
 
     click($(m, "#bmcreate"));
-    await waitUntil(() => !!$(m, "#toast.show"));
-    expect(text(m, "#toast")).toContain("what needs doing");
+    // said inside the dialog, beside its buttons — not in a toast behind it
+    await waitUntil(() => text(m, ".scrim .mferr").length > 0);
+    expect(text(m, ".scrim .mferr")).toContain("what needs doing");
     expect($(m, ".scrim")).toBeTruthy(); // still open, nothing created
     expect(m.errors.join("\n")).toBe("");
   });

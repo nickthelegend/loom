@@ -91,6 +91,35 @@ describe("claude-code · a normal turn", () => {
     expect(of(events, "status")[1]).toMatchObject({ state: "turn_cost", costUsd: 0.0421 });
   });
 
+  it("asks for partial messages, and types the reply out live — its own, not a sub-agent's", async () => {
+    // the real --include-partial-messages shape (claude 2.1.276)
+    const DELTA = (kind: "text_delta" | "thinking_delta", s: string, parent: string | null = null) =>
+      JSON.stringify({
+        type: "stream_event",
+        parent_tool_use_id: parent,
+        event: { type: "content_block_delta", index: 0, delta: kind === "text_delta" ? { type: kind, text: s } : { type: kind, thinking: s } },
+      });
+    const bin = fakeClaude([
+      INIT("sess-live"),
+      DELTA("thinking_delta", "let me see"),
+      DELTA("text_delta", "Hel"),
+      DELTA("text_delta", "sub-agent chatter", "toolu_1"),
+      DELTA("text_delta", "lo."),
+      TEXT("Hello."),
+      RESULT(),
+    ]);
+    const agent = new ClaudeCodeAdapter("claude-code", makeProjectDir({ name: "cc" }), { bin });
+    const live: Array<{ text: string; reasoning?: boolean }> = [];
+    const events: AdapterEvent[] = [];
+    agent.onStream((d) => live.push(d));
+    agent.onEvent((e) => events.push(e));
+    await agent.send({ text: "say hello" });
+    expect(argvOf(bin)).toContain("--include-partial-messages");
+    expect(live).toEqual([{ text: "let me see", reasoning: true }, { text: "Hel" }, { text: "lo." }]);
+    // the finished message is still the record, exactly once
+    expect(of(events, "message")).toEqual([{ text: "Hello." }]);
+  });
+
   it("captures token usage from the result and rides it on run_complete", async () => {
     const { events } = await run([
       INIT("sess-t"),

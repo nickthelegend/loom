@@ -7,6 +7,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Replies you can watch being written
+
+- **The thread showed nothing between your send and the finished reply** —
+  fifteen seconds of a blank pane, then a wall of text. Nothing between an
+  adapter and the socket carried text that wasn't a finished event.
+- Replies now stream token by token: Claude Code (`--include-partial-messages`),
+  OpenCode 1.18+ (`session.next.text.delta`, which the adapter had never
+  listened for), OpenAI-compatible model agents, and every orchestra worker in
+  its own task thread. The typing is a `stream` socket frame and is **never
+  logged** — the finished message is still the record, exactly once.
+- Model agents logged a reply as a message per sentence (and a message per
+  reasoning token), which read as one answer chopped into a stack of bubbles.
+  They log it once now.
+- **Stop keeps what was written.** A turn stopped mid-reply used to throw away
+  everything you'd watched arrive; it's kept, marked *stopped*.
+- From the moment you send, the thread shows who's on it, for how long, and
+  what they're doing ("Codex · shell: npm test · 54s") instead of nothing.
+
+### A thread that reads like a document
+
+- One reading column; replies have a byline (the agent's mark, name, model and
+  time) instead of a bordered bubble; prose is Geist, mono only for code.
+- A run of tool calls folds into one line — *Ran 3 commands, read 2 files* —
+  that opens to the list.
+- Every turn ends on a footer: who, how long, which model, what it cost.
+- An orchestrator's plan is a card of tasks, agents and files, not a page of
+  JSON. An empty round says "still looking" rather than "didn't parse". A
+  task's status updates in its own row instead of adding a line per state.
+- Code blocks are syntax-highlighted with a language label; markdown tables
+  render; errors are a card with the provider's raw payload folded away.
+- The thread stays where you are when you've scrolled up to read, with a
+  **Latest** pill, instead of yanking you to the bottom on every event.
+- **Load earlier messages** pages the thread backwards (`?before=` on the
+  events API); it stopped at the last 60 events before.
+- An empty thread offers something to start with instead of a blank pane.
+
+### Picking who and on what
+
+- The agent and its model are one control in the composer. The agent picker
+  shows each agent's model and permission mode, hides switched-off agents, and
+  ticks with a check (it was the info icon).
+- The model picker has descriptions, keyboard navigation, **free models
+  first**, and fits the window (it ran off the top with Orchestrate open).
+- **Picking a model agent's model from the list broke the agent.** The list
+  leads each id with its provider (`openrouter/google/gemma…`), and that whole
+  string went to the provider as the model name. It's split now, on save and
+  for configs already saved that way.
+- A model agent with the generic id is named by its model ("gemma-4-31b-it").
+- **Ask several models** is in the composer's More menu: tick models, and
+  what's in the box goes to each, a thread apiece. It was CLI-only.
+
+### Orchestrate
+
+- The cast panel reads as Lead / Team / At once, and each worker chip has two
+  zones — include/leave out, and its model and mode — so a click on the chip
+  no longer lands on a badge and opens a menu instead.
+- The cast is remembered per project; a reload reset it to "every agent" and
+  the next run quietly used agents you'd left out.
+- Each task thread is pinned to its worker: the sidebar says who, and the
+  composer in that thread aims at that agent.
+- A finished run ends on a result card with **Apply to your branch**; a run
+  that ended before any task finished no longer offers an Apply with nothing
+  on its branch.
+- Loom's own `.loom/` state no longer counts as "uncommitted changes" in the
+  warning every run showed.
+- Fleet said "no agents running" above a run with workers in flight.
+
+### One workspace at every window size
+
+- **Narrowing the window swapped in the phone layout** and took the sidebar,
+  the tabs and the panels away. On anything with a mouse the workspace now
+  stays at every width: the sidebar slims, then slides in behind a toggle; tabs
+  go icon-only (each with a tooltip); the right panel steps aside. The single
+  column is for touch phones only.
+- Tabs say what they are: **Chat, Orchestra, Agents, Board, Memory, Insights**
+  (they were Thread, Fleet, Brain and Observatory), each with a one-line hint.
+- A turn reads as a timeline: the agent's mark, a hairline through its tool
+  steps, a node where it ends. Your prompt is the card that opens a turn;
+  code blocks have an editor header; file edits are a review card
+  ("Edited 3 files +12 −4"); a reply can be copied from its byline; the
+  composer's border lights up when you're in it and send lights up when
+  there's something to send.
+
+### And the rest
+
+- **Loom on Node older than 22.5 showed every thread empty** — no node:sqlite,
+  so it opened a fresh JSONL log beside the real one (a shell that put nvm's
+  Node 20 first after a reboot). The CLI now refuses to start on <22.5 and says
+  why, and the log refuses to open an empty fallback beside a log.db.
+
+- `loom up --restart` left the old daemon alive — its port freed, the process
+  and everything it held still running — because shutdown waited on the
+  browser's keep-alive and WebSocket connections forever. They're closed now,
+  and a stuck shutdown exits after five seconds.
+- The sidebar rebuilt itself every five seconds, dropping hover and focus under
+  the pointer; it only redraws when something changed. Older threads fold
+  behind "Show N older".
+- The everyday confirmations (abort a run, remove a project, clear the queue,
+  update Loom) are an in-app dialog; the browser's own was dismissed unseen by
+  some embedders, so Abort simply did nothing.
+- Escape closes any composer menu; the right panel opens by default only on
+  wide windows; a reload reopens the project you were in.
+- **Reload mid-reply and the reply is still there.** A thread's first page
+  carries what agents are typing in it right now, and stream frames carry their
+  offset, so a window opened mid-answer shows the whole reply so far and keeps
+  going without repeating or dropping words.
+- When the daemon stops answering, one banner says so and how to start it,
+  instead of a "Failed to fetch" toast every few seconds; it clears itself and
+  the views refresh when the daemon is back.
+- Terminals stopped stacking a "restored scrollback" divider and prompt for
+  every restart nobody typed through.
+
+### On the phone
+
+- Replies stream in live, over the LAN, the tailnet or Loom Cloud, and render
+  as markdown — code blocks, lists, bold, inline code. The orchestrator's plan
+  reads as a plan card, not a JSON dump, and the Fleet previews drop the marks.
+- The Pair screen's second button said "Paste link instead" and actually
+  submitted the fields. It now says Connect when something's typed (Enter works
+  too) and pastes from the clipboard when nothing is.
+- A thread that can't load (the route still settling, the daemon down) says so
+  and retries until it does, instead of sitting blank; "Network request failed"
+  became a sentence that says what to check.
+
 ## [1.0.1] — 2026-09-21
 
 ### Orchestra spawns its workers again

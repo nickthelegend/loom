@@ -13,6 +13,8 @@ import { MAIN_CHAT } from "../types.js";
 
 export interface ListOpts {
   since?: number; // exclusive event id
+  /** Only events older than this id (exclusive) — paging a thread backwards. */
+  before?: number;
   limit?: number;
   kinds?: EventKind[];
   /**
@@ -97,6 +99,10 @@ class SqliteStore implements EventStore {
     if (opts.since !== undefined) {
       clauses.push("id > ?");
       params.push(opts.since);
+    }
+    if (opts.before !== undefined) {
+      clauses.push("id < ?");
+      params.push(opts.before);
     }
     if (opts.kinds?.length) {
       clauses.push(`kind IN (${opts.kinds.map(() => "?").join(",")})`);
@@ -189,6 +195,7 @@ class JsonlStore implements EventStore {
   list(opts: ListOpts = {}): LoomEvent[] {
     let out = this.cache;
     if (opts.since !== undefined) out = out.filter((e) => e.id > opts.since!);
+    if (opts.before !== undefined) out = out.filter((e) => e.id < opts.before!);
     if (opts.kinds?.length) out = out.filter((e) => opts.kinds!.includes(e.kind));
     // must match SqliteStore exactly: an event with no chat is main's
     if (opts.chat !== undefined) {
@@ -229,7 +236,16 @@ export class EventLog {
         sqlite = await import("node:sqlite");
       } catch {
         // No node:sqlite in this runtime — the JSONL store is the whole point
-        // of the fallback. This is the ONLY thing it catches.
+        // of the fallback. This is the ONLY thing it catches. But not beside a
+        // log.db: an older Node (a shell that put nvm's 20 first after a
+        // reboot) opened an EMPTY jsonl log next to the real history, and the
+        // app showed every thread blank, which reads exactly like data loss.
+        if (fs.existsSync(path.join(loomDir, "log.db"))) {
+          throw new Error(
+            `this project's history is in ${path.join(loomDir, "log.db")}, which needs node:sqlite — ` +
+              `run Loom on Node 22.5 or newer (this is Node ${process.versions.node})`,
+          );
+        }
         return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")));
       }
       // Deliberately outside the catch. If node:sqlite exists but the log won't

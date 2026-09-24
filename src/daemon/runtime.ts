@@ -13,6 +13,7 @@ import type {
   AnyAgent,
   ChatInfo,
   CostSummary,
+  LiveText,
   LoomEvent,
   McpServerConfig,
   ProjectConfig,
@@ -240,6 +241,7 @@ export class ProjectRuntime {
   private proxies = new Map<string, PreviewProxy>();
   private serverListeners = new Set<(f: ServerFrame) => void>();
   private queueListeners = new Set<(s: QueueState) => void>();
+  private streamListeners = new Set<(f: LiveText) => void>();
   private draining = false;
 
   /**
@@ -257,6 +259,24 @@ export class ProjectRuntime {
     this.info = info;
     this.config = config;
     this.log = log;
+    // What each agent has typed since its last finished message, so a window
+    // opened (or reloaded) mid-reply can show the reply so far, not just the
+    // words that arrive after it. A finished message supersedes its typing;
+    // a turn's end drops it.
+    log.onEvent((e) => {
+      const s = e.agentId ? this.liveSoFar.get(e.agentId) : undefined;
+      if (!s || !e.agentId) return;
+      const p = e.payload as { reasoning?: unknown; state?: unknown };
+      if (e.kind === "message") {
+        if (p.reasoning) s.think = "";
+        else s.text = "";
+      } else if (
+        e.kind === "run_complete" || e.kind === "error" || e.kind === "needs_input" ||
+        (e.kind === "status" && (p.state === "interrupted" || p.state === "stopped"))
+      ) {
+        this.liveSoFar.delete(e.agentId);
+      }
+    });
     this.baton = new BatonManager(info.dir, log);
     if (config.brain?.semantic) {
       const index = new SemanticIndex(path.join(info.dir, ".loom"));
@@ -310,7 +330,17 @@ export class ProjectRuntime {
         return agent;
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
-      createChat: (title) => this.createChat(title),
+      // A task thread is pinned to its worker, so the sidebar says who it is
+      // and a reply there reaches that agent. A worker that can't be pinned
+      // (none can't, today — but a roster can change mid-run) still gets its
+      // thread, just unpinned.
+      createChat: (title, opts) => {
+        try {
+          return this.createChat(title, opts?.agentId ? { agentId: opts.agentId } : {});
+        } catch {
+          return this.createChat(title);
+        }
+      },
       // Asked before a run is told to answer in a thread: an id from a client
       // is a claim about this machine, and Main is real without being stored.
       chatExists: (id) => this.chats().some((c) => c.id === id),
@@ -327,6 +357,7 @@ export class ProjectRuntime {
         this.enforceBudget(agentId);
       },
       observe: (event) => this.trackCost(event),
+      stream: (f) => this.liveText(f),
       gitDelivery: () => this.config.git?.delivery ?? "none",
       goalBudgetUsd: () => this.config.budgets?.perGoalUsd ?? null,
       maxConcurrentGoals: () => this.config.maxConcurrentGoals ?? null,
@@ -1004,8 +1035,23 @@ export class ProjectRuntime {
       this.agentDir(cfg.id),
     );
     this.agents.set(cfg.id, agent);
+    // What this turn has typed since its last finished message. A turn that
+    // is stopped (or dies) mid-reply never sends that message, and the words
+    // you watched arrive would vanish — so they're kept, marked partial.
+    let typed = "";
+    agent.onStream?.((d) => {
+      if (!d.reasoning) typed += d.text;
+      this.liveText({ agentId: agent.id, chat: this.turnChat.get(agent.id) ?? MAIN_CHAT, ...d });
+    });
     agent.onEvent((e) => {
       const chat = this.turnChat.get(agent.id);
+      const ep = e.payload as Record<string, unknown>;
+      if (e.kind === "message" && !ep.reasoning) typed = "";
+      const ending = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && ep.state === "interrupted");
+      if (ending && typed.trim()) {
+        this.log.append({ kind: "message", agentId: agent.id, ...(chat ? { chat } : {}), payload: { text: typed, partial: true } });
+        typed = "";
+      } else if (ending) typed = "";
       let payload = e.payload;
       // Enrich the completed turn so its gen_ai span carries system + model +
       // cost (adapters only put tokens on run_complete). The kind is known
@@ -1094,17 +1140,21 @@ export class ProjectRuntime {
    * An empty model clears the override, so the CLI falls back to its own default
    * — the honest "Default" the picker offers.
    */
-  setAgentModel(agentId: string, model: string): AgentConfig {
+  setAgentModel(agentId: string, model: string, provider?: string): AgentConfig {
     const cfg = this.config.agents.find((a) => a.id === agentId);
     if (!cfg) throw new Error(`unknown agent "${agentId}"`);
     const live = this.agents.get(agentId);
     if (live && isAdapter(live) && live.busy()) {
       throw new Error(`"${agentId}" is mid-turn — wait for it to finish, then switch models`);
     }
-    const next = model.trim().slice(0, 80);
+    // OpenRouter ids run long ("provider/family-size-variant:free"); 80 cut
+    // real ones off mid-name.
+    const next = model.trim().slice(0, 200);
     const options = { ...(cfg.options ?? {}) } as Record<string, unknown>;
     if (next) options.model = next;
     else delete options.model;
+    // A model agent's pick names its provider too (the list spans them all).
+    if (cfg.kind === "model" && provider?.trim()) options.provider = provider.trim().toLowerCase();
     cfg.options = options;
 
     // Rebuild so the new model actually takes: stop the old process, spawn a
@@ -1561,9 +1611,14 @@ export class ProjectRuntime {
       const agent = new ModelAdapter(agentId, this.info.dir, { provider, model: pick.model });
       // Its events land in the log tagged with its own thread, exactly as a
       // roster agent's do — which is what makes the answers readable later.
-      const off = agent.onEvent((e) => {
+      const offLive = agent.onStream((d) => this.liveText({ agentId, chat: chat.id, ...d }));
+      const offLog = agent.onEvent((e) => {
         this.appendIfOpen({ ...e, agentId, chat: chat.id });
       });
+      const off = () => {
+        offLive();
+        offLog();
+      };
       void agent
         .send({ text, ...(brief ? { briefing: brief } : {}) })
         .catch((err) => {
@@ -2485,6 +2540,44 @@ export class ProjectRuntime {
   onQueueChange(cb: (q: QueueState) => void): () => void {
     this.queueListeners.add(cb);
     return () => this.queueListeners.delete(cb);
+  }
+
+  /** Replies as they're written, for the socket. Returns unsubscribe. */
+  onStream(cb: (f: LiveText) => void): () => void {
+    this.streamListeners.add(cb);
+    return () => this.streamListeners.delete(cb);
+  }
+
+  /** The replies being typed right now in one thread (or all of them). */
+  liveNow(chat?: string): { agentId: string; chat: string; text: string; think: string }[] {
+    const out: { agentId: string; chat: string; text: string; think: string }[] = [];
+    for (const [agentId, s] of this.liveSoFar) {
+      if (chat !== undefined && s.chat !== chat) continue;
+      if (s.text || s.think) out.push({ agentId, ...s });
+    }
+    return out;
+  }
+
+  private liveSoFar = new Map<string, { chat: string; text: string; think: string }>();
+
+  private liveText(f: LiveText): void {
+    if (this.closed) return;
+    let s = this.liveSoFar.get(f.agentId);
+    if (!s || s.chat !== f.chat) this.liveSoFar.set(f.agentId, (s = { chat: f.chat, text: "", think: "" }));
+    const off = f.reasoning ? s.think.length : s.text.length;
+    if (f.reasoning) s.think += f.text;
+    else s.text += f.text;
+    // a runaway reply can't grow the buffer without bound
+    if (s.text.length > 400_000) s.text = "";
+    if (s.think.length > 400_000) s.think = "";
+    const framed: LiveText = { ...f, off };
+    for (const cb of this.streamListeners) {
+      try {
+        cb(framed);
+      } catch {
+        // a viewer that breaks must not break the turn
+      }
+    }
   }
 
   /** Line a prompt up; it goes as soon as nothing ahead of it is in the way. */

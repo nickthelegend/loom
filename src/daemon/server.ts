@@ -4,6 +4,7 @@
  * event stream.
  */
 
+import { hostedTarget } from "../core/hosted.js";
 import { execFile, spawn } from "node:child_process";
 import { VERSION } from "../version.js";
 import crypto from "node:crypto";
@@ -1153,6 +1154,56 @@ export class LoomDaemon {
       }
       res.json(this.team.status());
     });
+    /**
+     * Sign in to the hosted Team Hub with GitHub, from the app.
+     *
+     * It only existed in the CLI, so the app's Team screen offered a
+     * self-hosted form and nothing for the hub most people use. The daemon runs
+     * the same loopback sign-in the CLI does and answers with GitHub's
+     * authorize URL for the app to open; when GitHub sends the browser back,
+     * the session lands here and the team connects. The app watches /api/team.
+     */
+    let hostedPending: { startedAt: number; error?: string } | null = null;
+    app.post("/api/team/hosted-signin", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+        return void res.status(403).json({ error: "admin only" });
+      }
+      void (async () => {
+        try {
+          const { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+          const { hostedSignIn } = await import("../hub/supabase-client.js");
+          const supabaseUrl = hostedSupabaseUrl("hosted");
+          if (!supabaseUrl) throw new Error("no hosted hub is configured for this build");
+          let answered = false;
+          hostedPending = { startedAt: Date.now() };
+          const done = hostedSignIn({
+            supabaseUrl,
+            publishableKey: publishableKeyFor(supabaseUrl),
+            timeoutMs: 10 * 60 * 1000,
+            openBrowser: (url) => {
+              answered = true;
+              res.json({ url });
+            },
+          });
+          done
+            .then(async (session) => {
+              await this.team.signIn(hostedHubUrl(supabaseUrl), { token: session.refreshToken });
+              await this.team.connect();
+              hostedPending = null;
+            })
+            .catch((err: Error) => {
+              hostedPending = { startedAt: Date.now(), error: err.message };
+              if (!answered) res.status(400).json({ error: err.message });
+            });
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+        }
+      })();
+    });
+    app.get("/api/team/hosted-signin", (_req, res) => {
+      res.json({ pending: Boolean(hostedPending && !hostedPending.error), error: hostedPending?.error ?? null });
+    });
+
     app.post("/api/team/:action", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
         return void res.status(403).json({ error: "admin only" });
@@ -1852,11 +1903,22 @@ export class LoomDaemon {
       "/api/projects/:id/events",
       withRuntime(async (rt, req, res) => {
         const since = req.query.since ? Number(req.query.since) : undefined;
+        // ?before= pages backwards: the thread's "earlier messages"
+        const before = req.query.before ? Number(req.query.before) : undefined;
         const limit = req.query.limit ? Number(req.query.limit) : 200;
         // no ?chat= means the whole project — old clients keep seeing the
         // whole thread, which is what they've always shown
         const chat = req.query.chat ? String(req.query.chat) : undefined;
-        res.json({ events: rt.log.list({ since, limit, ...(chat ? { chat } : {}) }) });
+        const events = rt.log.list({
+          since,
+          limit,
+          ...(before !== undefined && Number.isFinite(before) ? { before } : {}),
+          ...(chat ? { chat } : {}),
+        });
+        // A thread's first page also carries the replies being typed in it
+        // right now: reload mid-reply and you see the reply so far.
+        const opening = chat && since === undefined && before === undefined;
+        res.json({ events, ...(opening ? { live: rt.liveNow(chat) } : {}) });
       }),
     );
 
@@ -1929,7 +1991,8 @@ export class LoomDaemon {
       withRuntime(async (rt, req, res) => {
         try {
           const cfg = rt.servers.mustConfig(String(req.params.name));
-          const target = urlFor(cfg);
+          // configured, or else what the running server announced it's on
+          const target = urlFor(cfg) ?? rt.servers.status(cfg).url ?? null;
           if (!target) return void res.status(400).json({ error: `server "${cfg.name}" has no port or url to preview` });
           const proxy = await rt.previewProxy(cfg.name, target);
           res.json({ url: `http://127.0.0.1:${proxy.port}`, target, bridged: true });
@@ -3525,9 +3588,9 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/agents/:agentId/model",
       withRuntime(async (rt, req, res) => {
-        const { model } = (req.body ?? {}) as { model?: string };
+        const { model, provider } = (req.body ?? {}) as { model?: string; provider?: string };
         try {
-          const cfg = rt.setAgentModel(String(req.params.agentId), model ?? "");
+          const cfg = rt.setAgentModel(String(req.params.agentId), model ?? "", provider);
           res.json({ agent: cfg });
         } catch (err) {
           res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
@@ -4367,7 +4430,39 @@ export class LoomDaemon {
         ...(waitingFor ? { waitingFor } : {}),
       }, info.id);
     });
+    // Replies as they're written. Deltas are coalesced per agent for a frame
+    // (~40ms), so a fast model is a few dozen socket frames a second at most,
+    // not one per token. Never logged: the finished message is the record.
+    const live = new Map<string, { chat: string; text: string; reasoning: boolean; off?: number }>();
+    let liveTimer: NodeJS.Timeout | null = null;
+    const flushLive = () => {
+      liveTimer = null;
+      for (const [agentId, f] of live) {
+        this.broadcastFrame({
+          type: "stream", projectId: info.id, agentId, chat: f.chat, text: f.text,
+          ...(f.reasoning ? { reasoning: true } : {}),
+          ...(f.off !== undefined ? { off: f.off } : {}),
+        }, info.id);
+      }
+      live.clear();
+    };
+    rt.onStream((f) => {
+      const key = f.agentId;
+      const have = live.get(key);
+      // A switch between thinking and answering (or thread) is a new piece.
+      if (have && (have.reasoning !== Boolean(f.reasoning) || have.chat !== f.chat)) flushLive();
+      const cur = live.get(key);
+      if (cur) cur.text += f.text;
+      else live.set(key, { chat: f.chat, text: f.text, reasoning: Boolean(f.reasoning), ...(f.off !== undefined ? { off: f.off } : {}) });
+      if (!liveTimer) liveTimer = setTimeout(flushLive, 40);
+    });
     rt.log.onEvent((e) => {
+      // A finished message supersedes its typing: send what's buffered first
+      // so the last few characters can't land after the message they belong to.
+      if (e.kind === "message" && e.agentId && live.has(e.agentId)) {
+        if (liveTimer) clearTimeout(liveTimer);
+        flushLive();
+      }
       this.broadcast(info.id, e);
       // The single central hook for live events — agent turns as well as
       // API-driven handoffs, routes and memory folds. Rehydration reads through
@@ -4679,6 +4774,7 @@ export class LoomDaemon {
       clients: this.relay?.clientCount() ?? 0,
       stats: this.relay?.stats ?? null,
       supabaseUrl: target?.url ?? null,
+      hostedUrl: hostedTarget().supabaseUrl,
       error: this.relayError,
     };
   }
@@ -4763,10 +4859,16 @@ export class LoomDaemon {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     this.extra.clear();
+    // Close the live sockets too. wss.close() stops new connections but leaves
+    // open ones open, and server.close() waits for every keep-alive socket a
+    // browser holds — so a restart used to leave the old daemon alive forever,
+    // its port freed but the process (and everything it held) still running.
+    for (const ws of this.wss?.clients ?? []) ws.terminate();
     this.wss?.close();
     await new Promise<void>((resolve) => {
       if (!this.server) return resolve();
       this.server.close(() => resolve());
+      this.server.closeAllConnections?.();
     });
     const cfg = readDaemonConfig();
     if (cfg && cfg.pid === process.pid) {

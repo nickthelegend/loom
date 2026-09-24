@@ -15,6 +15,20 @@ import { Command } from "commander";
 import pc from "picocolors";
 import qrcode from "qrcode-terminal";
 import type { LoomEvent, ProjectStatus } from "../types.js";
+
+// package.json says node >=22.5, but npm doesn't enforce engines at run time.
+// Below that there is no node:sqlite, so every project's history would read
+// as empty — say so up front instead of looking like the data is gone.
+{
+  const [maj, min] = process.versions.node.split(".").map(Number);
+  if (maj! < 22 || (maj === 22 && min! < 5)) {
+    console.error(
+      `loom needs Node 22.5 or newer — this is Node ${process.versions.node} (${process.execPath}).\n` +
+        `If you use nvm, \`nvm use 22\` (or newer) — or put a newer node first on your PATH.`,
+    );
+    process.exit(1);
+  }
+}
 import type { QueueItem } from "../core/prompt-queue.js";
 import {
   DaemonClient,
@@ -188,7 +202,10 @@ program
       console.log(pc.dim("bound to the tailnet — pair your phone with `loom pair`"));
     }
     const shutdown = () => {
-      void daemon.close().then(() => process.exit(0));
+      // A shutdown that can't finish in a few seconds is stuck on something it
+      // shouldn't wait for; leave rather than linger as a headless daemon.
+      setTimeout(() => process.exit(0), 5000).unref();
+      void daemon.close().then(() => process.exit(0), () => process.exit(1));
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);

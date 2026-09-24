@@ -448,6 +448,33 @@ export interface AdapterEvent {
   payload: Record<string, unknown>;
 }
 
+/**
+ * A piece of a reply that is still being written.
+ *
+ * Shown live and never logged: the finished `message` event is the record,
+ * and this is only the view of it arriving. Logging every token would put a
+ * few hundred rows in the event log for one paragraph, and a reader who opens
+ * the thread later wants the paragraph, not its typing.
+ */
+export interface StreamDelta {
+  text: string;
+  /** The model's working-out rather than its answer. */
+  reasoning?: boolean;
+}
+
+/** A StreamDelta placed: which agent is writing it, in which thread. */
+export interface LiveText extends StreamDelta {
+  agentId: string;
+  chat: string;
+  /**
+   * Where this piece starts in what the agent has typed since its last
+   * finished message (of the same kind). A window that opens mid-reply gets
+   * the text so far from the log route and uses this to stitch on without
+   * repeating or dropping characters.
+   */
+  off?: number;
+}
+
 export interface AgentCapabilities {
   tier: AgentTier;
   /**
@@ -473,6 +500,8 @@ export interface BaseAgent {
   injectMemory(projection: string): Promise<void>;
   /** Subscribe to live events; returns unsubscribe. */
   onEvent(cb: (e: AdapterEvent) => void): () => void;
+  /** Subscribe to a reply as it's written (see StreamDelta); returns unsubscribe. */
+  onStream?(cb: (d: StreamDelta) => void): () => void;
 }
 
 /** Full-duplex adapter — may hold the baton. */

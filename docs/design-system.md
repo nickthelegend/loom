@@ -202,6 +202,35 @@ pills.
 Mobile (<900px) keeps the single-column thread: chips row, glass sheets, and
 the docked composer.
 
+## The thread (1.1 layer)
+
+The last block of the stylesheet ("Loom 1.1 design layer") is the finish on
+top of the tokens above; it uses the same tokens and wins by order.
+
+- **One reading column** — `--measure: 760px` with a `--gutter` either side.
+  Prose is Geist at 14.5px / 1.72; mono is for code, paths and ids only.
+- **A reply is a byline, not a bubble.** `.who` = 22px mark tile (`.av`),
+  name, model pill, time (on hover). The body indents 30px under the name.
+  An agent continuing its own turn (`.msg.agent.cont`) drops the byline.
+- **Your message** is the only bubble: `--secondary`, 18px radius with a
+  6px tail corner, right-aligned.
+- **Tool use** folds: consecutive `.tool` rows become one `details.acts`
+  whose summary counts them ("Ran 3 commands, read 2 files").
+- **Every turn ends on `.turnend`** — agent · duration · model · cost.
+- **Live** — `#feedlive` holds a `.livebox` per working agent: a bar
+  (spinning ring + shimmer label + timer) until text arrives, then the reply
+  itself with a cyan `.caret`. Never logged; the finished message replaces it.
+- **Cards** — `.plancard` (orchestrator plan), `.nicard` (needs you, warn
+  tint), `.apcard` (approval), `.errcard` (error, raw payload folded),
+  `.odone` (orchestra complete, ok tint). One radius (14px), one shadow.
+- **Motion** — custom `--ease-out`; nothing over 250ms on UI; no animation on
+  keyboard-driven actions; `prefers-reduced-motion` turns it all off.
+- **Confirmations** are `askConfirm()` (an in-app `.cfmodal`), not
+  `window.confirm`.
+- **Regex escapes in the page are written doubled** (`\\s`), because the
+  page is one template literal and a single backslash is eaten — a test
+  enforces it.
+
 ## Window chrome (Electron)
 
 Matches Orca: `titleBarStyle: hiddenInset` (macOS) with traffic lights at

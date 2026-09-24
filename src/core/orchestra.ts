@@ -263,7 +263,8 @@ export interface OrchestraHost {
   /** Build a fresh adapter instance for `cfg`, working in `dir`. */
   makeAgent(cfg: AgentConfig, dir: string): Adapter;
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
-  createChat(title: string): ChatInfo;
+  /** agentId pins who answers there — a task thread is its worker's. */
+  createChat(title: string, opts?: { agentId?: string }): ChatInfo;
   /** Does this thread exist? Asked before a run is told to answer in one. */
   chatExists?(id: string): boolean;
   /** Skills + retrieved memories for a task, or "" — the project brain (and the team's, when shared). */
@@ -277,6 +278,8 @@ export interface OrchestraHost {
   gate(agentId: string): void;
   /** Cost/metrics bookkeeping for a worker event. */
   observe(event: LoomEvent): void;
+  /** A reply as it's written, for the live view (never logged — see StreamDelta). */
+  stream?(f: { agentId: string; chat: string; text: string; reasoning?: boolean }): void;
   /** The project's git delivery policy, read when a run completes. */
   gitDelivery?(): GitDelivery;
   /** The project's own per-goal spend cap, when it sets one (.loom/config.json). */
@@ -948,7 +951,10 @@ export class OrchestraEngine {
       baseCommit = (await git(["rev-parse", `origin/${opts.from.branch}`], dir)).trim();
       baseBranch = null;
     }
-    const dirty = (await git(["status", "--porcelain"], dir)).trim().length > 0;
+    // Loom's own state (.loom/: the log, the brain, run files) changes on every
+    // turn and is never the user's work; counting it warned "uncommitted
+    // changes" on every run in a project that doesn't gitignore it.
+    const dirty = (await git(["status", "--porcelain", "--", ".", ":(exclude).loom"], dir)).trim().length > 0;
 
     const id = `o${Date.now().toString(36)}`;
     // Integration and task branches are siblings under one prefix: git can't
@@ -1366,7 +1372,7 @@ export class OrchestraEngine {
 
   async shutdown(): Promise<void> {
     for (const run of this.runs.values()) {
-      if (!isTerminal(run.status)) await this.abort(run.id, "the project was closed");
+      if (!isTerminal(run.status)) await this.abort(run.id, "Loom stopped while this run was going (a restart or shutdown) — what finished is on its branch; start the goal again to carry on");
     }
   }
 
@@ -1573,7 +1579,7 @@ export class OrchestraEngine {
     if (!id || run.tasks.some((t) => t.id === id)) id = `t${run.tasks.length + 1}`;
     while (run.tasks.some((t) => t.id === id)) id = `${id}x`;
     const deps = (a.dependsOn ?? []).filter((d) => run.tasks.some((t) => t.id === d));
-    const chat = this.host.createChat(`${id} · ${a.title}`.slice(0, 60));
+    const chat = this.host.createChat(`${id} · ${a.title}`.slice(0, 60), { agentId: cfg.id });
     const task: OrchestraTask = {
       id,
       title: a.title.slice(0, 120),
@@ -1995,6 +2001,7 @@ export class OrchestraEngine {
   // ── event wiring ──
 
   private wire(run: OrchestraRun, agent: Adapter, agentId: string, chat: string, key: string): void {
+    agent.onStream?.((d) => this.host.stream?.({ agentId, chat, ...d }));
     agent.onEvent((e) => {
       const p = e.payload as Record<string, unknown>;
       if (e.kind === "message" && !p.reasoning && p.role !== "user") {
