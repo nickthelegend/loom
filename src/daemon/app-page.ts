@@ -5898,7 +5898,14 @@ ${BRAND_SPRITE}
       if (document.startViewTransition && state.tab && state.tab !== name && !still && !showTab.inTransition) {
         showTab.inTransition = true;
         try {
-          document.startViewTransition(function(){ showTabNow(name); }).finished.then(function(){ showTab.inTransition = false; }, function(){ showTab.inTransition = false; });
+          var vt = document.startViewTransition(function(){ showTabNow(name); });
+          // A transition skipped (hidden tab, a second one on top) rejects
+          // ready and updateCallbackDone too; the tab still switches, so
+          // those are nothing to report.
+          var quiet = function(){};
+          if (vt.ready) vt.ready.catch(quiet);
+          if (vt.updateCallbackDone) vt.updateCallbackDone.catch(quiet);
+          vt.finished.then(function(){ showTab.inTransition = false; }, function(){ showTab.inTransition = false; });
           return;
         } catch (e) { showTab.inTransition = false; }
       }
