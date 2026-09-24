@@ -3665,6 +3665,9 @@ window.__loomPageRev="%%BUILD_REV%%";
   @media (prefers-reduced-motion: reduce){
     *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}
   }
+  .statusbar .branchpill{display:inline-flex;align-items:center;gap:5px}
+  .statusbar .branchpill svg{width:12px;height:12px}
+  .statusbar .branchpill .bpn{font-size:10.5px;padding:0 6px;border-radius:99px;background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -10005,6 +10008,7 @@ ${BRAND_SPRITE}
       openTurns = {};
       historyLoaded = false; pendingStream = [];
       syncStars();
+      if (state.loadGitStat && (!state.gitStat || state.gitStat.pid !== pid)) setTimeout(function(){ if (!pageGone() && state.loadGitStat) state.loadGitStat(); }, 300);
       return api("/api/projects/" + pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(chatId))
         .then(function(j){
           var evs = j.events || [];
@@ -10075,7 +10079,7 @@ ${BRAND_SPRITE}
           // a dev server started, stopped, crashed, or printed a line
           if (frame.type === "server") { onServerFrame(frame); return; }
           // an agent changed files while a preview is open: show the new page
-          if (frame.type === "event" && frame.event && frame.event.kind === "turn_diff") maybeReloadPreview();
+          if (frame.type === "event" && frame.event && frame.event.kind === "turn_diff") { maybeReloadPreview(); if (state.loadGitStat) state.loadGitStat(); }
           if (frame.type === "event" && frame.event) {
             // "an agent needs you" is the whole reason Loom exists, so it must
             // reach you even when this isn't the chat you're looking at, or the
@@ -14731,6 +14735,7 @@ ${BRAND_SPRITE}
         ? '<button class="sit updready" id="updready" title="Loom ' + esc(state.update.latest) + ' is out \u2014 open Updates">' + ICONS.up + " " + esc(state.update.latest) + "</button>"
         : "") +
       lpSeg +
+      branchSeg() +
       gdSeg +
       ghSeg +
       (busy ? '<span class="sit" style="color:var(--live)">' + busy + " working</span>" : "") +
@@ -14746,7 +14751,39 @@ ${BRAND_SPRITE}
     if (upill) upill.onclick = openUsage;
     var gdb = document.getElementById("gitdel");
     if (gdb) gdb.onclick = function(){ openGitDeliveryMenu(gdb); };
+    var brb = document.getElementById("branchpill");
+    if (brb) brb.onclick = function(){
+      if (!state.showRail) { toast("open a project to see its changes"); return; }
+      if (!railOpen()) toggleRail(); // the panel is closed on laptop widths: open it
+      state.showRail("scm");
+    };
   }
+  /**
+   * The open project's branch, where it stands against its upstream, and how
+   * many files are changed — Loom's own .loom/ bookkeeping not counted.
+   * Polled gently (git status in a big repo isn't free) and after each turn.
+   */
+  function branchSeg(){
+    var g = state.gitStat, p = state.project;
+    if (!g || !p || g.pid !== p.id || !g.branch) return "";
+    var bits = (g.ahead ? " ↑" + g.ahead : "") + (g.behind ? " ↓" + g.behind : "");
+    return '<button class="sit branchpill' + (g.changed ? " dirty" : "") + '" id="branchpill" type="button" title="' +
+      esc(g.branch + (g.changed ? " · " + g.changed + " changed file" + (g.changed === 1 ? "" : "s") : " · clean") + (g.upstream ? " · tracking " + g.upstream : "") + " — open Source Control") + '">' +
+      ICONS.branch + esc(g.branch) + esc(bits) + (g.changed ? '<span class="bpn">' + g.changed + "</span>" : "") + "</button>";
+  }
+  function loadGitStat(){
+    var p = state.project; if (!state.token || !p || !p.id) return;
+    var pid = p.id;
+    api("/api/projects/" + pid + "/git/status").then(function(s){
+      var mine = function(f){ var n = typeof f === "string" ? f : (f && (f.path || f.file)) || ""; return n.indexOf(".loom/") !== 0; };
+      var changed = (s.staged || []).concat(s.unstaged || [], s.untracked || []).filter(mine);
+      var seen = {}; changed.forEach(function(f){ seen[typeof f === "string" ? f : (f.path || f.file)] = 1; });
+      state.gitStat = { pid: pid, branch: s.branch || "", ahead: s.ahead || 0, behind: s.behind || 0, upstream: s.upstream || null, changed: Object.keys(seen).length };
+      drawStatusbar();
+    }).catch(function(){ state.gitStat = { pid: pid, branch: "" }; drawStatusbar(); });
+  }
+  state.loadGitStat = loadGitStat;
+  if (!window.__gitPoll) window.__gitPoll = setInterval(function(){ if (!document.hidden) loadGitStat(); }, 15000);
 
   // GitHub connection, fetched once and after a connect. Machine-wide (gh auth
   // is per-host), so it's cached on state and shown in the status bar.
