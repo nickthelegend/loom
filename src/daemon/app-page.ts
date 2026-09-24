@@ -3687,6 +3687,7 @@ window.__loomPageRev="%%BUILD_REV%%";
   .bsort button{border:1px solid transparent;background:none;color:var(--muted-foreground);font:inherit;padding:2px 9px;border-radius:99px;cursor:pointer}
   .bsort button.on{border-color:var(--border);background:var(--secondary);color:var(--foreground)}
   .bused{margin-left:6px;font-size:11px;padding:0 7px;border-radius:99px;background:color-mix(in srgb,var(--thread) 16%,transparent);color:var(--thread-ink,var(--foreground))}
+  .monthstats{margin-bottom:16px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -6118,7 +6119,17 @@ ${BRAND_SPRITE}
             " · " + d.turns + " turn" + (d.turns === 1 ? "" : "s") + (d.errors ? " (" + d.errors + " failed)" : "") + (d.costUsd ? " · " + money(d.costUsd) : "")) + '"></i>');
         });
         var active = days.filter(function(d){ return d.turns; }).length;
+        // this month so far, and where this month's pace ends up
+        var now = new Date(), ym = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+        var month = days.filter(function(d){ return d.date.slice(0, 7) === ym; });
+        var spent = month.reduce(function(a, d){ return a + (d.costUsd || 0); }, 0);
+        var dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), dayN = now.getDate();
+        var pace = dayN ? spent / dayN : 0, forecast = spent + pace * (dim - dayN);
         host.innerHTML =
+          '<div class="burnstats monthstats">' +
+            '<div class="obminicard"><div class="obcl">This month so far</div><div class="obcv sm">' + money(spent) + "</div></div>" +
+            '<div class="obminicard"><div class="obcl">Daily average</div><div class="obcv sm">' + money(pace) + "</div></div>" +
+            '<div class="obminicard" title="this month’s spend so far, plus the daily average for the days left"><div class="obcl">Month-end at this pace</div><div class="obcv sm">' + money(forecast) + "</div></div></div>" +
           '<div class="obmlabel lbhead">Agent leaderboard<span class="spacer"></span>' +
             '<button type="button" class="btn xs outline" id="turnscsv">' + ICONS.download + "Export turns (CSV)</button></div>" +
           '<div class="lbwrap"><table class="lbtable"><thead><tr><th>#</th><th>Agent</th><th class="num">Turns</th><th>Finished cleanly</th><th class="num">Median time</th><th class="num">Per turn</th><th class="num">Total</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
