@@ -3812,6 +3812,14 @@ export class LoomDaemon {
 
     // Likely contradictions between units, heuristically flagged for a human
     // to resolve — each flag names the signal that tripped it.
+    // How often each memory reached an agent's prompt.
+    app.get(
+      "/api/projects/:id/brain/usage",
+      withRuntime(async (rt, _req, res) => {
+        res.json({ usage: rt.memoryUsage() });
+      }),
+    );
+
     app.get(
       "/api/projects/:id/brain/conflicts",
       withRuntime(async (rt, _req, res) => {

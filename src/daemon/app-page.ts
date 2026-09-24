@@ -3683,6 +3683,10 @@ window.__loomPageRev="%%BUILD_REV%%";
   .psrolewrap .psinstr{margin-left:6px}
   .psrolewrap .psinstr svg{width:11px;height:11px;margin-right:4px}
   .psrolewrap .psinstr.on{border-color:color-mix(in srgb,var(--thread) 45%,var(--border))}
+  .bsort{display:flex;align-items:center;gap:4px;margin:8px 0 2px;font-size:11.5px;color:var(--muted-foreground)}
+  .bsort button{border:1px solid transparent;background:none;color:var(--muted-foreground);font:inherit;padding:2px 9px;border-radius:99px;cursor:pointer}
+  .bsort button.on{border-color:var(--border);background:var(--secondary);color:var(--foreground)}
+  .bused{margin-left:6px;font-size:11px;padding:0 7px;border-radius:99px;background:color-mix(in srgb,var(--thread) 16%,transparent);color:var(--thread-ink,var(--foreground))}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -7880,7 +7884,9 @@ ${BRAND_SPRITE}
       Promise.all([
         api("/api/projects/" + pid + "/brain?limit=200"),
         api("/api/projects/" + pid + "/memory").catch(function(){ return { memory: {} }; }),
+        api("/api/projects/" + pid + "/brain/usage").catch(function(){ return { usage: {} }; }),
       ]).then(function(r){
+        var usage = (r[2] && r[2].usage) || {};
         el = document.getElementById("pane-brain"); if (!el || brainView !== "mine") return;
         var memories = (r[0] && r[0].memories) || [];
         var stats = (r[0] && r[0].stats) || { total: 0, byKind: {} };
@@ -7897,10 +7903,15 @@ ${BRAND_SPRITE}
         var head = '<div class="bhead">' + brainSwitchHtml() + '<div class="bkinds">' + chips + "</div>" +
           '<div class="bio"><button type="button" class="btn xs ghost" id="bexport" title="download what this project knows, as JSON">' + ICONS.download + "Export</button>" +
           '<button type="button" class="btn xs ghost" id="bimport" title="bring in a brain exported from Loom (duplicates are skipped)">' + ICONS.plus + "Import</button>" +
-          '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>';
+          '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>' +
+          '<div class="bsort"><span>Sort</span><button type="button" data-bsort="new" class="' + (state.brainSort !== "used" ? "on" : "") + '">Newest</button>' +
+          '<button type="button" data-bsort="used" class="' + (state.brainSort === "used" ? "on" : "") + '" title="how often each memory reached an agent’s prompt">Most used</button></div>';
 
         // The memory list — the learned units. This is what phase 2 fills.
         var shown = brainKind ? memories.filter(function(x){ return x.kind === brainKind; }) : memories;
+        if (state.brainSort === "used") {
+          shown = shown.slice().sort(function(a, b){ return ((usage[b.id] || {}).n || 0) - ((usage[a.id] || {}).n || 0); });
+        }
         var list;
         if (!shown.length) {
           list = '<div class="bempty">' + (memories.length
@@ -7921,7 +7932,8 @@ ${BRAND_SPRITE}
               (ents ? '<div class="bents">' + ents + "</div>" : "") +
               '<div class="bmmeta">' + brandMark(kindOf(who)) + esc(who) +
               (when ? ' <span class="dim">\\u00b7 ' + esc(when) + "</span>" : "") +
-              (low ? ' <span class="dim">\\u00b7 ' + conf + '% \\u2014 shown, not injected</span>' : "") +
+              (low ? ' <span class="dim">· ' + conf + '% — shown, not injected</span>' : "") +
+              (usage[x.id] ? ' <span class="bused" title="reached an agent’s prompt ' + usage[x.id].n + " time" + (usage[x.id].n === 1 ? "" : "s") + ", last " + esc(rel(usage[x.id].at)) + '">used ' + usage[x.id].n + "×</span>" : "") +
               "</div></div>";
           }).join("") + "</div>";
         }
@@ -7964,6 +7976,9 @@ ${BRAND_SPRITE}
 
         Array.prototype.forEach.call(el.querySelectorAll(".bkind"), function(b){
           b.onclick = function(){ brainKind = b.getAttribute("data-kind"); refreshBrain(); };
+        });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-bsort]"), function(b){
+          b.onclick = function(){ state.brainSort = b.getAttribute("data-bsort"); refreshBrain(); };
         });
         Array.prototype.forEach.call(el.querySelectorAll("[data-medit]"), function(b){
           b.onclick = function(ev){

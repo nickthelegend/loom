@@ -2270,8 +2270,50 @@ export class ProjectRuntime {
    */
   private brainBrief(opts: RetrieveOpts): string {
     const pool = this.teamBrain?.pool(this.brain.all());
-    if (!pool) return compileBrief(retrieve(this.brain, opts).map((h) => h.memory));
-    return compileTieredBrief(retrieveTiered(pool, opts));
+    if (!pool) {
+      const hits = retrieve(this.brain, opts);
+      this.noteMemoriesUsed(hits.map((h) => h.memory.id));
+      return compileBrief(hits.map((h) => h.memory));
+    }
+    const tiered = retrieveTiered(pool, opts);
+    this.noteMemoriesUsed(tiered.map((h) => h.memory.id));
+    return compileTieredBrief(tiered);
+  }
+
+  // How often each memory made it into a prompt — the Brain tab's "most
+  // used". Counted where briefs are compiled, so it's what agents actually
+  // got, not what a search happened to return. Written at most every few
+  // seconds; a lost count on a crash costs nothing.
+  private memoryUse: Record<string, { n: number; at: number }> | null = null;
+  private memoryUseTimer: NodeJS.Timeout | null = null;
+  private memoryUseFile(): string {
+    return path.join(this.info.dir, ".loom", "memory-usage.json");
+  }
+  memoryUsage(): Record<string, { n: number; at: number }> {
+    if (!this.memoryUse) {
+      try {
+        this.memoryUse = JSON.parse(fs.readFileSync(this.memoryUseFile(), "utf8")) as Record<string, { n: number; at: number }>;
+      } catch {
+        this.memoryUse = {};
+      }
+    }
+    return this.memoryUse;
+  }
+  private noteMemoriesUsed(ids: string[]): void {
+    if (!ids.length) return;
+    const use = this.memoryUsage();
+    const now = Date.now();
+    for (const id of new Set(ids)) use[id] = { n: (use[id]?.n ?? 0) + 1, at: now };
+    if (this.memoryUseTimer) return;
+    this.memoryUseTimer = setTimeout(() => {
+      this.memoryUseTimer = null;
+      try {
+        fs.writeFileSync(this.memoryUseFile(), JSON.stringify(this.memoryUse));
+      } catch {
+        /* a count that didn't save is not worth a failed turn */
+      }
+    }, 3000);
+    this.memoryUseTimer.unref?.();
   }
 
   /**
