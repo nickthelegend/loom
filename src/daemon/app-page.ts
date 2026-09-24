@@ -3717,6 +3717,15 @@ window.__loomPageRev="%%BUILD_REV%%";
   .termfind[hidden]{display:none}
   .termfind input{width:150px;height:22px;border:1px solid var(--border);border-radius:6px;background:var(--input,var(--muted));color:var(--foreground);font:inherit;font-size:12px;padding:0 7px}
   .termqn{font-size:11px;color:var(--muted-foreground);min-width:34px}
+  /* orchestra timeline */
+  .otlbody{padding:2px 12px 10px}
+  .otlrow{display:grid;grid-template-columns:34px 1fr 64px;align-items:center;gap:8px;height:22px;cursor:pointer}
+  .otlid{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+  .otltrack{position:relative;height:8px;border-radius:99px;background:var(--secondary)}
+  .otlbar{position:absolute;top:0;height:100%;border-radius:99px;background:var(--muted-foreground)}
+  .otlbar.live{background:var(--live)} .otlbar.ok{background:var(--ok)} .otlbar.warn{background:var(--warn)} .otlbar.err{background:var(--err)}
+  .otld{font-size:11px;color:var(--muted-foreground);text-align:right;font-variant-numeric:tabular-nums}
+  .otlaxis{display:flex;justify-content:space-between;margin:4px 72px 0 42px;font-size:10.5px;color:var(--muted-foreground)}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -9002,6 +9011,7 @@ ${BRAND_SPRITE}
     }
     /** The chat at a glance: each of your prompts, click to go there. */
     function drawOutline(el){
+      railTitle('<span class="b">Outline</span>');
       var mine = Array.prototype.slice.call(document.querySelectorAll("#feed > .msg.user[data-raw]"));
       var more = !!document.getElementById("loadearlier");
       if (!mine.length) { el.innerHTML = '<div class="olempty">Nothing asked in this chat yet — your prompts will line up here.</div>'; return; }
@@ -12862,6 +12872,27 @@ ${BRAND_SPRITE}
         '<defs><marker id="ogarrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="currentColor"/></marker></defs>' +
         edges + nodes + "</svg></div></details>";
     }
+    /**
+     * When each task actually ran, on one time axis from the run's start:
+     * where the parallelism was, and what everything waited on.
+     */
+    function orchTimeline(run, tasks){
+      var t0 = Number(run.createdAt) || Math.min.apply(null, tasks.map(function(t){ return t.startedAt || Infinity; }));
+      var now = Date.now();
+      var end = Math.max.apply(null, tasks.map(function(t){ return t.finishedAt || (t.status === "running" ? now : t.startedAt || t0); }).concat([orchTerminal(run.status) ? Number(run.updatedAt) || t0 : now]));
+      var span = Math.max(1000, end - t0);
+      var rows = tasks.filter(function(t){ return t.startedAt; }).sort(function(a, b){ return a.startedAt - b.startedAt; }).map(function(t){
+        var s = ORCH_TASK_ST[t.status] || [t.status, "off"];
+        var a = (t.startedAt - t0) / span * 100;
+        var b = ((t.finishedAt || (t.status === "running" ? now : t.startedAt)) - t0) / span * 100;
+        var dur = (t.finishedAt || now) - t.startedAt;
+        return '<div class="otlrow" data-otask="' + esc(t.id) + '" title="' + esc(t.id + " · " + (t.title || "") + " · " + s[0] + " · " + durfmt(dur)) + '">' +
+          '<span class="otlid">' + esc(t.id) + '</span><span class="otltrack"><i class="otlbar ' + s[1] + '" style="left:' + a.toFixed(2) + "%;width:" + Math.max(0.8, b - a).toFixed(2) + '%"></i></span>' +
+          '<span class="otld">' + esc(durfmt(dur)) + "</span></div>";
+      }).join("");
+      return '<details class="ograph otl" open><summary>Timeline<span class="ogs">' + esc(durfmt(span)) + " from start" + (orchTerminal(run.status) ? " to finish" : " so far") + "</span></summary>" +
+        '<div class="otlbody">' + rows + '<div class="otlaxis"><span>0</span><span>' + esc(durfmt(span / 2)) + "</span><span>" + esc(durfmt(span)) + "</span></div></div></details>";
+    }
     /** Put a finished goal back in the composer, cast and all. */
     function runAgain(run){
       var c = orchCfg(), roster = orchRoster(), ids = roster.map(function(a){ return a.id; });
@@ -12939,6 +12970,7 @@ ${BRAND_SPRITE}
         return h;
       }
       if (tasks.length > 1) h += orchGraph(tasks);
+      if (tasks.some(function(t){ return t.startedAt; })) h += orchTimeline(run, tasks);
       // What needs you first, then what's moving, then what's settled.
       var ORDER = ["needs_input", "conflict", "running", "pending", "failed", "done", "cancelled"];
       ORDER.forEach(function(stName){
