@@ -3652,6 +3652,10 @@ window.__loomPageRev="%%BUILD_REV%%";
   .dsc span{font-size:11px;color:var(--muted-foreground)}
   .dsc b{font-size:12.5px;font-weight:600;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dshell{zoom:var(--tz,1);height:calc(100dvh / var(--tz,1))}
+  .bhead .bio{display:flex;gap:4px;margin-left:auto}
+  .bhead .bio .btn svg{width:12px;height:12px;margin-right:4px}
+  .bmrow .bedit{opacity:0;transition:opacity .15s}
+  .bmem:hover .bedit,.bmrow .bedit:focus-visible{opacity:1}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -7855,7 +7859,10 @@ ${BRAND_SPRITE}
           if (!n && brainKind !== k) return; // hide empty kinds unless selected
           chips += '<button class="bkind bk-' + k + (brainKind === k ? " on" : "") + '" data-kind="' + k + '">' + k + ' <span class="kn">' + n + "</span></button>";
         });
-        var head = '<div class="bhead">' + brainSwitchHtml() + '<div class="bkinds">' + chips + "</div></div>";
+        var head = '<div class="bhead">' + brainSwitchHtml() + '<div class="bkinds">' + chips + "</div>" +
+          '<div class="bio"><button type="button" class="btn xs ghost" id="bexport" title="download what this project knows, as JSON">' + ICONS.download + "Export</button>" +
+          '<button type="button" class="btn xs ghost" id="bimport" title="bring in a brain exported from Loom (duplicates are skipped)">' + ICONS.plus + "Import</button>" +
+          '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>';
 
         // The memory list — the learned units. This is what phase 2 fills.
         var shown = brainKind ? memories.filter(function(x){ return x.kind === brainKind; }) : memories;
@@ -7874,6 +7881,7 @@ ${BRAND_SPRITE}
             return '<div class="bmem' + (low ? " low" : "") + '" data-mid="' + esc(x.id) + '">' +
               '<div class="bmrow"><span class="bbadge bk-' + esc(x.kind) + '">' + esc(x.kind) + "</span>" +
               '<span class="bmtext">' + esc(x.text) + "</span>" +
+              '<button class="bedit iconbtn xs" data-medit="' + esc(x.id) + '" title="correct this" aria-label="edit this memory">' + ICONS.pencil + "</button>" +
               '<button class="bforget iconbtn xs" data-forget="' + esc(x.id) + '" title="forget this" aria-label="forget this memory">' + ICONS.x + "</button></div>" +
               (ents ? '<div class="bents">' + ents + "</div>" : "") +
               '<div class="bmmeta">' + brandMark(kindOf(who)) + esc(who) +
@@ -7922,6 +7930,48 @@ ${BRAND_SPRITE}
         Array.prototype.forEach.call(el.querySelectorAll(".bkind"), function(b){
           b.onclick = function(){ brainKind = b.getAttribute("data-kind"); refreshBrain(); };
         });
+        Array.prototype.forEach.call(el.querySelectorAll("[data-medit]"), function(b){
+          b.onclick = function(ev){
+            ev.stopPropagation();
+            var id = b.getAttribute("data-medit");
+            var cur = memories.filter(function(m){ return m.id === id; })[0];
+            if (!cur) return;
+            askText("Correct this memory", { value: cur.text, multiline: true, required: true, note: "Agents get the new wording from their next turn. The old one stays in its history.", ok: "Save" }).then(function(text){
+              if (text === null || !text.trim() || text.trim() === cur.text) return;
+              api("/api/projects/" + pid + "/brain/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ text: text.trim() }) })
+                .then(function(){ toast("updated · the old wording stays in its history"); refreshBrain(); })
+                .catch(function(err){ toast(err.message); });
+            });
+          };
+        });
+        var bex = document.getElementById("bexport");
+        if (bex) bex.onclick = function(){
+          api("/api/projects/" + pid + "/brain/export").then(function(dump){
+            var blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = String((state.project && state.project.name) || "loom").replace(/[^\\w.-]+/g, "-") + "-brain.json";
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+            toast("exported " + ((dump && dump.memories && dump.memories.length) || 0) + " memories");
+          }).catch(function(err){ toast(err.message); });
+        };
+        var bim = document.getElementById("bimport"), bif = document.getElementById("bimportf");
+        if (bim && bif) {
+          bim.onclick = function(){ bif.value = ""; bif.click(); };
+          bif.onchange = function(){
+            var f = bif.files && bif.files[0]; if (!f) return;
+            if (f.size > 1900000) { toast("that file is over 2 MB — too big to import in one go"); return; }
+            f.text().then(function(txt){
+              var body;
+              try { body = JSON.parse(txt); } catch (e) { throw new Error("that isn’t a JSON file"); }
+              return api("/api/projects/" + pid + "/brain/import", { method: "POST", body: JSON.stringify(body) });
+            }).then(function(r){
+              toast("imported " + (r.added || 0) + " new · " + (r.known || 0) + " already known");
+              refreshBrain();
+            }).catch(function(err){ toast(err.message); });
+          };
+        }
         Array.prototype.forEach.call(el.querySelectorAll("[data-forget]"), function(b){
           b.onclick = function(ev){
             ev.stopPropagation();
