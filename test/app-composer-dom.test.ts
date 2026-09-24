@@ -373,6 +373,29 @@ describe("web app · voice input without a transcriber", () => {
   });
 });
 
+describe("web app · since you were here", () => {
+  it("sums up the turns taken while you were away, once, over Main", async () => {
+    // a turn to report on
+    const first = await opened();
+    await sendFromComposer(first, "recap me");
+    await waitUntil(() => text(first, "#feed").includes("echo("), { timeoutMs: 20_000 });
+    first.close();
+
+    const m = mount({ hash: `#p/${projectId}`, pid: projectId });
+    m.window.localStorage.setItem(`loomLastVisit:${projectId}`, String(Date.now() - 2 * 86_400_000));
+    await waitUntil(() => !!$(m, "#recap"), { timeoutMs: 15_000 });
+    expect(text(m, "#recap")).toMatch(/Since you were here.*\d+ turns?/);
+    click($(m, "#recapx"));
+    expect($(m, "#recap")).toBeNull();
+    // and it doesn't come back on the next visit a minute later
+    const again = mount({ hash: `#p/${projectId}`, pid: projectId });
+    await waitUntil(() => !!$(again, '#box[data-bound="1"]'));
+    await new Promise((r) => setTimeout(r, 400));
+    expect($(again, "#recap")).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  }, 40_000);
+});
+
 describe("web app · mermaid diagrams", () => {
   it("draws a mermaid block only when asked, and flips back to the code", async () => {
     const m = await opened();

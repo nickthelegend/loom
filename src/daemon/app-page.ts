@@ -3847,6 +3847,11 @@ window.__loomPageRev="%%BUILD_REV%%";
   .md .mdcodewrap .mddraw:disabled{opacity:.6;cursor:progress}
   .md .mdcodewrap .mmout{padding:34px 10px 10px;overflow:auto;text-align:center}
   .md .mdcodewrap .mmout svg{max-width:100%;height:auto}
+  .recap{display:flex;align-items:center;gap:8px;margin:10px 16px 0;padding:8px 10px 8px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card);font-size:12.5px}
+  .recap .recapi{display:inline-flex;color:var(--muted-foreground)}
+  .recap .recapi svg{width:14px;height:14px}
+  .recap .recapt{flex:1;min-width:0}
+  .recap .recaperr{color:var(--err)}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -10645,6 +10650,50 @@ ${BRAND_SPRITE}
     // The transcript-level menu lives in the shell's scope, and this doesn't.
     state.redrawFeed = loadHistory;
     loadHistory();
+    if (chatId === "main") showRecap();
+
+    /**
+     * Back after a while (a new day, or eight hours on): what happened while
+     * you were away, in one strip over Main — turns, who took them, what
+     * failed, what it cost. From the log's own turn rows; shown once per
+     * return, gone when you close it.
+     */
+    function showRecap(){
+      var key = "loomLastVisit:" + pid, now = Date.now(), last = 0;
+      try { last = Number(localStorage.getItem(key)) || 0; localStorage.setItem(key, String(now)); } catch (e) { return; }
+      if (!last) return;
+      var away = now - last, newDay = new Date(last).toDateString() !== new Date(now).toDateString();
+      if (away < 8 * 3600 * 1000 && !newDay) return;
+      if (away < 20 * 60 * 1000) return;
+      api("/api/projects/" + pid + "/insights/turns?since=" + last).then(function(j){
+        var rows = (j && j.leaderboard) || [];
+        var turns = 0, errs = 0, cost = 0;
+        rows.forEach(function(a){ turns += a.turns || 0; errs += a.errors || 0; cost += a.totalCostUsd || 0; });
+        if (!turns || pageGone()) return;
+        var host = document.getElementById("pane-thread"), feed = document.getElementById("feed");
+        if (!host || !feed || document.getElementById("recap")) return;
+        var who = rows.slice().sort(function(a, b){ return b.turns - a.turns; }).slice(0, 3).map(function(a){ return esc(labelOf(a.agentId)) + " " + a.turns; }).join(", ");
+        var el = document.createElement("div");
+        el.id = "recap";
+        el.className = "recap";
+        el.setAttribute("role", "status");
+        el.innerHTML = '<span class="recapi">' + ICONS.clock + "</span>" +
+          '<span class="recapt"><b>Since you were here</b> <span class="dim">' + esc(newDay ? relDay(last) : rel(last)) + "</span> · " +
+          turns + " turn" + (turns === 1 ? "" : "s") + " (" + who + ")" +
+          (errs ? ' · <span class="recaperr">' + errs + " failed</span>" : "") +
+          (cost > 0 ? " · " + money(cost) : "") + "</span>" +
+          '<button type="button" class="btn xs ghost" id="recapgo">Insights</button>' +
+          '<button type="button" class="iconbtn xs" id="recapx" aria-label="dismiss" title="dismiss">' + ICONS.x + "</button>";
+        host.insertBefore(el, feed);
+        el.querySelector("#recapx").onclick = function(){ el.remove(); };
+        el.querySelector("#recapgo").onclick = function(){ el.remove(); showTab("observatory"); };
+      }).catch(function(){});
+    }
+    function relDay(ts){
+      var d = new Date(ts), y = new Date(); y.setDate(y.getDate() - 1);
+      var hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return (d.toDateString() === y.toDateString() ? "yesterday " : d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + " ") + hm;
+    }
     (function(){
       var j = document.getElementById("jumpnew"), sc = threadScroller();
       if (j) j.onclick = toBottom;
