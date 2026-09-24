@@ -559,6 +559,8 @@ export interface AgentStatus {
   permissions?: string;
   /** Standing instructions sent ahead of every turn (see AgentConfig). */
   instructions?: string;
+  /** Model agents: sampling overrides (absent = the provider's default). */
+  sampling?: { temperature?: number; maxTokens?: number };
 }
 
 export interface ProjectStatus {

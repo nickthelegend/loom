@@ -3726,6 +3726,10 @@ window.__loomPageRev="%%BUILD_REV%%";
   .otlbar.live{background:var(--live)} .otlbar.ok{background:var(--ok)} .otlbar.warn{background:var(--warn)} .otlbar.err{background:var(--err)}
   .otld{font-size:11px;color:var(--muted-foreground);text-align:right;font-variant-numeric:tabular-nums}
   .otlaxis{display:flex;justify-content:space-between;margin:4px 72px 0 42px;font-size:10.5px;color:var(--muted-foreground)}
+  .cfmodal .cflab{display:block;font-size:13px;margin-top:12px}
+  .cfmodal .cflab span{color:var(--muted-foreground);font-size:11.5px;margin-left:6px}
+  .cfmodal .cflab .cfin{margin-top:6px}
+  .cfmodal .mferr{color:var(--err);font-size:12.5px;margin-top:10px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -17331,7 +17335,10 @@ ${BRAND_SPRITE}
           '<div class="psrolewrap"><span class="pslabel">role</span>' + roleSel +
           '<button type="button" class="btn xs ' + (a.instructions ? "outline psinstr on" : "ghost psinstr") + '" data-instr="' + esc(a.id) + '" title="' +
             esc(a.instructions ? "Standing instructions: " + a.instructions.slice(0, 160) : "Add standing instructions this agent gets before every turn") + '">' +
-            ICONS.pencil + (a.instructions ? "Instructions" : "Instruct") + "</button></div></div>";
+            ICONS.pencil + (a.instructions ? "Instructions" : "Instruct") + "</button>" +
+          (a.kind === "model" ? '<button type="button" class="btn xs ghost psinstr" data-sampling="' + esc(a.id) + '" title="' +
+            esc("Temperature " + (a.sampling && a.sampling.temperature != null ? a.sampling.temperature : "default") + " · max tokens " + (a.sampling && a.sampling.maxTokens ? a.sampling.maxTokens : "default")) + '">' +
+            ICONS.gear + "Sampling</button>" : "") + "</div></div>";
       }).join("");
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \\u00b7 baton " + esc(p.holder || "\\u2014") + "</div></div>" +
         '<div class="pssec">Agents \\u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
@@ -17374,6 +17381,40 @@ ${BRAND_SPRITE}
           var agent = cb.getAttribute("data-agent");
           api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/enabled", { method: "PUT", body: JSON.stringify({ enabled: cb.checked }) })
             .then(afterChange).catch(function(err){ toast(err.message || "could not toggle"); cb.checked = !cb.checked; });
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-sampling]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-sampling");
+          var a = (p.agents || []).filter(function(x){ return x.id === agent; })[0] || {};
+          var cur = a.sampling || {};
+          var sc = document.createElement("div");
+          sc.className = "scrim cfscrim";
+          sc.innerHTML = '<div class="modal cfmodal" role="dialog" aria-modal="true"><div class="cft">Sampling for ' + esc(agent) + "</div>" +
+            '<div class="cfb">How ' + esc(agent) + ' writes. Leave a field blank for the provider’s default.</div>' +
+            '<label class="cflab">Temperature <span>0 is steady, 1 is lively, up to 2</span><input class="cfin" id="smtemp" type="number" min="0" max="2" step="0.1" placeholder="default"></label>' +
+            '<label class="cflab">Max tokens per reply <span>16 to 200000</span><input class="cfin" id="smmax" type="number" min="16" max="200000" step="1" placeholder="default"></label>' +
+            '<div class="cfa"><button type="button" class="btn sm ghost" id="smcancel">Cancel</button><button type="button" class="btn sm primary" id="smsave">Save</button></div></div>';
+          document.body.appendChild(sc);
+          var t = document.getElementById("smtemp"), m = document.getElementById("smmax");
+          if (cur.temperature != null) t.value = cur.temperature;
+          if (cur.maxTokens) m.value = cur.maxTokens;
+          function done(){ sc.remove(); document.removeEventListener("keydown", key, true); }
+          function key(e){ if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } }
+          document.addEventListener("keydown", key, true);
+          sc.onmousedown = function(e){ if (e.target === sc) done(); };
+          document.getElementById("smcancel").onclick = done;
+          document.getElementById("smsave").onclick = function(){
+            var body2 = { temperature: t.value === "" ? null : Number(t.value), maxTokens: m.value === "" ? null : Number(m.value) };
+            api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/sampling", { method: "PUT", body: JSON.stringify(body2) })
+              .then(function(){ done(); toast(agent + " sampling saved — it takes on the next turn"); afterChange(); })
+              .catch(function(err){
+                var e = sc.querySelector(".mferr");
+                if (!e) { e = document.createElement("div"); e.className = "mferr"; e.setAttribute("role", "alert"); sc.querySelector(".cfa").insertAdjacentElement("beforebegin", e); }
+                e.textContent = err.message;
+              });
+          };
+          setTimeout(function(){ t.focus(); }, 0);
         };
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-instr]"), function(b){

@@ -212,6 +212,16 @@ export type ServerFrame =
 /** How often a time-held prompt checks the clock. */
 export const CLOCK_TICK_MS = 15_000;
 
+/** A model agent's sampling settings, for its status (empty for everything else). */
+function sampling(cfg: AgentConfig): { sampling?: { temperature?: number; maxTokens?: number } } {
+  if (cfg.kind !== "model") return {};
+  const o = (cfg.options ?? {}) as { temperature?: unknown; maxTokens?: unknown };
+  const out: { temperature?: number; maxTokens?: number } = {};
+  if (typeof o.temperature === "number") out.temperature = o.temperature;
+  if (typeof o.maxTokens === "number") out.maxTokens = o.maxTokens;
+  return { sampling: out };
+}
+
 export class ProjectRuntime {
   readonly info: ProjectInfo;
   readonly config: ProjectConfig;
@@ -1176,6 +1186,38 @@ export class ProjectRuntime {
 
     // Rebuild so the new model actually takes: stop the old process, spawn a
     // replacement subscribed exactly as the constructor's loop does.
+    if (live) {
+      void Promise.resolve(live.stop()).catch(() => {});
+      this.agents.delete(agentId);
+    }
+    this.spawnAgent(cfg);
+    this.saveConfig();
+    return cfg;
+  }
+
+  /**
+   * A model agent's sampling: temperature (0–2) and the reply's token cap.
+   * Null clears one back to the provider's default. Rebuilt like a model
+   * switch, because the adapter reads them when it's built.
+   */
+  setAgentSampling(agentId: string, s: { temperature?: number | null; maxTokens?: number | null }): AgentConfig {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) throw new Error(`unknown agent "${agentId}"`);
+    if (cfg.kind !== "model") throw new Error(`"${agentId}" is a ${cfg.kind} — sampling is set in its own CLI, not here`);
+    const live = this.agents.get(agentId);
+    if (live && isAdapter(live) && live.busy()) throw new Error(`"${agentId}" is mid-turn — wait for it to finish`);
+    const options = { ...(cfg.options ?? {}) } as Record<string, unknown>;
+    if (s.temperature !== undefined) {
+      if (s.temperature === null) delete options.temperature;
+      else if (!Number.isFinite(s.temperature) || s.temperature < 0 || s.temperature > 2) throw new Error("temperature must be between 0 and 2");
+      else options.temperature = Math.round(s.temperature * 100) / 100;
+    }
+    if (s.maxTokens !== undefined) {
+      if (s.maxTokens === null) delete options.maxTokens;
+      else if (!Number.isInteger(s.maxTokens) || s.maxTokens < 16 || s.maxTokens > 200_000) throw new Error("max tokens must be a whole number from 16 to 200000");
+      else options.maxTokens = s.maxTokens;
+    }
+    cfg.options = options;
     if (live) {
       void Promise.resolve(live.stop()).catch(() => {});
       this.agents.delete(agentId);
@@ -3677,6 +3719,7 @@ export class ProjectRuntime {
             model,
             permissions: permissionFor(cfg.kind, cfg.options),
             ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
+            ...sampling(cfg),
             // "not spawned" is not "switched off". An agent whose CLI is missing
             // is still enabled in config, and reporting it as disabled made the
             // project-settings toggle render off — clicking it then wrote the
@@ -3696,6 +3739,7 @@ export class ProjectRuntime {
           permissions: permissionFor(cfg.kind, cfg.options),
           enabled: true,
           ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
+          ...sampling(cfg),
         };
       }),
     );

@@ -2466,6 +2466,21 @@ export class LoomDaemon {
       }),
     );
 
+    // A model agent's sampling: temperature and max tokens (null clears).
+    app.put(
+      "/api/projects/:id/agents/:agentId/sampling",
+      withRuntime(async (rt, req, res) => {
+        const b = (req.body ?? {}) as { temperature?: unknown; maxTokens?: unknown };
+        const num = (v: unknown): number | null | undefined => (v === undefined ? undefined : v === null || v === "" ? null : Number(v));
+        try {
+          const cfg = rt.setAgentSampling(String(req.params.agentId), { temperature: num(b.temperature), maxTokens: num(b.maxTokens) });
+          res.json({ id: cfg.id, options: cfg.options });
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     // Standing instructions for one agent, sent ahead of every turn it takes.
     app.put(
       "/api/projects/:id/agents/:agentId/instructions",

@@ -163,6 +163,17 @@ describe("a model agent takes a turn", () => {
   });
 });
 
+describe("a model agent's sampling", () => {
+  it("sends the temperature and token cap it was built with, and the defaults when it wasn't", async () => {
+    process.env.LOOM_HOME = tmpDir("home-model-sampling");
+    const { id, seen } = await fakeProvider({ say: ["ok"] });
+    await new ModelAdapter("tuned", tmpDir("p"), { provider: id, model: "fast", temperature: 0.3, maxTokens: 800 }).send({ text: "hi" });
+    expect(seen[0]).toMatchObject({ temperature: 0.3, max_tokens: 800 });
+    await new ModelAdapter("plain", tmpDir("p"), { provider: id, model: "fast" }).send({ text: "hi" });
+    expect(seen[1]!.temperature).toBeUndefined();
+  });
+});
+
 describe("when the provider says no", () => {
   it("names an exhausted pool as exhausted, not as a bad key", async () => {
     process.env.LOOM_HOME = tmpDir("home-model-402");

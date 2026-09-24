@@ -78,6 +78,12 @@ describe("chat flags, stars and unread", () => {
     expect(r.after.events).toBe(r.before.events);
   });
 
+  it("refuses sampling for an agent that isn't a model agent, in words", async () => {
+    const r = await call("PUT", "/agents/plannerbot/sampling", { temperature: 0.5 });
+    expect(r.status).toBe(400);
+    expect(String(r.json.error)).toMatch(/sampling is set in its own CLI/);
+  });
+
   it("sends an agent's standing instructions ahead of every turn it takes", async () => {
     expect((await call("PUT", "/agents/plannerbot/instructions", { instructions: "Answer in one line." })).json).toEqual({
       id: "plannerbot",
