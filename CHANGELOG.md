@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### A hundred small things (the enhancement sweep)
+
+Ranked, filed as #109–#208, and built top down. Each one was tried in the
+running app with real agents before the next started.
+
+**In the thread**
+- **Find** (⌘F) with highlighted matches; **drafts** that survive reloads and
+  chat switches; **↑** recalls your last prompts; **[ / ]** jump between them.
+- A reply's ⋯ menu: **Retry**, **Retry with…** another agent, **Continue** a
+  stopped reply, **Edit & resend**, **Quote**, **Star**, **Copy link**
+  (permalinks), **Branch from here**, **Make a card**, **Read aloud**.
+- 👍 / 👎 on replies, counted on the Insights leaderboard.
+- Day separators, relative times that stay fresh, **Show more** on very long
+  messages, a token estimate in the composer, **Reply length** (Brief /
+  Normal / Detailed), `{{variables}}` in saved prompts.
+- **Mermaid** blocks get *Draw diagram* — the renderer is fetched the first
+  time you press it, never before.
+- Export a thread to Markdown (also `loom export`).
+- Error cards you can act on: a countdown on rate limits, *Send to…* another
+  agent, *Copy details*.
+- A prompt sent while Loom is down waits and sends itself.
+- Very long live threads trim themselves; the outline rail lists your prompts.
+
+**The sidebar**
+- Pin, archive and unread dots on chats; **folders** (right-click → Move to
+  folder…, fold them, rename or ungroup); **Group chats by agent**.
+- *Since you were here*: back on a new day, Main opens with what happened
+  while you were away.
+
+**Orchestra**
+- The plan as a **graph** and a **timeline**; a live cost and time ticker;
+  **Run again**; a finish flourish.
+- **Resume**: a run Loom stopped by restarting picks up where it was.
+- **Race**: every picked agent takes the same goal in its own worktree; the
+  entrants sit side by side with a diff each, and *Pick this one* merges only
+  that one.
+
+**Agents, memory, board, insights**
+- Per-agent **standing instructions**, **pictures**, model **temperature and
+  max tokens**, and **Check** — installed, signed in, model listed, no prompt
+  sent.
+- Memory you can **edit**, **export** and **import**; which memories agents
+  actually get (*used N×*, Most used); a **graph** of memories joined by the
+  files they share.
+- Board cards with **priority** and **due** dates; **WIP limits** on columns.
+- Insights: an agent **leaderboard**, an activity **heatmap**, costs as
+  **CSV**, and month-end at this pace.
+- Diffs **side by side**, and **revert one file** of a turn.
+
+**The app around it**
+- Tab title and favicon show what's working and who needs you; a finished turn
+  in a hidden tab notifies (with an optional chime); **?** lists every
+  shortcut; **focus mode** (⌘.); a first-run tour.
+- Text size, density and accent colour; view transitions between tabs;
+  reduced-motion respected; skeleton loaders; the branch in the status bar;
+  empty states you can recognise; a project whose folder is gone says so.
+- Terminal find and clear. Diagnostics says what's running. Project settings →
+  Storage shows the log's size and compacts it.
+- Voice input without a transcriber uses the browser's own speech recognition.
+- CLI: `loom backup`, `loom export`, `loom stats`, `loom completion zsh|bash`,
+  `loom orchestra:resume`; `loom pair` carries the Loom Cloud route.
+- Hardened edges: security headers, a throttled pairing claim, JSON errors
+  instead of Express's HTML pages (which leaked stack traces).
+
+**On the phone**
+- Follows the system theme; long-press a message to copy or share; a copy
+  button on code; pull to refresh; unread and working dots on the chat chips;
+  haptics.
+- The daemon card graphs **link quality** over the last two minutes.
+- An **offline copy** of the project list and your last eight threads, per
+  paired daemon, cleared on unpair.
+- Android's status bar no longer covers every screen's header.
+
+**Fixed on the way**
+- Every *Rename…* used `window.prompt`, which the desktop app doesn't have —
+  they silently did nothing. An in-app dialog replaces all seven.
+- A turn's diff was logged to Main whatever chat the turn ran in.
+- An orchestra task's second attempt sent an empty prompt.
+- A queued prompt lost its reply length.
+- A skipped tab transition filled the console with uncaught rejections.
+- `npm test` skipped four DOM suites; it runs them now.
+
 ### Replies you can watch being written
 
 - **The thread showed nothing between your send and the finished reply** —
