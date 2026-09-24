@@ -3688,6 +3688,9 @@ window.__loomPageRev="%%BUILD_REV%%";
   .bsort button.on{border-color:var(--border);background:var(--secondary);color:var(--foreground)}
   .bused{margin-left:6px;font-size:11px;padding:0 7px;border-radius:99px;background:color-mix(in srgb,var(--thread) 16%,transparent);color:var(--thread-ink,var(--foreground))}
   .monthstats{margin-bottom:16px}
+  .heldnote{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:7px 12px;border-radius:10px;font-size:12.5px;
+    border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);background:color-mix(in srgb,var(--warn) 8%,var(--card))}
+  .heldnote .linkbtn{margin-left:auto}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -4672,10 +4675,12 @@ ${BRAND_SPRITE}
     state.daemonUp = up;
     if (typeof drawStatusbar === "function") drawStatusbar();
     offlineBanner(!up);
-    // Back after an outage: re-read what the view missed while it was gone.
+    // Back after an outage: re-read what the view missed while it was gone,
+    // and send whatever was typed while it was down.
     if (up && wasDown) {
       if (state.refreshShell) state.refreshShell();
       if (state.redrawFeed) state.redrawFeed();
+      if (state.onReconnect) state.onReconnect();
     }
   }
   /**
@@ -10601,6 +10606,10 @@ ${BRAND_SPRITE}
       });
       var full = refs.length ? refs.join("\\n") + (text ? "\\n\\n" + text : "") : text;
 
+      // Loom isn't answering: keep the words and send them when it's back,
+      // rather than clearing the box for a request that can't land.
+      if (state.daemonUp === false) { holdForReconnect(full); return; }
+
       box.value = ""; autosizeBox(); attach = []; drawAttach(); clearDraft(); recall.i = -1;
       var p = state.project || {};
       var plan = planState;
@@ -10678,8 +10687,29 @@ ${BRAND_SPRITE}
         var who = (!state.auto && state.selected) || (state.project && state.project.holder) || p.holder;
         if (who && historyLoaded) { liveFor(who); drawEmpty(); stickOrFlag(true); }
         return refresh();
-      }).catch(function(err){ toast(err.message); });
+      }).catch(function(err){
+        if (err && err.offline) { var bx = document.getElementById("box"); if (bx && !bx.value) { bx.value = full; autosizeBox(); } holdForReconnect(full); return; }
+        toast(err.message);
+      });
     }
+    /** A prompt waiting for the daemon to come back, shown above the composer. */
+    function holdForReconnect(full){
+      state.heldSend = { pid: pid, chat: chatId, text: full, agent: (!state.auto && state.selected) || null };
+      saveDraft();
+      var old = document.getElementById("heldnote"); if (old) old.remove();
+      var form = document.getElementById("cform"); if (!form) return;
+      var n = document.createElement("div");
+      n.id = "heldnote"; n.className = "heldnote"; n.setAttribute("role", "status");
+      n.innerHTML = '<span class="obspin"></span><span>Loom isn’t answering — this sends as soon as it’s back.</span><button type="button" class="linkbtn" id="heldcancel">Don’t send</button>';
+      form.parentNode.insertBefore(n, form);
+      document.getElementById("heldcancel").onclick = function(){ state.heldSend = null; n.remove(); toast("kept in the composer — it won’t send by itself"); };
+    }
+    state.onReconnect = function(){
+      var h = state.heldSend; if (!h || h.pid !== pid || h.chat !== chatId) return;
+      state.heldSend = null;
+      var n = document.getElementById("heldnote"); if (n) n.remove();
+      setTimeout(function(){ if (!pageGone()) { composeFor(h.text, h.agent, true); toast("sent — Loom is back"); } }, 700);
+    };
 
     // ---- the prompt queue --------------------------------------------------
     // What you've lined up while something else is running. Yours until it's
