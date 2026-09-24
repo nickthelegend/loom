@@ -8,7 +8,9 @@ One Supabase project powers three optional features:
 | **Sign in with Google** in the phone app | Auth | "Continue without an account" still works fully |
 | **Anonymous usage stats** (country only) | one Postgres table | Nothing is sent |
 
-The free tier covers all three. Loom runs no server of its own.
+The free tier covers all three. Loom runs no server of its own, but out of the
+box the relay and the Team Hub use Loom's hosted Supabase project (see
+`src/core/hosted.ts`). Everything below points them at a project of your own.
 
 ## 1. Create the project
 
@@ -94,7 +96,13 @@ select country, count(*) from app_opens group by 1 order by 2 desc;
   travels only in the pairing link's URL fragment, which is never sent to a server.
 - **Requests are authorized exactly as on the LAN.** Your computer runs each
   relayed request against itself, with the phone's own paired token. Revoking a
-  phone (`loom clients --revoke`) works the same over the cloud.
+  phone (`loom clients --revoke`) stops its requests the same way over the cloud.
+  Every phone paired to one computer shares one relay key, though, so a revoked
+  phone that kept the key can still *read* the others' traffic until you run
+  `loom cloud rotate` (which re-pairs everyone).
+- **A captured request can't be replayed.** Each one carries its send time
+  inside the seal; your computer refuses anything stamped more than ten minutes
+  off and never runs the same request id twice.
 - **The local admin bootstrap is refused over the relay.**
 - Someone who learns your channel id still can't read or forge anything without
   the key.
