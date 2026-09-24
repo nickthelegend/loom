@@ -3083,6 +3083,7 @@ window.__loomPageRev="%%BUILD_REV%%";
   html[data-electron="darwin"] header.appbar{padding-left:88px}
   html[data-electron="darwin"] #root > .panel > header{padding-left:88px}
   /* on wide screens the app-shell fills the window and owns the height */
+  html.desk #root{max-width:none;height:100dvh;display:block}
   @media (min-width:900px){
     #root{max-width:none;height:100dvh;display:block}
     .dmain .composer .inner{max-width:840px}
@@ -3453,6 +3454,104 @@ window.__loomPageRev="%%BUILD_REV%%";
     .msg.agent .bubble{padding-left:0}
     .tool,.acts,.turnend,.turncard,.msg.agent.thinking{margin-left:0}
     #pane-thread > #feed,#pane-thread > #feedlive{padding-inline:14px}
+  }
+  /* ══ Agentic IDE finish ═══════════════════════════════════════════════════
+     Each turn is a timeline: the agent's mark at the top, a hairline running
+     down through its tool steps, and a node where the turn ends. Your prompt
+     is the card that opens a turn. The composer is the instrument panel. */
+  /* ── your prompt: the card that opens a turn ── */
+  .msg.user{align-items:stretch;margin-top:34px}
+  .msg.user .bubble,.dmain .msg.user .bubble{max-width:none;border-radius:14px;padding:12px 16px 13px;
+    background:color-mix(in srgb,var(--secondary) 72%,transparent);border:1px solid var(--border);
+    box-shadow:0 1px 0 rgb(255 255 255 / .025) inset}
+  .msg.user .mt{align-self:flex-end}
+  /* ── the agent's byline ── */
+  .av{width:24px;height:24px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--border),0 0 0 3px var(--background)}
+  .msg .who{position:relative;z-index:1}
+  .msg .who .msgcopy{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+    border-radius:7px;color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease}
+  .msg .who .msgcopy svg{width:13px;height:13px}
+  .msg:hover .who .msgcopy{opacity:1}
+  .msg .who .msgcopy:hover{background:var(--secondary);color:var(--foreground)}
+  .msg .who .wt{margin-left:4px}
+  .msg.agent .bubble,.dmain .msg.agent .bubble{padding-left:34px}
+  /* ── the turn timeline ── */
+  .msg.agent:not(.thinking) .bubble{position:relative}
+  .msg.agent:not(.thinking) .bubble::before{content:"";position:absolute;left:11.5px;top:-6px;bottom:-14px;width:1px;
+    background:color-mix(in srgb,var(--foreground) 13%,transparent)}
+  .msg.agent.cont .bubble::before{top:-16px}
+  .acts,.tool,.turnend,.msg.agent.thinking,.nicard,.apcard,.sys.errcard,.turncard{position:relative;margin-left:34px}
+  .acts::before,.tool::before,.turnend::before,.msg.agent.thinking::before,.turncard::before,.nicard::before,.apcard::before,.sys.errcard::before{
+    content:"";position:absolute;left:-22.5px;top:-12px;bottom:-12px;width:1px;background:color-mix(in srgb,var(--foreground) 13%,transparent)}
+  .acts .actlist .tool::before{display:none}
+  .acts .actlist .tool{margin-left:12px}
+  .turnend::before{bottom:50%}
+  .turnend svg{position:absolute;left:-29px;top:50%;margin-top:-7px;width:14px;height:14px;padding:2px;border-radius:50%;
+    background:var(--background);box-shadow:0 0 0 1px color-mix(in srgb,var(--ok) 45%,transparent)}
+  .turnend{min-height:18px}
+  .acts::after{content:"";position:absolute;left:-26px;top:11px;width:8px;height:8px;border-radius:50%;
+    background:var(--background);box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--muted-foreground) 70%,transparent)}
+  .tool::after{content:"";position:absolute;left:-25px;top:50%;margin-top:-3px;width:6px;height:6px;border-radius:50%;
+    background:color-mix(in srgb,var(--muted-foreground) 55%,transparent)}
+  .acts .actlist .tool::after{display:none}
+  .livebox.bar{margin-left:0}
+  /* ── code: an editor pane, not a box ── */
+  .md .mdcodewrap{padding-top:34px;border-radius:12px;background:var(--editor-surface);box-shadow:0 1px 0 rgb(255 255 255 / .02) inset}
+  .md .mdcodewrap::before{content:"";position:absolute;left:0;right:0;top:0;height:34px;border-bottom:1px solid var(--border);
+    background:color-mix(in srgb,var(--secondary) 55%,transparent)}
+  .md .mdcodewrap .mdlang{top:10px;left:14px;right:auto;opacity:1;color:var(--muted-foreground);font-size:11px}
+  .mdcodewrap:hover .mdlang{opacity:1}
+  .md .mdcodewrap .mdcopy{top:4px;right:6px;opacity:1;background:transparent;border-color:transparent}
+  .md .mdcodewrap .mdcopy:hover{background:var(--secondary)}
+  .md .mdcodewrap:not(:has(.mdlang))::after{content:"code";position:absolute;top:10px;left:14px;font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+  /* ── file changes: a review card ── */
+  .turncard{max-width:none;border-radius:12px;padding:10px 12px;background:var(--card)}
+  .turncard .tch{display:flex;align-items:center;gap:8px;font-family:var(--font-sans);font-size:13px;font-weight:500}
+  .turncard .tci{display:inline-flex;color:var(--muted-foreground)}
+  .turncard .tci svg{width:14px;height:14px}
+  .turncard .tca{color:var(--ok);font-family:var(--font-mono);font-size:12px}
+  .turncard .tcd{color:var(--err);font-family:var(--font-mono);font-size:12px}
+  .turncard .tcf{font-family:var(--font-mono);font-size:11.5px;color:var(--muted-foreground);margin-top:5px}
+  /* ── the composer: the instrument panel ── */
+  .cbox{background:linear-gradient(var(--card),var(--card)) padding-box,
+      linear-gradient(135deg,color-mix(in srgb,var(--foreground) 14%,transparent),color-mix(in srgb,var(--foreground) 7%,transparent)) border-box;
+    border:1px solid transparent}
+  .cbox:focus-within{background:linear-gradient(var(--card),var(--card)) padding-box,
+      linear-gradient(120deg,color-mix(in srgb,var(--thread) 70%,transparent),color-mix(in srgb,var(--shuttle) 55%,transparent)) border-box;
+    box-shadow:0 1px 0 rgb(255 255 255 / .03) inset,0 18px 44px -18px rgb(0 0 0 / .6),0 0 0 4px color-mix(in srgb,var(--thread) 7%,transparent)}
+  .cmode button{display:inline-flex;align-items:center;gap:6px}
+  .cmode button svg{width:13px;height:13px;opacity:.8}
+  .ckhint{display:none!important}
+  @media (min-width:1500px){ .dshell:not(.railopen) .ckhint{display:inline-flex!important} }
+  .ckhint{font-size:11px;color:var(--muted-foreground);opacity:.75;white-space:nowrap;margin-right:6px;display:inline-flex;align-items:center;gap:4px}
+  .ckhint kbd{font-family:var(--font-sans);font-size:10.5px;padding:0 5px;border-radius:5px;border:1px solid var(--border);background:var(--background);line-height:16px}
+  .cbox #send{transition:transform .12s var(--ease-out),opacity .15s ease,background .15s ease}
+  .cbox:not(.hastext) #send{opacity:.38}
+  .cbox.hastext #send{box-shadow:0 6px 16px -6px color-mix(in srgb,var(--foreground) 45%,transparent)}
+  /* ── one workspace at every width ── */
+  .sbbtn{display:none}
+  .sbbtn svg{transform:scaleX(-1)}
+  @media (max-width:1180px){ html.desk .dshell{--sbw:228px!important} }
+  @media (max-width:1040px){
+    .tab .tl{display:none}
+    .tab{padding:0 11px}
+    .ckhint{display:none}
+    .cmode button{font-size:0;gap:0;padding:0 9px}
+    .cmode button svg{width:14px;height:14px;opacity:1}
+    .cpick .cmodel{max-width:96px}
+    .cpick .cagent{max-width:150px}
+    #pane-thread > #feed,#pane-thread > #feedlive,.dmain .composer{--gutter:20px}
+  }
+  @media (max-width:780px){
+    html.desk .dshell,html.desk .dshell.railopen{grid-template-columns:minmax(0,1fr)!important}
+    html.desk .dshell .dmain{grid-column:1}
+    html.desk .dshell .rail{display:none!important}
+    html.desk .dshell .sidebar{position:fixed;left:0;top:0;bottom:25px;width:min(290px,86vw);z-index:45;
+      transform:translateX(-104%);transition:transform .22s var(--ease-out);box-shadow:var(--shadow-float)}
+    html.desk .dshell.sbopen .sidebar{transform:none}
+    html.desk .sbbtn{display:inline-flex;align-self:center;margin-right:4px}
+    html.desk .dockpane.open{position:absolute;inset:0;width:auto!important;z-index:30}
+    .statusbar > :nth-child(n+4){display:none}
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -4290,7 +4389,8 @@ ${BRAND_SPRITE}
     var p = e.payload || {};
     return '<div class="who">' + avatarFor(e.agentId) + '<span class="wn">' + esc(labelOf(e.agentId)) + "</span>" +
       (p.model ? '<span class="wm">' + esc(shortModel(p.model)) + "</span>" : "") + (extra || "") +
-      '<span class="wt" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + clock(e.ts) + "</span></div>";
+      '<span class="wt" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + clock(e.ts) + "</span>" +
+      '<button type="button" class="msgcopy" title="copy this reply" aria-label="copy this reply">' + ICONS.copy + "</button></div>";
   }
   /** Which icon a tool call gets, and which bucket it counts in. */
   function toolKind(p){
@@ -4426,9 +4526,9 @@ ${BRAND_SPRITE}
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
       var enc = p.patch ? encodeURIComponent(String(p.patch)) : "";
-      var lbl = "Update(" + fl.length + " file" + (fl.length === 1 ? "" : "s") + ")";
+      var lbl = "Edited " + fl.length + " file" + (fl.length === 1 ? "" : "s");
       return '<div class="turncard" data-patch="' + enc + '" data-label="' + esc(lbl) + '">' +
-        '<div class="tch"><span>\\u270e ' + lbl + "</span>" +
+        '<div class="tch"><span class="tci">' + ICONS.pencil + "</span><span>" + lbl + "</span>" +
         '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\\u2212' + Number(p.removed || 0) + "</span>" +
         (p.checkpoint ? '<button class="tcrw" type="button" data-rewind="' + esc(p.checkpoint) +
             '" title="put these files back the way they were before this turn">' + ICONS.rewind + "Rewind</button>" : "") +
@@ -4785,8 +4885,8 @@ ${BRAND_SPRITE}
       '<div class="corch" id="corch" style="display:none"></div>' +
       '<div class="crow">' +
       '<div class="cmode" id="cmode" role="tablist" aria-label="composer mode">' +
-      '<button type="button" role="tab" data-cmode="chat" title="talk to one agent">Chat</button>' +
-      '<button type="button" role="tab" data-cmode="orch" title="one agent plans, many work in parallel">Orchestrate</button></div>' +
+      '<button type="button" role="tab" data-cmode="chat" title="talk to one agent">' + ICONS.chat + "Chat</button>" +
+      '<button type="button" role="tab" data-cmode="orch" title="one agent plans, many work in parallel">' + ICONS.orchestra + "Orchestrate</button></div>" +
       '<button class="ctool iconly" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.plus + '</button>' +
       // Who and on what, as one joined control: the agent half opens the
       // agent picker, the model half the model picker. Two pills side by side
@@ -4810,6 +4910,7 @@ ${BRAND_SPRITE}
       '<span style="flex:1"></span>' +
       // Plan and send travel together: when a narrow row wraps, the switch that
       // changes what send does never ends up a line away from send.
+      '<span class="ckhint" aria-hidden="true"><kbd>\\u23ce</kbd> send \\u00b7 <kbd>\\u21e7\\u23ce</kbd> new line</span>' +
       '<span class="csend">' +
       // Plan: a switch, not a mode tab — it changes what either send does.
       '<button class="cplan" id="planbtn" type="button" role="switch" aria-checked="false" title="plan mode \\u2014 write a plan, change no code">' +
@@ -4827,7 +4928,10 @@ ${BRAND_SPRITE}
       mount.innerHTML =
         '<div class="panel">' +
         // Orca chrome: the strip is the window top — context, tabs, actions.
-        '<div class="tabstrip" id="tabstrip">' +
+          '<div class="tabstrip" id="tabstrip">' +
+        // Only shown on a narrow window, where the sidebar slides in instead
+        // of taking a third of the width.
+        '<button id="sbbtn" class="iconbtn sbbtn" type="button" title="projects and threads" aria-label="show projects and threads">' + ICONS.panelRight + "</button>" +
         // No project title here. The sidebar already names every project and
         // highlights the open one, so this printed it a second time three
         // inches away — and for a project called "loom" that's the word "loom"
@@ -4992,11 +5096,18 @@ ${BRAND_SPRITE}
       // asked of every agent in every open project, not one run's workers.
       tabs.splice(2, 0, "fleet");
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
-      var LBL = { thread: [ICONS.thread, "Thread"], orchestra: [ICONS.orchestra, "Orchestra"], fleet: [ICONS.fleet, "Fleet"], board: [ICONS.board, "Board"],
-                  brain: [ICONS.memory, "Brain"], observatory: [ICONS.telescope, "Observatory"] };
+      // Plain words, each with a line saying what's behind it: "Brain",
+      // "Fleet" and "Observatory" were names you had to learn before you
+      // could guess what they did.
+      var LBL = { thread: [ICONS.thread, "Chat", "talk to an agent in this thread"],
+                  orchestra: [ICONS.orchestra, "Orchestra", "one agent plans, a team builds in parallel"],
+                  fleet: [ICONS.fleet, "Agents", "what every agent is doing right now"],
+                  board: [ICONS.board, "Board", "issues, PRs and tasks"],
+                  brain: [ICONS.memory, "Memory", "what every agent here remembers"],
+                  observatory: [ICONS.telescope, "Insights", "time, tokens and cost"] };
       box.innerHTML = tabs.map(function(tb){
-        return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '">' +
-          LBL[tb][0] + LBL[tb][1] + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") + "</button>";
+        return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '" title="' + LBL[tb][1] + " \u2014 " + LBL[tb][2] + '">' +
+          LBL[tb][0] + '<span class="tl">' + LBL[tb][1] + "</span>" + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".tab"), function(tb){
         tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
@@ -6522,6 +6633,17 @@ ${BRAND_SPRITE}
     if (desktop) {
       document.getElementById("dockclose").onclick = closeDock;
       document.getElementById("railbtn").onclick = toggleRail;
+      // Narrow window: the sidebar slides in over the thread, and goes away
+      // again on a pick (this view is re-rendered then) or a click outside it.
+      var shellEl = document.querySelector(".dshell");
+      if (shellEl) shellEl.classList.remove("sbopen");
+      var sbb = document.getElementById("sbbtn");
+      if (sbb) sbb.onclick = function(ev){ ev.stopPropagation(); var sh = document.querySelector(".dshell"); if (sh) sh.classList.toggle("sbopen"); };
+      var dm = document.getElementById("dmain");
+      if (dm && !dm._sbClose) {
+        dm._sbClose = true;
+        dm.addEventListener("mousedown", function(){ var sh = document.querySelector(".dshell"); if (sh) sh.classList.remove("sbopen"); });
+      }
       // The terminal button wants the terminal. If the console tab is the active
       // pane, switch to a terminal rather than closing the dock out from under it.
       document.getElementById("termbtn").onclick = function(){
@@ -7107,6 +7229,15 @@ ${BRAND_SPRITE}
       if (rw) { ev.preventDefault(); ev.stopPropagation(); askRewind(rw.getAttribute("data-rewind"), rw); return; }
       var go = ev.target.closest && ev.target.closest("[data-gochat]");
       if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
+      // Copy a whole reply — the words, not the markup around them.
+      var mc = ev.target.closest && ev.target.closest(".msgcopy");
+      if (mc) {
+        ev.preventDefault(); ev.stopPropagation();
+        var mb = mc.closest(".msg"); var body = mb && mb.querySelector(".bubble");
+        var txt = body ? body.innerText : "";
+        if (navigator.clipboard && txt) navigator.clipboard.writeText(txt).then(function(){ toast("copied"); }, function(){ toast("couldn\u2019t copy"); });
+        return;
+      }
       var cp = ev.target.closest && ev.target.closest(".mdcopy");
       if (cp) {
         ev.preventDefault(); ev.stopPropagation();
@@ -9621,6 +9752,8 @@ ${BRAND_SPRITE}
       box.style.height = "auto";
       // floor at two lines (48px), grow to a cap, then let it scroll
       box.style.height = Math.max(48, Math.min(200, box.scrollHeight)) + "px";
+      // send lights up only when there's something to send
+      var cf = document.getElementById("cform"); if (cf) cf.classList.toggle("hastext", !!box.value.trim());
     }
 
     function drawAttach(){
@@ -10111,7 +10244,7 @@ ${BRAND_SPRITE}
       box.setAttribute("data-bound", "1");
       autosizeBox();
 
-      box.addEventListener("input", function(){ autosizeBox(); scanTrigger(); scheduleSkillSuggest(box.value); });
+      box.addEventListener("input", function(){ autosizeBox(); scanTrigger(); scheduleSkillSuggest(box.value); form.classList.toggle("hastext", !!box.value.trim()); });
       loadSkillCache();
       box.addEventListener("keydown", function(e){
         // Menu open: arrows move, Enter/Tab accept, Esc closes.
@@ -10295,7 +10428,14 @@ ${BRAND_SPRITE}
       var lbl = document.getElementById("cmodellabel");
       var p = state.project || {};
       var cur = (p.agents || []).filter(function(a){ return a.id === state.selected; })[0];
-      if (lbl) lbl.textContent = (cur && cur.model) ? shortModel(cur.model) : (cur && cur.kind === "model" ? "Pick a model" : "Default");
+      if (lbl) {
+        var mtxt = (cur && cur.model) ? shortModel(cur.model) : (cur && cur.kind === "model" ? "Pick a model" : "Default");
+        // A model agent already wears its model as its name; don't say it twice.
+        if (cur && cur.kind === "model" && cur.model && agentLabel(cur.kind, cur.id) === mtxt.replace(/:free$/, "")) {
+          mtxt = /:free$/.test(cur.model) ? "free" : "model";
+        }
+        lbl.textContent = mtxt;
+      }
       var mp = document.getElementById("modelpick");
       if (mp) mp.style.display = state.auto || state.cmode === "orch" ? "none" : "";
       var chip = document.getElementById("cagent");
@@ -15889,7 +16029,10 @@ ${BRAND_SPRITE}
   }
 
   // ---- router ----------------------------------------------------------
-  var mq = window.matchMedia("(min-width:900px)");
+  // The workspace on anything with a mouse, at any width: narrowing a desktop
+  // window used to swap in the phone layout and take the sidebar, the tabs and
+  // the panels away. The single column is for touch phones only.
+  var mq = window.matchMedia("(min-width:900px), (hover:hover) and (pointer:fine)");
   function isDesktop(){ return mq.matches; }
   function clearShell(){ if (state.shellTimer) { clearInterval(state.shellTimer); state.shellTimer = null; } }
 
@@ -16584,6 +16727,7 @@ ${BRAND_SPRITE}
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     state.redrawFeed = null;
     if (!state.token) return renderPair();
+    document.documentElement.classList.toggle("desk", isDesktop());
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
     if (m) return renderProject(m[1], root, false);

@@ -74,7 +74,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning every run showed.
 - Fleet said "no agents running" above a run with workers in flight.
 
+### One workspace at every window size
+
+- **Narrowing the window swapped in the phone layout** and took the sidebar,
+  the tabs and the panels away. On anything with a mouse the workspace now
+  stays at every width: the sidebar slims, then slides in behind a toggle; tabs
+  go icon-only (each with a tooltip); the right panel steps aside. The single
+  column is for touch phones only.
+- Tabs say what they are: **Chat, Orchestra, Agents, Board, Memory, Insights**
+  (they were Thread, Fleet, Brain and Observatory), each with a one-line hint.
+- A turn reads as a timeline: the agent's mark, a hairline through its tool
+  steps, a node where it ends. Your prompt is the card that opens a turn;
+  code blocks have an editor header; file edits are a review card
+  ("Edited 3 files +12 −4"); a reply can be copied from its byline; the
+  composer's border lights up when you're in it and send lights up when
+  there's something to send.
+
 ### And the rest
+
+- **Loom on Node older than 22.5 showed every thread empty** — no node:sqlite,
+  so it opened a fresh JSONL log beside the real one (a shell that put nvm's
+  Node 20 first after a reboot). The CLI now refuses to start on <22.5 and says
+  why, and the log refuses to open an empty fallback beside a log.db.
 
 - `loom up --restart` left the old daemon alive — its port freed, the process
   and everything it held still running — because shutdown waited on the
