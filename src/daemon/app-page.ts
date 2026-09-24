@@ -43,6 +43,7 @@ export const APP_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="icon" id="favicon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230a0a0a'/%3E%3Ctext x='50' y='60' font-size='36' text-anchor='middle' fill='%23fafafa' font-family='-apple-system,Segoe UI,sans-serif' font-weight='600'%3Elo%3C/text%3E%3Crect x='32' y='70' width='36' height='4' rx='2' fill='%2367e8f9'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/app/vendor/xterm.css">
 <title>Loom</title>
 <script>
@@ -3572,6 +3573,69 @@ window.__loomPageRev="%%BUILD_REV%%";
     .statusbar > :nth-child(n+4){display:none}
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
+  /* message actions */
+  .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
+    color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease}
+  .msg .who .msgmore svg{width:14px;height:14px}
+  .msg:hover .who .msgmore,.msg .who .msgmore:focus-visible{opacity:1}
+  .msg .who .msgmore:hover{background:var(--secondary);color:var(--foreground)}
+  .wstar{display:inline-flex;color:#f5b301;margin-left:6px}
+  .wstar svg{width:12px;height:12px;fill:currentColor}
+  .msg.user .mt{display:flex;align-items:center;gap:2px}
+  .msg.user .mt .uact{display:inline-flex;align-items:center;justify-content:center;width:24px;height:22px;border-radius:6px;
+    color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease;margin-right:1px}
+  .msg.user .mt .uact svg{width:12.5px;height:12.5px}
+  .msg.user:hover .mt .uact,.msg.user .mt .uact:focus-visible{opacity:1}
+  .msg.user .mt .uact:hover{background:var(--secondary);color:var(--foreground)}
+  .msg.user .mt .wstar{margin:0 6px 0 2px}
+  .msgfoot{display:flex;align-items:center;gap:10px;margin:8px 0 0 34px}
+  .msgfoot .btn svg{width:12px;height:12px;margin-right:4px}
+  .msgfoot .mfh{font-size:12px;color:var(--muted-foreground)}
+  @keyframes msgflash{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--live) 55%,transparent)}100%{box-shadow:0 0 0 14px transparent}}
+  .msg.flash{animation:msgflash .9s var(--ease-out,ease-out) 2;border-radius:12px}
+  /* find in thread */
+  .findbar{position:absolute;top:10px;right:18px;z-index:30;display:flex;align-items:center;gap:4px;padding:5px 6px 5px 10px;
+    border-radius:12px;background:var(--popover);border:1px solid var(--border);box-shadow:var(--shadow-float);animation:fadeup .15s ease-out}
+  .findbar > svg{width:14px;height:14px;color:var(--muted-foreground)}
+  .findbar input{width:200px;border:0;background:transparent;color:var(--foreground);font:inherit;font-size:13px;outline:none;padding:4px 2px}
+  .findbar input:focus,.findbar input:focus-visible{outline:none;box-shadow:none;border:0}
+  .findbar .findcount{font-size:12px;color:var(--muted-foreground);min-width:62px;text-align:right;white-space:nowrap}
+  .findbar .iconbtn{width:26px;height:26px}
+  mark.fhit{background:color-mix(in srgb,#f5b301 38%,transparent);color:inherit;border-radius:3px;padding:0 1px}
+  mark.fhit.cur{background:#f5b301;color:#111;box-shadow:0 0 0 2px color-mix(in srgb,#f5b301 40%,transparent)}
+  /* day separators */
+  .daysep{display:flex;align-items:center;gap:12px;margin:26px 0 6px;color:var(--muted-foreground);font-size:11.5px;
+    font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+  .daysep::before,.daysep::after{content:"";flex:1;height:1px;background:var(--border)}
+  .daysep + .msg.user{margin-top:14px}
+  /* sidebar */
+  .crow .udot{width:7px;height:7px;border-radius:50%;background:var(--thread,#67e8f9);flex:none;margin-left:6px;
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--thread,#67e8f9) 22%,transparent)}
+  .crow .ci svg{width:13px;height:13px}
+  /* shortcut sheet */
+  .kbmodal{width:min(640px,calc(100vw - 32px))}
+  .kbmodal .modalhead svg{width:16px;height:16px;margin-right:6px;vertical-align:-3px}
+  .kbgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px 26px}
+  .kbh{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:8px}
+  .kbrow{display:flex;align-items:center;gap:12px;font-size:13px;padding:5px 0;border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent)}
+  .kbrow .kbd{min-width:84px;display:inline-flex;justify-content:center;font-family:var(--font-mono);font-size:11.5px;padding:2px 7px;
+    border-radius:6px;background:var(--secondary);border:1px solid var(--border);color:var(--foreground)}
+  /* in-app text prompt */
+  .cfmodal .cfin{width:100%;margin:12px 0 2px;padding:9px 11px;border-radius:9px;border:1px solid var(--border);
+    background:var(--input,var(--muted));color:var(--foreground);font:inherit;font-size:14px;resize:vertical;box-sizing:border-box}
+  .cfmodal .cfin:focus{outline:none;border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 25%,transparent)}
+  .cfmodal .cfin.bad{border-color:var(--err)}
+  /* focus mode: the thread and nothing else */
+  html.focusmode .dshell,html.focusmode .dshell.railopen{grid-template-columns:minmax(0,1fr)!important}
+  html.focusmode .dshell > .sidebar,html.focusmode .dshell > .rail{display:none!important}
+  html.focusmode .dshell .dmain{grid-column:1}
+  /* quote a selection */
+  .quotebtn{position:fixed;z-index:60;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:9px;
+    background:var(--popover);border:1px solid var(--border);box-shadow:var(--shadow-float);font-size:12.5px;color:var(--foreground);
+    cursor:pointer;animation:fadeup .12s ease-out}
+  .quotebtn svg{width:13px;height:13px}
+  @media (prefers-reduced-motion: reduce){.msg.flash,.findbar,.quotebtn{animation:none}}
 </style>
 </head>
 <body id="loom-app">
@@ -3844,6 +3908,53 @@ ${BRAND_SPRITE}
       setTimeout(function(){ var b = scrim.querySelector('[data-cf="1"]'); if (b) b.focus(); }, 0);
     });
   }
+  /**
+   * An in-app text prompt. The desktop shell (Electron) has no window.prompt
+   * at all — it returns nothing — so every "Rename…" and "why?" that used it
+   * silently did nothing there. Resolves the text, or null when cancelled. A
+   * page that installed its own window.prompt (a test harness) is honoured.
+   */
+  function askText(message, opts){
+    opts = opts || {};
+    try {
+      if (typeof window.prompt === "function" && String(window.prompt).indexOf("[native code]") < 0) {
+        var v = window.prompt(message, opts.value || "");
+        return Promise.resolve(v === undefined ? null : v);
+      }
+    } catch (e) {}
+    return new Promise(function(resolve){
+      var scrim = document.createElement("div");
+      scrim.className = "scrim cfscrim";
+      var multi = !!opts.multiline;
+      scrim.innerHTML = '<div class="modal cfmodal" role="dialog" aria-modal="true">' +
+        '<div class="cft">' + esc(String(message || "")) + "</div>" +
+        (opts.note ? '<div class="cfb">' + esc(opts.note) + "</div>" : "") +
+        (multi
+          ? '<textarea class="cfin" rows="4" spellcheck="true"></textarea>'
+          : '<input class="cfin" type="text" spellcheck="false" autocomplete="off">') +
+        '<div class="cfa"><button type="button" class="btn sm ghost" data-cf="0">Cancel</button>' +
+        '<button type="button" class="btn sm primary" data-cf="1">' + esc(opts.ok || "OK") + "</button></div></div>";
+      document.body.appendChild(scrim);
+      var input = scrim.querySelector(".cfin");
+      input.value = opts.value || "";
+      if (opts.placeholder) input.placeholder = opts.placeholder;
+      function done(v){ document.removeEventListener("keydown", key, true); if (scrim.parentNode) scrim.parentNode.removeChild(scrim); resolve(v); }
+      function ok(){
+        var v = input.value;
+        if (opts.required && !v.trim()) { input.focus(); input.classList.add("bad"); return; }
+        done(v);
+      }
+      function key(e){
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); }
+        else if (e.key === "Enter" && (!multi || e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); ok(); }
+      }
+      document.addEventListener("keydown", key, true);
+      scrim.onmousedown = function(e){ if (e.target === scrim) done(null); };
+      scrim.querySelector('[data-cf="1"]').onclick = ok;
+      scrim.querySelector('[data-cf="0"]').onclick = function(){ done(null); };
+      setTimeout(function(){ input.focus(); input.select(); }, 0);
+    });
+  }
   function toast(msg){ if (typeof document === "undefined" || !document) return; var t = document.getElementById("toast"); if (!t) return;
     // while the daemon is down the banner says so once; polls don't each toast it
     if (state.daemonUp === false && /Can\u2019t reach Loom|Failed to fetch|Load failed|NetworkError/i.test(String(msg))) return;
@@ -3895,6 +4006,100 @@ ${BRAND_SPRITE}
         }
       } catch (e) {}
     }
+  }
+  /**
+   * The tab you're not looking at: its title says how many agents are
+   * working, and its icon carries the count (or an amber "!" when one is
+   * waiting on you). Redrawn only when something changed.
+   */
+  var _ambient = "";
+  function updateAmbient(busy, needs){
+    var name = state.project && state.project.name;
+    _baseTitle = (needs ? "⏸ " : busy ? "● " + busy + " working · " : "") + (name ? name + " · " : "") + "Loom";
+    if (!_titleFlash) document.title = _baseTitle;
+    var key = busy + "|" + (needs ? 1 : 0);
+    if (key === _ambient) return;
+    _ambient = key;
+    var link = document.getElementById("favicon");
+    // jsdom (the test DOM) has no canvas and says so loudly; a real browser does
+    if (!link || /jsdom/i.test(navigator.userAgent || "")) return;
+    try {
+      var c = document.createElement("canvas"); c.width = 64; c.height = 64;
+      var g = c.getContext("2d");
+      g.fillStyle = "#0a0a0a";
+      g.beginPath();
+      if (g.roundRect) g.roundRect(0, 0, 64, 64, 14); else g.rect(0, 0, 64, 64);
+      g.fill();
+      g.fillStyle = "#fafafa"; g.font = "600 24px -apple-system,Segoe UI,sans-serif"; g.textAlign = "center";
+      g.fillText("lo", 32, 38);
+      g.fillStyle = "#67e8f9"; g.fillRect(20, 45, 24, 3);
+      if (needs || busy) {
+        g.beginPath(); g.arc(48, 16, 15, 0, Math.PI * 2);
+        g.fillStyle = needs ? "#f59e0b" : "#eab308"; g.fill();
+        g.lineWidth = 3; g.strokeStyle = "#0a0a0a"; g.stroke();
+        g.fillStyle = "#0a0a0a"; g.font = "800 19px -apple-system,Segoe UI,sans-serif";
+        g.fillText(needs ? "!" : busy > 9 ? "9+" : String(busy), 48, 23);
+      }
+      link.type = "image/png";
+      link.href = c.toDataURL("image/png");
+    } catch (e) {}
+  }
+  /**
+   * Has a thread got replies this device hasn't seen? A thread never opened
+   * here takes its current newest reply as the baseline — a first launch
+   * shouldn't light up every chat you ever had.
+   */
+  function isUnread(pid, c){
+    if (!c || !c.lastReplyId) return false;
+    var m = {};
+    try { m = JSON.parse(localStorage.getItem("loomSeen") || "{}") || {}; } catch (e) { return false; }
+    var k = pid + ":" + c.id;
+    if (m[k] === undefined) {
+      m[k] = c.lastReplyId;
+      try { localStorage.setItem("loomSeen", JSON.stringify(m)); } catch (e) {}
+      return false;
+    }
+    return c.lastReplyId > m[k];
+  }
+  /** Preferences that belong to this device (how it should get your attention). */
+  function devicePref(name, fallback){
+    try { var v = localStorage.getItem("loomPref:" + name); return v === null ? fallback : v === "1"; } catch (e) { return fallback; }
+  }
+  function setDevicePref(name, on){ try { localStorage.setItem("loomPref:" + name, on ? "1" : "0"); } catch (e) {} }
+  /** A soft two-note chime, made on the spot: no audio file to ship or fetch. */
+  function chime(){
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+      var ctx = chime.ctx || (chime.ctx = new AC());
+      [[660, 0], [880, 0.12]].forEach(function(n){
+        var o = ctx.createOscillator(), v = ctx.createGain(), t = ctx.currentTime + n[1];
+        o.type = "sine"; o.frequency.value = n[0];
+        v.gain.setValueAtTime(0.0001, t); v.gain.exponentialRampToValueAtTime(0.12, t + 0.02); v.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+        o.connect(v); v.connect(ctx.destination); o.start(t); o.stop(t + 0.4);
+      });
+    } catch (e) {}
+  }
+  /**
+   * A long turn finished while you were in another window: say who, and the
+   * first line of what they said. Short turns don't — you were still here.
+   */
+  function notifyDone(ev, projectName){
+    var p = (ev && ev.payload) || {};
+    if (!document.hidden || !devicePref("notifyDone", true)) return;
+    if (Number(p.durationMs || 0) < 20000) return;
+    var who = labelOf((ev && ev.agentId) || "agent");
+    var last = document.querySelectorAll('#feed .msg.agent[data-agent="' + String(ev.agentId || "").replace(/"/g, "") + '"] .bubble');
+    var line = last.length ? (last[last.length - 1].innerText || "").trim().split("\\n")[0].slice(0, 140) : "";
+    var title = who + " finished" + (projectName ? " · " + projectName : "");
+    var body = line || ("after " + durfmt(Number(p.durationMs || 0)));
+    if (devicePref("chime", false)) chime();
+    if (window.loomNative && window.loomNative.notify) {
+      try { window.loomNative.notify({ title: title, body: body, chat: (ev && ev.chat) || "main", project: state.pid || null, agentId: (ev && ev.agentId) || null }); } catch (e) {}
+      return;
+    }
+    try {
+      if (window.Notification && Notification.permission === "granted") new Notification(title, { body: body, tag: "loom-done-" + (ev.agentId || "") });
+    } catch (e) {}
   }
   document.addEventListener("visibilitychange", function(){ if (!document.hidden) stopTitleFlash(); });
   /** Keyboard access for the row/card controls that are <div>s driven by event
@@ -4149,6 +4354,12 @@ ${BRAND_SPRITE}
     shield: svg('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'),
     pin: svg('<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>'),
     bookmark: svg('<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>'),
+    star: svg('<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>'),
+    link: svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
+    archive: svg('<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>'),
+    download: svg('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'),
+    keyboard: svg('<path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/>'),
+    quote: svg('<path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/>'),
     clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
     trash: svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
     check: svg('<path d="M20 6 9 17l-5-5"/>'),
@@ -4452,7 +4663,10 @@ ${BRAND_SPRITE}
     return '<div class="who">' + avatarFor(e.agentId) + '<span class="wn">' + esc(labelOf(e.agentId)) + "</span>" +
       (p.model ? '<span class="wm">' + esc(shortModel(p.model)) + "</span>" : "") + (extra || "") +
       '<span class="wt" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + clock(e.ts) + "</span>" +
-      '<button type="button" class="msgcopy" title="copy this reply" aria-label="copy this reply">' + ICONS.copy + "</button></div>";
+      (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
+      '<button type="button" class="msgcopy" title="copy this reply" aria-label="copy this reply">' + ICONS.copy + "</button>" +
+      (e.id ? '<button type="button" class="msgmore" title="More: retry, star, quote, make a card, link" aria-label="more actions">' + ICONS.dots + "</button>" : "") +
+      "</div>";
   }
   /** Which icon a tool call gets, and which bucket it counts in. */
   function toolKind(p){
@@ -4555,8 +4769,13 @@ ${BRAND_SPRITE}
             (tview() === "verbose" ? rawBlock(p) : "") + "</div></div>";
         }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
-        return '<div class="msg user" data-ts="' + Number(e.ts || 0) + '"><div class="bubble md">' + mdToHtml(p.text) + "</div>" +
-          '<div class="mt">' + clock(e.ts) + "</div></div>";
+        return '<div class="msg user" data-id="' + Number(e.id || 0) + '" data-ts="' + Number(e.ts || 0) + '" data-raw="' + esc(encodeURIComponent(String(p.text || ""))) + '">' +
+          '<div class="bubble md">' + mdToHtml(p.text) + "</div>" +
+          '<div class="mt"><button type="button" class="uact uedit" title="Edit and send again" aria-label="edit and send again">' + ICONS.pencil + "</button>" +
+          '<button type="button" class="uact ucopy" title="Copy" aria-label="copy your message">' + ICONS.copy + "</button>" +
+          (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
+          '<button type="button" class="uact ustar" title="Star" aria-label="star your message">' + ICONS.star + "</button>" +
+          clock(e.ts) + "</div></div>";
       }
       var h = hue(e.agentId);
       // Reasoning / thinking (codex, grok, and now claude) renders as a distinct
@@ -4571,9 +4790,12 @@ ${BRAND_SPRITE}
           '<details class="thinkbox"' + (tv === "verbose" ? " open" : "") + "><summary>" + ICONS.spark + "Thought for a moment</summary><div class=\\"md\\">" +
           mdToHtml(p.text) + "</div></details></div>";
       }
-      return '<div class="msg agent' + (p.partial ? " partial" : "") + '" data-agent="' + esc(e.agentId) + '">' +
+      return '<div class="msg agent' + (p.partial ? " partial" : "") + '" data-agent="' + esc(e.agentId) + '" data-id="' + Number(e.id || 0) + '" data-ts="' + Number(e.ts || 0) + '">' +
         whoHtml(e, p.partial ? '<span class="thinktag stopped">stopped</span>' : "") +
-        '<div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div></div>";
+        '<div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div>" +
+        (p.partial ? '<div class="msgfoot"><button type="button" class="btn xs outline" data-continue="' + esc(e.agentId) + '">' + ICONS.play + "Continue</button>" +
+          '<span class="mfh">ask ' + esc(labelOf(e.agentId)) + " to pick up where it stopped</span></div>" : "") +
+        "</div>";
     }
     if (e.kind === "tool_call") {
       var tk = toolKind(p);
@@ -7291,6 +7513,21 @@ ${BRAND_SPRITE}
       if (rw) { ev.preventDefault(); ev.stopPropagation(); askRewind(rw.getAttribute("data-rewind"), rw); return; }
       var go = ev.target.closest && ev.target.closest("[data-gochat]");
       if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
+      // A message's own actions: the ⋯ menu, your prompt's edit/copy/star,
+      // and Continue on a reply you stopped.
+      var mm = ev.target.closest && ev.target.closest(".msgmore");
+      if (mm) { ev.preventDefault(); ev.stopPropagation(); msgMenu(mm.closest(".msg"), mm); return; }
+      var ua = ev.target.closest && ev.target.closest(".uact");
+      if (ua) {
+        ev.preventDefault(); ev.stopPropagation();
+        var um = ua.closest(".msg"), raw = decodeURIComponent((um && um.getAttribute("data-raw")) || "");
+        if (ua.classList.contains("uedit")) composeFor(raw, null, false);
+        else if (ua.classList.contains("ucopy")) copyText(raw);
+        else if (ua.classList.contains("ustar")) toggleStar(Number(um.getAttribute("data-id")) || 0);
+        return;
+      }
+      var cn = ev.target.closest && ev.target.closest("[data-continue]");
+      if (cn) { ev.preventDefault(); ev.stopPropagation(); composeFor("Continue from exactly where you stopped.", cn.getAttribute("data-continue"), true); return; }
       // Copy a whole reply — the words, not the markup around them.
       var mc = ev.target.closest && ev.target.closest(".msgcopy");
       if (mc) {
@@ -7445,11 +7682,12 @@ ${BRAND_SPRITE}
           b.onclick = function(ev){
             ev.stopPropagation();
             var id = b.getAttribute("data-forget");
-            var reason = window.prompt("Forget this memory — why? (kept in history)", "no longer true");
-            if (reason === null) return;
-            api("/api/projects/" + pid + "/brain/" + id + "?reason=" + encodeURIComponent(reason.trim() || "forgotten"), { method: "DELETE" })
-              .then(function(){ toast("forgotten \\u00b7 its history stays"); refreshBrain(); })
-              .catch(function(err){ toast(err.message); });
+            askText("Forget this memory — why?", { value: "no longer true", note: "It leaves the brain; its history stays.", ok: "Forget" }).then(function(reason){
+              if (reason === null) return;
+              api("/api/projects/" + pid + "/brain/" + id + "?reason=" + encodeURIComponent(reason.trim() || "forgotten"), { method: "DELETE" })
+                .then(function(){ toast("forgotten · its history stays"); refreshBrain(); })
+                .catch(function(err){ toast(err.message); });
+            });
           };
         });
         var reimp = document.getElementById("reimport");
@@ -7589,13 +7827,19 @@ ${BRAND_SPRITE}
           var action = b.getAttribute("data-tbact"), body = JSON.parse(b.getAttribute("data-tbbody") || "{}");
           if (action === "correct") {
             var cur = mems.filter(function(m){ return m.id === body.id; })[0];
-            var text = window.prompt("Correct this memory \\u2014 what\\u2019s true instead? (theirs stays in history)", cur ? cur.text : "");
-            if (text === null || !text.trim()) return;
-            body.text = text.trim();
+            askText("Correct this memory — what’s true instead?", { value: cur ? cur.text : "", note: "Theirs stays in history.", multiline: true, required: true, ok: "Correct" }).then(function(text){
+              if (text === null || !text.trim()) return;
+              body.text = text.trim();
+              teamBrainAct(action, body, b);
+            });
+            return;
           } else if (action === "resolve") {
-            var why = window.prompt("Why keep this one? (the other stays in history)", "");
-            if (why === null) return;
-            body.reason = why.trim();
+            askText("Why keep this one?", { note: "The other stays in history.", ok: "Keep this one" }).then(function(why){
+              if (why === null) return;
+              body.reason = why.trim();
+              teamBrainAct(action, body, b);
+            });
+            return;
           }
           teamBrainAct(action, body, b);
         };
@@ -9066,6 +9310,7 @@ ${BRAND_SPRITE}
       return api("/api/projects/" + pid).then(function(j){
         var first = !state.project || !state.project.agents;
         state.project = j.project;
+        syncStars();
         // the empty thread drew before the project arrived ("Ready in this
         // project", no agent) — draw it again now that it knows both
         drawStatus();
@@ -9180,7 +9425,17 @@ ${BRAND_SPRITE}
         added = true;
       });
       drawEmpty();
+      if (added) { markDays(); markSeen(); }
       if (added) stickOrFlag(wasNear);
+    }
+    /** What this device has read in this chat — the sidebar's unread dots. */
+    function markSeen(){
+      var m = {};
+      try { m = JSON.parse(localStorage.getItem("loomSeen") || "{}") || {}; } catch (e) {}
+      var k = pid + ":" + chatId;
+      if ((m[k] || 0) >= state.lastId) return;
+      m[k] = state.lastId;
+      try { localStorage.setItem("loomSeen", JSON.stringify(m)); } catch (e) {}
     }
 
     // ---- live: a reply being written, and who is working ----------------------
@@ -9388,9 +9643,9 @@ ${BRAND_SPRITE}
     /** Page the thread backwards, keeping what you were looking at in place. */
     function loadEarlier(){
       var feed = document.getElementById("feed"), btn = document.getElementById("loadearlier");
-      if (!feed || !state.firstId) return;
-      if (btn) { btn.disabled = true; btn.textContent = "Loading\\u2026"; }
-      api("/api/projects/" + pid + "/events?limit=" + PAGE + "&before=" + state.firstId + "&chat=" + encodeURIComponent(chatId))
+      if (!feed || !state.firstId) return Promise.resolve();
+      if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+      return api("/api/projects/" + pid + "/events?limit=" + PAGE + "&before=" + state.firstId + "&chat=" + encodeURIComponent(chatId))
         .then(function(j){
           var evs = j.events || [], sc = threadScroller();
           var fromBottom = sc ? sc.scrollHeight - sc.scrollTop : 0;
@@ -9402,6 +9657,7 @@ ${BRAND_SPRITE}
             if (html) placeLine(feed, html, anchor);
           });
           drawEarlier(evs.length >= PAGE);
+          markDays();
           if (sc) sc.scrollTop = sc.scrollHeight - fromBottom;
         })
         .catch(function(err){ toast(err.message); if (btn) { btn.disabled = false; btn.textContent = "Load earlier messages"; } });
@@ -9416,6 +9672,7 @@ ${BRAND_SPRITE}
       clearLive();
       openTurns = {};
       historyLoaded = false; pendingStream = [];
+      syncStars();
       return api("/api/projects/" + pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(chatId))
         .then(function(j){
           var evs = j.events || [];
@@ -9424,6 +9681,9 @@ ${BRAND_SPRITE}
           if (!evs.length) { var f = document.getElementById("feed"); if (f && f.firstChild && f.firstChild.className === "loader") f.innerHTML = ""; drawEmpty(); }
           drawEarlier(evs.length >= PAGE);
           flushPending(j.live);
+          markDays(); markSeen();
+          var go = state.pendingGo;
+          if (go && go.pid === pid && go.chat === chatId) { state.pendingGo = null; setTimeout(function(){ if (!pageGone()) jumpToMessage(go.id); }, 60); }
           if (state.project) reconcileLive(state.project);
           toBottom();
         })
@@ -9491,6 +9751,7 @@ ${BRAND_SPRITE}
             // permitted) raise an OS notification. Deliberately above the
             // per-chat filter below, which would otherwise swallow it.
             if (frame.event.kind === "needs_input") notifyNeedsInput(frame.event);
+            if (frame.event.kind === "run_complete") notifyDone(frame.event, state.project && state.project.name);
             // An orchestra spans many chats — its run's and one per task — so
             // the view listens above the per-chat filter too.
             onOrchEvent(frame.event);
@@ -9519,6 +9780,388 @@ ${BRAND_SPRITE}
     // the attachment. Cleared after each send.
     var attach = [];
 
+    // ---- message actions ------------------------------------------------------
+    /** The prompt behind an agent's reply: the nearest of your messages above it. */
+    function promptFor(msgEl){
+      for (var n = msgEl && msgEl.previousElementSibling; n; n = n.previousElementSibling) {
+        if (n.classList && n.classList.contains("msg") && n.classList.contains("user")) return decodeURIComponent(n.getAttribute("data-raw") || "");
+      }
+      return "";
+    }
+    function bubbleText(msgEl){
+      var b = msgEl && msgEl.querySelector(".bubble");
+      return b ? (b.innerText || b.textContent || "").trim() : "";
+    }
+    /**
+     * Put text in the composer, for an agent, and send it — or leave it there
+     * to edit. The one path Retry, Edit, Continue and Quote all take, so a
+     * resend follows every rule a typed prompt does (the queue, plan mode,
+     * the handoff to a different agent).
+     */
+    function composeFor(text, agentId, go){
+      var box = document.getElementById("box"); if (!box) return;
+      if (state.cmode === "orch" && !orchRunForChat()) setComposerMode("chat");
+      var roster = (state.project && state.project.agents) || [];
+      if (agentId && roster.some(function(a){ return a.id === agentId; })) { state.auto = false; state.selected = agentId; drawStatus(); }
+      box.value = text; autosizeBox(); saveDraft();
+      var form = document.getElementById("cform"); if (form) form.classList.toggle("hastext", !!box.value.trim());
+      if (go) { send(); return; }
+      box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+    }
+    function quoteIntoComposer(text){
+      var box = document.getElementById("box"); if (!box || !text) return;
+      var q = String(text).trim().split("\\n").slice(0, 12).map(function(l){ return "> " + l; }).join("\\n");
+      var cur = box.value.replace(/\\s+$/, "");
+      box.value = (cur ? cur + "\\n\\n" : "") + q + "\\n\\n";
+      autosizeBox(); saveDraft(); box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+      var form = document.getElementById("cform"); if (form) form.classList.add("hastext");
+    }
+    function msgMenu(msgEl, anchor){
+      if (!msgEl) return;
+      var id = Number(msgEl.getAttribute("data-id")) || 0, agentId = msgEl.getAttribute("data-agent");
+      var prompt = promptFor(msgEl);
+      var others = ((state.project && state.project.agents) || []).filter(function(a){
+        return a.tier === "adapter" && a.enabled !== false && a.id !== agentId;
+      });
+      var starred = !!(state.starSet && state.starSet[id]);
+      var r = anchor.getBoundingClientRect();
+      var items = [{ head: agentId ? labelOf(agentId) : "Message" }];
+      if (prompt) {
+        items.push({ label: "Retry", icon: ICONS.refresh, hint: "same prompt", run: function(){ composeFor(prompt, agentId, true); } });
+        if (others.length) items.push({ label: "Retry with\\u2026", icon: ICONS.agents, hint: others.length + " agents", run: function(){
+          openMenu(Math.round(r.left), Math.round(r.bottom + 4), [{ head: "Send the same prompt to" }].concat(others.map(function(a){
+            return { label: agentLabel(a.kind, a.id), icon: agentGlyph(a.kind, a.id), hint: a.busy ? "busy" : "", run: function(){ composeFor(prompt, a.id, true); } };
+          })));
+        } });
+        items.push({ sep: true });
+      }
+      items.push({ label: starred ? "Unstar" : "Star", icon: ICONS.star, run: function(){ toggleStar(id); } });
+      items.push({ label: "Quote in reply", icon: ICONS.quote, run: function(){ quoteIntoComposer(bubbleText(msgEl)); } });
+      items.push({ label: "Make a card", icon: ICONS.board, hint: "on the board", run: function(){
+        openBoardTaskModal(pid, "working", function(){ if (state.reloadBoard) state.reloadBoard(); }, bubbleText(msgEl).split("\\n")[0].slice(0, 200));
+      } });
+      items.push({ label: "Copy link", icon: ICONS.link, run: function(){ copyText(messageLink(id)); } });
+      items.push({ label: "Branch from here", icon: ICONS.branch, hint: "new chat", run: function(){ branchFrom(msgEl); } });
+      openMenu(Math.round(r.right - 220), Math.round(r.bottom + 4), items);
+    }
+    /** A link that opens this project, this chat, this message. */
+    function messageLink(id){
+      return location.origin + location.pathname + "#p/" + encodeURIComponent(pid) + "/c/" + encodeURIComponent(chatId) + "/m/" + id;
+    }
+    /** Stars live with the chat on the daemon, so every device sees them. */
+    function syncStars(){
+      var c = ((state.project && state.project.chats) || []).filter(function(q){ return q.id === chatId; })[0];
+      var set = {};
+      ((c && c.starred) || []).forEach(function(n){ set[n] = true; });
+      state.starSet = set;
+    }
+    function toggleStar(id){
+      if (!id) return;
+      var on = !(state.starSet && state.starSet[id]);
+      api("/api/projects/" + pid + "/chats/" + encodeURIComponent(chatId) + "/star", { method: "POST", body: JSON.stringify({ eventId: id, on: on }) })
+        .then(function(j){
+          var set = {}; (j.starred || []).forEach(function(n){ set[n] = true; }); state.starSet = set;
+          var el = document.querySelector('#feed .msg[data-id="' + id + '"]');
+          if (el) {
+            var old = el.querySelector(".wstar"); if (old) old.remove();
+            if (on) {
+              var host = el.querySelector(".who .msgcopy") || el.querySelector(".mt .ustar");
+              if (host) host.insertAdjacentHTML("beforebegin", '<span class="wstar" title="starred">' + ICONS.star + "</span>");
+              el.classList.add("flash"); setTimeout(function(){ el.classList.remove("flash"); }, 900);
+            }
+          }
+          toast(on ? "starred · ⋯ beside the composer → Starred messages" : "unstarred");
+          if (state.refreshShell) state.refreshShell();
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+    state.showStarred = function(){
+      var ids = Object.keys(state.starSet || {}).map(Number).sort(function(a, b){ return b - a; });
+      if (!ids.length) { toast("nothing starred in this chat yet \\u2014 \\u22ef on a message \\u2192 Star"); return; }
+      var items = [{ head: "Starred in this chat" }].concat(ids.slice(0, 30).map(function(id){
+        var el = document.querySelector('#feed .msg[data-id="' + id + '"]');
+        var t = el ? bubbleText(el).split("\\n")[0].slice(0, 70) : "message #" + id + " (earlier \\u2014 load earlier messages)";
+        return { label: t || "message #" + id, icon: ICONS.star, run: function(){ jumpToMessage(id); } };
+      }));
+      openMenu(Math.round(window.innerWidth / 2 - 180), 90, items);
+    };
+    /** Scroll to a message and flash it; page back for it when it's older than what's loaded. */
+    function jumpToMessage(id, tries){
+      var el = document.querySelector('#feed .msg[data-id="' + id + '"]');
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("flash"); setTimeout(function(){ el.classList.remove("flash"); }, 1600);
+        return;
+      }
+      tries = tries || 0;
+      if (tries < 8 && document.getElementById("loadearlier") && state.firstId && id < state.firstId) {
+        loadEarlier().then(function(){ jumpToMessage(id, tries + 1); });
+        return;
+      }
+      toast("that message isn\\u2019t in this chat any more");
+    }
+    state.jumpToMessage = jumpToMessage;
+    /**
+     * Start a new chat that carries this one up to a message — for trying a
+     * different direction without losing the one you're on.
+     */
+    function branchFrom(msgEl){
+      var feed = document.getElementById("feed"); if (!feed || !msgEl) return;
+      var lines = [], budget = 6000;
+      var all = Array.prototype.slice.call(feed.querySelectorAll(":scope > .msg:not(.thinking)"));
+      var upto = all.indexOf(msgEl);
+      all.slice(0, upto + 1).reverse().some(function(n){
+        var who = n.classList.contains("user") ? "Me" : labelOf(n.getAttribute("data-agent") || "agent");
+        var t = n.classList.contains("user") ? decodeURIComponent(n.getAttribute("data-raw") || "") : bubbleText(n);
+        var chunk = who + ": " + t.trim();
+        if (chunk.length > budget) chunk = chunk.slice(0, budget) + "\\u2026";
+        lines.unshift(chunk); budget -= chunk.length;
+        return budget <= 0;
+      });
+      var c = ((state.project && state.project.chats) || []).filter(function(q){ return q.id === chatId; })[0];
+      var title = "Branch of " + ((c && c.title) || "Main");
+      api("/api/projects/" + pid + "/chats", { method: "POST", body: JSON.stringify({ title: title.slice(0, 60) }) })
+        .then(function(j){
+          var draft = "Earlier, in \\u201c" + ((c && c.title) || "Main") + "\\u201d:\\n\\n" + lines.map(function(l){ return l.split("\\n").map(function(x){ return "> " + x; }).join("\\n"); }).join("\\n>\\n") + "\\n\\n";
+          try { localStorage.setItem(draftKey(j.chat.id), draft); } catch (e) {}
+          if (state.setChat) state.setChat(pid, j.chat.id);
+          toast("branched \\u2014 the conversation so far is in the composer; add where to go next");
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    // ---- drafts and recall ------------------------------------------------------
+    function draftKey(cid){ return "loomDraft:" + pid + ":" + (cid || chatId); }
+    var draftTimer = null;
+    function saveDraft(){
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(function(){
+        if (pageGone()) return;
+        var box = document.getElementById("box"); if (!box) return;
+        try {
+          if (box.value.trim()) localStorage.setItem(draftKey(), box.value);
+          else localStorage.removeItem(draftKey());
+        } catch (e) {}
+      }, 250);
+    }
+    function clearDraft(){ clearTimeout(draftTimer); try { localStorage.removeItem(draftKey()); } catch (e) {} }
+    function restoreDraft(){
+      var box = document.getElementById("box"); if (!box || box.value) return;
+      var d = null;
+      try { d = localStorage.getItem(draftKey()); } catch (e) {}
+      if (!d) return;
+      box.value = d; autosizeBox();
+      var form = document.getElementById("cform"); if (form) form.classList.toggle("hastext", !!d.trim());
+    }
+    var recall = { i: -1, shown: "" };
+    function myPrompts(){
+      return Array.prototype.map.call(document.querySelectorAll("#feed .msg.user[data-raw]"), function(n){
+        return decodeURIComponent(n.getAttribute("data-raw") || "");
+      }).filter(function(t, i, all){ return t.trim() && t !== all[i + 1]; }).reverse();
+    }
+
+    // ---- find in thread --------------------------------------------------------
+    var find = { hits: [], i: -1, q: "" };
+    function clearFind(){
+      Array.prototype.forEach.call(document.querySelectorAll("#feed mark.fhit"), function(m){
+        var parent = m.parentNode; if (!parent) return;
+        parent.replaceChild(document.createTextNode(m.textContent), m);
+        parent.normalize();
+      });
+      find.hits = []; find.i = -1;
+    }
+    function runFind(q){
+      clearFind(); find.q = q;
+      var feed = document.getElementById("feed");
+      if (!q || !feed) return drawFindCount();
+      var ql = q.toLowerCase(), nodes = [];
+      Array.prototype.forEach.call(feed.querySelectorAll(".bubble, .sys, .tool .tx, .turncard .tcf, .plancard"), function(root){
+        var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+        for (var t = w.nextNode(); t; t = w.nextNode()) if (t.nodeValue && t.nodeValue.toLowerCase().indexOf(ql) >= 0) nodes.push(t);
+      });
+      var total = 0;
+      nodes.forEach(function(t){
+        if (total >= 500) return;
+        var text = t.nodeValue.toLowerCase(), at = [], from = 0, k;
+        while ((k = text.indexOf(ql, from)) >= 0 && total + at.length < 500) { at.push(k); from = k + ql.length; }
+        for (var j = at.length - 1; j >= 0; j--) {
+          var mid = t.splitText(at[j]); mid.splitText(q.length);
+          var m = document.createElement("mark"); m.className = "fhit";
+          mid.parentNode.replaceChild(m, mid); m.appendChild(mid);
+        }
+        total += at.length;
+      });
+      find.hits = Array.prototype.slice.call(feed.querySelectorAll("mark.fhit"));
+      find.i = find.hits.length ? find.hits.length - 1 : -1; // newest first: you usually want the latest
+      showFindHit();
+    }
+    function showFindHit(){
+      find.hits.forEach(function(m, i){ m.classList.toggle("cur", i === find.i); });
+      var m = find.hits[find.i];
+      if (m) {
+        for (var d = m.parentNode; d && d.id !== "feed"; d = d.parentNode) if (d.tagName === "DETAILS") d.open = true;
+        m.scrollIntoView({ block: "center" });
+      }
+      drawFindCount();
+    }
+    function drawFindCount(){
+      var c = document.getElementById("findcount"); if (!c) return;
+      var more = document.getElementById("loadearlier");
+      c.innerHTML = !find.q ? "" : find.hits.length
+        ? (find.i + 1) + " of " + find.hits.length + (find.hits.length >= 500 ? "+" : "")
+        : "No matches" + (more ? ' \\u00b7 <button type="button" class="linkbtn" id="findearlier">search earlier</button>' : "");
+      var fe = document.getElementById("findearlier");
+      if (fe) fe.onclick = function(){ loadEarlier().then(function(){ runFind(find.q); }); };
+    }
+    function stepFind(dir){
+      if (!find.hits.length) return;
+      find.i = (find.i + dir + find.hits.length) % find.hits.length;
+      showFindHit();
+    }
+    function closeFind(){
+      clearFind(); find.q = "";
+      var b = document.getElementById("findbar"); if (b) b.remove();
+    }
+    function openFind(){
+      if (state.showTab) state.showTab("thread");
+      var sc = threadScroller(); if (!sc || !sc.parentNode) return;
+      var bar = document.getElementById("findbar");
+      if (!bar) {
+        var host = sc.parentNode;
+        if (getComputedStyle(host).position === "static") host.style.position = "relative";
+        bar = document.createElement("div");
+        bar.id = "findbar"; bar.className = "findbar"; bar.setAttribute("role", "search");
+        bar.innerHTML = ICONS.search + '<input id="findq" placeholder="Find in this chat" spellcheck="false" autocomplete="off" aria-label="find in this chat">' +
+          '<span class="findcount" id="findcount" aria-live="polite"></span>' +
+          '<button type="button" class="iconbtn" id="findprev" title="Previous (\\u21e7Enter)" aria-label="previous match">' + ICONS.up + "</button>" +
+          '<button type="button" class="iconbtn" id="findnext" title="Next (Enter)" aria-label="next match">' + ICONS.arrowDown + "</button>" +
+          '<button type="button" class="iconbtn" id="findx" title="Close (Esc)" aria-label="close find">' + ICONS.x + "</button>";
+        host.appendChild(bar);
+        var qi = document.getElementById("findq"), t = null;
+        qi.addEventListener("input", function(){ clearTimeout(t); var v = qi.value; t = setTimeout(function(){ runFind(v.trim()); }, 120); });
+        qi.addEventListener("keydown", function(e){
+          if (e.key === "Enter") { e.preventDefault(); stepFind(e.shiftKey ? 1 : -1); }
+          else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); var bx = document.getElementById("box"); if (bx) bx.focus(); }
+        });
+        document.getElementById("findprev").onclick = function(){ stepFind(-1); };
+        document.getElementById("findnext").onclick = function(){ stepFind(1); };
+        document.getElementById("findx").onclick = closeFind;
+      }
+      var inp = document.getElementById("findq");
+      var sel = String(window.getSelection ? window.getSelection() : "").trim();
+      if (sel && sel.length < 80 && sel.indexOf("\\n") < 0) { inp.value = sel; runFind(sel); }
+      inp.focus(); inp.select();
+    }
+    state.openFind = openFind;
+
+    // Select words in a reply → a small Quote button beside them.
+    (function(){
+      var feed = document.getElementById("feed"); if (!feed) return;
+      function hide(){ var q = document.getElementById("quotebtn"); if (q) q.remove(); }
+      feed.addEventListener("mouseup", function(){
+        setTimeout(function(){
+          if (pageGone()) return;
+          hide();
+          var sel = window.getSelection && window.getSelection();
+          var text = sel ? String(sel).trim() : "";
+          if (!text || !sel.rangeCount) return;
+          var a = sel.anchorNode, host = a && (a.nodeType === 1 ? a : a.parentNode);
+          if (!host || !host.closest || !host.closest("#feed .bubble")) return;
+          var r = sel.getRangeAt(0).getBoundingClientRect();
+          var b = document.createElement("button");
+          b.type = "button"; b.id = "quotebtn"; b.className = "quotebtn";
+          b.innerHTML = ICONS.quote + "Quote";
+          b.style.left = Math.max(8, Math.min(window.innerWidth - 100, r.left + r.width / 2 - 38)) + "px";
+          b.style.top = Math.max(8, r.top - 38) + "px";
+          b.onmousedown = function(ev){ ev.preventDefault(); };
+          b.onclick = function(){ quoteIntoComposer(text); hide(); if (sel.removeAllRanges) sel.removeAllRanges(); };
+          document.body.appendChild(b);
+        }, 0);
+      });
+      if (!state.quoteHideBound) {
+        state.quoteHideBound = true;
+        document.addEventListener("mousedown", function(ev){ if (!ev.target.closest || !ev.target.closest("#quotebtn")) { var q = document.getElementById("quotebtn"); if (q) q.remove(); } }, true);
+      }
+      var sc = threadScroller(); if (sc) sc.addEventListener("scroll", hide, { passive: true });
+    })();
+
+    // ---- day separators ----------------------------------------------------------
+    function dayLabel(ts){
+      var d = new Date(ts), t = new Date();
+      var d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      var t0 = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+      var diff = Math.round((t0 - d0) / 86400000);
+      if (diff === 0) return "Today";
+      if (diff === 1) return "Yesterday";
+      if (diff > 1 && diff < 7) return d.toLocaleDateString([], { weekday: "long" });
+      var o = { weekday: "short", month: "short", day: "numeric" };
+      if (d.getFullYear() !== t.getFullYear()) o.year = "numeric";
+      return d.toLocaleDateString([], o);
+    }
+    var daysQueued = false;
+    function markDays(){
+      if (daysQueued) return;
+      daysQueued = true;
+      setTimeout(function(){
+        daysQueued = false;
+        if (pageGone()) return;
+        var feed = document.getElementById("feed"); if (!feed) return;
+        Array.prototype.forEach.call(feed.querySelectorAll(":scope > .daysep"), function(n){ n.remove(); });
+        var last = "";
+        Array.prototype.forEach.call(feed.querySelectorAll(":scope > .msg[data-ts]"), function(n){
+          var ts = Number(n.getAttribute("data-ts")); if (!ts) return;
+          var key = new Date(ts).toDateString();
+          if (key === last) return;
+          last = key;
+          var sep = document.createElement("div");
+          sep.className = "daysep"; sep.setAttribute("role", "separator");
+          sep.innerHTML = "<span>" + esc(dayLabel(ts)) + "</span>";
+          feed.insertBefore(sep, n);
+          n.classList.remove("cont"); // a new day gets its byline back
+        });
+      }, 0);
+    }
+
+    // ---- export ----------------------------------------------------------------
+    /** The whole chat as Markdown: prompts, replies, what was done, what changed. */
+    function exportThread(){
+      toast("gathering the whole chat\\u2026");
+      var all = [], pages = 0;
+      function page(before){
+        return api("/api/projects/" + pid + "/events?limit=500&chat=" + encodeURIComponent(chatId) + (before ? "&before=" + before : ""))
+          .then(function(j){
+            var evs = j.events || [];
+            all = evs.concat(all); pages++;
+            if (evs.length >= 500 && pages < 20) return page(evs[0].id);
+          });
+      }
+      return page(0).then(function(){
+        var c = ((state.project && state.project.chats) || []).filter(function(q){ return q.id === chatId; })[0];
+        var title = ((state.project && state.project.name) || "Loom") + " \\u2014 " + ((c && c.title) || "Main");
+        var out = ["# " + title, "", "_Exported from Loom " + new Date().toLocaleString() + " \\u00b7 " + all.length + " events_", ""];
+        var day = "";
+        all.forEach(function(e){
+          var p = e.payload || {}, when = new Date(Number(e.ts) || 0);
+          var d = when.toDateString(); if (d !== day) { day = d; out.push("", "---", "", "*" + dayLabel(Number(e.ts)) + "*", ""); }
+          var hm = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          if (e.kind === "message" && !e.agentId && p.author !== "loom") out.push("", "### You \\u00b7 " + hm, "", String(p.text || ""));
+          else if (e.kind === "message" && e.agentId && !p.reasoning) out.push("", "### " + labelOf(e.agentId) + (p.model ? " (" + p.model + ")" : "") + " \\u00b7 " + hm + (p.partial ? " \\u00b7 stopped" : ""), "", String(p.text || ""));
+          else if (e.kind === "tool_call") out.push("- \\u2699 " + String(p.summary || p.tool || p.name || "tool").split("\\n")[0]);
+          else if (e.kind === "turn_diff") out.push("", "> Edited " + (p.files || []).length + " file(s) \\u00b7 +" + Number(p.added || 0) + " \\u2212" + Number(p.removed || 0) + ": " + (p.files || []).map(function(f){ return f.path; }).slice(0, 12).join(", "));
+          else if (e.kind === "error") out.push("", "> **Error** (" + (e.agentId || "loom") + "): " + String(p.message || p.error || "").split("\\n")[0]);
+          else if (e.kind === "run_complete") out.push("", "_" + (e.agentId || "agent") + " finished" + (p.durationMs ? " in " + durfmt(p.durationMs) : "") + (p.costUsd ? " \\u00b7 $" + Number(p.costUsd).toFixed(4) : "") + "_");
+        });
+        var blob = new Blob([out.join("\\n") + "\\n"], { type: "text/markdown" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = title.replace(/[^\\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase() + ".md";
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+        toast("exported " + a.download);
+      }).catch(function(err){ toast(err.message); });
+    }
+    state.exportThread = exportThread;
+
     function send(){
       if (state.cmode === "orch") return sendOrchestra();
       var box = document.getElementById("box");
@@ -9533,7 +10176,7 @@ ${BRAND_SPRITE}
       });
       var full = refs.length ? refs.join("\\n") + (text ? "\\n\\n" + text : "") : text;
 
-      box.value = ""; autosizeBox(); attach = []; drawAttach();
+      box.value = ""; autosizeBox(); attach = []; drawAttach(); clearDraft(); recall.i = -1;
       var p = state.project || {};
       var plan = planState;
       // what you just sent should be on screen, wherever you'd scrolled to
@@ -9591,7 +10234,7 @@ ${BRAND_SPRITE}
       if (wouldQueue()) {
         queueFromComposer(full, plan).catch(function(err){
           toast(err.message);
-          box.value = full; autosizeBox(); // a refused queue leaves what you wrote where you wrote it
+          box.value = full; autosizeBox(); saveDraft(); // a refused queue leaves what you wrote where you wrote it
         });
         return;
       }
@@ -10060,7 +10703,14 @@ ${BRAND_SPRITE}
       var active = cur.model || "";
       var allModels = [], rowsNow = [], hi = 0;
       function choose(val){
-        if (val === "__custom__"){ closeMenu(); var typed = window.prompt("Model for " + cur.id + " (blank = default):", active); if (typed === null) return; val = typed.trim(); }
+        if (val === "__custom__"){
+          closeMenu();
+          askText("Model for " + cur.id, { value: active, placeholder: "blank = the agent’s default", ok: "Use this model" }).then(function(typed){
+            if (typed === null) return;
+            choose(typed.trim() || "");
+          });
+          return;
+        }
         else closeMenu();
         if (val === active || (cur.kind === "model" && active && val.slice(val.indexOf("/") + 1) === active)) return;
         // A model agent's list spans every provider, each id led by the one
@@ -10335,7 +10985,8 @@ ${BRAND_SPRITE}
       box.setAttribute("data-bound", "1");
       autosizeBox();
 
-      box.addEventListener("input", function(){ autosizeBox(); scanTrigger(); scheduleSkillSuggest(box.value); form.classList.toggle("hastext", !!box.value.trim()); });
+      box.addEventListener("input", function(){ autosizeBox(); scanTrigger(); scheduleSkillSuggest(box.value); form.classList.toggle("hastext", !!box.value.trim()); saveDraft(); recall.i = -1; });
+      restoreDraft();
       loadSkillCache();
       box.addEventListener("keydown", function(e){
         // Menu open: arrows move, Enter/Tab accept, Esc closes.
@@ -10344,6 +10995,20 @@ ${BRAND_SPRITE}
           if (e.key === "ArrowUp") { e.preventDefault(); menuState.sel = (menuState.sel - 1 + menuState.items.length) % menuState.items.length; renderMenu(menuState.items, menuState.kind === "cmd" ? "actions" : "files"); return; }
           if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); acceptMenu(menuState.sel); return; }
           if (e.key === "Escape") { e.preventDefault(); closeMenu(); return; }
+        }
+        // ↑/↓ in an empty composer walk back through what you sent here.
+        if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+          var untouched = box.value === "" || (recall.i >= 0 && box.value === recall.shown);
+          var mine = untouched ? myPrompts() : [];
+          if (mine.length && (e.key === "ArrowUp" ? recall.i < mine.length - 1 : recall.i >= 0)) {
+            e.preventDefault();
+            recall.i += e.key === "ArrowUp" ? 1 : -1;
+            recall.shown = recall.i >= 0 ? mine[recall.i] : "";
+            box.value = recall.shown; autosizeBox();
+            box.setSelectionRange(box.value.length, box.value.length);
+            form.classList.toggle("hastext", !!box.value.trim());
+            return;
+          }
         }
         // Enter sends; Shift+Enter is a newline.
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
@@ -10435,7 +11100,11 @@ ${BRAND_SPRITE}
           { label: "Verbose", icon: tview() === "verbose" ? ICONS.check : "", hint: "+ raw payloads",
             run: function(){ setTView("verbose"); } },
           { sep: true },
-          { label: "Ask several models\u2026", icon: ICONS.sparkles, hint: "a thread each", run: function(){ openAskSeveral(); } },
+          { label: "Ask several models…", icon: ICONS.sparkles, hint: "a thread each", run: function(){ openAskSeveral(); } },
+          { sep: true },
+          { label: "Find in this chat", icon: ICONS.search, hint: KMOD + "F", run: function(){ openFind(); } },
+          { label: "Starred messages", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
+          { label: "Export as Markdown", icon: ICONS.download, hint: ".md", run: function(){ exportThread(); } },
           { sep: true },
           { label: "Rewind\u2026", icon: ICONS.rewind, hint: "put the files back", run: function(){ openRewindMenu(); } },
           { sep: true },
@@ -11759,9 +12428,10 @@ ${BRAND_SPRITE}
           } else if (act === "review") {
             landAct("review", { runId: run.id }, b, function(){ toast("review requested"); });
           } else if (act === "override") {
-            var why = window.prompt("Override loom/review on PR #" + l.pr + "? Say why \\u2014 it goes on the PR.");
-            if (!why || !why.trim()) return;
-            landAct("override", { runId: run.id, reason: why.trim() }, b, function(){ toast("review overridden"); });
+            askText("Override loom/review on PR #" + l.pr + "?", { note: "Say why — it goes on the PR.", multiline: true, required: true, ok: "Override" }).then(function(why){
+              if (!why || !why.trim()) return;
+              landAct("override", { runId: run.id, reason: why.trim() }, b, function(){ toast("review overridden"); });
+            });
           }
         };
       });
@@ -13552,6 +14222,7 @@ ${BRAND_SPRITE}
       total += pr.costUsd > 0 ? pr.costUsd : 0;
       (pr.agents || []).forEach(function(a){ if (a.busy) busy++; });
     });
+    updateAmbient(busy, (state.projects || []).some(function(pr){ return pr.needsInput; }));
     var share = p && p.costUsd > 0 && total > 0 ? Math.min(100, Math.round((p.costUsd / total) * 100)) : 0;
     // GitHub connection — the whole PR/Projects/review half rides on gh being
     // logged in, so it lives in the corner you glance at, with a one-click
@@ -14993,7 +15664,7 @@ ${BRAND_SPRITE}
    * "Create & start" hands the text to the agent and drops the card in
    * Working, which is where that work actually is.
    */
-  function openBoardTaskModal(pid, column, onDone){
+  function openBoardTaskModal(pid, column, onDone, prefill){
     if (document.querySelector(".scrim")) return;
     var p = state.project;
     var adapters = (p && p.agents ? p.agents : []).filter(function(a){ return a.tier === "adapter"; });
@@ -15024,6 +15695,7 @@ ${BRAND_SPRITE}
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("bmclose").onclick = close;
     document.getElementById("bmcancel").onclick = close;
+    if (prefill) { var bmt = document.getElementById("bmtitle"); if (bmt) bmt.value = prefill; }
 
     function drawChips(){
       var box = document.getElementById("bmagsel"); if (!box) return;
@@ -15271,8 +15943,23 @@ ${BRAND_SPRITE}
       h += '<div class="prow"><div class="pl"><div class="pt">Theme</div>' +
         '<div class="pd">Light or dark. Open terminals repaint to match.</div></div>' +
         '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }], themeNow()) + "</div></div>";
+      h += '<div class="sgrouph">Notifications · this device</div>';
+      h += '<div class="prow"><div class="pl"><div class="pt">When a long turn finishes</div>' +
+        '<div class="pd">A notification when an agent finishes something that took more than 20 seconds, while Loom is in the background.</div></div>' +
+        '<div class="pc">' + seg("notifydone", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("notifyDone", true) ? "on" : "off") + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Chime</div>' +
+        '<div class="pd">A soft two-note sound with it.</div></div>' +
+        '<div class="pc">' + seg("chime", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("chime", false) ? "on" : "off") + "</div></div>";
       h += '<div id="projprefs"></div>';
       pane.innerHTML = h;
+      bindSeg("notifydone", function(v){
+        setDevicePref("notifyDone", v === "on");
+        if (v === "on" && !window.loomNative && window.Notification && Notification.permission === "default") {
+          try { Notification.requestPermission(); } catch (e) {}
+        }
+        toast(v === "on" ? "you’ll hear when long turns finish" : "finish notifications off");
+      });
+      bindSeg("chime", function(v){ setDevicePref("chime", v === "on"); if (v === "on") chime(); });
       bindSeg("theme", function(v){
         localStorage.setItem(THEME_KEY, v === "light" ? "light" : "dark");
         applyTheme();
@@ -16448,10 +17135,15 @@ ${BRAND_SPRITE}
           // always shown, wherever it falls.
           var here = currentChat(), SHOW = 8;
           var mainC = chats.filter(function(c){ return c.id === "main"; });
-          var rest = chats.filter(function(c){ return c.id !== "main"; }).sort(function(a, b){ return (b.createdAt || 0) - (a.createdAt || 0); });
+          var archOpen = !!(state.chatsArchived && state.chatsArchived[p.id]);
+          var archived = chats.filter(function(c){ return c.id !== "main" && c.archived; });
+          var rest = chats.filter(function(c){ return c.id !== "main" && (!c.archived || archOpen || (sel && c.id === here)); }).sort(function(a, b){
+            // pinned threads first, then newest first
+            return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.createdAt || 0) - (a.createdAt || 0);
+          });
           var moreOpen = !!(state.chatsMore && state.chatsMore[p.id]);
           var older = moreOpen ? 0 : Math.max(0, rest.length - SHOW);
-          var visible = moreOpen ? rest : rest.slice(0, SHOW).concat(rest.slice(SHOW).filter(function(c){ return sel && c.id === here; }));
+          var visible = moreOpen ? rest : rest.slice(0, SHOW).concat(rest.slice(SHOW).filter(function(c){ return (sel && c.id === here) || c.pinned; }));
           if (!moreOpen && sel && rest.slice(SHOW).some(function(c){ return c.id === here; })) older--;
           chats = mainC.concat(visible);
           var byId = {}; (p.agents || []).forEach(function(a){ byId[a.id] = a; });
@@ -16459,8 +17151,9 @@ ${BRAND_SPRITE}
             var curC = c.id === currentChat();
             return '<div class="crow' + (curC ? " cur" : "") + '" data-p="' + esc(p.id) +
               '" data-chat="' + esc(c.id) + '"' + (curC ? ' data-current="true"' : "") + ">" +
-              '<span class="ci">' + ICONS.chat + "</span>" +
+              '<span class="ci">' + (c.pinned ? ICONS.pin : c.archived ? ICONS.archive : ICONS.chat) + "</span>" +
               '<span class="cnm">' + esc(c.title) + "</span>" +
+              (!curC && isUnread(p.id, c) ? '<span class="udot" title="new replies since you last looked" aria-label="unread"></span>' : "") +
               // Is it working, did it finish, did it fail — from the run's
               // own task rows, so this is a fact Loom already had rather than
               // a guess. A thread that never ran shows nothing at all.
@@ -16481,6 +17174,10 @@ ${BRAND_SPRITE}
             rows += '<div class="crow more" data-chatsmore="' + esc(p.id) + '"><span class="ci">' + ICONS.dots + '</span><span class="cnm">' +
               (moreOpen ? "Show fewer" : "Show " + older + " older") + "</span></div>";
           }
+          if (archived.length) {
+            rows += '<div class="crow more" data-chatsarch="' + esc(p.id) + '"><span class="ci">' + ICONS.archive + '</span><span class="cnm">' +
+              (archOpen ? "Hide archived" : "Archived · " + archived.length) + "</span></div>";
+          }
           rows += '<div class="crow add" data-newchat="' + esc(p.id) + '">' +
             '<span class="ci">' + ICONS.plus + '</span><span class="cnm">New chat</span></div>';
         }
@@ -16495,6 +17192,15 @@ ${BRAND_SPRITE}
 
       drawChatHits(el);
 
+      Array.prototype.forEach.call(el.querySelectorAll("[data-chatsarch]"), function(row){
+        row.onclick = function(ev){
+          ev.stopPropagation();
+          var id = row.getAttribute("data-chatsarch");
+          state.chatsArchived = state.chatsArchived || {};
+          state.chatsArchived[id] = !state.chatsArchived[id];
+          drawList();
+        };
+      });
       Array.prototype.forEach.call(el.querySelectorAll("[data-chatsmore]"), function(row){
         row.onclick = function(ev){
           ev.stopPropagation();
@@ -16763,11 +17469,30 @@ ${BRAND_SPRITE}
       // Main follows the baton and its name is not yours to change — the menu
       // says so by not offering, rather than by offering and refusing.
       if (!isMain) {
-        items.push({ label: "Rename\u2026", icon: ICONS.file, run: function(){ renameChat(pid, cid, c.title); } });
+        items.push({ label: c.pinned ? "Unpin" : "Pin to top", icon: ICONS.pin, run: function(){ flagChat(pid, cid, { pinned: !c.pinned }); } });
+        items.push({ label: c.archived ? "Unarchive" : "Archive", icon: ICONS.archive, hint: c.archived ? "" : "hide, keep history", run: function(){ flagChat(pid, cid, { archived: !c.archived }); } });
+      }
+      items.push({ label: "Export as Markdown", icon: ICONS.download, run: function(){
+        if (pid === cur && currentChat() === cid && state.exportThread) { state.exportThread(); return; }
+        setChat(pid, cid);
+        setTimeout(function(){ if (state.exportThread) state.exportThread(); }, 600);
+      } });
+      if (!isMain) {
+        items.push({ label: "Rename…", icon: ICONS.file, run: function(){ renameChat(pid, cid, c.title); } });
         items.push({ sep: true });
         items.push({ label: "Forget this chat", icon: ICONS.trash, danger: true, run: function(){ forgetChat(pid, cid); } });
       }
       openMenu(x, y, items);
+    }
+
+    function flagChat(pid, cid, flags){
+      api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid), { method: "PATCH", body: JSON.stringify(flags) })
+        .then(function(){
+          if (flags.archived && currentChat() === cid) setChat(pid, "main");
+          refresh();
+          toast(flags.pinned ? "pinned to the top" : flags.pinned === false ? "unpinned" : flags.archived ? "archived · under Archived in the sidebar" : "back in the list");
+        })
+        .catch(function(err){ toast(err.message); });
     }
 
     function bindChat(pid, cid, agentId){
@@ -16779,13 +17504,14 @@ ${BRAND_SPRITE}
     }
 
     function renameChat(pid, cid, was){
-      var next = window.prompt("Rename this chat", was || "");
-      if (next === null) return;
-      next = next.trim();
-      if (!next || next === was) return;
-      api("/api/projects/" + pid + "/chats/" + cid + "/rename", { method: "POST", body: JSON.stringify({ title: next }) })
-        .then(function(){ refresh(); })
-        .catch(function(err){ toast(err.message); });
+      askText("Rename this chat", { value: was || "", ok: "Rename" }).then(function(next){
+        if (next === null) return;
+        next = next.trim();
+        if (!next || next === was) return;
+        api("/api/projects/" + pid + "/chats/" + cid + "/rename", { method: "POST", body: JSON.stringify({ title: next }) })
+          .then(function(){ refresh(); })
+          .catch(function(err){ toast(err.message); });
+      });
     }
 
     function forgetChat(pid, cid){
@@ -16800,13 +17526,14 @@ ${BRAND_SPRITE}
 
     /** Rename in place, from the menu — the same call the settings pane makes. */
     function renameProject(pid, was){
-      var next = window.prompt("Rename this project", was || "");
-      if (next === null) return;
-      next = next.trim();
-      if (!next || next === was) return;
-      api("/api/projects/" + pid, { method: "PATCH", body: JSON.stringify({ name: next }) })
-        .then(function(){ refresh(); toast("renamed"); })
-        .catch(function(err){ toast(err.message); });
+      askText("Rename this project", { value: was || "", ok: "Rename" }).then(function(next){
+        if (next === null) return;
+        next = next.trim();
+        if (!next || next === was) return;
+        api("/api/projects/" + pid, { method: "PATCH", body: JSON.stringify({ name: next }) })
+          .then(function(){ refresh(); toast("renamed"); })
+          .catch(function(err){ toast(err.message); });
+      });
     }
 
     /**
@@ -16898,13 +17625,30 @@ ${BRAND_SPRITE}
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     state.redrawFeed = null;
     if (!state.token) return renderPair();
+    takePermalink();
     document.documentElement.classList.toggle("desk", isDesktop());
     if (isDesktop()) return renderShell();
     var m = location.hash.match(/^#p\\/(.+)$/);
     if (m) return renderProject(m[1], root, false);
     renderBoard();
   }
+  /**
+   * A message permalink: open that project and chat, then scroll to the
+   * message once its history loads. The address settles back to #p/<pid>,
+   * which is what the rest of the app routes on.
+   */
+  function takePermalink(){
+    var m = location.hash.match(/^#p\\/([^\\/]+)\\/c\\/([^\\/]+)\\/m\\/(\\d+)$/);
+    if (!m) return null;
+    var go = { pid: decodeURIComponent(m[1]), chat: decodeURIComponent(m[2]), id: Number(m[3]) };
+    try { localStorage.setItem("loomChat:" + go.pid, go.chat); } catch (e) {}
+    state.pendingGo = go;
+    history.replaceState(null, "", "#p/" + go.pid);
+    return go;
+  }
   window.addEventListener("hashchange", function(){
+    var go = takePermalink();
+    if (go && state.setChat && isDesktop()) { state.setChat(go.pid, go.chat); return; }
     if (!isDesktop()) return route();
     // The desktop shell navigates with replaceState, so this only fires for a
     // hash someone typed or pasted — honour it instead of ignoring the URL.
@@ -16914,6 +17658,49 @@ ${BRAND_SPRITE}
     if (known) state.selectProject(m[1]);
   });
   mq.addEventListener("change", function(){ clearShell(); route(); });
+  /** Every key Loom listens for, on one sheet (press ?). */
+  function openShortcuts(){
+    if (document.querySelector(".scrim")) return;
+    var K = KMOD;
+    var rows = [
+      ["Anywhere", [
+        [K + "K", "Search everything — files, chats, commands"],
+        [K + "F", "Find in this chat"],
+        [K + ".", "Focus mode: hide the sidebar and panel"],
+        [K + "⇧V", "Prompts you’ve saved"],
+        ["Ctrl+\\u0060", "Show or hide the terminal"],
+        ["N", "New task"], ["P", "New project"],
+        ["?", "This sheet"], ["Esc", "Close a menu, dialog or find"],
+      ]],
+      ["In the composer", [
+        ["Enter", "Send"], ["⇧Enter", "New line"],
+        ["↑ / ↓", "Walk through what you sent here (empty box)"],
+        ["@", "Mention a file"], ["/", "Actions"],
+      ]],
+      ["Find", [["Enter / ⇧Enter", "Previous / next match"]]],
+    ];
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.innerHTML = '<div class="modal kbmodal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">' +
+      '<div class="modalhead">' + ICONS.keyboard + ' Keyboard shortcuts<button class="iconbtn" id="kbx" aria-label="close">' + ICONS.x + "</button></div>" +
+      '<div class="modalbody kbgrid">' + rows.map(function(g){
+        return '<div class="kbsec"><div class="kbh">' + esc(g[0]) + "</div>" + g[1].map(function(r){
+          return '<div class="kbrow"><span class="kbd">' + esc(r[0]) + "</span><span>" + esc(r[1]) + "</span></div>";
+        }).join("") + "</div>";
+      }).join("") + "</div></div>";
+    document.body.appendChild(scrim);
+    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey, true); }
+    function onKey(e){ if (e.key === "Escape" || e.key === "?") { e.preventDefault(); e.stopPropagation(); close(); } }
+    document.addEventListener("keydown", onKey, true);
+    scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
+    document.getElementById("kbx").onclick = close;
+  }
+  state.openShortcuts = openShortcuts;
+  function setFocusMode(on){
+    document.documentElement.classList.toggle("focusmode", on);
+    try { localStorage.setItem("loomFocus", on ? "1" : "0"); } catch (e) {}
+  }
+  try { if (localStorage.getItem("loomFocus") === "1") document.documentElement.classList.add("focusmode"); } catch (e) {}
   // Global shortcuts: Ctrl+backtick toggles the terminal; "n" opens New task
   // (both only while a desktop workspace is mounted, never while typing).
   function typingInField(t){
@@ -16926,6 +17713,19 @@ ${BRAND_SPRITE}
     if ((e.metaKey || e.ctrlKey) && !e.altKey && (e.key === "k" || e.key === "K")) {
       if (state.token && !document.querySelector(".scrim")) { e.preventDefault(); openPalette(); }
       return;
+    }
+    // ⌘F — find in this chat (the browser's own find can't see folded tool groups)
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && (e.key === "f" || e.key === "F")) {
+      if (state.openFind && state.token && !document.querySelector(".scrim")) { e.preventDefault(); state.openFind(); }
+      return;
+    }
+    // ⌘. — focus mode
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key === ".") {
+      if (state.token && isDesktop()) { e.preventDefault(); setFocusMode(!document.documentElement.classList.contains("focusmode")); }
+      return;
+    }
+    if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey && state.token && !typingInField(e.target) && !document.querySelector(".scrim")) {
+      e.preventDefault(); openShortcuts(); return;
     }
     // ⌘⇧V / Ctrl+Shift+V — the prompt manager, even mid-type (that's when you want it)
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === "v" || e.key === "V")) {

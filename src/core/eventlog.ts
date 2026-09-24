@@ -34,6 +34,8 @@ export interface EventStore {
   ): LoomEvent;
   list(opts?: ListOpts): LoomEvent[];
   lastId(): number;
+  /** The newest agent message id per chat (a missing chat is main's). */
+  lastReplyIds(): Map<string, number>;
   close(): void;
 }
 
@@ -141,6 +143,15 @@ class SqliteStore implements EventStore {
     }));
   }
 
+  lastReplyIds(): Map<string, number> {
+    const rows = this.db
+      .prepare(
+        "SELECT COALESCE(chat, ?) AS c, MAX(id) AS m FROM events WHERE kind = 'message' AND agent_id IS NOT NULL GROUP BY COALESCE(chat, ?)",
+      )
+      .all(MAIN_CHAT, MAIN_CHAT) as Array<{ c: string; m: number | bigint }>;
+    return new Map(rows.map((r) => [r.c, Number(r.m)]));
+  }
+
   lastId(): number {
     const row = this.db.prepare("SELECT MAX(id) AS m FROM events").get() as
       | { m: number | bigint | null }
@@ -211,6 +222,12 @@ class JsonlStore implements EventStore {
     return this.cache[this.cache.length - 1]?.id ?? 0;
   }
 
+  lastReplyIds(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const e of this.cache) if (e.kind === "message" && e.agentId) out.set(e.chat ?? MAIN_CHAT, e.id);
+    return out;
+  }
+
   close(): void {}
 }
 
@@ -276,6 +293,10 @@ export class EventLog {
 
   lastId(): number {
     return this.store.lastId();
+  }
+
+  lastReplyIds(): Map<string, number> {
+    return this.store.lastReplyIds();
   }
 
   /** Live subscription to appended events; returns unsubscribe. */

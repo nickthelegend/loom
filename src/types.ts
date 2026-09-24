@@ -101,6 +101,18 @@ export interface ChatInfo {
    * at the point of binding rather than ignored at the point of sending.
    */
   model?: string;
+  /** Kept at the top of the sidebar, under Main. */
+  pinned?: boolean;
+  /** Out of the sidebar, not forgotten: its history stays in the log. */
+  archived?: boolean;
+  /** Event ids marked as worth coming back to (newest last, capped). */
+  starred?: number[];
+  /**
+   * The id of the newest agent reply in this thread. Computed from the log on
+   * read, never stored: a client compares it with what it last saw to show
+   * an unread dot.
+   */
+  lastReplyId?: number;
 }
 
 // ---------------------------------------------------------------------------

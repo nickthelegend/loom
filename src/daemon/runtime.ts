@@ -1502,10 +1502,58 @@ export class ProjectRuntime {
    */
   chats(): ChatInfo[] {
     const stored = readProjectState(this.info.dir).chats ?? [];
+    let last: Map<string, number>;
+    try {
+      last = this.log.lastReplyIds();
+    } catch {
+      last = new Map(); // an unread dot is a nicety; the list must still load
+    }
+    const withLast = (c: ChatInfo): ChatInfo => (last.has(c.id) ? { ...c, lastReplyId: last.get(c.id)! } : c);
     return [
-      { id: MAIN_CHAT, title: "Main", createdAt: 0 },
-      ...stored.filter((c) => c.id !== MAIN_CHAT),
+      withLast({
+        id: MAIN_CHAT,
+        title: "Main",
+        createdAt: 0,
+        // main is stored only once it has stars to keep
+        ...(stored.find((c) => c.id === MAIN_CHAT)?.starred ? { starred: stored.find((c) => c.id === MAIN_CHAT)!.starred! } : {}),
+      }),
+      ...stored.filter((c) => c.id !== MAIN_CHAT).map(withLast),
     ];
+  }
+
+  /** Pin or archive a thread. Main is always first and always there. */
+  setChatFlags(id: string, flags: { pinned?: boolean; archived?: boolean }): ChatInfo | null {
+    if (id === MAIN_CHAT) return null;
+    const state = readProjectState(this.info.dir);
+    const chat = (state.chats ?? []).find((c) => c.id === id);
+    if (!chat) return null;
+    for (const k of ["pinned", "archived"] as const) {
+      if (flags[k] === undefined) continue;
+      if (flags[k]) chat[k] = true;
+      else delete chat[k];
+    }
+    writeProjectState(this.info.dir, state);
+    return chat;
+  }
+
+  /** Star or unstar a message in a thread (main included). */
+  starMessage(chatId: string, eventId: number, on: boolean): number[] | null {
+    if (!Number.isInteger(eventId) || eventId <= 0) return null;
+    const state = readProjectState(this.info.dir);
+    state.chats = state.chats ?? [];
+    let chat = state.chats.find((c) => c.id === chatId);
+    if (!chat) {
+      if (chatId !== MAIN_CHAT) return null;
+      // Main isn't stored until it has something to remember
+      chat = { id: MAIN_CHAT, title: "Main", createdAt: 0 };
+      state.chats.push(chat);
+    }
+    const set = (chat.starred ?? []).filter((n) => n !== eventId);
+    if (on) set.push(eventId);
+    chat.starred = set.slice(-200);
+    if (!chat.starred.length) delete chat.starred;
+    writeProjectState(this.info.dir, state);
+    return chat.starred ?? [];
   }
 
   createChat(title: string, opts: { agentId?: string; model?: string } = {}): ChatInfo {
