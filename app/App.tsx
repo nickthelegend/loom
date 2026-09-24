@@ -117,7 +117,9 @@ export default function App() {
 
   return (
     <SafeAreaView key={scheme} style={{ flex: 1, backgroundColor: T.bg }}>
-      <StatusBar style={scheme === "light" ? "dark" : "light"} backgroundColor={T.bg} />
+      {/* Opaque on Android: SafeAreaView only insets on iOS, so a translucent
+          bar would sit on top of every screen's header (unpair, Fleet, back). */}
+      <StatusBar style={scheme === "light" ? "dark" : "light"} backgroundColor={T.bg} translucent={false} />
       {!booted || !auth.ready ? (
         <View style={{ flex: 1, backgroundColor: T.bg }} />
       ) : showWelcome ? (
