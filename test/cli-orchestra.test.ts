@@ -84,21 +84,27 @@ describe("loom orchestrate / orchestra", () => {
 });
 
 describe("loom cloud", () => {
-  it("reports status, and explains what's missing", async () => {
+  it("reports status, off by default, ready on Loom's hosted project", async () => {
+    // One click: with no project of your own, Cloud relays through the hosted
+    // one (ciphertext only), so status names it rather than asking for a URL.
     const r = await runCli(["cloud"]);
     expect(r.out).toContain("Loom Cloud");
     expect(r.out).toContain("off");
-    expect(r.out).toContain("loom cloud enable --url");
+    expect(r.out).toMatch(/via https:\/\/\S+\.supabase\.co/);
+    expect(r.out).not.toContain("loom cloud enable --url");
   });
 
-  it("fails honestly with no Supabase project", async () => {
+  it("fails honestly when you name a project of your own but no key for it", async () => {
     const saved = { url: process.env.LOOM_SUPABASE_URL, key: process.env.LOOM_SUPABASE_ANON_KEY };
     delete process.env.LOOM_SUPABASE_URL;
     delete process.env.LOOM_SUPABASE_ANON_KEY;
-    const r = await runCli(["cloud", "enable"]);
-    expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/Supabase/);
-    if (saved.url) process.env.LOOM_SUPABASE_URL = saved.url;
-    if (saved.key) process.env.LOOM_SUPABASE_ANON_KEY = saved.key;
+    try {
+      const r = await runCli(["cloud", "enable", "--url", "https://someone-elses-project.supabase.co"]);
+      expect(r.code).not.toBe(0);
+      expect(r.out).toMatch(/Supabase|key/i);
+    } finally {
+      if (saved.url) process.env.LOOM_SUPABASE_URL = saved.url;
+      if (saved.key) process.env.LOOM_SUPABASE_ANON_KEY = saved.key;
+    }
   });
 });

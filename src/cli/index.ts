@@ -1135,9 +1135,10 @@ program
     }
   });
 
-for (const action of ["abort", "apply", "cleanup"] as const) {
+for (const action of ["abort", "apply", "cleanup", "resume"] as const) {
   const blurb = {
     abort: "stop a run — every worker is interrupted",
+    resume: "carry on a run Loom stopped by restarting — its interrupted tasks pick up where they left off",
     apply: "merge a run's integration branch into your current branch",
     cleanup: "remove a finished run's worktrees (its branch stays)",
   }[action];

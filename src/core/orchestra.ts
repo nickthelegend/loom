@@ -168,6 +168,12 @@ export interface OrchestraRun {
   moving?: boolean;
   /** Where the goal went (D75). */
   movedTo?: { where: string; at: number };
+  /**
+   * Set when Loom itself stopped the run (a restart or shutdown), not you:
+   * which tasks were in flight, so Resume can pick exactly those back up in
+   * the worktrees they left.
+   */
+  interrupted?: { at: number; tasks: string[]; phase: OrchestraStatus };
   costUsd: number;
   createdAt: number;
   updatedAt: number;
@@ -1372,9 +1378,57 @@ export class OrchestraEngine {
 
   async shutdown(): Promise<void> {
     for (const run of this.runs.values()) {
-      if (!isTerminal(run.status)) await this.abort(run.id, "Loom stopped while this run was going (a restart or shutdown) — what finished is on its branch; start the goal again to carry on");
+      if (isTerminal(run.status)) continue;
+      run.interrupted = {
+        at: Date.now(),
+        tasks: run.tasks.filter((t) => t.status === "running" || t.status === "pending").map((t) => t.id),
+        phase: run.status,
+      };
+      await this.abort(run.id, "Loom stopped while this run was going (a restart or shutdown) — what finished is on its branch, and Resume carries on from there");
     }
   }
+
+  /**
+   * Carry on a run Loom stopped by restarting. The tasks that were in flight
+   * go back to pending in the worktrees they left (their work so far is
+   * there); the orchestrator — a fresh session, so it's briefed again —
+   * picks up at review when nothing was in flight.
+   */
+  async resume(runId: string): Promise<OrchestraRun> {
+    const run = this.mustGet(runId);
+    if (run.status !== "aborted" || !run.interrupted) {
+      throw new Error(`run ${run.id} wasn't stopped by a restart — start the goal again instead`);
+    }
+    if (!run.dir || !fs.existsSync(run.dir)) throw new Error("its worktrees were cleaned up — start the goal again");
+    const again = new Set(run.interrupted.tasks);
+    let pending = 0;
+    for (const t of run.tasks) {
+      if (!again.has(t.id) || t.status !== "cancelled") continue;
+      t.status = "pending";
+      delete t.error;
+      t.reported = false;
+      pending++;
+    }
+    delete run.interrupted;
+    delete run.error;
+    run.maxRounds = Math.max(run.maxRounds, run.round + 10);
+    run.updatedAt = Date.now();
+    this.rebrief.add(run.id);
+    this.emit(run, "resumed", { tasks: pending });
+    if (pending) {
+      run.status = "running";
+      this.save(run);
+      this.schedule(run);
+    } else {
+      run.status = "reviewing";
+      this.save(run);
+      void this.orchestratorTurn(run, `Loom restarted while this run was going, and it's carrying on now.\n\n${this.statusReport(run)}`);
+    }
+    return run;
+  }
+
+  /** Runs whose orchestrator restarts as a fresh session (resume) and needs its brief again. */
+  private rebrief = new Set<string>();
 
   private mustGet(id: string): OrchestraRun {
     const run = this.runs.get(id);
@@ -1410,6 +1464,8 @@ export class OrchestraEngine {
 
   private async orchestratorTurn(run: OrchestraRun, text: string, briefing?: string, retry = 0): Promise<void> {
     if (isTerminal(run.status) || run.moving) return;
+    // a resumed run's orchestrator is a fresh session: its first turn carries the instructions again
+    if (!briefing && this.rebrief.delete(run.id)) briefing = this.briefingOf(run);
     if (this.overBudget(run)) return;
     if (run.round >= run.maxRounds) {
       return this.finish(run, "failed", `stopped after ${run.maxRounds} orchestrator rounds without "done"`);
@@ -1877,6 +1933,7 @@ export class OrchestraEngine {
         this.save(run);
       }
       let agent = this.live.get(key);
+      const freshSession = !agent;
       if (!agent) {
         const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
         agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
@@ -1888,14 +1945,24 @@ export class OrchestraEngine {
       // The first attempt always sends the task itself — a follow-up the
       // orchestrator queued in the same breath waits its turn behind it.
       const first = task.attempts === 1;
-      const text = first ? task.prompt : task.queued.shift()!;
+      // A later attempt sends the orchestrator's next follow-up. With none
+      // queued, this is a task picking back up after Loom restarted (resume,
+      // or a goal moved here): say so, and give it the task again — its
+      // session is new, its worktree still has everything it did.
+      const followUp = first ? undefined : task.queued.shift();
+      const text =
+        first
+          ? task.prompt
+          : (followUp ??
+            `Loom was restarted while you were on this task (${task.title}). Everything you'd done is still in this worktree. ` +
+              `Check where it stands, finish the task, and report back.\n\nThe task, again:\n${task.prompt}`);
       this.host.append({
         kind: "message",
         chat: task.chat,
         payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
       });
       this.turnText.set(key, "");
-      const briefing = first
+      const briefing = first || freshSession
         ? workerBriefing({
             project: this.host.projectName,
             runGoal: run.goal,

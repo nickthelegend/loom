@@ -5217,7 +5217,9 @@ ${BRAND_SPRITE}
     }
     if (ph === "failed") return row(" err", "\\u2717 Orchestra failed \\u2014 " + esc(p.error || "stopped") +
       (p.runId ? ' <button class="btn xs outline" type="button" data-orch-apply="' + esc(p.runId) + '">Apply what finished</button>' : ""));
-    if (ph === "aborted") return row(" warn", "\\u2298 Orchestra aborted" + (p.reason ? " \\u2014 " + esc(p.reason) : ""));
+    if (ph === "aborted") return row(" warn", "⊘ Orchestra aborted" + (p.reason ? " — " + esc(p.reason) : "") +
+      (p.runId && /restart|shutdown/i.test(String(p.reason || "")) ? ' <button class="btn xs primary" type="button" data-orch-resume="' + esc(p.runId) + '">Resume</button>' : ""));
+    if (ph === "resumed") return row(" start", ICONS.play + "Orchestra resumed" + (p.tasks ? " — " + Number(p.tasks) + " interrupted task" + (Number(p.tasks) === 1 ? "" : "s") + " picking up where " + (Number(p.tasks) === 1 ? "it" : "they") + " left off" : " — the orchestrator reviews where things stand"));
     if (ph === "applied") return row(" ok", "\\u2713 Orchestra merged into " + esc(p.into || "your branch"));
     if (ph === "cleaned") return row("", "Orchestra worktrees cleaned up");
     // Plan mode: the orchestrator's plan, on the run's branch, as files.
@@ -7931,6 +7933,14 @@ ${BRAND_SPRITE}
       }
       var ap = ev.target.closest && ev.target.closest("[data-orch-apply]");
       if (ap) { applyOrch(ap.getAttribute("data-orch-apply"), ap); return; }
+      var rsm = ev.target.closest && ev.target.closest("[data-orch-resume]");
+      if (rsm) {
+        rsm.disabled = true;
+        api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(rsm.getAttribute("data-orch-resume")) + "/resume", { method: "POST", body: "{}" })
+          .then(function(j){ if (j && j.run) mergeOrchRun(j.run); rsm.remove(); })
+          .catch(function(err){ toast(err.message); rsm.disabled = false; });
+        return;
+      }
       var rd = ev.target.closest && ev.target.closest("[data-orch-deliver]");
       if (rd) { redeliverOrch(rd.getAttribute("data-orch-deliver"), rd); return; }
       if (approvalClick(ev)) return;
@@ -12942,6 +12952,7 @@ ${BRAND_SPRITE}
         '<div class="oacts">' +
           (run.chat && desktop ? '<button class="btn outline sm" id="othread">' + ICONS.thread + "Orchestrator thread</button>" : "") +
           (!terminal ? '<button class="btn outline sm prdanger" id="oabort">' + ICONS.stop + "Abort</button>" : "") +
+          (run.status === "aborted" && run.interrupted ? '<button class="btn primary sm" type="button" id="oresume" title="Loom stopped this run by restarting — carry it on: the tasks that were in flight pick up in the worktrees they left">' + ICONS.play + "Resume</button>" : "") +
           // Apply only when something finished: a run that ended before any task
           // merged has nothing on its branch to bring over.
           (terminal && !moved && !run.applied && (run.tasks || []).some(function(t){ return t.status === "done"; }) ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
@@ -13208,6 +13219,13 @@ ${BRAND_SPRITE}
     function wireOrchDetail(el, run){
       var ag = document.getElementById("oagain");
       if (ag) ag.onclick = function(){ runAgain(run); };
+      var rs = document.getElementById("oresume");
+      if (rs) rs.onclick = function(){
+        rs.disabled = true; rs.textContent = "Resuming…";
+        api("/api/projects/" + pid + "/orchestra/" + encodeURIComponent(run.id) + "/resume", { method: "POST", body: "{}" })
+          .then(function(j){ if (j && j.run) mergeOrchRun(j.run); toast("resumed — the interrupted tasks are picking up where they left off"); })
+          .catch(function(err){ toast(err.message); rs.disabled = false; rs.textContent = "Resume"; });
+      };
       Array.prototype.forEach.call(el.querySelectorAll("[data-run]"), function(row){
         row.onclick = function(){ orch.sel = row.getAttribute("data-run"); orch.pinned = true; drawOrch(); };
       });

@@ -3632,13 +3632,14 @@ export class LoomDaemon {
         res.json({ run });
       }),
     );
-    for (const action of ["abort", "reply", "apply", "cleanup"] as const) {
+    for (const action of ["abort", "reply", "apply", "cleanup", "resume"] as const) {
       app.post(
         `/api/projects/:id/orchestra/:runId/${action}`,
         withRuntime(async (rt, req, res) => {
           const runId = String(req.params.runId);
           try {
             if (action === "abort") res.json({ run: await rt.orchestra.abort(runId) });
+            else if (action === "resume") res.json({ run: await rt.orchestra.resume(runId) });
             else if (action === "reply") {
               const text = String((req.body as { text?: string } | undefined)?.text ?? "");
               res.json({ run: await rt.orchestra.reply(runId, text) });

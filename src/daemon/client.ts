@@ -216,7 +216,7 @@ export class DaemonClient {
   orchestraAction(
     id: string,
     runId: string,
-    action: "abort" | "reply" | "apply" | "cleanup",
+    action: "abort" | "reply" | "apply" | "cleanup" | "resume",
     body?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     return this.request(
