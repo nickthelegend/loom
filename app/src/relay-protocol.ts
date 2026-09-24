@@ -41,6 +41,13 @@ export interface RelayRequest {
   path: string; // must start with /api/
   auth?: string; // "Bearer <token>"
   body?: unknown;
+  /**
+   * When the client sent it (ms). Inside the sealed envelope, so nobody on the
+   * relay can change it: the daemon refuses a request stamped too far from
+   * now, and remembers the ids it has run — a captured request can't be sent
+   * again. Absent from clients older than this field.
+   */
+  ts?: number;
 }
 
 export interface RelayResponse {

@@ -161,6 +161,11 @@ const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 const MAX_CLIENTS = 32;
 const MAX_INFLIGHT = 16;
 const CLIENT_IDLE_MS = 5 * 60_000;
+/** How far a request's own timestamp may sit from the daemon's clock. */
+const REQ_SKEW_MS = 10 * 60_000;
+/** Ids are remembered for longer than any stamp could pass, so a copy is always caught one way or the other. */
+const SEEN_TTL_MS = 2 * REQ_SKEW_MS + 60_000;
+const SEEN_MAX = 20_000;
 const FLUSH_MS = 60;
 const FLUSH_BYTES = 48 * 1024;
 
@@ -187,7 +192,9 @@ export class RelayBridge {
   private clients = new Map<string, ClientState>();
   private sweeper: ReturnType<typeof setInterval>;
   private closed = false;
-  stats = { requests: 0, rejected: 0, frames: 0 };
+  /** "<client>:<request id>" → when it was first run (see RelayRequest.ts). */
+  private seen = new Map<string, number>();
+  stats = { requests: 0, rejected: 0, frames: 0, replayed: 0 };
 
   constructor(private opts: RelayBridgeOptions) {
     this.key = fromB64(opts.key);
@@ -235,6 +242,21 @@ export class RelayBridge {
     const c = this.client(from);
     const reply = (status: number, body: unknown) => this.send({ t: "res", id: String(msg.id), to: from, status, body });
     if (!c) return reply(503, { error: "too many relay clients" });
+    // A request seen before is a copy, not a retry (a retry gets a fresh id):
+    // drop it without an answer, which the real client already had.
+    const now = Date.now();
+    const key = `${from}:${String(msg.id)}`;
+    if (this.seen.has(key)) {
+      this.stats.replayed++;
+      return;
+    }
+    if (typeof msg.ts === "number" && Math.abs(now - msg.ts) > REQ_SKEW_MS) {
+      this.stats.rejected++;
+      const mins = Math.round((now - msg.ts) / 60_000);
+      return reply(408, { error: `this request is stamped ${Math.abs(mins)} min ${mins > 0 ? "ago" : "ahead"} — check the phone's clock` });
+    }
+    this.seen.set(key, now);
+    if (this.seen.size > SEEN_MAX) this.forgetSeen(now, true);
     const method = String(msg.method || "GET").toUpperCase();
     const p = String(msg.path || "");
     if (!p.startsWith("/api/") || p.includes("..") || DENY.some((re) => re.test(p)) || !METHODS.has(method)) {
@@ -266,6 +288,20 @@ export class RelayBridge {
       await reply(502, { error: `daemon unreachable: ${(err as Error).message}` });
     } finally {
       c.inflight--;
+    }
+  }
+
+  private forgetSeen(now: number, force = false): void {
+    for (const [k, at] of this.seen) {
+      if (now - at > SEEN_TTL_MS) this.seen.delete(k);
+    }
+    // still full of fresh ids (a flood): drop the oldest half rather than grow
+    if (force && this.seen.size > SEEN_MAX) {
+      let n = Math.floor(this.seen.size / 2);
+      for (const k of this.seen.keys()) {
+        if (n-- <= 0) break;
+        this.seen.delete(k);
+      }
     }
   }
 
@@ -330,6 +366,7 @@ export class RelayBridge {
   private sweep(): void {
     const cutoff = Date.now() - CLIENT_IDLE_MS;
     for (const [id, c] of this.clients) if (c.lastSeen < cutoff) this.unsubscribe(id);
+    this.forgetSeen(Date.now());
   }
 
   async close(): Promise<void> {
