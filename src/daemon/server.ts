@@ -1988,14 +1988,19 @@ export class LoomDaemon {
     app.post(
       "/api/projects/:id/messages",
       withRuntime(async (rt, req, res) => {
-        const { text, agentId, chat, plan } = (req.body ?? {}) as {
+        const { text, agentId, chat, plan, length } = (req.body ?? {}) as {
           text?: string;
           agentId?: string;
           chat?: string;
           plan?: boolean;
+          length?: string;
         };
         if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
-        const result = await rt.sendMessage(text, agentId, { ...(chat ? { chat } : {}), ...(plan ? { plan: true } : {}) });
+        const result = await rt.sendMessage(text, agentId, {
+          ...(chat ? { chat } : {}),
+          ...(plan ? { plan: true } : {}),
+          ...(length === "brief" || length === "detailed" ? { length } : {}),
+        });
         recordRecent(text, { project: rt.info.name, mode: plan ? "plan" : "chat" });
         res.json(result);
       }),

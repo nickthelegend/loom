@@ -108,6 +108,16 @@ describe("chat flags, stars and unread", () => {
     expect((await call("POST", "/chats/main/rate", { eventId: reply, value: 1 })).status).toBe(400);
   });
 
+  it("asks for a brief (or detailed) reply ahead of the turn, and only when asked", async () => {
+    await call("POST", "/messages", { text: "short please", agentId: "plannerbot", length: "brief" });
+    await call("POST", "/messages", { text: "normal please", agentId: "plannerbot", length: "sideways" });
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 200);
+      const said = events.filter((e) => e.kind === "message" && e.agentId === "plannerbot").map((e) => String(e.payload.text));
+      return said.some((t) => t.startsWith("echo(plannerbot): short please (briefed:")) && said.some((t) => t === "echo(plannerbot): normal please");
+    });
+  });
+
   it("gives cards a priority and a due date, and columns a work-in-progress limit", async () => {
     const made = (await call("POST", "/board/tasks", { title: "ship it", priority: "high", due: "2026-10-01" })).json.task as { id: string };
     expect(made).toMatchObject({ priority: "high", due: "2026-10-01" });

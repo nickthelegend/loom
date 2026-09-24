@@ -3770,6 +3770,8 @@ window.__loomPageRev="%%BUILD_REV%%";
   .msg .who .msgrate.on{color:var(--ok)} .msg .who .msgrate.on.down{color:var(--err)}
   .msg .who .msgrate.on svg{fill:color-mix(in srgb,currentColor 22%,transparent)}
   .lbrated .up{color:var(--ok)} .lbrated .dn{color:var(--err)}
+  .lenpill{border:1px solid color-mix(in srgb,var(--thread) 45%,var(--border));background:color-mix(in srgb,var(--thread) 10%,transparent);
+    color:var(--foreground);font:inherit;font-size:11.5px;padding:2px 9px;border-radius:99px;cursor:pointer;margin-right:6px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -10986,7 +10988,7 @@ ${BRAND_SPRITE}
       chain.then(function(){
         // into the chat you're looking at — the agent's reply comes back here
         return api("/api/projects/" + pid + "/messages", { method: "POST",
-          body: JSON.stringify({ text: full, agentId: (state.auto ? undefined : state.selected) || undefined, chat: chatId, plan: plan || undefined }) });
+          body: JSON.stringify({ text: full, agentId: (state.auto ? undefined : state.selected) || undefined, chat: chatId, plan: plan || undefined, length: replyLength() || undefined }) });
       }).then(function(){
         // Show who's on it straight away; the first thing the agent logs or
         // types takes the line over from here.
@@ -10997,6 +10999,24 @@ ${BRAND_SPRITE}
         if (err && err.offline) { var bx = document.getElementById("box"); if (bx && !bx.value) { bx.value = full; autosizeBox(); } holdForReconnect(full); return; }
         toast(err.message);
       });
+    }
+    /** Brief / Normal / Detailed — how long replies should be, per project, on this device. */
+    function replyLength(){ try { var v = localStorage.getItem("loomLength:" + pid); return v === "brief" || v === "detailed" ? v : ""; } catch (e) { return ""; } }
+    function setReplyLength(v){
+      try { if (v) localStorage.setItem("loomLength:" + pid, v); else localStorage.removeItem("loomLength:" + pid); } catch (e) {}
+      drawLengthPill();
+      toast(v === "brief" ? "replies will be brief" : v === "detailed" ? "replies will be detailed" : "replies back to normal length");
+    }
+    function drawLengthPill(){
+      var old = document.getElementById("lenpill"); if (old) old.remove();
+      var v = replyLength(); if (!v) return;
+      var plan = document.getElementById("planbtn"); if (!plan || !plan.parentNode) return;
+      var b = document.createElement("button");
+      b.type = "button"; b.id = "lenpill"; b.className = "lenpill";
+      b.title = "reply length for this project — click for normal";
+      b.textContent = v === "brief" ? "Brief" : "Detailed";
+      b.onclick = function(){ setReplyLength(""); };
+      plan.parentNode.insertBefore(b, plan);
     }
     /** A prompt waiting for the daemon to come back, shown above the composer. */
     function holdForReconnect(full){
@@ -11849,6 +11869,7 @@ ${BRAND_SPRITE}
       var plb = document.getElementById("planbtn");
       if (plb) plb.onclick = function(){ setPlan(!planState); var bx = document.getElementById("box"); if (bx) bx.focus(); };
       drawPlan();
+      drawLengthPill();
       // the page may be gone by the time profiles arrive (a closed tab, a torn-down test window)
       loadPermProfiles().then(function(){ if (typeof document === "undefined" || !document) return; updateModelLabel(); drawOrchControls(); });
       var moreB = document.getElementById("morebtn");
@@ -11871,6 +11892,11 @@ ${BRAND_SPRITE}
           { label: "Ask several models…", icon: ICONS.sparkles, hint: "a thread each", run: function(){ openAskSeveral(); } },
           { sep: true },
           { label: "Find in this chat", icon: ICONS.search, hint: KMOD + "F", run: function(){ openFind(); } },
+          { head: "reply length" },
+          { label: "Brief", icon: replyLength() === "brief" ? ICONS.check : "", hint: "the answer first", run: function(){ setReplyLength("brief"); } },
+          { label: "Normal", icon: !replyLength() ? ICONS.check : "", run: function(){ setReplyLength(""); } },
+          { label: "Detailed", icon: replyLength() === "detailed" ? ICONS.check : "", hint: "reasoning, trade-offs", run: function(){ setReplyLength("detailed"); } },
+          { sep: true },
           { label: "Starred messages", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
           { label: "Export as Markdown", icon: ICONS.download, hint: ".md", run: function(){ exportThread(); } },
           { sep: true },

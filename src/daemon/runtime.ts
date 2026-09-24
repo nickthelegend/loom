@@ -2990,13 +2990,19 @@ export class ProjectRuntime {
     const to = t.kind === "agent" ? t.agentId : undefined;
     const holder = this.validHolder();
     if (to && holder && holder !== to) await this.handoff(to, { source: item.source });
-    await this.sendMessage(item.text, to, { source: item.source, chat: item.chat, fromQueue: true, ...(item.plan ? { plan: true } : {}) });
+    await this.sendMessage(item.text, to, {
+      source: item.source,
+      chat: item.chat,
+      fromQueue: true,
+      ...(item.plan ? { plan: true } : {}),
+      ...(item.length ? { length: item.length } : {}),
+    });
   }
 
   async sendMessage(
     text: string,
     agentId?: string,
-    opts: { source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean } = {},
+    opts: { source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean; length?: "brief" | "detailed" } = {},
   ): Promise<{ agentId: string; queued?: number; queueId?: string }> {
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;
@@ -3041,7 +3047,14 @@ export class ProjectRuntime {
     if (source === "user") this.releaseQuestionHold(target);
     // It shows in the queue, editable, and enters the thread when it's sent.
     if (!opts.fromQueue && this.busySince.has(target)) {
-      const item = this.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source, ...(opts.plan ? { plan: true } : {}) });
+      const item = this.queue.add({
+        text,
+        target: { kind: "agent", agentId: target },
+        chat,
+        source,
+        ...(opts.plan ? { plan: true } : {}),
+        ...(opts.length ? { length: opts.length } : {}),
+      });
       return { agentId: target, queued: this.queue.length, queueId: item.id };
     }
 
@@ -3066,7 +3079,18 @@ export class ProjectRuntime {
     // Prepend the enabled skills so every turn carries them, alongside any
     // one-shot handoff briefing. Empty when no skills are on.
     const briefing =
-      [this.agentInstructions(target), this.activeSkillsBlock(), pendingBriefing, opts.plan ? planModeBriefing(text) : ""]
+      [
+        this.agentInstructions(target),
+        this.activeSkillsBlock(),
+        pendingBriefing,
+        opts.plan ? planModeBriefing(text) : "",
+        // how long you asked the answer to be, this once
+        opts.length === "brief"
+          ? "Keep this reply brief: the answer first, a few sentences at most, no preamble."
+          : opts.length === "detailed"
+            ? "Give a detailed reply this time: explain your reasoning and the trade-offs, with examples where they help."
+            : "",
+      ]
         .filter(Boolean)
         .join("\n")
         .trim() || undefined;
