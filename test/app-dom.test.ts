@@ -1368,6 +1368,37 @@ describe("web app · the brain", () => {
     expect($(m, ".bmem [data-forget]"), "each memory can be forgotten").toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
   }, 20_000);
+
+  it("draws the brain as a graph: memories joined by the files they share", async () => {
+    for (const [kind, text, entities] of [
+      ["constraint", "graph: the router reads routes.ts at boot", ["src/routes.ts"]],
+      ["decision", "graph: routes.ts owns every URL, nothing else registers one", ["src/routes.ts", "registerRoute"]],
+      ["fact", "graph: registerRoute is called once per route", ["registerRoute"]],
+    ] as const) {
+      await fetch(`${baseUrl}/api/projects/${projectId}/brain`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${clientToken}` },
+        body: JSON.stringify({ kind, text, entities }),
+      });
+    }
+    const m = await openBrain();
+    await ready(m, '[data-bview="graph"]');
+    click($(m, '[data-bview="graph"]'));
+    await waitUntil(() => !!$(m, "#bgraph svg"));
+    const names = [...m.window.document.querySelectorAll("#bgraph .bge title")].map((t) => t.textContent ?? "");
+    expect(names.some((n) => n.startsWith("src/routes.ts"))).toBe(true);
+    expect(names.some((n) => n.startsWith("registerRoute"))).toBe(true);
+    expect(m.window.document.querySelectorAll("#bgraph .bgl").length).toBeGreaterThanOrEqual(4);
+    // a shared file lists the memories about it, and dims the rest
+    const routes = [...m.window.document.querySelectorAll("#bgraph .bge")].find((g) => (g.querySelector("title")?.textContent ?? "").startsWith("src/routes.ts"))!;
+    click(routes);
+    expect(text(m, "#bgpick")).toContain("2 memories");
+    expect(text(m, "#bgpick")).toContain("owns every URL");
+    expect($(m, "#bgraph svg")?.classList.contains("focus")).toBe(true);
+    click($(m, '[data-bview="list"]'));
+    await waitUntil(() => !!$(m, ".bmems"));
+    expect(m.errors.join("\n")).toBe("");
+  }, 20_000);
 });
 
 /**

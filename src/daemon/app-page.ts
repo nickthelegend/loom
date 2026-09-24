@@ -3814,6 +3814,25 @@ window.__loomPageRev="%%BUILD_REV%%";
   .slist .crow.fold .fg .agmono,.slist .crow.fold .fg img,.slist .crow.fold .fg svg{width:13px;height:13px;font-size:8px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
   .slist .crow .fcnt{margin-left:auto;font-size:11px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
   .slist .crow.infold{padding-left:38px}
+  .bgraph{margin:10px 0 14px;border:1px solid var(--border);border-radius:10px;background:var(--card);padding:10px}
+  .bgcap{font-size:12px;color:var(--muted-foreground);margin-bottom:6px}
+  .bgsvg{width:100%;height:auto;max-height:520px;display:block}
+  .bgsvg .bgl{stroke:var(--border);stroke-width:1}
+  .bgsvg .bgm circle{fill:currentColor;fill-opacity:.85;stroke:var(--card);stroke-width:1.5;cursor:pointer}
+  .bgsvg .bgm.bk-fact{color:var(--muted-foreground)}
+  .bgsvg .bge rect{fill:var(--muted-foreground);cursor:pointer}
+  .bgsvg .bge text{font-size:9px;fill:var(--muted-foreground);font-family:var(--mono, ui-monospace, monospace);cursor:pointer}
+  .bgsvg .bgm:focus,.bgsvg .bge:focus{outline:none}
+  .bgsvg .bgm:focus circle{stroke:var(--foreground)}
+  .bgsvg.focus [data-i]:not(.near){opacity:.18}
+  .bgsvg.focus .bgl:not(.near){opacity:.12}
+  .bgsvg .bgl.near{stroke:var(--foreground);stroke-opacity:.5}
+  .bgsvg .bge.near text{fill:var(--foreground)}
+  .bgpick{font-size:12.5px;line-height:1.5;margin-top:6px}
+  .bgpick:empty{display:none}
+  .bgpick ul{margin:6px 0 0;padding-left:16px}
+  .bgpick li{margin:3px 0}
+  @media (prefers-reduced-motion: no-preference){ .bgsvg [data-i], .bgsvg .bgl{transition:opacity .15s ease} }
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -8181,6 +8200,101 @@ ${BRAND_SPRITE}
     var brainKind = "";
     var BRAIN_KINDS = ["constraint", "failure", "decision", "convention", "fact", "task"];
 
+    /**
+     * What this project knows, as a map: each memory a dot (coloured by kind,
+     * bigger the more it's been used), joined to the files and symbols it's
+     * about. Only entities two or more memories share get a node — the rest
+     * connect nothing. Laid out once with a small force simulation, seeded by
+     * id so the same brain draws the same way every time.
+     */
+    function drawMemGraph(host, mems, usage){
+      if (!host) return;
+      mems = mems.slice(0, 150);
+      var count = {};
+      mems.forEach(function(m){ (m.entities || []).forEach(function(e){ count[e] = (count[e] || 0) + 1; }); });
+      var ents = Object.keys(count).filter(function(e){ return count[e] > 1; })
+        .sort(function(a, b){ return count[b] - count[a]; }).slice(0, 60);
+      var eset = {}; ents.forEach(function(e){ eset[e] = 1; });
+      var nodes = [], idx = {}, links = [];
+      function seed(s){ var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h; }
+      function add(id, kind, data){
+        var h = seed(id);
+        idx[id] = nodes.length;
+        nodes.push({ id: id, t: kind, d: data, x: (h % 400) / 2, y: ((h >> 9) % 400) / 2, vx: 0, vy: 0 });
+      }
+      mems.forEach(function(m){ add("m:" + m.id, "m", m); });
+      ents.forEach(function(e){ add("e:" + e, "e", e); });
+      mems.forEach(function(m){ (m.entities || []).forEach(function(e){ if (eset[e]) links.push([idx["m:" + m.id], idx["e:" + e]]); }); });
+      var n = nodes.length;
+      for (var it = 0; it < 260; it++) {
+        var alpha = 1 - it / 260;
+        for (var i = 0; i < n; i++) {
+          var a = nodes[i];
+          for (var j = i + 1; j < n; j++) {
+            var b = nodes[j], dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy + 0.01;
+            if (d2 > 40000) continue;
+            var f = 260 / d2;
+            a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
+          }
+          a.vx -= a.x * 0.012; a.vy -= a.y * 0.012;
+        }
+        links.forEach(function(l){
+          var a = nodes[l[0]], b = nodes[l[1]], dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+          var f = (d - 46) * 0.05 / d;
+          a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
+        });
+        nodes.forEach(function(o){
+          o.vx = Math.max(-12, Math.min(12, o.vx)); o.vy = Math.max(-12, Math.min(12, o.vy));
+          o.x += o.vx * alpha; o.y += o.vy * alpha; o.vx *= 0.6; o.vy *= 0.6;
+        });
+      }
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      nodes.forEach(function(o){ x0 = Math.min(x0, o.x); y0 = Math.min(y0, o.y); x1 = Math.max(x1, o.x); y1 = Math.max(y1, o.y); });
+      var pad = 40, w = Math.max(200, x1 - x0 + pad * 2), h = Math.max(160, y1 - y0 + pad * 2);
+      var svg = '<svg class="bgsvg" viewBox="' + (x0 - pad) + " " + (y0 - pad) + " " + w + " " + h + '" role="img" aria-label="memory graph">' +
+        links.map(function(l, k){
+          var a = nodes[l[0]], b = nodes[l[1]];
+          return '<line class="bgl" data-a="' + l[0] + '" data-b="' + l[1] + '" x1="' + a.x.toFixed(1) + '" y1="' + a.y.toFixed(1) + '" x2="' + b.x.toFixed(1) + '" y2="' + b.y.toFixed(1) + '"/>';
+        }).join("") +
+        nodes.map(function(o, i){
+          if (o.t === "e") {
+            var label = o.d.length > 22 ? "…" + o.d.slice(-21) : o.d;
+            return '<g class="bge" data-i="' + i + '" tabindex="0"><title>' + esc(o.d) + " · " + count[o.d] + " memories</title>" +
+              '<rect x="' + (o.x - 3).toFixed(1) + '" y="' + (o.y - 3).toFixed(1) + '" width="6" height="6" rx="1.5"/>' +
+              '<text x="' + (o.x + 6).toFixed(1) + '" y="' + (o.y + 3).toFixed(1) + '">' + esc(label) + "</text></g>";
+          }
+          var used = (usage[o.d.id] || {}).n || 0;
+          var r = 4.5 + Math.min(6, Math.sqrt(used) * 1.5);
+          return '<g class="bgm bk-' + esc(o.d.kind) + '" data-i="' + i + '" tabindex="0"><title>' + esc(o.d.kind + ": " + o.d.text) + "</title>" +
+            '<circle cx="' + o.x.toFixed(1) + '" cy="' + o.y.toFixed(1) + '" r="' + r.toFixed(1) + '"/></g>';
+        }).join("") + "</svg>";
+      var lonely = mems.filter(function(m){ return !(m.entities || []).some(function(e){ return eset[e]; }); }).length;
+      host.innerHTML = '<div class="bgcap">' + mems.length + " memor" + (mems.length === 1 ? "y" : "ies") + " · " + ents.length + " shared file" + (ents.length === 1 ? "" : "s") + " or symbol" + (ents.length === 1 ? "" : "s") + " joining them" +
+        (lonely ? " · " + lonely + " stand alone" : "") + '<span class="dim"> · click a dot or a name</span></div>' + svg + '<div class="bgpick" id="bgpick"></div>';
+      var svgEl = host.querySelector("svg"), pick = host.querySelector("#bgpick");
+      function focus(i){
+        var near = {}; near[i] = 1;
+        links.forEach(function(l){ if (l[0] === i) near[l[1]] = 1; if (l[1] === i) near[l[0]] = 1; });
+        svgEl.classList.add("focus");
+        Array.prototype.forEach.call(svgEl.querySelectorAll("[data-i]"), function(g){ g.classList.toggle("near", !!near[+g.getAttribute("data-i")]); });
+        Array.prototype.forEach.call(svgEl.querySelectorAll(".bgl"), function(l){ l.classList.toggle("near", +l.getAttribute("data-a") === i || +l.getAttribute("data-b") === i); });
+        var o = nodes[i];
+        if (o.t === "m") {
+          pick.innerHTML = '<span class="bbadge bk-' + esc(o.d.kind) + '">' + esc(o.d.kind) + "</span> " + esc(o.d.text) +
+            ((o.d.entities || []).length ? '<div class="bents">' + o.d.entities.slice(0, 8).map(function(e){ return '<span class="bent">' + esc(e) + "</span>"; }).join("") + "</div>" : "");
+        } else {
+          var about = mems.filter(function(m){ return (m.entities || []).indexOf(o.d) >= 0; });
+          pick.innerHTML = '<b class="mono">' + esc(o.d) + "</b> · " + about.length + " memor" + (about.length === 1 ? "y" : "ies") + "<ul>" +
+            about.slice(0, 8).map(function(m){ return '<li><span class="bbadge bk-' + esc(m.kind) + '">' + esc(m.kind) + "</span> " + esc(m.text) + "</li>"; }).join("") + "</ul>";
+        }
+      }
+      Array.prototype.forEach.call(svgEl.querySelectorAll("[data-i]"), function(g){
+        g.onclick = function(ev){ ev.stopPropagation(); focus(+g.getAttribute("data-i")); };
+        g.onkeydown = function(ev){ if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); focus(+g.getAttribute("data-i")); } };
+      });
+      svgEl.onclick = function(){ svgEl.classList.remove("focus"); pick.innerHTML = ""; };
+    }
+
     function refreshBrain(){
       if (brainView === "team") return refreshTeamBrain();
       var el = document.getElementById("pane-brain"); if (!el) return;
@@ -8211,7 +8325,9 @@ ${BRAND_SPRITE}
           '<button type="button" class="btn xs ghost" id="bimport" title="bring in a brain exported from Loom (duplicates are skipped)">' + ICONS.plus + "Import</button>" +
           '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>' +
           '<div class="bsort"><span>Sort</span><button type="button" data-bsort="new" class="' + (state.brainSort !== "used" ? "on" : "") + '">Newest</button>' +
-          '<button type="button" data-bsort="used" class="' + (state.brainSort === "used" ? "on" : "") + '" title="how often each memory reached an agent’s prompt">Most used</button></div>';
+          '<button type="button" data-bsort="used" class="' + (state.brainSort === "used" ? "on" : "") + '" title="how often each memory reached an agent’s prompt">Most used</button>' +
+          '<span style="margin-left:auto">View</span><button type="button" data-bview="list" class="' + (!state.brainGraph ? "on" : "") + '">List</button>' +
+          '<button type="button" data-bview="graph" class="' + (state.brainGraph ? "on" : "") + '" title="memories joined by the files and symbols they share">Graph</button></div>';
 
         // The memory list — the learned units. This is what phase 2 fills.
         var shown = brainKind ? memories.filter(function(x){ return x.kind === brainKind; }) : memories;
@@ -8223,6 +8339,8 @@ ${BRAND_SPRITE}
           list = '<div class="bempty">' + (memories.length ? "" : emptyArt("brain")) + (memories.length
             ? "No " + esc(brainKind) + " memories yet."
             : "Nothing learned yet. As agents finish turns, Loom reads each one and records what's worth keeping — constraints, decisions, and the failures worth not repeating. Add a decision below to seed it, or let an agent take a turn.") + "</div>";
+        } else if (state.brainGraph) {
+          list = '<div class="bgraph" id="bgraph"></div>';
         } else {
           list = '<div class="bmems">' + shown.map(function(x){
             var ents = (x.entities || []).slice(0, 6).map(function(e){ return '<span class="bent">' + esc(e) + "</span>"; }).join("");
@@ -8264,6 +8382,10 @@ ${BRAND_SPRITE}
 
         el.innerHTML = '<div class="pane-inner brain">' + head + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
         wireBrainSwitch(el);
+        if (state.brainGraph && shown.length) drawMemGraph(document.getElementById("bgraph"), shown, usage);
+        Array.prototype.forEach.call(el.querySelectorAll("[data-bview]"), function(b){
+          b.onclick = function(){ state.brainGraph = b.getAttribute("data-bview") === "graph"; refreshBrain(); };
+        });
 
         // Contradictions, above the units: two memories that likely disagree
         // are worth more attention than either alone. Quiet when clean.
