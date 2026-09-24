@@ -3730,6 +3730,21 @@ window.__loomPageRev="%%BUILD_REV%%";
   .cfmodal .cflab span{color:var(--muted-foreground);font-size:11.5px;margin-left:6px}
   .cfmodal .cflab .cfin{margin-top:6px}
   .cfmodal .mferr{color:var(--err);font-size:12.5px;margin-top:10px}
+  /* diff layout toggle + side by side */
+  .dvtoggle{display:inline-flex;gap:2px;margin:8px 10px 0;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
+  .dvtoggle button{border:0;background:none;color:var(--muted-foreground);font:inherit;font-size:11.5px;padding:3px 10px;border-radius:6px;cursor:pointer}
+  .dvtoggle button.on{background:var(--secondary);color:var(--foreground)}
+  .dsplit{font-family:var(--font-mono);font-size:12px;line-height:1.55;min-width:max-content}
+  .dsplit .sl{display:grid;grid-template-columns:40px minmax(280px,1fr) 40px minmax(280px,1fr)}
+  .dsplit .sl.hunk,.dsplit .sl.meta{display:block;padding:2px 10px;color:var(--muted-foreground);background:color-mix(in srgb,var(--secondary) 60%,transparent)}
+  .dsplit .ln{color:var(--muted-foreground);text-align:right;padding-right:8px;user-select:none;opacity:.7}
+  .dsplit .sc{white-space:pre;padding:0 10px;border-left:1px solid color-mix(in srgb,var(--border) 60%,transparent)}
+  .dsplit .sc.del{background:color-mix(in srgb,var(--err) 13%,transparent)}
+  .dsplit .sc.add{background:color-mix(in srgb,var(--ok) 13%,transparent)}
+  .dsplit .sc.empty{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--border) 45%,transparent) 6px 7px)}
+  .dfh .dfrevert{margin-left:auto}
+  .dfh .dfrevert svg{width:11px;height:11px;margin-right:4px}
+  .dfh .dfrevert.done{color:var(--ok)}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -5277,6 +5292,9 @@ ${BRAND_SPRITE}
     String(patch || "").split("\\n").forEach(function(line){
       var m = line.match(/^diff --git a\\/(.+) b\\/(.+)$/);
       if (m) { cur = { path: m[2], lines: [], add: 0, del: 0 }; parts.push(cur); return; }
+      // a file the turn created, reported without a git diff of its own
+      var nf = line.match(/^\\?\\? new file: (.+)$/);
+      if (nf) { cur = { path: nf[1], lines: [line], add: 0, del: 0, created: true }; parts.push(cur); return; }
       if (!cur) { cur = { path: "", lines: [], add: 0, del: 0 }; parts.push(cur); }
       cur.lines.push(line);
       if (line.charAt(0) === "+" && line.slice(0, 3) !== "+++") cur.add++;
@@ -5323,6 +5341,39 @@ ${BRAND_SPRITE}
     });
     return out;
   }
+  /** Old on the left, new on the right: removals and additions paired row by row within a hunk. */
+  function renderSplitLines(lines){
+    var oldN = 0, newN = 0, out = "", dels = [], adds = [];
+    function cell(n, text, cls){ return '<span class="ln">' + (n || "") + '</span><span class="sc' + (cls ? " " + cls : "") + '">' + (text === null ? "" : (esc(text) || " ")) + "</span>"; }
+    function flush(){
+      var n = Math.max(dels.length, adds.length);
+      for (var i = 0; i < n; i++) {
+        var d = dels[i], a = adds[i];
+        out += '<div class="sl">' + (d ? cell(d[0], d[1], "del") : cell("", null, "empty")) + (a ? cell(a[0], a[1], "add") : cell("", null, "empty")) + "</div>";
+      }
+      dels = []; adds = [];
+    }
+    lines.forEach(function(line){
+      var m = line.match(/^@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
+      if (m) { flush(); oldN = Number(m[1]); newN = Number(m[2]); out += '<div class="sl hunk">' + esc(line) + "</div>"; return; }
+      var c = diffLineClass(line);
+      if (c === "meta" || (!oldN && !newN && line.charAt(0) !== "+" && line.charAt(0) !== "-")) { flush(); if (line) out += '<div class="sl meta">' + esc(line) + "</div>"; return; }
+      var body = /^[+\\- ]/.test(line) ? line.slice(1) : line;
+      if (c === "del") { dels.push([oldN++, body]); return; }
+      if (c === "add") { adds.push([newN++, body]); return; }
+      flush();
+      out += '<div class="sl">' + cell(oldN++, body, "") + cell(newN++, body, "") + "</div>";
+    });
+    flush();
+    return out;
+  }
+  function diffView(){ try { return localStorage.getItem("loomDiffView") === "split" ? "split" : "unified"; } catch (e) { return "unified"; } }
+  function diffBody(lines, path){ return diffView() === "split" ? '<div class="dsplit">' + renderSplitLines(lines) + "</div>" : renderDiffLines(lines, path); }
+  function diffToggle(){
+    var v = diffView();
+    return '<div class="dvtoggle" role="group" aria-label="diff layout"><button type="button" data-dv="unified" class="' + (v === "unified" ? "on" : "") + '">Unified</button>' +
+      '<button type="button" data-dv="split" class="' + (v === "split" ? "on" : "") + '">Side by side</button></div>';
+  }
   function renderDiffFiles(tree){
     var files = splitPatch(tree.patch).filter(function(f){ return !isLoomInternal(f.path); });
     files.forEach(function(f){
@@ -5334,7 +5385,7 @@ ${BRAND_SPRITE}
       return '<div class="dfile" id="df-' + i + '">' +
         '<div class="dfh">' + ICONS.tree + '<span class="p">' + esc(f.path || "patch") + "</span>" +
         '<span class="cadd">+' + f.add + "</span><span class=\\"cdel\\">\\u2212" + f.del + "</span></div>" +
-        '<div class="dcode">' + renderDiffLines(f.lines, f.path) + "</div></div>";
+        '<div class="dcode">' + diffBody(f.lines, f.path) + "</div></div>";
     }).join("");
   }
 
@@ -7207,19 +7258,36 @@ ${BRAND_SPRITE}
       else { document.getElementById("pane-changes").innerHTML = LOADER; api("/api/projects/" + pid + "/tree").then(function(j){ state.tree = j.tree || {}; render(); drawRail(); }).catch(function(){}); }
     }
     // Show a turn's combined patch (from a turn_diff card in the thread).
-    function openPatchDock(patch, label){
+    function openPatchDock(patch, label, cp){
       openDock();
       dockTitle(ICONS.tree, label || "changes");
       var el = document.getElementById("pane-changes");
       var files = splitPatch(patch);
-      el.innerHTML = '<div class="diffwrap">' + (files.length
+      el.innerHTML = diffToggle() + '<div class="diffwrap">' + (files.length
         ? files.map(function(f, i){
             return '<div class="dfile" id="df-' + i + '"><div class="dfh">' + ICONS.tree +
               '<span class="p">' + esc(f.path || "patch") + "</span>" +
-              '<span class="cadd">+' + f.add + '</span><span class="cdel">\\u2212' + f.del + "</span></div>" +
-              '<div class="dcode">' + renderDiffLines(f.lines, f.path) + "</div></div>";
+              '<span class="cadd">+' + f.add + '</span><span class="cdel">−' + f.del + "</span>" +
+              (cp && f.path ? '<button type="button" class="btn xs ghost dfrevert" data-rvfile="' + esc(f.path) + '" title="put just this file back the way it was before this turn">' + ICONS.rewind + "Revert file</button>" : "") +
+              "</div>" +
+              '<div class="dcode">' + diffBody(f.lines, f.path) + "</div></div>";
           }).join("")
-        : '<div class="dcode">' + renderDiffLines(String(patch).split("\\n")) + "</div>") + "</div>";
+        : '<div class="dcode">' + diffBody(String(patch).split("\\n")) + "</div>") + "</div>";
+      Array.prototype.forEach.call(el.querySelectorAll("[data-dv]"), function(b){
+        b.onclick = function(){ try { localStorage.setItem("loomDiffView", b.getAttribute("data-dv")); } catch (e) {} openPatchDock(patch, label, cp); };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-rvfile]"), function(b){
+        b.onclick = function(){
+          var file = b.getAttribute("data-rvfile");
+          askConfirm("Put " + file + " back the way it was before this turn?\\n\\nOnly this file changes. The version it replaces is saved first, so this can be undone from Rewind.", { ok: "Revert file" }).then(function(yes){
+            if (!yes) return;
+            b.disabled = true;
+            api("/api/projects/" + pid + "/checkpoints/" + encodeURIComponent(cp) + "/rewind-file", { method: "POST", body: JSON.stringify({ path: file }) })
+              .then(function(r){ b.textContent = r.removed ? "Removed" : "Reverted"; b.classList.add("done"); toast(file + (r.removed ? " removed — this turn created it" : " is back to how it was before this turn")); if (state.loadGitStat) state.loadGitStat(); })
+              .catch(function(err){ b.disabled = false; toast(err.message); });
+          });
+        };
+      });
       var sc = el; if (sc) sc.scrollTop = 0;
     }
     // Show a read-only file preview (from Explorer clicks).
@@ -7955,7 +8023,7 @@ ${BRAND_SPRITE}
       if (ev.target.closest && ev.target.closest(".tcdiff")) return; // let diff text select/scroll
       var enc = t.getAttribute("data-patch"); if (!enc) return;
       var patch = decodeURIComponent(enc);
-      if (desktop) { openPatchDock(patch, t.getAttribute("data-label") || "changes"); return; }
+      if (desktop) { var rwb = t.querySelector("[data-rewind]"); openPatchDock(patch, t.getAttribute("data-label") || "changes", rwb ? rwb.getAttribute("data-rewind") : null); return; }
       var d = t.querySelector(".tcdiff"); if (!d) return;
       var open = d.style.display !== "none" && d.innerHTML;
       if (open) { d.style.display = "none"; }

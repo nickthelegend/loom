@@ -4,6 +4,7 @@
  * on the daemon, so every device sees the same sidebar.
  */
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -36,6 +37,10 @@ describe("chat flags, stars and unread", () => {
     auth = { authorization: `Bearer ${cfg.adminToken}` };
     const dir = makeProjectDir({ name: "flags" });
     fs.writeFileSync(path.join(dir, "README.md"), "# flags\n");
+    // a repository, so turns have diffs to file
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "t"], ["add", "-A"], ["commit", "-qm", "seed"]]) {
+      execFileSync("git", args, { cwd: dir });
+    }
     projectId = (await client.addProject(dir)).project.id;
   });
   afterAll(async () => {
@@ -76,6 +81,16 @@ describe("chat flags, stars and unread", () => {
     expect(before.events).toBeGreaterThan(0);
     const r = (await call("POST", "/log/compact")).json as { before: { events: number }; after: { events: number } };
     expect(r.after.events).toBe(r.before.events);
+  });
+
+  it("files a turn's changes in the chat the turn ran in, not Main", async () => {
+    const made = await call("POST", "/chats", { title: "side work" });
+    const chat = (made.json.chat as { id: string }).id;
+    await call("POST", "/messages", { text: "write:side-note.txt", agentId: "plannerbot", chat });
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 100);
+      return events.some((e) => e.kind === "turn_diff" && e.chat === chat);
+    });
   });
 
   it("refuses sampling for an agent that isn't a model agent, in words", async () => {

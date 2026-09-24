@@ -2068,6 +2068,20 @@ export class ProjectRuntime {
     return out;
   }
 
+  /** Put one file back as a checkpoint had it (see checkpoints.restoreFile). */
+  async rewindFile(id: string, file: string): Promise<Awaited<ReturnType<typeof checkpoints.restoreFile>>> {
+    const busy = [...this.busySince.keys()];
+    if (busy.length) {
+      throw new Error(`${busy.join(", ")} ${busy.length === 1 ? "is" : "are"} mid-turn — stop the turn first, or the file changes underneath it`);
+    }
+    const out = await checkpoints.restoreFile(this.info.dir, id, file);
+    this.log.append({
+      kind: "checkpoint",
+      payload: { id: out.restored.id, label: `${out.path} only`, at: Date.now(), reason: "rewound", files: 1, undo: out.undo.id, path: out.path },
+    });
+    return out;
+  }
+
   /**
    * The diff of each agent's most recent turn, as a promise.
    *
@@ -2099,6 +2113,10 @@ export class ProjectRuntime {
     this.preTurnTree.delete(agentId);
     const checkpoint = this.turnCheckpoint.get(agentId);
     this.turnCheckpoint.delete(agentId);
+    // The chat the turn ran in, read now: by the time the diff is computed the
+    // agent may already be on its next turn somewhere else. Without it, every
+    // "changed N files" card landed in Main whatever thread asked.
+    const turnChat = this.turnChat.get(agentId);
     const pending = diffSinceSnapshot(this.agentDir(agentId), before).catch(() => null);
     this.lastTurnDiff.set(agentId, pending);
     void pending
@@ -2107,6 +2125,7 @@ export class ProjectRuntime {
           this.log.append({
             kind: "turn_diff",
             agentId,
+            ...(turnChat && turnChat !== MAIN_CHAT ? { chat: turnChat } : {}),
             payload: {
               files: diff.files,
               added: diff.added,

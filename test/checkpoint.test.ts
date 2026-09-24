@@ -13,7 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { capture, find, forgetAll, list, prune, restore } from "../src/core/checkpoint.js";
+import { capture, find, forgetAll, list, prune, restore, restoreFile } from "../src/core/checkpoint.js";
 import { tmpDir } from "./helpers.js";
 
 const git = (dir: string, ...args: string[]): string => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
@@ -207,6 +207,34 @@ describe("rewinding to a checkpoint", () => {
     await expect(restore(dir, "cnope")).rejects.toThrow(/no checkpoint/);
     await expect(restore(dir, "../../etc/passwd")).rejects.toThrow(/no checkpoint/);
     expect(read(dir, "app.ts")).toBe("mine\n");
+  });
+});
+
+describe("putting back one file", () => {
+  it("restores that file, removes one the turn created, and leaves everything else as it is", async () => {
+    const dir = repo();
+    const cp = (await capture(dir, "before the turn"))!;
+    write(dir, "app.ts", "export const port = 9999;\n");
+    write(dir, "README.md", "# rewritten\n");
+    write(dir, "added.ts", "new\n");
+    const one = await restoreFile(dir, cp.id, "app.ts");
+    expect(one.removed).toBe(false);
+    expect(read(dir, "app.ts")).toBe("export const port = 3000;\n");
+    expect(read(dir, "README.md")).toBe("# rewritten\n"); // untouched
+    const gone = await restoreFile(dir, cp.id, "added.ts");
+    expect(gone.removed).toBe(true);
+    expect(read(dir, "added.ts")).toBeNull();
+    // it reads as a plain edit, not staged
+    expect(git(dir, "diff", "--cached", "--name-only").trim()).toBe("");
+    // and the version it replaced was saved first
+    expect(await find(dir, one.undo.id)).not.toBeNull();
+    expect(read(dir, ".env")).toBe("SECRET=hunter2\n");
+  });
+
+  it("refuses a path outside the project", async () => {
+    const dir = repo();
+    const cp = (await capture(dir, "x"))!;
+    await expect(restoreFile(dir, cp.id, "../outside.txt")).rejects.toThrow(/isn't a path inside/);
   });
 });
 
