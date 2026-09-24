@@ -3842,6 +3842,11 @@ window.__loomPageRev="%%BUILD_REV%%";
   .pschk{color:var(--muted-foreground)}
   .pschk .pschkn{display:inline-block;min-width:88px;color:var(--foreground)}
   .pschk.bad .pschkn{color:var(--err)}
+  .md .mdcodewrap .mddraw{position:absolute;top:6px;right:36px;display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--foreground);font:inherit;font-size:11.5px;cursor:pointer}
+  .md .mdcodewrap .mddraw svg{width:12px;height:12px}
+  .md .mdcodewrap .mddraw:disabled{opacity:.6;cursor:progress}
+  .md .mdcodewrap .mmout{padding:34px 10px 10px;overflow:auto;text-align:center}
+  .md .mdcodewrap .mmout svg{max-width:100%;height:auto}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -4002,6 +4007,7 @@ ${BRAND_SPRITE}
         // somewhere else rather than on screen.
         out.push('<div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
           "</button>" + (lang ? '<span class="mdlang">' + lang + "</span>" : "") +
+          (lang === "mermaid" ? '<button class="mddraw" type="button" title="draw it — fetches the Mermaid renderer from jsdelivr the first time">' + ICONS.tree + "Draw diagram</button>" : "") +
           '<pre class="mdcode"><code>' + hlCode(body, lang) + "</code></pre></div>");
         i = j + 1; continue;
       }
@@ -4041,6 +4047,58 @@ ${BRAND_SPRITE}
     }
     return out.join("");
   }
+  /**
+   * A mermaid code block, drawn on request. The renderer (about 3 MB) comes from
+   * jsdelivr the first time you ask and never before — Loom doesn't phone out
+   * to draw a diagram you didn't ask to see. Strict mode: labels are text,
+   * never markup or script. "Code" flips back to the source.
+   */
+  var mermaidLoad = null;
+  function loadMermaid(){
+    if (window.mermaid) return Promise.resolve(window.mermaid);
+    if (mermaidLoad) return mermaidLoad;
+    mermaidLoad = new Promise(function(resolve, reject){
+      var s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js";
+      s.async = true;
+      s.onload = function(){ window.mermaid ? resolve(window.mermaid) : reject(new Error("the renderer loaded but didn’t start")); };
+      s.onerror = function(){ mermaidLoad = null; reject(new Error("couldn’t fetch the diagram renderer — it needs the internet once")); };
+      document.head.appendChild(s);
+    });
+    return mermaidLoad;
+  }
+  var mermaidN = 0;
+  function drawMermaid(wrap, btn){
+    if (!wrap) return;
+    var shown = wrap.querySelector(".mmout");
+    if (shown) {
+      var codeOn = shown.style.display === "none";
+      shown.style.display = codeOn ? "" : "none";
+      wrap.querySelector(".mdcode").style.display = codeOn ? "none" : "";
+      btn.lastChild.textContent = codeOn ? "Code" : "Diagram";
+      return;
+    }
+    var src = (wrap.querySelector("code") || {}).textContent || "";
+    btn.disabled = true;
+    btn.lastChild.textContent = "Drawing…";
+    loadMermaid().then(function(mm){
+      var bg = getComputedStyle(document.body).backgroundColor.match(/\\d+/g) || [255, 255, 255];
+      var dark = (Number(bg[0]) + Number(bg[1]) + Number(bg[2])) / 3 < 128;
+      mm.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default", fontFamily: "inherit" });
+      return mm.render("loommm" + (++mermaidN), src);
+    }).then(function(r){
+      var out = document.createElement("div");
+      out.className = "mmout";
+      out.innerHTML = r.svg;
+      wrap.insertBefore(out, wrap.querySelector(".mdcode"));
+      wrap.querySelector(".mdcode").style.display = "none";
+      btn.lastChild.textContent = "Code";
+    }).catch(function(err){
+      btn.lastChild.textContent = "Draw diagram";
+      toast(/fetch|internet/.test(String(err && err.message)) ? err.message : "that diagram doesn’t parse — " + String((err && err.message) || err).split("\\n")[0].slice(0, 120));
+    }).then(function(){ btn.disabled = false; });
+  }
+
   /**
    * Just enough syntax colour to read code at a glance: comments, strings,
    * numbers, keywords and calls. A tokenizer, not a parser — it walks the
@@ -8149,6 +8207,8 @@ ${BRAND_SPRITE}
         if (navigator.clipboard && txt) navigator.clipboard.writeText(txt).then(function(){ toast("copied"); }, function(){ toast("couldn\u2019t copy"); });
         return;
       }
+      var dr = ev.target.closest && ev.target.closest(".mddraw");
+      if (dr) { ev.preventDefault(); ev.stopPropagation(); drawMermaid(dr.parentNode, dr); return; }
       var cp = ev.target.closest && ev.target.closest(".mdcopy");
       if (cp) {
         ev.preventDefault(); ev.stopPropagation();

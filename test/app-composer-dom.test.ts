@@ -373,6 +373,34 @@ describe("web app · voice input without a transcriber", () => {
   });
 });
 
+describe("web app · mermaid diagrams", () => {
+  it("draws a mermaid block only when asked, and flips back to the code", async () => {
+    const m = await opened();
+    let rendered = "";
+    // stand in for the renderer, so the test needs no network
+    (m.window as unknown as Record<string, unknown>).mermaid = {
+      initialize() {},
+      render: async (_id: string, src: string) => {
+        rendered = src;
+        return { svg: '<svg class="fakemm"><g class="node"></g></svg>' };
+      },
+    };
+    await sendFromComposer(m, "sketch\n```mermaid\ngraph LR\n  A --> B\n```");
+    await waitUntil(() => $$(m, "#feed .mddraw").length >= 1);
+    // nothing is drawn (or fetched) until you ask
+    expect($(m, "#feed .mmout")).toBeNull();
+    const btn = $$(m, "#feed .mddraw").pop()!;
+    click(btn);
+    await waitUntil(() => !!btn.parentElement?.querySelector(".mmout svg.fakemm"));
+    expect(rendered).toContain("A --> B");
+    const code = btn.parentElement!.querySelector(".mdcode") as HTMLElement;
+    expect(code.style.display).toBe("none");
+    click(btn);
+    expect(code.style.display).toBe("");
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · plan mode", () => {
   it("is a real switch, remembered per project, and sends a chat turn with plan: true", async () => {
     const m = await opened();
