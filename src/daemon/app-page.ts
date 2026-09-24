@@ -3784,6 +3784,10 @@ window.__loomPageRev="%%BUILD_REV%%";
   .unavail .uah{font-size:12px;color:var(--muted-foreground)}
   .srow .m.merr{color:var(--warn);display:flex;align-items:center;gap:4px}
   .srow .m.merr svg{width:11px;height:11px}
+  .av.pic{padding:0;overflow:hidden}
+  .av.pic img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
+  .psinstr .psav{width:14px;height:14px;border-radius:4px;margin-right:5px;object-fit:cover}
+  img.agpic{width:16px;height:16px;border-radius:5px;object-fit:cover;flex:none;vertical-align:-3px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -4429,6 +4433,8 @@ ${BRAND_SPRITE}
   }
   /** The brand mark, or a hue monogram for a kind that has none — never blank. */
   function agentGlyph(kind, id, cls){
+    var pic = id && state.project && (state.project.agents || []).filter(function(a){ return a.id === id && a.avatar; })[0];
+    if (pic && /^data:image\\/(png|jpeg|webp);base64,/.test(pic.avatar)) return '<img class="agpic' + (cls ? " " + cls : "") + '" src="' + pic.avatar + '" alt="">';
     if (hasBrand(kind)) return brandMark(kind, cls);
     var h = hue(String(id || kind || "?"));
     return '<span class="agmono" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 20%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +
@@ -4905,6 +4911,9 @@ ${BRAND_SPRITE}
   /** The agent's mark in a small tile — its logo, or a monogram in its hue. */
   function avatarFor(id){
     var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
+    // a picture you gave this agent wins over its brand mark
+    var mine = state.project && (state.project.agents || []).filter(function(a){ return a.id === s && a.avatar; })[0];
+    if (mine && /^data:image\\/(png|jpeg|webp);base64,/.test(mine.avatar)) return '<span class="av pic"><img src="' + mine.avatar + '" alt=""></span>';
     if (s.indexOf("ask:") === 0) k = "model";
     if (hasBrand(k)) return '<span class="av">' + brandMark(k) + "</span>";
     var h = hue(s);
@@ -17612,6 +17621,9 @@ ${BRAND_SPRITE}
           '<button type="button" class="btn xs ' + (a.instructions ? "outline psinstr on" : "ghost psinstr") + '" data-instr="' + esc(a.id) + '" title="' +
             esc(a.instructions ? "Standing instructions: " + a.instructions.slice(0, 160) : "Add standing instructions this agent gets before every turn") + '">' +
             ICONS.pencil + (a.instructions ? "Instructions" : "Instruct") + "</button>" +
+          '<button type="button" class="btn xs ghost psinstr" data-avatar="' + esc(a.id) + '" title="' + (a.avatar ? "change its picture" : "give this agent a picture") + '">' +
+            (a.avatar ? '<img class="psav" src="' + a.avatar + '" alt="">' : ICONS.camera) + (a.avatar ? "Picture" : "Picture") + "</button>" +
+          (a.avatar ? '<button type="button" class="btn xs ghost" data-avatarx="' + esc(a.id) + '" title="remove its picture" aria-label="remove picture">' + ICONS.x + "</button>" : "") +
           (a.kind === "model" ? '<button type="button" class="btn xs ghost psinstr" data-sampling="' + esc(a.id) + '" title="' +
             esc("Temperature " + (a.sampling && a.sampling.temperature != null ? a.sampling.temperature : "default") + " · max tokens " + (a.sampling && a.sampling.maxTokens ? a.sampling.maxTokens : "default")) + '">' +
             ICONS.gear + "Sampling</button>" : "") + "</div></div>";
@@ -17657,6 +17669,43 @@ ${BRAND_SPRITE}
           var agent = cb.getAttribute("data-agent");
           api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/enabled", { method: "PUT", body: JSON.stringify({ enabled: cb.checked }) })
             .then(afterChange).catch(function(err){ toast(err.message || "could not toggle"); cb.checked = !cb.checked; });
+        };
+      });
+      /** Crop to a square and shrink to 96px on the device; only that small PNG is sent. */
+      function pictureFrom(file){
+        return new Promise(function(resolve, reject){
+          if (!/^image\\//.test(file.type)) return reject(new Error("that isn’t an image"));
+          var url = URL.createObjectURL(file), img = new Image();
+          img.onload = function(){
+            var side = Math.min(img.width, img.height), c = document.createElement("canvas");
+            c.width = c.height = 96;
+            c.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 96, 96);
+            URL.revokeObjectURL(url);
+            resolve(c.toDataURL("image/png"));
+          };
+          img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error("couldn’t read that image")); };
+          img.src = url;
+        });
+      }
+      Array.prototype.forEach.call(body.querySelectorAll("[data-avatar]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-avatar");
+          var inp = document.createElement("input");
+          inp.type = "file"; inp.accept = "image/png,image/jpeg,image/webp";
+          inp.onchange = function(){
+            var f = inp.files && inp.files[0]; if (!f) return;
+            pictureFrom(f).then(function(dataUrl){
+              return api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/avatar", { method: "PUT", body: JSON.stringify({ avatar: dataUrl }) });
+            }).then(function(){ toast(agent + " has a picture now"); afterChange(); }).catch(function(err){ toast(err.message); });
+          };
+          inp.click();
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-avatarx]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-avatarx");
+          api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/avatar", { method: "PUT", body: JSON.stringify({ avatar: null }) })
+            .then(function(){ toast(agent + "’s picture removed"); afterChange(); }).catch(function(err){ toast(err.message); });
         };
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-sampling]"), function(b){

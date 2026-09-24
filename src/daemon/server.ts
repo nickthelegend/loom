@@ -2486,6 +2486,21 @@ export class LoomDaemon {
       }),
     );
 
+    // An agent's picture ({ avatar: data URL | null }).
+    app.put(
+      "/api/projects/:id/agents/:agentId/avatar",
+      withRuntime(async (rt, req, res) => {
+        const { avatar } = (req.body ?? {}) as { avatar?: unknown };
+        try {
+          const out = rt.setAgentAvatar(String(req.params.agentId), avatar === null || avatar === undefined ? null : String(avatar));
+          if (!out) return void res.status(404).json({ error: "unknown agent" });
+          res.json(out);
+        } catch (err) {
+          res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        }
+      }),
+    );
+
     // A model agent's sampling: temperature and max tokens (null clears).
     app.put(
       "/api/projects/:id/agents/:agentId/sampling",

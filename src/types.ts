@@ -155,6 +155,8 @@ export interface AgentConfig {
    * "never touch migrations"), sent ahead of every turn it takes.
    */
   instructions?: string;
+  /** A picture for this agent, as a small image data URL (≤ ~96px). */
+  avatar?: string;
 }
 
 /** One ADE's native memory pulled into the unified brain. */
@@ -563,6 +565,8 @@ export interface AgentStatus {
   instructions?: string;
   /** Model agents: sampling overrides (absent = the provider's default). */
   sampling?: { temperature?: number; maxTokens?: number };
+  /** The agent's own picture, when one was set. */
+  avatar?: string;
 }
 
 export interface ProjectStatus {

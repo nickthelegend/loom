@@ -130,6 +130,16 @@ describe("chat flags, stars and unread", () => {
     expect((await call("PUT", "/board/limits", { column: "nope", limit: 2 })).status).toBe(400);
   });
 
+  it("keeps a small picture per agent, refuses what isn't an image, and clears it", async () => {
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: png })).json).toEqual({ id: "plannerbot", avatar: png });
+    const status = (await call("GET", "")).json.project as { agents: Array<{ id: string; avatar?: string }> };
+    expect(status.agents.find((a) => a.id === "plannerbot")?.avatar).toBe(png);
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: "javascript:alert(1)" })).status).toBe(400);
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: "data:image/png;base64," + "A".repeat(130_000) })).status).toBe(400);
+    expect((await call("PUT", "/agents/plannerbot/avatar", { avatar: null })).json.avatar).toBeNull();
+  });
+
   it("refuses sampling for an agent that isn't a model agent, in words", async () => {
     const r = await call("PUT", "/agents/plannerbot/sampling", { temperature: 0.5 });
     expect(r.status).toBe(400);

@@ -783,6 +783,20 @@ export class ProjectRuntime {
    * on an agent's turn to finish. Nothing is torn down: a role is a name, not
    * a capability, so no adapter needs restarting.
    */
+  /** An agent's picture: a small PNG/JPEG/WebP data URL, or null to clear. */
+  setAgentAvatar(agentId: string, dataUrl: string | null): { id: string; avatar: string | null } | null {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) return null;
+    if (dataUrl === null || dataUrl === "") delete cfg.avatar;
+    else {
+      if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new Error("a picture is a PNG, JPEG or WebP image");
+      if (dataUrl.length > 120_000) throw new Error("that picture is too big — Loom keeps them small (about 96px)");
+      cfg.avatar = dataUrl;
+    }
+    this.saveConfig();
+    return { id: agentId, avatar: cfg.avatar ?? null };
+  }
+
   /** Standing instructions for an agent; empty clears them. */
   setAgentInstructions(agentId: string, text: string): { id: string; instructions: string } | null {
     const cfg = this.config.agents.find((a) => a.id === agentId);
@@ -3825,6 +3839,7 @@ export class ProjectRuntime {
             permissions: permissionFor(cfg.kind, cfg.options),
             ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
             ...sampling(cfg),
+            ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
             // "not spawned" is not "switched off". An agent whose CLI is missing
             // is still enabled in config, and reporting it as disabled made the
             // project-settings toggle render off — clicking it then wrote the
@@ -3845,6 +3860,7 @@ export class ProjectRuntime {
           enabled: true,
           ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
           ...sampling(cfg),
+          ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
         };
       }),
     );
