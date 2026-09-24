@@ -1803,7 +1803,9 @@ export class LoomDaemon {
         // ?since= (ms) narrows the leaderboard to a window — "today", for loom stats
         const since = Number(req.query.since) || 0;
         const board = leaderboard(since ? rows.filter((r) => r.ts >= since) : rows);
-        res.json({ leaderboard: board, days: perDay(rows, days), total: rows.length });
+        // your 👍/👎, beside what the log says
+        const rated = rt.ratingsByAgent();
+        res.json({ leaderboard: board.map((a) => (rated[a.agentId] ? { ...a, rated: rated[a.agentId] } : a)), days: perDay(rows, days), total: rows.length });
       }),
     );
     app.get(
@@ -2428,6 +2430,17 @@ export class LoomDaemon {
         const chat = rt.setChatFlags(String(req.params.chatId), flags);
         if (!chat) return void res.status(404).json({ error: "no such thread" });
         res.json({ chat });
+      }),
+    );
+
+    // Rate a reply: { eventId, agentId, value: 1 | -1 | 0 }.
+    app.post(
+      "/api/projects/:id/chats/:chatId/rate",
+      withRuntime(async (rt, req, res) => {
+        const { eventId, agentId, value } = (req.body ?? {}) as { eventId?: unknown; agentId?: unknown; value?: unknown };
+        const ratings = rt.rateMessage(String(req.params.chatId), Number(eventId), String(agentId ?? ""), Number(value));
+        if (!ratings) return void res.status(400).json({ error: "no such thread, message or agent" });
+        res.json({ ratings });
       }),
     );
 

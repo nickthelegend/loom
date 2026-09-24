@@ -3762,6 +3762,14 @@ window.__loomPageRev="%%BUILD_REV%%";
   .bmmeta{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .bmmeta select,.bmmeta input{width:100%}
   .pmfoot .pmvars{flex-basis:100%;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);opacity:.8}
+  .msg .who .msgrate{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
+    color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease}
+  .msg .who .msgrate svg{width:13px;height:13px}
+  .msg:hover .who .msgrate,.msg .who .msgrate.on,.msg .who .msgrate:focus-visible{opacity:1}
+  .msg .who .msgrate:hover{background:var(--secondary);color:var(--foreground)}
+  .msg .who .msgrate.on{color:var(--ok)} .msg .who .msgrate.on.down{color:var(--err)}
+  .msg .who .msgrate.on svg{fill:color-mix(in srgb,currentColor 22%,transparent)}
+  .lbrated .up{color:var(--ok)} .lbrated .dn{color:var(--err)}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -4543,6 +4551,8 @@ ${BRAND_SPRITE}
     shield: svg('<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>'),
     pin: svg('<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>'),
     bookmark: svg('<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>'),
+    thumbsUp: svg('<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>'),
+    thumbsDown: svg('<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>'),
     star: svg('<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>'),
     link: svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'),
     archive: svg('<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>'),
@@ -4893,6 +4903,11 @@ ${BRAND_SPRITE}
       (p.model ? '<span class="wm">' + esc(shortModel(p.model)) + "</span>" : "") + (extra || "") +
       '<span class="wt"' + (e.id ? ' data-rel="' + Number(e.ts || 0) + '"' : "") + ' title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + (e.id ? relClock(e.ts) : clock(e.ts)) + "</span>" +
       (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
+      (e.id ? (function(){
+        var rv = state.rateMap && state.rateMap[e.id] ? state.rateMap[e.id].v : 0;
+        return '<button type="button" class="msgrate' + (rv === 1 ? " on" : "") + '" data-rate="1" title="Good reply — counts on the Insights leaderboard" aria-label="good reply" aria-pressed="' + (rv === 1) + '">' + ICONS.thumbsUp + "</button>" +
+          '<button type="button" class="msgrate' + (rv === -1 ? " on down" : "") + '" data-rate="-1" title="Bad reply" aria-label="bad reply" aria-pressed="' + (rv === -1) + '">' + ICONS.thumbsDown + "</button>";
+      })() : "") +
       '<button type="button" class="msgcopy" title="copy this reply" aria-label="copy this reply">' + ICONS.copy + "</button>" +
       (e.id ? '<button type="button" class="msgmore" title="More: retry, star, quote, make a card, link" aria-label="more actions">' + ICONS.dots + "</button>" : "") +
       "</div>";
@@ -6235,8 +6250,9 @@ ${BRAND_SPRITE}
           return '<tr><td class="lbrank">' + (i + 1) + '</td><td><span class="lbwho">' + avatarFor(a.agentId) + esc(labelOf(a.agentId)) + "</span></td>" +
             '<td class="num">' + a.turns + '</td><td><span class="lbbar ' + tone + '"><i style="width:' + pct + '%"></i></span><span class="num">' + pct + "%</span></td>" +
             '<td class="num">' + (a.medianMs != null ? durfmt(a.medianMs) : "—") + "</td>" +
-            '<td class="num">' + (a.avgCostUsd != null ? money(a.avgCostUsd) : "—") + '</td><td class="num">' + money(a.totalCostUsd || 0) + "</td></tr>";
-        }).join("") : '<tr><td colspan="7" class="lbempty">No finished turns yet — the table fills in as agents work.</td></tr>';
+            '<td class="num">' + (a.avgCostUsd != null ? money(a.avgCostUsd) : "—") + '</td><td class="num">' + money(a.totalCostUsd || 0) + "</td>" +
+            '<td class="num lbrated">' + (a.rated ? '<span class="up">' + a.rated.up + '</span> · <span class="dn">' + a.rated.down + "</span>" : "—") + "</td></tr>";
+        }).join("") : '<tr><td colspan="8" class="lbempty">No finished turns yet — the table fills in as agents work.</td></tr>';
         // the heatmap: weeks as columns, Monday on top
         var max = 1; days.forEach(function(d){ if (d.turns > max) max = d.turns; });
         var first = days.length ? new Date(days[0].date + "T00:00:00") : new Date();
@@ -6261,7 +6277,7 @@ ${BRAND_SPRITE}
             '<div class="obminicard" title="this month’s spend so far, plus the daily average for the days left"><div class="obcl">Month-end at this pace</div><div class="obcv sm">' + money(forecast) + "</div></div></div>" +
           '<div class="obmlabel lbhead">Agent leaderboard<span class="spacer"></span>' +
             '<button type="button" class="btn xs outline" id="turnscsv">' + ICONS.download + "Export turns (CSV)</button></div>" +
-          '<div class="lbwrap"><table class="lbtable"><thead><tr><th>#</th><th>Agent</th><th class="num">Turns</th><th>Finished cleanly</th><th class="num">Median time</th><th class="num">Per turn</th><th class="num">Total</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+          '<div class="lbwrap"><table class="lbtable"><thead><tr><th>#</th><th>Agent</th><th class="num">Turns</th><th>Finished cleanly</th><th class="num">Median time</th><th class="num">Per turn</th><th class="num">Total</th><th class="num" title="your thumbs up and down on its replies">You rated</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
           '<div class="obmlabel" style="margin-top:18px">Activity · last 12 weeks<span class="hmsum">' + (r.total || 0) + " turns · active " + active + " of " + days.length + " days</span></div>" +
           '<div class="hmgrid" role="img" aria-label="turns per day for twelve weeks">' + cells.join("") + "</div>" +
           '<div class="hmkey">Less <i class="hm l0"></i><i class="hm l1"></i><i class="hm l2"></i><i class="hm l3"></i><i class="hm l4"></i> More<span class="spacer"></span><i class="hm l2 err"></i> a day with a failed turn</div>';
@@ -7953,6 +7969,24 @@ ${BRAND_SPRITE}
       if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
       // A message's own actions: the ⋯ menu, your prompt's edit/copy/star,
       // and Continue on a reply you stopped.
+      var rb = ev.target.closest && ev.target.closest(".msgrate");
+      if (rb) {
+        ev.preventDefault(); ev.stopPropagation();
+        var rmsg = rb.closest(".msg"), rid = Number(rmsg.getAttribute("data-id")) || 0, ragent = rmsg.getAttribute("data-agent");
+        var want = Number(rb.getAttribute("data-rate")), had = state.rateMap && state.rateMap[rid] ? state.rateMap[rid].v : 0;
+        var val = had === want ? 0 : want;
+        api("/api/projects/" + pid + "/chats/" + encodeURIComponent(chatId) + "/rate", { method: "POST", body: JSON.stringify({ eventId: rid, agentId: ragent, value: val }) })
+          .then(function(j){
+            state.rateMap = j.ratings || {};
+            Array.prototype.forEach.call(rmsg.querySelectorAll(".msgrate"), function(x){
+              var on = Number(x.getAttribute("data-rate")) === val;
+              x.classList.toggle("on", on); x.classList.toggle("down", on && val === -1); x.setAttribute("aria-pressed", on ? "true" : "false");
+            });
+            toast(val === 1 ? "noted — a good one from " + labelOf(ragent) : val === -1 ? "noted — " + labelOf(ragent) + " missed on this one" : "rating cleared");
+          })
+          .catch(function(err){ toast(err.message); });
+        return;
+      }
       var mm = ev.target.closest && ev.target.closest(".msgmore");
       if (mm) { ev.preventDefault(); ev.stopPropagation(); msgMenu(mm.closest(".msg"), mm); return; }
       var ua = ev.target.closest && ev.target.closest(".uact");
@@ -10519,6 +10553,7 @@ ${BRAND_SPRITE}
       var set = {};
       ((c && c.starred) || []).forEach(function(n){ set[n] = true; });
       state.starSet = set;
+      state.rateMap = (c && c.ratings) || {};
     }
     function toggleStar(id){
       if (!id) return;

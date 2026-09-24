@@ -107,6 +107,8 @@ export interface ChatInfo {
   archived?: boolean;
   /** Event ids marked as worth coming back to (newest last, capped). */
   starred?: number[];
+  /** Your verdict on replies: event id → up (1) or down (-1), with who wrote it. */
+  ratings?: Record<string, { v: 1 | -1; agent: string }>;
   /**
    * The id of the newest agent reply in this thread. Computed from the log on
    * read, never stored: a client compares it with what it last saw to show

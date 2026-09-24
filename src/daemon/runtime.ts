@@ -1590,8 +1590,9 @@ export class ProjectRuntime {
         id: MAIN_CHAT,
         title: "Main",
         createdAt: 0,
-        // main is stored only once it has stars to keep
+        // main is stored only once it has stars or ratings to keep
         ...(stored.find((c) => c.id === MAIN_CHAT)?.starred ? { starred: stored.find((c) => c.id === MAIN_CHAT)!.starred! } : {}),
+        ...(stored.find((c) => c.id === MAIN_CHAT)?.ratings ? { ratings: stored.find((c) => c.id === MAIN_CHAT)!.ratings! } : {}),
       }),
       ...stored.filter((c) => c.id !== MAIN_CHAT).map(withLast),
     ];
@@ -1610,6 +1611,41 @@ export class ProjectRuntime {
     }
     writeProjectState(this.info.dir, state);
     return chat;
+  }
+
+  /** Rate a reply up or down (0 clears). Main included. */
+  rateMessage(chatId: string, eventId: number, agent: string, v: number): Record<string, { v: 1 | -1; agent: string }> | null {
+    if (!Number.isInteger(eventId) || eventId <= 0 || !agent) return null;
+    const state = readProjectState(this.info.dir);
+    state.chats = state.chats ?? [];
+    let chat = state.chats.find((c) => c.id === chatId);
+    if (!chat) {
+      if (chatId !== MAIN_CHAT) return null;
+      chat = { id: MAIN_CHAT, title: "Main", createdAt: 0 };
+      state.chats.push(chat);
+    }
+    const ratings = { ...(chat.ratings ?? {}) };
+    if (v === 1 || v === -1) ratings[String(eventId)] = { v, agent };
+    else delete ratings[String(eventId)];
+    const keys = Object.keys(ratings);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 500))) delete ratings[k]; // bounded
+    if (Object.keys(ratings).length) chat.ratings = ratings;
+    else delete chat.ratings;
+    writeProjectState(this.info.dir, state);
+    return chat.ratings ?? {};
+  }
+
+  /** Every rating in every thread, per agent: how many up, how many down. */
+  ratingsByAgent(): Record<string, { up: number; down: number }> {
+    const out: Record<string, { up: number; down: number }> = {};
+    for (const c of readProjectState(this.info.dir).chats ?? []) {
+      for (const r of Object.values(c.ratings ?? {})) {
+        const a = (out[r.agent] ??= { up: 0, down: 0 });
+        if (r.v === 1) a.up++;
+        else a.down++;
+      }
+    }
+    return out;
   }
 
   /** Star or unstar a message in a thread (main included). */

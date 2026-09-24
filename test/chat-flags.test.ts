@@ -93,6 +93,21 @@ describe("chat flags, stars and unread", () => {
     });
   });
 
+  it("rates replies up or down, clears a rating, and counts them per agent on the leaderboard", async () => {
+    await call("POST", "/messages", { text: "rate me", agentId: "plannerbot" });
+    let reply = 0;
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 100);
+      reply = events.filter((e) => e.kind === "message" && e.agentId === "plannerbot").at(-1)?.id ?? 0;
+      return reply > 0;
+    });
+    expect((await call("POST", "/chats/main/rate", { eventId: reply, agentId: "plannerbot", value: 1 })).json.ratings).toEqual({ [String(reply)]: { v: 1, agent: "plannerbot" } });
+    const board = (await call("GET", "/insights/turns")).json.leaderboard as Array<{ agentId: string; rated?: { up: number; down: number } }>;
+    expect(board.find((a) => a.agentId === "plannerbot")?.rated).toEqual({ up: 1, down: 0 });
+    expect((await call("POST", "/chats/main/rate", { eventId: reply, agentId: "plannerbot", value: 0 })).json.ratings).toEqual({});
+    expect((await call("POST", "/chats/main/rate", { eventId: reply, value: 1 })).status).toBe(400);
+  });
+
   it("gives cards a priority and a due date, and columns a work-in-progress limit", async () => {
     const made = (await call("POST", "/board/tasks", { title: "ship it", priority: "high", due: "2026-10-01" })).json.task as { id: string };
     expect(made).toMatchObject({ priority: "high", due: "2026-10-01" });
