@@ -423,7 +423,12 @@ export class ProjectRuntime {
 
   static async open(info: ProjectInfo): Promise<ProjectRuntime> {
     const config = readProjectConfig(info.dir);
-    if (!config) throw new Error(`project at ${info.dir} has no .loom/config.json — run loom init`);
+    if (!config) {
+      // Say which: a folder that's gone (moved, deleted, a temp dir a reboot
+      // cleared) is a different fix from a folder that was never initialised.
+      if (!fs.existsSync(info.dir)) throw new Error(`this project's folder is gone: ${info.dir} — it was moved or deleted`);
+      throw new Error(`project at ${info.dir} has no .loom/config.json — run loom init`);
+    }
     const log = await EventLog.open(projectLoomDir(info.dir));
     const rt = new ProjectRuntime(info, config, log);
     rt.configMtime = configMtimeOf(info.dir);

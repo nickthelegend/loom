@@ -3772,6 +3772,18 @@ window.__loomPageRev="%%BUILD_REV%%";
   .lbrated .up{color:var(--ok)} .lbrated .dn{color:var(--err)}
   .lenpill{border:1px solid color-mix(in srgb,var(--thread) 45%,var(--border));background:color-mix(in srgb,var(--thread) 10%,transparent);
     color:var(--foreground);font:inherit;font-size:11.5px;padding:2px 9px;border-radius:99px;cursor:pointer;margin-right:6px}
+  .emptyart{display:block;width:136px;height:100px;margin:6px auto 14px;color:var(--muted-foreground)}
+  .emptyart .eaglow{stroke-dasharray:180;stroke-dashoffset:180;animation:eadraw 1.4s .2s cubic-bezier(.3,.7,.2,1) forwards}
+  @keyframes eadraw{to{stroke-dashoffset:0}}
+  .unavail{max-width:520px;margin:12vh auto 0;padding:0 24px;text-align:center}
+  .unavail .uat{font-size:18px;font-weight:600;margin-bottom:8px}
+  .unavail .uab{font-size:13.5px;line-height:1.6;color:var(--muted-foreground)}
+  .unavail .uab code,.unavail .uaa code{font-family:var(--font-mono);font-size:12px;padding:1px 6px;border-radius:5px;background:var(--secondary)}
+  .unavail .uaa{display:flex;gap:8px;justify-content:center;margin:18px 0 10px}
+  .unavail .uaa .btn svg{width:13px;height:13px;margin-right:6px}
+  .unavail .uah{font-size:12px;color:var(--muted-foreground)}
+  .srow .m.merr{color:var(--warn);display:flex;align-items:center;gap:4px}
+  .srow .m.merr svg{width:11px;height:11px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -5029,6 +5041,22 @@ ${BRAND_SPRITE}
     if (s <= 0) return "Retry now";
     var h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
     return "Retry in " + (h ? h + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0");
+  }
+  /**
+   * The empty-state mark: threads on a loom, warp and weft, with one bright
+   * thread for the thing that isn't there yet. Drawn, not an image, so it
+   * follows the theme.
+   */
+  function emptyArt(tone){
+    var c = tone === "brain" ? "var(--shuttle)" : "var(--thread)";
+    var warp = "", weft = "";
+    for (var i = 0; i < 7; i++) warp += '<line x1="' + (20 + i * 16) + '" y1="14" x2="' + (20 + i * 16) + '" y2="86" stroke="currentColor" stroke-opacity=".22" stroke-width="2" stroke-linecap="round"/>';
+    for (var j = 0; j < 4; j++) {
+      var y = 26 + j * 16, d = "M12 " + y;
+      for (var k = 0; k < 7; k++) d += " Q" + (20 + k * 16) + " " + (y + (k % 2 === j % 2 ? -5 : 5)) + " " + (28 + k * 16) + " " + y;
+      weft += '<path d="' + d + '" fill="none" stroke="' + (j === 2 ? c : "currentColor") + '" stroke-opacity="' + (j === 2 ? "1" : ".32") + '" stroke-width="' + (j === 2 ? "2.6" : "2") + '" stroke-linecap="round"' + (j === 2 ? ' class="eaglow"' : "") + "/>";
+    }
+    return '<svg class="emptyart" viewBox="0 0 136 100" aria-hidden="true">' + warp + weft + "</svg>";
   }
   function lineFor(e){
     var p = e.payload || {};
@@ -8147,7 +8175,7 @@ ${BRAND_SPRITE}
         }
         var list;
         if (!shown.length) {
-          list = '<div class="bempty">' + (memories.length
+          list = '<div class="bempty">' + (memories.length ? "" : emptyArt("brain")) + (memories.length
             ? "No " + esc(brainKind) + " memories yet."
             : "Nothing learned yet. As agents finish turns, Loom reads each one and records what's worth keeping — constraints, decisions, and the failures worth not repeating. Add a decision below to seed it, or let an agent take a turn.") + "</div>";
         } else {
@@ -13056,7 +13084,7 @@ ${BRAND_SPRITE}
         '<span class="spacer"></span><button class="iconbtn" id="orefresh" title="refresh">' + ICONS.refresh + "</button></div>";
       if (orch.runs === null) { el.innerHTML = '<div class="orchview">' + head + (orch.err ? '<div class="onote err">' + esc(orch.err) + "</div>" : LOADER) + "</div>"; wireOrchHead(); return; }
       if (!orch.runs.length) {
-        el.innerHTML = '<div class="orchview">' + head + '<div class="oempty"><b>No orchestra runs yet.</b><br>' +
+        el.innerHTML = '<div class="orchview">' + head + '<div class="oempty">' + emptyArt("orch") + '<b>No orchestra runs yet.</b><br>' +
           "Switch the composer to <b>Orchestrate</b>, describe a goal, and pick who plans and who works.<br>" +
           '<button class="btn outline sm" id="ostart" style="margin-top:14px">' + ICONS.orchestra + "Start one</button></div></div>";
         wireOrchHead();
@@ -18211,9 +18239,10 @@ ${BRAND_SPRITE}
           // margin-left:auto — .cnt's rule loses to the badge's inline style.
           (act ? '<span class="badge live" style="margin-left:auto">' + (r.current + 1) + "/" + r.steps.length + "</span>" : '<span class="cnt" style="margin-left:auto">' + adapters.length + "</span>") +
           '<button class="psetbtn" data-pset="' + esc(p.id) + '" title="project settings" aria-label="settings for ' + esc(p.name) + '">' + ICONS.gear + "</button></div>" +
-          '<div class="m">baton ' + esc(p.holder || "\\u2014") +
-          (p.costUsd > 0 ? " \\u00b7 " + money(p.costUsd) : "") + "</div></div>";
-        if (open) {
+          (p.error
+            ? '<div class="m merr">' + ICONS.alert + (p.missing ? "folder missing" : "needs loom init") + "</div></div>"
+            : '<div class="m">baton ' + esc(p.holder || "—") + (p.costUsd > 0 ? " · " + money(p.costUsd) : "") + "</div></div>");
+        if (open && !p.error) {
           // A project holds conversations. The agents that work them live in
           // the rail's roster — they belong to the project, not to one chat.
           var chats = (p.chats || [{ id: "main", title: "Main", createdAt: 0 }]).slice();
@@ -18647,8 +18676,33 @@ ${BRAND_SPRITE}
       try { localStorage.setItem("loomProject", pid); } catch (e) {}
       wanted = null; // whatever the URL wanted, this is a real choice now
       history.replaceState(null, "", "#p/" + pid);
+      var info = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
+      if (info && info.error) { drawUnavailable(info); drawList(); return; }
       renderProject(pid, dmain, true);
       drawList();
+    }
+    /**
+     * A project Loom can't open — its folder gone, or never initialised — is
+     * one clear page with the way out, not an error in every tab.
+     */
+    function drawUnavailable(info){
+      clearTimers();
+      state.project = null;
+      dmain.innerHTML = '<div class="unavail">' + emptyArt("orch") +
+        '<div class="uat">' + (info.missing ? "This project’s folder is gone" : "Loom can’t open this project") + "</div>" +
+        '<div class="uab">' + (info.missing
+          ? "<code>" + esc(info.dir) + "</code> doesn’t exist any more — it was moved, deleted, or it was a temporary folder a restart cleared. Its history went with it."
+          : esc(info.error || "") + ".") + "</div>" +
+        '<div class="uaa">' +
+          '<button type="button" class="btn primary" id="uaforget">' + ICONS.trash + "Remove from Loom</button>" +
+          (info.missing ? "" : '<button type="button" class="btn outline" id="uacopy">' + ICONS.copy + "Copy <code>loom init</code></button>") +
+        "</div>" +
+        '<div class="uah">' + (info.missing ? "Moved it? Remove it here, then add the folder where it lives now with New project." : "Run it in that folder, then come back — the project opens as usual.") + "</div></div>";
+      var f = document.getElementById("uaforget");
+      if (f) f.onclick = function(){ forgetProject(info.id, info.name); };
+      var c = document.getElementById("uacopy");
+      if (c) c.onclick = function(){ copyText("cd " + JSON.stringify(info.dir) + " && loom init"); };
+      drawStatusbar();
     }
     state.selectProject = select;
     state.setChat = setChat; // the palette jumps to a conversation by id

@@ -593,6 +593,8 @@ export interface ProjectStatus {
   quarantine?: Record<string, { reason: string; since: number; displaced: boolean }>;
   /** The live or latest orchestra run, compact. See core/orchestra.ts. */
   orchestra?: Record<string, unknown> | null;
+  /** The project's folder no longer exists (moved or deleted). */
+  missing?: boolean;
 }
 
 // ---------------------------------------------------------------------------
