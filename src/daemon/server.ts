@@ -2466,6 +2466,18 @@ export class LoomDaemon {
       }),
     );
 
+    // Standing instructions for one agent, sent ahead of every turn it takes.
+    app.put(
+      "/api/projects/:id/agents/:agentId/instructions",
+      withRuntime(async (rt, req, res) => {
+        const { instructions } = (req.body ?? {}) as { instructions?: unknown };
+        if (typeof instructions !== "string") return void res.status(400).json({ error: "instructions must be text (empty clears them)" });
+        const updated = rt.setAgentInstructions(String(req.params.agentId), instructions);
+        if (!updated) return void res.status(404).json({ error: "unknown agent" });
+        res.json(updated);
+      }),
+    );
+
     // Switch an agent off (or back on) without removing it from the roster.
     // 409 rather than 400 for the refusals — holding the baton and being
     // mid-turn are both states that pass on their own, so the message names

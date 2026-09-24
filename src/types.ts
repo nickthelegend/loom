@@ -148,6 +148,11 @@ export interface AgentConfig {
   memoryFiles?: string[];
   /** Off agents stay in the roster but aren't spawned and can't hold the baton. Default on. */
   enabled?: boolean;
+  /**
+   * Standing instructions for this agent in this project ("prefer pnpm",
+   * "never touch migrations"), sent ahead of every turn it takes.
+   */
+  instructions?: string;
 }
 
 /** One ADE's native memory pulled into the unified brain. */
@@ -552,6 +557,8 @@ export interface AgentStatus {
   enabled?: boolean;
   /** Permission mode in effect: bypass | auto | ask. See core/permissions.ts. */
   permissions?: string;
+  /** Standing instructions sent ahead of every turn (see AgentConfig). */
+  instructions?: string;
 }
 
 export interface ProjectStatus {

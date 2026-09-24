@@ -751,6 +751,23 @@ export class ProjectRuntime {
    * on an agent's turn to finish. Nothing is torn down: a role is a name, not
    * a capability, so no adapter needs restarting.
    */
+  /** Standing instructions for an agent; empty clears them. */
+  setAgentInstructions(agentId: string, text: string): { id: string; instructions: string } | null {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) return null;
+    const clean = text.trim().slice(0, 4000);
+    if (clean) cfg.instructions = clean;
+    else delete cfg.instructions;
+    this.saveConfig();
+    return { id: agentId, instructions: clean };
+  }
+
+  /** The block an agent's standing instructions ride in, ahead of its turn. */
+  private agentInstructions(agentId: string): string {
+    const text = this.config.agents.find((a) => a.id === agentId)?.instructions?.trim();
+    return text ? `Standing instructions for you in this project, from the person you work for:\n${text}\n` : "";
+  }
+
   setAgentRole(agentId: string, role: string): { id: string; role: string } | null {
     const cfg = this.config.agents.find((a) => a.id === agentId);
     if (!cfg) return null;
@@ -2889,7 +2906,7 @@ export class ProjectRuntime {
     // Prepend the enabled skills so every turn carries them, alongside any
     // one-shot handoff briefing. Empty when no skills are on.
     const briefing =
-      [this.activeSkillsBlock(), pendingBriefing, opts.plan ? planModeBriefing(text) : ""]
+      [this.agentInstructions(target), this.activeSkillsBlock(), pendingBriefing, opts.plan ? planModeBriefing(text) : ""]
         .filter(Boolean)
         .join("\n")
         .trim() || undefined;
@@ -3617,6 +3634,7 @@ export class ProjectRuntime {
             holdsBaton: false,
             model,
             permissions: permissionFor(cfg.kind, cfg.options),
+            ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
             // "not spawned" is not "switched off". An agent whose CLI is missing
             // is still enabled in config, and reporting it as disabled made the
             // project-settings toggle render off — clicking it then wrote the
@@ -3635,6 +3653,7 @@ export class ProjectRuntime {
           model,
           permissions: permissionFor(cfg.kind, cfg.options),
           enabled: true,
+          ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
         };
       }),
     );

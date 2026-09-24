@@ -3680,6 +3680,9 @@ window.__loomPageRev="%%BUILD_REV%%";
     background:linear-gradient(100deg,transparent 20%,color-mix(in srgb,var(--foreground) 6%,transparent) 50%,transparent 80%);
     transform:translateX(-100%);animation:skim 1.3s ease-in-out infinite}
   @keyframes skim{to{transform:translateX(100%)}}
+  .psrolewrap .psinstr{margin-left:6px}
+  .psrolewrap .psinstr svg{width:11px;height:11px;margin-right:4px}
+  .psrolewrap .psinstr.on{border-color:color-mix(in srgb,var(--thread) 45%,var(--border))}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -17106,7 +17109,10 @@ ${BRAND_SPRITE}
         return '<div class="psrow' + (on ? "" : " off") + '">' +
           '<label class="psswitch" aria-label="toggle ' + esc(a.id) + '"><input type="checkbox" class="psen" data-agent="' + esc(a.id) + '"' + (on ? " checked" : "") + (a.holdsBaton ? " disabled" : "") + '><span class="pssl"></span></label>' +
           '<div class="psinfo"><div class="psname">' + esc(a.id) + (a.holdsBaton ? ' <span class="psbaton">baton</span>' : "") + '</div><div class="pskind">' + esc(a.kind) + (a.model ? " \\u00b7 " + esc(a.model) : "") + "</div></div>" +
-          '<div class="psrolewrap"><span class="pslabel">role</span>' + roleSel + "</div></div>";
+          '<div class="psrolewrap"><span class="pslabel">role</span>' + roleSel +
+          '<button type="button" class="btn xs ' + (a.instructions ? "outline psinstr on" : "ghost psinstr") + '" data-instr="' + esc(a.id) + '" title="' +
+            esc(a.instructions ? "Standing instructions: " + a.instructions.slice(0, 160) : "Add standing instructions this agent gets before every turn") + '">' +
+            ICONS.pencil + (a.instructions ? "Instructions" : "Instruct") + "</button></div></div>";
       }).join("");
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \\u00b7 baton " + esc(p.holder || "\\u2014") + "</div></div>" +
         '<div class="pssec">Agents \\u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
@@ -17147,6 +17153,23 @@ ${BRAND_SPRITE}
           var agent = cb.getAttribute("data-agent");
           api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/enabled", { method: "PUT", body: JSON.stringify({ enabled: cb.checked }) })
             .then(afterChange).catch(function(err){ toast(err.message || "could not toggle"); cb.checked = !cb.checked; });
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-instr]"), function(b){
+        b.onclick = function(){
+          var agent = b.getAttribute("data-instr");
+          var a = (p.agents || []).filter(function(x){ return x.id === agent; })[0] || {};
+          askText("Standing instructions for " + agent, {
+            value: a.instructions || "", multiline: true,
+            placeholder: "e.g. Use pnpm, never npm. Don’t touch db/migrations. Keep replies short.",
+            note: "Sent ahead of every turn " + agent + " takes in this project. Empty clears them.",
+            ok: "Save",
+          }).then(function(text){
+            if (text === null) return;
+            api("/api/projects/" + pid + "/agents/" + encodeURIComponent(agent) + "/instructions", { method: "PUT", body: JSON.stringify({ instructions: text }) })
+              .then(function(r){ toast(r.instructions ? agent + " will get these before every turn" : agent + "’s instructions cleared"); afterChange(); })
+              .catch(function(err){ toast(err.message); });
+          });
         };
       });
       Array.prototype.forEach.call(body.querySelectorAll(".psrole"), function(sel){

@@ -70,4 +70,21 @@ describe("chat flags, stars and unread", () => {
     expect((await call("POST", "/chats/main/star", { eventId: replyId, on: false })).json.starred).toEqual([]);
     expect((await call("POST", "/chats/main/star", { eventId: "x" })).status).toBe(400);
   });
+
+  it("sends an agent's standing instructions ahead of every turn it takes", async () => {
+    expect((await call("PUT", "/agents/plannerbot/instructions", { instructions: "Answer in one line." })).json).toEqual({
+      id: "plannerbot",
+      instructions: "Answer in one line.",
+    });
+    const status = (await call("GET", "")).json.project as { agents: Array<{ id: string; instructions?: string }> };
+    expect(status.agents.find((a) => a.id === "plannerbot")?.instructions).toBe("Answer in one line.");
+    await client.send(projectId, "brief me", "plannerbot");
+    await waitUntil(async () => {
+      const { events } = await client.events(projectId, 0, 50);
+      return events.some((e) => e.kind === "message" && e.agentId === "plannerbot" && String(e.payload.text).includes("brief me (briefed:"));
+    });
+    expect((await call("PUT", "/agents/plannerbot/instructions", { instructions: "" })).json.instructions).toBe("");
+    expect((await call("PUT", "/agents/nobody/instructions", { instructions: "x" })).status).toBe(404);
+    expect((await call("PUT", "/agents/plannerbot/instructions", {})).status).toBe(400);
+  });
 });
