@@ -3610,6 +3610,48 @@ window.__loomPageRev="%%BUILD_REV%%";
   .hm.err{box-shadow:inset 0 0 0 1.5px var(--err)}
   .hmkey{display:flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;color:var(--muted-foreground)}
   .hmkey .hm{width:10px;height:10px}
+  /* orchestra plan graph */
+  .ograph{margin:4px 0 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+  .ograph > summary{cursor:pointer;padding:9px 12px;font-size:12px;font-weight:600;color:var(--muted-foreground);list-style:none;display:flex;gap:8px;align-items:center}
+  .ograph > summary::-webkit-details-marker{display:none}
+  .ograph .ogs{font-weight:400}
+  .ogscroll{overflow-x:auto;padding:0 8px 10px}
+  .ograph svg{display:block;color:var(--muted-foreground)}
+  .oge{fill:none;stroke:var(--border);stroke-width:1.6}
+  .oge.done{stroke:color-mix(in srgb,var(--ok) 60%,var(--border))}
+  .ogn rect{fill:var(--secondary);stroke:var(--border)}
+  .ogn .ogd{fill:var(--muted-foreground)}
+  .ogn.live rect{stroke:var(--live)} .ogn.live .ogd{fill:var(--live);animation:ogpulse 1.4s ease-in-out infinite}
+  .ogn.ok rect{stroke:color-mix(in srgb,var(--ok) 55%,var(--border))} .ogn.ok .ogd{fill:var(--ok)}
+  .ogn.warn rect{stroke:var(--warn)} .ogn.warn .ogd{fill:var(--warn)}
+  .ogn.err rect{stroke:var(--err)} .ogn.err .ogd{fill:var(--err)}
+  .ogn .ogid{font-size:10.5px;fill:var(--muted-foreground);font-family:var(--font-mono)}
+  .ogn .ogt{font-size:12px;fill:var(--foreground)}
+  .ogn{cursor:pointer}
+  @keyframes ogpulse{50%{opacity:.35}}
+  /* orchestra complete: a moment, once */
+  @keyframes odpop{0%{transform:scale(.97);opacity:0}60%{transform:scale(1.01);opacity:1}100%{transform:none}}
+  @keyframes odglow{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 45%,transparent)}100%{box-shadow:0 0 0 18px transparent}}
+  @keyframes odcheck{from{stroke-dashoffset:24}to{stroke-dashoffset:0}}
+  .sys.orch.odone.celebrate{animation:odpop .45s cubic-bezier(.2,.9,.3,1.2),odglow 1.1s ease-out .2s}
+  .sys.orch.odone.celebrate .odh svg{stroke-dasharray:24;animation:odcheck .5s ease-out .15s both}
+  @media (prefers-reduced-motion: reduce){.sys.orch.odone.celebrate,.sys.orch.odone.celebrate .odh svg,.ogn.live .ogd{animation:none}}
+  /* appearance */
+  .accents{display:flex;gap:8px}
+  .accentsw{width:22px;height:22px;border-radius:50%;border:2px solid var(--background);background:var(--sw);
+    box-shadow:0 0 0 1px var(--border);cursor:pointer;padding:0}
+  .accentsw.on{box-shadow:0 0 0 2px var(--foreground)}
+  html.compact .msg{margin-top:14px}
+  html.compact .msg.user{margin-top:20px}
+  html.compact .msg.user .bubble{padding:8px 12px 9px}
+  html.compact .daysep{margin:16px 0 4px}
+  html.compact .acts,html.compact .tool{margin-top:2px;margin-bottom:2px}
+  /* diagnostics: what's running */
+  .dsys{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0 14px}
+  .dsc{border:1px solid var(--border);border-radius:9px;padding:8px 10px;background:var(--card);display:flex;flex-direction:column;gap:2px}
+  .dsc span{font-size:11px;color:var(--muted-foreground)}
+  .dsc b{font-size:12.5px;font-weight:600;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dshell{zoom:var(--tz,1);height:calc(100dvh / var(--tz,1))}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -4455,9 +4497,40 @@ ${BRAND_SPRITE}
   }).observe(document.documentElement, { childList: true, subtree: true });
 
   function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
+  /**
+   * Text size, density and accent — this device's, remembered here. Zoom
+   * scales the whole app (every size in it is in px); density tightens the
+   * thread; the accent is the thread colour, a lighter tint for dark and a
+   * deeper one for light so it keeps its contrast.
+   */
+  var ACCENTS = {
+    cyan: ["#67e8f9", "#0e7490"], violet: ["#c4b5fd", "#6d28d9"], emerald: ["#6ee7b7", "#047857"],
+    amber: ["#fcd34d", "#b45309"], rose: ["#fda4af", "#be123c"], blue: ["#93c5fd", "#1d4ed8"]
+  };
+  var TEXT_SIZES = { s: 0.92, m: 1, l: 1.08, xl: 1.16 };
+  function appearancePref(name, fallback){ try { return localStorage.getItem("loomPref:" + name) || fallback; } catch (e) { return fallback; } }
+  function applyAppearance(){
+    var root = document.documentElement;
+    // The workspace is scaled, not the page: menus and dialogs live on <body>
+    // and place themselves from the workspace's on-screen boxes, which are
+    // right only if <body> itself isn't zoomed.
+    var z = TEXT_SIZES[appearancePref("textsize", "m")] || 1;
+    if (z === 1) root.style.removeProperty("--tz"); else root.style.setProperty("--tz", String(z));
+    root.classList.toggle("compact", appearancePref("density", "comfy") === "compact");
+    var a = ACCENTS[appearancePref("accent", "cyan")] || ACCENTS.cyan;
+    var dark = themeNow() !== "light";
+    if (appearancePref("accent", "cyan") === "cyan") {
+      root.style.removeProperty("--thread"); root.style.removeProperty("--thread-ink"); root.style.removeProperty("--accentBlue");
+    } else {
+      root.style.setProperty("--thread", a[0]);
+      root.style.setProperty("--thread-ink", dark ? a[0] : a[1]);
+      root.style.setProperty("--accentBlue", dark ? a[0] : a[1]);
+    }
+  }
   function applyTheme(){
     var t = themeNow();
     document.documentElement.classList.toggle("dark", t !== "light");
+    applyAppearance();
     var m = document.querySelector('meta[name="theme-color"]');
     if (m) m.setAttribute("content", t === "light" ? "#ffffff" : "#0a0a0a");
     var tb = document.getElementById("themebtn");
@@ -9765,6 +9838,7 @@ ${BRAND_SPRITE}
     state.timers.push(setInterval(function(){
       Object.keys(live).forEach(paintLiveState);
       Array.prototype.forEach.call(document.querySelectorAll("#feed .errcd[data-until]"), function(n){ n.textContent = untilText(Number(n.getAttribute("data-until"))); });
+      Array.prototype.forEach.call(document.querySelectorAll("[data-oel]"), function(n){ n.textContent = durfmt(Math.max(0, Date.now() - Number(n.getAttribute("data-oel")))); });
     }, 1000));
 
     // ---- empty thread ---------------------------------------------------------
@@ -9946,6 +10020,9 @@ ${BRAND_SPRITE}
             if ((frame.event.chat || "main") !== chatId) return;
             if (historyLoaded) append([frame.event]);
             else pendingWs.push(frame.event);
+            if (historyLoaded && frame.event.kind === "orchestra" && frame.event.payload && frame.event.payload.phase === "completed") {
+              var dn = document.querySelectorAll("#feed .odone"); if (dn.length) dn[dn.length - 1].classList.add("celebrate");
+            }
           }
         } catch (e) {}
       };
@@ -11321,6 +11398,8 @@ ${BRAND_SPRITE}
         openMenu(Math.round(r.left), Math.round(r.top - 4), items);
       };
       setAuto(state.auto);
+      // "Run again" from a run's own thread lands here, in Main, ready to orchestrate
+      try { if (chatId === "main" && localStorage.getItem("loomOrchNext:" + pid)) { localStorage.removeItem("loomOrchNext:" + pid); state.cmode = "orch"; } } catch (e) {}
       setComposerMode(state.cmode || "chat");
       refreshSkillCount();
 
@@ -12450,6 +12529,77 @@ ${BRAND_SPRITE}
       wireOrchHead();
       wireOrchDetail(el, run);
     }
+    /**
+     * The plan as a graph: each task a node, each dependsOn an arrow, left to
+     * right in the order they can run. Colours are the task's live status.
+     */
+    function orchGraph(tasks){
+      var byId = {}; tasks.forEach(function(t){ byId[t.id] = t; });
+      var level = {}, seen = {};
+      function lv(t){
+        if (level[t.id] != null) return level[t.id];
+        if (seen[t.id]) return 0; // a cycle the orchestrator shouldn't have made: flatten it
+        seen[t.id] = true;
+        var deps = (t.dependsOn || []).filter(function(d){ return byId[d]; });
+        level[t.id] = deps.length ? 1 + Math.max.apply(null, deps.map(function(d){ return lv(byId[d]); })) : 0;
+        return level[t.id];
+      }
+      tasks.forEach(lv);
+      var cols = [];
+      tasks.forEach(function(t){ (cols[level[t.id]] = cols[level[t.id]] || []).push(t); });
+      var NW = 168, NH = 44, GX = 58, GY = 14, PAD = 10;
+      var rows = Math.max.apply(null, cols.map(function(c){ return c.length; }));
+      var W = PAD * 2 + cols.length * NW + (cols.length - 1) * GX, H = PAD * 2 + rows * NH + (rows - 1) * GY;
+      var pos = {};
+      cols.forEach(function(c, ci){
+        var off = (H - (c.length * NH + (c.length - 1) * GY)) / 2;
+        c.forEach(function(t, ri){ pos[t.id] = { x: PAD + ci * (NW + GX), y: off + ri * (NH + GY) }; });
+      });
+      var edges = "";
+      tasks.forEach(function(t){
+        (t.dependsOn || []).forEach(function(d){
+          if (!pos[d]) return;
+          var a = pos[d], b = pos[t.id], x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
+          var done = byId[d].status === "done";
+          edges += '<path class="oge' + (done ? " done" : "") + '" d="M' + x1 + " " + y1 + " C" + mx + " " + y1 + " " + mx + " " + y2 + " " + (x2 - 4) + " " + y2 + '" marker-end="url(#ogarrow)"/>';
+        });
+      });
+      var nodes = tasks.map(function(t){
+        var s = ORCH_TASK_ST[t.status] || [t.status, "off"], q = pos[t.id];
+        var title = String(t.title || t.id);
+        return '<g class="ogn ' + s[1] + '" data-otask="' + esc(t.id) + '" transform="translate(' + q.x + " " + q.y + ')"><title>' + esc(t.id + " · " + title + " · " + s[0]) + "</title>" +
+          '<rect width="' + NW + '" height="' + NH + '" rx="10"/>' +
+          '<circle cx="14" cy="15" r="4" class="ogd"/>' +
+          '<text x="24" y="19" class="ogid">' + esc(t.id) + " · " + esc(labelOf(t.agent)) + "</text>" +
+          '<text x="12" y="34" class="ogt">' + esc(title.length > 24 ? title.slice(0, 23) + "…" : title) + "</text></g>";
+      }).join("");
+      return '<details class="ograph" open><summary>Plan graph<span class="ogs">' + tasks.length + " tasks · " + cols.length + " stage" + (cols.length === 1 ? "" : "s") + "</span></summary>" +
+        '<div class="ogscroll"><svg viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="task dependency graph">' +
+        '<defs><marker id="ogarrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="currentColor"/></marker></defs>' +
+        edges + nodes + "</svg></div></details>";
+    }
+    /** Put a finished goal back in the composer, cast and all. */
+    function runAgain(run){
+      var c = orchCfg(), roster = orchRoster(), ids = roster.map(function(a){ return a.id; });
+      var lead = run.orchestrator && run.orchestrator.agent;
+      if (lead && ids.indexOf(lead) >= 0) c.orchestrator = lead;
+      var ws = (run.workers || []).filter(function(w){ return ids.indexOf(w) >= 0; });
+      if (ws.length) { var off = {}; ids.forEach(function(id){ if (ws.indexOf(id) < 0) off[id] = true; }); c.off = off; }
+      if (run.maxParallel) c.parallel = Math.max(1, Math.min(12, Number(run.maxParallel)));
+      saveOrchCfg(c);
+      if (owns(run) || orchRunForChat()) {
+        // this thread steers its run; a new goal starts from Main
+        try { localStorage.setItem(draftKey("main"), run.goal); localStorage.setItem("loomOrchNext:" + pid, "1"); } catch (e) {}
+        if (state.setChat) state.setChat(pid, "main");
+        return;
+      }
+      if (desktop) showTab("thread"); else closeOrchSheet();
+      setComposerMode("orch");
+      var box = document.getElementById("box");
+      if (box) { box.value = run.goal; autosizeBox(); saveDraft(); box.focus(); }
+      drawOrchControls();
+      toast("the goal is back in the composer — same lead and team; edit it or press Enter");
+    }
     function orchDetail(run){
       var tasks = run.tasks || [];
       var done = tasks.filter(function(t){ return t.status === "done"; }).length;
@@ -12468,6 +12618,8 @@ ${BRAND_SPRITE}
           '<span class="omi"><span class="omk">Round</span><span class="omv">' + Number(run.round || 0) + "/" + Number(run.maxRounds || 0) + "</span></span>" +
           '<span class="omi"><span class="omk">Parallel</span><span class="omv">' + Number(run.maxParallel || 0) + "</span></span>" +
           '<span class="omi"><span class="omk">Cost</span><span class="omv">' + money(run.costUsd) + "</span></span>" +
+          '<span class="omi"><span class="omk">Elapsed</span><span class="omv"' + (terminal ? "" : ' data-oel="' + Number(run.createdAt || 0) + '"') + ">" +
+            durfmt(Math.max(0, (terminal ? Number(run.updatedAt || run.createdAt) : Date.now()) - Number(run.createdAt || 0))) + "</span></span>" +
           '<span class="omi"><span class="omk">Branch</span><code>' + esc(run.branch || "\\u2014") + "</code></span>" +
         "</div>" +
         '<div class="oprog"><div class="obar" title="' + done + " done, " + running + ' running"><i style="width:' + pct + '%"></i><i class="run" style="width:' + rpct + '%"></i></div>' +
@@ -12478,7 +12630,8 @@ ${BRAND_SPRITE}
           // Apply only when something finished: a run that ended before any task
           // merged has nothing on its branch to bring over.
           (terminal && !moved && !run.applied && (run.tasks || []).some(function(t){ return t.status === "done"; }) ? '<button class="btn primary sm" id="oapply">Apply to ' + esc(run.baseBranch || "your branch") + "</button>" : "") +
-          (terminal && !moved ? '<button class="btn ghost sm" id="oclean" title="remove this run\\u2019s worktrees (the branch stays)">Clean up</button>' : "") +
+          (terminal && !moved ? '<button class="btn ghost sm" id="oclean" title="remove this run’s worktrees (the branch stays)">Clean up</button>' : "") +
+          (terminal ? '<button class="btn outline sm" type="button" id="oagain" title="put this goal back in the composer with the same lead, team and parallelism">' + ICONS.refresh + "Run again</button>" : "") +
           (canMove ? '<button class="btn outline sm" type="button" id="orunner" title="move it to your runner; it carries on there">' + ICONS.orchestra + "Continue on runner</button>" : "") +
         "</div>" + orchMovedHtml(run) + orchOutcome(run) + orchLandingHtml(run) + "</div>";
       if (run.status === "waiting_human") {
@@ -12501,6 +12654,7 @@ ${BRAND_SPRITE}
           : "The orchestrator is planning\\u2026 tasks appear here as it spawns them.") + "</div>";
         return h;
       }
+      if (tasks.length > 1) h += orchGraph(tasks);
       // What needs you first, then what's moving, then what's settled.
       var ORDER = ["needs_input", "conflict", "running", "pending", "failed", "done", "cancelled"];
       ORDER.forEach(function(stName){
@@ -12736,6 +12890,8 @@ ${BRAND_SPRITE}
       orchAction(run, "apply", {}, btn, function(j){ toast("merged into " + ((j && j.into) || "your branch")); refreshTree(true); if (state.refreshExplorer) state.refreshExplorer(); });
     }
     function wireOrchDetail(el, run){
+      var ag = document.getElementById("oagain");
+      if (ag) ag.onclick = function(){ runAgain(run); };
       Array.prototype.forEach.call(el.querySelectorAll("[data-run]"), function(row){
         row.onclick = function(){ orch.sel = row.getAttribute("data-run"); orch.pinned = true; drawOrch(); };
       });
@@ -16125,6 +16281,7 @@ ${BRAND_SPRITE}
         if (!bad && !warn) h += '<span class="updpill ok">All ' + checks.length + " checks pass</span>";
         else h += '<span class="updpill warn">' + (bad ? bad + " failing" : "") + (bad && warn ? " \\u00b7 " : "") + (warn ? warn + " warning" + (warn > 1 ? "s" : "") : "") + "</span>";
         h += '<button class="btn ghost sm" id="diagrerun">Re-run</button></div>';
+        h += '<div class="dsys" id="dsys"></div>';
         checks.forEach(function(c){
           var st = c.status === "ok" ? "ok" : c.status === "warn" ? "warn" : "bad";
           h += '<div class="dchk"><span class="sdot ' + st + '" style="margin-top:5px"></span>' +
@@ -16133,6 +16290,14 @@ ${BRAND_SPRITE}
         });
         pane.innerHTML = h;
         document.getElementById("diagrerun").onclick = renderDiag;
+        // what is actually running, beside what it checked
+        Promise.all([sapi("/api/health"), sapi("/api/version")]).then(function(r){
+          var hh = r[0] || {}, v = r[1] || {}, box = document.getElementById("dsys"); if (!box) return;
+          var up = Number(v.uptimeSec || 0);
+          var cells = [["Loom", (hh.version || "?") + " · " + String(hh.rev || v.rev || "").slice(0, 8)], ["Node", v.node || "?"],
+            ["Platform", v.platform || "?"], ["Up for", durfmt(up * 1000)], ["Process", "pid " + (v.pid || "?")], ["Terminal", hh.terminal || "?"]];
+          box.innerHTML = cells.map(function(c){ return '<div class="dsc"><span>' + esc(c[0]) + "</span><b>" + esc(c[1]) + "</b></div>"; }).join("");
+        }).catch(function(){});
       }).catch(fail);
     }
 
@@ -16148,6 +16313,18 @@ ${BRAND_SPRITE}
       h += '<div class="prow"><div class="pl"><div class="pt">Theme</div>' +
         '<div class="pd">Light or dark. Open terminals repaint to match.</div></div>' +
         '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }], themeNow()) + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Text size</div>' +
+        '<div class="pd">Scales the whole app on this device.</div></div>' +
+        '<div class="pc">' + seg("textsize", [{ v: "s", l: "S" }, { v: "m", l: "M" }, { v: "l", l: "L" }, { v: "xl", l: "XL" }], appearancePref("textsize", "m")) + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Density</div>' +
+        '<div class="pd">Compact fits more of a conversation on screen.</div></div>' +
+        '<div class="pc">' + seg("density", [{ v: "comfy", l: "Comfortable" }, { v: "compact", l: "Compact" }], appearancePref("density", "comfy")) + "</div></div>";
+      h += '<div class="prow"><div class="pl"><div class="pt">Accent</div>' +
+        '<div class="pd">The thread colour: live replies, links, unread dots, the heatmap.</div></div>' +
+        '<div class="pc"><div class="accents" role="group" aria-label="accent colour">' + Object.keys(ACCENTS).map(function(k){
+          var on = appearancePref("accent", "cyan") === k;
+          return '<button type="button" class="accentsw' + (on ? " on" : "") + '" data-accent="' + k + '" aria-pressed="' + on + '" title="' + k + '" style="--sw:' + ACCENTS[k][0] + '"></button>';
+        }).join("") + "</div></div></div>";
       h += '<div class="sgrouph">Notifications · this device</div>';
       h += '<div class="prow"><div class="pl"><div class="pt">When a long turn finishes</div>' +
         '<div class="pd">A notification when an agent finishes something that took more than 20 seconds, while Loom is in the background.</div></div>' +
@@ -16165,6 +16342,15 @@ ${BRAND_SPRITE}
         toast(v === "on" ? "you’ll hear when long turns finish" : "finish notifications off");
       });
       bindSeg("chime", function(v){ setDevicePref("chime", v === "on"); if (v === "on") chime(); });
+      bindSeg("textsize", function(v){ try { localStorage.setItem("loomPref:textsize", v); } catch (e) {} applyAppearance(); });
+      bindSeg("density", function(v){ try { localStorage.setItem("loomPref:density", v); } catch (e) {} applyAppearance(); });
+      Array.prototype.forEach.call(pane.querySelectorAll("[data-accent]"), function(b){
+        b.onclick = function(){
+          try { localStorage.setItem("loomPref:accent", b.getAttribute("data-accent")); } catch (e) {}
+          Array.prototype.forEach.call(pane.querySelectorAll("[data-accent]"), function(x){ x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b ? "true" : "false"); });
+          applyAppearance();
+        };
+      });
       bindSeg("theme", function(v){
         localStorage.setItem(THEME_KEY, v === "light" ? "light" : "dark");
         applyTheme();
