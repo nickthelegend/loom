@@ -14,7 +14,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, agentEnv, cliAvailable, fetchJson, frameBriefing, freePort, waitFor } from "./base.js";
+import { AdapterBase, agentEnv, cliAvailable, cliOutput, fetchJson, firstLine, frameBriefing, freePort, waitFor, type AgentCheck } from "./base.js";
 import { permissionFor } from "../core/permissions.js";
 
 interface OpenCodeOptions {
@@ -104,6 +104,28 @@ export class OpenCodeAdapter extends AdapterBase {
   async available(): Promise<boolean> {
     if (this.options.baseUrl) return true;
     return cliAvailable("opencode");
+  }
+
+  async selfCheck(): Promise<AgentCheck[]> {
+    if (this.options.baseUrl) return [{ name: "server", ok: true, detail: `uses the opencode server at ${this.options.baseUrl}` }];
+    const v = await cliOutput("opencode", ["--version"]);
+    if (v?.code !== 0) return [{ name: "installed", ok: false, detail: "opencode not found on this machine — install it" }];
+    const checks: AgentCheck[] = [{ name: "installed", ok: true, detail: `opencode ${firstLine(v.out)}` }];
+    const a = await cliOutput("opencode", ["auth", "list"]);
+    const providers = (a?.out ?? "")
+      .split("\n")
+      .map((l) => /[●•]\s+(.+?)(?:\s{2,}|\s+(?:api|oauth|wellknown)\s*$|$)/.exec(l)?.[1]?.trim())
+      .filter((x): x is string => !!x)
+      // the environment section names the variable too ("OpenRouter OPENROUTER_API_KEY")
+      .map((x) => x.replace(/\s+[A-Z][A-Z0-9_]{2,}$/, ""))
+      .filter((x, i, all) => all.indexOf(x) === i);
+    checks.push({
+      name: "providers",
+      // opencode's own free models need no sign-in, so none is a note, not a failure
+      ok: true,
+      detail: providers.length ? `signed in to ${providers.join(", ")}` : "no providers signed in — its free models still work",
+    });
+    return checks;
   }
 
   /** Kill a serve child left behind by a previous daemon (verified by cmdline). */

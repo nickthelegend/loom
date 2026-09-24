@@ -3833,6 +3833,15 @@ window.__loomPageRev="%%BUILD_REV%%";
   .bgpick ul{margin:6px 0 0;padding-left:16px}
   .bgpick li{margin:3px 0}
   @media (prefers-reduced-motion: no-preference){ .bgsvg [data-i], .bgsvg .bgl{transition:opacity .15s ease} }
+  .pscheck:empty{display:none}
+  .pscheck{margin:-2px 0 8px 52px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:12px;line-height:1.55}
+  .pschkhead{display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:3px}
+  .pschkhead svg{width:13px;height:13px}
+  .pschkhead.ok{color:var(--ok, #22c55e)}
+  .pschkhead.bad{color:var(--err)}
+  .pschk{color:var(--muted-foreground)}
+  .pschk .pschkn{display:inline-block;min-width:88px;color:var(--foreground)}
+  .pschk.bad .pschkn{color:var(--err)}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -17865,7 +17874,9 @@ ${BRAND_SPRITE}
           (a.avatar ? '<button type="button" class="btn xs ghost" data-avatarx="' + esc(a.id) + '" title="remove its picture" aria-label="remove picture">' + ICONS.x + "</button>" : "") +
           (a.kind === "model" ? '<button type="button" class="btn xs ghost psinstr" data-sampling="' + esc(a.id) + '" title="' +
             esc("Temperature " + (a.sampling && a.sampling.temperature != null ? a.sampling.temperature : "default") + " · max tokens " + (a.sampling && a.sampling.maxTokens ? a.sampling.maxTokens : "default")) + '">' +
-            ICONS.gear + "Sampling</button>" : "") + "</div></div>";
+            ICONS.gear + "Sampling</button>" : "") +
+          '<button type="button" class="btn xs ghost psinstr" data-check="' + esc(a.id) + '" title="is it installed, signed in, and is its model there? No prompt is sent">' + ICONS.check + "Check</button>" +
+          "</div></div>" + '<div class="pscheck" data-chkout="' + esc(a.id) + '"></div>';
       }).join("");
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \\u00b7 baton " + esc(p.holder || "\\u2014") + "</div></div>" +
         '<div class="pssec">Agents \\u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
@@ -17938,6 +17949,24 @@ ${BRAND_SPRITE}
             }).then(function(){ toast(agent + " has a picture now"); afterChange(); }).catch(function(err){ toast(err.message); });
           };
           inp.click();
+        };
+      });
+      Array.prototype.forEach.call(body.querySelectorAll("[data-check]"), function(b){
+        b.onclick = function(){
+          var id = b.getAttribute("data-check");
+          var out = body.querySelector('[data-chkout="' + id + '"]');
+          if (!out) return;
+          b.disabled = true;
+          out.innerHTML = '<div class="pschk dim">checking ' + esc(id) + "…</div>";
+          api("/api/projects/" + pid + "/agents/" + encodeURIComponent(id) + "/check", { method: "POST", body: "{}" }).then(function(r){
+            out.innerHTML = '<div class="pschkhead ' + (r.ok ? "ok" : "bad") + '">' + (r.ok ? ICONS.check + esc(id) + " is ready" : ICONS.alert + esc(id) + " isn’t ready") +
+              '<span class="dim"> · ' + (r.ms < 1000 ? r.ms + " ms" : (r.ms / 1000).toFixed(1) + " s") + "</span></div>" +
+              (r.checks || []).map(function(c){
+                return '<div class="pschk ' + (c.ok ? "ok" : "bad") + '"><span class="pschkn">' + (c.ok ? "✓ " : "✗ ") + esc(c.name) + "</span>" + esc(c.detail) + "</div>";
+              }).join("");
+          }).catch(function(err){
+            out.innerHTML = '<div class="pschk bad">' + esc(err.message) + "</div>";
+          }).then(function(){ b.disabled = false; });
         };
       });
       Array.prototype.forEach.call(body.querySelectorAll("[data-avatarx]"), function(b){

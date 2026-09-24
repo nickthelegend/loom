@@ -106,6 +106,7 @@ import {
 import { NO_CHANGES, type TurnFacts } from "../core/step-conditions.js";
 import { SemanticIndex } from "../core/semantic.js";
 import { ModelAdapter } from "../adapters/model.js";
+import { AdapterBase, type AgentCheck } from "../adapters/base.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 
 /** How many models one ask may go to at once. */
@@ -795,6 +796,25 @@ export class ProjectRuntime {
     }
     this.saveConfig();
     return { id: agentId, avatar: cfg.avatar ?? null };
+  }
+
+  /**
+   * Ask an agent whether it's ready — installed, signed in, model listed —
+   * without sending it a prompt (see AdapterBase.selfCheck).
+   */
+  async checkAgent(agentId: string): Promise<{ ok: boolean; ms: number; checks: AgentCheck[] } | null> {
+    const cfg = this.config.agents.find((a) => a.id === agentId);
+    if (!cfg) return null;
+    const started = Date.now();
+    if (cfg.enabled === false) return { ok: false, ms: 0, checks: [{ name: "switched on", ok: false, detail: "this agent is switched off in the roster" }] };
+    const live = this.agents.get(agentId);
+    let checks: AgentCheck[];
+    if (live && live instanceof AdapterBase) checks = await live.selfCheck();
+    else if (live) {
+      const ok = await live.available();
+      checks = [{ name: "available", ok, detail: ok ? "running" : "not available on this machine" }];
+    } else checks = [{ name: "loaded", ok: false, detail: "Loom hasn't loaded this agent — is its CLI installed?" }];
+    return { ok: checks.every((c) => c.ok), ms: Date.now() - started, checks };
   }
 
   /** Standing instructions for an agent; empty clears them. */

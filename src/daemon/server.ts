@@ -2521,6 +2521,16 @@ export class LoomDaemon {
       }),
     );
 
+    // Is this agent ready? Installed, signed in, model listed — no prompt sent.
+    app.post(
+      "/api/projects/:id/agents/:agentId/check",
+      withRuntime(async (rt, req, res) => {
+        const out = await rt.checkAgent(String(req.params.agentId));
+        if (!out) return void res.status(404).json({ error: "no such agent" });
+        res.json(out);
+      }),
+    );
+
     // Standing instructions for one agent, sent ahead of every turn it takes.
     app.put(
       "/api/projects/:id/agents/:agentId/instructions",

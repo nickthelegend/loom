@@ -60,6 +60,17 @@ describe("chat flags, stars and unread", () => {
     expect((await call("PATCH", `/chats/${id}`, {})).status).toBe(400);
   });
 
+  it("checks an agent without sending it a prompt", async () => {
+    const before = ((await call("GET", "/events?limit=500")).json.events as unknown[]).length;
+    const r = await call("POST", "/agents/plannerbot/check", {});
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true });
+    expect((r.json.checks as Array<{ name: string; ok: boolean }>)[0]).toMatchObject({ name: "installed", ok: true });
+    // nothing reached the thread
+    expect(((await call("GET", "/events?limit=500")).json.events as unknown[]).length).toBe(before);
+    expect((await call("POST", "/agents/nobody/check", {})).status).toBe(404);
+  });
+
   it("files a thread in a folder, tidies the name, and takes it out again", async () => {
     const id = ((await call("POST", "/chats", { title: "filed" })).json.chat as { id: string }).id;
     expect((await call("PATCH", `/chats/${id}`, { folder: "  Bugs   and fixes " })).json.chat).toMatchObject({ folder: "Bugs and fixes" });

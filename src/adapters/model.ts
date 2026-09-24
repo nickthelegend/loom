@@ -53,7 +53,7 @@ import {
   specFor,
   type ResolvedProvider,
 } from "../core/providers.js";
-import { AdapterBase } from "./base.js";
+import { AdapterBase, type AgentCheck } from "./base.js";
 
 /** One turn of the conversation, as the wire wants it. */
 interface WireMessage {
@@ -170,6 +170,31 @@ export class ModelAdapter extends AdapterBase {
     } catch {
       return false;
     }
+  }
+
+  async selfCheck(): Promise<AgentCheck[]> {
+    const p = this.provider();
+    if (!p) return [{ name: "provider", ok: false, detail: `unknown provider "${this.opts.provider ?? "openrouter"}"` }];
+    const checks: AgentCheck[] = [];
+    const keyed = !!p.key || p.id === "ollama";
+    checks.push({ name: "key", ok: keyed, detail: keyed ? `${p.label} key is set` : `no ${p.label} key — add one in Settings → Models` });
+    if (!keyed) return checks;
+    try {
+      const res = await fetch(modelsUrl(p), { headers: requestHeaders(p), signal: AbortSignal.timeout(10_000) });
+      checks.push({ name: "reachable", ok: res.ok, detail: res.ok ? `${p.label} answers` : `${p.label} said ${res.status}` });
+      if (!res.ok) return checks;
+      const ids = (((await res.json()) as { data?: Array<{ id?: string }> }).data ?? []).map((m) => String(m.id));
+      const want = this.chain();
+      const hit = want.find((m) => ids.includes(m));
+      checks.push({
+        name: "model",
+        ok: want.length === 0 || !!hit,
+        detail: want.length === 0 ? "no model pinned — the provider picks" : hit ? `${hit} is listed` : `${want[0]} isn't in ${p.label}'s list any more`,
+      });
+    } catch (err) {
+      checks.push({ name: "reachable", ok: false, detail: `couldn't reach ${p.label} — ${(err as Error).message}` });
+    }
+    return checks;
   }
 
   async start(): Promise<void> {
