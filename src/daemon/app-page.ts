@@ -4751,6 +4751,7 @@ ${BRAND_SPRITE}
    */
   function checkBuild(){
     fetch("/api/health").then(function(r){ return r.json(); }).then(function(h){
+      if (h && typeof h.stt === "boolean") state.stt = h.stt;
       if (!h.rev || h.rev === window.__loomPageRev) return;
       if (document.getElementById("revbanner")) return;
       var b = document.createElement("div");
@@ -5614,7 +5615,7 @@ ${BRAND_SPRITE}
       // it wrapped. The count badge stays on the outside, because "two skills
       // are on" is the part you need without opening anything.
       '<button class="cslot" id="morebtn" type="button" aria-haspopup="menu" aria-expanded="false" title="MCPs, skills and more"><span class="cslotico">' + ICONS.dots + '</span><span class="cslotlbl">More</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
-      '<button class="cslot" id="micbtn" type="button" title="hold to talk \u2014 needs LOOM_STT_CMD on the daemon"><span class="cslotico">' + ICONS.mic + "</span></button>" +
+      '<button class="cslot" id="micbtn" type="button" title="hold to talk — transcribed by LOOM_STT_CMD on the daemon, or by this browser when that isn’t set"><span class="cslotico">' + ICONS.mic + "</span></button>" +
       // Saved and recent prompts, a clipboard manager's worth (⌘⇧V).
       '<button class="cprompt" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \\u2014 saved and recent (' + KMOD + '\\u21e7V)">' +
         ICONS.clipboard + '<span class="cslotlbl">Prompts</span><kbd>' + KMOD + "\\u21e7V</kbd></button>" +
@@ -12130,11 +12131,45 @@ ${BRAND_SPRITE}
       if (micB && navigator.mediaDevices && window.MediaRecorder) {
         var rec = null, chunks = [];
         var stopRec = function(){
+          if (recog) { try { recog.stop(); } catch (e) {} return; }
           if (rec && rec.state !== "inactive") rec.stop();
           micB.classList.remove("active");
         };
+        // No transcriber on the daemon: the browser's own speech recognition
+        // (Chrome, Edge, Safari) types a live transcript instead. It is the
+        // browser vendor's service, so it's only used when nothing local is set.
+        var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        var recog = null;
+        var startSpeech = function(){
+          if (recog) return;
+          var box = document.getElementById("box"); if (!box) return;
+          var base = box.value ? box.value.replace(/\\s+$/, "") + " " : "";
+          var finals = "";
+          recog = new SR();
+          recog.continuous = true;
+          recog.interimResults = true;
+          recog.lang = navigator.language || "en-US";
+          recog.onresult = function(e){
+            var interim = "";
+            for (var i = e.resultIndex; i < e.results.length; i++) {
+              if (e.results[i].isFinal) finals += e.results[i][0].transcript;
+              else interim += e.results[i][0].transcript;
+            }
+            box.value = base + (finals + interim).replace(/^\\s+/, "");
+            box.dispatchEvent(new Event("input", { bubbles: true }));
+          };
+          recog.onerror = function(e){
+            var why = e && e.error;
+            toast(why === "not-allowed" || why === "service-not-allowed" ? "microphone permission refused"
+              : why === "network" ? "this browser’s speech service can’t be reached — set LOOM_STT_CMD on the daemon to transcribe locally"
+              : why === "no-speech" ? "didn’t hear anything" : "voice input stopped" + (why ? " (" + why + ")" : ""));
+          };
+          recog.onend = function(){ recog = null; micB.classList.remove("active"); box.focus(); };
+          try { recog.start(); micB.classList.add("active"); } catch (err) { recog = null; }
+        };
         var startRec = function(ev){
           ev.preventDefault();
+          if (state.stt === false && SR) { startSpeech(); return; }
           if (rec && rec.state === "recording") return;
           navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
             chunks = [];

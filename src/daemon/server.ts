@@ -612,6 +612,8 @@ export class LoomDaemon {
         version: VERSION,
         rev: BUILD_REV,
         terminal: this.terminals.mode,
+        // a transcriber is configured: the mic records and the daemon transcribes
+        stt: !!process.env.LOOM_STT_CMD,
       });
     });
 
