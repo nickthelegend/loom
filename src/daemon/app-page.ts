@@ -2950,6 +2950,8 @@ window.__loomPageRev="%%BUILD_REV%%";
   .phseg .pho.on{background:var(--background);color:var(--foreground);box-shadow:0 1px 2px rgba(0,0,0,.12)}
   .phseg .pho.dim{opacity:.5}
   .phstage{min-height:232px;display:flex;align-items:center;justify-content:center;padding:6px 2px}
+  /* the pad's dialog has no QR to hold room for: just the words */
+  .lpmodal .phstage{min-height:0;padding:14px 2px 10px}
   .phqrcard{background:#fff;padding:12px;border-radius:12px;line-height:0;box-shadow:0 1px 3px rgba(0,0,0,.14)}
   .phqrcard svg{width:208px;height:208px;display:block}
   .phmsg{text-align:center;font-size:13px;color:var(--foreground);line-height:1.5;max-width:308px}

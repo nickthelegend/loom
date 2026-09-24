@@ -58,7 +58,8 @@ import {
   type TaskResult,
   type WorkingTree,
 } from "./api";
-import { Btn, DiffView, EventLine, Sys, TaskRow, field } from "./components";
+import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, field } from "./components";
+import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { AskView } from "./ask";
 import { AgentPicker } from "./agents";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
@@ -161,6 +162,9 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
   };
 
   const go = () => void pairFrom(`${url} ${token}`);
+  // Something typed (or pasted by hand) into the fields: the button connects
+  // with it. Nothing typed: it reads the link off the clipboard instead.
+  const typed = token.trim().length > 0 || url.trim().replace(/^https?:\/\/$/, "").length > 0;
 
   const startScan = async () => {
     setErr(null);
@@ -250,10 +254,21 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         placeholder="pairing token or whole link"
         placeholderTextColor={T.faint}
         selectionColor={T.accentBlue}
+        returnKeyType="go"
+        onSubmitEditing={go}
       />
       {err && <Text style={{ color: T.err, fontSize: 13, textAlign: "center" }}>{err}</Text>}
-      <Btn label="⚌  Scan QR code" primary onPress={startScan} />
-      <Btn label="Paste link instead" onPress={go} />
+      {typed ? (
+        <>
+          <Btn label="Connect" primary onPress={go} />
+          <Btn label="⚌  Scan QR code instead" onPress={startScan} />
+        </>
+      ) : (
+        <>
+          <Btn label="⚌  Scan QR code" primary onPress={startScan} />
+          <Btn label="Paste link from clipboard" onPress={() => void pairFromClipboard()} />
+        </>
+      )}
 
       <Modal visible={scanning} animationType="slide" onRequestClose={() => setScanning(false)}>
         <View style={{ flex: 1, backgroundColor: "#000" }}>
@@ -284,7 +299,7 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
             }}
           />
           <View style={{ position: "absolute", bottom: 48, left: 24, right: 24, gap: 10 }}>
-            <Btn label="Copy pairing link" onPress={() => void pairFromClipboard()} />
+            <Btn label="Paste link from clipboard" onPress={() => void pairFromClipboard()} />
             <Btn label="Cancel" onPress={() => setScanning(false)} />
           </View>
         </View>
@@ -778,6 +793,8 @@ export function ProjectScreen(props: {
   // Bumped on every `orchestra` event so the Orchestra tab refetches that run.
   const [orchPulse, setOrchPulse] = useState<{ n: number; runId: string | null }>({ n: 0, runId: null });
   const [events, setEvents] = useState<LoomEvent[]>([]);
+  // What agents are typing in this chat right now, before it's a message.
+  const [live, setLive] = useState<LiveMap>({});
   const [tree, setTree] = useState<WorkingTree | null>(null);
   const [tasks, setTasks] = useState<TaskResult | null>(null);
   const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
@@ -829,18 +846,28 @@ export function ProjectScreen(props: {
   useEffect(() => {
     let live = true;
     setEvents([]); // clear the old chat's thread while the new one loads
+    setLive({});
     lastId.current = 0;
     void getEvents(creds, project.id, chatId)
-      .then(({ events }) => {
+      .then(({ events, live: typing }) => {
         if (!live) return;
         lastId.current = Math.max(lastId.current, events[events.length - 1]?.id ?? 0);
         setEvents(events);
+        setLive((m) => seed(m, typing, chatId));
       })
       .catch(() => {});
     const close = openLiveStream(creds, project.id, (raw) => {
-      const frame = raw as { type?: string; event?: LoomEvent };
+      const frame = raw as { type?: string; event?: LoomEvent; chat?: string } & Partial<StreamFrame>;
+      if (frame?.type === "stream") {
+        if ((frame.chat || "main") === chatId && frame.agentId && frame.text) {
+          const f = frame as StreamFrame;
+          setLive((m) => applyStream(m, f));
+        }
+        return;
+      }
       if (frame?.type !== "event" || !frame.event) return;
       const ev = frame.event;
+      setLive((m) => applyEvent(m, ev));
       // Orchestra steps land in task chats; the tab wants them whichever chat is open.
       if (ev.kind === "orchestra") {
         const runId = typeof ev.payload?.runId === "string" ? ev.payload.runId : null;
@@ -1196,6 +1223,7 @@ export function ProjectScreen(props: {
                 <EventLine e={item} />
               )
             }
+            ListFooterComponent={<LiveReplies live={live} />}
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
             style={{ flex: 1 }}

@@ -5,6 +5,7 @@
 
 import * as SecureStore from "expo-secure-store";
 import { AppState, Platform, type AppStateStatus } from "react-native";
+import type { LiveSnapshot } from "./live-model";
 import { RelayClient, parseCloudFragment } from "./relay-client";
 import { unpackCredentials, type RelayCredentials } from "./relay-protocol";
 import { supabaseRelayTransport } from "./relay-transport";
@@ -874,7 +875,8 @@ export async function pingDaemon(c: Creds): Promise<DaemonReachability> {
 export const getProject = (c: Creds, id: string) =>
   api<{ project: Project }>(c, `/api/projects/${id}`);
 export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
-  api<{ events: LoomEvent[] }>(
+  // `live`: replies being typed in this chat right now (newer daemons only)
+  api<{ events: LoomEvent[]; live?: LiveSnapshot[] }>(
     c,
     `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}`,
   );
