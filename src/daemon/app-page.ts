@@ -3573,6 +3573,43 @@ window.__loomPageRev="%%BUILD_REV%%";
     .statusbar > :nth-child(n+4){display:none}
   }
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  .errcard .erra{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .errcard .erra .btn svg{width:12px;height:12px;margin-right:5px}
+  .errcard .erra [data-errwait].armed{border-color:var(--live);color:var(--live)}
+  .msg.clamped .bubble{max-height:540px;overflow:hidden;-webkit-mask-image:linear-gradient(#000 78%,transparent);mask-image:linear-gradient(#000 78%,transparent)}
+  .msg .showmore{margin:6px 0 0 34px;border:1px solid var(--border);background:var(--secondary);color:var(--foreground);
+    font:inherit;font-size:12px;padding:4px 12px;border-radius:999px;cursor:pointer}
+  .msg .showmore:hover{background:color-mix(in srgb,var(--secondary) 70%,var(--foreground) 8%)}
+  .lstate .lpace{margin-left:8px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;font-size:11.5px}
+  /* leaderboard + heatmap */
+  #obboard{min-height:0;margin-top:18px}
+  .lbhead{display:flex;align-items:center}
+  .lbhead .btn svg{width:12px;height:12px;margin-right:5px}
+  .lbwrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+  .lbtable{width:100%;border-collapse:collapse;font-size:13px}
+  .lbtable th{text-align:left;font-weight:500;font-size:11px;color:var(--muted-foreground);padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+  .lbtable td{padding:9px 12px;border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent);white-space:nowrap}
+  .lbtable tr:last-child td{border-bottom:0}
+  .lbtable .num{text-align:right;font-variant-numeric:tabular-nums}
+  .lbtable td .num{margin-left:8px}
+  .lbrank{color:var(--muted-foreground);width:24px}
+  .lbwho{display:inline-flex;align-items:center;gap:8px}
+  .lbwho .av{width:20px;height:20px;border-radius:6px}
+  .lbbar{display:inline-block;width:90px;height:6px;border-radius:99px;background:var(--secondary);vertical-align:middle;overflow:hidden}
+  .lbbar i{display:block;height:100%;border-radius:99px;background:var(--ok)}
+  .lbbar.warn i{background:var(--warn)} .lbbar.bad i{background:var(--err)}
+  .lbempty{color:var(--muted-foreground);text-align:center;padding:18px!important}
+  .hmsum{margin-left:10px;text-transform:none;letter-spacing:0;color:var(--muted-foreground)}
+  .hmgrid{display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;overflow-x:auto;padding-bottom:4px}
+  .hm{display:inline-block;width:12px;height:12px;border-radius:3px;background:var(--secondary)}
+  .hm.pad{background:transparent}
+  .hm.l1{background:color-mix(in srgb,var(--thread,#67e8f9) 28%,var(--secondary))}
+  .hm.l2{background:color-mix(in srgb,var(--thread,#67e8f9) 50%,var(--secondary))}
+  .hm.l3{background:color-mix(in srgb,var(--thread,#67e8f9) 72%,var(--secondary))}
+  .hm.l4{background:var(--thread,#67e8f9)}
+  .hm.err{box-shadow:inset 0 0 0 1.5px var(--err)}
+  .hmkey{display:flex;align-items:center;gap:4px;margin-top:8px;font-size:11px;color:var(--muted-foreground)}
+  .hmkey .hm{width:10px;height:10px}
   /* ══ Enhancement sweep ═════════════════════════════════════════════════════ */
   /* message actions */
   .msg .who .msgmore{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
@@ -4748,6 +4785,42 @@ ${BRAND_SPRITE}
       '<ol class="pclist">' + rows.join("") + "</ol>" + rawFold + "</div>";
   }
 
+  /**
+   * How long a provider says to wait, from its own words: "try again in 23s",
+   * "retry after 2 minutes", "Retry-After: 60", "resets in 1h 5m". 0 when it
+   * doesn't say — no guessing a countdown.
+   */
+  function retryUntil(text, at){
+    var ms = retryAfterMs(text);
+    if (ms) return at + ms;
+    // OpenRouter and friends say when, not how long: X-RateLimit-Reset (epoch s or ms)
+    var m = String(text || "").match(/ratelimit-reset["':\\s]+(\\d{10,13})/i);
+    if (!m) return 0;
+    var n = Number(m[1]); if (n < 1e12) n *= 1000;
+    return n > at && n - at < 48 * 3600000 ? n : 0;
+  }
+  function retryAfterMs(text){
+    var t = String(text || "");
+    var m = t.match(/retry-after["':\\s]+(\\d{1,6})/i);
+    if (m) return Number(m[1]) * 1000;
+    m = t.match(/(?:try again|retry|resets?|available again)[^0-9]{0,24}(\\d+(?:\\.\\d+)?)\\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?)\\b(?:\\s*(\\d+)\\s*(m|mins?|minutes?|s|secs?|seconds?)\\b)?/i);
+    if (!m) return 0;
+    function unit(n, u){
+      u = u.toLowerCase();
+      if (/^ms|^milli/.test(u)) return n;
+      if (/^s/.test(u)) return n * 1000;
+      if (/^m/.test(u)) return n * 60000;
+      return n * 3600000;
+    }
+    var ms = unit(Number(m[1]), m[2]) + (m[3] ? unit(Number(m[3]), m[4]) : 0);
+    return ms > 0 && ms < 48 * 3600000 ? ms : 0;
+  }
+  function untilText(until){
+    var s = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+    if (s <= 0) return "Retry now";
+    var h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+    return "Retry in " + (h ? h + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0");
+  }
   function lineFor(e){
     var p = e.payload || {};
     if (e.kind === "message") {
@@ -4863,9 +4936,17 @@ ${BRAND_SPRITE}
       var rest = cutAt > 12 ? msg.slice(cutAt) : "";
       if (head.length > 240) { rest = head.slice(240) + rest; head = head.slice(0, 240) + "\\u2026"; }
       var detail = rest || (p.stderr ? String(p.stderr) : "");
-      return '<div class="sys err errcard"' + (e.agentId ? ' data-agent="' + esc(e.agentId) + '"' : "") + ">" +
-        '<div class="errh">' + ICONS.alert + "<span>" + (e.agentId ? "<b>" + esc(labelOf(e.agentId)) + "</b> \\u00b7 " : "") + esc(head) + "</span></div>" +
-        (detail ? '<details class="errd"><summary>Details</summary><pre>' + esc(detail.slice(0, 4000)) + "</pre></details>" : "") + "</div>";
+      // A limit that says when it lifts gets a countdown and a retry that waits for it.
+      var until = retryUntil(msg + " " + detail, Number(e.ts || Date.now()));
+      var limited = /quota|rate.?limit|429|too many requests|credit|insufficient|billing|exceeded/i.test(msg);
+      return '<div class="sys err errcard"' + (e.agentId ? ' data-agent="' + esc(e.agentId) + '"' : "") + ' data-ts="' + Number(e.ts || 0) + '">' +
+        '<div class="errh">' + ICONS.alert + "<span>" + (e.agentId ? "<b>" + esc(labelOf(e.agentId)) + "</b> · " : "") + esc(head) + "</span></div>" +
+        (detail ? '<details class="errd"><summary>Details</summary><pre>' + esc(detail.slice(0, 4000)) + "</pre></details>" : "") +
+        '<div class="erra">' +
+          (e.agentId ? '<button type="button" class="btn xs' + (limited ? " primary" : " outline") + '" data-errother="' + esc(e.agentId) + '">' + ICONS.agents + "Send to another agent</button>" : "") +
+          (until && until > Date.now() ? '<button type="button" class="btn xs outline" data-errwait="' + esc(e.agentId || "") + '" data-until="' + until + '">' + ICONS.clock + '<span class="errcd" data-until="' + until + '">' + untilText(until) + "</span></button>" : "") +
+          '<button type="button" class="btn xs ghost" data-errcopy="1">' + ICONS.copy + "Copy details</button>" +
+        "</div></div>";
     }
     if (e.kind === "route_started") {
       if (p.mode === "dynamic") return '<div class="sys">\\u25b8 route "auto" started \\u2014 ' + esc(p.router) + " picks each hop</div>";
@@ -5734,6 +5815,7 @@ ${BRAND_SPRITE}
         // nobody asked separately from "what is this costing me".
         body = renderKairoMetrics(state.obKairo || {}) + obCharts(p, events, byAgent) +
           observatoryMetricsDetail(p, events, byAgent, state.obHealth || {}) +
+          '<div id="obboard" class="obasync">' + LOADER + "</div>" +
           '<div id="obburn" class="obasync">' + LOADER + "</div>" +
           '<div id="obmex" class="obasync">' + LOADER + "</div>";
       else if (state.obView === "decisions") body = '<div id="obdecisions" class="obasync">' + LOADER + "</div>";
@@ -5816,7 +5898,7 @@ ${BRAND_SPRITE}
       if (askBtn) askBtn.onclick = function(){ state.obAsk.open = !state.obAsk.open; renderAskPanel(); };
       renderAskPanel();
       if (state.obView === "canvas" || state.obView === "graph") wireObservatoryDrag(el);
-      if (state.obView === "metrics") observatoryBurn(p);
+      if (state.obView === "metrics") { observatoryBoard(p); observatoryBurn(p); }
       if (state.obView === "metrics") observatoryMetricExplorer(p);
       if (state.obView === "decisions") observatoryDecisions(p);
       if (state.obView === "logs") observatoryLogs(p);
@@ -5893,6 +5975,57 @@ ${BRAND_SPRITE}
     function traceUiLink(){
       var b = backendBase();
       return b ? '<a class="obtraceui" href="' + b + '" target="_blank" rel="noreferrer">' + ICONS.route + " View traces</a>" : "";
+    }
+    // LEADERBOARD + HEATMAP: every turn off the log — who finishes, how fast,
+    // what a turn costs — and twelve weeks of activity, a square a day.
+    function observatoryBoard(p){
+      var host = document.getElementById("obboard"); if (!host) return;
+      api("/api/projects/" + p.id + "/insights/turns?days=84").then(function(r){
+        if (!document.getElementById("obboard")) return;
+        var lb = r.leaderboard || [], days = r.days || [];
+        var rows = lb.length ? lb.map(function(a, i){
+          var pct = Math.round((a.successRate || 0) * 100);
+          var tone = pct >= 90 ? "ok" : pct >= 70 ? "warn" : "bad";
+          return '<tr><td class="lbrank">' + (i + 1) + '</td><td><span class="lbwho">' + avatarFor(a.agentId) + esc(labelOf(a.agentId)) + "</span></td>" +
+            '<td class="num">' + a.turns + '</td><td><span class="lbbar ' + tone + '"><i style="width:' + pct + '%"></i></span><span class="num">' + pct + "%</span></td>" +
+            '<td class="num">' + (a.medianMs != null ? durfmt(a.medianMs) : "—") + "</td>" +
+            '<td class="num">' + (a.avgCostUsd != null ? money(a.avgCostUsd) : "—") + '</td><td class="num">' + money(a.totalCostUsd || 0) + "</td></tr>";
+        }).join("") : '<tr><td colspan="7" class="lbempty">No finished turns yet — the table fills in as agents work.</td></tr>';
+        // the heatmap: weeks as columns, Monday on top
+        var max = 1; days.forEach(function(d){ if (d.turns > max) max = d.turns; });
+        var first = days.length ? new Date(days[0].date + "T00:00:00") : new Date();
+        var pad = (first.getDay() + 6) % 7, cells = [];
+        for (var k = 0; k < pad; k++) cells.push('<i class="hm pad"></i>');
+        days.forEach(function(d){
+          var lvl = d.turns ? Math.min(4, 1 + Math.floor((d.turns / max) * 3.999)) : 0;
+          cells.push('<i class="hm l' + lvl + (d.errors ? " err" : "") + '" title="' + esc(new Date(d.date + "T00:00:00").toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) +
+            " · " + d.turns + " turn" + (d.turns === 1 ? "" : "s") + (d.errors ? " (" + d.errors + " failed)" : "") + (d.costUsd ? " · " + money(d.costUsd) : "")) + '"></i>');
+        });
+        var active = days.filter(function(d){ return d.turns; }).length;
+        host.innerHTML =
+          '<div class="obmlabel lbhead">Agent leaderboard<span class="spacer"></span>' +
+            '<button type="button" class="btn xs outline" id="turnscsv">' + ICONS.download + "Export turns (CSV)</button></div>" +
+          '<div class="lbwrap"><table class="lbtable"><thead><tr><th>#</th><th>Agent</th><th class="num">Turns</th><th>Finished cleanly</th><th class="num">Median time</th><th class="num">Per turn</th><th class="num">Total</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+          '<div class="obmlabel" style="margin-top:18px">Activity · last 12 weeks<span class="hmsum">' + (r.total || 0) + " turns · active " + active + " of " + days.length + " days</span></div>" +
+          '<div class="hmgrid" role="img" aria-label="turns per day for twelve weeks">' + cells.join("") + "</div>" +
+          '<div class="hmkey">Less <i class="hm l0"></i><i class="hm l1"></i><i class="hm l2"></i><i class="hm l3"></i><i class="hm l4"></i> More<span class="spacer"></span><i class="hm l2 err"></i> a day with a failed turn</div>';
+        var csv = document.getElementById("turnscsv");
+        if (csv) csv.onclick = function(){
+          csv.disabled = true;
+          fetch("/api/projects/" + p.id + "/insights/turns.csv", { headers: { Authorization: "Bearer " + state.token } })
+            .then(function(res){ if (!res.ok) throw new Error("export failed (" + res.status + ")"); return res.blob(); })
+            .then(function(blob){
+              var a = document.createElement("a");
+              a.href = URL.createObjectURL(blob);
+              a.download = String(p.name || "loom").replace(/[^\\w.-]+/g, "-") + "-turns.csv";
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+              toast("exported " + a.download);
+            })
+            .catch(function(err){ toast(err.message); })
+            .then(function(){ csv.disabled = false; });
+        };
+      }).catch(function(err){ if (host) host.innerHTML = '<div class="obnote">Couldn’t read turns: ' + esc(err.message) + "</div>"; });
     }
     // BURN: per-agent cost over time (real ClickHouse), linear projection, budgets.
     function observatoryBurn(p){
@@ -7524,6 +7657,44 @@ ${BRAND_SPRITE}
         if (ua.classList.contains("uedit")) composeFor(raw, null, false);
         else if (ua.classList.contains("ucopy")) copyText(raw);
         else if (ua.classList.contains("ustar")) toggleStar(Number(um.getAttribute("data-id")) || 0);
+        return;
+      }
+      var eo = ev.target.closest && ev.target.closest("[data-errother]");
+      if (eo) {
+        ev.preventDefault(); ev.stopPropagation();
+        var card = eo.closest(".errcard"), failed = eo.getAttribute("data-errother");
+        var ask = promptFor(card);
+        if (!ask) { toast("couldn’t find the prompt this error answered — scroll up and use Retry on it"); return; }
+        var alts = ((state.project && state.project.agents) || []).filter(function(a){ return a.tier === "adapter" && a.enabled !== false && a.id !== failed; });
+        if (!alts.length) { toast("no other agent is switched on in this project"); return; }
+        var rr = eo.getBoundingClientRect();
+        openMenu(Math.round(rr.left), Math.round(rr.bottom + 4), [{ head: "Send the same prompt to" }].concat(alts.map(function(a){
+          return { label: agentLabel(a.kind, a.id), icon: agentGlyph(a.kind, a.id), hint: a.busy ? "busy" : "", run: function(){ composeFor(ask, a.id, true); } };
+        })));
+        return;
+      }
+      var ew = ev.target.closest && ev.target.closest("[data-errwait]");
+      if (ew) {
+        ev.preventDefault(); ev.stopPropagation();
+        var wcard = ew.closest(".errcard"), wprompt = promptFor(wcard), wagent = ew.getAttribute("data-errwait");
+        var wuntil = Number(ew.getAttribute("data-until")) || 0;
+        if (!wprompt) { toast("couldn’t find the prompt this error answered"); return; }
+        if (wuntil <= Date.now()) { composeFor(wprompt, wagent, true); return; }
+        if (ew.getAttribute("data-armed")) { ew.removeAttribute("data-armed"); clearTimeout(ew._t); toast("won’t retry"); ew.classList.remove("armed"); return; }
+        ew.setAttribute("data-armed", "1"); ew.classList.add("armed");
+        toast("will retry when the limit lifts — click again to cancel");
+        ew._t = setTimeout(function(){ if (!pageGone() && ew.getAttribute("data-armed")) composeFor(wprompt, wagent, true); }, wuntil - Date.now() + 500);
+        return;
+      }
+      var ec = ev.target.closest && ev.target.closest("[data-errcopy]");
+      if (ec) {
+        ev.preventDefault(); ev.stopPropagation();
+        var ecard = ec.closest(".errcard");
+        var head = ecard.querySelector(".errh") ? ecard.querySelector(".errh").innerText.trim() : "";
+        var det = ecard.querySelector(".errd pre") ? ecard.querySelector(".errd pre").textContent : "";
+        var when = new Date(Number(ecard.getAttribute("data-ts")) || Date.now()).toISOString();
+        copyText(["Loom error", "project: " + ((state.project && state.project.name) || pid), "chat: " + chatId,
+          "agent: " + (ecard.getAttribute("data-agent") || "loom"), "at: " + when, "", head, det ? "\\n" + det : ""].join("\\n").trim());
         return;
       }
       var cn = ev.target.closest && ev.target.closest("[data-continue]");
@@ -9469,7 +9640,14 @@ ${BRAND_SPRITE}
       var st = L.el.querySelector(".lstate"); if (!st) return;
       var secs = Math.floor((Date.now() - L.since) / 1000);
       var what = L.text ? "Writing" : L.think ? "Thinking" : L.act ? L.act : "Working";
-      st.innerHTML = '<span class="shimmer">' + esc(what) + "</span>" + (secs >= 1 ? '<span class="lsecs">' + durfmt(secs * 1000) + "</span>" : "");
+      // how fast it's coming: words so far, and words a second since the first one
+      var pace = "";
+      if (L.text && L.firstTextAt) {
+        var words = (L.text.match(/\\S+/g) || []).length;
+        var dt = (Date.now() - L.firstTextAt) / 1000;
+        pace = '<span class="lpace">' + words + " word" + (words === 1 ? "" : "s") + (dt >= 1.5 ? " · " + (words / dt).toFixed(1) + " w/s" : "") + "</span>";
+      }
+      st.innerHTML = '<span class="shimmer">' + esc(what) + "</span>" + (secs >= 1 ? '<span class="lsecs">' + durfmt(secs * 1000) + "</span>" : "") + pace;
     }
     function paintLive(agentId){
       var L = live[agentId]; if (!L) return;
@@ -9536,6 +9714,7 @@ ${BRAND_SPRITE}
       var wasNear = nearBottom();
       var L = liveFor(f.agentId); if (!L) return;
       var key = f.reasoning ? "think" : "text", have = L[key];
+      if (key === "text" && !L.firstTextAt) L.firstTextAt = Date.now();
       // Seeded from the snapshot of a reply already under way, pieces carry
       // their offset: skip what the snapshot already had, stitch the rest.
       if (L.synced && typeof f.off === "number") {
@@ -9583,7 +9762,10 @@ ${BRAND_SPRITE}
         else if (now - L.touched > 20 * 60 * 1000) endLive(id);
       });
     }
-    state.timers.push(setInterval(function(){ Object.keys(live).forEach(paintLiveState); }, 1000));
+    state.timers.push(setInterval(function(){
+      Object.keys(live).forEach(paintLiveState);
+      Array.prototype.forEach.call(document.querySelectorAll("#feed .errcd[data-until]"), function(n){ n.textContent = untilText(Number(n.getAttribute("data-until"))); });
+    }, 1000));
 
     // ---- empty thread ---------------------------------------------------------
     var SUGGEST = [
@@ -9999,7 +10181,10 @@ ${BRAND_SPRITE}
       find.hits.forEach(function(m, i){ m.classList.toggle("cur", i === find.i); });
       var m = find.hits[find.i];
       if (m) {
-        for (var d = m.parentNode; d && d.id !== "feed"; d = d.parentNode) if (d.tagName === "DETAILS") d.open = true;
+        for (var d = m.parentNode; d && d.id !== "feed"; d = d.parentNode) {
+          if (d.tagName === "DETAILS") d.open = true;
+          if (d.classList && d.classList.contains("clamped")) { d.classList.remove("clamped"); var sm = d.querySelector(".showmore"); if (sm) sm.textContent = "Show less"; }
+        }
         m.scrollIntoView({ block: "center" });
       }
       drawFindCount();
@@ -10119,7 +10304,27 @@ ${BRAND_SPRITE}
           feed.insertBefore(sep, n);
           n.classList.remove("cont"); // a new day gets its byline back
         });
+        clampLong(feed);
       }, 0);
+    }
+    /** A reply taller than a screen folds behind Show more. */
+    function clampLong(feed){
+      Array.prototype.forEach.call(feed.querySelectorAll(":scope > .msg.agent:not(.live):not([data-ck])"), function(m){
+        m.setAttribute("data-ck", "1");
+        var b = m.querySelector(".bubble");
+        if (!b || b.scrollHeight < 760) return;
+        m.classList.add("clamped");
+        var btn = document.createElement("button");
+        btn.type = "button"; btn.className = "showmore";
+        btn.textContent = "Show more";
+        btn.onclick = function(ev){
+          ev.stopPropagation();
+          var open = m.classList.toggle("clamped");
+          btn.textContent = open ? "Show more" : "Show less";
+          if (open) m.scrollIntoView({ block: "nearest" });
+        };
+        b.insertAdjacentElement("afterend", btn);
+      });
     }
 
     // ---- export ----------------------------------------------------------------

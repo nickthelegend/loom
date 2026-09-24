@@ -52,6 +52,7 @@ import { suggestServers, urlFor, type ServerConfig } from "../core/servers.js";
 import { capture } from "../core/preview-shot.js";
 import { digest } from "../core/digest.js";
 import { logbook, type LogLevel } from "../core/logbook.js";
+import { leaderboard, perDay, turnRows, turnsCsv } from "../core/turn-stats.js";
 import {
   CHECK_TTL_MS,
   detectInstall,
@@ -356,6 +357,8 @@ export class LoomDaemon {
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
   private auth: AuthManager;
+  /** Wrong pairing codes per address, for throttling guesses at /api/pair/claim. */
+  private claimTries = new Map<string, { fails: number; until: number }>();
   private runtimes = new Map<string, ProjectRuntime>();
   private sockets = new Map<WebSocket, { project?: string; scope?: string[] }>();
   /** In-flight self-heal recheck timers, cleared on close. */
@@ -508,6 +511,22 @@ export class LoomDaemon {
 
   private routes(): void {
     const app = this.app;
+    app.disable("x-powered-by");
+    // Headers every response carries. No full CSP: the app shell is one
+    // inline document by design. What it does get: no MIME sniffing, no
+    // referrer leaking a token-bearing URL to a site you click through to,
+    // and only Loom itself may frame the app (the Browser tab's previews
+    // are same-origin, so they keep working).
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("Permissions-Policy", "geolocation=(), payment=(), usb=(), serial=(), bluetooth=()");
+      if (req.path === "/app" || req.path === "/") {
+        res.setHeader("X-Frame-Options", "SAMEORIGIN");
+        res.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+      }
+      next();
+    });
     app.use(express.json({ limit: "2mb" }));
 
     // CORS for same-machine browser origins only (the Expo web dev server running
@@ -598,8 +617,25 @@ export class LoomDaemon {
     app.post("/api/pair/claim", (req, res) => {
       const { token, name } = (req.body ?? {}) as { token?: string; name?: string };
       if (!token) return void res.status(400).json({ error: "missing token" });
+      // A pairing token is the only credential this route takes, so guessing
+      // is throttled: ten wrong ones from one address and it waits.
+      const who = String(req.headers["x-loom-via"] ? "relay" : req.socket.remoteAddress ?? "?");
+      const now = Date.now();
+      const tries = this.claimTries.get(who);
+      if (tries && tries.until > now && tries.fails >= 10) {
+        const mins = Math.ceil((tries.until - now) / 60_000);
+        res.setHeader("Retry-After", String(Math.ceil((tries.until - now) / 1000)));
+        return void res.status(429).json({ error: `too many wrong pairing codes from here — try again in ${mins} minute${mins === 1 ? "" : "s"}` });
+      }
       const claimed = this.auth.claim(token, name ?? "device");
-      if (!claimed) return void res.status(403).json({ error: "invalid or expired pairing token" });
+      if (!claimed) {
+        const t = tries && tries.until > now ? tries : { fails: 0, until: now + 10 * 60_000 };
+        t.fails++;
+        this.claimTries.set(who, t);
+        if (this.claimTries.size > 1000) this.claimTries.clear(); // bounded, whatever happens
+        return void res.status(403).json({ error: "invalid or expired pairing token" });
+      }
+      this.claimTries.delete(who);
       res.json(claimed);
     });
 
@@ -1754,6 +1790,27 @@ export class LoomDaemon {
         // day's real spend per agent and whether it has run out. The bare
         // `budgets` map stays for the inputs that edit it.
         res.json({ burn: series, budgets: rt.budgets(), budgetStatus: rt.budgetStatus() });
+      }),
+    );
+    // Turns off the log: the agent leaderboard, a per-day count for the
+    // activity heatmap, and every turn as CSV.
+    app.get(
+      "/api/projects/:id/insights/turns",
+      withRuntime(async (rt, req, res) => {
+        const days = Math.min(366, Math.max(7, Number(req.query.days) || 84));
+        const rows = turnRows(rt.log.list({ kinds: ["run_complete", "error"], limit: 50_000 }));
+        res.json({ leaderboard: leaderboard(rows), days: perDay(rows, days), total: rows.length });
+      }),
+    );
+    app.get(
+      "/api/projects/:id/insights/turns.csv",
+      withRuntime(async (rt, _req, res) => {
+        const rows = turnRows(rt.log.list({ kinds: ["run_complete", "error"], limit: 50_000 }));
+        const safe = rt.info.name.replace(/[^\w.-]+/g, "-");
+        res
+          .type("text/csv")
+          .setHeader("Content-Disposition", `attachment; filename="${safe}-turns.csv"`)
+          .send(turnsCsv(rows));
       }),
     );
     app.get(
@@ -4423,6 +4480,23 @@ export class LoomDaemon {
         return void res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
       }
       res.json({ path: rel, bytes: buf.length, mime });
+    });
+
+    // Anything under /api nobody answered: JSON, like every other API reply,
+    // not Express's HTML page.
+    app.use("/api", (_req: Request, res: Response) => {
+      res.status(404).json({ error: "no such endpoint" });
+    });
+    // Errors that escaped a route, and bodies that never parsed. Express's
+    // default answers these with an HTML page carrying a stack trace.
+    app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+      if (res.headersSent) return void next(err);
+      const e = (err ?? {}) as { type?: string; status?: number; message?: string };
+      if (e.type === "entity.too.large") return void res.status(413).json({ error: "that request is too large (the limit is 2 MB)" });
+      if (e.type === "entity.parse.failed") return void res.status(400).json({ error: "that request body isn't valid JSON" });
+      logbook.error("daemon", `request failed: ${e.message ?? String(err)}`, err);
+      const status = typeof e.status === "number" && e.status >= 400 && e.status < 600 ? e.status : 500;
+      res.status(status).json({ error: status >= 500 ? "something went wrong in the daemon — the Console has the details" : e.message || "bad request" });
     });
   }
 
