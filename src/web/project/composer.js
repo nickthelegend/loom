@@ -338,7 +338,7 @@ export function createComposer(view) {
             var base = pth.split("/").pop();
             return { label: base, sub: pth, value: "@" + pth, icon: ICONS.file };
           });
-          renderMenu(items, "files");
+          renderMenu(items, j.recent ? "recent files" : "files");
         })
         .catch(function(){ closeMenu(); });
     }

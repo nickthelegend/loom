@@ -7,9 +7,9 @@ import { askText,toast } from './notifications.js';
 import { openPalette } from './palette.js';
 import { openProjectModal,openProjectSettings,openSettingsModal } from './settings.js';
 import { isDesktop } from './shell.js';
-import { THEME_KEY,state } from './state.js';
+import { state } from './state.js';
 import { openTaskModal } from './tasks.js';
-import { applyTheme } from './theme.js';
+import { setThemePref } from './theme.js';
 import { ICONS } from './icons.js';
 
   /**
@@ -28,11 +28,7 @@ import { ICONS } from './icons.js';
     var needProject = function(){ if (!state.pid || !state.showTab) { toast("open a project first"); return false; } return true; };
     if (item.indexOf("tab:") === 0) { if (needProject()) state.showTab(item.slice(4)); return; }
     if (item.indexOf("theme:") === 0) {
-      var t = item.slice(6);
-      // "system" takes the OS's choice now (there's no live-following theme yet)
-      if (t === "system") t = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-      try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
-      applyTheme(); if (state.retheme) state.retheme();
+      setThemePref(item.slice(6)); // "system" follows the OS from here on
       return;
     }
     if (item.indexOf("quote:") === 0) {
@@ -174,6 +170,7 @@ import { ICONS } from './icons.js';
     ["settings", "Settings", "⌘,", ICONS.gear, false],
     ["theme:light", "Light theme", "", ICONS.sun, false],
     ["theme:dark", "Dark theme", "", ICONS.moon, false],
+    ["theme:system", "Match system theme", "", ICONS.sun, false],
     ["shortcuts", "Keyboard shortcuts", "⌘/", ICONS.keyboard, false],
   ].map(function(c){ return { id: c[0], label: c[1], keys: c[2], icon: c[3], needsProject: c[4] }; });
 

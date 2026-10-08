@@ -3,7 +3,28 @@ import { ICONS } from './icons.js';
 import { THEME_KEY,state } from './state.js';
 
 
-  function themeNow(){ return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; }
+  /** What you picked: "light", "dark", or "system" (follow the OS, live). */
+  function themePref(){
+    var t = null;
+    try { t = localStorage.getItem(THEME_KEY); } catch (e) {}
+    return t === "light" || t === "system" ? t : "dark";
+  }
+  function systemLight(){ return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches); }
+  /** The theme on screen right now. */
+  function themeNow(){ var p = themePref(); return p === "system" ? (systemLight() ? "light" : "dark") : p; }
+  function setThemePref(t){
+    try { localStorage.setItem(THEME_KEY, t === "light" || t === "system" ? t : "dark"); } catch (e) {}
+    applyTheme();
+    if (state.retheme) state.retheme(); // live terminals repaint too
+  }
+  // "Match system" follows the OS as it changes (sunset, a Control Center flip).
+  if (typeof window !== "undefined" && window.matchMedia) {
+    try {
+      window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", function(){
+        if (themePref() === "system") { applyTheme(); if (state.retheme) state.retheme(); }
+      });
+    } catch (e) {}
+  }
 
   /**
    * Text size, density and accent — this device's, remembered here. Zoom
@@ -49,14 +70,10 @@ import { THEME_KEY,state } from './state.js';
     var tb = document.getElementById("themebtn");
     if (!tb) return;
     tb.innerHTML = themeNow() === "light" ? ICONS.moon : ICONS.sun;
-    tb.onclick = function(){
-      localStorage.setItem(THEME_KEY, themeNow() === "light" ? "dark" : "light");
-      applyTheme();
-      if (state.retheme) state.retheme(); // live terminals repaint too
-    };
+    tb.onclick = function(){ setThemePref(themeNow() === "light" ? "dark" : "light"); };
   }
 
   var THEME_BTN = '<button id="themebtn" class="iconbtn" title="toggle theme"></button>';
 
   function isElectron(){ return document.documentElement.hasAttribute("data-electron"); }
-export { ACCENTS,appearancePref,applyAppearance,applyTheme,bindTheme,isElectron,THEME_BTN,themeNow };
+export { ACCENTS,appearancePref,applyAppearance,applyTheme,bindTheme,isElectron,setThemePref,THEME_BTN,themeNow,themePref };

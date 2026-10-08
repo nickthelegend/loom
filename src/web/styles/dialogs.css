@@ -413,6 +413,9 @@
   .md .mdlist{margin:0 0 12px;padding-left:22px}
   .md .mdlist li{margin:5px 0;line-height:1.65}
   .md .mdlist li::marker{color:var(--muted-foreground)}
+  .md .mdlist .mdlist{margin:4px 0 2px}
+  .md .mdlist li.mdtask{list-style:none;margin-left:-20px}
+  .md .mdcheck{width:13px;height:13px;margin:0 6px 0 0;vertical-align:-2px;accent-color:var(--thread)}
   .md .mdq{border-left:3px solid color-mix(in srgb,var(--foreground) 14%,transparent);padding-left:14px;margin:0 0 12px}
   .md .mdi{font-size:.86em;padding:1.5px 6px;border-radius:6px;background:color-mix(in srgb,var(--foreground) 7%,transparent);
     border:1px solid color-mix(in srgb,var(--foreground) 7%,transparent)}
@@ -1184,3 +1187,13 @@
     cursor:pointer;animation:fadeup .12s ease-out}
   .quotebtn svg{width:13px;height:13px}
   @media (prefers-reduced-motion: reduce){.msg.flash,.findbar,.quotebtn{animation:none}}
+
+  /* attachments on your own messages: thumbnails, not paths */
+  .msg.user .uatts{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;margin:0 0 6px}
+  .uatt{padding:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--muted);cursor:zoom-in;line-height:0;width:132px;height:96px}
+  .uatt img{width:100%;height:100%;object-fit:cover;display:block}
+  .uatt.big{width:auto;height:auto;max-width:min(520px,100%);cursor:zoom-out}
+  .uatt.big img{object-fit:contain;max-height:420px}
+  .uatt.gone{display:none}
+  .uattf{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--muted);color:var(--muted-foreground)}
+  .uattf svg{width:13px;height:13px}

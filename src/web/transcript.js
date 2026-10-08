@@ -215,8 +215,11 @@ import { shortModel } from './permissions.js';
             (tview() === "verbose" ? rawBlock(p) : "") + "</div></div>";
         }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
+        // Attachments lead the text as "[image] path" lines: pictures, not paths.
+        var att = splitAttachments(String(p.text || ""));
         return '<div class="msg user" data-id="' + Number(e.id || 0) + '" data-ts="' + Number(e.ts || 0) + '" data-raw="' + esc(encodeURIComponent(String(p.text || ""))) + '">' +
-          '<div class="bubble md">' + mdToHtml(p.text) + "</div>" +
+          (att.html ? '<div class="uatts">' + att.html + "</div>" : "") +
+          (att.text.trim() || !att.html ? '<div class="bubble md">' + mdToHtml(att.text) + "</div>" : "") +
           '<div class="mt"><button type="button" class="uact uedit" title="Edit and send again" aria-label="edit and send again">' + ICONS.pencil + "</button>" +
           '<button type="button" class="uact ucopy" title="Copy" aria-label="copy your message">' + ICONS.copy + "</button>" +
           (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
@@ -595,4 +598,54 @@ import { shortModel } from './permissions.js';
       '<button class="mdcopy" type="button" title="copy">' + ICONS.copy + '</button>' +
       '<pre class="mdcode"><code>' + esc(text) + "</code></pre></div></details>";
   }
-export { actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };
+/**
+ * A sent message's leading "[image] path" / "[file] path" lines (composer.js
+ * writes them so the agent reads the file first) as thumbnails and chips;
+ * the rest is the message. Images load through the API with your token
+ * (an <img src> can't send one), once each, when they appear.
+ */
+function splitAttachments(text){
+  var lines = text.split("\n"), html = "", n = 0;
+  while (n < lines.length) {
+    var m = lines[n].match(/^\[(image|file)\] (\.loom\/attachments\/[\w.-]+)$/);
+    if (!m) break;
+    var name = m[2].split("/").pop();
+    html += m[1] === "image"
+      ? '<button type="button" class="uatt" title="' + esc(m[2]) + '" aria-label="attached image ' + esc(name) + '"><img data-att="' + esc(m[2]) + '" alt=""></button>'
+      : '<span class="uattf">' + ICONS.file + "<span>" + esc(name) + "</span></span>";
+    n++;
+  }
+  if (!html) return { html: "", text: text };
+  while (n < lines.length && !lines[n].trim()) n++;
+  return { html: html, text: lines.slice(n).join("\n") };
+}
+
+var attCache = {};
+function loadAttachment(img){
+  img.setAttribute("data-loading", "1");
+  var key = state.pid + "|" + img.getAttribute("data-att");
+  var done = function(url){ if (url) img.src = url; else img.parentNode && img.parentNode.classList.add("gone"); };
+  if (attCache[key]) { attCache[key].then(done); return; }
+  attCache[key] = fetch("/api/projects/" + state.pid + "/attachment?path=" + encodeURIComponent(img.getAttribute("data-att")), {
+    headers: { Authorization: "Bearer " + state.token },
+  }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){ return b ? URL.createObjectURL(b) : null; }).catch(function(){ return null; });
+  attCache[key].then(done);
+}
+if (typeof document !== "undefined" && document.addEventListener && typeof MutationObserver !== "undefined") {
+  var attScan = function(){
+    Array.prototype.forEach.call(document.querySelectorAll("img[data-att]:not([data-loading])"), loadAttachment);
+  };
+  var attQueued = false;
+  new MutationObserver(function(){
+    if (attQueued) return;
+    attQueued = true;
+    requestAnimationFrame(function(){ attQueued = false; attScan(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  // a tap makes a thumbnail big, and back
+  document.addEventListener("click", function(ev){
+    var b = ev.target && ev.target.closest && ev.target.closest(".uatt");
+    if (b) b.classList.toggle("big");
+  });
+}
+
+export { splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };

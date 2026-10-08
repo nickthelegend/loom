@@ -5,9 +5,9 @@ import { api,logout } from './connection.js';
 import { esc,rel } from './format.js';
 import { ICONS,LOADER } from './icons.js';
 import { askConfirm,askText,chime,devicePref,setDevicePref,toast } from './notifications.js';
-import { THEME_KEY,state } from './state.js';
+import { state } from './state.js';
 import { JOB_KIND,loadTeam,loadTeamPolicy,loadTeamRunners,loadTeamShare,runnerName,teamAvatar,teamEditing,teamField,teamHooks,teamInviteHtml,teamInvites,teamNotify,teamPolicyHtml,teamRunners,teamShareHtml,teamShareOf,teamShares,wireTeamForms,wireTeamInvites,wireTeamShare } from './team.js';
-import { ACCENTS,appearancePref,applyAppearance,applyTheme,isElectron,themeNow } from './theme.js';
+import { ACCENTS,appearancePref,applyAppearance,isElectron,setThemePref,themePref } from './theme.js';
 import { durfmt } from './transcript.js';
 
 
@@ -201,7 +201,7 @@ import { durfmt } from './transcript.js';
       h += '<div class="sgrouph">Appearance</div>';
       h += '<div class="prow"><div class="pl"><div class="pt">Theme</div>' +
         '<div class="pd">Light or dark. Open terminals repaint to match.</div></div>' +
-        '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }], themeNow()) + "</div></div>";
+        '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }, { v: "system", l: "System" }], themePref()) + "</div></div>";
       h += '<div class="prow"><div class="pl"><div class="pt">Text size</div>' +
         '<div class="pd">Scales the whole app on this device.</div></div>' +
         '<div class="pc">' + seg("textsize", [{ v: "s", l: "S" }, { v: "m", l: "M" }, { v: "l", l: "L" }, { v: "xl", l: "XL" }], appearancePref("textsize", "m")) + "</div></div>";
@@ -240,11 +240,7 @@ import { durfmt } from './transcript.js';
           applyAppearance();
         };
       });
-      bindSeg("theme", function(v){
-        localStorage.setItem(THEME_KEY, v === "light" ? "light" : "dark");
-        applyTheme();
-        if (state.retheme) state.retheme();
-      });
+      bindSeg("theme", function(v){ setThemePref(v); });
       var pp = document.getElementById("projprefs");
       if (!pid) { pp.innerHTML = '<div class="snote">Open a project to change how its brain learns and how handoff briefs are written.</div>'; return; }
       pp.innerHTML = LOADER;

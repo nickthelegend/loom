@@ -41,7 +41,84 @@ import { toast } from './notifications.js';
     // [text](url) — only http(s); the url is already entity-escaped, so &amp; etc. are safe in the attribute.
     s = s.replace(/\[([^\]]+?)\]\((https?:\/\/[^)\s]+?)\)/g,
       '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-    return s;
+    return autolink(s);
+  }
+
+  /**
+   * Bare http(s) URLs become links — outside tags, existing links and code
+   * only. Trailing punctuation stays text: "see https://x.dev." links x.dev.
+   */
+  function autolink(s){
+    if (s.indexOf("http") < 0) return s;
+    var parts = s.split(/(<[^>]+>)/), skip = 0;
+    for (var k = 0; k < parts.length; k++) {
+      var p = parts[k];
+      if (p.charAt(0) === "<") {
+        if (/^<(a|code)\b/i.test(p)) skip++;
+        else if (/^<\/(a|code)>/i.test(p)) skip = Math.max(0, skip - 1);
+        continue;
+      }
+      if (skip) continue;
+      parts[k] = p.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, function(_m, pre, url){
+        var tail = "";
+        for (;;) {
+          var t = url.match(/(?:[.,;:!?)\]]|&quot;|&#39;|&gt;)$/);
+          if (!t) break;
+          // a URL with its own "(…)" keeps the closing paren
+          if (t[0] === ")" && (url.match(/\(/g) || []).length >= (url.match(/\)/g) || []).length) break;
+          tail = t[0] + tail; url = url.slice(0, -t[0].length);
+        }
+        return pre + '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + "</a>" + tail;
+      });
+    }
+    return parts.join("");
+  }
+
+  /**
+   * A list, nested by indentation: deeper items become a list inside the item
+   * above them; an indented line under an item continues it. "[ ]" and "[x]"
+   * at the start of an item are checkboxes (read-only — it's a transcript).
+   */
+  function mdList(lines, i){
+    var ULI = /^(\s*)([-*+]|\d+\.)\s+(.*)$/;
+    var first = lines[i].match(ULI), indent = first[1].replace(/\t/g, "    ").length;
+    var ordered = /\d/.test(first[2]);
+    var start = ordered ? Number(first[2].replace(".", "")) || 1 : 1;
+    var items = [];
+    while (i < lines.length) {
+      var m = lines[i].match(ULI);
+      if (m) {
+        var ind = m[1].replace(/\t/g, "    ").length;
+        if (ind < indent) break;
+        if (ind > indent && items.length) {
+          var sub = mdList(lines, i);
+          items[items.length - 1].kids += sub.html; i = sub.i; continue;
+        }
+        if (/\d/.test(m[2]) !== ordered) break; // a bullet after a number list starts a new list
+        items.push({ text: m[3], kids: "" }); i++; continue;
+      }
+      var line = lines[i];
+      // a blank line between items ("loose" list) doesn't end the list
+      if (!line.trim()) {
+        var nx = lines[i + 1];
+        var nm = nx != null && nx.match(ULI);
+        if (nm && nm[1].replace(/\t/g, "    ").length >= indent) { i++; continue; }
+        break;
+      }
+      // an indented continuation line belongs to the item above
+      if (items.length && /^\s+\S/.test(line) && line.replace(/\t/g, "    ").search(/\S/) > indent) {
+        items[items.length - 1].text += " " + line.trim(); i++; continue;
+      }
+      break;
+    }
+    var html = "<" + (ordered ? "ol" : "ul") + ' class="mdlist"' + (ordered && start !== 1 ? ' start="' + start + '"' : "") + ">" +
+      items.map(function(it){
+        var t = it.text, box = t.match(/^\[([ xX])\]\s+/);
+        if (box) t = '<input type="checkbox" class="mdcheck" disabled' + (box[1] === " " ? "" : " checked") + "> " + mdInline(t.slice(box[0].length));
+        else t = mdInline(t);
+        return "<li" + (box ? ' class="mdtask"' : "") + ">" + t + it.kids + "</li>";
+      }).join("") + "</" + (ordered ? "ol" : "ul") + ">";
+    return { html: html, i: i };
   }
 
   function mdToHtml(src){
@@ -95,18 +172,9 @@ import { toast } from './notifications.js';
       }
       if (RULE.test(line)) { out.push('<hr class="mdhr">'); i++; continue; }
       if (ULI.test(line) || OLI.test(line)) {
-        var ordered = OLI.test(line), items = [];
         // an ordered list keeps its own numbering: "3." after a paragraph is 3, not 1
-        var start = ordered ? Number((line.match(/^\s*(\d+)\./) || [])[1] || 1) : 1;
-        while (i < lines.length) {
-          if (ULI.test(lines[i]) || OLI.test(lines[i])) {
-            items.push("<li>" + mdInline(lines[i].replace(/^\s*(?:[-*+]|\d+\.)\s+/, "")) + "</li>"); i++; continue;
-          }
-          // a blank line between items ("loose" list) doesn't end the list
-          if (!lines[i].trim() && i + 1 < lines.length && (ordered ? OLI : ULI).test(lines[i + 1])) { i++; continue; }
-          break;
-        }
-        out.push("<" + (ordered ? "ol" : "ul") + ' class="mdlist"' + (ordered && start !== 1 ? ' start="' + start + '"' : "") + ">" + items.join("") + "</" + (ordered ? "ol" : "ul") + ">"); continue;
+        var li = mdList(lines, i);
+        out.push(li.html); i = li.i; continue;
       }
       if (!line.trim()) { i++; continue; }
       var para = [];
