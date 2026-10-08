@@ -152,6 +152,8 @@ export interface UserInputQuestion {
   options: Array<{ label: string; description: string; value?: string }>;
   allowCustomAnswer?: boolean;
   multiSelect?: boolean;
+  /** A password-like answer: typed hidden, never kept in the thread. */
+  secret?: boolean;
 }
 
 export interface ItemLifecyclePayload {

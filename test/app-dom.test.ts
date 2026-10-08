@@ -1551,3 +1551,45 @@ describe("web app · the rest of the shell", () => {
     expect(m.errors.join("\n")).toBe("");
   });
 });
+
+describe("web app · an agent's structured question", () => {
+  it("shows option descriptions, takes several picks for a pick-any question, and sends them with Submit", async () => {
+    type Rt = { log: { append: (e: Record<string, unknown>) => unknown }; answerQuestion: unknown };
+    const rt = await (daemon as unknown as { runtime(id: string): Promise<Rt> }).runtime(projectId);
+    const calls: unknown[][] = [];
+    const real = rt.answerQuestion;
+    rt.answerQuestion = async (...a: unknown[]) => { calls.push(a); };
+    try {
+      const m = mount({ hash: `#p/${projectId}` });
+      await waitUntil(() => !!$(m, "#feed"));
+      rt.log.append({ kind: "needs_input", agentId: "plannerbot", chat: "main", payload: {
+        question: "Which extras?", requestId: "req-multi", responseMode: "tool",
+        questions: [{ id: "x", header: "Extras", question: "Which extras?", multiSelect: true, allowCustomAnswer: false,
+          options: [{ label: "Auth", description: "sign-in with GitHub" }, { label: "Billing", description: "Stripe" }, { label: "Docs", description: "" }] }] } });
+      await waitUntil(() => !!$(m, '.nicard[data-nireq="req-multi"]'));
+      const card = $(m, '.nicard[data-nireq="req-multi"]')!;
+      expect(card.querySelector(".niqb.multi")).toBeTruthy();
+      expect(card.textContent).toContain("sign-in with GitHub");
+      expect(card.querySelector(".nitext")).toBeNull(); // the agent didn't allow free text
+      const opt = (label: string) => card.querySelector(`[data-nipick="${label}"]`) as HTMLElement;
+      opt("Auth").click(); opt("Docs").click(); opt("Docs").click(); opt("Billing").click();
+      expect(calls).toHaveLength(0); // picks wait for Submit
+      (card.querySelector(".nisend") as HTMLElement).click();
+      await waitUntil(() => calls.length === 1);
+      expect(calls[0]).toEqual(["plannerbot", "main", "req-multi", { x: ["Auth", "Billing"] }]);
+      await waitUntil(() => card.classList.contains("done"));
+      expect(text(m, '.nicard[data-nireq="req-multi"] .nidone')).toBe("↳ Auth, Billing");
+
+      // answered somewhere else: the event folds the card by itself
+      rt.log.append({ kind: "needs_input", agentId: "plannerbot", chat: "main", payload: { question: "DB?", requestId: "req-two", responseMode: "tool",
+        questions: [{ id: "0", header: "DB", question: "DB?", options: [{ label: "Postgres", description: "" }] }] } });
+      await waitUntil(() => !!$(m, '.nicard[data-nireq="req-two"]'));
+      rt.log.append({ kind: "status", agentId: "plannerbot", chat: "main", payload: { state: "question_answered", requestId: "req-two", answers: { 0: "Postgres" } } });
+      await waitUntil(() => !!$(m, '.nicard[data-nireq="req-two"].done'));
+      expect(text(m, '.nicard[data-nireq="req-two"] .nidone')).toBe("↳ Postgres");
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      rt.answerQuestion = real;
+    }
+  });
+});

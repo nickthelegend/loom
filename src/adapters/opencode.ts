@@ -24,6 +24,8 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, agentEnv, cliAvailable, cliOutput, fetchJson, firstLine, frameBriefing, freePort, waitFor, type AgentCheck } from "./base.js";
+import { requestApproval } from "../core/approvals.js";
+import { logbook } from "../core/logbook.js";
 import { permissionFor } from "../core/permissions.js";
 import { NativeDispatchRejected, NativeQuiescenceUnknown, NativeSessionMissing } from "../core/continuity/contracts.js";
 
@@ -398,15 +400,109 @@ export class OpenCodeAdapter extends AdapterBase {
       return;
     }
 
-    if (/^(permission|question)(\.v2)?\.asked$/.test(type)) {
+    if (/^question(\.v2)?\.asked$/.test(type)) {
       if (props.sessionID && props.sessionID !== mySession) return;
-      const detail =
-        (props.title as string | undefined) ??
-        (props.text as string | undefined) ??
-        ((props.permission as Json | undefined)?.title as string | undefined) ??
-        type;
-      this.emit({ kind: "needs_input", payload: { question: String(detail).slice(0, 500) } });
+      this.askQuestion(props, type.includes(".v2"));
+      return;
     }
+    // Answered or dismissed somewhere else (opencode's own TUI, a timeout): fold the card.
+    if (/^question(\.v2)?\.(replied|rejected)$/.test(type)) {
+      const id = String(props.requestID ?? props.id ?? "");
+      if (id && this.questions.delete(`oc-q:${id}`)) {
+        this.emit({ kind: "status", payload: { state: "question_answered", requestId: `oc-q:${id}`, ...(type.endsWith("rejected") ? { answers: {} } : {}) } });
+      }
+      return;
+    }
+    if (/^permission(\.v2)?\.asked$/.test(type)) {
+      if (props.sessionID && props.sessionID !== mySession) return;
+      void this.askPermission(props, type.includes(".v2"));
+    }
+  }
+
+  // ---- opencode asking you things ---------------------------------------------
+
+  /** Open questions by Loom request id → opencode's request, so an answer can find its way back. */
+  private questions = new Map<string, { id: string; sid: string; count: number }>();
+
+  /**
+   * opencode's question tool: one or more questions, each with labelled
+   * options, maybe several picks, maybe your own words. The card in the thread
+   * answers it through respondToUserInput.
+   */
+  private askQuestion(props: Json, _v2: boolean): void {
+    const id = String(props.id ?? "");
+    const list = Array.isArray(props.questions) ? (props.questions as Json[]) : [];
+    if (!id || !list.length) return;
+    const questions = list.map((q, i) => ({
+      id: String(i),
+      header: String(q.header ?? "Question").slice(0, 40),
+      question: String(q.question ?? ""),
+      options: (Array.isArray(q.options) ? (q.options as Json[]) : []).map((o) =>
+        typeof o === "string" ? { label: o, description: "" } : { label: String(o.label ?? ""), description: String(o.description ?? "") }),
+      multiSelect: q.multiple === true,
+      allowCustomAnswer: q.custom !== false,
+    }));
+    const requestId = `oc-q:${id}`;
+    this.questions.set(requestId, { id, sid: String(props.sessionID ?? this.activeSid ?? this.sessionId ?? ""), count: questions.length });
+    this.emit({
+      kind: "needs_input",
+      payload: { question: questions.map((q) => q.question).join("\n").slice(0, 500), questions, requestId, responseMode: "tool" },
+    });
+  }
+
+  /** Answer an open opencode question. answers: { [questionIndex]: label | labels }; none at all dismisses it. */
+  async respondToUserInput(_chat: string, requestId: string, answers: Record<string, unknown>): Promise<void> {
+    const open = this.questions.get(requestId);
+    if (!open || !this.baseUrl) throw new Error(`no open opencode question "${requestId}"`);
+    const picks = Array.from({ length: open.count }, (_v, i) => {
+      const a = answers[String(i)];
+      return (Array.isArray(a) ? a : a == null || a === "" ? [] : [a]).map((x) => String(x));
+    });
+    const dismiss = picks.every((p) => !p.length);
+    // the session-scoped route on current builds, the global one on older
+    const routes = [
+      `${this.baseUrl}/api/session/${encodeURIComponent(open.sid)}/question/${encodeURIComponent(open.id)}/${dismiss ? "reject" : "reply"}`,
+      `${this.baseUrl}/question/${encodeURIComponent(open.id)}/${dismiss ? "reject" : "reply"}`,
+    ];
+    let last = "";
+    for (const url of routes) {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify(dismiss ? {} : { answers: picks }), signal: AbortSignal.timeout(15_000) }).catch((e: Error) => ({ ok: false, status: 0, text: async () => e.message }) as unknown as Response);
+      if (res.ok) {
+        this.questions.delete(requestId);
+        this.emit({ kind: "status", payload: { state: "question_answered", requestId, answers } });
+        return;
+      }
+      last = `${res.status} ${(await res.text().catch(() => "")).slice(0, 160)}`;
+      if (res.status !== 404) break;
+    }
+    throw new Error(`opencode didn't take the answer (${last})`);
+  }
+
+  /**
+   * opencode asking to run a command, edit a file, fetch a URL: the same
+   * approval card Loom shows for any agent, and opencode hears once / always / no.
+   */
+  private async askPermission(props: Json, v2: boolean): Promise<void> {
+    const id = String(props.id ?? "");
+    if (!id || !this.baseUrl) return;
+    const sid = String(props.sessionID ?? this.activeSid ?? this.sessionId ?? "");
+    const tool = String((v2 ? props.action : props.permission) ?? "permission");
+    const targets = (Array.isArray(v2 ? props.resources : props.patterns) ? (v2 ? props.resources : props.patterns) as unknown[] : []).map(String);
+    const meta = (props.metadata ?? {}) as Json;
+    const summary = String(meta.command ?? meta.description ?? meta.filePath ?? meta.url ?? (targets.length ? `${tool} ${targets.join(", ")}` : tool)).slice(0, 300);
+    const decision = await requestApproval({
+      project: (this.options as { loomProject?: string }).loomProject ?? "",
+      agent: this.id, tool, input: { ...meta, ...(targets.length ? { targets } : {}) }, summary, sessionOption: true,
+    });
+    const reply = decision.behavior !== "allow" ? "reject" : decision.scope === "session" ? "always" : "once";
+    const body = JSON.stringify({ reply, ...(decision.message ? { message: decision.message } : {}) });
+    for (const url of [`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/permission/${encodeURIComponent(id)}/reply`, `${this.baseUrl}/permission/${encodeURIComponent(id)}/reply`]) {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      if (res?.ok) return;
+      if (res && res.status !== 404) break;
+    }
+    logbook.warn(`agent:${this.id}`, "opencode didn't take the permission reply", id);
   }
 
   /** opencode 1.18's tool and compaction events, for a session already known to be ours. */

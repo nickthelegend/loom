@@ -894,6 +894,16 @@ import { openMenu } from './menus.js';
           "agent: " + (ecard.getAttribute("data-agent") || "loom"), "at: " + when, "", head, det ? "\n" + det : ""].join("\n").trim());
         return;
       }
+      // A proposed plan's buttons: leave plan mode and build it, or say what to change.
+      var pi = ev.target.closest && ev.target.closest("[data-planimpl]");
+      if (pi) {
+        ev.preventDefault(); ev.stopPropagation();
+        if (planState) { var pb = document.getElementById("planbtn"); if (pb) pb.click(); }
+        composeFor("Implement the plan above.", pi.getAttribute("data-planimpl"), true);
+        return;
+      }
+      var pr = ev.target.closest && ev.target.closest("[data-planrevise]");
+      if (pr) { ev.preventDefault(); ev.stopPropagation(); composeFor("Change the plan: ", pr.getAttribute("data-planrevise"), false); return; }
       var cn = ev.target.closest && ev.target.closest("[data-continue]");
       if (cn) { ev.preventDefault(); ev.stopPropagation(); composeFor("Continue from exactly where you stopped.", cn.getAttribute("data-continue"), true); return; }
       // Copy a whole reply — the words, not the markup around them.

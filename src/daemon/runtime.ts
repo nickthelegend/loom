@@ -244,6 +244,8 @@ export class ProjectRuntime {
       get teamPolicy() { return runtime.teamPolicy; },
       get baton() { return runtime.baton; },
       releaseQuestionHold: (...args) => this.releaseQuestionHold(...args),
+      openQuestion: (agentId) => this.openQuestions.get(agentId),
+      answerQuestion: (...args) => this.answerQuestion(...args),
       get queue() { return runtime.queue; },
       get routes() { return runtime.routes; },
       ensureStarted: (...args) => this.ensureStarted(...args),
@@ -921,12 +923,22 @@ export class ProjectRuntime {
       // so the queue waits for you instead. Answering goes out immediately —
       // a paused queue holds what's lined up, not what you type now.
       if (liveRun && e.kind === "needs_input") this.holdQueueFor(agent.id);
+      // A question asked through the agent's tool blocks its turn until answered: remember it,
+      // so a reply typed in the chat reaches it (turns.ts) and status stays honest.
+      if (e.kind === "needs_input" && typeof p.requestId === "string" && p.responseMode !== "message") {
+        const ids = Array.isArray(p.questions) ? (p.questions as Array<{ id?: unknown }>).map((q, i) => String(q.id ?? i)) : [];
+        this.openQuestions.set(agent.id, { requestId: p.requestId, chat: chat ?? MAIN_CHAT, ids });
+      }
+      if (e.kind === "status" && p.state === "question_answered" && this.openQuestions.get(agent.id)?.requestId === p.requestId) {
+        this.openQuestions.delete(agent.id);
+      }
       // Any terminal event stops the stale-session clock — a turn that ended in
       // an error is over, not hung.
       const turnOver = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted");
       if (turnOver && !this.continuity) {
         this.turns.busySince.delete(agent.id);
       }
+      if (turnOver) this.openQuestions.delete(agent.id);
       if (keepsPartial) {
         if (e.kind === "message" && !p.reasoning) typed = "";
         if (turnOver && typed.trim()) {
@@ -2210,11 +2222,18 @@ export class ProjectRuntime {
    * with a requestId). The turn carries on with the answer.
    */
   async answerQuestion(agentId: string, chat: string, requestId: string, answers: Record<string, unknown>): Promise<void> {
-    const agent = this.agents.get(agentId);
-    if (!(agent instanceof ProviderAgent)) throw new Error(`agent "${agentId}" can't take answers to questions`);
+    // a crew teammate or orchestra worker runs as its own instance; its card names that instance
+    const agent = (this.agents.get(agentId) ?? this.crews?.liveAgent?.(agentId) ?? this.orchestra?.liveAgent?.(agentId)) as
+      | { respondToUserInput?: (chat: string, requestId: string, answers: Record<string, unknown>) => Promise<void> }
+      | undefined;
+    if (!agent || typeof agent.respondToUserInput !== "function") throw new Error(`agent "${agentId}" can't take answers to questions`);
     this.releaseQuestionHold(agentId);
     await agent.respondToUserInput(chat, requestId, answers);
+    if (this.openQuestions.get(agentId)?.requestId === requestId) this.openQuestions.delete(agentId);
   }
+
+  /** Structured questions agents are blocked on, by agent. */
+  private openQuestions = new Map<string, { requestId: string; chat: string; ids: string[] }>();
 
   /** Compact an agent's native context for a chat now, instead of waiting for the harness to. */
   async compactAgent(agentId: string, chat: string = MAIN_CHAT): Promise<void> {
@@ -2850,8 +2869,12 @@ export class ProjectRuntime {
       .reverse()
       .find((e) => e.kind === "message" && !e.agentId);
     const lastNeedsInput = [...recent].reverse().find((e) => e.kind === "needs_input");
+    const reqId = lastNeedsInput && (lastNeedsInput.payload as { requestId?: unknown }).requestId;
+    // a question answered on its card (no message typed) is answered all the same
+    const answeredOnCard = Boolean(reqId && recent.some((e) => e.id > lastNeedsInput!.id && e.kind === "status" &&
+      (e.payload as { state?: unknown; requestId?: unknown }).state === "question_answered" && (e.payload as { requestId?: unknown }).requestId === reqId));
     const needsInput = Boolean(
-      lastNeedsInput && (!lastUserMsg || lastNeedsInput.id > lastUserMsg.id),
+      lastNeedsInput && !answeredOnCard && (!lastUserMsg || lastNeedsInput.id > lastUserMsg.id),
     );
     return {
       id: this.info.id,

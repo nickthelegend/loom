@@ -66,6 +66,7 @@ import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
 import { AgentPicker } from "./agents";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
+import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
@@ -1120,6 +1121,7 @@ export function ProjectScreen(props: {
   const adapters = project.agents.filter((a) => a.tier === "adapter");
   const selectedAgent = project.agents.find((a) => a.id === selected) ?? null;
   const decisions = useMemo(() => approvalDecisions(events), [events]);
+  const answered = useMemo(() => answeredQuestions(events), [events]);
   const requested = useMemo(
     () =>
       new Set(
@@ -1338,6 +1340,9 @@ export function ProjectScreen(props: {
                   kindOf={kindOf}
                   onDecided={loadPending}
                 />
+              ) : item.kind === "needs_input" && typeof item.payload?.requestId === "string" && item.payload?.responseMode !== "message" &&
+                Array.isArray(item.payload?.questions) && item.payload.questions.length ? (
+                <QuestionEvent creds={creds} projectId={project.id} e={item} answered={answered.get(String(item.payload.requestId))} />
               ) : (
                 <EventLine e={item} />
               )

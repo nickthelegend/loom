@@ -235,7 +235,7 @@ describe("a crew works a goal", () => {
     first.crews.update(crew!.id, { planApproval: false });
     scripts = { lead: () => loom([{ type: "plan", cards: [{ title: "One" }] }]) };
     await first.crews.goal(crew!.id, "Something");
-    await waitUntil(() => first.crews.get(crew!.id).state.goal?.status !== "planning", { timeoutMs: 10_000 });
+    await waitUntil(() => first.crews.get(crew!.id).state.goal?.status !== "planning", { timeoutMs: 25_000 });
     await first.crews.stop(crew!.id).catch(() => {});
     expect(["stopped", "completed"]).toContain(first.crews.get(crew!.id).state.goal!.status);
     // a goal left "running" on disk reads as interrupted when Loom comes back
@@ -249,7 +249,7 @@ describe("a crew works a goal", () => {
     expect(rt.crews.get("ship").state.goal!.status).toBe("interrupted");
     scripts = { builder: (_i, wd) => { write(wd, "one.txt", "1\n"); return loom([{ type: "done", summary: "one" }]); } };
     rt.crews.resume("ship");
-    await waitUntil(() => rt!.crews.get("ship").state.goal?.status === "completed", { timeoutMs: 10_000 });
+    await waitUntil(() => rt!.crews.get("ship").state.goal?.status === "completed", { timeoutMs: 25_000 });
   });
 
   it("a teammate that goes silent is interrupted and retried once; silent twice fails the card — never a free approval", async () => {

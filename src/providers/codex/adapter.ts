@@ -201,7 +201,7 @@ interface PendingRequest {
   resolve: (decision: ApprovalDecision) => void;
 }
 
-interface PendingInput { turnId?: TurnId; resolve: (answers: UserInputAnswers) => void }
+interface PendingInput { turnId?: TurnId; resolve: (answers: UserInputAnswers) => void; secret?: Set<string> }
 
 interface Session {
   info: ProviderSession;
@@ -457,7 +457,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (!pending) throw new ProviderError("not_found", "respondToUserInput", `no open codex question "${requestId}"`, { provider: this.provider, threadId });
     s.inputs.delete(requestId);
     pending.resolve(answers);
-    this.emit(threadId, "user-input.resolved", { answers }, { requestId, ...(pending.turnId ? { turnId: pending.turnId } : {}) });
+    // a secret answer reaches Codex, never the thread's log
+    const shown = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, pending.secret?.has(k) ? "\u2022\u2022\u2022\u2022" : v]));
+    this.emit(threadId, "user-input.resolved", { answers: shown }, { requestId, ...(pending.turnId ? { turnId: pending.turnId } : {}) });
   }
 
   async compact(threadId: ThreadId): Promise<void> {
@@ -632,7 +634,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
       this.emit(threadId, "item.completed", { itemType, status: "completed", ...describeItem(itemType, item) }, extra);
       this.emit(threadId, "user-input.requested", { responseMode: "message", questions: (item.questions as Json[]).map((q, index) => ({
         id: String(index), header: "Question", question: String(q.title ?? ""), allowCustomAnswer: true, multiSelect: false,
-        options: (Array.isArray(q.options) ? q.options : []).map(label => ({ label: String(label), description: "" })) })) },
+        options: (Array.isArray(q.options) ? q.options : []).map(o => (o && typeof o === "object"
+          ? { label: String((o as Json).label ?? (o as Json).value ?? ""), description: String((o as Json).description ?? "") }
+          : { label: String(o), description: "" })) })) },
       { ...at, requestId: `codex-async:${threadId}:${itemId ?? randomUUID()}` });
       return;
     }
@@ -694,7 +698,8 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private async serverRequest(s: Session, method: string, params: Json): Promise<Json> {
     switch (method) {
       case "item/commandExecution/requestApproval":
-      case "item/fileChange/requestApproval": {
+      case "item/fileChange/requestApproval":
+      case "item/fileRead/requestApproval": {
         const decision = await this.ask(s, method, params);
         return { decision };
       }
@@ -710,8 +715,15 @@ export class CodexProviderAdapter implements ProviderAdapter {
         return { permissions: decision === "accept" || decision === "acceptForSession" ? params.permissions ?? {} : {},
           scope: decision === "acceptForSession" ? "session" : "turn" };
       }
-      case "mcpServer/elicitation/request":
+      case "mcpServer/elicitation/request": {
+        // An MCP server asking for structured input: not answerable from Loom yet,
+        // so it's declined — but out loud, so a tool that fails next isn't a mystery.
+        const who = typeof params.serverName === "string" ? params.serverName : "an MCP server";
+        const what = typeof params.message === "string" ? `: ${params.message.slice(0, 200)}` : "";
+        this.emit(s.info.threadId, "runtime.warning", { message: `${who} asked for input${what} — Loom declined it (MCP forms aren't supported yet)` },
+          typeof params.turnId === "string" ? { turnId: params.turnId } : {});
         return { action: "decline", content: null, _meta: null };
+      }
       case "item/tool/requestUserInput":
         return { answers: toCodexAnswers(await this.askUser(s, params)) };
       default:
@@ -725,8 +737,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (s.stopping || !questions.length) return Promise.resolve({});
     const requestId = randomUUID();
     const turnId = typeof params.turnId === "string" ? params.turnId : s.info.activeTurnId;
+    const secret = new Set(questions.filter(q => q.secret).map(q => q.id));
     return new Promise(resolve => {
-      s.inputs.set(requestId, { resolve, ...(turnId ? { turnId } : {}) });
+      s.inputs.set(requestId, { resolve, ...(turnId ? { turnId } : {}), ...(secret.size ? { secret } : {}) });
       this.emit(s.info.threadId, "user-input.requested", { questions }, { requestId, ...(turnId ? { turnId } : {}),
         ...(typeof params.itemId === "string" ? { itemId: params.itemId } : {}) });
     });
@@ -762,7 +775,8 @@ function toUserInputQuestions(raw: unknown): UserInputQuestion[] {
       .map(o => ({ label: text(o.label), description: text(o.description) })).filter(o => o.label);
     if (!text(q.id) || !text(q.question)) return [];
     return [{ id: text(q.id), header: text(q.header) || "Question", question: text(q.question), options,
-      ...(q.isOther === true || !options.length ? { allowCustomAnswer: true } : {}), multiSelect: false }];
+      ...(q.isOther === true || !options.length ? { allowCustomAnswer: true } : {}), multiSelect: false,
+      ...(q.isSecret === true ? { secret: true, allowCustomAnswer: true } : {}) }];
   });
 }
 

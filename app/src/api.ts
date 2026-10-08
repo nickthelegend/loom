@@ -903,6 +903,13 @@ export const getTriage = (c: Creds, id: string, agentId: string) =>
 export const getTasks = (c: Creds, id: string, kind: "issue" | "pr", search: string) =>
   api<TaskResult>(c, `/api/projects/${id}/tasks?kind=${kind}&search=${encodeURIComponent(search)}`);
 /** `plan: true` asks the agent for a plan markdown file instead of code. */
+/** Answer a structured question an agent's turn is blocked on. answers: { [questionId]: label | labels }. */
+export const answerQuestion = (c: Creds, id: string, agentId: string, chat: string | undefined, requestId: string, answers: Record<string, string | string[]>) =>
+  api<{ ok: boolean }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/answers`, {
+    method: "POST",
+    body: JSON.stringify({ chat: chat ?? "main", requestId, answers }),
+  });
+
 export const sendMessage = (
   c: Creds,
   id: string,

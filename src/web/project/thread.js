@@ -8,7 +8,7 @@ import { maybeReloadPreview,onServerFrame,onSpecFrame } from '../preview.js';
 import { state } from '../state.js';
 import { drawStatusbar } from '../statusbar.js';
 import { onTeamFrame } from '../team.js';
-import { actSummary,avatarFor,durfmt,lineFor,relClock,untilText,whoHtml } from '../transcript.js';
+import { actSummary,avatarFor,durfmt,lineFor,relClock,settleQuestionCard,untilText,whoHtml } from '../transcript.js';
 import { observeUsage,usageMeter } from '../usage.js';
 import { ICONS } from '../icons.js';
 
@@ -334,6 +334,18 @@ export function createThread(view) {
         // A tool still showing as running goes when the turn does.
         if (e.agentId && ((e.kind === "message" && !pl.reasoning) || pl.state === "interrupted" || e.kind === "run_complete" || e.kind === "error")) {
           clearStreaming(feed, e.agentId);
+        }
+        // A question answered (on its card, by a typed reply, in the agent's own UI) folds its card;
+        // a turn that ended leaves its unanswered cards closed, not clickable into an error.
+        if (e.kind === "status" && pl.state === "question_answered" && pl.requestId) {
+          Array.prototype.forEach.call(feed.querySelectorAll('.nicard[data-nireq]'), function(c){
+            if (c.getAttribute("data-nireq") === pl.requestId) settleQuestionCard(c, pl.answers || {});
+          });
+        }
+        if (e.agentId && (pl.state === "interrupted" || e.kind === "run_complete" || e.kind === "error")) {
+          Array.prototype.forEach.call(feed.querySelectorAll('.nicard[data-nireq]:not(.done)'), function(c){
+            if (c.getAttribute("data-niwho") === e.agentId) settleQuestionCard(c, null);
+          });
         }
         if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;

@@ -794,6 +794,11 @@ const RECHECK_MS = 15_000;
 export class OrchestraEngine {
   private runs = new Map<string, OrchestraRun>();
   private live = new Map<string, Adapter>(); // `${runId}/${taskId|orch}` → adapter
+
+  /** A worker's or orchestrator's live instance by its id, for answering its questions. */
+  liveAgent(instanceId: string): Adapter | undefined {
+    return [...this.live.values()].find((a) => a.id === instanceId);
+  }
   private gitLock = new Mutex();
   private turnText = new Map<string, string>();
   private orchestratorBusy = new Set<string>();

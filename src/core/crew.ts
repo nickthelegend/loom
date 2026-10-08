@@ -211,6 +211,13 @@ export class CrewEngine {
   private states = new Map<string, CrewState>();
   /** Live adapters for the active goal: `${crew}/${teammate}`. */
   private agents = new Map<string, Adapter>();
+  /** Teammates blocked on a structured question: key → the request, its question ids, the thread. */
+  private waiting = new Map<string, { requestId: string; ids: string[]; chat: string }>();
+
+  /** A teammate's live instance by its id (`crew-<crew>-<seat>.<agent>`), for answering its questions. */
+  liveAgent(instanceId: string): Adapter | undefined {
+    return [...this.agents.values()].find((a) => a.id === instanceId);
+  }
   private running = new Set<string>();
   private turnText = new Map<string, string>();
   private turnError = new Map<string, string>();
@@ -370,6 +377,15 @@ export class CrewEngine {
     }
     this.host.append({ kind: "message", chat: st.channel, payload: { text: body, author: "user", crew: { crewId: cfg.id, goalId: g.id, ...(target ? { to: target } : {}) } } });
     if (g.status === "waiting_human" && g.question && (!target || target === g.question.teammate)) {
+      // a teammate whose turn is blocked on its own question: this message is the answer, delivered now
+      const seat = cfg.teammates.find((t) => t.id === g.question!.teammate);
+      const key = seat ? `${cfg.id}/${seat.id}/${seat.agent}` : "";
+      const open = this.waiting.get(key);
+      const live = this.agents.get(key);
+      if (open && live?.respondToUserInput) {
+        await live.respondToUserInput(open.chat, open.requestId, Object.fromEntries(open.ids.map((qid) => [qid, body])));
+        return { routed: "answer", to: target };
+      }
       (st.notes[g.question.teammate] ??= []).push(`Your question was: ${g.question.text}\nThe answer: ${body}`);
       g.status = g.question.step === "plan" ? "planning" : "running";
       g.question = undefined;
@@ -754,6 +770,8 @@ export class CrewEngine {
     let stalled = false;
     this.lastActivity.set(key, Date.now());
     const watchdog = setInterval(() => {
+      // waiting on your answer isn't going silent
+      if (this.waiting.has(key)) { this.lastActivity.set(key, Date.now()); return; }
       if (Date.now() - (this.lastActivity.get(key) ?? Date.now()) < stallMs) return;
       stalled = true;
       clearInterval(watchdog);
@@ -818,14 +836,29 @@ export class CrewEngine {
         this.turnText.set(key, next.length > TURN_TEXT_CAP ? next.slice(-TURN_TEXT_CAP) : next);
       }
       if (e.kind === "error") this.turnError.set(key, String(p.message ?? "error").slice(0, 1000));
-      // A teammate that stops to ask in its own UI would wait forever: take the
-      // question to the channel and end the turn.
-      if (e.kind === "needs_input" && !this.turnQuestion.has(key)) {
+      // A structured question (the agent's own ask tool) waits for its answer:
+      // the card in the teammate's thread answers it, the turn carries on, and
+      // the watchdog leaves a teammate waiting on you alone. A question asked
+      // any other way would wait forever in a UI nobody sees: take it to the
+      // channel and end the turn.
+      const structured = e.kind === "needs_input" && typeof p.requestId === "string" && p.responseMode !== "message" && typeof agent.respondToUserInput === "function";
+      if (structured) {
+        const ids = Array.isArray(p.questions) ? (p.questions as Array<{ id?: unknown }>).map((q, i) => String(q.id ?? i)) : ["0"];
+        this.waiting.set(key, { requestId: String(p.requestId), ids, chat: this.thread(cfg, st, tm) });
+        g.status = "waiting_human";
+        g.question = { teammate: tm.id, text: String(p.question ?? "").slice(0, 1000), step: g.current?.step === "plan" ? "plan" : "card" };
+        this.save(st);
+        this.phase(cfg, st, "asks", { teammate: tm.id, question: g.question.text });
+      } else if (e.kind === "needs_input" && !this.turnQuestion.has(key)) {
         this.turnQuestion.set(key, String(p.question ?? "the teammate needs input").slice(0, 1000));
         void agent.interrupt().catch(() => {});
       }
+      if (e.kind === "status" && p.state === "question_answered" && this.waiting.get(key)?.requestId === p.requestId) {
+        this.waiting.delete(key);
+        if (g.status === "waiting_human") { g.status = "running"; delete g.question; this.save(st); }
+      }
       const event = this.host.append({ kind: e.kind, agentId: tm.agent, chat: this.thread(cfg, st, tm),
-        payload: { ...p, crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id } } });
+        payload: { ...p, ...(structured ? { askAgent: agent.id } : {}), crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id } } });
       if (e.kind === "status" && p.state === "turn_cost") g.costUsd += Number(p.costUsd ?? 0) || 0;
       this.host.observe(event);
     });

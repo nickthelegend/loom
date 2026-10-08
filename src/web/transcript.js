@@ -244,6 +244,10 @@ import { shortModel } from './permissions.js';
         '<div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div>" +
         (p.partial ? '<div class="msgfoot"><button type="button" class="btn xs outline" data-continue="' + esc(e.agentId) + '">' + ICONS.play + "Continue</button>" +
           '<span class="mfh">ask ' + esc(labelOf(e.agentId)) + " to pick up where it stopped</span></div>" : "") +
+        // A plan the agent proposed in plan mode: the next step is yours — build it, or change it.
+        (p.proposedPlan ? '<div class="msgfoot planfoot"><span class="pftag">' + ICONS.spark + "Proposed plan</span>" +
+          '<button type="button" class="btn xs primary" data-planimpl="' + esc(e.agentId) + '">' + ICONS.play + "Implement the plan</button>" +
+          '<button type="button" class="btn xs outline" data-planrevise="' + esc(e.agentId) + '">' + ICONS.pencil + "Revise</button></div>" : "") +
         "</div>";
     }
     if (e.kind === "tool_call") {
@@ -294,21 +298,30 @@ import { shortModel } from './permissions.js';
       // answer sent it to the wrong agent entirely (#106).
       var q = String(p.question || "what next?");
       var who = String(e.agentId || "agent");
+      // the live instance to answer (a crew seat, an orchestra worker), when it isn't the roster agent
+      var askWho = String(p.askAgent || who);
       // A structured question the turn is waiting on: its own options, and the
       // answer goes back to that request rather than as a new message.
       if (p.requestId && p.responseMode !== "message" && Array.isArray(p.questions) && p.questions.length) {
-        return '<div class="nicard" data-niask="' + esc(who) + '" data-nichat="' + esc(e.chat || "") + '" data-nireq="' + esc(p.requestId) + '">' +
-          '<div class="nih">' + brandMark(kindOf(who)) + '<span class="niwho">' + esc(who) + "</span>" +
+        var multi = p.questions.some(function(qq){ return qq.multiSelect; });
+        var custom = p.questions.some(function(qq){ return qq.allowCustomAnswer !== false || !(qq.options || []).length; });
+        var secret = p.questions.some(function(qq){ return qq.secret; });
+        return '<div class="nicard' + (multi ? " hasmulti" : "") + '" data-niask="' + esc(askWho) + '" data-niwho="' + esc(who) + '" data-nichat="' + esc(e.chat || "") + '" data-nireq="' + esc(p.requestId) + '"' + (secret ? " data-nisecret" : "") + ">" +
+          '<div class="nih">' + brandMark(kindOf(who)) + '<span class="niwho">' + esc(labelOf(who)) + "</span>" +
           '<span class="nitag">needs you</span></div>' +
           p.questions.map(function(qq){
-            return '<div class="niqb" data-niqid="' + esc(qq.id) + '">' + (qq.header ? '<div class="nitag">' + esc(qq.header) + "</div>" : "") +
+            return '<div class="niqb' + (qq.multiSelect ? " multi" : "") + '" data-niqid="' + esc(qq.id) + '">' +
+              (qq.header ? '<div class="nitag">' + esc(qq.header) + (qq.multiSelect ? " \u00b7 pick any" : "") + "</div>" : qq.multiSelect ? '<div class="nitag">pick any</div>' : "") +
               '<div class="niq">' + esc(qq.question) + "</div>" +
               ((qq.options || []).length ? '<div class="niopts">' + qq.options.map(function(o){
-                return '<button class="nio" type="button" data-nipick="' + esc(o.label) + '" data-niqid="' + esc(qq.id) + '" title="' + esc(o.description || "") + '">' + esc(o.label) + "</button>";
+                return '<button class="nio' + (o.description ? " hasd" : "") + '" type="button" data-nipick="' + esc(o.label) + '" data-niqid="' + esc(qq.id) + '"' +
+                  (qq.multiSelect ? ' aria-pressed="false"' : "") + ">" +
+                  (qq.multiSelect ? '<span class="nibox"></span>' : "") + '<span class="nil">' + esc(o.label) + "</span>" +
+                  (o.description ? '<span class="niod">' + esc(o.description) + "</span>" : "") + "</button>";
               }).join("") + "</div>" : "") + "</div>";
           }).join("") +
-          '<div class="nirow"><input class="nitext" placeholder="or answer in your words…" spellcheck="false">' +
-          '<button class="btn primary xs nisend" type="button">Send</button></div>' +
+          '<div class="nirow">' + (custom ? '<input class="nitext"' + (secret ? ' type="password" autocomplete="off"' : "") + ' placeholder="' + ((p.questions[0].options || []).length ? "or answer in your words\u2026" : "your answer\u2026") + '" spellcheck="false">' : '<span class="spacer"></span>') +
+          '<button class="btn primary xs nisend" type="button">' + (multi ? "Submit" : "Send") + "</button></div>" +
           '<div class="nidone"></div></div>';
       }
       var opts = questionChoices(q);
@@ -653,4 +666,16 @@ if (typeof document !== "undefined" && document.addEventListener && typeof Mutat
   });
 }
 
-export { splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };
+/** Fold a question card: what was answered, or that it's closed. */
+function settleQuestionCard(card, answers){
+  if (!card || card.classList.contains("done")) return false;
+  var vals = answers ? Object.keys(answers).map(function(k){ var v = answers[k]; return Array.isArray(v) ? v.join(", ") : String(v == null ? "" : v); }).filter(Boolean) : [];
+  var done = card.querySelector(".nidone");
+  if (card.hasAttribute("data-nisecret") && vals.length) vals = ["answered (hidden)"];
+  if (done) done.textContent = vals.length ? "\u21b3 " + vals.join(" \u00b7 ") : answers ? "\u21b3 dismissed" : "\u21b3 closed \u2014 answered elsewhere, or the turn ended";
+  card.classList.add("done");
+  Array.prototype.forEach.call(card.querySelectorAll("button,input"), function(el){ el.disabled = true; });
+  return true;
+}
+
+export { settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };

@@ -1285,3 +1285,24 @@
   .md .mdalert.important{--alert-c:#a371f7}
   .md .mdalert.warning{--alert-c:var(--warn, #d29922)}
   .md .mdalert.caution{--alert-c:var(--err, #f85149)}
+
+  /* ── question cards: descriptions on the card, pick-any boxes, a settled state ── */
+  .nicard .nio{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;max-width:100%}
+  .nicard .nio.hasd{padding:7px 12px}
+  .nicard .nio .nil{font-weight:500}
+  .nicard .nio .niod{font-size:11.5px;line-height:1.4;color:var(--muted-foreground);white-space:normal}
+  .nicard .niqb.multi .nio{flex-direction:row;align-items:center;gap:8px}
+  .nicard .niqb.multi .nio .nil,.nicard .niqb.multi .nio .niod{display:block}
+  .nicard .niqb.multi .nio:has(.niod){align-items:flex-start}
+  .nicard .nibox{width:14px;height:14px;flex:none;border-radius:4px;border:1.5px solid var(--muted-foreground);margin-top:1px;position:relative}
+  .nicard .nio.sel{border-color:var(--thread);background:color-mix(in srgb, var(--thread) 12%, var(--card))}
+  .nicard .nio.sel .nibox{background:var(--thread);border-color:var(--thread)}
+  .nicard .nio.sel .nibox::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid var(--background);border-width:0 2px 2px 0;transform:rotate(45deg)}
+  .nicard .niqb + .niqb{margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)}
+  .nicard .nirow .spacer{flex:1}
+  .nicard.done .niopts,.nicard.done .nirow{display:none}
+  .nicard.done{opacity:.85}
+  .nicard .nidone{font-size:12.5px;color:var(--muted-foreground)}
+  .msgfoot.planfoot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .planfoot .pftag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--thread-ink);margin-right:4px}
+  .planfoot .pftag svg{width:13px;height:13px}

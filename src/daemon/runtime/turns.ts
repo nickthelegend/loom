@@ -47,7 +47,7 @@ function lengthLine(length: TurnOptions["length"]): string {
       : "";
 }
 
-export interface TurnResult { agentId: string; queued?: number; queueId?: string;
+export interface TurnResult { agentId: string; queued?: number; queueId?: string; answered?: boolean;
   requestId?: string; receiptId?: string; packetId?: string; continuityStatus?: string; }
 
 /** Dependencies owned by the project coordinator, read live for each operation. */
@@ -74,6 +74,9 @@ export interface RuntimeTurnsHost {
   closed: boolean;
   baton: BatonManager;
   releaseQuestionHold: (agentId: string) => void;
+  /** The structured question this agent's turn is blocked on, if any. */
+  openQuestion: (agentId: string) => { requestId: string; chat: string; ids: string[] } | undefined;
+  answerQuestion: (agentId: string, chat: string, requestId: string, answers: Record<string, unknown>) => Promise<void>;
   queue: PromptQueue;
   routes: RouteEngine;
   ensureStarted: (agentId: string) => Promise<AnyAgent>;
@@ -364,6 +367,16 @@ export class RuntimeTurns {
     // an error event — the prompt was lost while the send had said 200.
     // Answering while the agent is still busy is still answering.
     if (source === "user") this.host.releaseQuestionHold(target);
+    // A turn blocked on a question the agent asked through its tool won't end
+    // until that question is answered — so a message queued behind it would
+    // wait forever. What you type in that chat IS the answer: it goes to the
+    // question, and the turn carries on.
+    const open = source === "user" && !opts.fromQueue && this.busySince.has(target) ? this.host.openQuestion(target) : undefined;
+    if (open && open.chat === chat) {
+      this.host.log.append({ kind: "message", chat, payload: { text, author: "user", answers: open.requestId } });
+      await this.host.answerQuestion(target, chat, open.requestId, Object.fromEntries((open.ids.length ? open.ids : ["0"]).map((id) => [id, text])));
+      return { agentId: target, answered: true };
+    }
     // It shows in the queue, editable, and enters the thread when it's sent.
     if (!opts.fromQueue && this.busySince.has(target)) {
       const item = this.host.queue.add({

@@ -558,6 +558,8 @@ export interface Adapter extends BaseAgent {
   /** Working-tree changes attributable to the agent (porcelain-ish). */
   diff(): Promise<string>;
   busy(): boolean;
+  /** Answer a structured question the agent's turn is blocked on (a needs_input with a requestId). */
+  respondToUserInput?(chat: string, requestId: string, answers: Record<string, unknown>): Promise<void>;
 }
 
 /** Read-mostly bridge — never holds the baton (GUI agents). */
