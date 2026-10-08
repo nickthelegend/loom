@@ -411,6 +411,9 @@ export async function allModels(
     const p = resolveProvider(row.id, env);
     if (!p) continue;
     const got = await fetchModels(p, opts.refresh ? { refresh: true } : {});
+    // A provider with free models offers the free pool first: every turn on the
+    // next free model in a rotation (core/free-pool.ts), so the work spreads.
+    if (got.models.some((m) => m.free)) models.push({ id: "pool:free", provider: row.id, free: true });
     models.push(...got.models);
     if (got.error) errors.push({ provider: row.id, error: got.error });
   }

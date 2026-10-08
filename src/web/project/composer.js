@@ -379,6 +379,7 @@ export function createComposer(view) {
      */
     function modelBlurb(m){
       var s = String(m || "").toLowerCase();
+      if (/(^|\/)pool:free$/.test(s)) return "every free model, in turn \u00b7 spreads the load";
       if (/opus/.test(s)) return "most capable \u00b7 deepest reasoning";
       if (/sonnet/.test(s)) return "balanced \u00b7 fast and capable";
       if (/haiku/.test(s)) return "fastest \u00b7 lightest";

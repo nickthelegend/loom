@@ -8,6 +8,7 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { freeUsage } from "../core/free-pool.js";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -362,6 +363,13 @@ program
       console.log(`${mark} ${pc.bold(p.id.padEnd(13))} ${pc.dim(p.baseUrl.padEnd(34))} ${key}`);
       if (p.note) console.log(pc.dim(`    ${p.note}`));
     }
+    const fu = freeUsage();
+    console.log(
+      `\n${pc.bold("free models")} ${fu.used} request${fu.used === 1 ? "" : "s"} from this machine today (UTC)` +
+        (fu.cappedUntil ? pc.yellow(` · daily cap hit, resets ${new Date(fu.cappedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`) : "") +
+        pc.dim("\n    OpenRouter allows 50 free requests a day per account (1000 with $10 of credits), shared by every :free model." +
+          "\n    Spread the work: give model agents `pool:free` and each turn takes the next free model — `loom agents:add model --model openrouter/pool:free`"),
+    );
     console.log(
       pc.dim("\nkeys live in ~/.loom/providers.json (0600) or the environment \u2014 never in a project"),
     );
