@@ -66,6 +66,8 @@ export interface SkillInstallResult {
   source: string;
   /** True when an existing skill of the same id was replaced (needs `force`). */
   replaced: boolean;
+  /** With #all: the other skills installed from the same repo. */
+  also?: string[];
 }
 
 export interface InstallOptions {
@@ -315,24 +317,37 @@ export async function installSkillFromGit(
   projectDir: string,
   opts: InstallOptions & { timeoutMs?: number } = {},
 ): Promise<SkillInstallResult> {
-  const remote = assertGitUrl(url);
+  // "#name" picks one skill out of a repo that holds several; "#all" takes every one.
+  const hash = url.indexOf("#");
+  const pick = hash >= 0 ? url.slice(hash + 1).trim() : "";
+  const remote = assertGitUrl(hash >= 0 ? url.slice(0, hash) : url);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "loom-skill-"));
   const checkout = path.join(tmp, "repo");
   try {
     await runGit(["clone", "--depth", "1", "--quiet", "--", remote, checkout], tmp, opts.timeoutMs ?? 90_000);
 
-    const found = findSkillDir(checkout);
-    if (!found) {
+    const dirs = findSkillDirs(checkout);
+    if (!dirs.length) {
       throw new SkillInstallError(
-        `no SKILL.md found in ${remote} — looked in the repository root and one level below it`,
+        `no SKILL.md found in ${remote} — looked in the repository root, one level below it, and under skills/`,
       );
     }
-    // The id comes from the subdirectory when the repo holds several skills, and
-    // from the repository name when the repo *is* the skill. Either way it goes
-    // through the same validation as a hand-typed one.
-    const derived = found === checkout ? repoName(remote) : path.basename(found);
-    const installed = installSkillFromDir(found, projectDir, { ...opts, id: opts.id ?? derived });
-    return { ...installed, from: "git", source: remote };
+    const idOf = (d: string) => (d === checkout ? repoName(remote) : path.basename(d));
+    let chosen: string[];
+    if (pick === "all") chosen = dirs;
+    else if (pick) {
+      const hit = dirs.find((d) => path.basename(d) === pick);
+      if (!hit) throw new SkillInstallError(`no skill "${pick}" in ${remote} — it has: ${dirs.map(idOf).join(", ")}`);
+      chosen = [hit];
+    } else if (dirs.length === 1) chosen = dirs;
+    else {
+      // Several skills and no choice: say so, rather than install whichever sorts first.
+      throw new SkillInstallError(
+        `${remote} holds ${dirs.length} skills: ${dirs.map(idOf).slice(0, 12).join(", ")}${dirs.length > 12 ? ", …" : ""} — add #<name> to the URL to pick one, or #all for every one`,
+      );
+    }
+    const results = chosen.map((d) => installSkillFromDir(d, projectDir, { ...opts, id: chosen.length === 1 ? (opts.id ?? idOf(d)) : idOf(d) }));
+    return { ...results[0]!, from: "git", source: remote, ...(results.length > 1 ? { also: results.slice(1).map((r) => r.id) } : {}) };
   } finally {
     try {
       fs.rmSync(tmp, { recursive: true, force: true });
@@ -350,19 +365,29 @@ export async function installSkillFromGit(
  * can't reach offline.
  */
 export function findSkillDir(root: string): string | null {
-  if (fs.existsSync(path.join(root, "SKILL.md"))) return root;
-  let children: string[] = [];
-  try {
-    children = fs
-      .readdirSync(root, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-      .map((d) => d.name)
-      .sort();
-  } catch {
-    return null;
-  }
-  for (const child of children) {
-    if (fs.existsSync(path.join(root, child, "SKILL.md"))) return path.join(root, child);
-  }
-  return null;
+  return findSkillDirs(root)[0] ?? null;
+}
+
+/**
+ * Every skill in a checkout: the root if it is one; else each child directory
+ * that is; else each one under skills/ (and .claude/skills/) — the layouts
+ * people publish.
+ */
+export function findSkillDirs(root: string): string[] {
+  if (fs.existsSync(path.join(root, "SKILL.md"))) return [root];
+  const kids = (dir: string) => {
+    try {
+      return fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith("."))
+        .map((d) => path.join(dir, d.name))
+        .filter((d) => fs.existsSync(path.join(d, "SKILL.md")))
+        .sort();
+    } catch {
+      return [];
+    }
+  };
+  const top = kids(root);
+  if (top.length) return top;
+  return [...kids(path.join(root, "skills")), ...kids(path.join(root, ".claude", "skills"))];
 }

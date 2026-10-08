@@ -96,10 +96,17 @@ import { toast } from './notifications.js';
       if (RULE.test(line)) { out.push('<hr class="mdhr">'); i++; continue; }
       if (ULI.test(line) || OLI.test(line)) {
         var ordered = OLI.test(line), items = [];
-        while (i < lines.length && (ULI.test(lines[i]) || OLI.test(lines[i]))) {
-          items.push("<li>" + mdInline(lines[i].replace(/^\s*(?:[-*+]|\d+\.)\s+/, "")) + "</li>"); i++;
+        // an ordered list keeps its own numbering: "3." after a paragraph is 3, not 1
+        var start = ordered ? Number((line.match(/^\s*(\d+)\./) || [])[1] || 1) : 1;
+        while (i < lines.length) {
+          if (ULI.test(lines[i]) || OLI.test(lines[i])) {
+            items.push("<li>" + mdInline(lines[i].replace(/^\s*(?:[-*+]|\d+\.)\s+/, "")) + "</li>"); i++; continue;
+          }
+          // a blank line between items ("loose" list) doesn't end the list
+          if (!lines[i].trim() && i + 1 < lines.length && (ordered ? OLI : ULI).test(lines[i + 1])) { i++; continue; }
+          break;
         }
-        out.push("<" + (ordered ? "ol" : "ul") + ' class="mdlist">' + items.join("") + "</" + (ordered ? "ol" : "ul") + ">"); continue;
+        out.push("<" + (ordered ? "ol" : "ul") + ' class="mdlist"' + (ordered && start !== 1 ? ' start="' + start + '"' : "") + ">" + items.join("") + "</" + (ordered ? "ol" : "ul") + ">"); continue;
       }
       if (!line.trim()) { i++; continue; }
       var para = [];

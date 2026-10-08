@@ -656,8 +656,24 @@ export class RuntimeTurns {
   }
 
   async interrupt(
-    opts: { source?: "user" | "route" } = {},
+    opts: { source?: "user" | "route"; chat?: string } = {},
   ): Promise<{ interrupted: string | null }> {
+    // Stop in one chat stops that chat's turn — not whatever the baton holder
+    // is doing in another thread.
+    if (opts.chat) {
+      for (const [id, chat] of this.turnChat) {
+        if ((chat ?? "main") !== opts.chat) continue;
+        const a = this.host.agent(id);
+        if (isAdapter(a) && a.busy()) {
+          if ((opts.source ?? "user") === "user") this.host.routes.onManualInterrupt();
+          await a.interrupt();
+          return { interrupted: id };
+        }
+      }
+      const pendingHere = [...this.preparing.entries()].find(([id]) => (this.turnChat.get(id) ?? "main") === opts.chat);
+      if (pendingHere) { pendingHere[1].abort(); return { interrupted: pendingHere[0] }; }
+      return { interrupted: null };
+    }
     if ((opts.source ?? "user") === "user") this.host.routes.onManualInterrupt();
     const pending = this.preparing.entries().next().value;
     if (pending) {

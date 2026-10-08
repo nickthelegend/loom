@@ -329,7 +329,12 @@ export class LoomDaemon {
       next();
     });
 
-    app.use(express.json({ limit: "2mb" }));
+    // 2 MB for every JSON body but an attachment: a 12 MB file is ~16 MB as
+    // base64, and the global cap used to refuse a retina screenshot at 413
+    // before the route's own 12 MB check ever ran.
+    const smallJson = express.json({ limit: "2mb" });
+    const attachmentJson = express.json({ limit: "17mb" });
+    app.use((req, res, next) => (/^\/api\/projects\/[^/]+\/attachments$/.test(req.path) ? attachmentJson : smallJson)(req, res, next));
 
     // CORS for same-machine browser origins only (the Expo web dev server running
     // on another localhost port, etc.). Scoped to loopback so it can't be abused

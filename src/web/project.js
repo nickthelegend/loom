@@ -283,7 +283,7 @@ import { openMenu } from './menus.js';
       '<div class="cmenu" id="cmenu" style="display:none"></div>' +
       '<div class="cchips" id="cchips" style="display:none"></div>' +
       '<div class="cqueue" id="cqueue" style="display:none"></div>' +
-      '<textarea id="box" class="cinput" rows="2" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
+      '<textarea id="box" class="cinput" rows="2" aria-label="message" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
       '<div class="cskillsug" id="cskillsug" style="display:none"></div>' +
       '<div class="cpanel" id="cpanel" style="display:none"></div>' +
       // Orchestrate mode's cast: who plans, who works, how many at once.
@@ -311,7 +311,7 @@ import { openMenu } from './menus.js';
       // it wrapped. The count badge stays on the outside, because "two skills
       // are on" is the part you need without opening anything.
       '<button class="cslot" id="morebtn" type="button" aria-haspopup="menu" aria-expanded="false" title="MCPs, skills and more"><span class="cslotico">' + ICONS.dots + '</span><span class="cslotlbl">More</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
-      '<button class="cslot" id="micbtn" type="button" title="hold to talk — transcribed by LOOM_STT_CMD on the daemon, or by this browser when that isn’t set"><span class="cslotico">' + ICONS.mic + "</span></button>" +
+      '<button class="cslot" id="micbtn" type="button" aria-label="hold to talk" title="hold to talk — transcribed by LOOM_STT_CMD on the daemon, or by this browser when that isn’t set"><span class="cslotico">' + ICONS.mic + "</span></button>" +
       // Saved and recent prompts, a clipboard manager's worth (⌘⇧V).
       '<button class="cprompt" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \u2014 saved and recent (' + KMOD + '\u21e7V)">' +
         ICONS.clipboard + '<span class="cslotlbl">Prompts</span><kbd>' + KMOD + "\u21e7V</kbd></button>" +
@@ -324,12 +324,12 @@ import { openMenu } from './menus.js';
       // Plan: a switch, not a mode tab — it changes what either send does.
       '<button class="cplan" id="planbtn" type="button" role="switch" aria-checked="false" title="plan mode \u2014 write a plan, change no code">' +
         '<span class="ptrack"><i></i></span><span class="cplanlbl">Plan</span></button>' +
-      '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
+      '<button class="sendbtn" id="send" type="submit" title="send" aria-label="send">' + ICONS.up + "</button>" +
       '<button class="sendbtn orchsend" id="orchsend" type="button" title="plan this goal and run it in parallel" style="display:none">' + ICONS.orchestra + "Orchestrate</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
       ICONS.stop + "</button></span>" +
       '</div>' +
-      '<input type="file" id="cfile" accept="image/*,.md,.txt,.markdown" multiple style="display:none">' +
+      '<input type="file" id="cfile" multiple style="display:none">' +
       "</form>" +
       '<div class="hint" id="hint"></div></div>';
 
@@ -491,7 +491,7 @@ import { openMenu } from './menus.js';
     var backBtn = document.getElementById("back");
     if (backBtn) backBtn.onclick = function(){ location.hash = ""; };
     document.getElementById("stop").onclick = function(){
-      api("/api/projects/" + pid + "/interrupt", { method: "POST", body: "{}" })
+      api("/api/projects/" + pid + "/interrupt", { method: "POST", body: JSON.stringify({ chat: chatId }) })
         .then(function(j){ toast(j.interrupted ? "interrupted " + j.interrupted : "nothing running"); })
         .catch(function(err){ toast(err.message); });
     };
@@ -902,7 +902,7 @@ import { openMenu } from './menus.js';
         ev.preventDefault(); ev.stopPropagation();
         var mb = mc.closest(".msg"); var body = mb && mb.querySelector(".bubble");
         var txt = body ? body.innerText : "";
-        if (navigator.clipboard && txt) navigator.clipboard.writeText(txt).then(function(){ toast("copied"); }, function(){ toast("couldn’t copy"); });
+        if (txt) { copyText(txt); toast("copied"); }
         return;
       }
       var dr = ev.target.closest && ev.target.closest(".mddraw");
@@ -1613,8 +1613,8 @@ import { openMenu } from './menus.js';
         bar.id = "findbar"; bar.className = "findbar"; bar.setAttribute("role", "search");
         bar.innerHTML = ICONS.search + '<input id="findq" placeholder="Find in this chat" spellcheck="false" autocomplete="off" aria-label="find in this chat">' +
           '<span class="findcount" id="findcount" aria-live="polite"></span>' +
-          '<button type="button" class="iconbtn" id="findprev" title="Previous (\u21e7Enter)" aria-label="previous match">' + ICONS.up + "</button>" +
-          '<button type="button" class="iconbtn" id="findnext" title="Next (Enter)" aria-label="next match">' + ICONS.arrowDown + "</button>" +
+          '<button type="button" class="iconbtn" id="findprev" title="Previous (Enter)" aria-label="previous match">' + ICONS.up + "</button>" +
+          '<button type="button" class="iconbtn" id="findnext" title="Next (\u21e7Enter)" aria-label="next match">' + ICONS.arrowDown + "</button>" +
           '<button type="button" class="iconbtn" id="findx" title="Close (Esc)" aria-label="close find">' + ICONS.x + "</button>";
         host.appendChild(bar);
         var qi = document.getElementById("findq"), t = null;

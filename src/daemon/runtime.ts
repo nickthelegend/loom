@@ -2685,7 +2685,7 @@ export class ProjectRuntime {
     return { from, ...(merge ? { merge } : {}) };
   }
   async interrupt(
-    opts: { source?: "user" | "route" } = {},
+    opts: { source?: "user" | "route"; chat?: string } = {},
   ): Promise<{ interrupted: string | null }> { return this.turns.interrupt(opts); }
 
   // -------------------------------------------------------------------------
@@ -2831,6 +2831,8 @@ export class ProjectRuntime {
             : await live.available().catch(() => false),
           ...(this.continuity && isNativeKind(cfg.kind) ? { cliVersion: this.harnesses.get(cfg.id)?.version ?? null } : {}),
           busy: isAdapter(live) ? live.busy() || Boolean(this.continuity && this.turns.busySince.has(cfg.id)) : false,
+          // which chat that turn is in, so a client shows Stop only where it applies
+          ...(isAdapter(live) && (live.busy() || this.turns.busySince.has(cfg.id)) ? { chat: this.turns.turnChat.get(cfg.id) ?? MAIN_CHAT } : {}),
           holdsBaton: holder === cfg.id,
           model,
           permissions: permissionFor(cfg.kind, cfg.options),

@@ -1,7 +1,7 @@
 import { agentGlyph,agentLabel,BRAND_TITLES,brandMark,hasBrand,labelOf } from '../agents.js';
 import { settleApprovalCards } from '../approvals.js';
 import { api,checkBuild } from '../connection.js';
-import { addLogRecord } from '../console.js';
+import { addLogRecord,clog } from '../console.js';
 import { esc,hue,mdToHtml,money,pageGone } from '../format.js';
 import { notifyDone,notifyNeedsInput,toast } from '../notifications.js';
 import { maybeReloadPreview,onServerFrame,onSpecFrame } from '../preview.js';
@@ -83,7 +83,10 @@ export function createThread(view) {
       // interrupt, in the one place you're already looking. Driven by the
       // agents' own busy flag rather than a local guess, so a turn you started
       // from your phone shows a stop here too.
-      var anyBusy = adapters.some(function(a){ return a.busy; });
+      // busy *in this chat*: an agent working in another thread doesn't take
+      // this one's Send away (a daemon too old to say which chat counts as here)
+      var here = view.chatId || "main";
+      var anyBusy = adapters.some(function(a){ return a.busy && (!a.chat || a.chat === here); });
       var sendBtn = document.getElementById("send");
       var stopBtn = document.getElementById("stop");
       // Orchestrate has its own send, and a run is stopped from its view
@@ -763,7 +766,10 @@ export function createThread(view) {
               var dn = document.querySelectorAll("#feed .odone"); if (dn.length) dn[dn.length - 1].classList.add("celebrate");
             }
           }
-        } catch (e) {}
+        } catch (e) {
+          // a frame that throws while drawing is a bug to see, not to swallow
+          try { clog("error", "thread", "couldn't draw a live update: " + ((e && e.message) || e), (e && e.stack) || ""); } catch (e2) {}
+        }
       };
       ws.onclose = function(){
         state.wsLive = false; drawStatusbar();
