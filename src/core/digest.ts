@@ -55,6 +55,9 @@ export function digest(events: LoomEvent[], since: number, agentLabel: (id: stri
     const line = (kind: DigestLine["kind"], text: string) =>
       lines.push({ at: e.ts, kind, text, eventId: e.id, ...(e.chat ? { chat: e.chat } : {}) });
 
+    // answered, replied to, or its turn has ended: no longer waiting on you
+    if ((e.kind === "status" && (p.state === "question_answered" || p.state === "interrupted")) || e.kind === "run_complete" || e.kind === "error") waiting.delete(who);
+    if (e.kind === "message" && !e.agentId) waiting.clear();
     if (e.kind === "run_complete") {
       turns++;
       costUsd += Number(p.costUsd ?? 0);

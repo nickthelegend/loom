@@ -47,6 +47,18 @@ describe("reading a night back", () => {
     expect(d.waiting).toEqual(["planner"]);
   });
 
+  it("a question that was answered, or whose turn ended, isn't still waiting", () => {
+    const t = Date.now();
+    const asked = (agentId: string, ts: number) => ev("needs_input", { question: "?", requestId: `r-${agentId}` }, { ts, agentId });
+    const d = digest([
+      asked("a", t - 5000), ev("status", { state: "question_answered", requestId: "r-a" }, { ts: t - 4000, agentId: "a" }),
+      asked("b", t - 3500), ev("run_complete", {}, { ts: t - 3000, agentId: "b" }),
+      asked("c", t - 2000),
+    ], t - 10_000);
+    expect(d.waiting).toEqual(["c"]);
+    expect(digest([asked("c", t - 2000), ev("message", { text: "Blue" }, { ts: t - 1000 })], t - 10_000).waiting).toEqual([]);
+  });
+
   it("ignores what happened before you left", () => {
     const t = Date.now();
     const d = digest(
