@@ -3,7 +3,8 @@ import { api } from '../connection.js';
 import { visibleFiles } from '../diff.js';
 import { esc,highlight,hue } from '../format.js';
 import { ICONS,LOADER } from '../icons.js';
-import { openScmMenu } from '../menus.js';
+import { openMenu,openScmMenu } from '../menus.js';
+import { copyText } from '../clipboard.js';
 import { toast } from '../notifications.js';
 import { state } from '../state.js';
 import { openTaskModal } from '../tasks.js';
@@ -98,7 +99,53 @@ export function createExplorer(view) {
           var f = row.getAttribute("data-file");
           if (f) openFileFromTree(f);
         };
+        row.oncontextmenu = function(ev){
+          ev.preventDefault();
+          treeMenu(row.getAttribute("data-file"), row.getAttribute("data-dir"), ev.clientX, ev.clientY, el);
+        };
       });
+    }
+
+    /** Put text into the composer (appended), focus it, and keep the draft. */
+    function toComposer(text){
+      var box = document.getElementById("box"); if (!box) { toast("open the chat to use the composer"); return; }
+      if (state.showTab) state.showTab("thread");
+      var cur = box.value.replace(/\s+$/, "");
+      box.value = (cur ? cur + " " : "") + text;
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+    }
+
+    /** Right-click a file or folder in the tree. */
+    function treeMenu(file, dir, x, y, el){
+      var rel = file || dir;
+      if (!rel) return;
+      var root = (state.project && state.project.dir) || "";
+      var abs = root ? root.replace(/\/$/, "") + "/" + rel.replace(/^\.\//, "") : rel;
+      var items = [{ head: rel.split("/").pop() || rel }];
+      if (file) {
+        items.push({ label: "Open", icon: ICONS.file, run: function(){ openFileFromTree(file); } });
+        items.push({ label: "Mention in chat", icon: ICONS.chat, hint: "@" + file.split("/").pop(), run: function(){ toComposer("@" + file + " "); } });
+        items.push({ label: "Ask an agent about it", icon: ICONS.sparkles, run: function(){ toComposer("Explain what @" + file + " does and how it fits into the project."); } });
+        items.push({ label: "Make a card for it", icon: ICONS.board, run: function(){ openTaskModal(view.pid, null, "Work on " + file); } });
+      } else {
+        var open = !!view.expl.open[dir];
+        items.push({ label: open ? "Collapse" : "Expand", icon: ICONS.folder, run: function(){
+          view.expl.open[dir] = !open;
+          if (!open && !view.expl.kids[dir]) loadDir(dir); else drawExplorer(el);
+        } });
+        items.push({ label: "Mention in chat", icon: ICONS.chat, hint: "@" + dir.split("/").pop() + "/", run: function(){ toComposer("@" + dir + "/ "); } });
+      }
+      items.push({ sep: true });
+      items.push({ label: "Copy relative path", icon: ICONS.copy, run: function(){ copyText(rel); toast("copied " + rel); } });
+      if (root) items.push({ label: "Copy full path", icon: ICONS.copy, run: function(){ copyText(abs); toast("copied"); } });
+      if (window.loomNative && window.loomNative.reveal && root) {
+        items.push({ label: navigator.platform.indexOf("Mac") >= 0 ? "Reveal in Finder" : "Show in folder", icon: ICONS.folder, run: function(){ window.loomNative.reveal(abs); } });
+      }
+      if (state.termRun && root) {
+        items.push({ label: "Open in terminal", icon: ICONS.terminal, run: function(){ state.termRun("cd " + JSON.stringify(file ? abs.replace(/\/[^\/]*$/, "") : abs)); } });
+      }
+      openMenu(x, y, items);
     }
 
     /**

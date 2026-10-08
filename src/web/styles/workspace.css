@@ -6,6 +6,9 @@
     grid-template-columns:var(--sbw) minmax(0,1fr);
     grid-template-rows:minmax(0,1fr) 25px}
   .dshell.railopen{grid-template-columns:var(--sbw) minmax(0,1fr) var(--railw)}
+  /* View ▸ Toggle Sidebar (⌘B) */
+  html.nosidebar .dshell{--sbw:0px!important}
+  html.nosidebar .dshell > .sidebar{display:none}
   /* drag handles: wide hit area, hairline that lights up on hover (Orca) */
   .rz{position:absolute;top:0;bottom:0;width:9px;z-index:12;cursor:col-resize}
   .rz::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;

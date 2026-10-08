@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld("loomNative", {
   pickFolder: function () {
     return ipcRenderer.invoke("loom:pick-folder");
   },
+  // Explorer's "Reveal in Finder": the main process checks the path is an
+  // absolute one that exists before showing it.
+  reveal: function (p) {
+    return ipcRenderer.invoke("loom:reveal", String(p || ""));
+  },
   // Native menu items (Loom ▸ New Orchestra…, Connect a Phone…, Settings…).
   // The page subscribes; the action is one of a fixed set of strings.
   onMenu: function (cb) {

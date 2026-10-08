@@ -947,6 +947,18 @@ import { openMenu } from './menus.js';
       var ch = t.querySelector(".tchev");
       if (ch) ch.textContent = open ? "\u25b8" : "\u25be";
     });
+    // Right-click a message: its actions where you clicked. A text selection
+    // inside it keeps the native menu (Copy, Look Up, spelling) — that's what
+    // you right-clicked for.
+    document.getElementById("feed").addEventListener("contextmenu", function(ev){
+      var msgEl = ev.target && ev.target.closest ? ev.target.closest(".msg") : null;
+      if (!msgEl || !msgEl.getAttribute("data-id")) return;
+      var sel = window.getSelection && window.getSelection();
+      if (sel && !sel.isCollapsed && msgEl.contains(sel.anchorNode)) return;
+      if (ev.target.closest("a[href], input, textarea")) return;
+      ev.preventDefault();
+      msgMenu(msgEl, null, { x: ev.clientX, y: ev.clientY }, ev.target.closest("pre"));
+    });
     document.getElementById("feed").addEventListener("keydown", approvalKey);
     // Enter in an answer box sends it, the way Enter sends anywhere else.
     document.getElementById("feed").addEventListener("keydown", function(ev){
@@ -1346,16 +1358,39 @@ import { openMenu } from './menus.js';
       autosizeBox(); saveDraft(); box.focus(); box.setSelectionRange(box.value.length, box.value.length);
       var form = document.getElementById("cform"); if (form) form.classList.add("hastext");
     }
-    function msgMenu(msgEl, anchor){
+    /**
+     * A message's actions: from its ⋯ button, or a right-click anywhere on it
+     * (`at` is the cursor; `code` the code block under it, if any).
+     */
+    function msgMenu(msgEl, anchor, at, code){
       if (!msgEl) return;
       var id = Number(msgEl.getAttribute("data-id")) || 0, agentId = msgEl.getAttribute("data-agent");
+      var mine = msgEl.classList.contains("user");
       var prompt = promptFor(msgEl);
       var others = ((state.project && state.project.agents) || []).filter(function(a){
         return a.tier === "adapter" && a.enabled !== false && a.id !== agentId;
       });
       var starred = !!(state.starSet && state.starSet[id]);
-      var r = anchor.getBoundingClientRect();
-      var items = [{ head: agentId ? labelOf(agentId) : "Message" }];
+      var r = anchor ? anchor.getBoundingClientRect() : { left: at.x, right: at.x + 220, bottom: at.y, top: at.y };
+      var items = [{ head: agentId ? labelOf(agentId) : mine ? "Your message" : "Message" }];
+      if (code) {
+        items.push({ label: "Copy code", icon: ICONS.copy, run: function(){ copyText(code.innerText || code.textContent || ""); toast("code copied"); } });
+        items.push({ label: "Code into the composer", icon: ICONS.quote, run: function(){ quoteIntoComposer("```\n" + (code.innerText || code.textContent || "").trim() + "\n```"); } });
+        items.push({ sep: true });
+      }
+      items.push({ label: "Copy text", icon: ICONS.copy, run: function(){
+        copyText(mine ? decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl) : bubbleText(msgEl)); toast("copied");
+      } });
+      if (mine) {
+        var raw = decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl);
+        items.push({ label: "Edit & resend", icon: ICONS.pencil, run: function(){ composeFor(raw, null, false); } });
+        items.push({ label: "Send again", icon: ICONS.refresh, run: function(){ composeFor(raw, null, true); } });
+        items.push({ label: "Save as a prompt", icon: ICONS.bookmark, run: function(){
+          api("/api/prompts", { method: "POST", body: JSON.stringify({ text: raw, title: raw.split("\n")[0].slice(0, 60) }) })
+            .then(function(){ toast("saved — it's in Prompts"); }).catch(function(err){ toast(err.message); });
+        } });
+        items.push({ sep: true });
+      }
       if (prompt) {
         items.push({ label: "Retry", icon: ICONS.refresh, hint: "same prompt", run: function(){ composeFor(prompt, agentId, true); } });
         if (others.length) items.push({ label: "Retry with\u2026", icon: ICONS.agents, hint: others.length + " agents", run: function(){
@@ -1382,7 +1417,8 @@ import { openMenu } from './menus.js';
         } });
       }
       items.push({ label: "Branch from here", icon: ICONS.branch, hint: "new chat", run: function(){ branchFrom(msgEl); } });
-      openMenu(Math.round(r.right - 220), Math.round(r.bottom + 4), items);
+      if (at) openMenu(at.x, at.y, items);
+      else openMenu(Math.round(r.right - 220), Math.round(r.bottom + 4), items);
     }
     /** A link that opens this project, this chat, this message. */
     function messageLink(id){
