@@ -197,7 +197,7 @@ import { openMenu } from './menus.js';
       get showTab() { return showTab; },
       get ORCH_TASK_KINDS() { return ORCH_TASK_KINDS; },
     });
-    var { loadCrews, onCrewEvent, drawCrew } = createCrew({
+    var { loadCrews, onCrewEvent, drawCrew, openCrewSheet, closeCrewSheet } = createCrew({
       get pid() { return pid; },
       get desktop() { return desktop; },
       get chatId() { return chatId; },
@@ -265,6 +265,7 @@ import { openMenu } from './menus.js';
         '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
         '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>" +
         '<button id="orchbtn" class="iconbtn" title="orchestra">' + ICONS.orchestra + "</button>" +
+        '<button id="crewbtn" class="iconbtn" title="crew \u00b7 agents with roles on one goal">' + ICONS.team + "</button>" +
         '<button id="fleetbtn" class="iconbtn" title="fleet \u00b7 what every agent is doing">' + ICONS.fleet + "</button>" +
         '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>');
 
@@ -1169,6 +1170,11 @@ import { openMenu } from './menus.js';
       document.getElementById("orchbtn").onclick = function(){
         if (document.getElementById("orchsheet")) { closeOrchSheet(); return; }
         openOrchSheet();
+      };
+      // Crew the same way.
+      document.getElementById("crewbtn").onclick = function(){
+        if (document.getElementById("crewsheet")) { closeCrewSheet(); return; }
+        openCrewSheet();
       };
       // Fleet the same way: the desktop tab's drawing, in the sheet slot.
       document.getElementById("fleetbtn").onclick = function(){

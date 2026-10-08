@@ -564,6 +564,7 @@ export function createOrchestra(view) {
     function openOrchSheet(){
       var el = document.getElementById("routesheet"); if (!el) return;
       el.innerHTML = '<div class="sheet"><div id="orchsheet"></div></div>';
+      var sc = document.getElementById("pane-thread"); if (sc) sc.scrollTop = 0;
       drawOrch(); loadOrch();
     }
 

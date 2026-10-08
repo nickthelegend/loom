@@ -1856,3 +1856,75 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
     stop();
   };
 }
+
+// --- Crews (Agent Teams) ------------------------------------------------------
+// A lead, builders, a reviewer and a tester working one goal on its own branch
+// (daemon core/crew.ts). Every step is a `crew` event in the crew's channel.
+
+export type CrewRole = "lead" | "builder" | "reviewer" | "tester" | "researcher";
+export type CrewGoalStatus = "planning" | "awaiting_approval" | "running" | "waiting_human" | "completed" | "failed" | "stopped" | "interrupted";
+export type CrewCardStage = "planned" | "building" | "review" | "testing" | "done" | "failed";
+
+export interface CrewTeammate { id: string; agent: string; role: CrewRole; charter?: string }
+
+export interface CrewCard {
+  id: string;
+  title: string;
+  detail?: string;
+  stage: CrewCardStage;
+  builder?: string;
+  rounds: number;
+  commits: string[];
+  summary?: string;
+  error?: string;
+}
+
+export interface CrewGoal {
+  id: string;
+  text: string;
+  status: CrewGoalStatus;
+  branch: string;
+  cards: CrewCard[];
+  current?: { teammate: string; card?: string; step: string };
+  question?: { teammate: string; text: string };
+  summary?: string;
+  error?: string;
+  costUsd: number;
+  startedAt: number;
+  applied?: { into: string; at: number };
+}
+
+export interface Crew {
+  id: string;
+  name: string;
+  teammates: CrewTeammate[];
+  planApproval?: boolean;
+  /** What Loom runs to test each card (exit 0 passes); without one, the tester agent tests. */
+  testCommand?: string;
+  busy: boolean;
+  state: { channel: string; threads: Record<string, string>; goal?: CrewGoal };
+}
+
+export const getCrews = (c: Creds, id: string) =>
+  api<{ crews: Crew[]; templates: string[]; previews?: Record<string, CrewTeammate[]>; roster?: Array<{ id: string; kind: string }> }>(
+    c,
+    `/api/projects/${id}/crews`,
+  );
+
+export const createCrew = (c: Creds, id: string, body: { template: string; name?: string; planApproval?: boolean; teammates?: CrewTeammate[] }) =>
+  api<{ crew: Crew }>(c, `/api/projects/${id}/crews`, { method: "POST", body: JSON.stringify(body) });
+
+export const updateCrew = (c: Creds, id: string, crew: string, body: { teammates?: CrewTeammate[]; planApproval?: boolean }) =>
+  api<{ crew: Crew }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}`, { method: "PATCH", body: JSON.stringify(body) });
+
+export type CrewAction = "say" | "approve" | "stop" | "resume" | "apply";
+
+/** Answers with the crew as it is now, plus `routed` for say (goal | answer | note | replan) and `into` for apply. */
+export const crewAction = (c: Creds, id: string, crew: string, action: CrewAction, body: { text?: string; to?: string } = {}) =>
+  api<{ crew: Crew; routed?: string; to?: string; into?: string }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const crewDiff = (c: Creds, id: string, crew: string) =>
+  api<{ diff: string }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}/diff`);

@@ -41,6 +41,12 @@
   .crewname{font-size:19px;font-weight:650;letter-spacing:-.015em;color:var(--foreground)}
   .cwsub{font-size:12px;color:var(--muted-foreground)}
   .cwhero .spacer{margin-left:auto}
+  .cwtestbtn{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;font:inherit;font-size:inherit;color:var(--muted-foreground);cursor:pointer}
+  .cwtestbtn:hover{color:var(--foreground)}
+  .cwtestbtn svg{width:11px;height:11px;color:var(--ok)}
+  .cwtestbtn code{font-family:var(--font-mono);font-size:11px;background:var(--muted);padding:0 5px;border-radius:4px;color:var(--foreground)}
+  .cwtestrow{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .cwtestrow input{flex:1 1 220px;height:32px;font-family:var(--font-mono);font-size:12px}
   .crewsel{height:28px;max-width:100%;padding:0 8px;border-radius:var(--radius-sm);border:1px solid var(--input);
     background:var(--background);color:var(--foreground);font:inherit;font-size:12.5px}
   .crewbusy{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:99px;font-size:11px;font-weight:500;
@@ -240,7 +246,34 @@
     .crewgrid{grid-template-columns:minmax(0,1fr)}
     .crewchan{position:static;max-height:420px}
   }
+  /* the phone: the same view in a sheet that slides up over the chat */
+  .mscrim{position:fixed;inset:0;z-index:60;background:rgb(0 0 0 / .45);display:flex;align-items:flex-end;animation:msfade .18s ease}
+  .msheet{width:100%;max-height:calc(100dvh - 44px);display:flex;flex-direction:column;background:var(--background);
+    border-radius:18px 18px 0 0;border-top:1px solid var(--border);box-shadow:0 -12px 40px rgb(0 0 0 / .35);animation:msup .24s cubic-bezier(.2,.8,.2,1);
+    padding-bottom:env(safe-area-inset-bottom)}
+  .msgrab{width:38px;height:5px;border-radius:3px;background:var(--border);margin:8px auto 2px;flex:none}
+  .msh{display:flex;align-items:center;justify-content:space-between;padding:2px 10px 6px 16px;flex:none}
+  .mst{display:inline-flex;align-items:center;gap:7px;font-size:15px;font-weight:650;color:var(--foreground)}
+  .mst svg{width:16px;height:16px;color:var(--shuttle-ink)}
+  .msbody{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;flex:1;min-height:0}
+  @keyframes msup{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+  @keyframes msfade{from{opacity:0}to{opacity:1}}
+  .crewsheetwrap{padding:4px 12px 16px}
+  .crewsheetwrap .crewview{gap:12px}
+  .crewsheetwrap .cwhero{padding:11px 12px;gap:10px}
+  .crewsheetwrap .cwhero .btn span,.crewsheetwrap .cwsub{font-size:11.5px}
+  .crewsheetwrap .crewname{font-size:16px}
+  .crewsheetwrap .crewroster{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+  .crewsheetwrap .crewmate{padding:8px 9px;gap:8px}
+  .crewsheetwrap .cmdoing{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .crewsheetwrap .crewchan{max-height:380px}
+  .crewsheetwrap .crewsay select,.crewsheetwrap .crewsay input{height:26px}
   @media (max-width:700px){
+    .cwban{flex-wrap:wrap}
+    .cwban .btn{width:100%;justify-content:center;height:38px}
+    .cwboard{display:flex !important;flex-direction:column;gap:8px}
+    .cwcol:has(.cwnone){display:none}
+    .cwhero .cwstack .cav:nth-child(n+5){display:none}
     #pane-crew{padding:12px 12px 32px}
     .cwgtop{flex-direction:column}
     .cwhint{display:none}

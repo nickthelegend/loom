@@ -136,6 +136,8 @@ export interface CrewHost {
   member?(): string | null;
   /** Tests: how long silence counts as a stall, in ms (else the crew's stallMinutes, else 8 min). */
   stallMs?: number;
+  /** How long a crew's test command may run (default 10 min). */
+  testTimeoutMs?: number;
 }
 
 /** Templates (§5.1): which roles, and which agent kinds each prefers, in order. */
@@ -187,6 +189,18 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
 const newId = () => `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 const terminal = (s: GoalStatus) => s === "completed" || s === "failed" || s === "stopped";
 const TURN_TEXT_CAP = 40_000;
+
+/** Run a crew's test command in the worktree: ok when it exits 0; the output's tail either way. */
+function runTests(command: string, cwd: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
+  return new Promise((resolve) => {
+    execFile("/bin/sh", ["-c", command], { cwd, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } },
+      (err, stdout, stderr) => {
+        const output = `${stdout}${stderr ? `\n${stderr}` : ""}`.trim().slice(-8000);
+        const timedOut = Boolean(err && (err as NodeJS.ErrnoException & { killed?: boolean }).killed);
+        resolve({ ok: !err, output: timedOut ? `${output}\n(timed out after ${Math.round(timeoutMs / 1000)}s)` : output || (err ? err.message : "") });
+      });
+  });
+}
 
 async function git(args: string[], cwd: string): Promise<string> {
   const { stdout } = await exec("git", args, { cwd, maxBuffer: 32 * 1024 * 1024 });
@@ -277,6 +291,9 @@ export class CrewEngine {
       else delete cfg.stallMinutes;
     }
     this.host.saveCrews(crews);
+    // every client showing this crew should redraw it (a phone, the other window)
+    const st = this.state(cfg);
+    this.host.append({ kind: "crew", chat: st.channel, payload: { phase: "updated", crewId: cfg.id, crew: cfg.name } });
     return this.get(id);
   }
 
@@ -574,7 +591,7 @@ export class CrewEngine {
       }
       const sha = await this.commit(cfg, g, card, builder);
       if (sha) card.commits.push(sha);
-      card.stage = this.reviewer(cfg) ? "review" : this.tester(cfg) ? "testing" : "done";
+      card.stage = this.reviewer(cfg) ? "review" : this.tests(cfg) ? "testing" : "done";
       this.save(st);
     }
     if (card.stage === "review") {
@@ -603,30 +620,48 @@ export class CrewEngine {
         this.save(st);
         return;
       }
-      card.stage = this.tester(cfg) ? "testing" : "done";
+      card.stage = this.tests(cfg) ? "testing" : "done";
       this.save(st);
     }
     if (card.stage === "testing") {
-      const tester = this.tester(cfg)!;
       this.host.updateTask(card.id, { column: "in-review", stage: "testing" });
-      const prompt = [
-        `Test the work so far for "${card.title}" in this worktree.`,
-        cfg.testCommand ? `Run: ${cfg.testCommand}` : "Run the project's tests (look at package.json scripts, Makefile, pytest, cargo…). Don't change source files.",
-        "Report pass or fail with the last lines of output.",
-      ].join("\n");
-      const reply = await this.turn(cfg, st, g, tester, prompt, "card", card);
-      if (reply === null || reply.asked || g.status !== "running") return;
-      if (reply.error) return this.giveUp(cfg, st, card, `tests didn't run: ${reply.error}`);
-      const test = reply.actions.find((a): a is Extract<CrewAction, { type: "test" }> => a.type === "test");
-      const result = test?.result ?? "pass";
-      this.phase(cfg, st, "tested", { card: card.id, title: card.title, teammate: tester.id, result, log: (test?.log ?? "").slice(-1200) });
-      // a tester's own edits (a fixture, a snapshot) are part of the card
-      const sha = await this.commit(cfg, g, card, tester, "tests");
-      if (sha) card.commits.push(sha);
+      let result: "pass" | "fail";
+      let log: string;
+      let who: string;
+      if (cfg.testCommand) {
+        // A test command is a fact, not an opinion: Loom runs it in the worktree
+        // itself — no model to misread it, no agent sandbox to block a server
+        // the tests start — and the exit code decides.
+        g.current = { teammate: "loom", card: card.id, step: "testing" };
+        this.save(st);
+        const out = await runTests(cfg.testCommand, g.dir, this.host.testTimeoutMs ?? 10 * 60_000);
+        if (terminal(g.status) || this.closed || g.status !== "running") return;
+        result = out.ok ? "pass" : "fail";
+        log = out.output;
+        who = "loom";
+      } else {
+        const tester = this.tester(cfg)!;
+        const prompt = [
+          `Test the work so far for "${card.title}" in this worktree.`,
+          "Run the project's tests (look at package.json scripts, Makefile, pytest, cargo…). Don't change source files.",
+          "Report pass or fail with the last lines of output.",
+        ].join("\n");
+        const reply = await this.turn(cfg, st, g, tester, prompt, "card", card);
+        if (reply === null || reply.asked || g.status !== "running") return;
+        if (reply.error) return this.giveUp(cfg, st, card, `tests didn't run: ${reply.error}`);
+        const test = reply.actions.find((a): a is Extract<CrewAction, { type: "test" }> => a.type === "test");
+        result = test?.result ?? "pass";
+        log = test?.log ?? "";
+        who = tester.id;
+        // a tester's own edits (a fixture, a snapshot) are part of the card
+        const sha = await this.commit(cfg, g, card, tester, "tests");
+        if (sha) card.commits.push(sha);
+      }
+      this.phase(cfg, st, "tested", { card: card.id, title: card.title, teammate: who, result, log: log.slice(-1200), ...(cfg.testCommand ? { command: cfg.testCommand } : {}) });
       if (result === "fail") {
         if (card.rounds >= maxRounds) return this.giveUp(cfg, st, card, `tests still fail after ${card.rounds} rounds`);
         card.rounds++;
-        card.feedback.push(`The tests fail (${tester.id}):\n${(test?.log ?? "").slice(-3000)}`);
+        card.feedback.push(`The tests fail (${who}${cfg.testCommand ? `: ${cfg.testCommand}` : ""}):\n${log.slice(-3000)}`);
         card.stage = "building";
         this.save(st);
         return;
@@ -882,6 +917,8 @@ export class CrewEngine {
   private lead(cfg: CrewConfig): CrewTeammate | undefined { return cfg.teammates.find((t) => t.role === "lead"); }
   private reviewer(cfg: CrewConfig): CrewTeammate | undefined { return cfg.teammates.find((t) => t.role === "reviewer"); }
   private tester(cfg: CrewConfig): CrewTeammate | undefined { return cfg.teammates.find((t) => t.role === "tester"); }
+  /** Is there a test step: a test command Loom runs, or a tester teammate? */
+  private tests(cfg: CrewConfig): boolean { return Boolean(cfg.testCommand || this.tester(cfg)); }
 
   private thread(cfg: CrewConfig, st: CrewState, tm: CrewTeammate): string {
     const have = st.threads[tm.id];

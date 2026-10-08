@@ -75,6 +75,7 @@ import { describeLink, linkQuality, pushSample, sparkBars, type LinkSample } fro
 import { clearCache, loadProjects, loadThread, saveProjects, saveThread } from "./cache";
 import { savedAgo } from "./cache-model";
 import { OrchestraView } from "./orchestra";
+import { CrewView } from "./crew";
 import { ObservatoryView } from "./observatory";
 import { ToolsView } from "./tools";
 import { TeamBrainView, useBrainSummary } from "./team-brain";
@@ -763,7 +764,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
+type Tab = "thread" | "orchestra" | "crew" | "observatory" | "ask" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -773,6 +774,7 @@ type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "landing" 
 const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "thread", label: "Thread" },
   { key: "orchestra", label: "Orchestra", accent: T.thread },
+  { key: "crew", label: "Crew", accent: T.shuttle },
   { key: "observatory", label: "Observatory", accent: T.primary },
   { key: "ask", label: "Ask", accent: T.primary },
   // only while the repo is shared with a team (see visibleTabs below)
@@ -817,6 +819,8 @@ export function ProjectScreen(props: {
   const [promptsOpen, setPromptsOpen] = useState(false);
   // Bumped on every `orchestra` event so the Orchestra tab refetches that run.
   const [orchPulse, setOrchPulse] = useState<{ n: number; runId: string | null }>({ n: 0, runId: null });
+  // Bumped on every `crew` event so the Crew tab refetches.
+  const [crewPulse, setCrewPulse] = useState(0);
   const [events, setEvents] = useState<LoomEvent[]>([]);
   // What agents are typing in this chat right now, before it's a message.
   const [live, setLive] = useState<LiveMap>({});
@@ -953,6 +957,8 @@ export function ProjectScreen(props: {
         const runId = typeof ev.payload?.runId === "string" ? ev.payload.runId : null;
         setOrchPulse((p) => ({ n: p.n + 1, runId }));
       }
+      // A crew spans its channel and a thread per teammate: the Crew tab wants every step.
+      if (ev.kind === "crew") setCrewPulse((n) => n + 1);
       // Approvals matter whichever chat they're in: the banner counts them all.
       if (ev.kind === "approval") {
         const aid = String(ev.payload?.approvalId ?? "");
@@ -1646,6 +1652,17 @@ export function ProjectScreen(props: {
             onInsert={(t) => setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n${t}` : t))}
           />
         </>
+      ) : tab === "crew" ? (
+        <CrewView
+          creds={creds}
+          project={project}
+          pulse={crewPulse}
+          onOpenChat={(id, title) => {
+            if (!chats.some((c) => c.id === id)) setExtraChat({ id, title, createdAt: Date.now() });
+            setChatId(id);
+            setTab("thread");
+          }}
+        />
       ) : tab === "orchestra" ? (
         <OrchestraView
           creds={creds}

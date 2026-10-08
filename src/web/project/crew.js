@@ -25,7 +25,7 @@ export function createCrew(view) {
 
     // This mount's reading of the crews. The factory is created per mount, so
     // its own closure is this view's state; nothing here outlives the view.
-    var crew = { list: null, templates: [], previews: {}, roster: [], seats: {}, sel: null, err: "", t: null, events: {}, diff: null, tpl: "ship", making: false, busy: "" };
+    var crew = { editTest: false, list: null, templates: [], previews: {}, roster: [], seats: {}, sel: null, err: "", t: null, events: {}, diff: null, tpl: "ship", making: false, busy: "" };
 
     var TEMPLATES = {
       ship: ["Ship", "lead plans, two builders, a reviewer and a tester", "Features end to end, reviewed and tested."],
@@ -60,9 +60,29 @@ export function createCrew(view) {
     var moving = function(g){ return !!g && (g.status === "planning" || g.status === "running"); };
 
     function crewEl(){
-      if (pageGone() || !view.desktop) return null;
-      return state.tab === "crew" ? document.getElementById("pane-crew") : null;
+      if (pageGone()) return null;
+      if (view.desktop) return state.tab === "crew" ? document.getElementById("pane-crew") : null;
+      // the phone has no tab strip: the same drawing, in the sheet slot
+      return document.getElementById("crewsheet");
     }
+
+    /** The phone: a sheet that slides up over the chat, scrolls on its own, and closes with ✕ or a swipe of the scrim. */
+    function openCrewSheet(){
+      if (document.getElementById("crewsheet")) return;
+      var host = document.querySelector(".panel") || document.body;
+      var scrim = document.createElement("div");
+      scrim.className = "mscrim"; scrim.id = "crewmscrim";
+      scrim.innerHTML = '<div class="msheet" role="dialog" aria-modal="true" aria-label="Crew">' +
+        '<div class="msgrab"></div>' +
+        '<div class="msh"><span class="mst">' + ICONS.team + 'Crew</span><button class="iconbtn" type="button" id="crewmsx" aria-label="close">' + ICONS.x + "</button></div>" +
+        '<div class="msbody crewsheetwrap" id="crewsheet"></div></div>';
+      host.appendChild(scrim);
+      scrim.addEventListener("click", function(ev){ if (ev.target === scrim) closeCrewSheet(); });
+      document.getElementById("crewmsx").onclick = closeCrewSheet;
+      drawCrew(); loadCrews();
+    }
+
+    function closeCrewSheet(){ var el = document.getElementById("crewmscrim"); if (el) el.remove(); }
 
     function current(){
       var list = crew.list || [];
@@ -92,7 +112,7 @@ export function createCrew(view) {
       if (!ch) return;
       return api("/api/projects/" + pid + "/events?limit=40&chat=" + encodeURIComponent(ch)).then(function(j){
         if (state.pid !== pid) return;
-        crew.events[c.id] = (j.events || []).filter(function(e){ return e.kind === "message" || e.kind === "crew"; }).slice(-40);
+        crew.events[c.id] = (j.events || []).filter(function(e){ return e.kind === "message" || (e.kind === "crew" && (e.payload || {}).phase !== "updated"); }).slice(-40);
         drawCrew();
       }).catch(function(){});
     }
@@ -165,7 +185,12 @@ export function createCrew(view) {
         '<div class="cwstack">' + mates.slice(0, 6).map(function(t){ return avatar(t, 36, liveMate(c) === t.id); }).join("") + "</div>" +
         '<div class="cwtitle"><div class="cwnamerow"><span class="crewname">' + esc(c.name) + "</span>" + picker +
           (c.busy ? '<span class="crewbusy"><span class="odot live"></span>working</span>' : "") + "</div>" +
-          '<div class="cwsub">' + esc(sub) + (c.planApproval === false ? " · starts without asking" : " · asks before building") + "</div></div>" +
+          '<div class="cwsub">' + esc(sub) + (c.planApproval === false ? " · starts without asking" : " · asks before building") +
+            ' · <button type="button" class="cwtestbtn" data-crew-testedit title="what Loom runs to test each card">' + ICONS.check +
+            (c.testCommand ? "tests: <code>" + esc(c.testCommand) + "</code>" : "set a test command") + "</button></div>" +
+          (crew.editTest ? '<div class="cwtestrow"><input id="crewtestcmd" class="crewin" placeholder="e.g. npm test — Loom runs it in the goal\u2019s worktree; exit 0 passes" value="' + esc(c.testCommand || "") + '">' +
+            '<button type="button" class="btn sm primary" data-crew-testsave>Save</button><button type="button" class="btn sm ghost" data-crew-testcancel>Cancel</button></div>' : "") +
+          "</div>" +
         '<span class="spacer"></span>' +
         '<button class="btn xs outline" type="button" data-crew-new>' + ICONS.plus + "New crew</button>" +
         '<button class="iconbtn" type="button" data-crew-refresh title="refresh" aria-label="refresh">' + ICONS.refresh + "</button>" +
@@ -369,7 +394,7 @@ export function createCrew(view) {
         : "Say something to the crew — it reaches them on their next turn…";
       var label = fresh ? "Start goal" : g.status === "waiting_human" ? "Answer" : "Send";
       return '<form class="crewsay" id="crewsay" autocomplete="off">' +
-        '<textarea id="crewsaytext" class="crewin" rows="2" placeholder="' + esc(ph) + '"></textarea>' +
+        '<textarea id="crewsaytext" class="crewin" rows="2" autocorrect="off" autocapitalize="sentences" placeholder="' + esc(ph) + '"></textarea>' +
         '<div class="crewsayrow"><label class="cwto">' + ICONS.team + '<select id="crewsayto" class="crewsel" title="who it\'s for"><option value="">' + (fresh ? "everyone" : "the crew") + "</option>" +
           (c.teammates || []).map(function(t){ return '<option value="' + esc(t.id) + '">@' + esc(t.id) + "</option>"; }).join("") + "</select></label>" +
           '<span class="cwhint">Enter to send · Shift+Enter for a new line</span>' +
@@ -398,6 +423,7 @@ export function createCrew(view) {
             }).join("") + "</div>") +
         '<div class="crewmrow">' +
           '<input id="crewname" class="crewin" type="text" maxlength="60" placeholder="Name it (optional) — e.g. Ship crew" autocomplete="off">' +
+          '<input id="crewtestnew" class="crewin" type="text" maxlength="300" placeholder="Test command (optional) — e.g. npm test" autocomplete="off">' +
           '<label class="crewchk"><input type="checkbox" id="crewapprove" checked> Ask me to approve the plan</label>' +
           '<button class="btn sm primary" type="button" id="crewcreate"' + (crew.busy === "create" || noAgents ? " disabled" : "") + ">" + ICONS.team + "Create crew</button>" +
           ((crew.list || []).length ? '<button class="btn sm ghost" type="button" data-crew-cancel>Cancel</button>' : "") +
@@ -423,7 +449,7 @@ export function createCrew(view) {
     /** Redraws replace the pane; keep what you were typing (and where) across them. */
     function keep(el){
       var kept = {}, act = document.activeElement;
-      ["crewsaytext", "crewsayto", "crewname"].forEach(function(id){
+      ["crewsaytext", "crewsayto", "crewname", "crewtestnew", "crewtestcmd"].forEach(function(id){
         var x = el.querySelector("#" + id); if (x) kept[id] = x.value;
       });
       var chk = el.querySelector("#crewapprove"); if (chk) kept.crewapprove = chk.checked;
@@ -462,7 +488,12 @@ export function createCrew(view) {
         body = hero(c) + err + roster(c) +
           '<div class="crewgrid"><div class="crewmain">' + goalBlock(c) + sayForm(c) + "</div>" + channel(c) + "</div>";
       }
-      el.innerHTML = '<div class="orchview crewview">' + body + "</div>";
+      var html = '<div class="orchview crewview">' + body + "</div>";
+      // Nothing changed (a refetch that found the same crew): leave the DOM alone,
+      // so a tap that's landing right now lands on the element it started on.
+      if (el._crewHtml === html && el.firstChild) return;
+      el._crewHtml = html;
+      el.innerHTML = html;
       restore(el, k);
       wire(el);
     }
@@ -505,6 +536,7 @@ export function createCrew(view) {
       crew.busy = "create"; drawCrew();
       api("/api/projects/" + view.pid + "/crews", { method: "POST", body: JSON.stringify({
         template: crew.tpl, ...(name.trim() ? { name: name.trim() } : {}), ...(chk && !chk.checked ? { planApproval: false } : {}),
+        ...(((el.querySelector("#crewtestnew") || {}).value || "").trim() ? { testCommand: el.querySelector("#crewtestnew").value.trim() } : {}),
         ...(crew.seats[crew.tpl] && (crew.previews[crew.tpl] || []).length ? { teammates: seated(crew.previews[crew.tpl]) } : {}),
       }) }).then(function(j){
         crew.busy = ""; crew.making = false; crew.err = "";
@@ -539,8 +571,8 @@ export function createCrew(view) {
 
     function openChannel(chat){
       if (!chat) return;
-      if (view.desktop && state.setChat) { state.setChat(view.pid, chat); return; }
-      toast("open this thread from the desktop app");
+      if (state.setChat) { if (!view.desktop) closeCrewSheet(); state.setChat(view.pid, chat); return; }
+      toast("open the channel from the chat list");
     }
 
     function wire(el){
@@ -554,6 +586,17 @@ export function createCrew(view) {
         if ((x = t.closest("#crewcreate"))) { create(el); return; }
         if ((x = t.closest("[data-crew-act]"))) { act(x.getAttribute("data-crew-act")); return; }
         if ((x = t.closest("[data-crew-chan]"))) { ev.preventDefault(); openChannel(x.getAttribute("data-crew-chan")); return; }
+        if ((x = t.closest("[data-crew-testedit]"))) { crew.editTest = !crew.editTest; drawCrew(); var ti = el.querySelector("#crewtestcmd"); if (ti) ti.focus(); return; }
+        if ((x = t.closest("[data-crew-testcancel]"))) { crew.editTest = false; drawCrew(); return; }
+        if ((x = t.closest("[data-crew-testsave]"))) {
+          var cc = current(), inp = el.querySelector("#crewtestcmd");
+          if (!cc || !inp) return;
+          var cmd = inp.value.trim();
+          api("/api/projects/" + view.pid + "/crews/" + encodeURIComponent(cc.id), { method: "PATCH", body: JSON.stringify({ testCommand: cmd || null }) })
+            .then(function(j){ merge(j); crew.editTest = false; toast(cmd ? "Loom runs \u201c" + cmd + "\u201d to test each card" : "the tester agent tests each card"); drawCrew(); })
+            .catch(function(err){ toast(err.message); });
+          return;
+        }
         if ((x = t.closest("[data-crew-suggest]"))) {
           var box = el.querySelector("#crewsaytext");
           if (box) { box.value = x.getAttribute("data-crew-suggest"); box.focus(); }
@@ -590,5 +633,5 @@ export function createCrew(view) {
       }
     }
 
-return { loadCrews, onCrewEvent, drawCrew, drawCrewTabDot };
+return { loadCrews, onCrewEvent, drawCrew, drawCrewTabDot, openCrewSheet, closeCrewSheet };
 }

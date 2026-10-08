@@ -314,6 +314,28 @@ describe("a crew works a goal", () => {
     expect(testers).toEqual(["crew-ship-tester.small", "crew-ship-tester.big"]);
   });
 
+  it("with a test command, Loom runs the tests itself and the exit code decides — no tester agent needed", async () => {
+    const { rt } = await project(false);
+    const made = rt.crews.create({ name: "Cmd", teammates: [{ id: "lead", agent: "big", role: "lead" }, { id: "builder", agent: "small", role: "builder" }], planApproval: false, testCommand: "test -f done.txt && echo all-green" });
+    scripts = {
+      lead: (input) => (input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "Make done.txt" }] }]) : loom([{ type: "done", summary: "x" }])),
+      // first try forgets the file; the failure output sends it back
+      builder: (input, wd) => {
+        if (/The tests fail \(loom: test -f done\.txt/.test(input.text)) write(wd, "done.txt", "ok\n");
+        else write(wd, "other.txt", "x\n");
+        return loom([{ type: "done", summary: "did" }]);
+      },
+    };
+    await rt.crews.goal(made.id, "make it");
+    await waitUntil(() => ["completed", "failed"].includes(rt.crews.get(made.id).state.goal?.status ?? ""), { timeoutMs: 10_000 });
+    const g = rt.crews.get(made.id).state.goal!;
+    expect(g.status).toBe("completed");
+    expect(g.cards[0]).toMatchObject({ stage: "done", rounds: 1 });
+    const tested = rt.log.list({ kinds: ["crew"] }).filter((e) => e.payload.phase === "tested").map((e) => [e.payload.teammate, e.payload.result]);
+    expect(tested).toEqual([["loom", "fail"], ["loom", "pass"]]);
+    expect(rt.log.list({ kinds: ["crew"] }).find((e) => e.payload.phase === "tested" && e.payload.result === "pass")!.payload.log).toContain("all-green");
+  });
+
   it("refuses a crew that can't work, and a goal while one is running", async () => {
     const { rt } = await project(false);
     expect(() => rt.crews.create({ name: "x", teammates: [{ id: "r", agent: "big", role: "reviewer" }] })).toThrow(/does the work/);
