@@ -696,6 +696,184 @@ program
     }
   });
 
+/** "KEY=VAL" / "Header: value" pairs from repeated flags. */
+function kv(list: string[] | undefined, sep: RegExp): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const item of list ?? []) {
+    const m = sep.exec(item);
+    if (!m || m.index === 0) throw new Error(`"${item}" isn't a pair`);
+    out[item.slice(0, m.index).trim()] = item.slice(m.index + m[0].length).trim();
+  }
+  return out;
+}
+const collect = (v: string, prev: string[] = []) => [...prev, v];
+
+program
+  .command("prompts [action] [args...]")
+  .description("saved prompts, shared with the app: list [query] | save <text> | show <id> | send <id> | pin <id> | unpin <id> | rename <id> <title> | rm <id>")
+  .option("-t, --title <title>", "save: a title (else the first words)")
+  .option("-a, --agent <id>", "send: address a specific agent")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { title?: string; agent?: string }) => {
+    const client = await ensureDaemon();
+    const a = (action ?? "list").toLowerCase();
+    const rest = (args ?? []).join(" ").trim();
+    const find = async (ref: string) => {
+      const { saved } = await client.prompts();
+      const hit = saved.find((p) => p.id === ref) ?? saved.find((p) => p.id.startsWith(ref)) ??
+        saved.find((p) => p.title.toLowerCase() === ref.toLowerCase());
+      if (!hit) throw new Error(`no saved prompt "${ref}" — loom prompts lists them`);
+      return hit;
+    };
+    if (a === "list" || a === "ls") {
+      const { saved } = await client.prompts(rest);
+      if (!saved.length) return void console.log(pc.dim(rest ? `no saved prompt matches "${rest}"` : "no saved prompts yet — loom prompts save \"…\" (or ⌘⇧V in the app)"));
+      for (const p of saved) {
+        console.log(`${pc.dim(p.id.slice(0, 8))}  ${p.pinned ? pc.yellow("★ ") : ""}${pc.bold(p.title)}  ${pc.dim(`${p.uses}×`)}`);
+        console.log(`          ${pc.dim(p.text.replace(/\s+/g, " ").slice(0, 90))}`);
+      }
+      return;
+    }
+    if (a === "save" || a === "add") {
+      const text = rest || (process.stdin.isTTY ? "" : fs.readFileSync(0, "utf8"));
+      if (!text.trim()) throw new Error("what should it say? loom prompts save \"review this diff for…\" (or pipe it in)");
+      const { prompt } = await client.savePrompt({ text, ...(opts.title ? { title: opts.title } : {}) });
+      return void console.log(`${pc.green("✓")} saved ${pc.bold(prompt.title)} ${pc.dim(prompt.id.slice(0, 8))}`);
+    }
+    if (!["show", "cat", "send", "use", "pin", "unpin", "rename", "rm", "delete"].includes(a)) {
+      throw new Error(`unknown action "${a}" — list | save | show | send | pin | unpin | rename | rm`);
+    }
+    if (!rest) throw new Error(`which prompt? loom prompts ${a} <id or title>`);
+    const [ref, ...more] = rest.split(/\s+/);
+    const p = await find(a === "rename" ? ref! : rest);
+    if (a === "show" || a === "cat") return void process.stdout.write(p.text + "\n");
+    if (a === "send" || a === "use") {
+      const project = await currentProject(client);
+      const now = new Date();
+      const text = p.text
+        .replace(/\{\{date\}\}/g, now.toLocaleDateString())
+        .replace(/\{\{time\}\}/g, now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+        .replace(/\{\{project\}\}/g, project.name)
+        .replace(/\{\{(?:selection|branch|chat|agent|last_reply|file)\}\}/g, "");
+      const result = await sendWithHandoffConfirm(client, project.id, text, opts.agent);
+      await client.updatePrompt(p.id, { used: true }).catch(() => {});
+      if (result) console.log(pc.dim(`→ sent "${p.title}" to ${result.agentId} (loom log --follow to watch)`));
+      return;
+    }
+    if (a === "pin" || a === "unpin") {
+      await client.updatePrompt(p.id, { pinned: a === "pin" });
+      return void console.log(`${pc.green("✓")} ${a === "pin" ? "pinned" : "unpinned"} ${p.title}`);
+    }
+    if (a === "rename") {
+      const title = more.join(" ").trim();
+      if (!title) throw new Error("loom prompts rename <id> <new title>");
+      await client.updatePrompt(p.id, { title });
+      return void console.log(`${pc.green("✓")} renamed to ${pc.bold(title)}`);
+    }
+    if (a === "rm" || a === "delete") {
+      await client.deletePrompt(p.id);
+      return void console.log(`${pc.green("✓")} removed ${p.title}`);
+    }
+    throw new Error(`unknown action "${a}" — list | save | show | send | pin | unpin | rename | rm`);
+  });
+
+program
+  .command("skills [action] [args...]")
+  .description("skills for this project: list [query] | on <id> | off <id> | install <git-url|dir>[#name|#all] | rm <id>")
+  .option("--all", "list: every skill found on this machine, not just the ones on")
+  .option("--force", "install: replace a skill with the same name")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { all?: boolean; force?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const a = (action ?? "list").toLowerCase();
+    const rest = (args ?? []).join(" ").trim();
+    if (a === "list" || a === "ls") {
+      const { skills } = await client.skillsCatalog(project.id);
+      const q = rest.toLowerCase();
+      const rows = skills.filter((k) => (opts.all || q || k.enabled) && (!q || `${k.id} ${k.name ?? ""} ${k.description ?? ""}`.toLowerCase().includes(q)));
+      const on = skills.filter((k) => k.enabled).length;
+      console.log(pc.dim(`${on} on · ${skills.length} found${opts.all || q ? "" : " — loom skills list --all shows them all"}`));
+      for (const k of rows) {
+        console.log(`${k.enabled ? pc.green("●") : pc.dim("○")} ${pc.bold(k.id)}${k.installed ? pc.dim(" (this project)") : k.origin ? pc.dim(` (${k.origin})`) : ""}`);
+        if (k.description) console.log(`  ${pc.dim(k.description.replace(/\s+/g, " ").slice(0, 96))}`);
+      }
+      return;
+    }
+    if (!["on", "off", "install", "add", "rm", "remove"].includes(a)) throw new Error(`unknown action "${a}" — list | on | off | install | rm`);
+    if (!rest) throw new Error(`loom skills ${a} <${a === "install" ? "git url or folder" : "skill id"}>`);
+    if (a === "on" || a === "off") {
+      await client.setSkill(project.id, rest, a === "on");
+      return void console.log(`${pc.green("✓")} ${rest} ${a === "on" ? "on" : "off"} for ${project.name}`);
+    }
+    if (a === "install" || a === "add") {
+      const local = !/^(https?:|git@|ssh:)/.test(rest) && fs.existsSync(rest.replace(/#.*$/, ""));
+      const { skill } = await client.installSkill(project.id, local
+        ? { dir: path.resolve(rest), ...(opts.force ? { force: true } : {}) }
+        : { gitUrl: rest, ...(opts.force ? { force: true } : {}) });
+      const names = [skill.id, ...(skill.also ?? [])];
+      for (const n of names) await client.setSkill(project.id, n, true).catch(() => {});
+      return void console.log(`${pc.green("✓")} installed and turned on ${names.map((n) => pc.bold(n)).join(", ")}`);
+    }
+    if (a === "rm" || a === "remove") {
+      await client.removeSkill(project.id, rest);
+      return void console.log(`${pc.green("✓")} removed ${rest} from ${project.name}`);
+    }
+    throw new Error(`unknown action "${a}" — list | on | off | install | rm`);
+  });
+
+program
+  .command("mcp [action] [args...]")
+  .description("MCP servers for this project: list | add <name> (--url <url> | --command <cmd> [args…]) | on <name> | off <name> | rm <name>")
+  .option("--url <url>", "add: a remote server's endpoint")
+  .option("--command <cmd>", "add: a local server to run (args follow the name)")
+  .option("-H, --header <header>", "add: 'Name: value', repeatable", collect)
+  .option("-e, --env <pair>", "add: KEY=VALUE for a local server, repeatable", collect)
+  // the server's own flags (npx -y …) ride along as its args; put them after -- if they clash with ours
+  .allowUnknownOption()
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { url?: string; command?: string; header?: string[]; env?: string[] }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const a = (action ?? "list").toLowerCase();
+    const [name, ...more] = args ?? [];
+    if (a === "list" || a === "ls") {
+      const { mcps } = await client.mcps(project.id);
+      const rows = mcps.filter((m) => m.url || m.command);
+      if (!rows.length) return void console.log(pc.dim("no MCP servers yet — loom mcp add github --url https://api.githubcopilot.com/mcp/ (or Skills & MCP in the app)"));
+      for (const m of rows) {
+        const state = m.enabledForSession === false ? pc.dim("off") : m.command ? pc.cyan("local") : m.connected ? pc.green("up") : pc.red("unreachable");
+        console.log(`${m.name.padEnd(20)} ${state.padEnd(20)} ${pc.dim(m.url || [m.command, ...(m.args ?? [])].join(" "))}`);
+      }
+      console.log(pc.dim("Claude Code and Codex load these; other agents don't speak MCP."));
+      return;
+    }
+    if (!["add", "install", "on", "off", "rm", "remove"].includes(a)) throw new Error(`unknown action "${a}" — list | add | on | off | rm`);
+    if (!name) throw new Error(`loom mcp ${a} <name>`);
+    if (a === "add" || a === "install") {
+      if (!opts.url && !opts.command) throw new Error("add needs --url <endpoint> or --command <program>");
+      const { installed } = await client.installMcp(project.id, {
+        name,
+        ...(opts.url ? { url: opts.url } : {}),
+        ...(opts.command ? { command: opts.command, ...(more.length ? { args: more } : {}) } : {}),
+        ...(opts.header?.length ? { headers: kv(opts.header, /:\s*/) } : {}),
+        ...(opts.env?.length ? { env: kv(opts.env, /=/) } : {}),
+      });
+      const note = opts.command ? "it starts when an agent needs it" : installed?.connected ? "it answered" : "it didn't answer yet — check the URL, or it may need sign-in headers (-H)";
+      return void console.log(`${pc.green("✓")} added ${pc.bold(name)} — ${note}`);
+    }
+    if (a === "on" || a === "off") {
+      const { mcps } = await client.mcps(project.id, false);
+      const row = mcps.find((m) => m.name === name);
+      if (!row) throw new Error(`no MCP server "${name}" — loom mcp lists them`);
+      const { connected: _c, ...keep } = row as typeof row & { probedAt?: number };
+      await client.patchMcp(project.id, { ...keep, enabledForSession: a === "on" });
+      return void console.log(`${pc.green("✓")} ${name} ${a}`);
+    }
+    if (a === "rm" || a === "remove") {
+      await client.removeMcp(project.id, name);
+      return void console.log(`${pc.green("✓")} removed ${name}`);
+    }
+    throw new Error(`unknown action "${a}" — list | add | on | off | rm`);
+  });
+
 program
   .command("snapshot [file]")
   .description("checkpoint this project's brain + board + config to a file")

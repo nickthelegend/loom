@@ -514,6 +514,46 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/conflicts`);
   }
 
+  // ---- saved prompts (core/prompts.ts) — machine-wide, not per project ----
+  prompts(q = ""): Promise<{ saved: Array<{ id: string; title: string; text: string; pinned: boolean; uses: number }>; recent?: string[] }> {
+    return this.request("GET", `/api/prompts${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+  }
+  savePrompt(input: { title?: string; text: string; pinned?: boolean }): Promise<{ prompt: { id: string; title: string } }> {
+    return this.request("POST", "/api/prompts", input);
+  }
+  updatePrompt(promptId: string, patch: { title?: string; text?: string; pinned?: boolean; used?: boolean }): Promise<{ prompt: { id: string } }> {
+    return this.request("PATCH", `/api/prompts/${encodeURIComponent(promptId)}`, patch);
+  }
+  deletePrompt(promptId: string): Promise<{ ok: boolean }> {
+    return this.request("DELETE", `/api/prompts/${encodeURIComponent(promptId)}`);
+  }
+
+  // ---- skills and MCP servers --------------------------------------------
+  skillsCatalog(id: string): Promise<{ skills: Array<{ id: string; name?: string; description?: string; enabled?: boolean; origin?: string; installed?: boolean }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/skills/catalog`);
+  }
+  setSkill(id: string, skillId: string, enabled: boolean): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/skills/${encodeURIComponent(skillId)}`, { enabled });
+  }
+  installSkill(id: string, from: { gitUrl?: string; dir?: string; force?: boolean }): Promise<{ skill: { id: string; name?: string; also?: string[] } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/skills/install`, from);
+  }
+  removeSkill(id: string, skillId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/skills/${encodeURIComponent(skillId)}`);
+  }
+  mcps(id: string, probe = true): Promise<{ mcps: Array<{ name: string; url?: string; command?: string; args?: string[]; enabledForSession?: boolean; connected?: boolean; description?: string }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/mcps${probe ? "" : "?probe=0"}`);
+  }
+  installMcp(id: string, mcp: { name: string; url?: string; command?: string; args?: string[]; headers?: Record<string, string>; env?: Record<string, string> }): Promise<{ installed: { name: string; connected?: boolean } | null }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/mcps/install`, mcp);
+  }
+  patchMcp(id: string, mcp: Record<string, unknown> & { name: string }): Promise<unknown> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/mcps`, { mcp });
+  }
+  removeMcp(id: string, name: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/mcps/${encodeURIComponent(name)}`);
+  }
+
   mcpHealth(id: string): Promise<{ health: Record<string, { up: boolean; failures: number; probedAt: number }> }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/mcps/health`);
   }
