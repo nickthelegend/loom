@@ -210,9 +210,37 @@ export function createComposer(view) {
   function closeMenu(){
       view.menuState = null;
       document.removeEventListener("mousedown", menuAway);
+      document.removeEventListener("keydown", pickerKeys, true);
       // the prompt manager dresses #cmenu up as a bigger glass panel; undress it
-      var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; m.className = "cmenu"; }
+      var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; m.className = "cmenu"; m.removeAttribute("role"); m.removeAttribute("aria-label"); }
       var pb = document.getElementById("promptbtn"); if (pb) pb.classList.remove("on");
+    }
+
+    /**
+     * Arrow keys, Enter and Escape for a picker opened from a button (the
+     * agent menu): focus stays where it was, so the keys are caught here and
+     * walk the rows that have a mousedown action.
+     */
+    function pickerKeys(e){
+      var m = document.getElementById("cmenu");
+      if (!m || m.style.display === "none" || !view.menuState || view.menuState.kind !== "agentmenu") return;
+      var rows = Array.prototype.slice.call(m.querySelectorAll("[data-auto],[data-ai]"));
+      if (!rows.length) return;
+      var at = rows.findIndex(function(r){ return r.classList.contains("sel"); });
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); e.stopPropagation();
+        at = at < 0 ? rows.findIndex(function(r){ return r.classList.contains("cur"); }) : at;
+        var next = (at + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+        rows.forEach(function(r, i){ r.classList.toggle("sel", i === next); r.setAttribute("aria-selected", i === next ? "true" : "false"); });
+        rows[next].scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter" && at >= 0) {
+        e.preventDefault(); e.stopPropagation();
+        rows[at].onmousedown({ preventDefault: function(){} });
+      } else if (e.key === "Escape") {
+        e.preventDefault(); e.stopPropagation();
+        closeMenu();
+        var box = document.getElementById("box"); if (box) box.focus();
+      }
     }
 
     // The model/agent pickers open from a button, not the textarea, so a blur
@@ -630,7 +658,9 @@ export function createComposer(view) {
           var box = document.getElementById("box"); if (box) box.focus();
         };
       });
-      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      m.setAttribute("role", "listbox"); m.setAttribute("aria-label", "Who takes this turn");
+      Array.prototype.forEach.call(m.querySelectorAll("[data-auto],[data-ai]"), function(r){ r.setAttribute("role", "option"); });
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); document.addEventListener("keydown", pickerKeys, true); }, 0);
     }
 
 
@@ -1668,5 +1698,7 @@ export function createComposer(view) {
         var x = bar.querySelector(".sugx"); if (x) x.onclick = function(){ bar.style.display = "none"; };
       }).catch(function(){});
     }
+// Settings → Preferences opens these for the project on screen.
+state.openTools = function(kind){ if (!view.pid) return; if (kind === "skills") openSkillsModal(view.pid); else openMcpModal(view.pid); };
 return { autosizeBox, drawAttach, closeMenu, menuAway, openModelMenu, bindComposer, updateModelLabel, openPermMenu, composerPlaceholder, send };
 }

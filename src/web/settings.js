@@ -262,6 +262,13 @@ import { durfmt } from './transcript.js';
             '<div class="pd">How the baton note is written when one agent hands to the next. Template is instant and free; LLM distills it with a small Claude.</div></div>' +
             '<div class="pc">' + seg("projection", [{ v: "template", l: "Template" }, { v: "llm", l: "LLM" }], cfg.projection.mode) + "</div></div>";
         }
+        hh += '<div class="sgrouph">Tools \u00b7 ' + esc(pname) + "</div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">Skills</div>' +
+          '<div class="pd">Instructions your agents load for this project — install from GitHub or a folder, turn them on and off.</div></div>' +
+          '<div class="pc"><button class="btn outline sm" type="button" data-tools="skills">' + ICONS.spark + "Manage skills</button></div></div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">MCP servers</div>' +
+          '<div class="pd">Tools your agents can call — GitHub, Linear, Slack, databases. Claude Code and Codex use them.</div></div>' +
+          '<div class="pc"><button class="btn outline sm" type="button" data-tools="mcp">' + ICONS.plug + "Manage servers</button></div></div>";
         var agents = cfg.agents || [];
         hh += '<div class="prow"><div class="pl"><div class="pt">Default agent</div>' +
           '<div class="pd">Who receives a message when nobody holds the baton.</div></div>' +
@@ -276,6 +283,18 @@ import { durfmt } from './transcript.js';
             v === "on" ? "Semantic retrieval on — it warms up in the background" : "Semantic retrieval off");
         });
         bindSeg("projection", function(v){ patchCfg({ projection: { mode: v } }, "Briefs: " + v); });
+        Array.prototype.forEach.call(pp.querySelectorAll("[data-tools]"), function(b){
+          b.onclick = function(){
+            var kind = b.getAttribute("data-tools");
+            close();
+            if (state.pid !== pid) location.hash = "#p/" + pid;
+            var tries = 0;
+            (function go(){
+              if (state.openTools && state.pid === pid && document.getElementById("box")) return state.openTools(kind);
+              if (++tries < 40) setTimeout(go, 100); else toast("open " + pname + "\u2019s chat, then try again");
+            })();
+          };
+        });
         document.getElementById("defagent").onchange = function(){ patchCfg({ defaultAgent: this.value }, "Default agent saved"); };
       }).catch(function(e){ pp.innerHTML = '<div class="snote">' + esc(e.message) + "</div>"; });
     }
@@ -870,12 +889,39 @@ import { durfmt } from './transcript.js';
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \u00b7 baton " + esc(p.holder || "\u2014") + "</div></div>" +
         '<div class="pssec">Agents \u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
         '<div class="pshint">Off agents stay in the roster but can\u2019t take turns or hold the baton. Changes land on the next turn \u2014 no restart. You can\u2019t switch off the baton holder; hand it off first.</div>' +
+        '<div class="pssec" style="margin-top:14px">Tools \u2014 skills and MCP servers</div><div class="psrows">' +
+          '<div class="psrow"><div class="psinfo"><div class="psname">Skills</div><div class="pskind" id="psskills">instructions your agents load for this project</div></div>' +
+            '<button type="button" class="btn xs outline" data-pstools="skills">' + ICONS.spark + "Manage</button></div>" +
+          '<div class="psrow"><div class="psinfo"><div class="psname">MCP servers</div><div class="pskind" id="psmcps">tools Claude Code and Codex can call \u2014 GitHub, Linear, Slack, databases</div></div>' +
+            '<button type="button" class="btn xs outline" data-pstools="mcp">' + ICONS.plug + "Manage</button></div></div>" +
         '<div class="pssec" style="margin-top:14px">Policies \u2014 all off by default</div>' +
         '<div class="psrows" id="pspolicies"><div class="loader"><i></i><i></i><i></i><i></i></div></div>' +
         '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>" +
         '<div class="pssec" style="margin-top:14px">Storage</div><div id="psstore" class="psstore">' + LOADER + "</div>";
       if (state.team) drawPsTeam(); else loadTeam().then(drawPsTeam);
       drawPsStore();
+      api("/api/projects/" + pid + "/skills").then(function(r){
+        var el = document.getElementById("psskills"), list = (r && r.skills) || [];
+        var on = list.filter(function(x){ return x.enabled; }).length;
+        if (el) el.textContent = list.length ? on + " of " + list.length + " on \u2014 install from GitHub or a folder" : "none installed yet \u2014 install from GitHub or a folder";
+      }).catch(function(){});
+      api("/api/projects/" + pid + "/mcps").then(function(r){
+        var el = document.getElementById("psmcps"), list = ((r && r.mcps) || []).filter(function(m){ return m.url || m.command; });
+        if (el && list.length) el.textContent = list.length + " installed \u2014 " + list.map(function(m){ return m.name || m.id; }).slice(0, 4).join(", ");
+      }).catch(function(){});
+      Array.prototype.forEach.call(body.querySelectorAll("[data-pstools]"), function(b){
+        b.onclick = function(){
+          var kind = b.getAttribute("data-pstools");
+          close();
+          // settings for another project: go there, then open it once its composer is up
+          if (state.pid !== pid) location.hash = "#p/" + pid;
+          var tries = 0;
+          (function go(){
+            if (state.openTools && state.pid === pid && document.getElementById("box")) return state.openTools(kind);
+            if (++tries < 40) setTimeout(go, 100); else toast("open the project's chat, then try again");
+          })();
+        };
+      });
       // The policy toggles, from the same settings the CLI and config file use.
       api("/api/projects/" + pid + "/config").then(function(cfg){
         var host = document.getElementById("pspolicies"); if (!host) return;
