@@ -225,6 +225,11 @@ export interface BoardTask {
   priority?: "high" | "medium" | "low";
   /** When it's due, as a local date: YYYY-MM-DD. */
   due?: string;
+  /** A crew card (core/crew.ts): the crew, its goal, where it is, and which teammate holds it. */
+  crew?: string;
+  goal?: string;
+  stage?: string;
+  claimedBy?: string;
   createdAt: number;
 }
 

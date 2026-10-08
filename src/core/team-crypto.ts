@@ -186,6 +186,20 @@ export interface InviteFragment {
   invite: string;
   key: TeamKey;
   hub: string;
+  /**
+   * One-link onboarding (daemon/onboard.ts): what the link sets up besides
+   * team membership. All optional — a bare team invite is still an invite.
+   */
+  teamId?: string;
+  team?: string;
+  /** The GitHub repo ("owner/name") to clone and open as a project. */
+  repo?: string;
+  /** The inviter's GitHub login, for "invited by". */
+  from?: string;
+  /** The inviter's project name, used as the joiner's when it clones. */
+  project?: string;
+  /** Crews to set up on the joiner's side, filled from the joiner's own agents. */
+  crews?: Array<{ name: string; planApproval?: boolean; teammates: Array<{ id: string; role: string; kind?: string; charter?: string }> }>;
 }
 
 export function packInvite(f: InviteFragment): string {

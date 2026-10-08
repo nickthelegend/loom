@@ -748,6 +748,8 @@ export function createThread(view) {
             // An orchestra spans many chats — its run's and one per task — so
             // the view listens above the per-chat filter too.
             view.onOrchEvent(frame.event);
+            // A crew spans its channel and one thread per teammate, likewise.
+            view.onCrewEvent(frame.event);
             // Approvals are per project, not per chat: the badge counts them
             // all, and a request from another thread still reaches you.
             view.onApprovalEvent(frame.event);

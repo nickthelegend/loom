@@ -1,5 +1,6 @@
 /** Browser navigation module. See README.md for ownership and startup. */
 import { renderPair } from './connection.js';
+import { joinFromHash,renderJoin } from './join.js';
 import { renderBoard } from './home.js';
 import { renderProject } from './project.js';
 import { isDesktop,renderShell } from './shell.js';
@@ -27,6 +28,9 @@ import { esc } from './format.js';
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     state.redrawFeed = null;
     if (!state.token) return renderPair();
+    // An invite link opened here: what it sets up, then one click (join.js).
+    var invite = joinFromHash();
+    if (invite) return renderJoin(invite);
     takePermalink();
     document.documentElement.classList.toggle("desk", isDesktop());
     if (isDesktop()) return renderShell();

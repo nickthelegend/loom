@@ -717,7 +717,7 @@ import { durfmt } from './transcript.js';
           '<div class="pillrow"><button class="btn outline sm" type="button" data-tcreate>Create team</button></div>';
       }
       h += '<div class="sgrouph">Join a team</div><div class="cloudin">' +
-        teamField("Invite link", "link", 'class="mono" placeholder="loom://team/join#\u2026"') + "</div>" +
+        teamField("Invite link", "link", 'class="mono" placeholder="https://\u2026/join/#\u2026"') + "</div>" +
         '<div class="pillrow"><button class="btn outline sm" type="button" data-tjoin>Join team</button>' +
         '<span class="hintx">' + (t.signedIn ? "The link names its hub; you join as " + esc(t.github) + "." : "Signs in to the link\u2019s hub with the login and secret above.") + "</span></div>";
       pane.innerHTML = h;

@@ -18,6 +18,7 @@ import { probeMcpServer, probeMcpServers, writeMcpSession } from "../core/mcp.js
 import { NativeUsage } from "./runtime/native-usage.js";
 import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
+import { CrewEngine } from "../core/crew.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
@@ -142,6 +143,8 @@ export class ProjectRuntime {
   readonly routes: RouteEngine;
   /** One orchestrator, many parallel workers — see core/orchestra.ts. */
   readonly orchestra: OrchestraEngine;
+  /** Agent Teams: crews of agents with roles, one goal at a time (core/crew.ts). */
+  readonly crews: CrewEngine;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -358,6 +361,45 @@ export class ProjectRuntime {
       maxConcurrentGoals: () => this.config.maxConcurrentGoals ?? null,
       member: () => this.memberLogin,
       coordinator: () => this.coordinator,
+    });
+
+    this.crews = new CrewEngine({
+      projectId: info.id,
+      projectName: info.name,
+      projectDir: info.dir,
+      crews: () => this.config.crews ?? [],
+      saveCrews: (crews) => {
+        if (crews.length) this.config.crews = crews;
+        else delete this.config.crews;
+        this.saveConfig();
+      },
+      roster: () =>
+        this.config.agents.filter(
+          (a) => a.enabled !== false && tierForKind(a.kind) === "adapter" && !isWithdrawnKind(a.kind),
+        ),
+      makeAgent: (cfg, dir) => {
+        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
+        const agent = createAgent({ ...cfg, options: { ...this.policyOptions(cfg), loomProject: info.id } }, dir);
+        if (!isAdapter(agent)) throw new Error(`"${cfg.id}" is a bridge — it can't be on a crew`);
+        return agent;
+      },
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      createChat: (title, opts) => this.createChat(title, opts?.agentId ? { agentId: opts.agentId } : {}),
+      chatExists: (id) => this.chats().some((c) => c.id === id),
+      briefingFor: async (query, agentId) =>
+        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
+          .filter(Boolean)
+          .join("\n\n"),
+      gate: (agentId) => {
+        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
+        this.enforceQuarantine(agentId);
+        this.enforceBudget(agentId);
+      },
+      observe: (event) => this.trackCost(event),
+      stream: (f) => this.liveText(f),
+      createTask: (input) => this.createTask(input),
+      updateTask: (id, patch) => this.updateTask(id, patch as Parameters<ProjectRuntime["updateTask"]>[1]),
+      member: () => this.memberLogin,
     });
 
     this.queue = new PromptQueue(path.join(projectLoomDir(info.dir), "queue.json"), (q) => {
@@ -1688,7 +1730,10 @@ export class ProjectRuntime {
   /** Move or retitle a card. Yours, so this is the real state — not a hint. */
   updateTask(
     id: string,
-    patch: { title?: string; column?: string; agent?: string; blockedBy?: string[]; priority?: string | null; due?: string | null },
+    patch: {
+      title?: string; column?: string; agent?: string; blockedBy?: string[]; priority?: string | null; due?: string | null;
+      crew?: string; goal?: string; stage?: string; claimedBy?: string;
+    },
   ): BoardTask | null {
     const state = readProjectState(this.info.dir);
     const task = (state.tasks ?? []).find((t) => t.id === id);
@@ -1726,6 +1771,7 @@ export class ProjectRuntime {
     if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 200) || task.title;
     if (patch.column !== undefined) task.column = patch.column;
     if (patch.agent !== undefined) task.agent = patch.agent;
+    for (const k of ["crew", "goal", "stage", "claimedBy"] as const) if (patch[k] !== undefined) task[k] = String(patch[k]).slice(0, 80);
     if (patch.blockedBy !== undefined) {
       // Cycles refused at write: A→B→A makes both unbecomable forever, and the
       // person who typed it is the one who can pick which link was wrong.
@@ -3019,6 +3065,7 @@ export class ProjectRuntime {
 
   async close(): Promise<void> {
     await this.orchestra.shutdown().catch(() => { });
+    await this.crews.shutdown().catch(() => { });
     this.closed = true;
     this.harnesses.stop();
     this.live.close();

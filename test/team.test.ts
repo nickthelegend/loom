@@ -235,7 +235,7 @@ describe("two members, one repo, a real hub", () => {
     const team = await alice.link.createTeam("Acme");
     await alice.link.share(alice.rt, team.id);
     const { link } = await alice.link.invite(team.id);
-    expect(link).toMatch(/^loom:\/\/team\/join#/);
+    expect(link).toMatch(/^https:\/\/.+\/join\/#/);
 
     // bob's daemon signs in from the link's hub; the key comes from the fragment
     await bob.link.join(link, { github: "bob", secret: "s3cret" });
@@ -323,7 +323,7 @@ describe("the daemon's team routes and the `loom team` CLI", () => {
       const created = await client.teamAction("create", { name: "Routes" });
       expect(created.result).toMatchObject({ name: "Routes" });
       const inv = (await client.teamAction("invite")).result as { link: string };
-      expect(inv.link).toMatch(/^loom:\/\/team\/join#/);
+      expect(inv.link).toMatch(/^https:\/\/.+\/join\/#/);
       expect(await client.shareProject(pid)).toEqual({ repo: "acme/routes", teamId: (created.result as { id: string }).id });
 
       const st = (await client.team()) as { github: string; teams: Array<{ repos: string[]; members: Array<{ github: string }> }> };

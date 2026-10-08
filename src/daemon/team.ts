@@ -34,6 +34,7 @@ import {
   signPayload,
   unpackInvite,
   type DeviceKeys,
+  type InviteFragment,
   type TeamKey,
 } from "../core/team-crypto.js";
 import {
@@ -61,6 +62,7 @@ import { TeamCoordinator } from "./team-coordinator.js";
 import type { OrchestraRun } from "../core/orchestra.js";
 import { Runner, readRunnerConfig, writeRunnerConfig, type JobPayload, type JobProgress, type RunnerConfig } from "./runner.js";
 import { rollupCosts } from "../core/team-landing.js";
+import { inviteFragment, inviteLink } from "../core/invite-link.js";
 import { prRowFeed, WEBHOOK_EVENTS } from "../core/github-events.js";
 
 // ---------------------------------------------------------------------------
@@ -77,6 +79,12 @@ interface TeamState {
   hub?: { url: string; token: string; github: string; userId: string; key?: string };
   device?: DeviceKeys & { id?: string };
   teams: Record<string, { name: string; role: TeamRole; keys: TeamKey[] }>;
+  /**
+   * One-link onboarding: invites that should give whoever redeems them push
+   * access to a repo. Consumed oldest-first by `member_joined` (invites are
+   * single-use, so one join is one grant).
+   */
+  grants?: Array<{ teamId: string; repo: string; expiresAt: number; createdAt?: number }>;
 }
 
 function defaultStateFile(): string {
@@ -139,6 +147,8 @@ export interface TeamLinkHost {
   hubFactory?: (url: string, token: string) => HubClient;
   /** Where team.json lives; defaults to ~/.loom/team.json. Tests run two members in one process. */
   statePath?: string;
+  /** Tests swap `gh` for one-link onboarding's repo-access grant. */
+  gh?: (args: string[]) => Promise<string>;
   /** Tests swap `gh` (and friends) for the landing flow (Phase 4). */
   landingExec?: Exec;
   landingRerunSettleMs?: number;
@@ -395,6 +405,14 @@ export class TeamLink {
     });
     const unsub = await this.hub().subscribe(teamId, (e) => void this.onHubEvent(e));
     this.unsubs.set(teamId, unsub);
+    // Someone may have joined on one of our invites while this Loom was off:
+    // they're in the member list now, newer than the invite.
+    const granted = new Set<string>();
+    for (const g of (this.state.grants ?? []).filter((x) => x.teamId === teamId && x.createdAt)) {
+      const joiner = members.find((m) => m.joinedAt >= g.createdAt! && m.user.github !== this.state.hub?.github && !granted.has(m.user.github));
+      if (joiner) granted.add(joiner.user.github);
+      if (joiner) void this.grantJoiner(teamId, joiner.user.github).catch((err) => logbook.warn("team", "couldn't give the new teammate access", String(err)));
+    }
   }
 
   private async onHubEvent(e: HubEvent): Promise<void> {
@@ -429,6 +447,7 @@ export class TeamLink {
       const t = e.event.type;
       if (t === "key_rotated") await this.pullKeys(e.teamId).then(() => writeState(this.file, this.state)).catch(() => {});
       if (t === "member_joined" || t === "member_left" || t === "key_rotated") v.members = await this.hub().members(e.teamId).catch(() => v.members);
+      if (t === "member_joined") void this.grantJoiner(e.teamId, String(e.event.meta.github ?? "")).catch((err) => logbook.warn("team", "couldn't give the new teammate access", String(err)));
       if (t === "repo_shared") v.repos = await this.hub().repos(e.teamId).catch(() => v.repos);
       if (t === "member_left" && e.event.meta.github === this.state.hub?.github) {
         // We were removed: drop the team and its keys.
@@ -454,18 +473,60 @@ export class TeamLink {
     return { id: team.id, name: team.name };
   }
 
-  /** An invite link: the token and the current team key ride the #fragment (D5). */
-  async invite(teamId = this.defaultTeam()): Promise<{ link: string; expiresAt: number }> {
+  /**
+   * An invite link: the token and the current team key ride the #fragment
+   * (D5) — never sent to any server, the join page included. `extra` makes it
+   * a one-link onboarding (daemon/onboard.ts): the repo to clone, the crews to
+   * set up, and whether joining grants push access to the repo.
+   */
+  async invite(
+    teamId = this.defaultTeam(),
+    extra: { repo?: string; project?: string; crews?: InviteFragment["crews"]; grant?: boolean } = {},
+  ): Promise<{ link: string; expiresAt: number }> {
     const { invite, expiresAt } = await this.hub().createInvite(teamId);
-    const frag = packInvite({ invite, key: this.currentKey(teamId), hub: this.state.hub!.url });
-    return { link: `loom://team/join#${frag}`, expiresAt };
+    const frag = packInvite({
+      invite,
+      key: this.currentKey(teamId),
+      hub: this.state.hub!.url,
+      teamId,
+      team: this.state.teams[teamId]?.name,
+      ...(this.state.hub?.github ? { from: this.state.hub.github } : {}),
+      ...(extra.repo ? { repo: extra.repo } : {}),
+      ...(extra.project ? { project: extra.project.slice(0, 60) } : {}),
+      ...(extra.crews?.length ? { crews: extra.crews } : {}),
+    });
+    if (extra.grant && extra.repo) {
+      const now = Date.now();
+      this.state.grants = [...(this.state.grants ?? []).filter((g) => g.expiresAt > now), { teamId, repo: extra.repo, expiresAt, createdAt: now }];
+      writeState(this.file, this.state);
+    }
+    return { link: inviteLink(frag), expiresAt };
   }
 
-  async join(link: string, opts: { github?: string; secret?: string } = {}): Promise<{ id: string; name: string }> {
-    const frag = link.includes("#") ? link.slice(link.indexOf("#") + 1) : link;
-    const inv = unpackInvite(frag);
+  /** Signed in to this hub already? (A link names its hub.) */
+  signedInTo(hub: string): boolean {
+    return Boolean(this.state.hub && this.state.hub.url === hub.replace(/\/$/, ""));
+  }
+
+  /** This daemon's GitHub login on its hub. */
+  github(): string | null {
+    return this.state.hub?.github ?? null;
+  }
+
+  /** The teams this daemon is in, with the repos each shares. */
+  teams(): Array<{ id: string; name: string; repos: string[] }> {
+    return Object.entries(this.state.teams).map(([id, t]) => ({ id, name: t.name, repos: this.views.get(id)?.repos ?? [] }));
+  }
+
+  async join(link: string, opts: { github?: string; secret?: string; token?: string } = {}): Promise<{ id: string; name: string; alreadyMember?: boolean }> {
+    const inv = unpackInvite(inviteFragment(link));
     if (!inv) throw new Error("that isn't a Loom team invite link");
-    if (!this.state.hub || this.state.hub.url !== inv.hub.replace(/\/$/, "")) await this.signIn(inv.hub, opts);
+    if (!this.signedInTo(inv.hub)) await this.signIn(inv.hub, opts);
+    // Clicking your own link twice (or one for a team you're in) is not an error.
+    if (inv.teamId && this.state.teams[inv.teamId]) {
+      if (!this.views.has(inv.teamId)) await this.attach(inv.teamId);
+      return { id: inv.teamId, name: this.state.teams[inv.teamId]!.name, alreadyMember: true };
+    }
     const { team, role } = await this.hub().redeemInvite(inv.invite);
     // Seal the key we were handed to our own device, so it survives a reinstall
     // of team.json from the hub, and so rotation has a device to seal to.
@@ -506,6 +567,26 @@ export class TeamLink {
     this.views.delete(teamId);
     delete this.state.teams[teamId];
     writeState(this.file, this.state);
+  }
+
+  /**
+   * Someone redeemed an invite that promised repo access: add them as a
+   * collaborator with push, through this machine's `gh` (it's your repo, and
+   * your invite). GitHub sends them an invitation their Loom accepts.
+   */
+  private async grantJoiner(teamId: string, github: string): Promise<void> {
+    if (!github || github === this.state.hub?.github) return;
+    const now = Date.now();
+    const grants = (this.state.grants ?? []).filter((g) => g.expiresAt > now);
+    const at = grants.findIndex((g) => g.teamId === teamId);
+    if (at < 0) return;
+    const [grant] = grants.splice(at, 1);
+    this.state.grants = grants;
+    writeState(this.file, this.state);
+    const gh = this.host.gh ?? ((args: string[]) => run("gh", args));
+    await gh(["api", "-X", "PUT", `repos/${grant!.repo}/collaborators/${github}`, "-f", "permission=push"]);
+    logbook.info("team", `gave @${github} push access to ${grant!.repo}`);
+    this.host.broadcast({ type: "team", teamId, event: { type: "access_granted", meta: { github, repo: grant!.repo }, ts: now } });
   }
 
   private defaultTeam(): string {

@@ -7,6 +7,7 @@ import { createExplorer } from './project/explorer.js';
 import { createFleet } from './project/fleet.js';
 import { createObservatory } from './project/observatory.js';
 import { createOrchestra } from './project/orchestra.js';
+import { createCrew } from './project/crew.js';
 import { createQueue } from './project/queue.js';
 import { createRoutes } from './project/routes.js';
 import { createTerminal } from './project/terminal.js';
@@ -15,6 +16,7 @@ import { createThread } from './project/thread.js';
 import { approvalClick,approvalKey,closeApprovalsPop,openApprovalsPop } from './approvals.js';
 import { copyText } from './clipboard.js';
 import { openConnectPhone } from './connect-phone.js';
+import { openInvite } from './invite.js';
 import { api,clearTimers } from './connection.js';
 import { bindConsole } from './console.js';
 import { renderDiffLines } from './diff.js';
@@ -114,6 +116,7 @@ import { openMenu } from './menus.js';
       get onTermFrame() { return onTermFrame; },
       get onQueueFrame() { return onQueueFrame; },
       get onOrchEvent() { return onOrchEvent; },
+      get onCrewEvent() { return onCrewEvent; },
       get onApprovalEvent() { return onApprovalEvent; },
       get onFleetEvent() { return onFleetEvent; }
     });
@@ -193,6 +196,12 @@ import { openMenu } from './menus.js';
       get desktop() { return desktop; }, set desktop(value) { desktop = value; },
       get showTab() { return showTab; },
       get ORCH_TASK_KINDS() { return ORCH_TASK_KINDS; },
+    });
+    var { loadCrews, onCrewEvent, drawCrew } = createCrew({
+      get pid() { return pid; },
+      get desktop() { return desktop; },
+      get chatId() { return chatId; },
+      get showTab() { return showTab; }
     });
     var { loadApprovals, onApprovalEvent } = createApprovalEvents({
       get pid() { return pid; },
@@ -341,6 +350,8 @@ import { openMenu } from './menus.js';
         // Tool calls waiting on you, from any thread of this project.
         '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>' +
         // &#96; is a backtick — a literal one would close this template literal
+        // One link brings a teammate in: the team, this repo, their agents, the crews.
+        '<button id="invitebtn" class="btn outline sm invitebtn" type="button" title="invite a teammate \u2014 one link sets up the team, this repo and their agents">' + ICONS.team + "<span>Invite</span></button>" +
         '<button id="termbtn" class="iconbtn" title="toggle terminal (\u2303&#96;)">' + ICONS.terminal + "</button>" +
         // Connect a phone: a QR (or copy link) that pairs the native app over the
         // LAN or the tailnet. Sits by the terminal because both are "reach this
@@ -364,6 +375,7 @@ import { openMenu } from './menus.js';
         '<div class="pane scroll" id="pane-observatory" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-board" style="display:none"></div>' +
         '<div class="pane scroll" id="pane-orchestra" style="display:none"></div>' +
+        '<div class="pane scroll" id="pane-crew" style="display:none"></div>' +
         '<div class="pane scroll" id="pane-fleet" style="display:none"></div>' +
                 composerHtml +
         "</div>" +
@@ -494,22 +506,26 @@ import { openMenu } from './menus.js';
       // Orchestra sits beside Thread: a run is a conversation that fanned out,
       // and its tasks are threads of their own.
       tabs.splice(1, 0, "orchestra");
-      // Fleet sits beside Orchestra: the same question — who is doing what —
+      // Crew sits beside Orchestra: agents with roles working one goal together.
+      tabs.splice(2, 0, "crew");
+      // Fleet sits beside them: the same question — who is doing what —
       // asked of every agent in every open project, not one run's workers.
-      tabs.splice(2, 0, "fleet");
+      tabs.splice(3, 0, "fleet");
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
       // Plain words, each with a line saying what's behind it: "Brain",
       // "Fleet" and "Observatory" were names you had to learn before you
       // could guess what they did.
       var LBL = { thread: [ICONS.thread, "Chat", "talk to an agent in this thread"],
                   orchestra: [ICONS.orchestra, "Orchestra", "one agent plans, a team builds in parallel"],
+                  crew: [ICONS.team, "Crew", "agents with roles plan, build, review and test a goal"],
                   fleet: [ICONS.fleet, "Agents", "what every agent is doing right now"],
                   board: [ICONS.board, "Board", "issues, PRs and tasks"],
                   brain: [ICONS.memory, "Memory", "what every agent here remembers"],
                   observatory: [ICONS.telescope, "Insights", "time, tokens and cost"] };
       box.innerHTML = tabs.map(function(tb){
         return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '" title="' + LBL[tb][1] + " — " + LBL[tb][2] + '">' +
-          LBL[tb][0] + '<span class="tl">' + LBL[tb][1] + "</span>" + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") + "</button>";
+          LBL[tb][0] + '<span class="tl">' + LBL[tb][1] + "</span>" + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") +
+          (tb === "crew" ? '<span class="tdot" id="crewtdot" style="display:none"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".tab"), function(tb){
         tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
@@ -536,7 +552,7 @@ import { openMenu } from './menus.js';
     }
     function showTabNow(name){
       state.tab = name;
-      ["thread", "orchestra", "fleet", "board", "brain", "observatory"].forEach(function(t){
+      ["thread", "orchestra", "crew", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -551,6 +567,7 @@ import { openMenu } from './menus.js';
       if (name === "board") { if (board.data) drawBoardPane(); else loadBoard(); }
       if (name === "observatory") drawObservatory();
       if (name === "orchestra") { drawOrch(); loadOrch(); }
+      if (name === "crew") { drawCrew(); loadCrews(); }
       // Fleet polls only while you can see it.
       if (name === "fleet") { drawFleet(); loadFleet(); loadTeam(); }
       fleetPoll(name === "fleet");
@@ -625,6 +642,8 @@ import { openMenu } from './menus.js';
       };
       var phb = document.getElementById("phonebtn");
       if (phb) phb.onclick = openConnectPhone;
+      var ivb = document.getElementById("invitebtn");
+      if (ivb) ivb.onclick = function(){ openInvite(pid); };
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
       var dockEl = document.getElementById("dockpane");
@@ -1758,6 +1777,8 @@ import { openMenu } from './menus.js';
       if (el && names && !teamEditing(el)) drawOrch();
     };
     loadOrch();
+    // The Crew tab's dot says a crew is working (or waits on you) before you open it.
+    if (desktop) loadCrews();
     loadApprovals();
     // Events that change a Fleet row; a burst (a plan spawning five tasks)
     // coalesces into one fetch.

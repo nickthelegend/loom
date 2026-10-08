@@ -91,6 +91,10 @@ import {
 import { SpecRunner } from "./specs.js";
 import { BUILD_REV, DEFAULT_PORT, tailscaleIp } from './system.js';
 import { TeamLink } from "./team.js";
+import { Onboarding } from "./onboard.js";
+import { addProjectAt } from "./routes/projects.js";
+import { registerCrewsRoutes } from "./routes/crews.js";
+import { registerOnboardRoutes } from "./routes/onboard.js";
 import { TerminalManager } from "./terminals.js";
 export { BUILD_REV, DEFAULT_PORT, fingerprintBuild, isLoopback, isLoopbackHost, lanIp, listModelsForKind, type ModelList, type ModelSource, tailscaleFunnel, tailscaleIp, tailscaleState, tailscaleUp } from './system.js';
 
@@ -108,6 +112,9 @@ export interface DaemonOptions {
   hubFactory?: (url: string, token: string) => HubClient;
   /** `loom runner exec` in a container: run this one claimed job, then call done (Phase 5, D70). */
   runnerExec?: { teamId: string; jobId: string; done(ok: boolean): void };
+  /** Tests: GitHub without GitHub — `gh` for invites/grants, and the clone a join makes. */
+  gh?: (args: string[]) => Promise<string>;
+  onboard?: { clone?: (repo: string, dir: string) => Promise<void>; projectsHome?: string; accessPollMs?: number; accessWaitMs?: number };
 }
 
 export class LoomDaemon {
@@ -233,6 +240,9 @@ export class LoomDaemon {
 
   /** Loom Teams: this daemon on a Team Hub. See daemon/team.ts. */
   readonly team: TeamLink;
+  /** One-link onboarding: joining a team, its repo and its crews from an invite. See daemon/onboard.ts. */
+  readonly onboarding: Onboarding;
+  private gh: DaemonOptions["gh"];
 
   constructor(opts: DaemonOptions = {}) {
     this.team = new TeamLink({
@@ -242,6 +252,7 @@ export class LoomDaemon {
       },
       ...(opts.hubFactory ? { hubFactory: opts.hubFactory } : {}),
       ...(opts.runnerExec ? { runnerExec: opts.runnerExec } : {}),
+      ...(opts.gh ? { gh: opts.gh } : {}),
       // Phase 5: a runner opens each goal's fresh clone as its own project, and drops it after.
       openProject: async (dir, name) => this.runtime(registerProject(dir, name).id),
       closeProject: async (rt) => {
@@ -250,6 +261,16 @@ export class LoomDaemon {
         unregisterProject(rt.info.id);
       },
     });
+    this.onboarding = new Onboarding({
+      team: this.team,
+      projects: () => listProjects(),
+      addProject: async (dir, name) => (await addProjectAt(dir, name)).info,
+      runtime: (id) => this.runtime(id),
+      broadcast: (frame) => this.delivery.publish(frame, { kind: "admin" }),
+      ...(opts.gh ? { gh: opts.gh } : {}),
+      ...opts.onboard,
+    });
+    this.gh = opts.gh;
     this.relayTransportFactory = opts.relayTransport;
     this.host = opts.host ?? "127.0.0.1";
     this.port = opts.port ?? DEFAULT_PORT;
@@ -424,6 +445,8 @@ export class LoomDaemon {
     registerProjectTeamRoutes(app, ctx, withRuntime);
     registerApprovalsRoutes(app, ctx, withRuntime);
     registerOrchestraRoutes(app, withRuntime);
+    registerCrewsRoutes(app, withRuntime);
+    registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
     registerAgentsRoutes(app, withRuntime);
     registerBrainRoutes(app, withRuntime);
     registerRoutingRoutes(app, withRuntime);

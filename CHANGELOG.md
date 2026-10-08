@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### One link to bring a teammate in, and crews of agents
+
+- **Invite** (a project's header, or `loom invite`) gives you one https link.
+  Opening it signs the teammate in with GitHub, joins the team, and clones the
+  repo; for a private repo, your Loom grants push access on join and theirs
+  accepts GitHub's invitation. It then opens the repo with *their* agents,
+  shares it with the team, and sets up your crews. Without Loom, the link's
+  page shows one command that installs it and joins. `loom join <link>` does
+  the same from a terminal.
+- **Crews** (Agent Teams, Phase 1): a lead, builders, a reviewer and a tester
+  work one goal in its own worktree. The Lead plans, you approve, and each card
+  is built, reviewed (with rounds of changes) and tested; then you apply the
+  branch. Use the Crew tab, or `loom crew create|goal|say|approve|stop|resume|apply`.
+- Team invite links are https links now. `loom://team/join#…` links still work
+  anywhere a link is accepted.
+
 ### A hundred small things (the enhancement sweep)
 
 Ranked, filed as #109–#208, and built top down. Each one was tried in the

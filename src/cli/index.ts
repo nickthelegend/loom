@@ -1277,6 +1277,160 @@ function printTeam(t: Record<string, unknown>): void {
 }
 
 program
+  .command("invite")
+  .description("invite a teammate to this project: one link sets up the team, the repo, their agents and your crews")
+  .option("--team <id>", "which team, when you're in several")
+  .option("--no-grant", "don't give them push access to the repo when they join")
+  .option("--paste", "hosted sign-in without a local browser")
+  .action(async (opts: { team?: string; grant?: boolean; paste?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const invite = () => client.inviteTeammate(project.id, { ...(opts.team ? { teamId: opts.team } : {}), ...(opts.grant === false ? { grant: false } : {}) });
+    let out;
+    try {
+      out = await invite();
+    } catch (err) {
+      if (!/sign in to a team hub/.test((err as Error).message)) throw err;
+      // not on a hub yet: the hosted one, with GitHub, then try again
+      const { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+      const supabaseUrl = hostedSupabaseUrl("hosted")!;
+      const session = await hostedSession(supabaseUrl, publishableKeyFor(supabaseUrl), Boolean(opts.paste));
+      await client.teamAction("signin", { hub: hostedHubUrl(supabaseUrl), token: session.refreshToken });
+      out = await invite();
+    }
+    console.log(`${pc.green("✓")} ${pc.bold(out.repo)} on ${pc.bold(out.team.name)} — send this to your teammate:\n`);
+    console.log(`  ${pc.cyan(out.link)}\n`);
+    qrcode.generate(out.link, { small: true });
+    console.log(pc.dim(`  one click: GitHub sign-in, the team, the repo, their agents${out.grant ? ", push access" : ""} and your crews`));
+    if (out.grantNote) console.log(pc.yellow(`  ${out.grantNote}`));
+    console.log(pc.dim(`  works once, until ${new Date(out.expiresAt).toLocaleString()} · it carries the team key — send it like a password`));
+    console.log(pc.dim("  no Loom yet on their side? the link shows the one command that installs it and joins"));
+  });
+
+program
+  .command("join <link>")
+  .description("join a team from an invite link: sign in, clone the repo, open it with your agents, set up the crews")
+  .option("--into <dir>", "clone here (default ~/loom-projects/<repo>)")
+  .option("--github <login>", "your GitHub login, for a self-hosted hub")
+  .option("--secret <s>", "a self-hosted hub's join secret")
+  .option("--paste", "hosted sign-in without a local browser")
+  .option("--no-open", "don't open the project in the browser after")
+  .action(async (link: string, opts: { into?: string; github?: string; secret?: string; paste?: boolean; open?: boolean }) => {
+    const client = await ensureDaemon();
+    const p = await client.previewInvite(link);
+    console.log(`${pc.bold(p.team ?? "a Loom team")}${p.repo ? ` · ${p.repo}` : ""}${p.from ? pc.dim(` — from @${p.from}`) : ""}`);
+    let token: string | undefined;
+    if (!p.signedIn) {
+      const { hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+      const sb = hostedSupabaseUrl(p.hub);
+      if (sb !== null) token = (await hostedSession(sb, publishableKeyFor(sb), Boolean(opts.paste))).refreshToken;
+    }
+    let { job } = await client.startJoin({
+      link,
+      dir: process.cwd(),
+      ...(opts.into ? { into: opts.into } : {}),
+      ...(opts.github ? { github: opts.github } : {}),
+      ...(opts.secret ? { secret: opts.secret } : {}),
+      ...(token ? { token } : {}),
+    });
+    const said = new Map<string, string>();
+    const mark: Record<string, string> = { done: pc.green("✓"), skipped: pc.dim("·"), failed: pc.red("✗"), waiting: pc.yellow("…"), running: pc.cyan("→") };
+    for (;;) {
+      for (const s of job.steps) {
+        const line = `${s.state}|${s.detail ?? ""}`;
+        if (s.state === "pending" || said.get(s.id) === line) continue;
+        said.set(s.id, line);
+        if (s.state === "running" && !s.detail) continue;
+        console.log(`  ${mark[s.state] ?? " "} ${s.label}${s.detail ? pc.dim(` — ${s.detail}`) : ""}`);
+      }
+      if (job.state !== "running") break;
+      await new Promise((r) => setTimeout(r, 400));
+      job = (await client.joinStatus(job.id)).job;
+    }
+    if (job.state === "failed") {
+      console.error(pc.red(`couldn't finish: ${job.error}`));
+      console.error(pc.dim("  run the same command again once it's fixed — finished steps are skipped"));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`\n${pc.green("✓")} you're in${job.project ? ` — ${pc.bold(job.project.name)} at ${job.project.dir}` : ""}`);
+    if (job.project) {
+      console.log(pc.dim(`  cd ${job.project.dir} && loom`));
+      if (opts.open !== false) {
+        const url = `${client.baseUrl}/app#p/${job.project.id}`;
+        const { spawn: sp } = await import("node:child_process");
+        const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+        sp(opener, [url], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+      }
+    }
+  });
+
+program
+  .command("crew [action] [args...]")
+  .description("Agent Teams: status | create [template] [name] | goal <text> | say <text> | approve | stop | resume | apply | diff | remove — crews of agents with roles")
+  .option("--crew <id>", "which crew, when the project has several")
+  .option("--to <teammate>", "say: to one teammate")
+  .option("--no-approval", "create: the Lead's plan starts without your OK")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const a = (action ?? "status").toLowerCase();
+    const words = (args ?? []).join(" ").trim();
+    const { crews, templates } = await client.crews(project.id);
+    if (a === "create") {
+      const [first, ...rest] = args ?? [];
+      const template = first && templates.includes(first.toLowerCase()) ? first.toLowerCase() : "ship";
+      const name = (first && templates.includes(first.toLowerCase()) ? rest : args ?? []).join(" ");
+      const { crew } = await client.createCrew(project.id, { template, ...(name ? { name } : {}), ...(opts.approval === false ? { planApproval: false } : {}) });
+      console.log(`${pc.green("✓")} ${pc.bold(crew.name)} (${crew.id}) — ${crew.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}=${t.agent}`).join(", ")}`);
+      console.log(pc.dim(`  give it a goal: loom crew goal "…"${crews.length ? ` --crew ${crew.id}` : ""}`));
+      return;
+    }
+    if (!crews.length) {
+      console.log(pc.dim(`no crews here yet — loom crew create [${templates.join("|")}] [name]`));
+      return;
+    }
+    const crew = opts.crew ? crews.find((c) => c.id === opts.crew || c.name === opts.crew) : crews.length === 1 ? crews[0] : undefined;
+    if (!crew) throw new Error(`which crew? --crew ${crews.map((c) => c.id).join(" | ")}`);
+    if (a === "status") {
+      for (const c of opts.crew ? [crew] : crews) printCrew(c);
+      return;
+    }
+    if (a === "diff") {
+      const out = await client.crewDiff(project.id, crew.id);
+      process.stdout.write(out.diff || pc.dim("no changes yet\n"));
+      return;
+    }
+    if (a === "remove") {
+      await client.removeCrew(project.id, crew.id);
+      console.log(`${pc.green("✓")} removed ${crew.name}`);
+      return;
+    }
+    if ((a === "goal" || a === "say") && !words) throw new Error(`loom crew ${a} "<text>"`);
+    const out = await client.crewAction(project.id, crew.id, a, { ...(words ? { text: words } : {}), ...(opts.to ? { to: opts.to } : {}) });
+    if (a === "say") console.log(`${pc.green("✓")} ${out.routed === "goal" ? "new goal" : out.routed === "answer" ? "answered" : out.routed === "replan" ? "the Lead replans with that" : `noted for ${out.to}`}`);
+    else if (a === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(out.merged)} into ${pc.bold(out.into)}`);
+    else printCrew(out.crew);
+  });
+
+function printCrew(c: Record<string, any>): void {
+  const g = c.state?.goal;
+  console.log(`${pc.bold(c.name)} ${pc.dim(`(${c.id})`)}${c.busy ? pc.cyan(" working") : ""}`);
+  console.log(`  ${c.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}${pc.dim(`:${t.role}=${t.agent}`)}`).join("  ")}`);
+  if (!g) return void console.log(pc.dim("  no goal yet — loom crew goal \"…\""));
+  const color = g.status === "completed" ? pc.green : g.status === "failed" ? pc.red : g.status.startsWith("waiting") || g.status === "awaiting_approval" ? pc.yellow : pc.cyan;
+  console.log(`  ${color(g.status)} ${g.text.split("\n")[0].slice(0, 80)} ${pc.dim(g.branch)}`);
+  for (const card of g.cards ?? []) {
+    const m = card.stage === "done" ? pc.green("✓") : card.stage === "failed" ? pc.red("✗") : card.stage === "planned" ? pc.dim("·") : pc.cyan("→");
+    console.log(`   ${m} ${card.title}${card.builder ? pc.dim(` ${card.builder}`) : ""}${card.stage !== "done" && card.stage !== "planned" ? pc.dim(` [${card.stage}]`) : ""}${card.error ? pc.red(` ${card.error.slice(0, 80)}`) : ""}`);
+  }
+  if (g.question) console.log(pc.yellow(`  ${g.question.teammate} asks: ${g.question.text}`) + pc.dim("  (loom crew say \"…\")"));
+  if (g.status === "awaiting_approval") console.log(pc.dim("  loom crew approve — or loom crew say \"…\" to change the plan"));
+  if (g.status === "completed" && !g.applied) console.log(pc.dim("  loom crew apply — merge it into your branch · loom crew diff"));
+  if (g.summary && g.status === "completed") console.log(`  ${g.summary.split("\n")[0].slice(0, 120)}`);
+}
+
+program
   .command("team [action] [args...]")
   .description("Loom Teams: status | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | deploys | release-notes <since> | webhook [--repo r] [--install] | remove <github> | leave")
   .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")

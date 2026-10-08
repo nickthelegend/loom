@@ -672,7 +672,7 @@ describe("web app · fleet", () => {
     const m = await opened();
     await ready(m, '.tab[data-tab="fleet"]');
     const tabs = $$(m, "#tabsbox .tab").map((t) => t.getAttribute("data-tab"));
-    expect(tabs.slice(0, 3)).toEqual(["thread", "orchestra", "fleet"]);
+    expect(tabs.slice(0, 4)).toEqual(["thread", "orchestra", "crew", "fleet"]);
     click($(m, '.tab[data-tab="fleet"]'));
     await waitUntil(() => shown($(m, "#pane-fleet")) && !!$(m, '#pane-fleet .frow[data-fagent="plannerbot"]'));
     // this project leads, marked as such; the other open project is there too

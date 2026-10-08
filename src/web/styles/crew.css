@@ -1,0 +1,94 @@
+  /* ── Crew (Agent Teams P1): a roster strip, the goal's cards by stage, the channel ──
+     Built on the Orchestra view's frame (.orchview/.ohead/.ocard/.opill), so
+     the two read as one family. Colour is state only: live cyan, warn, ok, err. */
+  #pane-crew{padding:18px 20px 40px}
+  .crewview .crewtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .crewname{font-size:14px;font-weight:600;color:var(--foreground)}
+  .crewsel{height:28px;max-width:100%;padding:0 8px;border-radius:var(--radius-sm);border:1px solid var(--input);
+    background:var(--background);color:var(--foreground);font:inherit;font-size:12.5px}
+  .crewbusy{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted-foreground);font-family:var(--font-mono)}
+  .crewnote{font-size:12.5px;color:var(--muted-foreground);line-height:1.5}
+  .crewempty{padding:28px 16px 8px}
+
+  /* create */
+  .crewmake{display:flex;flex-direction:column;gap:12px;border:1px solid var(--border);border-radius:var(--radius-xl);
+    background:var(--card);padding:14px 16px}
+  .crewtpls{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+  .crewtpl{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;padding:10px 12px;cursor:pointer;
+    border:1px solid var(--border);border-radius:var(--radius-md);background:transparent;color:var(--muted-foreground);
+    font:inherit;font-size:12px;line-height:1.4;transition:background .12s,border-color .12s,color .12s}
+  .crewtpl b{font-size:13px;font-weight:600;color:var(--foreground)}
+  .crewtpl:hover{background:var(--accent)}
+  .crewtpl.on{border-color:color-mix(in srgb, var(--primary) 35%, transparent);background:color-mix(in srgb, var(--primary) 7%, transparent);color:var(--foreground)}
+  .crewmrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .crewin{min-width:0;border:1px solid var(--input);border-radius:var(--radius-sm);background:var(--background);
+    color:var(--foreground);font:inherit;font-size:13px;padding:6px 9px}
+  .crewin:focus{outline:none;border-color:var(--ring)}
+  input.crewin{height:32px;flex:1 1 200px}
+  .crewchk{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted-foreground);cursor:pointer}
+
+  /* roster strip */
+  .crewroster{display:flex;flex-wrap:wrap;gap:6px}
+  .crewmate{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:99px;
+    border:1px solid var(--border);background:var(--card);font-size:12px;color:var(--muted-foreground);max-width:100%}
+  .crewmate .brand,.crewmate .agpic{width:13px;height:13px}
+  .crewmate .cmid{color:var(--foreground);font-weight:600}
+  .crewmate .cmrole{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+  .crewmate .cmagent{font-family:var(--font-mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .crewmate.live{border-color:color-mix(in srgb, var(--thread) 45%, transparent);background:color-mix(in srgb, var(--thread) 8%, var(--card))}
+  .crewmate .odot.live{animation:autopulse 1.6s ease-in-out infinite}
+
+  /* goal + channel */
+  .crewgrid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start}
+  .crewmain{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .crewgoal{display:flex;flex-direction:column;gap:10px}
+  .crewmeta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:11.5px;color:var(--muted-foreground)}
+  .crewmeta .mono{font-family:var(--font-mono);font-size:11px;word-break:break-all}
+  .crewask{font-size:13px;line-height:1.5;padding:9px 12px;border-radius:var(--radius-md);color:var(--foreground);
+    border:1px solid color-mix(in srgb, var(--warn) 40%, transparent);background:color-mix(in srgb, var(--warn) 9%, transparent);word-break:break-word}
+  .crewask b{color:var(--warn)}
+  .crewsum{font-size:12.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--foreground)}
+  .crewacts{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .crewacts .btn svg{width:13px;height:13px}
+  .crewapplied{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ok)}
+  .crewapplied svg{width:13px;height:13px}
+  .crewdiff{max-height:420px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-md)}
+  .crewcards{display:flex;flex-direction:column;gap:10px}
+  .crewsth{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:5px}
+  .crewsth .n{font-family:var(--font-mono);font-weight:500}
+  .crewstage{display:flex;flex-direction:column;gap:5px}
+  .crewcard{border:1px solid var(--border);border-radius:var(--radius-md);padding:8px 10px;background:var(--background)}
+  .crewcard.live{border-color:color-mix(in srgb, var(--thread) 45%, transparent)}
+  .crewstage[data-stage="done"] .crewcard{border-color:color-mix(in srgb, var(--ok) 30%, var(--border))}
+  .crewstage[data-stage="failed"] .crewcard{border-color:color-mix(in srgb, var(--err) 40%, var(--border))}
+  .crewcard .cct{font-size:13px;font-weight:500;color:var(--foreground);word-break:break-word}
+  .crewcard .ccm{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:3px;font-size:10.5px;font-family:var(--font-mono);color:var(--muted-foreground)}
+  .crewcard .ccm .live{color:var(--thread-ink)}
+  .crewcard .cce{margin-top:4px;font-size:12px;color:var(--err);white-space:pre-wrap;word-break:break-word}
+  .crewsay{display:flex;flex-direction:column;gap:8px}
+  .crewsay textarea{resize:vertical;min-height:52px;line-height:1.45}
+  .crewsayrow{display:flex;align-items:center;gap:8px}
+  .crewsayrow .spacer{margin-left:auto}
+  .crewsay .btn svg{width:14px;height:14px}
+  .crewchan{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius-xl);background:var(--card);
+    min-width:0;max-height:70vh}
+  .crewchh{display:flex;align-items:center;gap:8px;padding:8px 10px 6px 14px;border-bottom:1px solid var(--border);
+    font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
+  .crewchh .spacer{margin-left:auto}
+  .crewchh .btn{text-transform:none;letter-spacing:0;font-weight:500}
+  .crewchh .btn svg{width:13px;height:13px}
+  .crewevs{display:flex;flex-direction:column;gap:2px;padding:8px 10px 10px;overflow-y:auto}
+  .crewev{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 7px;padding:4px 4px;font-size:12px;line-height:1.45;border-radius:var(--radius-sm)}
+  .crewev .cwt{font-size:10px;font-family:var(--font-mono);color:var(--muted-foreground);flex:none}
+  .crewev .cww{font-weight:600;color:var(--foreground);flex:none}
+  .crewev .cwx{color:var(--foreground);word-break:break-word;white-space:pre-wrap;min-width:0;flex:1 1 160px}
+  .crewev.cphase .cwx{color:var(--muted-foreground)}
+  .crewev.cmine{background:color-mix(in srgb, var(--muted) 60%, transparent)}
+  .crewev.cphase[data-phase="asks"] .cwx{color:var(--warn)}
+  .crewev.cphase[data-phase="failed"] .cwx,.crewev.cphase[data-phase="card_failed"] .cwx{color:var(--err)}
+  .crewev.cphase[data-phase="completed"] .cwx,.crewev.cphase[data-phase="applied"] .cwx{color:var(--ok)}
+  @media (max-width: 900px){
+    #pane-crew{padding:14px 12px 32px}
+    .crewgrid{grid-template-columns:minmax(0,1fr)}
+    .crewchan{max-height:none}
+  }

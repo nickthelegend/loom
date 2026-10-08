@@ -43,6 +43,9 @@ export type EventKind =
   // agents run them in parallel, each in its own thread and worktree. One
   // kind, `payload.phase` says which step. See core/orchestra.ts.
   | "orchestra"
+  // Agent Teams: a crew's phases (planned, claimed, reviewed, …) in its
+  // channel; `payload.phase` says which. See core/crew.ts.
+  | "crew"
   // An agent in "always ask" mode wants permission for a tool use; payload
   // .phase is "requested" or "decided". See core/approvals.ts.
   | "approval"
@@ -244,6 +247,8 @@ import type { ServerConfig } from "./core/servers.js";
 export interface ProjectConfig {
   name: string;
   agents: AgentConfig[];
+  /** Agent Teams: named crews of roster agents with roles (core/crew.ts). */
+  crews?: import("./core/crew.js").CrewConfig[];
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
   /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */

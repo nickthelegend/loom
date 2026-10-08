@@ -51,6 +51,57 @@ and memory they don't share on their own.
   <em>One thread over every agent — projects and chats on the left, the shared conversation in the middle, the Explorer on the right, and a composer you switch agents from without leaving the box.</em>
 </p>
 
+## One link — a teammate, their agents, your repo
+
+Click **Invite** in a project, or run `loom invite`. Loom makes sure you're on a
+team that shares this repo (it creates the team and shares the repo if you
+haven't) and gives you one https link to send.
+
+Your teammate clicks it. If they already have Loom, it opens in their Loom and
+one **Join** does the rest. If they don't, the page shows one command that
+installs Loom and joins:
+
+1. **Sign in** with GitHub.
+2. **Join** the team, and keep the team key the link carries.
+3. **Get the repo.** Loom uses a clone they already have, or clones it. For a
+   private repo, *your* Loom adds them as a collaborator the moment they join,
+   and *theirs* accepts GitHub's invitation.
+4. **Open it with their agents** — whichever of Codex, OpenCode, Claude Code
+   and the rest are installed on their machine.
+5. **Share** it with the team, so you see each other's live agents, goals and
+   files.
+6. **Set up your crews**, filled from their own agents.
+
+```bash
+loom invite                 # in a project: the link, a QR, and a message to paste
+loom join '<link>'          # the same thing from a terminal
+```
+
+The invite is the part of the link after `#`. Browsers never send that part to
+a server, including the join page's. A link works once and expires in a day.
+It carries the team key, so send it the way you'd send a password.
+
+## Crews — agents with roles, on one goal
+
+A crew is a few of your agents with jobs: a **lead** who plans, **builders**, a
+**reviewer**, a **tester**. You give the crew a goal. The Lead turns it into
+cards, and you approve the plan. Each card is then built, reviewed (changes go
+back to the same builder), and tested, in the goal's own worktree and branch.
+When it's done, you apply it.
+
+```bash
+loom crew create ship       # templates: ship · fix · research · solo
+loom crew goal "Add rate limiting to the public API"
+loom crew approve           # or: loom crew say "smaller cards, please"
+loom crew                   # cards by stage; questions a teammate asked you
+loom crew apply             # merge the goal's branch into yours
+```
+
+The **Crew** tab shows the same thing. Every commit carries `Loom-Crew`,
+`Loom-Goal`, `Loom-Card` and `Loom-Teammate` trailers. Phase 1 works one card
+at a time; [docs/proposals/agent-teams.md](docs/proposals/agent-teams.md) has
+the rest of the plan.
+
 ## Orchestra — one conductor, many agents, in parallel
 
 Give Loom a goal and let one agent run the others. The **orchestrator** can be any
@@ -591,6 +642,8 @@ detects at least two roles.
 | `loom backup [--out file]` | Everything Loom knows in one archive: `~/.loom` and every project's `.loom` (logs copied as consistent snapshots) |
 | `loom completion zsh\|bash` | Shell completion: `loom completion zsh >> ~/.zshrc` |
 | `loom hub [--host --port --secret]` | Run a self-hosted Team Hub for your team |
+| `loom invite` / `loom join <link>` | One link: a teammate joins the team and gets this repo, their agents and your crews |
+| `loom crew [status\|create\|goal\|say\|approve\|stop\|resume\|apply\|diff\|remove]` | Crews: agents with roles (lead, builders, reviewer, tester) working one goal |
 | `loom team [status\|signin\|create\|invite\|join\|share\|unshare\|brain\|landing\|doctor\|adopt\|deploys\|release-notes\|webhook\|remove\|leave]` | Loom Teams: see teammates' live agents and goals; the shared team brain; landing goal PRs; GitHub webhooks; membership and key rotation |
 | `loom land [runId]` | Land a goal's PR: fresh main in, fast tests, push, merge when GitHub's rules pass |
 | `loom runner [status\|pair\|join\|start\|stop\|token\|doctor\|install\|revoke\|goal\|move\|back\|jobs]` | Runners: your always-on Loom that takes goals while you're away |
