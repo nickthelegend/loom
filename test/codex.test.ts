@@ -142,6 +142,41 @@ describe("codex · a normal turn", () => {
   });
 });
 
+describe("codex · a model the ChatGPT plan doesn't have", () => {
+  const PLAN = [{ id: "gpt-6-astra", isDefault: true }, { id: "gpt-6-sol" }, { id: "gpt-5.6-luna" }];
+
+  it("runs the account's default when ~/.codex/config.toml names a model the plan lacks, and says so", async () => {
+    const { events, bin } = await run(CODEX_OK, { model: "gpt-6.1-sol", models: PLAN });
+    expect(rpcOf(bin, "model/list")).toHaveLength(1);
+    expect(rpcOf(bin, "turn/start")[0]).toMatchObject({ model: "gpt-6-astra" });
+    expect(of(events, "status").some((p) => /gpt-6\.1-sol to gpt-6-astra.*older codex/.test(String(p.message)))).toBe(true);
+    expect(of(events, "run_complete")[0]).toMatchObject({ model: "gpt-6-astra" });
+  });
+
+  it("leaves a model the plan has alone, and a model you picked", async () => {
+    const fine = await run(CODEX_OK, { model: "gpt-6-sol", models: PLAN });
+    expect(rpcOf(fine.bin, "turn/start")[0]!.model).toBe("gpt-6-sol");
+    const picked = await run(CODEX_OK, { model: "gpt-6.1-sol", models: PLAN }, {}, { model: "gpt-custom" });
+    expect(rpcOf(picked.bin, "turn/start")[0]!.model).toBe("gpt-custom");
+    // a codex too old for model/list: nothing to judge against, so the thread's model stands
+    const old = await run(CODEX_OK, { model: "gpt-6.1-sol" });
+    expect(rpcOf(old.bin, "turn/start")[0]!.model).toBe("gpt-6.1-sol");
+  });
+
+  it("a refused turn switches the chat to a model the plan has for the next turn", async () => {
+    const refusal = "The 'gpt-custom' model is not supported when using Codex with a ChatGPT account.";
+    const bin = fakeCodex({ models: PLAN, scripts: [[started, codexDone("failed", refusal)]], script: CODEX_OK });
+    const agent = new CodexAdapter("codex", makeProjectDir({ name: "cx" }), { bin, model: "gpt-custom" });
+    const events: AdapterEvent[] = [];
+    agent.onEvent((e) => events.push(e));
+    await agent.send({ text: "one" }).catch(() => {});
+    expect(of(events, "error").map((p) => String(p.message)).join(" ")).toMatch(/update codex, or pick a model/);
+    await agent.send({ text: "two" });
+    expect(rpcOf(bin, "turn/start").map((t) => t.model)).toEqual(["gpt-custom", "gpt-6-astra"]);
+    expect(kinds(events).at(-1)).toBe("run_complete");
+  });
+});
+
 describe("codex · what it did", () => {
   const shell = (command: string, exitCode: number | null, extra: Record<string, unknown> = {}) =>
     codexItem({ type: "commandExecution", command, cwd: "/repo", aggregatedOutput: "ok\n", exitCode, status: "completed", ...extra });
