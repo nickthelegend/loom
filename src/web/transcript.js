@@ -273,6 +273,11 @@ import { shortModel } from './permissions.js';
         (det ? '<span class="tchev">' + ICONS.chevron + "</span>" + '<div class="tooldet">' + det + "</div>" : "") +
         (tview() === "verbose" ? rawBlock(p) : "") + "</div>" + imgs;
     }
+    // a model agent moving to its next model (a busy or app-only free model), and a CLI stopping early: say so
+    if (e.kind === "status" && p.state === "model_fallback") {
+      return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
+    }
+    if (e.kind === "status" && p.state === "stopped_early") return '<div class="sys">\u25a0 ' + esc(labelOf(e.agentId)) + " stopped early" + (p.reason ? " (" + esc(String(p.reason)) + ")" : "") + "</div>";
     // the agent's todo list, as a checklist (the thread keeps the newest one per turn in place)
     if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {
       var doneN = p.plan.filter(function(x){ return x.status === "completed"; }).length;

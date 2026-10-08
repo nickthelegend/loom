@@ -509,7 +509,28 @@ export function EventLine(props: { e: LoomEvent }) {
     );
   }
 
-  if (e.kind === "tool_call") return <Sys color={T.faint} text={`⚙ ${String(p.summary ?? p.tool ?? "tool")}`} />;
+  if (e.kind === "tool_call") {
+    const failed = p.ok === false || !!p.error || (typeof p.exitCode === "number" && p.exitCode !== 0);
+    const why = typeof p.exitCode === "number" && p.exitCode !== 0 ? ` · exit ${p.exitCode}` : failed ? " · failed" : "";
+    const imgs = Array.isArray(p.images) ? p.images.length : 0;
+    return <Sys color={failed ? T.err : T.faint} text={`${failed ? "✗" : "⚙"} ${p.server ? `${String(p.server)} · ` : ""}${String(p.summary ?? p.tool ?? "tool")}${why}${imgs ? ` · ${imgs} image${imgs === 1 ? "" : "s"}` : ""}`} />;
+  }
+  if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {
+    const plan = p.plan as Array<{ step?: string; status?: string }>;
+    return (
+      <View style={{ marginVertical: spacing.xs, padding: spacing.sm, borderRadius: radii.card, borderWidth: 1, borderColor: T.line, backgroundColor: T.panel }}>
+        <Text style={{ color: T.dim, fontSize: 11, fontWeight: "700", marginBottom: 4 }}>
+          PLAN · {plan.filter((x) => x.status === "completed").length}/{plan.length}
+        </Text>
+        {plan.map((x, i) => (
+          <Text key={i} style={{ color: x.status === "completed" ? T.faint : T.text, fontSize: 13, lineHeight: 19,
+            textDecorationLine: x.status === "completed" ? "line-through" : "none", fontWeight: x.status === "inProgress" ? "700" : "400" }}>
+            {x.status === "completed" ? "☑" : x.status === "inProgress" ? "◐" : "☐"} {String(x.step ?? "")}
+          </Text>
+        ))}
+      </View>
+    );
+  }
   if (e.kind === "file_edit") return <Sys color={T.faint} text={`✎ ${String(p.path ?? "")}`} />;
   if (e.kind === "handoff")
     return <Sys color={T.shuttle} text={`${String(p.from ?? "—")}  ⟿  ${String(p.to ?? "—")}`} />;

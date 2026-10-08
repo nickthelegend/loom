@@ -1593,3 +1593,30 @@ describe("web app · an agent's structured question", () => {
     }
   });
 });
+
+describe("web app · what an agent's tools did", () => {
+  it("opens a tool row to its output and exit code, shows its images, and keeps one checklist per turn", async () => {
+    type Rt = { log: { append: (e: Record<string, unknown>) => unknown } };
+    const rt = await (daemon as unknown as { runtime(id: string): Promise<Rt> }).runtime(projectId);
+    const m = mount({ hash: `#p/${projectId}/c/main` });
+    await waitUntil(() => !!$(m, "#feed"));
+    await new Promise((r) => setTimeout(r, 300));
+    rt.log.append({ kind: "tool_call", agentId: "plannerbot", chat: "main", payload: { tool: "shell", summary: "shell: npm test", command: "npm test",
+      exitCode: 1, ok: false, preview: "FAIL tests/a.test.ts" } });
+    rt.log.append({ kind: "tool_call", agentId: "plannerbot", chat: "main", payload: { tool: "screenshot", server: "playwright", kind: "mcp_tool_call",
+      summary: "playwright · screenshot", ok: true, images: [{ path: ".loom/attachments/abc123abc123.png", mime: "image/png" }] } });
+    rt.log.append({ kind: "status", agentId: "plannerbot", chat: "main", payload: { state: "plan_updated", plan: [{ step: "write tests", status: "inProgress" }, { step: "fix", status: "pending" }] } });
+    rt.log.append({ kind: "status", agentId: "plannerbot", chat: "main", payload: { state: "plan_updated", plan: [{ step: "write tests", status: "completed" }, { step: "fix", status: "inProgress" }] } });
+    await waitUntil(() => !!$(m, ".plancheck") && !!$(m, ".toolimgs"));
+    const run = [...m.window.document.querySelectorAll(".tool.hasdet")].find((r) => /npm test/.test(r.textContent ?? ""))! as HTMLElement;
+    expect(run.classList.contains("tfail")).toBe(true);
+    expect(run.textContent).toContain("exit 1");
+    run.click();
+    expect(run.classList.contains("open")).toBe(true);
+    expect(run.querySelector(".tooldet")!.textContent).toContain("FAIL tests/a.test.ts");
+    expect($(m, ".toolimgs img")!.getAttribute("data-att")).toBe(".loom/attachments/abc123abc123.png");
+    expect(m.window.document.querySelectorAll(".plancheck")).toHaveLength(1); // updated in place
+    expect(text(m, ".plancheck .pcn")).toBe("1/2");
+    expect(m.errors.join("\n")).toBe("");
+  });
+});

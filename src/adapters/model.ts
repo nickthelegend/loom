@@ -541,6 +541,8 @@ export class ModelAdapter extends AdapterBase {
               delta?: {
                 content?: string;
                 reasoning_content?: string;
+                /** OpenRouter's name for the same thing. */
+                reasoning?: string;
                 tool_calls?: Array<{
                   index?: number;
                   id?: string;
@@ -562,9 +564,10 @@ export class ModelAdapter extends AdapterBase {
           }
           if (frame.usage) usage = frame.usage;
           const delta = frame.choices?.[0]?.delta;
-          if (delta?.reasoning_content) {
-            thought += delta.reasoning_content;
-            this.streamText(delta.reasoning_content, true);
+          const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+          if (reasoning) {
+            thought += reasoning;
+            this.streamText(reasoning, true);
           }
           if (delta?.content) {
             text += delta.content;

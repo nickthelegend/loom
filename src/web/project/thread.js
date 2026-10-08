@@ -596,6 +596,18 @@ export function createThread(view) {
     // live reply every agent gets — see onStreamFrame), so a delta frame's
     // text is not drawn a second time. Kept for clients that only see deltas.
     function onDelta(frame){
+      // a running command's output, live, under its row (the last few KB; the finished row keeps its tail)
+      if (frame.streamKind === "command_output" && frame.itemId && view.historyLoaded && (frame.chat || "main") === view.chatId) {
+        var fd = document.getElementById("feed"), run = null;
+        if (fd) Array.prototype.forEach.call(fd.querySelectorAll(".tool.running"), function(r){ if (r.getAttribute("data-item") === frame.itemId) run = r; });
+        if (run) {
+          var pre = run.querySelector(".runout");
+          if (!pre) { pre = document.createElement("pre"); pre.className = "runout"; run.appendChild(pre); }
+          pre.textContent = (pre.textContent + String(frame.delta || "")).slice(-4000);
+          pre.scrollTop = pre.scrollHeight;
+        }
+        return;
+      }
       if (frame.streamKind !== "assistant_text" || !frame.agentId || !view.historyLoaded) return;
       if (typeof onStreamFrame === "function") return;
       if ((frame.chat || "main") !== view.chatId) return;
