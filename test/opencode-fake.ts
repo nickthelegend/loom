@@ -150,7 +150,8 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
         push("session.next.step.started", { sessionID: sid, assistantMessageID: asstId, model: s.model });
         if (opts.tool) {
           push("session.next.tool.called", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", tool: opts.tool.tool, input: opts.tool.input });
-          push("session.next.tool.success", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", result: {} });
+          push("session.next.tool.success", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", result: {}, structured: {},
+            content: [{ type: "text", text: "total 8\nhello.html" }], provider: { executed: true } });
         }
         if (opts.compact) {
           push("session.next.compaction.started", { sessionID: sid, messageID: asstId, reason: "auto" });

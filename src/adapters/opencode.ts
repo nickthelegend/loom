@@ -21,6 +21,9 @@
  */
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, agentEnv, cliAvailable, cliOutput, fetchJson, firstLine, frameBriefing, freePort, waitFor, type AgentCheck } from "./base.js";
@@ -102,7 +105,7 @@ export class OpenCodeAdapter extends AdapterBase {
   /** interrupt() was asked for during this turn. */
   private interrupted = false;
   /** Tools opencode started this turn, by call id (1.18 reports name and result separately). */
-  private toolCalls = new Map<string, { tool: string; title: string }>();
+  private toolCalls = new Map<string, { tool: string; title: string; input?: Json }>();
   /** A compaction was already reported as done (both the step event and the session event can say so). */
   private compactionReported = false;
 
@@ -447,6 +450,28 @@ export class OpenCodeAdapter extends AdapterBase {
   private reasoningParts = new Map<string, string>();
   private toolsDone = new Set<string>();
 
+  /** An image a tool returned (a file: URI, or data: base64 filed under .loom/attachments), as a path the thread can show. */
+  private keepImage(uri: string, mime: string): Array<{ path: string; mime: string }> {
+    try {
+      if (uri.startsWith("file://")) {
+        const abs = decodeURIComponent(uri.slice(7));
+        const rel = path.relative(this.projectDir, abs);
+        return [{ path: rel.startsWith("..") ? abs : rel.split(path.sep).join("/"), mime }];
+      }
+      const m = /^data:([^;,]+);base64,(.+)$/s.exec(uri);
+      if (!m) return [];
+      const buf = Buffer.from(m[2]!, "base64");
+      if (!buf.length || buf.length > 12 * 1024 * 1024) return [];
+      const ext = ({ "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" } as Record<string, string>)[m[1]!] ?? "png";
+      const rel = path.join(".loom", "attachments", `${createHash("sha1").update(buf).digest("hex").slice(0, 12)}.${ext}`);
+      const abs = path.join(this.projectDir, rel);
+      if (!fs.existsSync(abs)) { fs.mkdirSync(path.dirname(abs), { recursive: true }); fs.writeFileSync(abs, buf); }
+      return [{ path: rel.split(path.sep).join("/"), mime }];
+    } catch {
+      return [];
+    }
+  }
+
   /** opencode's todos as Loom's plan checklist. */
   private emitPlan(todos: Json[]): void {
     const plan = todos.map((t) => ({ step: String(t.content ?? t.text ?? ""),
@@ -546,7 +571,7 @@ export class OpenCodeAdapter extends AdapterBase {
     if (type === "session.next.tool.called") {
       const input = (props.input ?? {}) as Json;
       const title = String(input.description ?? input.command ?? input.filePath ?? input.path ?? input.pattern ?? props.tool ?? "tool");
-      this.toolCalls.set(callId, { tool: String(props.tool ?? "tool"), title: title.slice(0, 200) });
+      this.toolCalls.set(callId, { tool: String(props.tool ?? "tool"), title: title.slice(0, 200), input });
       return;
     }
     if (type === "session.next.tool.success" || type === "session.next.tool.failed") {
@@ -556,10 +581,20 @@ export class OpenCodeAdapter extends AdapterBase {
       if (callId && this.toolsDone.has(callId)) return;
       if (callId) this.toolsDone.add(callId);
       const err = (props.error ?? {}) as Json;
+      // the result: text blocks are its output, file blocks with an image type are pictures it made or read
+      const content = Array.isArray(props.content) ? (props.content as Json[]) : [];
+      const output = content.filter((c) => c.type === "text" && typeof c.text === "string").map((c) => String(c.text)).join("\n");
+      const images = content.filter((c) => c.type === "file" && /^image\//.test(String(c.mime ?? ""))).flatMap((c) => this.keepImage(String(c.uri ?? ""), String(c.mime)));
+      const input = call.input ? Object.fromEntries(Object.entries(call.input).slice(0, 20).map(([k, v]) => [k, typeof v === "string" && v.length > 600 ? `${v.slice(0, 600)}\u2026` : v])) : undefined;
       this.emit({
         kind: "tool_call",
-        payload: { tool: call.tool, summary: call.title, ok: !type.endsWith("failed"), ...(type.endsWith("failed") ? { error: String(err.message ?? "failed").slice(0, 300) } : {}) },
+        payload: { tool: call.tool, summary: call.title, ok: !type.endsWith("failed"),
+          ...(input && Object.keys(input).length ? { input } : {}),
+          ...(output.trim() ? { preview: output.length > 4000 ? `\u2026\n${output.slice(-4000)}` : output } : {}),
+          ...(images.length ? { images } : {}),
+          ...(type.endsWith("failed") ? { error: String(err.message ?? "failed").slice(0, 1500) } : {}) },
       });
+      if (call.tool === "todowrite" && Array.isArray(call.input?.todos)) this.emitPlan(call.input!.todos as Json[]);
       return;
     }
     if (type === "session.next.compaction.started") {

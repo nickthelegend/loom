@@ -105,3 +105,18 @@ describe("answering in the chat", () => {
     }
   });
 });
+
+describe("opencode's tool results", () => {
+  it("shows a tool's input and output from the 1.18 events, once", async () => {
+    server = await fakeOpenCode({ tool: { tool: "bash", input: { command: "ls -la demo2", description: "list demo2" } } });
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "oct" }), { baseUrl: server.url, pollMs: 30 });
+    const events: AdapterEvent[] = [];
+    adapter.onEvent((e) => events.push(e));
+    await adapter.start();
+    await adapter.send({ text: "list it" });
+    const tools = events.filter((e) => e.kind === "tool_call").map((e) => e.payload);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ tool: "bash", ok: true, input: { command: "ls -la demo2" }, preview: "total 8\nhello.html" });
+    await adapter.stop();
+  });
+});
