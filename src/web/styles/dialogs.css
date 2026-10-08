@@ -1270,3 +1270,18 @@
     background:color-mix(in srgb, var(--ok, #4aa564) 12%, transparent);margin-bottom:4px;box-sizing:content-box}
   .conempty b{font-size:12.5px;font-weight:600;color:var(--foreground)}
   .conempty span{font-size:11.5px;max-width:360px;line-height:1.5}
+
+  /* ── markdown: lists that hold blocks, quotes that nest, GitHub alerts ── */
+  .md .mdlist.loose > li{margin:8px 0}
+  .md .mdlist li > .mdp{margin:0 0 6px}
+  .md .mdlist li > .mdcodewrap,.md .mdlist li > .mdq,.md .mdlist li > .mdtablewrap{margin:6px 0}
+  .md .mdq .mdp:last-child,.md .mdalert .mdp:last-child{margin-bottom:0}
+  .md .mdq .mdq{margin:6px 0 0}
+  .md .mdalert{margin:0 0 12px;padding:8px 12px;border-radius:8px;border-left:3px solid var(--alert-c, var(--thread));
+    background:color-mix(in srgb, var(--alert-c, var(--thread)) 8%, transparent)}
+  .md .mdalerth{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--alert-c, var(--thread));margin-bottom:4px}
+  .md .mdalert.note{--alert-c:#4b8df8}
+  .md .mdalert.tip{--alert-c:var(--ok, #4aa564)}
+  .md .mdalert.important{--alert-c:#a371f7}
+  .md .mdalert.warning{--alert-c:var(--warn, #d29922)}
+  .md .mdalert.caution{--alert-c:var(--err, #f85149)}
