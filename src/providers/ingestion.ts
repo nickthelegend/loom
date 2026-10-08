@@ -12,8 +12,11 @@
  * item's `detail` only stands in when nothing was streamed.
  */
 
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type {
-  CommandItemData, FileChangeItemData, InstanceId, ProviderKind, ProviderRuntimeEvent, ThreadId, ToolItemData,
+  CommandItemData, FileChangeItemData, InstanceId, ProviderKind, ProviderRuntimeEvent, ThreadId, ToolImage, ToolItemData,
 } from "./contracts.js";
 import { ContextArtifacts } from "../core/continuity/artifacts.js";
 
@@ -65,6 +68,28 @@ const PROVIDER_ACCOUNT: Record<ProviderKind, string> = { codex: "codex", "claude
 /** Items that are the agent doing something (as opposed to saying something). */
 const TOOL_ITEMS = new Set(["command_execution", "file_change", "mcp_tool_call", "dynamic_tool_call", "collab_agent_tool_call", "web_search", "image_view"]);
 const ARTIFACT_THRESHOLD = 100_000;
+/** What the thread keeps of a tool's output: enough to read, not a log dump. */
+const OUTPUT_PREVIEW = 4_000;
+const DIFF_PREVIEW = 20_000;
+
+/** The tail of a long output (where a command's verdict is), marked as cut. */
+function preview(text: string | undefined | null, max = OUTPUT_PREVIEW): string | undefined {
+  if (typeof text !== "string" || !text.trim()) return undefined;
+  return text.length > max ? `\u2026 (${text.length - max} characters earlier)\n${text.slice(-max)}` : text;
+}
+
+/** A tool's input for the thread: long strings cut, so a Write's whole file isn't logged twice. */
+function trimInput(input: unknown): Record<string, unknown> | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>).slice(0, 24)) {
+    out[k] = typeof v === "string" && v.length > 600 ? `${v.slice(0, 600)}\u2026 (${v.length} chars)` : v;
+  }
+  const json = JSON.stringify(out);
+  return json.length > 6_000 ? { truncated: json.slice(0, 6_000) } : out;
+}
+
+const IMG_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" };
 
 interface SessionState {
   providerThreadId?: string;
@@ -241,7 +266,11 @@ export class RuntimeIngestion {
         const output = typeof d.output === "string" ? d.output : null;
         const dir = s.tags && output !== null && output.length > ARTIFACT_THRESHOLD ? this.options.artifactDir?.(event.instanceId) : undefined;
         const outputArtifact = dir ? new ContextArtifacts(dir).put(JSON.stringify({ version: 1, output })) : undefined;
+        const shown = preview(output);
         emit("tool_call", { tool: "shell", summary: `shell: ${command.replace(/\s+/g, " ").slice(0, 160)}`, exitCode,
+          command: command.slice(0, 2_000), ...(shown ? { preview: shown } : {}),
+          ok: exitCode !== null ? exitCode === 0 : p.status !== "failed" && p.status !== "declined",
+          ...(p.parentToolUseId ? { parent: p.parentToolUseId } : {}),
           ...(s.tags ? { outcome: exitCode !== null ? exitCode === 0 ? "success" : "failure" : outcome,
             output: output?.slice(0, ARTIFACT_THRESHOLD) ?? null, ...(outputArtifact ? { outputArtifact } : {}),
             outputTruncated: output !== null && output.length > ARTIFACT_THRESHOLD } : {}) });
@@ -249,10 +278,12 @@ export class RuntimeIngestion {
       }
       case "file_change": {
         const d = (p.data ?? {}) as Partial<FileChangeItemData>;
-        if (p.title) emit("tool_call", { tool: p.title, summary: p.detail ?? p.title, ...(s.tags ? { outcome } : {}) });
+        if (p.title) emit("tool_call", { tool: p.title, summary: p.detail ?? p.title, ok: p.status !== "failed" && p.status !== "declined",
+          ...(p.parentToolUseId ? { parent: p.parentToolUseId } : {}), ...(s.tags ? { outcome } : {}) });
         if (p.status === "failed" || p.status === "declined") return;
         for (const change of d.changes ?? []) if (change?.path)
-          emit("file_edit", { path: String(change.path), tool: p.title ?? `file_change:${change.kind}` });
+          emit("file_edit", { path: String(change.path), tool: p.title ?? `file_change:${change.kind}`,
+            ...(change.diff ? { diff: change.diff.length > DIFF_PREVIEW ? change.diff.slice(0, DIFF_PREVIEW) : change.diff } : {}) });
         return;
       }
       case "mcp_tool_call":
@@ -262,7 +293,15 @@ export class RuntimeIngestion {
       case "image_view": {
         const d = (p.data ?? {}) as Partial<ToolItemData>;
         const tool = String(d.tool ?? p.title ?? p.itemType);
-        emit("tool_call", { tool, summary: (p.detail ?? `${tool}`).slice(0, 200), ...(s.tags ? { outcome } : {}) });
+        const input = trimInput(d.input);
+        const out = preview(d.output);
+        const err = preview(d.error, 1_500);
+        const images = this.fileImages(event.instanceId, d.images);
+        emit("tool_call", { tool, summary: (p.detail ?? `${tool}`).slice(0, 200), kind: p.itemType,
+          ok: !err && p.status !== "failed" && p.status !== "declined",
+          ...(d.server ? { server: d.server } : {}), ...(input ? { input } : {}), ...(out ? { preview: out } : {}), ...(err ? { error: err } : {}),
+          ...(images.length ? { images } : {}), ...(p.parentToolUseId ? { parent: p.parentToolUseId } : {}),
+          ...(s.tags ? { outcome } : {}) });
         return;
       }
       case "context_compaction":
@@ -274,6 +313,34 @@ export class RuntimeIngestion {
       default:
         return;
     }
+  }
+
+  /**
+   * A tool's images, as files the thread can show: base64 is written once
+   * under the project's .loom/attachments (named by its hash), a path inside
+   * the project is kept as it is. Base64 never goes into the event log.
+   */
+  private fileImages(instanceId: string, images: ToolImage[] | undefined): Array<{ path: string; mime?: string }> {
+    if (!images?.length) return [];
+    const dir = this.options.artifactDir?.(instanceId);
+    const out: Array<{ path: string; mime?: string }> = [];
+    for (const img of images.slice(0, 8)) {
+      if (img.data && dir) {
+        try {
+          const buf = Buffer.from(img.data, "base64");
+          if (!buf.length || buf.length > 12 * 1024 * 1024) continue;
+          const ext = IMG_EXT[String(img.mime ?? "").toLowerCase()] ?? "png";
+          const rel = path.join(".loom", "attachments", `${createHash("sha1").update(buf).digest("hex").slice(0, 12)}.${ext}`);
+          const abs = path.join(dir, rel);
+          if (!fs.existsSync(abs)) { fs.mkdirSync(path.dirname(abs), { recursive: true }); fs.writeFileSync(abs, buf); }
+          out.push({ path: rel.split(path.sep).join("/"), ...(img.mime ? { mime: img.mime } : {}) });
+        } catch { /* an image we couldn't keep is not worth failing a turn over */ }
+      } else if (img.path) {
+        const rel = dir && path.isAbsolute(img.path) && !path.relative(dir, img.path).startsWith("..") ? path.relative(dir, img.path) : img.path;
+        out.push({ path: rel.split(path.sep).join("/") });
+      }
+    }
+    return out;
   }
 
   private complete(event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>, s: SessionState,

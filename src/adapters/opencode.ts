@@ -354,16 +354,32 @@ export class OpenCodeAdapter extends AdapterBase {
           const delta = typeof props.delta === "string" ? props.delta : part.text.startsWith(prev) ? part.text.slice(prev.length) : "";
           if (delta) this.streamText(delta);
         }
+      } else if (partType === "reasoning" && typeof part.text === "string") {
+        // its thinking, kept (not only streamed): the finished part replaces any earlier copy
+        if (this.roles.get(messageID) !== "user") this.reasoningParts.set(`${messageID}:${String(part.id ?? "r")}`, part.text);
       } else if (partType === "tool") {
         const state = (part.state ?? {}) as Json;
-        if (String(state.status ?? "") === "completed") {
+        const st = String(state.status ?? "");
+        const key = String(part.callID ?? part.id ?? "");
+        if ((st === "completed" || st === "error") && !this.toolsDone.has(key)) {
+          if (key) this.toolsDone.add(key);
+          const input = state.input && typeof state.input === "object" ? (state.input as Json) : undefined;
+          const output = typeof state.output === "string" ? state.output : "";
+          const error = st === "error" ? String(state.error ?? "failed") : "";
+          const tool = String(part.tool ?? "tool");
           this.emit({
             kind: "tool_call",
             payload: {
-              tool: String(part.tool ?? "tool"),
-              summary: String((state as Json).title ?? part.tool ?? "tool"),
+              tool,
+              summary: String((state as Json).title ?? tool),
+              ok: st === "completed",
+              ...(input ? { input: Object.fromEntries(Object.entries(input).slice(0, 20).map(([k, v]) => [k, typeof v === "string" && v.length > 600 ? `${v.slice(0, 600)}\u2026` : v])) } : {}),
+              ...(output.trim() ? { preview: output.length > 4000 ? `\u2026\n${output.slice(-4000)}` : output } : {}),
+              ...(error ? { error: error.slice(0, 1500) } : {}),
             },
           });
+          // its todo list is its plan
+          if (tool === "todowrite" && Array.isArray(input?.todos)) this.emitPlan(input!.todos as Json[]);
         }
       } else if (partType === "patch") {
         const files = Array.isArray(part.files) ? part.files : [];
@@ -382,6 +398,9 @@ export class OpenCodeAdapter extends AdapterBase {
       if (role) this.roles.set(messageID, role);
       const time = (info.time ?? {}) as Json;
       if (role === "assistant" && time.completed) {
+        const thought = [...this.reasoningParts.entries()].filter(([k]) => k.startsWith(`${messageID}:`)).map(([, v]) => v).join("\n").trim();
+        for (const k of [...this.reasoningParts.keys()]) if (k.startsWith(`${messageID}:`)) this.reasoningParts.delete(k);
+        if (thought) this.emit({ kind: "message", payload: { text: thought, reasoning: true } });
         const parts = this.textParts.get(messageID);
         if (parts && parts.size) {
           const text = [...parts.values()].join("").trim();
@@ -397,6 +416,12 @@ export class OpenCodeAdapter extends AdapterBase {
           this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
         }
       }
+      return;
+    }
+
+    if (type === "todo.updated") {
+      if (props.sessionID && props.sessionID !== mySession) return;
+      if (Array.isArray(props.todos)) this.emitPlan(props.todos as Json[]);
       return;
     }
 
@@ -417,6 +442,16 @@ export class OpenCodeAdapter extends AdapterBase {
       if (props.sessionID && props.sessionID !== mySession) return;
       void this.askPermission(props, type.includes(".v2"));
     }
+  }
+
+  private reasoningParts = new Map<string, string>();
+  private toolsDone = new Set<string>();
+
+  /** opencode's todos as Loom's plan checklist. */
+  private emitPlan(todos: Json[]): void {
+    const plan = todos.map((t) => ({ step: String(t.content ?? t.text ?? ""),
+      status: t.status === "completed" ? "completed" : t.status === "in_progress" ? "inProgress" : "pending" })).filter((t) => t.step);
+    if (plan.length) this.emit({ kind: "status", payload: { state: "plan_updated", plan } });
   }
 
   // ---- opencode asking you things ---------------------------------------------
@@ -517,10 +552,13 @@ export class OpenCodeAdapter extends AdapterBase {
     if (type === "session.next.tool.success" || type === "session.next.tool.failed") {
       const call = this.toolCalls.get(callId) ?? { tool: "tool", title: "tool" };
       this.toolCalls.delete(callId);
+      // the same call also arrives as a message part on these builds: log it once
+      if (callId && this.toolsDone.has(callId)) return;
+      if (callId) this.toolsDone.add(callId);
       const err = (props.error ?? {}) as Json;
       this.emit({
         kind: "tool_call",
-        payload: { tool: call.tool, summary: call.title, ...(type.endsWith("failed") ? { error: String(err.message ?? "failed").slice(0, 300) } : {}) },
+        payload: { tool: call.tool, summary: call.title, ok: !type.endsWith("failed"), ...(type.endsWith("failed") ? { error: String(err.message ?? "failed").slice(0, 300) } : {}) },
       });
       return;
     }

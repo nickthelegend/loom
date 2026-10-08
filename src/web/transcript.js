@@ -65,6 +65,10 @@ import { shortModel } from './permissions.js';
   /** Which icon a tool call gets, and which bucket it counts in. */
   function toolKind(p){
     var t = String(p.tool || p.name || "").toLowerCase(), s = String(p.summary || "").toLowerCase();
+    if (p.kind === "mcp_tool_call" || p.server) return "mcp";
+    if (/todo/.test(t)) return "plan";
+    if (/web_?search|websearch|webfetch|web_fetch/.test(t)) return "web";
+    if (/image_view|view_image/.test(t)) return "image";
     if (/bash|shell|exec|command|terminal|run_|^run/.test(t) || /^(shell|bash|\$)[: ]/.test(s)) return "run";
     if (/edit|write|patch|apply|notebook|create_file|str_replace/.test(t)) return "edit";
     if (/grep|glob|search|find|ls$|list/.test(t)) return "search";
@@ -73,15 +77,17 @@ import { shortModel } from './permissions.js';
     if (/task|agent/.test(t)) return "agent";
     return "tool";
   }
-  var TOOL_ICON = { run: "terminal", edit: "pencil", search: "search", web: "globe", read: "file", agent: "agents", tool: "gear" };
+  var TOOL_ICON = { run: "terminal", edit: "pencil", search: "search", web: "globe", read: "file", agent: "agents", tool: "gear", mcp: "plug", plan: "tasks", image: "image" };
   /** "Ran 2 commands, read 3 files" — what a folded stretch of tool use did. */
   function actSummary(rows){
-    var n = { run: 0, edit: 0, search: 0, web: 0, read: 0, agent: 0, tool: 0 };
+    var n = { run: 0, edit: 0, search: 0, web: 0, read: 0, agent: 0, tool: 0, mcp: 0, plan: 0, image: 0 };
     rows.forEach(function(r){ var k = r.getAttribute("data-tk") || "tool"; n[k] = (n[k] || 0) + 1; });
     var out = [];
     function one(k, verb, noun){ if (n[k]) out.push(verb + " " + n[k] + " " + noun + (n[k] === 1 ? "" : "s")); }
     one("run", "ran", "command"); one("read", "read", "file"); one("edit", "edited", "file");
     one("search", "searched", "time"); one("web", "fetched", "page"); one("agent", "started", "sub-agent"); one("tool", "used", "tool");
+    one("mcp", "called", "MCP tool"); one("image", "viewed", "image");
+    if (n.plan) out.push("updated the plan");
     var s = out.join(", ");
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : rows.length + " actions";
   }
@@ -252,13 +258,33 @@ import { shortModel } from './permissions.js';
     }
     if (e.kind === "tool_call") {
       var tk = toolKind(p);
-      return '<div class="tool" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + (ICONS[TOOL_ICON[tk]] || ICONS.gear) + "</span>" +
-        '<span class="tx">' + esc(p.summary || p.tool || p.name) + "</span>" +
-        (p.ok === false ? '<span class="tbad">failed</span>' : "") +
-        (tview() === "verbose" ? rawBlock(p) : "") + "</div>";
+      var det = toolDetail(p, tk);
+      var failed = p.ok === false || !!p.error || (typeof p.exitCode === "number" && p.exitCode !== 0);
+      // images a tool returned sit on their own line, outside the folded activity group, so they're seen
+      var imgs = (p.images || []).length ? '<div class="toolimgs" data-agent="' + esc(e.agentId || "") + '">' + p.images.map(function(im){
+        var att = /^\.loom\/attachments\//.test(im.path);
+        return '<button type="button" class="toolimg"' + (att ? "" : ' data-artifact="' + esc(im.path) + '"') + ' title="' + esc(im.path) + '"><img ' + (att ? 'data-att="' : 'data-projimg="') + esc(im.path) + '" alt=""></button>';
+      }).join("") + "</div>" : "";
+      return '<div class="tool' + (det ? " hasdet" : "") + (failed ? " tfail" : "") + '" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"' + (p.parent ? ' data-parent="' + esc(p.parent) + '"' : "") + ">" +
+        '<span class="ti">' + (ICONS[TOOL_ICON[tk]] || ICONS.gear) + "</span>" +
+        (p.server ? '<span class="tsrv">' + esc(p.server) + "</span>" : "") +
+        '<span class="tx">' + esc(p.server ? String(p.summary || "").replace(/^[^·]*·\s*/, "") : (p.summary || p.tool || p.name)) + "</span>" +
+        (typeof p.exitCode === "number" && p.exitCode !== 0 ? '<span class="tbad">exit ' + p.exitCode + "</span>" : failed ? '<span class="tbad">failed</span>' : "") +
+        (det ? '<span class="tchev">' + ICONS.chevron + "</span>" + '<div class="tooldet">' + det + "</div>" : "") +
+        (tview() === "verbose" ? rawBlock(p) : "") + "</div>" + imgs;
+    }
+    // the agent's todo list, as a checklist (the thread keeps the newest one per turn in place)
+    if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {
+      var doneN = p.plan.filter(function(x){ return x.status === "completed"; }).length;
+      return '<div class="plancheck" data-agent="' + esc(e.agentId || "") + '"><div class="pch">' + ICONS.tasks + "<span>Plan</span>" +
+        '<span class="pcn">' + doneN + "/" + p.plan.length + "</span>" + (p.explanation ? '<span class="pce">' + esc(String(p.explanation).slice(0, 140)) + "</span>" : "") + "</div>" +
+        '<ul class="pcl">' + p.plan.map(function(x){
+          return '<li class="pc-' + esc(x.status || "pending") + '"><span class="pcb"></span><span>' + esc(x.step) + "</span></li>";
+        }).join("") + "</ul></div>";
     }
     if (e.kind === "file_edit") {
-      return '<div class="tool" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span>" +
+      var fdiff = p.diff ? '<span class="tchev">' + ICONS.chevron + '</span><div class="tooldet md">' + mdToHtml("```diff\n" + String(p.diff) + "\n```") + "</div>" : "";
+      return '<div class="tool' + (p.diff ? " hasdet" : "") + '" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span>" + fdiff +
         (ARTIFACT_EXT.test(String(p.path || "")) ? '<button type="button" class="artchip mini" data-artifact="' + esc(p.path) + '" title="preview ' + esc(p.path) + '">' + ICONS.play + "Preview</button>" : "") + "</div>";
     }
     if (e.kind === "turn_diff") {
@@ -678,6 +704,34 @@ if (typeof document !== "undefined" && document.addEventListener && typeof Mutat
     var b = ev.target && ev.target.closest && ev.target.closest(".uatt");
     if (b) b.classList.toggle("big");
   });
+}
+
+/**
+ * What a tool did, for the row's expanded view: its arguments, the command
+ * and exit code, its output (the tail of it), its error, and for a web search
+ * the links it found. Empty when there's nothing beyond the summary.
+ */
+function toolDetail(p, tk){
+  var parts = [];
+  if (p.command && tk === "run") parts.push('<div class="tdk">command</div><pre class="tdpre">' + esc(p.command) + "</pre>");
+  if (p.input && typeof p.input === "object") {
+    var keys = Object.keys(p.input).filter(function(k){ return p.input[k] !== undefined && p.input[k] !== null && p.input[k] !== ""; });
+    if (keys.length) parts.push('<div class="tdk">input</div><div class="tdargs">' + keys.slice(0, 14).map(function(k){
+      var v = p.input[k], txt = typeof v === "string" ? v : JSON.stringify(v);
+      return '<div class="tdarg"><span class="tdn">' + esc(k) + '</span><span class="tdv">' + esc(String(txt).slice(0, 400)) + "</span></div>";
+    }).join("") + "</div>");
+  }
+  if (typeof p.exitCode === "number") parts.push('<div class="tdk">exit code <b class="' + (p.exitCode === 0 ? "ok" : "bad") + '">' + p.exitCode + "</b></div>");
+  var out = p.preview || p.output;
+  if (out) {
+    var links = tk === "web" ? (String(out).match(/https?:\/\/[^\s)\]"'<>]+/g) || []).filter(function(u, i, all){ return all.indexOf(u) === i; }).slice(0, 8) : [];
+    if (links.length) parts.push('<div class="tdk">sources</div><div class="tdlinks">' + links.map(function(u){
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(u.replace(/^https?:\/\//, "").slice(0, 70)) + "</a>";
+    }).join("") + "</div>");
+    parts.push('<div class="tdk">output</div><pre class="tdpre">' + esc(String(out)) + "</pre>");
+  }
+  if (p.error) parts.push('<div class="tdk bad">error</div><pre class="tdpre bad">' + esc(String(p.error)) + "</pre>");
+  return parts.join("");
 }
 
 /** Files worth seeing as themselves rather than as a diff: pages, pictures, documents. */

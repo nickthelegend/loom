@@ -351,6 +351,14 @@ export function createThread(view) {
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
         }
         noteLive(e);
+        // a todo list that changed mid-turn updates its checklist in place, rather than stacking copies
+        if (e.kind === "status" && pl.state === "plan_updated") {
+          var cards = feed.querySelectorAll(".plancheck"), prevCard = null;
+          for (var ci = cards.length - 1; ci >= 0; ci--) if (cards[ci].getAttribute("data-agent") === (e.agentId || "")) { prevCard = cards[ci]; break; }
+          var sib = prevCard && prevCard.nextElementSibling, userSince = false;
+          while (sib && !userSince) { if (sib.classList.contains("user")) userSince = true; sib = sib.nextElementSibling; }
+          if (prevCard && !userSince) { var fresh = lineFor(e); if (fresh) prevCard.outerHTML = fresh; return; }
+        }
         var html = lineFor(e);
         if (!html) return;
         placeLine(feed, html);

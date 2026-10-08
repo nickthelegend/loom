@@ -810,25 +810,47 @@ function describeItem(itemType: CanonicalItemType, item: Json): Omit<ItemLifecyc
         ...(typeof item.aggregatedOutput === "string" ? { output: item.aggregatedOutput } : {}) } };
     }
     case "file_change": {
-      const changes = ((item.changes as Array<{ path?: string; kind?: { type?: string } }> | undefined) ?? [])
-        .filter(c => c.path).map(c => ({ path: String(c.path), kind: c.kind?.type ?? "update" }));
+      const changes = ((item.changes as Array<{ path?: string; kind?: { type?: string }; diff?: string }> | undefined) ?? [])
+        .filter(c => c.path).map(c => ({ path: String(c.path), kind: c.kind?.type ?? "update", ...(typeof c.diff === "string" && c.diff ? { diff: c.diff } : {}) }));
       return { data: { changes } };
     }
-    case "mcp_tool_call":
-      return { detail: `mcp: ${String(item.tool ?? "")}`, data: { tool: String(item.tool ?? "mcp"),
-        ...(item.arguments && typeof item.arguments === "object" ? { input: item.arguments as Record<string, unknown> } : {}) } };
+    case "mcp_tool_call": {
+      const { output, images } = mcpResult(item.result);
+      const err = item.error && typeof item.error === "object" ? String((item.error as Json).message ?? "") : typeof item.error === "string" ? item.error : "";
+      const server = typeof item.server === "string" ? item.server : "";
+      return { detail: `${server ? server + " · " : "mcp: "}${String(item.tool ?? "")}`, data: { tool: String(item.tool ?? "mcp"), ...(server ? { server } : {}),
+        ...(item.arguments && typeof item.arguments === "object" ? { input: item.arguments as Record<string, unknown> } : {}),
+        ...(output ? { output } : {}), ...(err ? { error: err } : {}), ...(images.length ? { images } : {}) } };
+    }
     case "dynamic_tool_call":
-    case "collab_agent_tool_call":
-      return { detail: String(item.tool ?? itemType), data: { tool: String(item.tool ?? itemType) } };
+    case "collab_agent_tool_call": {
+      const { output, images } = mcpResult({ content: item.contentItems });
+      const prompt = typeof item.prompt === "string" ? item.prompt : "";
+      return { detail: prompt ? `${String(item.tool ?? itemType)}: ${prompt.replace(/\s+/g, " ").slice(0, 140)}` : String(item.tool ?? itemType),
+        data: { tool: String(item.tool ?? itemType), ...(item.arguments && typeof item.arguments === "object" ? { input: item.arguments as Record<string, unknown> } : {}),
+          ...(output ? { output } : {}), ...(images.length ? { images } : {}) } };
+    }
     case "web_search":
-      return { detail: `search: ${String(item.query ?? "")}`.slice(0, 160), data: { tool: "web_search" } };
+      return { detail: `search: ${String(item.query ?? "")}`.slice(0, 160), data: { tool: "web_search", ...(item.query ? { input: { query: String(item.query) } } : {}) } };
     case "image_view":
-      return { data: { tool: "image_view" } };
+      return { detail: typeof item.path === "string" ? `view ${item.path}` : "view image",
+        data: { tool: "image_view", ...(typeof item.path === "string" ? { images: [{ path: item.path }] } : {}) } };
     case "error":
       return typeof item.message === "string" ? { detail: item.message } : {};
     default:
       return {};
   }
+}
+
+/** An MCP result's text and images (content blocks: {type:"text"|"image", text | data+mimeType}). */
+function mcpResult(result: unknown): { output: string; images: Array<{ data: string; mime: string }> } {
+  const content = result && typeof result === "object" ? (result as Json).content : undefined;
+  if (!Array.isArray(content)) return { output: typeof result === "string" ? result : "", images: [] };
+  const blocks = content as Json[];
+  return {
+    output: blocks.map(b => (b.type === "text" && typeof b.text === "string" ? b.text : "")).filter(Boolean).join("\n"),
+    images: blocks.flatMap(b => (b.type === "image" && typeof b.data === "string" ? [{ data: b.data, mime: String(b.mimeType ?? b.mime_type ?? "image/png") }] : [])),
+  };
 }
 
 function describeRequest(method: string, params: Json): { detail?: string } {

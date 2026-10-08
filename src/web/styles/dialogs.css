@@ -1329,3 +1329,38 @@
   .artimg{padding:14px;display:flex;justify-content:center}
   .artimg img{max-width:100%;height:auto;border-radius:8px;box-shadow:0 1px 6px rgb(0 0 0 / .2);background:repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0/16px 16px}
   .artdoc{padding:14px 18px}
+
+  /* ── what a tool did: expandable rows, failures, images, the plan ── */
+  .tool.hasdet{cursor:pointer;flex-wrap:wrap}
+  .tool .tchev{margin-left:auto;display:inline-flex;opacity:.55;transition:transform .15s}
+  .tool .tchev svg{width:11px;height:11px}
+  .tool.open .tchev{transform:rotate(90deg)}
+  .tool .tooldet{display:none;flex-basis:100%;margin:6px 0 2px 22px;padding:8px 10px;border-radius:8px;cursor:text;
+    background:color-mix(in srgb, var(--muted) 60%, transparent);border:1px solid var(--border);font-size:11.5px;min-width:0}
+  .tool.open .tooldet{display:block}
+  .tooldet .tdk{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin:6px 0 3px}
+  .tooldet .tdk:first-child{margin-top:0}
+  .tooldet .tdk b.ok{color:var(--ok, #4aa564)} .tooldet .tdk b.bad,.tooldet .tdk.bad{color:var(--err, #f85149)}
+  .tooldet .tdpre{margin:0;max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--font-mono);font-size:11px;line-height:1.5}
+  .tooldet .tdpre.bad{color:var(--err, #f85149)}
+  .tooldet .tdargs{display:grid;grid-template-columns:max-content 1fr;gap:2px 10px;font-family:var(--font-mono);font-size:11px}
+  .tooldet .tdn{color:var(--muted-foreground)} .tooldet .tdv{word-break:break-word;white-space:pre-wrap}
+  .tooldet .tdlinks{display:flex;flex-direction:column;gap:2px} .tooldet .tdlinks a{font-size:11.5px}
+  .tooldet.md .mdcodewrap{margin:0}
+  .tool.tfail .ti{color:var(--err, #f85149)}
+  .tool .tsrv{font-family:var(--font-mono);font-size:10px;padding:0 5px;border-radius:4px;background:color-mix(in srgb, var(--thread) 12%, transparent);color:var(--thread-ink);margin-right:2px}
+  .toolimgs{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 30px}
+  .toolimg{padding:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--muted);cursor:zoom-in;line-height:0}
+  .toolimg img{max-width:280px;max-height:200px;display:block;object-fit:contain}
+  .plancheck{margin:10px 0 10px 30px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--card);max-width:560px}
+  .plancheck .pch{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600}
+  .plancheck .pch svg{width:14px;height:14px;color:var(--thread-ink)}
+  .plancheck .pcn{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);font-weight:400}
+  .plancheck .pce{font-weight:400;color:var(--muted-foreground);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .plancheck .pcl{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+  .plancheck li{display:flex;gap:8px;align-items:flex-start;line-height:1.45}
+  .plancheck .pcb{width:13px;height:13px;flex:none;margin-top:3px;border-radius:50%;border:1.5px solid var(--muted-foreground)}
+  .plancheck .pc-inProgress .pcb{border-color:var(--thread);background:radial-gradient(circle, var(--thread) 40%, transparent 45%)}
+  .plancheck .pc-inProgress{font-weight:600}
+  .plancheck .pc-completed .pcb{border-color:var(--ok, #4aa564);background:var(--ok, #4aa564)}
+  .plancheck .pc-completed span:last-child{color:var(--muted-foreground);text-decoration:line-through}
