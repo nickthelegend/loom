@@ -255,7 +255,7 @@ export async function envChecks(): Promise<Check[]> {
     } else if (a.authed === false) {
       checks.push(fail(a.kind, `${a.label} is signed out — ${a.auth}`));
     } else if (a.authed === true) {
-      checks.push(ok(a.kind, `${a.label} · signed in${a.kind === "codex" ? codexWhich() : ""}`));
+      checks.push(ok(a.kind, `${a.label} · signed in${a.authDetail ? ` with ${a.authDetail}` : ""}${a.kind === "codex" ? codexWhich() : ""}`));
     } else {
       checks.push(warn(a.kind, `${a.label} found — couldn't confirm sign-in · ${a.auth}`));
     }

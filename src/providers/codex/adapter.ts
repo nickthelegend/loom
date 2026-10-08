@@ -356,8 +356,15 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private async accountModels(rpc: CodexRpc): Promise<Array<{ id: string; isDefault?: boolean }>> {
     if (this.modelCache && Date.now() - this.modelCache.at < 600_000) return this.modelCache.list;
     try {
-      const res = await rpc.request("model/list", { limit: 100 }, 10_000);
-      const data = Array.isArray(res.data) ? res.data as Json[] : [];
+      // paged by cursor, as t3code and Agent Orchestrator read it
+      const data: Json[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 10; page++) {
+        const res = await rpc.request("model/list", { limit: 100, ...(cursor ? { cursor } : {}) }, 10_000);
+        if (Array.isArray(res.data)) data.push(...res.data as Json[]);
+        cursor = typeof res.nextCursor === "string" && res.nextCursor ? res.nextCursor : undefined;
+        if (!cursor) break;
+      }
       const list = data.filter(m => typeof m.id === "string" || typeof m.model === "string")
         .map(m => ({ id: String(m.model ?? m.id), isDefault: m.isDefault === true }));
       this.modelCache = { at: Date.now(), list };
