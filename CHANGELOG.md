@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   work one goal in its own worktree. The Lead plans, you approve, and each card
   is built, reviewed (with rounds of changes) and tested; then you apply the
   branch. Use the Crew tab, or `loom crew create|goal|say|approve|stop|resume|apply`.
+- The Crew tab: the crew's faces in a hero, each teammate as a card that
+  lights up while it works, the goal's progress, a board with a column per
+  stage, an approval banner, the channel as a conversation, and a composer
+  that knows whether you're starting, answering or changing the plan. Pick
+  which agent sits in each seat when you make a crew, and swap one later.
+- Crews keep going when an agent misbehaves: a teammate that goes silent is
+  interrupted and retried once (`stallMinutes`, default 8); a turn that errors
+  is retried once; a reviewer or tester whose turn failed fails the card
+  instead of approving it.
+- **Fixed:** OpenCode chat turns could end after a step that only ran tools,
+  before the answer, when the model was slow to start its next step. And
+  interrupting an OpenCode turn that never answered no longer waits out the hour.
+- **Fixed:** a project forgot which tab you were on whenever it redrew while
+  loading, so you landed back on Chat.
 - Team invite links are https links now. `loom://team/join#…` links still work
   anywhere a link is accepted.
 

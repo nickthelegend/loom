@@ -27,6 +27,11 @@ export interface FakeOpenCodeOptions {
   compact?: boolean;
   /** Emit a tool call during the turn. */
   tool?: { tool: string; input: Json };
+  /**
+   * A two-step turn: a first assistant message that finishes on tool calls,
+   * then this long a pause (the session still running) before the answer.
+   */
+  stepGapMs?: number;
 }
 
 export interface FakeOpenCode {
@@ -135,7 +140,14 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
         push("session.next.text.delta", { sessionID: sid, assistantMessageID: asstId, textID: "t0", delta: opts.reply ?? "done" });
       });
       if (opts.stuck) return;
-      later(opts.turnMs ?? 60, () => {
+      const gap = opts.stepGapMs ?? 0;
+      if (gap) {
+        later(opts.turnMs ?? 60, () => {
+          s.messages.push({ id: nextId("msg"), type: "assistant", time: { created: Date.now(), completed: Date.now() }, finish: "tool-calls",
+            content: [{ type: "tool", tool: "read" }], tokens: { input: 5, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }, model: s.model });
+        });
+      }
+      later((opts.turnMs ?? 60) + gap, () => {
         s.messages.push({
           id: asstId, type: "assistant", time: { created: Date.now(), completed: Date.now() },
           finish: opts.fail ? "error" : "stop",

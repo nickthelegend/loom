@@ -1,6 +1,6 @@
 import type { Express } from 'express';
 import express from "express";
-import { CREW_TEMPLATES, type CrewTeammate } from "../../core/crew.js";
+import { CREW_TEMPLATES, teammatesFromTemplate, type CrewTeammate } from "../../core/crew.js";
 import type { WithRuntime } from './context.js';
 /** Register crew routes (Agent Teams, core/crew.ts) in the order established by LoomDaemon.routes(). */
 export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): void {
@@ -14,7 +14,17 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.get(
     "/api/projects/:id/crews",
     withRuntime(async (rt, _req, res) => {
-      res.json({ crews: rt.crews.list(), templates: CREW_TEMPLATES });
+      // which of this project's agents each template would seat, for the picker
+      const roster = rt.crews.roster();
+      const previews: Record<string, CrewTeammate[]> = {};
+      for (const t of CREW_TEMPLATES) {
+        try {
+          previews[t] = teammatesFromTemplate(t, roster);
+        } catch {
+          /* no agents: the picker says so */
+        }
+      }
+      res.json({ crews: rt.crews.list(), templates: CREW_TEMPLATES, previews, roster: roster.map((a) => ({ id: a.id, kind: a.kind })) });
     }),
   );
 
@@ -50,7 +60,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.patch(
     "/api/projects/:id/crews/:crew",
     withRuntime(async (rt, req, res) => {
-      const b = (req.body ?? {}) as { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null };
+      const b = (req.body ?? {}) as { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null };
       try {
         res.json({ crew: rt.crews.update(String(req.params.crew), b) });
       } catch (err) {

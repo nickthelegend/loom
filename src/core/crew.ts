@@ -48,6 +48,8 @@ export interface CrewConfig {
   maxRounds?: number;
   /** What the tester runs, when you'd rather say than have it look. */
   testCommand?: string;
+  /** Minutes a teammate may go silent before its turn is interrupted and retried once (default 8). */
+  stallMinutes?: number;
 }
 
 export type CardStage = "planned" | "building" | "review" | "testing" | "done" | "failed";
@@ -132,6 +134,8 @@ export interface CrewHost {
   updateTask(id: string, patch: Record<string, unknown>): BoardTask | null;
   /** The GitHub login running this daemon, when on a team (commit trailers). */
   member?(): string | null;
+  /** Tests: how long silence counts as a stall, in ms (else the crew's stallMinutes, else 8 min). */
+  stallMs?: number;
 }
 
 /** Templates (§5.1): which roles, and which agent kinds each prefers, in order. */
@@ -198,6 +202,8 @@ export class CrewEngine {
   private turnError = new Map<string, string>();
   private turnQuestion = new Map<string, string>();
   private currentTurn = new Map<string, string>();
+  /** When each live teammate last showed a sign of life (any event or streamed text). */
+  private lastActivity = new Map<string, number>();
   private gitChain: Promise<unknown> = Promise.resolve();
   private closed = false;
 
@@ -248,7 +254,7 @@ export class CrewEngine {
     return this.get(id);
   }
 
-  update(id: string, patch: { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null }): CrewView {
+  update(id: string, patch: { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null }): CrewView {
     const crews = this.host.crews();
     const cfg = crews.find((c) => c.id === id);
     if (!cfg) throw new Error(`no crew "${id}"`);
@@ -265,6 +271,10 @@ export class CrewEngine {
     if (patch.testCommand !== undefined) {
       if (patch.testCommand) cfg.testCommand = patch.testCommand.slice(0, 300);
       else delete cfg.testCommand;
+    }
+    if (patch.stallMinutes !== undefined) {
+      if (patch.stallMinutes && patch.stallMinutes > 0) cfg.stallMinutes = Math.min(patch.stallMinutes, 240);
+      else delete cfg.stallMinutes;
     }
     this.host.saveCrews(crews);
     return this.get(id);
@@ -580,6 +590,8 @@ export class CrewEngine {
       ].filter(Boolean).join("\n");
       const reply = await this.turn(cfg, st, g, reviewer, prompt, "card", card);
       if (reply === null || reply.asked || g.status !== "running") return;
+      // a review that errored is no review — never an approval
+      if (reply.error) return this.giveUp(cfg, st, card, `review didn't happen: ${reply.error}`);
       const review = reply.actions.find((a): a is Extract<CrewAction, { type: "review" }> => a.type === "review");
       const verdict = review?.verdict ?? "approve";
       this.phase(cfg, st, "reviewed", { card: card.id, title: card.title, teammate: reviewer.id, verdict, notes: review?.notes ?? "" });
@@ -604,6 +616,7 @@ export class CrewEngine {
       ].join("\n");
       const reply = await this.turn(cfg, st, g, tester, prompt, "card", card);
       if (reply === null || reply.asked || g.status !== "running") return;
+      if (reply.error) return this.giveUp(cfg, st, card, `tests didn't run: ${reply.error}`);
       const test = reply.actions.find((a): a is Extract<CrewAction, { type: "test" }> => a.type === "test");
       const result = test?.result ?? "pass";
       this.phase(cfg, st, "tested", { card: card.id, title: card.title, teammate: tester.id, result, log: (test?.log ?? "").slice(-1200) });
@@ -669,9 +682,9 @@ export class CrewEngine {
    * Its role, charter, crewmates, protocol and any notes ride in the briefing.
    * Null when the goal stopped meanwhile.
    */
-  private async turn(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, prompt: string, step: "plan" | "card", card?: CrewCard):
+  private async turn(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, prompt: string, step: "plan" | "card", card?: CrewCard, retried = false):
     Promise<{ text: string; actions: CrewAction[]; asked: boolean; error?: string } | null> {
-    const key = `${cfg.id}/${tm.id}`;
+    const key = `${cfg.id}/${tm.id}/${tm.agent}`;
     const rosterCfg = this.host.roster().find((a) => a.id === tm.agent);
     if (!rosterCfg) throw new Error(`teammate ${tm.id}'s agent "${tm.agent}" is no longer on the roster`);
     this.host.gate(tm.agent);
@@ -679,7 +692,9 @@ export class CrewEngine {
     const fresh = !agent;
     if (!agent) {
       // Its own instance and state slot, so two teammates on one agent kind keep separate sessions.
-      agent = this.host.makeAgent({ ...rosterCfg, id: `crew-${cfg.id}-${tm.id}`.slice(0, 60), role: tm.role }, g.dir);
+      // The seat *and* the agent in it: swap a teammate's agent and the old one's
+      // saved session (an opencode ses_…, say) never reaches the new one.
+      agent = this.host.makeAgent({ ...rosterCfg, id: `crew-${cfg.id}-${tm.id}.${rosterCfg.id}`.slice(0, 80), role: tm.role }, g.dir);
       this.agents.set(key, agent);
       this.wire(cfg, st, g, agent, tm, key);
       await agent.start();
@@ -698,14 +713,45 @@ export class CrewEngine {
     this.turnError.delete(key);
     this.turnQuestion.delete(key);
     this.currentTurn.set(cfg.id, key);
+    // A teammate that goes silent (a model that never answers) would hold the
+    // goal forever: interrupt it, and give the turn one more try.
+    const stallMs = this.host.stallMs ?? (cfg.stallMinutes ?? 8) * 60_000;
+    let stalled = false;
+    this.lastActivity.set(key, Date.now());
+    const watchdog = setInterval(() => {
+      if (Date.now() - (this.lastActivity.get(key) ?? Date.now()) < stallMs) return;
+      stalled = true;
+      clearInterval(watchdog);
+      void agent!.interrupt().catch(() => {});
+    }, Math.max(20, Math.min(15_000, stallMs / 4)));
+    watchdog.unref?.();
     try {
       await agent.send({ text: prompt, briefing });
+    } catch (err) {
+      // an agent that throws (it won't start, it can't resume) fails this turn, not the whole goal
+      this.turnError.set(key, (err as Error).message.slice(0, 1000));
     } finally {
+      clearInterval(watchdog);
       this.currentTurn.delete(cfg.id);
     }
     if (terminal(g.status) || this.closed) return null;
+    if (stalled) {
+      const mins = Math.max(1, Math.round(stallMs / 60_000));
+      if (!retried) {
+        this.phase(cfg, st, "stalled", { teammate: tm.id, ...(card ? { card: card.id, title: card.title } : {}), retrying: true });
+        (st.notes[tm.id] ??= []).push("Your last turn produced nothing and was stopped. Please try again.");
+        return this.turn(cfg, st, g, tm, prompt, step, card, true);
+      }
+      this.phase(cfg, st, "stalled", { teammate: tm.id, ...(card ? { card: card.id, title: card.title } : {}), retrying: false });
+      this.turnError.set(key, `${tm.id} went silent twice (no output for ${stallMs < 60_000 ? `${Math.round(stallMs / 1000)}s` : `${mins} min`}) — its agent may be down or rate-limited`);
+    }
     const text = (this.turnText.get(key) ?? "").trim();
     const error = this.turnError.get(key);
+    // A provider hiccup (a dropped stream, a 5xx) shouldn't sink a card: one more try.
+    if (error && !stalled && !retried) {
+      this.phase(cfg, st, "retrying", { teammate: tm.id, error: error.slice(0, 300), ...(card ? { card: card.id, title: card.title } : {}) });
+      return this.turn(cfg, st, g, tm, prompt, step, card, true);
+    }
     const parsed = parseCrewReply(text, tm.role);
     for (const a of parsed.allowed) if (a.type === "post") this.post(cfg, st, g, tm, a.text, a.to);
     if (parsed.refused.length) {
@@ -724,8 +770,12 @@ export class CrewEngine {
   }
 
   private wire(cfg: CrewConfig, st: CrewState, g: CrewGoal, agent: Adapter, tm: CrewTeammate, key: string): void {
-    agent.onStream?.((d) => this.host.stream?.({ agentId: tm.agent, chat: this.thread(cfg, st, tm), ...d }));
+    agent.onStream?.((d) => {
+      this.lastActivity.set(key, Date.now());
+      this.host.stream?.({ agentId: tm.agent, chat: this.thread(cfg, st, tm), ...d });
+    });
     agent.onEvent((e) => {
+      this.lastActivity.set(key, Date.now());
       const p = e.payload as Record<string, unknown>;
       if (e.kind === "message" && !p.reasoning && p.role !== "user") {
         const prev = this.turnText.get(key) ?? "";

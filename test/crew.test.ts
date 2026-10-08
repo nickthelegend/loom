@@ -26,24 +26,34 @@ const git = (dir: string, ...args: string[]): string => execFileSync("git", args
 const loom = (actions: unknown[]) => "Sure.\n```loom\n" + JSON.stringify({ actions }) + "\n```";
 
 /** What each teammate says, by teammate id: a function of its turn. */
-type Script = (input: SendInput, dir: string, n: number) => string | { text: string; ask?: string };
+type Script = (input: SendInput, dir: string, n: number) => string | { text: string; ask?: string } | { silent: true };
 let scripts: Record<string, Script> = {};
-const turns: Array<{ teammate: string; text: string; briefing: string }> = [];
+const turns: Array<{ teammate: string; text: string; briefing: string; instance: string }> = [];
 
 class CrewBot extends AdapterBase {
   private n = 0;
+  private stopped = false;
   async available() { return true; }
   async start() {}
   async stop() {}
-  async interrupt() {}
+  async interrupt() { this.stopped = true; }
   async diff() { return ""; }
   async send(input: SendInput): Promise<void> {
     this._busy = true;
-    const teammate = this.id.split("-").slice(2).join("-"); // crew-<crew>-<teammate>
-    turns.push({ teammate, text: input.text, briefing: input.briefing ?? "" });
+    const teammate = this.id.split(".")[0]!.split("-").slice(2).join("-"); // crew-<crew>-<teammate>.<agent>
+    turns.push({ teammate, text: input.text, briefing: input.briefing ?? "", instance: this.id });
     const out = (scripts[teammate] ?? (() => loom([{ type: "done", summary: "ok" }])))(input, this.projectDir, this.n++);
+    if (typeof out === "object" && "silent" in out) {
+      // a model that never answers: nothing until interrupted
+      this.stopped = false;
+      while (!this.stopped) await new Promise((r) => setTimeout(r, 10));
+      this.emit({ kind: "run_complete", payload: {} });
+      this._busy = false;
+      return;
+    }
     const reply = typeof out === "string" ? { text: out } : out;
     if (reply.ask) this.emit({ kind: "needs_input", payload: { question: reply.ask } });
+    else if (reply.text.startsWith("fail:")) this.emit({ kind: "error", payload: { message: reply.text.slice(5) } });
     else this.emit({ kind: "message", payload: { text: reply.text } });
     this.emit({ kind: "run_complete", payload: {} });
     this._busy = false;
@@ -240,6 +250,68 @@ describe("a crew works a goal", () => {
     scripts = { builder: (_i, wd) => { write(wd, "one.txt", "1\n"); return loom([{ type: "done", summary: "one" }]); } };
     rt.crews.resume("ship");
     await waitUntil(() => rt!.crews.get("ship").state.goal?.status === "completed", { timeoutMs: 10_000 });
+  });
+
+  it("a teammate that goes silent is interrupted and retried once; silent twice fails the card — never a free approval", async () => {
+    const { rt, crew } = await project();
+    rt.crews.update(crew!.id, { planApproval: false, stallMinutes: 0.005 }); // 300ms
+    scripts = {
+      lead: (input) => (input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "Card" }] }]) : loom([{ type: "done", summary: "x" }])),
+      builder: (_i, wd, n) => (n === 0 ? { silent: true } : (write(wd, "a.txt", "a\n"), loom([{ type: "done", summary: "made a.txt" }]))),
+      reviewer: () => ({ silent: true }),
+    };
+    await rt.crews.goal(crew!.id, "Something small");
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 15_000 });
+    const g = rt.crews.get(crew!.id).state.goal!;
+    // the builder's silent first try was retried, and the retry built it
+    expect(turns.filter((t) => t.teammate === "builder")).toHaveLength(2);
+    expect(turns.filter((t) => t.teammate === "builder")[1]!.briefing).toMatch(/produced nothing and was stopped/);
+    expect(g.cards[0]!.commits).toHaveLength(1);
+    // the reviewer was silent twice: the card fails, it is not approved
+    expect(turns.filter((t) => t.teammate === "reviewer")).toHaveLength(2);
+    expect(g.cards[0]).toMatchObject({ stage: "failed" });
+    expect(g.cards[0]!.error).toMatch(/review didn't happen: reviewer went silent twice/);
+    expect(turns.some((t) => t.teammate === "tester")).toBe(false);
+    const stalls = rt.log.list({ kinds: ["crew"] }).filter((e) => e.payload.phase === "stalled").map((e) => [e.payload.teammate, e.payload.retrying]);
+    expect(stalls).toEqual([["builder", true], ["reviewer", true], ["reviewer", false]]);
+  });
+
+  it("a turn that errors is tried once more before the card fails", async () => {
+    const { rt, crew } = await project();
+    rt.crews.update(crew!.id, { planApproval: false });
+    let testerTurns = 0;
+    scripts = {
+      lead: (input) => (input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "Card" }] }]) : loom([{ type: "done", summary: "x" }])),
+      builder: (_i, wd) => (write(wd, "b.txt", "b\n"), loom([{ type: "done", summary: "b" }])),
+      reviewer: () => loom([{ type: "review", verdict: "approve", notes: "" }]),
+      tester: () => (++testerTurns === 1 ? "fail:Invalid stream event" : loom([{ type: "test", result: "pass", log: "ok" }])),
+    };
+    await rt.crews.goal(crew!.id, "b");
+    await waitUntil(() => ["completed", "failed"].includes(rt.crews.get(crew!.id).state.goal?.status ?? ""), { timeoutMs: 10_000 });
+    expect(rt.crews.get(crew!.id).state.goal!.status).toBe("completed");
+    expect(testerTurns).toBe(2);
+    expect(rt.log.list({ kinds: ["crew"] }).some((e) => e.payload.phase === "retrying" && e.payload.teammate === "tester")).toBe(true);
+  });
+
+  it("swapping a failed teammate's agent and resuming seats a fresh instance, not the old one's session", async () => {
+    const { rt, crew } = await project();
+    rt.crews.update(crew!.id, { planApproval: false });
+    scripts = {
+      lead: (input) => (input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "Card" }] }]) : loom([{ type: "done", summary: "x" }])),
+      builder: (_i, wd) => (write(wd, "c.txt", "c\n"), loom([{ type: "done", summary: "c" }])),
+      reviewer: () => loom([{ type: "review", verdict: "approve", notes: "" }]),
+      tester: (input) => (/crew-ship-tester\.small/.test(String(turns.at(-1)?.instance)) ? "fail:provider down" : loom([{ type: "test", result: "pass", log: "ok" }])),
+    };
+    await rt.crews.goal(crew!.id, "c");
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 10_000 });
+    expect(rt.crews.get(crew!.id).state.goal!.cards[0]!.error).toMatch(/tests didn't run: provider down/);
+    // put the other agent in the tester's seat, and carry on
+    const tms = rt.crews.get(crew!.id).teammates.map((t) => (t.id === "tester" ? { ...t, agent: "big" } : t));
+    rt.crews.update(crew!.id, { teammates: tms });
+    rt.crews.resume(crew!.id);
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 10_000 });
+    const testers = [...new Set(turns.filter((t) => t.teammate === "tester").map((t) => t.instance))];
+    expect(testers).toEqual(["crew-ship-tester.small", "crew-ship-tester.big"]);
   });
 
   it("refuses a crew that can't work, and a goal while one is running", async () => {

@@ -460,6 +460,14 @@ export class OpenCodeAdapter extends AdapterBase {
    * fact holds across two consecutive polls (nothing new started).
    * `/wait` is tried first but returns 503 on 1.17.
    */
+  /** Is opencode still running this session? Null when this opencode can't say (older builds). */
+  private async sessionActive(sid: string): Promise<boolean | null> {
+    const res = await fetchJson<Json>(`${this.baseUrl}/api/session/active`).catch(() => null);
+    const active = res ? ((res.data ?? res) as Json) : null;
+    if (!active || typeof active !== "object") return null;
+    return Object.prototype.hasOwnProperty.call(active, sid);
+  }
+
   private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
     try {
       await fetchJson(
@@ -473,6 +481,13 @@ export class OpenCodeAdapter extends AdapterBase {
     const deadline = Date.now() + timeoutMs;
     let stableId: string | null = null;
     while (Date.now() < deadline) {
+      // Interrupted: done as soon as opencode stops running it, answer or not
+      // (one that never answered would otherwise be waited on for the hour).
+      if (this.interrupted && (await this.sessionActive(sid)) !== true) {
+        const after = await this.listMessages(sid).catch(() => [] as Json[]);
+        const last = after.filter((m) => (m.type ?? m.role) === "assistant" && !baseline.has(String(m.id))).at(-1);
+        return last ?? null;
+      }
       const messages = await this.listMessages(sid).catch(() => [] as Json[]);
       const newest = messages[messages.length - 1];
       const newAssistants = messages.filter(
@@ -487,15 +502,20 @@ export class OpenCodeAdapter extends AdapterBase {
         (newest.time as Json | undefined)?.completed &&
         newAssistants.length > 0;
       if (turnLooksDone) {
-        // Errors are terminal immediately; otherwise require stability
-        // across two polls so multi-step turns aren't cut short.
+        // Errors are terminal immediately. A finished *step* is not a finished
+        // turn: one that ended in tool calls is followed by another, and a slow
+        // model can take longer than a poll to start it — so a session opencode
+        // still lists as active, or a step that finished on tool calls, keeps
+        // waiting. Otherwise require stability across two polls.
         if (newest!.finish === "error" || newest!.error) return newest!;
-        if (stableId === String(newest!.id)) return newest!;
-        stableId = String(newest!.id);
+        const midTurn = /tool/i.test(String(newest!.finish ?? "")) || (await this.sessionActive(sid)) === true;
+        if (midTurn) stableId = null;
+        else if (stableId === String(newest!.id)) return newest!;
+        else stableId = String(newest!.id);
       } else {
         stableId = null;
       }
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, typeof (this.options as { pollMs?: unknown }).pollMs === "number" ? (this.options as { pollMs: number }).pollMs : 3000));
     }
     return null;
   }
@@ -505,6 +525,7 @@ export class OpenCodeAdapter extends AdapterBase {
     if (!this.started) await this.start();
     if (this._busy) throw new Error(`opencode agent "${this.id}" is busy`);
     this._busy = true;
+    this.interrupted = false;
     const started = Date.now();
     const timeoutMs = 60 * 60 * 1000;
     try {
@@ -523,7 +544,9 @@ export class OpenCodeAdapter extends AdapterBase {
       });
 
       const turn = await this.waitForTurn(sid, baseline, timeoutMs);
-      if (!turn) {
+      if (!turn && this.interrupted) {
+        this.emit({ kind: "status", payload: { state: "interrupted" } });
+      } else if (!turn) {
         this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
       } else {
         const turnId = String(turn.id);

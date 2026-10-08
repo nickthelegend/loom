@@ -229,7 +229,7 @@ describe("one link, end to end", () => {
     expect(granted).toEqual(["erin"]);
   });
 
-  it("an invite needs a GitHub remote and a signed-in hub, and says so", async () => {
+  it("an invite needs a GitHub remote, then a signed-in hub, and says so", async () => {
     const dir = tmpDir("onboard-norepo");
     git(dir, "init", "-q");
     writeProjectConfig(dir, { name: "solo", agents: [{ id: "w", kind: "echo" }], brain: { extractor: "off" } });
@@ -237,8 +237,9 @@ describe("one link, end to end", () => {
     close.push(() => rt.close());
     const link = new TeamLink({ runtimes: () => [rt], broadcast: () => {}, statePath: path.join(tmpDir("onb-solo-state"), "team.json") });
     close.push(() => link.stop());
-    await expect(inviteTeammate(link, rt)).rejects.toMatchObject({ code: "signin" });
-    await link.signIn(hub.url, { github: "carol", secret: "s3cret" });
+    // not on GitHub: said first, signed in or not — signing in wouldn't help
     await expect(inviteTeammate(link, rt)).rejects.toThrow(/GitHub `origin` remote/);
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/solo.git"], { cwd: dir });
+    await expect(inviteTeammate(link, rt)).rejects.toMatchObject({ code: "signin" });
   });
 });

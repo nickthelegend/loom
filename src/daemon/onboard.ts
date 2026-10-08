@@ -376,13 +376,14 @@ export async function inviteTeammate(
   rt: ProjectRuntime,
   opts: { teamId?: string; grant?: boolean; gh?: (args: string[]) => Promise<string> } = {},
 ): Promise<{ link: string; expiresAt: number; team: { id: string; name: string }; repo: string; grant: boolean; grantNote?: string; message: string }> {
+  // the repo first: signing in can't help a project that isn't on GitHub
+  const repo = await repoOf(rt.info.dir);
+  if (!repo) throw new Error("this project has no GitHub `origin` remote — push it to GitHub first, then invite");
   if (!team.github()) {
     const err = new Error("sign in to a team hub first — Loom uses your GitHub account") as Error & { code?: string };
     err.code = "signin";
     throw err;
   }
-  const repo = await repoOf(rt.info.dir);
-  if (!repo) throw new Error("this project has no GitHub `origin` remote — push it to GitHub first, then invite");
   const teams = team.teams();
   let target =
     (opts.teamId && teams.find((t) => t.id === opts.teamId)) ||

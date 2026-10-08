@@ -20,7 +20,7 @@ import { toast } from './notifications.js';
     scrim.innerHTML = '<div class="modal invmodal" role="dialog" aria-modal="true" aria-label="Invite a teammate">' +
       '<div class="modalhead">Invite a teammate<button class="iconbtn" id="ivx" aria-label="close">' + ICONS.x + "</button></div>" +
       '<div class="modalbody" id="ivbody">' + LOADER + "</div>" +
-      '<div class="modalfoot"><span class="ivexp" id="ivexp"></span><span class="spacer"></span>' +
+      '<div class="modalfoot" id="ivfoot" style="display:none"><span class="ivexp" id="ivexp"></span><span class="spacer"></span>' +
         '<label class="ivgrant" id="ivgrantl" style="display:none"><input type="checkbox" id="ivgrant" checked> give them push access</label>' +
         '<button class="btn ghost" id="ivnew" style="display:none">New link</button></div>' +
     "</div>";
@@ -54,15 +54,18 @@ import { toast } from './notifications.js';
     }
 
     function showError(msg){
-      body('<div class="ivstate"><p class="ivwarn">' + esc(msg) + '</p><button class="btn outline sm" id="ivretry">Try again</button></div>');
+      var html = esc(msg).replace(/`([^`]+)`/g, "<code>$1</code>");
+      body('<div class="ivstate"><div class="ivbad">' + ICONS.alert + '</div><p class="ivwarn">' + html + '</p><button class="btn outline sm" id="ivretry">Try again</button></div>');
       q("ivretry").onclick = mint;
     }
 
     function mint(){
       body('<div class="ivstate">' + LOADER + "<p>Making your link…</p></div>");
+      q("ivfoot").style.display = "none";
       q("ivnew").style.display = "none";
       var grant = q("ivgrant");
       api("/api/projects/" + pid + "/team/invite", { method: "POST", body: JSON.stringify({ grant: grant ? grant.checked : true }) }).then(function(r){
+        q("ivfoot").style.display = "";
         q("ivnew").style.display = "";
         q("ivgrantl").style.display = "";
         q("ivexp").textContent = r.expiresAt ? "works once · until " + new Date(r.expiresAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";

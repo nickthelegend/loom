@@ -552,6 +552,7 @@ import { openMenu } from './menus.js';
     }
     function showTabNow(name){
       state.tab = name;
+      (state.tabByProject || (state.tabByProject = {}))[pid] = name;
       ["thread", "orchestra", "crew", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
@@ -660,7 +661,9 @@ import { openMenu } from './menus.js';
         def: 520, key: "loomDockW", invert: true,
       });
       drawTabs();
-      showTab("thread");
+      // Back on a project (or the same one drawn again while it loads): the
+      // tab you were on, not Chat — a click on Crew mid-load used to bounce.
+      showTab((state.tabByProject && state.tabByProject[pid]) || "thread");
       // A just-launched orchestra lands on its own view, in its own chat.
       if (state.pendingTab) { var pt = state.pendingTab; state.pendingTab = null; showTab(pt); }
       drawRail();

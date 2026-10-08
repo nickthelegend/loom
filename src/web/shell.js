@@ -818,6 +818,8 @@ import { shortModel } from './permissions.js';
     }
     function setChat(pidC, cid){
       try { localStorage.setItem("loomChat:" + pidC, cid); } catch (e) {}
+      // opening a conversation means reading it: land on Chat, not the tab the project was on
+      if (state.tabByProject) delete state.tabByProject[pidC];
       if (pidC !== cur) { select(pidC); return; }
       state.chat = cid;
       renderProject(cur, dmain, true); // reload the thread for this chat

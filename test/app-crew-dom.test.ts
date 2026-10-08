@@ -27,6 +27,7 @@ let daemon: LoomDaemon;
 let baseUrl: string;
 let clientToken: string;
 let projectId: string;
+let client: DaemonClient;
 let projectDir: string;
 
 beforeAll(async () => {
@@ -44,7 +45,7 @@ beforeAll(async () => {
   git("add", "-A");
   git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed");
 
-  const client = new DaemonClient(readDaemonConfig()!);
+  client = new DaemonClient(readDaemonConfig()!);
   projectId = (await client.addProject(projectDir)).project.id;
 
   const { token } = await client.newPairingToken();
@@ -220,6 +221,13 @@ describe("web app · crew tab", () => {
     expect(text(m, '#pane-crew [data-crew-tpl="ship"]')).toContain("two builders");
     click($(m, '#pane-crew [data-crew-tpl="fix"]'));
     await waitUntil(() => $(m, '#pane-crew [data-crew-tpl="fix"]')?.classList.contains("on") === true);
+    // who sits where: one picker per seat, filled from the roster; pick another agent for the builder
+    await waitUntil(() => $$(m, "#pane-crew [data-crew-seat]").length === 3);
+    const seat = $(m, '#pane-crew [data-crew-seat="builder"]') as HTMLSelectElement;
+    expect([...seat.options].map((o) => o.value)).toEqual(["plannerbot", "execbot"]);
+    seat.value = "execbot";
+    seat.dispatchEvent(new m.window.Event("change", { bubbles: true }));
+    await waitUntil(() => ($(m, '#pane-crew [data-crew-seat="builder"]') as HTMLSelectElement).value === "execbot");
     ($(m, "#crewname") as HTMLInputElement).value = "Fixers";
     click($(m, "#crewcreate"));
 
@@ -228,8 +236,17 @@ describe("web app · crew tab", () => {
     expect($$(m, "#pane-crew .crewmate").map((c) => c.getAttribute("data-mate"))).toEqual(["lead", "builder", "tester"]);
     expect(text(m, '#pane-crew .crewmate[data-mate="tester"]')).toMatch(/tester.*tester.*plannerbot/);
     expect(text(m, "#pane-crew .crewname")).toBe("Fixers");
+    expect((await client.crews(projectId)).crews[0]!.teammates.find((t: { id: string }) => t.id === "builder")!.agent).toBe("execbot");
+    // and a seat can be swapped later, from the teammate's card
+    const swap = $(m, '#pane-crew [data-crew-swap="tester"]') as HTMLSelectElement;
+    swap.value = "execbot";
+    swap.dispatchEvent(new m.window.Event("change", { bubbles: true }));
+    await waitUntil(async () => (await client.crews(projectId)).crews[0]!.teammates.find((t: { id: string }) => t.id === "tester")!.agent === "execbot");
+    swap.value = "plannerbot";
+    swap.dispatchEvent(new m.window.Event("change", { bubbles: true }));
+    await waitUntil(async () => (await client.crews(projectId)).crews[0]!.teammates.find((t: { id: string }) => t.id === "tester")!.agent === "plannerbot");
     expect(text(m, "#pane-crew .crewgoal, #pane-crew .crewnote")).toContain("No goal yet");
-    expect(($(m, "#crewsaytext") as HTMLTextAreaElement).placeholder).toMatch(/goal/);
+    expect(($(m, "#crewsaytext") as HTMLTextAreaElement).placeholder).toBe("What should Fixers build?");
 
     // Say a goal: it routes to "goal", the Lead plans (twice, no plan → one card)
     // and the plan waits for your OK.
@@ -255,7 +272,7 @@ describe("web app · crew tab", () => {
     // The channel carries what you said and the crew's phases.
     await waitUntil(() => !!$(m, '#pane-crew .crewev.cphase[data-phase="completed"]'));
     expect(text(m, "#pane-crew .crewev.cmine")).toContain("add a greeting");
-    expect(text(m, '#pane-crew .crewev.cphase[data-phase="planned"]')).toContain("planned 1 card");
+    expect(text(m, '#pane-crew .crewev.cphase[data-phase="planned"]')).toContain("Planned 1 card");
     const crew = (await rest<{ crews: Crew[] }>("GET", "/crews")).crews[0]!;
     expect($(m, "#pane-crew [data-crew-chan]")?.getAttribute("data-crew-chan")).toBe(crew.state.channel);
 
@@ -295,7 +312,7 @@ describe("web app · crew tab", () => {
     // A Lead that asks: the banner names who asks what, and your reply answers it.
     say(m, "pick a palette ask: which colour?");
     await waitUntil(() => pill(m) === "needs you" && !!$(m, "#pane-crew .crewask"), { timeoutMs: 30_000 });
-    expect(text(m, "#pane-crew .crewask")).toBe("lead asks: which colour?");
+    expect(text(m, "#pane-crew .crewask .cwbt")).toBe("lead asks: which colour?");
     expect(($(m, "#crewsaytext") as HTMLTextAreaElement).placeholder).toMatch(/Answer lead/);
     expect(act(m, "stop")).toBeTruthy();
     // The "to" select names every teammate.
