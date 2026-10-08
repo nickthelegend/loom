@@ -275,7 +275,12 @@ import { shortModel } from './permissions.js';
         Number(p.files || 0) + " file" + (Number(p.files || 0) === 1 ? "" : "s") +
         (p.undo ? ' <button class="btn xs outline" type="button" data-rewind="' + esc(p.undo) + '">Undo the rewind</button>' : "") + "</div>";
     }
-    if (e.kind === "handoff") return '<div class="handoff"><span class="a">' + esc(p.from || "\u2014") + '</span><span class="shuttle">\u27ff</span><span class="b">' + esc(p.to || "\u2014") + "</span></div>";
+    // The baton changing hands: a chip with both agents, not a bare glyph the font may not have.
+    if (e.kind === "handoff") {
+      var who = function(id, c){ return '<span class="' + c + '">' + (id ? agentGlyph(kindOf(id), id, "brand") : "") + esc(id ? labelOf(id) : "\u2014") + "</span>"; };
+      return '<div class="handoff" title="the baton passed ' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '"><span class="hochip">' +
+        '<span class="hok">baton</span>' + who(p.from, "a") + '<span class="shuttle">' + ICONS.arrowRight + "</span>" + who(p.to, "b") + "</span></div>";
+    }
     // Sub-agents: indent under the turn, marked as borrowed hands — the parent
     // kept the baton, and the thread should read that way.
     if (e.kind === "subtask_started") return '<div class="sys" style="padding-left:22px">\u21b3 ' + esc(e.agentId) + " picks up a subtask for " + esc(p.parent) + ": " + esc(String(p.task || "").slice(0, 90)) + "</div>";

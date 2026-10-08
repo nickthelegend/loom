@@ -278,8 +278,14 @@ export function createExplorer(view) {
       var brs = state.gitBranches;
       var branchEl;
       if (brs && brs.all && brs.all.length > 1) {
-        branchEl = '<select class="gbranchsel" id="gcheckout">' +
-          brs.all.map(function(b){ return '<option value="' + esc(b) + '"' + (b === g.branch ? " selected" : "") + ">" + esc(b) + "</option>"; }).join("") +
+        // your branches first; the ones Loom's crews and orchestra runs cut, in their own groups
+        var opt = function(b){ return '<option value="' + esc(b) + '"' + (b === g.branch ? " selected" : "") + ">" + esc(b) + "</option>"; };
+        var mine = brs.all.filter(function(b){ return b.indexOf("loom/") !== 0; });
+        var crewB = brs.all.filter(function(b){ return b.indexOf("loom/crew/") === 0; });
+        var runB = brs.all.filter(function(b){ return b.indexOf("loom/") === 0 && b.indexOf("loom/crew/") !== 0; });
+        branchEl = '<select class="gbranchsel" id="gcheckout" aria-label="switch branch">' + mine.map(opt).join("") +
+          (crewB.length ? '<optgroup label="Crew goals">' + crewB.map(opt).join("") + "</optgroup>" : "") +
+          (runB.length ? '<optgroup label="Orchestra runs">' + runB.map(opt).join("") + "</optgroup>" : "") +
           "</select>";
       } else {
         branchEl = '<span class="bn">' + esc(g.branch) + "</span>";
@@ -287,12 +293,18 @@ export function createExplorer(view) {
       html += '<div class="gbranch">' + ICONS.branch + branchEl +
         (g.ahead ? '<span class="gcount">↑' + g.ahead + "</span>" : "") +
         (g.behind ? '<span class="gcount">↓' + g.behind + "</span>" : "") +
-        (g.upstream ? "" : '<span class="gcount dim">no upstream</span>') +
+        (g.upstream ? "" : '<span class="gcount dim" title="this branch isn\u2019t on a remote yet \u2014 Push publishes it">local</span>') +
         '<span style="flex:1"></span>' +
         '<button class="iconbtn xs" id="gitpush" title="push to the remote" aria-label="push">' + ICONS.up + "</button>" +
         "</div>";
 
       var staged = g.staged || [], unstaged = g.unstaged || [], untracked = g.untracked || [];
+      // Loom's own working files (.loom/: the event log, sessions, memory) are
+      // not your changes. Folded into one row, with the fix: ignore them.
+      var isLoom = function(pth){ return /^\.loom(\/|$)/.test(pth); };
+      var loomFiles = untracked.filter(isLoom).concat(unstaged.filter(function(f){ return isLoom(f.path); }).map(function(f){ return f.path; }));
+      untracked = untracked.filter(function(f){ return !isLoom(f); });
+      unstaged = unstaged.filter(function(f){ return !isLoom(f.path); });
       var changeCount = staged.length + unstaged.length + untracked.length;
 
       // The commit box — always at the top, VS Code style: a message field with
@@ -304,12 +316,17 @@ export function createExplorer(view) {
         '<button class="scmgen" id="gitgen" type="button" title="Draft a message from the staged diff">' + ICONS.spark + " Generate</button>" +
         "</div>" +
         '<div class="scmcommitrow">' +
-        '<button class="btn primary scmcommitbtn" id="gcommitbtn"' + (staged.length ? "" : " disabled") + '>Commit' + (staged.length ? " " + staged.length : "") + "</button>" +
+        '<button class="btn primary scmcommitbtn" id="gcommitbtn"' + (staged.length ? "" : ' disabled title="stage a file (+) to commit it"') + '>Commit' + (staged.length ? " " + staged.length : "") + "</button>" +
         '<button class="btn primary scmsplit" id="gcommitmore" type="button" aria-label="more commit actions">' + ICONS.chevron + "</button>" +
         "</div></div>";
 
+      var loomRow = loomFiles.length
+        ? '<div class="scmloom" title="' + esc(loomFiles.slice(0, 30).join("\n")) + '">' + ICONS.gear +
+            '<span class="scmloomt">Loom\u2019s working files<small>.loom/ \u00b7 ' + loomFiles.length + " file" + (loomFiles.length === 1 ? "" : "s") + "</small></span>" +
+            '<button class="btn ghost xs" id="gitignoreloom" title="add .loom/ to .gitignore \u2014 the log, sessions and memory Loom keeps here aren\u2019t project changes">Ignore</button></div>'
+        : "";
       if (!changeCount) {
-        html += '<div class="rempty">No changes — the working tree is clean.</div>';
+        html += loomRow + '<div class="rempty">No changes \u2014 the working tree is clean.</div>';
         el.innerHTML = html + gitLogHtml();
         wireGitRows(el);
         return;
@@ -322,8 +339,10 @@ export function createExplorer(view) {
         var pth = f.path, base = pth.split("/").pop(), dir = pth.slice(0, pth.length - base.length);
         var letter = st === "?" ? "U" : st.charAt(0);
         var bc = letter === "D" ? "del" : (letter === "U" || letter === "A" ? "add" : "mod");
+        // the name first, the folder after it, dimmed: a narrow panel cuts the folder, never the name
         return '<div class="scmrow" data-file="' + esc(pth) + '" title="' + esc(pth) + '">' +
-          '<span class="scmname" data-open="' + esc(pth) + '">' + (dir ? '<span class="scmdir">' + esc(dir) + "</span>" : "") + esc(base) + "</span>" +
+          '<span class="scmname" data-open="' + esc(pth) + '"><span class="scmbase">' + esc(base) + "</span>" +
+            (dir ? '<span class="scmdir">' + esc(dir.replace(/\/$/, "")) + "</span>" : "") + "</span>" +
           '<span class="scmacts">' +
           (kind === "staged"
             ? '<button class="iconbtn xs" data-unstage="' + esc(pth) + '" title="unstage" aria-label="unstage">' + ICONS.minus + "</button>"
@@ -349,7 +368,7 @@ export function createExplorer(view) {
           '<button class="lnk" id="stageuntracked">' + ICONS.plus + "</button></div>";
         html += '<div class="scmlist">' + untracked.map(function(f){ return fileRow({ path: f, status: "?" }, "untracked"); }).join("") + "</div>";
       }
-      el.innerHTML = html + gitLogHtml();
+      el.innerHTML = html + loomRow + gitLogHtml();
       wireGitRows(el);
     }
 
@@ -400,6 +419,13 @@ export function createExplorer(view) {
       Array.prototype.forEach.call(el.querySelectorAll("[data-open]"), function(f){
         f.onclick = function(){ view.openChangesDock(f.getAttribute("data-open")); };
       });
+      var ig = document.getElementById("gitignoreloom");
+      if (ig) ig.onclick = function(){
+        ig.disabled = true;
+        api("/api/projects/" + view.pid + "/git/ignore", { method: "POST", body: JSON.stringify({ pattern: ".loom/" }) })
+          .then(function(r){ toast(r.added ? ".loom/ added to .gitignore" : ".loom/ was already ignored"); refreshGit(); })
+          .catch(function(e){ toast(e.message); ig.disabled = false; });
+      };
       var sa = document.getElementById("stageall");
       if (sa) sa.onclick = function(){
         var g = state.git || {};
@@ -408,7 +434,7 @@ export function createExplorer(view) {
       };
       var su = document.getElementById("stageuntracked");
       if (su) su.onclick = function(){
-        var all = (state.git && state.git.untracked) || [];
+        var all = ((state.git && state.git.untracked) || []).filter(function(f){ return !/^\.loom(\/|$)/.test(f); });
         if (all.length) act("stage", { paths: all });
       };
       var ua = document.getElementById("unstageall");
@@ -542,7 +568,7 @@ export function createExplorer(view) {
           '<span class="fp" style="color:hsl(' + hh + ',55%,var(--agent-l))">' + esc(a.id) + "</span>" +
           (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") +
           // your project decides what jobs exist — click and type
-          '<span class="role edit" data-role-p="' + esc(view.pid) + '" data-role-a="' + esc(a.id) +
+          '<span class="role edit' + (!a.role || a.role === a.id || a.role === a.kind ? " same" : "") + '" data-role-p="' + esc(view.pid) + '" data-role-a="' + esc(a.id) +
           '" title="click to rename this job">' + esc(a.role || "\u2026") + "</span></div>";
       });
       var bridges = p ? p.agents.filter(function(a){ return a.tier === "bridge"; }) : [];

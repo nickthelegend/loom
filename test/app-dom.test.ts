@@ -1104,7 +1104,7 @@ describe("web app · the console", () => {
     // …and an impossible query says so instead of showing an empty box.
     search.value = "zzz-no-such-line";
     search.dispatchEvent(new m.window.Event("input"));
-    await waitUntil(() => text(m, "#conlist").includes("nothing matches"));
+    await waitUntil(() => text(m, "#conlist").includes("Nothing matches"));
     expect(m.errors.join("\n")).toBe("");
   });
 });

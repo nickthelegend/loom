@@ -824,7 +824,6 @@
   .sbbtn svg{transform:scaleX(-1)}
   @media (max-width:1180px){ html.desk .dshell{--sbw:228px!important} }
   @media (max-width:1040px){
-    .tab .tl{display:none}
     .tab{padding:0 11px}
     .ckhint{display:none}
     .cmode button{font-size:0;gap:0;padding:0 9px}
@@ -1197,3 +1196,77 @@
   .uatt.gone{display:none}
   .uattf{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:5px 9px;border:1px solid var(--border);border-radius:8px;background:var(--muted);color:var(--muted-foreground)}
   .uattf svg{width:13px;height:13px}
+
+  /* ── top bar: sized by the chat column it sits over, not the window ──
+     The sidebar and right panel take their share first, so a wide window can
+     still leave the bar 450px: labels give way before buttons get squeezed. */
+  .dmain{container:main / inline-size}
+  .tabstrip{overflow:hidden}
+  .tabstrip .iconbtn,.tabstrip .invitebtn,.tabstrip .apbadge{flex:none}
+  .tabstrip .iconbtn{width:28px;height:28px;border-radius:7px}
+  .tabstrip .iconbtn svg{width:15px;height:15px}
+  .tabstrip #invitebtn{margin-right:6px}
+  .tabstrip #termbtn{margin-left:2px;position:relative}
+  .tabstrip #termbtn::before{content:"";position:absolute;left:-5px;top:7px;bottom:7px;width:1px;background:var(--border)}
+  .tab{flex:none}
+  @container main (max-width:980px){ .tab:not(.active) .tl{display:none} .tab{padding:0 10px} }
+  @container main (max-width:640px){
+    .tab .tl{display:none}
+    .tab{padding:0 9px}
+    .invitebtn span{display:none}
+    .invitebtn{padding:0 6px}
+    #phonebtn,#browserbtn{display:none}
+  }
+  @container main (max-width:470px){ #consolebtn{display:none} .tab{padding:0 7px} }
+
+  /* ── the right panel's agent roster: a row of its own, not the Agents tab's 5-column grid ── */
+  .rail .frow{display:flex;grid-template-columns:none;gap:8px;padding:6px 8px;align-items:center;min-height:30px}
+  .rail .frow > svg,.rail .frow .brand,.rail .frow .agpic{width:16px;height:16px;flex:none}
+  .rail .frow .fp{flex:1 1 auto;min-width:0;font-weight:500}
+  .rail .frow .role{flex:0 1 auto;max-width:42%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    padding:1px 6px;border-radius:5px;background:color-mix(in srgb, var(--muted-foreground) 10%, transparent)}
+  .rail .frow .abadge{flex:none}
+  /* a role that only repeats the agent's name shows on hover, still click-to-rename */
+  .rail .frow .role.same{opacity:0;transition:opacity .12s}
+  .rail .frow:hover .role.same,.rail .frow .role.same:focus{opacity:1}
+  .rail .frow.agentrow.cur{box-shadow:inset 2px 0 0 var(--thread)}
+  .rsec{display:flex;align-items:center;gap:6px}
+
+  /* ── source control: the file's name first, Loom's own files folded away ── */
+  .scmname{display:flex;align-items:baseline;gap:6px;text-decoration:none}
+  .scmname:hover{text-decoration:none}
+  .scmname:hover .scmbase{text-decoration:underline}
+  .scmbase{flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--foreground)}
+  .scmname .scmdir{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:11px;font-family:var(--font-mono);direction:rtl;text-align:left}
+  .scmloom{display:flex;align-items:center;gap:8px;margin:6px 10px;padding:7px 9px;border:1px dashed var(--border);
+    border-radius:8px;color:var(--muted-foreground);font-size:12px}
+  .scmloom > svg{width:14px;height:14px;flex:none}
+  .scmloomt{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.3}
+  .scmloomt small{font-family:var(--font-mono);font-size:10.5px;opacity:.8}
+  .scmcommitbtn:disabled{opacity:.55}
+  .gbranch{min-width:0}
+  .gbranch .gbranchsel,.gbranch .bn{flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  .gbranch .gcount{flex:none;white-space:nowrap}
+  .gclog{padding:6px 10px;border-radius:6px}
+  .gcsub{font-size:12.5px}
+
+  /* ── the baton changing hands ── */
+  .handoff .hochip{max-width:min(92%,520px);white-space:nowrap;display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 6px;border-radius:999px;
+    border:1px solid color-mix(in srgb, var(--shuttle) 35%, var(--border));
+    background:color-mix(in srgb, var(--shuttle) 7%, transparent);font-size:12px}
+  .handoff .hok{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+    padding:1px 6px;border-radius:999px;background:color-mix(in srgb, var(--shuttle) 16%, transparent);color:var(--shuttle-ink)}
+  .handoff .a,.handoff .b{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .handoff .a svg,.handoff .b svg,.handoff .agpic,.handoff .agmono{width:14px;height:14px;font-size:8px}
+  .handoff .shuttle{display:inline-flex;font-size:inherit}
+  .handoff .shuttle svg{width:13px;height:13px}
+  .handoff .b{font-weight:600}
+
+  /* ── console: an empty state that reads as good news ── */
+  .conempty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;
+    padding:26px 16px;min-height:120px}
+  .conempty svg{width:22px;height:22px;padding:6px;border-radius:50%;color:var(--ok, #4aa564);
+    background:color-mix(in srgb, var(--ok, #4aa564) 12%, transparent);margin-bottom:4px;box-sizing:content-box}
+  .conempty b{font-size:12.5px;font-weight:600;color:var(--foreground)}
+  .conempty span{font-size:11.5px;max-width:360px;line-height:1.5}

@@ -21,7 +21,9 @@ import { ICONS } from './icons.js';
     var scrim = document.querySelector(".scrim");
     var click = function(id, why){
       var b = document.getElementById(id);
-      if (b && b.offsetParent !== null) { b.click(); return true; }
+      // present is enough: a narrow chat column hides some top-bar buttons, and
+      // the menu, palette and shortcuts are how you reach them then
+      if (b && b.isConnected && !b.disabled) { b.click(); return true; }
       toast(why || "open a project first");
       return false;
     };
