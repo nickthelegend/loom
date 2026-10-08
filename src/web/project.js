@@ -47,7 +47,7 @@ import { openMenu } from './menus.js';
       get OBPAL() { return OBPAL; },
       get obNodePos() { return obNodePos; },
     });
-    var { closeDock, openChangesDock, openPatchDock, openFileDock } = createChanges({
+    var { closeDock, openChangesDock, openPatchDock, openFileDock, openArtifactDock, openCodePreview } = createChanges({
       get pid() { return pid; },
       get drawRail() { return drawRail; }
     });
@@ -90,6 +90,7 @@ import { openMenu } from './menus.js';
       get refresh() { return refresh; },
       get openChangesDock() { return openChangesDock; },
       get openFileDock() { return openFileDock; },
+      get openArtifactDock() { return openArtifactDock; },
       get expl() { return expl; },
       get pid() { return pid; },
       get refreshTree() { return refreshTree; },
@@ -915,6 +916,21 @@ import { openMenu } from './menus.js';
         if (txt) { copyText(txt); toast("copied"); }
         return;
       }
+      // an artifact an agent made (a page, an image, a doc), shown as itself
+      var art = ev.target.closest && ev.target.closest("[data-artifact]");
+      if (art) { ev.preventDefault(); ev.stopPropagation(); openArtifactDock(art.getAttribute("data-artifact")); return; }
+      // an html/svg code block, rendered
+      var pv = ev.target.closest && ev.target.closest(".mdprev");
+      if (pv) {
+        ev.preventDefault(); ev.stopPropagation();
+        var wrap = pv.closest(".mdcodewrap"), codeEl = wrap && wrap.querySelector("pre code");
+        var lng = wrap && wrap.querySelector(".mdlang") ? wrap.querySelector(".mdlang").textContent : "html";
+        if (codeEl) openCodePreview(codeEl.textContent, lng);
+        return;
+      }
+      // a picture in a reply: open it at full size
+      var mi = ev.target.closest && ev.target.closest("img.mdimg[data-projimg]");
+      if (mi) { ev.preventDefault(); openArtifactDock(mi.getAttribute("data-projimg")); return; }
       var dr = ev.target.closest && ev.target.closest(".mddraw");
       if (dr) { ev.preventDefault(); ev.stopPropagation(); drawMermaid(dr.parentNode, dr); return; }
       var cp = ev.target.closest && ev.target.closest(".mdcopy");

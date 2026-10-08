@@ -24,7 +24,9 @@ export function createExplorer(view) {
     function openFileFromTree(relPath){
       var t = state.tree;
       var changed = t && t.git && visibleFiles(t).some(function(f){ return f.path === relPath; });
-      if (changed) view.openChangesDock(relPath); else view.openFileDock(relPath);
+      // pages, pictures and docs open as themselves (Source is one click away); a changed text file opens its diff
+      if (/\.(html?|svg|png|jpe?g|gif|webp|avif|pdf|md|markdown)$/i.test(relPath) && view.openArtifactDock) view.openArtifactDock(relPath);
+      else if (changed) view.openChangesDock(relPath); else view.openFileDock(relPath);
     }
 
     function drawRail(){

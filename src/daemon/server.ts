@@ -56,6 +56,7 @@ import { registerClientsRoutes } from './routes/clients.js';
 import { registerCloudRoutes } from './routes/cloud.js';
 import { registerConfigRoutes } from './routes/config.js';
 import type { RouteContext } from './routes/context.js';
+import { registerPreviewPublic, registerPreviewRoutes } from "./routes/preview.js";
 import { registerFilesRoutes } from './routes/files.js';
 import { registerGitRoutes } from './routes/git.js';
 import { registerHistoryRoutes } from './routes/history.js';
@@ -359,6 +360,7 @@ export class LoomDaemon {
     });
     registerAssetsRoutes(app);
     registerPublicRoutes(app, ctx);
+    registerPreviewPublic(app);
 
     // Everything else requires a bearer token.
     app.use((req: Request, res: Response, next: NextFunction) => {
@@ -459,6 +461,7 @@ export class LoomDaemon {
     registerBoardRoutes(app, ctx, withRuntime);
     registerIntegrationsProjectRoutes(app);
     registerFilesRoutes(app);
+    registerPreviewRoutes(app);
 
     // Anything under /api nobody answered: JSON, like every other API reply,
     // not Express's HTML page.

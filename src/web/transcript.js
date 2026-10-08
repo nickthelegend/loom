@@ -258,7 +258,8 @@ import { shortModel } from './permissions.js';
         (tview() === "verbose" ? rawBlock(p) : "") + "</div>";
     }
     if (e.kind === "file_edit") {
-      return '<div class="tool" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span></div>";
+      return '<div class="tool" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span>" +
+        (ARTIFACT_EXT.test(String(p.path || "")) ? '<button type="button" class="artchip mini" data-artifact="' + esc(p.path) + '" title="preview ' + esc(p.path) + '">' + ICONS.play + "Preview</button>" : "") + "</div>";
     }
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
@@ -271,6 +272,7 @@ import { shortModel } from './permissions.js';
             '" title="put these files back the way they were before this turn">' + ICONS.rewind + "Rewind</button>" : "") +
         '<span class="tchev">\u25b8</span></div>' +
         '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \u2026" : "") + "</div>" +
+        artifactChips((p.files || []).filter(function(f){ return f.status !== "deleted" && f.status !== "D"; }).map(function(f){ return f.path; })) +
         '<div class="tcdiff" style="display:none"></div></div>';
     }
     if (e.kind === "checkpoint") {
@@ -639,19 +641,31 @@ function splitAttachments(text){
 }
 
 var attCache = {};
+/**
+ * Images the thread can't load by URL, because the API wants your token:
+ * attachments (data-att) and files in the project (data-projimg — a screenshot
+ * an agent saved, an image in its markdown). Fetched once each, when they appear.
+ */
 function loadAttachment(img){
   img.setAttribute("data-loading", "1");
-  var key = state.pid + "|" + img.getAttribute("data-att");
-  var done = function(url){ if (url) img.src = url; else img.parentNode && img.parentNode.classList.add("gone"); };
+  var att = img.getAttribute("data-att"), proj = img.getAttribute("data-projimg");
+  var rel = att || proj;
+  var key = state.pid + "|" + rel;
+  var done = function(url){
+    if (url) { img.src = url; return; }
+    // an image that isn't there says so, rather than leaving a hole
+    if (proj) { var miss = document.createElement("span"); miss.className = "mdimgmiss"; miss.textContent = "\ud83d\uddbc " + rel + " (not found)"; img.replaceWith(miss); }
+    else if (img.parentNode) img.parentNode.classList.add("gone");
+  };
   if (attCache[key]) { attCache[key].then(done); return; }
-  attCache[key] = fetch("/api/projects/" + state.pid + "/attachment?path=" + encodeURIComponent(img.getAttribute("data-att")), {
+  attCache[key] = fetch("/api/projects/" + state.pid + (att ? "/attachment" : "/image") + "?path=" + encodeURIComponent(rel), {
     headers: { Authorization: "Bearer " + state.token },
   }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){ return b ? URL.createObjectURL(b) : null; }).catch(function(){ return null; });
   attCache[key].then(done);
 }
 if (typeof document !== "undefined" && document.addEventListener && typeof MutationObserver !== "undefined") {
   var attScan = function(){
-    Array.prototype.forEach.call(document.querySelectorAll("img[data-att]:not([data-loading])"), loadAttachment);
+    Array.prototype.forEach.call(document.querySelectorAll("img[data-att]:not([data-loading]),img[data-projimg]:not([data-loading])"), loadAttachment);
   };
   var attQueued = false;
   new MutationObserver(function(){
@@ -666,6 +680,18 @@ if (typeof document !== "undefined" && document.addEventListener && typeof Mutat
   });
 }
 
+/** Files worth seeing as themselves rather than as a diff: pages, pictures, documents. */
+var ARTIFACT_EXT = /\.(html?|svg|png|jpe?g|gif|webp|avif|pdf|md|markdown)$/i;
+function artifactChips(paths){
+  var arts = paths.filter(function(x){ return ARTIFACT_EXT.test(String(x || "")); }).slice(0, 6);
+  if (!arts.length) return "";
+  return '<div class="artchips">' + arts.map(function(x){
+    var ext = String(x).split(".").pop().toLowerCase();
+    var icon = /png|jpe?g|gif|webp|avif|svg/.test(ext) ? ICONS.image || ICONS.file : /html?/.test(ext) ? ICONS.globe : ICONS.file;
+    return '<button type="button" class="artchip" data-artifact="' + esc(x) + '" title="preview ' + esc(x) + '">' + icon + "<span>" + esc(String(x).split("/").pop()) + "</span></button>";
+  }).join("") + "</div>";
+}
+
 /** Fold a question card: what was answered, or that it's closed. */
 function settleQuestionCard(card, answers){
   if (!card || card.classList.contains("done")) return false;
@@ -678,4 +704,4 @@ function settleQuestionCard(card, answers){
   return true;
 }
 
-export { settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };
+export { ARTIFACT_EXT,artifactChips,settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };

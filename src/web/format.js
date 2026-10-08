@@ -45,8 +45,16 @@ import { toast } from './notifications.js';
     s = s.replace(/(\x60+)([^\x60]|[^\x60][\s\S]*?[^\x60])\1(?!\x60)/g, function(_m, _t, code){
       return park('<code class="mdi">' + code.replace(/^ (.*) $/, "$1") + "</code>");
     });
-    s = s.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+?)(?:\s+&quot;[^&]*&quot;)?\)/g, function(_m, alt, url){
-      return park(link(url, "\ud83d\uddbc " + (alt || "image")));
+    // Images: from the web (no referrer), small data: images, and files in the
+    // project (a screenshot the agent saved) — those load through the API with
+    // your token once they're on screen (transcript.js). Anything else stays a link.
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+?)(?:\s+&quot;[^&]*&quot;)?\)/g, function(m, alt, url){
+      var a = ' alt="' + alt + '" title="' + (alt || "image") + '"';
+      if (/^https?:\/\//i.test(url)) return park('<a class="mdimgl" href="' + url + '" target="_blank" rel="noopener noreferrer"><img class="mdimg" src="' + url + '"' + a + ' loading="lazy" referrerpolicy="no-referrer"></a>');
+      if (/^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+\/=]+$/i.test(url)) return park('<img class="mdimg" src="' + url + '"' + a + ">");
+      var local = url.replace(/^file:\/\//i, "");
+      if (/^(?![a-z]+:)[^\u0000]+\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(local)) return park('<img class="mdimg" data-projimg="' + local + '"' + a + ">");
+      return m;
     });
     s = s.replace(/\[([^\]]+?)\]\((https?:\/\/[^)\s]+?)(?:\s+&quot;[^&]*&quot;)?\)/g, function(_m, label, url){
       return park(link(url, mdInline(label)));
@@ -110,6 +118,7 @@ import { toast } from './notifications.js';
     return '<div class="mdcodewrap"><button class="mdcopy" type="button" title="copy">' + ICONS.copy +
       "</button>" + (lang ? '<span class="mdlang">' + lang + "</span>" : "") +
       (lang === "mermaid" ? '<button class="mddraw" type="button" title="draw it — fetches the Mermaid renderer from jsdelivr the first time">' + ICONS.tree + "Draw diagram</button>" : "") +
+      (/^(html|htm|svg|xml)$/.test(lang) && (lang !== "xml" || /&lt;svg[\s&]/.test(body)) ? '<button class="mdprev" type="button" title="see it rendered, in a sandbox that can\u2019t reach Loom">' + ICONS.play + "Preview</button>" : "") +
       '<pre class="mdcode"><code>' + hlCode(body, lang) + "</code></pre></div>";
   }
 

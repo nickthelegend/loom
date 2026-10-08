@@ -1306,3 +1306,26 @@
   .msgfoot.planfoot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
   .planfoot .pftag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--thread-ink);margin-right:4px}
   .planfoot .pftag svg{width:13px;height:13px}
+
+  /* ── images and artifacts ── */
+  .md .mdimg{display:block;max-width:min(100%,560px);max-height:420px;height:auto;border-radius:10px;border:1px solid var(--border);
+    margin:6px 0;background:var(--muted);cursor:zoom-in;object-fit:contain}
+  .md a.mdimgl{display:inline-block}
+  .md .mdimgmiss{display:inline-block;font-size:12px;color:var(--muted-foreground);padding:4px 8px;border:1px dashed var(--border);border-radius:6px}
+  .mdcodewrap .mdprev{position:absolute;top:6px;right:66px;display:inline-flex;white-space:nowrap;align-items:center;gap:4px;height:22px;padding:0 8px;
+    font-size:11px;border-radius:6px;border:1px solid var(--border);background:var(--card);color:var(--foreground);cursor:pointer}
+  .mdcodewrap .mdprev svg{width:11px;height:11px}
+  .artchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .artchip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;font-size:11.5px;cursor:pointer;
+    border:1px solid color-mix(in srgb, var(--thread) 35%, var(--border));background:color-mix(in srgb, var(--thread) 7%, transparent);color:var(--foreground)}
+  .artchip:hover{background:color-mix(in srgb, var(--thread) 14%, transparent)}
+  .artchip svg{width:12px;height:12px;color:var(--thread-ink)}
+  .artchip.mini{height:20px;padding:0 7px;font-size:10.5px;margin-left:auto}
+  .artbar{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--editor-surface, var(--background));z-index:1}
+  .artbar .artpath{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .artbar .btn svg{width:12px;height:12px}
+  #pane-changes:has(.artframe){padding:0;display:flex;flex-direction:column}
+  .artframe{flex:1;width:100%;min-height:420px;border:0;background:#fff}
+  .artimg{padding:14px;display:flex;justify-content:center}
+  .artimg img{max-width:100%;height:auto;border-radius:8px;box-shadow:0 1px 6px rgb(0 0 0 / .2);background:repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0/16px 16px}
+  .artdoc{padding:14px 18px}

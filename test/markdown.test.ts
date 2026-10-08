@@ -55,7 +55,13 @@ describe("markdown for agent output", () => {
     expect(strip(md("~~~\nraw\n~~~"))).toContain("<code>raw</code>");
     expect(md("## Title ##")).toBe('<div class="mdh mdh2">Title</div>');
     expect(md("***")).toBe('<hr class="mdhr">');
-    expect(md("![logo](https://x.dev/a.png)")).toContain('<a href="https://x.dev/a.png"');
+    expect(md("![logo](https://x.dev/a.png)")).toContain('<img class="mdimg" src="https://x.dev/a.png"');
+    expect(md("![logo](https://x.dev/a.png)")).toContain('referrerpolicy="no-referrer"');
+    expect(md("![shot](out/shot.png)")).toContain('data-projimg="out/shot.png"');
+    expect(md("![shot](file:///Users/me/p/shot.png)")).toContain('data-projimg="/Users/me/p/shot.png"');
+    expect(md("![x](javascript:alert(1).png)")).not.toContain("<img");
+    expect(md("![x](data:image/png;base64,iVBORw0KGgo=)")).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+    expect(md("![x](data:text/html;base64,PHNjcmlwdD4=)")).not.toContain("<img");
     expect(md("<img src=x onerror=alert(1)>")).toBe('<div class="mdp">&lt;img src=x onerror=alert(1)&gt;</div>');
     expect(md("[x](javascript:alert(1))")).not.toContain("href=\"javascript");
   });

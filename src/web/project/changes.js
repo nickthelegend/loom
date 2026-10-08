@@ -1,6 +1,6 @@
 import { api } from '../connection.js';
 import { diffBody,diffToggle,isLoomInternal,renderDiffFiles,renderDiffLines,splitPatch } from '../diff.js';
-import { esc } from '../format.js';
+import { esc,mdToHtml } from '../format.js';
 import { ICONS,LOADER } from '../icons.js';
 import { askConfirm,toast } from '../notifications.js';
 import { state } from '../state.js';
@@ -165,5 +165,58 @@ export function createChanges(view) {
         el.scrollTop = 0;
       }).catch(function(err){ el.innerHTML = '<div class="sys err">' + esc(err.message) + "</div>"; });
     }
-return { closeDock, openChangesDock, openPatchDock, openFileDock };
+    /**
+     * An artifact, shown as itself: a page or SVG or PDF in a sandboxed frame
+     * (served from a short-lived preview link, so its own CSS, scripts and
+     * images load — and it can't reach Loom), an image as an image, markdown
+     * rendered. Anything else falls back to the source view.
+     */
+    function openArtifactDock(relPath){
+      var ext = String(relPath).split(".").pop().toLowerCase();
+      if (!/^(html?|svg|pdf|png|jpe?g|gif|webp|avif|md|markdown)$/.test(ext)) return openFileDock(relPath);
+      openDock();
+      dockTitle(/^(html?)$/.test(ext) ? ICONS.globe : /^(md|markdown|pdf)$/.test(ext) ? ICONS.file : ICONS.image, relPath);
+      var el = document.getElementById("pane-changes"); el.innerHTML = LOADER;
+      var bar = function(extra){
+        return '<div class="artbar"><span class="artpath">' + esc(relPath) + '</span><span class="spacer"></span>' + (extra || "") +
+          '<button type="button" class="btn xs ghost" data-artsrc title="show the source">' + ICONS.code + "Source</button></div>";
+      };
+      var wireBar = function(url){
+        var src = el.querySelector("[data-artsrc]"); if (src) src.onclick = function(){ openFileDock(relPath); };
+        var re = el.querySelector("[data-artreload]"); if (re) re.onclick = function(){ openArtifactDock(relPath); };
+        var ex = el.querySelector("[data-artopen]"); if (ex && url) ex.onclick = function(){ window.open(url, "_blank", "noopener"); };
+      };
+      if (/^(md|markdown)$/.test(ext)) {
+        api("/api/projects/" + view.pid + "/file?path=" + encodeURIComponent(relPath)).then(function(j){
+          el.innerHTML = bar() + '<div class="artdoc md">' + mdToHtml(String(j.content || "")) + "</div>";
+          wireBar(null);
+        }).catch(function(err){ el.innerHTML = '<div class="sys err">' + esc(err.message) + "</div>"; });
+        return;
+      }
+      if (/^(png|jpe?g|gif|webp|avif)$/.test(ext)) {
+        el.innerHTML = bar() + '<div class="artimg"><img data-projimg="' + esc(relPath) + '" alt="' + esc(relPath) + '"></div>';
+        wireBar(null);
+        return;
+      }
+      api("/api/projects/" + view.pid + "/preview", { method: "POST", body: JSON.stringify({ path: relPath }) }).then(function(j){
+        el.innerHTML = bar('<button type="button" class="btn xs ghost" data-artreload title="reload">' + ICONS.refresh + "Reload</button>" +
+            '<button type="button" class="btn xs ghost" data-artopen title="open in your browser">' + ICONS.external + "Open</button>") +
+          '<iframe class="artframe" src="' + esc(j.url) + '" sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads" referrerpolicy="no-referrer" title="' + esc(relPath) + '"></iframe>';
+        wireBar(location.origin + j.url);
+      }).catch(function(err){ el.innerHTML = '<div class="sys err">' + esc(err.message) + "</div>"; });
+    }
+
+    /** An html/svg code block from the thread, rendered in the same sandbox (no file, so no relative assets). */
+    function openCodePreview(code, lang){
+      openDock();
+      dockTitle(ICONS.globe, (lang || "html") + " preview");
+      var el = document.getElementById("pane-changes");
+      var doc = lang === "svg" || lang === "xml"
+        ? '<!doctype html><meta charset="utf-8"><style>html,body{margin:0;height:100%;display:grid;place-items:center;background:#fff}svg{max-width:100%;max-height:100vh}</style>' + code
+        : code;
+      el.innerHTML = '<div class="artbar"><span class="artpath">' + esc((lang || "html").toUpperCase()) + ' from the thread \u00b7 sandboxed</span></div>' +
+        '<iframe class="artframe" sandbox="allow-scripts allow-forms allow-popups allow-modals" referrerpolicy="no-referrer" title="preview"></iframe>';
+      el.querySelector("iframe").srcdoc = doc;
+    }
+return { closeDock, openChangesDock, openPatchDock, openFileDock, openArtifactDock, openCodePreview };
 }
