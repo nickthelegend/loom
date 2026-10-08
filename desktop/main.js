@@ -104,12 +104,23 @@ async function createWindow() {
   attachContextMenu(win.webContents);
 
   // Open external links (docs, github) in the real browser, not the shell.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith("http://127.0.0.1") && !url.startsWith("http://localhost")) {
-      void shell.openExternal(url);
-      return { action: "deny" };
-    }
-    return { action: "allow" };
+  // Only this machine's own pages may open inside it — compared by parsed
+  // hostname, because "http://localhost.evil.com" starts with
+  // "http://localhost". The preview's "Open in browser" names its window
+  // "loom-external", which always means the real browser, local or not.
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    let u = null;
+    try { u = new URL(url); } catch { /* not a url at all */ }
+    if (!u) return { action: "deny" };
+    // No popup opens inside Loom, loopback included: a child window would
+    // inherit this window's preload (window.loomNative), so a page in the
+    // preview could reach the shell through it. Every link goes to the real
+    // browser; a dev server's OAuth popup works there just the same.
+    void frameName;
+    // Only the schemes a browser or mail client is for — never file:, or a
+    // custom scheme that launches some other app with arguments from a page.
+    if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "mailto:") void shell.openExternal(u.href);
+    return { action: "deny" };
   });
 
   try {
@@ -320,6 +331,18 @@ function attachContextMenu(contents) {
     Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(contents) ?? undefined });
   });
 }
+
+
+// The Browser pane's screenshot, of exactly what's on screen: the preview is
+// another origin, so the page can't photograph its own frame — the shell can.
+// A rectangle of the asking window only, clamped to it; a PNG data URL back.
+ipcMain.handle("loom:capture", async (e, rect) => {
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.round(Number(v))) : 0);
+  const r = rect && typeof rect === "object" ? { x: n(rect.x), y: n(rect.y), width: n(rect.width), height: n(rect.height) } : null;
+  if (!r || r.width < 2 || r.height < 2 || r.width > 10000 || r.height > 10000) return null;
+  const image = await e.sender.capturePage(r);
+  return image.isEmpty() ? null : image.toDataURL();
+});
 
 // "Reveal in Finder" from the Explorer: only an absolute path to something that exists.
 ipcMain.handle("loom:reveal", async (_e, p) => {

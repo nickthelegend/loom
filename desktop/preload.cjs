@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld("loomNative", {
   isFocused: function () {
     return ipcRenderer.invoke("loom:focused");
   },
+  // A picture of a rectangle of this window (the Browser pane's frame), as a
+  // PNG data URL — the shell can photograph what the page can't.
+  capture: function (rect) {
+    return ipcRenderer.invoke("loom:capture", rect);
+  },
   onNotifyAction: function (cb) {
     ipcRenderer.on("loom:notify-action", function (_e, action) {
       if (action && typeof action === "object") cb(action);

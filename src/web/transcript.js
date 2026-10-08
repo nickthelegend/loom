@@ -700,9 +700,10 @@ if (typeof document !== "undefined" && document.addEventListener && typeof Mutat
   };
   var attQueued = false;
   new MutationObserver(function(){
-    if (attQueued) return;
+    // a closing window empties its body; there's nothing left to load into
+    if (attQueued || !document.defaultView || !document.body) return;
     attQueued = true;
-    requestAnimationFrame(function(){ attQueued = false; attScan(); });
+    requestAnimationFrame(function(){ attQueued = false; if (document.defaultView) attScan(); });
   }).observe(document.documentElement, { childList: true, subtree: true });
   // a tap makes a thumbnail big, and back
   document.addEventListener("click", function(ev){

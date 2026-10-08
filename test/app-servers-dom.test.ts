@@ -163,6 +163,12 @@ function mount(screenshot?: () => Promise<Response>): Mounted {
           /* already gone */
         }
       }
+      // close() empties the body, which the app's MutationObservers see one
+      // microtask later — and one of them asks for an animation frame. jsdom
+      // then runs it against a window with no document, and its error report
+      // throws reading location ("_location" of null) long after the test. A
+      // closed browser window runs nothing; make this one do the same.
+      dom.window.requestAnimationFrame = () => 0;
       dom.window.close();
     },
   };

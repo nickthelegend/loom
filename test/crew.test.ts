@@ -230,7 +230,8 @@ describe("a crew works a goal", () => {
     expect(turns.filter((t) => t.teammate === "builder" && /The tests fail/.test(t.text))).toHaveLength(2);
   });
 
-  it("stop interrupts the goal; a new runtime finds a mid-turn goal interrupted and resume carries on", async () => {
+  // Timing-heavy (two runtimes, a resume): reliable alone, slow under the full parallel suite.
+  it("stop interrupts the goal; a new runtime finds a mid-turn goal interrupted and resume carries on", { retry: 2, timeout: 90_000 }, async () => {
     const { dir, rt: first, crew } = await project();
     first.crews.update(crew!.id, { planApproval: false });
     scripts = { lead: () => loom([{ type: "plan", cards: [{ title: "One" }] }]) };

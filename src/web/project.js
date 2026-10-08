@@ -26,7 +26,7 @@ import { ICONS,LOADER } from './icons.js';
 import { applyRail,makeResizer,toggleRail } from './layout.js';
 import { toast } from './notifications.js';
 import { KMOD } from './permissions.js';
-import { closeBrowser,openBrowser } from './preview.js';
+import { closeBrowser,openBrowser,resetBrowser } from './preview.js';
 import { root,state } from './state.js';
 import { loadGitDelivery } from './statusbar.js';
 import { loadTeam,loadTeamRunners,runnerHooks,teamEditing,teamHooks } from './team.js';
@@ -233,6 +233,7 @@ import { openMenu } from './menus.js';
     // A chat just created with a chosen agent leaves its pick here, so the
     // composer opens aimed at that agent instead of snapping back to the holder.
     state.pid = pid; state.lastId = 0;
+    resetBrowser(pid); // the Browser pane's page, specs and servers are this project's, not the last one's
     state.selected = state.pendingSelect || null;
     state.pendingSelect = null;
     state.tab = "thread"; state.tree = null; state.lastQuestion = null;
@@ -413,21 +414,33 @@ import { openMenu } from './menus.js';
         '<div class="conlist" id="conlist"></div>' +
         "</div>" +
         '<div class="browwrap" id="browwrap">' +
-        '<div class="browrail">' +
+        // At a narrow dock the rail is a drawer over the frame (tools.css), opened
+        // from the "Servers" button in the address bar.
+        '<div class="browrail" id="browrail">' +
         // The servers this project runs, above its tests: what's up, on which
         // port, and one click to start, stop or look at what it printed.
         '<div class="browbar"><span class="lbl">Dev servers</span><span class="spacer" style="flex:1"></span>' +
-        '<button id="srvreload" class="iconbtn xs" title="refresh">' + ICONS.refresh + "</button></div>" +
+        '<button id="srvreload" class="iconbtn xs" title="refresh">' + ICONS.refresh + "</button>" +
+        '<button id="browrailclose" class="iconbtn xs browrailclose" title="hide">' + ICONS.x + "</button></div>" +
         '<div class="srvlist" id="srvlist">' + LOADER + "</div>" +
         '<div class="browbar"><span class="lbl">Playwright specs</span><span class="spacer" style="flex:1"></span>' +
+        '<button id="specstop" class="iconbtn xs" title="stop the running spec" style="display:none">' + ICONS.stop + "</button>" +
         '<button id="specreload" class="iconbtn xs" title="rescan">' + ICONS.refresh + "</button></div>" +
         '<div class="speclist" id="speclist">' + LOADER + "</div>" +
         '<div class="specout" id="specout" style="display:none"></div>' +
         "</div>" +
         '<div class="browmain">' +
         '<div class="browurl">' +
+        '<button id="browrailbtn" class="iconbtn browrailbtn" title="servers and specs">' + ICONS.tasks + "</button>" +
+        '<button id="browback" class="iconbtn" title="back">' + ICONS.back + "</button>" +
+        '<button id="browfwd" class="iconbtn" title="forward">' + ICONS.arrowRight + "</button>" +
+        '<button id="browreload" class="iconbtn" title="reload">' + ICONS.refresh + "</button>" +
         '<input id="browurl" placeholder="http://localhost:3000 \u2014 preview a dev server" autocomplete="off" spellcheck="false">' +
         '<button id="browgo" class="iconbtn" title="open">' + ICONS.play + "</button>" +
+        '<button id="browmore" class="iconbtn browmore" title="more">' + ICONS.dots + "</button>" +
+        // Everything else lives in one group, so a narrow dock can fold it
+        // behind "⋯" instead of squeezing the address to nothing.
+        '<span class="browtools" id="browtools">' +
         // The conditions a bug was seen under, and a way to carry the view
         // into the next prompt.
         '<span class="browsizes" id="browsizes">' +
@@ -444,9 +457,10 @@ import { openMenu } from './menus.js';
         '<button data-s="dark" title="preview the page in dark mode">☽</button>' +
         "</span>" +
         '<button id="browshot" class="iconbtn" title="screenshot into the composer">' + ICONS.camera + "</button>" +
-        '<button id="browreload" class="iconbtn" title="reload">' + ICONS.refresh + "</button>" +
+        '<button id="browext" class="iconbtn" title="open in your browser">' + ICONS.external + "</button>" +
         '<label class="browauto" title="reload when an agent changes a file this server serves">' +
         '<input type="checkbox" id="browautorel" checked><span>auto</span></label>' +
+        "</span>" +
         "</div>" +
         '<div class="browframe" id="browframe">' +
         '<div class="browhint">Point this at a running dev server to see the page beside its tests.<br>' +
@@ -916,6 +930,9 @@ import { openMenu } from './menus.js';
         if (txt) { copyText(txt); toast("copied"); }
         return;
       }
+      // a tool row opens to what it did (args, output, exit code, error); its details stay selectable
+      var trow = ev.target.closest && ev.target.closest(".tool.hasdet");
+      if (trow && !ev.target.closest(".tooldet") && !ev.target.closest("a,button")) { ev.preventDefault(); trow.classList.toggle("open"); return; }
       // an artifact an agent made (a page, an image, a doc), shown as itself
       var art = ev.target.closest && ev.target.closest("[data-artifact]");
       if (art) { ev.preventDefault(); ev.stopPropagation(); openArtifactDock(art.getAttribute("data-artifact")); return; }

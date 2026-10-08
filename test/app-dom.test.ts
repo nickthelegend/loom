@@ -1141,6 +1141,8 @@ describe("web app · the browser tab", () => {
     const projDir = projects.find((p) => p.id === projectId)!.dir;
     fs.mkdirSync(path.join(projDir, "e2e"), { recursive: true });
     fs.writeFileSync(path.join(projDir, "e2e", "smoke.spec.ts"), "// spec\n");
+    // specs are only offered in a project that uses Playwright (daemon/specs.ts)
+    fs.writeFileSync(path.join(projDir, "playwright.config.ts"), "export default {};\n");
 
     const m = mount({ hash: `#p/${projectId}` });
     await ready(m, "#browserbtn");
@@ -1560,8 +1562,10 @@ describe("web app · an agent's structured question", () => {
     const real = rt.answerQuestion;
     rt.answerQuestion = async (...a: unknown[]) => { calls.push(a); };
     try {
-      const m = mount({ hash: `#p/${projectId}` });
+      // the main chat, whatever an earlier test left selected
+      const m = mount({ hash: `#p/${projectId}/c/main` });
       await waitUntil(() => !!$(m, "#feed"));
+      await new Promise((r) => setTimeout(r, 300)); // history in, socket up
       rt.log.append({ kind: "needs_input", agentId: "plannerbot", chat: "main", payload: {
         question: "Which extras?", requestId: "req-multi", responseMode: "tool",
         questions: [{ id: "x", header: "Extras", question: "Which extras?", multiSelect: true, allowCustomAnswer: false,
