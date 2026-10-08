@@ -914,7 +914,7 @@ import { ORCH_RUN_ST } from './transcript.js';
           esc(String(t.name || "?").slice(0, 1)) + "</span>" +
         '<span class="tcn">' + esc(t.name) + "</span>" +
         '<span class="trole">' + esc(t.role) + "</span>" +
-        '<span class="tcm">' + (others.length ? others.length + " live" : "quiet") + (t.keyVersion != null ? " \u00b7 key v" + esc(t.keyVersion) : "") + "</span>" +
+        '<span class="tcm">' + (t.missing ? "not on the hub any more" : others.length ? others.length + " live" : "quiet") + (t.keyVersion != null ? " \u00b7 key v" + esc(t.keyVersion) : "") + "</span>" +
         '<span class="spacer"></span>' +
         (t.role !== "viewer" ? '<button class="btn outline xs" type="button" data-tinvite="' + esc(t.id) + '">' + ICONS.plus + "Invite</button>" : "") + "</div>" +
       '<div class="tcrow"><span class="tck">Members</span>' + teamMembersHtml(t) + "</div>" +
@@ -930,6 +930,10 @@ import { ORCH_RUN_ST } from './transcript.js';
   function teamFleetHtml(st, pid){
     var teams = st.teams || [];
     if (!teams.length) return teamHeadHtml() + teamJoinCardHtml();
-    return teamHeadHtml() + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
+    var down = st.connected === false
+      ? '<div class="tinvw thubdown">' + ICONS.alert + "<span><b>Can\u2019t reach the team hub.</b> " + esc(st.lastError || "") +
+          " \u2014 your agents keep working here; Loom tries again every 15 seconds.</span></div>"
+      : "";
+    return teamHeadHtml() + down + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
   }
 export { DEPLOY_ST,fleetSince,ghRepo,JOB_KIND,JOB_ST,jobProgressText,LEASE_STALE_MS,leaseClash,leasePill,leasePrefix,leaseStale,leaseUnder,loadTeam,loadTeamLanding,loadTeamPolicy,loadTeamRunners,loadTeamShare,onlineRunners,onTeamFrame,orchGoalName,runnerAct,runnerFrameT,runnerHooks,runnerName,runnersChanged,setTeamRunners,setTeamShare,TEAM_LANDING_EVENTS,TEAM_POLICY_SAMPLE,TEAM_ST,teamAct,teamAgentOf,teamAvatar,teamCardHtml,teamClaimMap,teamClaimRows,teamCostsHtml,teamDeploys,teamDeploysHtml,teamEditing,teamFeedGoal,teamFeedHtml,teamFeedLine,teamField,teamFleetHtml,teamFrameT,teamGlobs,teamGoalOf,teamHeadHtml,teamHooks,teamInviteHtml,teamInvites,teamJoinCardHtml,teamLandings,teamLeaseRow,teamLeasesHtml,teamMembersHtml,teamMyRuns,teamNeedsHtml,teamNotify,teamOthers,teamPaths,teamPill,teamPolicies,teamPolicyHtml,teamPresenceLeasesHtml,teamRow,teamRunners,teamRunnersHtml,teamSessionsHtml,teamShareHtml,teamShareOf,teamShares,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare };

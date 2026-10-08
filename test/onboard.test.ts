@@ -15,7 +15,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { inviteFragment, inviteLink, previewInvite } from "../src/core/invite-link.js";
-import { unpackInvite } from "../src/core/team-crypto.js";
+import { packInvite, unpackInvite } from "../src/core/team-crypto.js";
 import { registerProject, writeProjectConfig } from "../src/core/registry.js";
 import { fillCrew, inviteTeammate, Onboarding } from "../src/daemon/onboard.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
@@ -227,6 +227,49 @@ describe("one link, end to end", () => {
     await again.connect();
     await new Promise((r) => setTimeout(r, 200));
     expect(granted).toEqual(["erin"]);
+  });
+
+  it("a link whose repo was swapped, or whose signature was stripped, clones nothing", async () => {
+    const dir = tmpDir("onboard-gina");
+    git(path.dirname(dir), "clone", "-q", origin, dir);
+    git(dir, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    writeProjectConfig(dir, { name: "app-gina", agents: [{ id: "w", kind: "echo" }], brain: { extractor: "off" } });
+    const rt = await ProjectRuntime.open({ id: "onb-gina", name: "app-gina", dir });
+    close.push(() => rt.close());
+    const gina = new TeamLink({ runtimes: () => [rt], broadcast: () => {}, statePath: path.join(tmpDir("onb-gina-state"), "team.json") });
+    close.push(() => gina.stop());
+    await gina.signIn(hub.url, { github: "gina", secret: "s3cret" });
+    const reforge = (link: string, edit: (f: ReturnType<typeof unpackInvite> & object) => void) => {
+      const f = unpackInvite(inviteFragment(link))!;
+      edit(f);
+      return inviteLink(packInvite(f), {});
+    };
+    const tampered = reforge((await inviteTeammate(gina, rt, { gh: async () => "" })).link, (f) => { f.repo = "evil/app"; });
+    expect(previewInvite(tampered)).toMatchObject({ repo: "evil/app", signed: true }); // can't tell until it's on the team
+    const clones: string[] = [];
+    const hank = new TeamLink({ runtimes: () => [], broadcast: () => {}, statePath: path.join(tmpDir("onb-hank-state"), "team.json") });
+    close.push(() => hank.stop());
+    const onboarding = new Onboarding({
+      team: hank,
+      projects: () => [],
+      addProject: async () => { throw new Error("no project should be added"); },
+      runtime: async () => { throw new Error("no runtime"); },
+      projectsHome: tmpDir("onboard-hank-projects"),
+      clone: async (repo) => { clones.push(repo); },
+      gh: async () => "",
+    });
+    const bad = await onboarding.join(tampered, { github: "hank", secret: "s3cret" });
+    expect(bad.state).toBe("failed");
+    expect(bad.steps.find((s) => s.id === "team")!.state).toBe("done"); // the team part is the hub's to vouch for
+    expect(bad.steps.find((s) => s.id === "repo")).toMatchObject({ state: "failed" });
+    expect(bad.error).toMatch(/changed after it was made/);
+    // and a link with the signature taken off is no better
+    const stripped = reforge((await inviteTeammate(gina, rt, { gh: async () => "" })).link, (f) => { delete f.sig; delete f.dev; });
+    expect(previewInvite(stripped)).toMatchObject({ signed: false });
+    const bare = await onboarding.join(stripped);
+    expect(bare.state).toBe("failed");
+    expect(bare.error).toMatch(/isn't signed/);
+    expect(clones).toEqual([]);
   });
 
   it("an invite needs a GitHub remote, then a signed-in hub, and says so", async () => {

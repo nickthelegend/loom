@@ -32,6 +32,8 @@ import {
   sealForTeam,
   sealTeamKey,
   signPayload,
+  verifyPayload,
+  inviteSigned,
   unpackInvite,
   type DeviceKeys,
   type InviteFragment,
@@ -49,8 +51,9 @@ import {
   type Presence,
   type PresenceIn,
   type TeamRole,
+  inviteTag,
 } from "../core/team-hub.js";
-import { HttpHubClient, hubSignIn } from "../hub/client.js";
+import { HttpHubClient, hubErrorText, hubSignIn } from "../hub/client.js";
 import { hostedSignIn, openInBrowser, SupabaseHubClient, type HostedSession } from "../hub/supabase-client.js";
 import { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } from "../core/hosted.js";
 import type { LoomEvent } from "../types.js";
@@ -78,13 +81,13 @@ interface TeamState {
    */
   hub?: { url: string; token: string; github: string; userId: string; key?: string };
   device?: DeviceKeys & { id?: string };
-  teams: Record<string, { name: string; role: TeamRole; keys: TeamKey[] }>;
+  teams: Record<string, { name: string; role: TeamRole; keys: TeamKey[]; missing?: boolean }>;
   /**
    * One-link onboarding: invites that should give whoever redeems them push
    * access to a repo. Consumed oldest-first by `member_joined` (invites are
    * single-use, so one join is one grant).
    */
-  grants?: Array<{ teamId: string; repo: string; expiresAt: number; createdAt?: number }>;
+  grants?: Array<{ teamId: string; repo: string; expiresAt: number; createdAt?: number; tag?: string }>;
 }
 
 function defaultStateFile(): string {
@@ -209,7 +212,7 @@ export class TeamLink {
     if (this.started) return;
     this.started = true;
     if (this.state.hub) await this.connect().catch((e) => logbook.warn("team", "couldn't reach the team hub", String(e)));
-    this.timers.push(setInterval(() => void this.beat().catch(() => {}), HEARTBEAT_MS));
+    this.timers.push(setInterval(() => void this.tick().catch(() => {}), HEARTBEAT_MS));
     this.timers.push(setInterval(() => void this.pollGitHub().catch(() => {}), GH_POLL_MS));
     this.timers.push(setInterval(() => void this.syncBrains().catch(() => {}), BRAIN_SYNC_MS));
     this.timers.push(setInterval(() => void this.pollDeploys().catch(() => {}), DEPLOY_POLL_MS));
@@ -351,19 +354,31 @@ export class TeamLink {
     const cur = this.hubClient;
     const keep = cur instanceof SupabaseHubClient && hostedSupabaseUrl(h.url) === cur.supabaseUrl && !this.host.hubFactory;
     if (!keep) this.setHubClient(this.makeClient(h.url, h.token, h.key));
-    await this.ensureDevice();
-    const teams = await this.hub().teams();
-    // Forget teams we were removed from; learn roles and any new key versions.
-    for (const id of Object.keys(this.state.teams)) {
-      if (!teams.some((t) => t.id === id)) delete this.state.teams[id];
+    let teams: Awaited<ReturnType<HubClient["teams"]>>;
+    try {
+      await this.ensureDevice();
+      teams = await this.hub().teams();
+    } catch (err) {
+      this.noteHub(err);
+      throw err;
+    }
+    this.noteHub();
+    // A team the hub no longer lists is marked, not forgotten: a self-hosted
+    // hub restarted without its data lists nothing, and deleting here would
+    // throw away the only copy of the team keys. Removal arrives as
+    // `member_left`, and the keys rotate past us then anyway.
+    for (const [id, t] of Object.entries(this.state.teams)) {
+      if (!teams.some((x) => x.id === id)) t.missing = true;
     }
     for (const t of teams) {
       const known = this.state.teams[t.id] ?? { name: t.name, role: t.role, keys: [] };
-      this.state.teams[t.id] = { ...known, name: t.name, role: t.role };
+      const { missing: _m, ...rest } = known;
+      this.state.teams[t.id] = { ...rest, name: t.name, role: t.role };
       await this.pullKeys(t.id);
       await this.attach(t.id);
     }
     writeState(this.file, this.state);
+    this.connected = true;
     this.watchRuntimes();
     void this.syncBrains().catch(() => {});
   }
@@ -407,11 +422,17 @@ export class TeamLink {
     this.unsubs.set(teamId, unsub);
     // Someone may have joined on one of our invites while this Loom was off:
     // they're in the member list now, newer than the invite.
+    // A join on one of our invites while this Loom was off: the feed says which
+    // invite each joiner used (hubs that say so); otherwise, members newer than it.
     const granted = new Set<string>();
     for (const g of (this.state.grants ?? []).filter((x) => x.teamId === teamId && x.createdAt)) {
-      const joiner = members.find((m) => m.joinedAt >= g.createdAt! && m.user.github !== this.state.hub?.github && !granted.has(m.user.github));
-      if (joiner) granted.add(joiner.user.github);
-      if (joiner) void this.grantJoiner(teamId, joiner.user.github).catch((err) => logbook.warn("team", "couldn't give the new teammate access", String(err)));
+      const byTag = g.tag ? feed.find((f) => f.type === "member_joined" && f.meta?.invite === g.tag) : undefined;
+      const login = byTag ? String(byTag.meta.github ?? "")
+        : feed.some((f) => f.type === "member_joined" && f.meta?.invite) ? "" // this hub tags joins: an untagged match isn't this invite's
+        : members.find((m) => m.joinedAt >= g.createdAt! && m.user.github !== this.state.hub?.github && !granted.has(m.user.github))?.user.github ?? "";
+      if (!login || granted.has(login)) continue;
+      granted.add(login);
+      void this.grantJoiner(teamId, login, g.tag).catch((err) => logbook.warn("team", "couldn't give the new teammate access", String(err)));
     }
   }
 
@@ -447,7 +468,16 @@ export class TeamLink {
       const t = e.event.type;
       if (t === "key_rotated") await this.pullKeys(e.teamId).then(() => writeState(this.file, this.state)).catch(() => {});
       if (t === "member_joined" || t === "member_left" || t === "key_rotated") v.members = await this.hub().members(e.teamId).catch(() => v.members);
-      if (t === "member_joined") void this.grantJoiner(e.teamId, String(e.event.meta.github ?? "")).catch((err) => logbook.warn("team", "couldn't give the new teammate access", String(err)));
+      if (t === "member_joined") void this.grantJoiner(e.teamId, String(e.event.meta.github ?? ""), typeof e.event.meta.invite === "string" ? e.event.meta.invite : undefined).catch((err) => logbook.warn("team", "couldn't give the new teammate access", String(err)));
+      // Someone left: nothing new should be readable to them. One owner rotates
+      // (the first by id, so two owners don't race to version N+1).
+      if (t === "member_left" && e.event.meta.github !== this.state.hub?.github && this.state.teams[e.teamId]?.role === "owner" &&
+          Date.now() - (this.rotatedAt.get(e.teamId) ?? 0) > 15_000) { // a remove we just did rotated already
+        const owners = (v.members ?? []).filter((m) => m.role === "owner").map((m) => m.user.id).sort();
+        if (!owners.length || owners[0] === this.state.hub?.userId) {
+          void this.rotate(e.teamId).then((r) => logbook.info("team", `rotated the team key to v${r.keyVersion} after a member left`)).catch((err) => logbook.warn("team", "couldn't rotate the key after a member left", String(err)));
+        }
+      }
       if (t === "repo_shared") v.repos = await this.hub().repos(e.teamId).catch(() => v.repos);
       if (t === "member_left" && e.event.meta.github === this.state.hub?.github) {
         // We were removed: drop the team and its keys.
@@ -484,7 +514,7 @@ export class TeamLink {
     extra: { repo?: string; project?: string; crews?: InviteFragment["crews"]; grant?: boolean } = {},
   ): Promise<{ link: string; expiresAt: number }> {
     const { invite, expiresAt } = await this.hub().createInvite(teamId);
-    const frag = packInvite({
+    const f: InviteFragment = {
       invite,
       key: this.currentKey(teamId),
       hub: this.state.hub!.url,
@@ -494,13 +524,32 @@ export class TeamLink {
       ...(extra.repo ? { repo: extra.repo } : {}),
       ...(extra.project ? { project: extra.project.slice(0, 60) } : {}),
       ...(extra.crews?.length ? { crews: extra.crews } : {}),
-    });
+    };
+    f.dev = this.device().id;
+    f.sig = signPayload(this.device(), inviteSigned(f));
+    const frag = packInvite(f);
     if (extra.grant && extra.repo) {
       const now = Date.now();
-      this.state.grants = [...(this.state.grants ?? []).filter((g) => g.expiresAt > now), { teamId, repo: extra.repo, expiresAt, createdAt: now }];
+      this.state.grants = [...(this.state.grants ?? []).filter((g) => g.expiresAt > now), { teamId, repo: extra.repo, expiresAt, createdAt: now, tag: inviteTag(invite) }];
       writeState(this.file, this.state);
     }
     return { link: inviteLink(frag), expiresAt };
+  }
+
+  /**
+   * Is what a link asks for (the repo to clone, the crews to set up) what its
+   * inviter signed? Checked once we're on the team and can see the inviter's
+   * registered devices: anyone holding the link holds the team key, so only the
+   * device signature can't be forged. "unsigned" is a link from an older Loom —
+   * or one with the signature stripped, so it gets no more trust than a bad one.
+   */
+  verifyInvite(inv: InviteFragment, teamId: string): "ok" | "unsigned" | "bad" {
+    if (!inv.sig || !inv.dev) return "unsigned";
+    const m = this.views.get(teamId)?.members.find((x) => x.devices.some((d) => d.id === inv.dev));
+    const d = m?.devices.find((x) => x.id === inv.dev);
+    if (!m || !d) return "bad";
+    if (inv.from && m.user.github.toLowerCase() !== inv.from.toLowerCase()) return "bad";
+    return verifyPayload(d.signPub, inviteSigned(inv), inv.sig) ? "ok" : "bad";
   }
 
   /** Signed in to this hub already? (A link names its hub.) */
@@ -550,7 +599,11 @@ export class TeamLink {
     return this.rotate(teamId);
   }
 
+  /** When this daemon last rotated each team's key. */
+  private rotatedAt = new Map<string, number>();
+
   async rotate(teamId = this.defaultTeam()): Promise<{ keyVersion: number }> {
+    this.rotatedAt.set(teamId, Date.now());
     const members = await this.hub().members(teamId);
     const next = newTeamKey(this.currentKey(teamId).version + 1);
     const envelopes = members.flatMap((m) => m.devices.map((d) => ({ deviceId: d.id, box: sealTeamKey(d.sealPub, next) })));
@@ -574,11 +627,13 @@ export class TeamLink {
    * collaborator with push, through this machine's `gh` (it's your repo, and
    * your invite). GitHub sends them an invitation their Loom accepts.
    */
-  private async grantJoiner(teamId: string, github: string): Promise<void> {
+  private async grantJoiner(teamId: string, github: string, tag?: string): Promise<void> {
     if (!github || github === this.state.hub?.github) return;
     const now = Date.now();
     const grants = (this.state.grants ?? []).filter((g) => g.expiresAt > now);
-    const at = grants.findIndex((g) => g.teamId === teamId);
+    // The grant for the invite this person used; a hub that doesn't tag joins
+    // (the hosted one, today) falls back to the oldest grant for the team.
+    const at = tag ? grants.findIndex((g) => g.teamId === teamId && g.tag === tag) : grants.findIndex((g) => g.teamId === teamId);
     if (at < 0) return;
     const [grant] = grants.splice(at, 1);
     this.state.grants = grants;
@@ -628,7 +683,26 @@ export class TeamLink {
 
   // ── presence ──
 
-  /** One heartbeat for every live session in every shared project. */
+  // ── hub reachability ──
+
+  /** Whether the last call to the hub got through, and the error when it didn't. */
+  private hubOk: { ok: boolean | null; at: number; error?: string } = { ok: null, at: 0 };
+  private connected = false;
+
+  private noteHub(err?: unknown): void {
+    this.hubOk = err ? { ok: false, at: Date.now(), error: hubErrorText(err, this.state.hub?.url) } : { ok: true, at: Date.now() };
+  }
+
+  /** The heartbeat timer: reconnect when the hub was down at start, then beat. */
+  private async tick(): Promise<void> {
+    if (this.state.hub && !this.connected) {
+      await this.connect().catch(() => {});
+      if (!this.connected) return;
+    }
+    await this.beat();
+  }
+
+  /** One heartbeat for every live session in every shared project; returns how many the hub took. */
   async beat(): Promise<number> {
     if (!this.hubClient || !this.state.device?.id) return 0;
     const seen = new Map<string, Set<string>>();
@@ -646,11 +720,17 @@ export class TeamLink {
         const sealed = sealForTeam(key, p.intent);
         const beat: PresenceIn = { ...p.presence, deviceId: this.device().id, sealed };
         beat.sig = signPayload(this.device(), { ...beat, sig: undefined });
-        await this.hub().heartbeat(share.teamId, beat).catch((e) => logbook.warn("team", "heartbeat refused", String(e)));
         const set = seen.get(share.teamId) ?? new Set();
         set.add(`${beat.repo}/${beat.agent}`);
         seen.set(share.teamId, set);
-        count++;
+        try {
+          await this.hub().heartbeat(share.teamId, beat);
+          this.noteHub();
+          count++;
+        } catch (e) {
+          this.noteHub(e);
+          logbook.warn("team", "heartbeat refused", String(e));
+        }
       }
     }
     // Sessions that ended since the last beat: say so now.
@@ -1192,6 +1272,10 @@ export class TeamLink {
     return {
       signedIn: Boolean(h),
       hub: h?.url ?? null,
+      // null until the first call; false with the reason while the hub is down
+      connected: h ? this.hubOk.ok : null,
+      lastError: this.hubOk.ok === false ? this.hubOk.error ?? null : null,
+      checkedAt: this.hubOk.at || null,
       github: h?.github ?? null,
       device: this.state.device?.id ?? null,
       teams: Object.entries(this.state.teams).map(([id, t]) => {
@@ -1201,6 +1285,7 @@ export class TeamLink {
           id,
           name: t.name,
           role: t.role,
+          ...(t.missing ? { missing: true } : {}),
           keyVersion: keys[keys.length - 1]?.version ?? null,
           members: v?.members.map((m) => ({ id: m.user.id, github: m.user.github, name: m.user.name, role: m.role, devices: m.devices.length })) ?? [],
           repos: v?.repos ?? [],

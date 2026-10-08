@@ -170,6 +170,16 @@ describe("hub leases (MemoryHub)", async () => {
     expect((await a.feed(team.id)).at(-1)).toMatchObject({ type: "lease_released", meta: { runId: "o1", reason: "PR #4 merged" } });
   });
 
+  it("reusing a teammate's run id doesn't slip past their hard zone", async () => {
+    const { a, b, team, da, db, claim } = await setup();
+    const zones = ["db/migrations/**"];
+    await a.claimLease(team.id, claim(da.id, "o1", "t1", ["db/migrations/002_add.sql"], zones));
+    // bob names alice's run: still a rival, because the run is hers, not his
+    const spoof = await b.claimLease(team.id, claim(db.id, "o1", "t9", ["db/**"], zones));
+    expect(spoof.lease).toBeNull();
+    expect(spoof.blockedBy).toMatchObject({ lease: { github: "alice" } });
+  });
+
   it("a sleeping laptop's leases go stale and stop blocking; renewing brings them back (D12)", async () => {
     const { a, b, team, da, db, claim, advance } = await setup();
     const zones = ["db/migrations/**"];

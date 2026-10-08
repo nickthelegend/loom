@@ -286,6 +286,20 @@ describe("two members, one repo, a real hub", () => {
     expect(st.teams[0]!.members.map((m) => m.github)).toEqual(["alice"]);
   });
 
+  it("someone leaving rotates the key on the owner's Loom, once", async () => {
+    const olive = await member("olive");
+    const pete = await member("pete");
+    await olive.link.signIn(hub.url, { github: "olive", secret: "s3cret" });
+    const team = await olive.link.createTeam("Leavers");
+    await pete.link.join((await olive.link.invite(team.id)).link, { github: "pete", secret: "s3cret" });
+    const version = () => (olive.link.status() as { teams: Array<{ id: string; keyVersion: number }> }).teams.find((t) => t.id === team.id)!.keyVersion;
+    expect(version()).toBe(1);
+    await pete.link.leave(team.id);
+    await waitUntil(() => version() === 2);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(version()).toBe(2);
+  });
+
   it("an explicit opt-out beats the remote auto-match", async () => {
     const carol = await member("carol");
     const alice = members.find((m) => m.dir.includes("alice"))!;
@@ -355,5 +369,41 @@ describe("lease staleness in the team view", () => {
       state: "active", since: 0, ts: Date.now() - 11 * 60_000, stale: false, globs: [], files: [], prefixes: [] };
     const view = (link as unknown as { decryptLease(t: string, l: unknown): { stale: boolean } }).decryptLease("t", lease);
     expect(view.stale).toBe(true);
+  });
+});
+
+describe("when the hub is down or forgets", () => {
+  it("keeps the team keys, says the hub is unreachable in words, and reconnects", async () => {
+    const hub = new MemoryHub();
+    const { token, user } = hub.signIn("alice");
+    let down: Error | null = null;
+    const statePath = path.join(tmpDir("hub-down"), "team.json");
+    fs.writeFileSync(statePath, JSON.stringify({
+      hub: { url: "http://127.0.0.1:9", token, github: "alice", userId: user.id },
+      teams: { t_old: { name: "old", role: "owner", keys: [newTeamKey(1)] } },
+    }));
+    const client = hub.client(token);
+    const link = new TeamLink({
+      runtimes: () => [], broadcast: () => {}, statePath,
+      hubFactory: () => new Proxy(client, {
+        get: (c, k) => (down && k === "teams" ? () => Promise.reject(down) : (c as never)[k]),
+      }),
+    });
+    // a self-hosted hub restarted without its data lists no teams: marked, not deleted
+    await link.connect();
+    let st = link.status() as { connected: boolean | null; lastError: string | null; teams: Array<{ id: string; missing?: boolean; keyVersion: number }> };
+    expect(st.connected).toBe(true);
+    expect(st.teams).toMatchObject([{ id: "t_old", missing: true, keyVersion: 1 }]);
+    expect(JSON.parse(fs.readFileSync(statePath, "utf8")).teams.t_old.keys).toHaveLength(1);
+    // the hub stops answering: the reason, not "fetch failed"
+    down = Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
+    await expect(link.connect()).rejects.toThrow();
+    st = link.status() as typeof st;
+    expect(st.connected).toBe(false);
+    expect(st.lastError).toMatch(/nothing is listening at http:\/\/127\.0\.0\.1:9/);
+    down = null;
+    await link.connect();
+    expect((link.status() as typeof st).connected).toBe(true);
+    await link.stop();
   });
 });

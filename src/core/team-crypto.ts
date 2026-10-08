@@ -200,6 +200,19 @@ export interface InviteFragment {
   project?: string;
   /** Crews to set up on the joiner's side, filled from the joiner's own agents. */
   crews?: Array<{ name: string; planApproval?: boolean; teammates: Array<{ id: string; role: string; kind?: string; charter?: string }> }>;
+  /**
+   * The inviter's device signature over everything above but the key (and
+   * which device signed). Anyone holding the link holds the key, so only a
+   * device signature — checked against the inviter's registered device after
+   * joining — proves the repo and crews are what the inviter put there.
+   */
+  sig?: string;
+  dev?: string;
+}
+
+/** What an invite's signature covers. */
+export function inviteSigned(f: InviteFragment): Record<string, unknown> {
+  return { invite: f.invite, hub: f.hub, teamId: f.teamId ?? null, team: f.team ?? null, repo: f.repo ?? null, from: f.from ?? null, project: f.project ?? null, crews: f.crews ?? null };
 }
 
 export function packInvite(f: InviteFragment): string {

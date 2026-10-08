@@ -64,8 +64,10 @@ import { root } from './state.js';
     function preview(){
       api("/api/onboard/preview", { method: "POST", body: JSON.stringify({ link: frag }) }).then(function(p){
         var selfHosted = !p.signedIn && !/^supabase:/.test(p.hub || "");
+        var hubHost = String(p.hub || "").replace(/^supabase:/, "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
         var plan = [
-          { label: "Sign in with GitHub", state: p.signedIn ? "skipped" : "pending", detail: p.signedIn ? "signed in as @" + p.github : "a GitHub page opens" },
+          { label: selfHosted ? "Sign in to the team hub" : "Sign in with GitHub", state: p.signedIn ? "skipped" : "pending",
+            detail: p.signedIn ? "signed in as @" + p.github : selfHosted ? "your GitHub login, on " + hubHost : "a GitHub page opens" },
           { label: "Join the team", state: p.member ? "skipped" : "pending", detail: p.member ? "you're already on it" : "" },
         ];
         if (p.repo) {
@@ -75,7 +77,9 @@ import { root } from './state.js';
           if (p.crews && p.crews.length) plan.push({ label: "Set up the crews", state: "pending", detail: p.crews.join(", ") });
         }
         card.innerHTML = head(p) + '<div class="jsub">Here’s what joining does:</div>' + steps(plan) +
-          (selfHosted ? '<div class="jfields">' +
+          (p.repo && !p.signed ? '<div class="tinvw jwarn">' + ICONS.alert + "<span><b>This link isn’t signed.</b> You can still join the team, but Loom won’t clone the repo it names. Ask " + (p.from ? "@" + esc(p.from) : "your teammate") + " for a fresh link.</span></div>" : "") +
+          (selfHosted ? '<div class="tinvw jwarn">' + ICONS.shield + "<span>This team runs its own hub at <code>" + esc(hubHost) + "</code>. Only fill these in if you know that address — it receives your join secret.</span></div>" +
+            '<div class="jfields">' +
             '<div class="field"><label>GitHub login</label><input id="jgh" autocomplete="off" spellcheck="false" placeholder="your GitHub username"></div>' +
             '<div class="field"><label>Join secret <span class="opt">if the hub has one</span></label><input id="jsec" type="password"></div></div>' : "") +
           (p.repo ? '<details class="jmore"><summary>Clone somewhere else</summary><div class="field"><label>Folder</label><input id="jinto" class="mono" spellcheck="false" placeholder="~/loom-projects/' + esc(p.repo.split("/")[1]) + '"></div></details>' : "") +

@@ -41,6 +41,8 @@ export function previewInvite(link: string): {
   project: string | null;
   hub: string;
   crews: string[];
+  /** Carries its inviter's device signature (checked after joining). */
+  signed: boolean;
 } | null {
   const inv: InviteFragment | null = unpackInvite(inviteFragment(link));
   if (!inv) return null;
@@ -49,6 +51,7 @@ export function previewInvite(link: string): {
     teamId: inv.teamId ?? null,
     repo: inv.repo ?? null,
     from: inv.from ?? null,
+    signed: Boolean(inv.sig && inv.dev),
     project: inv.project ?? null,
     hub: inv.hub,
     crews: (inv.crews ?? []).map((c) => c.name),

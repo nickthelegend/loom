@@ -167,7 +167,7 @@ export class Onboarding {
       begin("signin");
       if (this.host.team.signedInTo(inv.hub)) end("skipped", `already signed in as @${this.host.team.github()}`);
       else {
-        step!.detail = "a GitHub page opens in your browser";
+        step!.detail = auth.secret || auth.github ? `signing in to ${inv.hub}` : "a GitHub page opens in your browser";
         this.emit(job);
         await this.host.team.signIn(inv.hub, auth);
         end("done", `@${this.host.team.github()}`);
@@ -182,6 +182,16 @@ export class Onboarding {
       if (!inv.repo) {
         for (const id of ["repo", "project", "share", "crews"] as StepId[]) job.steps.find((s) => s.id === id)!.state = "skipped";
         return this.finish(job);
+      }
+
+      // The repo and crews ride in the link next to the key, so anyone who had
+      // the link could have swapped them. Clone nothing the inviter didn't sign.
+      const trust = this.host.team.verifyInvite(inv, team.id);
+      if (trust !== "ok") {
+        begin("repo");
+        throw new Error(trust === "unsigned"
+          ? `you're on ${team.name}, but this link isn't signed, so Loom won't clone the repo it names — ask ${inv.from ? "@" + inv.from : "your teammate"} for a fresh link (their Loom may need an update)`
+          : `you're on ${team.name}, but this link's repo or crews were changed after it was made — Loom cloned nothing. Ask ${inv.from ? "@" + inv.from : "your teammate"} for a fresh link`);
       }
 
       // 3. repo

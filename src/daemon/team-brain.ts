@@ -341,6 +341,10 @@ export class TeamBrain {
       entries.push({ id: v.id, kind: v.kind, text: v.text });
     }
     const dir = this.rt.info.dir;
+    // The PR is the point: check for gh before force-pushing a branch nobody can open.
+    await this.exec("gh", ["auth", "status"], dir).catch(() => {
+      throw new Error("Loom opens the canon PR with GitHub's `gh` CLI — install it and run `gh auth login`, then promote again");
+    });
     await this.exec("git", ["fetch", "--quiet", "origin"]).catch(() => {});
     const base = await this.defaultBranch();
     const pending = await this.exec("git", ["show", `origin/${CANON_BRANCH}:AGENTS.md`]).catch(() => "");
