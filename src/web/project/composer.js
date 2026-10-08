@@ -11,6 +11,7 @@ import { KMOD,loadPermProfiles,PERM_MODES,PERM_NAMES,PERM_SHORT,permOf,permProfi
 import { state } from '../state.js';
 import { showContinuityOverflow } from './continuity.js';
 import { openTaskModal } from '../tasks.js';
+import { openProjectSettings } from '../settings.js';
 import { setTView,tview } from '../transcript.js';
 
 /** composer behavior for one mounted project.
@@ -781,6 +782,27 @@ export function createComposer(view) {
       if (ap) ap.onclick = function(){
         if (view.menuState && view.menuState.kind === "agentmenu") { closeMenu(); return; }
         openAgentMenu();
+      };
+      // Right-click the chip: the agent's other knobs, without hunting for them.
+      if (ap) ap.oncontextmenu = function(ev){
+        ev.preventDefault();
+        var a = ((state.project || {}).agents || []).filter(function(x){ return x.id === state.selected; })[0];
+        var items = [
+          { label: "Choose agent", icon: ICONS.agents, hint: "\u2318\u21e7A", run: openAgentMenu },
+          { label: state.auto ? "Turn Auto off" : "Auto-route turns", icon: ICONS.spark, run: function(){ setAuto(!state.auto); } },
+        ];
+        if (a && !state.auto) {
+          items.push({ sep: true }, { head: agentLabel(a.kind, a.id) });
+          if (a.tier !== "bridge") items.push({ label: "Change model\u2026", icon: ICONS.gear, run: function(){ openModelMenu(); } });
+          if (document.getElementById("cperm")) items.push({ label: "Permissions\u2026", icon: ICONS.shield, run: function(){ openPermMenu(a.id); } });
+          if (a.busy) items.push({ label: "Interrupt", icon: ICONS.x, run: function(){
+            api("/api/projects/" + view.pid + "/interrupt", { method: "POST", body: JSON.stringify({ chat: view.chatId || undefined }) }).catch(function(err){ toast(err.message); });
+          } });
+          items.push({ label: "Copy agent id", icon: ICONS.copy, run: function(){ copyText(a.id); } });
+        }
+        items.push({ sep: true }, { label: "Project settings\u2026", icon: ICONS.gear, run: function(){ openProjectSettings(view.pid); } });
+        var r = ap.getBoundingClientRect();
+        openMenu(Math.round(ev.clientX || r.left), Math.round(ev.clientY || r.bottom), items);
       };
       Array.prototype.forEach.call(document.querySelectorAll("#cmode [data-cmode]"), function(b){
         b.onclick = function(){ view.setComposerMode(b.getAttribute("data-cmode")); var bx = document.getElementById("box"); if (bx) bx.focus(); };
