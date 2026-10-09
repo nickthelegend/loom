@@ -26,7 +26,7 @@ export type Block =
 /** `**bold**`, `*italic*`, `code` and [links](url), in one left-to-right pass. */
 export function inline(src: string): Inline[] {
   const out: Inline[] = [];
-  const re = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(\*[^*\s][^*\n]*\*|_[^_\s][^_\n]*_)|(\[[^\]\n]+\]\([^)\s]+\))/g;
+  const re = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(\*[^*\s][^*\n]*\*|_[^_\s][^_\n]*_)|(!?\[[^\]\n]*\]\([^)\s]+\))/g;
   let last = 0;
   for (let m = re.exec(src); m; m = re.exec(src)) {
     if (m.index > last) out.push({ t: "text", s: src.slice(last, m.index) });
@@ -39,8 +39,9 @@ export function inline(src: string): Inline[] {
       if (tok.startsWith("_") && /\w/.test(before)) out.push({ t: "text", s: tok });
       else out.push({ t: "italic", s: tok.slice(1, -1) });
     } else if (m[4]) {
-      const mm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok)!;
-      out.push({ t: "link", s: mm[1]!, href: mm[2]! });
+      // an image is a labelled link here: a phone thread shows it as "🖼 alt", tappable when it's on the web
+      const mm = /^(!?)\[([^\]]*)\]\(([^)]+)\)$/.exec(tok)!;
+      out.push({ t: "link", s: mm[1] ? `\u{1F5BC} ${mm[2] || "image"}` : mm[2]!, href: mm[3]! });
     }
     last = m.index + tok.length;
   }

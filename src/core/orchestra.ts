@@ -791,9 +791,23 @@ const RESULT_CHARS = 4000;
 /** How often a task waiting on the team (a PR, a zone, capacity) is re-admitted. */
 const RECHECK_MS = 15_000;
 
+const PICK_ONE = "compare them and pick one to apply.";
+
+/** A race's summary once you've picked: which take went in, not the instruction to pick. */
+function raceApplied(run: OrchestraRun): string {
+  const done = run.tasks.filter((t) => t.status === "done").length;
+  const pick = run.tasks.find((t) => t.id === run.applied?.task);
+  return `${done} of ${run.tasks.length} finished — ${pick ? `${pick.agent}'s take` : "one take"} was applied.`;
+}
+
 export class OrchestraEngine {
   private runs = new Map<string, OrchestraRun>();
   private live = new Map<string, Adapter>(); // `${runId}/${taskId|orch}` → adapter
+
+  /** A worker's or orchestrator's live instance by its id, for answering its questions. */
+  liveAgent(instanceId: string): Adapter | undefined {
+    return [...this.live.values()].find((a) => a.id === instanceId);
+  }
   private gitLock = new Mutex();
   private turnText = new Map<string, string>();
   private orchestratorBusy = new Set<string>();
@@ -830,7 +844,10 @@ export class OrchestraEngine {
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith(".json")) continue;
       try {
-        out.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as OrchestraRun);
+        const run = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as OrchestraRun;
+        // a race applied before its summary was rewritten on apply still says "pick one"
+        if (run.race && run.applied?.task && run.summary?.endsWith(PICK_ONE)) run.summary = raceApplied(run);
+        out.push(run);
       } catch {
         /* a torn file is one lost run, not a dead project */
       }
@@ -1400,6 +1417,7 @@ export class OrchestraEngine {
         }
       });
       run.applied = { at: Date.now(), into, task: pick.id };
+      run.summary = raceApplied(run);
       this.save(run);
       this.emit(run, "applied", { into, task: pick.id, agent: pick.agent });
       return { merged: pick.branch!, into };
@@ -1917,7 +1935,7 @@ export class OrchestraEngine {
       // A race has no reviewer: it's over when every entrant has finished.
       if (run.tasks.some((t) => t.status === "pending")) return;
       const done = run.tasks.filter((t) => t.status === "done").length;
-      void this.finish(run, "completed", undefined, `${done} of ${run.tasks.length} finished — compare them and pick one to apply.`);
+      void this.finish(run, "completed", undefined, `${done} of ${run.tasks.length} finished — ${PICK_ONE}`);
       return;
     }
     const ready = (t: OrchestraTask) =>

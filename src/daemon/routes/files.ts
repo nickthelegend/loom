@@ -85,7 +85,8 @@ export function registerFilesRoutes(app: Express): void {
     const base = projectPath(String(req.params.id), ".");
     if (!base) return void res.status(404).json({ error: "not found" });
     const q = String(req.query.q ?? "").trim().toLowerCase();
-    if (!q) return void res.json({ matches: [] });
+    // A bare "@": the files touched most recently, which is usually what you mean.
+    if (!q) return void res.json({ matches: recentFiles(base, 20), recent: true });
     const matches: string[] = [];
     let visited = 0;
     const walk = (dir: string) => {
@@ -110,6 +111,34 @@ export function registerFilesRoutes(app: Express): void {
     walk(base);
     res.json({ matches });
   });
+
+  /** The project's most recently modified files (bounded walk, hidden dirs skipped). */
+  function recentFiles(base: string, n: number): string[] {
+    const found: Array<{ p: string; t: number }> = [];
+    let visited = 0;
+    const walk = (dir: string, depth: number) => {
+      if (visited >= 5_000 || depth > 8) return;
+      let ents: fs.Dirent[];
+      try {
+        ents = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of ents) {
+        if (visited++ >= 5_000) return;
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (!HIDE_DIRS.has(e.name) && !e.name.startsWith(".")) walk(full, depth + 1);
+        } else if (e.isFile() && !e.name.startsWith(".")) {
+          try {
+            found.push({ p: path.relative(base, full), t: fs.statSync(full).mtimeMs });
+          } catch {}
+        }
+      }
+    };
+    walk(base, 0);
+    return found.sort((a, b) => b.t - a.t).slice(0, n).map((f) => f.p);
+  }
 
   /**
    * Stash a pasted image or dropped file, and hand back its path.
@@ -186,5 +215,18 @@ export function registerFilesRoutes(app: Express): void {
       return void res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
     }
     res.json({ path: rel, bytes: buf.length, mime });
+  });
+
+  /** An attached image, back as an image: the thread's thumbnails. Images under .loom/attachments only. */
+  const IMG_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
+  app.get("/api/projects/:id/attachment", (req, res) => {
+    const rel = path.normalize(String(req.query.path ?? ""));
+    const type = IMG_TYPES[path.extname(rel).toLowerCase()];
+    if (!type || !rel.startsWith(path.join(".loom", "attachments") + path.sep)) return void res.status(400).json({ error: "not an attached image" });
+    const abs = projectPath(String(req.params.id), rel);
+    if (!abs) return void res.status(404).json({ error: "not found" });
+    res.setHeader("content-type", type);
+    res.setHeader("cache-control", "private, max-age=86400"); // content-addressed: the name is its hash
+    fs.createReadStream(abs).on("error", () => res.status(404).end()).pipe(res);
   });
 }

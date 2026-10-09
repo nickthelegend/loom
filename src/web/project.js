@@ -7,6 +7,7 @@ import { createExplorer } from './project/explorer.js';
 import { createFleet } from './project/fleet.js';
 import { createObservatory } from './project/observatory.js';
 import { createOrchestra } from './project/orchestra.js';
+import { createCrew } from './project/crew.js';
 import { createQueue } from './project/queue.js';
 import { createRoutes } from './project/routes.js';
 import { createTerminal } from './project/terminal.js';
@@ -15,6 +16,7 @@ import { createThread } from './project/thread.js';
 import { approvalClick,approvalKey,closeApprovalsPop,openApprovalsPop } from './approvals.js';
 import { copyText } from './clipboard.js';
 import { openConnectPhone } from './connect-phone.js';
+import { openInvite } from './invite.js';
 import { api,clearTimers } from './connection.js';
 import { bindConsole } from './console.js';
 import { renderDiffLines } from './diff.js';
@@ -24,7 +26,7 @@ import { ICONS,LOADER } from './icons.js';
 import { applyRail,makeResizer,toggleRail } from './layout.js';
 import { toast } from './notifications.js';
 import { KMOD } from './permissions.js';
-import { closeBrowser,openBrowser } from './preview.js';
+import { closeBrowser,openBrowser,resetBrowser } from './preview.js';
 import { root,state } from './state.js';
 import { loadGitDelivery } from './statusbar.js';
 import { loadTeam,loadTeamRunners,runnerHooks,teamEditing,teamHooks } from './team.js';
@@ -45,7 +47,15 @@ import { openMenu } from './menus.js';
       get OBPAL() { return OBPAL; },
       get obNodePos() { return obNodePos; },
     });
-    var { closeDock, openChangesDock, openPatchDock, openFileDock } = createChanges({
+    // When an orchestrator starts work — an Orchestra run, a race, a crew goal —
+    // its subagents get their own tab in the dock, the way an IDE opens the
+    // run panel: who's working, who's done, and each one's thread a click away.
+    function onSubagentEvent(ev){
+      var p = (ev && ev.payload) || {};
+      var started = (ev.kind === "orchestra" && p.phase === "started") || (ev.kind === "crew" && p.phase === "goal_started");
+      if (started && document.getElementById("dockpane")) openSubagentsDock();
+    }
+    var { closeDock, openChangesDock, openPatchDock, openFileDock, openArtifactDock, openCodePreview, openSubagentsDock } = createChanges({
       get pid() { return pid; },
       get drawRail() { return drawRail; }
     });
@@ -68,7 +78,9 @@ import { openMenu } from './menus.js';
       get BRAIN_KINDS() { return BRAIN_KINDS; },
       get tbHistory() { return tbHistory; }, set tbHistory(value) { tbHistory = value; },
       get TB_TIERS() { return TB_TIERS; },
-      get tbPr() { return tbPr; }, set tbPr(value) { tbPr = value; }
+      get tbPr() { return tbPr; }, set tbPr(value) { tbPr = value; },
+      // the continuity review it opens resumes a request and then refreshes the thread
+      get refresh() { return refresh; }
     });
     var { routeFormHtml, bindRouteForm } = createRoutes({
       get pid() { return pid; },
@@ -88,6 +100,7 @@ import { openMenu } from './menus.js';
       get refresh() { return refresh; },
       get openChangesDock() { return openChangesDock; },
       get openFileDock() { return openFileDock; },
+      get openArtifactDock() { return openArtifactDock; },
       get expl() { return expl; },
       get pid() { return pid; },
       get refreshTree() { return refreshTree; },
@@ -114,6 +127,8 @@ import { openMenu } from './menus.js';
       get onTermFrame() { return onTermFrame; },
       get onQueueFrame() { return onQueueFrame; },
       get onOrchEvent() { return onOrchEvent; },
+      get onCrewEvent() { return onCrewEvent; },
+      get onSubagentEvent() { return onSubagentEvent; },
       get onApprovalEvent() { return onApprovalEvent; },
       get onFleetEvent() { return onFleetEvent; }
     });
@@ -194,6 +209,12 @@ import { openMenu } from './menus.js';
       get showTab() { return showTab; },
       get ORCH_TASK_KINDS() { return ORCH_TASK_KINDS; },
     });
+    var { loadCrews, onCrewEvent, drawCrew, openCrewSheet, closeCrewSheet } = createCrew({
+      get pid() { return pid; },
+      get desktop() { return desktop; },
+      get chatId() { return chatId; },
+      get showTab() { return showTab; }
+    });
     var { loadApprovals, onApprovalEvent } = createApprovalEvents({
       get pid() { return pid; },
       get chatId() { return chatId; },
@@ -223,6 +244,7 @@ import { openMenu } from './menus.js';
     // A chat just created with a chosen agent leaves its pick here, so the
     // composer opens aimed at that agent instead of snapping back to the holder.
     state.pid = pid; state.lastId = 0;
+    resetBrowser(pid); // the Browser pane's page, specs and servers are this project's, not the last one's
     state.selected = state.pendingSelect || null;
     state.pendingSelect = null;
     state.tab = "thread"; state.tree = null; state.lastQuestion = null;
@@ -256,6 +278,7 @@ import { openMenu } from './menus.js';
         '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
         '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>" +
         '<button id="orchbtn" class="iconbtn" title="orchestra">' + ICONS.orchestra + "</button>" +
+        '<button id="crewbtn" class="iconbtn" title="crew \u00b7 agents with roles on one goal">' + ICONS.team + "</button>" +
         '<button id="fleetbtn" class="iconbtn" title="fleet \u00b7 what every agent is doing">' + ICONS.fleet + "</button>" +
         '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>');
 
@@ -273,7 +296,7 @@ import { openMenu } from './menus.js';
       '<div class="cmenu" id="cmenu" style="display:none"></div>' +
       '<div class="cchips" id="cchips" style="display:none"></div>' +
       '<div class="cqueue" id="cqueue" style="display:none"></div>' +
-      '<textarea id="box" class="cinput" rows="2" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
+      '<textarea id="box" class="cinput" rows="2" aria-label="message" placeholder="Message&hellip;  @ for files, / for actions" autocomplete="off"></textarea>' +
       '<div class="cskillsug" id="cskillsug" style="display:none"></div>' +
       '<div class="cpanel" id="cpanel" style="display:none"></div>' +
       // Orchestrate mode's cast: who plans, who works, how many at once.
@@ -301,7 +324,7 @@ import { openMenu } from './menus.js';
       // it wrapped. The count badge stays on the outside, because "two skills
       // are on" is the part you need without opening anything.
       '<button class="cslot" id="morebtn" type="button" aria-haspopup="menu" aria-expanded="false" title="MCPs, skills and more"><span class="cslotico">' + ICONS.dots + '</span><span class="cslotlbl">More</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
-      '<button class="cslot" id="micbtn" type="button" title="hold to talk — transcribed by LOOM_STT_CMD on the daemon, or by this browser when that isn’t set"><span class="cslotico">' + ICONS.mic + "</span></button>" +
+      '<button class="cslot" id="micbtn" type="button" aria-label="hold to talk" title="hold to talk — transcribed by LOOM_STT_CMD on the daemon, or by this browser when that isn’t set"><span class="cslotico">' + ICONS.mic + "</span></button>" +
       // Saved and recent prompts, a clipboard manager's worth (⌘⇧V).
       '<button class="cprompt" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \u2014 saved and recent (' + KMOD + '\u21e7V)">' +
         ICONS.clipboard + '<span class="cslotlbl">Prompts</span><kbd>' + KMOD + "\u21e7V</kbd></button>" +
@@ -314,12 +337,12 @@ import { openMenu } from './menus.js';
       // Plan: a switch, not a mode tab — it changes what either send does.
       '<button class="cplan" id="planbtn" type="button" role="switch" aria-checked="false" title="plan mode \u2014 write a plan, change no code">' +
         '<span class="ptrack"><i></i></span><span class="cplanlbl">Plan</span></button>' +
-      '<button class="sendbtn" id="send" type="submit" title="send">' + ICONS.up + "</button>" +
+      '<button class="sendbtn" id="send" type="submit" title="send" aria-label="send">' + ICONS.up + "</button>" +
       '<button class="sendbtn orchsend" id="orchsend" type="button" title="plan this goal and run it in parallel" style="display:none">' + ICONS.orchestra + "Orchestrate</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
       ICONS.stop + "</button></span>" +
       '</div>' +
-      '<input type="file" id="cfile" accept="image/*,.md,.txt,.markdown" multiple style="display:none">' +
+      '<input type="file" id="cfile" multiple style="display:none">' +
       "</form>" +
       '<div class="hint" id="hint"></div></div>';
 
@@ -341,6 +364,8 @@ import { openMenu } from './menus.js';
         // Tool calls waiting on you, from any thread of this project.
         '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>' +
         // &#96; is a backtick — a literal one would close this template literal
+        // One link brings a teammate in: the team, this repo, their agents, the crews.
+        '<button id="invitebtn" class="btn outline sm invitebtn" type="button" title="invite a teammate \u2014 one link sets up the team, this repo and their agents">' + ICONS.team + "<span>Invite</span></button>" +
         '<button id="termbtn" class="iconbtn" title="toggle terminal (\u2303&#96;)">' + ICONS.terminal + "</button>" +
         // Connect a phone: a QR (or copy link) that pairs the native app over the
         // LAN or the tailnet. Sits by the terminal because both are "reach this
@@ -353,6 +378,7 @@ import { openMenu } from './menus.js';
         '<button id="consolebtn" class="iconbtn" title="console \u00b7 errors and logs">' +
         ICONS.console + '<span class="errdot" id="errdot"></span></button>' +
         '<button id="browserbtn" class="iconbtn" title="browser \u00b7 live page and Playwright specs">' + ICONS.globe + "</button>" +
+        '<button id="subagentsbtn" class="iconbtn" title="subagents \u00b7 every agent an orchestrator or crew put to work">' + ICONS.agents + "</button>" +
         '<button id="railbtn" class="iconbtn" title="toggle right panel">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
@@ -364,14 +390,15 @@ import { openMenu } from './menus.js';
         '<div class="pane scroll" id="pane-observatory" style="display:none">' + LOADER + "</div>" +
         '<div class="pane scroll" id="pane-board" style="display:none"></div>' +
         '<div class="pane scroll" id="pane-orchestra" style="display:none"></div>' +
+        '<div class="pane scroll" id="pane-crew" style="display:none"></div>' +
         '<div class="pane scroll" id="pane-fleet" style="display:none"></div>' +
                 composerHtml +
         "</div>" +
         '<div class="dockpane" id="dockpane">' +
         '<div class="rz rz-dock" id="rz-dock" title="drag to resize"></div>' +
-        '<div class="dockhead" id="dockhead"><span class="di" id="dockicon"></span>' +
-        '<span class="p" id="dockpath">changes</span><span class="spacer"></span>' +
-        '<button id="dockclose" class="iconbtn" title="close">' + ICONS.x + "</button></div>" +
+        // tabs, like an editor: a diff, a file, an artifact and the Subagents list side by side
+        '<div class="dockhead" id="dockhead"><div class="docktabs" id="docktabs" role="tablist"></div>' +
+        '<button id="dockclose" class="iconbtn" title="close every tab">' + ICONS.x + "</button></div>" +
         '<div class="pane scroll" id="pane-changes">' + LOADER + "</div>" +
         "</div>" +
         "</div>" +
@@ -399,21 +426,33 @@ import { openMenu } from './menus.js';
         '<div class="conlist" id="conlist"></div>' +
         "</div>" +
         '<div class="browwrap" id="browwrap">' +
-        '<div class="browrail">' +
+        // At a narrow dock the rail is a drawer over the frame (tools.css), opened
+        // from the "Servers" button in the address bar.
+        '<div class="browrail" id="browrail">' +
         // The servers this project runs, above its tests: what's up, on which
         // port, and one click to start, stop or look at what it printed.
         '<div class="browbar"><span class="lbl">Dev servers</span><span class="spacer" style="flex:1"></span>' +
-        '<button id="srvreload" class="iconbtn xs" title="refresh">' + ICONS.refresh + "</button></div>" +
+        '<button id="srvreload" class="iconbtn xs" title="refresh">' + ICONS.refresh + "</button>" +
+        '<button id="browrailclose" class="iconbtn xs browrailclose" title="hide">' + ICONS.x + "</button></div>" +
         '<div class="srvlist" id="srvlist">' + LOADER + "</div>" +
         '<div class="browbar"><span class="lbl">Playwright specs</span><span class="spacer" style="flex:1"></span>' +
+        '<button id="specstop" class="iconbtn xs" title="stop the running spec" style="display:none">' + ICONS.stop + "</button>" +
         '<button id="specreload" class="iconbtn xs" title="rescan">' + ICONS.refresh + "</button></div>" +
         '<div class="speclist" id="speclist">' + LOADER + "</div>" +
         '<div class="specout" id="specout" style="display:none"></div>' +
         "</div>" +
         '<div class="browmain">' +
         '<div class="browurl">' +
+        '<button id="browrailbtn" class="iconbtn browrailbtn" title="servers and specs">' + ICONS.tasks + "</button>" +
+        '<button id="browback" class="iconbtn" title="back">' + ICONS.back + "</button>" +
+        '<button id="browfwd" class="iconbtn" title="forward">' + ICONS.arrowRight + "</button>" +
+        '<button id="browreload" class="iconbtn" title="reload">' + ICONS.refresh + "</button>" +
         '<input id="browurl" placeholder="http://localhost:3000 \u2014 preview a dev server" autocomplete="off" spellcheck="false">' +
         '<button id="browgo" class="iconbtn" title="open">' + ICONS.play + "</button>" +
+        '<button id="browmore" class="iconbtn browmore" title="more">' + ICONS.dots + "</button>" +
+        // Everything else lives in one group, so a narrow dock can fold it
+        // behind "⋯" instead of squeezing the address to nothing.
+        '<span class="browtools" id="browtools">' +
         // The conditions a bug was seen under, and a way to carry the view
         // into the next prompt.
         '<span class="browsizes" id="browsizes">' +
@@ -430,9 +469,10 @@ import { openMenu } from './menus.js';
         '<button data-s="dark" title="preview the page in dark mode">☽</button>' +
         "</span>" +
         '<button id="browshot" class="iconbtn" title="screenshot into the composer">' + ICONS.camera + "</button>" +
-        '<button id="browreload" class="iconbtn" title="reload">' + ICONS.refresh + "</button>" +
+        '<button id="browext" class="iconbtn" title="open in your browser">' + ICONS.external + "</button>" +
         '<label class="browauto" title="reload when an agent changes a file this server serves">' +
         '<input type="checkbox" id="browautorel" checked><span>auto</span></label>' +
+        "</span>" +
         "</div>" +
         '<div class="browframe" id="browframe">' +
         '<div class="browhint">Point this at a running dev server to see the page beside its tests.<br>' +
@@ -478,7 +518,7 @@ import { openMenu } from './menus.js';
     var backBtn = document.getElementById("back");
     if (backBtn) backBtn.onclick = function(){ location.hash = ""; };
     document.getElementById("stop").onclick = function(){
-      api("/api/projects/" + pid + "/interrupt", { method: "POST", body: "{}" })
+      api("/api/projects/" + pid + "/interrupt", { method: "POST", body: JSON.stringify({ chat: chatId }) })
         .then(function(j){ toast(j.interrupted ? "interrupted " + j.interrupted : "nothing running"); })
         .catch(function(err){ toast(err.message); });
     };
@@ -494,22 +534,26 @@ import { openMenu } from './menus.js';
       // Orchestra sits beside Thread: a run is a conversation that fanned out,
       // and its tasks are threads of their own.
       tabs.splice(1, 0, "orchestra");
-      // Fleet sits beside Orchestra: the same question — who is doing what —
+      // Crew sits beside Orchestra: agents with roles working one goal together.
+      tabs.splice(2, 0, "crew");
+      // Fleet sits beside them: the same question — who is doing what —
       // asked of every agent in every open project, not one run's workers.
-      tabs.splice(2, 0, "fleet");
+      tabs.splice(3, 0, "fleet");
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
       // Plain words, each with a line saying what's behind it: "Brain",
       // "Fleet" and "Observatory" were names you had to learn before you
       // could guess what they did.
       var LBL = { thread: [ICONS.thread, "Chat", "talk to an agent in this thread"],
                   orchestra: [ICONS.orchestra, "Orchestra", "one agent plans, a team builds in parallel"],
+                  crew: [ICONS.team, "Crew", "agents with roles plan, build, review and test a goal"],
                   fleet: [ICONS.fleet, "Agents", "what every agent is doing right now"],
                   board: [ICONS.board, "Board", "issues, PRs and tasks"],
                   brain: [ICONS.memory, "Memory", "what every agent here remembers"],
                   observatory: [ICONS.telescope, "Insights", "time, tokens and cost"] };
       box.innerHTML = tabs.map(function(tb){
         return '<button class="tab' + (state.tab === tb ? " active" : "") + '" data-tab="' + tb + '" title="' + LBL[tb][1] + " — " + LBL[tb][2] + '">' +
-          LBL[tb][0] + '<span class="tl">' + LBL[tb][1] + "</span>" + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") + "</button>";
+          LBL[tb][0] + '<span class="tl">' + LBL[tb][1] + "</span>" + (tb === "orchestra" ? '<span class="tdot" id="orchtdot" style="display:none"></span>' : "") +
+          (tb === "crew" ? '<span class="tdot" id="crewtdot" style="display:none"></span>' : "") + "</button>";
       }).join("");
       Array.prototype.forEach.call(box.querySelectorAll(".tab"), function(tb){
         tb.onclick = function(){ showTab(tb.getAttribute("data-tab")); };
@@ -536,7 +580,8 @@ import { openMenu } from './menus.js';
     }
     function showTabNow(name){
       state.tab = name;
-      ["thread", "orchestra", "fleet", "board", "brain", "observatory"].forEach(function(t){
+      (state.tabByProject || (state.tabByProject = {}))[pid] = name;
+      ["thread", "orchestra", "crew", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -551,6 +596,7 @@ import { openMenu } from './menus.js';
       if (name === "board") { if (board.data) drawBoardPane(); else loadBoard(); }
       if (name === "observatory") drawObservatory();
       if (name === "orchestra") { drawOrch(); loadOrch(); }
+      if (name === "crew") { drawCrew(); loadCrews(); }
       // Fleet polls only while you can see it.
       if (name === "fleet") { drawFleet(); loadFleet(); loadTeam(); }
       fleetPoll(name === "fleet");
@@ -623,8 +669,13 @@ import { openMenu } from './menus.js';
       if (bwb) bwb.onclick = function(){
         (state.browserActive && state.browserActive()) ? closeBrowser() : openBrowser();
       };
+      var sab = document.getElementById("subagentsbtn");
+      if (sab) sab.onclick = openSubagentsDock;
+      state.openSubagents = openSubagentsDock;
       var phb = document.getElementById("phonebtn");
       if (phb) phb.onclick = openConnectPhone;
+      var ivb = document.getElementById("invitebtn");
+      if (ivb) ivb.onclick = function(){ openInvite(pid); };
       if (!state.railView) state.railView = localStorage.getItem("loomRailView") || "explorer";
       applyRail();
       var dockEl = document.getElementById("dockpane");
@@ -641,7 +692,9 @@ import { openMenu } from './menus.js';
         def: 520, key: "loomDockW", invert: true,
       });
       drawTabs();
-      showTab("thread");
+      // Back on a project (or the same one drawn again while it loads): the
+      // tab you were on, not Chat — a click on Crew mid-load used to bounce.
+      showTab((state.tabByProject && state.tabByProject[pid]) || "thread");
       // A just-launched orchestra lands on its own view, in its own chat.
       if (state.pendingTab) { var pt = state.pendingTab; state.pendingTab = null; showTab(pt); }
       drawRail();
@@ -744,7 +797,9 @@ import { openMenu } from './menus.js';
         var startY = ev.clientY, startH = dock.offsetHeight;
         document.body.classList.add("resizing-x");
         function mv(e){
-          dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, startH + (startY - e.clientY))) + "px";
+          // the dock never takes the room the thread and composer need
+          var room = (dock.parentNode && dock.parentNode.clientHeight ? dock.parentNode.clientHeight : window.innerHeight) - 380;
+          dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, room, startH + (startY - e.clientY))) + "px";
           fitActive();
         }
         function up(){
@@ -871,6 +926,16 @@ import { openMenu } from './menus.js';
           "agent: " + (ecard.getAttribute("data-agent") || "loom"), "at: " + when, "", head, det ? "\n" + det : ""].join("\n").trim());
         return;
       }
+      // A proposed plan's buttons: leave plan mode and build it, or say what to change.
+      var pi = ev.target.closest && ev.target.closest("[data-planimpl]");
+      if (pi) {
+        ev.preventDefault(); ev.stopPropagation();
+        if (planState) { var pb = document.getElementById("planbtn"); if (pb) pb.click(); }
+        composeFor("Implement the plan above.", pi.getAttribute("data-planimpl"), true);
+        return;
+      }
+      var pr = ev.target.closest && ev.target.closest("[data-planrevise]");
+      if (pr) { ev.preventDefault(); ev.stopPropagation(); composeFor("Change the plan: ", pr.getAttribute("data-planrevise"), false); return; }
       var cn = ev.target.closest && ev.target.closest("[data-continue]");
       if (cn) { ev.preventDefault(); ev.stopPropagation(); composeFor("Continue from exactly where you stopped.", cn.getAttribute("data-continue"), true); return; }
       // Copy a whole reply — the words, not the markup around them.
@@ -879,9 +944,27 @@ import { openMenu } from './menus.js';
         ev.preventDefault(); ev.stopPropagation();
         var mb = mc.closest(".msg"); var body = mb && mb.querySelector(".bubble");
         var txt = body ? body.innerText : "";
-        if (navigator.clipboard && txt) navigator.clipboard.writeText(txt).then(function(){ toast("copied"); }, function(){ toast("couldn’t copy"); });
+        if (txt) { copyText(txt); toast("copied"); }
         return;
       }
+      // a tool row opens to what it did (args, output, exit code, error); its details stay selectable
+      var trow = ev.target.closest && ev.target.closest(".tool.hasdet");
+      if (trow && !ev.target.closest(".tooldet") && !ev.target.closest("a,button")) { ev.preventDefault(); trow.classList.toggle("open"); return; }
+      // an artifact an agent made (a page, an image, a doc), shown as itself
+      var art = ev.target.closest && ev.target.closest("[data-artifact]");
+      if (art) { ev.preventDefault(); ev.stopPropagation(); openArtifactDock(art.getAttribute("data-artifact")); return; }
+      // an html/svg code block, rendered
+      var pv = ev.target.closest && ev.target.closest(".mdprev");
+      if (pv) {
+        ev.preventDefault(); ev.stopPropagation();
+        var wrap = pv.closest(".mdcodewrap"), codeEl = wrap && wrap.querySelector("pre code");
+        var lng = wrap && wrap.querySelector(".mdlang") ? wrap.querySelector(".mdlang").textContent : "html";
+        if (codeEl) openCodePreview(codeEl.textContent, lng);
+        return;
+      }
+      // a picture in a reply: open it at full size
+      var mi = ev.target.closest && ev.target.closest("img.mdimg[data-projimg]");
+      if (mi) { ev.preventDefault(); openArtifactDock(mi.getAttribute("data-projimg")); return; }
       var dr = ev.target.closest && ev.target.closest(".mddraw");
       if (dr) { ev.preventDefault(); ev.stopPropagation(); drawMermaid(dr.parentNode, dr); return; }
       var cp = ev.target.closest && ev.target.closest(".mdcopy");
@@ -923,6 +1006,18 @@ import { openMenu } from './menus.js';
       }
       var ch = t.querySelector(".tchev");
       if (ch) ch.textContent = open ? "\u25b8" : "\u25be";
+    });
+    // Right-click a message: its actions where you clicked. A text selection
+    // inside it keeps the native menu (Copy, Look Up, spelling) — that's what
+    // you right-clicked for.
+    document.getElementById("feed").addEventListener("contextmenu", function(ev){
+      var msgEl = ev.target && ev.target.closest ? ev.target.closest(".msg") : null;
+      if (!msgEl || !msgEl.getAttribute("data-id")) return;
+      var sel = window.getSelection && window.getSelection();
+      if (sel && !sel.isCollapsed && msgEl.contains(sel.anchorNode)) return;
+      if (ev.target.closest("a[href], input, textarea")) return;
+      ev.preventDefault();
+      msgMenu(msgEl, null, { x: ev.clientX, y: ev.clientY }, ev.target.closest("pre"));
     });
     document.getElementById("feed").addEventListener("keydown", approvalKey);
     // Enter in an answer box sends it, the way Enter sends anywhere else.
@@ -1148,6 +1243,11 @@ import { openMenu } from './menus.js';
         if (document.getElementById("orchsheet")) { closeOrchSheet(); return; }
         openOrchSheet();
       };
+      // Crew the same way.
+      document.getElementById("crewbtn").onclick = function(){
+        if (document.getElementById("crewsheet")) { closeCrewSheet(); return; }
+        openCrewSheet();
+      };
       // Fleet the same way: the desktop tab's drawing, in the sheet slot.
       document.getElementById("fleetbtn").onclick = function(){
         if (document.getElementById("fleetsheet")) { closeFleetSheet(); return; }
@@ -1318,16 +1418,39 @@ import { openMenu } from './menus.js';
       autosizeBox(); saveDraft(); box.focus(); box.setSelectionRange(box.value.length, box.value.length);
       var form = document.getElementById("cform"); if (form) form.classList.add("hastext");
     }
-    function msgMenu(msgEl, anchor){
+    /**
+     * A message's actions: from its ⋯ button, or a right-click anywhere on it
+     * (`at` is the cursor; `code` the code block under it, if any).
+     */
+    function msgMenu(msgEl, anchor, at, code){
       if (!msgEl) return;
       var id = Number(msgEl.getAttribute("data-id")) || 0, agentId = msgEl.getAttribute("data-agent");
+      var mine = msgEl.classList.contains("user");
       var prompt = promptFor(msgEl);
       var others = ((state.project && state.project.agents) || []).filter(function(a){
         return a.tier === "adapter" && a.enabled !== false && a.id !== agentId;
       });
       var starred = !!(state.starSet && state.starSet[id]);
-      var r = anchor.getBoundingClientRect();
-      var items = [{ head: agentId ? labelOf(agentId) : "Message" }];
+      var r = anchor ? anchor.getBoundingClientRect() : { left: at.x, right: at.x + 220, bottom: at.y, top: at.y };
+      var items = [{ head: agentId ? labelOf(agentId) : mine ? "Your message" : "Message" }];
+      if (code) {
+        items.push({ label: "Copy code", icon: ICONS.copy, run: function(){ copyText(code.innerText || code.textContent || ""); toast("code copied"); } });
+        items.push({ label: "Code into the composer", icon: ICONS.quote, run: function(){ quoteIntoComposer("```\n" + (code.innerText || code.textContent || "").trim() + "\n```"); } });
+        items.push({ sep: true });
+      }
+      items.push({ label: "Copy text", icon: ICONS.copy, run: function(){
+        copyText(mine ? decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl) : bubbleText(msgEl)); toast("copied");
+      } });
+      if (mine) {
+        var raw = decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl);
+        items.push({ label: "Edit & resend", icon: ICONS.pencil, run: function(){ composeFor(raw, null, false); } });
+        items.push({ label: "Send again", icon: ICONS.refresh, run: function(){ composeFor(raw, null, true); } });
+        items.push({ label: "Save as a prompt", icon: ICONS.bookmark, run: function(){
+          api("/api/prompts", { method: "POST", body: JSON.stringify({ text: raw, title: raw.split("\n")[0].slice(0, 60) }) })
+            .then(function(){ toast("saved — it's in Prompts"); }).catch(function(err){ toast(err.message); });
+        } });
+        items.push({ sep: true });
+      }
       if (prompt) {
         items.push({ label: "Retry", icon: ICONS.refresh, hint: "same prompt", run: function(){ composeFor(prompt, agentId, true); } });
         if (others.length) items.push({ label: "Retry with\u2026", icon: ICONS.agents, hint: others.length + " agents", run: function(){
@@ -1354,7 +1477,8 @@ import { openMenu } from './menus.js';
         } });
       }
       items.push({ label: "Branch from here", icon: ICONS.branch, hint: "new chat", run: function(){ branchFrom(msgEl); } });
-      openMenu(Math.round(r.right - 220), Math.round(r.bottom + 4), items);
+      if (at) openMenu(at.x, at.y, items);
+      else openMenu(Math.round(r.right - 220), Math.round(r.bottom + 4), items);
     }
     /** A link that opens this project, this chat, this message. */
     function messageLink(id){
@@ -1549,8 +1673,8 @@ import { openMenu } from './menus.js';
         bar.id = "findbar"; bar.className = "findbar"; bar.setAttribute("role", "search");
         bar.innerHTML = ICONS.search + '<input id="findq" placeholder="Find in this chat" spellcheck="false" autocomplete="off" aria-label="find in this chat">' +
           '<span class="findcount" id="findcount" aria-live="polite"></span>' +
-          '<button type="button" class="iconbtn" id="findprev" title="Previous (\u21e7Enter)" aria-label="previous match">' + ICONS.up + "</button>" +
-          '<button type="button" class="iconbtn" id="findnext" title="Next (Enter)" aria-label="next match">' + ICONS.arrowDown + "</button>" +
+          '<button type="button" class="iconbtn" id="findprev" title="Previous (Enter)" aria-label="previous match">' + ICONS.up + "</button>" +
+          '<button type="button" class="iconbtn" id="findnext" title="Next (\u21e7Enter)" aria-label="next match">' + ICONS.arrowDown + "</button>" +
           '<button type="button" class="iconbtn" id="findx" title="Close (Esc)" aria-label="close find">' + ICONS.x + "</button>";
         host.appendChild(bar);
         var qi = document.getElementById("findq"), t = null;
@@ -1758,6 +1882,8 @@ import { openMenu } from './menus.js';
       if (el && names && !teamEditing(el)) drawOrch();
     };
     loadOrch();
+    // The Crew tab's dot says a crew is working (or waits on you) before you open it.
+    if (desktop) loadCrews();
     loadApprovals();
     // Events that change a Fleet row; a burst (a plan spawning five tasks)
     // coalesces into one fetch.

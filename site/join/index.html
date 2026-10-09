@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>Join on Loom</title>
+<meta name="description" content="You've been invited to a team on Loom — open it in your Loom, or install Loom and join in one command.">
+<!--
+  The page every Loom invite link opens (src/core/invite-link.ts). Static on
+  purpose: the invite is the #fragment, which browsers never send to a
+  server — not this one, not anyone's. The page reads it here, shows what it
+  is, and hands it to the Loom on this machine (http://localhost:<port>/app#join=…)
+  or prints the one command that installs Loom and joins.
+-->
+<style>
+  :root{
+    --bg:#fafafa;--card:#fff;--fg:#0a0a0a;--muted:#737373;--line:#e5e5e5;--soft:#f4f4f5;
+    --accent:#0e7490;--accent-soft:#cffafe;--warn:#b45309;--ok:#15803d;
+    --mono:'SF Mono',SFMono-Regular,ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){--bg:#0a0a0a;--card:#151515;--fg:#fafafa;--muted:#a1a1a1;--line:#262626;--soft:#1f1f1f;--accent:#67e8f9;--accent-soft:#164e63;--warn:#fbbf24;--ok:#4ade80}
+  }
+  :root[data-theme="dark"]{--bg:#0a0a0a;--card:#151515;--fg:#fafafa;--muted:#a1a1a1;--line:#262626;--soft:#1f1f1f;--accent:#67e8f9;--accent-soft:#164e63;--warn:#fbbf24;--ok:#4ade80}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  main{max-width:520px;margin:0 auto;padding:40px 16px 56px;display:flex;flex-direction:column;gap:16px}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:650;letter-spacing:-.01em;font-size:15px;color:var(--muted)}
+  .brand b{color:var(--fg)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+  h1{font-size:22px;line-height:1.3;margin:0 0 6px;font-weight:600;letter-spacing:-.01em}
+  .repo{display:inline-block;font-family:var(--mono);font-size:12.5px;background:var(--soft);padding:2px 8px;border-radius:6px;margin-top:2px}
+  p{margin:8px 0;color:var(--muted);font-size:14px}
+  .steps{margin:14px 0 4px;padding:0;list-style:none;display:grid;gap:6px;font-size:13.5px}
+  .steps li{display:flex;gap:8px}
+  .steps li::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-top:8px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:42px;padding:0 18px;border-radius:10px;
+    font:inherit;font-size:14.5px;font-weight:550;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--fg);text-decoration:none}
+  .btn.primary{background:var(--fg);color:var(--bg);border-color:var(--fg);width:100%}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .small{font-size:12.5px;color:var(--muted)}
+  .small input{width:72px;font:inherit;font-size:12.5px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+  h2{font-size:15px;margin:0 0 4px;font-weight:600}
+  .tabs{display:flex;gap:4px;background:var(--soft);padding:3px;border-radius:9px;margin:12px 0 10px;width:max-content;max-width:100%}
+  .tabs button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12.5px;padding:5px 10px;border-radius:7px;cursor:pointer}
+  .tabs button[aria-selected="true"]{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+  .cmd{position:relative;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px 12px 12px 12px}
+  .cmd code{display:block;font-family:var(--mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;padding-right:64px}
+  .cmd button{position:absolute;top:8px;right:8px;height:28px;padding:0 10px;font-size:12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+  .note{display:flex;gap:8px;font-size:12.5px;color:var(--muted);line-height:1.55}
+  .note svg{flex:none;width:15px;height:15px;margin-top:2px;color:var(--warn)}
+  .bad h1{color:var(--fg)}
+  footer{font-size:12px;color:var(--muted);text-align:center}
+  footer a{color:inherit}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><b>loom</b> · one link to join</div>
+
+  <section class="card" id="invite" hidden>
+    <h1 id="title">You're invited</h1>
+    <div id="repoline" hidden><span class="repo" id="repo"></span></div>
+    <p>Joining sets this up on your computer:</p>
+    <ul class="steps" id="steps"></ul>
+  </section>
+
+  <section class="card" id="have" hidden>
+    <h2>Have Loom?</h2>
+    <p>Open the invite in the Loom on this computer and click Join.</p>
+    <a class="btn primary" id="open" href="#">Open in my Loom</a>
+    <div class="row small" style="margin-top:10px">Loom on another port? <input id="port" inputmode="numeric" value="7420" aria-label="Loom port"></div>
+  </section>
+
+  <section class="card" id="new" hidden>
+    <h2>New to Loom?</h2>
+    <p>One command installs Loom and joins. It needs <b>git</b> and <b>Node 22.5+</b>.</p>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-cmd="script">macOS / Linux</button>
+      <button role="tab" aria-selected="false" data-cmd="npm">npm</button>
+      <button role="tab" aria-selected="false" data-cmd="have">Already installed</button>
+    </div>
+    <div class="cmd"><code id="cmd"></code><button id="copy" type="button">Copy</button></div>
+    <p class="small">Paste it into a terminal. It signs you in with GitHub in your browser, clones the repo and opens it with the agents you have installed (Codex, OpenCode, Claude Code…).</p>
+  </section>
+
+  <section class="card" id="safety" hidden>
+    <div class="note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+      <span>This invite never left your browser — everything after the <b>#</b> in the address stays on your device. It works once and carries the team's key, so don't forward it.</span></div>
+  </section>
+
+  <section class="card bad" id="bad" hidden>
+    <h1>This link is incomplete</h1>
+    <p>An invite link ends in a long code after <b>#</b>. Ask whoever sent it to copy the whole link again — or run <code>loom invite</code> in their project for a new one.</p>
+  </section>
+
+  <footer><a href="https://github.com/nickthelegend/loom" rel="noopener">Loom</a> — a local-first control plane for coding agents</footer>
+</main>
+<script>
+(function(){
+  var frag = (location.hash || "").replace(/^#/, "").replace(/^join=/, "");
+  var $ = function(id){ return document.getElementById(id); };
+  function decode(s){
+    try {
+      var b = s.replace(/-/g, "+").replace(/_/g, "/");
+      while (b.length % 4) b += "=";
+      var bin = atob(b), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var inv = JSON.parse(new TextDecoder().decode(bytes));
+      return inv && typeof inv.invite === "string" && inv.key && typeof inv.hub === "string" ? inv : null;
+    } catch (e) { return null; }
+  }
+  var inv = frag ? decode(frag) : null;
+  if (!inv) { $("bad").hidden = false; return; }
+  // keep the key out of the tab's history once read; the page still holds it
+  try { history.replaceState(null, "", location.pathname); } catch (e) {}
+
+  var text = function(el, s){ el.textContent = s; return el; };
+  text($("title"), "");
+  if (inv.from) { var b = document.createElement("b"); b.textContent = "@" + inv.from; $("title").append(b, " invited you to "); }
+  else $("title").append("Join ");
+  var t = document.createElement("b"); t.textContent = inv.team || "a Loom team"; $("title").append(t);
+  if (inv.repo) { text($("repo"), inv.repo); $("repoline").hidden = false; }
+  var steps = ["Sign in with GitHub", "Join " + (inv.team || "the team") + " — see who's working on what, live"];
+  if (inv.repo) {
+    steps.push("Clone " + inv.repo + " — a private repo waits for " + (inv.from ? "@" + inv.from + "’s" : "the inviter’s") + " Loom to let you in");
+    steps.push("Open it with the coding agents on your machine");
+  }
+  if (inv.crews && inv.crews.length) steps.push("Set up the crew" + (inv.crews.length > 1 ? "s" : "") + ": " + inv.crews.map(function(c){ return c.name; }).join(", "));
+  steps.forEach(function(s){ var li = document.createElement("li"); li.textContent = s; $("steps").appendChild(li); });
+
+  var link = location.origin + location.pathname + "#" + frag;
+  function openHref(){ var p = String($("port").value || "7420").replace(/\D/g, "") || "7420"; return "http://localhost:" + p + "/app#join=" + frag; }
+  $("open").href = openHref();
+  $("port").oninput = function(){ $("open").href = openHref(); };
+
+  var quoted = "'" + link.replace(/'/g, "") + "'";
+  var CMDS = {
+    script: "curl -fsSL https://raw.githubusercontent.com/nickthelegend/loom/main/scripts/install.sh | LOOM_JOIN=" + quoted + " bash",
+    npm: "npm install -g @loompad/cli && loom join " + quoted,
+    have: "loom join " + quoted,
+  };
+  var cur = "script";
+  function show(k){
+    cur = k; text($("cmd"), CMDS[k]);
+    Array.prototype.forEach.call(document.querySelectorAll("[data-cmd]"), function(b){ b.setAttribute("aria-selected", String(b.getAttribute("data-cmd") === k)); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cmd]"), function(b){ b.onclick = function(){ show(b.getAttribute("data-cmd")); }; });
+  show(/Windows/.test(navigator.userAgent) ? "npm" : "script");
+  $("copy").onclick = function(){
+    var done = function(){ text($("copy"), "Copied"); setTimeout(function(){ text($("copy"), "Copy"); }, 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(CMDS[cur]).then(done, function(){});
+    else { var r = document.createRange(); r.selectNode($("cmd")); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand("copy"); done(); }
+  };
+  ["invite", "have", "new", "safety"].forEach(function(id){ $(id).hidden = false; });
+})();
+</script>
+</body>
+</html>

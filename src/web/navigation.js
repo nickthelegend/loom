@@ -1,5 +1,6 @@
 /** Browser navigation module. See README.md for ownership and startup. */
 import { renderPair } from './connection.js';
+import { joinFromHash,renderJoin } from './join.js';
 import { renderBoard } from './home.js';
 import { renderProject } from './project.js';
 import { isDesktop,renderShell } from './shell.js';
@@ -27,6 +28,9 @@ import { esc } from './format.js';
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     state.redrawFeed = null;
     if (!state.token) return renderPair();
+    // An invite link opened here: what it sets up, then one click (join.js).
+    var invite = joinFromHash();
+    if (invite) return renderJoin(invite);
     takePermalink();
     document.documentElement.classList.toggle("desk", isDesktop());
     if (isDesktop()) return renderShell();
@@ -70,6 +74,17 @@ import { esc } from './format.js';
       ]],
       ["Find", [["Enter / ⇧Enter", "Previous / next match"]]],
     ];
+    // The desktop app's menu bar adds its own; the browser keeps those keys for itself.
+    if (window.loomNative) rows.splice(1, 0, ["Desktop app", [
+      [K + "N", "New chat"], [K + "⇧N", "New task"], [K + "O", "Add a project"],
+      [K + "1 … " + K + "7", "Chat · Orchestra · Crew · Agents · Board · Memory · Insights"],
+      [K + "B", "Show or hide the sidebar"], ["⌥" + K + "B", "Show or hide the right panel"],
+      [K + "⇧A", "Choose the agent"], [K + "⇧M", "Plan mode"], [K + "⇧.", "Interrupt"],
+      [K + "⇧E", "Export this chat"], ["⌥" + K + "↑ / ↓", "Previous / next project"], [K + "⇧[ / ]", "Previous / next chat"],
+      [K + "⇧U", "Invite a teammate"], [K + "/", "This sheet"],
+    ]]);
+    rows.push(["Right-click", [["Messages", "Copy, retry, quote, branch, save as a prompt"], ["Code blocks", "Copy code, put it in the composer"],
+      ["Files", "Open, mention in chat, copy path" + (window.loomNative ? ", reveal" : "")], ["Projects & chats", "Settings, rename, pin, archive, export"]]]);
     var scrim = document.createElement("div");
     scrim.className = "scrim";
     scrim.innerHTML = '<div class="modal kbmodal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">' +

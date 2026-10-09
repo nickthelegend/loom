@@ -7,8 +7,11 @@
  * it is actually about.
  */
 
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { INSTALL_URL, open as openLink } from "./links";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -31,6 +34,19 @@ import {
   getActivity,
   getApprovals,
   getChats,
+  getCheckpoints,
+  getImportable,
+  importChat,
+  type ImportableChat,
+  gitCommit,
+  gitPush,
+  gitStage,
+  rewindTo,
+  type Checkpoint,
+  createChat,
+  deleteChat,
+  renameChat,
+  setChatFlags,
   getEvents,
   getProject,
   getProjects,
@@ -44,6 +60,7 @@ import {
   sendMessage,
   getQueue,
   queueEdit,
+  queueClear,
   queuePause,
   queueRemove,
   type QueueView,
@@ -59,13 +76,18 @@ import {
   type WorkingTree,
   kv,
 } from "./api";
-import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, field } from "./components";
+import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
-import { AgentPicker } from "./agents";
+import { MemoryView } from "./memory";
+import { BoardView } from "./board";
+import { AttachBar, AttachButton, useAttachments } from "./attach";
+import { AgentIcon, AgentPicker, ModelPicker } from "./agents";
+import { foldedEvents, groupToolRuns } from "./fold-model";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
+import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
@@ -75,14 +97,15 @@ import { describeLink, linkQuality, pushSample, sparkBars, type LinkSample } fro
 import { clearCache, loadProjects, loadThread, saveProjects, saveThread } from "./cache";
 import { savedAgo } from "./cache-model";
 import { OrchestraView } from "./orchestra";
-import { ObservatoryView } from "./observatory";
+import { CrewView } from "./crew";
+import { ObservatoryView, Sheet } from "./observatory";
 import { ToolsView } from "./tools";
 import { TeamBrainView, useBrainSummary } from "./team-brain";
 import { TeamLandingView, useLandingSummary } from "./team-landing";
 import { TeamRunnersView, useRunnersSummary } from "./team-runners";
 import { runnersTabVisible } from "./team-runners-model";
 import { useStt } from "./stt";
-import { T, radii, spacing, usd } from "./theme";
+import { T, radii, scheme, spacing, usd } from "./theme";
 
 /** Brand lockup: the wordmark over a short thread-cyan hairline. */
 function Wordmark(props: { size?: number }) {
@@ -116,7 +139,7 @@ function Wordmark(props: { size?: number }) {
 // Pair
 // ---------------------------------------------------------------------------
 
-function PairStep(props: { n: number; text: string }) {
+function PairStep(props: { n: number; text: string; link?: boolean }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
       <View
@@ -134,12 +157,13 @@ function PairStep(props: { n: number; text: string }) {
       >
         <Text style={{ color: T.dim, fontSize: 11, fontWeight: "700" }}>{props.n}</Text>
       </View>
-      <Text style={{ color: T.dim, fontSize: 13, lineHeight: 20, flex: 1 }}>{props.text}</Text>
+      <Text style={{ color: props.link ? T.text : T.dim, fontSize: 13, lineHeight: 20, flex: 1, textDecorationLine: props.link ? "underline" : "none" }}>{props.text}</Text>
     </View>
   );
 }
 
 export function PairScreen(props: { onPaired: (c: Creds) => void }) {
+  const insets = useSafeAreaInsets();
   const [url, setUrl] = useState("http://");
   const [token, setToken] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -237,9 +261,12 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         the shared-memory layer for your AI dev environments
       </Text>
       <View style={{ gap: 10, marginBottom: spacing.sm }}>
-        <PairStep n={1} text="On your computer: loom up --tailnet" />
-        <PairStep n={2} text="Then: loom pair — it prints a QR and a link" />
-        <PairStep n={3} text="Scan the QR below — or paste the link" />
+        <TouchableOpacity onPress={() => openLink(INSTALL_URL)} activeOpacity={0.7} accessibilityRole="link"
+          accessibilityLabel="Install Loom on your computer — open source, on GitHub">
+          <PairStep n={1} text="Install Loom on your computer — it runs your agents, and this app is its remote. Free and open source →" link />
+        </TouchableOpacity>
+        <PairStep n={2} text="Start it: open Loom Desktop, or run loom up --tailnet" />
+        <PairStep n={3} text="Connect a phone (or loom pair) shows a QR — scan it below, or paste the link" />
       </View>
       <TextInput
         style={field}
@@ -284,7 +311,7 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
             onBarcodeScanned={onScan}
           />
-          <View style={{ position: "absolute", top: 72, left: 24, right: 24, alignItems: "center" }}>
+          <View style={{ position: "absolute", top: insets.top + 48, left: 24, right: 24, alignItems: "center" }}>
             <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700", textAlign: "center" }}>
               Point at the QR on your computer
             </Text>
@@ -304,7 +331,7 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
               borderRadius: 20,
             }}
           />
-          <View style={{ position: "absolute", bottom: 48, left: 24, right: 24, gap: 10 }}>
+          <View style={{ position: "absolute", bottom: insets.bottom + 32, left: 24, right: 24, gap: 10 }}>
             <Btn label="Paste link from clipboard" onPress={() => void pairFromClipboard()} />
             <Btn label="Cancel" onPress={() => setScanning(false)} />
           </View>
@@ -319,13 +346,14 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
 // ---------------------------------------------------------------------------
 
 /** hue-tinted letter tile — mirrors the web app's repo glyphs. */
-function glyph(seed: string): { bg: string; fg: string; ch: string } {
+/** A tile's colours from `seed`; its letter from `label` (a project's name, not its id). */
+function glyph(seed: string, label = seed): { bg: string; fg: string; ch: string } {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
   return {
     bg: `hsla(${h}, 60%, 50%, 0.18)`,
-    fg: `hsl(${h}, 55%, 72%)`,
-    ch: (seed.trim()[0] ?? "?").toUpperCase(),
+    fg: `hsl(${h}, 55%, ${scheme === "light" ? 34 : 72}%)`, // the letter has to read on the tint in either theme
+    ch: (label.trim()[0] ?? "?").toUpperCase(),
   };
 }
 
@@ -373,7 +401,7 @@ function StatTile(props: { value: string; label: string }) {
 /** A project row styled like Orca's Desktop/Resume cards: tile + name + meta. */
 function ProjectCard(props: { p: Project; onPress: () => void }) {
   const { p } = props;
-  const g = glyph(`${p.id}${p.name}`);
+  const g = glyph(`${p.id}${p.name}`, p.name);
   const r = p.route;
   const active = r && (r.status === "running" || r.status === "waiting_human");
   const working = p.agents.some((a) => a.busy);
@@ -763,7 +791,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
+type Tab = "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -773,8 +801,11 @@ type Tab = "thread" | "orchestra" | "observatory" | "ask" | "brain" | "landing" 
 const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "thread", label: "Thread" },
   { key: "orchestra", label: "Orchestra", accent: T.thread },
+  { key: "crew", label: "Crew", accent: T.shuttle },
   { key: "observatory", label: "Observatory", accent: T.primary },
   { key: "ask", label: "Ask", accent: T.primary },
+  // the project's own memory, shared or not (the desktop's Memory tab)
+  { key: "memory", label: "Memory", accent: T.ok },
   // only while the repo is shared with a team (see visibleTabs below)
   { key: "brain", label: "Team brain", accent: T.ok },
   // Phase 4: goal PRs on their way to main; shown with a team or once there are any
@@ -802,6 +833,33 @@ export function ProjectScreen(props: {
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "thread");
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
   const [chats, setChats] = useState<Chat[]>([]);
+  const [chatMenu, setChatMenu] = useState<Chat | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [groupOpen, setGroupOpen] = useState<{ g: NonNullable<Chat["group"]>; chats: Chat[] } | null>(null);
+  const attach = useAttachments(creds, project.id, (msg) => setErr(msg));
+  const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => setChats(chats)).catch(() => {});
+  // a chat change from the menu: do it, close the menu, re-read the list (and leave a deleted chat)
+  const act = async (fn: () => Promise<unknown>, gone?: string) => {
+    try {
+      await fn();
+      setChatMenu(null);
+      if (gone && gone === chatId) setChatId("main");
+      reloadChats();
+    } catch (e) {
+      setChatMenu(null);
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const newChat = async () => {
+    try {
+      const { chat } = await createChat(creds, project.id, "");
+      setChats((cs) => [...cs.filter((c) => c.id !== chat.id), chat]);
+      setChatId(chat.id);
+      haptic.tap();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
   // A chat opened from elsewhere (an Orchestra task) that isn't in the sidebar list.
   const [extraChat, setExtraChat] = useState<Chat | null>(
     props.initialChat && props.initialChat.id !== "main"
@@ -817,6 +875,8 @@ export function ProjectScreen(props: {
   const [promptsOpen, setPromptsOpen] = useState(false);
   // Bumped on every `orchestra` event so the Orchestra tab refetches that run.
   const [orchPulse, setOrchPulse] = useState<{ n: number; runId: string | null }>({ n: 0, runId: null });
+  // Bumped on every `crew` event so the Crew tab refetches.
+  const [crewPulse, setCrewPulse] = useState(0);
   const [events, setEvents] = useState<LoomEvent[]>([]);
   // What agents are typing in this chat right now, before it's a message.
   const [live, setLive] = useState<LiveMap>({});
@@ -846,8 +906,32 @@ export function ProjectScreen(props: {
     void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
   };
   const [tree, setTree] = useState<WorkingTree | null>(null);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[] | null>(null);
+  const [commitMsg, setCommitMsg] = useState("");
+  const [committing, setCommitting] = useState<"commit" | "push" | null>(null);
+  // everything changed goes in: a phone has no staging area to fiddle with
+  const commitAll = async (push: boolean) => {
+    if (!tree || !commitMsg.trim() || committing) return;
+    setCommitting(push ? "push" : "commit");
+    try {
+      await gitStage(creds, project.id, tree.files.map((f) => f.path).filter((p) => !p.startsWith(".loom/")));
+      const r = await gitCommit(creds, project.id, commitMsg.trim());
+      let note = `Committed ${r.sha} · ${r.files} file${r.files === 1 ? "" : "s"}`;
+      if (push) note += ` · pushed ${(await gitPush(creds, project.id)).branch}`;
+      setCommitMsg("");
+      setErr(null);
+      Alert.alert("Done", note);
+      void getTree(creds, project.id).then(({ tree }) => setTree(tree)).catch(() => {});
+    } catch (e) {
+      setErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setCommitting(null);
+    }
+  };
   const [tasks, setTasks] = useState<TaskResult | null>(null);
-  const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
+  const [tasksTry, setTasksTry] = useState(0);
+  // the Board first, as on the desktop; Issues and PRs are GitHub's own lists
+  const [taskKind, setTaskKind] = useState<"board" | "issue" | "pr">("board");
   const [taskBusy, setTaskBusy] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(
     props.project.holder ?? props.project.agents.find((a) => a.tier === "adapter")?.id ?? null,
@@ -953,6 +1037,8 @@ export function ProjectScreen(props: {
         const runId = typeof ev.payload?.runId === "string" ? ev.payload.runId : null;
         setOrchPulse((p) => ({ n: p.n + 1, runId }));
       }
+      // A crew spans its channel and a thread per teammate: the Crew tab wants every step.
+      if (ev.kind === "crew") setCrewPulse((n) => n + 1);
       // Approvals matter whichever chat they're in: the banner counts them all.
       if (ev.kind === "approval") {
         const aid = String(ev.payload?.approvalId ?? "");
@@ -1012,6 +1098,7 @@ export function ProjectScreen(props: {
       void getTree(creds, project.id)
         .then(({ tree }) => setTree(tree))
         .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+      void getCheckpoints(creds, project.id).then((r) => setCheckpoints(r.checkpoints)).catch(() => setCheckpoints([]));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
@@ -1024,10 +1111,11 @@ export function ProjectScreen(props: {
   // wins while the Issues pill is lit — and tapping a row would hand an agent
   // a brief for the kind you aren't looking at.
   useEffect(() => {
-    if (tab !== "tasks") return;
+    if (tab !== "tasks" || taskKind === "board") return;
     let live = true;
     setTasks(null);
-    void getTasks(creds, project.id, taskKind, `is:${taskKind} is:open`)
+    const kind = taskKind;
+    void getTasks(creds, project.id, kind, `is:${kind} is:open`)
       .then((r) => {
         if (live) setTasks(r);
       })
@@ -1040,7 +1128,7 @@ export function ProjectScreen(props: {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, taskKind, project.id]);
+  }, [tab, taskKind, project.id, tasksTry]);
 
   /**
    * Hand an issue to an agent: the same brief the desktop drafts, sent to the
@@ -1091,8 +1179,13 @@ export function ProjectScreen(props: {
 
   const send = async () => {
     if (stt.listening) void stt.toggle(); // stop dictation on send
-    const message = text.trim();
+    if (attach.uploading) return setErr("still uploading the picture…");
+    // pictures lead the message as "[image] <path>" lines, as the desktop sends them
+    const refs = attach.refs();
+    const typed = text.trim();
+    const message = refs.length ? refs.join("\n") + (typed ? `\n\n${typed}` : "") : typed;
     if (!message) return;
+    attach.clear();
     haptic.tap();
     setText("");
     sttBase.current = "";
@@ -1114,6 +1207,7 @@ export function ProjectScreen(props: {
   const adapters = project.agents.filter((a) => a.tier === "adapter");
   const selectedAgent = project.agents.find((a) => a.id === selected) ?? null;
   const decisions = useMemo(() => approvalDecisions(events), [events]);
+  const answered = useMemo(() => answeredQuestions(events), [events]);
   const requested = useMemo(
     () =>
       new Set(
@@ -1124,13 +1218,20 @@ export function ProjectScreen(props: {
     [events],
   );
   const kindOf = (id: string) => project.agents.find((a) => a.id === id)?.kind;
+  const threadCtx = useMemo(() => ({ creds, projectId: project.id }), [creds, project.id]);
+  // one checklist per plan, and no tool line under a card that already says it
+  const shownEvents = useMemo(() => {
+    const gone = foldedEvents(events);
+    // and a run of tool calls is one line that opens, as on the desktop
+    return groupToolRuns(gone.size ? events.filter((e) => !gone.has(e.id)) : events) as LoomEvent[];
+  }, [events]);
   const refreshProject = () =>
     void getProject(creds, project.id)
       .then(({ project: p }) => setProject(p))
       .catch(() => {});
   const r = project.route;
   const routeActive = r && (r.status === "running" || r.status === "waiting_human");
-  const armed = text.trim().length > 0;
+  const armed = text.trim().length > 0 || attach.items.length > 0;
 
   return (
     <KeyboardAvoidingView
@@ -1174,9 +1275,14 @@ export function ProjectScreen(props: {
         </View>
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
-        <Btn small label="■ stop" onPress={() =>
-          void interrupt(creds, project.id).catch((e) => setErr(String(e.message ?? e)))
-        } />
+        {project.needsInput || project.agents.some((a) => a.busy) ? (
+          <Btn small label="■ stop" onPress={() =>
+            // this chat's turn, as on the desktop — not a turn in another thread
+            void interrupt(creds, project.id, chatId)
+              .then((r) => { if (!r.interrupted) setErr("Nothing is running in this chat."); })
+              .catch((e) => setErr(String(e.message ?? e)))
+          } />
+        ) : null}
       </View>
 
       {/* tab strip — active tab carries a 2px underline; scrolls, six don't fit */}
@@ -1265,16 +1371,37 @@ export function ProjectScreen(props: {
       {tab === "thread" ? (
         <>
           {/* chats — the desktop's sidebar list, so you can read previous chats */}
-          {(chats.length > 1 || (extraChat && extraChat.id === chatId)) && (
+          {(
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={{ maxHeight: 46, flexGrow: 0, backgroundColor: T.panel, borderBottomWidth: 1, borderBottomColor: T.line }}
               contentContainerStyle={{ paddingHorizontal: spacing.md, paddingVertical: 8, gap: spacing.sm, alignItems: "center" }}
             >
+              {/* first, so they're in reach however many chats there are: a new chat, or one brought in from an agent's own history */}
+              <TouchableOpacity
+                onPress={() => void newChat()}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="New chat"
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: T.line, borderStyle: "dashed" }}
+              >
+                <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>+ New</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setImporting(true)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Import chats from Claude Code, Codex or OpenCode"
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: T.line, borderStyle: "dashed" }}
+              >
+                <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>⤓ Import</Text>
+              </TouchableOpacity>
               {(() => {
                 const shown = [...chats, ...(extraChat && !chats.some((c) => c.id === extraChat.id) ? [extraChat] : [])]
                   .filter((c) => !c.archived || c.id === chatId)
+                  // a run's / crew's threads ride under one chip (below), except the one you're in
+                  .filter((c) => !c.group || c.pinned || c.id === chatId)
                   .sort((a, b) => (a.id === "main" ? -1 : b.id === "main" ? 1 : (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)));
                 const { unread, seen: based } = unreadChats(shown, seen, chatId);
                 if (Object.keys(based).length !== Object.keys(seen).length) setTimeout(() => saveSeen(based), 0);
@@ -1285,8 +1412,11 @@ export function ProjectScreen(props: {
                   <TouchableOpacity
                     key={c.id}
                     onPress={() => setChatId(c.id)}
+                    onLongPress={() => c.id !== "main" && setChatMenu(c)}
+                    delayLongPress={350}
                     activeOpacity={0.7}
                     accessibilityRole="tab"
+                    accessibilityHint={c.id === "main" ? undefined : "long-press to rename, pin, archive or delete"}
                     accessibilityState={{ selected: on }}
                     style={{
                       paddingHorizontal: 12,
@@ -1305,8 +1435,56 @@ export function ProjectScreen(props: {
                   </TouchableOpacity>
                 );
               })}
+              {/* one chip per run, race or crew: its threads open from a sheet */}
+              {(() => {
+                const by = new Map<string, { g: NonNullable<Chat["group"]>; chats: Chat[] }>();
+                for (const c of chats) {
+                  if (!c.group || c.archived || c.pinned) continue;
+                  const k = `${c.group.kind}:${c.group.id}`;
+                  const e = by.get(k) ?? { g: c.group, chats: [] };
+                  e.chats.push(c);
+                  by.set(k, e);
+                }
+                return [...by.entries()].sort((a, b) => Math.max(b[1].g.at, ...b[1].chats.map((c) => c.createdAt)) - Math.max(a[1].g.at, ...a[1].chats.map((c) => c.createdAt))).map(([k, e]) => {
+                  const st = e.g.status ?? "";
+                  const color = /^(running|planning|starting|reviewing)$/.test(st) ? T.ok : /^(waiting_human|awaiting_approval)$/.test(st) ? T.warn : /^(failed|aborted|stopped|interrupted)$/.test(st) ? T.err : T.faint;
+                  const on = e.chats.some((c) => c.id === chatId);
+                  return (
+                    <TouchableOpacity key={k} onPress={() => setGroupOpen(e)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${e.g.title}, ${e.chats.length} chats`}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: on ? T.line2 : T.line, backgroundColor: on ? T.raised : "transparent", maxWidth: 230 }}>
+                      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />
+                      <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600", flexShrink: 1 }} numberOfLines={1}>{e.g.title}</Text>
+                      <Text style={{ color: T.faint, fontSize: 11.5 }}>{e.chats.length}</Text>
+                    </TouchableOpacity>
+                  );
+                });
+              })()}
+
             </ScrollView>
           )}
+          <Sheet title={groupOpen ? `${groupOpen.g.kind === "race" ? "Race" : groupOpen.g.kind === "crew" ? "Crew" : groupOpen.g.kind === "import" ? "Imported" : "Orchestra"} · ${groupOpen.chats.length} chats` : ""} visible={!!groupOpen} onClose={() => setGroupOpen(null)}>
+            {groupOpen ? <Text style={{ color: T.dim, fontSize: 12.5, marginBottom: 6 }} numberOfLines={2}>{groupOpen.g.title}</Text> : null}
+            {(groupOpen?.chats ?? []).map((c) => (
+              <TouchableOpacity key={c.id} onPress={() => { setGroupOpen(null); setChatId(c.id); }} activeOpacity={0.7} accessibilityRole="button"
+                style={{ minHeight: 44, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: T.line }}>
+                <Text style={{ color: c.id === chatId ? T.text : T.dim, fontSize: 14, fontWeight: c.id === chatId ? "700" : "400" }} numberOfLines={1}>{c.title}</Text>
+              </TouchableOpacity>
+            ))}
+          </Sheet>
+          <ImportSheet
+            visible={importing}
+            creds={creds}
+            project={project}
+            onClose={() => setImporting(false)}
+            onOpen={(id) => { setImporting(false); reloadChats(); setChatId(id); }}
+          />
+          <ChatMenu
+            chat={chatMenu}
+            onClose={() => setChatMenu(null)}
+            onRename={(title) => chatMenu && void act(() => renameChat(creds, project.id, chatMenu.id, title))}
+            onFlags={(flags) => chatMenu && void act(() => setChatFlags(creds, project.id, chatMenu.id, flags))}
+            onDelete={() => chatMenu && void act(() => deleteChat(creds, project.id, chatMenu.id), chatMenu.id)}
+          />
           {threadCachedAt ? (
             <View
               accessibilityRole="text"
@@ -1317,9 +1495,10 @@ export function ProjectScreen(props: {
               </Text>
             </View>
           ) : null}
+          <ThreadCtx.Provider value={threadCtx}>
           <FlatList
             ref={listRef}
-            data={events}
+            data={shownEvents}
             keyExtractor={(e) => String(e.id)}
             renderItem={({ item }) =>
               item.kind === "approval" ? (
@@ -1332,8 +1511,11 @@ export function ProjectScreen(props: {
                   kindOf={kindOf}
                   onDecided={loadPending}
                 />
+              ) : item.kind === "needs_input" && typeof item.payload?.requestId === "string" && item.payload?.responseMode !== "message" &&
+                Array.isArray(item.payload?.questions) && item.payload.questions.length ? (
+                <QuestionEvent creds={creds} projectId={project.id} e={item} answered={answered.get(String(item.payload.requestId))} />
               ) : (
-                <EventLine e={item} />
+                <EventLine e={item} kindOf={kindOf} />
               )
             }
             ListHeaderComponent={
@@ -1355,9 +1537,16 @@ export function ProjectScreen(props: {
               />
             }
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+            onContentSizeChange={() => {
+              listRef.current?.scrollToEnd({ animated: true });
+              // a card measured after the first pass (a question, an image) would end up under the dock
+              setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 300);
+            }}
+            // the keyboard closing after a send resizes the list without changing its content
+            onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
             style={{ flex: 1 }}
           />
+          </ThreadCtx.Provider>
           {/* command dock */}
           <View style={{ backgroundColor: T.panel, borderTopWidth: 1, borderTopColor: T.line }}>
             {/*
@@ -1385,6 +1574,17 @@ export function ProjectScreen(props: {
                     <Text style={{ color: T.primary, fontSize: 11, fontWeight: "600" }}>
                       {queue.paused ? "Resume" : "Pause"}
                     </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert(`Clear ${queue.queue.length} queued prompt${queue.queue.length === 1 ? "" : "s"}?`, "They won't run.", [
+                        { text: "Cancel", style: "cancel" },
+                        { text: "Clear", style: "destructive", onPress: () => void queueClear(creds, project.id).then(setQueue).catch((e) => setErr(String(e instanceof Error ? e.message : e))) },
+                      ])
+                    }
+                    accessibilityLabel="clear the queue"
+                  >
+                    <Text style={{ color: T.dim, fontSize: 11, fontWeight: "600" }}>Clear</Text>
                   </TouchableOpacity>
                 </View>
                 {queue.queue.map((item, i) => {
@@ -1480,6 +1680,31 @@ export function ProjectScreen(props: {
                               }`}
                             </Text>
                           </TouchableOpacity>
+                          {/* send it to someone else, as the desktop's target picker does */}
+                          <TouchableOpacity
+                            onPress={() =>
+                              Alert.alert("Send this to…", undefined, [
+                                ...["auto", ...adapters.map((a) => a.id), "orchestra"].filter((t) => t !== (item.target.kind === "agent" ? item.target.agentId : item.target.kind)).slice(0, 6).map((t) => ({
+                                  text: t === "auto" ? "Whoever is free (auto)" : t === "orchestra" ? "Orchestrate it" : t,
+                                  onPress: () => void queueEdit(creds, project.id, item.id, { target: t }).then(setQueue).catch((e) => setErr(String(e instanceof Error ? e.message : e))),
+                                })),
+                                { text: "Cancel", style: "cancel" as const },
+                              ])
+                            }
+                            accessibilityLabel={`change who this prompt goes to (now ${who})`}
+                            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                          >
+                            <Text style={{ color: T.dim, fontSize: 12 }}>⇄</Text>
+                          </TouchableOpacity>
+                          {item.when ? (
+                            <TouchableOpacity
+                              onPress={() => void queueEdit(creds, project.id, item.id, { when: null }).then(setQueue).catch((e) => setErr(String(e instanceof Error ? e.message : e)))}
+                              accessibilityLabel="stop holding this prompt and let it run in turn"
+                              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                            >
+                              <Text style={{ color: T.primary, fontSize: 11, fontWeight: "600" }}>Release</Text>
+                            </TouchableOpacity>
+                          ) : null}
                           <TouchableOpacity
                             onPress={() => {
                               void queueRemove(creds, project.id, item.id)
@@ -1514,6 +1739,7 @@ export function ProjectScreen(props: {
                 holder={project.holder}
                 onSelect={setSelected}
               />
+              <ModelPicker creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               <PermissionChip creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               {/* grouped so they wrap together, right-aligned, on a narrow phone */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" }}>
@@ -1552,6 +1778,7 @@ export function ProjectScreen(props: {
                 </View>
               </View>
             </View>
+            <AttachBar items={attach.items} onRemove={attach.remove} />
             <View
               style={{
                 flexDirection: "row",
@@ -1561,6 +1788,7 @@ export function ProjectScreen(props: {
                 alignItems: "center",
               }}
             >
+              <AttachButton onAdd={attach.add} onError={(m) => setErr(m)} />
               <TextInput
                 style={{ ...field, flex: 1, paddingVertical: 9, fontSize: 14 }}
                 value={text}
@@ -1646,6 +1874,17 @@ export function ProjectScreen(props: {
             onInsert={(t) => setText((cur) => (cur.trim() ? `${cur.trimEnd()}\n${t}` : t))}
           />
         </>
+      ) : tab === "crew" ? (
+        <CrewView
+          creds={creds}
+          project={project}
+          pulse={crewPulse}
+          onOpenChat={(id, title) => {
+            if (!chats.some((c) => c.id === id)) setExtraChat({ id, title, createdAt: Date.now() });
+            setChatId(id);
+            setTab("thread");
+          }}
+        />
       ) : tab === "orchestra" ? (
         <OrchestraView
           creds={creds}
@@ -1663,6 +1902,8 @@ export function ProjectScreen(props: {
         <ObservatoryView creds={creds} project={project} />
       ) : tab === "ask" ? (
         <AskView creds={creds} project={project} />
+      ) : tab === "memory" ? (
+        <MemoryView creds={creds} project={project} />
       ) : tab === "brain" ? (
         <TeamBrainView creds={creds} project={project} onChanged={brain.update} />
       ) : tab === "landing" ? (
@@ -1689,10 +1930,22 @@ export function ProjectScreen(props: {
           }
         />
       ) : tab === "tasks" ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: spacing.md }}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={() => setTasksTry((n) => n + 1)}
+              tintColor={T.dim}
+              colors={[T.thread]}
+              progressBackgroundColor={T.panel}
+            />
+          }
+        >
           {/* Issues / PRs */}
           <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md }}>
-            {(["issue", "pr"] as const).map((k) => (
+            {(["board", "issue", "pr"] as const).map((k) => (
               <TouchableOpacity
                 key={k}
                 onPress={() => setTaskKind(k)}
@@ -1709,11 +1962,11 @@ export function ProjectScreen(props: {
                 }}
               >
                 <Text style={{ color: taskKind === k ? T.text : T.dim, fontSize: 12, fontWeight: "600" }}>
-                  {k === "issue" ? "Issues" : "PRs"}
+                  {k === "board" ? "Board" : k === "issue" ? "Issues" : "PRs"}
                 </Text>
               </TouchableOpacity>
             ))}
-            {tasks?.available && (
+            {taskKind !== "board" && tasks?.available && (
               <Text
                 style={{ color: T.faint, fontFamily: T.mono, fontSize: 11, marginLeft: "auto", alignSelf: "center" }}
               >
@@ -1722,7 +1975,9 @@ export function ProjectScreen(props: {
             )}
           </View>
 
-          {!tasks ? (
+          {taskKind === "board" ? (
+            <BoardView creds={creds} project={project} />
+          ) : !tasks ? (
             <Sys text="loading…" />
           ) : !tasks.available ? (
             // never an empty list to mean "unavailable" — say which it is
@@ -1739,7 +1994,18 @@ export function ProjectScreen(props: {
                         : "couldn't load tasks"
                 }
               />
-              <Sys text={tasks.detail} />
+              {/* gh's own words only when they're the news; otherwise what to do about it */}
+              <Sys
+                text={
+                  tasks.reason === "no-remote"
+                    ? "This project isn't on GitHub yet. Push it to a GitHub repo and its issues and pull requests show up here."
+                    : tasks.reason === "no-auth"
+                      ? "Run gh auth login on your computer, then pull to refresh."
+                      : tasks.reason === "no-cli"
+                        ? "Install the GitHub CLI (gh) on your computer, then pull to refresh."
+                        : tasks.detail
+                }
+              />
             </View>
           ) : !tasks.items.length ? (
             <Sys text={`no open ${taskKind === "pr" ? "pull requests" : "issues"}`} />
@@ -1768,19 +2034,77 @@ export function ProjectScreen(props: {
                 {"  ·  "}
                 {tree.files.length} changed file{tree.files.length === 1 ? "" : "s"}
               </Text>
-              {tree.files.map((f) => (
-                <Text key={f.path} style={{ color: T.dim, fontFamily: T.mono, fontSize: 12 }}>
-                  <Text style={{ color: f.status.includes("D") ? T.gitDel : T.gitAdd }}>
-                    {f.status}
-                  </Text>{" "}
-                  {f.path}
-                </Text>
-              ))}
+              {tree.files.map((f) => {
+                const st = fileStatus(f.status);
+                return (
+                  <Text key={f.path} style={{ color: T.dim, fontFamily: T.mono, fontSize: 12 }}>
+                    <Text style={{ color: st.color }}>{st.label.padEnd(8, "\u00A0")}</Text>
+                    {f.path}
+                  </Text>
+                );
+              })}
               {tree.files.length ? (
-                <DiffView patch={tree.patch} maxHeight={520} />
+                <View style={{ gap: 8 }}>
+                  <TextInput value={commitMsg} onChangeText={setCommitMsg} placeholder="Commit message…" placeholderTextColor={T.faint}
+                    style={{ color: T.text, backgroundColor: T.raised, borderRadius: radii.key, paddingHorizontal: 12, height: 40, fontSize: 14 }} />
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    {(["commit", "push"] as const).map((k) => (
+                      <TouchableOpacity key={k} onPress={() => void commitAll(k === "push")} disabled={!commitMsg.trim() || !!committing} activeOpacity={0.75} accessibilityRole="button"
+                        style={{ flex: 1, minHeight: 40, borderRadius: radii.key, alignItems: "center", justifyContent: "center",
+                          backgroundColor: k === "commit" ? T.bright : "transparent", borderWidth: k === "commit" ? 0 : 1, borderColor: T.line2, opacity: !commitMsg.trim() ? 0.4 : 1 }}>
+                        {committing === k ? <ActivityIndicator color={k === "commit" ? T.onBright : T.text} /> : (
+                          <Text style={{ color: k === "commit" ? T.onBright : T.text, fontWeight: "700" }}>{k === "commit" ? "Commit all" : "Commit & push"}</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <DiffView patch={tree.patch} maxHeight={520} />
+                </View>
               ) : (
                 <Sys text="working tree is clean" />
               )}
+              {/* Rewind: the files as they were before a turn — the desktop's rewind menu */}
+              {checkpoints && checkpoints.length ? (
+                <View style={{ gap: 2, marginTop: spacing.md }}>
+                  <Text style={{ color: T.faint, fontSize: 11, fontWeight: "700", letterSpacing: 0.6, marginBottom: 4 }}>REWIND · BEFORE A TURN</Text>
+                  {checkpoints.slice(0, 12).map((cp) => (
+                    <TouchableOpacity
+                      key={cp.id}
+                      onPress={() =>
+                        Alert.alert(
+                          `Put the files back to "${cp.label.slice(0, 60)}"?`,
+                          "Anything written since is removed, and anything removed since comes back. Your commits, your history and files git ignores are untouched — and the rewind itself is saved, so you can undo it.",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Rewind",
+                              style: "destructive",
+                              onPress: () =>
+                                void rewindTo(creds, project.id, cp.id)
+                                  .then((r) => {
+                                    const n = (r.changed ?? []).length;
+                                    setErr(null);
+                                    Alert.alert("Rewound", `${n} file${n === 1 ? "" : "s"} put back.`);
+                                    void getTree(creds, project.id).then(({ tree }) => setTree(tree)).catch(() => {});
+                                    void getCheckpoints(creds, project.id).then((x) => setCheckpoints(x.checkpoints)).catch(() => {});
+                                  })
+                                  .catch((e) => setErr(String(e instanceof Error ? e.message : e))),
+                            },
+                          ],
+                        )
+                      }
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityHint="puts the files back to how they were before this turn"
+                      style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: T.line }}
+                    >
+                      <Text style={{ color: T.dim, fontSize: 13 }}>↺</Text>
+                      <Text style={{ color: T.text, fontSize: 13, flex: 1 }} numberOfLines={1}>{cp.label}</Text>
+                      <Text style={{ color: T.faint, fontSize: 11 }}>{ago(new Date(cp.at).toISOString())}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -1796,6 +2120,16 @@ export function ProjectScreen(props: {
       />
     </KeyboardAvoidingView>
   );
+}
+
+/** git's two-letter porcelain code, in words. */
+function fileStatus(code: string): { label: string; color: string } {
+  const c = code.trim();
+  if (c === "??" || c.includes("A")) return { label: "new", color: T.gitAdd };
+  if (c.includes("U")) return { label: "conflict", color: T.warn };
+  if (c.includes("D")) return { label: "deleted", color: T.gitDel };
+  if (c.includes("R")) return { label: "renamed", color: T.warn };
+  return { label: "edited", color: T.warn };
 }
 
 export async function unpair(): Promise<void> {
@@ -1833,5 +2167,108 @@ function LinkStrip(props: { samples: LinkSample[]; via: string }) {
         {props.via ? ` · ${props.via}` : ""}
       </Text>
     </View>
+  );
+}
+
+/** Long-press a chat: rename it, pin or archive it, or delete it — the desktop sidebar's menu. */
+function ChatMenu(props: {
+  chat: Chat | null;
+  onClose: () => void;
+  onRename: (title: string) => void;
+  onFlags: (flags: { pinned?: boolean; archived?: boolean }) => void;
+  onDelete: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  useEffect(() => setTitle(props.chat?.title ?? ""), [props.chat]);
+  const c = props.chat;
+  const row = (label: string, onPress: () => void, color = T.text) => (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7} accessibilityRole="button"
+      style={{ minHeight: 46, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: T.line }}>
+      <Text style={{ color, fontSize: 15, fontWeight: "600" }}>{label}</Text>
+    </TouchableOpacity>
+  );
+  return (
+    <Sheet title={c ? c.title : "Chat"} visible={!!c} onClose={props.onClose}>
+      {c ? (
+        <View style={{ gap: 4 }}>
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+            <TextInput value={title} onChangeText={setTitle} placeholder="Chat name" placeholderTextColor={T.faint}
+              returnKeyType="done" onSubmitEditing={() => title.trim() && props.onRename(title.trim())}
+              style={{ flex: 1, color: T.text, backgroundColor: T.raised, borderRadius: radii.input, paddingHorizontal: 12, height: 42, fontSize: 15 }} />
+            <TouchableOpacity disabled={!title.trim() || title.trim() === c.title} onPress={() => props.onRename(title.trim())}
+              style={{ paddingHorizontal: 14, borderRadius: radii.input, backgroundColor: T.bright, justifyContent: "center", opacity: !title.trim() || title.trim() === c.title ? 0.4 : 1 }}>
+              <Text style={{ color: T.onBright, fontWeight: "700" }}>Rename</Text>
+            </TouchableOpacity>
+          </View>
+          {row(c.pinned ? "Unpin" : "Pin to the front", () => props.onFlags({ pinned: !c.pinned }))}
+          {row(c.archived ? "Unarchive" : "Archive", () => props.onFlags({ archived: !c.archived }))}
+          {row("Delete chat", () =>
+            Alert.alert("Delete this chat?", `"${c.title}" and its messages go. The project's memory keeps what it learned.`, [
+              { text: "Cancel", style: "cancel" },
+              { text: "Delete", style: "destructive", onPress: props.onDelete },
+            ]), T.err)}
+        </View>
+      ) : null}
+    </Sheet>
+  );
+}
+
+/** Chats you had with Claude Code, Codex or OpenCode in this project's folder, one tap from being Loom chats. */
+function ImportSheet(props: { visible: boolean; creds: Creds; project: Project; onClose: () => void; onOpen: (chatId: string) => void }) {
+  const [list, setList] = useState<ImportableChat[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showLoom, setShowLoom] = useState(false);
+  useEffect(() => {
+    if (!props.visible) return;
+    setList(null);
+    setErr(null);
+    void getImportable(props.creds, props.project.id).then((r) => setList(r.chats)).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+  }, [props.visible, props.project.id]);
+  const go = async (c: ImportableChat) => {
+    if (c.chat) return props.onOpen(c.chat);
+    setBusy(`${c.source}:${c.id}`);
+    try {
+      const r = await importChat(props.creds, props.project.id, c.source, c.id);
+      props.onOpen(r.chat.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const mine = (list ?? []).filter((c) => !c.fromLoom);
+  const shown = showLoom ? list ?? [] : mine;
+  const loomCount = (list ?? []).length - mine.length;
+  return (
+    <Sheet title="Import chats" visible={props.visible} onClose={props.onClose}>
+      <Text style={{ color: T.faint, fontSize: 12, lineHeight: 17, marginBottom: 8 }}>
+        From Claude Code, Codex and OpenCode&apos;s own history on your computer, for this folder. Nothing leaves it.
+      </Text>
+      {err ? <Text style={{ color: T.err, fontSize: 12.5, marginBottom: 6 }}>{err}</Text> : null}
+      {!list && !err ? <ActivityIndicator color={T.dim} style={{ marginVertical: 16 }} /> : null}
+      {list && !list.length ? <Text style={{ color: T.faint, fontSize: 13, paddingVertical: 12 }}>No chats from those agents ran in this folder.</Text> : null}
+      {shown.slice(0, 60).map((c) => {
+        const key = `${c.source}:${c.id}`;
+        return (
+          <TouchableOpacity key={key} onPress={() => void go(c)} disabled={!!busy} activeOpacity={0.7} accessibilityRole="button"
+            style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.line }}>
+            <AgentIcon kind={c.source} size={26} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: T.text, fontSize: 13.5 }} numberOfLines={1}>{c.title}</Text>
+              <Text style={{ color: T.faint, fontSize: 11.5, marginTop: 2 }} numberOfLines={1}>
+                {c.label} · {ago(new Date(c.updatedAt).toISOString())}{c.automated ? " · by a tool" : ""}{c.fromLoom ? " · Loom ran this" : ""}
+              </Text>
+            </View>
+            {busy === key ? <ActivityIndicator color={T.dim} /> : <Text style={{ color: c.chat ? T.dim : T.primary, fontSize: 12.5, fontWeight: "700" }}>{c.chat ? "Open" : "Import"}</Text>}
+          </TouchableOpacity>
+        );
+      })}
+      {loomCount ? (
+        <TouchableOpacity onPress={() => setShowLoom((v) => !v)} style={{ paddingVertical: 12, alignItems: "center" }}>
+          <Text style={{ color: T.dim, fontSize: 12 }}>{showLoom ? "Hide" : "Show"} the {loomCount} Loom ran itself</Text>
+        </TouchableOpacity>
+      ) : null}
+    </Sheet>
   );
 }

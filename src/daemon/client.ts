@@ -64,6 +64,19 @@ export interface QueueView {
   waitingFor?: string;
 }
 
+export interface OnboardJobView {
+  id: string;
+  state: "running" | "done" | "failed";
+  team: string | null;
+  repo: string | null;
+  from: string | null;
+  steps: Array<{ id: string; label: string; state: string; detail?: string }>;
+  project?: { id: string; name: string; dir: string };
+  agents?: string[];
+  crews?: string[];
+  error?: string;
+}
+
 export class DaemonClient {
   private cfg: DaemonConfig;
 
@@ -234,6 +247,46 @@ export class DaemonClient {
 
   teamAction(action: string, body?: Record<string, unknown>): Promise<{ result: unknown; team: Record<string, unknown> }> {
     return this.request("POST", `/api/team/${action}`, body ?? {});
+  }
+
+  /** One-link onboarding (daemon/onboard.ts). */
+  inviteTeammate(id: string, body: { teamId?: string; grant?: boolean } = {}): Promise<{
+    link: string; expiresAt: number; team: { id: string; name: string }; repo: string; grant: boolean; grantNote?: string; message: string;
+  }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/team/invite`, body);
+  }
+
+  previewInvite(link: string): Promise<{ team: string | null; repo: string | null; from: string | null; hub: string; signedIn: boolean; member: boolean; crews: string[]; github: string | null }> {
+    return this.request("POST", "/api/onboard/preview", { link });
+  }
+
+  startJoin(body: { link: string; dir?: string; into?: string; github?: string; secret?: string; token?: string }): Promise<{ job: OnboardJobView }> {
+    return this.request("POST", "/api/onboard", body);
+  }
+
+  joinStatus(job: string): Promise<{ job: OnboardJobView }> {
+    return this.request("GET", `/api/onboard/${encodeURIComponent(job)}`);
+  }
+
+  /** Agent Teams (core/crew.ts). */
+  crews(id: string): Promise<{ crews: Array<Record<string, any>>; templates: string[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/crews`);
+  }
+
+  createCrew(id: string, body: Record<string, unknown>): Promise<{ crew: Record<string, any> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/crews`, body);
+  }
+
+  crewDiff(id: string, crew: string): Promise<{ diff: string }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/crews/${encodeURIComponent(crew)}/diff`);
+  }
+
+  removeCrew(id: string, crew: string): Promise<{ ok: boolean }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/crews/${encodeURIComponent(crew)}`);
+  }
+
+  crewAction(id: string, crew: string, action: string, body: Record<string, unknown> = {}): Promise<Record<string, any>> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/crews/${encodeURIComponent(crew)}/${action}`, body);
   }
 
   shareProject(id: string, teamId?: string): Promise<{ repo: string; teamId: string }> {
@@ -459,6 +512,46 @@ export class DaemonClient {
     conflicts: Array<{ a: { text: string }; b: { text: string }; similarity: number; signal: string }>;
   }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/brain/conflicts`);
+  }
+
+  // ---- saved prompts (core/prompts.ts) — machine-wide, not per project ----
+  prompts(q = ""): Promise<{ saved: Array<{ id: string; title: string; text: string; pinned: boolean; uses: number }>; recent?: string[] }> {
+    return this.request("GET", `/api/prompts${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+  }
+  savePrompt(input: { title?: string; text: string; pinned?: boolean }): Promise<{ prompt: { id: string; title: string } }> {
+    return this.request("POST", "/api/prompts", input);
+  }
+  updatePrompt(promptId: string, patch: { title?: string; text?: string; pinned?: boolean; used?: boolean }): Promise<{ prompt: { id: string } }> {
+    return this.request("PATCH", `/api/prompts/${encodeURIComponent(promptId)}`, patch);
+  }
+  deletePrompt(promptId: string): Promise<{ ok: boolean }> {
+    return this.request("DELETE", `/api/prompts/${encodeURIComponent(promptId)}`);
+  }
+
+  // ---- skills and MCP servers --------------------------------------------
+  skillsCatalog(id: string): Promise<{ skills: Array<{ id: string; name?: string; description?: string; enabled?: boolean; origin?: string; installed?: boolean }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/skills/catalog`);
+  }
+  setSkill(id: string, skillId: string, enabled: boolean): Promise<unknown> {
+    return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/skills/${encodeURIComponent(skillId)}`, { enabled });
+  }
+  installSkill(id: string, from: { gitUrl?: string; dir?: string; force?: boolean }): Promise<{ skill: { id: string; name?: string; also?: string[] } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/skills/install`, from);
+  }
+  removeSkill(id: string, skillId: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/skills/${encodeURIComponent(skillId)}`);
+  }
+  mcps(id: string, probe = true): Promise<{ mcps: Array<{ name: string; url?: string; command?: string; args?: string[]; enabledForSession?: boolean; connected?: boolean; description?: string }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/mcps${probe ? "" : "?probe=0"}`);
+  }
+  installMcp(id: string, mcp: { name: string; url?: string; command?: string; args?: string[]; headers?: Record<string, string>; env?: Record<string, string> }): Promise<{ installed: { name: string; connected?: boolean } | null }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/mcps/install`, mcp);
+  }
+  patchMcp(id: string, mcp: Record<string, unknown> & { name: string }): Promise<unknown> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/mcps`, { mcp });
+  }
+  removeMcp(id: string, name: string): Promise<unknown> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/mcps/${encodeURIComponent(name)}`);
   }
 
   mcpHealth(id: string): Promise<{ health: Record<string, { up: boolean; failures: number; probedAt: number }> }> {

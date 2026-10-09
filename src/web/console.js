@@ -1,6 +1,7 @@
 /** Browser console module. See README.md for ownership and startup. */
 import { api } from './connection.js';
 import { esc } from './format.js';
+import { ICONS } from './icons.js';
 import { toast } from './notifications.js';
 import { state } from './state.js';
 
@@ -57,11 +58,9 @@ import { state } from './state.js';
         : "";
     }
     if (!rows.length) {
-      list.innerHTML = '<div class="conempty">' +
-        (con.logs.length
-          ? (con.q || con.scope ? "nothing matches this filter" : "nothing at this level")
-          : "nothing has gone wrong \u2014 errors from the daemon, the API and your agents land here") +
-        "</div>";
+      list.innerHTML = '<div class="conempty">' + (con.logs.length ? ICONS.search : ICONS.check) +
+        "<b>" + (con.logs.length ? (con.q || con.scope ? "Nothing matches this filter" : "Nothing at this level") : "All clear") + "</b>" +
+        "<span>" + (con.logs.length ? "Clear the search or pick \u201call\u201d to see every record." : "Errors and warnings from the daemon, the API and your agents show up here.") + "</span></div>";
       return;
     }
     // Pinned to the bottom unless you've scrolled up to read something: yanking

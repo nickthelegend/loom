@@ -7,6 +7,7 @@ import { ICONS,LOADER } from './icons.js';
 import { toast } from './notifications.js';
 import { permBadge } from './permissions.js';
 import { state } from './state.js';
+import { openJoin } from './join.js';
 import { ORCH_RUN_ST } from './transcript.js';
 
 
@@ -472,7 +473,7 @@ import { ORCH_RUN_ST } from './transcript.js';
         '<button class="btn ghost sm" type="button" data-tshow>Show</button>' +
         '<button class="btn outline sm" type="button" data-tcopy>' + ICONS.copy + "Copy</button>" +
         '<button class="iconbtn" type="button" data-thide title="forget this link" aria-label="forget this link">' + ICONS.x + "</button></div>" +
-      '<span class="tinvx">they open it in Loom (Settings \u2192 Team \u2192 Join), or run <b>loom team join &lt;link&gt;</b></span></div>';
+      '<span class="tinvx">they click it \u2014 or run <b>loom join &lt;link&gt;</b>. For the repo and crews too, use <b>Invite</b> in a project.</span></div>';
   }
 
   function wireTeamInvites(host, act){
@@ -506,10 +507,8 @@ import { ORCH_RUN_ST } from './transcript.js';
     return '<div class="tcard tjoincard"><div class="tjoin">' +
       "<div>" +
         '<div class="tjh">' + ICONS.team + "Join your team</div>" +
-        '<div class="tjd">Paste the invite link a teammate sent you. It carries the hub\u2019s address and the team key.</div>' +
-        teamField("Invite link", "link", 'class="mono" placeholder="loom://team/join#\u2026"') +
-        (signed ? "" : teamField("GitHub login", "jgh", 'placeholder="your GitHub username"') +
-          teamField('Join secret <span class="opt">if the hub has one</span>', "jsec", 'type="password"')) +
+        '<div class="tjd">Paste the invite link a teammate sent you \u2014 Loom signs you in, clones the repo and sets up your agents. It carries the hub\u2019s address and the team key.</div>' +
+        teamField("Invite link", "link", 'class="mono" placeholder="https://\u2026/join/#\u2026"') +
         '<div class="tjgo"><button class="btn primary sm" type="button" data-tjoin>Join team</button></div>' +
       "</div>" +
       "<div>" +
@@ -534,11 +533,9 @@ import { ORCH_RUN_ST } from './transcript.js';
     if (jb) jb.onclick = function(){
       var link = v("link");
       if (!link) { toast("paste the invite link first"); return; }
-      jb.disabled = true;
-      // Settings has one set of sign-in fields, shared by sign-in and join
-      act("join", opt({ link: link, github: v("jgh") || v("cgh"), secret: v("jsec") || v("csec") }))
-        .then(function(r){ toast("joined " + ((r && r.name) || "the team")); })
-        .catch(function(err){ jb.disabled = false; toast(err.message); });
+      // One link does the whole join — team, repo, agents, crews — on its own page (join.js).
+      if (document.querySelector(".scrim")) document.querySelector(".scrim").remove();
+      openJoin(link);
     };
     var cb = host.querySelector("[data-tcreate]");
     if (cb) cb.onclick = function(){
@@ -917,7 +914,7 @@ import { ORCH_RUN_ST } from './transcript.js';
           esc(String(t.name || "?").slice(0, 1)) + "</span>" +
         '<span class="tcn">' + esc(t.name) + "</span>" +
         '<span class="trole">' + esc(t.role) + "</span>" +
-        '<span class="tcm">' + (others.length ? others.length + " live" : "quiet") + (t.keyVersion != null ? " \u00b7 key v" + esc(t.keyVersion) : "") + "</span>" +
+        '<span class="tcm">' + (t.missing ? "not on the hub any more" : others.length ? others.length + " live" : "quiet") + (t.keyVersion != null ? " \u00b7 key v" + esc(t.keyVersion) : "") + "</span>" +
         '<span class="spacer"></span>' +
         (t.role !== "viewer" ? '<button class="btn outline xs" type="button" data-tinvite="' + esc(t.id) + '">' + ICONS.plus + "Invite</button>" : "") + "</div>" +
       '<div class="tcrow"><span class="tck">Members</span>' + teamMembersHtml(t) + "</div>" +
@@ -933,6 +930,10 @@ import { ORCH_RUN_ST } from './transcript.js';
   function teamFleetHtml(st, pid){
     var teams = st.teams || [];
     if (!teams.length) return teamHeadHtml() + teamJoinCardHtml();
-    return teamHeadHtml() + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
+    var down = st.connected === false
+      ? '<div class="tinvw thubdown">' + ICONS.alert + "<span><b>Can\u2019t reach the team hub.</b> " + esc(st.lastError || "") +
+          " \u2014 your agents keep working here; Loom tries again every 15 seconds.</span></div>"
+      : "";
+    return teamHeadHtml() + down + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
   }
 export { DEPLOY_ST,fleetSince,ghRepo,JOB_KIND,JOB_ST,jobProgressText,LEASE_STALE_MS,leaseClash,leasePill,leasePrefix,leaseStale,leaseUnder,loadTeam,loadTeamLanding,loadTeamPolicy,loadTeamRunners,loadTeamShare,onlineRunners,onTeamFrame,orchGoalName,runnerAct,runnerFrameT,runnerHooks,runnerName,runnersChanged,setTeamRunners,setTeamShare,TEAM_LANDING_EVENTS,TEAM_POLICY_SAMPLE,TEAM_ST,teamAct,teamAgentOf,teamAvatar,teamCardHtml,teamClaimMap,teamClaimRows,teamCostsHtml,teamDeploys,teamDeploysHtml,teamEditing,teamFeedGoal,teamFeedHtml,teamFeedLine,teamField,teamFleetHtml,teamFrameT,teamGlobs,teamGoalOf,teamHeadHtml,teamHooks,teamInviteHtml,teamInvites,teamJoinCardHtml,teamLandings,teamLeaseRow,teamLeasesHtml,teamMembersHtml,teamMyRuns,teamNeedsHtml,teamNotify,teamOthers,teamPaths,teamPill,teamPolicies,teamPolicyHtml,teamPresenceLeasesHtml,teamRow,teamRunners,teamRunnersHtml,teamSessionsHtml,teamShareHtml,teamShareOf,teamShares,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare };

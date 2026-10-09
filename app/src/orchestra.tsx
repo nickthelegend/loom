@@ -29,6 +29,9 @@ import {
   applyOrchestra,
   deliverOrchestra,
   getOrchestra,
+  getSubagents,
+  orchestraTaskDiff,
+  resumeOrchestra,
   getOrchestraRun,
   planPath,
   replyOrchestra,
@@ -36,6 +39,7 @@ import {
   stopWaitingOrchestra,
   type Creds,
   type OrchestraRun,
+  type Subagent,
   type OrchestraStatus,
   type OrchestraTask,
   type OrchestraTaskHold,
@@ -43,7 +47,10 @@ import {
   type Project,
 } from "./api";
 import { AgentIcon, agentLabel } from "./agents";
-import { Badge, Callout, Empty, Panel, SectionLabel, TAP, Unreachable, ago, dur, field } from "./components";
+import { Badge, Callout, DiffView, Empty, Panel, SectionLabel, TAP, Unreachable, ago, dur, field } from "./components";
+import { Sheet } from "./observatory";
+import { Markdown } from "./markdown";
+import { plainText } from "./markdown-model";
 import { TeamPolicyCard } from "./team-policy";
 import { RunRunnerBar } from "./team-runners";
 import { movedLabel } from "./team-runners-model";
@@ -96,7 +103,7 @@ function StatusPill(props: { status: OrchestraStatus }) {
 }
 
 /** Tasks finished (merged or ended) over tasks planned; a segmented hairline bar. */
-function Progress(props: { tasks: OrchestraTask[] }) {
+function Progress(props: { tasks: OrchestraTask[]; race?: boolean; applied?: string }) {
   const total = props.tasks.length;
   const count = (s: OrchestraTaskStatus[]) => props.tasks.filter((t) => s.includes(t.status)).length;
   const done = count(["done"]);
@@ -114,7 +121,8 @@ function Progress(props: { tasks: OrchestraTask[] }) {
         {seg(total - done - running - trouble, "transparent")}
       </View>
       <Text style={{ color: T.dim, fontSize: 11.5, fontFamily: T.mono }}>
-        {done}/{total} merged{running ? ` · ${running} running` : ""}
+        {done}/{total} {props.race ? "finished" : "merged"}{running ? ` · ${running} running` : ""}
+        {props.applied ? ` · ${props.applied}'s take applied` : ""}
         {trouble ? ` · ${trouble} need attention` : ""}
       </Text>
     </View>
@@ -227,9 +235,14 @@ function TaskCard(props: {
   busy: boolean;
   onOpen: () => void;
   onStopWaiting: () => void;
+  /** A race entrant: finished isn't merged, and the one you pick is "applied". */
+  race?: { applied: boolean; onApply?: () => void; applying: boolean; onDiff?: () => void };
 }) {
   const { task } = props;
-  const look = TASK_LOOK[task.status] ?? TASK_LOOK.pending;
+  const look =
+    props.race && task.status === "done"
+      ? props.race.applied ? { label: "applied", color: T.ok, glyph: "●" } : { label: "finished", color: T.dim, glyph: "○" }
+      : TASK_LOOK[task.status] ?? TASK_LOOK.pending;
   const [open, setOpen] = useState(false);
   const detail = task.error || task.result;
   const touches = task.touches ?? [];
@@ -287,15 +300,43 @@ function TaskCard(props: {
       {task.hold ? (
         <HoldBanner hold={task.hold} now={props.now} busy={props.busy} onStopWaiting={props.onStopWaiting} />
       ) : null}
-      {detail ? (
+      {/* the agent's report is markdown: plain in the three-line preview, rendered when held open */}
+      {detail && open && !task.error ? (
+        <Markdown text={detail} />
+      ) : detail ? (
         <Text
           style={{ color: task.error ? T.err : T.dim, fontSize: 12, lineHeight: 18 }}
           numberOfLines={open ? undefined : 3}
         >
-          {detail}
+          {task.error ? detail : plainText(detail)}
         </Text>
       ) : null}
-      <Text style={{ color: T.faint, fontSize: 11, marginLeft: "auto" }}>open thread →</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+        {props.race?.onDiff ? (
+          <TouchableOpacity
+            onPress={props.race.onDiff}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`See what ${agentLabel(task.kind)} changed`}
+            style={{ minHeight: 34, paddingHorizontal: 12, borderRadius: radii.key, borderWidth: 1, borderColor: T.line2, alignItems: "center", justifyContent: "center" }}
+          >
+            <Text style={{ color: T.text, fontWeight: "600", fontSize: 12.5 }}>Changes</Text>
+          </TouchableOpacity>
+        ) : null}
+        {props.race?.onApply ? (
+          <TouchableOpacity
+            onPress={props.race.onApply}
+            disabled={props.race.applying}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Apply ${agentLabel(task.kind)}'s take`}
+            style={{ minHeight: 34, paddingHorizontal: 12, borderRadius: radii.key, backgroundColor: T.bright, alignItems: "center", justifyContent: "center" }}
+          >
+            {props.race.applying ? <ActivityIndicator color={T.onBright} /> : <Text style={{ color: T.onBright, fontWeight: "700", fontSize: 12.5 }}>Apply this take</Text>}
+          </TouchableOpacity>
+        ) : null}
+        <Text style={{ color: T.faint, fontSize: 11, marginLeft: "auto" }}>open thread →</Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -340,6 +381,8 @@ function StartForm(props: {
   const [workers, setWorkers] = useState<string[]>(adapters.map((a) => a.id));
   const [parallel, setParallel] = useState(3);
   const [plan, setPlan] = useState(false);
+  // a race: every checked agent gets the same prompt in its own worktree, and you keep one
+  const [race, setRace] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -351,13 +394,16 @@ function StartForm(props: {
     setErr(null);
     setBusy(true);
     try {
-      const { run } = await startOrchestra(props.creds, props.project.id, {
-        goal: goal.trim(),
-        ...(orch ? { orchestrator: orch } : {}),
-        ...(workers.length ? { workers } : {}),
-        maxParallel: parallel,
-        ...(plan ? { plan: true } : {}),
-      });
+      if (race && workers.length < 2) throw new Error("a race needs at least two agents — check another");
+      const { run } = await startOrchestra(props.creds, props.project.id, race
+        ? { goal: goal.trim(), ...(orch ? { orchestrator: orch } : {}), workers, race: true }
+        : {
+            goal: goal.trim(),
+            ...(orch ? { orchestrator: orch } : {}),
+            ...(workers.length ? { workers } : {}),
+            maxParallel: parallel,
+            ...(plan ? { plan: true } : {}),
+          });
       props.onStarted(run);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -373,6 +419,18 @@ function StartForm(props: {
 
   return (
     <View style={{ gap: spacing.md }}>
+      <View style={{ flexDirection: "row", gap: 6 }}>
+        {([["plan", "Plan & split", "one agent plans, the team builds"], ["race", "Race", "everyone tries, you keep one"]] as const).map(([k, l, sub]) => {
+          const on = (k === "race") === race;
+          return (
+            <TouchableOpacity key={k} onPress={() => setRace(k === "race")} activeOpacity={0.7} accessibilityRole="radio" accessibilityState={{ selected: on }}
+              style={{ flex: 1, padding: 10, borderRadius: radii.key, borderWidth: 1, borderColor: on ? T.line2 : T.line, backgroundColor: on ? T.raised : "transparent" }}>
+              <Text style={{ color: on ? T.text : T.dim, fontSize: 13.5, fontWeight: "700" }}>{l}</Text>
+              <Text style={{ color: T.faint, fontSize: 11, marginTop: 2 }}>{sub}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
       <View style={{ gap: 6 }}>
         <SectionLabel text="Goal" />
         <TextInput
@@ -386,7 +444,7 @@ function StartForm(props: {
         />
       </View>
 
-      <View style={{ gap: 6 }}>
+      {race ? null : <View style={{ gap: 6 }}>
         <SectionLabel text="Orchestrator — plans, reviews, merges" />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {adapters.map((a) => (
@@ -400,10 +458,10 @@ function StartForm(props: {
             />
           ))}
         </View>
-      </View>
+      </View>}
 
       <View style={{ gap: 6 }}>
-        <SectionLabel text={`Workers — ${workers.length || "any"} selected`} />
+        <SectionLabel text={race ? `Entrants — ${workers.length} (two or more)` : `Workers — ${workers.length || "any"} selected`} />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {adapters.map((a) => (
             <Chip
@@ -419,6 +477,7 @@ function StartForm(props: {
         {!adapters.length && <Empty text="This project has no enabled agents to orchestrate." />}
       </View>
 
+      {race ? null : <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: T.text, fontSize: 14, fontWeight: "600" }}>In parallel</Text>
@@ -481,6 +540,7 @@ function StartForm(props: {
           ios_backgroundColor={T.raised}
         />
       </View>
+      </>}
 
       {err && <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text>}
 
@@ -502,7 +562,7 @@ function StartForm(props: {
           <ActivityIndicator color={T.onBright} />
         ) : (
           <Text style={{ color: T.onBright, fontSize: 15, fontWeight: "700" }}>
-            {plan ? "Plan & start orchestra" : "Start orchestra"}
+            {race ? "Start the race" : plan ? "Plan & start orchestra" : "Start orchestra"}
           </Text>
         )}
       </TouchableOpacity>
@@ -524,10 +584,10 @@ function RunView(props: {
 }) {
   const { run } = props;
   const [reply, setReply] = useState("");
-  const [busy, setBusy] = useState<"reply" | "abort" | "apply" | "deliver" | `wait:${string}` | null>(null);
+  const [busy, setBusy] = useState<"reply" | "abort" | "apply" | `apply:${string}` | "deliver" | "resume" | `wait:${string}` | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const act = async (kind: "reply" | "abort" | "apply" | "deliver" | `wait:${string}`, fn: () => Promise<void>) => {
+  const act = async (kind: "reply" | "abort" | "apply" | `apply:${string}` | "deliver" | "resume" | `wait:${string}`, fn: () => Promise<void>) => {
     setErr(null);
     setBusy(kind);
     try {
@@ -561,19 +621,36 @@ function RunView(props: {
       },
     ]);
 
-  const apply = () =>
-    Alert.alert("Apply to your branch?", `Merges ${run.branch} into the project's current branch.`, [
+  const apply = (entrant?: OrchestraTask) =>
+    Alert.alert("Apply to your branch?", `Merges ${entrant ? `${agentLabel(entrant.kind)}'s take` : run.branch} into the project's current branch.`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Apply",
         onPress: () =>
-          void act("apply", async () => {
-            const r = await applyOrchestra(props.creds, props.projectId, run.id);
+          void act(entrant ? `apply:${entrant.id}` : "apply", async () => {
+            const r = await applyOrchestra(props.creds, props.projectId, run.id, entrant?.id);
             Alert.alert(r.merged ? "Applied" : "Nothing to merge", r.merged ? `Merged into ${r.into}.` : undefined);
             props.onRun((await getOrchestraRun(props.creds, props.projectId, run.id)).run);
           }),
       },
     ]);
+
+  // a race entrant's diff, to judge it before applying it
+  const [diff, setDiff] = useState<{ title: string; patch: string | null } | null>(null);
+  const showDiff = async (t: OrchestraTask) => {
+    setDiff({ title: `${agentLabel(t.kind)}'s take`, patch: null });
+    try {
+      const { patch } = await orchestraTaskDiff(props.creds, props.projectId, run.id, t.id);
+      setDiff({ title: `${agentLabel(t.kind)}'s take`, patch: patch || "" });
+    } catch (e) {
+      setDiff(null);
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const resume = () =>
+    void act("resume", async () => {
+      props.onRun((await resumeOrchestra(props.creds, props.projectId, run.id)).run);
+    });
 
   const stopWaiting = (task: OrchestraTask) =>
     Alert.alert(
@@ -600,6 +677,8 @@ function RunView(props: {
   // The daemon applies any run that has stopped moving; offer it once something merged.
   const settled = run.status === "completed" || run.status === "waiting_human" || run.status === "failed" || run.status === "aborted";
   const canApply = settled && !run.applied && (run.status === "completed" || run.tasks.some((t) => t.status === "done"));
+  // a race applies one entrant, picked on its card; there's no whole-run apply
+  const pickedTake = run.race ? run.tasks.find((t) => t.id === run.applied?.task) : undefined;
   const live = !terminal(run.status);
 
   return (
@@ -608,12 +687,13 @@ function RunView(props: {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusPill status={run.status} />
           <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono, flex: 1 }} numberOfLines={1}>
-            round {run.round}/{run.maxRounds} · ×{run.maxParallel}
+            {run.race ? `race · ${run.tasks.length} entrants` : `round ${run.round}/${run.maxRounds} · ×${run.maxParallel}`}
           </Text>
           {run.costUsd > 0 && <Badge text={usd(run.costUsd)} />}
         </View>
         <Text style={{ color: T.text, fontSize: 15.5, fontWeight: "600", lineHeight: 22 }}>{run.goal}</Text>
-        <TouchableOpacity
+        {/* a race has nobody orchestrating it: every entrant just got the prompt */}
+        {run.race ? null : <TouchableOpacity
           onPress={() => props.onOpenChat(run.chat, "orchestrator")}
           activeOpacity={0.7}
           accessibilityRole="button"
@@ -624,8 +704,8 @@ function RunView(props: {
             orchestrated by {agentLabel(run.orchestrator.kind)}
           </Text>
           <Text style={{ color: T.faint, fontSize: 11 }}>thread →</Text>
-        </TouchableOpacity>
-        <Progress tasks={run.tasks} />
+        </TouchableOpacity>}
+        <Progress tasks={run.tasks} race={run.race} applied={pickedTake ? agentLabel(pickedTake.kind) : undefined} />
         <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }} numberOfLines={1}>
           ⑂ {run.branch}
         </Text>
@@ -678,7 +758,11 @@ function RunView(props: {
       {run.summary ? <Callout label="Summary" text={run.summary} tint={T.ok} /> : null}
       {run.error ? <Callout label="Error" text={run.error} tint={T.err} /> : null}
       {run.applied ? (
-        <Callout label="Applied" text={`Merged into ${run.applied.into} ${ago(new Date(run.applied.at).toISOString())}.`} tint={T.ok} />
+        <Callout
+          label="Applied"
+          text={`Merged ${pickedTake ? `${agentLabel(pickedTake.kind)}'s take ` : ""}into ${run.applied.into} ${ago(new Date(run.applied.at).toISOString())}.`}
+          tint={T.ok}
+        />
       ) : null}
       {run.status === "moved" ? (
         <Callout
@@ -703,7 +787,19 @@ function RunView(props: {
       {run.notes?.length ? <TeamNotes notes={run.notes} /> : null}
       {err && <Text style={{ color: T.err, fontSize: 13 }}>{err}</Text>}
 
-      {(live || canApply) && (
+      {run.status === "aborted" && run.interrupted ? (
+        <TouchableOpacity
+          onPress={resume}
+          disabled={busy === "resume"}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityHint="Loom stopped this run by restarting; the tasks that were in flight pick up in the worktrees they left"
+          style={{ minHeight: TAP, borderRadius: radii.key, backgroundColor: T.bright, alignItems: "center", justifyContent: "center" }}
+        >
+          {busy === "resume" ? <ActivityIndicator color={T.onBright} /> : <Text style={{ color: T.onBright, fontWeight: "700" }}>Resume — carry on where the restart stopped it</Text>}
+        </TouchableOpacity>
+      ) : null}
+      {(live || (canApply && !run.race)) && (
         <View style={{ flexDirection: "row", gap: spacing.sm }}>
           {live && (
             <TouchableOpacity
@@ -725,9 +821,9 @@ function RunView(props: {
               {busy === "abort" ? <ActivityIndicator color={T.err} /> : <Text style={{ color: T.err, fontWeight: "600" }}>Abort</Text>}
             </TouchableOpacity>
           )}
-          {canApply && (
+          {canApply && !run.race && (
             <TouchableOpacity
-              onPress={apply}
+              onPress={() => apply()}
               disabled={busy === "apply"}
               activeOpacity={0.7}
               accessibilityRole="button"
@@ -750,6 +846,9 @@ function RunView(props: {
         </View>
       )}
 
+      <Sheet title={diff?.title ?? ""} visible={!!diff} onClose={() => setDiff(null)}>
+        {diff?.patch == null ? <ActivityIndicator color={T.dim} /> : diff.patch ? <DiffView patch={diff.patch} maxHeight={520} /> : <Text style={{ color: T.faint }}>No changes on this branch.</Text>}
+      </Sheet>
       <View style={{ gap: spacing.sm }}>
         <SectionLabel text={`Tasks · ${run.tasks.length}`} />
         {run.tasks.length ? (
@@ -761,6 +860,16 @@ function RunView(props: {
               busy={busy === `wait:${t.id}`}
               onOpen={() => props.onOpenChat(t.chat, t.title)}
               onStopWaiting={() => stopWaiting(t)}
+              race={
+                run.race
+                  ? {
+                      applied: run.applied?.task === t.id,
+                      onApply: settled && !run.applied && t.status === "done" ? () => apply(t) : undefined,
+                      applying: busy === `apply:${t.id}`,
+                      onDiff: t.status === "done" ? () => void showDiff(t) : undefined,
+                    }
+                  : undefined
+              }
             />
           ))
         ) : (
@@ -886,6 +995,79 @@ function Delivery(props: { run: OrchestraRun; busy: boolean; onRetry: () => void
  * The tab. `pulse` changes whenever an `orchestra` event arrives on the live
  * feed; `pulseRunId` names the run it was about.
  */
+const SUB_LOOK: Record<Subagent["status"], { label: string; color: () => string }> = {
+  running: { label: "working", color: () => T.ok },
+  asks: { label: "needs you", color: () => T.warn },
+  pending: { label: "waiting", color: () => T.dim },
+  done: { label: "done", color: () => T.dim },
+  failed: { label: "failed", color: () => T.err },
+  cancelled: { label: "stopped", color: () => T.dim },
+};
+
+function agoShort(ts: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+/**
+ * The desktop's Subagents tab, on the phone: every agent an Orchestra run, a
+ * race or a crew put to work. Active ones always show; the finished list
+ * folds behind a tap. A row opens that agent's thread.
+ */
+function SubagentsPanel(props: { creds: Creds; projectId: string; pulse: number; onOpenChat: (chatId: string, title: string) => void }) {
+  const [list, setList] = useState<{ active: Subagent[]; done: Subagent[] } | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const load = () => void getSubagents(props.creds, props.projectId).then((r) => { if (live) setList(r); }).catch(() => {});
+    load();
+    const t = setInterval(load, 4000);
+    return () => { live = false; clearInterval(t); };
+  }, [props.creds, props.projectId, props.pulse]);
+  if (!list || (!list.active.length && !list.done.length)) return null;
+  const row = (s: Subagent) => {
+    const look = SUB_LOOK[s.status];
+    return (
+      <TouchableOpacity
+        key={s.id}
+        disabled={!s.chat}
+        onPress={() => s.chat && props.onOpenChat(s.chat, s.name)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${s.name}, ${look.label}. Opens its thread`}
+        style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 }}
+      >
+        <AgentIcon kind={s.kind} size={26} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: T.text, fontSize: 13.5 }} numberOfLines={1}>{s.name}</Text>
+          <Text style={{ color: T.faint, fontSize: 11.5, marginTop: 1 }} numberOfLines={1}>
+            <Text style={{ color: look.color(), fontWeight: "600" }}>{look.label}</Text>
+            {s.note ? ` · ${s.note}` : ` · ${s.source === "crew" ? s.goal : s.source}`}
+          </Text>
+        </View>
+        <Text style={{ color: T.faint, fontSize: 11.5 }}>{agoShort(s.at)}</Text>
+      </TouchableOpacity>
+    );
+  };
+  return (
+    <Panel>
+      <SectionLabel text={`Subagents · ${list.active.length} active`} />
+      {list.active.length ? list.active.map(row) : <Text style={{ color: T.faint, fontSize: 12.5 }}>No active subagents</Text>}
+      {list.done.length ? (
+        <>
+          <TouchableOpacity onPress={() => setShowDone((v) => !v)} activeOpacity={0.7} accessibilityRole="button" style={{ paddingTop: 6, minHeight: 32, justifyContent: "center" }}>
+            <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>{showDone ? "▾" : "›"} Done · {list.done.length}</Text>
+          </TouchableOpacity>
+          {showDone ? list.done.slice(0, 20).map(row) : null}
+        </>
+      ) : null}
+    </Panel>
+  );
+}
+
 export function OrchestraView(props: {
   creds: Creds;
   project: Project;
@@ -960,6 +1142,8 @@ export function OrchestraView(props: {
           One agent plans, the rest build in parallel on their own branches, and it all merges into one.
         </Text>
       </View>
+
+      <SubagentsPanel creds={creds} projectId={project.id} pulse={props.pulse} onOpenChat={props.onOpenChat} />
 
       {err && !runs ? (
         <Unreachable what="Orchestra" detail={err} onRetry={() => void load()} />

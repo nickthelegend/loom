@@ -289,6 +289,11 @@ export function explainStatus(status: number, body: string, p: ResolvedProvider)
   if (status === 401 && /unauthorized_client|client detected/i.test(body)) {
     return `${p.label} refused Loom as a client, not your key — it only accepts callers it recognises. ${p.note ?? ""}`.trim();
   }
+  // "only available on agentic harnesses": the provider keeps this model for its
+  // own app list. Nothing is wrong with the key, and a key check would mislead.
+  if ((status === 403 || status === 404) && /only available (?:on|to|in)|not available (?:for|to|via)|restricted to/i.test(body)) {
+    return `${p.label} doesn't serve this model to Loom (${status}) — it keeps it for its own app list. Your key is fine: pick another model, or \`pool:free\` to spread across the free ones. ${snippet}`;
+  }
   if (status === 401 || status === 403) {
     return `${p.label} rejected the key (${status}). Check it with \`loom providers\`. ${snippet}`;
   }
@@ -411,6 +416,9 @@ export async function allModels(
     const p = resolveProvider(row.id, env);
     if (!p) continue;
     const got = await fetchModels(p, opts.refresh ? { refresh: true } : {});
+    // A provider with free models offers the free pool first: every turn on the
+    // next free model in a rotation (core/free-pool.ts), so the work spreads.
+    if (got.models.some((m) => m.free)) models.push({ id: "pool:free", provider: row.id, free: true });
     models.push(...got.models);
     if (got.error) errors.push({ provider: row.id, error: got.error });
   }

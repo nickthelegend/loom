@@ -53,6 +53,7 @@ import {
   specFor,
   type ResolvedProvider,
 } from "../core/providers.js";
+import { closeModel, countFreeRequest, dailyCapMessage, freeModels, freeUsage, isClosedToUs, isDailyCap, isFreeModel, isPool, noteCapped, resetAt, rest, rotation } from "../core/free-pool.js";
 import { AdapterBase, type AgentCheck } from "./base.js";
 
 /** One turn of the conversation, as the wire wants it. */
@@ -166,6 +167,7 @@ export class ModelAdapter extends AdapterBase {
       const body = (await res.json()) as { data?: Array<{ id?: string }> };
       const ids = (body.data ?? []).map((m) => String(m.id));
       const want = this.chain();
+      if (want.some(isPool)) return (await freeModels(p).catch(() => [])).length > 0;
       return want.length === 0 || want.some((m) => ids.includes(m));
     } catch {
       return false;
@@ -301,8 +303,16 @@ export class ModelAdapter extends AdapterBase {
     }
     // A thread can pin a model (types.ts SendInput.model): it takes the place
     // of the configured one for this turn, and the fallbacks still apply.
-    const chain = input.model ? [input.model, ...this.chain().filter((m) => m !== input.model)] : this.chain();
+    let chain = input.model ? [input.model, ...this.chain().filter((m) => m !== input.model)] : this.chain();
     if (!chain.length) throw new Error(`agent "${this.id}" has no model set — \`loom model ${this.id} <name>\``);
+    // The free pool: this turn's share of the provider's free models, next in the rotation.
+    if (chain.some(isPool)) {
+      const capped = freeUsage().cappedUntil;
+      if (capped) throw new Error(dailyCapMessage(p.label, capped));
+      const picked = rotation(await freeModels(p, { tools: this.tools().length > 0 }));
+      if (!picked.length) throw new Error(`${p.label} lists no free models right now`);
+      chain = chain.flatMap((m) => (isPool(m) ? picked : [m])).filter((m, i, all) => all.indexOf(m) === i);
+    }
 
     this._busy = true;
     this.interrupted = false;
@@ -407,7 +417,7 @@ export class ModelAdapter extends AdapterBase {
           ? {
               inputTokens: totals.prompt_tokens ?? 0,
               outputTokens: totals.completion_tokens ?? 0,
-              ...(p.free(model) ? { costUsd: 0 } : {}),
+              ...(isFreeModel(p, model) ? { costUsd: 0 } : {}),
             }
           : {}),
       },
@@ -457,6 +467,20 @@ export class ModelAdapter extends AdapterBase {
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      // Today's free requests are spent: every free model would say the same, so stop here.
+      if (isDailyCap(res.status, body)) {
+        const at = resetAt(res.headers);
+        noteCapped(at);
+        return { ok: false, error: dailyCapMessage(p.label, at), retryable: false };
+      }
+      // A model the provider keeps from Loom (OpenRouter's app-only free models):
+      // not the key, so say so, leave it out from now on, and try the next one.
+      if (isClosedToUs(res.status, body)) {
+        closeModel(model);
+        return { ok: false, error: `${model} isn't open to Loom — ${p.label} only serves it to apps on its own list`, retryable: true };
+      }
+      // One model busy: rest it, and the next one gets the turn.
+      if (res.status === 429) rest(model, Number(res.headers.get("retry-after")) * 1000 || 60_000);
       return {
         ok: false,
         error: explainStatus(res.status, body, p),
@@ -464,6 +488,7 @@ export class ModelAdapter extends AdapterBase {
         retryable: isExhausted(res.status),
       };
     }
+    if (isFreeModel(p, model)) countFreeRequest();
     if (!res.body) return { ok: false, error: `${p.label} sent no body`, retryable: false };
 
     const out = await this.readStream(res.body, model);
@@ -516,6 +541,8 @@ export class ModelAdapter extends AdapterBase {
               delta?: {
                 content?: string;
                 reasoning_content?: string;
+                /** OpenRouter's name for the same thing. */
+                reasoning?: string;
                 tool_calls?: Array<{
                   index?: number;
                   id?: string;
@@ -537,9 +564,10 @@ export class ModelAdapter extends AdapterBase {
           }
           if (frame.usage) usage = frame.usage;
           const delta = frame.choices?.[0]?.delta;
-          if (delta?.reasoning_content) {
-            thought += delta.reasoning_content;
-            this.streamText(delta.reasoning_content, true);
+          const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+          if (reasoning) {
+            thought += reasoning;
+            this.streamText(reasoning, true);
           }
           if (delta?.content) {
             text += delta.content;

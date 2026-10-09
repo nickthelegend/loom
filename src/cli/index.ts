@@ -8,6 +8,7 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { freeUsage } from "../core/free-pool.js";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -362,6 +363,13 @@ program
       console.log(`${mark} ${pc.bold(p.id.padEnd(13))} ${pc.dim(p.baseUrl.padEnd(34))} ${key}`);
       if (p.note) console.log(pc.dim(`    ${p.note}`));
     }
+    const fu = freeUsage();
+    console.log(
+      `\n${pc.bold("free models")} ${fu.used} request${fu.used === 1 ? "" : "s"} from this machine today (UTC)` +
+        (fu.cappedUntil ? pc.yellow(` · daily cap hit, resets ${new Date(fu.cappedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`) : "") +
+        pc.dim("\n    OpenRouter allows 50 free requests a day per account (1000 with $10 of credits), shared by every :free model." +
+          "\n    Spread the work: give model agents `pool:free` and each turn takes the next free model — `loom agents:add model --model openrouter/pool:free`"),
+    );
     console.log(
       pc.dim("\nkeys live in ~/.loom/providers.json (0600) or the environment \u2014 never in a project"),
     );
@@ -694,6 +702,184 @@ program
         `${name.padEnd(20)} ${h.up ? pc.green("up") : pc.red(`down ×${h.failures}`)}  ${pc.dim(`${age}s ago`)}`,
       );
     }
+  });
+
+/** "KEY=VAL" / "Header: value" pairs from repeated flags. */
+function kv(list: string[] | undefined, sep: RegExp): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const item of list ?? []) {
+    const m = sep.exec(item);
+    if (!m || m.index === 0) throw new Error(`"${item}" isn't a pair`);
+    out[item.slice(0, m.index).trim()] = item.slice(m.index + m[0].length).trim();
+  }
+  return out;
+}
+const collect = (v: string, prev: string[] = []) => [...prev, v];
+
+program
+  .command("prompts [action] [args...]")
+  .description("saved prompts, shared with the app: list [query] | save <text> | show <id> | send <id> | pin <id> | unpin <id> | rename <id> <title> | rm <id>")
+  .option("-t, --title <title>", "save: a title (else the first words)")
+  .option("-a, --agent <id>", "send: address a specific agent")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { title?: string; agent?: string }) => {
+    const client = await ensureDaemon();
+    const a = (action ?? "list").toLowerCase();
+    const rest = (args ?? []).join(" ").trim();
+    const find = async (ref: string) => {
+      const { saved } = await client.prompts();
+      const hit = saved.find((p) => p.id === ref) ?? saved.find((p) => p.id.startsWith(ref)) ??
+        saved.find((p) => p.title.toLowerCase() === ref.toLowerCase());
+      if (!hit) throw new Error(`no saved prompt "${ref}" — loom prompts lists them`);
+      return hit;
+    };
+    if (a === "list" || a === "ls") {
+      const { saved } = await client.prompts(rest);
+      if (!saved.length) return void console.log(pc.dim(rest ? `no saved prompt matches "${rest}"` : "no saved prompts yet — loom prompts save \"…\" (or ⌘⇧V in the app)"));
+      for (const p of saved) {
+        console.log(`${pc.dim(p.id.slice(0, 8))}  ${p.pinned ? pc.yellow("★ ") : ""}${pc.bold(p.title)}  ${pc.dim(`${p.uses}×`)}`);
+        console.log(`          ${pc.dim(p.text.replace(/\s+/g, " ").slice(0, 90))}`);
+      }
+      return;
+    }
+    if (a === "save" || a === "add") {
+      const text = rest || (process.stdin.isTTY ? "" : fs.readFileSync(0, "utf8"));
+      if (!text.trim()) throw new Error("what should it say? loom prompts save \"review this diff for…\" (or pipe it in)");
+      const { prompt } = await client.savePrompt({ text, ...(opts.title ? { title: opts.title } : {}) });
+      return void console.log(`${pc.green("✓")} saved ${pc.bold(prompt.title)} ${pc.dim(prompt.id.slice(0, 8))}`);
+    }
+    if (!["show", "cat", "send", "use", "pin", "unpin", "rename", "rm", "delete"].includes(a)) {
+      throw new Error(`unknown action "${a}" — list | save | show | send | pin | unpin | rename | rm`);
+    }
+    if (!rest) throw new Error(`which prompt? loom prompts ${a} <id or title>`);
+    const [ref, ...more] = rest.split(/\s+/);
+    const p = await find(a === "rename" ? ref! : rest);
+    if (a === "show" || a === "cat") return void process.stdout.write(p.text + "\n");
+    if (a === "send" || a === "use") {
+      const project = await currentProject(client);
+      const now = new Date();
+      const text = p.text
+        .replace(/\{\{date\}\}/g, now.toLocaleDateString())
+        .replace(/\{\{time\}\}/g, now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+        .replace(/\{\{project\}\}/g, project.name)
+        .replace(/\{\{(?:selection|branch|chat|agent|last_reply|file)\}\}/g, "");
+      const result = await sendWithHandoffConfirm(client, project.id, text, opts.agent);
+      await client.updatePrompt(p.id, { used: true }).catch(() => {});
+      if (result) console.log(pc.dim(`→ sent "${p.title}" to ${result.agentId} (loom log --follow to watch)`));
+      return;
+    }
+    if (a === "pin" || a === "unpin") {
+      await client.updatePrompt(p.id, { pinned: a === "pin" });
+      return void console.log(`${pc.green("✓")} ${a === "pin" ? "pinned" : "unpinned"} ${p.title}`);
+    }
+    if (a === "rename") {
+      const title = more.join(" ").trim();
+      if (!title) throw new Error("loom prompts rename <id> <new title>");
+      await client.updatePrompt(p.id, { title });
+      return void console.log(`${pc.green("✓")} renamed to ${pc.bold(title)}`);
+    }
+    if (a === "rm" || a === "delete") {
+      await client.deletePrompt(p.id);
+      return void console.log(`${pc.green("✓")} removed ${p.title}`);
+    }
+    throw new Error(`unknown action "${a}" — list | save | show | send | pin | unpin | rename | rm`);
+  });
+
+program
+  .command("skills [action] [args...]")
+  .description("skills for this project: list [query] | on <id> | off <id> | install <git-url|dir>[#name|#all] | rm <id>")
+  .option("--all", "list: every skill found on this machine, not just the ones on")
+  .option("--force", "install: replace a skill with the same name")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { all?: boolean; force?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const a = (action ?? "list").toLowerCase();
+    const rest = (args ?? []).join(" ").trim();
+    if (a === "list" || a === "ls") {
+      const { skills } = await client.skillsCatalog(project.id);
+      const q = rest.toLowerCase();
+      const rows = skills.filter((k) => (opts.all || q || k.enabled) && (!q || `${k.id} ${k.name ?? ""} ${k.description ?? ""}`.toLowerCase().includes(q)));
+      const on = skills.filter((k) => k.enabled).length;
+      console.log(pc.dim(`${on} on · ${skills.length} found${opts.all || q ? "" : " — loom skills list --all shows them all"}`));
+      for (const k of rows) {
+        console.log(`${k.enabled ? pc.green("●") : pc.dim("○")} ${pc.bold(k.id)}${k.installed ? pc.dim(" (this project)") : k.origin ? pc.dim(` (${k.origin})`) : ""}`);
+        if (k.description) console.log(`  ${pc.dim(k.description.replace(/\s+/g, " ").slice(0, 96))}`);
+      }
+      return;
+    }
+    if (!["on", "off", "install", "add", "rm", "remove"].includes(a)) throw new Error(`unknown action "${a}" — list | on | off | install | rm`);
+    if (!rest) throw new Error(`loom skills ${a} <${a === "install" ? "git url or folder" : "skill id"}>`);
+    if (a === "on" || a === "off") {
+      await client.setSkill(project.id, rest, a === "on");
+      return void console.log(`${pc.green("✓")} ${rest} ${a === "on" ? "on" : "off"} for ${project.name}`);
+    }
+    if (a === "install" || a === "add") {
+      const local = !/^(https?:|git@|ssh:)/.test(rest) && fs.existsSync(rest.replace(/#.*$/, ""));
+      const { skill } = await client.installSkill(project.id, local
+        ? { dir: path.resolve(rest), ...(opts.force ? { force: true } : {}) }
+        : { gitUrl: rest, ...(opts.force ? { force: true } : {}) });
+      const names = [skill.id, ...(skill.also ?? [])];
+      for (const n of names) await client.setSkill(project.id, n, true).catch(() => {});
+      return void console.log(`${pc.green("✓")} installed and turned on ${names.map((n) => pc.bold(n)).join(", ")}`);
+    }
+    if (a === "rm" || a === "remove") {
+      await client.removeSkill(project.id, rest);
+      return void console.log(`${pc.green("✓")} removed ${rest} from ${project.name}`);
+    }
+    throw new Error(`unknown action "${a}" — list | on | off | install | rm`);
+  });
+
+program
+  .command("mcp [action] [args...]")
+  .description("MCP servers for this project: list | add <name> (--url <url> | --command <cmd> [args…]) | on <name> | off <name> | rm <name>")
+  .option("--url <url>", "add: a remote server's endpoint")
+  .option("--command <cmd>", "add: a local server to run (args follow the name)")
+  .option("-H, --header <header>", "add: 'Name: value', repeatable", collect)
+  .option("-e, --env <pair>", "add: KEY=VALUE for a local server, repeatable", collect)
+  // the server's own flags (npx -y …) ride along as its args; put them after -- if they clash with ours
+  .allowUnknownOption()
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { url?: string; command?: string; header?: string[]; env?: string[] }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const a = (action ?? "list").toLowerCase();
+    const [name, ...more] = args ?? [];
+    if (a === "list" || a === "ls") {
+      const { mcps } = await client.mcps(project.id);
+      const rows = mcps.filter((m) => m.url || m.command);
+      if (!rows.length) return void console.log(pc.dim("no MCP servers yet — loom mcp add github --url https://api.githubcopilot.com/mcp/ (or Skills & MCP in the app)"));
+      for (const m of rows) {
+        const state = m.enabledForSession === false ? pc.dim("off") : m.command ? pc.cyan("local") : m.connected ? pc.green("up") : pc.red("unreachable");
+        console.log(`${m.name.padEnd(20)} ${state.padEnd(20)} ${pc.dim(m.url || [m.command, ...(m.args ?? [])].join(" "))}`);
+      }
+      console.log(pc.dim("Claude Code and Codex load these; other agents don't speak MCP."));
+      return;
+    }
+    if (!["add", "install", "on", "off", "rm", "remove"].includes(a)) throw new Error(`unknown action "${a}" — list | add | on | off | rm`);
+    if (!name) throw new Error(`loom mcp ${a} <name>`);
+    if (a === "add" || a === "install") {
+      if (!opts.url && !opts.command) throw new Error("add needs --url <endpoint> or --command <program>");
+      const { installed } = await client.installMcp(project.id, {
+        name,
+        ...(opts.url ? { url: opts.url } : {}),
+        ...(opts.command ? { command: opts.command, ...(more.length ? { args: more } : {}) } : {}),
+        ...(opts.header?.length ? { headers: kv(opts.header, /:\s*/) } : {}),
+        ...(opts.env?.length ? { env: kv(opts.env, /=/) } : {}),
+      });
+      const note = opts.command ? "it starts when an agent needs it" : installed?.connected ? "it answered" : "it didn't answer yet — check the URL, or it may need sign-in headers (-H)";
+      return void console.log(`${pc.green("✓")} added ${pc.bold(name)} — ${note}`);
+    }
+    if (a === "on" || a === "off") {
+      const { mcps } = await client.mcps(project.id, false);
+      const row = mcps.find((m) => m.name === name);
+      if (!row) throw new Error(`no MCP server "${name}" — loom mcp lists them`);
+      const { connected: _c, ...keep } = row as typeof row & { probedAt?: number };
+      await client.patchMcp(project.id, { ...keep, enabledForSession: a === "on" });
+      return void console.log(`${pc.green("✓")} ${name} ${a}`);
+    }
+    if (a === "rm" || a === "remove") {
+      await client.removeMcp(project.id, name);
+      return void console.log(`${pc.green("✓")} removed ${name}`);
+    }
+    throw new Error(`unknown action "${a}" — list | add | on | off | rm`);
   });
 
 program
@@ -1274,6 +1460,160 @@ function printTeam(t: Record<string, unknown>): void {
       console.log(`    ${pc.dim(new Date(Number(e.ts)).toLocaleTimeString())} ${who.padEnd(10)} ${String(e.type).padEnd(14)} ${detail}`);
     }
   }
+}
+
+program
+  .command("invite")
+  .description("invite a teammate to this project: one link sets up the team, the repo, their agents and your crews")
+  .option("--team <id>", "which team, when you're in several")
+  .option("--no-grant", "don't give them push access to the repo when they join")
+  .option("--paste", "hosted sign-in without a local browser")
+  .action(async (opts: { team?: string; grant?: boolean; paste?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const invite = () => client.inviteTeammate(project.id, { ...(opts.team ? { teamId: opts.team } : {}), ...(opts.grant === false ? { grant: false } : {}) });
+    let out;
+    try {
+      out = await invite();
+    } catch (err) {
+      if (!/sign in to a team hub/.test((err as Error).message)) throw err;
+      // not on a hub yet: the hosted one, with GitHub, then try again
+      const { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+      const supabaseUrl = hostedSupabaseUrl("hosted")!;
+      const session = await hostedSession(supabaseUrl, publishableKeyFor(supabaseUrl), Boolean(opts.paste));
+      await client.teamAction("signin", { hub: hostedHubUrl(supabaseUrl), token: session.refreshToken });
+      out = await invite();
+    }
+    console.log(`${pc.green("✓")} ${pc.bold(out.repo)} on ${pc.bold(out.team.name)} — send this to your teammate:\n`);
+    console.log(`  ${pc.cyan(out.link)}\n`);
+    qrcode.generate(out.link, { small: true });
+    console.log(pc.dim(`  one click: GitHub sign-in, the team, the repo, their agents${out.grant ? ", push access" : ""} and your crews`));
+    if (out.grantNote) console.log(pc.yellow(`  ${out.grantNote}`));
+    console.log(pc.dim(`  works once, until ${new Date(out.expiresAt).toLocaleString()} · it carries the team key — send it like a password`));
+    console.log(pc.dim("  no Loom yet on their side? the link shows the one command that installs it and joins"));
+  });
+
+program
+  .command("join <link>")
+  .description("join a team from an invite link: sign in, clone the repo, open it with your agents, set up the crews")
+  .option("--into <dir>", "clone here (default ~/loom-projects/<repo>)")
+  .option("--github <login>", "your GitHub login, for a self-hosted hub")
+  .option("--secret <s>", "a self-hosted hub's join secret")
+  .option("--paste", "hosted sign-in without a local browser")
+  .option("--no-open", "don't open the project in the browser after")
+  .action(async (link: string, opts: { into?: string; github?: string; secret?: string; paste?: boolean; open?: boolean }) => {
+    const client = await ensureDaemon();
+    const p = await client.previewInvite(link);
+    console.log(`${pc.bold(p.team ?? "a Loom team")}${p.repo ? ` · ${p.repo}` : ""}${p.from ? pc.dim(` — from @${p.from}`) : ""}`);
+    let token: string | undefined;
+    if (!p.signedIn) {
+      const { hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
+      const sb = hostedSupabaseUrl(p.hub);
+      if (sb !== null) token = (await hostedSession(sb, publishableKeyFor(sb), Boolean(opts.paste))).refreshToken;
+    }
+    let { job } = await client.startJoin({
+      link,
+      dir: process.cwd(),
+      ...(opts.into ? { into: opts.into } : {}),
+      ...(opts.github ? { github: opts.github } : {}),
+      ...(opts.secret ? { secret: opts.secret } : {}),
+      ...(token ? { token } : {}),
+    });
+    const said = new Map<string, string>();
+    const mark: Record<string, string> = { done: pc.green("✓"), skipped: pc.dim("·"), failed: pc.red("✗"), waiting: pc.yellow("…"), running: pc.cyan("→") };
+    for (;;) {
+      for (const s of job.steps) {
+        const line = `${s.state}|${s.detail ?? ""}`;
+        if (s.state === "pending" || said.get(s.id) === line) continue;
+        said.set(s.id, line);
+        if (s.state === "running" && !s.detail) continue;
+        console.log(`  ${mark[s.state] ?? " "} ${s.label}${s.detail ? pc.dim(` — ${s.detail}`) : ""}`);
+      }
+      if (job.state !== "running") break;
+      await new Promise((r) => setTimeout(r, 400));
+      job = (await client.joinStatus(job.id)).job;
+    }
+    if (job.state === "failed") {
+      console.error(pc.red(`couldn't finish: ${job.error}`));
+      console.error(pc.dim("  run the same command again once it's fixed — finished steps are skipped"));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`\n${pc.green("✓")} you're in${job.project ? ` — ${pc.bold(job.project.name)} at ${job.project.dir}` : ""}`);
+    if (job.project) {
+      console.log(pc.dim(`  cd ${job.project.dir} && loom`));
+      if (opts.open !== false) {
+        const url = `${client.baseUrl}/app#p/${job.project.id}`;
+        const { spawn: sp } = await import("node:child_process");
+        const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+        sp(opener, [url], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+      }
+    }
+  });
+
+program
+  .command("crew [action] [args...]")
+  .description("Agent Teams: status | create [template] [name] | goal <text> | say <text> | approve | stop | resume | apply | diff | remove — crews of agents with roles")
+  .option("--crew <id>", "which crew, when the project has several")
+  .option("--to <teammate>", "say: to one teammate")
+  .option("--no-approval", "create: the Lead's plan starts without your OK")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const a = (action ?? "status").toLowerCase();
+    const words = (args ?? []).join(" ").trim();
+    const { crews, templates } = await client.crews(project.id);
+    if (a === "create") {
+      const [first, ...rest] = args ?? [];
+      const template = first && templates.includes(first.toLowerCase()) ? first.toLowerCase() : "ship";
+      const name = (first && templates.includes(first.toLowerCase()) ? rest : args ?? []).join(" ");
+      const { crew } = await client.createCrew(project.id, { template, ...(name ? { name } : {}), ...(opts.approval === false ? { planApproval: false } : {}) });
+      console.log(`${pc.green("✓")} ${pc.bold(crew.name)} (${crew.id}) — ${crew.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}=${t.agent}`).join(", ")}`);
+      console.log(pc.dim(`  give it a goal: loom crew goal "…"${crews.length ? ` --crew ${crew.id}` : ""}`));
+      return;
+    }
+    if (!crews.length) {
+      console.log(pc.dim(`no crews here yet — loom crew create [${templates.join("|")}] [name]`));
+      return;
+    }
+    const crew = opts.crew ? crews.find((c) => c.id === opts.crew || c.name === opts.crew) : crews.length === 1 ? crews[0] : undefined;
+    if (!crew) throw new Error(`which crew? --crew ${crews.map((c) => c.id).join(" | ")}`);
+    if (a === "status") {
+      for (const c of opts.crew ? [crew] : crews) printCrew(c);
+      return;
+    }
+    if (a === "diff") {
+      const out = await client.crewDiff(project.id, crew.id);
+      process.stdout.write(out.diff || pc.dim("no changes yet\n"));
+      return;
+    }
+    if (a === "remove") {
+      await client.removeCrew(project.id, crew.id);
+      console.log(`${pc.green("✓")} removed ${crew.name}`);
+      return;
+    }
+    if ((a === "goal" || a === "say") && !words) throw new Error(`loom crew ${a} "<text>"`);
+    const out = await client.crewAction(project.id, crew.id, a, { ...(words ? { text: words } : {}), ...(opts.to ? { to: opts.to } : {}) });
+    if (a === "say") console.log(`${pc.green("✓")} ${out.routed === "goal" ? "new goal" : out.routed === "answer" ? "answered" : out.routed === "replan" ? "the Lead replans with that" : `noted for ${out.to}`}`);
+    else if (a === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(out.merged)} into ${pc.bold(out.into)}`);
+    else printCrew(out.crew);
+  });
+
+function printCrew(c: Record<string, any>): void {
+  const g = c.state?.goal;
+  console.log(`${pc.bold(c.name)} ${pc.dim(`(${c.id})`)}${c.busy ? pc.cyan(" working") : ""}`);
+  console.log(`  ${c.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}${pc.dim(`:${t.role}=${t.agent}`)}`).join("  ")}`);
+  if (!g) return void console.log(pc.dim("  no goal yet — loom crew goal \"…\""));
+  const color = g.status === "completed" ? pc.green : g.status === "failed" ? pc.red : g.status.startsWith("waiting") || g.status === "awaiting_approval" ? pc.yellow : pc.cyan;
+  console.log(`  ${color(g.status)} ${g.text.split("\n")[0].slice(0, 80)} ${pc.dim(g.branch)}`);
+  for (const card of g.cards ?? []) {
+    const m = card.stage === "done" ? pc.green("✓") : card.stage === "failed" ? pc.red("✗") : card.stage === "planned" ? pc.dim("·") : pc.cyan("→");
+    console.log(`   ${m} ${card.title}${card.builder ? pc.dim(` ${card.builder}`) : ""}${card.stage !== "done" && card.stage !== "planned" ? pc.dim(` [${card.stage}]`) : ""}${card.error ? pc.red(` ${card.error.slice(0, 80)}`) : ""}`);
+  }
+  if (g.question) console.log(pc.yellow(`  ${g.question.teammate} asks: ${g.question.text}`) + pc.dim("  (loom crew say \"…\")"));
+  if (g.status === "awaiting_approval") console.log(pc.dim("  loom crew approve — or loom crew say \"…\" to change the plan"));
+  if (g.status === "completed" && !g.applied) console.log(pc.dim("  loom crew apply — merge it into your branch · loom crew diff"));
+  if (g.summary && g.status === "completed") console.log(`  ${g.summary.split("\n")[0].slice(0, 120)}`);
 }
 
 program

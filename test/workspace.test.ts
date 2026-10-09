@@ -178,11 +178,15 @@ describe("explorer: find", () => {
     expect(matches.some((m) => m.includes("node_modules"))).toBe(false);
   });
 
-  it("returns nothing for an empty query", async () => {
-    const { matches } = (await get(`/api/projects/${projectId}/find?q=`).then((r) => r.json())) as {
+  it("an empty query lists recently edited files, newest first (a bare @)", async () => {
+    const { matches, recent } = (await get(`/api/projects/${projectId}/find?q=`).then((r) => r.json())) as {
       matches: string[];
+      recent?: boolean;
     };
-    expect(matches).toEqual([]);
+    expect(recent).toBe(true);
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches.length).toBeLessThanOrEqual(20);
+    expect(matches.some((m) => m.split("/").some((part) => part.startsWith(".") || part === "node_modules"))).toBe(false);
   });
 });
 

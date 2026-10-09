@@ -421,7 +421,8 @@ describe("web app · what the model list says about itself", () => {
 
   /** A CLI has a default. A model agent has no such thing to offer. */
   it("does not offer a model agent a default it cannot have", () => {
-    expect(APP_HTML).toContain('var head = cur.kind === "model" ? []');
+    // a model agent never gets "Default"; others lose it only while a filter rules it out
+    expect(APP_HTML).toContain('var head = cur.kind === "model" || f && "default".indexOf(f) < 0 ? []');
   });
 });
 

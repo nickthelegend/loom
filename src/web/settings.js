@@ -5,9 +5,9 @@ import { api,logout } from './connection.js';
 import { esc,rel } from './format.js';
 import { ICONS,LOADER } from './icons.js';
 import { askConfirm,askText,chime,devicePref,setDevicePref,toast } from './notifications.js';
-import { THEME_KEY,state } from './state.js';
+import { state } from './state.js';
 import { JOB_KIND,loadTeam,loadTeamPolicy,loadTeamRunners,loadTeamShare,runnerName,teamAvatar,teamEditing,teamField,teamHooks,teamInviteHtml,teamInvites,teamNotify,teamPolicyHtml,teamRunners,teamShareHtml,teamShareOf,teamShares,wireTeamForms,wireTeamInvites,wireTeamShare } from './team.js';
-import { ACCENTS,appearancePref,applyAppearance,applyTheme,isElectron,themeNow } from './theme.js';
+import { ACCENTS,appearancePref,applyAppearance,isElectron,setThemePref,themePref } from './theme.js';
 import { durfmt } from './transcript.js';
 
 
@@ -201,7 +201,7 @@ import { durfmt } from './transcript.js';
       h += '<div class="sgrouph">Appearance</div>';
       h += '<div class="prow"><div class="pl"><div class="pt">Theme</div>' +
         '<div class="pd">Light or dark. Open terminals repaint to match.</div></div>' +
-        '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }], themeNow()) + "</div></div>";
+        '<div class="pc">' + seg("theme", [{ v: "light", l: "Light" }, { v: "dark", l: "Dark" }, { v: "system", l: "System" }], themePref()) + "</div></div>";
       h += '<div class="prow"><div class="pl"><div class="pt">Text size</div>' +
         '<div class="pd">Scales the whole app on this device.</div></div>' +
         '<div class="pc">' + seg("textsize", [{ v: "s", l: "S" }, { v: "m", l: "M" }, { v: "l", l: "L" }, { v: "xl", l: "XL" }], appearancePref("textsize", "m")) + "</div></div>";
@@ -240,11 +240,7 @@ import { durfmt } from './transcript.js';
           applyAppearance();
         };
       });
-      bindSeg("theme", function(v){
-        localStorage.setItem(THEME_KEY, v === "light" ? "light" : "dark");
-        applyTheme();
-        if (state.retheme) state.retheme();
-      });
+      bindSeg("theme", function(v){ setThemePref(v); });
       var pp = document.getElementById("projprefs");
       if (!pid) { pp.innerHTML = '<div class="snote">Open a project to change how its brain learns and how handoff briefs are written.</div>'; return; }
       pp.innerHTML = LOADER;
@@ -256,8 +252,13 @@ import { durfmt } from './transcript.js';
           '<div class="pc">' + seg("continuity", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], cfg.brain.continuity ? "on" : "off") + "</div></div>";
         if (!cfg.brain.continuity) {
           hh += '<div class="prow"><div class="pl"><div class="pt">Memory extractor</div>' +
-            '<div class="pd">After each turn a small Claude reads what changed and files what\u2019s worth keeping. Off means the brain holds only what you write by hand.</div></div>' +
+            '<div class="pd">After each turn a small model reads what changed and files what\u2019s worth keeping. Off means the brain holds only what you write by hand.</div></div>' +
             '<div class="pc">' + seg("extractor", [{ v: "auto", l: "Auto" }, { v: "off", l: "Off" }], cfg.brain.extractor) + "</div></div>";
+          // Which model does the reading: Claude Haiku runs on your Claude plan,
+          // every turn; a free or local model keeps that usage for your own work.
+          if (cfg.brain.extractor !== "off") hh += '<div class="prow"><div class="pl"><div class="pt">Extractor model</div>' +
+            '<div class="pd" id="extmodelnote">Claude Haiku uses your Claude plan on every turn, whichever agent took it. A local Ollama model costs nothing; OpenRouter\u2019s free models share its daily cap.</div></div>' +
+            '<div class="pc"><select id="extmodel"><option value="">' + esc(cfg.brain.model || "haiku") + "</option></select></div></div>";
           hh += '<div class="prow"><div class="pl"><div class="pt">Semantic retrieval</div>' +
             '<div class="pd">Finds memories that mean the same thing in different words — “how does login work” reaching a note about JWKS. Needs a local model runtime Loom doesn’t ship: <code>npm i -g @huggingface/transformers</code> (~470MB once), then a 23MB model downloads on first use. Without it, retrieval is the three lexical channels it has always been.</div></div>' +
             '<div class="pc">' + seg("semantic", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], cfg.brain.semantic ? "on" : "off") + "</div></div>";
@@ -266,6 +267,13 @@ import { durfmt } from './transcript.js';
             '<div class="pd">How the baton note is written when one agent hands to the next. Template is instant and free; LLM distills it with a small Claude.</div></div>' +
             '<div class="pc">' + seg("projection", [{ v: "template", l: "Template" }, { v: "llm", l: "LLM" }], cfg.projection.mode) + "</div></div>";
         }
+        hh += '<div class="sgrouph">Tools \u00b7 ' + esc(pname) + "</div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">Skills</div>' +
+          '<div class="pd">Instructions your agents load for this project — install from GitHub or a folder, turn them on and off.</div></div>' +
+          '<div class="pc"><button class="btn outline sm" type="button" data-tools="skills">' + ICONS.spark + "Manage skills</button></div></div>";
+        hh += '<div class="prow"><div class="pl"><div class="pt">MCP servers</div>' +
+          '<div class="pd">Tools your agents can call — GitHub, Linear, Slack, databases. Claude Code and Codex use them.</div></div>' +
+          '<div class="pc"><button class="btn outline sm" type="button" data-tools="mcp">' + ICONS.plug + "Manage servers</button></div></div>";
         var agents = cfg.agents || [];
         hh += '<div class="prow"><div class="pl"><div class="pt">Default agent</div>' +
           '<div class="pd">Who receives a message when nobody holds the baton.</div></div>' +
@@ -275,11 +283,43 @@ import { durfmt } from './transcript.js';
         pp.innerHTML = hh;
         bindSeg("continuity", function(v){ patchCfg({ brain: { continuity: v === "on" } }, "Native continuity " + v); });
         bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
+        var ext = document.getElementById("extmodel");
+        if (ext) {
+          var cur = cfg.brain.model || "haiku";
+          var fill = function(opts){
+            if (!opts.some(function(o){ return o[0] === cur; })) opts.push([cur, cur]);
+            ext.innerHTML = opts.map(function(o){ return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join("");
+          };
+          fill([["haiku", "Claude Haiku \u2014 your Claude plan"]]);
+          sapi("/api/providers").then(function(r){
+            var on = {}; (r.providers || []).forEach(function(p){ if (p.configured) on[p.id] = true; });
+            var opts = [["haiku", "Claude Haiku \u2014 your Claude plan"]];
+            if (on.openrouter) opts.push(["openrouter/pool:free", "OpenRouter free models (daily cap)"]);
+            if (!on.ollama) return fill(opts);
+            return sapi("/api/models?provider=ollama").then(function(m){
+              (m.models || []).slice(0, 20).forEach(function(x){ var id = x.id || x; opts.push(["ollama/" + id, "Ollama \u00b7 " + id + " (local, free)"]); });
+              fill(opts);
+            }).catch(function(){ fill(opts); });
+          }).catch(function(){});
+          ext.onchange = function(){ patchCfg({ brain: { model: ext.value } }, "Extractor model: " + ext.value); };
+        }
         bindSeg("semantic", function(v){
           patchCfg({ brain: { semantic: v === "on" } },
             v === "on" ? "Semantic retrieval on — it warms up in the background" : "Semantic retrieval off");
         });
         bindSeg("projection", function(v){ patchCfg({ projection: { mode: v } }, "Briefs: " + v); });
+        Array.prototype.forEach.call(pp.querySelectorAll("[data-tools]"), function(b){
+          b.onclick = function(){
+            var kind = b.getAttribute("data-tools");
+            close();
+            if (state.pid !== pid) location.hash = "#p/" + pid;
+            var tries = 0;
+            (function go(){
+              if (state.openTools && state.pid === pid && document.getElementById("box")) return state.openTools(kind);
+              if (++tries < 40) setTimeout(go, 100); else toast("open " + pname + "\u2019s chat, then try again");
+            })();
+          };
+        });
         document.getElementById("defagent").onchange = function(){ patchCfg({ defaultAgent: this.value }, "Default agent saved"); };
       }).catch(function(e){ pp.innerHTML = '<div class="snote">' + esc(e.message) + "</div>"; });
     }
@@ -717,7 +757,7 @@ import { durfmt } from './transcript.js';
           '<div class="pillrow"><button class="btn outline sm" type="button" data-tcreate>Create team</button></div>';
       }
       h += '<div class="sgrouph">Join a team</div><div class="cloudin">' +
-        teamField("Invite link", "link", 'class="mono" placeholder="loom://team/join#\u2026"') + "</div>" +
+        teamField("Invite link", "link", 'class="mono" placeholder="https://\u2026/join/#\u2026"') + "</div>" +
         '<div class="pillrow"><button class="btn outline sm" type="button" data-tjoin>Join team</button>' +
         '<span class="hintx">' + (t.signedIn ? "The link names its hub; you join as " + esc(t.github) + "." : "Signs in to the link\u2019s hub with the login and secret above.") + "</span></div>";
       pane.innerHTML = h;
@@ -874,12 +914,39 @@ import { durfmt } from './transcript.js';
       body.innerHTML = '<div class="pshdr"><div class="psproj">' + esc(p.name) + '</div><div class="obsub">' + agents.length + " agents \u00b7 baton " + esc(p.holder || "\u2014") + "</div></div>" +
         '<div class="pssec">Agents \u2014 switch on/off, set each role</div><div class="psrows">' + rows + "</div>" +
         '<div class="pshint">Off agents stay in the roster but can\u2019t take turns or hold the baton. Changes land on the next turn \u2014 no restart. You can\u2019t switch off the baton holder; hand it off first.</div>' +
+        '<div class="pssec" style="margin-top:14px">Tools \u2014 skills and MCP servers</div><div class="psrows">' +
+          '<div class="psrow"><div class="psinfo"><div class="psname">Skills</div><div class="pskind" id="psskills">instructions your agents load for this project</div></div>' +
+            '<button type="button" class="btn xs outline" data-pstools="skills">' + ICONS.spark + "Manage</button></div>" +
+          '<div class="psrow"><div class="psinfo"><div class="psname">MCP servers</div><div class="pskind" id="psmcps">tools Claude Code and Codex can call \u2014 GitHub, Linear, Slack, databases</div></div>' +
+            '<button type="button" class="btn xs outline" data-pstools="mcp">' + ICONS.plug + "Manage</button></div></div>" +
         '<div class="pssec" style="margin-top:14px">Policies \u2014 all off by default</div>' +
         '<div class="psrows" id="pspolicies"><div class="loader"><i></i><i></i><i></i><i></i></div></div>' +
         '<div class="pssec" style="margin-top:14px">Team</div><div id="psteam">' + LOADER + "</div>" +
         '<div class="pssec" style="margin-top:14px">Storage</div><div id="psstore" class="psstore">' + LOADER + "</div>";
       if (state.team) drawPsTeam(); else loadTeam().then(drawPsTeam);
       drawPsStore();
+      api("/api/projects/" + pid + "/skills").then(function(r){
+        var el = document.getElementById("psskills"), list = (r && r.skills) || [];
+        var on = list.filter(function(x){ return x.enabled; }).length;
+        if (el) el.textContent = list.length ? on + " of " + list.length + " on \u2014 install from GitHub or a folder" : "none installed yet \u2014 install from GitHub or a folder";
+      }).catch(function(){});
+      api("/api/projects/" + pid + "/mcps").then(function(r){
+        var el = document.getElementById("psmcps"), list = ((r && r.mcps) || []).filter(function(m){ return m.url || m.command; });
+        if (el && list.length) el.textContent = list.length + " installed \u2014 " + list.map(function(m){ return m.name || m.id; }).slice(0, 4).join(", ");
+      }).catch(function(){});
+      Array.prototype.forEach.call(body.querySelectorAll("[data-pstools]"), function(b){
+        b.onclick = function(){
+          var kind = b.getAttribute("data-pstools");
+          close();
+          // settings for another project: go there, then open it once its composer is up
+          if (state.pid !== pid) location.hash = "#p/" + pid;
+          var tries = 0;
+          (function go(){
+            if (state.openTools && state.pid === pid && document.getElementById("box")) return state.openTools(kind);
+            if (++tries < 40) setTimeout(go, 100); else toast("open the project's chat, then try again");
+          })();
+        };
+      });
       // The policy toggles, from the same settings the CLI and config file use.
       api("/api/projects/" + pid + "/config").then(function(cfg){
         var host = document.getElementById("pspolicies"); if (!host) return;

@@ -2,6 +2,7 @@
 # Loom installer — clone, build, link. Usage:
 #   curl -fsSL https://raw.githubusercontent.com/nickthelegend/loom/main/scripts/install.sh | bash
 # Env overrides: LOOM_REPO (git url), LOOM_SRC (checkout dir).
+# LOOM_JOIN='<invite link>' joins that team right after installing (the join page's command).
 set -euo pipefail
 
 REPO="${LOOM_REPO:-https://github.com/nickthelegend/loom.git}"
@@ -34,5 +35,11 @@ say "linking the loom command (may ask for sudo depending on your npm prefix)"
 npm link >/dev/null
 
 say "installed: $(command -v loom || echo 'loom (restart your shell)')"
+if [ -n "${LOOM_JOIN:-}" ]; then
+  say "joining your team"
+  # piped into bash, stdin is the script: give the join the terminal back for sign-in prompts
+  if [ -r /dev/tty ]; then loom join "$LOOM_JOIN" < /dev/tty; else loom join "$LOOM_JOIN"; fi
+  exit $?
+fi
 say "next: cd your-project && loom init && loom"
 say "phone: loom up --restart --tailnet && loom pair"

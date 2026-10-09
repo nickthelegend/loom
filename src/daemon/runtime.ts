@@ -7,7 +7,7 @@ import { ADES, detectAdes } from "../core/ades.js";
 import { BatonManager } from "../core/baton.js";
 import { type Hit, type RetrieveOpts } from "../core/brain-index.js";
 import { Brain } from "../core/brain.js";
-import { claudeText } from "../core/claude-cli.js";
+import { helperText } from "../core/provider-text.js";
 import { ConversationStore } from "../core/conversations.js";
 import * as checkpoints from "../core/checkpoint.js";
 import { renderProjection } from "../core/distill.js";
@@ -18,6 +18,7 @@ import { probeMcpServer, probeMcpServers, writeMcpSession } from "../core/mcp.js
 import { NativeUsage } from "./runtime/native-usage.js";
 import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
+import { CrewEngine } from "../core/crew.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
@@ -142,6 +143,8 @@ export class ProjectRuntime {
   readonly routes: RouteEngine;
   /** One orchestrator, many parallel workers — see core/orchestra.ts. */
   readonly orchestra: OrchestraEngine;
+  /** Agent Teams: crews of agents with roles, one goal at a time (core/crew.ts). */
+  readonly crews: CrewEngine;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -197,7 +200,8 @@ export class ProjectRuntime {
       get brain() { return runtime.brain; },
       activeSkillsBlock: (...args) => this.activeSkillsBlock(...args),
       get turnChat() { return runtime.turns.turnChat; },
-      extractionEngine: (model) => (prompt) => claudeText(`${prompt.system}\n\n${prompt.user}`, { model, timeoutMs: 60_000 }),
+      // a provider/model (ollama/qwen3:4b, openrouter/pool:free) runs there; anything else is a Claude alias
+      extractionEngine: (model) => (prompt) => helperText(model, `${prompt.system}\n\n${prompt.user}`, { timeoutMs: 60_000 }),
       renderProjection: (input) => renderProjection(input, this.config.projection),
       createSemanticIndex: () => new SemanticIndex(path.join(this.info.dir, ".loom")),
       noteMemoriesUsed: (ids) => this.noteMemoriesUsed(ids),
@@ -241,6 +245,8 @@ export class ProjectRuntime {
       get teamPolicy() { return runtime.teamPolicy; },
       get baton() { return runtime.baton; },
       releaseQuestionHold: (...args) => this.releaseQuestionHold(...args),
+      openQuestion: (agentId) => this.openQuestions.get(agentId),
+      answerQuestion: (...args) => this.answerQuestion(...args),
       get queue() { return runtime.queue; },
       get routes() { return runtime.routes; },
       ensureStarted: (...args) => this.ensureStarted(...args),
@@ -358,6 +364,45 @@ export class ProjectRuntime {
       maxConcurrentGoals: () => this.config.maxConcurrentGoals ?? null,
       member: () => this.memberLogin,
       coordinator: () => this.coordinator,
+    });
+
+    this.crews = new CrewEngine({
+      projectId: info.id,
+      projectName: info.name,
+      projectDir: info.dir,
+      crews: () => this.config.crews ?? [],
+      saveCrews: (crews) => {
+        if (crews.length) this.config.crews = crews;
+        else delete this.config.crews;
+        this.saveConfig();
+      },
+      roster: () =>
+        this.config.agents.filter(
+          (a) => a.enabled !== false && tierForKind(a.kind) === "adapter" && !isWithdrawnKind(a.kind),
+        ),
+      makeAgent: (cfg, dir) => {
+        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
+        const agent = createAgent({ ...cfg, options: { ...this.policyOptions(cfg), loomProject: info.id } }, dir);
+        if (!isAdapter(agent)) throw new Error(`"${cfg.id}" is a bridge — it can't be on a crew`);
+        return agent;
+      },
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      createChat: (title, opts) => this.createChat(title, opts?.agentId ? { agentId: opts.agentId } : {}),
+      chatExists: (id) => this.chats().some((c) => c.id === id),
+      briefingFor: async (query, agentId) =>
+        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
+          .filter(Boolean)
+          .join("\n\n"),
+      gate: (agentId) => {
+        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
+        this.enforceQuarantine(agentId);
+        this.enforceBudget(agentId);
+      },
+      observe: (event) => this.trackCost(event),
+      stream: (f) => this.liveText(f),
+      createTask: (input) => this.createTask(input),
+      updateTask: (id, patch) => this.updateTask(id, patch as Parameters<ProjectRuntime["updateTask"]>[1]),
+      member: () => this.memberLogin,
     });
 
     this.queue = new PromptQueue(path.join(projectLoomDir(info.dir), "queue.json"), (q) => {
@@ -879,12 +924,22 @@ export class ProjectRuntime {
       // so the queue waits for you instead. Answering goes out immediately —
       // a paused queue holds what's lined up, not what you type now.
       if (liveRun && e.kind === "needs_input") this.holdQueueFor(agent.id);
+      // A question asked through the agent's tool blocks its turn until answered: remember it,
+      // so a reply typed in the chat reaches it (turns.ts) and status stays honest.
+      if (e.kind === "needs_input" && typeof p.requestId === "string" && p.responseMode !== "message") {
+        const ids = Array.isArray(p.questions) ? (p.questions as Array<{ id?: unknown }>).map((q, i) => String(q.id ?? i)) : [];
+        this.openQuestions.set(agent.id, { requestId: p.requestId, chat: chat ?? MAIN_CHAT, ids });
+      }
+      if (e.kind === "status" && p.state === "question_answered" && this.openQuestions.get(agent.id)?.requestId === p.requestId) {
+        this.openQuestions.delete(agent.id);
+      }
       // Any terminal event stops the stale-session clock — a turn that ended in
       // an error is over, not hung.
       const turnOver = e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted");
       if (turnOver && !this.continuity) {
         this.turns.busySince.delete(agent.id);
       }
+      if (turnOver) this.openQuestions.delete(agent.id);
       if (keepsPartial) {
         if (e.kind === "message" && !p.reasoning) typed = "";
         if (turnOver && typed.trim()) {
@@ -1358,13 +1413,40 @@ export class ProjectRuntime {
       last = new Map(); // an unread dot is a nicety; the list must still load
     }
     const main = stored.find((c) => c.id === MAIN_CHAT);
+    const groups = this.chatGroups();
     return this.conversations.chats().map((c) => {
       // main is stored only once it has stars or ratings to keep
       const withMain = c.id === MAIN_CHAT && main
         ? { ...c, ...(main.starred ? { starred: main.starred } : {}), ...(main.ratings ? { ratings: main.ratings } : {}) }
         : c;
-      return last.has(c.id) ? { ...withMain, lastReplyId: last.get(c.id)! } : withMain;
+      const g = c.id === MAIN_CHAT ? undefined : groups.get(c.id);
+      const withGroup = g ? { ...withMain, group: g } : withMain;
+      return last.has(c.id) ? { ...withGroup, lastReplyId: last.get(c.id)! } : withGroup;
     });
+  }
+
+  /** Which run, race, crew or import made each thread (ChatInfo.group). */
+  private chatGroups(): Map<string, NonNullable<ChatInfo["group"]>> {
+    const out = new Map<string, NonNullable<ChatInfo["group"]>>();
+    try {
+      for (const run of this.orchestra.list()) {
+        const g = { kind: run.race ? "race" as const : "orchestra" as const, id: run.id, title: run.goal, status: run.status, at: run.createdAt };
+        // a run that answered in a thread you already had leaves that thread alone
+        if (!run.inPlace && run.chat) out.set(run.chat, g);
+        for (const t of run.tasks) if (t.chat) out.set(t.chat, g);
+      }
+    } catch { /* no runs yet */ }
+    try {
+      for (const crew of this.crews.list()) {
+        const g = { kind: "crew" as const, id: crew.id, title: crew.name, ...(crew.state.goal ? { status: crew.state.goal.status } : {}), at: crew.state.goal?.startedAt ?? 0 };
+        if (crew.state.channel) out.set(crew.state.channel, g);
+        for (const chat of Object.values(crew.state.threads ?? {})) out.set(chat, g);
+      }
+    } catch { /* no crews yet */ }
+    for (const chat of Object.values(readProjectState(this.info.dir).imports ?? {})) {
+      if (!out.has(chat)) out.set(chat, { kind: "import", id: "imports", title: "Imported", at: 0 });
+    }
+    return out;
   }
 
   /** Pin, archive or file a thread. Main is always first and always there. */
@@ -1688,7 +1770,10 @@ export class ProjectRuntime {
   /** Move or retitle a card. Yours, so this is the real state — not a hint. */
   updateTask(
     id: string,
-    patch: { title?: string; column?: string; agent?: string; blockedBy?: string[]; priority?: string | null; due?: string | null },
+    patch: {
+      title?: string; column?: string; agent?: string; blockedBy?: string[]; priority?: string | null; due?: string | null;
+      crew?: string; goal?: string; stage?: string; claimedBy?: string;
+    },
   ): BoardTask | null {
     const state = readProjectState(this.info.dir);
     const task = (state.tasks ?? []).find((t) => t.id === id);
@@ -1726,6 +1811,7 @@ export class ProjectRuntime {
     if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 200) || task.title;
     if (patch.column !== undefined) task.column = patch.column;
     if (patch.agent !== undefined) task.agent = patch.agent;
+    for (const k of ["crew", "goal", "stage", "claimedBy"] as const) if (patch[k] !== undefined) task[k] = String(patch[k]).slice(0, 80);
     if (patch.blockedBy !== undefined) {
       // Cycles refused at write: A→B→A makes both unbecomable forever, and the
       // person who typed it is the one who can pick which link was wrong.
@@ -2164,11 +2250,18 @@ export class ProjectRuntime {
    * with a requestId). The turn carries on with the answer.
    */
   async answerQuestion(agentId: string, chat: string, requestId: string, answers: Record<string, unknown>): Promise<void> {
-    const agent = this.agents.get(agentId);
-    if (!(agent instanceof ProviderAgent)) throw new Error(`agent "${agentId}" can't take answers to questions`);
+    // a crew teammate or orchestra worker runs as its own instance; its card names that instance
+    const agent = (this.agents.get(agentId) ?? this.crews?.liveAgent?.(agentId) ?? this.orchestra?.liveAgent?.(agentId)) as
+      | { respondToUserInput?: (chat: string, requestId: string, answers: Record<string, unknown>) => Promise<void> }
+      | undefined;
+    if (!agent || typeof agent.respondToUserInput !== "function") throw new Error(`agent "${agentId}" can't take answers to questions`);
     this.releaseQuestionHold(agentId);
     await agent.respondToUserInput(chat, requestId, answers);
+    if (this.openQuestions.get(agentId)?.requestId === requestId) this.openQuestions.delete(agentId);
   }
+
+  /** Structured questions agents are blocked on, by agent. */
+  private openQuestions = new Map<string, { requestId: string; chat: string; ids: string[] }>();
 
   /** Compact an agent's native context for a chat now, instead of waiting for the harness to. */
   async compactAgent(agentId: string, chat: string = MAIN_CHAT): Promise<void> {
@@ -2639,7 +2732,7 @@ export class ProjectRuntime {
     return { from, ...(merge ? { merge } : {}) };
   }
   async interrupt(
-    opts: { source?: "user" | "route" } = {},
+    opts: { source?: "user" | "route"; chat?: string } = {},
   ): Promise<{ interrupted: string | null }> { return this.turns.interrupt(opts); }
 
   // -------------------------------------------------------------------------
@@ -2785,6 +2878,8 @@ export class ProjectRuntime {
             : await live.available().catch(() => false),
           ...(this.continuity && isNativeKind(cfg.kind) ? { cliVersion: this.harnesses.get(cfg.id)?.version ?? null } : {}),
           busy: isAdapter(live) ? live.busy() || Boolean(this.continuity && this.turns.busySince.has(cfg.id)) : false,
+          // which chat that turn is in, so a client shows Stop only where it applies
+          ...(isAdapter(live) && (live.busy() || this.turns.busySince.has(cfg.id)) ? { chat: this.turns.turnChat.get(cfg.id) ?? MAIN_CHAT } : {}),
           holdsBaton: holder === cfg.id,
           model,
           permissions: permissionFor(cfg.kind, cfg.options),
@@ -2802,8 +2897,12 @@ export class ProjectRuntime {
       .reverse()
       .find((e) => e.kind === "message" && !e.agentId);
     const lastNeedsInput = [...recent].reverse().find((e) => e.kind === "needs_input");
+    const reqId = lastNeedsInput && (lastNeedsInput.payload as { requestId?: unknown }).requestId;
+    // a question answered on its card (no message typed) is answered all the same
+    const answeredOnCard = Boolean(reqId && recent.some((e) => e.id > lastNeedsInput!.id && e.kind === "status" &&
+      (e.payload as { state?: unknown; requestId?: unknown }).state === "question_answered" && (e.payload as { requestId?: unknown }).requestId === reqId));
     const needsInput = Boolean(
-      lastNeedsInput && (!lastUserMsg || lastNeedsInput.id > lastUserMsg.id),
+      lastNeedsInput && !answeredOnCard && (!lastUserMsg || lastNeedsInput.id > lastUserMsg.id),
     );
     return {
       id: this.info.id,
@@ -3019,6 +3118,7 @@ export class ProjectRuntime {
 
   async close(): Promise<void> {
     await this.orchestra.shutdown().catch(() => { });
+    await this.crews.shutdown().catch(() => { });
     this.closed = true;
     this.harnesses.stop();
     this.live.close();

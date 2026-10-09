@@ -201,6 +201,8 @@ export interface ProjectState {
    * resolves — so the loop can retry the original agent, not just fail over.
    */
   quarantine?: Record<string, { reason: string; since: number; displaced: boolean }>;
+  /** Chats brought in from an agent's own history: "<source>:<session id>" → the Loom chat it became. */
+  imports?: Record<string, string>;
 }
 
 /**
@@ -225,6 +227,11 @@ export interface BoardTask {
   priority?: "high" | "medium" | "low";
   /** When it's due, as a local date: YYYY-MM-DD. */
   due?: string;
+  /** A crew card (core/crew.ts): the crew, its goal, where it is, and which teammate holds it. */
+  crew?: string;
+  goal?: string;
+  stage?: string;
+  claimedBy?: string;
   createdAt: number;
 }
 
@@ -265,6 +272,8 @@ export interface PairedClient {
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
   platform?: string;
+  /** Which push categories this device wants (questions, approvals, done, goals); absent means all. */
+  pushKinds?: string[];
   /**
    * Project ids this token may touch. Absent means all — which keeps every
    * client paired before scoping existed exactly as powerful as it was.

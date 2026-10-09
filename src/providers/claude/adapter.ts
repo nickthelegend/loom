@@ -21,6 +21,7 @@
  * process group, and stopping it proves every tool it started is gone.
  */
 
+import { attachedImages } from "../attachments.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -31,7 +32,7 @@ import {
 import { guardNativeOutput } from "../../adapters/base.js";
 import { EventHub, type ProviderAdapter } from "../adapter.js";
 import type {
-  AdapterCapabilities, ApprovalDecision, CanonicalItemType, CanonicalRequestType, InstanceId, ItemLifecyclePayload,
+  AdapterCapabilities, ApprovalDecision, CanonicalItemType, CanonicalRequestType, InstanceId, ItemLifecyclePayload, ToolImage,
   ProviderRuntimeEvent, ProviderSession, RequestId, RuntimeEventPayloads, RuntimeEventType, RuntimeMode, SendTurnInput,
   SessionStartInput, ThreadId, TurnId, TurnStartResult, UserInputAnswers, UserInputQuestion,
 } from "../contracts.js";
@@ -114,7 +115,11 @@ function requestTypeFor(name: string): CanonicalRequestType {
 }
 
 export function summarizeToolInput(name: string, input: Record<string, unknown>): string {
-  const interesting = input.file_path ?? input.command ?? input.pattern ?? input.url ?? input.prompt ?? "";
+  if (name === "TodoWrite" && Array.isArray(input.todos)) {
+    const todos = input.todos as Array<{ status?: string }>;
+    return `TodoWrite: ${todos.filter(t => t.status === "completed").length}/${todos.length} done`;
+  }
+  const interesting = input.file_path ?? input.notebook_path ?? input.command ?? input.query ?? input.pattern ?? input.url ?? input.description ?? input.prompt ?? "";
   return `${name}: ${String(interesting).replace(/\s+/g, " ").slice(0, 160)}`;
 }
 
@@ -435,7 +440,10 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     s.info = { ...s.info, status: "running", activeTurnId: turnId, updatedAt: Date.now() };
     this.emit(input.threadId, "turn.started", s.info.model ? { model: s.info.model } : {}, { turnId });
     try {
-      s.prompts.push({ type: "user", message: { role: "user", content: [{ type: "text", text: input.input }] },
+      // attached pictures go in as image blocks, so Claude sees them rather than a path it may not open
+      const pictures = attachedImages(input.input, s.info.cwd).map((im) => ({
+        type: "image" as const, source: { type: "base64" as const, media_type: im.mime, data: fs.readFileSync(im.abs).toString("base64") } }));
+      s.prompts.push({ type: "user", message: { role: "user", content: [{ type: "text", text: input.input }, ...pictures] },
         parent_tool_use_id: null, uuid: turnId } as SDKUserMessage);
     } catch (error) {
       s.turn = null;
@@ -601,6 +609,12 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
             s.tools.set(block.id, tool);
             this.emit(threadId, "item.started", { itemType: tool.itemType, status: "inProgress", ...describeTool(tool),
               ...(main ? {} : { parentToolUseId: msg.parent_tool_use_id! }) }, { ...at, itemId: block.id });
+            // A todo list is the agent's plan: shown as a checklist that updates in place.
+            if (name === "TodoWrite" && main && Array.isArray(toolInput.todos)) {
+              const plan = (toolInput.todos as Array<Record<string, unknown>>).map(t => ({ step: String(t.content ?? t.activeForm ?? ""),
+                status: t.status === "completed" ? "completed" as const : t.status === "in_progress" ? "inProgress" as const : "pending" as const })).filter(t => t.step);
+              if (plan.length) this.emit(threadId, "turn.plan.updated", { plan }, at);
+            }
           }
         });
         return;
@@ -614,8 +628,9 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
           if (!tool) continue;
           s.tools.delete(block.tool_use_id);
           const output = toolResultText(block.content);
+          const images = toolResultImages(block.content);
           const status = tool.declined ? "declined" : block.is_error === true ? "failed" : "completed";
-          this.emit(threadId, "item.completed", { itemType: tool.itemType, status, ...describeTool(tool, output),
+          this.emit(threadId, "item.completed", { itemType: tool.itemType, status, ...describeTool(tool, output, images, block.is_error === true),
             ...(msg.parent_tool_use_id ? { parentToolUseId: msg.parent_tool_use_id } : {}) }, { ...at, itemId: block.tool_use_id });
         }
         return;
@@ -677,20 +692,36 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
 }
 
 /** Title, detail and normalized data for a Claude tool call. */
-function describeTool(tool: Tool, output?: string): Omit<ItemLifecyclePayload, "itemType" | "status"> {
+function describeTool(tool: Tool, output?: string, images?: ToolImage[], failed = false): Omit<ItemLifecyclePayload, "itemType" | "status"> {
   const detail = summarizeToolInput(tool.name, tool.input);
   switch (tool.itemType) {
     case "command_execution": {
       const command = String(tool.input.command ?? "");
       return { detail: command, data: { command, ...(output !== undefined ? { output } : {}) } };
     }
+    case "mcp_tool_call": {
+      // mcp__<server>__<tool>
+      const [, server = "", ...rest] = tool.name.split("__");
+      return { title: tool.name, detail: `${server} · ${rest.join("__") || tool.name}`, data: { tool: rest.join("__") || tool.name, server, input: tool.input,
+        ...(output !== undefined ? (failed ? { error: output } : { output }) : {}), ...(images?.length ? { images } : {}) } };
+    }
     case "file_change": {
       const p = tool.input.file_path ?? tool.input.notebook_path;
       return { title: tool.name, detail, data: { changes: p ? [{ path: String(p), kind: tool.name === "Write" ? "add_or_update" : "update" }] : [] } };
     }
     default:
-      return { title: tool.name, detail, data: { tool: tool.name, input: tool.input } };
+      return { title: tool.name, detail, data: { tool: tool.name, input: tool.input,
+        ...(output !== undefined ? (failed ? { error: output } : { output }) : {}), ...(images?.length ? { images } : {}) } };
   }
+}
+
+/** Image blocks in a tool result (Read on a PNG, an MCP screenshot): base64 for ingestion to file. */
+function toolResultImages(content: unknown): ToolImage[] {
+  if (!Array.isArray(content)) return [];
+  return (content as Array<Record<string, unknown>>).flatMap(c => {
+    const src = c && c.type === "image" ? (c.source as Record<string, unknown> | undefined) : undefined;
+    return src && src.type === "base64" && typeof src.data === "string" ? [{ data: src.data, mime: String(src.media_type ?? "image/png") }] : [];
+  });
 }
 
 /** Is an absolute path outside `dir`? Symlinks resolved (macOS /tmp is /private/tmp). */

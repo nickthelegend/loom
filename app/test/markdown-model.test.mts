@@ -63,3 +63,12 @@ describe("a preview line", () => {
     assert.equal(plainText('```loom\n{"actions":[{"type":"done","summary":"All good"}]}\n```'), "All good");
   });
 });
+
+it("an image is a labelled link, not a stray '!' before one", () => {
+  const parts = inline("see ![chart](demo/chart.svg) and ![](https://x.dev/a.png)");
+  assert.deepEqual(parts.filter((p) => p.t === "link"), [
+    { t: "link", s: "\u{1F5BC} chart", href: "demo/chart.svg" },
+    { t: "link", s: "\u{1F5BC} image", href: "https://x.dev/a.png" },
+  ]);
+  assert.equal(parts.map((p) => p.s).join("").includes("!"), false);
+});

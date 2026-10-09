@@ -23,7 +23,12 @@ export function registerToolsRoutes(app: Express, withRuntime: WithRuntime): voi
     "/api/projects/:id/skills/:skillId",
     withRuntime(async (rt, req, res) => {
       const { enabled } = (req.body ?? {}) as { enabled?: boolean };
-      res.json({ skills: rt.setSkillEnabled(String(req.params.skillId), enabled !== false) });
+      const id = String(req.params.skillId);
+      // turning on a skill that doesn't exist saved a phantom row and said OK
+      if (enabled !== false && !rt.skillsCatalog().some((sk) => sk.id === id)) {
+        return void res.status(404).json({ error: `no skill "${id}" in this project or on this machine` });
+      }
+      res.json({ skills: rt.setSkillEnabled(id, enabled !== false) });
     }),
   );
 

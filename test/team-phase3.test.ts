@@ -63,7 +63,7 @@ beforeAll(async () => {
   const bin = tmpDir("p3-bin");
   fs.writeFileSync(
     path.join(bin, "gh"),
-    '#!/bin/sh\ncase "$*" in\n  *"pr list"*) echo "[]" ;;\n  *"pr create"*) echo "https://github.com/acme/app/pull/42" ;;\n  *) exit 1 ;;\nesac\n',
+    '#!/bin/sh\ncase "$*" in\n  "auth status") exit 0 ;;\n  *"pr list"*) echo "[]" ;;\n  *"pr create"*) echo "https://github.com/acme/app/pull/42" ;;\n  *) exit 1 ;;\nesac\n',
     { mode: 0o755 },
   );
   oldPath = process.env.PATH;

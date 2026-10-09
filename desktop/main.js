@@ -5,8 +5,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, shell } from "electron";
-import { prepareAppUrl } from "./loom-app.js";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, screen, shell } from "electron";
+import { prepareAppUrl, readDaemonConfig } from "./loom-app.js";
+import { createPet, petEnabled } from "./pet-window.js";
 import { checkForUpdates } from "./updater.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -22,6 +23,7 @@ app.setName("Loom Desktop");
 // no flash while the daemon spins up (#0a0a0a dark / #ffffff light).
 const BG = "#0a0a0a";
 let win = null;
+let pet = null;
 
 // One Loom per machine: a second launch focuses the window that's already
 // open instead of racing it for the daemon.
@@ -100,15 +102,29 @@ async function createWindow() {
   });
 
   if (saved?.maximized) win.maximize();
+  // the pet keeps a window open, so closing Loom's own has to mean quit off macOS
+  win.on("closed", () => { if (process.platform !== "darwin") app.quit(); });
   persistBounds(win);
+  attachContextMenu(win.webContents);
 
   // Open external links (docs, github) in the real browser, not the shell.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith("http://127.0.0.1") && !url.startsWith("http://localhost")) {
-      void shell.openExternal(url);
-      return { action: "deny" };
-    }
-    return { action: "allow" };
+  // Only this machine's own pages may open inside it — compared by parsed
+  // hostname, because "http://localhost.evil.com" starts with
+  // "http://localhost". The preview's "Open in browser" names its window
+  // "loom-external", which always means the real browser, local or not.
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    let u = null;
+    try { u = new URL(url); } catch { /* not a url at all */ }
+    if (!u) return { action: "deny" };
+    // No popup opens inside Loom, loopback included: a child window would
+    // inherit this window's preload (window.loomNative), so a page in the
+    // preview could reach the shell through it. Every link goes to the real
+    // browser; a dev server's OAuth popup works there just the same.
+    void frameName;
+    // Only the schemes a browser or mail client is for — never file:, or a
+    // custom scheme that launches some other app with arguments from a page.
+    if (u.protocol === "http:" || u.protocol === "https:" || u.protocol === "mailto:") void shell.openExternal(u.href);
+    return { action: "deny" };
   });
 
   try {
@@ -129,59 +145,217 @@ async function createWindow() {
   }
 }
 
+/**
+ * The menu bar: everything the app can do, where a desktop app keeps it, with
+ * the shortcut beside it. Items are words sent to the page (loom:menu), which
+ * runs the same code the buttons do — the menu is a second door, not a second
+ * implementation. Editing and windows use the OS's own roles.
+ */
 function buildMenu() {
   const isMac = process.platform === "darwin";
+  const send = (action) => () => menuAction(action);
+  const item = (label, action, accelerator) => ({ label, click: send(action), ...(accelerator ? { accelerator } : {}) });
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
-      ...(isMac ? [{ role: "appMenu" }] : []),
+      ...(isMac
+        ? [{
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { label: "Check for Updates…", click: () => void checkForUpdates().catch(() => {}) },
+              { type: "separator" },
+              item("Settings…", "settings", "CmdOrCtrl+,"),
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          }]
+        : []),
       {
-        label: "Loom",
+        label: "File",
         submenu: [
-          { label: "New Orchestra…", accelerator: "CmdOrCtrl+Shift+O", click: () => menuAction("orchestrate") },
-          { label: "New Chat", accelerator: "CmdOrCtrl+N", click: () => menuAction("new-chat") },
+          item("New Chat", "new-chat", "CmdOrCtrl+N"),
+          item("New Task…", "new-task", "CmdOrCtrl+Shift+N"),
+          item("New Orchestra…", "orchestrate", "CmdOrCtrl+Shift+O"),
+          item("New Crew Goal…", "crew", "CmdOrCtrl+Shift+G"),
+          item("Import Chats from Your Agents…", "import-chats", "CmdOrCtrl+Shift+I"),
           { type: "separator" },
-          { label: "Connect a Phone…", accelerator: "CmdOrCtrl+Shift+P", click: () => menuAction("pair") },
-          { label: "Loom Cloud…", click: () => menuAction("cloud") },
+          item("Add Project…", "add-project", "CmdOrCtrl+O"),
+          item("Project Settings…", "project-settings"),
           { type: "separator" },
-          { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => menuAction("settings") },
+          item("Export Chat as Markdown…", "export-chat", "CmdOrCtrl+Shift+E"),
+          { type: "separator" },
+          ...(isMac ? [{ role: "close" }] : [item("Settings…", "settings", "CmdOrCtrl+,"), { type: "separator" }, { role: "quit" }]),
         ],
       },
-      { role: "editMenu" },
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          ...(isMac ? [{ role: "pasteAndMatchStyle" }] : []),
+          { role: "delete" },
+          { role: "selectAll" },
+          { type: "separator" },
+          item("Find in Chat…", "find", "CmdOrCtrl+F"),
+          item("Command Palette…", "palette", "CmdOrCtrl+K"),
+          item("Saved Prompts…", "prompts", "CmdOrCtrl+Shift+V"),
+          ...(isMac ? [{ type: "separator" }, { label: "Speech", submenu: [{ role: "startSpeaking" }, { role: "stopSpeaking" }] }] : []),
+        ],
+      },
       {
         label: "View",
         submenu: [
-          { role: "reload" },
-          { role: "toggleDevTools" },
+          item("Chat", "tab:thread", "CmdOrCtrl+1"),
+          item("Orchestra", "tab:orchestra", "CmdOrCtrl+2"),
+          item("Crew", "tab:crew", "CmdOrCtrl+3"),
+          item("Agents", "tab:fleet", "CmdOrCtrl+4"),
+          item("Board", "tab:board", "CmdOrCtrl+5"),
+          item("Memory", "tab:brain", "CmdOrCtrl+6"),
+          item("Insights", "tab:observatory", "CmdOrCtrl+7"),
+          { type: "separator" },
+          item("Toggle Sidebar", "toggle-sidebar", "CmdOrCtrl+B"),
+          item("Toggle Right Panel", "toggle-rail", "CmdOrCtrl+Alt+B"),
+          item("Toggle Terminal", "toggle-terminal", "Ctrl+`"),
+          item("Toggle Browser", "toggle-browser", "CmdOrCtrl+Shift+B"),
+          item("Console", "console", "CmdOrCtrl+Shift+Y"),
+          item("Focus Mode", "focus", "CmdOrCtrl+."),
+          { label: "Loom Pet", type: "checkbox", checked: petEnabled(), click: (mi) => pet?.setEnabled(mi.checked) },
+          { type: "separator" },
+          {
+            label: "Appearance",
+            submenu: [item("Light", "theme:light"), item("Dark", "theme:dark"), item("Match System", "theme:system")],
+          },
           { type: "separator" },
           { role: "resetZoom" },
           { role: "zoomIn" },
           { role: "zoomOut" },
           { type: "separator" },
           { role: "togglefullscreen" },
+          { type: "separator" },
+          { role: "reload" },
+          { role: "toggleDevTools" },
         ],
       },
       {
-        label: "Help",
+        label: "Agent",
         submenu: [
-          {
-            // On demand only. A shell that checked on launch and downloaded
-            // by itself would be deciding to replace the thing you are in the
-            // middle of using.
-            label: "Check for Updates…",
-            click: () => {
-              void checkForUpdates().catch(() => {});
-            },
-          },
+          item("Interrupt", "interrupt", "CmdOrCtrl+Shift+."),
+          item("Choose Agent…", "pick-agent", "CmdOrCtrl+Shift+A"),
+          item("Toggle Plan Mode", "plan", "CmdOrCtrl+Shift+M"),
           { type: "separator" },
-          {
-            label: "Loom on GitHub",
-            click: () => shell.openExternal("https://github.com/nickthelegend/loom"),
-          },
+          item("Approvals…", "approvals"),
+          item("Add an Agent…", "add-agent"),
+          item("Skills & MCP Servers…", "tools"),
+        ],
+      },
+      {
+        label: "Go",
+        submenu: [
+          item("Next Project", "project:next", "CmdOrCtrl+Alt+Down"),
+          item("Previous Project", "project:prev", "CmdOrCtrl+Alt+Up"),
+          item("Next Chat", "chat:next", "CmdOrCtrl+Shift+]"),
+          item("Previous Chat", "chat:prev", "CmdOrCtrl+Shift+["),
+          { type: "separator" },
+          item("All Projects", "home", "CmdOrCtrl+Shift+H"),
+        ],
+      },
+      {
+        label: "Team",
+        submenu: [
+          item("Invite a Teammate…", "invite", "CmdOrCtrl+Shift+U"),
+          item("Join with an Invite Link…", "join"),
+          { type: "separator" },
+          item("Team Activity", "tab:fleet"),
+          item("Team Settings…", "team-settings"),
+          { type: "separator" },
+          item("Connect a Phone…", "pair", "CmdOrCtrl+Shift+P"),
+          item("Loom Cloud…", "cloud"),
+        ],
+      },
+      { role: "windowMenu" },
+      {
+        role: "help",
+        submenu: [
+          item("Keyboard Shortcuts", "shortcuts", "CmdOrCtrl+/"),
+          { label: "Documentation", click: () => shell.openExternal("https://github.com/nickthelegend/loom#readme") },
+          { label: "Report an Issue…", click: () => shell.openExternal("https://github.com/nickthelegend/loom/issues/new") },
+          { type: "separator" },
+          ...(isMac ? [] : [{ label: "Check for Updates…", click: () => void checkForUpdates().catch(() => {}) }]),
+          { label: "Loom on GitHub", click: () => shell.openExternal("https://github.com/nickthelegend/loom") },
         ],
       },
     ]),
   );
 }
+
+/**
+ * The right-click menu the page doesn't draw itself. The app has its own for
+ * messages, files, projects and chats (it calls preventDefault there); this
+ * covers the rest the way a native app would: editing in any text field —
+ * with spelling suggestions — copying a selection, and links.
+ */
+function attachContextMenu(contents) {
+  contents.on("context-menu", (_e, p) => {
+    const items = [];
+    if (p.misspelledWord) {
+      for (const s of p.dictionarySuggestions.slice(0, 5)) items.push({ label: s, click: () => contents.replaceMisspelling(s) });
+      if (p.dictionarySuggestions.length) items.push({ type: "separator" });
+      items.push({ label: "Add to Dictionary", click: () => contents.session.addWordToSpellCheckerDictionary(p.misspelledWord) });
+      items.push({ type: "separator" });
+    }
+    if (p.linkURL && /^https?:/i.test(p.linkURL)) {
+      items.push({ label: "Open Link in Browser", click: () => shell.openExternal(p.linkURL) });
+      items.push({ label: "Copy Link", click: () => clipboard.writeText(p.linkURL) });
+      items.push({ type: "separator" });
+    }
+    if (p.isEditable) {
+      items.push(
+        { role: "undo", enabled: p.editFlags.canUndo },
+        { role: "redo", enabled: p.editFlags.canRedo },
+        { type: "separator" },
+        { role: "cut", enabled: p.editFlags.canCut },
+        { role: "copy", enabled: p.editFlags.canCopy },
+        { role: "paste", enabled: p.editFlags.canPaste },
+        { role: "selectAll" },
+      );
+    } else if (p.selectionText && p.selectionText.trim()) {
+      items.push({ role: "copy" });
+      items.push({ label: "Quote in Chat", click: () => menuAction("quote:" + p.selectionText.slice(0, 4000)) });
+    }
+    if (!items.length) return;
+    while (items.length && items[items.length - 1].type === "separator") items.pop();
+    Menu.buildFromTemplate(items).popup({ window: BrowserWindow.fromWebContents(contents) ?? undefined });
+  });
+}
+
+
+// The Browser pane's screenshot, of exactly what's on screen: the preview is
+// another origin, so the page can't photograph its own frame — the shell can.
+// A rectangle of the asking window only, clamped to it; a PNG data URL back.
+ipcMain.handle("loom:capture", async (e, rect) => {
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.round(Number(v))) : 0);
+  const r = rect && typeof rect === "object" ? { x: n(rect.x), y: n(rect.y), width: n(rect.width), height: n(rect.height) } : null;
+  if (!r || r.width < 2 || r.height < 2 || r.width > 10000 || r.height > 10000) return null;
+  const image = await e.sender.capturePage(r);
+  return image.isEmpty() ? null : image.toDataURL();
+});
+
+// "Reveal in Finder" from the Explorer: only an absolute path to something that exists.
+ipcMain.handle("loom:reveal", async (_e, p) => {
+  if (typeof p !== "string" || !path.isAbsolute(p) || !fs.existsSync(p)) return false;
+  shell.showItemInFolder(p);
+  return true;
+});
 
 // Native folder picker for "New project". The renderer only ever receives a
 // path the user chose in the OS dialog themselves.
@@ -217,7 +391,7 @@ ipcMain.handle("loom:notify", (_e, payload) => {
     silent: false,
   });
   note.on("click", () => {
-    const target = BrowserWindow.getAllWindows()[0] ?? win;
+    const target = win && !win.isDestroyed() ? win : null;
     if (!target) return;
     if (target.isMinimized()) target.restore();
     target.show();
@@ -225,7 +399,7 @@ ipcMain.handle("loom:notify", (_e, payload) => {
     target.webContents.send("loom:notify-action", { kind: "open", chat: p.chat ?? null, project: p.project ?? null });
   });
   note.on("reply", (_ev, reply) => {
-    const target = BrowserWindow.getAllWindows()[0] ?? win;
+    const target = win && !win.isDestroyed() ? win : null;
     if (!target) return;
     target.webContents.send("loom:notify-action", {
       kind: "reply",
@@ -241,7 +415,7 @@ ipcMain.handle("loom:notify", (_e, payload) => {
 
 /** Does the shell's window have focus? The page asks before deciding to notify. */
 ipcMain.handle("loom:focused", () => {
-  const target = BrowserWindow.getAllWindows()[0] ?? win;
+  const target = win && !win.isDestroyed() ? win : null;
   return Boolean(target && target.isFocused() && target.isVisible());
 });
 
@@ -255,8 +429,26 @@ app.whenReady().then(() => {
   }
   buildMenu();
   void createWindow();
+  // The pet floats over everything and shows what the agents are doing; a
+  // click brings Loom (and that chat) to the front.
+  pet = createPet({
+    daemon: () => {
+      const c = readDaemonConfig();
+      return c ? { base: `http://${c.host}:${c.port}`, adminToken: c.adminToken } : null;
+    },
+    openChat: async (target) => {
+      if (!win || win.isDestroyed()) await createWindow();
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      if (target) win.webContents.send("loom:notify-action", { kind: "open", project: target.project, chat: target.chat ?? null });
+    },
+    onToggle: () => buildMenu(),
+  });
+  if (petEnabled()) setTimeout(() => pet.show(), 1500);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    // the pet is a window too, so "no windows" isn't the test
+    if (!win || win.isDestroyed()) void createWindow();
   });
 });
 

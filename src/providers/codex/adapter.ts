@@ -18,7 +18,10 @@
  * codex-cli 0.153.4).
  */
 
+import { attachedImages } from "../attachments.js";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { guardNativeOutput } from "../../adapters/base.js";
 import { VERSION } from "../../version.js";
@@ -47,15 +50,66 @@ export interface CodexAdapterOptions {
 
 /** The CLI bundled inside the desktop app. */
 const BUNDLED = [
+  // Codex ships inside the ChatGPT desktop app now, and stays current with it
+  "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+  `${process.env.HOME ?? ""}/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex`,
   "/Applications/Codex.app/Contents/Resources/codex",
   `${process.env.HOME ?? ""}/Applications/Codex.app/Contents/Resources/codex`,
 ];
 
-/** Where the codex CLI is: an explicit override, the app bundle, then PATH. */
+/** `codex --version` as numbers, cached per binary until it changes on disk. */
+const versions = new Map<string, { mtimeMs: number; v: number[] | null }>();
+export function codexVersion(bin: string): number[] | null {
+  try {
+    const { mtimeMs } = fs.statSync(bin);
+    const hit = versions.get(bin);
+    if (hit && hit.mtimeMs === mtimeMs) return hit.v;
+    const out = execFileSync(bin, ["--version"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
+    const m = /(\d+)\.(\d+)\.(\d+)/.exec(out);
+    const v = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+    versions.set(bin, { mtimeMs, v });
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+function onPath(name: string): string | null {
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+    const p = dir && path.join(dir, name);
+    try { if (p && fs.statSync(p).isFile()) return p; } catch { /* not here */ }
+  }
+  return null;
+}
+
+const newer = (a: number[] | null, b: number[] | null): boolean => {
+  if (!a) return false;
+  if (!b) return true;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! > b[i]!;
+  return false;
+};
+
+/**
+ * Where the codex CLI is: an explicit override (or LOOM_CODEX_BIN), else the
+ * newest of the app bundles and the one on PATH. Newest matters: OpenAI only
+ * serves its latest models to recent clients, and an old one is refused with
+ * "The 'X' model is not supported when using Codex with a ChatGPT account" —
+ * a Homebrew codex a few versions behind the ChatGPT app's can't run the model
+ * the app just set as your default.
+ */
 export function codexBin(override?: string): string | null {
   if (override) return fs.existsSync(override) ? override : null;
-  for (const p of BUNDLED) if (fs.existsSync(p)) return p;
-  return "codex";
+  const pinned = process.env.LOOM_CODEX_BIN;
+  if (pinned) return fs.existsSync(pinned) ? pinned : null;
+  const found = [...new Set([...BUNDLED.filter(p => fs.existsSync(p)), onPath("codex")].filter((p): p is string => Boolean(p)))];
+  if (!found.length) return "codex";
+  if (found.length === 1) return found[0]!;
+  let best = found[0]!, bestV = codexVersion(best);
+  for (const p of found.slice(1)) {
+    const v = codexVersion(p);
+    if (newer(v, bestV)) { best = p; bestV = v; }
+  }
+  return best;
 }
 
 const SIGNED_OUT = /\b(?:not\s+(?:logged|signed)\s+in|not\s+authenticated|authentication\s+required|login\s+required|please\s+log\s+in)\b/i;
@@ -64,7 +118,22 @@ const MISSING_THREAD = /not found|missing thread|no such thread|unknown thread|d
 
 export function codexFailure(message: string, stderr = ""): string {
   if (SIGNED_OUT.test(`${message}\n${stderr}`)) return "codex not signed in — run `codex login` and try again";
+  if (PLAN_REFUSED.test(message)) return `${message} (OpenAI says this when the codex CLI is too old for the model, or the plan lacks it.) Loom switches this chat to one this Codex lists; update codex, or pick a model for this agent.`;
   return message;
+}
+
+/** ChatGPT sign-in, a model this client or plan can't run. */
+export const PLAN_REFUSED = /model is not supported when using Codex with a ChatGPT account/i;
+
+/**
+ * The model to run instead of one this login can't use: the account's own
+ * default from `model/list` (Codex filters that list by sign-in and plan, as
+ * t3code relies on), else the first one listed. Null when the model is fine,
+ * or there's nothing to judge it against.
+ */
+export function planFallback(model: string | undefined, list: Array<{ id: string; isDefault?: boolean }>): string | null {
+  if (!model || !list.length || list.some(m => m.id === model)) return null;
+  return (list.find(m => m.isDefault) ?? list[0])!.id;
 }
 
 /**
@@ -133,10 +202,13 @@ interface PendingRequest {
   resolve: (decision: ApprovalDecision) => void;
 }
 
-interface PendingInput { turnId?: TurnId; resolve: (answers: UserInputAnswers) => void }
+interface PendingInput { turnId?: TurnId; resolve: (answers: UserInputAnswers) => void; secret?: Set<string> }
 
 interface Session {
   info: ProviderSession;
+  /** Models this sign-in's plan refused in this session, and the switch away from the last one. */
+  refused?: Set<string>;
+  rerouting?: Promise<void>;
   proc: HarnessProcess;
   rpc: CodexRpc;
   providerThreadId: string;
@@ -219,6 +291,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
     });
     void proc.closed.then(({ code }) => this.exited(session, code));
 
+    let reroute: { fromModel: string; toModel: string } | null = null;
     try {
       await session.rpc.request("initialize", { clientInfo: { name: "loom", title: "Loom", version: VERSION },
         capabilities: { experimentalApi: true, requestAttestation: false } });
@@ -241,6 +314,14 @@ export class CodexProviderAdapter implements ProviderAdapter {
       session.info = { ...session.info, status: "ready", resumeCursor: threadId, updatedAt: Date.now(),
         ...(typeof opened.model === "string" && opened.model ? { model: opened.model } : {}),
         ...(typeof opened.cwd === "string" && opened.cwd ? { cwd: opened.cwd } : {}) };
+      // No model chosen in Loom: Codex falls back to ~/.codex/config.toml, which
+      // the Codex app may have set to a model this sign-in's plan doesn't have.
+      // Ask what the account can run and use its default instead of failing.
+      if (!input.modelSelection?.model) {
+        const to = planFallback(session.info.model, await this.accountModels(session.rpc));
+        if (to) reroute = { fromModel: session.info.model!, toModel: to };
+        if (to) session.info = { ...session.info, model: to };
+      }
     } catch (error) {
       session.stopping = true;
       await stopHarness(proc).catch(() => {});
@@ -255,7 +336,43 @@ export class CodexProviderAdapter implements ProviderAdapter {
     this.emit(input.threadId, "session.started", cursorPayload(input.resumeCursor));
     this.emit(input.threadId, "thread.started", { providerThreadId: session.providerThreadId });
     this.emit(input.threadId, "session.state.changed", { state: "ready" });
+    if (reroute) this.emit(input.threadId, "model.rerouted", { ...reroute, reason: "this Codex doesn't list it for your sign-in — an older codex, or a model your plan lacks" });
     return { ...session.info };
+  }
+
+  /** A turn was refused for the plan: the next one runs on a model the account has. */
+  private async afterPlanRefusal(s: Session): Promise<void> {
+    const from = s.info.model!;
+    (s.refused ??= new Set()).add(from);
+    this.modelCache = null;
+    const list = (await this.accountModels(s.rpc)).filter(m => m.id !== from);
+    const to = (list.find(m => m.isDefault) ?? list[0])?.id;
+    if (!to) return;
+    s.info = { ...s.info, model: to };
+    this.emit(s.info.threadId, "model.rerouted", { fromModel: from, toModel: to, reason: "this Codex doesn't list it for your sign-in — an older codex, or a model your plan lacks" });
+  }
+
+  /** What this sign-in can run (`model/list`), cached for ten minutes; empty when Codex can't say. */
+  private modelCache: { at: number; list: Array<{ id: string; isDefault?: boolean }> } | null = null;
+  private async accountModels(rpc: CodexRpc): Promise<Array<{ id: string; isDefault?: boolean }>> {
+    if (this.modelCache && Date.now() - this.modelCache.at < 600_000) return this.modelCache.list;
+    try {
+      // paged by cursor, as t3code and Agent Orchestrator read it
+      const data: Json[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 10; page++) {
+        const res = await rpc.request("model/list", { limit: 100, ...(cursor ? { cursor } : {}) }, 10_000);
+        if (Array.isArray(res.data)) data.push(...res.data as Json[]);
+        cursor = typeof res.nextCursor === "string" && res.nextCursor ? res.nextCursor : undefined;
+        if (!cursor) break;
+      }
+      const list = data.filter(m => typeof m.id === "string" || typeof m.model === "string")
+        .map(m => ({ id: String(m.model ?? m.id), isDefault: m.isDefault === true }));
+      this.modelCache = { at: Date.now(), list };
+      return list;
+    } catch {
+      return [];
+    }
   }
 
   /** Thread settings from the runtime mode, applied on start and resume. */
@@ -278,7 +395,10 @@ export class CodexProviderAdapter implements ProviderAdapter {
     const s = this.session(input.threadId, "sendTurn");
     if (s.info.activeTurnId) throw new ProviderError("validation", "sendTurn", "a codex turn is already running in this chat",
       { provider: this.provider, instanceId: this.instanceId, threadId: input.threadId, mayHaveStarted: false });
-    const model = input.modelSelection?.model ?? s.info.model;
+    // A model this plan refused earlier in the session gives way to the one it switched to.
+    if (s.rerouting) { await s.rerouting; s.rerouting = undefined; }
+    const asked = input.modelSelection?.model;
+    const model = asked && !s.refused?.has(asked) ? asked : s.info.model;
     const effort = input.modelSelection?.effort;
     s.baseline = null;
     s.turnUsage = null;
@@ -291,7 +411,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
     let response: Json;
     try {
       response = await s.rpc.request("turn/start", { threadId: s.providerThreadId,
-        input: [{ type: "text", text: input.input, text_elements: [] }],
+        // attached pictures go in as localImage inputs, so Codex sees them rather than a path
+        input: [{ type: "text", text: input.input, text_elements: [] },
+          ...attachedImages(input.input, s.info.cwd).map((im) => ({ type: "localImage", path: im.abs }))],
         ...(input.clientTurnId ? { clientUserMessageId: input.clientTurnId } : {}),
         ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...collaboration });
     } catch (error) {
@@ -338,7 +460,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (!pending) throw new ProviderError("not_found", "respondToUserInput", `no open codex question "${requestId}"`, { provider: this.provider, threadId });
     s.inputs.delete(requestId);
     pending.resolve(answers);
-    this.emit(threadId, "user-input.resolved", { answers }, { requestId, ...(pending.turnId ? { turnId: pending.turnId } : {}) });
+    // a secret answer reaches Codex, never the thread's log
+    const shown = Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, pending.secret?.has(k) ? "\u2022\u2022\u2022\u2022" : v]));
+    this.emit(threadId, "user-input.resolved", { answers: shown }, { requestId, ...(pending.turnId ? { turnId: pending.turnId } : {}) });
   }
 
   async compact(threadId: ThreadId): Promise<void> {
@@ -439,6 +563,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
         }
         this.settlePending(s, "cancel");
         const error = (turn.error ?? null) as Json | null;
+        if (error?.message && PLAN_REFUSED.test(String(error.message)) && s.info.model) s.rerouting = this.afterPlanRefusal(s).catch(() => {});
         const u = s.turnUsage;
         this.emit(threadId, "turn.completed", { state: TURN_STATES[String(turn.status)] ?? "failed",
           ...(error?.message ? { errorMessage: codexFailure(String(error.message), s.proc.stderr()) } : {}),
@@ -512,7 +637,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
       this.emit(threadId, "item.completed", { itemType, status: "completed", ...describeItem(itemType, item) }, extra);
       this.emit(threadId, "user-input.requested", { responseMode: "message", questions: (item.questions as Json[]).map((q, index) => ({
         id: String(index), header: "Question", question: String(q.title ?? ""), allowCustomAnswer: true, multiSelect: false,
-        options: (Array.isArray(q.options) ? q.options : []).map(label => ({ label: String(label), description: "" })) })) },
+        options: (Array.isArray(q.options) ? q.options : []).map(o => (o && typeof o === "object"
+          ? { label: String((o as Json).label ?? (o as Json).value ?? ""), description: String((o as Json).description ?? "") }
+          : { label: String(o), description: "" })) })) },
       { ...at, requestId: `codex-async:${threadId}:${itemId ?? randomUUID()}` });
       return;
     }
@@ -574,7 +701,8 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private async serverRequest(s: Session, method: string, params: Json): Promise<Json> {
     switch (method) {
       case "item/commandExecution/requestApproval":
-      case "item/fileChange/requestApproval": {
+      case "item/fileChange/requestApproval":
+      case "item/fileRead/requestApproval": {
         const decision = await this.ask(s, method, params);
         return { decision };
       }
@@ -590,8 +718,15 @@ export class CodexProviderAdapter implements ProviderAdapter {
         return { permissions: decision === "accept" || decision === "acceptForSession" ? params.permissions ?? {} : {},
           scope: decision === "acceptForSession" ? "session" : "turn" };
       }
-      case "mcpServer/elicitation/request":
+      case "mcpServer/elicitation/request": {
+        // An MCP server asking for structured input: not answerable from Loom yet,
+        // so it's declined — but out loud, so a tool that fails next isn't a mystery.
+        const who = typeof params.serverName === "string" ? params.serverName : "an MCP server";
+        const what = typeof params.message === "string" ? `: ${params.message.slice(0, 200)}` : "";
+        this.emit(s.info.threadId, "runtime.warning", { message: `${who} asked for input${what} — Loom declined it (MCP forms aren't supported yet)` },
+          typeof params.turnId === "string" ? { turnId: params.turnId } : {});
         return { action: "decline", content: null, _meta: null };
+      }
       case "item/tool/requestUserInput":
         return { answers: toCodexAnswers(await this.askUser(s, params)) };
       default:
@@ -605,8 +740,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (s.stopping || !questions.length) return Promise.resolve({});
     const requestId = randomUUID();
     const turnId = typeof params.turnId === "string" ? params.turnId : s.info.activeTurnId;
+    const secret = new Set(questions.filter(q => q.secret).map(q => q.id));
     return new Promise(resolve => {
-      s.inputs.set(requestId, { resolve, ...(turnId ? { turnId } : {}) });
+      s.inputs.set(requestId, { resolve, ...(turnId ? { turnId } : {}), ...(secret.size ? { secret } : {}) });
       this.emit(s.info.threadId, "user-input.requested", { questions }, { requestId, ...(turnId ? { turnId } : {}),
         ...(typeof params.itemId === "string" ? { itemId: params.itemId } : {}) });
     });
@@ -642,7 +778,8 @@ function toUserInputQuestions(raw: unknown): UserInputQuestion[] {
       .map(o => ({ label: text(o.label), description: text(o.description) })).filter(o => o.label);
     if (!text(q.id) || !text(q.question)) return [];
     return [{ id: text(q.id), header: text(q.header) || "Question", question: text(q.question), options,
-      ...(q.isOther === true || !options.length ? { allowCustomAnswer: true } : {}), multiSelect: false }];
+      ...(q.isOther === true || !options.length ? { allowCustomAnswer: true } : {}), multiSelect: false,
+      ...(q.isSecret === true ? { secret: true, allowCustomAnswer: true } : {}) }];
   });
 }
 
@@ -676,25 +813,47 @@ function describeItem(itemType: CanonicalItemType, item: Json): Omit<ItemLifecyc
         ...(typeof item.aggregatedOutput === "string" ? { output: item.aggregatedOutput } : {}) } };
     }
     case "file_change": {
-      const changes = ((item.changes as Array<{ path?: string; kind?: { type?: string } }> | undefined) ?? [])
-        .filter(c => c.path).map(c => ({ path: String(c.path), kind: c.kind?.type ?? "update" }));
+      const changes = ((item.changes as Array<{ path?: string; kind?: { type?: string }; diff?: string }> | undefined) ?? [])
+        .filter(c => c.path).map(c => ({ path: String(c.path), kind: c.kind?.type ?? "update", ...(typeof c.diff === "string" && c.diff ? { diff: c.diff } : {}) }));
       return { data: { changes } };
     }
-    case "mcp_tool_call":
-      return { detail: `mcp: ${String(item.tool ?? "")}`, data: { tool: String(item.tool ?? "mcp"),
-        ...(item.arguments && typeof item.arguments === "object" ? { input: item.arguments as Record<string, unknown> } : {}) } };
+    case "mcp_tool_call": {
+      const { output, images } = mcpResult(item.result);
+      const err = item.error && typeof item.error === "object" ? String((item.error as Json).message ?? "") : typeof item.error === "string" ? item.error : "";
+      const server = typeof item.server === "string" ? item.server : "";
+      return { detail: `${server ? server + " · " : "mcp: "}${String(item.tool ?? "")}`, data: { tool: String(item.tool ?? "mcp"), ...(server ? { server } : {}),
+        ...(item.arguments && typeof item.arguments === "object" ? { input: item.arguments as Record<string, unknown> } : {}),
+        ...(output ? { output } : {}), ...(err ? { error: err } : {}), ...(images.length ? { images } : {}) } };
+    }
     case "dynamic_tool_call":
-    case "collab_agent_tool_call":
-      return { detail: String(item.tool ?? itemType), data: { tool: String(item.tool ?? itemType) } };
+    case "collab_agent_tool_call": {
+      const { output, images } = mcpResult({ content: item.contentItems });
+      const prompt = typeof item.prompt === "string" ? item.prompt : "";
+      return { detail: prompt ? `${String(item.tool ?? itemType)}: ${prompt.replace(/\s+/g, " ").slice(0, 140)}` : String(item.tool ?? itemType),
+        data: { tool: String(item.tool ?? itemType), ...(item.arguments && typeof item.arguments === "object" ? { input: item.arguments as Record<string, unknown> } : {}),
+          ...(output ? { output } : {}), ...(images.length ? { images } : {}) } };
+    }
     case "web_search":
-      return { detail: `search: ${String(item.query ?? "")}`.slice(0, 160), data: { tool: "web_search" } };
+      return { detail: `search: ${String(item.query ?? "")}`.slice(0, 160), data: { tool: "web_search", ...(item.query ? { input: { query: String(item.query) } } : {}) } };
     case "image_view":
-      return { data: { tool: "image_view" } };
+      return { detail: typeof item.path === "string" ? `view ${item.path}` : "view image",
+        data: { tool: "image_view", ...(typeof item.path === "string" ? { images: [{ path: item.path }] } : {}) } };
     case "error":
       return typeof item.message === "string" ? { detail: item.message } : {};
     default:
       return {};
   }
+}
+
+/** An MCP result's text and images (content blocks: {type:"text"|"image", text | data+mimeType}). */
+function mcpResult(result: unknown): { output: string; images: Array<{ data: string; mime: string }> } {
+  const content = result && typeof result === "object" ? (result as Json).content : undefined;
+  if (!Array.isArray(content)) return { output: typeof result === "string" ? result : "", images: [] };
+  const blocks = content as Json[];
+  return {
+    output: blocks.map(b => (b.type === "text" && typeof b.text === "string" ? b.text : "")).filter(Boolean).join("\n"),
+    images: blocks.flatMap(b => (b.type === "image" && typeof b.data === "string" ? [{ data: b.data, mime: String(b.mimeType ?? b.mime_type ?? "image/png") }] : [])),
+  };
 }
 
 function describeRequest(method: string, params: Json): { detail?: string } {

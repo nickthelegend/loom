@@ -20,10 +20,16 @@
  * `session.next.compaction.*` reports compaction).
  */
 
+import { attachedImages } from "../providers/attachments.js";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
 import { AdapterBase, agentEnv, cliAvailable, cliOutput, fetchJson, firstLine, frameBriefing, freePort, waitFor, type AgentCheck } from "./base.js";
+import { requestApproval } from "../core/approvals.js";
+import { logbook } from "../core/logbook.js";
 import { permissionFor } from "../core/permissions.js";
 import { NativeDispatchRejected, NativeQuiescenceUnknown, NativeSessionMissing } from "../core/continuity/contracts.js";
 
@@ -50,6 +56,26 @@ export function parseModelRef(model: string): { providerID: string; id: string }
   const idx = model.indexOf("/");
   if (idx <= 0 || idx === model.length - 1) return null;
   return { providerID: model.slice(0, idx), id: model.slice(idx + 1) };
+}
+
+/** Errors that come from something already in the session's history, not from this turn. */
+const POISONED_HISTORY = /media must contain valid base64|invalid (?:image|base64)|could not process image|image (?:is )?(?:too large|not supported)/i;
+
+/** The prompt body, with attached pictures as file attachments so OpenCode sees them, not just their path. */
+function promptWithFiles(text: string, dir: string): { text: string; files?: Array<{ uri: string; name: string }> } {
+  // inline as a data URL: a file:// URL to a folder with a space in it ("Extreme SSD") reached the model as empty media
+  const files = attachedImages(text, dir).map((im) => ({ uri: `data:${im.mime};base64,${fs.readFileSync(im.abs).toString("base64")}`, name: path.basename(im.rel) }));
+  return files.length ? { text, files } : { text };
+}
+
+/** A turn's tokens for run_complete: totals, plus the cached and reasoning shares when there are any. */
+function usagePayload(u: { input: number; output: number; cached: number; reasoning: number }): Record<string, number> {
+  return {
+    inputTokens: u.input,
+    outputTokens: u.output,
+    ...(u.cached ? { cachedInputTokens: u.cached } : {}),
+    ...(u.reasoning ? { reasoningTokens: u.reasoning } : {}),
+  };
 }
 
 /**
@@ -86,7 +112,7 @@ export class OpenCodeAdapter extends AdapterBase {
   private options: OpenCodeOptions;
   private started = false;
   // Token usage from the assistant message, stashed to ride run_complete.
-  private lastUsage: { input: number; output: number } | null = null;
+  private lastUsage: { input: number; output: number; cached: number; reasoning: number } | null = null;
   // The provider/model the assistant message actually ran, for the gen_ai span.
   private lastModel: string | null = null;
 
@@ -100,7 +126,7 @@ export class OpenCodeAdapter extends AdapterBase {
   /** interrupt() was asked for during this turn. */
   private interrupted = false;
   /** Tools opencode started this turn, by call id (1.18 reports name and result separately). */
-  private toolCalls = new Map<string, { tool: string; title: string }>();
+  private toolCalls = new Map<string, { tool: string; title: string; input?: Json }>();
   /** A compaction was already reported as done (both the step event and the session event can say so). */
   private compactionReported = false;
 
@@ -352,16 +378,32 @@ export class OpenCodeAdapter extends AdapterBase {
           const delta = typeof props.delta === "string" ? props.delta : part.text.startsWith(prev) ? part.text.slice(prev.length) : "";
           if (delta) this.streamText(delta);
         }
+      } else if (partType === "reasoning" && typeof part.text === "string") {
+        // its thinking, kept (not only streamed): the finished part replaces any earlier copy
+        if (this.roles.get(messageID) !== "user") this.reasoningParts.set(`${messageID}:${String(part.id ?? "r")}`, part.text);
       } else if (partType === "tool") {
         const state = (part.state ?? {}) as Json;
-        if (String(state.status ?? "") === "completed") {
+        const st = String(state.status ?? "");
+        const key = String(part.callID ?? part.id ?? "");
+        if ((st === "completed" || st === "error") && !this.toolsDone.has(key)) {
+          if (key) this.toolsDone.add(key);
+          const input = state.input && typeof state.input === "object" ? (state.input as Json) : undefined;
+          const output = typeof state.output === "string" ? state.output : "";
+          const error = st === "error" ? String(state.error ?? "failed") : "";
+          const tool = String(part.tool ?? "tool");
           this.emit({
             kind: "tool_call",
             payload: {
-              tool: String(part.tool ?? "tool"),
-              summary: String((state as Json).title ?? part.tool ?? "tool"),
+              tool,
+              summary: String((state as Json).title ?? tool),
+              ok: st === "completed",
+              ...(input ? { input: Object.fromEntries(Object.entries(input).slice(0, 20).map(([k, v]) => [k, typeof v === "string" && v.length > 600 ? `${v.slice(0, 600)}\u2026` : v])) } : {}),
+              ...(output.trim() ? { preview: output.length > 4000 ? `\u2026\n${output.slice(-4000)}` : output } : {}),
+              ...(error ? { error: error.slice(0, 1500) } : {}),
             },
           });
+          // its todo list is its plan
+          if (tool === "todowrite" && Array.isArray(input?.todos)) this.emitPlan(input!.todos as Json[]);
         }
       } else if (partType === "patch") {
         const files = Array.isArray(part.files) ? part.files : [];
@@ -380,6 +422,9 @@ export class OpenCodeAdapter extends AdapterBase {
       if (role) this.roles.set(messageID, role);
       const time = (info.time ?? {}) as Json;
       if (role === "assistant" && time.completed) {
+        const thought = [...this.reasoningParts.entries()].filter(([k]) => k.startsWith(`${messageID}:`)).map(([, v]) => v).join("\n").trim();
+        for (const k of [...this.reasoningParts.keys()]) if (k.startsWith(`${messageID}:`)) this.reasoningParts.delete(k);
+        if (thought) this.emit({ kind: "message", payload: { text: thought, reasoning: true } });
         const parts = this.textParts.get(messageID);
         if (parts && parts.size) {
           const text = [...parts.values()].join("").trim();
@@ -398,15 +443,147 @@ export class OpenCodeAdapter extends AdapterBase {
       return;
     }
 
-    if (/^(permission|question)(\.v2)?\.asked$/.test(type)) {
+    if (type === "todo.updated") {
       if (props.sessionID && props.sessionID !== mySession) return;
-      const detail =
-        (props.title as string | undefined) ??
-        (props.text as string | undefined) ??
-        ((props.permission as Json | undefined)?.title as string | undefined) ??
-        type;
-      this.emit({ kind: "needs_input", payload: { question: String(detail).slice(0, 500) } });
+      if (Array.isArray(props.todos)) this.emitPlan(props.todos as Json[]);
+      return;
     }
+
+    if (/^question(\.v2)?\.asked$/.test(type)) {
+      if (props.sessionID && props.sessionID !== mySession) return;
+      this.askQuestion(props, type.includes(".v2"));
+      return;
+    }
+    // Answered or dismissed somewhere else (opencode's own TUI, a timeout): fold the card.
+    if (/^question(\.v2)?\.(replied|rejected)$/.test(type)) {
+      const id = String(props.requestID ?? props.id ?? "");
+      if (id && this.questions.delete(`oc-q:${id}`)) {
+        this.emit({ kind: "status", payload: { state: "question_answered", requestId: `oc-q:${id}`, ...(type.endsWith("rejected") ? { answers: {} } : {}) } });
+      }
+      return;
+    }
+    if (/^permission(\.v2)?\.asked$/.test(type)) {
+      if (props.sessionID && props.sessionID !== mySession) return;
+      void this.askPermission(props, type.includes(".v2"));
+    }
+  }
+
+  private reasoningParts = new Map<string, string>();
+  private toolsDone = new Set<string>();
+
+  /** An image a tool returned (a file: URI, or data: base64 filed under .loom/attachments), as a path the thread can show. */
+  private keepImage(uri: string, mime: string): Array<{ path: string; mime: string }> {
+    try {
+      if (uri.startsWith("file://")) {
+        const abs = decodeURIComponent(uri.slice(7));
+        const rel = path.relative(this.projectDir, abs);
+        return [{ path: rel.startsWith("..") ? abs : rel.split(path.sep).join("/"), mime }];
+      }
+      const m = /^data:([^;,]+);base64,(.+)$/s.exec(uri);
+      if (!m) return [];
+      const buf = Buffer.from(m[2]!, "base64");
+      if (!buf.length || buf.length > 12 * 1024 * 1024) return [];
+      const ext = ({ "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" } as Record<string, string>)[m[1]!] ?? "png";
+      const rel = path.join(".loom", "attachments", `${createHash("sha1").update(buf).digest("hex").slice(0, 12)}.${ext}`);
+      const abs = path.join(this.projectDir, rel);
+      if (!fs.existsSync(abs)) { fs.mkdirSync(path.dirname(abs), { recursive: true }); fs.writeFileSync(abs, buf); }
+      return [{ path: rel.split(path.sep).join("/"), mime }];
+    } catch {
+      return [];
+    }
+  }
+
+  /** opencode's todos as Loom's plan checklist. */
+  private emitPlan(todos: Json[]): void {
+    const plan = todos.map((t) => ({ step: String(t.content ?? t.text ?? ""),
+      status: t.status === "completed" ? "completed" : t.status === "in_progress" ? "inProgress" : "pending" })).filter((t) => t.step);
+    if (plan.length) this.emit({ kind: "status", payload: { state: "plan_updated", plan } });
+  }
+
+  // ---- opencode asking you things ---------------------------------------------
+
+  /** Open questions by Loom request id → opencode's request, so an answer can find its way back. */
+  private questions = new Map<string, { id: string; sid: string; count: number }>();
+
+  /**
+   * opencode's question tool: one or more questions, each with labelled
+   * options, maybe several picks, maybe your own words. The card in the thread
+   * answers it through respondToUserInput.
+   */
+  private askQuestion(props: Json, _v2: boolean): void {
+    const id = String(props.id ?? "");
+    const list = Array.isArray(props.questions) ? (props.questions as Json[]) : [];
+    if (!id || !list.length) return;
+    const questions = list.map((q, i) => ({
+      id: String(i),
+      header: String(q.header ?? "Question").slice(0, 40),
+      question: String(q.question ?? ""),
+      options: (Array.isArray(q.options) ? (q.options as Json[]) : []).map((o) =>
+        typeof o === "string" ? { label: o, description: "" } : { label: String(o.label ?? ""), description: String(o.description ?? "") }),
+      multiSelect: q.multiple === true,
+      allowCustomAnswer: q.custom !== false,
+    }));
+    const requestId = `oc-q:${id}`;
+    this.questions.set(requestId, { id, sid: String(props.sessionID ?? this.activeSid ?? this.sessionId ?? ""), count: questions.length });
+    this.emit({
+      kind: "needs_input",
+      payload: { question: questions.map((q) => q.question).join("\n").slice(0, 500), questions, requestId, responseMode: "tool" },
+    });
+  }
+
+  /** Answer an open opencode question. answers: { [questionIndex]: label | labels }; none at all dismisses it. */
+  async respondToUserInput(_chat: string, requestId: string, answers: Record<string, unknown>): Promise<void> {
+    const open = this.questions.get(requestId);
+    if (!open || !this.baseUrl) throw new Error(`no open opencode question "${requestId}"`);
+    const picks = Array.from({ length: open.count }, (_v, i) => {
+      const a = answers[String(i)];
+      return (Array.isArray(a) ? a : a == null || a === "" ? [] : [a]).map((x) => String(x));
+    });
+    const dismiss = picks.every((p) => !p.length);
+    // the session-scoped route on current builds, the global one on older
+    const routes = [
+      `${this.baseUrl}/api/session/${encodeURIComponent(open.sid)}/question/${encodeURIComponent(open.id)}/${dismiss ? "reject" : "reply"}`,
+      `${this.baseUrl}/question/${encodeURIComponent(open.id)}/${dismiss ? "reject" : "reply"}`,
+    ];
+    let last = "";
+    for (const url of routes) {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify(dismiss ? {} : { answers: picks }), signal: AbortSignal.timeout(15_000) }).catch((e: Error) => ({ ok: false, status: 0, text: async () => e.message }) as unknown as Response);
+      if (res.ok) {
+        this.questions.delete(requestId);
+        this.emit({ kind: "status", payload: { state: "question_answered", requestId, answers } });
+        return;
+      }
+      last = `${res.status} ${(await res.text().catch(() => "")).slice(0, 160)}`;
+      if (res.status !== 404) break;
+    }
+    throw new Error(`opencode didn't take the answer (${last})`);
+  }
+
+  /**
+   * opencode asking to run a command, edit a file, fetch a URL: the same
+   * approval card Loom shows for any agent, and opencode hears once / always / no.
+   */
+  private async askPermission(props: Json, v2: boolean): Promise<void> {
+    const id = String(props.id ?? "");
+    if (!id || !this.baseUrl) return;
+    const sid = String(props.sessionID ?? this.activeSid ?? this.sessionId ?? "");
+    const tool = String((v2 ? props.action : props.permission) ?? "permission");
+    const targets = (Array.isArray(v2 ? props.resources : props.patterns) ? (v2 ? props.resources : props.patterns) as unknown[] : []).map(String);
+    const meta = (props.metadata ?? {}) as Json;
+    const summary = String(meta.command ?? meta.description ?? meta.filePath ?? meta.url ?? (targets.length ? `${tool} ${targets.join(", ")}` : tool)).slice(0, 300);
+    const decision = await requestApproval({
+      project: (this.options as { loomProject?: string }).loomProject ?? "",
+      agent: this.id, tool, input: { ...meta, ...(targets.length ? { targets } : {}) }, summary, sessionOption: true,
+    });
+    const reply = decision.behavior !== "allow" ? "reject" : decision.scope === "session" ? "always" : "once";
+    const body = JSON.stringify({ reply, ...(decision.message ? { message: decision.message } : {}) });
+    for (const url of [`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/permission/${encodeURIComponent(id)}/reply`, `${this.baseUrl}/permission/${encodeURIComponent(id)}/reply`]) {
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      if (res?.ok) return;
+      if (res && res.status !== 404) break;
+    }
+    logbook.warn(`agent:${this.id}`, "opencode didn't take the permission reply", id);
   }
 
   /** opencode 1.18's tool and compaction events, for a session already known to be ours. */
@@ -415,17 +592,30 @@ export class OpenCodeAdapter extends AdapterBase {
     if (type === "session.next.tool.called") {
       const input = (props.input ?? {}) as Json;
       const title = String(input.description ?? input.command ?? input.filePath ?? input.path ?? input.pattern ?? props.tool ?? "tool");
-      this.toolCalls.set(callId, { tool: String(props.tool ?? "tool"), title: title.slice(0, 200) });
+      this.toolCalls.set(callId, { tool: String(props.tool ?? "tool"), title: title.slice(0, 200), input });
       return;
     }
     if (type === "session.next.tool.success" || type === "session.next.tool.failed") {
       const call = this.toolCalls.get(callId) ?? { tool: "tool", title: "tool" };
       this.toolCalls.delete(callId);
+      // the same call also arrives as a message part on these builds: log it once
+      if (callId && this.toolsDone.has(callId)) return;
+      if (callId) this.toolsDone.add(callId);
       const err = (props.error ?? {}) as Json;
+      // the result: text blocks are its output, file blocks with an image type are pictures it made or read
+      const content = Array.isArray(props.content) ? (props.content as Json[]) : [];
+      const output = content.filter((c) => c.type === "text" && typeof c.text === "string").map((c) => String(c.text)).join("\n");
+      const images = content.filter((c) => c.type === "file" && /^image\//.test(String(c.mime ?? ""))).flatMap((c) => this.keepImage(String(c.uri ?? ""), String(c.mime)));
+      const input = call.input ? Object.fromEntries(Object.entries(call.input).slice(0, 20).map(([k, v]) => [k, typeof v === "string" && v.length > 600 ? `${v.slice(0, 600)}\u2026` : v])) : undefined;
       this.emit({
         kind: "tool_call",
-        payload: { tool: call.tool, summary: call.title, ...(type.endsWith("failed") ? { error: String(err.message ?? "failed").slice(0, 300) } : {}) },
+        payload: { tool: call.tool, summary: call.title, ok: !type.endsWith("failed"),
+          ...(input && Object.keys(input).length ? { input } : {}),
+          ...(output.trim() ? { preview: output.length > 4000 ? `\u2026\n${output.slice(-4000)}` : output } : {}),
+          ...(images.length ? { images } : {}),
+          ...(type.endsWith("failed") ? { error: String(err.message ?? "failed").slice(0, 1500) } : {}) },
       });
+      if (call.tool === "todowrite" && Array.isArray(call.input?.todos)) this.emitPlan(call.input!.todos as Json[]);
       return;
     }
     if (type === "session.next.compaction.started") {
@@ -460,6 +650,14 @@ export class OpenCodeAdapter extends AdapterBase {
    * fact holds across two consecutive polls (nothing new started).
    * `/wait` is tried first but returns 503 on 1.17.
    */
+  /** Is opencode still running this session? Null when this opencode can't say (older builds). */
+  private async sessionActive(sid: string): Promise<boolean | null> {
+    const res = await fetchJson<Json>(`${this.baseUrl}/api/session/active`).catch(() => null);
+    const active = res ? ((res.data ?? res) as Json) : null;
+    if (!active || typeof active !== "object") return null;
+    return Object.prototype.hasOwnProperty.call(active, sid);
+  }
+
   private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
     try {
       await fetchJson(
@@ -473,6 +671,13 @@ export class OpenCodeAdapter extends AdapterBase {
     const deadline = Date.now() + timeoutMs;
     let stableId: string | null = null;
     while (Date.now() < deadline) {
+      // Interrupted: done as soon as opencode stops running it, answer or not
+      // (one that never answered would otherwise be waited on for the hour).
+      if (this.interrupted && (await this.sessionActive(sid)) !== true) {
+        const after = await this.listMessages(sid).catch(() => [] as Json[]);
+        const last = after.filter((m) => (m.type ?? m.role) === "assistant" && !baseline.has(String(m.id))).at(-1);
+        return last ?? null;
+      }
       const messages = await this.listMessages(sid).catch(() => [] as Json[]);
       const newest = messages[messages.length - 1];
       const newAssistants = messages.filter(
@@ -487,15 +692,20 @@ export class OpenCodeAdapter extends AdapterBase {
         (newest.time as Json | undefined)?.completed &&
         newAssistants.length > 0;
       if (turnLooksDone) {
-        // Errors are terminal immediately; otherwise require stability
-        // across two polls so multi-step turns aren't cut short.
+        // Errors are terminal immediately. A finished *step* is not a finished
+        // turn: one that ended in tool calls is followed by another, and a slow
+        // model can take longer than a poll to start it — so a session opencode
+        // still lists as active, or a step that finished on tool calls, keeps
+        // waiting. Otherwise require stability across two polls.
         if (newest!.finish === "error" || newest!.error) return newest!;
-        if (stableId === String(newest!.id)) return newest!;
-        stableId = String(newest!.id);
+        const midTurn = /tool/i.test(String(newest!.finish ?? "")) || (await this.sessionActive(sid)) === true;
+        if (midTurn) stableId = null;
+        else if (stableId === String(newest!.id)) return newest!;
+        else stableId = String(newest!.id);
       } else {
         stableId = null;
       }
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise((r) => setTimeout(r, typeof (this.options as { pollMs?: unknown }).pollMs === "number" ? (this.options as { pollMs: number }).pollMs : 3000));
     }
     return null;
   }
@@ -505,75 +715,87 @@ export class OpenCodeAdapter extends AdapterBase {
     if (!this.started) await this.start();
     if (this._busy) throw new Error(`opencode agent "${this.id}" is busy`);
     this._busy = true;
+    this.interrupted = false;
     const started = Date.now();
     const timeoutMs = 60 * 60 * 1000;
     try {
-      const sid = await this.ensureSession();
-      const baseline = new Set(
-        (await this.listMessages(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
-      );
-      // No per-prompt system field in the API, so the handoff briefing rides in
-      // the prompt — framed as an unmissable authoritative block (frameBriefing)
-      // rather than a loose preamble.
-      const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
-      await fetchJson(`${this.baseUrl}/api/session/${sid}/prompt`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: { text } }),
-      });
+      // One retry, in a fresh session, when opencode refuses the session's own
+      // history: a single bad picture in it (media that isn't valid base64)
+      // is replayed on every later turn and would lock this agent out for good.
+      for (let attempt = 0; ; attempt++) {
+        const sid = await this.ensureSession();
+        const baseline = new Set(
+          (await this.listMessages(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
+        );
+        // No per-prompt system field in the API, so the handoff briefing rides in
+        // the prompt — framed as an unmissable authoritative block (frameBriefing)
+        // rather than a loose preamble.
+        const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
+        await fetchJson(`${this.baseUrl}/api/session/${sid}/prompt`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt: promptWithFiles(text, this.projectDir) }),
+        });
 
-      const turn = await this.waitForTurn(sid, baseline, timeoutMs);
-      if (!turn) {
-        this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
-      } else {
-        const turnId = String(turn.id);
-        // Fetch the full message: parts (in case SSE missed them) + errors.
-        const detail = await fetchJson<Json>(
-          `${this.baseUrl}/api/session/${sid}/message/${turnId}`,
-        ).catch(() => null);
-        const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
-        if (info.finish === "error" || info.error) {
-          const err = (info.error ?? {}) as Json;
-          this.emit({
-            kind: "error",
-            payload: {
-              message: String(err.message ?? "opencode turn failed").slice(0, 500),
-            },
-          });
-        } else if (!this.emittedText.has(turnId)) {
-          const content = Array.isArray(info.content) ? (info.content as Json[]) : [];
-          const text = content
-            .filter((p) => p.type === "text" && typeof p.text === "string")
-            .map((p) => String(p.text))
-            .join("")
-            .trim();
-          if (text) {
-            this.emit({ kind: "message", payload: { text } });
-            this.emittedText.add(turnId);
+        const turn = await this.waitForTurn(sid, baseline, timeoutMs);
+        if (!turn && this.interrupted) {
+          this.emit({ kind: "status", payload: { state: "interrupted" } });
+        } else if (!turn) {
+          this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
+        } else {
+          const turnId = String(turn.id);
+          // Fetch the full message: parts (in case SSE missed them) + errors.
+          const detail = await fetchJson<Json>(
+            `${this.baseUrl}/api/session/${sid}/message/${turnId}`,
+          ).catch(() => null);
+          const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
+          if (info.finish === "error" || info.error) {
+            const err = (info.error ?? {}) as Json;
+            const message = String(err.message ?? "opencode turn failed").slice(0, 500);
+            if (attempt === 0 && POISONED_HISTORY.test(message)) {
+              this.sessionId = undefined;
+              this.emit({ kind: "status", payload: { state: "session_reset", reason: `opencode refused this session's history (${message}); carrying on in a fresh session` } });
+              continue;
+            }
+            this.emit({ kind: "error", payload: { message } });
+          } else if (!this.emittedText.has(turnId)) {
+            const content = Array.isArray(info.content) ? (info.content as Json[]) : [];
+            const text = content
+              .filter((p) => p.type === "text" && typeof p.text === "string")
+              .map((p) => String(p.text))
+              .join("")
+              .trim();
+            if (text) {
+              this.emit({ kind: "message", payload: { text } });
+              this.emittedText.add(turnId);
+            }
           }
+          const cost = Number(info.cost ?? 0);
+          if (cost > 0) {
+            this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
+          }
+          // OpenCode assistant messages carry token usage; capture it (cache
+          // reads/writes count as input) so it isn't dropped.
+          const tk = (info.tokens ?? {}) as Record<string, number>;
+          const cache = (tk.cache ?? {}) as unknown as Record<string, number>;
+          this.lastUsage = {
+            input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
+            output: (tk.output ?? 0) + (tk.reasoning ?? 0),
+            cached: cache.read ?? 0,
+            reasoning: tk.reasoning ?? 0,
+          };
+          const mid = (info as Record<string, unknown>).modelID;
+          const pid = (info as Record<string, unknown>).providerID;
+          if (typeof mid === "string" && mid) this.lastModel = typeof pid === "string" && pid ? `${pid}/${mid}` : mid;
         }
-        const cost = Number(info.cost ?? 0);
-        if (cost > 0) {
-          this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
-        }
-        // OpenCode assistant messages carry token usage; capture it (cache
-        // reads/writes count as input) so it isn't dropped.
-        const tk = (info.tokens ?? {}) as Record<string, number>;
-        const cache = (tk.cache ?? {}) as unknown as Record<string, number>;
-        this.lastUsage = {
-          input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
-          output: (tk.output ?? 0) + (tk.reasoning ?? 0),
-        };
-        const mid = (info as Record<string, unknown>).modelID;
-        const pid = (info as Record<string, unknown>).providerID;
-        if (typeof mid === "string" && mid) this.lastModel = typeof pid === "string" && pid ? `${pid}/${mid}` : mid;
+        break;
       }
       this.emit({
         kind: "run_complete",
         payload: {
           durationMs: Date.now() - started,
-          ...(this.lastModel ? { model: this.lastModel } : {}),
-          ...(this.lastUsage ? { inputTokens: this.lastUsage.input, outputTokens: this.lastUsage.output } : {}),
+          ...((this.lastModel ?? this.options.model) ? { model: this.lastModel ?? this.options.model } : {}),
+          ...(this.lastUsage ? usagePayload(this.lastUsage) : {}),
         },
       });
       this.lastUsage = null;
@@ -616,7 +838,7 @@ export class OpenCodeAdapter extends AdapterBase {
         res = await fetch(`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/prompt`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt: { text } }),
+          body: JSON.stringify({ prompt: promptWithFiles(text, this.projectDir) }),
           signal: AbortSignal.timeout(30_000),
         });
       } catch (err) {
@@ -654,8 +876,8 @@ export class OpenCodeAdapter extends AdapterBase {
         payload: {
           durationMs: Date.now() - started,
           session: sid,
-          ...(this.lastModel ? { model: this.lastModel } : {}),
-          ...(this.lastUsage ? { inputTokens: this.lastUsage.input, outputTokens: this.lastUsage.output } : {}),
+          ...((this.lastModel ?? this.options.model) ? { model: this.lastModel ?? this.options.model } : {}),
+          ...(this.lastUsage ? usagePayload(this.lastUsage) : {}),
         },
       });
     } catch (err) {
@@ -780,6 +1002,8 @@ export class OpenCodeAdapter extends AdapterBase {
     this.lastUsage = {
       input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
       output: (tk.output ?? 0) + (tk.reasoning ?? 0),
+      cached: cache.read ?? 0,
+      reasoning: tk.reasoning ?? 0,
     };
     const mid = info.modelID, pid = info.providerID;
     const model = (info.model ?? {}) as Json;

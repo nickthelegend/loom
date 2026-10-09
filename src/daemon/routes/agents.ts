@@ -101,8 +101,9 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
 
   app.post(
     "/api/projects/:id/interrupt",
-    withRuntime(async (rt, _req, res) => {
-      res.json(await rt.interrupt());
+    withRuntime(async (rt, req, res) => {
+      const chat = typeof req.body?.chat === "string" && req.body.chat ? String(req.body.chat) : undefined;
+      res.json(await rt.interrupt(chat ? { chat } : {}));
     }),
   );
 }

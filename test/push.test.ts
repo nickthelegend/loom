@@ -8,7 +8,9 @@ import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { DaemonClient } from "../src/daemon/client.js";
+import { pushCategory, pushContent, wantsPush } from "../src/daemon/push.js";
 import { LoomDaemon } from "../src/daemon/server.js";
+import type { LoomEvent } from "../src/types.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
 
 interface Delivered {
@@ -74,14 +76,39 @@ afterAll(async () => {
   delete process.env.LOOM_EXPO_PUSH_URL;
 });
 
-async function registerPush(pushToken: string): Promise<number> {
+async function registerPush(pushToken: string, kinds?: string[]): Promise<number> {
   const res = await fetch(`${baseUrl}/api/push/register`, {
     method: "POST",
     headers: { authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ token: pushToken, platform: "android" }),
+    body: JSON.stringify({ token: pushToken, platform: "android", ...(kinds ? { kinds } : {}) }),
   });
   return res.status;
 }
+
+describe("what pushes, under which switch", () => {
+  const ev = (kind: string, payload: Record<string, unknown>) => ({ id: 1, ts: 0, kind, payload }) as unknown as LoomEvent;
+  it("sorts events into questions, approvals, done and goals, and leaves the chatter out", () => {
+    expect(pushCategory(ev("needs_input", { question: "?" }))).toBe("questions");
+    expect(pushCategory(ev("approval", { phase: "requested", tool: "Bash" }))).toBe("approvals");
+    expect(pushCategory(ev("approval", { phase: "decided" }))).toBeNull();
+    expect(pushCategory(ev("run_complete", {}))).toBe("done");
+    expect(pushCategory(ev("orchestra", { phase: "completed" }))).toBe("goals");
+    expect(pushCategory(ev("orchestra", { phase: "waiting", question: "budget?" }))).toBe("questions");
+    expect(pushCategory(ev("orchestra", { phase: "task" }))).toBeNull();
+    expect(pushCategory(ev("crew", { phase: "failed" }))).toBe("goals");
+    expect(pushCategory(ev("crew", { phase: "asks" }))).toBe("questions");
+    expect(pushCategory(ev("crew", { phase: "planned", awaitingApproval: true }))).toBe("approvals");
+    expect(pushCategory(ev("crew", { phase: "planned", awaitingApproval: false }))).toBeNull();
+    expect(pushCategory(ev("message", { text: "hi" }))).toBeNull();
+    expect(wantsPush(undefined, "done")).toBe(true);
+    expect(wantsPush(["goals"], "done")).toBe(false);
+  });
+  it("says what happened in words", () => {
+    expect(pushContent("buzz", ev("orchestra", { phase: "completed", summary: "Dark mode shipped" }))).toEqual({ title: "Goal done · buzz", body: "Dark mode shipped" });
+    expect(pushContent("buzz", { ...ev("approval", { phase: "requested", tool: "Bash", input: "rm -rf build" }), agentId: "cody" } as LoomEvent).title).toBe("cody wants to use Bash · buzz");
+    expect(pushContent("buzz", { ...ev("run_complete", {}), agentId: "cody" } as LoomEvent, { reply: "All   done\n now" }).body).toBe("All done now");
+  });
+});
 
 describe("push notifications", () => {
   it("registration requires a paired device token (not admin)", async () => {
@@ -103,10 +130,27 @@ describe("push notifications", () => {
     await waitUntil(() => delivered.some((d) => d.body.includes("ship it tonight")));
     const ask = delivered.find((d) => d.body.includes("ship it tonight"))!;
     expect(ask.to).toBe("ExponentPushToken[test-device]");
-    expect(ask.title).toBe("Loom · buzz");
-    expect(ask.data?.kind).toBe("needs_input");
-    // The turn also completes → solo run_complete push arrives too.
-    await waitUntil(() => delivered.some((d) => d.body.includes("finished its turn")));
+    expect(ask.title).toMatch(/needs you · buzz$/);
+    expect(ask.data).toMatchObject({ kind: "needs_input", category: "questions", chat: "main" });
+    // The turn also completes → a "done" push that starts with the reply itself.
+    await waitUntil(() => delivered.some((d) => d.data?.kind === "run_complete"));
+    const done = delivered.find((d) => d.data?.kind === "run_complete")!;
+    expect(done.title).toMatch(/is done · buzz$/);
+    expect(done.body).not.toBe("finished its turn");
+    expect(done.data?.category).toBe("done");
+  });
+
+  it("a device that only wants goals hears no turn ending", async () => {
+    expect(await registerPush("ExponentPushToken[test-device]", ["goals", "bogus"])).toBe(200);
+    expect(readDaemonConfig()!.clients.find((c) => c.name === "pixel")?.pushKinds).toEqual(["goals"]);
+    const turns = async () => (await client.events(projectId, undefined, 200)).events.filter((e) => e.kind === "run_complete").length;
+    const before = await turns();
+    delivered = [];
+    await client.send(projectId, "quiet please");
+    await waitUntil(async () => (await turns()) > before);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(delivered.filter((d) => d.data?.kind === "run_complete")).toHaveLength(0);
+    expect(await registerPush("ExponentPushToken[test-device]", ["questions", "approvals", "done", "goals"])).toBe(200);
   });
 
   it("route hops stay silent; the outcome pushes exactly once", async () => {
@@ -114,7 +158,7 @@ describe("push notifications", () => {
     await client.startRoute(projectId, "tiny task", ["plannerbot", "execbot"]);
     await waitUntil(() => delivered.some((d) => d.body.includes("route complete")));
     await new Promise((r) => setTimeout(r, 300)); // let stragglers land
-    expect(delivered.filter((d) => d.body.includes("finished its turn"))).toHaveLength(0);
+    expect(delivered.filter((d) => d.data?.kind === "run_complete")).toHaveLength(0);
     expect(delivered.filter((d) => d.body.includes("route complete"))).toHaveLength(1);
   });
 

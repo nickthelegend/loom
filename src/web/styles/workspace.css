@@ -6,6 +6,9 @@
     grid-template-columns:var(--sbw) minmax(0,1fr);
     grid-template-rows:minmax(0,1fr) 25px}
   .dshell.railopen{grid-template-columns:var(--sbw) minmax(0,1fr) var(--railw)}
+  /* View ▸ Toggle Sidebar (⌘B) */
+  html.nosidebar .dshell{--sbw:0px!important}
+  html.nosidebar .dshell > .sidebar{display:none}
   /* drag handles: wide hit area, hairline that lights up on hover (Orca) */
   .rz{position:absolute;top:0;bottom:0;width:9px;z-index:12;cursor:col-resize}
   .rz::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;
@@ -157,7 +160,12 @@
   .dmain .msg .bubble{max-width:82%}
   .pane-inner{max-width:840px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
   /* diff/preview dock — opens to the RIGHT of the chat on click, closed by default */
-  .paneswrap{flex:1;min-height:0;min-width:0;display:flex}
+  .paneswrap{flex:1;min-height:0;min-width:0;display:flex;position:relative;container:panes / inline-size}
+  /* too narrow to split: the dock covers the chat rather than leave it a 240px strip */
+  @container panes (max-width: 700px){
+    .dockpane.open{position:absolute;inset:0;width:auto!important;min-width:0;z-index:30;border-left:0}
+    .dockpane.open .rz-dock{display:none}
+  }
   .mainpane{flex:1;min-width:0;display:flex;flex-direction:column}
   .dockpane{width:var(--dockw,48%);min-width:280px;flex:none;display:none;flex-direction:column;min-height:0;
     position:relative;border-left:1px solid var(--border);background:var(--editor-surface)}
@@ -172,6 +180,35 @@
   /* the dock's icon slot — every other icon wrapper centres its glyph; without
      this one the svg sits on the text baseline */
   .dockhead .di{display:inline-flex;align-items:center;flex:none}
+  .dockhead{padding-left:4px}
+  .docktabs{display:flex;align-items:stretch;gap:2px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:none;height:100%}
+  .docktabs::-webkit-scrollbar{display:none}
+  .dtab{display:flex;align-items:center;gap:6px;max-width:200px;padding:0 4px 0 9px;margin:5px 0;border-radius:var(--radius-md);
+    border:1px solid transparent;cursor:pointer;font-family:var(--font-sans);font-size:12px;color:var(--muted-foreground);flex:none}
+  .dtab:hover{background:var(--accent);color:var(--foreground)}
+  .dtab.on{background:var(--background);border-color:var(--border);color:var(--foreground)}
+  .dtab .dl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dtab .di{display:inline-flex}
+  .dtab .di svg{width:13px;height:13px}
+  .dtx{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;border:0;background:transparent;color:inherit;opacity:.55}
+  .dtx:hover{opacity:1;background:var(--muted)}
+  .dtx svg{width:11px!important;height:11px!important}
+  /* Subagents: every agent an orchestrator put to work */
+  .subagents{padding:10px 8px 24px}
+  .subh{font-size:12px;color:var(--muted-foreground);padding:12px 8px 6px}
+  .subempty{font-size:12.5px;color:var(--muted-foreground);padding:4px 8px 8px}
+  .subrow{display:flex;align-items:center;gap:10px;padding:8px;border-radius:var(--radius-md)}
+  .subrow.click{cursor:pointer}
+  .subrow.click:hover{background:var(--accent)}
+  .subrow .av{flex:none}
+  .subtxt{flex:1;min-width:0}
+  .subname{font-size:13px;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .subnote{font-size:11.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+  .subst{font-weight:500}
+  .subst.ok{color:var(--ok)}.subst.warn{color:var(--warn)}.subst.err{color:var(--err)}
+  .subpulse{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--ok);margin-right:5px;vertical-align:1px;animation:subpulse 1.4s ease-in-out infinite}
+  @keyframes subpulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .subwhen{flex:none;font-size:11.5px;color:var(--muted-foreground)}
   .dockhead .iconbtn{width:26px;height:26px}
   .dockhead .iconbtn svg{width:13px;height:13px}
   .iconbtn.active{background:var(--accent);color:var(--foreground)}
@@ -229,6 +266,9 @@
     border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:12px;min-width:0}
   .dfh .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dfh .cadd{margin-left:auto;color:var(--git-add);flex:none}
+  .dfh .dnew{margin-left:auto;flex:none;color:var(--git-add);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  .dnewimg{padding:12px;background:repeating-conic-gradient(var(--muted) 0 25%, transparent 0 50%) 0 0/16px 16px}
+  .dnewimg img{display:block;max-width:100%;max-height:360px;margin:0 auto;border-radius:4px}
   .dfh .cdel{color:var(--git-del);flex:none}
   .dcode{font-family:var(--font-mono);font-size:11.5px;line-height:1.6;overflow-x:auto;padding:6px 0}
   .dl{display:grid;grid-template-columns:34px 34px 14px 1fr;white-space:pre;min-width:max-content}

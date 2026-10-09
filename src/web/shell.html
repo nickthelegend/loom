@@ -10,7 +10,7 @@
 <title>Loom</title>
 <script>
 /* Apply the saved theme before first paint so there is no flash. */
-try{if(localStorage.getItem("loomTheme")==="light")document.documentElement.classList.remove("dark")}catch(e){}
+try{var t=localStorage.getItem("loomTheme");if(t==="light"||(t==="system"&&matchMedia("(prefers-color-scheme: light)").matches))document.documentElement.classList.remove("dark")}catch(e){}
 /* The telemetry backend's own UI, for the trace deep links, injected by the
    daemon from LOOM_TRACE_UI_URL. Empty unless one is configured — the links
    hide themselves rather than pointing at a guessed port. */

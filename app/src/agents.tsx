@@ -6,9 +6,11 @@
  * the thread, the picker and the Orchestra cards all say the same thing.
  */
 
-import { useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
-import type { AgentStatus } from "./api";
+import { SvgXml } from "react-native-svg";
+import { BRAND_MARK_ALIAS, BRAND_MARKS } from "./brand-marks";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { getAgentModels, setAgentModel, type AgentStatus, type Creds } from "./api";
 import { TAP } from "./components";
 import { Sheet } from "./observatory";
 import { T, hue, radii } from "./theme";
@@ -34,10 +36,35 @@ export function agentLabel(kind: string): string {
 }
 
 /** A small tile with the product's initial in its own thread hue. */
+/** The agent's own logo when it has one, as on the desktop. */
+function markFor(kind: string): string | undefined {
+  const k = kind === "grok" ? "grok-code" : BRAND_MARK_ALIAS[kind] ?? kind;
+  return BRAND_MARKS[k];
+}
+
 export function AgentIcon(props: { kind: string; size?: number }) {
   const size = props.size ?? 26;
   const label = agentLabel(props.kind);
   const c = hue(label);
+  const mark = markFor(props.kind);
+  if (mark)
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size * 0.3,
+          backgroundColor: T.raised,
+          borderWidth: 1,
+          borderColor: T.line2,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {/* mono marks (opencode, Grok) take the text colour: white on dark */}
+        <SvgXml xml={mark} width={size * 0.62} height={size * 0.62} color={T.text} />
+      </View>
+    );
   return (
     <View
       style={{
@@ -213,6 +240,67 @@ export function AgentPicker(props: {
             Sending hands the baton to {props.selected}.
           </Text>
         ) : null}
+      </Sheet>
+    </>
+  );
+}
+
+/**
+ * The model chip beside the agent: what it runs on, and a searchable list to
+ * change it — the desktop composer's model picker. "Default" unpins it.
+ */
+export function ModelPicker(props: { creds: Creds; projectId: string; agent: AgentStatus | null; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [models, setModels] = useState<string[] | null>(null);
+  const [q, setQ] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const a = props.agent;
+  useEffect(() => {
+    if (!open || !a) return;
+    setModels(null);
+    setErr(null);
+    getAgentModels(props.creds, props.projectId, a.id)
+      .then((r) => setModels(r.models))
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+  }, [open, a?.id]);
+  if (!a || a.tier !== "adapter") return null;
+  const pick = async (model: string) => {
+    setBusy(model || "default");
+    try {
+      await setAgentModel(props.creds, props.projectId, a.id, model);
+      setOpen(false);
+      props.onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const needle = q.trim().toLowerCase();
+  const shown = (models ?? []).filter((m) => !needle || m.toLowerCase().includes(needle)).slice(0, 80);
+  const row = (label: string, value: string, on: boolean) => (
+    <TouchableOpacity key={value || "default"} onPress={() => void pick(value)} disabled={!!busy} activeOpacity={0.7} accessibilityRole="button" accessibilityState={{ selected: on }}
+      style={{ flexDirection: "row", alignItems: "center", minHeight: 42, borderBottomWidth: 1, borderBottomColor: T.line, gap: 8 }}>
+      <Text style={{ color: on ? T.text : T.dim, fontSize: 13.5, fontFamily: value ? T.mono : undefined, flex: 1, fontWeight: on ? "700" : "400" }} numberOfLines={1}>{label}</Text>
+      {busy === (value || "default") ? <ActivityIndicator color={T.dim} /> : on ? <Text style={{ color: T.ok, fontSize: 14 }}>✓</Text> : null}
+    </TouchableOpacity>
+  );
+  return (
+    <>
+      <TouchableOpacity onPress={() => setOpen(true)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Model: ${a.model ?? "default"}. Change model`}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 34, paddingHorizontal: 11, borderRadius: radii.pill, borderWidth: 1, borderColor: T.line2, backgroundColor: T.raised, maxWidth: 170 }}>
+        <Text style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>{a.model ? a.model.split("/").pop() : "Default"}</Text>
+        <Text style={{ color: T.faint, fontSize: 10 }}>▼</Text>
+      </TouchableOpacity>
+      <Sheet title={`${agentLabel(a.kind)} · model`} visible={open} onClose={() => setOpen(false)}>
+        {models && !models.length ? null : <TextInput value={q} onChangeText={setQ} placeholder={`Filter ${models ? models.length : ""} models…`} placeholderTextColor={T.faint} autoCapitalize="none" autoCorrect={false}
+          style={{ color: T.text, backgroundColor: T.raised, borderRadius: radii.key, paddingHorizontal: 12, height: 40, fontSize: 14, marginBottom: 6 }} />}
+        {err ? <Text style={{ color: T.err, fontSize: 12.5, marginBottom: 6 }}>{err}</Text> : null}
+        {!needle ? row("Default — the agent's own choice", "", !a.model) : null}
+        {models == null && !err ? <ActivityIndicator color={T.dim} style={{ marginTop: 12 }} /> : shown.map((m) => row(m, m, a.model === m))}
+        {models && shown.length === 80 ? <Text style={{ color: T.faint, fontSize: 11.5, marginTop: 6 }}>Showing 80 — type to narrow.</Text> : null}
+        {models && !models.length ? <Text style={{ color: T.faint, fontSize: 12, marginTop: 8, lineHeight: 17 }}>{agentLabel(a.kind)} doesn&apos;t list its models, so it runs on its own default.</Text> : null}
       </Sheet>
     </>
   );

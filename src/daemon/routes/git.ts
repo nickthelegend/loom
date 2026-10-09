@@ -1,3 +1,5 @@
+import path from "node:path";
+import fs from "node:fs";
 import type { Express } from 'express';
 import { claudeText } from "../../core/claude-cli.js";
 import { branches as gitBranches, checkout as gitCheckout, commit as gitCommit, discard as gitDiscard, GitError, fileDiff as gitFileDiff, init as gitInit, log as gitLog, push as gitPush, stage as gitStage, stagedDiff as gitStagedDiff, status as gitStatus, unstage as gitUnstage } from "../../core/git.js";
@@ -33,6 +35,26 @@ export function registerGitRoutes(app: Express, withRuntime: WithRuntime): void 
         res.status(400).json({ error: message });
       }
     });
+
+  // Add one pattern to the project's .gitignore (the source-control panel's
+  // "Ignore" for Loom's own .loom/ files). One line, no globbing tricks beyond
+  // what git reads; a pattern that's already there is left alone.
+  app.post(
+    "/api/projects/:id/git/ignore",
+    withRuntime(async (rt, req, res) => {
+      const pattern = String((req.body as { pattern?: unknown } | undefined)?.pattern ?? "").trim();
+      if (!pattern || pattern.length > 200 || /[\r\n]/.test(pattern) || pattern.startsWith("!")) {
+        return void res.status(400).json({ error: "one gitignore pattern, please" });
+      }
+      const file = path.join(rt.info.dir, ".gitignore");
+      const cur = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+      const lines = cur.split(/\r?\n/).map((l) => l.trim());
+      const bare = pattern.replace(/^\/|\/$/g, "");
+      if (lines.some((l) => l.replace(/^\/|\/$/g, "") === bare)) return void res.json({ added: false });
+      fs.writeFileSync(file, cur + (cur && !cur.endsWith("\n") ? "\n" : "") + pattern + "\n");
+      res.json({ added: true });
+    }),
+  );
 
   app.post(
     "/api/projects/:id/git/stage",

@@ -121,6 +121,7 @@ function mount({
   hash = "",
   token = clientToken as string | null,
   bootstrap = true,
+  firstRun = false,
 } = {}): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
@@ -205,6 +206,8 @@ function mount({
         }
       } as unknown as typeof window.WebSocket;
       if (token) window.localStorage.setItem("loomClientToken", token);
+      // the first-run Setup dialog opens 400ms in and covers whatever a test is clicking
+      if (!firstRun) window.localStorage.setItem("loomSetupSeen", "1");
     },
   });
 
@@ -773,6 +776,16 @@ describe("web app · command palette", () => {
  * list is whatever this machine actually has.
  */
 describe("web app · settings", () => {
+  it("opens Setup by itself on the first run, and only then", async () => {
+    const m = mount({ firstRun: true });
+    await waitUntil(() => !!$(m, "#setpane"));
+    expect(m.window.localStorage.getItem("loomSetupSeen")).toBe("1");
+    const again = mount();
+    await waitUntil(() => !!$(again, ".sfoot #setupbtn"));
+    await new Promise((r) => setTimeout(r, 700));
+    expect($(again, "#setpane")).toBeFalsy();
+  });
+
   it("opens from the sidebar foot and reads this machine, not a script", async () => {
     const m = mount();
     await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
@@ -1104,7 +1117,7 @@ describe("web app · the console", () => {
     // …and an impossible query says so instead of showing an empty box.
     search.value = "zzz-no-such-line";
     search.dispatchEvent(new m.window.Event("input"));
-    await waitUntil(() => text(m, "#conlist").includes("nothing matches"));
+    await waitUntil(() => text(m, "#conlist").includes("Nothing matches"));
     expect(m.errors.join("\n")).toBe("");
   });
 });
@@ -1141,6 +1154,8 @@ describe("web app · the browser tab", () => {
     const projDir = projects.find((p) => p.id === projectId)!.dir;
     fs.mkdirSync(path.join(projDir, "e2e"), { recursive: true });
     fs.writeFileSync(path.join(projDir, "e2e", "smoke.spec.ts"), "// spec\n");
+    // specs are only offered in a project that uses Playwright (daemon/specs.ts)
+    fs.writeFileSync(path.join(projDir, "playwright.config.ts"), "export default {};\n");
 
     const m = mount({ hash: `#p/${projectId}` });
     await ready(m, "#browserbtn");
@@ -1548,6 +1563,77 @@ describe("web app · the rest of the shell", () => {
     box.dispatchEvent(new m.window.KeyboardEvent("keydown", { key: "n", bubbles: true }));
     await new Promise((r) => setTimeout(r, 150));
     expect($(m, "#mtask")).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
+describe("web app · an agent's structured question", () => {
+  it("shows option descriptions, takes several picks for a pick-any question, and sends them with Submit", async () => {
+    type Rt = { log: { append: (e: Record<string, unknown>) => unknown }; answerQuestion: unknown };
+    const rt = await (daemon as unknown as { runtime(id: string): Promise<Rt> }).runtime(projectId);
+    const calls: unknown[][] = [];
+    const real = rt.answerQuestion;
+    rt.answerQuestion = async (...a: unknown[]) => { calls.push(a); };
+    try {
+      // the main chat, whatever an earlier test left selected
+      const m = mount({ hash: `#p/${projectId}/c/main` });
+      await waitUntil(() => !!$(m, "#feed"));
+      await new Promise((r) => setTimeout(r, 300)); // history in, socket up
+      rt.log.append({ kind: "needs_input", agentId: "plannerbot", chat: "main", payload: {
+        question: "Which extras?", requestId: "req-multi", responseMode: "tool",
+        questions: [{ id: "x", header: "Extras", question: "Which extras?", multiSelect: true, allowCustomAnswer: false,
+          options: [{ label: "Auth", description: "sign-in with GitHub" }, { label: "Billing", description: "Stripe" }, { label: "Docs", description: "" }] }] } });
+      await waitUntil(() => !!$(m, '.nicard[data-nireq="req-multi"]'));
+      const card = $(m, '.nicard[data-nireq="req-multi"]')!;
+      expect(card.querySelector(".niqb.multi")).toBeTruthy();
+      expect(card.textContent).toContain("sign-in with GitHub");
+      expect(card.querySelector(".nitext")).toBeNull(); // the agent didn't allow free text
+      const opt = (label: string) => card.querySelector(`[data-nipick="${label}"]`) as HTMLElement;
+      opt("Auth").click(); opt("Docs").click(); opt("Docs").click(); opt("Billing").click();
+      expect(calls).toHaveLength(0); // picks wait for Submit
+      (card.querySelector(".nisend") as HTMLElement).click();
+      await waitUntil(() => calls.length === 1);
+      expect(calls[0]).toEqual(["plannerbot", "main", "req-multi", { x: ["Auth", "Billing"] }]);
+      await waitUntil(() => card.classList.contains("done"));
+      expect(text(m, '.nicard[data-nireq="req-multi"] .nidone')).toBe("↳ Auth, Billing");
+
+      // answered somewhere else: the event folds the card by itself
+      rt.log.append({ kind: "needs_input", agentId: "plannerbot", chat: "main", payload: { question: "DB?", requestId: "req-two", responseMode: "tool",
+        questions: [{ id: "0", header: "DB", question: "DB?", options: [{ label: "Postgres", description: "" }] }] } });
+      await waitUntil(() => !!$(m, '.nicard[data-nireq="req-two"]'));
+      rt.log.append({ kind: "status", agentId: "plannerbot", chat: "main", payload: { state: "question_answered", requestId: "req-two", answers: { 0: "Postgres" } } });
+      await waitUntil(() => !!$(m, '.nicard[data-nireq="req-two"].done'));
+      expect(text(m, '.nicard[data-nireq="req-two"] .nidone')).toBe("↳ Postgres");
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      rt.answerQuestion = real;
+    }
+  });
+});
+
+describe("web app · what an agent's tools did", () => {
+  it("opens a tool row to its output and exit code, shows its images, and keeps one checklist per turn", async () => {
+    type Rt = { log: { append: (e: Record<string, unknown>) => unknown } };
+    const rt = await (daemon as unknown as { runtime(id: string): Promise<Rt> }).runtime(projectId);
+    const m = mount({ hash: `#p/${projectId}/c/main` });
+    await waitUntil(() => !!$(m, "#feed"));
+    await new Promise((r) => setTimeout(r, 300));
+    rt.log.append({ kind: "tool_call", agentId: "plannerbot", chat: "main", payload: { tool: "shell", summary: "shell: npm test", command: "npm test",
+      exitCode: 1, ok: false, preview: "FAIL tests/a.test.ts" } });
+    rt.log.append({ kind: "tool_call", agentId: "plannerbot", chat: "main", payload: { tool: "screenshot", server: "playwright", kind: "mcp_tool_call",
+      summary: "playwright · screenshot", ok: true, images: [{ path: ".loom/attachments/abc123abc123.png", mime: "image/png" }] } });
+    rt.log.append({ kind: "status", agentId: "plannerbot", chat: "main", payload: { state: "plan_updated", plan: [{ step: "write tests", status: "inProgress" }, { step: "fix", status: "pending" }] } });
+    rt.log.append({ kind: "status", agentId: "plannerbot", chat: "main", payload: { state: "plan_updated", plan: [{ step: "write tests", status: "completed" }, { step: "fix", status: "inProgress" }] } });
+    await waitUntil(() => !!$(m, ".plancheck") && !!$(m, ".toolimgs"));
+    const run = [...m.window.document.querySelectorAll(".tool.hasdet")].find((r) => /npm test/.test(r.textContent ?? ""))! as HTMLElement;
+    expect(run.classList.contains("tfail")).toBe(true);
+    expect(run.textContent).toContain("exit 1");
+    run.click();
+    expect(run.classList.contains("open")).toBe(true);
+    expect(run.querySelector(".tooldet")!.textContent).toContain("FAIL tests/a.test.ts");
+    expect($(m, ".toolimgs img")!.getAttribute("data-att")).toBe(".loom/attachments/abc123abc123.png");
+    expect(m.window.document.querySelectorAll(".plancheck")).toHaveLength(1); // updated in place
+    expect(text(m, ".plancheck .pcn")).toBe("1/2");
     expect(m.errors.join("\n")).toBe("");
   });
 });

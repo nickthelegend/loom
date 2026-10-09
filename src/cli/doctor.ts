@@ -5,6 +5,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { codexBin, codexVersion } from "../providers/codex/adapter.js";
 import fs from "node:fs";
 import path from "node:path";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
@@ -226,6 +227,14 @@ function version(cmd: string, args: string[] = ["--version"]): Promise<string | 
   });
 }
 
+/** Which codex Loom runs, and its version: the newest client gets the newest models. */
+function codexWhich(): string {
+  const bin = codexBin();
+  if (!bin || bin === "codex") return "";
+  const v = codexVersion(bin);
+  return ` · ${v ? v.join(".") : "unknown version"} (${bin.includes("ChatGPT.app") ? "ChatGPT app" : bin.includes("Codex.app") ? "Codex app" : bin})`;
+}
+
 export async function envChecks(): Promise<Check[]> {
   const checks: Check[] = [];
 
@@ -246,7 +255,7 @@ export async function envChecks(): Promise<Check[]> {
     } else if (a.authed === false) {
       checks.push(fail(a.kind, `${a.label} is signed out — ${a.auth}`));
     } else if (a.authed === true) {
-      checks.push(ok(a.kind, `${a.label} · signed in`));
+      checks.push(ok(a.kind, `${a.label} · signed in${a.authDetail ? ` with ${a.authDetail}` : ""}${a.kind === "codex" ? codexWhich() : ""}`));
     } else {
       checks.push(warn(a.kind, `${a.label} found — couldn't confirm sign-in · ${a.auth}`));
     }

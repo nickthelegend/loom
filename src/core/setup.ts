@@ -151,8 +151,10 @@ async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail
       const bin = codexBin();
       if (!bin) return { authed: null };
       const { out } = await run(bin, ["login", "status"], 6000);
-      if (/logged in/i.test(out)) return { authed: true };
+      // "Not logged in" contains "logged in": the refusal is checked first
       if (/not logged in|no auth/i.test(out)) return { authed: false, detail: out.trim().slice(0, 60) };
+      const how = /logged in using (chatgpt|an api key)/i.exec(out)?.[1];
+      if (/logged in/i.test(out)) return { authed: true, ...(how ? { detail: /chatgpt/i.test(how) ? "ChatGPT account" : "API key" } : {}) };
       return { authed: null };
     }
     if (kind === "opencode") {

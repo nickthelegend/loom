@@ -1,15 +1,13 @@
 /** Browser palette module. See README.md for ownership and startup. */
-import { brandMark } from './agents.js';
+import { openImportChats } from './import-chats.js';
+import { agentLabel,brandMark } from './agents.js';
+import { COMMANDS,runCommand } from './commands.js';
 import { api } from './connection.js';
-import { openConsole } from './console.js';
 import { esc } from './format.js';
 import { ICONS } from './icons.js';
 import { toast } from './notifications.js';
-import { openBrowser } from './preview.js';
-import { openProjectModal,openSettingsModal } from './settings.js';
-import { THEME_KEY,state } from './state.js';
-import { openTaskModal } from './tasks.js';
-import { applyTheme,themeNow } from './theme.js';
+import { openSettingsModal } from './settings.js';
+import { state } from './state.js';
 
 
   /**
@@ -60,31 +58,26 @@ import { applyTheme,themeNow } from './theme.js';
     function shq(s){ return "'" + String(s).replace(/'/g, "'\\''") + "'"; } // POSIX single-quote
 
     var CMDS = buildCommands();
+    /**
+     * Every command the menu bar has, by the same names (commands.js), with
+     * its shortcut — plus the project-scoped panels and a jump to any project.
+     */
     function buildCommands(){
-      var C = [];
-      if (pid && state.showTab) {
-        C.push({ icon: ICONS.thread, label: "Go to Thread", run: function(){ state.showTab("thread"); } });
-        C.push({ icon: ICONS.board, label: "Go to Board", run: function(){ state.showTab("board"); } });
-        C.push({ icon: ICONS.memory, label: "Go to Brain", run: function(){ state.showTab("brain"); } });
-      }
+      var C = COMMANDS.filter(function(c){ return !c.needsProject || pid; }).map(function(c){
+        return { icon: c.icon, label: c.label, sub: c.keys || "", run: function(){ runCommand(c.id); } };
+      });
       if (pid && state.showRail) {
         C.push({ icon: ICONS.files, label: "Explorer", sub: "panel", run: function(){ state.showRail("explorer"); } });
         C.push({ icon: ICONS.search, label: "Search in files", sub: "panel", run: function(){ state.showRail("search"); } });
         C.push({ icon: ICONS.branch, label: "Source Control", sub: "panel", run: function(){ state.showRail("scm"); } });
-        C.push({ icon: ICONS.agents, label: "Agents", sub: "panel", run: function(){ state.showRail("tasks"); } });
+        if (state.openSubagents) C.push({ icon: ICONS.agents, label: "Subagents", sub: "dock", run: function(){ state.openSubagents(); } });
+        if (state.pid) C.push({ icon: ICONS.download, label: "Import chats from your agents", sub: "Claude, Codex, OpenCode", run: function(){ openImportChats(state.pid); } });
       }
-      C.push({ icon: ICONS.tasks, label: "New task", run: function(){ openTaskModal(pid); } });
-      // The dock surfaces this run added — reachable from the keyboard, like
-      // everything else worth reaching.
-      if (pid) {
-        C.push({ icon: ICONS.globe, label: "Browser \u00b7 Playwright specs", sub: "dock", run: function(){ openBrowser(); } });
-        C.push({ icon: ICONS.console, label: "Console \u00b7 errors and logs", sub: "dock", run: function(){ openConsole(); } });
-      }
-      C.push({ icon: ICONS.folderPlus, label: "New project", run: function(){ openProjectModal(); } });
-      C.push({ icon: ICONS.gear, label: "Settings", run: function(){ openSettingsModal("setup"); } });
       C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
-      if (pid && state.toggleTerm) C.push({ icon: ICONS.terminal, label: "Toggle terminal", run: function(){ state.toggleTerm(); } });
-      C.push({ icon: ICONS.sun, label: "Toggle theme", run: function(){ localStorage.setItem(THEME_KEY, themeNow() === "light" ? "dark" : "light"); applyTheme(); if (state.retheme) state.retheme(); } });
+      (state.projects || []).forEach(function(p){
+        if (p.id === pid || !state.selectProject) return;
+        C.push({ icon: ICONS.folder, label: "Open project " + p.name, sub: "project", run: function(){ state.selectProject(p.id); } });
+      });
       return C;
     }
 
@@ -108,7 +101,7 @@ import { applyTheme,themeNow } from './theme.js';
       h += section("Commands", CMDS.filter(function(c){ return fuzzy(c.label + " " + (c.sub || ""), q); }).slice(0, q ? 8 : 24));
       var ags = (state.project && state.project.agents) || [];
       if (state.selectAgent) h += section("Agents", ags.filter(function(a){ return fuzzy(a.id + " " + (a.role || ""), q); }).map(function(a){
-        return { markKind: a.kind, label: a.id, sub: (a.tier === "bridge" ? "bridge" : (a.role || "agent")) + " \u00b7 talk to", run: function(){ state.selectAgent(a.id); } };
+        return { markKind: a.kind, label: agentLabel(a.kind, a.id), sub: (a.id !== agentLabel(a.kind, a.id) ? a.id + " \u00b7 " : "") + (a.tier === "bridge" ? "bridge" : (a.role || "agent")) + " \u00b7 talk to", run: function(){ state.selectAgent(a.id); } };
       }));
       if (state.termRun && wt) {
         var wts = wt.filter(function(w){ return !w.main && fuzzy((w.branch || "") + " " + w.path, q); });
@@ -127,13 +120,21 @@ import { applyTheme,themeNow } from './theme.js';
                    run: function(){ state.openFile(hit.path); } };
         }));
         if (state.setChat && acc.chats && acc.chats.length) h += section("Conversations", acc.chats.map(function(c){
-          return { icon: ICONS.chat, label: (c.snippet || "").trim().slice(0, 72) || c.chat, sub: c.chat,
-                   run: function(){ state.setChat(pid, c.chat); } };
+          var chatName = ((state.project && state.project.chats) || []).filter(function(x){ return x.id === c.chat; }).map(function(x){ return x.title; })[0] || (c.chat === "main" ? "Main" : "a chat");
+          var eid = c.eventId || c.id;
+          return { icon: ICONS.chat, label: (c.snippet || "").trim().slice(0, 72) || chatName, sub: chatName,
+                   run: function(){
+                     // a permalink lands on the message itself, not just the chat
+                     if (eid) location.hash = "#p/" + encodeURIComponent(pid) + "/c/" + encodeURIComponent(c.chat) + "/m/" + eid;
+                     else state.setChat(pid, c.chat);
+                   } };
         }));
         var pending = acc.files === undefined || acc.code === undefined || acc.chats === undefined;
         if (pending) h += '<div class="pmore">searching the project\u2026</div>';
       }
       if (!items.length && !q) h += '<div class="pmore">type to search \u2014 files, code, agents, worktrees, commands</div>';
+      var still = q && pid && (acc.files === undefined || acc.code === undefined || acc.chats === undefined);
+      if (!items.length && q && !still) h += '<div class="pmore">Nothing matches \u201c' + esc(q) + '\u201d.</div>';
       body.innerHTML = h;
       if (sel >= items.length) sel = items.length ? items.length - 1 : 0;
       paint(); wireRows();

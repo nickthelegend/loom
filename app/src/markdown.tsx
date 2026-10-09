@@ -25,7 +25,8 @@ function Inl(props: { parts: Inline[]; size?: number }) {
         if (p.t === "code")
           return (
             <Text key={i} style={{ fontFamily: T.mono, fontSize: size - 1.5, color: T.thread, backgroundColor: T.raised }}>
-              {` ${p.s} `}
+              {/* non-breaking, so a wrap can't leave an empty shaded box at a line's end */}
+              {`\u00A0${p.s}\u00A0`}
             </Text>
           );
         if (p.t === "link")
@@ -111,7 +112,10 @@ function CodeBlock(props: { lang: string; code: string }) {
           <Text style={{ color: copied ? T.gitAdd : T.dim, fontSize: 11, fontWeight: "600" }}>{copied ? "Copied" : "Copy"}</Text>
         </TouchableOpacity>
       </View>
-      <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false}>
+      {/* flexGrow 0: on the New Architecture (always on in Expo Go) a horizontal
+          ScrollView in a list cell otherwise stretches to fill the list, and the
+          message becomes a screen-tall blank bubble */}
+      <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
         <Text selectable style={{ color: T.text, fontFamily: T.mono, fontSize: 12, lineHeight: 18, padding: 10, paddingTop: 6 }}>{props.code}</Text>
       </ScrollView>
     </View>

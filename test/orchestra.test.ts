@@ -413,6 +413,7 @@ describe("orchestra runs", () => {
     await settle(run.id);
     const done = rt.orchestra.get(run.id)!;
     expect(done.status).toBe("completed");
+    expect(done.summary).toBe("2 of 2 finished — compare them and pick one to apply.");
     expect(done.tasks.map((t) => t.id).sort()).toEqual(["race-alpha", "race-beta"]);
     expect(done.tasks.every((t) => t.status === "done" && t.prompt === "write:entry.txt")).toBe(true);
     // nobody orchestrated it: the conductor was never asked anything
@@ -428,6 +429,8 @@ describe("orchestra runs", () => {
     expect(fs.existsSync(path.join(dir, "entry.txt"))).toBe(true);
     expect(git(dir, "log", "-1", "--format=%s")).toMatch(/^Race .*beta's take/);
     expect(rt.orchestra.get(run.id)!.applied?.task).toBe("race-beta");
+    // once picked, the summary says which take went in, not "pick one"
+    expect(rt.orchestra.get(run.id)!.summary).toBe("2 of 2 finished — beta's take was applied.");
     await expect(rt.orchestra.apply(run.id, "race-alpha")).rejects.toThrow(/already applied/);
   });
 

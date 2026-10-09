@@ -266,7 +266,7 @@ import { railOpen,toggleRail } from './layout.js';
       rows.forEach(function(pr){
         var pct = total > 0 ? Math.round(((pr.costUsd||0)/total)*100) : 0;
         var isCur = cur && pr.id === cur.id;
-        body += '<div class="usagerow' + (isCur ? " cur" : "") + '">' +
+        body += '<div class="usagerow' + (isCur ? " cur" : "") + '" data-usagepid="' + esc(pr.id) + '" title="open its spend and token breakdown">' +
           '<div class="usagetop"><span class="usagename">' + esc(pr.name || pr.id) + (isCur ? ' <span class="usagecur">this project</span>' : "") + '</span><span class="usageval">' + money(pr.costUsd||0) + '</span></div>' +
           '<div class="usagebar"><i style="width:' + pct + '%"></i></div>' +
           '<div class="usagepct">' + pct + '% of total</div></div>';
@@ -290,6 +290,16 @@ import { railOpen,toggleRail } from './layout.js';
     document.addEventListener("keydown", onKey);
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("ux").onclick = close;
+    // a project's row opens its full breakdown: Insights ▸ Spend & tokens
+    Array.prototype.forEach.call(scrim.querySelectorAll("[data-usagepid]"), function(row){
+      row.onclick = function(){
+        var pid = row.getAttribute("data-usagepid");
+        close();
+        state.obView = "usage";
+        var go = function(){ if (state.showTab) state.showTab("observatory"); };
+        if (state.pid !== pid) { location.hash = "#p/" + pid; setTimeout(go, 400); } else go();
+      };
+    });
     var bsave = document.getElementById("budgetsave");
     if (bsave) bsave.onclick = function(){ var v = parseFloat((document.getElementById("budgetinp").value || "").trim());
       setBudgetFor(cur.id, isFinite(v) ? v : 0); _budgetWarned[cur.id] = 0; toast(isFinite(v) && v > 0 ? "budget set to $" + v.toFixed(2) : "budget cleared"); drawStatusbar(); close(); };

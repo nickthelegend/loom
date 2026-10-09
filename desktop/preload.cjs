@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld("loomNative", {
   pickFolder: function () {
     return ipcRenderer.invoke("loom:pick-folder");
   },
+  // Explorer's "Reveal in Finder": the main process checks the path is an
+  // absolute one that exists before showing it.
+  reveal: function (p) {
+    return ipcRenderer.invoke("loom:reveal", String(p || ""));
+  },
   // Native menu items (Loom ▸ New Orchestra…, Connect a Phone…, Settings…).
   // The page subscribes; the action is one of a fixed set of strings.
   onMenu: function (cb) {
@@ -33,6 +38,11 @@ contextBridge.exposeInMainWorld("loomNative", {
   },
   isFocused: function () {
     return ipcRenderer.invoke("loom:focused");
+  },
+  // A picture of a rectangle of this window (the Browser pane's frame), as a
+  // PNG data URL — the shell can photograph what the page can't.
+  capture: function (rect) {
+    return ipcRenderer.invoke("loom:capture", rect);
   },
   onNotifyAction: function (cb) {
     ipcRenderer.on("loom:notify-action", function (_e, action) {

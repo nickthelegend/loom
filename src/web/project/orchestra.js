@@ -7,7 +7,7 @@ import { askConfirm,askText,fitMenu,toast } from '../notifications.js';
 import { modelBadge,permBadge,permOf } from '../permissions.js';
 import { state } from '../state.js';
 import { fleetSince,jobProgressText,loadTeam,onlineRunners,runnerAct,runnerName,teamGlobs,teamGoalOf,teamRunners } from '../team.js';
-import { durfmt,emptyArt,LAND_ST,landPill,ORCH_RUN_ST,ORCH_TASK_ST,plainPreview } from '../transcript.js';
+import { durfmt,emptyArt,LAND_ST,landPill,ORCH_RUN_ST,ORCH_TASK_ST,plainPreview,settleQuestionCard } from '../transcript.js';
 
 /** orchestra behavior for one mounted project.
  * view contains live accessors to the owning project view's state and callbacks.
@@ -347,10 +347,16 @@ export function createOrchestra(view) {
       var card = ev.target.closest && ev.target.closest(".nicard");
       if (!card) return false;
       var pick = ev.target.closest("[data-nipick]");
+      // a pick-any question toggles; Submit sends them all
+      if (pick && pick.closest(".niqb.multi")) {
+        var on = !pick.classList.contains("sel");
+        pick.classList.toggle("sel", on); pick.setAttribute("aria-pressed", on ? "true" : "false");
+        return true;
+      }
       if (pick) { answerAgent(card, pick.getAttribute("data-nipick"), pick.getAttribute("data-niqid")); return true; }
       if (ev.target.closest(".nisend")) {
         var box = card.querySelector(".nitext");
-        answerAgent(card, box ? box.value : "");
+        answerAgent(card, box ? box.value : "", null, true);
         return true;
       }
       // Clicking into the text box is not a click on whatever is behind it.
@@ -367,9 +373,9 @@ export function createOrchestra(view) {
      * agent. The card carries who asked and in which thread; that is what is
      * used, whatever the composer happens to be pointed at.
      */
-    function answerAgent(card, text, qid){
+    function answerAgent(card, text, qid, submit){
       if (!card) return;
-      if (card.getAttribute("data-nireq")) return answerRequest(card, text, qid);
+      if (card.getAttribute("data-nireq")) return answerRequest(card, text, qid, submit);
       var answer = String(text || "").trim();
       if (!answer) { var box = card.querySelector(".nitext"); if (box) box.focus(); return; }
       var who = card.getAttribute("data-niask") || undefined;
@@ -395,35 +401,50 @@ export function createOrchestra(view) {
      * question takes a pick or typed words; once every one has an answer they
      * go back to that request, and the turn carries on.
      */
-    function answerRequest(card, text, qid){
+    function answerRequest(card, text, qid, submit){
       var blocks = Array.prototype.slice.call(card.querySelectorAll(".niqb"));
+      var picked = function(b){ return Array.prototype.map.call(b.querySelectorAll(".nio.sel"), function(o){ return o.getAttribute("data-nipick"); }); };
+      var answered = function(b){ return b.classList.contains("multi") ? picked(b).length > 0 || !!b.getAttribute("data-nians") : !!b.getAttribute("data-nians"); };
       var answer = String(text || "").trim();
-      if (!answer) { var box = card.querySelector(".nitext"); if (box) box.focus(); return; }
-      // Typed words answer the first question still open.
-      var target = qid || (blocks.filter(function(b){ return !b.getAttribute("data-nians"); })[0] || blocks[0]).getAttribute("data-niqid");
-      blocks.forEach(function(b){
-        if (b.getAttribute("data-niqid") !== target) return;
-        b.setAttribute("data-nians", answer);
-        Array.prototype.forEach.call(b.querySelectorAll("[data-nipick]"), function(o){ o.classList.toggle("sel", o.getAttribute("data-nipick") === answer); });
-      });
-      var t = card.querySelector(".nitext"); if (t && !qid) t.value = "";
-      if (blocks.some(function(b){ return !b.getAttribute("data-nians"); })) return;
+      if (answer) {
+        // Typed words answer the first question still open (or the one picked from).
+        var target = qid || (blocks.filter(function(b){ return !answered(b); })[0] || blocks[0]).getAttribute("data-niqid");
+        blocks.forEach(function(b){
+          if (b.getAttribute("data-niqid") !== target) return;
+          b.setAttribute("data-nians", answer);
+          if (!b.classList.contains("multi")) Array.prototype.forEach.call(b.querySelectorAll("[data-nipick]"), function(o){ o.classList.toggle("sel", o.getAttribute("data-nipick") === answer); });
+        });
+        var t = card.querySelector(".nitext"); if (t && !qid) t.value = "";
+      }
+      var open = blocks.filter(function(b){ return !answered(b); });
+      if (open.length) {
+        if (submit) { var tb = card.querySelector(".nitext"); toast("answer every question first"); if (tb) tb.focus(); }
+        return;
+      }
+      // pick-any questions wait for Submit, so a second pick isn't lost to the first
+      if (card.classList.contains("hasmulti") && !submit) return;
       var answers = {};
-      blocks.forEach(function(b){ answers[b.getAttribute("data-niqid")] = b.getAttribute("data-nians"); });
+      blocks.forEach(function(b){
+        var id = b.getAttribute("data-niqid");
+        if (b.classList.contains("multi")) {
+          var list = picked(b), own = b.getAttribute("data-nians");
+          if (own && list.indexOf(own) < 0) list.push(own);
+          answers[id] = list;
+        } else answers[id] = b.getAttribute("data-nians");
+      });
       var who = card.getAttribute("data-niask");
       var where = card.getAttribute("data-nichat") || view.chatId;
       Array.prototype.forEach.call(card.querySelectorAll("button,input"), function(el){ el.disabled = true; });
       api("/api/projects/" + view.pid + "/agents/" + encodeURIComponent(who) + "/answers", {
         method: "POST",
         body: JSON.stringify({ chat: where, requestId: card.getAttribute("data-nireq"), answers: answers }),
-      }).then(function(){
-        var done = card.querySelector(".nidone");
-        if (done) done.textContent = "\u21b3 " + Object.keys(answers).map(function(k){ return answers[k]; }).join(" \u00b7 ");
-        card.classList.add("done");
-      }).catch(function(err){
-        toast(err.message);
-        Array.prototype.forEach.call(card.querySelectorAll("button,input"), function(el){ el.disabled = false; });
-      });
+      }).then(function(){ settleQuestionCard(card, answers); })
+        .catch(function(err){
+          // answered from somewhere else meanwhile, or the turn has ended: say so on the card
+          if (/no open|no live|not found/i.test(err.message)) { settleQuestionCard(card, null); return; }
+          toast(err.message);
+          Array.prototype.forEach.call(card.querySelectorAll("button,input"), function(el){ el.disabled = false; });
+        });
     }
 
 
@@ -564,6 +585,7 @@ export function createOrchestra(view) {
     function openOrchSheet(){
       var el = document.getElementById("routesheet"); if (!el) return;
       el.innerHTML = '<div class="sheet"><div id="orchsheet"></div></div>';
+      var sc = document.getElementById("pane-thread"); if (sc) sc.scrollTop = 0;
       drawOrch(); loadOrch();
     }
 

@@ -1,6 +1,7 @@
 import { usageMeter } from '../usage.js';
 import { agentGlyph,agentLabel,agentSub,labelOf } from '../agents.js';
 import { api } from '../connection.js';
+import { copyText } from '../clipboard.js';
 import { clog } from '../console.js';
 import { esc,pageGone,rel } from '../format.js';
 import { ICONS,LOADER } from '../icons.js';
@@ -10,6 +11,7 @@ import { KMOD,loadPermProfiles,PERM_MODES,PERM_NAMES,PERM_SHORT,permOf,permProfi
 import { state } from '../state.js';
 import { showContinuityOverflow } from './continuity.js';
 import { openTaskModal } from '../tasks.js';
+import { openProjectSettings } from '../settings.js';
 import { setTView,tview } from '../transcript.js';
 
 /** composer behavior for one mounted project.
@@ -209,9 +211,37 @@ export function createComposer(view) {
   function closeMenu(){
       view.menuState = null;
       document.removeEventListener("mousedown", menuAway);
+      document.removeEventListener("keydown", pickerKeys, true);
       // the prompt manager dresses #cmenu up as a bigger glass panel; undress it
-      var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; m.className = "cmenu"; }
+      var m = document.getElementById("cmenu"); if (m) { m.style.display = "none"; m.innerHTML = ""; m.className = "cmenu"; m.removeAttribute("role"); m.removeAttribute("aria-label"); }
       var pb = document.getElementById("promptbtn"); if (pb) pb.classList.remove("on");
+    }
+
+    /**
+     * Arrow keys, Enter and Escape for a picker opened from a button (the
+     * agent menu): focus stays where it was, so the keys are caught here and
+     * walk the rows that have a mousedown action.
+     */
+    function pickerKeys(e){
+      var m = document.getElementById("cmenu");
+      if (!m || m.style.display === "none" || !view.menuState || view.menuState.kind !== "agentmenu") return;
+      var rows = Array.prototype.slice.call(m.querySelectorAll("[data-auto],[data-ai]"));
+      if (!rows.length) return;
+      var at = rows.findIndex(function(r){ return r.classList.contains("sel"); });
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); e.stopPropagation();
+        at = at < 0 ? rows.findIndex(function(r){ return r.classList.contains("cur"); }) : at;
+        var next = (at + (e.key === "ArrowDown" ? 1 : -1) + rows.length) % rows.length;
+        rows.forEach(function(r, i){ r.classList.toggle("sel", i === next); r.setAttribute("aria-selected", i === next ? "true" : "false"); });
+        rows[next].scrollIntoView({ block: "nearest" });
+      } else if (e.key === "Enter" && at >= 0) {
+        e.preventDefault(); e.stopPropagation();
+        rows[at].onmousedown({ preventDefault: function(){} });
+      } else if (e.key === "Escape") {
+        e.preventDefault(); e.stopPropagation();
+        closeMenu();
+        var box = document.getElementById("box"); if (box) box.focus();
+      }
     }
 
     // The model/agent pickers open from a button, not the textarea, so a blur
@@ -280,9 +310,14 @@ export function createComposer(view) {
               .catch(function(err){ toast(err.message); });
           } },
         { label: "Pick a model", sub: "for " + (state.selected || "this agent"), icon: ICONS.gear, run: openModelMenu },
-        { label: "Attach a file", sub: "image, .md, .txt", icon: ICONS.file, run: function(){ var f = document.getElementById("cfile"); if (f) f.click(); } },
+        { label: "Attach a file", sub: "any file, up to 12 MB", icon: ICONS.file, run: function(){ var f = document.getElementById("cfile"); if (f) f.click(); } },
         { label: "Browse skills", sub: "install one, or turn one on", icon: ICONS.spark, run: function(){ openSkillsModal(view.pid); } },
         { label: "MCP servers", sub: "browse the registry and install", icon: ICONS.plug, run: function(){ openMcpModal(view.pid); } },
+        { label: "Saved prompts", sub: "insert one (\u2318\u21e7V)", icon: ICONS.clipboard, run: function(){ setTimeout(function(){ if (state.openPrompts) state.openPrompts(); }, 0); } },
+        { label: "Plan mode", sub: "write a plan, change no code", icon: ICONS.plan, run: function(){ var b = document.getElementById("planbtn"); if (b) b.click(); } },
+        { label: "New chat", sub: "a fresh thread in this project", icon: ICONS.chat, run: function(){ var row = document.querySelector('[data-newchat="' + view.pid + '"]'); if (row) row.click(); else toast("open the project in the sidebar to start a chat"); } },
+        { label: "Find in this chat", sub: "\u2318F", icon: ICONS.search, run: function(){ if (state.openFind) state.openFind(); } },
+        { label: "Export this chat", sub: "as Markdown", icon: ICONS.download, run: function(){ if (state.exportThread) state.exportThread(); } },
       ].concat(skillSlashItems());
     }
 
@@ -332,7 +367,7 @@ export function createComposer(view) {
             var base = pth.split("/").pop();
             return { label: base, sub: pth, value: "@" + pth, icon: ICONS.file };
           });
-          renderMenu(items, "files");
+          renderMenu(items, j.recent ? "recent files" : "files");
         })
         .catch(function(){ closeMenu(); });
     }
@@ -344,6 +379,7 @@ export function createComposer(view) {
      */
     function modelBlurb(m){
       var s = String(m || "").toLowerCase();
+      if (/(^|\/)pool:free$/.test(s)) return "every free model, in turn \u00b7 spreads the load";
       if (/opus/.test(s)) return "most capable \u00b7 deepest reasoning";
       if (/sonnet/.test(s)) return "balanced \u00b7 fast and capable";
       if (/haiku/.test(s)) return "fastest \u00b7 lightest";
@@ -407,7 +443,9 @@ export function createComposer(view) {
         var f = (filter || "").trim().toLowerCase();
         var shown = f ? allModels.filter(function(mm){ return mm.toLowerCase().indexOf(f) >= 0; }) : allModels;
         var cap = 200; // don't paint 500 rows — the search narrows it
-        var head = cur.kind === "model" ? []
+        // While you search, Default only shows if you're searching for it — it used
+        // to sit first and soak up the Enter meant for the model you typed.
+        var head = cur.kind === "model" || (f && "default".indexOf(f) < 0) ? []
           : [{ label: "Default", sub: "whatever " + agentLabel(cur.kind, cur.id) + " picks", value: "" }];
         // Free models first: on a provider's free tier they cost nothing, and
         // "which of these 300 is free" shouldn't take a search to answer.
@@ -467,8 +505,9 @@ export function createComposer(view) {
               e.preventDefault();
               var v = sb.value.trim();
               var match = rowsNow[hi];
-              if (match && (!v || rowsNow.length)) choose(match.value);
-              else if (v) choose(v);
+              // nothing listed matches: the id as typed, as the footer promises
+              if (v && !rowsNow.length) choose(v);
+              else if (match) choose(match.value);
               return;
             }
             if (e.key === "Escape"){ e.preventDefault(); closeMenu(); var box = document.getElementById("box"); if (box) box.focus(); }
@@ -621,7 +660,9 @@ export function createComposer(view) {
           var box = document.getElementById("box"); if (box) box.focus();
         };
       });
-      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      m.setAttribute("role", "listbox"); m.setAttribute("aria-label", "Who takes this turn");
+      Array.prototype.forEach.call(m.querySelectorAll("[data-auto],[data-ai]"), function(r){ r.setAttribute("role", "option"); });
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); document.addEventListener("keydown", pickerKeys, true); }, 0);
     }
 
 
@@ -742,6 +783,27 @@ export function createComposer(view) {
       if (ap) ap.onclick = function(){
         if (view.menuState && view.menuState.kind === "agentmenu") { closeMenu(); return; }
         openAgentMenu();
+      };
+      // Right-click the chip: the agent's other knobs, without hunting for them.
+      if (ap) ap.oncontextmenu = function(ev){
+        ev.preventDefault();
+        var a = ((state.project || {}).agents || []).filter(function(x){ return x.id === state.selected; })[0];
+        var items = [
+          { label: "Choose agent", icon: ICONS.agents, hint: "\u2318\u21e7A", run: openAgentMenu },
+          { label: state.auto ? "Turn Auto off" : "Auto-route turns", icon: ICONS.spark, run: function(){ setAuto(!state.auto); } },
+        ];
+        if (a && !state.auto) {
+          items.push({ sep: true }, { head: agentLabel(a.kind, a.id) });
+          if (a.tier !== "bridge") items.push({ label: "Change model\u2026", icon: ICONS.gear, run: function(){ openModelMenu(); } });
+          if (document.getElementById("cperm")) items.push({ label: "Permissions\u2026", icon: ICONS.shield, run: function(){ openPermMenu(a.id); } });
+          if (a.busy) items.push({ label: "Interrupt", icon: ICONS.x, run: function(){
+            api("/api/projects/" + view.pid + "/interrupt", { method: "POST", body: JSON.stringify({ chat: view.chatId || undefined }) }).catch(function(err){ toast(err.message); });
+          } });
+          items.push({ label: "Copy agent id", icon: ICONS.copy, run: function(){ copyText(a.id); } });
+        }
+        items.push({ sep: true }, { label: "Project settings\u2026", icon: ICONS.gear, run: function(){ openProjectSettings(view.pid); } });
+        var r = ap.getBoundingClientRect();
+        openMenu(Math.round(ev.clientX || r.left), Math.round(ev.clientY || r.bottom), items);
       };
       Array.prototype.forEach.call(document.querySelectorAll("#cmode [data-cmode]"), function(b){
         b.onclick = function(){ view.setComposerMode(b.getAttribute("data-cmode")); var bx = document.getElementById("box"); if (bx) bx.focus(); };
@@ -1077,7 +1139,7 @@ export function createComposer(view) {
         '<div class="pmlist" id="pmlist" role="listbox" aria-label="prompts">' + (view.prompts.loaded ? "" : LOADER) + "</div>" +
         '<div class="pmfoot"><span><kbd>\u2191</kbd><kbd>\u2193</kbd> move</span><span><kbd>\u21b5</kbd> insert</span>' +
           "<span><kbd>" + KMOD + "↵</kbd> insert &amp; send</span><span><kbd>esc</kbd> close</span>" +
-          '<span class="pmvars" title="write these in a saved prompt and they fill in when you insert it">{{selection}} {{date}} {{project}} {{branch}} {{chat}} {{agent}} {{last_reply}} {{file}}</span></div>';
+          '<span class="pmvars" title="write these in a saved prompt and they fill in when you insert it">{{selection}} {{date}} {{time}} {{project}} {{branch}} {{chat}} {{agent}} {{last_reply}} {{file}}</span></div>';
       var pb = document.getElementById("promptbtn"); if (pb) pb.classList.add("on");
       var q = document.getElementById("pmq");
       q.oninput = function(){ view.prompts.q = q.value; view.prompts.sel = 0; drawPrompts(); };
@@ -1111,7 +1173,8 @@ export function createComposer(view) {
         ? (pr.uses ? "used " + pr.uses + "\u00d7" : "saved " + rel(pr.createdAt))
         : (pr.mode && pr.mode !== "chat" ? (pr.mode === "orchestrate" ? "orchestra" : pr.mode) + " \u00b7 " : "") + rel(pr.at);
       var acts = r.kind === "saved"
-        ? '<button type="button" data-pma="pin" class="' + (pinned ? "on" : "") + '" title="' + (pinned ? "unpin" : "pin to the top") + '">' + ICONS.pin + "</button>" +
+        ? '<button type="button" data-pma="edit" title="rename or edit">' + ICONS.pencil + "</button>" +
+          '<button type="button" data-pma="pin" class="' + (pinned ? "on" : "") + '" title="' + (pinned ? "unpin" : "pin to the top") + '">' + ICONS.pin + "</button>" +
           '<button type="button" data-pma="del" class="del" title="delete">' + ICONS.trash + "</button>"
         : (r.kept ? '<button type="button" class="on" title="already saved" disabled>' + ICONS.check + "</button>"
           : '<button type="button" data-pma="save" title="save this prompt">' + ICONS.bookmark + "</button>");
@@ -1151,6 +1214,25 @@ export function createComposer(view) {
           if (act) { promptAction(i, act.getAttribute("data-pma")); return; }
           if (ev.target.closest && ev.target.closest(".pmacts")) return;
           insertPrompt(i, ev.metaKey || ev.ctrlKey);
+        };
+        // right-click: everything a prompt can do
+        row.oncontextmenu = function(ev){
+          ev.preventDefault();
+          var i = Number(row.getAttribute("data-pr")), r = view.prompts.rows[i]; if (!r) return;
+          var items = [{ head: r.kind === "saved" ? "Saved prompt" : "Recent prompt" },
+            { label: "Insert", icon: ICONS.quote, run: function(){ insertPrompt(i, false); } },
+            { label: "Insert and send", icon: ICONS.up, run: function(){ insertPrompt(i, true); } },
+            { label: "Copy", icon: ICONS.copy, run: function(){ copyText(String(r.p.text || "")); toast("copied"); } }];
+          if (r.kind === "saved") {
+            items.push({ sep: true });
+            items.push({ label: "Rename or edit\u2026", icon: ICONS.pencil, run: function(){ promptAction(i, "edit"); } });
+            items.push({ label: r.p.pinned ? "Unpin" : "Pin to the top", icon: ICONS.pin, run: function(){ promptAction(i, "pin"); } });
+            items.push({ label: "Delete", icon: ICONS.trash, danger: true, run: function(){ promptAction(i, "del"); } });
+          } else if (!r.kept) {
+            items.push({ label: "Save", icon: ICONS.bookmark, run: function(){ promptAction(i, "save"); } });
+          }
+          closeMenu();
+          openMenu(ev.clientX, ev.clientY, items);
         };
       });
       var clr = list.querySelector("[data-pmclear]");
@@ -1199,8 +1281,14 @@ export function createComposer(view) {
         chat: (chat && chat.title) || "Main",
         agent: state.selected ? labelOf(state.selected) : "",
         last_reply: replies.length ? (replies[replies.length - 1].innerText || "").trim().slice(0, 4000) : "",
-        file: dockOpen ? ((document.getElementById("dockpath") || {}).textContent || "") : "",
+        file: dockOpen ? dockFile() : "",
       };
+      // the file in the dock's front tab ({{file}}): a diff, a preview or a source view, not Subagents
+      function dockFile(){
+        var t = document.querySelector("#docktabs .dtab.on");
+        if (t) return /^[fad]:/.test(t.getAttribute("data-dtab") || "") ? t.getAttribute("title") || "" : "";
+        return (document.getElementById("dockpath") || {}).textContent || "";
+      }
       return String(text).replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, function(m, k){
         var v = vars[k.toLowerCase()];
         return v ? v : m;
@@ -1244,9 +1332,26 @@ export function createComposer(view) {
       if (act === "pin") {
         r.p.pinned = !r.p.pinned; drawPrompts();
         api("/api/prompts/" + encodeURIComponent(r.p.id), { method: "PATCH", body: JSON.stringify({ pinned: r.p.pinned }) }).then(done, fail);
+      } else if (act === "edit") {
+        var p0 = r.p;
+        closeMenu();
+        askText("Name this prompt", { value: p0.title || String(p0.text || "").split("\n")[0].slice(0, 60), ok: "Next", required: true }).then(function(title){
+          if (title === null) return;
+          return askText("Edit the prompt", { value: String(p0.text || ""), ok: "Save", multiline: true, required: true,
+            note: "Variables fill in when you insert it: {{selection}} {{date}} {{time}} {{project}} {{branch}} {{chat}} {{agent}} {{last_reply}} {{file}}" })
+            .then(function(text){
+              if (text === null) return;
+              return api("/api/prompts/" + encodeURIComponent(p0.id), { method: "PATCH", body: JSON.stringify({ title: title.trim(), text: text }) })
+                .then(function(){ toast("saved \u201c" + view.trunc(title.trim(), 40) + "\u201d"); return done(); });
+            });
+        }).catch(fail);
       } else if (act === "del") {
-        view.prompts.saved = view.prompts.saved.filter(function(sp){ return sp !== r.p; }); drawPrompts();
-        api("/api/prompts/" + encodeURIComponent(r.p.id), { method: "DELETE" }).then(done, fail);
+        var gone = r.p;
+        view.prompts.saved = view.prompts.saved.filter(function(sp){ return sp !== gone; }); drawPrompts();
+        api("/api/prompts/" + encodeURIComponent(gone.id), { method: "DELETE" }).then(function(){
+          toast("deleted \u201c" + view.trunc(gone.title || String(gone.text || ""), 30) + "\u201d");
+          return done();
+        }, fail);
       } else if (act === "save") {
         api("/api/prompts", { method: "POST", body: JSON.stringify({ text: r.p.text }) })
           .then(function(j){ toast("saved \u201c" + view.trunc(j.prompt.title, 40) + "\u201d"); return done(); }, fail);
@@ -1277,6 +1382,8 @@ export function createComposer(view) {
         // badge on More carries the same signal.
         var btn = document.getElementById("morebtn"); if (btn){ btn.classList.toggle("active", on > 0); }
       }).catch(function(){});
+      // the "/" menu's skill rows read their own cache: keep it in step with every change
+      loadSkillCache();
     }
 
     /**
@@ -1327,82 +1434,166 @@ export function createComposer(view) {
       document.getElementById("mcx").onclick = close;
 
       var installed = {};
+      var MCP_KINDS = ["claude-code", "codex"]; // the adapters that take MCP servers from Loom (providers/agent.ts)
       function load(q){
         var body = document.getElementById("mcpbody"); if (!body) return;
         Promise.all([
           api("/api/mcp/catalog" + (q ? "?q=" + encodeURIComponent(q) : "")).catch(function(){ return { servers: [], featured: [], degraded: true }; }),
           api("/api/projects/" + pid + "/mcps").catch(function(){ return { mcps: [] }; })
         ]).then(function(res){
-          var cat = res[0] || {}, mine = (res[1] && res[1].mcps) || [];
+          var cat = res[0] || {}, all = (res[1] && res[1].mcps) || [];
+          // Only a row with somewhere to connect or something to run is installed;
+          // the rest are suggestion placeholders, and must not hide the catalog's offer.
+          var mine = all.filter(function(m){ return m.url || m.command; });
           installed = {}; mine.forEach(function(m){ installed[m.name] = m; });
           var list = (q ? (cat.servers || []) : (cat.featured || []).concat(cat.servers || []));
           renderMcpList(body, list, mine, cat.degraded, q);
         });
       }
+      /** A command line, split like a shell would: quotes keep spaces together. */
+      function splitArgs(line){
+        var out = [], cur = "", quote = null, any = false;
+        for (var i = 0; i < line.length; i++) {
+          var ch = line[i];
+          if (quote) { if (ch === quote) quote = null; else if (ch === "\\" && quote === '"' && i + 1 < line.length) cur += line[++i]; else cur += ch; continue; }
+          if (ch === '"' || ch === "'") { quote = ch; any = true; continue; }
+          if (/\s/.test(ch)) { if (cur || any) { out.push(cur); cur = ""; any = false; } continue; }
+          cur += ch;
+        }
+        if (cur || any) out.push(cur);
+        return out;
+      }
+      /** "KEY=value" (env) or "Header: value" (headers), one per line, into an object. */
+      function pairs(text, sep){
+        var o = {};
+        String(text || "").split("\n").forEach(function(l){
+          var at = l.indexOf(sep); if (at <= 0) return;
+          var k = l.slice(0, at).trim(), v = l.slice(at + 1).trim();
+          if (k) o[k] = v;
+        });
+        return o;
+      }
+      function reachNote(){
+        var kinds = ((state.project && state.project.agents) || []).filter(function(a){ return a.enabled !== false; }).map(function(a){ return a.kind; });
+        var yes = kinds.filter(function(k){ return MCP_KINDS.indexOf(k) >= 0; }), no = kinds.filter(function(k){ return MCP_KINDS.indexOf(k) < 0 && k !== "echo"; });
+        if (!kinds.length) return "";
+        return '<div class="mcpnote">' + ICONS.info + "<span>" +
+          (yes.length ? "Servers reach " + esc(yes.map(function(k){ return agentLabel(k); }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(" and ")) + " in this project." : "None of this project’s agents take MCP servers yet.") +
+          (no.length ? " " + esc(no.map(function(k){ return agentLabel(k); }).filter(function(v, i, a){ return a.indexOf(v) === i; }).join(", ")) + " " + (no.length === 1 ? "doesn’t" : "don’t") + " use them yet." : "") +
+          "</span></div>";
+      }
       function renderMcpList(body, list, mine, degraded, q){
         // What's already connected comes first: this modal is also where you
         // check on and remove what you installed, not only where you add.
-        var connectedRows = mine.filter(function(m){ return m.url || m.command; }).map(function(m){
-          var ok = !!m.connected;
-          return '<div class="mcpitem installed"><span class="mcpmark ' + (ok ? "on" : "off") + '">' + mcpMark(m.slug || String(m.name || "").toLowerCase(), m.name) + "</span>" +
+        var connectedRows = mine.map(function(m){
+          var on = m.enabledForSession !== false, local = !m.url && !!m.command;
+          var st = !on ? ["off", "off", "switched off"] : local ? ["", "local", "local command"] : m.connected ? ["on", "ok", "reachable"] : ["off", "bad", "unreachable"];
+          return '<div class="mcpitem installed' + (on ? "" : " disabled") + '" data-mcprow="' + esc(m.name) + '"><span class="mcpmark ' + st[0] + '">' + mcpMark(m.slug || String(m.name || "").toLowerCase(), m.name) + "</span>" +
             '<div class="mcpinfo"><div class="mcpname">' + esc(m.name) +
-              '<span class="mcpstate ' + (ok ? "ok" : "bad") + '">' + (ok ? "reachable" : "unreachable") + "</span></div>" +
-              '<div class="mcpdesc">' + esc(m.url || m.command || "") + "</div></div>" +
+              '<span class="mcpstate ' + st[1] + '">' + st[2] + "</span></div>" +
+              '<div class="mcpdesc">' + esc(m.url || [m.command].concat(m.args || []).join(" ")) + "</div></div>" +
+            '<label class="mcpswitch" title="' + (on ? "on for this project — click to switch off" : "off — click to switch on") + '"><input type="checkbox" data-toggle="' + esc(m.name) + '"' + (on ? " checked" : "") + '><span></span></label>' +
             '<button class="mcpbtn remove" data-remove="' + esc(m.name) + '">Remove</button></div>';
         }).join("");
         var rows = list.filter(function(s){ return !installed[s.name || s.title]; }).map(function(s){
-          var key = s.name || s.title;
           var dest = s.url || (s.command ? s.command + " " + ((s.args || []).join(" ")) : "");
+          var needsSetup = !!(s.needsUrl || s.requires || (!s.url && !s.command));
           return '<div class="mcpitem"><span class="mcpmark">' + mcpMark(s.slug, s.title || s.name) + "</span>" +
             '<div class="mcpinfo"><div class="mcpname">' + esc(s.title || s.name) +
               (s.transport ? '<span class="mcptr">' + esc(s.transport) + "</span>" : "") + "</div>" +
-              '<div class="mcpdesc">' + esc(s.description || dest || "") + "</div></div>" +
-            '<button class="mcpbtn" data-install="' + esc(encodeURIComponent(JSON.stringify(s))) + '">' + (s.needsUrl ? "Add\u2026" : "Install") + "</button></div>";
+              '<div class="mcpdesc">' + esc(s.description || dest || "") + "</div>" +
+              (s.requires ? '<div class="mcpreq">' + ICONS.key + esc(s.requires) + "</div>" : "") + "</div>" +
+            '<button class="mcpbtn" data-install="' + esc(encodeURIComponent(JSON.stringify(s))) + '">' + (needsSetup ? "Set up…" : "Install") + "</button></div>";
         }).join("");
         body.innerHTML =
-          (degraded ? '<div class="mcpwarn">' + ICONS.route + " The public registry didn\u2019t answer \u2014 showing well-known providers only. Search needs the registry.</div>" : "") +
+          (degraded ? '<div class="mcpwarn">' + ICONS.route + " The public registry didn’t answer — showing well-known providers only. Search needs the registry.</div>" : "") +
+          reachNote() +
           (connectedRows ? '<div class="mcpsec">Installed in this project</div>' + connectedRows : "") +
           '<div class="mcpsec">' + (q ? "Registry results" : "Popular providers") + "</div>" +
-          (rows || '<div class="mcpempty">Nothing matched \u201c' + esc(q || "") + '\u201d.</div>') +
+          (rows || '<div class="mcpempty">' + (q ? "Nothing matched “" + esc(q) + "”." : "Every provider here is installed.") + "</div>") +
           '<div class="mcpcustom"><div class="mcpsec">Add one by hand</div>' +
-            '<div class="mcprow2"><input id="mcpcn" class="mcpin" placeholder="Name"/><input id="mcpcu" class="mcpin wide" placeholder="https://\u2026/mcp or a command"/>' +
-            '<button class="mcpbtn" id="mcpcadd">Add</button></div></div>';
+            '<div class="mcprow2"><input id="mcpcn" class="mcpin" placeholder="Name"/><input id="mcpcu" class="mcpin wide" placeholder="https://…/mcp — or a command, e.g. npx -y @scope/server “/my dir”"/>' +
+            '<button class="mcpbtn" id="mcpcadd">Add</button></div>' +
+            '<details class="mcpmore"><summary>Headers and environment</summary>' +
+              '<textarea id="mcpch" class="mcpin mcpta" rows="2" placeholder="Authorization: Bearer …  (one header per line, for a URL)"></textarea>' +
+              '<textarea id="mcpce" class="mcpin mcpta" rows="2" placeholder="API_KEY=…  (one variable per line, for a command)"></textarea></details></div>';
         Array.prototype.forEach.call(body.querySelectorAll("[data-install]"), function(b){
           b.onclick = function(){
             var s = JSON.parse(decodeURIComponent(b.getAttribute("data-install")));
-            var url = s.url;
-            if (s.needsUrl || (!s.url && !s.command)){
-              // Some providers can't be shipped with a fixed endpoint — a hosted
-              // one typically embeds your account or region in the hostname. The
-              // catalog hands over a template rather than guessing a URL that
-              // would simply fail, so prefill it and let the person finish it.
-              var hint = (s.requires ? s.requires + "\n\n" : "") + "Endpoint URL for " + (s.title || s.name) + ":";
-              url = window.prompt(hint, s.urlTemplate || "https://");
-              if (!url || url === s.urlTemplate) return;
-            }
-            doInstall({ name: s.title || s.name, slug: s.slug, url: url, command: s.command, args: s.args, transport: s.transport, description: s.description }, b);
+            if (s.needsUrl || s.requires || (!s.url && !s.command)) { setupForm(b, s); return; }
+            doInstall({ name: s.title || s.name, slug: s.slug, url: s.url, command: s.command, args: s.args, transport: s.transport, description: s.description }, b);
+          };
+        });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-toggle]"), function(c){
+          c.onchange = function(){
+            var m = installed[c.getAttribute("data-toggle")]; if (!m) return;
+            var next = {}; Object.keys(m).forEach(function(k){ if (k !== "connected" && k !== "probedAt") next[k] = m[k]; });
+            next.enabledForSession = c.checked;
+            api("/api/projects/" + pid + "/mcps", { method: "PATCH", body: JSON.stringify({ mcp: next }) })
+              .then(function(){ toast(m.name + (c.checked ? " is on for this project" : " is off for this project")); load(document.getElementById("mcpq").value.trim()); })
+              .catch(function(err){ toast(err.message); c.checked = !c.checked; });
           };
         });
         Array.prototype.forEach.call(body.querySelectorAll("[data-remove]"), function(b){
           b.onclick = function(){
-            b.disabled = true; b.textContent = "\u2026";
-            api("/api/projects/" + pid + "/mcps/" + encodeURIComponent(b.getAttribute("data-remove")), { method: "DELETE" })
-              .then(function(){ load(document.getElementById("mcpq").value.trim()); })
-              .catch(function(err){ toast(err.message); b.disabled = false; b.textContent = "Remove"; });
+            var name = b.getAttribute("data-remove");
+            askConfirm("Remove " + name + " from this project?", { ok: "Remove", danger: true }).then(function(yes){
+              if (!yes) return;
+              b.disabled = true; b.textContent = "…";
+              api("/api/projects/" + pid + "/mcps/" + encodeURIComponent(name), { method: "DELETE" })
+                .then(function(){ toast(name + " removed"); load(document.getElementById("mcpq").value.trim()); })
+                .catch(function(err){ toast(err.message); b.disabled = false; b.textContent = "Remove"; });
+            });
           };
         });
         var addBtn = body.querySelector("#mcpcadd");
         if (addBtn) addBtn.onclick = function(){
           var n = body.querySelector("#mcpcn").value.trim(), u = body.querySelector("#mcpcu").value.trim();
           if (!n || !u) return void toast("Name and endpoint are both required.");
-          var isUrl = /^https?:\/\//.test(u);
-          doInstall(isUrl ? { name: n, url: u, transport: "http" } : { name: n, command: u.split(/\s+/)[0], args: u.split(/\s+/).slice(1), transport: "stdio" }, addBtn);
+          var headers = pairs(body.querySelector("#mcpch").value, ":"), env = pairs(body.querySelector("#mcpce").value, "=");
+          if (/^https?:\/\//.test(u)) doInstall({ name: n, url: u, transport: /\/sse\/?$/.test(u) ? "sse" : "http", headers: headers }, addBtn);
+          else { var parts = splitArgs(u); doInstall({ name: n, command: parts[0], args: parts.slice(1), env: env }, addBtn); }
+        };
+      }
+      /** Inline setup for a provider that needs a URL, a token or some arguments before it can work. */
+      function setupForm(btn, s){
+        var item = btn.closest(".mcpitem");
+        var open = item.nextElementSibling && item.nextElementSibling.classList.contains("mcpform");
+        Array.prototype.forEach.call(document.querySelectorAll("#mcpbody .mcpform"), function(f){ f.remove(); });
+        if (open) return;
+        var isCmd = !!s.command && !s.needsUrl;
+        var f = document.createElement("div"); f.className = "mcpform";
+        f.innerHTML = (s.requires ? '<div class="mcpreq">' + ICONS.key + esc(s.requires) + "</div>" : "") +
+          (isCmd
+            ? '<label>Command</label><input class="mcpin" data-f="cmd" value="' + esc([s.command].concat(s.args || []).map(function(a){ return /\s/.test(a) ? JSON.stringify(a) : a; }).join(" ")) + '"/>' +
+              '<label>Environment <span>KEY=value, one per line</span></label><textarea class="mcpin mcpta" rows="2" data-f="env"></textarea>'
+            : '<label>Endpoint URL</label><input class="mcpin" data-f="url" value="' + esc(s.urlTemplate || s.url || "https://") + '"/>' +
+              '<label>Headers <span>Name: value, one per line — e.g. Authorization: Bearer …</span></label><textarea class="mcpin mcpta" rows="2" data-f="headers"></textarea>') +
+          '<div class="mcpformacts"><button class="mcpbtn ghost" data-f="cancel">Cancel</button><button class="mcpbtn" data-f="go">Install</button></div>';
+        item.after(f);
+        var first = f.querySelector("input"); if (first) { first.focus(); first.setSelectionRange(first.value.length, first.value.length); }
+        f.querySelector('[data-f="cancel"]').onclick = function(){ f.remove(); };
+        f.querySelector('[data-f="go"]').onclick = function(){
+          var go = f.querySelector('[data-f="go"]');
+          if (isCmd) {
+            var parts = splitArgs(f.querySelector('[data-f="cmd"]').value.trim());
+            if (!parts.length) return void toast("Give it a command to run.");
+            doInstall({ name: s.title || s.name, slug: s.slug, command: parts[0], args: parts.slice(1), env: pairs(f.querySelector('[data-f="env"]').value, "="), description: s.description }, go);
+          } else {
+            var url = f.querySelector('[data-f="url"]').value.trim();
+            if (!/^https?:\/\/[^/]+\.[^/]+/.test(url) || url === s.urlTemplate || /[{<]/.test(url)) return void toast("Fill in the endpoint URL for your account.");
+            doInstall({ name: s.title || s.name, slug: s.slug, url: url, transport: s.transport, headers: pairs(f.querySelector('[data-f="headers"]').value, ":"), description: s.description }, go);
+          }
         };
       }
       function doInstall(payload, btn){
-        var old = btn.textContent; btn.disabled = true; btn.textContent = "Installing\u2026";
+        var old = btn.textContent; btn.disabled = true; btn.textContent = "Installing…";
         api("/api/projects/" + pid + "/mcps/install", { method: "POST", body: JSON.stringify(payload) })
-          .then(function(){ toast(payload.name + " installed"); load(document.getElementById("mcpq").value.trim()); })
+          .then(function(j){
+            var ok = j && j.installed && (j.installed.connected || !payload.url);
+            toast(payload.name + " installed" + (payload.url && !ok ? " — but it didn’t answer yet; check the URL or token" : ""));
+            load(document.getElementById("mcpq").value.trim());
+          })
           .catch(function(err){ toast(err.message || "install failed"); btn.disabled = false; btn.textContent = old; });
       }
       var qEl = document.getElementById("mcpq"), qT = null;
@@ -1428,7 +1619,8 @@ export function createComposer(view) {
         '<div class="mcpsearchwrap"><input id="skq" class="mcpsearch" type="search" placeholder="Filter skills\u2026" autocomplete="off"/></div>' +
         '<div class="modalbody" id="skbody"><div class="loader"><i></i><i></i><i></i><i></i></div></div></div>';
       document.body.appendChild(scrim);
-      function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); if (state.refreshComposer) state.refreshComposer(); }
+      // what you switched on or installed shows on More, its hint and the "/" menu at once
+      function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); refreshSkillCount(); }
       function onKey(e){ if (e.key === "Escape") close(); }
       document.addEventListener("keydown", onKey);
       scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
@@ -1461,14 +1653,16 @@ export function createComposer(view) {
                   (s.enabled ? '<span class="mcpstate ok">on</span>' : "") + "</div>" +
                   '<div class="mcpdesc">' + esc(s.description || "") + "</div></div>" +
                 '<button class="mcpbtn' + (s.enabled ? " remove" : "") + '" data-tog="' + esc(s.id) + '" data-on="' + (s.enabled ? "1" : "0") + '">' +
-                  (s.enabled ? "Disable" : "Enable") + "</button></div>";
+                  (s.enabled ? "Disable" : "Enable") + "</button>" +
+                (o === "project" ? '<button class="iconbtn skdel" data-skdel="' + esc(s.id) + '" title="remove from this project" aria-label="remove ' + esc(s.name || s.id) + '">' + ICONS.trash + "</button>" : "") +
+                "</div>";
             }).join("");
         });
-        body.innerHTML = (html || '<div class="mcpempty">No skills matched.</div>') +
+        body.innerHTML = (html || '<div class="mcpempty">' + (q ? "No skills matched \u201c" + esc(q) + "\u201d." : "No skills on this machine yet \u2014 install one below, or put a folder with a SKILL.md under this project\u2019s skills/.") + "</div>") +
           '<div class="mcpcustom"><div class="mcpsec">Install a skill</div>' +
           '<div class="mcprow2"><input id="skgit" class="mcpin wide" placeholder="https://github.com/\u2026 (git) or /path/to/skill"/>' +
           '<button class="mcpbtn" id="skadd">Install</button></div>' +
-          '<div class="mcphint">Needs a <code>SKILL.md</code> at the root. It is copied into this project\u2019s <code>skills/</code>.</div></div>';
+          '<div class="mcphint">A folder with a <code>SKILL.md</code> (at the root, or under <code>skills/&lt;name&gt;/</code>). It is copied into this project\u2019s <code>skills/</code> and turned on.</div></div>';
         Array.prototype.forEach.call(body.querySelectorAll("[data-tog]"), function(b){
           b.onclick = function(){
             var on = b.getAttribute("data-on") === "1";
@@ -1478,15 +1672,43 @@ export function createComposer(view) {
               .then(load).catch(function(err){ toast(err.message); b.disabled = false; });
           };
         });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-skdel]"), function(b){
+          b.onclick = function(){
+            var id = b.getAttribute("data-skdel");
+            askConfirm("Remove the skill \u201c" + id + "\u201d from this project? Its folder under skills/ is deleted.", { ok: "Remove", danger: true }).then(function(yes){
+              if (!yes) return;
+              api("/api/projects/" + pid + "/skills/" + encodeURIComponent(id), { method: "DELETE" })
+                .then(function(){ toast("removed " + id); load(); }).catch(function(err){ toast(err.message); });
+            });
+          };
+        });
         body.querySelector("#skadd").onclick = function(){
           var v = (body.querySelector("#skgit").value || "").trim();
           if (!v) return void toast("Paste a git URL or a folder path.");
           var btn = this; btn.disabled = true; btn.textContent = "Installing\u2026";
           var payload = /^(https?:|git@|ssh:)/.test(v) ? { gitUrl: v } : { dir: v };
-          api("/api/projects/" + pid + "/skills/install", { method: "POST", body: JSON.stringify(payload) })
-            .then(function(r){ toast("Installed " + ((r && r.installed && r.installed.id) || "skill")); load(); })
-            .catch(function(err){ toast(err.message || "install failed"); })
-            .then(function(){ btn.disabled = false; btn.textContent = "Install"; });
+          var install = function(force){
+            return api("/api/projects/" + pid + "/skills/install", { method: "POST", body: JSON.stringify(force ? Object.assign({ force: true }, payload) : payload) })
+              .then(function(r){
+                var sk = (r && (r.skill || r.installed)) || {};
+                var ids = [sk.id].concat(sk.also || []).filter(Boolean);
+                // installed means "use it": turn it on, so it reaches the next briefing
+                return Promise.all(ids.map(function(id){ return api("/api/projects/" + pid + "/skills/" + encodeURIComponent(id), { method: "PUT", body: JSON.stringify({ enabled: true }) }).catch(function(){}); }))
+                  .then(function(){
+                    toast(ids.length > 1 ? "Installed and turned on " + ids.length + " skills: " + ids.join(", ") : "Installed and turned on " + (sk.name || sk.id || "the skill"));
+                    body.querySelector("#skgit").value = ""; load();
+                  });
+              })
+              .catch(function(err){
+                var m = String((err && err.message) || "install failed");
+                if (/force/i.test(m) && !force) {
+                  return askConfirm("That skill is already installed in this project. Replace it with this copy?", { ok: "Replace" })
+                    .then(function(yes){ if (yes) return install(true); });
+                }
+                toast(m);
+              });
+          };
+          install(false).then(function(){ btn.disabled = false; btn.textContent = "Install"; });
         };
       }
       document.getElementById("skq").oninput = draw;
@@ -1504,9 +1726,11 @@ export function createComposer(view) {
         bar.style.display = "";
         bar.innerHTML = '<span class="sugico">' + ICONS.spark + '</span><span class="sugtx"><b>Skill: ' + esc(s.name || s.id) + '</b> <span class="obsub">' + esc((s.description || "").slice(0, 90)) + '</span></span><button class="sugadd" data-skill="' + esc(s.id) + '">+ Enable</button><button class="sugx iconbtn" aria-label="dismiss">' + ICONS.x + "</button>";
         var add = bar.querySelector(".sugadd");
-        if (add) add.onclick = function(){ api("/api/projects/" + view.pid + "/skills/" + encodeURIComponent(s.id), { method: "PUT", body: JSON.stringify({ enabled: true }) }).then(function(){ refreshSkillCount(); bar.style.display = "none"; toast("enabled " + (s.name || s.id)); }); };
+        if (add) add.onclick = function(){ api("/api/projects/" + view.pid + "/skills/" + encodeURIComponent(s.id), { method: "PUT", body: JSON.stringify({ enabled: true }) }).then(function(){ refreshSkillCount(); bar.style.display = "none"; toast("enabled " + (s.name || s.id)); }).catch(function(err){ toast(err.message); }); };
         var x = bar.querySelector(".sugx"); if (x) x.onclick = function(){ bar.style.display = "none"; };
       }).catch(function(){});
     }
+// Settings → Preferences opens these for the project on screen.
+state.openTools = function(kind){ if (!view.pid) return; if (kind === "skills") openSkillsModal(view.pid); else openMcpModal(view.pid); };
 return { autosizeBox, drawAttach, closeMenu, menuAway, openModelMenu, bindComposer, updateModelLabel, openPermMenu, composerPlaceholder, send };
 }

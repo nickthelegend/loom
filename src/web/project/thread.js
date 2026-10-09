@@ -1,14 +1,14 @@
 import { agentGlyph,agentLabel,BRAND_TITLES,brandMark,hasBrand,labelOf } from '../agents.js';
 import { settleApprovalCards } from '../approvals.js';
 import { api,checkBuild } from '../connection.js';
-import { addLogRecord } from '../console.js';
+import { addLogRecord,clog } from '../console.js';
 import { esc,hue,mdToHtml,money,pageGone } from '../format.js';
 import { notifyDone,notifyNeedsInput,toast } from '../notifications.js';
 import { maybeReloadPreview,onServerFrame,onSpecFrame } from '../preview.js';
 import { state } from '../state.js';
 import { drawStatusbar } from '../statusbar.js';
 import { onTeamFrame } from '../team.js';
-import { actSummary,avatarFor,durfmt,lineFor,relClock,untilText,whoHtml } from '../transcript.js';
+import { actSummary,avatarFor,durfmt,lineFor,relClock,settleQuestionCard,untilText,whoHtml } from '../transcript.js';
 import { observeUsage,usageMeter } from '../usage.js';
 import { ICONS } from '../icons.js';
 
@@ -83,7 +83,10 @@ export function createThread(view) {
       // interrupt, in the one place you're already looking. Driven by the
       // agents' own busy flag rather than a local guess, so a turn you started
       // from your phone shows a stop here too.
-      var anyBusy = adapters.some(function(a){ return a.busy; });
+      // busy *in this chat*: an agent working in another thread doesn't take
+      // this one's Send away (a daemon too old to say which chat counts as here)
+      var here = view.chatId || "main";
+      var anyBusy = adapters.some(function(a){ return a.busy && (!a.chat || a.chat === here); });
       var sendBtn = document.getElementById("send");
       var stopBtn = document.getElementById("stop");
       // Orchestrate has its own send, and a run is stopped from its view
@@ -332,10 +335,30 @@ export function createThread(view) {
         if (e.agentId && ((e.kind === "message" && !pl.reasoning) || pl.state === "interrupted" || e.kind === "run_complete" || e.kind === "error")) {
           clearStreaming(feed, e.agentId);
         }
+        // A question answered (on its card, by a typed reply, in the agent's own UI) folds its card;
+        // a turn that ended leaves its unanswered cards closed, not clickable into an error.
+        if (e.kind === "status" && pl.state === "question_answered" && pl.requestId) {
+          Array.prototype.forEach.call(feed.querySelectorAll('.nicard[data-nireq]'), function(c){
+            if (c.getAttribute("data-nireq") === pl.requestId) settleQuestionCard(c, pl.answers || {});
+          });
+        }
+        if (e.agentId && (pl.state === "interrupted" || e.kind === "run_complete" || e.kind === "error")) {
+          Array.prototype.forEach.call(feed.querySelectorAll('.nicard[data-nireq]:not(.done)'), function(c){
+            if (c.getAttribute("data-niwho") === e.agentId) settleQuestionCard(c, null);
+          });
+        }
         if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
         }
         noteLive(e);
+        // a todo list that changed mid-turn updates its checklist in place, rather than stacking copies
+        if (e.kind === "status" && pl.state === "plan_updated") {
+          var cards = feed.querySelectorAll(".plancheck"), prevCard = null;
+          for (var ci = cards.length - 1; ci >= 0; ci--) if (cards[ci].getAttribute("data-agent") === (e.agentId || "")) { prevCard = cards[ci]; break; }
+          var sib = prevCard && prevCard.nextElementSibling, userSince = false;
+          while (sib && !userSince) { if (sib.classList.contains("user")) userSince = true; sib = sib.nextElementSibling; }
+          if (prevCard && !userSince) { var fresh = lineFor(e); if (fresh) prevCard.outerHTML = fresh; return; }
+        }
         var html = lineFor(e);
         if (!html) return;
         placeLine(feed, html);
@@ -573,6 +596,18 @@ export function createThread(view) {
     // live reply every agent gets — see onStreamFrame), so a delta frame's
     // text is not drawn a second time. Kept for clients that only see deltas.
     function onDelta(frame){
+      // a running command's output, live, under its row (the last few KB; the finished row keeps its tail)
+      if (frame.streamKind === "command_output" && frame.itemId && view.historyLoaded && (frame.chat || "main") === view.chatId) {
+        var fd = document.getElementById("feed"), run = null;
+        if (fd) Array.prototype.forEach.call(fd.querySelectorAll(".tool.running"), function(r){ if (r.getAttribute("data-item") === frame.itemId) run = r; });
+        if (run) {
+          var pre = run.querySelector(".runout");
+          if (!pre) { pre = document.createElement("pre"); pre.className = "runout"; run.appendChild(pre); }
+          pre.textContent = (pre.textContent + String(frame.delta || "")).slice(-4000);
+          pre.scrollTop = pre.scrollHeight;
+        }
+        return;
+      }
       if (frame.streamKind !== "assistant_text" || !frame.agentId || !view.historyLoaded) return;
       if (typeof onStreamFrame === "function") return;
       if ((frame.chat || "main") !== view.chatId) return;
@@ -748,6 +783,10 @@ export function createThread(view) {
             // An orchestra spans many chats — its run's and one per task — so
             // the view listens above the per-chat filter too.
             view.onOrchEvent(frame.event);
+            // A crew spans its channel and one thread per teammate, likewise.
+            view.onCrewEvent(frame.event);
+            // a goal just started: open its Subagents tab beside the thread
+            view.onSubagentEvent(frame.event);
             // Approvals are per project, not per chat: the badge counts them
             // all, and a request from another thread still reaches you.
             view.onApprovalEvent(frame.event);
@@ -761,7 +800,10 @@ export function createThread(view) {
               var dn = document.querySelectorAll("#feed .odone"); if (dn.length) dn[dn.length - 1].classList.add("celebrate");
             }
           }
-        } catch (e) {}
+        } catch (e) {
+          // a frame that throws while drawing is a bug to see, not to swallow
+          try { clog("error", "thread", "couldn't draw a live update: " + ((e && e.message) || e), (e && e.stack) || ""); } catch (e2) {}
+        }
       };
       ws.onclose = function(){
         state.wsLive = false; drawStatusbar();

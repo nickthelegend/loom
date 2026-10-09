@@ -1,5 +1,7 @@
 /**
- * Loom mobile design tokens — the "quiet graphite" system adapted from the
+ * Loom mobile design tokens — the desktop app's own palette (src/web/styles/
+ * base.css), so the phone and the desktop read as one product. Adapted from the
+ * "quiet graphite" system of the
  * Orca mobile companion app (github.com/stablyai/orca, MIT): near-black
  * surfaces, hairline borders, neutral-grey active states, and one near-white
  * primary action per screen. Color is reserved for state — thread cyan marks
@@ -11,19 +13,19 @@ import { Platform } from "react-native";
 /** Dark: the design these tokens were drawn for. */
 const DARK = {
   // surfaces
-  bg: "#111111", // canvas
-  panel: "#1a1a1a", // cards, bars
-  raised: "#242424", // inputs, keys, pressed
-  editor: "#1e1e1e", // diff/code surface
-  line: "#2a2a2a", // hairline borders
-  line2: "#3a3a3a", // selected/stronger hairline
+  bg: "#0a0a0a", // canvas — the desktop app's background
+  panel: "#171717", // cards, bars (desktop --card)
+  raised: "#262626", // inputs, keys, pressed (desktop --muted)
+  editor: "#141414", // diff/code surface (desktop --editor-surface)
+  line: "#222222", // hairline borders (desktop --border, 7% white)
+  line2: "#383838", // selected/stronger hairline
   // text
-  text: "#e0e0e0",
-  dim: "#888888",
-  faint: "#555555",
+  text: "#fafafa",
+  dim: "#a1a1a1",
+  faint: "#737373",
   // the single loudest thing on any screen: near-white primary action
-  bright: "#f5f5f5",
-  onBright: "#111111",
+  bright: "#e5e5e5",
+  onBright: "#171717",
   // violet — the accent for the Observatory + self-heal moments
   primary: "#a78bfa",
   primaryDim: "#2e2545",
@@ -31,9 +33,9 @@ const DARK = {
   thread: "#67e8f9",
   threadDim: "#164e63",
   shuttle: "#e879f9",
-  ok: "#22c55e",
-  warn: "#f59e0b",
-  err: "#ef4444",
+  ok: "#10b981",
+  warn: "#eab308",
+  err: "#ff6568",
   accentBlue: "#3b82f6", // links/selection only
   // diffs (VS Code-grade washes)
   gitAdd: "#81b88b",
@@ -42,10 +44,10 @@ const DARK = {
   diffDelBg: "rgba(199, 78, 57, 0.11)",
   mono: Platform.select({ ios: "Menlo", default: "monospace" }) as string,
   // legacy aliases kept so stray references don't churn
-  ink2: "#1e1e1e",
-  panel2: "#242424",
+  ink2: "#141414",
+  panel2: "#262626",
   accent: "#67e8f9",
-  accentDark: "#111111",
+  accentDark: "#0a0a0a",
   mag: "#e879f9",
 };
 
@@ -55,16 +57,16 @@ const DARK = {
  * that keeps its contrast on white.
  */
 const LIGHT: typeof DARK = {
-  bg: "#f7f7f5",
+  bg: "#fafafa",
   panel: "#ffffff",
-  raised: "#efefec",
-  editor: "#f4f4f1",
-  line: "#e3e3de",
-  line2: "#d0d0ca",
-  text: "#1b1b1a",
-  dim: "#62625e",
-  faint: "#9a9a94",
-  bright: "#151515",
+  raised: "#f5f5f5",
+  editor: "#ffffff",
+  line: "#e5e5e5",
+  line2: "#d4d4d4",
+  text: "#0a0a0a",
+  dim: "#737373",
+  faint: "#a3a3a3",
+  bright: "#171717",
   onBright: "#fafafa",
   primary: "#6d28d9",
   primaryDim: "#ede9fe",
@@ -73,17 +75,17 @@ const LIGHT: typeof DARK = {
   shuttle: "#a21caf",
   ok: "#15803d",
   warn: "#b45309",
-  err: "#dc2626",
+  err: "#e40014",
   accentBlue: "#1d4ed8",
   gitAdd: "#2f7d3a",
   gitDel: "#b3261e",
   diffAddBg: "rgba(47, 125, 58, 0.1)",
   diffDelBg: "rgba(179, 38, 30, 0.09)",
   mono: DARK.mono,
-  ink2: "#f4f4f1",
-  panel2: "#efefec",
+  ink2: "#ffffff",
+  panel2: "#f5f5f5",
   accent: "#0e7490",
-  accentDark: "#f7f7f5",
+  accentDark: "#fafafa",
   mag: "#a21caf",
 };
 
@@ -100,6 +102,19 @@ export function onScheme(fn: () => void): void {
   schemeListeners.push(fn);
   fn();
 }
+/** What you picked, as on the desktop: dark (the default), light, or follow the phone. */
+export type ThemePref = "dark" | "light" | "system";
+export const THEME_KEY = "loom.theme";
+const prefListeners: Array<(p: ThemePref) => void> = [];
+export function onThemePref(fn: (p: ThemePref) => void): () => void {
+  prefListeners.push(fn);
+  return () => void prefListeners.splice(prefListeners.indexOf(fn) >>> 0, 1);
+}
+/** Announce a new preference; App persists it and re-themes. */
+export function pickTheme(p: ThemePref): void {
+  for (const fn of [...prefListeners]) fn(p);
+}
+
 export function setScheme(next: "dark" | "light"): boolean {
   if (next === scheme) return false;
   Object.assign(T, next === "light" ? LIGHT : DARK);

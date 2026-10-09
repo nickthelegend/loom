@@ -97,7 +97,7 @@ export function createBrain(view) {
           '<button class="lnk" id="reimport" style="margin-left:auto">re-import</button></div>';
         src += sources.length
           ? '<div class="bsrcs">' + sources.map(function(s){
-              return '<div class="bsrc">' + brandMark(s.kind) +
+              return '<div class="bsrcrow">' + brandMark(s.kind) +
                 '<span class="si">' + esc(s.agentId) + "</span>" +
                 '<span class="sf mono">' + esc(s.file) + "</span>" +
                 '<span class="sc">' + Math.round(s.chars / 1024 * 10) / 10 + "k</span></div>";

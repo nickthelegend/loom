@@ -43,6 +43,9 @@ export type EventKind =
   // agents run them in parallel, each in its own thread and worktree. One
   // kind, `payload.phase` says which step. See core/orchestra.ts.
   | "orchestra"
+  // Agent Teams: a crew's phases (planned, claimed, reviewed, …) in its
+  // channel; `payload.phase` says which. See core/crew.ts.
+  | "crew"
   // An agent in "always ask" mode wants permission for a tool use; payload
   // .phase is "requested" or "decided". See core/approvals.ts.
   | "approval"
@@ -107,6 +110,13 @@ export interface ChatInfo {
   archived?: boolean;
   /** A sidebar folder this thread is filed under (a plain name; folders exist while a thread is in them). */
   folder?: string;
+  /**
+   * What made this thread, when something did: an Orchestra run or race (its
+   * own thread and one per task), a crew (its channel and one per teammate),
+   * or an import. Computed on read from the runs, crews and imports — never
+   * stored — so the sidebar can fold a run's dozen threads into one row.
+   */
+  group?: { kind: "orchestra" | "race" | "crew" | "import"; id: string; title: string; status?: string; at: number };
   /** Event ids marked as worth coming back to (newest last, capped). */
   starred?: number[];
   /** Your verdict on replies: event id → up (1) or down (-1), with who wrote it. */
@@ -244,6 +254,8 @@ import type { ServerConfig } from "./core/servers.js";
 export interface ProjectConfig {
   name: string;
   agents: AgentConfig[];
+  /** Agent Teams: named crews of roster agents with roles (core/crew.ts). */
+  crews?: import("./core/crew.js").CrewConfig[];
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
   /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */
@@ -553,6 +565,8 @@ export interface Adapter extends BaseAgent {
   /** Working-tree changes attributable to the agent (porcelain-ish). */
   diff(): Promise<string>;
   busy(): boolean;
+  /** Answer a structured question the agent's turn is blocked on (a needs_input with a requestId). */
+  respondToUserInput?(chat: string, requestId: string, answers: Record<string, unknown>): Promise<void>;
 }
 
 /** Read-mostly bridge — never holds the baton (GUI agents). */

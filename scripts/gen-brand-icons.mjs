@@ -117,6 +117,11 @@ for (const [kind, Comp, title] of brands) {
   let inner = svg.replace(/^<svg[^>]*>/, "").replace(/<\/svg>$/, "");
   inner = inner.replace(/<title>[^<]*<\/title>/, ""); // the title belongs on the instance
 
+  // Mono marks paint in currentColor (the page sets it to the foreground, white
+  // on dark); opencode's hollow centre gets a soft fill, as its own logo has,
+  // so it doesn't read as a black hole on a dark chip.
+  if (kind === "opencode" || kind === "grok-code") inner = inner.replace(/<path(?![^>]*\bfill=)/g, '<path fill="currentColor"');
+  if (kind === "opencode") inner = '<path fill="currentColor" opacity=".45" d="M16 6H8v12h8z"></path>' + inner;
   symbols += `  <symbol id="brand-${kind}" viewBox="${viewBox}">${inner}</symbol>\n`;
   titles[kind] = title;
   process.stderr.write(`${kind}: ids=${ids.length} bytes=${inner.length}\n`);
