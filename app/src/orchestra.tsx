@@ -29,6 +29,7 @@ import {
   applyOrchestra,
   deliverOrchestra,
   getOrchestra,
+  getSubagents,
   getOrchestraRun,
   planPath,
   replyOrchestra,
@@ -36,6 +37,7 @@ import {
   stopWaitingOrchestra,
   type Creds,
   type OrchestraRun,
+  type Subagent,
   type OrchestraStatus,
   type OrchestraTask,
   type OrchestraTaskHold,
@@ -927,6 +929,79 @@ function Delivery(props: { run: OrchestraRun; busy: boolean; onRetry: () => void
  * The tab. `pulse` changes whenever an `orchestra` event arrives on the live
  * feed; `pulseRunId` names the run it was about.
  */
+const SUB_LOOK: Record<Subagent["status"], { label: string; color: () => string }> = {
+  running: { label: "working", color: () => T.ok },
+  asks: { label: "needs you", color: () => T.warn },
+  pending: { label: "waiting", color: () => T.dim },
+  done: { label: "done", color: () => T.dim },
+  failed: { label: "failed", color: () => T.err },
+  cancelled: { label: "stopped", color: () => T.dim },
+};
+
+function agoShort(ts: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return "now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+/**
+ * The desktop's Subagents tab, on the phone: every agent an Orchestra run, a
+ * race or a crew put to work. Active ones always show; the finished list
+ * folds behind a tap. A row opens that agent's thread.
+ */
+function SubagentsPanel(props: { creds: Creds; projectId: string; pulse: number; onOpenChat: (chatId: string, title: string) => void }) {
+  const [list, setList] = useState<{ active: Subagent[]; done: Subagent[] } | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const load = () => void getSubagents(props.creds, props.projectId).then((r) => { if (live) setList(r); }).catch(() => {});
+    load();
+    const t = setInterval(load, 4000);
+    return () => { live = false; clearInterval(t); };
+  }, [props.creds, props.projectId, props.pulse]);
+  if (!list || (!list.active.length && !list.done.length)) return null;
+  const row = (s: Subagent) => {
+    const look = SUB_LOOK[s.status];
+    return (
+      <TouchableOpacity
+        key={s.id}
+        disabled={!s.chat}
+        onPress={() => s.chat && props.onOpenChat(s.chat, s.name)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`${s.name}, ${look.label}. Opens its thread`}
+        style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 }}
+      >
+        <AgentIcon kind={s.kind} size={26} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: T.text, fontSize: 13.5 }} numberOfLines={1}>{s.name}</Text>
+          <Text style={{ color: T.faint, fontSize: 11.5, marginTop: 1 }} numberOfLines={1}>
+            <Text style={{ color: look.color(), fontWeight: "600" }}>{look.label}</Text>
+            {s.note ? ` · ${s.note}` : ` · ${s.source === "crew" ? s.goal : s.source}`}
+          </Text>
+        </View>
+        <Text style={{ color: T.faint, fontSize: 11.5 }}>{agoShort(s.at)}</Text>
+      </TouchableOpacity>
+    );
+  };
+  return (
+    <Panel>
+      <SectionLabel text={`Subagents · ${list.active.length} active`} />
+      {list.active.length ? list.active.map(row) : <Text style={{ color: T.faint, fontSize: 12.5 }}>No active subagents</Text>}
+      {list.done.length ? (
+        <>
+          <TouchableOpacity onPress={() => setShowDone((v) => !v)} activeOpacity={0.7} accessibilityRole="button" style={{ paddingTop: 6, minHeight: 32, justifyContent: "center" }}>
+            <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>{showDone ? "▾" : "›"} Done · {list.done.length}</Text>
+          </TouchableOpacity>
+          {showDone ? list.done.slice(0, 20).map(row) : null}
+        </>
+      ) : null}
+    </Panel>
+  );
+}
+
 export function OrchestraView(props: {
   creds: Creds;
   project: Project;
@@ -1001,6 +1076,8 @@ export function OrchestraView(props: {
           One agent plans, the rest build in parallel on their own branches, and it all merges into one.
         </Text>
       </View>
+
+      <SubagentsPanel creds={creds} projectId={project.id} pulse={props.pulse} onOpenChat={props.onOpenChat} />
 
       {err && !runs ? (
         <Unreachable what="Orchestra" detail={err} onRetry={() => void load()} />

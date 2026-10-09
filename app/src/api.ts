@@ -1252,6 +1252,24 @@ export const replyOrchestra = (c: Creds, id: string, runId: string, text: string
     body: JSON.stringify({ text }),
   });
 
+/** Every agent an orchestrator put to work (GET /subagents, core/subagents.ts). */
+export interface Subagent {
+  id: string;
+  name: string;
+  agentId: string;
+  kind: string;
+  status: "running" | "asks" | "pending" | "done" | "failed" | "cancelled";
+  chat?: string;
+  source: "orchestra" | "race" | "crew";
+  goal: string;
+  goalId: string;
+  at: number;
+  costUsd?: number;
+  note?: string;
+}
+export const getSubagents = (c: Creds, id: string) =>
+  api<{ active: Subagent[]; done: Subagent[] }>(c, `/api/projects/${id}/subagents`);
+
 /** `task` picks a race's entrant; a planned run applies as a whole. */
 export const applyOrchestra = (c: Creds, id: string, runId: string, task?: string) =>
   api<{ merged: boolean | string; into: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/apply`, {
