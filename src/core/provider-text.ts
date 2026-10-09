@@ -5,6 +5,7 @@
  * the rotation, so a busy one doesn't fail the job, and stops at the daily cap.
  */
 
+import { claudeText } from "./claude-cli.js";
 import { countFreeRequest, freeModels, isDailyCap, isPool, noteCapped, resetAt, rest, rotation } from "./free-pool.js";
 import { chatUrl, explainStatus, requestHeaders, resolveProvider } from "./providers.js";
 
@@ -49,4 +50,13 @@ export async function providerText(ref: string, prompt: string, opts: { timeoutM
     if (!isPool(pm.model)) break;
   }
   throw new Error(last || `${p.label} didn't answer`);
+}
+
+/**
+ * Loom's own small jobs (the memory extractor, LLM handoff briefs, the
+ * dynamic-route router) all come through here: a provider/model runs on that
+ * provider, anything else ("haiku", "sonnet") is a Claude alias.
+ */
+export function helperText(model: string, prompt: string, opts: { timeoutMs?: number } = {}): Promise<string> {
+  return providerModel(model) ? providerText(model, prompt, opts) : claudeText(prompt, { model, ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) });
 }

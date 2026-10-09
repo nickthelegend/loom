@@ -11,7 +11,7 @@
  */
 
 import type { AgentRole } from "../types.js";
-import { claudeText } from "./claude-cli.js";
+import { helperText } from "./provider-text.js";
 
 export interface RouterAgent {
   id: string;
@@ -125,7 +125,7 @@ export async function llmRouter(
   opts: LlmRouterOptions = {},
 ): Promise<HopDecision> {
   try {
-    const raw = await claudeText(routerPrompt(ctx), opts);
+    const raw = await helperText(opts.model ?? "haiku", routerPrompt(ctx), opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {});
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error("no JSON in router reply");
     const parsed = JSON.parse(match[0]) as { next?: string; reason?: string };
