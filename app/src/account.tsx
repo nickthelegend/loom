@@ -155,7 +155,8 @@ export function AccountSheet(props: {
             </Text>
           </View>
         </View>
-        {!profile && (
+        {/* a build without sign-in (the store build, a fork) just doesn't offer it */}
+        {!profile && supabaseConfigured && (
           <TouchableOpacity
             onPress={google}
             disabled={!supabaseConfigured || busy}
@@ -183,11 +184,6 @@ export function AccountSheet(props: {
               </>
             )}
           </TouchableOpacity>
-        )}
-        {!profile && !supabaseConfigured && (
-          <Text style={{ color: T.faint, fontSize: 11.5, lineHeight: 17 }}>
-            Sign-in isn&apos;t set up in this build (no Supabase keys).
-          </Text>
         )}
         {err && <Text style={{ color: T.err, fontSize: 12.5 }}>{err}</Text>}
       </Panel>
@@ -219,7 +215,8 @@ export function AccountSheet(props: {
         </Panel>
       </View>
 
-      {/* privacy */}
+      {/* privacy — only a build that can send the stats (Supabase configured) asks about them */}
+      {supabaseConfigured && (
       <View style={{ gap: 6 }}>
         <SectionLabel text="Privacy" />
         <Panel>
@@ -241,6 +238,7 @@ export function AccountSheet(props: {
           </Text>
         </Panel>
       </View>
+      )}
 
       {/* notifications: one switch per kind the daemon pushes */}
       {props.creds && kinds && (
