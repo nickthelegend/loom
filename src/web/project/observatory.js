@@ -678,42 +678,6 @@ export function createObservatory(view) {
       });
     }
 
-    // REPLAY: scrub the fleet's turns frame by frame — each frame is a real span.
-    function observatoryReplay(p){
-      var host = document.getElementById("obreplay"); if (!host) return;
-      api("/api/projects/" + p.id + "/insights/spans?limit=100").then(function(r){
-        var turns = (r.spans || []).filter(function(s){ return s.name === "gen_ai.agent.turn"; });
-        if (!turns.length){ host.innerHTML = '<div class="obnote">No turn spans yet. Run a turn and replay it here.</div>'; return; }
-        state.obReplaySrc = r.from;
-        state.obReplayTurns = turns; if (state.obReplayIx == null || state.obReplayIx >= turns.length) state.obReplayIx = 0;
-        renderReplay(p, host);
-      }).catch(function(){ host.innerHTML = '<div class="obnote">Span replay unavailable \u2014 the telemetry store is unreachable.</div>'; });
-    }
-
-    function renderReplay(p, host){
-      var turns = state.obReplayTurns || [], ix = state.obReplayIx || 0, t = turns[ix] || {};
-      var d = new Date(t.ts || Date.now()), hh = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) + ":" + ("0" + d.getSeconds()).slice(-2);
-      function pill(l, v){ return '<span class="rppill"><span class="rppl">' + l + "</span>" + v + "</span>"; }
-      var frame = '<div class="rpframe">' +
-        '<div class="rphead"><span class="rpagent">' + esc(t.agent || "agent") + "</span>" +
-          '<span class="rpade">' + esc(t.ade || "") + (t.model ? " \u00b7 " + esc(t.model) : "") + "</span>" +
-          '<span class="rpstatus ' + (t.code === 2 ? "err" : "ok") + '">' + (t.code === 2 ? "ERROR" : "OK") + "</span></div>" +
-        (t.msg ? '<div class="rpmsg">' + esc(t.msg) + "</div>" : "") +
-        '<div class="rpmetrics">' + pill("duration ", (t.ms || 0) + "ms") + pill("in ", tokfmt(t.tin || 0)) + pill("out ", tokfmt(t.tout || 0)) + pill("cost ", money(t.cost || 0)) + "</div>" +
-        '<div class="rpactions">' +
-          (t.traceId
-            ? '<button class="rpwf" data-trace="' + esc(t.traceId) + '">Trace waterfall</button><a class="obtrace" href="' + backendTraceUrl(t.traceId) + '" target="_blank" rel="noreferrer">Open trace \u2197</a>'
-            : '<span class="rpnote">' + ICONS.route + " The trace waterfall lights up once the telemetry store is reachable \u2014 this turn is from the local event log.</span>") +
-          "</div></div>";
-      var src = state.obReplaySrc === "local-log";
-      var scrub = '<div class="rpscrubwrap"><input class="rpscrub" type="range" aria-label="Scrub turns" aria-valuetext="turn ' + (ix + 1) + " of " + turns.length + (t.agent ? ", " + esc(t.agent) : "") + '" min="0" max="' + (turns.length - 1) + '" value="' + ix + '"/>' +
-        '<div class="rpscrubinfo">turn ' + (ix + 1) + " / " + turns.length + " \u00b7 " + hh + "</div></div>";
-      host.innerHTML = '<div class="replaywrap"><div class="obmlabel">Span replay \u00b7 scrub the fleet\u2019s turns \u00b7 ' + (src ? "local event log" : "from exported spans") + "</div>" + scrub + frame + "</div>";
-      var range = host.querySelector(".rpscrub");
-      if (range) range.oninput = function(){ state.obReplayIx = Number(range.value); renderReplay(p, host); };
-      var wf = host.querySelector(".rpwf");
-      if (wf) wf.onclick = function(){ openWaterfall(p, wf.getAttribute("data-trace")); };
-    }
 
     // WATERFALL: one trace's spans as time-positioned bars + a deep link.
     function openWaterfall(p, traceId){

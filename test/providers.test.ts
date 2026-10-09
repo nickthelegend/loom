@@ -126,6 +126,10 @@ describe("what a refusal means", () => {
     const client = explainStatus(401, '{"type":"unauthorized_client_error"}', p);
     expect(client).toMatch(/refused Loom as a client, not your key/);
     expect(explainStatus(401, "bad key", p)).toMatch(/rejected the key/);
+    // a model kept for the provider's own apps isn't a key problem
+    const closed = explainStatus(403, '{"error":{"message":"x/y:free is only available on agentic harnesses"}}', p);
+    expect(closed).toMatch(/doesn't serve this model to Loom/);
+    expect(closed).not.toMatch(/rejected the key/);
   });
 
   it("separates an empty pool from a wrong model name", () => {

@@ -78,25 +78,27 @@ export function ApprovalCard(props: {
   decided?: ApprovalOutcome;
   /** A label above the card — the project name in the cross-project list. */
   context?: string;
+  /** Offer "Allow for session" (the agent supports it for this request). */
+  sessionOption?: boolean;
   onDecided?: (outcome: ApprovalOutcome) => void;
 }) {
   const [local, setLocal] = useState<ApprovalOutcome | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
+  const [busy, setBusy] = useState<"allow" | "allow_session" | "deny" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const outcome = props.decided ?? local;
   const { headline, body } = formatInput(props.input);
 
-  const decide = async (decision: "allow" | "deny") => {
+  const decide = async (decision: "allow" | "allow_session" | "deny") => {
     if (busy) return;
     setErr(null);
     setBusy(decision);
     const message = decision === "deny" ? reason.trim() : "";
     try {
       await decideApproval(props.creds, props.projectId, props.approvalId, decision, message || undefined);
-      const o: ApprovalOutcome = { behavior: decision, ...(message ? { message } : {}) };
+      const o: ApprovalOutcome = { behavior: decision === "deny" ? "deny" : "allow", ...(message ? { message } : {}) };
       setLocal(o);
       props.onDecided?.(o);
     } catch (e) {
@@ -290,6 +292,22 @@ export function ApprovalCard(props: {
           </TouchableOpacity>
         )}
       </View>
+      {props.sessionOption && !denying ? (
+        <TouchableOpacity
+          onPress={() => void decide("allow_session")}
+          disabled={!!busy}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Allow ${props.tool} for the rest of the session`}
+          style={{ minHeight: 42, borderRadius: 10, borderWidth: 1, borderColor: T.line2, alignItems: "center", justifyContent: "center" }}
+        >
+          {busy === "allow_session" ? (
+            <ActivityIndicator color={T.text} />
+          ) : (
+            <Text style={{ color: T.text, fontSize: 14, fontWeight: "600" }}>Allow for this session</Text>
+          )}
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -323,6 +341,7 @@ export function ApprovalEvent(props: {
         tool={String(p.tool ?? "tool")}
         input={p.input ?? ""}
         createdAt={props.e.ts}
+        sessionOption={p.sessionOption === true}
         {...(decided ? { decided } : {})}
         onDecided={props.onDecided}
       />
@@ -441,6 +460,7 @@ export function ApprovalsSheet(props: {
             tool={a.tool}
             input={a.input}
             createdAt={a.createdAt}
+            sessionOption={a.sessionOption}
             {...(many ? { context: project.name } : {})}
             onDecided={() => props.onChanged?.()}
           />

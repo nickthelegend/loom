@@ -78,7 +78,9 @@ import { openMenu } from './menus.js';
       get BRAIN_KINDS() { return BRAIN_KINDS; },
       get tbHistory() { return tbHistory; }, set tbHistory(value) { tbHistory = value; },
       get TB_TIERS() { return TB_TIERS; },
-      get tbPr() { return tbPr; }, set tbPr(value) { tbPr = value; }
+      get tbPr() { return tbPr; }, set tbPr(value) { tbPr = value; },
+      // the continuity review it opens resumes a request and then refreshes the thread
+      get refresh() { return refresh; }
     });
     var { routeFormHtml, bindRouteForm } = createRoutes({
       get pid() { return pid; },

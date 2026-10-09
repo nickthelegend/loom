@@ -1382,6 +1382,8 @@ export function createComposer(view) {
         // badge on More carries the same signal.
         var btn = document.getElementById("morebtn"); if (btn){ btn.classList.toggle("active", on > 0); }
       }).catch(function(){});
+      // the "/" menu's skill rows read their own cache: keep it in step with every change
+      loadSkillCache();
     }
 
     /**
@@ -1617,7 +1619,8 @@ export function createComposer(view) {
         '<div class="mcpsearchwrap"><input id="skq" class="mcpsearch" type="search" placeholder="Filter skills\u2026" autocomplete="off"/></div>' +
         '<div class="modalbody" id="skbody"><div class="loader"><i></i><i></i><i></i><i></i></div></div></div>';
       document.body.appendChild(scrim);
-      function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); if (state.refreshComposer) state.refreshComposer(); }
+      // what you switched on or installed shows on More, its hint and the "/" menu at once
+      function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); refreshSkillCount(); }
       function onKey(e){ if (e.key === "Escape") close(); }
       document.addEventListener("keydown", onKey);
       scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });

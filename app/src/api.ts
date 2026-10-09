@@ -894,6 +894,14 @@ export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
   );
 export const getChats = (c: Creds, id: string) =>
   api<{ chats: Chat[] }>(c, `/api/projects/${id}/chats`);
+export const createChat = (c: Creds, id: string, title: string) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats`, { method: "POST", body: JSON.stringify({ title }) });
+export const renameChat = (c: Creds, id: string, chat: string, title: string) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/rename`, { method: "POST", body: JSON.stringify({ title }) });
+export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned?: boolean; archived?: boolean }) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "PATCH", body: JSON.stringify(flags) });
+export const deleteChat = (c: Creds, id: string, chat: string) =>
+  api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "DELETE" });
 export const getTree = (c: Creds, id: string) =>
   api<{ tree: WorkingTree }>(c, `/api/projects/${id}/tree`);
 /** Spend and tokens broken down (GET /usage, core/usage.ts on the daemon). */
@@ -988,8 +996,9 @@ export const queuePause = (c: Creds, id: string, paused: boolean) =>
 
 export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });
-export const interrupt = (c: Creds, id: string) =>
-  api(c, `/api/projects/${id}/interrupt`, { method: "POST", body: "{}" });
+/** Stop the turn in `chat` (the desktop's Stop); without one, whatever the baton holder is doing. */
+export const interrupt = (c: Creds, id: string, chat?: string) =>
+  api<{ interrupted: string | null }>(c, `/api/projects/${id}/interrupt`, { method: "POST", body: JSON.stringify(chat ? { chat } : {}) });
 export const startRoute = (c: Creds, id: string, task: string, spec: string) =>
   api(c, `/api/projects/${id}/route`, { method: "POST", body: JSON.stringify({ task, spec }) });
 export const abortRoute = (c: Creds, id: string) =>
@@ -1331,6 +1340,8 @@ export interface Approval {
   tool: string;
   input: unknown;
   createdAt: number;
+  /** The agent offers "allow for the rest of this session" for this request. */
+  sessionOption?: boolean;
 }
 
 export const getApprovals = (c: Creds, id: string) =>
@@ -1341,7 +1352,7 @@ export const decideApproval = (
   c: Creds,
   id: string,
   approvalId: string,
-  decision: "allow" | "deny",
+  decision: "allow" | "allow_session" | "deny",
   message?: string,
 ) =>
   api<{ ok: boolean }>(c, `/api/projects/${id}/approvals/${encodeURIComponent(approvalId)}`, {

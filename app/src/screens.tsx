@@ -31,6 +31,10 @@ import {
   getActivity,
   getApprovals,
   getChats,
+  createChat,
+  deleteChat,
+  renameChat,
+  setChatFlags,
   getEvents,
   getProject,
   getProjects,
@@ -78,7 +82,7 @@ import { clearCache, loadProjects, loadThread, saveProjects, saveThread } from "
 import { savedAgo } from "./cache-model";
 import { OrchestraView } from "./orchestra";
 import { CrewView } from "./crew";
-import { ObservatoryView } from "./observatory";
+import { ObservatoryView, Sheet } from "./observatory";
 import { ToolsView } from "./tools";
 import { TeamBrainView, useBrainSummary } from "./team-brain";
 import { TeamLandingView, useLandingSummary } from "./team-landing";
@@ -807,6 +811,30 @@ export function ProjectScreen(props: {
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "thread");
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
   const [chats, setChats] = useState<Chat[]>([]);
+  const [chatMenu, setChatMenu] = useState<Chat | null>(null);
+  const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => setChats(chats)).catch(() => {});
+  // a chat change from the menu: do it, close the menu, re-read the list (and leave a deleted chat)
+  const act = async (fn: () => Promise<unknown>, gone?: string) => {
+    try {
+      await fn();
+      setChatMenu(null);
+      if (gone && gone === chatId) setChatId("main");
+      reloadChats();
+    } catch (e) {
+      setChatMenu(null);
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const newChat = async () => {
+    try {
+      const { chat } = await createChat(creds, project.id, "");
+      setChats((cs) => [...cs.filter((c) => c.id !== chat.id), chat]);
+      setChatId(chat.id);
+      haptic.tap();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
   // A chat opened from elsewhere (an Orchestra task) that isn't in the sidebar list.
   const [extraChat, setExtraChat] = useState<Chat | null>(
     props.initialChat && props.initialChat.id !== "main"
@@ -1193,7 +1221,10 @@ export function ProjectScreen(props: {
         <ConnectionBadge />
         {project.needsInput || project.agents.some((a) => a.busy) ? (
           <Btn small label="■ stop" onPress={() =>
-            void interrupt(creds, project.id).catch((e) => setErr(String(e.message ?? e)))
+            // this chat's turn, as on the desktop — not a turn in another thread
+            void interrupt(creds, project.id, chatId)
+              .then((r) => { if (!r.interrupted) setErr("Nothing is running in this chat."); })
+              .catch((e) => setErr(String(e.message ?? e)))
           } />
         ) : null}
       </View>
@@ -1284,7 +1315,7 @@ export function ProjectScreen(props: {
       {tab === "thread" ? (
         <>
           {/* chats — the desktop's sidebar list, so you can read previous chats */}
-          {(chats.length > 1 || (extraChat && extraChat.id === chatId)) && (
+          {(
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -1304,8 +1335,11 @@ export function ProjectScreen(props: {
                   <TouchableOpacity
                     key={c.id}
                     onPress={() => setChatId(c.id)}
+                    onLongPress={() => c.id !== "main" && setChatMenu(c)}
+                    delayLongPress={350}
                     activeOpacity={0.7}
                     accessibilityRole="tab"
+                    accessibilityHint={c.id === "main" ? undefined : "long-press to rename, pin, archive or delete"}
                     accessibilityState={{ selected: on }}
                     style={{
                       paddingHorizontal: 12,
@@ -1324,8 +1358,25 @@ export function ProjectScreen(props: {
                   </TouchableOpacity>
                 );
               })}
+              {/* a new chat, as the desktop's sidebar offers */}
+              <TouchableOpacity
+                onPress={() => void newChat()}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="New chat"
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: T.line, borderStyle: "dashed" }}
+              >
+                <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>+ New</Text>
+              </TouchableOpacity>
             </ScrollView>
           )}
+          <ChatMenu
+            chat={chatMenu}
+            onClose={() => setChatMenu(null)}
+            onRename={(title) => chatMenu && void act(() => renameChat(creds, project.id, chatMenu.id, title))}
+            onFlags={(flags) => chatMenu && void act(() => setChatFlags(creds, project.id, chatMenu.id, flags))}
+            onDelete={() => chatMenu && void act(() => deleteChat(creds, project.id, chatMenu.id), chatMenu.id)}
+          />
           {threadCachedAt ? (
             <View
               accessibilityRole="text"
@@ -1906,5 +1957,48 @@ function LinkStrip(props: { samples: LinkSample[]; via: string }) {
         {props.via ? ` · ${props.via}` : ""}
       </Text>
     </View>
+  );
+}
+
+/** Long-press a chat: rename it, pin or archive it, or delete it — the desktop sidebar's menu. */
+function ChatMenu(props: {
+  chat: Chat | null;
+  onClose: () => void;
+  onRename: (title: string) => void;
+  onFlags: (flags: { pinned?: boolean; archived?: boolean }) => void;
+  onDelete: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  useEffect(() => setTitle(props.chat?.title ?? ""), [props.chat]);
+  const c = props.chat;
+  const row = (label: string, onPress: () => void, color = T.text) => (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7} accessibilityRole="button"
+      style={{ minHeight: 46, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: T.line }}>
+      <Text style={{ color, fontSize: 15, fontWeight: "600" }}>{label}</Text>
+    </TouchableOpacity>
+  );
+  return (
+    <Sheet title={c ? c.title : "Chat"} visible={!!c} onClose={props.onClose}>
+      {c ? (
+        <View style={{ gap: 4 }}>
+          <View style={{ flexDirection: "row", gap: 8, marginBottom: 6 }}>
+            <TextInput value={title} onChangeText={setTitle} placeholder="Chat name" placeholderTextColor={T.faint}
+              returnKeyType="done" onSubmitEditing={() => title.trim() && props.onRename(title.trim())}
+              style={{ flex: 1, color: T.text, backgroundColor: T.raised, borderRadius: radii.input, paddingHorizontal: 12, height: 42, fontSize: 15 }} />
+            <TouchableOpacity disabled={!title.trim() || title.trim() === c.title} onPress={() => props.onRename(title.trim())}
+              style={{ paddingHorizontal: 14, borderRadius: radii.input, backgroundColor: T.bright, justifyContent: "center", opacity: !title.trim() || title.trim() === c.title ? 0.4 : 1 }}>
+              <Text style={{ color: T.onBright, fontWeight: "700" }}>Rename</Text>
+            </TouchableOpacity>
+          </View>
+          {row(c.pinned ? "Unpin" : "Pin to the front", () => props.onFlags({ pinned: !c.pinned }))}
+          {row(c.archived ? "Unarchive" : "Archive", () => props.onFlags({ archived: !c.archived }))}
+          {row("Delete chat", () =>
+            Alert.alert("Delete this chat?", `"${c.title}" and its messages go. The project's memory keeps what it learned.`, [
+              { text: "Cancel", style: "cancel" },
+              { text: "Delete", style: "destructive", onPress: props.onDelete },
+            ]), T.err)}
+        </View>
+      ) : null}
+    </Sheet>
   );
 }

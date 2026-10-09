@@ -48,11 +48,24 @@ export function QuestionEvent(props: { creds: Creds; projectId: string; e: LoomE
   const custom = qs.some((q) => q.allowCustomAnswer !== false || !(q.options ?? []).length);
   const secret = qs.some((q) => q.secret);
 
-  const submit = async (next: Record<string, string[]>) => {
+  const submit = async (picked: Record<string, string[]>) => {
+    // Typed words answer the first question still open — as on the desktop —
+    // or, when every question has a pick, join a pick-any one's list. They
+    // stay on that question, so the rest can still be answered.
+    let next = picked;
+    const words = typed.trim();
+    if (words) {
+      const target = qs.find((q) => !(picked[q.id] ?? []).length) ?? qs.find((q) => q.multiSelect);
+      if (target) {
+        const cur = picked[target.id] ?? [];
+        next = { ...picked, [target.id]: target.multiSelect ? [...cur.filter((l) => l !== words), words] : [words] };
+        setPicks(next);
+        setTyped("");
+      }
+    }
     const answers: Record<string, string | string[]> = {};
     for (const q of qs) {
-      const list = [...(next[q.id] ?? [])];
-      if (!list.length && typed.trim()) list.push(typed.trim());
+      const list = next[q.id] ?? [];
       if (!list.length) { setErr("answer every question first"); return; }
       answers[q.id] = q.multiSelect ? list : list[0]!;
     }
@@ -96,6 +109,10 @@ export function QuestionEvent(props: { creds: Creds; projectId: string; e: LoomE
               </TouchableOpacity>
             );
           })}
+          {/* words you typed for this question, which no option shows */}
+          {!done && (picks[q.id] ?? []).filter((l) => !(q.options ?? []).some((o) => o.label === l)).map((l) => (
+            <Text key={l} style={{ color: T.thread, fontSize: 13 }}>↳ {q.secret ? "your answer (hidden)" : l}</Text>
+          ))}
         </View>
       ))}
       {done ? (
