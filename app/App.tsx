@@ -92,6 +92,7 @@ export default function App() {
           name: "project",
           project,
           from: "board",
+          ...(want.chat ? { chat: { id: want.chat, title: "" } } : {}),
           focus: { tab: want.tab, ...(want.runId ? { runId: want.runId } : {}), n: Date.now() },
         }),
       )

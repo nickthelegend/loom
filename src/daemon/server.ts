@@ -1,6 +1,7 @@
 import { ClientDelivery } from "./delivery.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import http, { type Server } from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +17,7 @@ import {
   ensureLoomHome,
   findProject,
   listProjects,
+  loomHome,
   readDaemonConfig,
   registerProject,
   unregisterProject,
@@ -26,15 +28,17 @@ import type { HubClient } from "../core/team-hub.js";
 import {
   CHECK_TTL_MS,
   latestRelease,
+  newerThan,
   type Release
 } from "../core/updater.js";
+import { VERSION } from "../version.js";
 import { recordAgentEvent } from "../observability/index.js";
 import {
   recentAgentErrors
 } from "../observability/insights.js";
 import type { LoomEvent, ProjectInfo } from "../types.js";
 import { AuthManager, bearerToken } from "./auth.js";
-import { pushContent, sendExpoPush, shouldPush } from "./push.js";
+import { pushCategory, pushContent, sendExpoPush, wantsPush, type PushCategory } from "./push.js";
 import {
   ensureCredentials,
   readCloudSettings,
@@ -601,26 +605,49 @@ export class LoomDaemon {
     this.delivery.publish(frame, { kind: "project", projectId });
   }
 
-  private pushTokens(): string[] {
+  private pushTokens(category?: PushCategory): string[] {
     const cfg = readDaemonConfig();
     return (cfg?.clients ?? [])
+      .filter((c) => !category || wantsPush(c.pushKinds, category))
       .map((c) => c.pushToken)
       .filter((t): t is string => Boolean(t));
   }
 
   /** Fire-and-notify to phones. Route hops stay quiet; the outcome pushes. */
   private maybePush(projectId: string, event: LoomEvent): void {
-    if (!shouldPush(event)) return;
-    if (event.kind === "run_complete" && this.runtimes.get(projectId)?.routes.isActive()) {
-      return; // a pipeline in flight buzzes once at the end, not per hop
+    const category = pushCategory(event);
+    if (!category) return;
+    const rt = this.runtimes.get(projectId);
+    let reply: string | undefined;
+    if (event.kind === "run_complete") {
+      if (rt?.routes.isActive()) return; // a pipeline in flight buzzes once at the end, not per hop
+      if (event.payload.error) return; // the error event says it
+      if (rt) {
+        // a goal's or crew's own task turns stay quiet: the goal pushes when it's done
+        try {
+          const chat = event.chat ?? "main";
+          const g = rt.chats().find((c) => c.id === chat)?.group;
+          if (g && g.kind !== "import") return;
+        } catch { /* push anyway */ }
+        try {
+          reply = rt.log.list({ kinds: ["message"], chat: event.chat ?? "main", before: event.id, limit: 1 })
+            .find((m) => !m.agentId || m.agentId === event.agentId)?.payload.text as string | undefined;
+        } catch { /* a push without the snippet */ }
+      }
     }
-    const tokens = this.pushTokens();
+    const tokens = this.pushTokens(category);
     if (!tokens.length) return;
     const name = listProjects().find((p) => p.id === projectId)?.name ?? "project";
     void sendExpoPush(tokens, {
-      ...pushContent(name, event),
-      // the phone opens this project (and goal) when the alert is tapped
-      data: { projectId, kind: event.kind, ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}) },
+      ...pushContent(name, event, { reply }),
+      // the phone opens this project (and goal, or chat) when the alert is tapped
+      data: {
+        projectId,
+        kind: event.kind,
+        category,
+        ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}),
+        ...(event.chat ? { chat: event.chat } : {}),
+      },
     });
   }
 
@@ -665,9 +692,41 @@ export class LoomDaemon {
     this.writeConfig();
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });
+    this.watchReleases();
 
     return { host: this.host, port: this.port };
   }
+
+  /**
+   * A new Loom release tells each phone once ("updates" push). The first look
+   * waits a minute so a restart doesn't hit GitHub at once, then every few
+   * hours; the version already announced is remembered across restarts.
+   */
+  private watchReleases(): void {
+    if (process.env.LOOM_NO_UPDATE_CHECK || process.env.VITEST) return;
+    const look = async () => {
+      const release = await this.cachedRelease(false);
+      if (!release || !newerThan(release.version, VERSION)) return;
+      const told = path.join(loomHome(), "update-announced");
+      let last = "";
+      try { last = fs.readFileSync(told, "utf8").trim(); } catch { /* never told */ }
+      if (last === release.version) return;
+      const tokens = this.pushTokens("updates");
+      try { fs.writeFileSync(told, release.version); } catch { /* tell again next time */ }
+      if (!tokens.length) return;
+      void sendExpoPush(tokens, {
+        title: `Loom ${release.version} is out`,
+        body: `This computer runs ${VERSION}. Update it from Loom's Settings, or run: loom update`,
+        data: { kind: "update", category: "updates", version: release.version, url: release.url },
+      });
+    };
+    const first = setTimeout(() => void look().catch(() => { }), 60_000);
+    const every = setInterval(() => void look().catch(() => { }), CHECK_TTL_MS);
+    first.unref?.(); every.unref?.();
+    this.healTimers.add(first);
+    this.releaseTimer = every;
+  }
+  private releaseTimer: NodeJS.Timeout | null = null;
 
   /**
    * Attach a WebSocket server (path /ws) to an HTTP server and wire the
@@ -916,6 +975,7 @@ export class LoomDaemon {
     await this.relay?.close().catch(() => { });
     this.relay = null;
     for (const t of this.healTimers) clearTimeout(t);
+    if (this.releaseTimer) clearInterval(this.releaseTimer);
     this.healTimers.clear();
     this.unstreamLogs?.();
     this.unstreamLogs = null;

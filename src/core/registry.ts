@@ -272,6 +272,8 @@ export interface PairedClient {
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
   platform?: string;
+  /** Which push categories this device wants (questions, approvals, done, goals); absent means all. */
+  pushKinds?: string[];
   /**
    * Project ids this token may touch. Absent means all — which keeps every
    * client paired before scoping existed exactly as powerful as it was.

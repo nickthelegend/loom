@@ -1,12 +1,48 @@
 /**
  * Register this device for pushes: ask permission, fetch the Expo push
  * token, hand it to the daemon (attached to our paired-client record).
- * The daemon buzzes us on needs_input / route outcomes / finished turns.
+ * The daemon buzzes us on questions, approvals, finished turns, goal
+ * outcomes and new releases — the kinds this phone switched on (PUSH_KINDS).
  */
 
+import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { AppState, Platform, Vibration } from "react-native";
-import { api, type Creds } from "./api";
+import { api, kv, type Creds } from "./api";
+
+/** What the daemon can push, each switchable from the account sheet (daemon push.ts PUSH_CATEGORIES). */
+export const PUSH_KINDS = [
+  { id: "questions", label: "Questions", hint: "An agent, goal or crew is waiting on your answer" },
+  { id: "approvals", label: "Approvals", hint: "A tool call or a crew's plan needs Allow / Approve" },
+  { id: "done", label: "Turns done", hint: "An agent finished replying in one of your chats" },
+  { id: "goals", label: "Goals", hint: "An Orchestra run, race, crew or route finished or failed" },
+  { id: "updates", label: "Loom updates", hint: "A new Loom release is out for your computer" },
+] as const;
+export type PushKind = (typeof PUSH_KINDS)[number]["id"];
+const ALL: PushKind[] = PUSH_KINDS.map((k) => k.id);
+const KINDS_KEY = "loom.pushKinds";
+
+export async function loadPushKinds(): Promise<PushKind[]> {
+  try {
+    const v = JSON.parse((await kv.get(KINDS_KEY)) ?? "null") as unknown;
+    if (Array.isArray(v)) return ALL.filter((k) => v.includes(k));
+  } catch {
+    /* never chosen */
+  }
+  return ALL;
+}
+
+/** Save which kinds this phone wants and tell the daemon (re-registers with the same token). */
+export async function setPushKinds(creds: Creds, kinds: PushKind[]): Promise<PushState> {
+  await kv.set(KINDS_KEY, JSON.stringify(kinds));
+  return enablePush(creds);
+}
+
+/** A standalone (Play / App Store) build needs its EAS project id for a push token; Expo Go doesn't. */
+function easProjectId(): string | undefined {
+  const c = Constants as unknown as { expoConfig?: { extra?: { eas?: { projectId?: string } } }; easConfig?: { projectId?: string } };
+  return c.expoConfig?.extra?.eas?.projectId ?? c.easConfig?.projectId ?? undefined;
+}
 
 // Native only — expo-notifications has no push on web (this is the browser demo).
 if (Platform.OS !== "web") {
@@ -19,8 +55,11 @@ if (Platform.OS !== "web") {
   });
 }
 
-export async function enablePush(creds: Creds): Promise<boolean> {
-  if (Platform.OS === "web") return false;
+/** on: registered · denied: the phone's notification setting is off · unavailable: no push here (a simulator, web, a build without push set up). */
+export type PushState = "on" | "denied" | "unavailable";
+
+export async function enablePush(creds: Creds): Promise<PushState> {
+  if (Platform.OS === "web") return "unavailable";
   try {
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync("default", {
@@ -30,16 +69,17 @@ export async function enablePush(creds: Creds): Promise<boolean> {
       });
     }
     const perm = await Notifications.requestPermissionsAsync();
-    if (!perm.granted) return false;
-    const token = (await Notifications.getExpoPushTokenAsync()).data;
+    if (!perm.granted) return "denied";
+    const projectId = easProjectId();
+    const token = (await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)).data;
     await api(creds, "/api/push/register", {
       method: "POST",
-      body: JSON.stringify({ token, platform: Platform.OS }),
+      body: JSON.stringify({ token, platform: Platform.OS, kinds: await loadPushKinds() }),
     });
-    return true;
+    return "on";
   } catch {
     // Push is optional — the app works fully without it.
-    return false;
+    return "unavailable";
   }
 }
 

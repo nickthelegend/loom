@@ -2088,3 +2088,14 @@ export const crewAction = (c: Creds, id: string, crew: string, action: CrewActio
 
 export const crewDiff = (c: Creds, id: string, crew: string) =>
   api<{ diff: string }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}/diff`);
+
+/** The computer's Loom against the newest release (GET /api/updates). */
+export interface UpdateStatus {
+  version: string;
+  latest: string | null;
+  behindRelease: boolean;
+  release: { url: string } | null;
+  install: "git" | "npm-global" | "unknown";
+}
+export const getUpdates = (creds: Creds, refresh = false) =>
+  api<UpdateStatus>(creds, `/api/updates${refresh ? "?refresh" : ""}`);

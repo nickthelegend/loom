@@ -9,7 +9,9 @@
 import type { User } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Switch, Text, TouchableOpacity, View } from "react-native";
-import type { Creds } from "./api";
+import { getUpdates, type Creds, type UpdateStatus } from "./api";
+import { DESKTOP_URL, INSTALL_URL, REPO_URL, appVersion, canRate, open as openLink, rateLoom } from "./links";
+import { PUSH_KINDS, loadPushKinds, setPushKinds, type PushKind, type PushState } from "./push";
 import { ConnectionBadge, GoogleMark, routeHint, useConnRoute } from "./brand";
 import { Panel, SectionLabel, TAP } from "./components";
 import { Sheet } from "./observatory";
@@ -105,6 +107,22 @@ export function AccountSheet(props: {
   useEffect(() => {
     if (props.visible) void loadUsageStatsEnabled().then(setStats);
   }, [props.visible]);
+
+  // which notifications this phone wants, and whether the computer's Loom is current
+  const [kinds, setKinds] = useState<PushKind[] | null>(null);
+  const [pushState, setPushState] = useState<PushState>("on");
+  const [upd, setUpd] = useState<UpdateStatus | null>(null);
+  useEffect(() => {
+    if (!props.visible) return;
+    void loadPushKinds().then(setKinds);
+    if (props.creds) void getUpdates(props.creds).then(setUpd).catch(() => setUpd(null));
+  }, [props.visible, props.creds]);
+  const toggleKind = (k: PushKind, on: boolean) => {
+    if (!kinds || !props.creds) return;
+    const next = on ? [...kinds, k] : kinds.filter((x) => x !== k);
+    setKinds(next);
+    void setPushKinds(props.creds, next).then(setPushState);
+  };
 
   const toggleStats = (on: boolean) => {
     setStats(on);
@@ -224,6 +242,37 @@ export function AccountSheet(props: {
         </Panel>
       </View>
 
+      {/* notifications: one switch per kind the daemon pushes */}
+      {props.creds && kinds && (
+        <View style={{ gap: 6 }}>
+          <SectionLabel text="Notifications" />
+          <Panel>
+            {PUSH_KINDS.map((k) => (
+              <View key={k.id} style={{ flexDirection: "row", alignItems: "center", gap: 12, minHeight: TAP }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={{ color: T.text, fontSize: 14, fontWeight: "600" }}>{k.label}</Text>
+                  <Text style={{ color: T.dim, fontSize: 12, marginTop: 1 }} numberOfLines={2}>{k.hint}</Text>
+                </View>
+                <Switch
+                  value={kinds.includes(k.id)}
+                  onValueChange={(on) => toggleKind(k.id, on)}
+                  trackColor={{ false: T.raised, true: T.ok }}
+                  thumbColor="#ffffff"
+                  accessibilityLabel={`${k.label} notifications`}
+                />
+              </View>
+            ))}
+            {pushState !== "on" && (
+              <Text style={{ color: T.warn, fontSize: 12, lineHeight: 17 }}>
+                {pushState === "denied"
+                  ? "Notifications are off for Loom in your phone's settings, so these can't reach you yet."
+                  : "This device can't get push notifications (a simulator, or a build without push). Your choices are kept for when it can."}
+              </Text>
+            )}
+          </Panel>
+        </View>
+      )}
+
       {/* team: a pointer to the Fleet's Team section, not a second copy of it */}
       {props.creds && team && props.onOpenTeam && (
         <View style={{ gap: 6 }}>
@@ -287,6 +336,35 @@ export function AccountSheet(props: {
         </View>
       )}
 
+      {/* about: Loom is open source and runs on your computer; this app is its remote */}
+      <View style={{ gap: 6 }}>
+        <SectionLabel text="About" />
+        <Panel>
+          {props.creds && upd && (
+            <TouchableOpacity
+              onPress={() => upd.behindRelease && openLink(upd.release?.url ?? DESKTOP_URL)}
+              disabled={!upd.behindRelease}
+              activeOpacity={0.7}
+              accessibilityRole={upd.behindRelease ? "link" : "text"}
+              style={{ minHeight: TAP, justifyContent: "center" }}
+            >
+              <Text style={{ color: T.text, fontSize: 14, fontWeight: "600" }}>
+                Loom on your computer · {upd.version}
+              </Text>
+              <Text style={{ color: upd.behindRelease ? T.warn : T.dim, fontSize: 12, marginTop: 1 }}>
+                {upd.behindRelease
+                  ? `${upd.latest} is out — update from Loom's Settings there, or run loom update →`
+                  : upd.latest ? "Up to date" : "Couldn't check for a newer release"}
+              </Text>
+            </TouchableOpacity>
+          )}
+          <AboutRow label="Install Loom on a computer" hint="macOS, Linux and Windows · npm, one-liner or Loom Desktop" onPress={() => openLink(INSTALL_URL)} />
+          <AboutRow label="Source code on GitHub" hint="Loom is open source — star it, file an issue, send a fix" onPress={() => openLink(REPO_URL)} />
+          {canRate && <AboutRow label="Rate Loom" hint="On Google Play — it helps other people find it" onPress={rateLoom} />}
+          <Text style={{ color: T.faint, fontSize: 11.5, fontFamily: T.mono }}>app {appVersion()}</Text>
+        </Panel>
+      </View>
+
       {profile && (
         <TouchableOpacity
           onPress={() => {
@@ -308,5 +386,18 @@ export function AccountSheet(props: {
         </TouchableOpacity>
       )}
     </Sheet>
+  );
+}
+
+function AboutRow(props: { label: string; hint: string; onPress: () => void }) {
+  return (
+    <TouchableOpacity onPress={props.onPress} activeOpacity={0.7} accessibilityRole="link" accessibilityLabel={props.label}
+      style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: TAP }}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ color: T.text, fontSize: 14, fontWeight: "600" }}>{props.label}</Text>
+        <Text style={{ color: T.dim, fontSize: 12, marginTop: 1 }} numberOfLines={2}>{props.hint}</Text>
+      </View>
+      <Text style={{ color: T.faint, fontSize: 18 }}>›</Text>
+    </TouchableOpacity>
   );
 }

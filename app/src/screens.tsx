@@ -7,6 +7,7 @@
  * it is actually about.
  */
 
+import { INSTALL_URL, open as openLink } from "./links";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -137,7 +138,7 @@ function Wordmark(props: { size?: number }) {
 // Pair
 // ---------------------------------------------------------------------------
 
-function PairStep(props: { n: number; text: string }) {
+function PairStep(props: { n: number; text: string; link?: boolean }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
       <View
@@ -155,7 +156,7 @@ function PairStep(props: { n: number; text: string }) {
       >
         <Text style={{ color: T.dim, fontSize: 11, fontWeight: "700" }}>{props.n}</Text>
       </View>
-      <Text style={{ color: T.dim, fontSize: 13, lineHeight: 20, flex: 1 }}>{props.text}</Text>
+      <Text style={{ color: props.link ? T.text : T.dim, fontSize: 13, lineHeight: 20, flex: 1, textDecorationLine: props.link ? "underline" : "none" }}>{props.text}</Text>
     </View>
   );
 }
@@ -258,9 +259,12 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         the shared-memory layer for your AI dev environments
       </Text>
       <View style={{ gap: 10, marginBottom: spacing.sm }}>
-        <PairStep n={1} text="On your computer: loom up --tailnet" />
-        <PairStep n={2} text="Then: loom pair — it prints a QR and a link" />
-        <PairStep n={3} text="Scan the QR below — or paste the link" />
+        <TouchableOpacity onPress={() => openLink(INSTALL_URL)} activeOpacity={0.7} accessibilityRole="link"
+          accessibilityLabel="Install Loom on your computer — open source, on GitHub">
+          <PairStep n={1} text="Install Loom on your computer — it runs your agents, and this app is its remote. Free and open source →" link />
+        </TouchableOpacity>
+        <PairStep n={2} text="Start it: open Loom Desktop, or run loom up --tailnet" />
+        <PairStep n={3} text="Connect a phone (or loom pair) shows a QR — scan it below, or paste the link" />
       </View>
       <TextInput
         style={field}
