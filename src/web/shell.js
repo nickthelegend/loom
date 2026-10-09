@@ -15,6 +15,7 @@ import { drawStatusbar,loadGithub,loadLoomPad,loadUpdate } from './statusbar.js'
 import { openTaskModal } from './tasks.js';
 import { THEME_BTN,bindTheme } from './theme.js';
 import { emptyArt } from './transcript.js';
+import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
 
 
@@ -347,7 +348,10 @@ import { shortModel } from './permissions.js';
               (archOpen ? "Hide archived" : "Archived · " + archived.length) + "</span></div>";
           }
           rows += '<div class="crow add" data-newchat="' + esc(p.id) + '">' +
-            '<span class="ci">' + ICONS.plus + '</span><span class="cnm">New chat</span></div>';
+            '<span class="ci">' + ICONS.plus + '</span><span class="cnm">New chat</span></div>' +
+            // chats you had with Claude Code, Codex or OpenCode in this folder, outside Loom
+            '<div class="crow add" data-importchats="' + esc(p.id) + '">' +
+            '<span class="ci">' + ICONS.download + '</span><span class="cnm">Import chats\u2026</span></div>';
         }
         return '<div class="sgroup">' + rows + "</div>";
       }).join("");
@@ -475,6 +479,9 @@ import { shortModel } from './permissions.js';
           inp.onblur = function(){ finish(true); };
           inp.onclick = function(e){ e.stopPropagation(); };
         };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-importchats]"), function(row){
+        row.onclick = function(ev){ ev.stopPropagation(); openImportChats(row.getAttribute("data-importchats")); };
       });
       // Every open project has a New chat row now, not just the selected one.
       Array.prototype.forEach.call(el.querySelectorAll("[data-newchat]"), function(addRow){
@@ -611,6 +618,7 @@ import { shortModel } from './permissions.js';
             var row = document.querySelector('[data-newchat="' + pid + '"]');
             if (row) row.click(); else { select(pid); toast("open the project to start a chat"); }
           } },
+        { label: "Import chats\u2026", icon: ICONS.download, hint: "Claude, Codex, OpenCode", run: function(){ openImportChats(pid); } },
         { sep: true },
         { label: "Project settings…", icon: ICONS.gear, run: function(){ openProjectSettings(pid); } },
         { label: "Rename…", icon: ICONS.file, run: function(){ renameProject(pid, p.name); } },

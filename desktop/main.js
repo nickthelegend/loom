@@ -183,6 +183,7 @@ function buildMenu() {
           item("New Task…", "new-task", "CmdOrCtrl+Shift+N"),
           item("New Orchestra…", "orchestrate", "CmdOrCtrl+Shift+O"),
           item("New Crew Goal…", "crew", "CmdOrCtrl+Shift+G"),
+          item("Import Chats from Your Agents…", "import-chats", "CmdOrCtrl+Shift+I"),
           { type: "separator" },
           item("Add Project…", "add-project", "CmdOrCtrl+O"),
           item("Project Settings…", "project-settings"),

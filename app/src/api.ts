@@ -892,6 +892,25 @@ export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
     c,
     `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}`,
   );
+/** A chat from an agent's own history on the daemon's machine (core/chat-import.ts). */
+export interface ImportableChat {
+  source: "claude-code" | "codex" | "opencode";
+  label: string;
+  id: string;
+  title: string;
+  cwd: string;
+  updatedAt: number;
+  bytes?: number;
+  automated?: boolean;
+  fromLoom?: boolean;
+  /** Already imported: the Loom chat it became. */
+  chat?: string;
+}
+export const getImportable = (c: Creds, id: string) =>
+  api<{ chats: ImportableChat[] }>(c, `/api/projects/${id}/imports`);
+export const importChat = (c: Creds, id: string, source: string, sessionId: string) =>
+  api<{ chat: Chat; items?: number; dropped?: number; already?: boolean }>(c, `/api/projects/${id}/imports`, { method: "POST", body: JSON.stringify({ source, id: sessionId }) });
+
 export const getChats = (c: Creds, id: string) =>
   api<{ chats: Chat[] }>(c, `/api/projects/${id}/chats`);
 export const createChat = (c: Creds, id: string, title: string) =>

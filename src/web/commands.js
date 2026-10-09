@@ -1,4 +1,5 @@
 /** Browser commands module: one name per command, for the menu bar and the palette. See README.md for ownership and startup. */
+import { openImportChats } from './import-chats.js';
 import { openConnectPhone } from './connect-phone.js';
 import { api } from './connection.js';
 import { openJoin } from './join.js';
@@ -48,6 +49,7 @@ import { ICONS } from './icons.js';
       case "cloud": if (!scrim) openSettingsModal("cloud"); return;
       case "team-settings": if (!scrim) openSettingsModal("team"); return;
       case "pair": openConnectPhone(); return;
+      case "import-chats": if (!scrim && state.pid) openImportChats(state.pid); return;
       case "new-chat": {
         var rows = Array.prototype.filter.call(document.querySelectorAll("[data-newchat]"), function(r){ return r.getAttribute("data-newchat") === state.pid; });
         var row = rows[0] || document.querySelector("[data-newchat]");

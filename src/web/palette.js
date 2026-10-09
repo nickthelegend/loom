@@ -1,4 +1,5 @@
 /** Browser palette module. See README.md for ownership and startup. */
+import { openImportChats } from './import-chats.js';
 import { agentLabel,brandMark } from './agents.js';
 import { COMMANDS,runCommand } from './commands.js';
 import { api } from './connection.js';
@@ -70,6 +71,7 @@ import { state } from './state.js';
         C.push({ icon: ICONS.search, label: "Search in files", sub: "panel", run: function(){ state.showRail("search"); } });
         C.push({ icon: ICONS.branch, label: "Source Control", sub: "panel", run: function(){ state.showRail("scm"); } });
         if (state.openSubagents) C.push({ icon: ICONS.agents, label: "Subagents", sub: "dock", run: function(){ state.openSubagents(); } });
+        if (state.pid) C.push({ icon: ICONS.download, label: "Import chats from your agents", sub: "Claude, Codex, OpenCode", run: function(){ openImportChats(state.pid); } });
       }
       C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
       (state.projects || []).forEach(function(p){

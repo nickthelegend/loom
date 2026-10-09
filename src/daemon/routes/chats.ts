@@ -1,4 +1,8 @@
 import type { Express } from 'express';
+import fs from "node:fs";
+import path from "node:path";
+import { findChats, readChat, type ImportSource } from "../../core/chat-import.js";
+import { readProjectState, writeProjectState } from "../../core/registry.js";
 import { resolveProvider } from "../../core/providers.js";
 import { LoomAskTimeoutError } from "../runtime.js";
 import type { WithRuntime } from './context.js';
@@ -53,6 +57,69 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): voi
     "/api/projects/:id/chats",
     withRuntime(async (rt, _req, res) => {
       res.json({ chats: rt.chats() });
+    }),
+  );
+
+  // ---- chats from your agents' own history (core/chat-import.ts) ----------
+  const SOURCES: ImportSource[] = ["claude-code", "codex", "opencode"];
+  const LABEL: Record<ImportSource, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+
+  /** Session ids Loom's own agents use here: those chats are already in the thread. */
+  const loomSessions = (dir: string): Set<string> => {
+    const ids = new Set<string>();
+    for (const a of Object.values(readProjectState(dir).agents ?? {})) if (typeof a.sessionId === "string") ids.add(a.sessionId);
+    try {
+      const b = JSON.parse(fs.readFileSync(path.join(dir, ".loom", "providers", "sessions.json"), "utf8")) as { bindings?: Array<{ resumeCursor?: unknown }> };
+      for (const x of b.bindings ?? []) if (typeof x.resumeCursor === "string") ids.add(x.resumeCursor);
+    } catch { /* none yet */ }
+    return ids;
+  };
+
+  app.get(
+    "/api/projects/:id/imports",
+    withRuntime(async (rt, _req, res) => {
+      const done = readProjectState(rt.info.dir).imports ?? {};
+      const chats = await findChats(rt.info.dir, { loomIds: loomSessions(rt.info.dir) });
+      res.json({ chats: chats.map((c) => ({ ...c, label: LABEL[c.source], ...(done[`${c.source}:${c.id}`] ? { chat: done[`${c.source}:${c.id}`] } : {}) })) });
+    }),
+  );
+
+  // Bring one in: a new chat holding your words, the agent's replies and a line
+  // per tool call, at their original times. Importing again opens the same chat.
+  app.post(
+    "/api/projects/:id/imports",
+    withRuntime(async (rt, req, res) => {
+      const { source, id } = (req.body ?? {}) as { source?: string; id?: string };
+      if (!SOURCES.includes(source as ImportSource) || typeof id !== "string" || !id) {
+        return void res.status(400).json({ error: "send { source: claude-code | codex | opencode, id }" });
+      }
+      const key = `${source}:${id}`;
+      const existing = readProjectState(rt.info.dir).imports?.[key];
+      if (existing && rt.chats().some((c) => c.id === existing)) return void res.json({ chat: rt.chats().find((c) => c.id === existing), already: true });
+      let got;
+      try {
+        got = await readChat(rt.info.dir, source as ImportSource, id);
+      } catch (err) {
+        return void res.status(404).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+      const chat = rt.createChat(`${LABEL[got.source]} · ${got.title}`.slice(0, 80));
+      // the agent's replies wear its name — the roster's agent of that kind, if there is one
+      const agentId = (await rt.status()).agents.find((a) => a.kind === got.source)?.id ?? got.source;
+      const imported = { source: got.source, sessionId: got.id };
+      const first = got.items[0]?.ts || Date.now();
+      rt.log.append({ kind: "message", chat: chat.id, ts: first - 1, payload: {
+        author: "loom",
+        text: `Imported from ${LABEL[got.source]}: ${got.items.length} messages and tool calls${got.dropped ? ` (the ${got.dropped} oldest left out)` : ""}. Read-only history — what you send from here starts fresh with the agent you pick.`,
+        imported,
+      } });
+      for (const it of got.items) {
+        if (it.kind === "user") rt.log.append({ kind: "message", chat: chat.id, ts: it.ts, payload: { text: it.text, author: "user", imported } });
+        else if (it.kind === "assistant") rt.log.append({ kind: "message", agentId, chat: chat.id, ts: it.ts, payload: { text: it.text, imported, ...(it.model ? { model: it.model } : {}) } });
+        else rt.log.append({ kind: "tool_call", agentId, chat: chat.id, ts: it.ts, payload: { tool: it.tool, summary: it.summary, ok: true, imported } });
+      }
+      const st = readProjectState(rt.info.dir);
+      writeProjectState(rt.info.dir, { ...st, imports: { ...(st.imports ?? {}), [key]: chat.id } });
+      res.json({ chat, items: got.items.length, dropped: got.dropped });
     }),
   );
 

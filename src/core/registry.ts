@@ -201,6 +201,8 @@ export interface ProjectState {
    * resolves — so the loop can retry the original agent, not just fail over.
    */
   quarantine?: Record<string, { reason: string; since: number; displaced: boolean }>;
+  /** Chats brought in from an agent's own history: "<source>:<session id>" → the Loom chat it became. */
+  imports?: Record<string, string>;
 }
 
 /**

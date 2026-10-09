@@ -33,6 +33,9 @@ import {
   getApprovals,
   getChats,
   getCheckpoints,
+  getImportable,
+  importChat,
+  type ImportableChat,
   gitCommit,
   gitPush,
   gitStage,
@@ -79,7 +82,7 @@ import { AskView } from "./ask";
 import { MemoryView } from "./memory";
 import { BoardView } from "./board";
 import { AttachBar, AttachButton, useAttachments } from "./attach";
-import { AgentPicker, ModelPicker } from "./agents";
+import { AgentIcon, AgentPicker, ModelPicker } from "./agents";
 import { foldedEvents, groupToolRuns } from "./fold-model";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
 import { QuestionEvent, answeredQuestions } from "./question";
@@ -825,6 +828,7 @@ export function ProjectScreen(props: {
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMenu, setChatMenu] = useState<Chat | null>(null);
+  const [importing, setImporting] = useState(false);
   const attach = useAttachments(creds, project.id, (msg) => setErr(msg));
   const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => setChats(chats)).catch(() => {});
   // a chat change from the menu: do it, close the menu, re-read the list (and leave a deleted chat)
@@ -1367,6 +1371,25 @@ export function ProjectScreen(props: {
               style={{ maxHeight: 46, flexGrow: 0, backgroundColor: T.panel, borderBottomWidth: 1, borderBottomColor: T.line }}
               contentContainerStyle={{ paddingHorizontal: spacing.md, paddingVertical: 8, gap: spacing.sm, alignItems: "center" }}
             >
+              {/* first, so they're in reach however many chats there are: a new chat, or one brought in from an agent's own history */}
+              <TouchableOpacity
+                onPress={() => void newChat()}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="New chat"
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: T.line, borderStyle: "dashed" }}
+              >
+                <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>+ New</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setImporting(true)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Import chats from Claude Code, Codex or OpenCode"
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: T.line, borderStyle: "dashed" }}
+              >
+                <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>⤓ Import</Text>
+              </TouchableOpacity>
               {(() => {
                 const shown = [...chats, ...(extraChat && !chats.some((c) => c.id === extraChat.id) ? [extraChat] : [])]
                   .filter((c) => !c.archived || c.id === chatId)
@@ -1403,18 +1426,16 @@ export function ProjectScreen(props: {
                   </TouchableOpacity>
                 );
               })}
-              {/* a new chat, as the desktop's sidebar offers */}
-              <TouchableOpacity
-                onPress={() => void newChat()}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="New chat"
-                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: T.line, borderStyle: "dashed" }}
-              >
-                <Text style={{ color: T.dim, fontSize: 12.5, fontWeight: "600" }}>+ New</Text>
-              </TouchableOpacity>
+
             </ScrollView>
           )}
+          <ImportSheet
+            visible={importing}
+            creds={creds}
+            project={project}
+            onClose={() => setImporting(false)}
+            onOpen={(id) => { setImporting(false); reloadChats(); setChatId(id); }}
+          />
           <ChatMenu
             chat={chatMenu}
             onClose={() => setChatMenu(null)}
@@ -2145,6 +2166,66 @@ function ChatMenu(props: {
               { text: "Delete", style: "destructive", onPress: props.onDelete },
             ]), T.err)}
         </View>
+      ) : null}
+    </Sheet>
+  );
+}
+
+/** Chats you had with Claude Code, Codex or OpenCode in this project's folder, one tap from being Loom chats. */
+function ImportSheet(props: { visible: boolean; creds: Creds; project: Project; onClose: () => void; onOpen: (chatId: string) => void }) {
+  const [list, setList] = useState<ImportableChat[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showLoom, setShowLoom] = useState(false);
+  useEffect(() => {
+    if (!props.visible) return;
+    setList(null);
+    setErr(null);
+    void getImportable(props.creds, props.project.id).then((r) => setList(r.chats)).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+  }, [props.visible, props.project.id]);
+  const go = async (c: ImportableChat) => {
+    if (c.chat) return props.onOpen(c.chat);
+    setBusy(`${c.source}:${c.id}`);
+    try {
+      const r = await importChat(props.creds, props.project.id, c.source, c.id);
+      props.onOpen(r.chat.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const mine = (list ?? []).filter((c) => !c.fromLoom);
+  const shown = showLoom ? list ?? [] : mine;
+  const loomCount = (list ?? []).length - mine.length;
+  return (
+    <Sheet title="Import chats" visible={props.visible} onClose={props.onClose}>
+      <Text style={{ color: T.faint, fontSize: 12, lineHeight: 17, marginBottom: 8 }}>
+        From Claude Code, Codex and OpenCode&apos;s own history on your computer, for this folder. Nothing leaves it.
+      </Text>
+      {err ? <Text style={{ color: T.err, fontSize: 12.5, marginBottom: 6 }}>{err}</Text> : null}
+      {!list && !err ? <ActivityIndicator color={T.dim} style={{ marginVertical: 16 }} /> : null}
+      {list && !list.length ? <Text style={{ color: T.faint, fontSize: 13, paddingVertical: 12 }}>No chats from those agents ran in this folder.</Text> : null}
+      {shown.slice(0, 60).map((c) => {
+        const key = `${c.source}:${c.id}`;
+        return (
+          <TouchableOpacity key={key} onPress={() => void go(c)} disabled={!!busy} activeOpacity={0.7} accessibilityRole="button"
+            style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.line }}>
+            <AgentIcon kind={c.source} size={26} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: T.text, fontSize: 13.5 }} numberOfLines={1}>{c.title}</Text>
+              <Text style={{ color: T.faint, fontSize: 11.5, marginTop: 2 }} numberOfLines={1}>
+                {c.label} · {ago(new Date(c.updatedAt).toISOString())}{c.automated ? " · by a tool" : ""}{c.fromLoom ? " · Loom ran this" : ""}
+              </Text>
+            </View>
+            {busy === key ? <ActivityIndicator color={T.dim} /> : <Text style={{ color: c.chat ? T.dim : T.primary, fontSize: 12.5, fontWeight: "700" }}>{c.chat ? "Open" : "Import"}</Text>}
+          </TouchableOpacity>
+        );
+      })}
+      {loomCount ? (
+        <TouchableOpacity onPress={() => setShowLoom((v) => !v)} style={{ paddingVertical: 12, alignItems: "center" }}>
+          <Text style={{ color: T.dim, fontSize: 12 }}>{showLoom ? "Hide" : "Show"} the {loomCount} Loom ran itself</Text>
+        </TouchableOpacity>
       ) : null}
     </Sheet>
   );
