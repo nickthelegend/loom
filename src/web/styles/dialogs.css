@@ -1383,3 +1383,17 @@
   .crow .cwho{flex:0 1 auto;min-width:0;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sidebar{container:sb / inline-size}
   @container sb (max-width: 250px){ .crow .cwho{display:none} }
+
+  /* ── the dock's viewer as a phone sheet (artifacts, files, diffs) ── */
+  .msheet{position:fixed;inset:0;z-index:300;display:flex;flex-direction:column;background:var(--background);
+    padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);animation:msheetIn .18s ease-out}
+  @keyframes msheetIn{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
+  .msheethead{display:flex;align-items:center;gap:8px;height:48px;flex:none;padding:0 8px 0 14px;border-bottom:1px solid var(--border);
+    font-family:var(--font-mono);font-size:12px;color:var(--muted-foreground)}
+  .msheethead .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .msheethead .di{display:inline-flex}
+  .msheethead .di svg{width:14px;height:14px}
+  .msheethead .iconbtn{width:36px;height:36px}
+  .msheet #pane-changes{flex:1;min-height:0;overflow:auto;padding:0}
+  .msheet #pane-changes:has(.artframe){display:flex;flex-direction:column}
+  .msheet .artframe{min-height:0;flex:1}

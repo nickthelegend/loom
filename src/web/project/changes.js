@@ -88,9 +88,31 @@ export function createChanges(view) {
 
 
     // ---- diff/preview dock (right of the chat, opens on click) --------------
-    function openDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.add("open"); bindReviewClicks(); }
+    /**
+     * The dock on a wide screen; on a phone (no dock in that layout) the same
+     * viewer as a full-screen sheet, with the same ids inside so every
+     * preview — a diff, a file, an artifact — renders into it unchanged.
+     */
+    function openDock(){
+      var d = document.getElementById("dockpane");
+      if (d) { d.classList.add("open"); bindReviewClicks(); return; }
+      var sheet = document.getElementById("msheet");
+      if (!sheet) {
+        sheet = document.createElement("div");
+        sheet.id = "msheet"; sheet.className = "msheet"; sheet.setAttribute("role", "dialog"); sheet.setAttribute("aria-modal", "true");
+        sheet.innerHTML = '<div class="msheethead"><span class="di" id="dockicon"></span><span class="p" id="dockpath"></span><span class="spacer"></span>' +
+          '<button class="iconbtn" id="msheetclose" aria-label="close">' + ICONS.x + "</button></div>" +
+          '<div class="pane scroll" id="pane-changes"></div>';
+        document.body.appendChild(sheet);
+        document.getElementById("msheetclose").onclick = closeDock;
+      }
+      bindReviewClicks();
+    }
 
-    function closeDock(){ var d = document.getElementById("dockpane"); if (d) d.classList.remove("open"); }
+    function closeDock(){
+      var d = document.getElementById("dockpane"); if (d) d.classList.remove("open");
+      var sheet = document.getElementById("msheet"); if (sheet) sheet.remove();
+    }
 
     function dockTitle(icon, label){
       var i = document.getElementById("dockicon"); if (i) i.innerHTML = icon || "";
