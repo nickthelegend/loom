@@ -65,6 +65,7 @@ import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
 import { AgentPicker } from "./agents";
+import { foldedEvents } from "./fold-model";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
 import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
@@ -1134,6 +1135,11 @@ export function ProjectScreen(props: {
     [events],
   );
   const kindOf = (id: string) => project.agents.find((a) => a.id === id)?.kind;
+  // one checklist per plan, and no tool line under a card that already says it
+  const shownEvents = useMemo(() => {
+    const gone = foldedEvents(events);
+    return gone.size ? events.filter((e) => !gone.has(e.id)) : events;
+  }, [events]);
   const refreshProject = () =>
     void getProject(creds, project.id)
       .then(({ project: p }) => setProject(p))
@@ -1331,7 +1337,7 @@ export function ProjectScreen(props: {
           ) : null}
           <FlatList
             ref={listRef}
-            data={events}
+            data={shownEvents}
             keyExtractor={(e) => String(e.id)}
             renderItem={({ item }) =>
               item.kind === "approval" ? (
