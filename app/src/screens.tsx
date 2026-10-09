@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -32,6 +33,9 @@ import {
   getApprovals,
   getChats,
   getCheckpoints,
+  gitCommit,
+  gitPush,
+  gitStage,
   rewindTo,
   type Checkpoint,
   createChat,
@@ -892,6 +896,27 @@ export function ProjectScreen(props: {
   };
   const [tree, setTree] = useState<WorkingTree | null>(null);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[] | null>(null);
+  const [commitMsg, setCommitMsg] = useState("");
+  const [committing, setCommitting] = useState<"commit" | "push" | null>(null);
+  // everything changed goes in: a phone has no staging area to fiddle with
+  const commitAll = async (push: boolean) => {
+    if (!tree || !commitMsg.trim() || committing) return;
+    setCommitting(push ? "push" : "commit");
+    try {
+      await gitStage(creds, project.id, tree.files.map((f) => f.path).filter((p) => !p.startsWith(".loom/")));
+      const r = await gitCommit(creds, project.id, commitMsg.trim());
+      let note = `Committed ${r.sha} · ${r.files} file${r.files === 1 ? "" : "s"}`;
+      if (push) note += ` · pushed ${(await gitPush(creds, project.id)).branch}`;
+      setCommitMsg("");
+      setErr(null);
+      Alert.alert("Done", note);
+      void getTree(creds, project.id).then(({ tree }) => setTree(tree)).catch(() => {});
+    } catch (e) {
+      setErr(String(e instanceof Error ? e.message : e));
+    } finally {
+      setCommitting(null);
+    }
+  };
   const [tasks, setTasks] = useState<TaskResult | null>(null);
   const [tasksTry, setTasksTry] = useState(0);
   // the Board first, as on the desktop; Issues and PRs are GitHub's own lists
@@ -1956,7 +1981,22 @@ export function ProjectScreen(props: {
                 );
               })}
               {tree.files.length ? (
-                <DiffView patch={tree.patch} maxHeight={520} />
+                <View style={{ gap: 8 }}>
+                  <TextInput value={commitMsg} onChangeText={setCommitMsg} placeholder="Commit message…" placeholderTextColor={T.faint}
+                    style={{ color: T.text, backgroundColor: T.raised, borderRadius: radii.key, paddingHorizontal: 12, height: 40, fontSize: 14 }} />
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    {(["commit", "push"] as const).map((k) => (
+                      <TouchableOpacity key={k} onPress={() => void commitAll(k === "push")} disabled={!commitMsg.trim() || !!committing} activeOpacity={0.75} accessibilityRole="button"
+                        style={{ flex: 1, minHeight: 40, borderRadius: radii.key, alignItems: "center", justifyContent: "center",
+                          backgroundColor: k === "commit" ? T.bright : "transparent", borderWidth: k === "commit" ? 0 : 1, borderColor: T.line2, opacity: !commitMsg.trim() ? 0.4 : 1 }}>
+                        {committing === k ? <ActivityIndicator color={k === "commit" ? T.onBright : T.text} /> : (
+                          <Text style={{ color: k === "commit" ? T.onBright : T.text, fontWeight: "700" }}>{k === "commit" ? "Commit all" : "Commit & push"}</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <DiffView patch={tree.patch} maxHeight={520} />
+                </View>
               ) : (
                 <Sys text="working tree is clean" />
               )}

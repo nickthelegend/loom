@@ -902,6 +902,14 @@ export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "PATCH", body: JSON.stringify(flags) });
 export const deleteChat = (c: Creds, id: string, chat: string) =>
   api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "DELETE" });
+/** Stage these paths, commit them, and (optionally) push — the desktop's Source control. */
+export const gitStage = (c: Creds, id: string, paths: string[]) =>
+  api<unknown>(c, `/api/projects/${id}/git/stage`, { method: "POST", body: JSON.stringify({ paths }) });
+export const gitCommit = (c: Creds, id: string, message: string) =>
+  api<{ sha: string; files: number }>(c, `/api/projects/${id}/git/commit`, { method: "POST", body: JSON.stringify({ message }) });
+export const gitPush = (c: Creds, id: string) =>
+  api<{ branch: string }>(c, `/api/projects/${id}/git/push`, { method: "POST", body: "{}" });
+
 /** Save a picture to the project (.loom/attachments) for a message to point at. */
 export const uploadAttachment = (c: Creds, id: string, name: string, dataUrl: string) =>
   api<{ path: string }>(c, `/api/projects/${id}/attachments`, { method: "POST", body: JSON.stringify({ name, dataUrl }) });
