@@ -1416,3 +1416,5 @@
   .msheet .artframe{min-height:0;flex:1}
   #obusage .cadd{color:var(--git-add)}
   #obusage .cdel{color:var(--git-del)}
+  .usagerow[data-usagepid]{cursor:pointer;border-radius:var(--radius-md)}
+  .usagerow[data-usagepid]:hover{background:var(--accent)}
