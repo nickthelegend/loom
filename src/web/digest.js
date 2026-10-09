@@ -21,7 +21,8 @@ import { state } from './state.js';
     if (!since || Date.now() - since < 30 * 60000) return mark();
     api("/api/projects/" + pid + "/digest?since=" + since).then(function(d){
       mark();
-      if (!d || !d.lines || !d.lines.length) return;
+      // a total with nothing behind it ("1 turn") isn't worth a dialog
+      if (!d || !d.lines || !d.lines.some(function(l){ return l.kind !== "cost"; })) return;
       showDigest(d, since);
     }).catch(function(){ mark(); });
   }
@@ -34,7 +35,8 @@ import { state } from './state.js';
     var scrim = document.createElement("div");
     scrim.className = "scrim";
     var rows = d.lines.map(function(l){
-      var when = new Date(l.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      // the totals row sums the whole stretch: it has no moment of its own
+      var when = l.kind === "cost" ? "in all" : new Date(l.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       return '<div class="dgrow ' + esc(l.kind) + '"' + (l.chat ? ' data-dgchat="' + esc(l.chat) + '"' : "") + '>' +
         '<span class="dgt">' + esc(when) + "</span><span>" + esc(l.text) + "</span></div>";
     }).join("");

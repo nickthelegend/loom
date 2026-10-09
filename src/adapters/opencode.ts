@@ -57,6 +57,16 @@ export function parseModelRef(model: string): { providerID: string; id: string }
   return { providerID: model.slice(0, idx), id: model.slice(idx + 1) };
 }
 
+/** A turn's tokens for run_complete: totals, plus the cached and reasoning shares when there are any. */
+function usagePayload(u: { input: number; output: number; cached: number; reasoning: number }): Record<string, number> {
+  return {
+    inputTokens: u.input,
+    outputTokens: u.output,
+    ...(u.cached ? { cachedInputTokens: u.cached } : {}),
+    ...(u.reasoning ? { reasoningTokens: u.reasoning } : {}),
+  };
+}
+
 /**
  * The model to use when the project pins none: opencode's free house model if
  * the server offers it, else any free opencode-hosted model, else nothing
@@ -91,7 +101,7 @@ export class OpenCodeAdapter extends AdapterBase {
   private options: OpenCodeOptions;
   private started = false;
   // Token usage from the assistant message, stashed to ride run_complete.
-  private lastUsage: { input: number; output: number } | null = null;
+  private lastUsage: { input: number; output: number; cached: number; reasoning: number } | null = null;
   // The provider/model the assistant message actually ran, for the gen_ai span.
   private lastModel: string | null = null;
 
@@ -755,6 +765,8 @@ export class OpenCodeAdapter extends AdapterBase {
         this.lastUsage = {
           input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
           output: (tk.output ?? 0) + (tk.reasoning ?? 0),
+          cached: cache.read ?? 0,
+          reasoning: tk.reasoning ?? 0,
         };
         const mid = (info as Record<string, unknown>).modelID;
         const pid = (info as Record<string, unknown>).providerID;
@@ -764,8 +776,8 @@ export class OpenCodeAdapter extends AdapterBase {
         kind: "run_complete",
         payload: {
           durationMs: Date.now() - started,
-          ...(this.lastModel ? { model: this.lastModel } : {}),
-          ...(this.lastUsage ? { inputTokens: this.lastUsage.input, outputTokens: this.lastUsage.output } : {}),
+          ...((this.lastModel ?? this.options.model) ? { model: this.lastModel ?? this.options.model } : {}),
+          ...(this.lastUsage ? usagePayload(this.lastUsage) : {}),
         },
       });
       this.lastUsage = null;
@@ -846,8 +858,8 @@ export class OpenCodeAdapter extends AdapterBase {
         payload: {
           durationMs: Date.now() - started,
           session: sid,
-          ...(this.lastModel ? { model: this.lastModel } : {}),
-          ...(this.lastUsage ? { inputTokens: this.lastUsage.input, outputTokens: this.lastUsage.output } : {}),
+          ...((this.lastModel ?? this.options.model) ? { model: this.lastModel ?? this.options.model } : {}),
+          ...(this.lastUsage ? usagePayload(this.lastUsage) : {}),
         },
       });
     } catch (err) {
@@ -972,6 +984,8 @@ export class OpenCodeAdapter extends AdapterBase {
     this.lastUsage = {
       input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
       output: (tk.output ?? 0) + (tk.reasoning ?? 0),
+      cached: cache.read ?? 0,
+      reasoning: tk.reasoning ?? 0,
     };
     const mid = info.modelID, pid = info.providerID;
     const model = (info.model ?? {}) as Json;

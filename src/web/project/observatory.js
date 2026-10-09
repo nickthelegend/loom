@@ -52,6 +52,7 @@ export function createObservatory(view) {
         canvas: "<b>Right now.</b> Who is running this second, who is idle, and where the " + fx + "baton</b> is \u2014 the ring pulses on whoever holds it. Every agent hangs off the <b>one shared brain</b> in the middle: that is the memory they all read and write, which is the whole point of the fleet. Updates live as turns start and finish. " + drag,
         graph: "<b>What already happened.</b> The baton\u2019s actual route through the fleet, left to right, oldest handoff first. Each " + fx + "\u2192</b> is one real handoff from the event log; <code>19t</code> under a name is turns that agent took. Live view is the <b>Live fleet</b> tab \u2014 this one is history. " + drag,
         timeline: "<b>The run, in the order it happened.</b> Every turn, handoff, route, memory fold, budget pause and self-heal line on one spine \u2014 so \u201cwhy did it do that?\u201d is answered by scrolling rather than by guessing. The \ud83d\udca1 lines are <b>decisions</b>; click one to read the reasoning behind it.",
+        usage: "<b>What it cost, and what it used.</b> Spend and tokens split by agent, model, chat, day and tool, beside the turn metrics. Each turn\u2019s dollars are counted once, on the turn that spent them. An agent that reports no price (a subscription CLI, a free model) shows its tokens at $0 and is flagged, so the total is the least you spent, not an estimate.",
         metrics: "<b>Where the run\u2019s time and money actually went.</b> Nothing here is estimated: tokens and cost are what each agent\u2019s own CLI reported for the turn, and the durations are the spans Loom exports. Every agent carries a 0\u2013100 <b>health score</b>, and <b>\u26a0 Triage</b> root-causes a bad one from that agent\u2019s own spans.",
         decisions: "<b>The reasoning, not just the result.</b> Every choice an agent made, with what it weighed and rejected \u2014 mined out of its own prose after each turn, so it survives the agent that made it. A confidence it actually measured and one merely pattern-matched are labelled differently, because a number you cannot source is worse than no number.",
         alerts: "<b>What your monitoring told Loom, and what Loom did about it.</b> A firing alert takes the named agent out of rotation \u2014 it is refused the baton until the alert resolves \u2014 and a resolved one puts it back. This is the part your dashboards cannot show you: they know the alert fired, only Loom knows the fleet reacted.",
@@ -294,7 +295,7 @@ export function createObservatory(view) {
       // Six views, ordered by the question people arrive with. "Replay" is the
       // old Time Travel: it absorbed the separate span-replay tab, which scrubbed
       // the same run on a second slider and left everyone asking which was which.
-      var VIEWS = [["metrics", "Metrics"], ["canvas", "Live fleet"], ["graph", "Handoffs"], ["alerts", "Self-heal"], ["timeline", "Timeline"], ["decisions", "Decisions"], ["logs", "Logs"], ["travel", "Replay"]];
+      var VIEWS = [["metrics", "Metrics"], ["usage", "Spend & tokens"], ["canvas", "Live fleet"], ["graph", "Handoffs"], ["alerts", "Self-heal"], ["timeline", "Timeline"], ["decisions", "Decisions"], ["logs", "Logs"], ["travel", "Replay"]];
       var tabs = VIEWS.map(function(v){
         var on = state.obView === v[0];
         return '<button class="obtab' + (on ? " on" : "") + '" role="tab" aria-selected="' + on + '" tabindex="' + (on ? "0" : "-1") + '" data-obv="' + v[0] + '">' + esc(v[1]) + "</button>";
@@ -311,6 +312,7 @@ export function createObservatory(view) {
           '<div id="obboard" class="obasync">' + LOADER + "</div>" +
           '<div id="obburn" class="obasync">' + LOADER + "</div>" +
           '<div id="obmex" class="obasync">' + LOADER + "</div>";
+      else if (state.obView === "usage") body = '<div id="obusage" class="obasync">' + LOADER + "</div>";
       else if (state.obView === "decisions") body = '<div id="obdecisions" class="obasync">' + LOADER + "</div>";
       else if (state.obView === "logs") body = '<div id="oblogs" class="obasync">' + LOADER + "</div>";
       else if (state.obView === "alerts") body = '<div id="obalerts" class="obasync">' + LOADER + "</div>";
@@ -393,6 +395,7 @@ export function createObservatory(view) {
       if (state.obView === "canvas" || state.obView === "graph") wireObservatoryDrag(el);
       if (state.obView === "metrics") { observatoryBoard(p); observatoryBurn(p); }
       if (state.obView === "metrics") observatoryMetricExplorer(p);
+      if (state.obView === "usage") observatoryUsage(p);
       if (state.obView === "decisions") observatoryDecisions(p);
       if (state.obView === "logs") observatoryLogs(p);
       if (state.obView === "alerts") observatoryAlerts(p, events);
@@ -538,6 +541,82 @@ export function createObservatory(view) {
     }
 
     // BURN: per-agent cost over time (real ClickHouse), linear projection, budgets.
+    /** Spend & tokens: GET /usage, broken down every way worth asking. */
+    function observatoryUsage(p){
+      var host = document.getElementById("obusage"); if (!host) return;
+      var days = state.obUsageDays || 30;
+      api("/api/projects/" + p.id + "/usage?days=" + days).then(function(r){
+        if (!document.getElementById("obusage")) return;
+        host.innerHTML = usageView(r.usage || {}, days);
+        Array.prototype.forEach.call(host.querySelectorAll("[data-udays]"), function(b){
+          b.onclick = function(){ state.obUsageDays = Number(b.getAttribute("data-udays")); host.innerHTML = LOADER; observatoryUsage(p); };
+        });
+        Array.prototype.forEach.call(host.querySelectorAll("[data-uchat]"), function(row){
+          row.onclick = function(){ if (state.setChat) state.setChat(state.pid, row.getAttribute("data-uchat")); if (state.showTab) state.showTab("thread"); };
+        });
+      }).catch(function(e){ host.innerHTML = '<div class="obnote">Usage unavailable \u2014 ' + esc(e.message) + "</div>"; });
+    }
+
+    function usageView(u, days){
+      var t = u.totals || {}, pct = function(x, of){ return of ? Math.round((x / of) * 100) + "%" : "\u2014"; };
+      var tok = function(n){ return tokfmt(n || 0); };
+      var range = '<div class="useg" role="group" aria-label="period">' + [1, 7, 30, 90].map(function(d){
+        return '<button type="button" data-udays="' + d + '" class="' + (d === days ? "on" : "") + '">' + (d === 1 ? "24h" : d + "d") + "</button>";
+      }).join("") + "</div>";
+      var tile = function(label, val, sub){ return '<div class="obminicard"><div class="obcl">' + esc(label) + '</div><div class="obcv sm">' + val + "</div>" + (sub ? '<div class="usub">' + sub + "</div>" : "") + "</div>"; };
+      var tiles =
+        tile("Spend", money(t.usd || 0), (t.unpriced ? t.unpriced + " unpriced turn" + (t.unpriced === 1 ? "" : "s") : "every turn priced")) +
+        tile("Per turn", money(t.usdPerTurn || 0), (t.turns || 0) + " turns") +
+        tile("Tokens in", tok(t.tokensIn), pct(t.cachedIn, t.tokensIn) + " from cache") +
+        tile("Tokens out", tok(t.tokensOut), t.reasoning ? tok(t.reasoning) + " thinking" : "") +
+        tile("Avg turn", durfmt(t.avgTurnMs || 0), durfmt(t.ms || 0) + " in all") +
+        tile("Tool calls", String(t.toolCalls || 0), (t.toolFailures || 0) + " failed") +
+        tile("Errors", String(t.errors || 0), (t.questions || 0) + " questions asked") +
+        tile("Changed", String(t.filesChanged || 0) + " files", '<span class="cadd">+' + (t.linesAdded || 0) + '</span> <span class="cdel">\u2212' + (t.linesRemoved || 0) + "</span>");
+      // daily bars: spend when there is any, else tokens
+      // every day of the period, so a quiet day is a gap rather than missing
+      var seen = {}; (u.byDay || []).forEach(function(d){ seen[d.day] = d; });
+      var byDay = [];
+      for (var di = days - 1; di >= 0; di--) {
+        var dt = new Date(Date.now() - di * 86400000);
+        var key = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
+        byDay.push(seen[key] || { day: key, usd: 0, turns: 0, tokensIn: 0, tokensOut: 0 });
+      }
+      var spendy = byDay.some(function(d){ return d.usd > 0; });
+      var val = function(d){ return spendy ? d.usd : d.tokensIn + d.tokensOut; };
+      var max = Math.max.apply(null, byDay.map(val).concat([0])) || 1;
+      var bars = byDay.some(function(d){ return d.turns; }) ? '<div class="ubars" role="img" aria-label="' + (spendy ? "spend" : "tokens") + ' per day">' + byDay.map(function(d){
+        var h = Math.max(2, Math.round((val(d) / max) * 100));
+        return '<i style="height:' + h + '%" title="' + esc(d.day + " \u00b7 " + money(d.usd) + " \u00b7 " + tokfmt(d.tokensIn + d.tokensOut) + " tokens \u00b7 " + d.turns + " turns") + '"></i>';
+      }).join("") + "</div>" : '<div class="obnote">No turns in this period.</div>';
+      var share = function(x){ return t.usd > 0 ? pct(x.usd, t.usd) : pct(x.tokensIn + x.tokensOut, (t.tokensIn || 0) + (t.tokensOut || 0)); };
+      var shareBar = function(x){ var v = t.usd > 0 ? x.usd / t.usd : (x.tokensIn + x.tokensOut) / (((t.tokensIn || 0) + (t.tokensOut || 0)) || 1); return '<span class="ushare"><i style="width:' + Math.round(v * 100) + '%"></i></span>'; };
+      var agentRows = (u.byAgent || []).map(function(a){
+        return "<tr><td>" + avatarFor(a.agentId) + " " + esc(labelOf(a.agentId)) + (a.unpriced ? ' <span class="uflag" title="reports tokens but no price">unpriced</span>' : "") + "</td>" +
+          '<td class="num">' + money(a.usd) + "</td><td>" + shareBar(a) + " " + share(a) + "</td>" +
+          '<td class="num">' + a.turns + '</td><td class="num">' + tok(a.tokensIn) + '</td><td class="num">' + tok(a.tokensOut) + '</td><td class="num">' + pct(a.cachedIn, a.tokensIn) + "</td>" +
+          '<td class="num">' + (a.turns ? durfmt(a.ms / a.turns) : "\u2014") + '</td><td class="num">' + a.toolCalls + (a.toolFailures ? ' <span class="cdel">(' + a.toolFailures + ")</span>" : "") + '</td><td class="num">' + a.errors + "</td>" +
+          '<td class="umodels">' + esc((a.models || []).join(", ")) + "</td></tr>";
+      }).join("");
+      var modelRows = (u.byModel || []).map(function(m){
+        return "<tr><td><code>" + esc(m.model) + '</code></td><td class="num">' + money(m.usd) + "</td><td>" + shareBar(m) + " " + share(m) + '</td><td class="num">' + m.turns + '</td><td class="num">' + tok(m.tokensIn) + '</td><td class="num">' + tok(m.tokensOut) + '</td><td class="num">' + money(m.turns ? m.usd / m.turns : 0) + "</td></tr>";
+      }).join("");
+      var chatRows = (u.byChat || []).map(function(c){
+        return '<tr class="uclick" data-uchat="' + esc(c.chat) + '"><td>' + esc(c.title || c.chat) + '</td><td class="num">' + money(c.usd) + '</td><td class="num">' + c.turns + '</td><td class="num">' + tok(c.tokensIn + c.tokensOut) + "</td></tr>";
+      }).join("");
+      var toolRows = (u.byTool || []).map(function(x){
+        return "<tr><td><code>" + esc(x.tool) + '</code></td><td class="num">' + x.calls + '</td><td class="num">' + (x.failures ? '<span class="cdel">' + x.failures + "</span>" : "0") + "</td></tr>";
+      }).join("");
+      var table = function(title, head, rows){ return rows ? '<div class="obmlabel" style="margin-top:18px">' + title + '</div><div class="lbwrap"><table class="lbtable"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table></div>" : ""; };
+      return '<div class="uhead"><div class="obmlabel">Last ' + (days === 1 ? "24 hours" : days + " days") + "</div>" + range + "</div>" +
+        '<div class="burnstats utiles">' + tiles + "</div>" +
+        '<div class="obmlabel" style="margin-top:18px">' + (spendy ? "Spend" : "Tokens") + " per day</div>" + bars +
+        table("By agent", '<th>Agent</th><th class="num">Spend</th><th>Share</th><th class="num">Turns</th><th class="num">In</th><th class="num">Out</th><th class="num">Cached</th><th class="num">Avg turn</th><th class="num">Tools</th><th class="num">Errors</th><th>Models</th>', agentRows) +
+        table("By model", '<th>Model</th><th class="num">Spend</th><th>Share</th><th class="num">Turns</th><th class="num">In</th><th class="num">Out</th><th class="num">Per turn</th>', modelRows) +
+        table("By chat", '<th>Chat</th><th class="num">Spend</th><th class="num">Turns</th><th class="num">Tokens</th>', chatRows) +
+        table("Tools", '<th>Tool</th><th class="num">Calls</th><th class="num">Failed</th>', toolRows);
+    }
+
     function observatoryBurn(p){
       var host = document.getElementById("obburn"); if (!host) return;
       api("/api/projects/" + p.id + "/insights/burn?hours=24&buckets=12").then(function(r){

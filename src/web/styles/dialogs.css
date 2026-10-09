@@ -856,6 +856,23 @@
   #obboard{min-height:0;margin-top:18px}
   .lbhead{display:flex;align-items:center}
   .lbhead .btn svg{width:12px;height:12px;margin-right:5px}
+  .uhead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .uhead .obmlabel{margin:0}
+  .useg{margin-left:auto;display:inline-flex;border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden}
+  .useg button{font-size:11.5px;padding:4px 10px;color:var(--muted-foreground);background:transparent;border:0}
+  .useg button.on{background:var(--accent);color:var(--foreground)}
+  .utiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .usub{font-size:11px;color:var(--muted-foreground);margin-top:3px}
+  .ubars{display:flex;align-items:flex-end;gap:3px;height:110px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+  .ubars i{flex:1;min-width:3px;background:var(--shuttle, var(--primary));border-radius:2px 2px 0 0;opacity:.85}
+  .ubars i:hover{opacity:1}
+  .ushare{display:inline-block;width:56px;height:5px;border-radius:3px;background:var(--muted);vertical-align:middle;overflow:hidden}
+  .ushare i{display:block;height:100%;background:var(--shuttle, var(--primary))}
+  .uflag{font-size:10px;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);border-radius:4px;padding:0 4px;margin-left:4px}
+  .umodels{color:var(--muted-foreground);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+  .lbtable tr.uclick{cursor:pointer}
+  .lbtable tr.uclick:hover td{background:var(--accent)}
+  .lbtable .av{display:inline-flex;vertical-align:middle;margin-right:4px}
   .lbwrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
   .lbtable{width:100%;border-collapse:collapse;font-size:13px}
   .lbtable th{text-align:left;font-weight:500;font-size:11px;color:var(--muted-foreground);padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -1397,3 +1414,5 @@
   .msheet #pane-changes{flex:1;min-height:0;overflow:auto;padding:0}
   .msheet #pane-changes:has(.artframe){display:flex;flex-direction:column}
   .msheet .artframe{min-height:0;flex:1}
+  #obusage .cadd{color:var(--git-add)}
+  #obusage .cdel{color:var(--git-del)}

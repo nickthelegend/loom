@@ -45,6 +45,7 @@ import {
   getSnapshots,
   getSpans,
   getTriage,
+  getUsage,
   liftQuarantine,
   type AgentDecision,
   type Creds,
@@ -59,7 +60,10 @@ import {
   type QuarantineMap,
   type TimeSnapshot,
   type Triage,
+  type UsageReport,
+  type UsageSlice,
 } from "./api";
+import { AgentIcon } from "./agents";
 import { LineChart, Meter, RankedBars, StackedBar, gradeColor, type Slice } from "./charts";
 import {
   Badge,
@@ -81,6 +85,7 @@ import { T, hue, radii, spacing, usd } from "./theme";
 
 type ObsView =
   | "metrics"
+  | "usage"
   | "fleet"
   | "handoffs"
   | "selfheal"
@@ -93,6 +98,7 @@ type ObsView =
 // knows where the other keeps things.
 const OBS_VIEWS: ReadonlyArray<{ key: ObsView; label: string }> = [
   { key: "metrics", label: "Metrics" },
+  { key: "usage", label: "Spend & tokens" },
   { key: "fleet", label: "Live fleet" },
   { key: "handoffs", label: "Handoffs" },
   { key: "selfheal", label: "Self-heal" },
@@ -272,6 +278,8 @@ export function ObservatoryView(props: { creds: Creds; project: Project }) {
             spans={spans}
             onTriage={setTriageFor}
           />
+        ) : view === "usage" ? (
+          <UsageView creds={creds} project={project} />
         ) : view === "fleet" ? (
           <FleetView project={project} metrics={metrics} health={health} />
         ) : view === "handoffs" ? (
@@ -295,6 +303,149 @@ export function ObservatoryView(props: { creds: Creds; project: Project }) {
         agentId={triageFor}
         onClose={() => setTriageFor(null)}
       />
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Spend & tokens — the desktop's usage breakdown, phone-shaped
+// ---------------------------------------------------------------------------
+
+const USAGE_RANGES: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "1", label: "24h" },
+  { key: "7", label: "7d" },
+  { key: "30", label: "30d" },
+  { key: "90", label: "90d" },
+];
+
+function UsageView(props: { creds: Creds; project: Project }) {
+  const [days, setDays] = useState("30");
+  const res = useResource(() => getUsage(props.creds, props.project.id, Number(days)), `u:${props.project.id}:${days}`, { pollMs: 20000 });
+  const u = res.data?.usage ?? null;
+  const pct = (x: number, of: number) => (of ? `${Math.round((x / of) * 100)}%` : "—");
+  return (
+    <>
+      <Segmented options={USAGE_RANGES} value={days} onChange={setDays} accent={T.primaryDim} />
+      <Load res={res} what="usage">
+        {() => {
+          if (!u) return null;
+          const t = u.totals;
+          const priced = t.usd > 0;
+          const share = (x: UsageSlice) => (priced ? x.usd : x.tokensIn + x.tokensOut);
+          const shareOf = priced ? t.usd : t.tokensIn + t.tokensOut;
+          return (
+            <View style={{ gap: spacing.md }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
+                <MetricCard label="Spend" value={usd(t.usd) || "$0"} sub={t.unpriced ? `${t.unpriced} unpriced turns` : "every turn priced"} accent />
+                <MetricCard label="Per turn" value={usd(t.usdPerTurn) || "$0"} sub={`${t.turns} turns`} />
+                <MetricCard label="Tokens in" value={tok(t.tokensIn)} sub={`${pct(t.cachedIn, t.tokensIn)} from cache`} />
+                <MetricCard label="Tokens out" value={tok(t.tokensOut)} sub={t.reasoning ? `${tok(t.reasoning)} thinking` : "—"} />
+                <MetricCard label="Avg turn" value={dur(t.avgTurnMs)} sub={`${dur(t.ms)} in all`} />
+                <MetricCard label="Tool calls" value={String(t.toolCalls)} sub={`${t.toolFailures} failed`} />
+                <MetricCard label="Errors" value={String(t.errors)} sub={`${t.questions} questions`} />
+                <MetricCard label="Changed" value={`${t.filesChanged} files`} sub={`+${t.linesAdded} −${t.linesRemoved}`} />
+              </View>
+              {t.unpriced ? (
+                <Text style={{ color: T.faint, fontSize: 11.5, lineHeight: 17 }}>
+                  Agents that report no price (a subscription CLI, a free model) show their tokens at $0, so the spend is the least it cost.
+                </Text>
+              ) : null}
+              <Panel>
+                <UsageDays u={u} days={Number(days)} />
+              </Panel>
+              <Panel>
+                <SectionLabel text="By agent" />
+                {u.byAgent.length ? (
+                  u.byAgent.map((a) => (
+                    <View key={a.agentId} style={{ paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: T.line, gap: 5 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <AgentIcon kind={a.kind ?? a.agentId} size={22} />
+                        <Text style={{ color: T.text, fontSize: 13.5, fontWeight: "600", flex: 1 }} numberOfLines={1}>{a.agentId}</Text>
+                        {a.unpriced ? <Badge text="unpriced" tint={T.warn} /> : null}
+                        <Text style={{ color: T.text, fontFamily: T.mono, fontSize: 13 }}>{usd(a.usd) || "$0"}</Text>
+                      </View>
+                      <Meter value={share(a)} max={shareOf || 1} tint={hue(a.agentId)} height={4} />
+                      <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }} numberOfLines={2}>
+                        {pct(share(a), shareOf)} · {a.turns} turns · {tok(a.tokensIn)} in · {tok(a.tokensOut)} out
+                        {a.cachedIn ? ` · ${pct(a.cachedIn, a.tokensIn)} cached` : ""}
+                        {a.turns ? ` · ${dur(a.ms / a.turns)}/turn` : ""} · {a.toolCalls} tools{a.toolFailures ? ` (${a.toolFailures} failed)` : ""}
+                        {a.errors ? ` · ${a.errors} errors` : ""}
+                        {a.models.length ? `\n${a.models.join(", ")}` : ""}
+                      </Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={{ color: T.faint, fontSize: 12 }}>No turns in this period.</Text>
+                )}
+              </Panel>
+              {u.byModel.length ? (
+                <Panel>
+                  <SectionLabel text="By model" />
+                  {u.byModel.map((m) => (
+                    <UsageRow key={m.model} label={m.model} mono value={usd(m.usd) || "$0"} sub={`${pct(share(m), shareOf)} · ${m.turns} turns · ${tok(m.tokensIn + m.tokensOut)} tokens · ${usd(m.turns ? m.usd / m.turns : 0) || "$0"}/turn`} />
+                  ))}
+                </Panel>
+              ) : null}
+              {u.byChat.length ? (
+                <Panel>
+                  <SectionLabel text="By chat" />
+                  {u.byChat.map((c) => (
+                    <UsageRow key={c.chat} label={c.title ?? c.chat} value={usd(c.usd) || "$0"} sub={`${c.turns} turns · ${tok(c.tokensIn + c.tokensOut)} tokens`} />
+                  ))}
+                </Panel>
+              ) : null}
+              {u.byTool.length ? (
+                <Panel>
+                  <SectionLabel text="Tools" />
+                  {u.byTool.map((x) => (
+                    <UsageRow key={x.tool} label={x.tool} mono value={String(x.calls)} sub={x.failures ? `${x.failures} failed` : "no failures"} />
+                  ))}
+                </Panel>
+              ) : null}
+            </View>
+          );
+        }}
+      </Load>
+    </>
+  );
+}
+
+function UsageRow(props: { label: string; value: string; sub: string; mono?: boolean }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: T.line }}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ color: T.text, fontSize: 13, fontFamily: props.mono ? T.mono : undefined }} numberOfLines={1}>{props.label}</Text>
+        <Text style={{ color: T.faint, fontSize: 11, marginTop: 2 }} numberOfLines={1}>{props.sub}</Text>
+      </View>
+      <Text style={{ color: T.text, fontFamily: T.mono, fontSize: 13 }}>{props.value}</Text>
+    </View>
+  );
+}
+
+/** Bars per day across the whole period: spend when any was priced, else tokens. */
+function UsageDays(props: { u: UsageReport; days: number }) {
+  const seen = new Map(props.u.byDay.map((d) => [d.day, d]));
+  const series: Array<{ day: string; v: number }> = [];
+  const spendy = props.u.byDay.some((d) => d.usd > 0);
+  for (let i = props.days - 1; i >= 0; i--) {
+    const dt = new Date(Date.now() - i * 86_400_000);
+    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    const d = seen.get(key);
+    series.push({ day: key, v: d ? (spendy ? d.usd : d.tokensIn + d.tokensOut) : 0 });
+  }
+  const max = Math.max(...series.map((x) => x.v), 0) || 1;
+  return (
+    <View style={{ gap: 8 }}>
+      <SectionLabel text={spendy ? "Spend per day" : "Tokens per day"} />
+      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 90 }}>
+        {series.map((x) => (
+          <View key={x.day} style={{ flex: 1, height: `${Math.max(2, (x.v / max) * 100)}%`, backgroundColor: x.v ? T.primary : T.line, borderRadius: 2 }} />
+        ))}
+      </View>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Text style={{ color: T.faint, fontSize: 10, fontFamily: T.mono }}>{series[0]?.day.slice(5)}</Text>
+        <Text style={{ color: T.faint, fontSize: 10, fontFamily: T.mono }}>today</Text>
+      </View>
     </View>
   );
 }

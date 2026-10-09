@@ -896,6 +896,23 @@ export const getChats = (c: Creds, id: string) =>
   api<{ chats: Chat[] }>(c, `/api/projects/${id}/chats`);
 export const getTree = (c: Creds, id: string) =>
   api<{ tree: WorkingTree }>(c, `/api/projects/${id}/tree`);
+/** Spend and tokens broken down (GET /usage, core/usage.ts on the daemon). */
+export interface UsageSlice { usd: number; turns: number; tokensIn: number; tokensOut: number; cachedIn: number; reasoning: number; ms: number }
+export interface UsageReport {
+  totals: UsageSlice & {
+    toolCalls: number; toolFailures: number; errors: number; prompts: number; questions: number;
+    filesChanged: number; linesAdded: number; linesRemoved: number; unpriced: number;
+    avgTurnMs: number; usdPerTurn: number; cacheHitRate: number;
+  };
+  byAgent: Array<UsageSlice & { agentId: string; kind?: string; models: string[]; toolCalls: number; toolFailures: number; errors: number; unpriced: number }>;
+  byModel: Array<UsageSlice & { model: string }>;
+  byChat: Array<UsageSlice & { chat: string; title?: string }>;
+  byDay: Array<UsageSlice & { day: string }>;
+  byTool: Array<{ tool: string; calls: number; failures: number }>;
+}
+export const getUsage = (c: Creds, id: string, days: number) =>
+  api<{ days: number; usage: UsageReport }>(c, `/api/projects/${id}/usage?days=${days}`);
+
 export const getMetrics = (c: Creds, id: string) =>
   api<{ metrics: Metrics }>(c, `/api/projects/${id}/metrics`);
 export const getTriage = (c: Creds, id: string, agentId: string) =>

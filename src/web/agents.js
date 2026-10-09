@@ -22,7 +22,9 @@ import { shortModel } from './permissions.js';
   function brandMark(kind, cls){
     if (!kind || !BRAND_TITLES[kind]) return "";
     var sym = BRAND_ICON_ALIAS[kind] || kind;
-    return '<svg class="' + (cls || "brand") + '" aria-hidden="true"><use href="#brand-' + sym + '"></use></svg>';
+    // the mono marks (opencode, Grok) have no colour of their own: draw them in the foreground
+    var mono = sym === "opencode" || sym === "grok-code" ? " mono" : "";
+    return '<svg class="' + (cls || "brand") + mono + '" aria-hidden="true"><use href="#brand-' + sym + '"></use></svg>';
   }
 
   function hasBrand(kind){ return !!(kind && BRAND_TITLES[kind]); }

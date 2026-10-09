@@ -6,6 +6,8 @@
  * the thread, the picker and the Orchestra cards all say the same thing.
  */
 
+import { SvgXml } from "react-native-svg";
+import { BRAND_MARK_ALIAS, BRAND_MARKS } from "./brand-marks";
 import { useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import type { AgentStatus } from "./api";
@@ -34,10 +36,35 @@ export function agentLabel(kind: string): string {
 }
 
 /** A small tile with the product's initial in its own thread hue. */
+/** The agent's own logo when it has one, as on the desktop. */
+function markFor(kind: string): string | undefined {
+  const k = kind === "grok" ? "grok-code" : BRAND_MARK_ALIAS[kind] ?? kind;
+  return BRAND_MARKS[k];
+}
+
 export function AgentIcon(props: { kind: string; size?: number }) {
   const size = props.size ?? 26;
   const label = agentLabel(props.kind);
   const c = hue(label);
+  const mark = markFor(props.kind);
+  if (mark)
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size * 0.3,
+          backgroundColor: T.raised,
+          borderWidth: 1,
+          borderColor: T.line2,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {/* mono marks (opencode, Grok) take the text colour: white on dark */}
+        <SvgXml xml={mark} width={size * 0.62} height={size * 0.62} color={T.text} />
+      </View>
+    );
   return (
     <View
       style={{

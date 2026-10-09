@@ -355,7 +355,9 @@ export class RuntimeIngestion {
       emit("run_complete", { durationMs: Math.max(0, event.createdAt - (s.turn?.startedAt ?? event.createdAt)),
         ...((p.model ?? s.turn?.model) ? { model: p.model ?? s.turn?.model } : {}),
         ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
-        ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}) });
+        ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+        ...(usage?.cachedInputTokens ? { cachedInputTokens: usage.cachedInputTokens } : {}),
+        ...(usage?.reasoningTokens ? { reasoningTokens: usage.reasoningTokens } : {}) });
     } else if (p.state === "failed") {
       emit("error", { message: p.errorMessage ?? "the turn failed" });
     } else {
