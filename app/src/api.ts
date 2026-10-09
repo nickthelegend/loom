@@ -1189,7 +1189,9 @@ export interface OrchestraRun {
   summary?: string;
   question?: string;
   error?: string;
-  applied?: { at: number; into: string };
+  applied?: { at: number; into: string; task?: string };
+  /** Every entrant got the same prompt in its own worktree; you apply the one you pick. */
+  race?: boolean;
   /** Plan mode: PLAN.md plus one spec per task, written under plans/<run id>/ on the branch. */
   plan?: boolean;
   /** What the git delivery policy did with the finished run. */
@@ -1233,10 +1235,11 @@ export const replyOrchestra = (c: Creds, id: string, runId: string, text: string
     body: JSON.stringify({ text }),
   });
 
-export const applyOrchestra = (c: Creds, id: string, runId: string) =>
-  api<{ merged: boolean; into: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/apply`, {
+/** `task` picks a race's entrant; a planned run applies as a whole. */
+export const applyOrchestra = (c: Creds, id: string, runId: string, task?: string) =>
+  api<{ merged: boolean | string; into: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/apply`, {
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(task ? { task } : {}),
   });
 
 /** Re-run the delivery policy (after fixing a push rejection, say). Answers with the run. */
