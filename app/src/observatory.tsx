@@ -335,15 +335,15 @@ function UsageView(props: { creds: Creds; project: Project }) {
           const shareOf = priced ? t.usd : t.tokensIn + t.tokensOut;
           return (
             <View style={{ gap: spacing.md }}>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
-                <MetricCard label="Spend" value={usd(t.usd) || "$0"} sub={t.unpriced ? `${t.unpriced} unpriced turns` : "every turn priced"} accent />
-                <MetricCard label="Per turn" value={usd(t.usdPerTurn) || "$0"} sub={`${t.turns} turns`} />
-                <MetricCard label="Tokens in" value={tok(t.tokensIn)} sub={`${pct(t.cachedIn, t.tokensIn)} from cache`} />
-                <MetricCard label="Tokens out" value={tok(t.tokensOut)} sub={t.reasoning ? `${tok(t.reasoning)} thinking` : "—"} />
-                <MetricCard label="Avg turn" value={dur(t.avgTurnMs)} sub={`${dur(t.ms)} in all`} />
-                <MetricCard label="Tool calls" value={String(t.toolCalls)} sub={`${t.toolFailures} failed`} />
-                <MetricCard label="Errors" value={String(t.errors)} sub={`${t.questions} questions`} />
-                <MetricCard label="Changed" value={`${t.filesChanged} files`} sub={`+${t.linesAdded} −${t.linesRemoved}`} />
+              <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: spacing.sm }}>
+                <MetricCard width="48.5%" label="Spend" value={usd(t.usd) || "$0"} sub={t.unpriced ? `${t.unpriced} unpriced turns` : "every turn priced"} accent />
+                <MetricCard width="48.5%" label="Per turn" value={usd(t.usdPerTurn) || "$0"} sub={`${t.turns} turns`} />
+                <MetricCard width="48.5%" label="Tokens in" value={tok(t.tokensIn)} sub={`${pct(t.cachedIn, t.tokensIn)} from cache`} />
+                <MetricCard width="48.5%" label="Tokens out" value={tok(t.tokensOut)} sub={t.reasoning ? `${tok(t.reasoning)} thinking` : "—"} />
+                <MetricCard width="48.5%" label="Avg turn" value={dur(t.avgTurnMs)} sub={`${dur(t.ms)} in all`} />
+                <MetricCard width="48.5%" label="Tool calls" value={String(t.toolCalls)} sub={`${t.toolFailures} failed`} />
+                <MetricCard width="48.5%" label="Errors" value={String(t.errors)} sub={`${t.questions} questions`} />
+                <MetricCard width="48.5%" label="Changed" value={`${t.filesChanged} files`} sub={`+${t.linesAdded} −${t.linesRemoved}`} />
               </View>
               {t.unpriced ? (
                 <Text style={{ color: T.faint, fontSize: 11.5, lineHeight: 17 }}>

@@ -22,7 +22,7 @@ import {
   signOut,
   supabaseConfigured,
 } from "./supabase";
-import { T, radii } from "./theme";
+import { T, pickTheme, radii, type ThemePref } from "./theme";
 
 /** The round avatar: Google's picture when there is one, otherwise an initial. */
 export function Avatar(props: { user: User | null; size?: number }) {
@@ -93,6 +93,7 @@ export function AccountSheet(props: {
   onSignedOut: () => void;
   /** Open the Fleet screen's Team section. */
   onOpenTeam?: () => void;
+  themePref: ThemePref;
 }) {
   const profile = profileOf(props.user);
   const team = useTeamSummary(props.creds, props.visible);
@@ -172,6 +173,33 @@ export function AccountSheet(props: {
         )}
         {err && <Text style={{ color: T.err, fontSize: 12.5 }}>{err}</Text>}
       </Panel>
+
+      {/* appearance — the desktop's three choices */}
+      <View style={{ gap: 6 }}>
+        <SectionLabel text="Appearance" />
+        <Panel>
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            {(["dark", "light", "system"] as const).map((p) => {
+              const on = props.themePref === p;
+              return (
+                <TouchableOpacity
+                  key={p}
+                  onPress={() => pickTheme(p)}
+                  activeOpacity={0.7}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: on }}
+                  style={{ flex: 1, minHeight: 38, borderRadius: radii.key, borderWidth: 1, borderColor: on ? T.line2 : T.line,
+                    backgroundColor: on ? T.raised : "transparent", alignItems: "center", justifyContent: "center" }}
+                >
+                  <Text style={{ color: on ? T.text : T.dim, fontSize: 13, fontWeight: "600" }}>
+                    {p === "dark" ? "Dark" : p === "light" ? "Light" : "Match phone"}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </Panel>
+      </View>
 
       {/* privacy */}
       <View style={{ gap: 6 }}>

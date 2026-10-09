@@ -65,7 +65,7 @@ import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
 import { AgentPicker } from "./agents";
-import { foldedEvents } from "./fold-model";
+import { foldedEvents, groupToolRuns } from "./fold-model";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
 import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
@@ -1138,7 +1138,8 @@ export function ProjectScreen(props: {
   // one checklist per plan, and no tool line under a card that already says it
   const shownEvents = useMemo(() => {
     const gone = foldedEvents(events);
-    return gone.size ? events.filter((e) => !gone.has(e.id)) : events;
+    // and a run of tool calls is one line that opens, as on the desktop
+    return groupToolRuns(gone.size ? events.filter((e) => !gone.has(e.id)) : events) as LoomEvent[];
   }, [events]);
   const refreshProject = () =>
     void getProject(creds, project.id)
@@ -1354,7 +1355,7 @@ export function ProjectScreen(props: {
                 Array.isArray(item.payload?.questions) && item.payload.questions.length ? (
                 <QuestionEvent creds={creds} projectId={project.id} e={item} answered={answered.get(String(item.payload.requestId))} />
               ) : (
-                <EventLine e={item} />
+                <EventLine e={item} kindOf={kindOf} />
               )
             }
             ListHeaderComponent={

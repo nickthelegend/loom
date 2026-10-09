@@ -38,3 +38,17 @@ describe("plan updates", () => {
     assert.deepEqual([...foldedEvents(ev)], [2]);
   });
 });
+
+import { groupToolRuns, summarizeTools } from "../src/fold-model.ts";
+
+describe("tool runs", () => {
+  const call = (id: number, tool: string, agentId = "opencode", extra: Record<string, unknown> = {}) => ({ id, kind: "tool_call", agentId, ts: id, payload: { tool, ...extra } });
+  it("folds consecutive calls from one agent, and leaves a lone call alone", () => {
+    const out = groupToolRuns([call(1, "bash"), call(2, "read"), { id: 3, kind: "message", agentId: "opencode" }, call(4, "read"), call(5, "bash", "codex")]);
+    assert.deepEqual(out.map((e) => e.kind), ["tool_group", "message", "tool_call", "tool_call"]);
+  });
+  it("says what a run did, the way the desktop does", () => {
+    assert.equal(summarizeTools([call(1, "bash"), call(2, "read"), call(3, "todowrite")]), "Ran 1 command, read 1 file, updated the plan");
+    assert.equal(summarizeTools([call(1, "edit"), call(2, "edit"), call(3, "grep")]), "Edited 2 files, searched the code");
+  });
+});
