@@ -213,7 +213,7 @@ export function AccountSheet(props: {
               value={stats}
               onValueChange={toggleStats}
               trackColor={{ false: T.raised, true: T.ok }}
-              thumbColor={T.bright}
+              thumbColor="#ffffff"
               accessibilityLabel="Anonymous usage stats, country only"
             />
           </View>
