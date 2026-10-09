@@ -135,6 +135,8 @@ export interface Chat {
   lastReplyId?: number;
   pinned?: boolean;
   archived?: boolean;
+  /** What made it — an Orchestra run, race, crew or import — so its threads fold together. */
+  group?: { kind: "orchestra" | "race" | "crew" | "import"; id: string; title: string; status?: string; at: number };
 }
 
 /** Per-agent cost + token rollup from the daemon's /metrics endpoint. */

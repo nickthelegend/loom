@@ -287,6 +287,19 @@ import { shortModel } from './permissions.js';
           var byAgent = devicePref("chatsByAgent", false);
           var groups = [], gIndex = {};
           var byIdG = {}; (p.agents || []).forEach(function(a){ byIdG[a.id] = a; });
+          // A run, race, crew or import made these threads: they fold under it
+          // (ChatInfo.group, from the daemon) — an afternoon of orchestra runs
+          // is a handful of rows, not fifty.
+          var runs = [], rIndex = {};
+          rest = rest.filter(function(c){
+            if (c.folder || !c.group || c.pinned) return true;
+            var gk = "g:" + c.group.kind + ":" + c.group.id;
+            if (!rIndex[gk]) { rIndex[gk] = { key: gk, run: c.group, name: c.group.title, chats: [], newest: 0 }; runs.push(rIndex[gk]); }
+            rIndex[gk].chats.push(c);
+            rIndex[gk].newest = Math.max(rIndex[gk].newest, c.createdAt || 0, c.group.at || 0);
+            return false;
+          });
+          runs.sort(function(a, b){ return b.newest - a.newest; });
           rest = rest.filter(function(c){
             var key = c.folder ? "f:" + c.folder : byAgent ? "a:" + (c.agentId || "") : "";
             if (!key) return true;
@@ -338,6 +351,32 @@ import { shortModel } from './permissions.js';
               '<span class="fcnt">' + g.chats.length + "</span></div>";
             rows += g.chats.filter(function(c){ return !shut || (sel && c.id === here); }).map(function(c){ return chatRowHtml(c).replace('class="crow', 'class="crow infold'); }).join("");
           });
+          var RUNS_SHOW = 6, runsOpen = !!(state.runsMore && state.runsMore[p.id]);
+          runs.forEach(function(g, ri){
+            var hasHere = sel && g.chats.some(function(c){ return c.id === here; });
+            if (!runsOpen && ri >= RUNS_SHOW && !hasHere) return;
+            var live = /^(running|planning|starting|reviewing|waiting_human|awaiting_approval)$/.test(g.run.status || "");
+            var fkey = p.id + "|" + g.key, shut = foldShut(fkey, !(live || hasHere));
+            var unread = g.chats.some(function(c){ return c.id !== currentChat() && isUnread(p.id, c); });
+            var st = g.run.status || "";
+            var dot = /^(running|planning|starting|reviewing)$/.test(st) ? '<span class="cstat run" title="running"></span>'
+              : /^(waiting_human|awaiting_approval)$/.test(st) ? '<span class="cstat wait" title="waiting on you"></span>'
+              : st === "completed" ? '<span class="cstat done" title="finished"></span>'
+              : /^(failed|aborted|stopped|interrupted)$/.test(st) ? '<span class="cstat bad" title="' + esc(st) + '"></span>' : "";
+            var icon = g.run.kind === "crew" ? ICONS.team : g.run.kind === "import" ? ICONS.download : ICONS.orchestra;
+            var kindWord = g.run.kind === "race" ? "Race" : g.run.kind === "crew" ? "Crew" : g.run.kind === "import" ? "" : "Orchestra";
+            rows += '<div class="crow fold run' + (shut ? "" : " open") + '" data-fold="' + esc(fkey) + '" data-runfold="' + esc(g.key) + '" data-p="' + esc(p.id) + '" role="button" aria-expanded="' + (shut ? "false" : "true") + '" title="' + esc((kindWord ? kindWord + " \u00b7 " : "") + g.name) + '">' +
+              '<span class="ci fcar">' + ICONS.chevron + "</span>" +
+              '<span class="ci fg">' + icon + "</span>" +
+              '<span class="cnm">' + esc(g.name) + "</span>" +
+              (shut && unread ? '<span class="udot" aria-label="unread inside"></span>' : "") + dot +
+              '<span class="fcnt">' + g.chats.length + "</span></div>";
+            rows += g.chats.filter(function(c){ return !shut || (sel && c.id === here); }).map(function(c){ return chatRowHtml(c).replace('class="crow', 'class="crow infold'); }).join("");
+          });
+          if (runs.length > RUNS_SHOW) {
+            rows += '<div class="crow more" data-runsmore="' + esc(p.id) + '"><span class="ci">' + ICONS.dots + '</span><span class="cnm">' +
+              (runsOpen ? "Show fewer runs" : "Show " + (runs.length - RUNS_SHOW) + " older runs") + "</span></div>";
+          }
           rows += visible.map(chatRowHtml).join("");
           if (older > 0 || moreOpen && rest.length > SHOW) {
             rows += '<div class="crow more" data-chatsmore="' + esc(p.id) + '"><span class="ci">' + ICONS.dots + '</span><span class="cnm">' +
@@ -373,8 +412,39 @@ import { shortModel } from './permissions.js';
           drawList();
         };
       });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-runsmore]"), function(row){
+        row.onclick = function(ev){
+          ev.stopPropagation();
+          var id = row.getAttribute("data-runsmore");
+          state.runsMore = state.runsMore || {};
+          state.runsMore[id] = !state.runsMore[id];
+          drawList();
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll("[data-runfold]"), function(row){
+        row.oncontextmenu = function(ev){
+          ev.preventDefault(); ev.stopPropagation();
+          var pid = row.getAttribute("data-p"), gk = row.getAttribute("data-runfold");
+          var proj = (state.projects || []).filter(function(q){ return q.id === pid; })[0];
+          var mine = ((proj && proj.chats) || []).filter(function(c){ return c.group && "g:" + c.group.kind + ":" + c.group.id === gk && !c.archived; });
+          openMenu(ev.clientX, ev.clientY, [
+            { head: row.getAttribute("title") || "" },
+            { label: "Archive its " + mine.length + " chat" + (mine.length === 1 ? "" : "s"), icon: ICONS.archive, run: function(){
+                Promise.all(mine.map(function(c){ return api("/api/projects/" + pid + "/chats/" + encodeURIComponent(c.id), { method: "PATCH", body: JSON.stringify({ archived: true }) }); }))
+                  .then(function(){ if (mine.some(function(c){ return c.id === currentChat(); })) setChat(pid, "main"); refresh(); toast("archived · under Archived in the sidebar"); })
+                  .catch(function(e){ toast(e.message); });
+              } },
+          ]);
+        };
+      });
       Array.prototype.forEach.call(el.querySelectorAll("[data-fold]"), function(row){
-        row.onclick = function(ev){ ev.stopPropagation(); setFoldShut(row.getAttribute("data-fold"), !foldShut(row.getAttribute("data-fold"))); drawList(); };
+        // a run's group is open by default only while it's live (or holds the open chat)
+        row.onclick = function(ev){
+          ev.stopPropagation();
+          var k = row.getAttribute("data-fold");
+          setFoldShut(k, row.getAttribute("aria-expanded") === "true");
+          drawList();
+        };
         if (row.getAttribute("data-folder")) row.oncontextmenu = function(ev){
           ev.preventDefault(); ev.stopPropagation();
           folderMenu(row.getAttribute("data-p"), row.getAttribute("data-folder"), ev.clientX, ev.clientY);
@@ -674,13 +744,16 @@ import { shortModel } from './permissions.js';
     }
 
     /** Which sidebar groups you folded, kept on this device. */
-    function foldShut(key){
-      try { return !!JSON.parse(localStorage.getItem("loomFolds") || "{}")[key]; } catch (e) { return false; }
+    function foldShut(key, dflt){
+      try {
+        var m = JSON.parse(localStorage.getItem("loomFolds") || "{}");
+        return key in m ? !!m[key] : !!dflt;
+      } catch (e) { return !!dflt; }
     }
     function setFoldShut(key, shut){
       try {
         var m = JSON.parse(localStorage.getItem("loomFolds") || "{}");
-        if (shut) m[key] = 1; else delete m[key];
+        m[key] = shut ? 1 : 0; // "open" is a choice too: a run's group defaults to shut once it's done
         localStorage.setItem("loomFolds", JSON.stringify(m));
       } catch (e) {}
     }

@@ -110,6 +110,13 @@ export interface ChatInfo {
   archived?: boolean;
   /** A sidebar folder this thread is filed under (a plain name; folders exist while a thread is in them). */
   folder?: string;
+  /**
+   * What made this thread, when something did: an Orchestra run or race (its
+   * own thread and one per task), a crew (its channel and one per teammate),
+   * or an import. Computed on read from the runs, crews and imports — never
+   * stored — so the sidebar can fold a run's dozen threads into one row.
+   */
+  group?: { kind: "orchestra" | "race" | "crew" | "import"; id: string; title: string; status?: string; at: number };
   /** Event ids marked as worth coming back to (newest last, capped). */
   starred?: number[];
   /** Your verdict on replies: event id → up (1) or down (-1), with who wrote it. */

@@ -1444,3 +1444,7 @@
   .impmeta{font-size:11.5px;color:var(--muted-foreground);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .impempty{font-size:13px;color:var(--muted-foreground);padding:24px 6px;text-align:center}
   .impmore{display:block;margin:10px auto 2px;border:0;background:transparent;color:var(--muted-foreground);font:inherit;font-size:12px;cursor:pointer;text-decoration:underline}
+  /* a run's / crew's group of threads reads as one row of its own */
+  .slist .crow.fold.run{color:var(--foreground);font-weight:500}
+  .slist .crow.fold.run .cstat{margin-left:auto}
+  .slist .crow.fold.run .cstat + .fcnt{margin-left:6px}

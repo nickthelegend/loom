@@ -829,6 +829,7 @@ export function ProjectScreen(props: {
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMenu, setChatMenu] = useState<Chat | null>(null);
   const [importing, setImporting] = useState(false);
+  const [groupOpen, setGroupOpen] = useState<{ g: NonNullable<Chat["group"]>; chats: Chat[] } | null>(null);
   const attach = useAttachments(creds, project.id, (msg) => setErr(msg));
   const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => setChats(chats)).catch(() => {});
   // a chat change from the menu: do it, close the menu, re-read the list (and leave a deleted chat)
@@ -1393,6 +1394,8 @@ export function ProjectScreen(props: {
               {(() => {
                 const shown = [...chats, ...(extraChat && !chats.some((c) => c.id === extraChat.id) ? [extraChat] : [])]
                   .filter((c) => !c.archived || c.id === chatId)
+                  // a run's / crew's threads ride under one chip (below), except the one you're in
+                  .filter((c) => !c.group || c.pinned || c.id === chatId)
                   .sort((a, b) => (a.id === "main" ? -1 : b.id === "main" ? 1 : (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)));
                 const { unread, seen: based } = unreadChats(shown, seen, chatId);
                 if (Object.keys(based).length !== Object.keys(seen).length) setTimeout(() => saveSeen(based), 0);
@@ -1426,9 +1429,42 @@ export function ProjectScreen(props: {
                   </TouchableOpacity>
                 );
               })}
+              {/* one chip per run, race or crew: its threads open from a sheet */}
+              {(() => {
+                const by = new Map<string, { g: NonNullable<Chat["group"]>; chats: Chat[] }>();
+                for (const c of chats) {
+                  if (!c.group || c.archived || c.pinned) continue;
+                  const k = `${c.group.kind}:${c.group.id}`;
+                  const e = by.get(k) ?? { g: c.group, chats: [] };
+                  e.chats.push(c);
+                  by.set(k, e);
+                }
+                return [...by.entries()].sort((a, b) => Math.max(b[1].g.at, ...b[1].chats.map((c) => c.createdAt)) - Math.max(a[1].g.at, ...a[1].chats.map((c) => c.createdAt))).map(([k, e]) => {
+                  const st = e.g.status ?? "";
+                  const color = /^(running|planning|starting|reviewing)$/.test(st) ? T.ok : /^(waiting_human|awaiting_approval)$/.test(st) ? T.warn : /^(failed|aborted|stopped|interrupted)$/.test(st) ? T.err : T.faint;
+                  const on = e.chats.some((c) => c.id === chatId);
+                  return (
+                    <TouchableOpacity key={k} onPress={() => setGroupOpen(e)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${e.g.title}, ${e.chats.length} chats`}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: on ? T.line2 : T.line, backgroundColor: on ? T.raised : "transparent", maxWidth: 230 }}>
+                      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />
+                      <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600", flexShrink: 1 }} numberOfLines={1}>{e.g.title}</Text>
+                      <Text style={{ color: T.faint, fontSize: 11.5 }}>{e.chats.length}</Text>
+                    </TouchableOpacity>
+                  );
+                });
+              })()}
 
             </ScrollView>
           )}
+          <Sheet title={groupOpen ? `${groupOpen.g.kind === "race" ? "Race" : groupOpen.g.kind === "crew" ? "Crew" : groupOpen.g.kind === "import" ? "Imported" : "Orchestra"} · ${groupOpen.chats.length} chats` : ""} visible={!!groupOpen} onClose={() => setGroupOpen(null)}>
+            {groupOpen ? <Text style={{ color: T.dim, fontSize: 12.5, marginBottom: 6 }} numberOfLines={2}>{groupOpen.g.title}</Text> : null}
+            {(groupOpen?.chats ?? []).map((c) => (
+              <TouchableOpacity key={c.id} onPress={() => { setGroupOpen(null); setChatId(c.id); }} activeOpacity={0.7} accessibilityRole="button"
+                style={{ minHeight: 44, justifyContent: "center", borderBottomWidth: 1, borderBottomColor: T.line }}>
+                <Text style={{ color: c.id === chatId ? T.text : T.dim, fontSize: 14, fontWeight: c.id === chatId ? "700" : "400" }} numberOfLines={1}>{c.title}</Text>
+              </TouchableOpacity>
+            ))}
+          </Sheet>
           <ImportSheet
             visible={importing}
             creds={creds}

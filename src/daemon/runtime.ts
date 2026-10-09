@@ -1413,13 +1413,40 @@ export class ProjectRuntime {
       last = new Map(); // an unread dot is a nicety; the list must still load
     }
     const main = stored.find((c) => c.id === MAIN_CHAT);
+    const groups = this.chatGroups();
     return this.conversations.chats().map((c) => {
       // main is stored only once it has stars or ratings to keep
       const withMain = c.id === MAIN_CHAT && main
         ? { ...c, ...(main.starred ? { starred: main.starred } : {}), ...(main.ratings ? { ratings: main.ratings } : {}) }
         : c;
-      return last.has(c.id) ? { ...withMain, lastReplyId: last.get(c.id)! } : withMain;
+      const g = c.id === MAIN_CHAT ? undefined : groups.get(c.id);
+      const withGroup = g ? { ...withMain, group: g } : withMain;
+      return last.has(c.id) ? { ...withGroup, lastReplyId: last.get(c.id)! } : withGroup;
     });
+  }
+
+  /** Which run, race, crew or import made each thread (ChatInfo.group). */
+  private chatGroups(): Map<string, NonNullable<ChatInfo["group"]>> {
+    const out = new Map<string, NonNullable<ChatInfo["group"]>>();
+    try {
+      for (const run of this.orchestra.list()) {
+        const g = { kind: run.race ? "race" as const : "orchestra" as const, id: run.id, title: run.goal, status: run.status, at: run.createdAt };
+        // a run that answered in a thread you already had leaves that thread alone
+        if (!run.inPlace && run.chat) out.set(run.chat, g);
+        for (const t of run.tasks) if (t.chat) out.set(t.chat, g);
+      }
+    } catch { /* no runs yet */ }
+    try {
+      for (const crew of this.crews.list()) {
+        const g = { kind: "crew" as const, id: crew.id, title: crew.name, ...(crew.state.goal ? { status: crew.state.goal.status } : {}), at: crew.state.goal?.startedAt ?? 0 };
+        if (crew.state.channel) out.set(crew.state.channel, g);
+        for (const chat of Object.values(crew.state.threads ?? {})) out.set(chat, g);
+      }
+    } catch { /* no crews yet */ }
+    for (const chat of Object.values(readProjectState(this.info.dir).imports ?? {})) {
+      if (!out.has(chat)) out.set(chat, { kind: "import", id: "imports", title: "Imported", at: 0 });
+    }
+    return out;
   }
 
   /** Pin, archive or file a thread. Main is always first and always there. */
