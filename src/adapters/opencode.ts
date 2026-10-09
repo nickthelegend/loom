@@ -20,6 +20,7 @@
  * `session.next.compaction.*` reports compaction).
  */
 
+import { attachedImages } from "../providers/attachments.js";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -55,6 +56,16 @@ export function parseModelRef(model: string): { providerID: string; id: string }
   const idx = model.indexOf("/");
   if (idx <= 0 || idx === model.length - 1) return null;
   return { providerID: model.slice(0, idx), id: model.slice(idx + 1) };
+}
+
+/** Errors that come from something already in the session's history, not from this turn. */
+const POISONED_HISTORY = /media must contain valid base64|invalid (?:image|base64)|could not process image|image (?:is )?(?:too large|not supported)/i;
+
+/** The prompt body, with attached pictures as file attachments so OpenCode sees them, not just their path. */
+function promptWithFiles(text: string, dir: string): { text: string; files?: Array<{ uri: string; name: string }> } {
+  // inline as a data URL: a file:// URL to a folder with a space in it ("Extreme SSD") reached the model as empty media
+  const files = attachedImages(text, dir).map((im) => ({ uri: `data:${im.mime};base64,${fs.readFileSync(im.abs).toString("base64")}`, name: path.basename(im.rel) }));
+  return files.length ? { text, files } : { text };
 }
 
 /** A turn's tokens for run_complete: totals, plus the cached and reasoning shares when there are any. */
@@ -708,69 +719,76 @@ export class OpenCodeAdapter extends AdapterBase {
     const started = Date.now();
     const timeoutMs = 60 * 60 * 1000;
     try {
-      const sid = await this.ensureSession();
-      const baseline = new Set(
-        (await this.listMessages(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
-      );
-      // No per-prompt system field in the API, so the handoff briefing rides in
-      // the prompt — framed as an unmissable authoritative block (frameBriefing)
-      // rather than a loose preamble.
-      const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
-      await fetchJson(`${this.baseUrl}/api/session/${sid}/prompt`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: { text } }),
-      });
+      // One retry, in a fresh session, when opencode refuses the session's own
+      // history: a single bad picture in it (media that isn't valid base64)
+      // is replayed on every later turn and would lock this agent out for good.
+      for (let attempt = 0; ; attempt++) {
+        const sid = await this.ensureSession();
+        const baseline = new Set(
+          (await this.listMessages(sid).catch(() => [] as Json[])).map((m) => String(m.id)),
+        );
+        // No per-prompt system field in the API, so the handoff briefing rides in
+        // the prompt — framed as an unmissable authoritative block (frameBriefing)
+        // rather than a loose preamble.
+        const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
+        await fetchJson(`${this.baseUrl}/api/session/${sid}/prompt`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt: promptWithFiles(text, this.projectDir) }),
+        });
 
-      const turn = await this.waitForTurn(sid, baseline, timeoutMs);
-      if (!turn && this.interrupted) {
-        this.emit({ kind: "status", payload: { state: "interrupted" } });
-      } else if (!turn) {
-        this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
-      } else {
-        const turnId = String(turn.id);
-        // Fetch the full message: parts (in case SSE missed them) + errors.
-        const detail = await fetchJson<Json>(
-          `${this.baseUrl}/api/session/${sid}/message/${turnId}`,
-        ).catch(() => null);
-        const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
-        if (info.finish === "error" || info.error) {
-          const err = (info.error ?? {}) as Json;
-          this.emit({
-            kind: "error",
-            payload: {
-              message: String(err.message ?? "opencode turn failed").slice(0, 500),
-            },
-          });
-        } else if (!this.emittedText.has(turnId)) {
-          const content = Array.isArray(info.content) ? (info.content as Json[]) : [];
-          const text = content
-            .filter((p) => p.type === "text" && typeof p.text === "string")
-            .map((p) => String(p.text))
-            .join("")
-            .trim();
-          if (text) {
-            this.emit({ kind: "message", payload: { text } });
-            this.emittedText.add(turnId);
+        const turn = await this.waitForTurn(sid, baseline, timeoutMs);
+        if (!turn && this.interrupted) {
+          this.emit({ kind: "status", payload: { state: "interrupted" } });
+        } else if (!turn) {
+          this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
+        } else {
+          const turnId = String(turn.id);
+          // Fetch the full message: parts (in case SSE missed them) + errors.
+          const detail = await fetchJson<Json>(
+            `${this.baseUrl}/api/session/${sid}/message/${turnId}`,
+          ).catch(() => null);
+          const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
+          if (info.finish === "error" || info.error) {
+            const err = (info.error ?? {}) as Json;
+            const message = String(err.message ?? "opencode turn failed").slice(0, 500);
+            if (attempt === 0 && POISONED_HISTORY.test(message)) {
+              this.sessionId = undefined;
+              this.emit({ kind: "status", payload: { state: "session_reset", reason: `opencode refused this session's history (${message}); carrying on in a fresh session` } });
+              continue;
+            }
+            this.emit({ kind: "error", payload: { message } });
+          } else if (!this.emittedText.has(turnId)) {
+            const content = Array.isArray(info.content) ? (info.content as Json[]) : [];
+            const text = content
+              .filter((p) => p.type === "text" && typeof p.text === "string")
+              .map((p) => String(p.text))
+              .join("")
+              .trim();
+            if (text) {
+              this.emit({ kind: "message", payload: { text } });
+              this.emittedText.add(turnId);
+            }
           }
+          const cost = Number(info.cost ?? 0);
+          if (cost > 0) {
+            this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
+          }
+          // OpenCode assistant messages carry token usage; capture it (cache
+          // reads/writes count as input) so it isn't dropped.
+          const tk = (info.tokens ?? {}) as Record<string, number>;
+          const cache = (tk.cache ?? {}) as unknown as Record<string, number>;
+          this.lastUsage = {
+            input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
+            output: (tk.output ?? 0) + (tk.reasoning ?? 0),
+            cached: cache.read ?? 0,
+            reasoning: tk.reasoning ?? 0,
+          };
+          const mid = (info as Record<string, unknown>).modelID;
+          const pid = (info as Record<string, unknown>).providerID;
+          if (typeof mid === "string" && mid) this.lastModel = typeof pid === "string" && pid ? `${pid}/${mid}` : mid;
         }
-        const cost = Number(info.cost ?? 0);
-        if (cost > 0) {
-          this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: cost } });
-        }
-        // OpenCode assistant messages carry token usage; capture it (cache
-        // reads/writes count as input) so it isn't dropped.
-        const tk = (info.tokens ?? {}) as Record<string, number>;
-        const cache = (tk.cache ?? {}) as unknown as Record<string, number>;
-        this.lastUsage = {
-          input: (tk.input ?? 0) + (cache.read ?? 0) + (cache.write ?? 0),
-          output: (tk.output ?? 0) + (tk.reasoning ?? 0),
-          cached: cache.read ?? 0,
-          reasoning: tk.reasoning ?? 0,
-        };
-        const mid = (info as Record<string, unknown>).modelID;
-        const pid = (info as Record<string, unknown>).providerID;
-        if (typeof mid === "string" && mid) this.lastModel = typeof pid === "string" && pid ? `${pid}/${mid}` : mid;
+        break;
       }
       this.emit({
         kind: "run_complete",
@@ -820,7 +838,7 @@ export class OpenCodeAdapter extends AdapterBase {
         res = await fetch(`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/prompt`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt: { text } }),
+          body: JSON.stringify({ prompt: promptWithFiles(text, this.projectDir) }),
           signal: AbortSignal.timeout(30_000),
         });
       } catch (err) {

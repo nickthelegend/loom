@@ -21,6 +21,7 @@
  * process group, and stopping it proves every tool it started is gone.
  */
 
+import { attachedImages } from "../attachments.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -439,7 +440,10 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     s.info = { ...s.info, status: "running", activeTurnId: turnId, updatedAt: Date.now() };
     this.emit(input.threadId, "turn.started", s.info.model ? { model: s.info.model } : {}, { turnId });
     try {
-      s.prompts.push({ type: "user", message: { role: "user", content: [{ type: "text", text: input.input }] },
+      // attached pictures go in as image blocks, so Claude sees them rather than a path it may not open
+      const pictures = attachedImages(input.input, s.info.cwd).map((im) => ({
+        type: "image" as const, source: { type: "base64" as const, media_type: im.mime, data: fs.readFileSync(im.abs).toString("base64") } }));
+      s.prompts.push({ type: "user", message: { role: "user", content: [{ type: "text", text: input.input }, ...pictures] },
         parent_tool_use_id: null, uuid: turnId } as SDKUserMessage);
     } catch (error) {
       s.turn = null;

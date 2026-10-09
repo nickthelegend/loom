@@ -586,8 +586,18 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
           <Text style={{ color: T.text, fontSize: 13.5, fontWeight: "700" }}>{agentLabel(kind)}</Text>
           {author !== kind && author !== agentLabel(kind) ? <Text style={{ color: T.faint, fontSize: 12 }}>{author}</Text> : null}
         </View>
-        <View style={{ paddingLeft: 30 }}>
-          <Markdown text={text} />
+        <View style={{ paddingLeft: 30, gap: 6 }}>
+          {/* an attachment line in a reply (an agent quoting it back) is the picture */}
+          {(() => {
+            const pics = [...text.matchAll(/^\[image\] (\.loom\/attachments\/[\w.-]+)\s*$/gm)].map((m) => m[1]!);
+            const rest = pics.length ? text.replace(/^\[image\] \.loom\/attachments\/[\w.-]+\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim() : text;
+            return (
+              <>
+                {rest ? <Markdown text={rest} /> : null}
+                {pics.length ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>{pics.map((im) => <ProjImage key={im} path={im} />)}</View> : null}
+              </>
+            );
+          })()}
           {p.partial === true && (
             <Text style={{ color: T.faint, fontSize: 11, marginTop: 6 }}>stopped — this is what it had written</Text>
           )}

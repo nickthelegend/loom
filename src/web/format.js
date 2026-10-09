@@ -256,7 +256,11 @@ import { toast } from './notifications.js';
   }
 
   function mdToHtml(src){
-    return mdBlocks(esc(String(src == null ? "" : src).replace(/\r\n?/g, "\n")).split("\n"));
+    // an attachment line ("[image] .loom/attachments/x.png", as clients send it)
+    // is a picture wherever it shows up — an agent quoting it back included
+    var text = String(src == null ? "" : src).replace(/\r\n?/g, "\n")
+      .replace(/^\[image\] (\.loom\/attachments\/[\w.-]+\.(?:png|jpe?g|gif|webp))\s*$/gim, "![attached image]($1)");
+    return mdBlocks(esc(text).split("\n"));
   }
 
   /**

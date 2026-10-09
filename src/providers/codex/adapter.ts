@@ -18,6 +18,7 @@
  * codex-cli 0.153.4).
  */
 
+import { attachedImages } from "../attachments.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -410,7 +411,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
     let response: Json;
     try {
       response = await s.rpc.request("turn/start", { threadId: s.providerThreadId,
-        input: [{ type: "text", text: input.input, text_elements: [] }],
+        // attached pictures go in as localImage inputs, so Codex sees them rather than a path
+        input: [{ type: "text", text: input.input, text_elements: [] },
+          ...attachedImages(input.input, s.info.cwd).map((im) => ({ type: "localImage", path: im.abs }))],
         ...(input.clientTurnId ? { clientUserMessageId: input.clientTurnId } : {}),
         ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...collaboration });
     } catch (error) {
