@@ -67,7 +67,7 @@ import {
   type WorkingTree,
   kv,
 } from "./api";
-import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ago, field } from "./components";
+import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
@@ -1182,6 +1182,7 @@ export function ProjectScreen(props: {
     [events],
   );
   const kindOf = (id: string) => project.agents.find((a) => a.id === id)?.kind;
+  const threadCtx = useMemo(() => ({ creds, projectId: project.id }), [creds, project.id]);
   // one checklist per plan, and no tool line under a card that already says it
   const shownEvents = useMemo(() => {
     const gone = foldedEvents(events);
@@ -1406,6 +1407,7 @@ export function ProjectScreen(props: {
               </Text>
             </View>
           ) : null}
+          <ThreadCtx.Provider value={threadCtx}>
           <FlatList
             ref={listRef}
             data={shownEvents}
@@ -1456,6 +1458,7 @@ export function ProjectScreen(props: {
             onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
             style={{ flex: 1 }}
           />
+          </ThreadCtx.Provider>
           {/* command dock */}
           <View style={{ backgroundColor: T.panel, borderTopWidth: 1, borderTopColor: T.line }}>
             {/*

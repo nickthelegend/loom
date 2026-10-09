@@ -1,10 +1,11 @@
 /** Shared UI atoms: event lines, diff viewer, buttons — quiet graphite. */
 
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import * as Clipboard from "expo-clipboard";
-import { Alert, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Image, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
-import type { LoomEvent, TaskItem } from "./api";
+import type { Creds, LoomEvent, TaskItem } from "./api";
+import { useConnRoute } from "./brand";
 import type { LiveMap } from "./live-model";
 import { AgentIcon, agentLabel } from "./agents";
 import { summarizeTools } from "./fold-model";
@@ -441,6 +442,57 @@ function messageActions(text: string, who: string): void {
 }
 
 /** One event in the thread. turn_diff renders as an expandable change card. */
+/**
+ * Which daemon and project the thread belongs to, so a picture in it can be
+ * fetched with your token (an <img> can't send one on its own).
+ */
+export const ThreadCtx = createContext<{ creds: Creds; projectId: string } | null>(null);
+
+/**
+ * A picture from the project: something you attached (.loom/attachments) or a
+ * file an agent saved. Loaded straight from the daemon with your token; over
+ * the cloud relay, which carries requests but not raw image bytes, it's a
+ * labelled chip instead of a broken frame.
+ */
+export function ProjImage(props: { path: string; size?: number }) {
+  const ctx = useContext(ThreadCtx);
+  const route = useConnRoute();
+  const [failed, setFailed] = useState(false);
+  const size = props.size ?? 120;
+  const name = props.path.split("/").pop() ?? props.path;
+  if (!ctx || route === "cloud" || failed) {
+    return (
+      <View style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: T.line, backgroundColor: T.raised }}>
+        <Text style={{ color: T.dim, fontSize: 12 }} numberOfLines={1}>🖼 {name}</Text>
+      </View>
+    );
+  }
+  const att = props.path.startsWith(".loom/attachments/");
+  const uri = `${ctx.creds.url}/api/projects/${ctx.projectId}/${att ? "attachment" : "image"}?path=${encodeURIComponent(props.path)}`;
+  return (
+    <Image
+      source={{ uri, headers: { Authorization: `Bearer ${ctx.creds.token}` } }}
+      onError={() => setFailed(true)}
+      accessibilityLabel={name}
+      style={{ width: size, height: size, borderRadius: 10, borderWidth: 1, borderColor: T.line, backgroundColor: T.raised }}
+      resizeMode="cover"
+    />
+  );
+}
+
+/** "[image] <path>" lines at the top of a message, as the desktop and the phone both send them. */
+function splitAttachments(text: string): { images: string[]; files: string[]; rest: string } {
+  const images: string[] = [], files: string[] = [];
+  const lines = text.split("\n");
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const m = /^\[(image|file)\] (\S.*)$/.exec(lines[i]!.trim());
+    if (!m) break;
+    (m[1] === "image" ? images : files).push(m[2]!);
+  }
+  return { images, files, rest: lines.slice(i).join("\n").trim() };
+}
+
 const toolFailed = (p: Record<string, unknown>) => p.ok === false || !!p.error || (typeof p.exitCode === "number" && p.exitCode !== 0);
 const tokText = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
 const usdText = (n: number) => (n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`);
@@ -452,14 +504,18 @@ function ToolLine(props: { p: Record<string, unknown>; inGroup?: boolean }) {
   const why = typeof p.exitCode === "number" && p.exitCode !== 0 ? ` · exit ${p.exitCode}` : failed ? " · failed" : "";
   const imgs = Array.isArray(p.images) ? p.images.length : 0;
   return (
-    <View style={{ flexDirection: "row", gap: 7, paddingLeft: props.inGroup ? 10 : 30, marginVertical: props.inGroup ? 1 : 3 }}>
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, paddingLeft: props.inGroup ? 10 : 30, marginVertical: props.inGroup ? 1 : 3 }}>
       <Text style={{ color: failed ? T.err : T.faint, fontSize: 11.5, fontFamily: T.mono }}>{failed ? "✗" : "›"}</Text>
       <Text style={{ color: failed ? T.err : T.dim, fontSize: 12, fontFamily: T.mono, flexShrink: 1 }} numberOfLines={2}>
         {p.server ? `${String(p.server)} · ` : ""}
         {String(p.summary ?? p.tool ?? "tool")}
         {why}
-        {imgs ? ` · ${imgs} image${imgs === 1 ? "" : "s"}` : ""}
       </Text>
+      {imgs ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, width: "100%" }}>
+          {(p.images as Array<{ path?: string }>).filter((im) => im?.path).map((im) => <ProjImage key={im.path} path={im.path!} size={96} />)}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -478,6 +534,24 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
     const text = String(p.text ?? "");
     // as on the desktop: your message is a card; an agent's reply is its logo
     // and name over plain text, no bubble
+    if (mine) {
+      const { images, files, rest } = splitAttachments(text);
+      if (images.length || files.length)
+        return (
+          <View style={{ alignSelf: "flex-end", maxWidth: "92%", marginVertical: 8, alignItems: "flex-end", gap: 6 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: "flex-end" }}>
+              {images.map((im) => <ProjImage key={im} path={im} />)}
+              {files.map((f) => <Text key={f} style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }}>📎 {f.split("/").pop()}</Text>)}
+            </View>
+            {rest ? (
+              <Pressable delayLongPress={350} onLongPress={() => messageActions(rest, "Your message")}
+                style={{ backgroundColor: T.panel, borderColor: T.line, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14 }}>
+                <Text style={{ color: T.text, fontSize: 14.5, lineHeight: 22 }}>{rest}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        );
+    }
     if (mine)
       return (
         <Pressable
