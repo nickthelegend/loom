@@ -58,7 +58,16 @@ if (Platform.OS !== "web") {
 /** on: registered · denied: the phone's notification setting is off · unavailable: no push here (a simulator, web, a build without push set up). */
 export type PushState = "on" | "denied" | "unavailable";
 
+/** How the last registration went (App registers on launch), for the account sheet. */
+let lastState: PushState | null = null;
+export const lastPushState = () => lastState;
+
 export async function enablePush(creds: Creds): Promise<PushState> {
+  lastState = await register(creds);
+  return lastState;
+}
+
+async function register(creds: Creds): Promise<PushState> {
   if (Platform.OS === "web") return "unavailable";
   try {
     if (Platform.OS === "android") {

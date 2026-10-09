@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Switch, Text, TouchableOpacity, View } from "react-native";
 import { getUpdates, type Creds, type UpdateStatus } from "./api";
 import { DESKTOP_URL, INSTALL_URL, REPO_URL, appVersion, canRate, open as openLink, rateLoom } from "./links";
-import { PUSH_KINDS, loadPushKinds, setPushKinds, type PushKind, type PushState } from "./push";
+import { PUSH_KINDS, lastPushState, loadPushKinds, setPushKinds, type PushKind, type PushState } from "./push";
 import { ConnectionBadge, GoogleMark, routeHint, useConnRoute } from "./brand";
 import { Panel, SectionLabel, TAP } from "./components";
 import { Sheet } from "./observatory";
@@ -115,6 +115,7 @@ export function AccountSheet(props: {
   useEffect(() => {
     if (!props.visible) return;
     void loadPushKinds().then(setKinds);
+    setPushState(lastPushState() ?? "on");
     if (props.creds) void getUpdates(props.creds).then(setUpd).catch(() => setUpd(null));
   }, [props.visible, props.creds]);
   const toggleKind = (k: PushKind, on: boolean) => {
