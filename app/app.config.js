@@ -1,7 +1,7 @@
 /**
  * app.json, plus what only exists on the machine that builds a store release:
  *
- *   google-services.json   Firebase's file for this app (dev.loom.app) — Android
+ *   google-services.json   Firebase's file for this app (tech.loompad.app) — Android
  *                          push in a Play build goes through FCM. Not committed.
  *   EAS_PROJECT_ID         the Expo project id (`eas init` prints it) — a store
  *                          build needs it to get an Expo push token.

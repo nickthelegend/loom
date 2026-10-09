@@ -288,14 +288,14 @@ loom doctor        # checks node, agents, tailscale, daemon, and your project
 Surfaces, all talking to the same daemon:
 - **TUI / CLI** — `loom` (default), `loom chat`, `loom send`, …
 - **Desktop app (Loom Desktop)** — prebuilt for
-  [**macOS**, **Linux**, and **Windows**](https://github.com/nickthelegend/loom/releases/latest)
+  [**macOS**, **Linux**, and **Windows**](https://loompad.tech/#download)
   (`.dmg` · `.AppImage` · `.exe`; the macOS dmg is ad-hoc signed, so right-click → **Open**
   the first time), or build from [`desktop/`](desktop/README.md): `cd desktop && npm
   install && npm start`. Either way it opens a native window that starts the daemon and
   pairs itself.
-- **Phone app (LoomPad)** — install the prebuilt
-  [`loompad.apk`](https://github.com/nickthelegend/loom/releases/latest) (allow unknown
-  sources), open **Loom**, and **Scan QR code** from the desktop's *Connect a phone*.
+- **Phone app (LoomPad)** — install the newest
+  [Android APK](https://loompad.tech/download/android) (allow unknown sources; Google
+  Play is coming), open **Loom**, and **Scan QR code** from the desktop's *Connect a phone*.
   Voice input, per-prompt diffs, push. Or build from source
   ([`app/`](app/README.md)): `cd app && npx expo install && npx expo start`.
 - **Web app** — no install; `loom pair` → open the link. Same workspace in the browser.

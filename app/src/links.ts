@@ -1,16 +1,20 @@
 /**
- * Where the phone app points outward: the open-source repo (Loom itself runs
- * on your computer — the app is its remote), the desktop downloads, and the
- * store page to rate it on.
+ * Where the phone app points outward: loompad.tech (install, downloads,
+ * privacy), the open-source repo (Loom itself runs on your computer — the app
+ * is its remote), and the store page to rate it on.
  */
 
 import Constants from "expo-constants";
 import { Linking, Platform } from "react-native";
 
+export const SITE_URL = "https://loompad.tech";
 export const REPO_URL = "https://github.com/nickthelegend/loom";
-export const INSTALL_URL = `${REPO_URL}#install`;
-export const DESKTOP_URL = `${REPO_URL}/releases/latest`;
-export const PACKAGE = "dev.loom.app";
+/** The site's Download section: the newest desktop apps and the install command. */
+export const INSTALL_URL = `${SITE_URL}/#download`;
+/** Always the newest release's file for that platform (the site resolves it). */
+export const DESKTOP_URL = `${SITE_URL}/#download`;
+export const PRIVACY_URL = `${SITE_URL}/privacy`;
+export const PACKAGE = "tech.loompad.app";
 export const STORE_URL = `https://play.google.com/store/apps/details?id=${PACKAGE}`;
 
 /** This app's own version, as the store knows it. */

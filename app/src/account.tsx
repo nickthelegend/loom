@@ -10,7 +10,7 @@ import type { User } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, Switch, Text, TouchableOpacity, View } from "react-native";
 import { getUpdates, type Creds, type UpdateStatus } from "./api";
-import { DESKTOP_URL, INSTALL_URL, REPO_URL, appVersion, canRate, open as openLink, rateLoom } from "./links";
+import { DESKTOP_URL, INSTALL_URL, PRIVACY_URL, REPO_URL, appVersion, canRate, open as openLink, rateLoom } from "./links";
 import { PUSH_KINDS, lastPushState, loadPushKinds, setPushKinds, type PushKind, type PushState } from "./push";
 import { ConnectionBadge, GoogleMark, routeHint, useConnRoute } from "./brand";
 import { Panel, SectionLabel, TAP } from "./components";
@@ -357,9 +357,10 @@ export function AccountSheet(props: {
               </Text>
             </TouchableOpacity>
           )}
-          <AboutRow label="Install Loom on a computer" hint="macOS, Linux and Windows · npm, one-liner or Loom Desktop" onPress={() => openLink(INSTALL_URL)} />
+          <AboutRow label="Install Loom on a computer" hint="loompad.tech · macOS, Linux and Windows apps, or npm" onPress={() => openLink(INSTALL_URL)} />
           <AboutRow label="Source code on GitHub" hint="Loom is open source — star it, file an issue, send a fix" onPress={() => openLink(REPO_URL)} />
           {canRate && <AboutRow label="Rate Loom" hint="On Google Play — it helps other people find it" onPress={rateLoom} />}
+          <AboutRow label="Privacy" hint="What the app keeps, and what leaves your phone" onPress={() => openLink(PRIVACY_URL)} />
           <Text style={{ color: T.faint, fontSize: 11.5, fontFamily: T.mono }}>app {appVersion()}</Text>
         </Panel>
       </View>

@@ -1,6 +1,6 @@
 # Loom on Google Play
 
-What the Play Console asks for, and Loom's answers. The app is `dev.loom.app`.
+What the Play Console asks for, and Loom's answers. The app is `tech.loompad.app`.
 
 ## Build the bundle
 
@@ -27,7 +27,7 @@ under Play App Signing and upload that same keystore as the app signing key.
 Expo Go gets push for free. A store build needs two things that only you can set up:
 
 1. **Firebase:** create a project at console.firebase.google.com, add an Android app with
-   package `dev.loom.app`, and download `google-services.json` into `app/`. It's
+   package `tech.loompad.app`, and download `google-services.json` into `app/`. It's
    gitignored, and `app.config.js` picks it up.
 2. **Expo:** run `npx eas-cli login`, then `npx eas-cli init` in `app/`. It prints a
    project id. Build with `EAS_PROJECT_ID=<that id>` set. Then upload the Firebase
@@ -54,14 +54,14 @@ Without them, the app works and its account sheet says this build can't get push
   > • get notified when an agent asks something, finishes, or a goal is done
   >
   > You'll need Loom on a Mac, Linux or Windows computer: see
-  > github.com/nickthelegend/loom#install. Nothing goes through Loom's servers. The phone
+  > loompad.tech. Nothing goes through Loom's servers. The phone
   > talks to your computer over your network, your tailnet, or an encrypted relay.
 
 - **Category:** Tools (or Productivity) · **Tags:** developer tools
 - **Contact email:** required, use one you read.
-- **Website:** https://github.com/nickthelegend/loom
-- **Privacy policy:** https://nickthelegend.github.io/loom/privacy/ (from `site/privacy/`;
-  Pages publishes it once it's on `main`)
+- **Website:** https://loompad.tech
+- **Privacy policy:** https://loompad.tech/privacy (the landing site,
+  nickthelegend/loompad-landing)
 - **Graphics:** a 512×512 icon (`app/assets/icon.png` scaled down), a 1024×500 feature
   graphic, and at least 2 phone screenshots (Board, a chat, the Orchestra tab, the
   account sheet).
@@ -72,7 +72,7 @@ Without them, the app works and its account sheet says this build can't get push
 - **Ads:** no ads.
 - **App access:** "All or some functionality is restricted." Reviewers can't pair without
   a computer running Loom, so give them instructions: "Loom is the companion app for a
-  desktop tool. Install Loom on a computer (github.com/nickthelegend/loom#install), run
+  desktop tool. Install Loom on a computer (loompad.tech), run
   `loom up` then `loom pair`, and scan the QR code." Better still, link a short screen
   recording of pairing and use.
 - **Content rating:** answer the IARC questionnaire as a utility/productivity app. No
