@@ -434,6 +434,8 @@ export class CrewEngine {
     this.save(st);
     const key = this.currentTurn.get(id);
     if (key) await this.agents.get(key)?.interrupt().catch(() => {});
+    // a commit already under way lands before Stop returns, so nothing writes to the branch after it
+    await this.gitChain;
     this.phase(cfg, st, "stopped", {});
     return g;
   }
@@ -483,6 +485,7 @@ export class CrewEngine {
     this.closed = true;
     for (const a of this.agents.values()) await Promise.resolve(a.stop()).catch(() => {});
     this.agents.clear();
+    await this.gitChain; // the next runtime gets the worktree with no commit of ours half-done
   }
 
   // ── the play ──
@@ -735,6 +738,8 @@ export class CrewEngine {
    */
   private async turn(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, prompt: string, step: "plan" | "card", card?: CrewCard, retried = false):
     Promise<{ text: string; actions: CrewAction[]; asked: boolean; error?: string } | null> {
+    // a goal stopped (or an engine closed) between one step of a card and the next starts no new turn
+    if (terminal(g.status) || this.closed) return null;
     const key = `${cfg.id}/${tm.id}/${tm.agent}`;
     const rosterCfg = this.host.roster().find((a) => a.id === tm.agent);
     if (!rosterCfg) throw new Error(`teammate ${tm.id}'s agent "${tm.agent}" is no longer on the roster`);
@@ -896,6 +901,9 @@ export class CrewEngine {
 
   private async commit(cfg: CrewConfig, g: CrewGoal, card: CrewCard, tm: CrewTeammate, what = ""): Promise<string | null> {
     return this.serial(async () => {
+      // A turn that finished as the goal was stopped, or as this engine closed
+      // (a new runtime may already be working the same worktree), commits nothing.
+      if (terminal(g.status) || this.closed) return null;
       await git(["add", "-A"], g.dir);
       await git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".loom"], g.dir).catch(() => {});
       if (!(await git(["diff", "--cached", "--name-only"], g.dir)).trim()) return null;
@@ -1026,6 +1034,8 @@ export class CrewEngine {
 
   private save(st: CrewState): void {
     this.states.set(st.id, st);
+    // a closed engine's late writes would clobber the state its successor runs on
+    if (this.closed) return;
     const file = this.stateFile(st.id);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
