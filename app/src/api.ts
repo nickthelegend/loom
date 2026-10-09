@@ -902,6 +902,10 @@ export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "PATCH", body: JSON.stringify(flags) });
 export const deleteChat = (c: Creds, id: string, chat: string) =>
   api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "DELETE" });
+/** Save a picture to the project (.loom/attachments) for a message to point at. */
+export const uploadAttachment = (c: Creds, id: string, name: string, dataUrl: string) =>
+  api<{ path: string }>(c, `/api/projects/${id}/attachments`, { method: "POST", body: JSON.stringify({ name, dataUrl }) });
+
 /** A snapshot of the working tree taken before a turn (the desktop's Rewind). */
 export interface Checkpoint { id: string; label: string; commit: string; at: number; branch: string | null; dirty: number }
 export const getCheckpoints = (c: Creds, id: string) =>

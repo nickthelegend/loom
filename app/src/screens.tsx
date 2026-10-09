@@ -74,6 +74,7 @@ import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
 import { MemoryView } from "./memory";
 import { BoardView } from "./board";
+import { AttachBar, AttachButton, useAttachments } from "./attach";
 import { AgentPicker, ModelPicker } from "./agents";
 import { foldedEvents, groupToolRuns } from "./fold-model";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
@@ -820,6 +821,7 @@ export function ProjectScreen(props: {
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMenu, setChatMenu] = useState<Chat | null>(null);
+  const attach = useAttachments(creds, project.id, (msg) => setErr(msg));
   const reloadChats = () => void getChats(creds, project.id).then(({ chats }) => setChats(chats)).catch(() => {});
   // a chat change from the menu: do it, close the menu, re-read the list (and leave a deleted chat)
   const act = async (fn: () => Promise<unknown>, gone?: string) => {
@@ -1141,8 +1143,13 @@ export function ProjectScreen(props: {
 
   const send = async () => {
     if (stt.listening) void stt.toggle(); // stop dictation on send
-    const message = text.trim();
+    if (attach.uploading) return setErr("still uploading the picture…");
+    // pictures lead the message as "[image] <path>" lines, as the desktop sends them
+    const refs = attach.refs();
+    const typed = text.trim();
+    const message = refs.length ? refs.join("\n") + (typed ? `\n\n${typed}` : "") : typed;
     if (!message) return;
+    attach.clear();
     haptic.tap();
     setText("");
     sttBase.current = "";
@@ -1187,7 +1194,7 @@ export function ProjectScreen(props: {
       .catch(() => {});
   const r = project.route;
   const routeActive = r && (r.status === "running" || r.status === "waiting_human");
-  const armed = text.trim().length > 0;
+  const armed = text.trim().length > 0 || attach.items.length > 0;
 
   return (
     <KeyboardAvoidingView
@@ -1680,6 +1687,7 @@ export function ProjectScreen(props: {
                 </View>
               </View>
             </View>
+            <AttachBar items={attach.items} onRemove={attach.remove} />
             <View
               style={{
                 flexDirection: "row",
@@ -1689,6 +1697,7 @@ export function ProjectScreen(props: {
                 alignItems: "center",
               }}
             >
+              <AttachButton onAdd={attach.add} onError={(m) => setErr(m)} />
               <TextInput
                 style={{ ...field, flex: 1, paddingVertical: 9, fontSize: 14 }}
                 value={text}

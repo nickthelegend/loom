@@ -562,7 +562,7 @@ function StartForm(props: {
           <ActivityIndicator color={T.onBright} />
         ) : (
           <Text style={{ color: T.onBright, fontSize: 15, fontWeight: "700" }}>
-            {plan ? "Plan & start orchestra" : "Start orchestra"}
+            {race ? "Start the race" : plan ? "Plan & start orchestra" : "Start orchestra"}
           </Text>
         )}
       </TouchableOpacity>
