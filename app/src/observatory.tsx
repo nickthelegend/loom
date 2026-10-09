@@ -63,6 +63,7 @@ import {
   type UsageReport,
   type UsageSlice,
 } from "./api";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AgentIcon } from "./agents";
 import { LineChart, Meter, RankedBars, StackedBar, gradeColor, type Slice } from "./charts";
 import {
@@ -1847,6 +1848,7 @@ export function Sheet(props: {
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={props.visible} transparent animationType="fade" onRequestClose={props.onClose}>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
@@ -1858,7 +1860,7 @@ export function Sheet(props: {
             borderWidth: 1,
             borderColor: T.line,
             maxHeight: "86%",
-            paddingBottom: 28,
+            paddingBottom: Math.max(28, insets.bottom + 12),
           }}
         >
           <View

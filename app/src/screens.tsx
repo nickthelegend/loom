@@ -7,6 +7,7 @@
  * it is actually about.
  */
 
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { INSTALL_URL, open as openLink } from "./links";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -162,6 +163,7 @@ function PairStep(props: { n: number; text: string; link?: boolean }) {
 }
 
 export function PairScreen(props: { onPaired: (c: Creds) => void }) {
+  const insets = useSafeAreaInsets();
   const [url, setUrl] = useState("http://");
   const [token, setToken] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -309,7 +311,7 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
             onBarcodeScanned={onScan}
           />
-          <View style={{ position: "absolute", top: 72, left: 24, right: 24, alignItems: "center" }}>
+          <View style={{ position: "absolute", top: insets.top + 48, left: 24, right: 24, alignItems: "center" }}>
             <Text style={{ color: "#fff", fontSize: 17, fontWeight: "700", textAlign: "center" }}>
               Point at the QR on your computer
             </Text>
@@ -329,7 +331,7 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
               borderRadius: 20,
             }}
           />
-          <View style={{ position: "absolute", bottom: 48, left: 24, right: 24, gap: 10 }}>
+          <View style={{ position: "absolute", bottom: insets.bottom + 32, left: 24, right: 24, gap: 10 }}>
             <Btn label="Paste link from clipboard" onPress={() => void pairFromClipboard()} />
             <Btn label="Cancel" onPress={() => setScanning(false)} />
           </View>

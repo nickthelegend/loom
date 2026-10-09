@@ -11,6 +11,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Modal, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { uploadAttachment, type Creds } from "./api";
 import { T, radii } from "./theme";
 
@@ -79,6 +80,7 @@ export function AttachButton(props: { onAdd: (dataUrl: string, name: string) => 
 }
 
 function CameraSheet(props: { visible: boolean; onClose: () => void; onShot: (dataUrl: string) => void; onError: (msg: string) => void }) {
+  const insets = useSafeAreaInsets();
   const [perm, requestPerm] = useCameraPermissions();
   const ref = useRef<CameraView>(null);
   const [busy, setBusy] = useState(false);
@@ -108,7 +110,7 @@ function CameraSheet(props: { visible: boolean; onClose: () => void; onShot: (da
             </TouchableOpacity>
           </View>
         )}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 24, paddingBottom: 44 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 24, paddingBottom: 24 + Math.max(20, insets.bottom) }}>
           <TouchableOpacity onPress={props.onClose} accessibilityRole="button" style={{ minWidth: 70 }}>
             <Text style={{ color: "#fff", fontSize: 16 }}>Cancel</Text>
           </TouchableOpacity>

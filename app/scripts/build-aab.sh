@@ -64,6 +64,7 @@ fi
 (cd android && ./gradlew bundleRelease --no-daemon --max-workers=2 \
   -Dorg.gradle.jvmargs="-Xmx2g -XX:MaxMetaspaceSize=512m${TMPDIR:+ -Djava.io.tmpdir=$TMPDIR}" \
   -Pkotlin.compiler.execution.strategy=in-process \
+  -Pandroid.suppressUnsupportedCompileSdk=36 \
   -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64)
 
 AAB="android/app/build/outputs/bundle/release/app-release.aab"

@@ -14,7 +14,8 @@ import "react-native-get-random-values";
 
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { AppState, SafeAreaView, TouchableOpacity, View, useColorScheme } from "react-native";
+import { AppState, TouchableOpacity, View, useColorScheme } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AccountSheet, Avatar } from "./src/account";
 import { getProject, kv, loadCreds, setUnauthorizedHandler, type Creds, type Project } from "./src/api";
 import { FleetScreen } from "./src/fleet";
@@ -122,10 +123,12 @@ export default function App() {
   setScheme(themePref === "system" ? (sysScheme === "light" ? "light" : "dark") : themePref);
 
   return (
-    <SafeAreaView key={scheme} style={{ flex: 1, backgroundColor: T.bg }}>
-      {/* Opaque on Android: SafeAreaView only insets on iOS, so a translucent
-          bar would sit on top of every screen's header (unpair, Fleet, back). */}
-      <StatusBar style={scheme === "light" ? "dark" : "light"} backgroundColor={T.bg} translucent={false} />
+    <SafeAreaProvider>
+    {/* Android 15+ draws every app edge to edge (and an app targeting API 36
+        can't opt out), so the status and navigation bars are real insets on
+        both platforms now — not an opaque bar Android lays out for us. */}
+    <SafeAreaView key={scheme} style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
+      <StatusBar style={scheme === "light" ? "dark" : "light"} />
       {!booted || !auth.ready ? (
         <View style={{ flex: 1, backgroundColor: T.bg }} />
       ) : showWelcome ? (
@@ -208,5 +211,6 @@ export default function App() {
         }}
       />
     </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
