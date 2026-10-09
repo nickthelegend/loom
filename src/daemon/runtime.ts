@@ -8,6 +8,7 @@ import { BatonManager } from "../core/baton.js";
 import { type Hit, type RetrieveOpts } from "../core/brain-index.js";
 import { Brain } from "../core/brain.js";
 import { claudeText } from "../core/claude-cli.js";
+import { providerModel, providerText } from "../core/provider-text.js";
 import { ConversationStore } from "../core/conversations.js";
 import * as checkpoints from "../core/checkpoint.js";
 import { renderProjection } from "../core/distill.js";
@@ -200,7 +201,11 @@ export class ProjectRuntime {
       get brain() { return runtime.brain; },
       activeSkillsBlock: (...args) => this.activeSkillsBlock(...args),
       get turnChat() { return runtime.turns.turnChat; },
-      extractionEngine: (model) => (prompt) => claudeText(`${prompt.system}\n\n${prompt.user}`, { model, timeoutMs: 60_000 }),
+      // a provider/model (ollama/qwen3:4b, openrouter/pool:free) runs there; anything else is a Claude alias
+      extractionEngine: (model) => (prompt) =>
+        providerModel(model)
+          ? providerText(model, `${prompt.system}\n\n${prompt.user}`, { timeoutMs: 60_000 })
+          : claudeText(`${prompt.system}\n\n${prompt.user}`, { model, timeoutMs: 60_000 }),
       renderProjection: (input) => renderProjection(input, this.config.projection),
       createSemanticIndex: () => new SemanticIndex(path.join(this.info.dir, ".loom")),
       noteMemoriesUsed: (ids) => this.noteMemoriesUsed(ids),

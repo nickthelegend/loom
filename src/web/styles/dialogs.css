@@ -256,8 +256,11 @@
   .setphead{font-size:15px;font-weight:600;margin:14px 0 2px}
   .setpsub{font-size:12.5px;color:var(--muted-foreground);line-height:1.5;margin-bottom:6px}
   /* a preference row: label+description on the left, control on the right */
-  .prow{display:flex;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid var(--border)}
-  .prow:last-child{border-bottom:0}
+  /* settings rows share the .prow class with the palette's fixed 38px rows; a
+     settings row is the one with a label block (.pl), and its description wraps,
+     so it sizes to its text and leaves the palette's rows alone */
+  .prow:has(> .pl){display:flex;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid var(--border);height:auto;cursor:auto;border-radius:0}
+  .prow:has(> .pl):last-child{border-bottom:0}
   .prow .pl{flex:1;min-width:0}
   .prow .pt{font-size:13px;font-weight:500}
   .prow .pd{font-size:12px;color:var(--muted-foreground);line-height:1.5;margin-top:2px}

@@ -252,8 +252,13 @@ import { durfmt } from './transcript.js';
           '<div class="pc">' + seg("continuity", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], cfg.brain.continuity ? "on" : "off") + "</div></div>";
         if (!cfg.brain.continuity) {
           hh += '<div class="prow"><div class="pl"><div class="pt">Memory extractor</div>' +
-            '<div class="pd">After each turn a small Claude reads what changed and files what\u2019s worth keeping. Off means the brain holds only what you write by hand.</div></div>' +
+            '<div class="pd">After each turn a small model reads what changed and files what\u2019s worth keeping. Off means the brain holds only what you write by hand.</div></div>' +
             '<div class="pc">' + seg("extractor", [{ v: "auto", l: "Auto" }, { v: "off", l: "Off" }], cfg.brain.extractor) + "</div></div>";
+          // Which model does the reading: Claude Haiku runs on your Claude plan,
+          // every turn; a free or local model keeps that usage for your own work.
+          if (cfg.brain.extractor !== "off") hh += '<div class="prow"><div class="pl"><div class="pt">Extractor model</div>' +
+            '<div class="pd" id="extmodelnote">Claude Haiku uses your Claude plan on every turn, whichever agent took it. A local Ollama model costs nothing; OpenRouter\u2019s free models share its daily cap.</div></div>' +
+            '<div class="pc"><select id="extmodel"><option value="">' + esc(cfg.brain.model || "haiku") + "</option></select></div></div>";
           hh += '<div class="prow"><div class="pl"><div class="pt">Semantic retrieval</div>' +
             '<div class="pd">Finds memories that mean the same thing in different words — “how does login work” reaching a note about JWKS. Needs a local model runtime Loom doesn’t ship: <code>npm i -g @huggingface/transformers</code> (~470MB once), then a 23MB model downloads on first use. Without it, retrieval is the three lexical channels it has always been.</div></div>' +
             '<div class="pc">' + seg("semantic", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], cfg.brain.semantic ? "on" : "off") + "</div></div>";
@@ -278,6 +283,26 @@ import { durfmt } from './transcript.js';
         pp.innerHTML = hh;
         bindSeg("continuity", function(v){ patchCfg({ brain: { continuity: v === "on" } }, "Native continuity " + v); });
         bindSeg("extractor", function(v){ patchCfg({ brain: { extractor: v } }, v === "off" ? "Extractor off" : "Extractor on"); });
+        var ext = document.getElementById("extmodel");
+        if (ext) {
+          var cur = cfg.brain.model || "haiku";
+          var fill = function(opts){
+            if (!opts.some(function(o){ return o[0] === cur; })) opts.push([cur, cur]);
+            ext.innerHTML = opts.map(function(o){ return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? " selected" : "") + ">" + esc(o[1]) + "</option>"; }).join("");
+          };
+          fill([["haiku", "Claude Haiku \u2014 your Claude plan"]]);
+          sapi("/api/providers").then(function(r){
+            var on = {}; (r.providers || []).forEach(function(p){ if (p.configured) on[p.id] = true; });
+            var opts = [["haiku", "Claude Haiku \u2014 your Claude plan"]];
+            if (on.openrouter) opts.push(["openrouter/pool:free", "OpenRouter free models (daily cap)"]);
+            if (!on.ollama) return fill(opts);
+            return sapi("/api/models?provider=ollama").then(function(m){
+              (m.models || []).slice(0, 20).forEach(function(x){ var id = x.id || x; opts.push(["ollama/" + id, "Ollama \u00b7 " + id + " (local, free)"]); });
+              fill(opts);
+            }).catch(function(){ fill(opts); });
+          }).catch(function(){});
+          ext.onchange = function(){ patchCfg({ brain: { model: ext.value } }, "Extractor model: " + ext.value); };
+        }
         bindSeg("semantic", function(v){
           patchCfg({ brain: { semantic: v === "on" } },
             v === "on" ? "Semantic retrieval on — it warms up in the background" : "Semantic retrieval off");
