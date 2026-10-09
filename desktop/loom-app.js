@@ -44,7 +44,7 @@ function loomHome() {
   return process.env.LOOM_HOME ?? path.join(os.homedir(), ".loom");
 }
 
-function readDaemonConfig() {
+export function readDaemonConfig() {
   try {
     return JSON.parse(fs.readFileSync(path.join(loomHome(), "daemon.json"), "utf8"));
   } catch {

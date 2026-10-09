@@ -32,6 +32,10 @@
       "updater.js",
       "updater-mac.js",
       "preload.cjs",
+      "preload-pet.cjs",
+      "pet-window.js",
+      "pet-model.js",
+      "pet/**/*",
       "package.json",
       "node_modules/**/*"
     ],

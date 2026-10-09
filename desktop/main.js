@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, screen, shell } from "electron";
-import { prepareAppUrl } from "./loom-app.js";
+import { prepareAppUrl, readDaemonConfig } from "./loom-app.js";
+import { createPet, petEnabled } from "./pet-window.js";
 import { checkForUpdates } from "./updater.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
@@ -22,6 +23,7 @@ app.setName("Loom Desktop");
 // no flash while the daemon spins up (#0a0a0a dark / #ffffff light).
 const BG = "#0a0a0a";
 let win = null;
+let pet = null;
 
 // One Loom per machine: a second launch focuses the window that's already
 // open instead of racing it for the daemon.
@@ -100,6 +102,8 @@ async function createWindow() {
   });
 
   if (saved?.maximized) win.maximize();
+  // the pet keeps a window open, so closing Loom's own has to mean quit off macOS
+  win.on("closed", () => { if (process.platform !== "darwin") app.quit(); });
   persistBounds(win);
   attachContextMenu(win.webContents);
 
@@ -224,6 +228,7 @@ function buildMenu() {
           item("Toggle Browser", "toggle-browser", "CmdOrCtrl+Shift+B"),
           item("Console", "console", "CmdOrCtrl+Shift+Y"),
           item("Focus Mode", "focus", "CmdOrCtrl+."),
+          { label: "Loom Pet", type: "checkbox", checked: petEnabled(), click: (mi) => pet?.setEnabled(mi.checked) },
           { type: "separator" },
           {
             label: "Appearance",
@@ -385,7 +390,7 @@ ipcMain.handle("loom:notify", (_e, payload) => {
     silent: false,
   });
   note.on("click", () => {
-    const target = BrowserWindow.getAllWindows()[0] ?? win;
+    const target = win && !win.isDestroyed() ? win : null;
     if (!target) return;
     if (target.isMinimized()) target.restore();
     target.show();
@@ -393,7 +398,7 @@ ipcMain.handle("loom:notify", (_e, payload) => {
     target.webContents.send("loom:notify-action", { kind: "open", chat: p.chat ?? null, project: p.project ?? null });
   });
   note.on("reply", (_ev, reply) => {
-    const target = BrowserWindow.getAllWindows()[0] ?? win;
+    const target = win && !win.isDestroyed() ? win : null;
     if (!target) return;
     target.webContents.send("loom:notify-action", {
       kind: "reply",
@@ -409,7 +414,7 @@ ipcMain.handle("loom:notify", (_e, payload) => {
 
 /** Does the shell's window have focus? The page asks before deciding to notify. */
 ipcMain.handle("loom:focused", () => {
-  const target = BrowserWindow.getAllWindows()[0] ?? win;
+  const target = win && !win.isDestroyed() ? win : null;
   return Boolean(target && target.isFocused() && target.isVisible());
 });
 
@@ -423,8 +428,26 @@ app.whenReady().then(() => {
   }
   buildMenu();
   void createWindow();
+  // The pet floats over everything and shows what the agents are doing; a
+  // click brings Loom (and that chat) to the front.
+  pet = createPet({
+    daemon: () => {
+      const c = readDaemonConfig();
+      return c ? { base: `http://${c.host}:${c.port}`, adminToken: c.adminToken } : null;
+    },
+    openChat: async (target) => {
+      if (!win || win.isDestroyed()) await createWindow();
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      if (target) win.webContents.send("loom:notify-action", { kind: "open", project: target.project, chat: target.chat ?? null });
+    },
+    onToggle: () => buildMenu(),
+  });
+  if (petEnabled()) setTimeout(() => pet.show(), 1500);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    // the pet is a window too, so "no windows" isn't the test
+    if (!win || win.isDestroyed()) void createWindow();
   });
 });
 
