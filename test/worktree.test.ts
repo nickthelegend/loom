@@ -108,7 +108,9 @@ describe("per-prompt diffs", () => {
     expect(paths).toContain("base.txt");
     expect(paths).toContain("new.txt");
     expect(tree.patch).toContain("+edited");
-    expect(tree.patch).toContain("?? new file: new.txt");
+    // a new file comes with its content, like any other change
+    expect(tree.patch).toContain("+++ b/new.txt");
+    expect(tree.patch).toContain("+brand new");
   });
 
   it("non-git projects degrade gracefully", async () => {

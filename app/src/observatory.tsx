@@ -340,7 +340,7 @@ function MetricsView(props: {
   return (
     <>
       {/* hero tiles */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: spacing.sm }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: spacing.sm }}>
         <MetricCard label="Agents" value={`${active} / ${project.agents.length}`} sub="active / fleet" />
         <MetricCard label="Baton" value={project.holder ?? "—"} sub="holds it now" accent />
         <MetricCard label="Spend" value={usd(totalUsd) || "$0"} sub="all agents" />

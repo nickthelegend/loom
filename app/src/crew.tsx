@@ -34,6 +34,7 @@ import {
 import { AgentIcon } from "./agents";
 import { Empty, Panel, SectionLabel, TAP, Unreachable } from "./components";
 import { haptic } from "./haptics";
+import { Markdown } from "./markdown";
 import { T, radii, spacing, usd } from "./theme";
 
 const ROLE: Record<CrewRole, { label: string; color: () => string; does: string }> = {
@@ -344,7 +345,7 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
           </TouchableOpacity>
         </View>
         {crews.length > 1 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 10 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 6, marginTop: 10 }}>
             {crews.map((x) => (
               <TouchableOpacity key={x.id} onPress={() => setSel(x.id)} style={{ paddingHorizontal: 10, height: 28, justifyContent: "center", borderRadius: radii.pill, borderWidth: 1, borderColor: x.id === c.id ? T.thread : T.line }}>
                 <Text style={{ color: x.id === c.id ? T.bright : T.dim, fontSize: 12.5 }}>{x.name}</Text>
@@ -355,7 +356,7 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
       </Panel>
 
       {/* teammates */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8 }}>
         {c.teammates.map((m) => {
           const live = liveId === m.id;
           const asking = goal?.status === "waiting_human" && goal.question?.teammate === m.id;
@@ -403,7 +404,9 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
             <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }} numberOfLines={1}>{goal.branch}</Text>
             <Banner goal={goal} busy={busy} onAct={(a) => void act(a)} />
             {goal.summary && goal.status === "completed" ? (
-              <Text style={{ color: T.text, fontSize: 13, lineHeight: 19, backgroundColor: T.raised, padding: 10, borderRadius: 8 }}>{goal.summary.slice(0, 900)}</Text>
+              <View style={{ backgroundColor: T.raised, padding: 10, borderRadius: 8 }}>
+                <Markdown text={goal.summary.length > 1200 ? `${goal.summary.slice(0, 1200)}…` : goal.summary} />
+              </View>
             ) : null}
             <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
               {moving(goal) || goal.status === "waiting_human" || goal.status === "awaiting_approval" ? <Btn testID="crew-stop" label="Stop" kind="ghost" disabled={!!busy} onPress={() => void act("stop")} /> : null}

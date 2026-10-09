@@ -94,6 +94,8 @@ export async function diffSinceSnapshot(dir: string, before: string): Promise<Tu
   };
 }
 
+const NEW_FILES_SHOWN = 30;
+
 /** A new file as a unified diff (text under 200KB; anything else as a one-line note). */
 function newFilePatch(dir: string, rel: string): { patch: string; lines: number } {
   try {
@@ -134,7 +136,10 @@ export async function workingTree(dir: string): Promise<WorkingTree> {
   let patch = rawPatch;
   const untracked = files.filter((f) => f.status === "??").map((f) => f.path);
   if (untracked.length) {
-    patch += (patch ? "\n" : "") + untracked.map((p) => `?? new file: ${p}`).join("\n");
+    // the first few new files with their content, as a diff can show them; the rest (and Loom's own state) as a note
+    let shown = 0;
+    const parts = untracked.map((p) => (!p.startsWith(".loom/") && shown++ < NEW_FILES_SHOWN ? newFilePatch(dir, p).patch : `?? new file: ${p}`));
+    patch += (patch ? "\n" : "") + parts.join("\n");
   }
   const truncated = patch.length > PATCH_VIEW_LIMIT;
   return {

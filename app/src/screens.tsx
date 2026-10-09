@@ -84,7 +84,7 @@ import { TeamLandingView, useLandingSummary } from "./team-landing";
 import { TeamRunnersView, useRunnersSummary } from "./team-runners";
 import { runnersTabVisible } from "./team-runners-model";
 import { useStt } from "./stt";
-import { T, radii, spacing, usd } from "./theme";
+import { T, radii, scheme, spacing, usd } from "./theme";
 
 /** Brand lockup: the wordmark over a short thread-cyan hairline. */
 function Wordmark(props: { size?: number }) {
@@ -321,13 +321,14 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
 // ---------------------------------------------------------------------------
 
 /** hue-tinted letter tile — mirrors the web app's repo glyphs. */
-function glyph(seed: string): { bg: string; fg: string; ch: string } {
+/** A tile's colours from `seed`; its letter from `label` (a project's name, not its id). */
+function glyph(seed: string, label = seed): { bg: string; fg: string; ch: string } {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
   return {
     bg: `hsla(${h}, 60%, 50%, 0.18)`,
-    fg: `hsl(${h}, 55%, 72%)`,
-    ch: (seed.trim()[0] ?? "?").toUpperCase(),
+    fg: `hsl(${h}, 55%, ${scheme === "light" ? 34 : 72}%)`, // the letter has to read on the tint in either theme
+    ch: (label.trim()[0] ?? "?").toUpperCase(),
   };
 }
 
@@ -375,7 +376,7 @@ function StatTile(props: { value: string; label: string }) {
 /** A project row styled like Orca's Desktop/Resume cards: tile + name + meta. */
 function ProjectCard(props: { p: Project; onPress: () => void }) {
   const { p } = props;
-  const g = glyph(`${p.id}${p.name}`);
+  const g = glyph(`${p.id}${p.name}`, p.name);
   const r = p.route;
   const active = r && (r.status === "running" || r.status === "waiting_human");
   const working = p.agents.some((a) => a.busy);
@@ -852,6 +853,7 @@ export function ProjectScreen(props: {
   };
   const [tree, setTree] = useState<WorkingTree | null>(null);
   const [tasks, setTasks] = useState<TaskResult | null>(null);
+  const [tasksTry, setTasksTry] = useState(0);
   const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
   const [taskBusy, setTaskBusy] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(
@@ -1047,7 +1049,7 @@ export function ProjectScreen(props: {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, taskKind, project.id]);
+  }, [tab, taskKind, project.id, tasksTry]);
 
   /**
    * Hand an issue to an agent: the same brief the desktop drafts, sent to the
@@ -1182,9 +1184,11 @@ export function ProjectScreen(props: {
         </View>
         <DeliveryChip creds={creds} projectId={project.id} />
         <ConnectionBadge />
-        <Btn small label="■ stop" onPress={() =>
-          void interrupt(creds, project.id).catch((e) => setErr(String(e.message ?? e)))
-        } />
+        {project.needsInput || project.agents.some((a) => a.busy) ? (
+          <Btn small label="■ stop" onPress={() =>
+            void interrupt(creds, project.id).catch((e) => setErr(String(e.message ?? e)))
+          } />
+        ) : null}
       </View>
 
       {/* tab strip — active tab carries a 2px underline; scrolls, six don't fit */}
@@ -1366,7 +1370,13 @@ export function ProjectScreen(props: {
               />
             }
             contentContainerStyle={{ padding: spacing.md, paddingBottom: 20 }}
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+            onContentSizeChange={() => {
+              listRef.current?.scrollToEnd({ animated: true });
+              // a card measured after the first pass (a question, an image) would end up under the dock
+              setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 300);
+            }}
+            // the keyboard closing after a send resizes the list without changing its content
+            onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
             style={{ flex: 1 }}
           />
           {/* command dock */}
@@ -1711,7 +1721,19 @@ export function ProjectScreen(props: {
           }
         />
       ) : tab === "tasks" ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: spacing.md }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: spacing.md }}
+          refreshControl={
+            <RefreshControl
+              refreshing={false}
+              onRefresh={() => setTasksTry((n) => n + 1)}
+              tintColor={T.dim}
+              colors={[T.thread]}
+              progressBackgroundColor={T.panel}
+            />
+          }
+        >
           {/* Issues / PRs */}
           <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md }}>
             {(["issue", "pr"] as const).map((k) => (
@@ -1761,7 +1783,18 @@ export function ProjectScreen(props: {
                         : "couldn't load tasks"
                 }
               />
-              <Sys text={tasks.detail} />
+              {/* gh's own words only when they're the news; otherwise what to do about it */}
+              <Sys
+                text={
+                  tasks.reason === "no-remote"
+                    ? "This project isn't on GitHub yet. Push it to a GitHub repo and its issues and pull requests show up here."
+                    : tasks.reason === "no-auth"
+                      ? "Run gh auth login on your computer, then pull to refresh."
+                      : tasks.reason === "no-cli"
+                        ? "Install the GitHub CLI (gh) on your computer, then pull to refresh."
+                        : tasks.detail
+                }
+              />
             </View>
           ) : !tasks.items.length ? (
             <Sys text={`no open ${taskKind === "pr" ? "pull requests" : "issues"}`} />
@@ -1790,14 +1823,15 @@ export function ProjectScreen(props: {
                 {"  ·  "}
                 {tree.files.length} changed file{tree.files.length === 1 ? "" : "s"}
               </Text>
-              {tree.files.map((f) => (
-                <Text key={f.path} style={{ color: T.dim, fontFamily: T.mono, fontSize: 12 }}>
-                  <Text style={{ color: f.status.includes("D") ? T.gitDel : T.gitAdd }}>
-                    {f.status}
-                  </Text>{" "}
-                  {f.path}
-                </Text>
-              ))}
+              {tree.files.map((f) => {
+                const st = fileStatus(f.status);
+                return (
+                  <Text key={f.path} style={{ color: T.dim, fontFamily: T.mono, fontSize: 12 }}>
+                    <Text style={{ color: st.color }}>{st.label.padEnd(8, "\u00A0")}</Text>
+                    {f.path}
+                  </Text>
+                );
+              })}
               {tree.files.length ? (
                 <DiffView patch={tree.patch} maxHeight={520} />
               ) : (
@@ -1818,6 +1852,16 @@ export function ProjectScreen(props: {
       />
     </KeyboardAvoidingView>
   );
+}
+
+/** git's two-letter porcelain code, in words. */
+function fileStatus(code: string): { label: string; color: string } {
+  const c = code.trim();
+  if (c === "??" || c.includes("A")) return { label: "new", color: T.gitAdd };
+  if (c.includes("U")) return { label: "conflict", color: T.warn };
+  if (c.includes("D")) return { label: "deleted", color: T.gitDel };
+  if (c.includes("R")) return { label: "renamed", color: T.warn };
+  return { label: "edited", color: T.warn };
 }
 
 export async function unpair(): Promise<void> {

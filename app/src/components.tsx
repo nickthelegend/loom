@@ -138,7 +138,8 @@ export function Callout(props: { label: string; text: string; tint: string }) {
           padding: 12,
         }}
       >
-        <Text style={{ color: T.text, fontSize: 13.5, lineHeight: 20 }}>{props.text}</Text>
+        {/* agents write these, in markdown */}
+        <Markdown text={props.text} />
       </View>
     </View>
   );
@@ -342,14 +343,32 @@ export function DiffView(props: { patch: string; maxHeight?: number }) {
       nestedScrollEnabled
     >
       {lines.map((line, i) => {
+        // git's per-file header collapses to the path, in bold; a phone has no room for the rest
+        const file = /^diff --git a\/.+ b\/(.+)$/.exec(line);
+        if (file)
+          return (
+            <Text key={i} style={{ color: T.text, fontFamily: T.mono, fontSize: 11.5, fontWeight: "700", paddingHorizontal: 8, paddingTop: i ? 10 : 2, paddingBottom: 2 }}>
+              {file[1]}
+            </Text>
+          );
+        if (/^(index |--- |\+\+\+ |new file mode|deleted file mode|old mode|new mode|similarity index|rename (from|to) )/.test(line)) return null;
+        const nf = /^\?\? new file: (.+?)( \(binary\))?$/.exec(line);
+        if (nf)
+          return (
+            <Text key={i} style={{ color: T.gitAdd, fontFamily: T.mono, fontSize: 11.5, fontWeight: "700", paddingHorizontal: 8, paddingTop: i ? 10 : 2 }}>
+              {nf[1]} <Text style={{ color: T.faint, fontWeight: "400" }}>{nf[2] ? "new · binary" : "new"}</Text>
+            </Text>
+          );
+        // the blank line git leaves at a file's end; the next header brings its own space
+        if (!line && /^(diff --git |\?\? new file: )/.test(lines[i + 1] ?? "")) return null;
         const add = line.startsWith("+");
         const del = line.startsWith("-");
-        const meta = line.startsWith("@@") || line.startsWith("??");
+        const meta = line.startsWith("@@");
         return (
           <Text
             key={i}
             style={{
-              color: add ? T.gitAdd : del ? T.gitDel : meta ? T.dim : T.dim,
+              color: add ? T.gitAdd : del ? T.gitDel : meta ? T.faint : T.dim,
               backgroundColor: add ? T.diffAddBg : del ? T.diffDelBg : "transparent",
               fontFamily: T.mono,
               fontSize: 11,
