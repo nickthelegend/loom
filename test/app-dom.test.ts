@@ -121,6 +121,7 @@ function mount({
   hash = "",
   token = clientToken as string | null,
   bootstrap = true,
+  firstRun = false,
 } = {}): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
@@ -205,6 +206,8 @@ function mount({
         }
       } as unknown as typeof window.WebSocket;
       if (token) window.localStorage.setItem("loomClientToken", token);
+      // the first-run Setup dialog opens 400ms in and covers whatever a test is clicking
+      if (!firstRun) window.localStorage.setItem("loomSetupSeen", "1");
     },
   });
 
@@ -773,6 +776,16 @@ describe("web app · command palette", () => {
  * list is whatever this machine actually has.
  */
 describe("web app · settings", () => {
+  it("opens Setup by itself on the first run, and only then", async () => {
+    const m = mount({ firstRun: true });
+    await waitUntil(() => !!$(m, "#setpane"));
+    expect(m.window.localStorage.getItem("loomSetupSeen")).toBe("1");
+    const again = mount();
+    await waitUntil(() => !!$(again, ".sfoot #setupbtn"));
+    await new Promise((r) => setTimeout(r, 700));
+    expect($(again, "#setpane")).toBeFalsy();
+  });
+
   it("opens from the sidebar foot and reads this machine, not a script", async () => {
     const m = mount();
     await waitUntil(() => !!$(m, ".sfoot #setupbtn"));

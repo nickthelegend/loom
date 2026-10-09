@@ -114,6 +114,7 @@ function mount(hash: string): Mounted {
         constructor(url: string | URL, protocols?: string | string[]) { super(url, protocols); sockets.push(this); }
       } as unknown as typeof window.WebSocket;
       window.localStorage.setItem("loomClientToken", adminToken);
+      window.localStorage.setItem("loomSetupSeen", "1"); // the first-run dialog would cover the page
       window.open = (() => null) as typeof window.open;
     },
   });

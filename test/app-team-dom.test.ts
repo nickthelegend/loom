@@ -141,6 +141,7 @@ function mount({ desktop = true } = {}): Mounted {
         }
       } as unknown as typeof window.WebSocket;
       window.localStorage.setItem("loomClientToken", adminToken);
+      window.localStorage.setItem("loomSetupSeen", "1"); // the first-run dialog would cover the page
       // Remove asks first; jsdom has no dialogs, and a test always means yes
       window.confirm = () => true;
     },
