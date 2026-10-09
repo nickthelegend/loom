@@ -782,7 +782,9 @@ import { openMenu } from './menus.js';
         var startY = ev.clientY, startH = dock.offsetHeight;
         document.body.classList.add("resizing-x");
         function mv(e){
-          dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, startH + (startY - e.clientY))) + "px";
+          // the dock never takes the room the thread and composer need
+          var room = (dock.parentNode && dock.parentNode.clientHeight ? dock.parentNode.clientHeight : window.innerHeight) - 380;
+          dock.style.height = Math.max(110, Math.min(window.innerHeight * 0.7, room, startH + (startY - e.clientY))) + "px";
           fitActive();
         }
         function up(){

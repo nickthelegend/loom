@@ -241,9 +241,9 @@
   .browmain{flex:1;display:flex;flex-direction:column;min-height:0}
   .browurl{min-height:34px;flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;padding:4px 8px;border-bottom:1px solid var(--border)}
   .browurl .iconbtn{flex:none}
-  .browurl input{flex:1 1 160px;min-width:120px;height:24px;background:var(--editor-surface);border:1px solid var(--border);border-radius:6px;
+  .browurl input:not([type="checkbox"]){flex:1 1 160px;min-width:120px;height:24px;background:var(--editor-surface);border:1px solid var(--border);border-radius:6px;
     color:var(--foreground);font-family:var(--font-mono);font-size:11.5px;padding:0 9px;outline:none}
-  .browurl input:focus{border-color:var(--ring)}
+  .browurl input:not([type="checkbox"]):focus{border-color:var(--ring)}
   .browframe{flex:1;min-height:0;background:#fff;position:relative}
   .browtools{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
   .browrailbtn,.browmore,.browrailclose{display:none}

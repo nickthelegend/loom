@@ -1370,3 +1370,16 @@
     border-radius:6px;padding:6px 8px}
   /* a sub-agent's own tool calls, indented under the task that started it */
   .tool[data-parent]{margin-left:18px;border-left:2px solid color-mix(in srgb, var(--thread) 30%, var(--border));padding-left:8px;opacity:.92}
+
+  /* ── saved sizes fit the window they're shown in ──
+     A rail dragged to 500px on a wide screen, or a dock dragged tall, used to
+     come back at that size on a laptop and leave the chat a sliver. The side
+     columns now give way past a share of the window, and the dock always
+     leaves the thread and composer room. */
+  .dshell{grid-template-columns:min(var(--sbw), 26vw) minmax(0,1fr)}
+  .dshell.railopen{grid-template-columns:min(var(--sbw), 24vw) minmax(0,1fr) min(var(--railw), 32vw)}
+  .dmain .termdock{max-height:max(110px, min(70vh, calc(100% - 380px)))}
+  .crow .cnm{flex:1 1 auto;min-width:0}
+  .crow .cwho{flex:0 1 auto;min-width:0;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sidebar{container:sb / inline-size}
+  @container sb (max-width: 250px){ .crow .cwho{display:none} }

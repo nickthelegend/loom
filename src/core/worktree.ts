@@ -5,6 +5,8 @@
  */
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 const PATCH_EVENT_LIMIT = 12_000; // per-turn patch stored in the event log
 const PATCH_VIEW_LIMIT = 64_000; // full working-tree patch served to apps
@@ -75,8 +77,12 @@ export async function diffSinceSnapshot(dir: string, before: string): Promise<Tu
 
   let patch = await git(["diff", "HEAD", "--", ...paths], dir);
   const untracked = files.filter((f) => f.status === "??").map((f) => f.path);
-  if (untracked.length) {
-    patch += (patch ? "\n" : "") + untracked.map((p) => `?? new file: ${p}`).join("\n");
+  // A file the turn created isn't in `git diff HEAD`: count its lines and show
+  // it as an addition, so a new page reads "+12", not "+0 −0".
+  for (const rel of untracked) {
+    const created = newFilePatch(dir, rel);
+    added += created.lines;
+    patch += (patch ? "\n" : "") + created.patch;
   }
   const truncated = patch.length > PATCH_EVENT_LIMIT;
   return {
@@ -86,6 +92,25 @@ export async function diffSinceSnapshot(dir: string, before: string): Promise<Tu
     patch: truncated ? patch.slice(0, PATCH_EVENT_LIMIT) + "\n… (truncated)" : patch,
     truncated,
   };
+}
+
+/** A new file as a unified diff (text under 200KB; anything else as a one-line note). */
+function newFilePatch(dir: string, rel: string): { patch: string; lines: number } {
+  try {
+    const abs = path.join(dir, rel);
+    const st = fs.statSync(abs);
+    if (!st.isFile() || st.size > 200_000) return { patch: `?? new file: ${rel}`, lines: 0 };
+    const buf = fs.readFileSync(abs);
+    if (buf.includes(0)) return { patch: `?? new file: ${rel} (binary)`, lines: 0 };
+    const text = buf.toString("utf8");
+    const lines = text.length ? text.replace(/\n$/, "").split("\n") : [];
+    return {
+      patch: [`diff --git a/${rel} b/${rel}`, "new file mode 100644", "--- /dev/null", `+++ b/${rel}`, `@@ -0,0 +1,${lines.length} @@`, ...lines.map((l) => `+${l}`)].join("\n"),
+      lines: lines.length,
+    };
+  } catch {
+    return { patch: `?? new file: ${rel}`, lines: 0 };
+  }
 }
 
 export interface WorkingTree {

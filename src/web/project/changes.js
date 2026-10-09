@@ -178,7 +178,8 @@ export function createChanges(view) {
       dockTitle(/^(html?)$/.test(ext) ? ICONS.globe : /^(md|markdown|pdf)$/.test(ext) ? ICONS.file : ICONS.image, relPath);
       var el = document.getElementById("pane-changes"); el.innerHTML = LOADER;
       var bar = function(extra){
-        return '<div class="artbar"><span class="artpath">' + esc(relPath) + '</span><span class="spacer"></span>' + (extra || "") +
+        // the dock's header already names the file; the bar is for what you can do with it
+        return '<div class="artbar"><span class="spacer"></span>' + (extra || "") +
           '<button type="button" class="btn xs ghost" data-artsrc title="show the source">' + ICONS.code + "Source</button></div>";
       };
       var wireBar = function(url){
