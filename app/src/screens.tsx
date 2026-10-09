@@ -31,6 +31,9 @@ import {
   getActivity,
   getApprovals,
   getChats,
+  getCheckpoints,
+  rewindTo,
+  type Checkpoint,
   createChat,
   deleteChat,
   renameChat,
@@ -64,12 +67,13 @@ import {
   type WorkingTree,
   kv,
 } from "./api";
-import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, field } from "./components";
+import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
 import { MemoryView } from "./memory";
+import { BoardView } from "./board";
 import { AgentPicker, ModelPicker } from "./agents";
 import { foldedEvents, groupToolRuns } from "./fold-model";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
@@ -885,9 +889,11 @@ export function ProjectScreen(props: {
     void kv.set(seenKey, JSON.stringify(next)).catch(() => {});
   };
   const [tree, setTree] = useState<WorkingTree | null>(null);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[] | null>(null);
   const [tasks, setTasks] = useState<TaskResult | null>(null);
   const [tasksTry, setTasksTry] = useState(0);
-  const [taskKind, setTaskKind] = useState<"issue" | "pr">("issue");
+  // the Board first, as on the desktop; Issues and PRs are GitHub's own lists
+  const [taskKind, setTaskKind] = useState<"board" | "issue" | "pr">("board");
   const [taskBusy, setTaskBusy] = useState<number | null>(null);
   const [selected, setSelected] = useState<string | null>(
     props.project.holder ?? props.project.agents.find((a) => a.tier === "adapter")?.id ?? null,
@@ -1054,6 +1060,7 @@ export function ProjectScreen(props: {
       void getTree(creds, project.id)
         .then(({ tree }) => setTree(tree))
         .catch((e) => setErr(String(e instanceof Error ? e.message : e)));
+      void getCheckpoints(creds, project.id).then((r) => setCheckpoints(r.checkpoints)).catch(() => setCheckpoints([]));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
@@ -1066,10 +1073,11 @@ export function ProjectScreen(props: {
   // wins while the Issues pill is lit — and tapping a row would hand an agent
   // a brief for the kind you aren't looking at.
   useEffect(() => {
-    if (tab !== "tasks") return;
+    if (tab !== "tasks" || taskKind === "board") return;
     let live = true;
     setTasks(null);
-    void getTasks(creds, project.id, taskKind, `is:${taskKind} is:open`)
+    const kind = taskKind;
+    void getTasks(creds, project.id, kind, `is:${kind} is:open`)
       .then((r) => {
         if (live) setTasks(r);
       })
@@ -1837,7 +1845,7 @@ export function ProjectScreen(props: {
         >
           {/* Issues / PRs */}
           <View style={{ flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md }}>
-            {(["issue", "pr"] as const).map((k) => (
+            {(["board", "issue", "pr"] as const).map((k) => (
               <TouchableOpacity
                 key={k}
                 onPress={() => setTaskKind(k)}
@@ -1854,11 +1862,11 @@ export function ProjectScreen(props: {
                 }}
               >
                 <Text style={{ color: taskKind === k ? T.text : T.dim, fontSize: 12, fontWeight: "600" }}>
-                  {k === "issue" ? "Issues" : "PRs"}
+                  {k === "board" ? "Board" : k === "issue" ? "Issues" : "PRs"}
                 </Text>
               </TouchableOpacity>
             ))}
-            {tasks?.available && (
+            {taskKind !== "board" && tasks?.available && (
               <Text
                 style={{ color: T.faint, fontFamily: T.mono, fontSize: 11, marginLeft: "auto", alignSelf: "center" }}
               >
@@ -1867,7 +1875,9 @@ export function ProjectScreen(props: {
             )}
           </View>
 
-          {!tasks ? (
+          {taskKind === "board" ? (
+            <BoardView creds={creds} project={project} />
+          ) : !tasks ? (
             <Sys text="loading…" />
           ) : !tasks.available ? (
             // never an empty list to mean "unavailable" — say which it is
@@ -1938,6 +1948,48 @@ export function ProjectScreen(props: {
               ) : (
                 <Sys text="working tree is clean" />
               )}
+              {/* Rewind: the files as they were before a turn — the desktop's rewind menu */}
+              {checkpoints && checkpoints.length ? (
+                <View style={{ gap: 2, marginTop: spacing.md }}>
+                  <Text style={{ color: T.faint, fontSize: 11, fontWeight: "700", letterSpacing: 0.6, marginBottom: 4 }}>REWIND · BEFORE A TURN</Text>
+                  {checkpoints.slice(0, 12).map((cp) => (
+                    <TouchableOpacity
+                      key={cp.id}
+                      onPress={() =>
+                        Alert.alert(
+                          `Put the files back to "${cp.label.slice(0, 60)}"?`,
+                          "Anything written since is removed, and anything removed since comes back. Your commits, your history and files git ignores are untouched — and the rewind itself is saved, so you can undo it.",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Rewind",
+                              style: "destructive",
+                              onPress: () =>
+                                void rewindTo(creds, project.id, cp.id)
+                                  .then((r) => {
+                                    const n = (r.changed ?? []).length;
+                                    setErr(null);
+                                    Alert.alert("Rewound", `${n} file${n === 1 ? "" : "s"} put back.`);
+                                    void getTree(creds, project.id).then(({ tree }) => setTree(tree)).catch(() => {});
+                                    void getCheckpoints(creds, project.id).then((x) => setCheckpoints(x.checkpoints)).catch(() => {});
+                                  })
+                                  .catch((e) => setErr(String(e instanceof Error ? e.message : e))),
+                            },
+                          ],
+                        )
+                      }
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityHint="puts the files back to how they were before this turn"
+                      style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: T.line }}
+                    >
+                      <Text style={{ color: T.dim, fontSize: 13 }}>↺</Text>
+                      <Text style={{ color: T.text, fontSize: 13, flex: 1 }} numberOfLines={1}>{cp.label}</Text>
+                      <Text style={{ color: T.faint, fontSize: 11 }}>{ago(new Date(cp.at).toISOString())}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </>
           )}
         </ScrollView>

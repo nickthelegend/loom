@@ -902,6 +902,13 @@ export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "PATCH", body: JSON.stringify(flags) });
 export const deleteChat = (c: Creds, id: string, chat: string) =>
   api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "DELETE" });
+/** A snapshot of the working tree taken before a turn (the desktop's Rewind). */
+export interface Checkpoint { id: string; label: string; commit: string; at: number; branch: string | null; dirty: number }
+export const getCheckpoints = (c: Creds, id: string) =>
+  api<{ checkpoints: Checkpoint[] }>(c, `/api/projects/${id}/checkpoints`);
+/** Put the files back to a checkpoint; the rewind is itself saved, so it can be undone. */
+export const rewindTo = (c: Creds, id: string, cp: string) =>
+  api<{ changed?: string[] }>(c, `/api/projects/${id}/checkpoints/${encodeURIComponent(cp)}/rewind`, { method: "POST", body: "{}" });
 export const getTree = (c: Creds, id: string) =>
   api<{ tree: WorkingTree }>(c, `/api/projects/${id}/tree`);
 /** Spend and tokens broken down (GET /usage, core/usage.ts on the daemon). */
@@ -925,6 +932,29 @@ export const getMetrics = (c: Creds, id: string) =>
   api<{ metrics: Metrics }>(c, `/api/projects/${id}/metrics`);
 export const getTriage = (c: Creds, id: string, agentId: string) =>
   api<{ triage: Triage }>(c, `/api/projects/${id}/triage/${encodeURIComponent(agentId)}`);
+/** One card on the Board: your own task, or a PR/issue from GitHub. */
+export interface BoardCard {
+  id: string;
+  title: string;
+  agent?: string;
+  kind?: string;
+  state?: string;
+  column: string;
+  own?: boolean;
+  pr?: number;
+  priority?: string | null;
+}
+export const getBoard = (c: Creds, id: string) =>
+  api<{ available: boolean; repo: string | null; ghError?: { reason: string; detail?: string } | null; cards: BoardCard[] }>(c, `/api/projects/${id}/board`);
+export const createBoardTask = (c: Creds, id: string, title: string, column: string) =>
+  api<{ task: unknown }>(c, `/api/projects/${id}/board/tasks`, { method: "POST", body: JSON.stringify({ title, column }) });
+export const moveBoardTask = (c: Creds, id: string, task: string, column: string) =>
+  api<{ task: unknown }>(c, `/api/projects/${id}/board/tasks/${encodeURIComponent(task)}`, { method: "POST", body: JSON.stringify({ column }) });
+export const dispatchBoardTask = (c: Creds, id: string, task: string) =>
+  api<{ dispatched: boolean; agentId: string }>(c, `/api/projects/${id}/board/tasks/${encodeURIComponent(task)}/dispatch`, { method: "POST", body: "{}" });
+export const deleteBoardTask = (c: Creds, id: string, task: string) =>
+  api<{ deleted: boolean }>(c, `/api/projects/${id}/board/tasks/${encodeURIComponent(task)}`, { method: "DELETE" });
+
 export const getTasks = (c: Creds, id: string, kind: "issue" | "pr", search: string) =>
   api<TaskResult>(c, `/api/projects/${id}/tasks?kind=${kind}&search=${encodeURIComponent(search)}`);
 /** `plan: true` asks the agent for a plan markdown file instead of code. */
