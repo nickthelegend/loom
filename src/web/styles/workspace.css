@@ -160,7 +160,12 @@
   .dmain .msg .bubble{max-width:82%}
   .pane-inner{max-width:840px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
   /* diff/preview dock — opens to the RIGHT of the chat on click, closed by default */
-  .paneswrap{flex:1;min-height:0;min-width:0;display:flex}
+  .paneswrap{flex:1;min-height:0;min-width:0;display:flex;position:relative;container:panes / inline-size}
+  /* too narrow to split: the dock covers the chat rather than leave it a 240px strip */
+  @container panes (max-width: 700px){
+    .dockpane.open{position:absolute;inset:0;width:auto!important;min-width:0;z-index:30;border-left:0}
+    .dockpane.open .rz-dock{display:none}
+  }
   .mainpane{flex:1;min-width:0;display:flex;flex-direction:column}
   .dockpane{width:var(--dockw,48%);min-width:280px;flex:none;display:none;flex-direction:column;min-height:0;
     position:relative;border-left:1px solid var(--border);background:var(--editor-surface)}
@@ -232,6 +237,9 @@
     border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:12px;min-width:0}
   .dfh .p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dfh .cadd{margin-left:auto;color:var(--git-add);flex:none}
+  .dfh .dnew{margin-left:auto;flex:none;color:var(--git-add);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  .dnewimg{padding:12px;background:repeating-conic-gradient(var(--muted) 0 25%, transparent 0 50%) 0 0/16px 16px}
+  .dnewimg img{display:block;max-width:100%;max-height:360px;margin:0 auto;border-radius:4px}
   .dfh .cdel{color:var(--git-del);flex:none}
   .dcode{font-family:var(--font-mono);font-size:11.5px;line-height:1.6;overflow-x:auto;padding:6px 0}
   .dl{display:grid;grid-template-columns:34px 34px 14px 1fr;white-space:pre;min-width:max-content}

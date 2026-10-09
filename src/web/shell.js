@@ -146,6 +146,8 @@ import { shortModel } from './permissions.js';
       // the others re-read the working tree / project state.
       if (state.refreshExplorer && state.railView === "explorer") { state.refreshExplorer(); return; }
       state.tree = null;
+      // Source control draws from git status, not the tree: drop it and drawScm fetches it again
+      if (state.railView === "scm") state.git = null;
       if (state.drawRail) state.drawRail();
       api("/api/projects/" + (cur || "") + "/tree").then(function(j){
         state.tree = j.tree || {};

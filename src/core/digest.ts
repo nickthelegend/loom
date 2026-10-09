@@ -16,7 +16,7 @@ import type { LoomEvent } from "../types.js";
 export interface DigestLine {
   at: number;
   /** For the UI: which pill to paint, and what to jump to. */
-  kind: "goal" | "question" | "landed" | "failed" | "cost" | "server" | "turn";
+  kind: "goal" | "question" | "answered" | "landed" | "failed" | "cost" | "server" | "turn";
   text: string;
   /** The event this came from, so a click can go there. */
   eventId: number;
@@ -48,6 +48,8 @@ export function digest(events: LoomEvent[], since: number, agentLabel: (id: stri
   const waiting = new Set<string>();
   let turns = 0;
   let costUsd = 0;
+  // a question's line, by request id, so its answer can settle it
+  const asked = new Map<string, DigestLine>();
 
   for (const e of fresh) {
     const p = (e.payload ?? {}) as Record<string, unknown>;
@@ -57,6 +59,13 @@ export function digest(events: LoomEvent[], since: number, agentLabel: (id: stri
 
     // answered, replied to, or its turn has ended: no longer waiting on you
     if ((e.kind === "status" && (p.state === "question_answered" || p.state === "interrupted")) || e.kind === "run_complete" || e.kind === "error") waiting.delete(who);
+    if (e.kind === "status" && p.state === "question_answered" && typeof p.requestId === "string") {
+      const q = asked.get(p.requestId);
+      if (q && q.kind === "question") {
+        q.kind = "answered";
+        q.text += " · answered";
+      }
+    }
     if (e.kind === "message" && !e.agentId) waiting.clear();
     if (e.kind === "run_complete") {
       turns++;
@@ -66,6 +75,7 @@ export function digest(events: LoomEvent[], since: number, agentLabel: (id: stri
     if (e.kind === "needs_input") {
       waiting.add(who);
       line("question", `${who} asked: ${String(p.question ?? "something").slice(0, 160)}`);
+      if (typeof p.requestId === "string") asked.set(p.requestId, lines[lines.length - 1]!);
       continue;
     }
     if (e.kind === "error") {

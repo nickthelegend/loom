@@ -56,6 +56,10 @@ describe("reading a night back", () => {
       asked("c", t - 2000),
     ], t - 10_000);
     expect(d.waiting).toEqual(["c"]);
+    // and its line says so, instead of reading as still open
+    const byAgent = (who: string) => d.lines.find((l) => l.text.startsWith(`${who} asked`))!;
+    expect(byAgent("a")).toMatchObject({ kind: "answered", text: "a asked: ? · answered" });
+    expect(byAgent("c").kind).toBe("question");
     expect(digest([asked("c", t - 2000), ev("message", { text: "Blue" }, { ts: t - 1000 })], t - 10_000).waiting).toEqual([]);
   });
 
