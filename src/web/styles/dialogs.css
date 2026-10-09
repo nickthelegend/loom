@@ -1050,8 +1050,10 @@
   .bch .bwip:hover{background:var(--secondary)}
   .bcol.over .bch .bwip{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
   .bcol.over{box-shadow:inset 0 2px 0 var(--warn)}
-  .bmmeta{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .bmmeta select,.bmmeta input{width:100%}
+  /* the board task modal's priority/due pair — .field-scoped, because a memory
+     card's footer is also .bmmeta and this grid broke it into columns */
+  .field.bmmeta{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .field.bmmeta select,.field.bmmeta input{width:100%}
   .pmfoot .pmvars{flex-basis:100%;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);opacity:.8}
   .msg .who .msgrate{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
     color:var(--muted-foreground);opacity:0;transition:opacity .15s ease,background .15s ease}
