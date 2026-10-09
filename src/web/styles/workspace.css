@@ -180,6 +180,35 @@
   /* the dock's icon slot — every other icon wrapper centres its glyph; without
      this one the svg sits on the text baseline */
   .dockhead .di{display:inline-flex;align-items:center;flex:none}
+  .dockhead{padding-left:4px}
+  .docktabs{display:flex;align-items:stretch;gap:2px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:none;height:100%}
+  .docktabs::-webkit-scrollbar{display:none}
+  .dtab{display:flex;align-items:center;gap:6px;max-width:200px;padding:0 4px 0 9px;margin:5px 0;border-radius:var(--radius-md);
+    border:1px solid transparent;cursor:pointer;font-family:var(--font-sans);font-size:12px;color:var(--muted-foreground);flex:none}
+  .dtab:hover{background:var(--accent);color:var(--foreground)}
+  .dtab.on{background:var(--background);border-color:var(--border);color:var(--foreground)}
+  .dtab .dl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dtab .di{display:inline-flex}
+  .dtab .di svg{width:13px;height:13px}
+  .dtx{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;border:0;background:transparent;color:inherit;opacity:.55}
+  .dtx:hover{opacity:1;background:var(--muted)}
+  .dtx svg{width:11px!important;height:11px!important}
+  /* Subagents: every agent an orchestrator put to work */
+  .subagents{padding:10px 8px 24px}
+  .subh{font-size:12px;color:var(--muted-foreground);padding:12px 8px 6px}
+  .subempty{font-size:12.5px;color:var(--muted-foreground);padding:4px 8px 8px}
+  .subrow{display:flex;align-items:center;gap:10px;padding:8px;border-radius:var(--radius-md)}
+  .subrow.click{cursor:pointer}
+  .subrow.click:hover{background:var(--accent)}
+  .subrow .av{flex:none}
+  .subtxt{flex:1;min-width:0}
+  .subname{font-size:13px;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .subnote{font-size:11.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+  .subst{font-weight:500}
+  .subst.ok{color:var(--ok)}.subst.warn{color:var(--warn)}.subst.err{color:var(--err)}
+  .subpulse{display:inline-block;width:6px;height:6px;border-radius:3px;background:var(--ok);margin-right:5px;vertical-align:1px;animation:subpulse 1.4s ease-in-out infinite}
+  @keyframes subpulse{0%,100%{opacity:.35}50%{opacity:1}}
+  .subwhen{flex:none;font-size:11.5px;color:var(--muted-foreground)}
   .dockhead .iconbtn{width:26px;height:26px}
   .dockhead .iconbtn svg{width:13px;height:13px}
   .iconbtn.active{background:var(--accent);color:var(--foreground)}

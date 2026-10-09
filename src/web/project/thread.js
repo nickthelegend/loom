@@ -785,6 +785,8 @@ export function createThread(view) {
             view.onOrchEvent(frame.event);
             // A crew spans its channel and one thread per teammate, likewise.
             view.onCrewEvent(frame.event);
+            // a goal just started: open its Subagents tab beside the thread
+            view.onSubagentEvent(frame.event);
             // Approvals are per project, not per chat: the badge counts them
             // all, and a request from another thread still reaches you.
             view.onApprovalEvent(frame.event);

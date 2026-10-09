@@ -47,7 +47,15 @@ import { openMenu } from './menus.js';
       get OBPAL() { return OBPAL; },
       get obNodePos() { return obNodePos; },
     });
-    var { closeDock, openChangesDock, openPatchDock, openFileDock, openArtifactDock, openCodePreview } = createChanges({
+    // When an orchestrator starts work — an Orchestra run, a race, a crew goal —
+    // its subagents get their own tab in the dock, the way an IDE opens the
+    // run panel: who's working, who's done, and each one's thread a click away.
+    function onSubagentEvent(ev){
+      var p = (ev && ev.payload) || {};
+      var started = (ev.kind === "orchestra" && p.phase === "started") || (ev.kind === "crew" && p.phase === "goal_started");
+      if (started && document.getElementById("dockpane")) openSubagentsDock();
+    }
+    var { closeDock, openChangesDock, openPatchDock, openFileDock, openArtifactDock, openCodePreview, openSubagentsDock } = createChanges({
       get pid() { return pid; },
       get drawRail() { return drawRail; }
     });
@@ -118,6 +126,7 @@ import { openMenu } from './menus.js';
       get onQueueFrame() { return onQueueFrame; },
       get onOrchEvent() { return onOrchEvent; },
       get onCrewEvent() { return onCrewEvent; },
+      get onSubagentEvent() { return onSubagentEvent; },
       get onApprovalEvent() { return onApprovalEvent; },
       get onFleetEvent() { return onFleetEvent; }
     });
@@ -367,6 +376,7 @@ import { openMenu } from './menus.js';
         '<button id="consolebtn" class="iconbtn" title="console \u00b7 errors and logs">' +
         ICONS.console + '<span class="errdot" id="errdot"></span></button>' +
         '<button id="browserbtn" class="iconbtn" title="browser \u00b7 live page and Playwright specs">' + ICONS.globe + "</button>" +
+        '<button id="subagentsbtn" class="iconbtn" title="subagents \u00b7 every agent an orchestrator or crew put to work">' + ICONS.agents + "</button>" +
         '<button id="railbtn" class="iconbtn" title="toggle right panel">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
@@ -384,9 +394,9 @@ import { openMenu } from './menus.js';
         "</div>" +
         '<div class="dockpane" id="dockpane">' +
         '<div class="rz rz-dock" id="rz-dock" title="drag to resize"></div>' +
-        '<div class="dockhead" id="dockhead"><span class="di" id="dockicon"></span>' +
-        '<span class="p" id="dockpath">changes</span><span class="spacer"></span>' +
-        '<button id="dockclose" class="iconbtn" title="close">' + ICONS.x + "</button></div>" +
+        // tabs, like an editor: a diff, a file, an artifact and the Subagents list side by side
+        '<div class="dockhead" id="dockhead"><div class="docktabs" id="docktabs" role="tablist"></div>' +
+        '<button id="dockclose" class="iconbtn" title="close every tab">' + ICONS.x + "</button></div>" +
         '<div class="pane scroll" id="pane-changes">' + LOADER + "</div>" +
         "</div>" +
         "</div>" +
@@ -657,6 +667,9 @@ import { openMenu } from './menus.js';
       if (bwb) bwb.onclick = function(){
         (state.browserActive && state.browserActive()) ? closeBrowser() : openBrowser();
       };
+      var sab = document.getElementById("subagentsbtn");
+      if (sab) sab.onclick = openSubagentsDock;
+      state.openSubagents = openSubagentsDock;
       var phb = document.getElementById("phonebtn");
       if (phb) phb.onclick = openConnectPhone;
       var ivb = document.getElementById("invitebtn");

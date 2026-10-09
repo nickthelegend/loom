@@ -1281,8 +1281,14 @@ export function createComposer(view) {
         chat: (chat && chat.title) || "Main",
         agent: state.selected ? labelOf(state.selected) : "",
         last_reply: replies.length ? (replies[replies.length - 1].innerText || "").trim().slice(0, 4000) : "",
-        file: dockOpen ? ((document.getElementById("dockpath") || {}).textContent || "") : "",
+        file: dockOpen ? dockFile() : "",
       };
+      // the file in the dock's front tab ({{file}}): a diff, a preview or a source view, not Subagents
+      function dockFile(){
+        var t = document.querySelector("#docktabs .dtab.on");
+        if (t) return /^[fad]:/.test(t.getAttribute("data-dtab") || "") ? t.getAttribute("title") || "" : "";
+        return (document.getElementById("dockpath") || {}).textContent || "";
+      }
       return String(text).replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, function(m, k){
         var v = vars[k.toLowerCase()];
         return v ? v : m;
