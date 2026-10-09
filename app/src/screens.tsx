@@ -48,6 +48,7 @@ import {
   sendMessage,
   getQueue,
   queueEdit,
+  queueClear,
   queuePause,
   queueRemove,
   type QueueView,
@@ -68,7 +69,8 @@ import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from ".
 import { haptic } from "./haptics";
 import { markRead, unreadChats, type SeenMap } from "./seen-model";
 import { AskView } from "./ask";
-import { AgentPicker } from "./agents";
+import { MemoryView } from "./memory";
+import { AgentPicker, ModelPicker } from "./agents";
 import { foldedEvents, groupToolRuns } from "./fold-model";
 import { ApprovalBanner, ApprovalEvent, ApprovalsSheet, approvalDecisions } from "./approvals";
 import { QuestionEvent, answeredQuestions } from "./question";
@@ -771,7 +773,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "crew" | "observatory" | "ask" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
+type Tab = "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -784,6 +786,8 @@ const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "crew", label: "Crew", accent: T.shuttle },
   { key: "observatory", label: "Observatory", accent: T.primary },
   { key: "ask", label: "Ask", accent: T.primary },
+  // the project's own memory, shared or not (the desktop's Memory tab)
+  { key: "memory", label: "Memory", accent: T.ok },
   // only while the repo is shared with a team (see visibleTabs below)
   { key: "brain", label: "Team brain", accent: T.ok },
   // Phase 4: goal PRs on their way to main; shown with a team or once there are any
@@ -1465,6 +1469,17 @@ export function ProjectScreen(props: {
                       {queue.paused ? "Resume" : "Pause"}
                     </Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() =>
+                      Alert.alert(`Clear ${queue.queue.length} queued prompt${queue.queue.length === 1 ? "" : "s"}?`, "They won't run.", [
+                        { text: "Cancel", style: "cancel" },
+                        { text: "Clear", style: "destructive", onPress: () => void queueClear(creds, project.id).then(setQueue).catch((e) => setErr(String(e instanceof Error ? e.message : e))) },
+                      ])
+                    }
+                    accessibilityLabel="clear the queue"
+                  >
+                    <Text style={{ color: T.dim, fontSize: 11, fontWeight: "600" }}>Clear</Text>
+                  </TouchableOpacity>
                 </View>
                 {queue.queue.map((item, i) => {
                   const who =
@@ -1559,6 +1574,31 @@ export function ProjectScreen(props: {
                               }`}
                             </Text>
                           </TouchableOpacity>
+                          {/* send it to someone else, as the desktop's target picker does */}
+                          <TouchableOpacity
+                            onPress={() =>
+                              Alert.alert("Send this to…", undefined, [
+                                ...["auto", ...adapters.map((a) => a.id), "orchestra"].filter((t) => t !== (item.target.kind === "agent" ? item.target.agentId : item.target.kind)).slice(0, 6).map((t) => ({
+                                  text: t === "auto" ? "Whoever is free (auto)" : t === "orchestra" ? "Orchestrate it" : t,
+                                  onPress: () => void queueEdit(creds, project.id, item.id, { target: t }).then(setQueue).catch((e) => setErr(String(e instanceof Error ? e.message : e))),
+                                })),
+                                { text: "Cancel", style: "cancel" as const },
+                              ])
+                            }
+                            accessibilityLabel={`change who this prompt goes to (now ${who})`}
+                            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                          >
+                            <Text style={{ color: T.dim, fontSize: 12 }}>⇄</Text>
+                          </TouchableOpacity>
+                          {item.when ? (
+                            <TouchableOpacity
+                              onPress={() => void queueEdit(creds, project.id, item.id, { when: null }).then(setQueue).catch((e) => setErr(String(e instanceof Error ? e.message : e)))}
+                              accessibilityLabel="stop holding this prompt and let it run in turn"
+                              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                            >
+                              <Text style={{ color: T.primary, fontSize: 11, fontWeight: "600" }}>Release</Text>
+                            </TouchableOpacity>
+                          ) : null}
                           <TouchableOpacity
                             onPress={() => {
                               void queueRemove(creds, project.id, item.id)
@@ -1593,6 +1633,7 @@ export function ProjectScreen(props: {
                 holder={project.holder}
                 onSelect={setSelected}
               />
+              <ModelPicker creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               <PermissionChip creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               {/* grouped so they wrap together, right-aligned, on a narrow phone */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" }}>
@@ -1753,6 +1794,8 @@ export function ProjectScreen(props: {
         <ObservatoryView creds={creds} project={project} />
       ) : tab === "ask" ? (
         <AskView creds={creds} project={project} />
+      ) : tab === "memory" ? (
+        <MemoryView creds={creds} project={project} />
       ) : tab === "brain" ? (
         <TeamBrainView creds={creds} project={project} onChanged={brain.update} />
       ) : tab === "landing" ? (

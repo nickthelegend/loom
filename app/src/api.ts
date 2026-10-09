@@ -991,11 +991,42 @@ export const queueEdit = (
   api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const queueRemove = (c: Creds, id: string, itemId: string) =>
   api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "DELETE" });
+/** Drop everything that's lined up. */
+export const queueClear = (c: Creds, id: string) =>
+  api<QueueView>(c, `/api/projects/${id}/queue`, { method: "DELETE" });
 export const queuePause = (c: Creds, id: string, paused: boolean) =>
   api<QueueView>(c, `/api/projects/${id}/queue/pause`, { method: "POST", body: JSON.stringify({ paused }) });
 
 export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });
+/** One thing the project's agents remember (core/brain.ts). */
+export interface Memory {
+  id: string;
+  kind: string;
+  text: string;
+  entities?: string[];
+  provenance?: { agentId?: string; eventId?: number; ts?: number };
+  confidence?: number;
+  evidence?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+export const getMemories = (c: Creds, id: string) =>
+  api<{ memories: Memory[] }>(c, `/api/projects/${id}/brain`);
+export const addMemory = (c: Creds, id: string, text: string, kind: string) =>
+  api<{ memory: Memory; created: boolean }>(c, `/api/projects/${id}/brain`, { method: "POST", body: JSON.stringify({ text, kind }) });
+export const updateMemory = (c: Creds, id: string, mid: string, patch: { text?: string; kind?: string }) =>
+  api<{ memory: Memory }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}`, { method: "PATCH", body: JSON.stringify(patch) });
+export const forgetMemory = (c: Creds, id: string, mid: string, reason: string) =>
+  api<{ forgot: boolean }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}?reason=${encodeURIComponent(reason)}`, { method: "DELETE" });
+
+/** The models an agent can run (its CLI's own list, or the provider's). */
+export const getAgentModels = (c: Creds, id: string, agentId: string) =>
+  api<{ kind: string; count: number; models: string[]; source?: string }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/models`);
+/** Pin an agent to a model; "" goes back to its own default. */
+export const setAgentModel = (c: Creds, id: string, agentId: string, model: string) =>
+  api<{ agent: unknown }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/model`, { method: "POST", body: JSON.stringify({ model }) });
+
 /** Stop the turn in `chat` (the desktop's Stop); without one, whatever the baton holder is doing. */
 export const interrupt = (c: Creds, id: string, chat?: string) =>
   api<{ interrupted: string | null }>(c, `/api/projects/${id}/interrupt`, { method: "POST", body: JSON.stringify(chat ? { chat } : {}) });
@@ -1218,6 +1249,8 @@ export interface OrchestraRun {
   applied?: { at: number; into: string; task?: string };
   /** Every entrant got the same prompt in its own worktree; you apply the one you pick. */
   race?: boolean;
+  /** Stopped by Loom restarting (status aborted) — it can be resumed. */
+  interrupted?: boolean;
   /** Plan mode: PLAN.md plus one spec per task, written under plans/<run id>/ on the branch. */
   plan?: boolean;
   /** What the git delivery policy did with the finished run. */
@@ -1246,8 +1279,16 @@ export const getOrchestraRun = (c: Creds, id: string, runId: string) =>
 export const startOrchestra = (
   c: Creds,
   id: string,
-  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean },
+  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean },
 ) => api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra`, { method: "POST", body: JSON.stringify(opts) });
+
+/** Carry on a run Loom's restart stopped: its in-flight tasks pick up where they were. */
+export const resumeOrchestra = (c: Creds, id: string, runId: string) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/resume`, { method: "POST", body: "{}" });
+
+/** What one task (a race entrant) changed on its branch. */
+export const orchestraTaskDiff = (c: Creds, id: string, runId: string, taskId: string) =>
+  api<{ patch: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/diff`);
 
 export const abortOrchestra = (c: Creds, id: string, runId: string) =>
   api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/abort`, {
@@ -1970,7 +2011,7 @@ export const getCrews = (c: Creds, id: string) =>
 export const createCrew = (c: Creds, id: string, body: { template: string; name?: string; planApproval?: boolean; teammates?: CrewTeammate[] }) =>
   api<{ crew: Crew }>(c, `/api/projects/${id}/crews`, { method: "POST", body: JSON.stringify(body) });
 
-export const updateCrew = (c: Creds, id: string, crew: string, body: { teammates?: CrewTeammate[]; planApproval?: boolean }) =>
+export const updateCrew = (c: Creds, id: string, crew: string, body: { teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string }) =>
   api<{ crew: Crew }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}`, { method: "PATCH", body: JSON.stringify(body) });
 
 export type CrewAction = "say" | "approve" | "stop" | "resume" | "apply";

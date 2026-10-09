@@ -145,6 +145,8 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
   const [making, setMaking] = useState(false);
   const [tpl, setTpl] = useState("ship");
   const [diff, setDiff] = useState<string | null>(null);
+  // the tester's command, edited in place (the desktop's crew settings)
+  const [testEdit, setTestEdit] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   // A quiet line that says what just happened (sent, approved, applied) — not a dialog to dismiss.
   const [notice, setNotice] = useState<{ text: string; tone: "ok" | "err" } | null>(null);
@@ -338,7 +340,24 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text testID="crew-name" style={{ color: T.bright, fontSize: 17, fontWeight: "700" }} numberOfLines={1}>{c.name}</Text>
             <Text style={{ color: T.dim, fontSize: 12 }}>{c.teammates.length} teammates{c.busy ? " · working" : ""}</Text>
-            {c.testCommand ? <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }} numberOfLines={1}>✓ tests: {c.testCommand}</Text> : null}
+            {testEdit != null ? (
+              <TextInput value={testEdit} onChangeText={setTestEdit} autoFocus autoCapitalize="none" autoCorrect={false} placeholder="e.g. npm test" placeholderTextColor={T.faint}
+                returnKeyType="done"
+                onBlur={() => setTestEdit(null)}
+                onSubmitEditing={() => {
+                  const next = testEdit.trim();
+                  setTestEdit(null);
+                  if (next === (c.testCommand ?? "")) return;
+                  void updateCrew(creds, project.id, c.id, { testCommand: next })
+                    .then((r) => setCrews((prev) => (prev ?? []).map((x) => (x.id === r.crew.id ? r.crew : x))))
+                    .catch((e: unknown) => Alert.alert("Couldn't save the test command", e instanceof Error ? e.message : String(e)));
+                }}
+                style={{ color: T.text, fontSize: 12, fontFamily: T.mono, backgroundColor: T.raised, borderRadius: 6, paddingHorizontal: 8, height: 30, marginTop: 3 }} />
+            ) : (
+              <TouchableOpacity onPress={() => setTestEdit(c.testCommand ?? "")} accessibilityRole="button" accessibilityLabel={c.testCommand ? `Test command ${c.testCommand}. Change it` : "Set the test command"}>
+                <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }} numberOfLines={1}>{c.testCommand ? `✓ tests: ${c.testCommand}` : "+ set a test command"}</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <TouchableOpacity accessibilityLabel="new crew" onPress={() => setMaking(true)} style={{ minWidth: TAP, minHeight: TAP, alignItems: "center", justifyContent: "center" }}>
             <Text style={{ color: T.dim, fontSize: 22 }}>＋</Text>
