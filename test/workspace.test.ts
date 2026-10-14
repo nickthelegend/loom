@@ -425,8 +425,8 @@ describe("terminal", () => {
 describe.runIf(process.env.LOOM_NO_PTY !== "1")("terminal · pty mode", () => {
   it("gives the shell a real tty", async () => {
     if (mode !== "pty") return; // node-pty didn't build here — fallback covers it
-    const out = await runTerm("t1", "tty", /dev\/(tty|pts)/);
-    expect(out).toMatch(/dev\/(tty|pts)/);
+    const out = await runTerm("t1", "node -p \"process.stdout.isTTY\"", /true/);
+    expect(out).toMatch(/true/);
   });
 
   it("echoes typed input back, like a terminal", async () => {
@@ -435,13 +435,13 @@ describe.runIf(process.env.LOOM_NO_PTY !== "1")("terminal · pty mode", () => {
     // no newline: nothing runs, but a tty still echoes the keystrokes
     await post(`/api/projects/${projectId}/term/input`, { term: "t1", data: "echo-me" });
     await waitUntil(() => outputSince(before, "t1").includes("echo-me"));
-    await post(`/api/projects/${projectId}/term/input`, { term: "t1", data: "\u0015" }); // ^U clears the line
+    await post(`/api/projects/${projectId}/term/input`, { term: "t1", data: process.platform === "win32" ? "\u0003" : "\u0015" }); // clear the line
   });
 
   it("resizes the tty", async () => {
     if (mode !== "pty") return;
     await post(`/api/projects/${projectId}/term/resize`, { term: "t1", cols: 100, rows: 30 });
-    const out = await runTerm("t1", "tput cols", /\b100\b/);
+    const out = await runTerm("t1", "node -p \"process.stdout.columns\"", /\b100\b/);
     expect(out).toMatch(/\b100\b/);
   });
 });
