@@ -502,15 +502,14 @@ describe("web app · plan mode", () => {
 
 describe("web app · permissions", () => {
   it("shows the chosen agent's mode as a chip, and changes it from the dropdown", async () => {
-    // A mode change is refused mid-turn (it rebuilds the agent), and an earlier
-    // test's turn can still be finishing on a slow runner: start from idle.
-    // "busy" here is the fleet's: it counts a turn from the moment it's sent,
-    // which is what the refusal checks (the status payload waits for the CLI).
+    // A mode change is correctly refused mid-turn. Give this UI test its own
+    // roster: an earlier test's queued chat turn can start after an idle poll.
+    const permissionId = (await new DaemonClient(readDaemonConfig()!).addProject(makeProjectDir({ name: "permission-controls" }))).project.id;
     type Activity = { projects: Array<{ id: string; agents: Array<{ id: string; busy: boolean; since: number | null }> }> };
     const busyAgents = async () =>
-      ((await api<Activity>("GET", "/api/activity")).projects.find((p) => p.id === projectId)?.agents ?? []).filter((a) => a.busy);
+      ((await api<Activity>("GET", "/api/activity")).projects.find((p) => p.id === permissionId)?.agents ?? []).filter((a) => a.busy);
     await waitUntil(async () => (await busyAgents()).length === 0, { timeoutMs: 30_000 });
-    const m = await opened();
+    const m = await opened(permissionId);
     await ready(m, "#cperm");
     await waitUntil(() => shown($(m, "#cperm")) && text(m, "#cperm") === "Auto");
     click($(m, "#cperm"));
@@ -523,7 +522,7 @@ describe("web app · permissions", () => {
     mousedown(m, $(m, '#cmenu [data-pm="bypass"]'));
     await waitUntil(() => $(m, "#cperm")?.classList.contains("bypass") ?? false);
     await waitUntil(async () =>
-      (await rest<{ project: { agents: Array<{ id: string; permissions: string }> } }>("GET", "")).project.agents.some(
+      (await rest<{ project: { agents: Array<{ id: string; permissions: string }> } }>("GET", "", undefined, permissionId)).project.agents.some(
         (a) => a.permissions === "bypass",
       ),
     ).catch(async (err) => {
@@ -549,13 +548,12 @@ describe("web app · permissions", () => {
     mousedown(m, $(m, '#cmenu [data-pm="ask"]'));
     await waitUntil(() => $(m, '#cowk [data-wk="execbot"] .pbdg[data-permof]')?.textContent === "ask");
     await waitUntil(async () =>
-      (await rest<{ project: { agents: Array<{ id: string; permissions: string }> } }>("GET", "")).project.agents.find(
+      (await rest<{ project: { agents: Array<{ id: string; permissions: string }> } }>("GET", "", undefined, permissionId)).project.agents.find(
         (a) => a.id === "execbot",
       )!.permissions === "ask",
     );
-    // put the roster back for the other tests
-    await rest("POST", "/agents/execbot/permissions", { permissions: "auto" });
-    await rest("POST", "/agents/plannerbot/permissions", { permissions: "auto" });
+    await rest("POST", "/agents/execbot/permissions", { permissions: "auto" }, permissionId);
+    await rest("POST", "/agents/plannerbot/permissions", { permissions: "auto" }, permissionId);
     expect(m.errors.join("\n")).toBe("");
   });
 
