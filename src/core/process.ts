@@ -80,15 +80,31 @@ export const execFileSync: typeof nodeExecFileSync = ((command: string, args: st
  */
 export async function stopWindowsTree(child: ChildProcess): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-  await promisify(nodeExecFile)("taskkill.exe", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }).catch(() => {
+  await terminateWindowsTree(child.pid, true).catch(() => {
     try { child.kill(); } catch { /* already gone */ }
   });
 }
 
 /** Interrupt a pipe terminal's foreground children, preserving its cmd session. */
 export async function stopWindowsChildren(parentPid: number): Promise<void> {
+  await terminateWindowsTree(parentPid, false);
+}
+
+async function terminateWindowsTree(rootPid: number, includeRoot: boolean): Promise<void> {
   const { stdout } = await promisify(nodeExecFile)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    `Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${parentPid}' | Select-Object -ExpandProperty ProcessId`], { windowsHide: true, timeout: 8000 });
-  await Promise.all(stdout.split(/\s+/).filter(pid => /^\d+$/.test(pid)).map(pid =>
-    promisify(nodeExecFile)("taskkill.exe", ["/pid", pid, "/T", "/F"], { windowsHide: true, timeout: 8000 }).catch(() => {})));
+    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"], { windowsHide: true, timeout: 8000 });
+  const rows = JSON.parse(stdout) as Array<{ ProcessId: number; ParentProcessId: number; Name: string }>;
+  const pids: number[] = [], visited = new Set<number>();
+  const visit = (pid: number): void => {
+    if (visited.has(pid)) return;
+    visited.add(pid);
+    for (const row of rows) if (row.ParentProcessId === pid) {
+      // A console host can serve the surviving shell/daemon too. taskkill /T
+      // kills it and leaves later console children with DLL_INIT_FAILED.
+      if (!/^(?:conhost|OpenConsole)\.exe$/i.test(row.Name)) { visit(row.ProcessId); pids.push(row.ProcessId); }
+    }
+  };
+  visit(rootPid);
+  if (includeRoot) pids.push(rootPid);
+  if (pids.length) await promisify(nodeExecFile)("taskkill.exe", [...pids.flatMap(pid => ["/pid", String(pid)]), "/F"], { windowsHide: true, timeout: 8000 }).catch(() => {});
 }
