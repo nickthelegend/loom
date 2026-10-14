@@ -4,7 +4,7 @@
  * A condition is a promise about when something runs, so the risk is a prompt
  * that goes early (the thing you were avoiding happens anyway) or one that
  * never goes at all (silently lost). Both are tested here against a real
- * runtime, with real timer ticks and a controlled wall clock.
+ * runtime and a controlled clock.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,18 +57,20 @@ describe("a prompt held for a time", () => {
   it("doesn't go early, and goes once the moment passes", async () => {
     const r = await open();
     const now = Date.now();
-    vi.useFakeTimers({ toFake: ["Date"] });
+    // Only the queue's interval and wall clock are controlled. CLI I/O,
+    // adapter timeouts and waitUntil's monotonic deadline remain real.
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(now);
     const soon = Date.now() + 1200;
     const item = r.enqueue({ text: "later, please", target: { kind: "agent", agentId: "echo" }, when: { kind: "at", at: soon } });
     expect(r.queueBlocker(item)).toMatch(/waiting until/);
 
-    await new Promise((res) => setTimeout(res, 400));
+    await vi.advanceTimersByTimeAsync(400);
     expect(prompts(r)).toEqual([]); // still held
 
     // A delayed CI worker cannot accidentally cross the wall-clock deadline
-    // before the early-send assertion. The real queue timer still wakes it.
-    vi.setSystemTime(soon);
+    // before the early-send assertion. Advance through the queue's timer tick.
+    await vi.advanceTimersByTimeAsync(20_000);
     await waitUntil(() => prompts(r).includes("later, please"), { timeoutMs: 20_000 });
     expect(Date.now()).toBeGreaterThanOrEqual(soon);
   }, 40_000);
