@@ -130,7 +130,9 @@ afterAll(async () => {
   await rt.close();
 });
 
-const settle = (id: string) => waitUntil(() => ["completed", "failed", "waiting_human"].includes(rt.orchestra.get(id)!.status), { timeoutMs: 15_000 });
+// These waits include real worktrees, commits, pushes and a Node gh stub.
+const integrationTimeoutMs = process.platform === "win32" ? 45_000 : 15_000;
+const settle = (id: string) => waitUntil(() => ["completed", "failed", "waiting_human"].includes(rt.orchestra.get(id)!.status), { timeoutMs: integrationTimeoutMs });
 
 describe("Phase 4 in the orchestra", () => {
   it("a member over the daily budget can't start a goal (D64)", async () => {
@@ -151,7 +153,7 @@ describe("Phase 4 in the orchestra", () => {
     expect(r.question).toMatch(/spent \$2\.00 of its \$1\.50 budget/);
     expect(r.tasks.map((t) => t.status)).toEqual(["done", "done"]);
     await rt.orchestra.reply(run.id, "continue");
-    await waitUntil(() => rt.orchestra.get(run.id)!.status === "completed" && Boolean(rt.orchestra.get(run.id)!.delivered), { timeoutMs: 15_000 });
+    await waitUntil(() => rt.orchestra.get(run.id)!.status === "completed" && Boolean(rt.orchestra.get(run.id)!.delivered), { timeoutMs: integrationTimeoutMs });
     r = rt.orchestra.get(run.id)!;
     expect(r.budgetUsd).toBeCloseTo(3.5);
     coord.budget = null;
@@ -164,7 +166,7 @@ describe("Phase 4 in the orchestra", () => {
     script.push(() => loom([{ type: "spawn", id: "t2", title: "api", agent: "writer", prompt: "write:src/api.ts:300", dependsOn: ["t1"] }]));
     script.push(() => loom([{ type: "done", summary: "models and api" }]));
     const run = await rt.orchestra.start({ goal: "Models and API", orchestrator: "conductor" });
-    await waitUntil(() => Boolean(rt.orchestra.get(run.id)!.landing), { timeoutMs: 15_000 });
+    await waitUntil(() => Boolean(rt.orchestra.get(run.id)!.landing), { timeoutMs: integrationTimeoutMs });
     const r = rt.orchestra.get(run.id)!;
     const stack = r.landing!.stack!;
     expect(stack).toHaveLength(2);

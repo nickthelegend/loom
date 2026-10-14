@@ -65,6 +65,9 @@ describe("codex · structured questions", () => {
     await agent.interrupt();
     await turn;
     expect(stdinOf(bin).some((m) => m.method === undefined && JSON.stringify(m.result) === JSON.stringify({ answers: {} }))).toBe(true);
+    const received = stdinOf(bin);
+    expect(received.findIndex(m => m.method === undefined && JSON.stringify(m.result) === JSON.stringify({ answers: {} })))
+      .toBeLessThan(received.findIndex(m => m.method === "turn/interrupt"));
     await agent.stop();
   });
 

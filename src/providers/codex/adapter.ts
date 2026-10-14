@@ -438,6 +438,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
     // Settle open approvals and questions first (t3code: the interrupt must not
     // queue behind a card nobody will answer).
     this.settlePending(s, "cancel");
+    await s.rpc.flushServerResponses();
     const target = turnId ?? s.info.activeTurnId;
     if (!target || s.finished.has(target)) return;
     await s.rpc.request("turn/interrupt", { threadId: s.providerThreadId, turnId: target }, 5000);

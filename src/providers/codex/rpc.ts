@@ -17,6 +17,7 @@ type Pending = { resolve: (value: Json) => void; reject: (error: Error) => void;
 export class CodexRpc {
   private seq = 0;
   private readonly pending = new Map<number | string, Pending>();
+  private readonly responses = new Set<Promise<void>>();
   private closedError: Error | null = null;
   private readonly lines: readline.Interface;
 
@@ -49,6 +50,12 @@ export class CodexRpc {
     this.write(params === undefined ? { method } : { method, params });
   }
 
+  /** Write replies to server requests settled by the caller before a later
+   * request (such as interruption) can overtake those replies on stdin. */
+  async flushServerResponses(): Promise<void> {
+    await Promise.allSettled([...this.responses]);
+  }
+
   /** Fail every outstanding request; later calls reject with the same error. */
   close(error: Error): void {
     if (this.closedError) return;
@@ -73,10 +80,12 @@ export class CodexRpc {
     if (method && id !== undefined) {
       // A server request: always answer, even when the handler fails, or the
       // turn waits forever on a response nobody will send.
-      void this.handlers.request(method, (message.params ?? {}) as Json).then(
+      const response = this.handlers.request(method, (message.params ?? {}) as Json).then(
         result => this.write({ id, result }),
         (error: Error) => this.write({ id, error: { code: -32000, message: error.message } }),
       );
+      this.responses.add(response);
+      void response.then(() => this.responses.delete(response), () => this.responses.delete(response));
       return;
     }
     if (method) { this.handlers.notification(method, (message.params ?? {}) as Json); return; }
