@@ -708,7 +708,7 @@ export function workerBriefing(opts: {
 function git(args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", args, { cwd, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error((stderr || err.message).trim()));
+      if (err) reject(new Error((stderr || `${err.message} (exit ${err.code ?? "unknown"}, signal ${err.signal ?? "none"})`).trim(), { cause: err }));
       else resolve(stdout);
     });
   });

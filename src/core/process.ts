@@ -89,7 +89,7 @@ export const execFileSync: typeof nodeExecFileSync = ((command: string, args: st
  */
 export async function stopWindowsTree(child: ChildProcess): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-  await terminateWindowsTree(child.pid, true).catch(() => {
+  await terminateWindowsTree(child.pid, true, () => child.exitCode === null && child.signalCode === null).catch(() => {
     try { child.kill(); } catch { /* already gone */ }
   });
 }
@@ -104,10 +104,14 @@ export async function stopWindowsPid(pid: number): Promise<void> {
   await terminateWindowsTree(pid, true);
 }
 
-async function terminateWindowsTree(rootPid: number, includeRoot: boolean): Promise<void> {
+async function terminateWindowsTree(rootPid: number, includeRoot: boolean, stillRunning = () => true): Promise<void> {
   const { stdout } = await promisify(nodeExecFile)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
     "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"], { windowsHide: true, timeout: 8000 });
   const rows = JSON.parse(stdout) as Array<{ ProcessId: number; ParentProcessId: number; Name: string }>;
+  // CIM can take seconds. A provider (or a second stop request) may have
+  // closed the child meanwhile, and Windows can reuse its PID for another
+  // process. Never act on that stale process-tree snapshot.
+  if (!stillRunning() || !rows.some(row => row.ProcessId === rootPid)) return;
   const pids: number[] = [], visited = new Set<number>();
   const visit = (pid: number): void => {
     if (visited.has(pid)) return;
