@@ -22,7 +22,7 @@
 
 import { attachedImages } from "../providers/attachments.js";
 import { type ChildProcess } from "node:child_process";
-import { execFile, spawn, stopWindowsTree } from "../core/process.js";
+import { execFile, spawn, stopWindowsTree, stopWindowsPid } from "../core/process.js";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -61,6 +61,10 @@ export function parseModelRef(model: string): { providerID: string; id: string }
 
 /** Errors that come from something already in the session's history, not from this turn. */
 const POISONED_HISTORY = /media must contain valid base64|invalid (?:image|base64)|could not process image|image (?:is )?(?:too large|not supported)/i;
+
+function turnError(error: Json): string {
+  return String(error.message ?? (error.data as Json | undefined)?.message ?? "opencode turn failed").slice(0, 500);
+}
 
 /** The prompt body, with attached pictures as file attachments so OpenCode sees them, not just their path. */
 function promptWithFiles(text: string, dir: string): { text: string; files?: Array<{ uri: string; name: string }> } {
@@ -112,6 +116,30 @@ export class OpenCodeAdapter extends AdapterBase {
   private sseAbort: AbortController | null = null;
   private options: OpenCodeOptions;
   private started = false;
+  /** npm builds expose /session + /global/health; newer builds use /api. */
+  private modernApi = false;
+
+  private api(route: string): string {
+    return `${this.baseUrl}${this.modernApi ? "" : "/api"}${route}`;
+  }
+
+  private promptBody(text: string): Json {
+    if (!this.modernApi) return { prompt: promptWithFiles(text, this.projectDir) };
+    const ref = this.options.model ? parseModelRef(this.options.model) : null;
+    return {
+      parts: [{ type: "text", text }, ...attachedImages(text, this.projectDir).map(im => ({
+        type: "file", mime: im.mime, filename: path.basename(im.abs), url: `data:${im.mime};base64,${fs.readFileSync(im.abs).toString("base64")}`,
+      }))],
+      ...(ref ? { model: { providerID: ref.providerID, modelID: ref.id } } : {}),
+      ...(this.options.agent ? { agent: this.options.agent } : {}),
+    };
+  }
+
+  private async messageDetail(sid: string, mid: string): Promise<Json | null> {
+    const detail = await fetchJson<Json>(this.api(`/session/${sid}/message/${mid}`)).catch(() => null);
+    if (this.modernApi && detail?.info) return { ...(detail.info as Json), content: detail.parts };
+    return detail;
+  }
   // Token usage from the assistant message, stashed to ride run_complete.
   private lastUsage: { input: number; output: number; cached: number; reasoning: number } | null = null;
   // The provider/model the assistant message actually ran, for the gen_ai span.
@@ -183,7 +211,7 @@ export class OpenCodeAdapter extends AdapterBase {
     });
     if (/opencode(?:\.exe)?["\s]+serve\b/i.test(cmd)) {
       try {
-        if (process.platform === "win32") await new Promise<void>((resolve) => execFile("taskkill.exe", ["/pid", String(pid), "/T", "/F"], () => resolve()));
+        if (process.platform === "win32") await stopWindowsPid(pid);
         else process.kill(pid, "SIGTERM");
         this.emit({ kind: "status", payload: { state: "reaped_orphan_serve", pid } });
       } catch {
@@ -227,9 +255,10 @@ export class OpenCodeAdapter extends AdapterBase {
       });
     }
     await waitFor(async () => {
-      await fetchJson(`${this.baseUrl}/api/health`);
+      try { await fetchJson(`${this.baseUrl}/api/health`); this.modernApi = false; }
+      catch { await fetchJson(`${this.baseUrl}/global/health`); this.modernApi = true; }
       return true;
-    });
+    }, { timeoutMs: process.platform === "win32" ? 60_000 : 30_000 });
     await this.assertModelAvailable();
     // No session yet: an ordinary turn makes (or reuses) the agent's own when it
     // sends, and a continuity turn runs on its binding's. Creating one here left
@@ -257,8 +286,11 @@ export class OpenCodeAdapter extends AdapterBase {
    * server can actually run — and fail loudly with suggestions instead.
    */
   private async assertModelAvailable(): Promise<void> {
-    const res = await fetchJson<Json>(`${this.baseUrl}/api/model`).catch(() => null);
-    const models = Array.isArray(res?.data) ? (res!.data as Json[]) : [];
+    const res = await fetchJson<Json>(this.modernApi ? `${this.baseUrl}/provider` : `${this.baseUrl}/api/model`).catch(() => null);
+    const connected = Array.isArray(res?.connected) ? res.connected as string[] : [];
+    const models = this.modernApi && Array.isArray(res?.all)
+      ? (res.all as Json[]).filter(p => connected.includes(String(p.id))).flatMap(p => Object.keys((p.models ?? {}) as Json).map(id => ({ providerID: p.id, id })))
+      : Array.isArray(res?.data) ? (res!.data as Json[]) : [];
     if (!models.length) return; // endpoint unavailable — don't block
     const ids = models.map((m) => `${String(m.providerID)}/${String(m.id)}`);
     if (!this.options.model) {
@@ -286,7 +318,7 @@ export class OpenCodeAdapter extends AdapterBase {
     const modelChanged = (this.options.model ?? undefined) !== this.sessionModel;
     if (existing && !modelChanged) {
       try {
-        await fetchJson(`${this.baseUrl}/api/session/${existing}`);
+        await fetchJson(this.api(`/session/${existing}`));
         return existing;
       } catch {
         // stale session (server state moved on) — create a fresh one
@@ -298,7 +330,7 @@ export class OpenCodeAdapter extends AdapterBase {
       if (ref) body.model = ref;
     }
     if (this.options.agent) body.agent = this.options.agent;
-    const res = await fetchJson<Json>(`${this.baseUrl}/api/session`, {
+    const res = await fetchJson<Json>(this.api("/session"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -545,7 +577,7 @@ export class OpenCodeAdapter extends AdapterBase {
     });
     const dismiss = picks.every((p) => !p.length);
     // the session-scoped route on current builds, the global one on older
-    const routes = [
+    const routes = this.modernApi ? [`${this.baseUrl}/question/${encodeURIComponent(open.id)}/${dismiss ? "reject" : "reply"}`] : [
       `${this.baseUrl}/api/session/${encodeURIComponent(open.sid)}/question/${encodeURIComponent(open.id)}/${dismiss ? "reject" : "reply"}`,
       `${this.baseUrl}/question/${encodeURIComponent(open.id)}/${dismiss ? "reject" : "reply"}`,
     ];
@@ -582,7 +614,7 @@ export class OpenCodeAdapter extends AdapterBase {
     });
     const reply = decision.behavior !== "allow" ? "reject" : decision.scope === "session" ? "always" : "once";
     const body = JSON.stringify({ reply, ...(decision.message ? { message: decision.message } : {}) });
-    for (const url of [`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/permission/${encodeURIComponent(id)}/reply`, `${this.baseUrl}/permission/${encodeURIComponent(id)}/reply`]) {
+    for (const url of this.modernApi ? [`${this.baseUrl}/permission/${encodeURIComponent(id)}/reply`] : [`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/permission/${encodeURIComponent(id)}/reply`, `${this.baseUrl}/permission/${encodeURIComponent(id)}/reply`]) {
       const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(15_000) }).catch(() => null);
       if (res?.ok) return;
       if (res && res.status !== 404) break;
@@ -635,7 +667,7 @@ export class OpenCodeAdapter extends AdapterBase {
 
   /** All messages in the session, oldest first (info objects). */
   private async listMessages(sid: string): Promise<Json[]> {
-    const res = await fetchJson<Json>(`${this.baseUrl}/api/session/${sid}/message`);
+    const res = await fetchJson<Json>(this.api(`/session/${sid}/message`));
     const data = (res.data ?? res) as unknown;
     const items = Array.isArray(data) ? (data as Json[]) : [];
     return items
@@ -656,15 +688,15 @@ export class OpenCodeAdapter extends AdapterBase {
    */
   /** Is opencode still running this session? Null when this opencode can't say (older builds). */
   private async sessionActive(sid: string): Promise<boolean | null> {
-    const res = await fetchJson<Json>(`${this.baseUrl}/api/session/active`).catch(() => null);
+    const res = await fetchJson<Json>(this.modernApi ? this.api("/session/status") : this.api("/session/active")).catch(() => null);
     const active = res ? ((res.data ?? res) as Json) : null;
     if (!active || typeof active !== "object") return null;
-    return Object.prototype.hasOwnProperty.call(active, sid);
+    return Object.prototype.hasOwnProperty.call(active, sid) && (!this.modernApi || (active[sid] as Json)?.type !== "idle");
   }
 
   private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
     try {
-      await fetchJson(
+      if (!this.modernApi) await fetchJson(
         `${this.baseUrl}/api/session/${sid}/wait`,
         { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
         timeoutMs,
@@ -735,11 +767,14 @@ export class OpenCodeAdapter extends AdapterBase {
         // the prompt — framed as an unmissable authoritative block (frameBriefing)
         // rather than a loose preamble.
         const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
-        await fetchJson(`${this.baseUrl}/api/session/${sid}/prompt`, {
+        const admission = await fetch(this.api(`/session/${sid}/${this.modernApi ? "prompt_async" : "prompt"}`), {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt: promptWithFiles(text, this.projectDir) }),
+          body: JSON.stringify(this.promptBody(text)),
+          signal: AbortSignal.timeout(30_000),
         });
+        if (!admission.ok) throw new Error(`opencode prompt failed (${admission.status}): ${(await admission.text()).slice(0, 500)}`);
+        await admission.arrayBuffer();
 
         const turn = await this.waitForTurn(sid, baseline, timeoutMs);
         if (!turn && this.interrupted) {
@@ -749,13 +784,11 @@ export class OpenCodeAdapter extends AdapterBase {
         } else {
           const turnId = String(turn.id);
           // Fetch the full message: parts (in case SSE missed them) + errors.
-          const detail = await fetchJson<Json>(
-            `${this.baseUrl}/api/session/${sid}/message/${turnId}`,
-          ).catch(() => null);
+          const detail = await this.messageDetail(sid, turnId);
           const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
           if (info.finish === "error" || info.error) {
             const err = (info.error ?? {}) as Json;
-            const message = String(err.message ?? "opencode turn failed").slice(0, 500);
+            const message = turnError(err);
             if (attempt === 0 && POISONED_HISTORY.test(message)) {
               this.sessionId = undefined;
               this.emit({ kind: "status", payload: { state: "session_reset", reason: `opencode refused this session's history (${message}); carrying on in a fresh session` } });
@@ -831,6 +864,7 @@ export class OpenCodeAdapter extends AdapterBase {
           throw new NativeDispatchRejected(`opencode didn't start: ${(err as Error).message}`);
         }
       }
+      if (this.modernApi) throw new NativeDispatchRejected("native continuity requires OpenCode's verified /api/session admission and quiescence endpoints");
       const sid = await this.continuitySession(c.nativeSessionId, input.model);
       this.activeSid = sid;
       this.emit({ kind: "status", payload: { state: "turn_started", session: sid } });
@@ -983,7 +1017,7 @@ export class OpenCodeAdapter extends AdapterBase {
     const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
     if (info.finish === "error" || info.error) {
       const err = (info.error ?? {}) as Json;
-      const message = String(err.message ?? "opencode turn failed").slice(0, 500);
+      const message = turnError(err);
       this.emit({ kind: "error", payload: { message } });
       return message;
     }
@@ -1021,7 +1055,7 @@ export class OpenCodeAdapter extends AdapterBase {
     const sid = this.activeSid ?? this.sessionId;
     if (!sid || !this.baseUrl) return;
     try {
-      await fetchJson(`${this.baseUrl}/api/session/${sid}/interrupt`, {
+      await fetchJson(this.api(`/session/${sid}/${this.modernApi ? "abort" : "interrupt"}`), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",

@@ -90,6 +90,11 @@ export async function stopWindowsChildren(parentPid: number): Promise<void> {
   await terminateWindowsTree(parentPid, false);
 }
 
+/** Stop a verified orphan's tree without terminating shared console hosts. */
+export async function stopWindowsPid(pid: number): Promise<void> {
+  await terminateWindowsTree(pid, true);
+}
+
 async function terminateWindowsTree(rootPid: number, includeRoot: boolean): Promise<void> {
   const { stdout } = await promisify(nodeExecFile)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
     "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"], { windowsHide: true, timeout: 8000 });
