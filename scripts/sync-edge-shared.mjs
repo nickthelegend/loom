@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * The hosted hub's Edge Functions (Deno) run copies of a few self-contained
  * files from src/core. This writes the copies; test/github-events.test.ts

@@ -9,17 +9,20 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { TestProject } from "vitest/node";
 
-export default function setup(): () => void {
+export default function setup(project: TestProject): () => void {
   const started = Date.now() - 1000;
+  const prefix = `loom-test-${project.config.env.LOOM_TEST_RUN_ID ?? "local"}-`;
   return () => {
     if (process.env.LOOM_KEEP_TEST_DIRS) return;
     const tmp = os.tmpdir();
     for (const name of fs.readdirSync(tmp)) {
-      if (!name.startsWith(`loom-test-${process.env.LOOM_TEST_RUN_ID ?? "local"}-`)) continue;
+      if (!name.startsWith(prefix)) continue;
       const p = path.join(tmp, name);
       try {
-        if (fs.statSync(p).birthtimeMs >= started) fs.rmSync(p, { recursive: true, force: true });
+        if (path.dirname(path.resolve(p)) === path.resolve(tmp) && fs.statSync(p).birthtimeMs >= started)
+          fs.rmSync(p, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
       } catch {
         /* gone already, or not ours to touch */
       }

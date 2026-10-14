@@ -75,7 +75,7 @@ interface PtyModule {
   spawn(
     file: string,
     args: string[],
-    opts: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv },
+    opts: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv; useConptyDll?: boolean },
   ): PtyProcess;
 }
 
@@ -136,6 +136,7 @@ export function loadPty(): PtyModule | null {
       rows: 24,
       cwd: process.cwd(),
       env: process.env,
+      ...(isWin ? { useConptyDll: true } : {}),
     });
     if (isWin) probe.write("exit\r");
     else probe.kill();
@@ -192,6 +193,7 @@ class PtySession implements TerminalSession {
       rows,
       cwd,
       env: baseEnv(),
+      ...(isWin ? { useConptyDll: true } : {}),
     });
     this.proc.onData((d) => {
       this.buf = (this.buf + d).slice(-SCROLLBACK_MAX);
