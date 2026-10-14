@@ -106,23 +106,29 @@ export async function stopWindowsPid(pid: number): Promise<void> {
 
 async function terminateWindowsTree(rootPid: number, includeRoot: boolean, stillRunning = () => true): Promise<void> {
   const { stdout } = await promisify(nodeExecFile)("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"], { windowsHide: true, timeout: 8000 });
-  const rows = JSON.parse(stdout) as Array<{ ProcessId: number; ParentProcessId: number; Name: string }>;
+    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,@{Name='Created';Expression={if($_.CreationDate){$_.CreationDate.ToUniversalTime().ToString('o')}}} | ConvertTo-Json -Compress"], { windowsHide: true, timeout: 8000 });
+  type ProcessRow = { ProcessId: number; ParentProcessId: number; Name: string; Created: string | null };
+  const rows = JSON.parse(stdout) as ProcessRow[];
   // CIM can take seconds. A provider (or a second stop request) may have
   // closed the child meanwhile, and Windows can reuse its PID for another
   // process. Never act on that stale process-tree snapshot.
-  if (!stillRunning() || !rows.some(row => row.ProcessId === rootPid)) return;
+  const root = rows.find(row => row.ProcessId === rootPid);
+  if (!stillRunning() || !root) return;
   const pids: number[] = [], visited = new Set<number>();
-  const visit = (pid: number): void => {
-    if (visited.has(pid)) return;
-    visited.add(pid);
-    for (const row of rows) if (row.ParentProcessId === pid) {
+  const visit = (parent: ProcessRow): void => {
+    if (visited.has(parent.ProcessId)) return;
+    visited.add(parent.ProcessId);
+    for (const row of rows) if (row.ParentProcessId === parent.ProcessId) {
+      // ParentProcessId can refer to a later process that reused an old
+      // parent's PID. UTC round-trip strings retain CIM's timestamp precision.
+      // Unknown ancestry is left alone rather than killing another session.
+      if (!parent.Created || !row.Created || row.Created < parent.Created) continue;
       // A console host can serve the surviving shell/daemon too. taskkill /T
       // kills it and leaves later console children with DLL_INIT_FAILED.
-      if (!/^(?:conhost|OpenConsole)\.exe$/i.test(row.Name)) { visit(row.ProcessId); pids.push(row.ProcessId); }
+      if (!/^(?:conhost|OpenConsole)\.exe$/i.test(row.Name)) { visit(row); pids.push(row.ProcessId); }
     }
   };
-  visit(rootPid);
+  visit(root);
   if (includeRoot) pids.push(rootPid);
   if (pids.length) await promisify(nodeExecFile)("taskkill.exe", [...pids.flatMap(pid => ["/pid", String(pid)]), "/F"], { windowsHide: true, timeout: 8000 }).catch(() => {});
 }
