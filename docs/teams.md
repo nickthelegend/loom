@@ -151,6 +151,14 @@ loom runner jobs                     # runners and what they're doing
 
 Or run it in Docker: `docker build -f Dockerfile.runner -t loom-runner .`
 
+On Windows use `loom.cmd runner install`. It adds **Loom Runner.vbs** to your
+account's Startup folder and starts the daemon immediately, without elevation.
+The script uses your installed Node and preserves `LOOM_HOME`. Remove that
+file from `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` to disable
+login startup. If Windows Script Host is disabled by your organization, run
+`loom.cmd up` manually. Windows login startup does not restart a daemon after
+a crash; run `loom.cmd up` again in that case.
+
 Each goal gets a fresh clone (a fresh container when Docker runs), and agents
 get a scrubbed environment with only their logins and the token. If a goal of
 yours needs a CI fix and you've been offline 15 minutes, your runner takes it.

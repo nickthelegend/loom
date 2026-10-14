@@ -48,6 +48,17 @@ describe("the runner's trust tier (D70)", () => {
 });
 
 describe("setting up a runner (D77, D78)", () => {
+  it("uses the current user's Windows Startup folder with literal paths", () => {
+    const win = serviceFile({ platform: "win32", home: "C:/Users/O'Brien & Co", node: "C:/Program Files/nodejs/node.exe", loom: "C:/Loom/cli.js", loomHome: "C:/Loom data" });
+    expect(win.path).toBe("C:/Users/O'Brien & Co/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/Loom Runner.vbs");
+    expect(win.content).toContain('env("LOOM_HOME") = "C:/Loom data"');
+    expect(win.content).toContain('shell.CurrentDirectory = "C:/Users/O\'Brien & Co"');
+    expect(win.content).toContain('shell.Run("""C:/Program Files/nodejs/node.exe"" ""C:/Loom/cli.js"" up", 0, True)');
+    expect(win.content).toContain('WScript.Quit code');
+    expect(win.enable).toEqual([["cscript.exe", "//nologo", win.path]]);
+    expect(serviceFile({ platform: "win32", home: "C:/Users/a", appData: "D:/Roaming", node: "node.exe", loom: "cli.js" }).path).toBe("D:/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/Loom Runner.vbs");
+  });
+
   it("writes a launchd agent on macOS and a systemd user unit elsewhere", () => {
     const mac = serviceFile({ platform: "darwin", home: "/Users/a", node: "/usr/bin/node", loom: "/opt/loom/cli.js" });
     expect(mac.path).toBe("/Users/a/Library/LaunchAgents/dev.loom.runner.plist");

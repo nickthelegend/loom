@@ -331,7 +331,9 @@ export const firstLine = (s: string): string => (s.split("\n").map((l) => l.trim
 export function cliAvailable(
   cmd: string,
   args: string[] = ["--version"],
-  timeoutMs = 5_000,
+  // Windows npm launchers may load a native binary through Node first; a cold
+  // OpenCode version probe takes over six seconds on an otherwise usable disk.
+  timeoutMs = process.platform === "win32" ? 15_000 : 5_000,
 ): Promise<boolean> {
   return new Promise((resolve) => {
     try {

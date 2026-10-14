@@ -10,6 +10,7 @@ import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import { freeUsage } from "../core/free-pool.js";
 import path from "node:path";
+import os from "node:os";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
@@ -1840,14 +1841,18 @@ program
     try {
       if (a === "install") {
         const loomBin = fileURLToPath(new URL("./index.js", import.meta.url));
-        const f = serviceFile({ platform: process.platform, home: process.env.HOME ?? "", node: process.execPath, loom: loomBin, ...(process.env.LOOM_HOME ? { loomHome: process.env.LOOM_HOME } : {}) });
+        const f = serviceFile({ platform: process.platform, home: os.homedir(), node: process.execPath, loom: loomBin, ...(process.env.LOOM_HOME ? { loomHome: process.env.LOOM_HOME } : {}), ...(process.env.APPDATA ? { appData: process.env.APPDATA } : {}) });
         fs.mkdirSync(path.dirname(f.path), { recursive: true });
-        fs.writeFileSync(f.path, f.content);
+        // Windows Script Host reads Unicode reliably as UTF-16 with a BOM.
+        fs.writeFileSync(f.path, process.platform === "win32" ? Buffer.from("\uFEFF" + f.content, "utf16le") : f.content);
         console.log(`${pc.green("✓")} wrote ${f.path}`);
         for (const cmd of f.enable) {
-          await new Promise<void>((resolve) => spawn(cmd[0]!, cmd.slice(1), { stdio: "inherit" }).on("exit", () => resolve()));
+          await new Promise<void>((resolve, reject) => spawn(cmd[0]!, cmd.slice(1), { stdio: "inherit" })
+            .on("error", reject).on("exit", (code) => code === 0 ? resolve() : reject(new Error(`${cmd[0]} failed (exit ${code})`))));
         }
-        console.log(pc.dim("  the daemon now starts at login and restarts if it stops; `loom runner status` to check"));
+        console.log(pc.dim(process.platform === "win32"
+          ? "  the daemon now starts at login; `loom runner status` to check, `loom up` to restart after a failure"
+          : "  the daemon now starts at login and restarts if it stops; `loom runner status` to check"));
         return;
       }
       if (a === "token") {
