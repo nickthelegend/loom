@@ -438,7 +438,8 @@ describe("web app · mermaid diagrams", () => {
 
 describe("web app · plan mode", () => {
   it("is a real switch, remembered per project, and sends a chat turn with plan: true", async () => {
-    const m = await opened();
+    const planId = (await new DaemonClient(readDaemonConfig()!).addProject(makeProjectDir({ name: "plan-controls" }))).project.id;
+    const m = await opened(planId);
     await ready(m, "#planbtn");
     const sw = $(m, "#planbtn")!;
     expect(sw.getAttribute("role")).toBe("switch");
@@ -448,7 +449,7 @@ describe("web app · plan mode", () => {
     await waitUntil(() => sw.getAttribute("aria-checked") === "true");
     expect(sw.classList.contains("on")).toBe(true);
     expect($(m, ".cbox")?.classList.contains("planon")).toBe(true);
-    expect(m.window.localStorage.getItem(`loomPlan:${projectId}`)).toBe("1");
+    expect(m.window.localStorage.getItem(`loomPlan:${planId}`)).toBe("1");
     await waitUntil(() => text(m, "#hint").includes("agent writes a plan to plans/"));
     expect(text(m, "#hint")).toContain("no code changes");
 
@@ -460,11 +461,18 @@ describe("web app · plan mode", () => {
     // and the daemon took it as a plan turn
     await waitUntil(async () => (await api<Prompts>("GET", "/api/prompts")).recent.some((r) => r.text === words && r.mode === "plan"));
 
+    // Finish the first plan turn before testing a second direct submission.
+    // Other queued turns would correctly route new input through /queue.
+    await waitUntil(async () => {
+      const activity = await api<{ projects: Array<{ project: { id: string }; agents: Array<{ busy: boolean }> }> }>("GET", "/api/activity");
+      return activity.projects.find(p => p.project.id === planId)?.agents.every(a => !a.busy) ?? false;
+    });
+
     // off again: storage forgets it, and a send goes without the flag
     const m2 = m;
     click($(m2, "#planbtn"));
     await waitUntil(() => $(m2, "#planbtn")?.getAttribute("aria-checked") === "false");
-    expect(m2.window.localStorage.getItem(`loomPlan:${projectId}`)).toBeNull();
+    expect(m2.window.localStorage.getItem(`loomPlan:${planId}`)).toBeNull();
     const plain = `no plan ${Date.now()}`;
     await sendFromComposer(m2, plain);
     await waitUntil(() => m2.sent.some((s) => s.path.endsWith("/messages") && s.body?.text === plain));
@@ -505,9 +513,9 @@ describe("web app · permissions", () => {
     // A mode change is correctly refused mid-turn. Give this UI test its own
     // roster: an earlier test's queued chat turn can start after an idle poll.
     const permissionId = (await new DaemonClient(readDaemonConfig()!).addProject(makeProjectDir({ name: "permission-controls" }))).project.id;
-    type Activity = { projects: Array<{ id: string; agents: Array<{ id: string; busy: boolean; since: number | null }> }> };
+    type Activity = { projects: Array<{ project: { id: string }; agents: Array<{ id: string; busy: boolean; since: number | null }> }> };
     const busyAgents = async () =>
-      ((await api<Activity>("GET", "/api/activity")).projects.find((p) => p.id === permissionId)?.agents ?? []).filter((a) => a.busy);
+      ((await api<Activity>("GET", "/api/activity")).projects.find((p) => p.project.id === permissionId)?.agents ?? []).filter((a) => a.busy);
     await waitUntil(async () => (await busyAgents()).length === 0, { timeoutMs: 30_000 });
     const m = await opened(permissionId);
     await ready(m, "#cperm");

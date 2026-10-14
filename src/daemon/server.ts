@@ -3,6 +3,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http, { type Server } from "node:http";
+import { configureHttpServer } from "../core/http-server.js";
 import os from "node:os";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
@@ -665,6 +666,7 @@ export class LoomDaemon {
       // resolve this as a phantom success — a daemon that prints "listening" and
       // exits 0 while another process actually holds the port.
       const server = this.app.listen(this.port, this.host);
+      configureHttpServer(server);
       this.server = server;
       let settled = false;
       server.once("error", (err) => {
@@ -812,6 +814,7 @@ export class LoomDaemon {
   async expose(ip: string): Promise<void> {
     if (!ip || ip === this.host || this.extra.has(ip)) return;
     const server = http.createServer(this.app);
+    configureHttpServer(server);
     await new Promise<void>((resolve, reject) => {
       server.listen(this.port, ip, () => resolve());
       server.on("error", reject);
