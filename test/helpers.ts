@@ -1,29 +1,17 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { writeProjectConfig } from "../src/core/registry.js";
 import type { ProjectConfig } from "../src/types.js";
 
 /**
- * Every temp dir a test makes goes when its worker exits. They used to pile
- * up — thousands of repos, homes and bare origins — until the disk filled and
- * whole files failed with ENOSPC.
+ * Global teardown removes this run's directories after workers have stopped.
+ * Deleting whole Git repos in each fork's exit hook left many Windows forks
+ * busy deleting files while Vitest tried to start their replacements.
  */
-const made: string[] = [];
-process.once("exit", () => {
-  if (process.env.LOOM_KEEP_TEST_DIRS) return;
-  for (const d of made) {
-    try {
-      fs.rmSync(d, { recursive: true, force: true });
-    } catch {
-      /* best effort */
-    }
-  }
-});
-
 export function tmpDir(prefix: string): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), `loom-test-${process.env.LOOM_TEST_RUN_ID ?? "local"}-${prefix}-`));
-  made.push(d);
   return d;
 }
 
@@ -68,8 +56,8 @@ export async function waitUntil(
   predicate: () => Promise<boolean> | boolean,
   { timeoutMs = 20_000, intervalMs = 40 } = {},
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
     if (await predicate()) return;
     await new Promise((r) => setTimeout(r, intervalMs));
   }

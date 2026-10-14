@@ -6,7 +6,9 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     // test temp dirs are removed when the run ends (test/global-setup.ts)
     globalSetup: ["test/global-setup.ts"],
-    maxWorkers: 4,
+    // Windows starts real CLI/Git processes in these suites. Leave capacity
+    // for those children and cold fork startup on hosted runners.
+    maxWorkers: process.platform === "win32" ? 2 : 4,
     // Above waitUntil's 20s default (see test/helpers.ts) — a test that hits
     // that budget should fail on the wait, with its message, not get cut off
     // mid-poll by the runner and report a bare timeout instead.

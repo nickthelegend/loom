@@ -4,10 +4,10 @@
  * A condition is a promise about when something runs, so the risk is a prompt
  * that goes early (the thing you were avoiding happens anyway) or one that
  * never goes at all (silently lost). Both are tested here against a real
- * runtime, with a real clock.
+ * runtime, with real timer ticks and a controlled wall clock.
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { describeCondition, parseCondition } from "../src/core/prompt-queue.js";
 import { deleteRecipe, getRecipe, listRecipes, roleToTarget, saveRecipe, targetToRole } from "../src/core/recipes.js";
@@ -16,6 +16,7 @@ import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
 
 let rt: ProjectRuntime | null = null;
 afterEach(async () => {
+  vi.useRealTimers();
   await rt?.close();
   rt = null;
 });
@@ -55,6 +56,9 @@ describe("reading a condition", () => {
 describe("a prompt held for a time", () => {
   it("doesn't go early, and goes once the moment passes", async () => {
     const r = await open();
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
     const soon = Date.now() + 1200;
     const item = r.enqueue({ text: "later, please", target: { kind: "agent", agentId: "echo" }, when: { kind: "at", at: soon } });
     expect(r.queueBlocker(item)).toMatch(/waiting until/);
@@ -62,6 +66,9 @@ describe("a prompt held for a time", () => {
     await new Promise((res) => setTimeout(res, 400));
     expect(prompts(r)).toEqual([]); // still held
 
+    // A delayed CI worker cannot accidentally cross the wall-clock deadline
+    // before the early-send assertion. The real queue timer still wakes it.
+    vi.setSystemTime(soon);
     await waitUntil(() => prompts(r).includes("later, please"), { timeoutMs: 20_000 });
     expect(Date.now()).toBeGreaterThanOrEqual(soon);
   }, 40_000);
