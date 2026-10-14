@@ -10,10 +10,10 @@
 
 import { execFile } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const GUARDS = fileURLToPath(new URL("../src/daemon/guards.ts", import.meta.url));
+const GUARDS = pathToFileURL(fileURLToPath(new URL("../src/daemon/guards.ts", import.meta.url))).href;
 const tsx = process.execPath;
 
 /** Run a snippet in its own process; report how it ended. */

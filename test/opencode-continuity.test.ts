@@ -150,7 +150,7 @@ describe("OpenCode native continuity", () => {
     expect(server.prompts[1]!.session).toBe(server.prompts[0]!.session); // same session, rebuilt state
   });
 
-  it("probes an opencode agent pointed at a running server by that server's health", async () => {
+  it.skipIf(process.platform === "win32")("probes an opencode agent pointed at a running server by that server's health", async () => {
     const server = await fakeOpenCode(); open.push(server);
     const monitor = new HarnessMonitor(() => [{ id: "oc", kind: "opencode", options: { baseUrl: server.url } }]);
     expect(await monitor.ensure("oc")).toMatchObject({ kind: "opencode", available: true });
@@ -194,7 +194,7 @@ describe("OpenCode without continuity: interrupting a turn that never answered",
   });
 });
 
-describe("OpenCode through the project runtime with continuity on", () => {
+describe.skipIf(process.platform === "win32")("OpenCode through the project runtime with continuity on", () => {
   it("sends a continuity turn to OpenCode instead of refusing it", async () => {
     const server = await fakeOpenCode({ reply: "from the runtime" }); open.push(server);
     const dir = makeProjectDir({

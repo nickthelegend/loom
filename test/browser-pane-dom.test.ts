@@ -262,7 +262,7 @@ describe("web app · the Browser pane", () => {
   }, 60_000);
 
   it("runs a spec, and stops it from the row", async () => {
-    process.env.LOOM_SPEC_CMD = "echo hello-from-spec; sleep 20";
+    process.env.LOOM_SPEC_CMD = `node -e "console.log('hello-from-spec');setTimeout(()=>{},20000)"`;
     const m = mount(projectA);
     await openBrowser(m);
     await waitUntil(() => !!$(m, '.specrow[data-spec="tests/home.spec.ts"]'), { timeoutMs: 20_000 });

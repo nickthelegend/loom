@@ -48,6 +48,9 @@ export class ContextArtifacts {
     this.assertRoot();
     if (!/^[a-f0-9]{64}$/.test(hash)) throw new ContinuityError("invalid", "invalid artifact hash");
     const file = path.join(this.root, `${hash}.json`);
+    // O_NOFOLLOW is unavailable on Windows. Reject reparse-point symlinks
+    // explicitly there as well, before following any artifact path.
+    if (fs.lstatSync(file).isSymbolicLink()) throw new ContinuityError("invalid", "unsafe retrieval artifact symlink");
     let fd: number;
     try { fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0)); }
     catch (error) {
@@ -60,6 +63,9 @@ export class ContextArtifacts {
       if (!stat.isFile() || stat.size > 32_000_000) throw new ContinuityError("invalid", "unsafe or oversized retrieval artifact");
       text = fs.readFileSync(fd, "utf8");
       this.assertRoot();
+      const current = fs.lstatSync(file);
+      if (current.isSymbolicLink() || current.ino !== stat.ino || current.dev !== stat.dev)
+        throw new ContinuityError("invalid", "unsafe retrieval artifact changed while reading");
     } finally { fs.closeSync(fd); }
     if (digest(text) !== hash) throw new ContinuityError("invalid", "retrieval artifact integrity mismatch");
     return text;

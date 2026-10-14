@@ -74,7 +74,7 @@ export function agyBin(override?: string): string | null {
 
 /** agy's per-workspace conversation index; maps a working dir to its last id. */
 function conversationIndexPath(): string {
-  return path.join(os.homedir(), ".gemini", "antigravity-cli", "cache", "last_conversations.json");
+  return path.join(process.env.HOME ?? os.homedir(), ".gemini", "antigravity-cli", "cache", "last_conversations.json");
 }
 
 /** The conversation id agy last used for `dir`, or null if it has none. */

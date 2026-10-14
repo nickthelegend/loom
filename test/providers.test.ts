@@ -67,7 +67,9 @@ describe("the key", () => {
   it("is stored where only you can read it", () => {
     setProvider("openrouter", { key: "secret-value" });
     const mode = fs.statSync(providersFile()).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // Windows uses the containing account directory's ACL, not POSIX modes.
+    if (process.platform !== "win32") expect(mode).toBe(0o600);
+    expect(fs.readFileSync(providersFile(), "utf8")).toContain("secret-value");
   });
 
   it("is never in what gets shown", () => {

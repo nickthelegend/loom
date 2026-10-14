@@ -364,7 +364,7 @@ describe("terminal", () => {
     // own keystrokes back. The quotes survive the echo but not the expansion,
     // so ALIVE appears only in real output.
     const out = await runTerm("t2", `node -p "['AL','IVE'].join('')"`, /ALIVE/);
-    expect(out).toMatch(/ALIVE/);
+    expect(out, `terminal output after interrupt: ${JSON.stringify(out)}`).toMatch(/ALIVE/);
   });
 
   it("closes a session on request", async () => {

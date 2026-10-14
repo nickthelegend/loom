@@ -130,7 +130,7 @@ describe("finding specs", () => {
 
 describe("running one", () => {
   it("streams the reporter and records the pass in the Console", async () => {
-    process.env.LOOM_SPEC_CMD = "echo running {file}; echo 1 passed";
+    process.env.LOOM_SPEC_CMD = `node -e "console.log('running',process.argv[1]); console.log('1 passed')" {file}`;
     const r = await runSpec("tests/login.spec.ts");
     expect(r.status).toBe(200);
     const { run } = (await r.json()) as { run: { id: string; file: string } };
@@ -148,7 +148,7 @@ describe("running one", () => {
   });
 
   it("records a failure with the tail of the output", async () => {
-    process.env.LOOM_SPEC_CMD = "echo boom; exit 3";
+    process.env.LOOM_SPEC_CMD = `node -e "console.log('boom');process.exit(3)"`;
     await runSpec("tests/cart.e2e.ts");
     await waitUntil(async () => {
       const logs = await fetch(`${baseUrl}/api/logs`, { headers: H() });
@@ -175,7 +175,7 @@ describe("running one", () => {
   });
 
   it("refuses a second run while one is live", async () => {
-    process.env.LOOM_SPEC_CMD = "sleep 2; echo done";
+    process.env.LOOM_SPEC_CMD = `node -e "setTimeout(()=>console.log('done'),2000)"`;
     const first = await runSpec("tests/login.spec.ts");
     expect(first.status).toBe(200);
 
@@ -205,7 +205,7 @@ describe("a run that has to end", () => {
   };
 
   it("is stopped when it runs past the timeout, and says so", async () => {
-    process.env.LOOM_SPEC_CMD = "echo started; sleep 30";
+    process.env.LOOM_SPEC_CMD = `node -e "console.log('started');setTimeout(()=>{},30000)"`;
     const runner = new SpecRunner(400);
     const { done, lines, ev } = events();
     runner.start("p1", projectDir, "tests/login.spec.ts", ev);
@@ -219,7 +219,9 @@ describe("a run that has to end", () => {
   it("stops when asked — the whole process group, not only the shell", async () => {
     // the grandchild stands in for the test runner npx starts
     const pidFile = path.join(tmpDir("spec-pid"), "pid");
-    process.env.LOOM_SPEC_CMD = `sleep 30 & echo $! > ${pidFile}; wait`;
+    const parentScript = path.join(path.dirname(pidFile), "parent.cjs");
+    fs.writeFileSync(parentScript, `const child=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:'inherit'});require('fs').writeFileSync(${JSON.stringify(pidFile)},String(child.pid));setTimeout(()=>{},30000);`);
+    process.env.LOOM_SPEC_CMD = `node "${parentScript}"`;
     const runner = new SpecRunner();
     const { done, ev } = events();
     runner.start("p2", projectDir, "tests/login.spec.ts", ev);

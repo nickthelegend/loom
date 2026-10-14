@@ -701,7 +701,9 @@ export function createThread(view) {
     // Reading the thread again from scratch. Changing the transcript level
     // changes what every past line renders as, so there is nothing to patch —
     // the whole feed is re-read rather than re-styled.
+    var historyRequest = 0;
     function loadHistory(){
+      var request = ++historyRequest;
       var feed = document.getElementById("feed");
       if (feed) feed.innerHTML = '<div class="loader"></div>';
       state.lastId = 0; state.firstId = 0;
@@ -712,6 +714,7 @@ export function createThread(view) {
       if (state.loadGitStat && (!state.gitStat || state.gitStat.pid !== view.pid)) setTimeout(function(){ if (!pageGone() && state.loadGitStat) state.loadGitStat(); }, 300);
       return api("/api/projects/" + view.pid + "/events?limit=" + PAGE + "&chat=" + encodeURIComponent(view.chatId))
         .then(function(j){
+          if (request !== historyRequest || state.pid !== view.pid || state.chat !== view.chatId) return;
           var evs = j.events || [];
           forceScroll = true;
           append(evs);
@@ -724,7 +727,7 @@ export function createThread(view) {
           if (state.project) reconcileLive(state.project);
           toBottom();
         })
-        .catch(function(err){ toast(err.message); flushPending(); });
+        .catch(function(err){ if (request !== historyRequest) return; toast(err.message); flushPending(); });
     }
 
 
@@ -751,7 +754,7 @@ export function createThread(view) {
           // The daemon says hello once this socket is subscribed. Anything the
           // queue did before then went out as a frame this page never got, so
           // read it again now (a reconnect lands here too).
-          if (frame.type === "hello") { checkBuild(); view.loadQueue(); return; }
+          if (frame.type === "hello") { checkBuild(); view.loadQueue(); loadHistory(); return; }
           if (frame.type === "term") { view.onTermFrame(frame); return; }
           if (frame.type === "spec" || frame.type === "spec_done") { onSpecFrame(frame); return; }
           // A log record belongs to no chat — a daemon fault has no

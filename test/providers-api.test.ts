@@ -69,7 +69,7 @@ describe("providers over the wire", () => {
 
     // It is on disk, readable by nobody else.
     expect(fs.readFileSync(providersFile(), "utf8")).toContain(secret);
-    expect(fs.statSync(providersFile()).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(fs.statSync(providersFile()).mode & 0o777).toBe(0o600);
   });
 
   it("refuses a provider it has never heard of, unless given a base URL", async () => {

@@ -219,7 +219,7 @@ describe("authoring a skill", () => {
       description: "Use before every production deploy",
     });
     // id sanitised to a directory-safe slug
-    expect(out.dir.endsWith("skills/deploy-checklist")).toBe(true);
+    expect(out.dir.endsWith(path.join("skills", "deploy-checklist"))).toBe(true);
 
     const skills = loadSkills([path.join(dir, "skills")]);
     const mine = skills.find((s) => s.id === "deploy-checklist");

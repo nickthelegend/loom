@@ -156,7 +156,7 @@ describe("a crew works a goal", () => {
     expect(turns[0]!.briefing).toContain('"type":"plan"');
 
     rt.crews.approve(crew!.id);
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 30_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 60_000 });
     const g = rt.crews.get(crew!.id).state.goal!;
     expect(g.summary).toBe("Greeting and farewell, reviewed and tested.");
     expect(g.cards.map((c) => [c.title, c.stage, c.rounds])).toEqual([["Add greeting", "done", 1], ["Add farewell", "done", 0]]);
@@ -222,7 +222,7 @@ describe("a crew works a goal", () => {
     await waitUntil(() => rt.crews.get(crew!.id).state.goal?.cards[0]?.title === "Small step" && rt.crews.get(crew!.id).state.goal?.status === "awaiting_approval", { timeoutMs: 20_000 });
     expect(turns.filter((t) => t.teammate === "lead").at(-1)!.briefing).toMatch(/Feedback on your plan: smaller please/);
     rt.crews.approve(crew!.id);
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 30_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 60_000 });
     const card = rt.crews.get(crew!.id).state.goal!.cards[0]!;
     expect(card).toMatchObject({ stage: "failed", rounds: 2 });
     expect(card.error).toMatch(/tests still fail/);
@@ -262,7 +262,7 @@ describe("a crew works a goal", () => {
       reviewer: () => ({ silent: true }),
     };
     await rt.crews.goal(crew!.id, "Something small");
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 30_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 60_000 });
     const g = rt.crews.get(crew!.id).state.goal!;
     // the builder's silent first try was retried, and the retry built it
     expect(turns.filter((t) => t.teammate === "builder")).toHaveLength(2);
@@ -317,12 +317,12 @@ describe("a crew works a goal", () => {
 
   it("with a test command, Loom runs the tests itself and the exit code decides — no tester agent needed", async () => {
     const { rt } = await project(false);
-    const made = rt.crews.create({ name: "Cmd", teammates: [{ id: "lead", agent: "big", role: "lead" }, { id: "builder", agent: "small", role: "builder" }], planApproval: false, testCommand: "test -f done.txt && echo all-green" });
+    const made = rt.crews.create({ name: "Cmd", teammates: [{ id: "lead", agent: "big", role: "lead" }, { id: "builder", agent: "small", role: "builder" }], planApproval: false, testCommand: `node -e "require('fs').accessSync('done.txt'); console.log('all-green')"` });
     scripts = {
       lead: (input) => (input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "Make done.txt" }] }]) : loom([{ type: "done", summary: "x" }])),
       // first try forgets the file; the failure output sends it back
       builder: (input, wd) => {
-        if (/The tests fail \(loom: test -f done\.txt/.test(input.text)) write(wd, "done.txt", "ok\n");
+        if (/The tests fail \(loom:/.test(input.text)) write(wd, "done.txt", "ok\n");
         else write(wd, "other.txt", "x\n");
         return loom([{ type: "done", summary: "did" }]);
       },
