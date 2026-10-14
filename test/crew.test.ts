@@ -11,7 +11,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { registerAgentKind } from "../src/adapters/index.js";
 import { AdapterBase } from "../src/adapters/base.js";
@@ -119,6 +119,14 @@ describe("crew protocol", () => {
 });
 
 describe("a crew works a goal", () => {
+  it("lists a crew's channel without recursively decorating the chat list", async () => {
+    const { rt, crew } = await project();
+    const list = vi.spyOn(rt.crews, "list");
+    const chats = rt.chats();
+    expect(chats.filter(c => c.id === crew!.state.channel)).toHaveLength(1);
+    expect(list).toHaveBeenCalledTimes(1);
+    list.mockRestore();
+  });
   it("plans, waits for approval, builds, reviews (with one round of changes), tests and finishes", async () => {
     const { dir, rt, crew } = await project();
     scripts = {

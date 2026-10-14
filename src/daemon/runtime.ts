@@ -225,7 +225,7 @@ export class ProjectRuntime {
       harness: (id) => this.harnesses.ensure(id),
       kickQueue: () => this.kickQueue(),
       nativeOptions: (id) => this.policyOptions(this.config.agents.find(a => a.id === id)!),
-      chatExists: (chat) => this.chats().some(c => c.id === chat),
+      chatExists: (chat) => this.conversations.chats().some(c => c.id === chat),
       staleTurnMs: ProjectRuntime.STALE_TURN_MS,
       get closed() { return runtime.closed; },
       agentDir: (...args) => this.agentDir(...args),
@@ -343,7 +343,7 @@ export class ProjectRuntime {
       },
       // Asked before a run is told to answer in a thread: an id from a client
       // is a claim about this machine, and Main is real without being stored.
-      chatExists: (id) => this.chats().some((c) => c.id === id),
+      chatExists: (id) => this.conversations.chats().some((c) => c.id === id),
       briefingFor: async (query, agentId, files) =>
         [
           this.activeSkillsBlock(),
@@ -388,7 +388,9 @@ export class ProjectRuntime {
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       createChat: (title, opts) => this.createChat(title, opts?.agentId ? { agentId: opts.agentId } : {}),
-      chatExists: (id) => this.chats().some((c) => c.id === id),
+      // The decorated sidebar list calls crews.list() to discover groups.
+      // Using it to validate a crew's channel recurses back into crew state.
+      chatExists: (id) => this.conversations.chats().some((c) => c.id === id),
       briefingFor: async (query, agentId) =>
         [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
           .filter(Boolean)
