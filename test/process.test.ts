@@ -42,6 +42,10 @@ describe("portable CLI launches", () => {
     expect(commandInvocation("agent", ["a&b"], { env })).toEqual({ command: process.execPath, args: [entry, "a&b"] });
     const { stdout } = await promisify(execFile)("agent", ['"quoted" & %PATH%'], { env });
     expect(JSON.parse(stdout)).toEqual(['"quoted" & %PATH%']);
+    const native = path.join(dir, "native.exe");
+    fs.writeFileSync(native, "fixture");
+    fs.writeFileSync(path.join(dir, "native-agent.cmd"), '@echo off\n"%dp0%\\native.exe"   %*\n');
+    expect(commandInvocation("native-agent", ["a&b", '"quoted"'], { env })).toEqual({ command: native, args: ["a&b", '"quoted"'] });
     fs.writeFileSync(path.join(dir, "tool.exe"), "");
     expect(findExecutable("tool", env)).toBe(path.join(dir, "tool.exe"));
   });

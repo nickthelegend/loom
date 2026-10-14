@@ -49,6 +49,15 @@ export function commandInvocation(command: string, args: readonly string[], opti
       if (fs.existsSync(script)) return { command: process.execPath, args: [script, ...args] };
     }
   }
+  // npm also wraps native binaries (OpenCode 1.19+ on Windows). Unwrap only
+  // its literal %dp0% executable + %* form, without interpreting batch code.
+  if (/\.(cmd|bat)$/i.test(file)) {
+    const entry = /"%(?:dp0%|~dp0)[\\/]([^"\r\n]+\.(?:exe|com))"\s+%\*/i.exec(text)?.[1];
+    if (entry) {
+      const binary = path.resolve(path.dirname(file), entry);
+      if (fs.existsSync(binary)) return { command: binary, args: [...args] };
+    }
+  }
   // npm also writes an extensionless POSIX shim next to the .cmd file.
   if (!path.extname(file) && fs.existsSync(`${file}.cmd`)) return commandInvocation(`${file}.cmd`, args, options);
   return { command: file, args: [...args] };
