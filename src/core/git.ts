@@ -23,7 +23,7 @@
  * commit", "please tell me who you are").
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import path from "node:path";
 import { logbook } from "./logbook.js";
 
@@ -90,7 +90,7 @@ export function safeRelPath(dir: string, rel: string): string {
   if (!inside) throw new GitError(`"${rel}" is outside the project`, "");
   const out = path.relative(root, full);
   if (!out) throw new GitError("that's the project itself, not a file in it", "");
-  return out;
+  return out.split(path.sep).join("/");
 }
 
 function checkAll(dir: string, paths: string[]): string[] {

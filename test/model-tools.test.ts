@@ -294,7 +294,7 @@ describe("the allow-list", () => {
 
   it("runs an allowed command and brings back what it said", async () => {
     const dir = project();
-    const r = await applyRun(dir, call("run", { command: "echo hello" }), ["echo"]);
+    const r = await applyRun(dir, call("run", { command: "node -p 'hello'" }), ["node"]);
     expect(r.ok).toBe(true);
     expect(r.content).toContain("hello");
     expect(r.content).toContain("exit 0");
@@ -304,7 +304,7 @@ describe("the allow-list", () => {
     const dir = project();
     // `ls` on something that isn't there exits non-zero — which is the thing
     // the model asked to find out.
-    const r = await applyRun(dir, call("run", { command: "ls no-such-file" }), ["ls"]);
+    const r = await applyRun(dir, call("run", { command: "node no-such-file" }), ["node"]);
     expect(r.ok).toBe(true);
     expect(r.content).toMatch(/exit [1-9]/);
   });

@@ -253,7 +253,7 @@ beforeAll(async () => {
   const bin = tmpDir("p4-bin");
   fs.writeFileSync(
     path.join(bin, "gh"),
-    `#!/bin/sh\ncase "$*" in\n  *"pr create"*) n=$(cat "${bin}/n" 2>/dev/null || echo 6); n=$((n+1)); echo $n > "${bin}/n"; echo "https://github.com/acme/app/pull/$n" ;;\n  *) echo "[]" ;;\nesac\n`,
+    `#!/usr/bin/env node\nconst fs=require("node:fs"),path=require("node:path"),args=process.argv.slice(2).join(" ");\nif(args.includes("pr create")){const f=path.join(__dirname,"n");let n=6;try{n=Number(fs.readFileSync(f,"utf8"))}catch{}fs.writeFileSync(f,String(++n));console.log("https://github.com/acme/app/pull/"+n)}else console.log("[]");\n`,
     { mode: 0o755 },
   );
   oldPath = process.env.PATH;

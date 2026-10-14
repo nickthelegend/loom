@@ -11,7 +11,7 @@
  * item worded differently.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -315,7 +315,7 @@ export async function setupReport(): Promise<SetupReport> {
         kind: a.kind,
         label: a.label,
         found,
-        install: INSTALL[a.kind] ?? "",
+        install: p === "win32" && a.kind === "opencode" ? "npm i -g opencode-ai" : p === "win32" && a.kind === "codex" ? "npm i -g @openai/codex" : INSTALL[a.kind] ?? "",
         authed: auth.authed,
         ...(auth.detail ? { authDetail: auth.detail } : {}),
         auth: AUTH[a.kind] ?? "",

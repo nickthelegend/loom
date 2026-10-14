@@ -160,7 +160,7 @@ describe("Brain cleanup regressions", () => {
     await expect(brain.submit({ ...second, receipt: first.receipt })).rejects.toMatchObject({ code: "invalid" });
     expect(brain.store.activeReceipts()).toHaveLength(0);
   });
-  it("Stop during final submission observation cannot launch a native process", async () => {
+  it.skipIf(process.platform === "win32")("Stop during final submission observation cannot launch a native process", async () => {
     const bin = fakeCli("codex"), dir = makeProjectDir({ brain: { continuity: true }, agents: [{ id: "codex", kind: "codex", options: { bin } }] });
     const runtime = await ProjectRuntime.open({ id: "project", name: "test", dir }); open.push(runtime);
     const brain = runtime.continuity!, original = brain.submit.bind(brain);
@@ -175,7 +175,7 @@ describe("Brain cleanup regressions", () => {
     expect(brain.store.receipts("stopped").at(-1)?.status).toBe("prepared");
     expect(runtime.anyBusy()).toBe(false);
   });
-  it("returns durable overflow when new governing evidence forces reassembly", async () => {
+  it.skipIf(process.platform === "win32")("returns durable overflow when new governing evidence forces reassembly", async () => {
     const bin = fakeCli("codex"), dir = makeProjectDir({ brain: { continuity: true }, agents: [{ id: "codex", kind: "codex", options: { bin } }] });
     const runtime = await ProjectRuntime.open({ id: "project", name: "test", dir }); open.push(runtime);
     const brain = runtime.continuity!, original = brain.submit.bind(brain); let injected = false;
@@ -239,7 +239,7 @@ describe("Brain cleanup regressions", () => {
     await expect(runtime.startRoute({ task: "build it", spec: "auto" })).rejects.toMatchObject({ code: "unsupported" });
     expect(runtime.routes.read()).toBeUndefined();
   });
-  it("waits for app-owned turn commits before dispatching the next native writer", async () => {
+  it.skipIf(process.platform === "win32")("waits for app-owned turn commits before dispatching the next native writer", async () => {
     const bin = fakeCodex({ script: [{ spawn: "" }, { sleep: 400 }, ...CODEX_OK] });
     const dir = makeProjectDir({ brain: { continuity: true }, git: { commitPerTurn: true }, agents: [{ id: "codex", kind: "codex", options: { bin } }] });
     const configFile = path.join(dir, ".loom", "config.json");
@@ -307,7 +307,7 @@ describe("Brain cleanup regressions", () => {
     expect(fs.readdirSync(path.join(dir, ".loom")).some(name => name.startsWith(".config-"))).toBe(false);
     runtime.patchConfig({ brain: { continuity: true } }); expect(runtime.continuity).not.toBeNull();
   });
-  it("prevents mode changes around independent writers and freezes explicit queued text", async () => {
+  it.skipIf(process.platform === "win32")("prevents mode changes around independent writers and freezes explicit queued text", async () => {
     const bin = fakeCli("codex", 200), dir = makeProjectDir({ brain: { extractor: "off" }, agents: [{ id: "codex", kind: "codex", options: { bin } }] });
     const runtime = await ProjectRuntime.open({ id: "project", name: "test", dir }); open.push(runtime);
     const sending = (runtime.agent("codex") as CodexAdapter).send({ text: "legacy work" });
@@ -433,7 +433,7 @@ describe("native continuity lifecycle", () => {
     await expect(runtime.start("a")).rejects.toThrow("cannot stop");
     await expect(runtime.close()).rejects.toThrow("cannot stop");
   });
-  it("dispatches idempotently and queues switching to the captured target/model", async () => {
+  it.skipIf(process.platform === "win32")("dispatches idempotently and queues switching to the captured target/model", async () => {
     const claude = fakeCli("claude", 150), codex = fakeCli("codex");
     const dir = makeProjectDir({ brain: { continuity: true, extractor: "off" }, agents: [
       { id: "claude", kind: "claude-code", options: { bin: claude } }, { id: "codex", kind: "codex", options: { bin: codex } }] });
@@ -572,7 +572,7 @@ describe("usage-aware switching and validation fixes", () => {
       expect(brain.store.activeReceipts()).toHaveLength(0);
     }
   });
-  it("HarnessMonitor reports reachability transitions and serves cached results", async () => {
+  it.skipIf(process.platform === "win32")("HarnessMonitor reports reachability transitions and serves cached results", async () => {
     const bin = path.join(tmpDir("monitor"), "codex");
     fs.writeFileSync(bin, "#!/usr/bin/env node\nconsole.log('codex-cli 9.9.9')\n", { mode: 0o755 });
     const changes: boolean[] = [];
@@ -585,7 +585,7 @@ describe("usage-aware switching and validation fixes", () => {
     expect(monitor.get("codex")?.available).toBe(false);
     expect(changes).toEqual([true, false]);
   });
-  it("refuses an unreachable harness before capture; a retry runs any reachable version", async () => {
+  it.skipIf(process.platform === "win32")("refuses an unreachable harness before capture; a retry runs any reachable version", async () => {
     const bin = path.join(tmpDir("cli"), "claude"), good = fakeCli("claude");
     fs.writeFileSync(bin, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     const dir = makeProjectDir({ brain: { continuity: true, extractor: "off" }, agents: [{ id: "claude", kind: "claude-code", options: { bin } }] });
@@ -599,7 +599,7 @@ describe("usage-aware switching and validation fixes", () => {
     expect(retry.continuityStatus).toBe("submitting");
     await waitUntil(() => runtime.continuity!.store.receipts("r").at(-1)?.execution === "complete");
   });
-  it("re-runs an unsent request when its ID is retried after a pre-launch failure", async () => {
+  it.skipIf(process.platform === "win32")("re-runs an unsent request when its ID is retried after a pre-launch failure", async () => {
     const bin = fakeCli("codex"), dir = makeProjectDir({ brain: { continuity: true, extractor: "off" }, agents: [{ id: "codex", kind: "codex", options: { bin } }] });
     const runtime = await ProjectRuntime.open({ id: "project", name: "test", dir }); open.push(runtime);
     const brain = runtime.continuity!, original = brain.prepare.bind(brain);

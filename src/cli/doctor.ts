@@ -4,7 +4,7 @@
  * build freshness, binding), and the current project's config.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "../core/process.js";
 import { codexBin, codexVersion } from "../providers/codex/adapter.js";
 import fs from "node:fs";
 import path from "node:path";

@@ -22,7 +22,7 @@ let pid: string;
 
 function loom(...args: string[]): Promise<{ out: string; code: number }> {
   return new Promise((resolve) =>
-    execFile(path.join(root, "node_modules", ".bin", "tsx"), [path.join(root, "src", "cli", "index.ts"), ...args], {
+    execFile(process.execPath, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), path.join(root, "src", "cli", "index.ts"), ...args], {
       cwd: dir,
       env: { ...process.env, NO_COLOR: "1" },
     }, (e, so, se) => resolve({ out: so + se, code: e ? Number((e as { code?: number }).code ?? 1) : 0 })),

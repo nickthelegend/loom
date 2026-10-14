@@ -16,7 +16,7 @@
  * The hub never holds a readable team key.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

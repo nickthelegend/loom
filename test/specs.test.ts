@@ -253,7 +253,7 @@ describe("voice", () => {
   });
 
   it("runs the configured command on the audio and returns its text", async () => {
-    process.env.LOOM_STT_CMD = "printf 'ship the login page'; cat {file} > /dev/null";
+    process.env.LOOM_STT_CMD = `node -e "require('fs').readFileSync(process.argv[1]);console.log('ship the login page')" {file}`;
     const r = await fetch(`${baseUrl}/api/projects/${projectId}/voice`, {
       method: "POST",
       headers: { ...H(), "content-type": "application/octet-stream" },
@@ -265,7 +265,7 @@ describe("voice", () => {
   });
 
   it("422s when the transcriber hears nothing, rather than sending ''", async () => {
-    process.env.LOOM_STT_CMD = "true";
+    process.env.LOOM_STT_CMD = "node -e \"process.exit(0)\"";
     const r = await fetch(`${baseUrl}/api/projects/${projectId}/voice`, {
       method: "POST",
       headers: { ...H(), "content-type": "application/octet-stream" },

@@ -347,7 +347,7 @@ describe("the daemon's team routes and the `loom team` CLI", () => {
       // the CLI renders the same view
       const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
       const out = await new Promise<string>((resolve) =>
-        execFile(path.join(root, "node_modules", ".bin", "tsx"), [path.join(root, "src", "cli", "index.ts"), "team"], {
+        execFile(process.execPath, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), path.join(root, "src", "cli", "index.ts"), "team"], {
           cwd: dir,
           env: { ...process.env, NO_COLOR: "1" },
         }, (_e, so, se) => resolve(so + se)),

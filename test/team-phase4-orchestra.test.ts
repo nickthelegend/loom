@@ -94,7 +94,7 @@ beforeAll(async () => {
   ghLog = path.join(bin, "calls.log");
   fs.writeFileSync(
     path.join(bin, "gh"),
-    `#!/bin/sh\necho "$@" >> "${ghLog}"\ncase "$*" in\n  *"pr create"*) n=$(cat "${bin}/n" 2>/dev/null || echo 20); n=$((n+1)); echo $n > "${bin}/n"; echo "https://github.com/acme/app/pull/$n" ;;\nesac\n`,
+    `#!/usr/bin/env node\nconst fs=require("node:fs"),path=require("node:path"),args=process.argv.slice(2).join(" ");fs.appendFileSync(${JSON.stringify(ghLog)}, args+"\\n");\nif(args.includes("pr create")){const f=path.join(__dirname,"n");let n=20;try{n=Number(fs.readFileSync(f,"utf8"))}catch{}fs.writeFileSync(f,String(++n));console.log("https://github.com/acme/app/pull/"+n)}else console.log("[]");\n`,
     { mode: 0o755 },
   );
   oldPath = process.env.PATH;

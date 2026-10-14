@@ -19,7 +19,7 @@
  * crews across people are later phases (§11).
  */
 
-import { execFile } from "node:child_process";
+import { execFile, shellInvocation } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -193,7 +193,8 @@ const TURN_TEXT_CAP = 40_000;
 /** Run a crew's test command in the worktree: ok when it exits 0; the output's tail either way. */
 function runTests(command: string, cwd: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
-    execFile("/bin/sh", ["-c", command], { cwd, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } },
+    const shell = shellInvocation(command);
+    execFile(shell.command, shell.args, { windowsVerbatimArguments: shell.windowsVerbatimArguments, cwd, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } },
       (err, stdout, stderr) => {
         const output = `${stdout}${stderr ? `\n${stderr}` : ""}`.trim().slice(-8000);
         const timedOut = Boolean(err && (err as NodeJS.ErrnoException & { killed?: boolean }).killed);

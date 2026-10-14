@@ -12,7 +12,7 @@ import { tmpDir } from "./helpers.js";
 
 const fake = (dir: string, version: string): string => {
   const p = path.join(dir, "codex");
-  fs.writeFileSync(p, `#!/bin/sh\necho "codex-cli ${version}"\n`, { mode: 0o755 });
+  fs.writeFileSync(p, `#!/usr/bin/env node\nconsole.log("codex-cli ${version}");\n`, { mode: 0o755 });
   return p;
 };
 

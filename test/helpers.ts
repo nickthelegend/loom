@@ -22,7 +22,7 @@ process.once("exit", () => {
 });
 
 export function tmpDir(prefix: string): string {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), `loom-test-${prefix}-`));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), `loom-test-${process.env.LOOM_TEST_RUN_ID ?? "local"}-${prefix}-`));
   made.push(d);
   return d;
 }

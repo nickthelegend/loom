@@ -3,7 +3,8 @@
  * persistence, and small process/http helpers used by concrete adapters.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn } from "../core/process.js";
 import net from "node:net";
 import type {
   Adapter,

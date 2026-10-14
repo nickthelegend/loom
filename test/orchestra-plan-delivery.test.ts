@@ -173,9 +173,9 @@ describe("git delivery", () => {
   it("pr pushes the run's own branch and opens a PR with gh", async () => {
     const bin = tmpDir("fake-gh");
     const log = path.join(bin, "gh.log");
-    fs.writeFileSync(path.join(bin, "gh"), `#!/bin/sh\necho "$@" >> "${log}"\necho https://github.com/acme/app/pull/42\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, "gh"), `#!/usr/bin/env node\nrequire("node:fs").appendFileSync(${JSON.stringify(log)},process.argv.slice(2).join(" ")+"\\n");console.log("https://github.com/acme/app/pull/42");\n`, { mode: 0o755 });
     const PATH = process.env.PATH;
-    process.env.PATH = `${bin}:${PATH}`;
+    process.env.PATH = `${bin}${path.delimiter}${PATH}`;
     try {
       await openProject("pr");
       script = [loom([{ type: "spawn", title: "a", agent: "alpha", prompt: "write:a.txt" }]), loom([{ type: "done", summary: "built a" }])];

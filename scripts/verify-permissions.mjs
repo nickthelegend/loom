@@ -22,8 +22,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.LOOM_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "loom-vp-home-"));
-const { createAgent } = await import(`${ROOT}/dist/adapters/index.js`);
-const { PERMISSION_MODES, PERMISSION_PROFILES } = await import(`${ROOT}/dist/core/permissions.js`);
+const { createAgent } = await import(new URL("../dist/adapters/index.js", import.meta.url));
+const { PERMISSION_MODES, PERMISSION_PROFILES } = await import(new URL("../dist/core/permissions.js", import.meta.url));
 
 const kinds = (process.argv[2] ?? "claude-code,codex,antigravity-cli,grok-code,opencode").split(",");
 const OPTS = { opencode: { model: "opencode/big-pickle" } };

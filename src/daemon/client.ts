@@ -3,7 +3,7 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
-import { spawn } from "node:child_process";
+import { spawn } from "../core/process.js";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import type {

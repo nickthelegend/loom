@@ -261,6 +261,30 @@ agents' **memory together** so work *continues* across them instead of forking.
 
 Requires **Node ≥ 22.5** (Loom's event log uses the built-in `node:sqlite`).
 
+On **Windows**, install Node.js and Git for Windows, then use PowerShell or
+Command Prompt. Bash and WSL are not required. From a source checkout:
+
+```powershell
+git clone https://github.com/nickthelegend/loom.git
+cd loom
+npm.cmd ci
+npm.cmd link
+loom.cmd doctor
+```
+
+For a managed source installation, run `scripts/install.ps1` in PowerShell
+(it clones into `%USERPROFILE%\.loom-src`, builds, and links the CLI). Use
+`loom.cmd` when PowerShell's execution policy blocks npm's `.ps1` shim.
+Install agents separately: `npm.cmd i -g @openai/codex opencode-ai`, then
+sign in to the agents you use. Claude Code's native Windows installer is also
+detected under `%USERPROFILE%\.local\bin`.
+
+Normal chat, shared memory, routes, Orchestra worktrees and crews use the
+standard runtime on Windows. The optional **native continuity** mode
+(`brain.continuity: true`) requires verified process containment and remains
+unavailable on Windows until Job Objects are implemented. Leave it off for
+Orchestra and crews, which also run outside native continuity on other OSes.
+
 ```bash
 npm install -g @loompad/cli          # → `loom` on your PATH
 ```

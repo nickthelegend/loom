@@ -5,7 +5,7 @@
  * push — see daemon/push.ts.
  */
 
-import { spawn } from "node:child_process";
+import { spawn } from "./process.js";
 
 export interface Notification {
   title: string;

@@ -21,7 +21,8 @@
  */
 
 import { attachedImages } from "../providers/attachments.js";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { execFile, spawn, stopWindowsTree } from "../core/process.js";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -175,13 +176,15 @@ export class OpenCodeAdapter extends AdapterBase {
     const pid = Number(this.nativeState.read().servePid ?? 0);
     if (!pid) return;
     const cmd = await new Promise<string>((resolve) => {
-      execFile("ps", ["-p", String(pid), "-o", "command="], (err, stdout) =>
+      const windows = process.platform === "win32";
+      execFile(windows ? "powershell.exe" : "ps", windows ? ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`] : ["-p", String(pid), "-o", "command="], { timeout: 8000 }, (err, stdout) =>
         resolve(err ? "" : stdout.trim()),
       );
     });
-    if (/opencode serve/.test(cmd)) {
+    if (/opencode(?:\.exe)?["\s]+serve\b/i.test(cmd)) {
       try {
-        process.kill(pid, "SIGTERM");
+        if (process.platform === "win32") await new Promise<void>((resolve) => execFile("taskkill.exe", ["/pid", String(pid), "/T", "/F"], () => resolve()));
+        else process.kill(pid, "SIGTERM");
         this.emit({ kind: "status", payload: { state: "reaped_orphan_serve", pid } });
       } catch {
         // already gone
@@ -208,6 +211,7 @@ export class OpenCodeAdapter extends AdapterBase {
         { cwd: this.projectDir, stdio: "ignore", env: { ...agentEnv(), ...opencodePermissionEnv(this.options) } },
       );
       this.child = child;
+      child.on("error", (error) => this.emit({ kind: "error", payload: { message: `opencode serve could not start: ${error.message}` } }));
       this.recordServePid(child.pid);
       child.on("close", (code, signal) => {
         if (!this.started) return;
@@ -1032,7 +1036,8 @@ export class OpenCodeAdapter extends AdapterBase {
     this.sseAbort?.abort();
     this.sseAbort = null;
     if (this.child) {
-      this.child.kill("SIGTERM");
+      if (process.platform === "win32") await stopWindowsTree(this.child);
+      else this.child.kill("SIGTERM");
       this.child = null;
     }
     this.emit({ kind: "status", payload: { state: "stopped" } });

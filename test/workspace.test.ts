@@ -329,30 +329,32 @@ describe("terminal", () => {
   it("keeps cd across commands — it is one shell, not one per command", async () => {
     await runTerm("t1", "cd src/checkout", /\$|%|#|>/);
     // a later, separate command still sees the new directory
-    const out = await runTerm("t1", "pwd", /src\/checkout/);
+    const out = await runTerm("t1", (process.platform === "win32" ? "cd" : "pwd"), /src[\\/]checkout/);
     expect(out).toContain(path.join("src", "checkout"));
   });
 
   it("keeps shell variables across commands", async () => {
-    await runTerm("t1", "LOOM_TEST_VAR=woven", /\$|%|#|>/);
-    const out = await runTerm("t1", "echo \"v=$LOOM_TEST_VAR\"", /v=woven/);
+    await runTerm("t1", (process.platform === "win32" ? "set LOOM_TEST_VAR=woven" : "LOOM_TEST_VAR=woven"), /\$|%|#|>/);
+    const out = await runTerm("t1", (process.platform === "win32" ? "echo v=%LOOM_TEST_VAR%" : "echo \"v=$LOOM_TEST_VAR\""), /v=woven/);
     expect(out).toMatch(/v=woven/);
   });
 
   it("isolates terminals from each other", async () => {
     await post(`/api/projects/${projectId}/term/open`, { term: "t2" });
     // quoted: unquoted brackets are a glob, and zsh aborts a script on no-match
-    const out = await runTerm("t2", 'echo "[$LOOM_TEST_VAR]"', /\[\]/);
+    const out = await runTerm("t2", `node -p "'['+(process.env.LOOM_TEST_VAR||'')+']'"`, /\[\]/);
     expect(out).toMatch(/\[\]/); // t1's variable is not visible here
   });
 
   it("interrupts a running command without killing the shell", async () => {
     const before = termFrames.length;
-    const data = mode === "pty" ? "sleep 30\r" : "sleep 30";
+    const command = `node -e "setTimeout(()=>{},30000)"`;
+    const data = mode === "pty" ? command + "\r" : command;
     await post(`/api/projects/${projectId}/term/input`, { term: "t2", data });
     await new Promise((r) => setTimeout(r, 400));
     await post(`/api/projects/${projectId}/term/signal`, { term: "t2" });
-    await new Promise((r) => setTimeout(r, 600));
+    if (mode === "pipe") await waitUntil(() => termFrames.slice(before).some(f => f.term === "t2" && f.exit !== undefined));
+    else await new Promise((r) => setTimeout(r, 600));
     // the session must survive the interrupt in both modes
     expect(termFrames.slice(before).some((f) => f.term === "t2" && f.closed)).toBe(false);
     // ...and the shell must be free again, which is the only proof the sleep
@@ -361,7 +363,7 @@ describe("terminal", () => {
     // passes while `sleep 30` is still holding the shell — we'd be reading our
     // own keystrokes back. The quotes survive the echo but not the expansion,
     // so ALIVE appears only in real output.
-    const out = await runTerm("t2", 'echo AL"IVE"', /ALIVE/);
+    const out = await runTerm("t2", `node -p "['AL','IVE'].join('')"`, /ALIVE/);
     expect(out).toMatch(/ALIVE/);
   });
 
@@ -452,7 +454,7 @@ describe("terminal · pipe mode", () => {
     const ok = await runForExit("t1", "echo sentinel-check");
     expect(ok.exit).toBe(0);
     // a subshell — a bare `exit` would take the session's shell down with it
-    const bad = await runForExit("t1", "(exit 3)");
+    const bad = await runForExit("t1", "node -e \"process.exit(3)\"");
     expect(bad.exit).toBe(3);
     expect(outputSince(0, "t1")).not.toContain("__LOOM_END__");
   });

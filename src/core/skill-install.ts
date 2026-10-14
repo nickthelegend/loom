@@ -33,7 +33,7 @@
  * that nobody is at a terminal to answer.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

@@ -31,7 +31,8 @@
  *     another tool later rewrites that dir's mapping.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +55,7 @@ interface AntigravityOptions {
 
 /** The installer drops the binary here; it isn't always on the daemon's PATH. */
 const INSTALLED = [
+  ...(process.platform === "win32" ? [path.join(os.homedir(), ".local", "bin", "agy.exe")] : []),
   path.join(os.homedir(), ".local", "bin", "agy"),
 ];
 

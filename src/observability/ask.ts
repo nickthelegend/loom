@@ -23,7 +23,7 @@
  *     trace backend that isn't running.
  */
 
-import { spawn } from "node:child_process";
+import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

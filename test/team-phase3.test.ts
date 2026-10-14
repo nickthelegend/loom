@@ -63,7 +63,7 @@ beforeAll(async () => {
   const bin = tmpDir("p3-bin");
   fs.writeFileSync(
     path.join(bin, "gh"),
-    '#!/bin/sh\ncase "$*" in\n  "auth status") exit 0 ;;\n  *"pr list"*) echo "[]" ;;\n  *"pr create"*) echo "https://github.com/acme/app/pull/42" ;;\n  *) exit 1 ;;\nesac\n',
+    `#!/usr/bin/env node\nconst a=process.argv.slice(2).join(" ");if(a==="auth status")process.exit(0);if(a.includes("pr list"))console.log("[]");else if(a.includes("pr create"))console.log("https://github.com/acme/app/pull/42");else process.exit(1);\n`,
     { mode: 0o755 },
   );
   oldPath = process.env.PATH;

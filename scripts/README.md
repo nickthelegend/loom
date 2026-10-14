@@ -3,6 +3,8 @@
 | Script | What it does |
 |---|---|
 | `install.sh` | One-line install: clone, build, link `loom` (`curl -fsSL …/scripts/install.sh \| bash`) |
+| `install.ps1` | Native PowerShell install: clone, build, link `loom.cmd`; re-run to update |
+| `test.mjs` | Runs backend tests, then browser suites serially, without shell glob expansion |
 | `stage-daemon.mjs` | Copies the built daemon into `desktop/build/daemon` before packaging the desktop app |
 | `gen-brand-icons.mjs` | Regenerates the app and agent brand icons |
 | `sync-edge-shared.mjs` | Copies self-contained `src/core` files the hosted hub's Edge Functions run (`supabase/functions/_shared/`); `test/github-events.test.ts` fails when a copy drifts |

@@ -12,7 +12,7 @@
  *   5 min · D36 leases release when the goal lands · D37–D39 team policy.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "../core/process.js";
 
 import { logbook } from "../core/logbook.js";
 import { notify } from "../core/notify.js";

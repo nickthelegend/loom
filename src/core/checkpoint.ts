@@ -44,7 +44,7 @@
  * itself rewindable, or it is a trap.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import fs from "node:fs";
 
 import { GitError } from "./git.js";

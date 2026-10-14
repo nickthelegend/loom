@@ -24,6 +24,7 @@
 import { attachedImages } from "../attachments.js";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { randomUUID } from "node:crypto";
 import {
   query, type CanUseTool, type McpServerConfig, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKMessage,
@@ -61,8 +62,9 @@ export interface ClaudeAdapterOptions {
  */
 export function claudeBin(override?: string): string | null {
   if (override) return fs.existsSync(override) ? override : null;
-  const home = process.env.HOME ?? "";
-  for (const p of [`${home}/.local/bin/claude`, "/opt/homebrew/bin/claude", "/usr/local/bin/claude", `${home}/.bun/bin/claude`, `${home}/.volta/bin/claude`]) {
+  const home = process.env.HOME ?? os.homedir();
+  const candidates = process.platform === "win32" ? [path.join(home, ".local", "bin", "claude.exe")] : [`${home}/.local/bin/claude`, "/opt/homebrew/bin/claude", "/usr/local/bin/claude", `${home}/.bun/bin/claude`, `${home}/.volta/bin/claude`];
+  for (const p of candidates) {
     if (p && fs.existsSync(p)) return p;
   }
   return "claude";

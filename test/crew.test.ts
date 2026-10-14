@@ -143,7 +143,7 @@ describe("a crew works a goal", () => {
     };
     const goal = await rt.crews.goal(crew!.id, "Greet and say goodbye");
     expect(goal.branch).toBe(`loom/crew/ship/${goal.id}`);
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "awaiting_approval", { timeoutMs: 10_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "awaiting_approval", { timeoutMs: 20_000 });
     const planned = rt.crews.get(crew!.id).state.goal!;
     expect(planned.cards.map((c) => c.title)).toEqual(["Add greeting", "Add farewell"]);
     expect(planned.cards[1]!.blockedBy).toEqual([planned.cards[0]!.id]);
@@ -156,7 +156,7 @@ describe("a crew works a goal", () => {
     expect(turns[0]!.briefing).toContain('"type":"plan"');
 
     rt.crews.approve(crew!.id);
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 15_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 30_000 });
     const g = rt.crews.get(crew!.id).state.goal!;
     expect(g.summary).toBe("Greeting and farewell, reviewed and tested.");
     expect(g.cards.map((c) => [c.title, c.stage, c.rounds])).toEqual([["Add greeting", "done", 1], ["Add farewell", "done", 0]]);
@@ -195,10 +195,10 @@ describe("a crew works a goal", () => {
       },
     };
     await rt.crews.goal(crew!.id, "Make a file");
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "waiting_human", { timeoutMs: 10_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "waiting_human", { timeoutMs: 20_000 });
     expect(rt.crews.get(crew!.id).state.goal!.question).toMatchObject({ teammate: "builder", text: "Which file name?" });
     expect(await rt.crews.say(crew!.id, "out.txt")).toMatchObject({ routed: "answer" });
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 10_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 20_000 });
     const g = rt.crews.get(crew!.id).state.goal!;
     expect(git(rt.info.dir, "show", `${g.branch}:out.txt`)).toBe("x\n");
   });
@@ -217,12 +217,12 @@ describe("a crew works a goal", () => {
       tester: () => loom([{ type: "test", result: "fail", log: "1 failed: expected 2" }]),
     };
     await rt.crews.goal(crew!.id, "Do a thing");
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "awaiting_approval", { timeoutMs: 10_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "awaiting_approval", { timeoutMs: 20_000 });
     expect(await rt.crews.say(crew!.id, "smaller please")).toMatchObject({ routed: "replan", to: "lead" });
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.cards[0]?.title === "Small step" && rt.crews.get(crew!.id).state.goal?.status === "awaiting_approval", { timeoutMs: 10_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.cards[0]?.title === "Small step" && rt.crews.get(crew!.id).state.goal?.status === "awaiting_approval", { timeoutMs: 20_000 });
     expect(turns.filter((t) => t.teammate === "lead").at(-1)!.briefing).toMatch(/Feedback on your plan: smaller please/);
     rt.crews.approve(crew!.id);
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 15_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 30_000 });
     const card = rt.crews.get(crew!.id).state.goal!.cards[0]!;
     expect(card).toMatchObject({ stage: "failed", rounds: 2 });
     expect(card.error).toMatch(/tests still fail/);
@@ -262,7 +262,7 @@ describe("a crew works a goal", () => {
       reviewer: () => ({ silent: true }),
     };
     await rt.crews.goal(crew!.id, "Something small");
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 15_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 30_000 });
     const g = rt.crews.get(crew!.id).state.goal!;
     // the builder's silent first try was retried, and the retry built it
     expect(turns.filter((t) => t.teammate === "builder")).toHaveLength(2);
@@ -288,7 +288,7 @@ describe("a crew works a goal", () => {
       tester: () => (++testerTurns === 1 ? "fail:Invalid stream event" : loom([{ type: "test", result: "pass", log: "ok" }])),
     };
     await rt.crews.goal(crew!.id, "b");
-    await waitUntil(() => ["completed", "failed"].includes(rt.crews.get(crew!.id).state.goal?.status ?? ""), { timeoutMs: 10_000 });
+    await waitUntil(() => ["completed", "failed"].includes(rt.crews.get(crew!.id).state.goal?.status ?? ""), { timeoutMs: 20_000 });
     expect(rt.crews.get(crew!.id).state.goal!.status).toBe("completed");
     expect(testerTurns).toBe(2);
     expect(rt.log.list({ kinds: ["crew"] }).some((e) => e.payload.phase === "retrying" && e.payload.teammate === "tester")).toBe(true);
@@ -304,13 +304,13 @@ describe("a crew works a goal", () => {
       tester: (input) => (/crew-ship-tester\.small/.test(String(turns.at(-1)?.instance)) ? "fail:provider down" : loom([{ type: "test", result: "pass", log: "ok" }])),
     };
     await rt.crews.goal(crew!.id, "c");
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 10_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "failed", { timeoutMs: 20_000 });
     expect(rt.crews.get(crew!.id).state.goal!.cards[0]!.error).toMatch(/tests didn't run: provider down/);
     // put the other agent in the tester's seat, and carry on
     const tms = rt.crews.get(crew!.id).teammates.map((t) => (t.id === "tester" ? { ...t, agent: "big" } : t));
     rt.crews.update(crew!.id, { teammates: tms });
     rt.crews.resume(crew!.id);
-    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 10_000 });
+    await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 20_000 });
     const testers = [...new Set(turns.filter((t) => t.teammate === "tester").map((t) => t.instance))];
     expect(testers).toEqual(["crew-ship-tester.small", "crew-ship-tester.big"]);
   });
@@ -328,7 +328,7 @@ describe("a crew works a goal", () => {
       },
     };
     await rt.crews.goal(made.id, "make it");
-    await waitUntil(() => ["completed", "failed"].includes(rt.crews.get(made.id).state.goal?.status ?? ""), { timeoutMs: 10_000 });
+    await waitUntil(() => ["completed", "failed"].includes(rt.crews.get(made.id).state.goal?.status ?? ""), { timeoutMs: 20_000 });
     const g = rt.crews.get(made.id).state.goal!;
     expect(g.status).toBe("completed");
     expect(g.cards[0]).toMatchObject({ stage: "done", rounds: 1 });

@@ -20,7 +20,7 @@
  * Nothing here talks to GitHub or a hub directly — TeamLink and `gh`/`git` do.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

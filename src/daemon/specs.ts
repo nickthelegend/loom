@@ -12,7 +12,7 @@
  * the project didn't ask for.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, fileCommand, stopWindowsTree } from "../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -211,23 +211,22 @@ export class SpecRunner {
     };
 
     const custom = process.env.LOOM_SPEC_CMD;
-    const [cmd, args] = custom
-      ? ["/bin/sh", ["-c", custom.replaceAll("{file}", file)]]
-      : ["npx", ["--no-install", "playwright", "test", file, "--reporter=line"]];
+    const launch = custom ? fileCommand(custom, file) : { command: "npx", args: ["--no-install", "playwright", "test", file, "--reporter=line"], env: process.env, windowsVerbatimArguments: false };
 
     // Its own process group, so Stop reaches what npx started (the test
     // runner, its workers, the browsers) and not only npx itself.
     const group = process.platform !== "win32";
-    const child = spawn(cmd, args as string[], {
+    const child = spawn(launch.command, launch.args, {
       cwd: projectDir,
-      env: { ...process.env, CI: "1", FORCE_COLOR: "0" },
+      env: { ...launch.env, CI: "1", FORCE_COLOR: "0" },
       stdio: ["ignore", "pipe", "pipe"],
       detached: group,
+      windowsVerbatimArguments: launch.windowsVerbatimArguments,
     });
     const signal = (sig: NodeJS.Signals): void => {
       try {
         if (group && child.pid) process.kill(-child.pid, sig);
-        else child.kill(sig);
+        else void stopWindowsTree(child);
       } catch {
         try { child.kill(sig); } catch { /* already gone */ }
       }

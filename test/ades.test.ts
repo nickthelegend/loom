@@ -255,7 +255,7 @@ describe("ades · finding claude when it isn't on PATH", () => {
     const { claudeBin } = await import("../src/providers/claude/adapter.js");
     const fakeHome = tmpDir("home-claude");
     fs.mkdirSync(path.join(fakeHome, ".local", "bin"), { recursive: true });
-    const installed = path.join(fakeHome, ".local", "bin", "claude");
+    const installed = path.join(fakeHome, ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude");
     fs.writeFileSync(installed, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
     const realHome = process.env.HOME;

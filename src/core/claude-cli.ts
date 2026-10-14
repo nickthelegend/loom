@@ -5,7 +5,7 @@
  * claude-code adapter with sessions and streaming).
  */
 
-import { spawn } from "node:child_process";
+import { spawn } from "./process.js";
 import { agentEnv } from "../adapters/base.js";
 
 export interface ClaudeCliOptions {

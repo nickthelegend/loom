@@ -6,7 +6,7 @@
  * shared thread per project: one conversation, one baton, shared memory.
  */
 
-import { spawn } from "node:child_process";
+import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import { freeUsage } from "../core/free-pool.js";
 import path from "node:path";
@@ -533,8 +533,10 @@ program
     const url = `${client.baseUrl}/app`;
     console.log(url);
     const { spawn: sp } = await import("node:child_process");
-    const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-    sp(opener, [url], { detached: true, stdio: "ignore" }).unref();
+    const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd.exe" : "xdg-open";
+    const child = sp(opener, process.platform === "win32" ? ["/d", "/c", "start", "", url] : [url], { detached: true, windowsHide: true, stdio: "ignore" });
+    child.on("error", () => console.error(`Open ${url} in your browser.`));
+    child.unref();
   });
 
 program

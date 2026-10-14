@@ -28,8 +28,8 @@ const plan = process.argv.includes("--plan");
 
 process.env.LOOM_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "loom-vo-home-"));
 process.env.LOOM_NO_NOTIFY = "1";
-const { ProjectRuntime } = await import(`${ROOT}/dist/daemon/runtime.js`);
-const { writeProjectConfig } = await import(`${ROOT}/dist/core/registry.js`);
+const { ProjectRuntime } = await import(new URL("../dist/daemon/runtime.js", import.meta.url));
+const { writeProjectConfig } = await import(new URL("../dist/core/registry.js", import.meta.url));
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-vo-"));
 const git = (...a) => execFileSync("git", a, { cwd: dir, encoding: "utf8" });

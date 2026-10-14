@@ -19,7 +19,7 @@
  */
 
 import { attachedImages } from "../attachments.js";
-import { execFileSync } from "node:child_process";
+import { execFileSync, findExecutable } from "../../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -75,11 +75,7 @@ export function codexVersion(bin: string): number[] | null {
 }
 
 function onPath(name: string): string | null {
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
-    const p = dir && path.join(dir, name);
-    try { if (p && fs.statSync(p).isFile()) return p; } catch { /* not here */ }
-  }
-  return null;
+  return findExecutable(name);
 }
 
 const newer = (a: number[] | null, b: number[] | null): boolean => {

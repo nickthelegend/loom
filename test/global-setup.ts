@@ -16,7 +16,7 @@ export default function setup(): () => void {
     if (process.env.LOOM_KEEP_TEST_DIRS) return;
     const tmp = os.tmpdir();
     for (const name of fs.readdirSync(tmp)) {
-      if (!name.startsWith("loom-test-")) continue;
+      if (!name.startsWith(`loom-test-${process.env.LOOM_TEST_RUN_ID ?? "local"}-`)) continue;
       const p = path.join(tmp, name);
       try {
         if (fs.statSync(p).birthtimeMs >= started) fs.rmSync(p, { recursive: true, force: true });

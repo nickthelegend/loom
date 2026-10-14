@@ -4,7 +4,7 @@
  * a git repo.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
 

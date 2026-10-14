@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn } from "../core/process.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";

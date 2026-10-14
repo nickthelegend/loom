@@ -9,7 +9,7 @@
  * like "no issues".
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "../core/process.js";
 import { cliAvailable } from "../adapters/base.js";
 
 /** Why a project can't list tasks, in words a setup panel can show. */

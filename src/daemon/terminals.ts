@@ -16,7 +16,8 @@
  * session it left behind.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn, stopWindowsTree, stopWindowsChildren } from "../core/process.js";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -136,7 +137,8 @@ export function loadPty(): PtyModule | null {
       cwd: process.cwd(),
       env: process.env,
     });
-    probe.kill();
+    if (isWin) probe.write("exit\r");
+    else probe.kill();
     ptyModule = mod;
   } catch (err) {
     ptyLoadError = (err as Error).message;
@@ -244,7 +246,7 @@ class PipeSession implements TerminalSession {
   ) {
     this.buf = seed;
     const shell = isWin ? "cmd.exe" : process.env.SHELL || "/bin/sh";
-    this.child = spawn(shell, isWin ? [] : ["-s"], {
+    this.child = spawn(shell, isWin ? ["/d", "/q"] : ["-s"], {
       cwd,
       detached: !isWin, // own process group, so ^C reaches the foreground job
       env: baseEnv(),
@@ -272,6 +274,10 @@ class PipeSession implements TerminalSession {
   }
   interrupt(): void {
     if (!this.child.pid) return;
+    if (isWin) {
+      void stopWindowsChildren(this.child.pid).catch(error => this.events.onData(this.projectId, this.termId, `loom: ${error.message}\n`));
+      return;
+    }
     try {
       process.kill(-this.child.pid, "SIGINT");
     } catch {
@@ -285,7 +291,7 @@ class PipeSession implements TerminalSession {
   kill(): void {
     try {
       if (this.child.pid && !isWin) process.kill(-this.child.pid, "SIGKILL");
-      else this.child.kill("SIGKILL");
+      else void stopWindowsTree(this.child);
     } catch {
       /* gone */
     }

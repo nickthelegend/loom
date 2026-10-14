@@ -16,7 +16,7 @@ import { LoomDaemon } from "../src/daemon/server.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tsx = path.join(root, "node_modules", ".bin", "tsx");
+const tsx = process.execPath;
 const cli = path.join(root, "src", "cli", "index.ts");
 
 let daemon: LoomDaemon;
@@ -26,7 +26,7 @@ let client: DaemonClient;
 
 function runCli(args: string[]): Promise<{ out: string; code: number }> {
   return new Promise((resolve) => {
-    execFile(tsx, [cli, ...args], { cwd: projectDir, env: { ...process.env, NO_COLOR: "1" } }, (err, stdout, stderr) =>
+    execFile(tsx, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), cli, ...args], { cwd: projectDir, env: { ...process.env, NO_COLOR: "1" } }, (err, stdout, stderr) =>
       resolve({ out: stdout + stderr, code: err ? ((err as { code?: number }).code ?? 1) : 0 }),
     );
   });

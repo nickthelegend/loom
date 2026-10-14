@@ -7,7 +7,7 @@
  * from the goals merged since a tag.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "../core/process.js";
 
 import { logbook } from "../core/logbook.js";
 import { notify } from "../core/notify.js";

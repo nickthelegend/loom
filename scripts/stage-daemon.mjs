@@ -65,7 +65,9 @@ fs.copyFileSync(path.join(root, "package-lock.json"), path.join(stage, "package-
 // package.json it sits next to; ours differs (no devDependencies), so install
 // resolves it instead. Slower, and it can't lie about what it produced.
 log("installing production dependencies…");
-execFileSync("npm", ["install", "--omit=dev", "--no-audit", "--no-fund", "--silent"], {
+const npmCli = process.env.npm_execpath;
+if (!npmCli) throw new Error("Run staging through npm run stage so the npm CLI path is available");
+execFileSync(process.execPath, [npmCli, "install", "--omit=dev", "--no-audit", "--no-fund", "--silent"], {
   cwd: stage,
   stdio: ["ignore", "inherit", "inherit"],
 });

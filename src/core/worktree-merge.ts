@@ -23,7 +23,7 @@
  * handoff event and the incoming briefing can say exactly what happened.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
 

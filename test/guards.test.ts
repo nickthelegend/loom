@@ -14,14 +14,14 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const GUARDS = fileURLToPath(new URL("../src/daemon/guards.ts", import.meta.url));
-const tsx = path.resolve(fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url)));
+const tsx = process.execPath;
 
 /** Run a snippet in its own process; report how it ended. */
 function run(body: string): Promise<{ code: number | null; stderr: string; stdout: string }> {
   return new Promise((resolve) => {
     const child = execFile(
       tsx,
-      ["--eval", body],
+      ["--import", "tsx", "--eval", body],
       { timeout: 20_000, env: { ...process.env } },
       (err, stdout, stderr) => {
         resolve({
