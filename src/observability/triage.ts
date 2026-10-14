@@ -10,7 +10,7 @@
  * still works if the backend is down.
  */
 
-import { spawn } from "node:child_process";
+import { spawn } from "../core/process.js";
 import os from "node:os";
 import type { LoomEvent } from "../types.js";
 import { SERVICE_NAME, SPAN_TABLE, chLiteral, chQuery } from "./clickhouse.js";

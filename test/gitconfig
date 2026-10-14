@@ -1,0 +1,8 @@
+[core]
+    autocrlf = false
+    longpaths = true
+[user]
+    name = Loom Test
+    email = test@loom.local
+[init]
+    defaultBranch = main

@@ -16,7 +16,8 @@
  * session it left behind.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn, stopWindowsTree, stopWindowsChildren } from "../core/process.js";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -74,7 +75,7 @@ interface PtyModule {
   spawn(
     file: string,
     args: string[],
-    opts: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv },
+    opts: { name: string; cols: number; rows: number; cwd: string; env: NodeJS.ProcessEnv; useConptyDll?: boolean },
   ): PtyProcess;
 }
 
@@ -135,8 +136,10 @@ export function loadPty(): PtyModule | null {
       rows: 24,
       cwd: process.cwd(),
       env: process.env,
+      ...(isWin ? { useConptyDll: true } : {}),
     });
-    probe.kill();
+    if (isWin) probe.write("exit\r");
+    else probe.kill();
     ptyModule = mod;
   } catch (err) {
     ptyLoadError = (err as Error).message;
@@ -190,6 +193,7 @@ class PtySession implements TerminalSession {
       rows,
       cwd,
       env: baseEnv(),
+      ...(isWin ? { useConptyDll: true } : {}),
     });
     this.proc.onData((d) => {
       this.buf = (this.buf + d).slice(-SCROLLBACK_MAX);
@@ -244,7 +248,7 @@ class PipeSession implements TerminalSession {
   ) {
     this.buf = seed;
     const shell = isWin ? "cmd.exe" : process.env.SHELL || "/bin/sh";
-    this.child = spawn(shell, isWin ? [] : ["-s"], {
+    this.child = spawn(shell, isWin ? ["/d", "/q"] : ["-s"], {
       cwd,
       detached: !isWin, // own process group, so ^C reaches the foreground job
       env: baseEnv(),
@@ -272,6 +276,10 @@ class PipeSession implements TerminalSession {
   }
   interrupt(): void {
     if (!this.child.pid) return;
+    if (isWin) {
+      void stopWindowsChildren(this.child.pid).catch(error => this.events.onData(this.projectId, this.termId, `loom: ${error.message}\n`));
+      return;
+    }
     try {
       process.kill(-this.child.pid, "SIGINT");
     } catch {
@@ -285,7 +293,7 @@ class PipeSession implements TerminalSession {
   kill(): void {
     try {
       if (this.child.pid && !isWin) process.kill(-this.child.pid, "SIGKILL");
-      else this.child.kill("SIGKILL");
+      else void stopWindowsTree(this.child);
     } catch {
       /* gone */
     }
@@ -368,6 +376,8 @@ export class TooManySessionsError extends Error {
 
 export class TerminalManager {
   private sessions = new Map<string, TerminalSession>();
+  private seeds = new Map<string, string>();
+  private typed = new Set<string>();
   private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private events: TermEvents;
 
@@ -419,7 +429,12 @@ export class TerminalManager {
     if (!file || !sess) return;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, sess.scrollback().slice(-SCROLLBACK_MAX));
+      const key = this.key(projectId, termId);
+      const seed = this.seeds.get(key);
+      // An idle Windows cmd session emits several banner lines. Those are
+      // startup output, not new history, and must not stack restored dividers.
+      const text = seed && !this.typed.has(key) ? seed : sess.scrollback();
+      fs.writeFileSync(file, text.slice(-SCROLLBACK_MAX));
     } catch {
       /* a scrollback that can't be saved must never break a terminal */
     }
@@ -474,7 +489,11 @@ export class TerminalManager {
     const sess: TerminalSession = mod
       ? new PtySession(projectId, termId, dir, mod, this.events, cols, rows, seed)
       : new PipeSession(projectId, termId, dir, this.events, seed);
-    this.sessions.set(this.key(projectId, termId), sess);
+    const key = this.key(projectId, termId);
+    this.seeds.set(key, seed);
+    const write = sess.write.bind(sess);
+    sess.write = data => { this.typed.add(key); write(data); };
+    this.sessions.set(key, sess);
     return sess;
   }
 
@@ -494,12 +513,17 @@ export class TerminalManager {
       }
     }
     this.sessions.delete(key);
+    this.seeds.delete(key);
+    this.typed.delete(key);
     sess.kill();
   }
 
   /** Drop a session from the registry once its process is gone. */
   forget(projectId: string, termId: string): void {
-    this.sessions.delete(this.key(projectId, termId));
+    const key = this.key(projectId, termId);
+    this.sessions.delete(key);
+    this.seeds.delete(key);
+    this.typed.delete(key);
   }
 
   closeAll(): void {
@@ -516,5 +540,7 @@ export class TerminalManager {
       this.sessions.delete(key);
       sess.kill();
     }
+    this.seeds.clear();
+    this.typed.clear();
   }
 }

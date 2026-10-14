@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom privacy policy</title>
+<style>
+:root{--bg:#fafafa;--fg:#0a0a0a;--dim:#555;--link:#0e7490}
+@media (prefers-color-scheme:dark){:root{--bg:#0a0a0a;--fg:#fafafa;--dim:#a1a1aa;--link:#67e8f9}}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:40px 16px;line-height:1.6}
+main{max-width:680px;margin:0 auto}h1{font-size:28px;margin:0 0 4px}h2{font-size:18px;margin:28px 0 6px}
+p,li{color:var(--fg)}.dim{color:var(--dim)}a{color:var(--link)}ul{padding-left:20px}
+</style></head><body><main>
+<h1>Loom privacy policy</h1>
+<p class="dim">For the Loom phone app (tech.loompad.app) and Loom itself. Last updated 9 October 2026.</p>
+
+<p>Loom is open source (<a href="https://github.com/nickthelegend/loom">github.com/nickthelegend/loom</a>).
+It runs on your own computer; the phone app is a remote for that computer. There are no Loom servers
+holding your code, chats or projects, and the app has no ads and no tracking.</p>
+
+<h2>What stays on your devices</h2>
+<ul>
+<li>Your projects, chats with agents, memories, diffs and files live on your computer, in the project
+folders you open with Loom.</li>
+<li>The phone keeps the address of your computer and the pairing token it was given, in the phone's
+secure storage (Keychain / Android Keystore). Unpairing deletes them.</li>
+<li>Pictures you attach from the phone are sent to your computer only, and saved in that project's
+<code>.loom/attachments</code> folder.</li>
+</ul>
+
+<h2>What leaves your devices, and only when you use it</h2>
+<ul>
+<li><b>Your computer.</b> The app talks to the Loom running on your computer over your own network,
+your tailnet, or — if you turned it on there — Loom Cloud, an encrypted relay that passes messages
+through without being able to read them.</li>
+<li><b>Notifications.</b> If you allow notifications, the phone gets a push token from Google
+(Firebase Cloud Messaging) or Apple, via Expo's push service, and gives it to your computer. Your
+computer then sends the notification text (an agent's question, the start of a reply, a goal's
+outcome) through Expo and Google/Apple to your phone. Turn any kind off in the app's account sheet,
+or all of them in your phone's settings.</li>
+<li><b>Voice input.</b> Dictation uses your phone's own speech recognizer, which may send the audio
+to Google or Apple to turn it into text, under their privacy terms.</li>
+<li><b>Your agents.</b> What you send an agent (Claude Code, Codex, OpenCode and others) goes from
+your computer to that agent's provider, under your own account with them. Loom doesn't add anything
+of its own.</li>
+<li><b>Update checks.</b> Your computer asks GitHub for the newest Loom release every few hours.</li>
+</ul>
+
+<h2>Permissions the app asks for</h2>
+<ul>
+<li><b>Camera</b> — to scan the pairing QR code, and to take a picture to attach. Nothing is recorded
+otherwise.</li>
+<li><b>Microphone</b> — only while you dictate a message.</li>
+<li><b>Notifications</b> — for the alerts above.</li>
+</ul>
+
+<h2>Accounts and analytics</h2>
+<p>The Play Store build has no sign-in and sends no analytics. Builds that offer the optional
+"Continue with Google" sign-in (for Loom's cloud features) keep your name and email with that
+sign-in, and may send, at most once a day and only if you leave it on, the phone's region setting,
+platform and app version — no device id, location or IP lookup.</p>
+
+<h2>Children</h2>
+<p>Loom is a developer tool and isn't directed at children.</p>
+
+<h2>Deleting your data</h2>
+<p>Unpair or uninstall the app to remove what it stored on the phone. Everything else is in your
+project folders and Loom's folder (<code>~/.loom</code>) on your computer — delete them there.</p>
+
+<h2>Contact</h2>
+<p>Questions or requests: open an issue at
+<a href="https://github.com/nickthelegend/loom/issues">github.com/nickthelegend/loom/issues</a>.</p>
+</main></body></html>

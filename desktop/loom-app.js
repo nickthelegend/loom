@@ -44,7 +44,7 @@ function loomHome() {
   return process.env.LOOM_HOME ?? path.join(os.homedir(), ".loom");
 }
 
-function readDaemonConfig() {
+export function readDaemonConfig() {
   try {
     return JSON.parse(fs.readFileSync(path.join(loomHome(), "daemon.json"), "utf8"));
   } catch {
@@ -135,7 +135,9 @@ async function ensureDaemon() {
   }
   // Start the daemon from the built CLI (same entry the `loom` command uses).
   await spawnDaemon();
-  const deadline = Date.now() + 15_000;
+  // A cold Windows launch imports the staged SDKs and opens SQLite before
+  // health answers. Give that startup time to finish on slower disks.
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 300));
     cfg = readDaemonConfig();
@@ -201,7 +203,7 @@ async function spawnDaemon() {
       const ok = await new Promise((resolve) => {
         let child;
         try {
-          child = spawn(cmd, [CLI_ENTRY, "daemon"], { detached: true, stdio: ["ignore", log, log], env });
+          child = spawn(cmd, [CLI_ENTRY, "daemon"], { detached: true, windowsHide: true, stdio: ["ignore", log, log], env });
         } catch {
           return resolve(false);
         }

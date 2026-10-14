@@ -9,7 +9,7 @@ import type { AgentStatus } from "../src/types.js";
 import { makeProjectDir, tmpDir } from "./helpers.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const tsx = path.join(root, "node_modules", ".bin", "tsx");
+const tsx = process.execPath;
 const cli = path.join(root, "src", "cli", "index.ts");
 
 let daemon: LoomDaemon;
@@ -17,7 +17,7 @@ let projectDir: string;
 
 function runCli(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(tsx, [cli, ...args], { cwd: projectDir, env: process.env }, (err, stdout, stderr) => {
+    execFile(tsx, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), cli, ...args], { cwd: projectDir, env: process.env }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message));
       else resolve(stdout);
     });

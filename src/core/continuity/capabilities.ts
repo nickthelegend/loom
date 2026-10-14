@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile } from "../process.js";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import { codexBin } from "../../providers/codex/adapter.js";

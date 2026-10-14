@@ -1,5 +1,4 @@
 /** Browser main module. See README.md for ownership and startup. */
-import { openConnectPhone } from './connect-phone.js';
 import { api,pairFromHash } from './connection.js';
 import { clog } from './console.js';
 import { labelIcons } from './icons.js';
@@ -7,8 +6,9 @@ import { closeMenu } from './menus.js';
 import { bootstrapAdmin,openShortcuts,route,setFocusMode,takePermalink,typingInField } from './navigation.js';
 import { stopTitleFlash,toast } from './notifications.js';
 import { openPalette } from './palette.js';
+import { runCommand } from './commands.js';
 import { onPreviewMessage } from './preview.js';
-import { openProjectModal,openSettingsModal } from './settings.js';
+import { openProjectModal } from './settings.js';
 import { clearShell,isDesktop,mq } from './shell.js';
 import { state } from './state.js';
 import { loadLoomPad,loadUpdate } from './statusbar.js';
@@ -126,6 +126,8 @@ import { openTaskModal } from './tasks.js';
     }
   });
 
+  try { if (localStorage.getItem("loomNoSidebar") === "1") document.documentElement.classList.add("nosidebar"); } catch (e) {}
+
   // The Electron shell's own menu bar. Each item arrives as a word; the browser
   // build has no loomNative, so this is a no-op there.
   if (window.loomNative && window.loomNative.onMenu) {
@@ -141,21 +143,7 @@ import { openTaskModal } from './tasks.js';
         toast("running in the terminal — restart Loom when it finishes");
         return;
       }
-      if (item === "settings") { if (!document.querySelector(".scrim")) openSettingsModal(); return; }
-      if (item === "cloud") { if (!document.querySelector(".scrim")) openSettingsModal("cloud"); return; }
-      if (item === "pair") { openConnectPhone(); return; }
-      if (item === "new-chat") {
-        var rows = Array.prototype.filter.call(document.querySelectorAll("[data-newchat]"), function(r){ return r.getAttribute("data-newchat") === state.pid; });
-        var row = rows[0] || document.querySelector("[data-newchat]");
-        if (row) row.click(); else toast("open a project first");
-        return;
-      }
-      if (item === "orchestrate") {
-        if (!state.setComposerMode) { toast("open a project first"); return; }
-        if (state.showTab) state.showTab("thread");
-        state.setComposerMode("orch");
-        var box = document.getElementById("box"); if (box) box.focus();
-      }
+      runCommand(item);
     });
   }
 

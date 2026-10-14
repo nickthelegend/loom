@@ -16,7 +16,7 @@
  * redirect: `hostedSignIn`.
  */
 
-import { spawn } from "node:child_process";
+import { spawn } from "../core/process.js";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 

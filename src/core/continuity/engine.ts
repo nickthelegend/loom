@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile } from "../process.js";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import type { EventLog } from "../eventlog.js";

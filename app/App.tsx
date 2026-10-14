@@ -14,15 +14,16 @@ import "react-native-get-random-values";
 
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
-import { AppState, SafeAreaView, TouchableOpacity, View, useColorScheme } from "react-native";
+import { AppState, TouchableOpacity, View, useColorScheme } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AccountSheet, Avatar } from "./src/account";
-import { getProject, loadCreds, setUnauthorizedHandler, type Creds, type Project } from "./src/api";
+import { getProject, kv, loadCreds, setUnauthorizedHandler, type Creds, type Project } from "./src/api";
 import { FleetScreen } from "./src/fleet";
 import { enablePush, onNotificationOpen } from "./src/push";
 import { BoardScreen, PairScreen, ProjectScreen, unpair } from "./src/screens";
 import { loadAuthSkipped, recordAppOpen, setAuthSkipped, useAuth } from "./src/supabase";
 import { notificationRoute, type NotificationRoute } from "./src/team-runners-model";
-import { T, scheme, setScheme } from "./src/theme";
+import { T, THEME_KEY, onThemePref, scheme, setScheme, type ThemePref } from "./src/theme";
 import { WelcomeScreen } from "./src/welcome";
 
 type Route =
@@ -92,6 +93,7 @@ export default function App() {
           name: "project",
           project,
           from: "board",
+          ...(want.chat ? { chat: { id: want.chat, title: "" } } : {}),
           focus: { tab: want.tab, ...(want.runId ? { runId: want.runId } : {}), n: Date.now() },
         }),
       )
@@ -109,17 +111,24 @@ export default function App() {
 
   const showWelcome = booted && auth.ready && !auth.user && !skipped;
 
-  // The phone's own light/dark setting, followed live. The palette swaps in
-  // place and the tree below remounts under a new key, so every inline style
-  // reads the new tokens.
+  // Dark by default, as on the desktop; Light, or follow the phone, from the
+  // account sheet. The palette swaps in place and the tree below remounts
+  // under a new key, so every inline style reads the new tokens.
   const sysScheme = useColorScheme();
-  setScheme(sysScheme === "light" ? "light" : "dark");
+  const [themePref, setThemePref] = useState<ThemePref>("dark");
+  useEffect(() => {
+    void kv.get(THEME_KEY).then((v) => { if (v === "light" || v === "system" || v === "dark") setThemePref(v); });
+    return onThemePref((p) => { setThemePref(p); void kv.set(THEME_KEY, p); });
+  }, []);
+  setScheme(themePref === "system" ? (sysScheme === "light" ? "light" : "dark") : themePref);
 
   return (
-    <SafeAreaView key={scheme} style={{ flex: 1, backgroundColor: T.bg }}>
-      {/* Opaque on Android: SafeAreaView only insets on iOS, so a translucent
-          bar would sit on top of every screen's header (unpair, Fleet, back). */}
-      <StatusBar style={scheme === "light" ? "dark" : "light"} backgroundColor={T.bg} translucent={false} />
+    <SafeAreaProvider>
+    {/* Android 15+ draws every app edge to edge (and an app targeting API 36
+        can't opt out), so the status and navigation bars are real insets on
+        both platforms now — not an opaque bar Android lays out for us. */}
+    <SafeAreaView key={scheme} style={{ flex: 1, backgroundColor: T.bg }} edges={["top", "bottom", "left", "right"]}>
+      <StatusBar style={scheme === "light" ? "dark" : "light"} />
       {!booted || !auth.ready ? (
         <View style={{ flex: 1, backgroundColor: T.bg }} />
       ) : showWelcome ? (
@@ -185,6 +194,7 @@ export default function App() {
         />
       )}
       <AccountSheet
+        themePref={themePref}
         visible={accountOpen}
         onClose={() => setAccountOpen(false)}
         user={auth.user}
@@ -201,5 +211,6 @@ export default function App() {
         }}
       />
     </SafeAreaView>
+    </SafeAreaProvider>
   );
 }

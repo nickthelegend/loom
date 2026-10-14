@@ -13,12 +13,24 @@ import { describe, expect, it } from "vitest";
 import { ADES, adapterKinds, buildDefaultRoutes, defaultAgentConfigs } from "../src/core/ades.js";
 import { codexBin } from "../src/providers/codex/adapter.js";
 import { grokBin } from "../src/adapters/grok.js";
+import { agyBin } from "../src/adapters/antigravity-cli.js";
 import { parseGrokJson } from "../src/adapters/grok.js";
 import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../src/adapters/index.js";
 import { isAdapter } from "../src/types.js";
 import { tmpDir } from "./helpers.js";
 
 describe("ades · the list is the truth", () => {
+  it.skipIf(process.platform !== "win32")("finds Antigravity's native Windows installation before PATH is refreshed", () => {
+    const previous = process.env.LOCALAPPDATA;
+    const local = tmpDir("agy-local-appdata");
+    const bin = path.join(local, "agy", "bin", "agy.exe");
+    fs.mkdirSync(path.dirname(bin), { recursive: true });
+    fs.writeFileSync(bin, "fixture");
+    process.env.LOCALAPPDATA = local;
+    try { expect(agyBin()).toBe(bin); }
+    finally { if (previous === undefined) delete process.env.LOCALAPPDATA; else process.env.LOCALAPPDATA = previous; }
+  });
+
   /**
    * The bug this prevents: the web app shipped Codex and Kiro logos for kinds
    * `loom` would reject, because "what we support" lived in a sprite and in a
@@ -255,7 +267,7 @@ describe("ades · finding claude when it isn't on PATH", () => {
     const { claudeBin } = await import("../src/providers/claude/adapter.js");
     const fakeHome = tmpDir("home-claude");
     fs.mkdirSync(path.join(fakeHome, ".local", "bin"), { recursive: true });
-    const installed = path.join(fakeHome, ".local", "bin", "claude");
+    const installed = path.join(fakeHome, ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude");
     fs.writeFileSync(installed, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 
     const realHome = process.env.HOME;

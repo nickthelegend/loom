@@ -68,12 +68,13 @@
   .bdec .dm{color:var(--warn);flex:none}
   .bdec .dt{white-space:pre-wrap;word-break:break-word}
   .bsrcs{display:flex;flex-direction:column;gap:2px}
-  .bsrc{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:12px}
-  .bsrc:hover{background:var(--sidebar-accent)}
-  .bsrc svg{width:14px;height:14px;flex:none}
-  .bsrc .si{font-weight:600}
-  .bsrc .sf{color:var(--muted-foreground);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .bsrc .sc{margin-left:auto;color:var(--muted-foreground);font-family:var(--font-mono);font-size:10.5px;flex:none}
+  /* an imported memory file's row (not .bsrc: that's the Board's source switcher) */
+  .bsrcrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:12px}
+  .bsrcrow:hover{background:var(--sidebar-accent)}
+  .bsrcrow svg{width:14px;height:14px;flex:none}
+  .bsrcrow .si{font-weight:600}
+  .bsrcrow .sf{color:var(--muted-foreground);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bsrcrow .sc{margin-left:auto;color:var(--muted-foreground);font-family:var(--font-mono);font-size:10.5px;flex:none}
   .bdoc{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--card);
     max-height:420px;overflow:auto}
   .bl{font-size:11.5px;line-height:1.65;color:var(--muted-foreground);white-space:pre-wrap;word-break:break-word}
@@ -195,6 +196,7 @@
   .dgrow[data-dgchat]:hover{background:var(--sidebar-accent)}
   .dgrow .dgt{flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
   .dgrow.question{color:var(--warn)}
+  .dgrow.answered{color:var(--muted-foreground)}
   .dgrow.failed,.dgrow.server{color:var(--err)}
   .dgrow.landed{color:var(--ok)}
   .dgrow.cost{color:var(--muted-foreground);font-family:var(--font-mono);font-size:11.5px}
@@ -210,7 +212,7 @@
   .srvrow .nm{font-weight:600;color:var(--foreground)}
   .srvrow .st{flex:1;color:var(--muted-foreground);font-size:10.5px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .srvrow .acts{display:none;gap:1px;flex:none}
-  .srvrow:hover .acts{display:flex}
+  .srvrow:hover .acts,.srvrow:focus-within .acts{display:flex}
   .linkbtn{border:0;background:none;color:var(--accentBlue);cursor:pointer;font:inherit;padding:0;text-decoration:underline}
   .srvlog{display:none;flex-direction:column;border-top:1px solid var(--border);max-height:38%;min-height:120px}
   .srvlogbar{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-bottom:1px solid var(--border);
@@ -218,29 +220,12 @@
   .srvloglines{flex:1;overflow:auto;padding:6px 9px;font-family:var(--font-mono);font-size:11.5px;line-height:1.55;color:var(--foreground)}
   .srvloglines .e{color:var(--err)}
   .srvloglines .m{color:var(--muted-foreground)}
-  /* dev servers: the rail rows, and a server's output under the page */
-  .srvlist{display:flex;flex-direction:column;gap:2px;padding:4px}
-  .srvrow{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:7px;cursor:pointer;font-size:12px}
-  .srvrow:hover{background:var(--sidebar-accent)}
-  .srvrow .sdot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted-foreground)}
-  .srvrow .sdot.ok{background:var(--ok)}
-  .srvrow .sdot.warn{background:var(--warn)}
-  .srvrow .sdot.err{background:var(--err)}
-  .srvrow .sdot.off{background:var(--muted-foreground);opacity:.5}
-  .srvrow .nm{font-weight:600;color:var(--foreground)}
-  .srvrow .st{flex:1;color:var(--muted-foreground);font-size:10.5px;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .srvrow .acts{display:none;gap:1px;flex:none}
-  .srvrow:hover .acts{display:flex}
-  .linkbtn{border:0;background:none;color:var(--accentBlue);cursor:pointer;font:inherit;padding:0;text-decoration:underline}
-  .srvlog{display:none;flex-direction:column;border-top:1px solid var(--border);max-height:38%;min-height:120px}
-  .srvlogbar{display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)}
-  .srvloglines{flex:1;overflow:auto;padding:6px 9px;font-family:var(--font-mono);font-size:11.5px;line-height:1.55;color:var(--foreground)}
-  .srvloglines .e{color:var(--err)}
-  .srvloglines .m{color:var(--muted-foreground)}
   /* the Browser tab — live page + the project's Playwright specs */
   .browwrap{position:absolute;inset:0;display:none;overflow:hidden;
     background:var(--editor-background);border-top:1px solid var(--border)}
   .browwrap.on{display:flex;z-index:5}
+  /* the pane sizes itself to the dock, not the window: the queries below are on it */
+  .browwrap{container-type:inline-size;container-name:brow}
   .browrail{width:290px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border)}
   .browbar{height:34px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid var(--border)}
   .browbar .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted-foreground)}
@@ -256,11 +241,36 @@
   .specout .fail{color:var(--err)}
   .specout .pass{color:var(--live)}
   .browmain{flex:1;display:flex;flex-direction:column;min-height:0}
-  .browurl{height:34px;flex:none;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid var(--border)}
-  .browurl input{flex:1;height:24px;background:var(--editor-surface);border:1px solid var(--border);border-radius:6px;
+  .browurl{min-height:34px;flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;padding:4px 8px;border-bottom:1px solid var(--border)}
+  .browurl .iconbtn{flex:none}
+  .browurl input:not([type="checkbox"]){flex:1 1 160px;min-width:120px;height:24px;background:var(--editor-surface);border:1px solid var(--border);border-radius:6px;
     color:var(--foreground);font-family:var(--font-mono);font-size:11.5px;padding:0 9px;outline:none}
-  .browurl input:focus{border-color:var(--ring)}
-  .browframe{flex:1;min-height:0;background:#fff}
+  .browurl input:not([type="checkbox"]):focus{border-color:var(--ring)}
+  .browframe{flex:1;min-height:0;background:#fff;position:relative}
+  .browtools{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
+  .browrailbtn,.browmore,.browrailclose{display:none}
+  .browmore.on,.browrailbtn.on{color:var(--foreground);background:var(--sidebar-accent)}
+  /* a page that won't be framed, said plainly instead of a white rectangle */
+  .browblock{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px;text-align:center;background:var(--editor-background);color:var(--foreground);font-size:12.5px;line-height:1.6}
+  .browblock[hidden]{display:none}
+  .browblock .sub{color:var(--muted-foreground);font-size:11.5px;max-width:420px;overflow-wrap:anywhere}
+  .specrow .go.stop{color:var(--err);opacity:1}
+  /* A narrow dock (the default one is ~520px): the rail becomes a drawer over
+     the frame, and the secondary controls fold behind "⋯", so the page and
+     its address keep the width. */
+  @container brow (max-width: 700px){
+    .browrailbtn,.browmore,.browrailclose{display:inline-flex}
+    .browrail{position:absolute;left:0;top:0;bottom:0;z-index:7;width:min(290px,86%);
+      background:var(--editor-background);box-shadow:0 8px 28px rgba(0,0,0,.35);
+      transform:translateX(-102%);visibility:hidden;transition:transform .16s ease,visibility .16s}
+    .browwrap.railopen .browrail{transform:none;visibility:visible}
+    .browtools{display:none;flex-basis:100%}
+    .browwrap.toolsopen .browtools{display:flex}
+  }
+  @container brow (max-width: 380px){
+    #browfwd{display:none}
+  }
   .browframe iframe{width:100%;height:100%;border:0;display:block}
   .browhint{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;
     color:var(--muted-foreground);font-size:12.5px;line-height:1.7;padding:24px}

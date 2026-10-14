@@ -65,6 +65,10 @@ import { shortModel } from './permissions.js';
   /** Which icon a tool call gets, and which bucket it counts in. */
   function toolKind(p){
     var t = String(p.tool || p.name || "").toLowerCase(), s = String(p.summary || "").toLowerCase();
+    if (p.kind === "mcp_tool_call" || p.server) return "mcp";
+    if (/todo/.test(t)) return "plan";
+    if (/web_?search|websearch|webfetch|web_fetch/.test(t)) return "web";
+    if (/image_view|view_image/.test(t)) return "image";
     if (/bash|shell|exec|command|terminal|run_|^run/.test(t) || /^(shell|bash|\$)[: ]/.test(s)) return "run";
     if (/edit|write|patch|apply|notebook|create_file|str_replace/.test(t)) return "edit";
     if (/grep|glob|search|find|ls$|list/.test(t)) return "search";
@@ -73,15 +77,17 @@ import { shortModel } from './permissions.js';
     if (/task|agent/.test(t)) return "agent";
     return "tool";
   }
-  var TOOL_ICON = { run: "terminal", edit: "pencil", search: "search", web: "globe", read: "file", agent: "agents", tool: "gear" };
+  var TOOL_ICON = { run: "terminal", edit: "pencil", search: "search", web: "globe", read: "file", agent: "agents", tool: "gear", mcp: "plug", plan: "tasks", image: "image" };
   /** "Ran 2 commands, read 3 files" — what a folded stretch of tool use did. */
   function actSummary(rows){
-    var n = { run: 0, edit: 0, search: 0, web: 0, read: 0, agent: 0, tool: 0 };
+    var n = { run: 0, edit: 0, search: 0, web: 0, read: 0, agent: 0, tool: 0, mcp: 0, plan: 0, image: 0 };
     rows.forEach(function(r){ var k = r.getAttribute("data-tk") || "tool"; n[k] = (n[k] || 0) + 1; });
     var out = [];
     function one(k, verb, noun){ if (n[k]) out.push(verb + " " + n[k] + " " + noun + (n[k] === 1 ? "" : "s")); }
     one("run", "ran", "command"); one("read", "read", "file"); one("edit", "edited", "file");
     one("search", "searched", "time"); one("web", "fetched", "page"); one("agent", "started", "sub-agent"); one("tool", "used", "tool");
+    one("mcp", "called", "MCP tool"); one("image", "viewed", "image");
+    if (n.plan) out.push("updated the plan");
     var s = out.join(", ");
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : rows.length + " actions";
   }
@@ -215,8 +221,11 @@ import { shortModel } from './permissions.js';
             (tview() === "verbose" ? rawBlock(p) : "") + "</div></div>";
         }
         // Your own messages: markdown too, so a pasted snippet or list reads right.
+        // Attachments lead the text as "[image] path" lines: pictures, not paths.
+        var att = splitAttachments(String(p.text || ""));
         return '<div class="msg user" data-id="' + Number(e.id || 0) + '" data-ts="' + Number(e.ts || 0) + '" data-raw="' + esc(encodeURIComponent(String(p.text || ""))) + '">' +
-          '<div class="bubble md">' + mdToHtml(p.text) + "</div>" +
+          (att.html ? '<div class="uatts">' + att.html + "</div>" : "") +
+          (att.text.trim() || !att.html ? '<div class="bubble md">' + mdToHtml(att.text) + "</div>" : "") +
           '<div class="mt"><button type="button" class="uact uedit" title="Edit and send again" aria-label="edit and send again">' + ICONS.pencil + "</button>" +
           '<button type="button" class="uact ucopy" title="Copy" aria-label="copy your message">' + ICONS.copy + "</button>" +
           (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
@@ -241,17 +250,47 @@ import { shortModel } from './permissions.js';
         '<div class="bubble md" style="border-left-color:hsl(' + h + ',50%,var(--selvage-l))">' + mdToHtml(p.text) + "</div>" +
         (p.partial ? '<div class="msgfoot"><button type="button" class="btn xs outline" data-continue="' + esc(e.agentId) + '">' + ICONS.play + "Continue</button>" +
           '<span class="mfh">ask ' + esc(labelOf(e.agentId)) + " to pick up where it stopped</span></div>" : "") +
+        // A plan the agent proposed in plan mode: the next step is yours — build it, or change it.
+        (p.proposedPlan ? '<div class="msgfoot planfoot"><span class="pftag">' + ICONS.spark + "Proposed plan</span>" +
+          '<button type="button" class="btn xs primary" data-planimpl="' + esc(e.agentId) + '">' + ICONS.play + "Implement the plan</button>" +
+          '<button type="button" class="btn xs outline" data-planrevise="' + esc(e.agentId) + '">' + ICONS.pencil + "Revise</button></div>" : "") +
         "</div>";
     }
     if (e.kind === "tool_call") {
       var tk = toolKind(p);
-      return '<div class="tool" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + (ICONS[TOOL_ICON[tk]] || ICONS.gear) + "</span>" +
-        '<span class="tx">' + esc(p.summary || p.tool || p.name) + "</span>" +
-        (p.ok === false ? '<span class="tbad">failed</span>' : "") +
-        (tview() === "verbose" ? rawBlock(p) : "") + "</div>";
+      var det = toolDetail(p, tk);
+      var failed = p.ok === false || !!p.error || (typeof p.exitCode === "number" && p.exitCode !== 0);
+      // images a tool returned sit on their own line, outside the folded activity group, so they're seen
+      var imgs = (p.images || []).length ? '<div class="toolimgs" data-agent="' + esc(e.agentId || "") + '">' + p.images.map(function(im){
+        var att = /^\.loom\/attachments\//.test(im.path);
+        return '<button type="button" class="toolimg"' + (att ? "" : ' data-artifact="' + esc(im.path) + '"') + ' title="' + esc(im.path) + '"><img ' + (att ? 'data-att="' : 'data-projimg="') + esc(im.path) + '" alt=""></button>';
+      }).join("") + "</div>" : "";
+      return '<div class="tool' + (det ? " hasdet" : "") + (failed ? " tfail" : "") + '" data-tk="' + tk + '" data-agent="' + esc(e.agentId || "") + '"' + (p.parent ? ' data-parent="' + esc(p.parent) + '"' : "") + ">" +
+        '<span class="ti">' + (ICONS[TOOL_ICON[tk]] || ICONS.gear) + "</span>" +
+        (p.server ? '<span class="tsrv">' + esc(p.server) + "</span>" : "") +
+        '<span class="tx">' + esc(p.server ? String(p.summary || "").replace(/^[^·]*·\s*/, "") : (p.summary || p.tool || p.name)) + "</span>" +
+        (typeof p.exitCode === "number" && p.exitCode !== 0 ? '<span class="tbad">exit ' + p.exitCode + "</span>" : failed ? '<span class="tbad">failed</span>' : "") +
+        (det ? '<span class="tchev">' + ICONS.chevron + "</span>" + '<div class="tooldet">' + det + "</div>" : "") +
+        (tview() === "verbose" ? rawBlock(p) : "") + "</div>" + imgs;
+    }
+    // a model agent moving to its next model (a busy or app-only free model), and a CLI stopping early: say so
+    if (e.kind === "status" && p.state === "model_fallback") {
+      return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
+    }
+    if (e.kind === "status" && p.state === "stopped_early") return '<div class="sys">\u25a0 ' + esc(labelOf(e.agentId)) + " stopped early" + (p.reason ? " (" + esc(String(p.reason)) + ")" : "") + "</div>";
+    // the agent's todo list, as a checklist (the thread keeps the newest one per turn in place)
+    if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {
+      var doneN = p.plan.filter(function(x){ return x.status === "completed"; }).length;
+      return '<div class="plancheck" data-agent="' + esc(e.agentId || "") + '"><div class="pch">' + ICONS.tasks + "<span>Plan</span>" +
+        '<span class="pcn">' + doneN + "/" + p.plan.length + "</span>" + (p.explanation ? '<span class="pce">' + esc(String(p.explanation).slice(0, 140)) + "</span>" : "") + "</div>" +
+        '<ul class="pcl">' + p.plan.map(function(x){
+          return '<li class="pc-' + esc(x.status || "pending") + '"><span class="pcb"></span><span>' + esc(x.step) + "</span></li>";
+        }).join("") + "</ul></div>";
     }
     if (e.kind === "file_edit") {
-      return '<div class="tool" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span></div>";
+      var fdiff = p.diff ? '<span class="tchev">' + ICONS.chevron + '</span><div class="tooldet md">' + mdToHtml("```diff\n" + String(p.diff) + "\n```") + "</div>" : "";
+      return '<div class="tool' + (p.diff ? " hasdet" : "") + '" data-tk="edit" data-agent="' + esc(e.agentId || "") + '"><span class="ti">' + ICONS.pencil + '</span><span class="tx">' + esc(p.path) + "</span>" + fdiff +
+        (ARTIFACT_EXT.test(String(p.path || "")) ? '<button type="button" class="artchip mini" data-artifact="' + esc(p.path) + '" title="preview ' + esc(p.path) + '">' + ICONS.play + "Preview</button>" : "") + "</div>";
     }
     if (e.kind === "turn_diff") {
       var fl = (p.files || []).map(function(f){ return f.path; });
@@ -264,6 +303,7 @@ import { shortModel } from './permissions.js';
             '" title="put these files back the way they were before this turn">' + ICONS.rewind + "Rewind</button>" : "") +
         '<span class="tchev">\u25b8</span></div>' +
         '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \u2026" : "") + "</div>" +
+        artifactChips((p.files || []).filter(function(f){ return f.status !== "deleted" && f.status !== "D"; }).map(function(f){ return f.path; })) +
         '<div class="tcdiff" style="display:none"></div></div>';
     }
     if (e.kind === "checkpoint") {
@@ -272,7 +312,12 @@ import { shortModel } from './permissions.js';
         Number(p.files || 0) + " file" + (Number(p.files || 0) === 1 ? "" : "s") +
         (p.undo ? ' <button class="btn xs outline" type="button" data-rewind="' + esc(p.undo) + '">Undo the rewind</button>' : "") + "</div>";
     }
-    if (e.kind === "handoff") return '<div class="handoff"><span class="a">' + esc(p.from || "\u2014") + '</span><span class="shuttle">\u27ff</span><span class="b">' + esc(p.to || "\u2014") + "</span></div>";
+    // The baton changing hands: a chip with both agents, not a bare glyph the font may not have.
+    if (e.kind === "handoff") {
+      var who = function(id, c){ return '<span class="' + c + '">' + (id ? agentGlyph(kindOf(id), id, "brand") : "") + esc(id ? labelOf(id) : "\u2014") + "</span>"; };
+      return '<div class="handoff" title="the baton passed ' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '"><span class="hochip">' +
+        '<span class="hok">baton</span>' + who(p.from, "a") + '<span class="shuttle">' + ICONS.arrowRight + "</span>" + who(p.to, "b") + "</span></div>";
+    }
     // Sub-agents: indent under the turn, marked as borrowed hands — the parent
     // kept the baton, and the thread should read that way.
     if (e.kind === "subtask_started") return '<div class="sys" style="padding-left:22px">\u21b3 ' + esc(e.agentId) + " picks up a subtask for " + esc(p.parent) + ": " + esc(String(p.task || "").slice(0, 90)) + "</div>";
@@ -286,21 +331,30 @@ import { shortModel } from './permissions.js';
       // answer sent it to the wrong agent entirely (#106).
       var q = String(p.question || "what next?");
       var who = String(e.agentId || "agent");
+      // the live instance to answer (a crew seat, an orchestra worker), when it isn't the roster agent
+      var askWho = String(p.askAgent || who);
       // A structured question the turn is waiting on: its own options, and the
       // answer goes back to that request rather than as a new message.
       if (p.requestId && p.responseMode !== "message" && Array.isArray(p.questions) && p.questions.length) {
-        return '<div class="nicard" data-niask="' + esc(who) + '" data-nichat="' + esc(e.chat || "") + '" data-nireq="' + esc(p.requestId) + '">' +
-          '<div class="nih">' + brandMark(kindOf(who)) + '<span class="niwho">' + esc(who) + "</span>" +
+        var multi = p.questions.some(function(qq){ return qq.multiSelect; });
+        var custom = p.questions.some(function(qq){ return qq.allowCustomAnswer !== false || !(qq.options || []).length; });
+        var secret = p.questions.some(function(qq){ return qq.secret; });
+        return '<div class="nicard' + (multi ? " hasmulti" : "") + '" data-niask="' + esc(askWho) + '" data-niwho="' + esc(who) + '" data-nichat="' + esc(e.chat || "") + '" data-nireq="' + esc(p.requestId) + '"' + (secret ? " data-nisecret" : "") + ">" +
+          '<div class="nih">' + brandMark(kindOf(who)) + '<span class="niwho">' + esc(labelOf(who)) + "</span>" +
           '<span class="nitag">needs you</span></div>' +
           p.questions.map(function(qq){
-            return '<div class="niqb" data-niqid="' + esc(qq.id) + '">' + (qq.header ? '<div class="nitag">' + esc(qq.header) + "</div>" : "") +
+            return '<div class="niqb' + (qq.multiSelect ? " multi" : "") + '" data-niqid="' + esc(qq.id) + '">' +
+              (qq.header ? '<div class="nitag">' + esc(qq.header) + (qq.multiSelect ? " \u00b7 pick any" : "") + "</div>" : qq.multiSelect ? '<div class="nitag">pick any</div>' : "") +
               '<div class="niq">' + esc(qq.question) + "</div>" +
               ((qq.options || []).length ? '<div class="niopts">' + qq.options.map(function(o){
-                return '<button class="nio" type="button" data-nipick="' + esc(o.label) + '" data-niqid="' + esc(qq.id) + '" title="' + esc(o.description || "") + '">' + esc(o.label) + "</button>";
+                return '<button class="nio' + (o.description ? " hasd" : "") + '" type="button" data-nipick="' + esc(o.label) + '" data-niqid="' + esc(qq.id) + '"' +
+                  (qq.multiSelect ? ' aria-pressed="false"' : "") + ">" +
+                  (qq.multiSelect ? '<span class="nibox"></span>' : "") + '<span class="nil">' + esc(o.label) + "</span>" +
+                  (o.description ? '<span class="niod">' + esc(o.description) + "</span>" : "") + "</button>";
               }).join("") + "</div>" : "") + "</div>";
           }).join("") +
-          '<div class="nirow"><input class="nitext" placeholder="or answer in your words…" spellcheck="false">' +
-          '<button class="btn primary xs nisend" type="button">Send</button></div>' +
+          '<div class="nirow">' + (custom ? '<input class="nitext"' + (secret ? ' type="password" autocomplete="off"' : "") + ' placeholder="' + ((p.questions[0].options || []).length ? "or answer in your words\u2026" : "your answer\u2026") + '" spellcheck="false">' : '<span class="spacer"></span>') +
+          '<button class="btn primary xs nisend" type="button">' + (multi ? "Submit" : "Send") + "</button></div>" +
           '<div class="nidone"></div></div>';
       }
       var opts = questionChoices(q);
@@ -595,4 +649,119 @@ import { shortModel } from './permissions.js';
       '<button class="mdcopy" type="button" title="copy">' + ICONS.copy + '</button>' +
       '<pre class="mdcode"><code>' + esc(text) + "</code></pre></div></details>";
   }
-export { actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };
+/**
+ * A sent message's leading "[image] path" / "[file] path" lines (composer.js
+ * writes them so the agent reads the file first) as thumbnails and chips;
+ * the rest is the message. Images load through the API with your token
+ * (an <img src> can't send one), once each, when they appear.
+ */
+function splitAttachments(text){
+  var lines = text.split("\n"), html = "", n = 0;
+  while (n < lines.length) {
+    var m = lines[n].match(/^\[(image|file)\] (\.loom\/attachments\/[\w.-]+)$/);
+    if (!m) break;
+    var name = m[2].split("/").pop();
+    html += m[1] === "image"
+      ? '<button type="button" class="uatt" title="' + esc(m[2]) + '" aria-label="attached image ' + esc(name) + '"><img data-att="' + esc(m[2]) + '" alt=""></button>'
+      : '<span class="uattf">' + ICONS.file + "<span>" + esc(name) + "</span></span>";
+    n++;
+  }
+  if (!html) return { html: "", text: text };
+  while (n < lines.length && !lines[n].trim()) n++;
+  return { html: html, text: lines.slice(n).join("\n") };
+}
+
+var attCache = {};
+/**
+ * Images the thread can't load by URL, because the API wants your token:
+ * attachments (data-att) and files in the project (data-projimg — a screenshot
+ * an agent saved, an image in its markdown). Fetched once each, when they appear.
+ */
+function loadAttachment(img){
+  img.setAttribute("data-loading", "1");
+  var att = img.getAttribute("data-att"), proj = img.getAttribute("data-projimg");
+  var rel = att || proj;
+  var key = state.pid + "|" + rel;
+  var done = function(url){
+    if (url) { img.src = url; return; }
+    // an image that isn't there says so, rather than leaving a hole
+    if (proj) { var miss = document.createElement("span"); miss.className = "mdimgmiss"; miss.textContent = "\ud83d\uddbc " + rel + " (not found)"; img.replaceWith(miss); }
+    else if (img.parentNode) img.parentNode.classList.add("gone");
+  };
+  if (attCache[key]) { attCache[key].then(done); return; }
+  attCache[key] = fetch("/api/projects/" + state.pid + (att ? "/attachment" : "/image") + "?path=" + encodeURIComponent(rel), {
+    headers: { Authorization: "Bearer " + state.token },
+  }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){ return b ? URL.createObjectURL(b) : null; }).catch(function(){ return null; });
+  attCache[key].then(done);
+}
+if (typeof document !== "undefined" && document.addEventListener && typeof MutationObserver !== "undefined") {
+  var attScan = function(){
+    Array.prototype.forEach.call(document.querySelectorAll("img[data-att]:not([data-loading]),img[data-projimg]:not([data-loading])"), loadAttachment);
+  };
+  var attQueued = false;
+  new MutationObserver(function(){
+    // a closing window empties its body; there's nothing left to load into
+    if (attQueued || !document.defaultView || !document.body) return;
+    attQueued = true;
+    requestAnimationFrame(function(){ attQueued = false; if (document.defaultView) attScan(); });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  // a tap makes a thumbnail big, and back
+  document.addEventListener("click", function(ev){
+    var b = ev.target && ev.target.closest && ev.target.closest(".uatt");
+    if (b) b.classList.toggle("big");
+  });
+}
+
+/**
+ * What a tool did, for the row's expanded view: its arguments, the command
+ * and exit code, its output (the tail of it), its error, and for a web search
+ * the links it found. Empty when there's nothing beyond the summary.
+ */
+function toolDetail(p, tk){
+  var parts = [];
+  if (p.command && tk === "run") parts.push('<div class="tdk">command</div><pre class="tdpre">' + esc(p.command) + "</pre>");
+  if (p.input && typeof p.input === "object") {
+    var keys = Object.keys(p.input).filter(function(k){ return p.input[k] !== undefined && p.input[k] !== null && p.input[k] !== ""; });
+    if (keys.length) parts.push('<div class="tdk">input</div><div class="tdargs">' + keys.slice(0, 14).map(function(k){
+      var v = p.input[k], txt = typeof v === "string" ? v : JSON.stringify(v);
+      return '<div class="tdarg"><span class="tdn">' + esc(k) + '</span><span class="tdv">' + esc(String(txt).slice(0, 400)) + "</span></div>";
+    }).join("") + "</div>");
+  }
+  if (typeof p.exitCode === "number") parts.push('<div class="tdk">exit code <b class="' + (p.exitCode === 0 ? "ok" : "bad") + '">' + p.exitCode + "</b></div>");
+  var out = p.preview || p.output;
+  if (out) {
+    var links = tk === "web" ? (String(out).match(/https?:\/\/[^\s)\]"'<>]+/g) || []).filter(function(u, i, all){ return all.indexOf(u) === i; }).slice(0, 8) : [];
+    if (links.length) parts.push('<div class="tdk">sources</div><div class="tdlinks">' + links.map(function(u){
+      return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + esc(u.replace(/^https?:\/\//, "").slice(0, 70)) + "</a>";
+    }).join("") + "</div>");
+    parts.push('<div class="tdk">output</div><pre class="tdpre">' + esc(String(out)) + "</pre>");
+  }
+  if (p.error) parts.push('<div class="tdk bad">error</div><pre class="tdpre bad">' + esc(String(p.error)) + "</pre>");
+  return parts.join("");
+}
+
+/** Files worth seeing as themselves rather than as a diff: pages, pictures, documents. */
+var ARTIFACT_EXT = /\.(html?|svg|png|jpe?g|gif|webp|avif|pdf|md|markdown)$/i;
+function artifactChips(paths){
+  var arts = paths.filter(function(x){ return ARTIFACT_EXT.test(String(x || "")); }).slice(0, 6);
+  if (!arts.length) return "";
+  return '<div class="artchips">' + arts.map(function(x){
+    var ext = String(x).split(".").pop().toLowerCase();
+    var icon = /png|jpe?g|gif|webp|avif|svg/.test(ext) ? ICONS.image || ICONS.file : /html?/.test(ext) ? ICONS.globe : ICONS.file;
+    return '<button type="button" class="artchip" data-artifact="' + esc(x) + '" title="preview ' + esc(x) + '">' + icon + "<span>" + esc(String(x).split("/").pop()) + "</span></button>";
+  }).join("") + "</div>";
+}
+
+/** Fold a question card: what was answered, or that it's closed. */
+function settleQuestionCard(card, answers){
+  if (!card || card.classList.contains("done")) return false;
+  var vals = answers ? Object.keys(answers).map(function(k){ var v = answers[k]; return Array.isArray(v) ? v.join(", ") : String(v == null ? "" : v); }).filter(Boolean) : [];
+  var done = card.querySelector(".nidone");
+  if (card.hasAttribute("data-nisecret") && vals.length) vals = ["answered (hidden)"];
+  if (done) done.textContent = vals.length ? "\u21b3 " + vals.join(" \u00b7 ") : answers ? "\u21b3 dismissed" : "\u21b3 closed \u2014 answered elsewhere, or the turn ended";
+  card.classList.add("done");
+  Array.prototype.forEach.call(card.querySelectorAll("button,input"), function(el){ el.disabled = true; });
+  return true;
+}
+
+export { ARTIFACT_EXT,artifactChips,settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };

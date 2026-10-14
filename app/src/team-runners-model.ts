@@ -191,12 +191,15 @@ export interface NotificationRoute {
   projectId: string;
   tab: NotificationTab;
   runId?: string;
+  /** The chat a question or a finished turn happened in (main is the default anyway). */
+  chat?: string;
 }
 
 /**
- * The daemon's pushes carry `data: { projectId, kind, runId? }` (LoomDaemon.maybePush):
- * runId is set for orchestra alerts. A goal opens the Orchestra tab on that
- * run; anything else (a question, a finished turn) opens the project's thread.
+ * The daemon's pushes carry `data: { projectId, kind, category, runId?, chat? }`
+ * (LoomDaemon.maybePush): runId is set for goal pushes. A goal opens the
+ * Orchestra tab on that run; anything else (a question, a finished turn)
+ * opens the project's thread, in the chat it happened in.
  * Anything without a project id isn't ours to route.
  */
 export function notificationRoute(data: unknown): NotificationRoute | null {
@@ -206,5 +209,7 @@ export function notificationRoute(data: unknown): NotificationRoute | null {
   if (!projectId) return null;
   const runId = typeof d.runId === "string" && d.runId.trim() ? d.runId.trim() : undefined;
   if (runId) return { projectId, tab: "orchestra", runId };
-  return { projectId, tab: d.kind === "orchestra" ? "orchestra" : "thread" };
+  if (d.kind === "orchestra") return { projectId, tab: "orchestra" };
+  const chat = typeof d.chat === "string" && d.chat.trim() && d.chat !== "main" ? d.chat.trim() : undefined;
+  return { projectId, tab: "thread", ...(chat ? { chat } : {}) };
 }

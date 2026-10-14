@@ -55,6 +55,7 @@
   /* ── Orchestra (one orchestrator plans, many workers run in parallel) ── */
   #pane-orchestra{padding:18px 20px 40px}
   .orchview{display:flex;flex-direction:column;gap:14px;max-width:1180px;margin:0 auto}
+  .orchview.crewview{max-width:1320px}
   .ohead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
   .ohead .ot{font-size:20px;font-weight:650;letter-spacing:-.01em}
   .ohead .os{font-size:12.5px;color:var(--muted-foreground)}

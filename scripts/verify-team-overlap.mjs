@@ -20,11 +20,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const orchestrator = process.argv.includes("--orchestrator") ? process.argv[process.argv.indexOf("--orchestrator") + 1] : "claude-code";
 process.env.LOOM_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "loom-vto-home-"));
 process.env.LOOM_NO_NOTIFY = "1";
-const { ProjectRuntime } = await import(`${ROOT}/dist/daemon/runtime.js`);
-const { writeProjectConfig } = await import(`${ROOT}/dist/core/registry.js`);
-const { TeamLink } = await import(`${ROOT}/dist/daemon/team.js`);
-const { startHubServer } = await import(`${ROOT}/dist/hub/server.js`);
-const { scopeOf } = await import(`${ROOT}/dist/core/team-leases.js`);
+const { ProjectRuntime } = await import(new URL("../dist/daemon/runtime.js", import.meta.url));
+const { writeProjectConfig } = await import(new URL("../dist/core/registry.js", import.meta.url));
+const { TeamLink } = await import(new URL("../dist/daemon/team.js", import.meta.url));
+const { startHubServer } = await import(new URL("../dist/hub/server.js", import.meta.url));
+const { scopeOf } = await import(new URL("../dist/core/team-leases.js", import.meta.url));
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), `loom-vto-${p}-`));
 const git = (dir, ...a) => execFileSync("git", a, { cwd: dir, encoding: "utf8" });
@@ -67,7 +67,7 @@ await alice.claimLease(team.id, {
   ...scopeOf(["src/auth/**"], ["src/auth/session.ts", "src/auth/login.ts"]),
 });
 const { invite } = await alice.createInvite(team.id);
-const { packInvite, newTeamKey } = await import(`${ROOT}/dist/core/team-crypto.js`);
+const { packInvite, newTeamKey } = await import(new URL("../dist/core/team-crypto.js", import.meta.url));
 await bob.join(`loom://team/join#${packInvite({ invite, key: newTeamKey(1), hub: hub.url })}`, { github: "bob", secret: "v" });
 
 console.log(`\n  real ${orchestrator} orchestrating on a team repo where alice holds src/auth/**\n`);

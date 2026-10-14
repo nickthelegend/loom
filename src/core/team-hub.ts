@@ -363,6 +363,11 @@ export class HubError extends Error {
 /** A heartbeat older than this is a session that stopped (laptop closed, crash). */
 export const PRESENCE_TTL_MS = 45_000;
 export const INVITE_TTL_MS = 24 * 60 * 60_000;
+
+/** A short, one-way tag for an invite token: names it in the feed without revealing it. */
+export function inviteTag(invite: string): string {
+  return crypto.createHash("sha256").update(invite).digest("hex").slice(0, 16);
+}
 export const FREE_SEATS = 3; // D21 — enforced by billing, surfaced by the hub
 /** A lease not renewed for this long is stale: its owner's machine is asleep or gone (D12). */
 export const LEASE_TTL_MS = 10 * 60_000;
@@ -516,7 +521,9 @@ export class MemoryHub {
     const m = this.memberships.get(inv.teamId)!;
     if (!m.has(userId)) {
       m.set(userId, { role: "member", joinedAt: this.now() });
-      this.appendFeedRaw(inv.teamId, null, { type: "member_joined", meta: { github: this.user(userId).github } });
+      // `invite` names which invite was used (a hash, never the token), so the
+      // inviter's Loom gives repo access to the person *that* link went to
+      this.appendFeedRaw(inv.teamId, null, { type: "member_joined", meta: { github: this.user(userId).github, invite: inviteTag(invite) } });
     }
     return { team: this.team(inv.teamId), role: m.get(userId)!.role };
   }
@@ -555,15 +562,19 @@ export class MemoryHub {
     return { ...l, stale: this.now() - l.ts > LEASE_TTL_MS };
   }
 
-  /** Everyone's live (non-stale) leases in a repo, except those of one run. */
-  private rivals(teamId: string, repo: string, exceptRun: string): Lease[] {
+  /**
+   * Everyone's live (non-stale) leases in a repo, except this user's own run.
+   * Matching on the run alone let anyone dodge a rival's lease by reusing its
+   * run id.
+   */
+  private rivals(teamId: string, repo: string, exceptRun: string, userId: string): Lease[] {
     return [...(this.leasesByTeam.get(teamId)?.values() ?? [])]
       .map((l) => this.withStale(l))
-      .filter((l) => l.repo === repo && l.runId !== exceptRun && !l.stale);
+      .filter((l) => l.repo === repo && !(l.runId === exceptRun && l.userId === userId) && !l.stale);
   }
 
-  private judge(teamId: string, repo: string, runId: string, scope: LeaseScope, hardZones: string[]): Omit<ClaimResult, "lease"> {
-    const rivals = this.rivals(teamId, repo, runId);
+  private judge(teamId: string, repo: string, runId: string, scope: LeaseScope, hardZones: string[], userId: string): Omit<ClaimResult, "lease"> {
+    const rivals = this.rivals(teamId, repo, runId, userId);
     const overlaps = rivals
       .map((l) => ({ lease: l, paths: overlap(scope, l) }))
       .filter((o) => o.paths.length > 0);
@@ -582,7 +593,7 @@ export class MemoryHub {
     const repo = normalizeRepo(c.repo);
     if (!this.reposByTeam.get(teamId)?.has(repo)) throw new HubError(`${repo} isn't shared with this team`, 403);
     const scope: LeaseScope = { globs: c.globs.slice(0, 50), files: c.files.slice(0, 500), prefixes: c.prefixes.slice(0, 50) };
-    const verdict = this.judge(teamId, repo, c.runId, scope, c.hardZones);
+    const verdict = this.judge(teamId, repo, c.runId, scope, c.hardZones, userId);
     if (verdict.blockedBy) return { lease: null, ...verdict };
     const map = this.leasesByTeam.get(teamId) ?? new Map<string, Lease>();
     // one lease per (run, task): a re-claim replaces the old one
@@ -623,7 +634,7 @@ export class MemoryHub {
       prefixes: [...new Set([...l.prefixes, ...scope.prefixes])].slice(0, 50),
     };
     // only the NEW part is judged — what was already held stays held
-    const verdict = this.judge(teamId, l.repo, l.runId, scope, hardZones);
+    const verdict = this.judge(teamId, l.repo, l.runId, scope, hardZones, userId);
     if (verdict.blockedBy) return { lease: null, ...verdict };
     Object.assign(l, wider, { ts: this.now() });
     this.emit(teamId, { type: "lease", teamId, lease: this.withStale(l) });

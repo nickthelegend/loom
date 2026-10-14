@@ -27,6 +27,15 @@ export interface FakeOpenCodeOptions {
   compact?: boolean;
   /** Emit a tool call during the turn. */
   tool?: { tool: string; input: Json };
+  /**
+   * A two-step turn: a first assistant message that finishes on tool calls,
+   * then this long a pause (the session still running) before the answer.
+   */
+  stepGapMs?: number;
+  /** Mid-turn, ask these questions (opencode's question tool) and finish only once answered. */
+  ask?: Json[];
+  /** Mid-turn, ask this permission and finish only once replied to. */
+  permission?: { permission: string; patterns: string[]; metadata?: Json };
 }
 
 export interface FakeOpenCode {
@@ -36,6 +45,8 @@ export interface FakeOpenCode {
   prompts: Array<{ session: string; text: string }>;
   modelSwitches: Array<{ session: string; model: Json }>;
   created: string[];
+  /** Replies to questions and permissions, as posted. */
+  replies: Array<{ path: string; body: Json }>;
   forget(session: string): void;
   close(): Promise<void>;
 }
@@ -50,6 +61,8 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
   const prompts: FakeOpenCode["prompts"] = [];
   const modelSwitches: FakeOpenCode["modelSwitches"] = [];
   const created: string[] = [];
+  const replies: FakeOpenCode["replies"] = [];
+  const waiting = new Map<string, () => void>(); // question/permission id → finish the turn
   const timers = new Set<NodeJS.Timeout>();
   const later = (ms: number, fn: () => void) => {
     const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
@@ -79,6 +92,18 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
       res.write(`data: ${JSON.stringify({ type: "server.connected", properties: {} })}\n\n`);
       sse.add(res);
       req.on("close", () => sse.delete(res));
+      return;
+    }
+    // answers to opencode's own asks: the session-scoped routes current builds serve
+    const qa = /^\/api\/session\/[^/]+\/(question|permission)\/([^/]+)\/(reply|reject)$/.exec(p);
+    if (qa && req.method === "POST") {
+      replies.push({ path: p, body: await body(req) });
+      const go = waiting.get(qa[2]!);
+      if (!go) return send(res, 404, { message: "no such request" });
+      waiting.delete(qa[2]!);
+      send(res, 200, { data: true });
+      push(qa[1] === "question" ? (qa[3] === "reply" ? "question.replied" : "question.rejected") : "permission.replied", { sessionID: "", requestID: qa[2] });
+      go();
       return;
     }
     if (p === "/api/session/active") return send(res, 200, { data: Object.fromEntries([...active].map((s) => [s, { type: "running" }])) });
@@ -125,7 +150,8 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
         push("session.next.step.started", { sessionID: sid, assistantMessageID: asstId, model: s.model });
         if (opts.tool) {
           push("session.next.tool.called", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", tool: opts.tool.tool, input: opts.tool.input });
-          push("session.next.tool.success", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", result: {} });
+          push("session.next.tool.success", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", result: {}, structured: {},
+            content: [{ type: "text", text: "total 8\nhello.html" }], provider: { executed: true } });
         }
         if (opts.compact) {
           push("session.next.compaction.started", { sessionID: sid, messageID: asstId, reason: "auto" });
@@ -135,7 +161,28 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
         push("session.next.text.delta", { sessionID: sid, assistantMessageID: asstId, textID: "t0", delta: opts.reply ?? "done" });
       });
       if (opts.stuck) return;
-      later(opts.turnMs ?? 60, () => {
+      if (opts.ask || opts.permission) {
+        const id = opts.ask ? nextId("que") : nextId("per");
+        later(30, () => {
+          if (opts.ask) push("question.asked", { id, sessionID: sid, questions: opts.ask });
+          else push("permission.asked", { id, sessionID: sid, ...opts.permission, always: [], metadata: opts.permission!.metadata ?? {} });
+        });
+        waiting.set(id, () => later(20, () => {
+          s.messages.push({ id: asstId, type: "assistant", time: { created: Date.now(), completed: Date.now() }, finish: "stop",
+            content: [{ type: "text", text: opts.reply ?? "done" }], tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, model: s.model });
+          push("session.next.step.ended", { sessionID: sid, assistantMessageID: asstId, finish: "stop" });
+          active.delete(sid);
+        }));
+        return;
+      }
+      const gap = opts.stepGapMs ?? 0;
+      if (gap) {
+        later(opts.turnMs ?? 60, () => {
+          s.messages.push({ id: nextId("msg"), type: "assistant", time: { created: Date.now(), completed: Date.now() }, finish: "tool-calls",
+            content: [{ type: "tool", tool: "read" }], tokens: { input: 5, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }, model: s.model });
+        });
+      }
+      later((opts.turnMs ?? 60) + gap, () => {
         s.messages.push({
           id: asstId, type: "assistant", time: { created: Date.now(), completed: Date.now() },
           finish: opts.fail ? "error" : "stop",
@@ -160,6 +207,7 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
     prompts,
     modelSwitches,
     created,
+    replies,
     forget: (session) => { sessions.delete(session); active.delete(session); },
     close: async () => {
       for (const t of timers) clearTimeout(t);

@@ -24,7 +24,7 @@
  * Everything outside git and the hub goes through `gh`, injectable for tests.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

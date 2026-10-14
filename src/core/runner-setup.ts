@@ -12,8 +12,30 @@ export interface ServiceFile {
 }
 
 /** A user-level service running the Loom daemon in runner mode. */
-export function serviceFile(opts: { platform: NodeJS.Platform; home: string; node: string; loom: string; loomHome?: string }): ServiceFile {
+export function serviceFile(opts: { platform: NodeJS.Platform; home: string; node: string; loom: string; loomHome?: string; appData?: string }): ServiceFile {
   const env = opts.loomHome ? { LOOM_HOME: opts.loomHome } : {};
+  if (opts.platform === "win32") {
+    const vb = (s: string) => '"' + s.replaceAll('"', '""') + '"';
+    const file = `${opts.appData ?? `${opts.home}/AppData/Roaming`}/Microsoft/Windows/Start Menu/Programs/Startup/Loom Runner.vbs`;
+    // Startup is writable by the current user. Register-ScheduledTask can
+    // require elevation even for a least-privilege InteractiveToken task.
+    // `up` starts the detached daemon or reuses the healthy one, then exits.
+    const command = `"${opts.node}" "${opts.loom}" up`;
+    return {
+      path: file,
+      content: [
+        'Option Explicit',
+        'Dim shell, env, code',
+        'Set shell = CreateObject("WScript.Shell")',
+        'Set env = shell.Environment("PROCESS")',
+        ...(opts.loomHome ? [`env("LOOM_HOME") = ${vb(opts.loomHome)}`] : []),
+        `shell.CurrentDirectory = ${vb(opts.home)}`,
+        `code = shell.Run(${vb(command)}, 0, True)`,
+        'WScript.Quit code', '',
+      ].join("\r\n"),
+      enable: [["cscript.exe", "//nologo", file]],
+    };
+  }
   if (opts.platform === "darwin") {
     const label = "dev.loom.runner";
     const envXml = Object.entries(env)

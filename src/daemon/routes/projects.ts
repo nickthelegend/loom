@@ -4,7 +4,47 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../../core/ades.js";
 import { ensureLoomHome, listProjects, projectLoomDir, readProjectConfig, registerProject, unregisterProject, writeProjectConfig } from "../../core/registry.js";
+import type { ProjectConfig, ProjectInfo } from "../../types.js";
 import type { RouteContext } from './context.js';
+
+/**
+ * Make a directory a project: its config (detecting the agents on this
+ * machine when it has none) and its registry entry. Also how a joined
+ * teammate's fresh clone becomes a project (daemon/onboard.ts).
+ */
+export async function addProjectAt(resolved: string, name?: string): Promise<{ info: ProjectInfo; config: ProjectConfig }> {
+  let config = readProjectConfig(resolved);
+  // A config that exists but has no name is legal on disk and was silently
+  // corrosive: the defaulting branch below is skipped, `--name` is ignored,
+  // and `registerProject` stores `name: null`. That null then surfaces as a
+  // nameless row in the project list and as a missing `project` field in
+  // snapshots — which declare it as a string. ProjectConfig types `name` as
+  // required, but the file is read through an unchecked cast, so the type
+  // system never had a chance to notice. Fill it in, and persist, because
+  // the docs tell people to hand-edit this file for agents; forgetting the
+  // name while doing so should cost them nothing.
+  if (config && !String(config.name ?? "").trim()) {
+    config = { ...config, name: name?.trim() || path.basename(resolved) };
+    writeProjectConfig(resolved, config);
+  }
+  if (!config) {
+    // Every ADE Loom can drive, probed in parallel — see core/ades.ts.
+    // This used to name claude and opencode by hand, which is how the list
+    // of what Loom actually drives drifted from the list of logos it ships.
+    const availability = await detectAdes();
+    const agents = defaultAgentConfigs(availability);
+    const routes = buildDefaultRoutes(agents);
+    config = {
+      name: name ?? path.basename(resolved),
+      agents,
+      ...(routes ? { routes } : {}),
+    };
+    writeProjectConfig(resolved, config);
+  }
+  const info = registerProject(resolved, config.name || path.basename(resolved));
+  return { info, config };
+}
+
 /** Register projects routes in the order established by LoomDaemon.routes(). */
 export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "runtime" | "runtimes" | "specRunner">): void {
 
@@ -46,35 +86,7 @@ export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "ru
       if (!fs.existsSync(resolved)) {
         return void res.status(400).json({ error: `no such directory: ${resolved}` });
       }
-      let config = readProjectConfig(resolved);
-      // A config that exists but has no name is legal on disk and was silently
-      // corrosive: the defaulting branch below is skipped, `--name` is ignored,
-      // and `registerProject` stores `name: null`. That null then surfaces as a
-      // nameless row in the project list and as a missing `project` field in
-      // snapshots — which declare it as a string. ProjectConfig types `name` as
-      // required, but the file is read through an unchecked cast, so the type
-      // system never had a chance to notice. Fill it in, and persist, because
-      // the docs tell people to hand-edit this file for agents; forgetting the
-      // name while doing so should cost them nothing.
-      if (config && !String(config.name ?? "").trim()) {
-        config = { ...config, name: name?.trim() || path.basename(resolved) };
-        writeProjectConfig(resolved, config);
-      }
-      if (!config) {
-        // Every ADE Loom can drive, probed in parallel — see core/ades.ts.
-        // This used to name claude and opencode by hand, which is how the list
-        // of what Loom actually drives drifted from the list of logos it ships.
-        const availability = await detectAdes();
-        const agents = defaultAgentConfigs(availability);
-        const routes = buildDefaultRoutes(agents);
-        config = {
-          name: name ?? path.basename(resolved),
-          agents,
-          ...(routes ? { routes } : {}),
-        };
-        writeProjectConfig(resolved, config);
-      }
-      const info = registerProject(resolved, config.name || path.basename(resolved));
+      const { info, config } = await addProjectAt(resolved, name);
       res.json({ project: info, config });
     })();
   });

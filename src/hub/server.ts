@@ -19,6 +19,7 @@
  */
 
 import http from "node:http";
+import { configureHttpServer } from "../core/http-server.js";
 import crypto from "node:crypto";
 import express from "express";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -150,6 +151,7 @@ export async function startHubServer(opts: HubServerOptions = {}): Promise<{
   });
 
   const server = http.createServer(app);
+  configureHttpServer(server);
   const wss = new WebSocketServer({ server, path: "/hub/subscribe" });
   wss.on("connection", (ws: WebSocket, req) => {
     const proto = String(req.headers["sec-websocket-protocol"] ?? "")

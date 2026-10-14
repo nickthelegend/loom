@@ -1,6 +1,6 @@
 import type { Express } from 'express';
 import { logbook } from "../../core/logbook.js";
-import { findSpecs, type SpecRun } from "../specs.js";
+import { findSpecs, playwrightSetup, type SpecRun } from "../specs.js";
 import type { RouteContext, WithRuntime } from './context.js';
 /** Register specs routes in the order established by LoomDaemon.routes(). */
 export function registerSpecsRoutes(app: Express, ctx: Pick<RouteContext, "specRunner" | "broadcastTerm">, withRuntime: WithRuntime): void {
@@ -13,9 +13,13 @@ export function registerSpecsRoutes(app: Express, ctx: Pick<RouteContext, "specR
   app.get(
     "/api/projects/:id/specs",
     withRuntime(async (rt, _req, res) => {
+      const setup = playwrightSetup(rt.info.dir);
       res.json({
         specs: findSpecs(rt.info.dir),
         running: ctx.specRunner.running(rt.info.id),
+        // so an empty list can say why: no Playwright here at all, or no specs yet
+        playwright: !!(setup.config || setup.dependency),
+        testDir: setup.testDir,
       });
     }),
   );
@@ -35,10 +39,13 @@ export function registerSpecsRoutes(app: Express, ctx: Pick<RouteContext, "specR
               runId: r.id,
               file: r.file,
               exitCode: r.exitCode,
+              ...(r.stopped ? { stopped: r.stopped } : {}),
             });
             // The Console keeps the record; the stream is for watching live.
             if (r.exitCode === 0) {
               logbook.info("specs", `${r.file} passed`, undefined, rt.info.id);
+            } else if (r.stopped === "stop") {
+              logbook.info("specs", `${r.file} stopped`, undefined, rt.info.id);
             } else {
               logbook.error(
                 "specs",

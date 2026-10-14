@@ -11,7 +11,7 @@
  */
 
 import type { LoomEvent, ProjectionConfig } from "../types.js";
-import { claudeText } from "./claude-cli.js";
+import { helperText } from "./provider-text.js";
 import { buildProjection, type ProjectionInput } from "./projection.js";
 
 const MAX_TRANSCRIPT_EVENTS = 60;
@@ -88,10 +88,8 @@ export async function renderProjection(
     return { content: buildProjection(input), mode: "template" };
   }
   try {
-    const body = await claudeText(distillPrompt(input), {
-      model: cfg.model ?? "haiku",
-      timeoutMs: cfg.timeoutMs ?? 45_000,
-    });
+    // "haiku" is Claude; a provider/model (ollama/…, openrouter/pool:free) runs there
+    const body = await helperText(cfg.model ?? "haiku", distillPrompt(input), { timeoutMs: cfg.timeoutMs ?? 45_000 });
     const trimmed = body.trim();
     if (trimmed.length < 80 || !/##\s/.test(trimmed)) {
       throw new Error("distillation came back malformed");

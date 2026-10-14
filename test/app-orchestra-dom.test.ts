@@ -116,6 +116,7 @@ function mount({
   token = clientToken as string | null,
   bootstrap = true,
   chat = "",
+  helloDelayMs = 0,
 } = {}): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
@@ -194,9 +195,23 @@ function mount({
       // jsdom has no WebSocket either. A real one, remembered so close() can
       // hang up: an open socket keeps the daemon's server.close() waiting.
       window.WebSocket = class extends WebSocket {
+        private helloSeen = helloDelayMs === 0;
         constructor(url: string | URL, protocols?: string | string[]) {
           super(url, protocols);
           sockets.push(this);
+        }
+        override emit(event: string | symbol, ...args: unknown[]): boolean {
+          if (event === "message" && helloDelayMs) {
+            const frame = JSON.parse(String(args[0]));
+            if (frame.type === "hello") {
+              setTimeout(() => { if (!closed) { this.helloSeen = true; super.emit(event, ...args); } }, helloDelayMs);
+              return true;
+            }
+            // Events published before subscription aren't delivered to a real
+            // socket. Reproduce that gap while the daemon starts a fast run.
+            if (!this.helloSeen && frame.type === "event") return true;
+          }
+          return super.emit(event, ...args);
         }
       } as unknown as typeof window.WebSocket;
       if (token) window.localStorage.setItem("loomClientToken", token);
@@ -343,7 +358,7 @@ describe("web app · composer modes", () => {
 
 describe("web app · orchestra", () => {
   it("orchestrates from the composer, then answers and aborts the run from its view", async () => {
-    const m = mount({ hash: `#p/${projectId}` });
+    const m = mount({ hash: `#p/${projectId}`, helloDelayMs: 1000 });
     await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
     await ready(m, '#cmode [data-cmode="orch"]');
     click($(m, '#cmode [data-cmode="orch"]'));
@@ -364,7 +379,10 @@ describe("web app · orchestra", () => {
     }, { timeoutMs: 30_000 });
     expect(run.chat).toBe("main");
     expect(run.inPlace).toBe(true);
-    await waitUntil(() => text(m, "#feed").includes("Orchestra started"));
+    await waitUntil(() => text(m, "#feed").includes("Orchestra started")).catch(async (error) => {
+      const events = await rest<{ events: unknown[] }>("GET", "/events?limit=30&chat=main");
+      throw new Error(`${error.message}\nfeed: ${text(m, "#feed")}\npage errors: ${m.errors.join("; ")}\nevents: ${JSON.stringify(events.events)}`);
+    });
     expect($(m, '.tab[data-tab="thread"]')?.classList.contains("active")).toBe(true);
     // …and the composer did not move you: still Main, stored or implied.
     expect([null, "main"]).toContain(m.window.localStorage.getItem(`loomChat:${projectId}`));

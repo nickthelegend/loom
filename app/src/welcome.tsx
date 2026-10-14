@@ -192,15 +192,16 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
       </View>
 
       <Animated.View style={[{ paddingHorizontal: spacing.xl, paddingBottom: spacing.xl, gap: 14 }, rise(actions, 20)]}>
+        {/* A build without sign-in (the store build, a fork) has one way in: start. */}
         <Animated.View style={{ transform: [{ scale: press }] }}>
           <Pressable
-            onPress={google}
+            onPress={supabaseConfigured ? google : props.onSkip}
             onPressIn={() => Animated.spring(press, { toValue: 0.97, useNativeDriver: true, speed: 40 }).start()}
             onPressOut={() => Animated.spring(press, { toValue: 1, useNativeDriver: true, speed: 30 }).start()}
-            disabled={!supabaseConfigured || busy}
+            disabled={busy}
             accessibilityRole="button"
-            accessibilityLabel="Continue with Google"
-            accessibilityState={{ disabled: !supabaseConfigured, busy }}
+            accessibilityLabel={supabaseConfigured ? "Continue with Google" : "Get started"}
+            accessibilityState={{ busy }}
             style={{
               height: 54,
               borderRadius: 14,
@@ -209,44 +210,44 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
               alignItems: "center",
               justifyContent: "center",
               gap: 12,
-              opacity: supabaseConfigured ? 1 : 0.38,
             }}
           >
             {busy ? (
               <ActivityIndicator color={T.onBright} />
-            ) : (
+            ) : supabaseConfigured ? (
               <>
                 <GoogleMark size={20} />
                 <Text style={{ color: T.onBright, fontSize: 16, fontWeight: "700", letterSpacing: -0.2 }}>
                   Continue with Google
                 </Text>
               </>
+            ) : (
+              <Text style={{ color: T.onBright, fontSize: 16, fontWeight: "700", letterSpacing: -0.2 }}>Get started</Text>
             )}
           </Pressable>
         </Animated.View>
 
-        {!supabaseConfigured && (
-          <Text style={{ color: T.faint, fontSize: 12, lineHeight: 18, textAlign: "center" }}>
-            Sign-in isn&apos;t set up in this build (no Supabase keys). Everything else works without an account.
-          </Text>
-        )}
         {err && (
           <Text style={{ color: T.err, fontSize: 13, lineHeight: 19, textAlign: "center" }} accessibilityLiveRegion="polite">
             {err}
           </Text>
         )}
 
-        <TouchableOpacity
-          onPress={props.onSkip}
-          activeOpacity={0.6}
-          accessibilityRole="button"
-          style={{ minHeight: 44, alignItems: "center", justifyContent: "center" }}
-        >
-          <Text style={{ color: T.text, fontSize: 14.5, fontWeight: "600" }}>Continue without an account</Text>
-        </TouchableOpacity>
+        {supabaseConfigured && (
+          <TouchableOpacity
+            onPress={props.onSkip}
+            activeOpacity={0.6}
+            accessibilityRole="button"
+            style={{ minHeight: 44, alignItems: "center", justifyContent: "center" }}
+          >
+            <Text style={{ color: T.text, fontSize: 14.5, fontWeight: "600" }}>Continue without an account</Text>
+          </TouchableOpacity>
+        )}
 
         <Text style={{ color: T.faint, fontSize: 11.5, lineHeight: 17, textAlign: "center" }}>
-          Loom runs fully on your own network. An account only turns on cloud features.
+          {supabaseConfigured
+            ? "Loom runs fully on your own network. An account only turns on cloud features."
+            : "Loom runs on your computer and your own network. No account needed."}
         </Text>
       </Animated.View>
     </View>

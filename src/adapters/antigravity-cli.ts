@@ -31,7 +31,8 @@
  *     another tool later rewrites that dir's mapping.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +55,7 @@ interface AntigravityOptions {
 
 /** The installer drops the binary here; it isn't always on the daemon's PATH. */
 const INSTALLED = [
+  ...(process.platform === "win32" ? [path.join(os.homedir(), ".local", "bin", "agy.exe")] : []),
   path.join(os.homedir(), ".local", "bin", "agy"),
 ];
 
@@ -64,6 +66,10 @@ const INSTALLED = [
  */
 export function agyBin(override?: string): string | null {
   if (override) return fs.existsSync(override) ? override : null;
+  if (process.platform === "win32") {
+    const native = path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "agy", "bin", "agy.exe");
+    if (fs.existsSync(native)) return native;
+  }
   for (const p of INSTALLED) {
     if (fs.existsSync(p)) return p;
   }
@@ -72,7 +78,7 @@ export function agyBin(override?: string): string | null {
 
 /** agy's per-workspace conversation index; maps a working dir to its last id. */
 function conversationIndexPath(): string {
-  return path.join(os.homedir(), ".gemini", "antigravity-cli", "cache", "last_conversations.json");
+  return path.join(process.env.HOME ?? os.homedir(), ".gemini", "antigravity-cli", "cache", "last_conversations.json");
 }
 
 /** The conversation id agy last used for `dir`, or null if it has none. */

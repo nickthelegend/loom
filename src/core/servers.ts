@@ -16,7 +16,8 @@
  * are elsewhere; nothing here starts anything by itself.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn, stopWindowsTree } from "./process.js";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -265,7 +266,7 @@ export class Servers {
     try {
       // The whole group: `npm run dev` spawns the server that holds the port.
       if (run.child.pid && process.platform !== "win32") process.kill(-run.child.pid, "SIGTERM");
-      else run.child.kill("SIGTERM");
+      else await stopWindowsTree(run.child);
     } catch {
       run.child.kill("SIGTERM");
     }

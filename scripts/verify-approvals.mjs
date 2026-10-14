@@ -17,8 +17,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.LOOM_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "loom-va-home-"));
 process.env.LOOM_NO_NOTIFY = "1";
-const { LoomDaemon } = await import(`${ROOT}/dist/daemon/server.js`);
-const { readDaemonConfig, writeProjectConfig } = await import(`${ROOT}/dist/core/registry.js`);
+const { LoomDaemon } = await import(new URL("../dist/daemon/server.js", import.meta.url));
+const { readDaemonConfig, writeProjectConfig } = await import(new URL("../dist/core/registry.js", import.meta.url));
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-va-"));
 execFileSync("git", ["init", "-q", "."], { cwd: dir });

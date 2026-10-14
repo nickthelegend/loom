@@ -22,8 +22,8 @@ import path from "node:path";
 
 import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const { createAgent } = await import(`${ROOT}/dist/adapters/index.js`);
-const { ADES } = await import(`${ROOT}/dist/core/ades.js`);
+const { createAgent } = await import(new URL("../dist/adapters/index.js", import.meta.url));
+const { ADES } = await import(new URL("../dist/core/ades.js", import.meta.url));
 
 function scratchRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-verify-"));

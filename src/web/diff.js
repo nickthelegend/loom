@@ -16,8 +16,8 @@ import { ICONS } from './icons.js';
       var m = line.match(/^diff --git a\/(.+) b\/(.+)$/);
       if (m) { cur = { path: m[2], lines: [], add: 0, del: 0 }; parts.push(cur); return; }
       // a file the turn created, reported without a git diff of its own
-      var nf = line.match(/^\?\? new file: (.+)$/);
-      if (nf) { cur = { path: nf[1], lines: [line], add: 0, del: 0, created: true }; parts.push(cur); return; }
+      var nf = line.match(/^\?\? new file: (.+?)( \(binary\))?$/);
+      if (nf) { cur = { path: nf[1], lines: [line], add: 0, del: 0, created: true, binary: !!nf[2] }; parts.push(cur); return; }
       if (!cur) { cur = { path: "", lines: [], add: 0, del: 0 }; parts.push(cur); }
       cur.lines.push(line);
       if (line.charAt(0) === "+" && line.slice(0, 3) !== "+++") cur.add++;
@@ -108,10 +108,17 @@ import { ICONS } from './icons.js';
     files = files.filter(function(f){ return f.path || f.lines.join("").trim(); });
     if (!files.length) return '<div class="sys">working tree is clean</div>';
     return files.map(function(f, i){
+      // the card's title already names the file; git's header lines only repeat it
+      var lines = f.lines.filter(function(l){ return !/^(index |--- |\+\+\+ |new file mode |deleted file mode )/.test(l); });
+      var newImage = f.created && /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(f.path);
+      var body = newImage
+        ? '<div class="dnewimg"><img data-projimg="' + esc(f.path) + '" alt="' + esc(f.path) + '"></div>'
+        : f.created && f.binary ? '<div class="dl meta full">new binary file</div>'
+        : diffBody(lines, f.path);
       return '<div class="dfile" id="df-' + i + '">' +
         '<div class="dfh">' + ICONS.tree + '<span class="p">' + esc(f.path || "patch") + "</span>" +
-        '<span class="cadd">+' + f.add + "</span><span class=\"cdel\">\u2212" + f.del + "</span></div>" +
-        '<div class="dcode">' + diffBody(f.lines, f.path) + "</div></div>";
+        (f.created ? '<span class="dnew">new</span>' : '<span class="cadd">+' + f.add + "</span><span class=\"cdel\">\u2212" + f.del + "</span>") + "</div>" +
+        '<div class="dcode">' + body + "</div></div>";
     }).join("");
   }
 export { diffBody,diffLineClass,diffToggle,isLoomInternal,renderDiffFiles,renderDiffLines,splitPatch,visibleFiles };

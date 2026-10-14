@@ -65,7 +65,7 @@ describe("connect a phone — network options", () => {
     const bin = path.join(binDir, "tailscale");
     fs.writeFileSync(
       bin,
-      '#!/bin/sh\nprintf \'{"BackendState":"NeedsLogin","TailscaleIPs":[]}\'\nexit 1\n',
+      `#!/usr/bin/env node\nconsole.log('{"BackendState":"NeedsLogin","TailscaleIPs":[]}');process.exit(1);\n`,
       { mode: 0o755 },
     );
     const previousPath = process.env.PATH;

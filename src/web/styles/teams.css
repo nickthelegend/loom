@@ -313,3 +313,62 @@
     font-size:11px;font-weight:600;color:var(--thread-ink);border:1px solid color-mix(in srgb, var(--thread) 40%, transparent);
     background:color-mix(in srgb, var(--thread) 9%, transparent)}
   .cloudbadge svg{width:12px;height:12px}
+
+  /* ---- one-link onboarding: the Invite button, its dialog, the join page ---- */
+  .invitebtn{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;margin-right:4px;font-size:12px}
+  .invitebtn svg{width:14px;height:14px}
+  @media (max-width:900px){ .invitebtn span{display:none} .invitebtn{padding:0 6px} }
+  .modal.invmodal{max-width:460px;
+    background:radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--thread) 10%, transparent), transparent 55%), var(--popover, var(--card))}
+  .invmodal .modalbody{display:flex;flex-direction:column;gap:12px}
+  .ivhead{display:flex;flex-direction:column;gap:6px}
+  .ivwho{display:flex;align-items:center;gap:7px;font-size:14px;flex-wrap:wrap}
+  .ivwho svg{width:16px;height:16px;color:var(--thread-ink)}
+  .ivwho code,.jrepo code{font-family:var(--font-mono);font-size:11.5px;background:var(--muted);padding:1px 6px;border-radius:4px}
+  .ivsub,.jsub{font-size:12.5px;line-height:1.55;color:var(--muted-foreground)}
+  .ivqr{align-self:center;background:#fff;padding:10px;border-radius:12px;line-height:0;box-shadow:0 1px 3px rgba(0,0,0,.14)}
+  .ivqr svg{width:196px;height:196px;display:block}
+  .ivacts{display:flex;gap:6px;flex-wrap:wrap}
+  .ivnote{font-size:12px;color:var(--warn);line-height:1.5}
+  .ivwarnrow{padding:9px 10px;border-radius:8px;background:color-mix(in srgb, var(--warn) 8%, transparent)}
+  .ivstate{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:18px 6px;font-size:13px;line-height:1.55}
+  .ivstate .btn svg{width:15px;height:15px}
+  .thubdown{padding:9px 10px;border-radius:8px;background:color-mix(in srgb, var(--warn) 9%, transparent);margin:6px 0 10px}
+  .jwarn{padding:9px 10px;border-radius:8px;background:color-mix(in srgb, var(--warn) 8%, transparent);margin-top:10px}
+  .jwarn code{font-family:var(--font-mono);font-size:11.5px;background:var(--muted);padding:1px 5px;border-radius:4px}
+  .ivwarn,.jerr{color:var(--err);font-size:12.5px;line-height:1.5}
+  .ivwarn code{font-family:var(--font-mono);font-size:11.5px;background:var(--muted);padding:1px 5px;border-radius:4px;color:var(--foreground)}
+  .ivbad{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--err);background:color-mix(in srgb, var(--err) 10%, transparent)}
+  .ivbad svg{width:18px;height:18px}
+  .ivexp{font-family:var(--font-mono);font-size:10px;color:var(--muted-foreground)}
+  .ivgrant{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted-foreground);margin-right:8px;cursor:pointer}
+
+  .joinwrap{min-height:92dvh;display:flex;align-items:center;justify-content:center;padding:28px 16px}
+  .joincard{width:100%;max-width:460px;
+    background:radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--thread) 12%, transparent), transparent 55%),
+      radial-gradient(120% 90% at 100% 100%, color-mix(in srgb, var(--shuttle) 10%, transparent), transparent 55%), var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);
+    padding:22px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 30px rgba(0,0,0,.08)}
+  .jhead{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+  .jlogo{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    background:color-mix(in srgb, var(--thread) 18%, transparent);color:var(--thread-ink)}
+  .jlogo svg{width:22px;height:22px}
+  .jtitle{font-size:17px;line-height:1.35}
+  .jsteps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+  .jsteps li{display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-radius:8px;font-size:13px}
+  .jsteps li.js-running,.jsteps li.js-waiting{background:var(--muted)}
+  .jsteps .jmark{width:16px;height:16px;flex:none;display:flex;align-items:center;justify-content:center;
+    border-radius:50%;border:1px solid var(--border);font-size:11px;color:var(--muted-foreground);margin-top:1px}
+  .jsteps .jmark svg{width:11px;height:11px}
+  .jsteps li.js-done .jmark{background:var(--ok);border-color:var(--ok);color:#fff}
+  .jsteps li.js-failed .jmark{background:var(--err);border-color:var(--err);color:#fff}
+  .jsteps li.js-waiting .jmark{border-color:var(--warn);color:var(--warn)}
+  .jsteps li.js-skipped{opacity:.65}
+  .jsteps .jmark .obspin{width:12px;height:12px}
+  .jsteps .jl{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .jsteps small{font-size:11.5px;color:var(--muted-foreground);line-height:1.45;overflow-wrap:anywhere}
+  .jfields{display:flex;flex-direction:column;gap:8px}
+  .jmore summary{font-size:12px;color:var(--muted-foreground);cursor:pointer}
+  .jmore .field{margin-top:8px}
+  .jacts{display:flex;gap:8px;justify-content:flex-end}
+  .jok{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--ok);justify-content:center}
+  .jok svg{width:16px;height:16px}

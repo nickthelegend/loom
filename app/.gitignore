@@ -8,3 +8,6 @@ dist/
 # local Supabase keys (see .env.example)
 .env
 .env.local
+
+# store-release only (app.config.js)
+google-services.json

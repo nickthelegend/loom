@@ -11,7 +11,7 @@
  * item worded differently.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -151,8 +151,10 @@ async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail
       const bin = codexBin();
       if (!bin) return { authed: null };
       const { out } = await run(bin, ["login", "status"], 6000);
-      if (/logged in/i.test(out)) return { authed: true };
+      // "Not logged in" contains "logged in": the refusal is checked first
       if (/not logged in|no auth/i.test(out)) return { authed: false, detail: out.trim().slice(0, 60) };
+      const how = /logged in using (chatgpt|an api key)/i.exec(out)?.[1];
+      if (/logged in/i.test(out)) return { authed: true, ...(how ? { detail: /chatgpt/i.test(how) ? "ChatGPT account" : "API key" } : {}) };
       return { authed: null };
     }
     if (kind === "opencode") {
@@ -313,7 +315,10 @@ export async function setupReport(): Promise<SetupReport> {
         kind: a.kind,
         label: a.label,
         found,
-        install: INSTALL[a.kind] ?? "",
+        install: p === "win32" && a.kind === "opencode" ? "npm i -g opencode-ai"
+          : p === "win32" && a.kind === "codex" ? "npm i -g @openai/codex"
+          : p === "win32" && a.kind === "antigravity-cli" ? "irm https://antigravity.google/cli/install.ps1 | iex"
+          : INSTALL[a.kind] ?? "",
         authed: auth.authed,
         ...(auth.detail ? { authDetail: auth.detail } : {}),
         auth: AUTH[a.kind] ?? "",

@@ -5,11 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node: [22, 24]
     steps:
       - uses: actions/checkout@v4
@@ -38,11 +44,7 @@ jobs:
   # above, so nothing here noticed when it broke. It can't be rendered in CI —
   # this at least keeps it compiling against the daemon's types.
   #
-  # `npm install`, not `npm ci`: app/package-lock.json is missing transitive
-  # entries that npm 10 insists on and npm 11 tolerates, so `npm ci` fails here
-  # while passing locally. Regenerating that lock moves an Expo/RN tree and can
-  # shift the APK build, so it's a deliberate change to make on its own — not a
-  # side effect of adding a typecheck.
+  # Keep the phone dependency tree reproducible on npm 10 as well as npm 11.
   app:
     runs-on: ubuntu-latest
     steps:
@@ -52,7 +54,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
         working-directory: app
       - run: npx tsc --noEmit
         working-directory: app

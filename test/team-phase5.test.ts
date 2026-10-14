@@ -160,7 +160,7 @@ beforeAll(async () => {
   const bin = tmpDir("p5-bin");
   fs.writeFileSync(
     path.join(bin, "gh"),
-    `#!/bin/sh\ncase "$*" in\n  *"pr create"*) n=$(cat "${bin}/n" 2>/dev/null || echo 50); n=$((n+1)); echo $n > "${bin}/n"; echo "https://github.com/acme/app/pull/$n" ;;\n  *) echo "[]" ;;\nesac\n`,
+    `#!/usr/bin/env node\nconst fs=require("node:fs"),path=require("node:path"),args=process.argv.slice(2).join(" ");\nif(args.includes("pr create")){const f=path.join(__dirname,"n");let n=50;try{n=Number(fs.readFileSync(f,"utf8"))}catch{}fs.writeFileSync(f,String(++n));console.log("https://github.com/acme/app/pull/"+n)}else console.log("[]");\n`,
     { mode: 0o755 },
   );
   oldPath = process.env.PATH;
@@ -267,7 +267,9 @@ describe("Phase 5: runners", () => {
     await LR.landingFor(rt).tick();
     await LR.runner!.tick();
     await waitUntil(async () => (await jobs()).find((x) => x.id === jobId)?.state === "done");
-    expect(fs.existsSync(path.join(process.env.LOOM_HOME!, "runner", "work", jobId))).toBe(false);
+    // The hub marks the job done before the runner closes its runtime and
+    // removes the clone. A background tick may already be doing that cleanup.
+    await waitUntil(() => !fs.existsSync(path.join(process.env.LOOM_HOME!, "runner", "work", jobId)));
     expect(runnerRts).toHaveLength(0);
   });
 

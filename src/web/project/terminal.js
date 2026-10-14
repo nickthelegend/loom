@@ -2,7 +2,7 @@ import { api } from '../connection.js';
 import { closeConsole,con,drawConsole,drawErrDot } from '../console.js';
 import { esc } from '../format.js';
 import { ICONS } from '../icons.js';
-import { brow,closeBrowser,drawBrowser,fillBrowserPane } from '../preview.js';
+import { brow,closeBrowser,ensureBrowserPane,fillBrowserPane } from '../preview.js';
 import { state } from '../state.js';
 
 /** terminal behavior for one mounted project.
@@ -285,7 +285,9 @@ export function createTerminal(view) {
         var c = ev.target.closest ? ev.target.closest("[data-browclose]") : null;
         if (c) { closeBrowser(); return; }
         view.activeTerm = view.BROWSER_TAB;
-        drawTermTabs(); showTermPane(); drawBrowser();
+        // A tab carried over from another view comes with this mount's fresh,
+        // empty markup: fill it, don't just redraw a list that isn't there.
+        drawTermTabs(); showTermPane(); ensureBrowserPane();
       };
     }
 

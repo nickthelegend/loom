@@ -221,6 +221,8 @@ describe("notificationRoute", () => {
   it("anything else opens the project's thread", () => {
     assert.deepEqual(notificationRoute({ projectId: "p1", kind: "needs_input" }), { projectId: "p1", tab: "thread" });
     assert.deepEqual(notificationRoute({ projectId: "p1", kind: "run_complete", runId: "" }), { projectId: "p1", tab: "thread" });
+    assert.deepEqual(notificationRoute({ projectId: "p1", kind: "run_complete", chat: "c7" }), { projectId: "p1", tab: "thread", chat: "c7" });
+    assert.deepEqual(notificationRoute({ projectId: "p1", kind: "needs_input", chat: "main" }), { projectId: "p1", tab: "thread" });
   });
 
   it("no project, no route", () => {

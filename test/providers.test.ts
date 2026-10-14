@@ -67,7 +67,9 @@ describe("the key", () => {
   it("is stored where only you can read it", () => {
     setProvider("openrouter", { key: "secret-value" });
     const mode = fs.statSync(providersFile()).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // Windows uses the containing account directory's ACL, not POSIX modes.
+    if (process.platform !== "win32") expect(mode).toBe(0o600);
+    expect(fs.readFileSync(providersFile(), "utf8")).toContain("secret-value");
   });
 
   it("is never in what gets shown", () => {
@@ -126,6 +128,10 @@ describe("what a refusal means", () => {
     const client = explainStatus(401, '{"type":"unauthorized_client_error"}', p);
     expect(client).toMatch(/refused Loom as a client, not your key/);
     expect(explainStatus(401, "bad key", p)).toMatch(/rejected the key/);
+    // a model kept for the provider's own apps isn't a key problem
+    const closed = explainStatus(403, '{"error":{"message":"x/y:free is only available on agentic harnesses"}}', p);
+    expect(closed).toMatch(/doesn't serve this model to Loom/);
+    expect(closed).not.toMatch(/rejected the key/);
   });
 
   it("separates an empty pool from a wrong model name", () => {

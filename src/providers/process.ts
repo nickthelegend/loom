@@ -4,7 +4,8 @@
  * stop resolves only once that group is gone.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn, stopWindowsTree } from "../core/process.js";
 import { agentEnv, quiesceProcessGroup } from "../adapters/base.js";
 
 export interface HarnessProcess {
@@ -54,6 +55,11 @@ export async function stopHarness(proc: HarnessProcess, graceMs = 2000): Promise
   const { child } = proc;
   const timeout = (ms: number) => new Promise<"timeout">(resolve => setTimeout(() => resolve("timeout"), ms).unref());
   if (child.pid && child.exitCode === null && child.signalCode === null) {
+    if (process.platform === "win32") {
+      await stopWindowsTree(child);
+      if (await Promise.race([proc.closed, timeout(6000)]) === "timeout") throw new Error("Windows agent process did not close after shutdown");
+      return;
+    }
     child.stdin?.end();
     if (await Promise.race([proc.closed, timeout(graceMs)]) === "timeout") {
       signalGroup(child, "SIGTERM");

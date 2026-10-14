@@ -20,7 +20,7 @@ describe("registry · symlinked paths", () => {
   it("finds and re-registers a project by its real path", () => {
     const real = tmpDir("real-proj");
     const link = path.join(tmpDir("links"), "via-link");
-    fs.symlinkSync(real, link);
+    fs.symlinkSync(real, link, process.platform === "win32" ? "junction" : "dir");
 
     const first = registerProject(link, "linked");
     const second = registerProject(real, "linked");

@@ -23,7 +23,7 @@
  * Phase 4 (D56–D64) adds landing, review, stacks (`delivery.stack`) and budgets.
  */
 
-import { execFile } from "node:child_process";
+import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
 

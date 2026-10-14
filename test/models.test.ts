@@ -74,15 +74,9 @@ describe("model lists · asked, or remembered, and it says which", () => {
   it("reads a CLI that answers and then holds stdout open", async () => {
     fakeOnPath(
       "opencode",
-      `#!/bin/sh
-# a grandchild that outlives us, still holding stdout — this is agy's shape
-sleep 20 &
-echo "You are not authenticated."
-echo "Default model: anthropic/claude-sonnet-4"
-echo "  * anthropic/claude-sonnet-4 (default)"
-echo "openai/gpt-5"
-echo "openai/gpt-5"
-exit 0
+      `#!/usr/bin/env node
+require("node:child_process").spawn(process.execPath,["-e","setTimeout(()=>{},20000)"],{stdio:["ignore",process.stdout,process.stderr]}).unref();
+console.log("You are not authenticated.");console.log("Default model: anthropic/claude-sonnet-4");console.log("  * anthropic/claude-sonnet-4 (default)");console.log("openai/gpt-5");console.log("openai/gpt-5");process.exit(0);
 `,
     );
     const t0 = Date.now();

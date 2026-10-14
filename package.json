@@ -51,7 +51,7 @@
     "prepare": "npm run build",
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --exclude 'test/app-*dom.test.ts' && vitest run --no-file-parallelism test/app-*dom.test.ts",
+    "test": "node scripts/test.mjs",
     "test:watch": "vitest",
     "test:all-parallel": "vitest run",
     "verify:adapters": "node scripts/verify-adapters.mjs",

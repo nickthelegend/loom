@@ -152,6 +152,8 @@ export interface UserInputQuestion {
   options: Array<{ label: string; description: string; value?: string }>;
   allowCustomAnswer?: boolean;
   multiSelect?: boolean;
+  /** A password-like answer: typed hidden, never kept in the thread. */
+  secret?: boolean;
 }
 
 export interface ItemLifecyclePayload {
@@ -171,8 +173,14 @@ export interface ItemLifecyclePayload {
  * `detail` is the whole text, used only when nothing was streamed.
  */
 export interface CommandItemData { command: string; cwd?: string; exitCode?: number | null; output?: string }
-export interface FileChangeItemData { changes: Array<{ path: string; kind: string }> }
-export interface ToolItemData { tool: string; input?: Record<string, unknown> }
+export interface FileChangeItemData { changes: Array<{ path: string; kind: string; diff?: string }> }
+/**
+ * An image a tool returned. `data` is base64 straight from the provider; ingestion
+ * writes it under .loom/attachments and logs only the `path`. A `path` alone is a
+ * file the tool looked at (Codex's view_image).
+ */
+export interface ToolImage { data?: string; path?: string; mime?: string }
+export interface ToolItemData { tool: string; input?: Record<string, unknown>; output?: string; error?: string; server?: string; images?: ToolImage[] }
 
 /** Payload by event type. */
 export interface RuntimeEventPayloads {

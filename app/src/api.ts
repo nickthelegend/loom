@@ -135,6 +135,8 @@ export interface Chat {
   lastReplyId?: number;
   pinned?: boolean;
   archived?: boolean;
+  /** What made it — an Orchestra run, race, crew or import — so its threads fold together. */
+  group?: { kind: "orchestra" | "race" | "crew" | "import"; id: string; title: string; status?: string; at: number };
 }
 
 /** Per-agent cost + token rollup from the daemon's /metrics endpoint. */
@@ -892,17 +894,110 @@ export const getEvents = (c: Creds, id: string, chatId?: string, limit = 60) =>
     c,
     `/api/projects/${id}/events?limit=${limit}${chatId ? `&chat=${encodeURIComponent(chatId)}` : ""}`,
   );
+/** A chat from an agent's own history on the daemon's machine (core/chat-import.ts). */
+export interface ImportableChat {
+  source: "claude-code" | "codex" | "opencode";
+  label: string;
+  id: string;
+  title: string;
+  cwd: string;
+  updatedAt: number;
+  bytes?: number;
+  automated?: boolean;
+  fromLoom?: boolean;
+  /** Already imported: the Loom chat it became. */
+  chat?: string;
+}
+export const getImportable = (c: Creds, id: string) =>
+  api<{ chats: ImportableChat[] }>(c, `/api/projects/${id}/imports`);
+export const importChat = (c: Creds, id: string, source: string, sessionId: string) =>
+  api<{ chat: Chat; items?: number; dropped?: number; already?: boolean }>(c, `/api/projects/${id}/imports`, { method: "POST", body: JSON.stringify({ source, id: sessionId }) });
+
 export const getChats = (c: Creds, id: string) =>
   api<{ chats: Chat[] }>(c, `/api/projects/${id}/chats`);
+export const createChat = (c: Creds, id: string, title: string) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats`, { method: "POST", body: JSON.stringify({ title }) });
+export const renameChat = (c: Creds, id: string, chat: string, title: string) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/rename`, { method: "POST", body: JSON.stringify({ title }) });
+export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned?: boolean; archived?: boolean }) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "PATCH", body: JSON.stringify(flags) });
+export const deleteChat = (c: Creds, id: string, chat: string) =>
+  api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "DELETE" });
+/** Stage these paths, commit them, and (optionally) push — the desktop's Source control. */
+export const gitStage = (c: Creds, id: string, paths: string[]) =>
+  api<unknown>(c, `/api/projects/${id}/git/stage`, { method: "POST", body: JSON.stringify({ paths }) });
+export const gitCommit = (c: Creds, id: string, message: string) =>
+  api<{ sha: string; files: number }>(c, `/api/projects/${id}/git/commit`, { method: "POST", body: JSON.stringify({ message }) });
+export const gitPush = (c: Creds, id: string) =>
+  api<{ branch: string }>(c, `/api/projects/${id}/git/push`, { method: "POST", body: "{}" });
+
+/** Save a picture to the project (.loom/attachments) for a message to point at. */
+export const uploadAttachment = (c: Creds, id: string, name: string, dataUrl: string) =>
+  api<{ path: string }>(c, `/api/projects/${id}/attachments`, { method: "POST", body: JSON.stringify({ name, dataUrl }) });
+
+/** A snapshot of the working tree taken before a turn (the desktop's Rewind). */
+export interface Checkpoint { id: string; label: string; commit: string; at: number; branch: string | null; dirty: number }
+export const getCheckpoints = (c: Creds, id: string) =>
+  api<{ checkpoints: Checkpoint[] }>(c, `/api/projects/${id}/checkpoints`);
+/** Put the files back to a checkpoint; the rewind is itself saved, so it can be undone. */
+export const rewindTo = (c: Creds, id: string, cp: string) =>
+  api<{ changed?: string[] }>(c, `/api/projects/${id}/checkpoints/${encodeURIComponent(cp)}/rewind`, { method: "POST", body: "{}" });
 export const getTree = (c: Creds, id: string) =>
   api<{ tree: WorkingTree }>(c, `/api/projects/${id}/tree`);
+/** Spend and tokens broken down (GET /usage, core/usage.ts on the daemon). */
+export interface UsageSlice { usd: number; turns: number; tokensIn: number; tokensOut: number; cachedIn: number; reasoning: number; ms: number }
+export interface UsageReport {
+  totals: UsageSlice & {
+    toolCalls: number; toolFailures: number; errors: number; prompts: number; questions: number;
+    filesChanged: number; linesAdded: number; linesRemoved: number; unpriced: number;
+    avgTurnMs: number; usdPerTurn: number; cacheHitRate: number;
+  };
+  byAgent: Array<UsageSlice & { agentId: string; kind?: string; models: string[]; toolCalls: number; toolFailures: number; errors: number; unpriced: number }>;
+  byModel: Array<UsageSlice & { model: string }>;
+  byChat: Array<UsageSlice & { chat: string; title?: string }>;
+  byDay: Array<UsageSlice & { day: string }>;
+  byTool: Array<{ tool: string; calls: number; failures: number }>;
+}
+export const getUsage = (c: Creds, id: string, days: number) =>
+  api<{ days: number; usage: UsageReport }>(c, `/api/projects/${id}/usage?days=${days}`);
+
 export const getMetrics = (c: Creds, id: string) =>
   api<{ metrics: Metrics }>(c, `/api/projects/${id}/metrics`);
 export const getTriage = (c: Creds, id: string, agentId: string) =>
   api<{ triage: Triage }>(c, `/api/projects/${id}/triage/${encodeURIComponent(agentId)}`);
+/** One card on the Board: your own task, or a PR/issue from GitHub. */
+export interface BoardCard {
+  id: string;
+  title: string;
+  agent?: string;
+  kind?: string;
+  state?: string;
+  column: string;
+  own?: boolean;
+  pr?: number;
+  priority?: string | null;
+}
+export const getBoard = (c: Creds, id: string) =>
+  api<{ available: boolean; repo: string | null; ghError?: { reason: string; detail?: string } | null; cards: BoardCard[] }>(c, `/api/projects/${id}/board`);
+export const createBoardTask = (c: Creds, id: string, title: string, column: string) =>
+  api<{ task: unknown }>(c, `/api/projects/${id}/board/tasks`, { method: "POST", body: JSON.stringify({ title, column }) });
+export const moveBoardTask = (c: Creds, id: string, task: string, column: string) =>
+  api<{ task: unknown }>(c, `/api/projects/${id}/board/tasks/${encodeURIComponent(task)}`, { method: "POST", body: JSON.stringify({ column }) });
+export const dispatchBoardTask = (c: Creds, id: string, task: string) =>
+  api<{ dispatched: boolean; agentId: string }>(c, `/api/projects/${id}/board/tasks/${encodeURIComponent(task)}/dispatch`, { method: "POST", body: "{}" });
+export const deleteBoardTask = (c: Creds, id: string, task: string) =>
+  api<{ deleted: boolean }>(c, `/api/projects/${id}/board/tasks/${encodeURIComponent(task)}`, { method: "DELETE" });
+
 export const getTasks = (c: Creds, id: string, kind: "issue" | "pr", search: string) =>
   api<TaskResult>(c, `/api/projects/${id}/tasks?kind=${kind}&search=${encodeURIComponent(search)}`);
 /** `plan: true` asks the agent for a plan markdown file instead of code. */
+/** Answer a structured question an agent's turn is blocked on. answers: { [questionId]: label | labels }. */
+export const answerQuestion = (c: Creds, id: string, agentId: string, chat: string | undefined, requestId: string, answers: Record<string, string | string[]>) =>
+  api<{ ok: boolean }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/answers`, {
+    method: "POST",
+    body: JSON.stringify({ chat: chat ?? "main", requestId, answers }),
+  });
+
 export const sendMessage = (
   c: Creds,
   id: string,
@@ -959,13 +1054,45 @@ export const queueEdit = (
   api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "PATCH", body: JSON.stringify(patch) });
 export const queueRemove = (c: Creds, id: string, itemId: string) =>
   api<QueueView>(c, `/api/projects/${id}/queue/${itemId}`, { method: "DELETE" });
+/** Drop everything that's lined up. */
+export const queueClear = (c: Creds, id: string) =>
+  api<QueueView>(c, `/api/projects/${id}/queue`, { method: "DELETE" });
 export const queuePause = (c: Creds, id: string, paused: boolean) =>
   api<QueueView>(c, `/api/projects/${id}/queue/pause`, { method: "POST", body: JSON.stringify({ paused }) });
 
 export const handoff = (c: Creds, id: string, to: string) =>
   api(c, `/api/projects/${id}/handoff`, { method: "POST", body: JSON.stringify({ to }) });
-export const interrupt = (c: Creds, id: string) =>
-  api(c, `/api/projects/${id}/interrupt`, { method: "POST", body: "{}" });
+/** One thing the project's agents remember (core/brain.ts). */
+export interface Memory {
+  id: string;
+  kind: string;
+  text: string;
+  entities?: string[];
+  provenance?: { agentId?: string; eventId?: number; ts?: number };
+  confidence?: number;
+  evidence?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+export const getMemories = (c: Creds, id: string) =>
+  api<{ memories: Memory[] }>(c, `/api/projects/${id}/brain`);
+export const addMemory = (c: Creds, id: string, text: string, kind: string) =>
+  api<{ memory: Memory; created: boolean }>(c, `/api/projects/${id}/brain`, { method: "POST", body: JSON.stringify({ text, kind }) });
+export const updateMemory = (c: Creds, id: string, mid: string, patch: { text?: string; kind?: string }) =>
+  api<{ memory: Memory }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}`, { method: "PATCH", body: JSON.stringify(patch) });
+export const forgetMemory = (c: Creds, id: string, mid: string, reason: string) =>
+  api<{ forgot: boolean }>(c, `/api/projects/${id}/brain/${encodeURIComponent(mid)}?reason=${encodeURIComponent(reason)}`, { method: "DELETE" });
+
+/** The models an agent can run (its CLI's own list, or the provider's). */
+export const getAgentModels = (c: Creds, id: string, agentId: string) =>
+  api<{ kind: string; count: number; models: string[]; source?: string }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/models`);
+/** Pin an agent to a model; "" goes back to its own default. */
+export const setAgentModel = (c: Creds, id: string, agentId: string, model: string) =>
+  api<{ agent: unknown }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/model`, { method: "POST", body: JSON.stringify({ model }) });
+
+/** Stop the turn in `chat` (the desktop's Stop); without one, whatever the baton holder is doing. */
+export const interrupt = (c: Creds, id: string, chat?: string) =>
+  api<{ interrupted: string | null }>(c, `/api/projects/${id}/interrupt`, { method: "POST", body: JSON.stringify(chat ? { chat } : {}) });
 export const startRoute = (c: Creds, id: string, task: string, spec: string) =>
   api(c, `/api/projects/${id}/route`, { method: "POST", body: JSON.stringify({ task, spec }) });
 export const abortRoute = (c: Creds, id: string) =>
@@ -1182,7 +1309,11 @@ export interface OrchestraRun {
   summary?: string;
   question?: string;
   error?: string;
-  applied?: { at: number; into: string };
+  applied?: { at: number; into: string; task?: string };
+  /** Every entrant got the same prompt in its own worktree; you apply the one you pick. */
+  race?: boolean;
+  /** Stopped by Loom restarting (status aborted) — it can be resumed. */
+  interrupted?: boolean;
   /** Plan mode: PLAN.md plus one spec per task, written under plans/<run id>/ on the branch. */
   plan?: boolean;
   /** What the git delivery policy did with the finished run. */
@@ -1211,8 +1342,16 @@ export const getOrchestraRun = (c: Creds, id: string, runId: string) =>
 export const startOrchestra = (
   c: Creds,
   id: string,
-  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean },
+  opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean },
 ) => api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra`, { method: "POST", body: JSON.stringify(opts) });
+
+/** Carry on a run Loom's restart stopped: its in-flight tasks pick up where they were. */
+export const resumeOrchestra = (c: Creds, id: string, runId: string) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/resume`, { method: "POST", body: "{}" });
+
+/** What one task (a race entrant) changed on its branch. */
+export const orchestraTaskDiff = (c: Creds, id: string, runId: string, taskId: string) =>
+  api<{ patch: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/diff`);
 
 export const abortOrchestra = (c: Creds, id: string, runId: string) =>
   api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/abort`, {
@@ -1226,10 +1365,29 @@ export const replyOrchestra = (c: Creds, id: string, runId: string, text: string
     body: JSON.stringify({ text }),
   });
 
-export const applyOrchestra = (c: Creds, id: string, runId: string) =>
-  api<{ merged: boolean; into: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/apply`, {
+/** Every agent an orchestrator put to work (GET /subagents, core/subagents.ts). */
+export interface Subagent {
+  id: string;
+  name: string;
+  agentId: string;
+  kind: string;
+  status: "running" | "asks" | "pending" | "done" | "failed" | "cancelled";
+  chat?: string;
+  source: "orchestra" | "race" | "crew";
+  goal: string;
+  goalId: string;
+  at: number;
+  costUsd?: number;
+  note?: string;
+}
+export const getSubagents = (c: Creds, id: string) =>
+  api<{ active: Subagent[]; done: Subagent[] }>(c, `/api/projects/${id}/subagents`);
+
+/** `task` picks a race's entrant; a planned run applies as a whole. */
+export const applyOrchestra = (c: Creds, id: string, runId: string, task?: string) =>
+  api<{ merged: boolean | string; into: string }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/apply`, {
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(task ? { task } : {}),
   });
 
 /** Re-run the delivery policy (after fixing a push rejection, say). Answers with the run. */
@@ -1286,6 +1444,8 @@ export interface Approval {
   tool: string;
   input: unknown;
   createdAt: number;
+  /** The agent offers "allow for the rest of this session" for this request. */
+  sessionOption?: boolean;
 }
 
 export const getApprovals = (c: Creds, id: string) =>
@@ -1296,7 +1456,7 @@ export const decideApproval = (
   c: Creds,
   id: string,
   approvalId: string,
-  decision: "allow" | "deny",
+  decision: "allow" | "allow_session" | "deny",
   message?: string,
 ) =>
   api<{ ok: boolean }>(c, `/api/projects/${id}/approvals/${encodeURIComponent(approvalId)}`, {
@@ -1856,3 +2016,86 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
     stop();
   };
 }
+
+// --- Crews (Agent Teams) ------------------------------------------------------
+// A lead, builders, a reviewer and a tester working one goal on its own branch
+// (daemon core/crew.ts). Every step is a `crew` event in the crew's channel.
+
+export type CrewRole = "lead" | "builder" | "reviewer" | "tester" | "researcher";
+export type CrewGoalStatus = "planning" | "awaiting_approval" | "running" | "waiting_human" | "completed" | "failed" | "stopped" | "interrupted";
+export type CrewCardStage = "planned" | "building" | "review" | "testing" | "done" | "failed";
+
+export interface CrewTeammate { id: string; agent: string; role: CrewRole; charter?: string }
+
+export interface CrewCard {
+  id: string;
+  title: string;
+  detail?: string;
+  stage: CrewCardStage;
+  builder?: string;
+  rounds: number;
+  commits: string[];
+  summary?: string;
+  error?: string;
+}
+
+export interface CrewGoal {
+  id: string;
+  text: string;
+  status: CrewGoalStatus;
+  branch: string;
+  cards: CrewCard[];
+  current?: { teammate: string; card?: string; step: string };
+  question?: { teammate: string; text: string };
+  summary?: string;
+  error?: string;
+  costUsd: number;
+  startedAt: number;
+  applied?: { into: string; at: number };
+}
+
+export interface Crew {
+  id: string;
+  name: string;
+  teammates: CrewTeammate[];
+  planApproval?: boolean;
+  /** What Loom runs to test each card (exit 0 passes); without one, the tester agent tests. */
+  testCommand?: string;
+  busy: boolean;
+  state: { channel: string; threads: Record<string, string>; goal?: CrewGoal };
+}
+
+export const getCrews = (c: Creds, id: string) =>
+  api<{ crews: Crew[]; templates: string[]; previews?: Record<string, CrewTeammate[]>; roster?: Array<{ id: string; kind: string }> }>(
+    c,
+    `/api/projects/${id}/crews`,
+  );
+
+export const createCrew = (c: Creds, id: string, body: { template: string; name?: string; planApproval?: boolean; teammates?: CrewTeammate[] }) =>
+  api<{ crew: Crew }>(c, `/api/projects/${id}/crews`, { method: "POST", body: JSON.stringify(body) });
+
+export const updateCrew = (c: Creds, id: string, crew: string, body: { teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string }) =>
+  api<{ crew: Crew }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}`, { method: "PATCH", body: JSON.stringify(body) });
+
+export type CrewAction = "say" | "approve" | "stop" | "resume" | "apply";
+
+/** Answers with the crew as it is now, plus `routed` for say (goal | answer | note | replan) and `into` for apply. */
+export const crewAction = (c: Creds, id: string, crew: string, action: CrewAction, body: { text?: string; to?: string } = {}) =>
+  api<{ crew: Crew; routed?: string; to?: string; into?: string }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const crewDiff = (c: Creds, id: string, crew: string) =>
+  api<{ diff: string }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}/diff`);
+
+/** The computer's Loom against the newest release (GET /api/updates). */
+export interface UpdateStatus {
+  version: string;
+  latest: string | null;
+  behindRelease: boolean;
+  release: { url: string } | null;
+  install: "git" | "npm-global" | "unknown";
+}
+export const getUpdates = (creds: Creds, refresh = false) =>
+  api<UpdateStatus>(creds, `/api/updates${refresh ? "?refresh" : ""}`);

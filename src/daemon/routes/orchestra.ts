@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import express from "express";
 import { recordRecent } from "../../core/prompts.js";
+import { subagents } from "../../core/subagents.js";
 import type { WithRuntime } from './context.js';
 /** Register orchestra routes in the order established by LoomDaemon.routes(). */
 export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime): void {
@@ -15,6 +16,21 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
     "/api/projects/:id/orchestra",
     withRuntime(async (rt, _req, res) => {
       res.json({ runs: rt.orchestra.list(), active: rt.orchestra.active()?.id ?? null });
+    }),
+  );
+
+  // Every agent working for an orchestrator (Orchestra tasks, race entrants,
+  // crew teammates), active first — the desktop's Subagents tab and the phone.
+  app.get(
+    "/api/projects/:id/subagents",
+    withRuntime(async (rt, _req, res) => {
+      const last = new Map<string, number>();
+      for (const e of rt.log.list({ kinds: ["message", "tool_call", "run_complete", "needs_input"], limit: 4000 })) {
+        if (e.chat && e.ts > (last.get(e.chat) ?? 0)) last.set(e.chat, e.ts);
+      }
+      const status = await rt.status();
+      const kinds = new Map(status.agents.map((a) => [a.id, a.kind]));
+      res.json(subagents(rt.orchestra.list(), rt.crews.list(), last, { kindOf: (id) => kinds.get(id) }));
     }),
   );
 

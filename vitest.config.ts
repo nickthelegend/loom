@@ -1,16 +1,24 @@
 import { defineConfig } from "vitest/config";
+import path from "node:path";
 
 export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     // test temp dirs are removed when the run ends (test/global-setup.ts)
     globalSetup: ["test/global-setup.ts"],
+    // Windows starts real CLI/Git processes in these suites. Leave capacity
+    // for those children and cold fork startup on hosted runners.
+    maxWorkers: process.platform === "win32" ? 2 : 4,
     // Above waitUntil's 20s default (see test/helpers.ts) — a test that hits
     // that budget should fail on the wait, with its message, not get cut off
     // mid-poll by the runner and report a bare timeout instead.
-    testTimeout: 40_000,
-    hookTimeout: 20_000,
+    testTimeout: process.platform === "win32" ? 90_000 : 40_000,
+    hookTimeout: process.platform === "win32" ? 45_000 : 20_000,
     env: {
+      LOOM_TEST_RUN_ID: `${process.pid}-${Date.now()}`,
+      GIT_CONFIG_GLOBAL: path.resolve("test/gitconfig"),
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
       // The decision extractor and triage both drive a real local agent CLI
       // (`claude -p`, `agy --print`) when no ANTHROPIC_API_KEY is set. A test
       // suite must not: it spends tokens, it passes only on a machine that

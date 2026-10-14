@@ -279,3 +279,47 @@ describe("LiveDeltaThrottle", () => {
     t.close();
   });
 });
+
+describe("ingestion · what a tool did", () => {
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  it("keeps a command's output (its tail) and exit code, and marks a non-zero exit as failed", () => {
+    const { run } = ingest([]);
+    const long = "x".repeat(5000) + "\nFAIL tests/a.test.ts";
+    const out = run([ev("item.completed", { itemType: "command_execution", status: "completed", data: { command: "npm test", exitCode: 1, output: long } }, { itemId: "c1" })]);
+    const t = out.find(e => e.kind === "tool_call")!.payload;
+    expect(t).toMatchObject({ tool: "shell", exitCode: 1, ok: false, command: "npm test" });
+    expect(String(t.preview)).toMatch(/characters earlier/);
+    expect(String(t.preview).endsWith("FAIL tests/a.test.ts")).toBe(true);
+  });
+
+  it("files a tool's base64 images under .loom/attachments, logs only the path, and carries server, input, output and errors", () => {
+    const dir = tmpDir("ingest-images");
+    const { run } = ingest([], dir);
+    const out = run([
+      ev("item.completed", { itemType: "mcp_tool_call", status: "completed", detail: "playwright · screenshot",
+        data: { tool: "screenshot", server: "playwright", input: { url: "http://localhost:3000", big: "y".repeat(2000) }, output: "saved", images: [{ data: PNG, mime: "image/png" }] } }, { itemId: "t1" }),
+      ev("item.completed", { itemType: "dynamic_tool_call", status: "failed", title: "Read", detail: "Read: nope.ts", data: { tool: "Read", error: "ENOENT: no such file" } }, { itemId: "t2" }),
+    ]);
+    const [shot, read] = out.filter(e => e.kind === "tool_call").map(e => e.payload);
+    expect(shot).toMatchObject({ tool: "screenshot", server: "playwright", ok: true, preview: "saved", kind: "mcp_tool_call" });
+    expect(String((shot!.input as Record<string, string>).big)).toMatch(/2000 chars/);
+    const img = (shot!.images as Array<{ path: string }>)[0]!;
+    expect(img.path).toMatch(/^\.loom\/attachments\/[0-9a-f]{12}\.png$/);
+    expect(fs.readFileSync(path.join(dir, img.path)).length).toBeGreaterThan(20);
+    expect(JSON.stringify(out)).not.toContain(PNG.slice(0, 30)); // base64 never reaches the log
+    expect(read).toMatchObject({ tool: "Read", ok: false, error: "ENOENT: no such file" });
+  });
+
+  it("keeps each edit's diff on its file_edit row", () => {
+    const { run } = ingest([]);
+    const out = run([ev("item.completed", { itemType: "file_change", status: "completed", data: { changes: [{ path: "a.ts", kind: "update", diff: "@@ -1 +1 @@\n-a\n+b" }] } }, { itemId: "f1" })]);
+    expect(out.find(e => e.kind === "file_edit")!.payload).toMatchObject({ path: "a.ts", diff: "@@ -1 +1 @@\n-a\n+b" });
+  });
+
+  it("a todo list is the plan", () => {
+    const { run } = ingest([]);
+    const out = run([ev("turn.plan.updated", { plan: [{ step: "write tests", status: "completed" }, { step: "fix bug", status: "inProgress" }] })]);
+    expect(out.find(e => e.kind === "status")!.payload).toMatchObject({ state: "plan_updated", plan: [{ step: "write tests" }, { step: "fix bug", status: "inProgress" }] });
+  });
+});

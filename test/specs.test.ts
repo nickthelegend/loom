@@ -14,7 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { readDaemonConfig } from "../src/core/registry.js";
-import { findSpecs } from "../src/daemon/specs.js";
+import { findSpecs, playwrightSetup, SpecRunner, type SpecRun } from "../src/daemon/specs.js";
 import { DaemonClient } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
@@ -54,6 +54,8 @@ beforeAll(async () => {
   projectDir = makeProjectDir({ name: "specs" });
 
   // A realistic little tree: two specs, one e2e, decoys that must not appear.
+  // Playwright is a dependency, with no config — discovery is by name.
+  fs.writeFileSync(path.join(projectDir, "package.json"), JSON.stringify({ devDependencies: { "@playwright/test": "^1.50.0" } }));
   fs.mkdirSync(path.join(projectDir, "tests"), { recursive: true });
   fs.mkdirSync(path.join(projectDir, "node_modules", "junk"), { recursive: true });
   fs.writeFileSync(path.join(projectDir, "tests", "login.spec.ts"), "// spec");
@@ -85,6 +87,40 @@ describe("finding specs", () => {
     expect(found.some((p) => p.includes("node_modules"))).toBe(false);
   });
 
+  it("offers nothing in a project that doesn't use Playwright", () => {
+    // *.spec.ts is also how Jest and Vitest name theirs: a name isn't evidence
+    const dir = tmpDir("no-pw");
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ devDependencies: { vitest: "^4" } }));
+    fs.writeFileSync(path.join(dir, "sum.spec.ts"), "// a vitest spec");
+    expect(findSpecs(dir)).toEqual([]);
+    expect(playwrightSetup(dir)).toMatchObject({ config: null, dependency: false });
+  });
+
+  it("looks only in the testDir a playwright.config names, with Playwright's own test match", () => {
+    const dir = tmpDir("pw-config");
+    fs.writeFileSync(
+      path.join(dir, "playwright.config.ts"),
+      `import { defineConfig } from "@playwright/test";\nexport default defineConfig({ testDir: "./e2e", use: { baseURL: "http://localhost:3000" } });\n`,
+    );
+    fs.mkdirSync(path.join(dir, "e2e", "auth"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "e2e", "home.spec.ts"), "//");
+    fs.writeFileSync(path.join(dir, "e2e", "auth", "login.test.ts"), "//");
+    fs.writeFileSync(path.join(dir, "e2e", "helpers.ts"), "// not a test");
+    fs.writeFileSync(path.join(dir, "src", "unit.spec.ts"), "// a unit test outside testDir");
+    expect(playwrightSetup(dir)).toMatchObject({ config: "playwright.config.ts", testDir: "e2e" });
+    expect(findSpecs(dir).map((x) => x.path)).toEqual(["e2e/auth/login.test.ts", "e2e/home.spec.ts"]);
+  });
+
+  it("reads a testDir written as path.join(__dirname, …)", () => {
+    const dir = tmpDir("pw-dirname");
+    fs.writeFileSync(path.join(dir, "playwright.config.js"), `module.exports = { testDir: path.join(__dirname, 'tests/browser') };`);
+    fs.mkdirSync(path.join(dir, "tests", "browser"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests", "browser", "cart.spec.js"), "//");
+    fs.writeFileSync(path.join(dir, "tests", "other.spec.js"), "//");
+    expect(findSpecs(dir).map((x) => x.path)).toEqual(["tests/browser/cart.spec.js"]);
+  });
+
   it("serves the same list over the API, with no run in progress", async () => {
     const body = await specs();
     expect(body.specs.map((s) => s.path)).toContain("tests/login.spec.ts");
@@ -94,7 +130,7 @@ describe("finding specs", () => {
 
 describe("running one", () => {
   it("streams the reporter and records the pass in the Console", async () => {
-    process.env.LOOM_SPEC_CMD = "echo running {file}; echo 1 passed";
+    process.env.LOOM_SPEC_CMD = `node -e "console.log('running',process.argv[1]); console.log('1 passed')" {file}`;
     const r = await runSpec("tests/login.spec.ts");
     expect(r.status).toBe(200);
     const { run } = (await r.json()) as { run: { id: string; file: string } };
@@ -112,7 +148,7 @@ describe("running one", () => {
   });
 
   it("records a failure with the tail of the output", async () => {
-    process.env.LOOM_SPEC_CMD = "echo boom; exit 3";
+    process.env.LOOM_SPEC_CMD = `node -e "console.log('boom');process.exit(3)"`;
     await runSpec("tests/cart.e2e.ts");
     await waitUntil(async () => {
       const logs = await fetch(`${baseUrl}/api/logs`, { headers: H() });
@@ -139,7 +175,7 @@ describe("running one", () => {
   });
 
   it("refuses a second run while one is live", async () => {
-    process.env.LOOM_SPEC_CMD = "sleep 2; echo done";
+    process.env.LOOM_SPEC_CMD = `node -e "setTimeout(()=>console.log('done'),2000)"`;
     const first = await runSpec("tests/login.spec.ts");
     expect(first.status).toBe(200);
 
@@ -158,6 +194,45 @@ describe("running one", () => {
     });
     expect(stop.status).toBe(200);
     await waitUntil(async () => (await specs()).running === null);
+  });
+});
+
+describe("a run that has to end", () => {
+  const events = () => {
+    const done: SpecRun[] = [];
+    const lines: string[] = [];
+    return { done, lines, ev: { onLine: (_r: SpecRun, l: string) => lines.push(l), onDone: (r: SpecRun) => done.push(r) } };
+  };
+
+  it("is stopped when it runs past the timeout, and says so", async () => {
+    process.env.LOOM_SPEC_CMD = `node -e "console.log('started');setTimeout(()=>{},30000)"`;
+    const runner = new SpecRunner(400);
+    const { done, lines, ev } = events();
+    runner.start("p1", projectDir, "tests/login.spec.ts", ev);
+    await waitUntil(() => done.length === 1, { timeoutMs: 10_000 });
+    expect(done[0]!.stopped).toBe("timeout");
+    expect(done[0]!.exitCode).not.toBe(0);
+    expect(lines.some((l) => l.includes("timed out"))).toBe(true);
+    expect(runner.running("p1")).toBeNull();
+  });
+
+  it("stops when asked — the whole process group, not only the shell", async () => {
+    // the grandchild stands in for the test runner npx starts
+    const pidFile = path.join(tmpDir("spec-pid"), "pid");
+    const parentScript = path.join(path.dirname(pidFile), "parent.cjs");
+    fs.writeFileSync(parentScript, `const child=require('child_process').spawn(process.execPath,['-e','setTimeout(()=>{},30000)'],{stdio:'inherit'});require('fs').writeFileSync(${JSON.stringify(pidFile)},String(child.pid));setTimeout(()=>{},30000);`);
+    process.env.LOOM_SPEC_CMD = `node "${parentScript}"`;
+    const runner = new SpecRunner();
+    const { done, ev } = events();
+    runner.start("p2", projectDir, "tests/login.spec.ts", ev);
+    await waitUntil(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, "utf8").trim() !== "", { timeoutMs: 10_000 });
+    const grandchild = Number(fs.readFileSync(pidFile, "utf8").trim());
+    expect(runner.stop("p2")).toBe(true);
+    await waitUntil(() => done.length === 1, { timeoutMs: 10_000 });
+    expect(done[0]!.stopped).toBe("stop");
+    expect(done[0]!.exitCode).not.toBe(0);
+    const gone = () => { try { process.kill(grandchild, 0); return false; } catch { return true; } };
+    await waitUntil(gone, { timeoutMs: 10_000 });
   });
 });
 
@@ -180,7 +255,7 @@ describe("voice", () => {
   });
 
   it("runs the configured command on the audio and returns its text", async () => {
-    process.env.LOOM_STT_CMD = "printf 'ship the login page'; cat {file} > /dev/null";
+    process.env.LOOM_STT_CMD = `node -e "require('fs').readFileSync(process.argv[1]);console.log('ship the login page')" {file}`;
     const r = await fetch(`${baseUrl}/api/projects/${projectId}/voice`, {
       method: "POST",
       headers: { ...H(), "content-type": "application/octet-stream" },
@@ -192,7 +267,7 @@ describe("voice", () => {
   });
 
   it("422s when the transcriber hears nothing, rather than sending ''", async () => {
-    process.env.LOOM_STT_CMD = "true";
+    process.env.LOOM_STT_CMD = "node -e \"process.exit(0)\"";
     const r = await fetch(`${baseUrl}/api/projects/${projectId}/voice`, {
       method: "POST",
       headers: { ...H(), "content-type": "application/octet-stream" },

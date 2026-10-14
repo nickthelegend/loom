@@ -58,11 +58,12 @@ describe("loom daemon end-to-end", () => {
       }),
     );
 
-    await expect(client.models(modelProject.project.id, "codex")).resolves.toMatchObject({
-      kind: "codex",
-      count: expect.any(Number),
-      models: expect.arrayContaining(["gpt-5.5"]),
-    });
+    // Real models, whatever this machine's Codex lists today (its catalogue
+    // moves — pinning one name made this fail whenever Codex updated).
+    const listed = await client.models(modelProject.project.id, "codex");
+    expect(listed).toMatchObject({ kind: "codex", count: expect.any(Number) });
+    expect(listed.models.length).toBeGreaterThan(0);
+    expect(listed.models.every((m: unknown) => typeof m === "string" && m.length > 0)).toBe(true);
   });
 
   it("rejects unauthenticated requests", async () => {

@@ -70,9 +70,13 @@ export class EchoAdapter extends AdapterBase {
         this.emit({ kind: "file_edit", payload: { path: writeMatch[1]! } });
       }
       const briefingNote = input.briefing ? ` (briefed: ${input.briefing.length} chars)` : "";
+      // attached pictures: say they arrived, each on its own line (where the thread shows it as the picture)
+      const pics = input.text.split("\n").filter((l) => /^\[image\] \S+$/.test(l.trim()));
+      const words = input.text.split("\n").filter((l) => !/^\[image\] \S+$/.test(l.trim())).join("\n").trim();
       const text = /make a plan/i.test(input.text)
         ? `Here is the approach. 1) analyze 2) implement 3) verify. The plan is complete and ready to execute.${briefingNote}`
-        : `echo(${this.id}): ${input.text}${briefingNote}`;
+        : `echo(${this.id}): ${words}${briefingNote}` +
+          (pics.length ? `\n\nreceived ${pics.length} image${pics.length === 1 ? "" : "s"}:\n\n${pics.map((l) => l.trim()).join("\n\n")}` : "");
       // stream:<ms> — type the reply out in pieces first, that far apart, the
       // way a real model streams, so the live view is testable end to end.
       const streamMatch = input.text.match(/stream:(\d+)/);

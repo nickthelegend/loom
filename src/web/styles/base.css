@@ -117,6 +117,8 @@
   .brand{width:14px;height:14px;flex:none;display:inline-block;vertical-align:middle}
   .brand.lg{width:18px;height:18px}
   .brand.xl{width:22px;height:22px}
+  /* opencode and Grok are mono marks: foreground, so white on dark wherever they sit */
+  svg.mono{color:var(--foreground)!important}
   .sendbtn{display:inline-flex;align-items:center;justify-content:center;flex:none;
     width:30px;height:30px;border-radius:15px;background:var(--primary);color:var(--primary-foreground);
     transition:opacity .15s,transform .1s}

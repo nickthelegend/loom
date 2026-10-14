@@ -1,5 +1,6 @@
 import type { Express } from 'express';
 import type { WithRuntime } from './context.js';
+import { usageReport } from '../../core/usage.js';
 /** Register routing routes in the order established by LoomDaemon.routes(). */
 export function registerRoutingRoutes(app: Express, withRuntime: WithRuntime): void {
 
@@ -38,6 +39,27 @@ export function registerRoutingRoutes(app: Express, withRuntime: WithRuntime): v
     "/api/projects/:id/costs",
     withRuntime(async (rt, _req, res) => {
       res.json({ costs: rt.costSummary() });
+    }),
+  );
+
+  // Spend and tokens broken down by agent, model, chat, day and tool, with
+  // the other turn metrics beside them (core/usage.ts).
+  app.get(
+    "/api/projects/:id/usage",
+    withRuntime(async (rt, req, res) => {
+      const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+      const since = Date.now() - days * 86_400_000;
+      const status = await rt.status();
+      const kinds: Record<string, string> = {};
+      const models: Record<string, string> = {};
+      for (const a of status.agents) {
+        kinds[a.id] = a.kind;
+        if (a.model) models[a.id] = a.model;
+      }
+      const events = rt.log.list({ kinds: ["status", "run_complete", "tool_call", "error", "message", "needs_input", "turn_diff"] });
+      const usage = usageReport(events, { since, kinds, models });
+      const titles = new Map(rt.chats().map((c) => [c.id, c.title]));
+      res.json({ days, usage: { ...usage, byChat: usage.byChat.map((c) => ({ ...c, title: titles.get(c.chat) ?? (c.chat === "main" ? "Main" : c.chat) })) } });
     }),
   );
 

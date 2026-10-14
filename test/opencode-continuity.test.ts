@@ -150,7 +150,7 @@ describe("OpenCode native continuity", () => {
     expect(server.prompts[1]!.session).toBe(server.prompts[0]!.session); // same session, rebuilt state
   });
 
-  it("probes an opencode agent pointed at a running server by that server's health", async () => {
+  it.skipIf(process.platform === "win32")("probes an opencode agent pointed at a running server by that server's health", async () => {
     const server = await fakeOpenCode(); open.push(server);
     const monitor = new HarnessMonitor(() => [{ id: "oc", kind: "opencode", options: { baseUrl: server.url } }]);
     expect(await monitor.ensure("oc")).toMatchObject({ kind: "opencode", available: true });
@@ -160,7 +160,41 @@ describe("OpenCode native continuity", () => {
   });
 });
 
-describe("OpenCode through the project runtime with continuity on", () => {
+describe("OpenCode without continuity", () => {
+  it("waits out a step that ended in tool calls instead of ending the turn there", async () => {
+    const dir = makeProjectDir();
+    const server = await fakeOpenCode({ reply: "the real answer", stepGapMs: 400 }); open.push(server);
+    const adapter = new OpenCodeAdapter("oc", dir, { baseUrl: server.url, pollMs: 50 });
+    const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+    adapter.onEvent((e) => events.push(e));
+    await adapter.send({ text: "look around, then answer" });
+    const during = [...events];
+    await adapter.stop();
+    expect(during.filter((e) => e.kind === "message").map((e) => e.payload.text)).toContain("the real answer");
+    expect(during.at(-1)!.kind).toBe("run_complete");
+  });
+});
+
+describe("OpenCode without continuity: interrupting a turn that never answered", () => {
+  it("ends the turn as interrupted instead of waiting out the hour", async () => {
+    const dir = makeProjectDir();
+    const server = await fakeOpenCode({ stuck: true }); open.push(server);
+    const adapter = new OpenCodeAdapter("oc", dir, { baseUrl: server.url, pollMs: 30 });
+    const events: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+    adapter.onEvent((e) => events.push(e));
+    const sending = adapter.send({ text: "hello?" });
+    await waitUntil(() => server.prompts.length === 1);
+    const t0 = Date.now();
+    await adapter.interrupt();
+    await sending;
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(events.some((e) => e.kind === "status" && e.payload.state === "interrupted")).toBe(true);
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    await adapter.stop();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("OpenCode through the project runtime with continuity on", () => {
   it("sends a continuity turn to OpenCode instead of refusing it", async () => {
     const server = await fakeOpenCode({ reply: "from the runtime" }); open.push(server);
     const dir = makeProjectDir({

@@ -24,18 +24,43 @@ import {
 import type { Sealed } from "../core/team-crypto.js";
 import type { LeaseScope } from "../core/team-leases.js";
 
+/**
+ * A hub call that never got an answer, said in words. Node's fetch throws a
+ * bare "fetch failed" and hides the reason (refused, DNS, timeout) in `cause`.
+ */
+export function hubErrorText(err: unknown, url?: string): string {
+  const e = err as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+  const where = url ? url.replace(/^supabase:/, "") : "the team hub";
+  const code = e?.cause?.code ?? "";
+  if (e?.name === "TimeoutError" || e?.name === "AbortError" || code === "UND_ERR_CONNECT_TIMEOUT") return `${where} didn't answer in time`;
+  if (code === "ECONNREFUSED") return `nothing is listening at ${where} — is the hub running?`;
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return `can't find ${where} — check the address, or your DNS`;
+  if (code === "ECONNRESET") return `${where} dropped the connection`;
+  if (/certificate|CERT_|SSL/i.test(code + (e?.cause?.message ?? ""))) return `${where} has a certificate problem: ${e?.cause?.message ?? code}`;
+  if (e?.message === "fetch failed") return `can't reach ${where}${e?.cause?.message ? ` (${e.cause.message})` : ""}`;
+  return e?.message ?? String(err);
+}
+
+async function reach(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    throw new HubError(hubErrorText(err, new URL(url).origin), 0);
+  }
+}
+
 export async function hubSignIn(
   baseUrl: string,
   github: string,
   opts: { name?: string; secret?: string } = {},
 ): Promise<{ token: string; user: { id: string; github: string; name: string } }> {
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/hub/signin`, {
+  const res = await reach(`${baseUrl.replace(/\/$/, "")}/hub/signin`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ github, ...opts }),
     signal: AbortSignal.timeout(15_000),
   });
-  const body = (await res.json()) as { token?: string; user?: never; error?: string };
+  const body = (await res.json().catch(() => ({}))) as { token?: string; user?: never; error?: string };
   if (!res.ok || !body.token) throw new HubError(body.error ?? `hub sign-in failed (${res.status})`, res.status);
   return body as unknown as { token: string; user: { id: string; github: string; name: string } };
 }
@@ -50,7 +75,7 @@ export class HttpHubClient implements HubClient {
   }
 
   private async call<T>(method: string, ...args: unknown[]): Promise<T> {
-    const res = await fetch(`${this.base}/hub/rpc/${method}`, {
+    const res = await reach(`${this.base}/hub/rpc/${method}`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.token}` },
       body: JSON.stringify({ args }),

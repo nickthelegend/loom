@@ -358,3 +358,33 @@ describe("claude-code · interrupt", () => {
     await expect(agent.interrupt()).resolves.toBeUndefined();
   });
 });
+
+describe("claude-code · what its tools did", () => {
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const result = (id: string, content: unknown, isError = false): Step =>
+    ({ out: { type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content, ...(isError ? { is_error: true } : {}) }] }, parent_tool_use_id: null, session_id: "$SESSION" } });
+
+  it("shows an image a tool returned, files it, and keeps an error as an error", async () => {
+    const { events, dir } = await run([claudeInit,
+      claudeTool("mcp__playwright__screenshot", { url: "http://localhost:3000" }),
+      result("tu-mcp__playwright__screenshot", [{ type: "text", text: "captured" }, { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } }]),
+      claudeTool("Read", { file_path: "missing.ts" }),
+      result("tu-Read", "File does not exist.", true),
+      claudeText("Done."), claudeResult()]);
+    const [shot, read] = of(events, "tool_call");
+    expect(shot).toMatchObject({ tool: "screenshot", server: "playwright", ok: true, preview: "captured" });
+    const img = (shot!.images as Array<{ path: string }>)[0]!.path;
+    expect(img).toMatch(/^\.loom\/attachments\/[0-9a-f]{12}\.png$/);
+    expect((await import("node:fs")).existsSync(`${dir}/${img}`)).toBe(true);
+    expect(read).toMatchObject({ tool: "Read", ok: false, error: "File does not exist." });
+  });
+
+  it("turns TodoWrite into the plan checklist", async () => {
+    const { events } = await run([claudeInit,
+      claudeTool("TodoWrite", { todos: [{ content: "Write tests", status: "completed", activeForm: "Writing tests" }, { content: "Fix the bug", status: "in_progress", activeForm: "Fixing" }] }),
+      result("tu-TodoWrite", "ok"), claudeText("Working."), claudeResult()]);
+    expect(of(events, "status").find((p) => p.state === "plan_updated")).toMatchObject({ plan: [
+      { step: "Write tests", status: "completed" }, { step: "Fix the bug", status: "inProgress" }] });
+    expect(of(events, "tool_call")[0]!.summary).toBe("TodoWrite: 1/2 done");
+  });
+});

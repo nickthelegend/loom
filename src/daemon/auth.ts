@@ -157,16 +157,18 @@ export class AuthManager {
   }
 
   /** Attach/detach a push token on a paired client (read-modify-write). */
-  setPushToken(clientId: string, pushToken: string | null, platform?: string): boolean {
+  setPushToken(clientId: string, pushToken: string | null, platform?: string, kinds?: string[]): boolean {
     this.reload();
     const client = this.config.clients.find((c) => c.id === clientId);
     if (!client) return false;
     if (pushToken) {
       client.pushToken = pushToken;
       if (platform) client.platform = platform;
+      if (kinds) client.pushKinds = kinds;
     } else {
       delete client.pushToken;
       delete client.platform;
+      delete client.pushKinds;
     }
     writeDaemonConfig(this.config);
     return true;

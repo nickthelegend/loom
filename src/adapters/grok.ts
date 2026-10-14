@@ -28,8 +28,11 @@
  * a persisted log; one event per token would turn a paragraph into 200 rows.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { spawn } from "../core/process.js";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { SendInput } from "../types.js";
 import { AdapterBase, agentEnv, cliAvailable } from "./base.js";
 import { permissionFor } from "../core/permissions.js";
@@ -63,7 +66,7 @@ interface GrokOptions {
 }
 
 /** grok's own installer puts it here; it isn't always on PATH. */
-const INSTALLED = [`${process.env.HOME ?? ""}/.grok/bin/grok`];
+const INSTALLED = [path.join(os.homedir(), ".grok", "bin", process.platform === "win32" ? "grok.exe" : "grok")];
 
 export function grokBin(override?: string): string | null {
   if (override) return fs.existsSync(override) ? override : null;

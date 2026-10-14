@@ -14,7 +14,7 @@
       "backgroundColor": "#111111"
     },
     "ios": {
-      "bundleIdentifier": "dev.loom.app",
+      "bundleIdentifier": "tech.loompad.app",
       "supportsTablet": false,
       "infoPlist": {
         "NSAppTransportSecurity": {
@@ -25,11 +25,28 @@
       }
     },
     "android": {
-      "package": "dev.loom.app",
+      "package": "tech.loompad.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1B1D21"
-      }
+      },
+      "versionCode": 3,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.VIBRATE",
+        "android.permission.INTERNET"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
+      ],
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -39,7 +56,10 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": true,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0"
           }
         }
       ],
@@ -50,7 +70,15 @@
           "speechRecognitionPermission": "Loom converts your speech to text so you can dictate messages"
         }
       ],
-      "expo-localization"
-    ]
+      "expo-localization",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#C9743C"
+        }
+      ]
+    ],
+    "description": "The remote for Loom, the open-source workspace where your coding agents share one memory. Watch, steer and approve your agents from your phone."
   }
 }

@@ -141,6 +141,7 @@ function mount({ desktop = true } = {}): Mounted {
         }
       } as unknown as typeof window.WebSocket;
       window.localStorage.setItem("loomClientToken", adminToken);
+      window.localStorage.setItem("loomSetupSeen", "1"); // the first-run dialog would cover the page
       // Remove asks first; jsdom has no dialogs, and a test always means yes
       window.confirm = () => true;
     },
@@ -232,7 +233,7 @@ describe("web app · Loom Teams", () => {
     click($(m, "#fteam [data-tinvite]"));
     await waitUntil(() => !!$(m, "#fteam .tinv .tinvlink"));
     const link = ($(m, "#fteam .tinvlink") as HTMLInputElement).value;
-    expect(link).toMatch(/^loom:\/\/team\/join#/);
+    expect(link).toMatch(/^https:\/\/.+\/join\/#/);
     expect(text(m, "#fteam .tinvw")).toContain("Treat this link like a password");
     expect(text(m, "#fteam .tinvw")).toContain("team key");
     expect($(m, "#fteam .tinv [data-tcopy]")).toBeTruthy();
@@ -326,7 +327,7 @@ describe("web app · Loom Teams", () => {
     // Invite from here too: same warning, same link shape
     click($(m, "#setpane [data-tinvite]"));
     await waitUntil(() => !!$(m, "#setpane .tinvlink"));
-    expect(($(m, "#setpane .tinvlink") as HTMLInputElement).value).toMatch(/^loom:\/\/team\/join#/);
+    expect(($(m, "#setpane .tinvlink") as HTMLInputElement).value).toMatch(/^https:\/\/.+\/join\/#/);
     expect(text(m, "#setpane .tinvw")).toContain("like a password");
 
     // Remove bob: the key rotates forward

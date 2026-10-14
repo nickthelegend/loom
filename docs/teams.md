@@ -3,6 +3,31 @@
 Several people, each with their own agents, on one GitHub repo. This guide is
 the how-to; [teams-architecture.md](teams-architecture.md) has the why.
 
+## 0. One link (the easy way)
+
+In a project, click **Invite** or run `loom invite`. You get one https link.
+Your teammate opens it and Loom does the rest:
+
+1. signs them in with GitHub
+2. joins the team
+3. clones the repo (for a private repo, your Loom grants them access when they join)
+4. opens it with the agents installed on their machine
+5. shares it with the team
+6. sets up your crews
+
+Without Loom, the page shows one command that installs it and joins. From a
+terminal, `loom join '<link>'` does the same.
+
+`loom invite` creates the team (named after the project) and shares the repo if
+you haven't yet. The link is single-use, expires in 24 hours and carries the
+team key, so send it to one person, privately. Repo access is granted with your
+`gh` and needs admin rights on the repo. Without them, Loom says so and you add
+the teammate on GitHub yourself.
+
+The links point at `https://nickthelegend.github.io/loom/join/` (`site/join/`).
+Set `LOOM_JOIN_URL` to host the page somewhere else. It is static: the invite
+lives in the URL's `#fragment`, which browsers never send to a server.
+
 ## 1. Set up a team
 
 ```bash
@@ -125,6 +150,14 @@ loom runner jobs                     # runners and what they're doing
 ```
 
 Or run it in Docker: `docker build -f Dockerfile.runner -t loom-runner .`
+
+On Windows use `loom.cmd runner install`. It adds **Loom Runner.vbs** to your
+account's Startup folder and starts the daemon immediately, without elevation.
+The script uses your installed Node and preserves `LOOM_HOME`. Remove that
+file from `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` to disable
+login startup. If Windows Script Host is disabled by your organization, run
+`loom.cmd up` manually. Windows login startup does not restart a daemon after
+a crash; run `loom.cmd up` again in that case.
 
 Each goal gets a fresh clone (a fresh container when Docker runs), and agents
 get a scrubbed environment with only their logins and the token. If a goal of

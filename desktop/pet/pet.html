@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>Loom pet</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none;
+    font: 12px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #stage { position: absolute; inset: 0; }
+  /* the pet sits bottom-right; the bubble floats above-left of it */
+  #pet { position: absolute; right: 14px; bottom: 6px; width: 90px; height: 110px; cursor: grab; image-rendering: pixelated; }
+  #pet:active { cursor: grabbing; }
+  #shadow { position: absolute; right: 30px; bottom: 4px; width: 58px; height: 9px; border-radius: 50%; background: rgba(0,0,0,.28); filter: blur(2px); transition: transform .3s; }
+  #bubble { position: absolute; right: 80px; bottom: 100px; max-width: 250px; min-width: 120px; padding: 9px 13px 10px; border-radius: 16px;
+    background: rgba(28, 28, 32, .86); color: #f4f4f5; box-shadow: 0 8px 28px -8px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.09);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); cursor: pointer;
+    opacity: 0; transform: translateY(6px) scale(.97); transform-origin: bottom right; transition: opacity .22s, transform .22s; pointer-events: none; }
+  #bubble.show { opacity: 1; transform: none; pointer-events: auto; }
+  #bubble .t { font-weight: 650; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #bubble .s { color: #a1a1aa; font-size: 11.5px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #bubble.alert { box-shadow: 0 8px 28px -8px rgba(0,0,0,.55), inset 0 0 0 1px rgba(251, 191, 36, .55); }
+  #bubble.alert .t { color: #fcd34d; }
+  #bubble.happy .t { color: #86efac; }
+  #bubble.sad .t { color: #fca5a5; }
+  #bubble::after { content: ""; position: absolute; right: -5px; bottom: 10px; width: 12px; height: 12px; background: inherit; transform: rotate(45deg); border-radius: 2px;
+    box-shadow: inset -1px -1px 0 rgba(255,255,255,.06); clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bubble"><div class="t"></div><div class="s"></div></div>
+  <div id="shadow"></div>
+  <canvas id="pet" width="18" height="22"></canvas>
+</div>
+<script src="pet.js"></script>
+</body>
+</html>

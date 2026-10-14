@@ -261,6 +261,59 @@ function App({ client, initial }: AppProps) {
             });
             break;
           }
+          case "prompts": {
+            const { saved } = await client.prompts(rest);
+            push(
+              "",
+              ...(saved.length
+                ? saved.map((p) => `  ${p.pinned ? pc.yellow("★ ") : "  "}${pc.bold(p.title)} ${pc.dim(p.id.slice(0, 8))}  ${pc.dim(p.text.replace(/\s+/g, " ").slice(0, 60))}`)
+                : [pc.dim("  no saved prompts yet — save one in the app (⌘⇧V) or with loom prompts save")]),
+              pc.dim("  /prompt <name> sends one"),
+              "",
+            );
+            break;
+          }
+          case "prompt": {
+            if (!rest) return setNotice("usage: /prompt <name or id>");
+            const { saved } = await client.prompts();
+            const hit = saved.find((p) => p.id.startsWith(rest)) ?? saved.find((p) => p.title.toLowerCase() === rest.toLowerCase()) ??
+              saved.find((p) => p.title.toLowerCase().includes(rest.toLowerCase()));
+            if (!hit) return setNotice(`no saved prompt "${rest}" — /prompts lists them`);
+            const now = new Date();
+            const text = hit.text
+              .replace(/\{\{date\}\}/g, now.toLocaleDateString())
+              .replace(/\{\{time\}\}/g, now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+              .replace(/\{\{project\}\}/g, project.name)
+              .replace(/\{\{agent\}\}/g, selected ?? "")
+              .replace(/\{\{(?:selection|branch|chat|last_reply|file)\}\}/g, "");
+            if (selected && selected !== project.holder) await client.handoff(project.id, selected);
+            await client.send(project.id, text, selected ?? undefined);
+            await client.updatePrompt(hit.id, { used: true }).catch(() => {});
+            break;
+          }
+          case "skills": {
+            const { skills } = await client.skillsCatalog(project.id);
+            const on = skills.filter((k) => k.enabled);
+            push(
+              "",
+              ...(on.length ? on.map((k) => `  ${pc.green("●")} ${pc.bold(k.id)}  ${pc.dim((k.description ?? "").slice(0, 60))}`) : [pc.dim("  no skills on")]),
+              pc.dim(`  ${skills.length} found on this machine — loom skills list --all · loom skills on <id>`),
+              "",
+            );
+            break;
+          }
+          case "mcp": {
+            const { mcps } = await client.mcps(project.id);
+            const rows = mcps.filter((m) => m.url || m.command);
+            push(
+              "",
+              ...(rows.length
+                ? rows.map((m) => `  ${m.name.padEnd(18)} ${m.enabledForSession === false ? pc.dim("off") : m.command ? pc.cyan("local") : m.connected ? pc.green("up") : pc.red("unreachable")}`)
+                : [pc.dim("  no MCP servers — loom mcp add <name> --url <endpoint>")]),
+              "",
+            );
+            break;
+          }
           case "quit":
           case "exit":
             exit();

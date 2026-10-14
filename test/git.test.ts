@@ -423,7 +423,7 @@ describe("git · worktrees", () => {
 
   it("puts the worktree path beside the repo, slugified", () => {
     const p = worktreePath("/tmp/my repo", "PR #42/fix");
-    expect(p).toBe(path.join("/tmp", "my repo--pr-42-fix"));
+    expect(p).toBe(path.resolve("/tmp", "my repo--pr-42-fix"));
   });
 });
 

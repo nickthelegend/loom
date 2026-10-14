@@ -7,6 +7,7 @@ import { askText,modalErr,toast } from '../notifications.js';
 import { state } from '../state.js';
 import { openBoardTaskModal,openTaskModal } from '../tasks.js';
 import { openMenu } from '../menus.js';
+import { copyText } from '../clipboard.js';
 
 /** board behavior for one mounted project.
  * view contains live accessors to the owning project view's state and callbacks.
@@ -592,6 +593,61 @@ export function createBoard(view) {
      * and dragging a card can't make either true, so the badge keeps saying what
      * is actually so and the card just wears a "pinned" mark.
      */
+    function moveCard(id, target){
+      var card = (view.board.data.cards || []).filter(function(c){ return c.id === id; })[0];
+      if (!card) return;
+      if (card.own) {
+        // your card: the column IS its state, so this is a real move —
+        // persisted, and it survives everyone else's refresh
+        card.column = target;
+        card.state = view.OWN_STATE[target] || "working";
+        drawBoardPane();
+        api("/api/projects/" + view.pid + "/board/tasks/" + id.replace(/^task-/, ""),
+            { method: "POST", body: JSON.stringify({ column: target }) })
+          .catch(function(err){ toast(err.message); loadBoard(); });
+        return;
+      }
+      // derived card: we can move where you SEE it, not what it is
+      var pins = boardPins();
+      if (target === card.column) delete pins[id]; else pins[id] = target;
+      savePins();
+      drawBoardPane();
+    }
+
+    /** Right-click a card: everything its buttons do, plus moving it without a drag. */
+    function cardMenu(el, x, y){
+      var id = el.getAttribute("data-card");
+      var c = (view.board.data.cards || []).filter(function(k){ return k.id === id; })[0];
+      if (!c) return;
+      var press = function(sel){ return function(){ var b = el.querySelector(sel); if (b) b.click(); }; };
+      var items = [];
+      if (c.own && el.querySelector("[data-edit]")) items.push({ label: "Edit title", icon: ICONS.pencil, run: press("[data-edit]") });
+      items.push({ label: "Ask in chat", icon: ICONS.chat || ICONS.spark, run: function(){
+        var box = document.getElementById("box"); if (!box) { toast("open the chat first"); return; }
+        if (state.showTab) state.showTab("thread");
+        box.value = (box.value.replace(/\s+$/, "") ? box.value.replace(/\s+$/, "") + "\n\n" : "") +
+          "Card: " + c.title + (c.pr ? " (PR #" + c.pr.number + ")" : c.issue ? " (issue #" + c.issue.number + ")" : "") + "\n";
+        box.dispatchEvent(new Event("input", { bubbles: true }));
+        box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+      } });
+      if (el.querySelector("[data-start]")) items.push({ label: "Hand to an agent", icon: ICONS.agents, run: press("[data-start]") });
+      if (el.querySelector("[data-review]")) items.push({ label: "Review PR", icon: ICONS.check, run: press("[data-review]") });
+      if (el.querySelector("[data-openpr]")) items.push({ label: "Open a PR", icon: ICONS.branch, run: press("[data-openpr]") });
+      if (el.querySelector("[data-wtpr],[data-wtissue]")) items.push({ label: "Open a worktree", icon: ICONS.branch, run: press("[data-wtpr],[data-wtissue]") });
+      if (c.own && el.querySelector("[data-prio]")) items.push({ label: "Priority\u2026", icon: ICONS.flag || ICONS.up, run: press("[data-prio]") });
+      items.push({ sep: true }, { head: c.own ? "Move to" : "Show in" });
+      view.BCOLS.forEach(function(col){
+        if (col[0] !== c.column) items.push({ label: col[1], icon: "", run: function(){ moveCard(id, col[0]); } });
+      });
+      items.push({ sep: true });
+      items.push({ label: "Copy title", icon: ICONS.copy, run: function(){ copyText(c.title); } });
+      var url = c.pr ? c.pr.url : c.issue ? c.issue.url : null;
+      if (url) items.push({ label: "Copy link", icon: ICONS.copy, run: function(){ copyText(url); } });
+      if (el.querySelector("[data-unpin]")) items.push({ label: "Unpin (let its state place it)", icon: ICONS.x, run: press("[data-unpin]") });
+      if (c.own && el.querySelector("[data-deltask]")) items.push({ sep: true }, { label: "Delete card", icon: ICONS.x, danger: true, run: press("[data-deltask]") });
+      openMenu(x, y, items);
+    }
+
     function wireBoardDnd(){
       var el = document.getElementById("pane-board"); if (!el) return;
       var dragging = null;
@@ -613,26 +669,14 @@ export function createBoard(view) {
           ev.preventDefault();
           col.classList.remove("over");
           var id = dragging || ev.dataTransfer.getData("text/plain");
-          if (!id) return;
-          var target = body.getAttribute("data-drop");
-          var card = (view.board.data.cards || []).filter(function(c){ return c.id === id; })[0];
-          if (!card) return;
-          if (card.own) {
-            // your card: the column IS its state, so this is a real move —
-            // persisted, and it survives everyone else's refresh
-            card.column = target;
-            card.state = view.OWN_STATE[target] || "working";
-            drawBoardPane();
-            api("/api/projects/" + view.pid + "/board/tasks/" + id.replace(/^task-/, ""),
-                { method: "POST", body: JSON.stringify({ column: target }) })
-              .catch(function(err){ toast(err.message); loadBoard(); });
-            return;
-          }
-          // derived card: we can move where you SEE it, not what it is
-          var pins = boardPins();
-          if (target === card.column) delete pins[id]; else pins[id] = target;
-          savePins();
-          drawBoardPane();
+          if (id) moveCard(id, body.getAttribute("data-drop"));
+        };
+      });
+      Array.prototype.forEach.call(el.querySelectorAll(".bcard"), function(card){
+        card.oncontextmenu = function(ev){
+          if (String(window.getSelection ? window.getSelection() : "").trim()) return; // copying text: the native menu
+          ev.preventDefault();
+          cardMenu(card, ev.clientX, ev.clientY);
         };
       });
       Array.prototype.forEach.call(el.querySelectorAll("[data-unpin]"), function(b){

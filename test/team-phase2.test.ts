@@ -192,7 +192,12 @@ describe("Phase 2: stop colliding", () => {
     expect(taskOf("bob", b.id, "t1").overlap).toMatch(/^proceed:/);
     // the decision reached the team feed, and alice's orchestrator will hear about it
     await waitUntil(() => (M.alice!.link.status() as { teams: Array<{ feed: Array<{ type: string }> }> }).teams[0]!.feed.some((e) => e.type === "overlap_decided"));
-    await waitUntil(() => (M.alice!.rt.orchestra.get(a.id)!.notes ?? []).some((n) => n.includes("chose to proceed alongside your work")));
+    // A review consumes pending notes. On slower Git/Windows runners alice
+    // can already have received this one by the time bob's goal completes.
+    await waitUntil(() => [
+      ...(M.alice!.rt.orchestra.get(a.id)!.notes ?? []),
+      ...told.alice,
+    ].some((n) => n.includes("chose to proceed alongside your work")));
     await finish("alice", a);
     await finish("bob", b);
   });

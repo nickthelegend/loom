@@ -1,6 +1,6 @@
 import type { Express } from 'express';
 import express from "express";
-import { execFile } from "node:child_process";
+import { execFile, fileCommand } from "../../core/process.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -37,11 +37,12 @@ export function registerVoiceRoutes(app: Express, withRuntime: WithRuntime): voi
       );
       try {
         fs.writeFileSync(tmp, body);
+        const launch = fileCommand(cmd, tmp);
         const text = await new Promise<string>((resolve, reject) => {
           execFile(
-            "/bin/sh",
-            ["-c", cmd.replaceAll("{file}", tmp)],
-            { timeout: 60_000, maxBuffer: 1024 * 1024 },
+            launch.command,
+            launch.args,
+            { env: launch.env, windowsVerbatimArguments: launch.windowsVerbatimArguments, timeout: 60_000, maxBuffer: 1024 * 1024 },
             (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
           );
         });

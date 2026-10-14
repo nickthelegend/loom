@@ -17,6 +17,7 @@
  */
 
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
 import { Readable } from "node:stream";
 
@@ -34,7 +35,19 @@ export const BRIDGE_MARK = "loom-preview-bridge";
  * one shape — {source:"loom-preview", kind, ...} — so the app has one reader.
  */
 export function bridgeScript(): string {
-  return `<script data-${BRIDGE_MARK}="1">(function(){
+  return ascii(BRIDGE_SOURCE);
+}
+
+/**
+ * Pure ASCII, so it can be spliced into a page's bytes whatever ASCII-based
+ * charset the page is in (see injectBytes). Only comments and string literals
+ * ever held anything else, and \uXXXX means the same thing in both.
+ */
+function ascii(js: string): string {
+  return js.replace(/[^\x00-\x7f]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+}
+
+const BRIDGE_SOURCE = `<script data-${BRIDGE_MARK}="1">(function(){
   if (window.__loomPreviewBridge) return;
   window.__loomPreviewBridge = 1;
   var send = function(kind, payload){
@@ -238,7 +251,13 @@ export function bridgeScript(): string {
     }).observe(document.documentElement, { childList: true, subtree: true });
   } catch (e) {}
 
+  // Back and forward, asked for by the app's own buttons: the page is another
+  // origin, so its history is only reachable from in here.
+  var go = function(n){ try { history.go(n); } catch (e) {} };
   window.addEventListener("message", function(e){
+    // Only the window that framed this page gives it orders — never a popup
+    // or a sibling frame. (A message with no source is a test harness.)
+    if (e.source && e.source !== parent) return;
     var d = e.data || {};
     if (d.source !== "loom-app") return;
     if (d.kind === "pick") {
@@ -250,11 +269,47 @@ export function bridgeScript(): string {
     } else if (d.kind === "scheme") {
       forced = d.value === "dark" ? "dark" : d.value === "light" ? "light" : null;
       applyScheme();
+    } else if (d.kind === "history") {
+      if (d.go === -1 || d.go === 1) go(d.go);
     }
   });
-  send("ready", { url: location.href, title: document.title });
+  // Does this page update itself? A dev server with hot module reload swaps
+  // code in place, and a hard reload from Loom would throw its state away.
+  // The bridge runs before the page's own scripts, so ask once now and again
+  // when the page has loaded — the HMR client is one of those scripts.
+  var hmr = function(){
+    try {
+      if (window.__vite_plugin_react_preamble_installed__ || window.__vite_is_modern_browser) return "vite";
+      if (document.querySelector('script[src*="/@vite/client"],script[src*="@react-refresh"]')) return "vite";
+      if (window.webpackHotUpdate || window.__webpack_hmr || window.__NEXT_HMR_CB || window.__NEXT_DATA__ && window.next) return "webpack";
+      for (var k in window) { if (/^webpackHotUpdate/.test(k)) return "webpack"; }
+    } catch (e) {}
+    return "";
+  };
+  send("ready", { url: location.href, title: document.title, hmr: !!hmr() });
+  // A single-page app moves without loading a page: say where it went, so the
+  // address bar (and what Reload and Screenshot point at) follows.
+  var lastHref = location.href;
+  var moved = function(){
+    if (location.href === lastHref) return;
+    lastHref = location.href;
+    send("nav", { url: location.href, title: document.title });
+  };
+  ["pushState", "replaceState"].forEach(function(name){
+    var original = history[name];
+    if (typeof original !== "function") return;
+    history[name] = function(){
+      var out = original.apply(this, arguments);
+      try { moved(); } catch (e) {}
+      return out;
+    };
+  });
+  window.addEventListener("popstate", moved);
+  window.addEventListener("hashchange", moved);
+  var hmrLater = function(){ var h = hmr(); if (h) send("hmr", { hmr: true, kind: h }); };
+  if (document.readyState === "complete") setTimeout(hmrLater, 0);
+  else window.addEventListener("load", function(){ setTimeout(hmrLater, 300); });
 })();</script>`;
-}
 
 /** Put the bridge first, so it sees what the page does on its way up. */
 export function injectBridge(html: string): string {
@@ -280,45 +335,145 @@ export interface PreviewProxy {
   close: () => Promise<void>;
 }
 
+/** A host that is this machine — the only kind the preview will stand in front of on its own. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return h === "localhost" || h.endsWith(".localhost") || h === "::1" || /^127(\.\d{1,3}){3}$/.test(h);
+}
+
+const portOf = (u: URL): string => u.port || (u.protocol === "https:" ? "443" : "80");
+
+/** Is `loc` the upstream itself (allowing localhost ≡ 127.0.0.1 on the same port)? */
+function isUpstream(loc: URL, to: URL): boolean {
+  if (loc.origin === to.origin) return true;
+  return loc.protocol === to.protocol && portOf(loc) === portOf(to) && isLoopbackHost(loc.hostname) && isLoopbackHost(to.hostname);
+}
+
 /**
- * Stand in front of `target` (http://host:port) on a port of our own.
+ * A redirect the dev server sent with its own absolute address would walk the
+ * frame off the proxy (and lose the bridge). Point it back through us.
+ */
+export function rewriteLocation(location: string, target: string, proxyOrigin: string): string {
+  let loc: URL;
+  try {
+    loc = new URL(location, target);
+  } catch {
+    return location;
+  }
+  if (!/^([a-z][a-z0-9+.-]*:)?\/\//i.test(location)) return location; // a path: already ours
+  if (!isUpstream(loc, new URL(target))) return location;
+  return proxyOrigin + loc.pathname + loc.search + loc.hash;
+}
+
+/**
+ * Will a browser show this page inside a frame on another origin? Read off the
+ * two headers that decide it, so a page that refuses can be said to refuse
+ * instead of leaving a white rectangle.
+ */
+export function frameability(xFrameOptions: string | null, csp: string | null): { frameable: boolean; reason: string } {
+  const xfo = (xFrameOptions ?? "").trim().toLowerCase();
+  if (xfo === "deny" || xfo === "sameorigin") return { frameable: false, reason: `X-Frame-Options: ${xfo.toUpperCase()}` };
+  for (const policy of (csp ?? "").split(",")) {
+    const directive = policy.split(";").map((d) => d.trim()).find((d) => /^frame-ancestors(\s|$)/i.test(d));
+    if (!directive) continue;
+    const sources = directive.split(/\s+/).slice(1);
+    // only a wildcard lets an unrelated app frame it; 'self', 'none' or a list of hosts don't
+    if (!sources.some((x) => x === "*" || /^https?:$/i.test(x))) {
+      return { frameable: false, reason: `Content-Security-Policy: ${directive}` };
+    }
+  }
+  return { frameable: true, reason: "" };
+}
+
+/** Charsets whose bytes for `<`, `h`, `e`… are ASCII's — the bridge can be spliced into them as bytes. */
+const ASCII_BASED = /^(utf-?8|us-ascii|ascii|iso-?8859-\d+|latin-?1|windows-125\d|cp125\d|koi8-[ru]|shift_jis|sjis|euc-jp|euc-kr|gbk|gb2312|gb18030|big5)$/i;
+
+/**
+ * The bridge, in a page given as bytes. Decoding as latin1 maps every byte to
+ * one code unit and back, so whatever the page's own encoding, every byte that
+ * isn't the script comes out exactly as it went in.
+ */
+export function injectBytes(body: Buffer, contentType: string): Buffer | null {
+  const charset = /charset\s*=\s*"?([^";\s]+)/i.exec(contentType)?.[1];
+  if (charset && !ASCII_BASED.test(charset)) return null; // UTF-16 and friends: leave it be
+  // A byte-order mark for UTF-16/32 means the same, whatever the header said.
+  if (body.length >= 2 && ((body[0] === 0xfe && body[1] === 0xff) || (body[0] === 0xff && body[1] === 0xfe))) return null;
+  return Buffer.from(injectBridge(body.toString("latin1")), "latin1");
+}
+
+/**
+ * Stand in front of `target` (http(s)://host:port) on a port of our own.
  *
  * Everything is forwarded as-is except HTML, which gets the bridge. The
  * WebSocket upgrade is forwarded too — a framework's hot reload rides on it,
  * and a preview that kills HMR would be a downgrade from an iframe.
+ *
+ * An https upstream is spoken to over TLS; a self-signed certificate is
+ * accepted only from this machine (a dev server's mkcert or vite's basic-ssl),
+ * never from anywhere else.
  */
 export async function startPreviewProxy(target: string, host = "127.0.0.1"): Promise<PreviewProxy> {
   const to = new URL(target);
+  const secure = to.protocol === "https:";
+  if (!secure && to.protocol !== "http:") throw new Error(`can't preview ${to.protocol} — only http and https`);
+  const lib: typeof http | typeof https = secure ? https : http;
+  const upstreamHost = to.hostname.replace(/^\[|\]$/g, "");
+  const upstreamPort = Number(portOf(to));
+  const tls = secure ? { rejectUnauthorized: !isLoopbackHost(to.hostname), servername: net.isIP(upstreamHost) ? undefined : upstreamHost } : {};
+  let ownPort = 0;
+  const proxyOrigin = (req: http.IncomingMessage) => `http://${req.headers.host ?? `${host}:${ownPort}`}`;
+
+  /** The browser's headers, as the upstream expects to see them. */
+  const forwardHeaders = (req: http.IncomingMessage): http.OutgoingHttpHeaders => {
+    const headers: http.OutgoingHttpHeaders = { ...req.headers, host: to.host };
+    // A server checking Origin/Referer (CSRF, CORS) should see itself, not us.
+    const self = proxyOrigin(req);
+    for (const k of ["origin", "referer"] as const) {
+      const v = req.headers[k];
+      if (typeof v === "string" && v.startsWith(self)) headers[k] = to.origin + v.slice(self.length);
+    }
+    return headers;
+  };
+
   const server = http.createServer((req, res) => {
-    const upstream = http.request(
+    const upstream = lib.request(
       {
-        host: to.hostname,
-        port: to.port || 80,
+        host: upstreamHost,
+        port: upstreamPort,
         method: req.method,
         path: req.url,
-        headers: { ...req.headers, host: to.host, "accept-encoding": "identity" },
+        headers: { ...forwardHeaders(req), "accept-encoding": "identity" },
+        ...tls,
       },
       (up) => {
-        const type = String(up.headers["content-type"] ?? "");
-        if (!/text\/html/i.test(type)) {
-          res.writeHead(up.statusCode ?? 200, up.headers);
+        const status = up.statusCode ?? 200;
+        const headers = { ...up.headers };
+        if (typeof headers.location === "string") headers.location = rewriteLocation(headers.location, to.href, proxyOrigin(req));
+        const type = String(headers["content-type"] ?? "");
+        const html = /text\/html/i.test(type);
+        if (html) {
+          // The page must not be embedded-blocked by its own dev server.
+          delete headers["x-frame-options"];
+          delete headers["content-security-policy"];
+        }
+        const encoded = !!headers["content-encoding"] && headers["content-encoding"] !== "identity";
+        // Nothing to put a script into: not a page, no body, or one we can't read.
+        if (!html || encoded || req.method === "HEAD" || status === 204 || status === 304 || (status >= 100 && status < 200)) {
+          res.writeHead(status, headers);
           up.pipe(res);
           return;
         }
         const chunks: Buffer[] = [];
         up.on("data", (c: Buffer) => chunks.push(c));
         up.on("end", () => {
-          const body = injectBridge(Buffer.concat(chunks).toString("utf8"));
-          const headers = { ...up.headers };
+          const raw = Buffer.concat(chunks);
+          const body = injectBytes(raw, type) ?? raw;
           // We buffered it to inject, so the framing is ours now: a chunked
           // header kept beside a content-length is an invalid response, and
           // the browser drops the page rather than showing it.
           delete headers["content-length"];
           delete headers["transfer-encoding"];
-          // The page must not be embedded-blocked by its own dev server.
-          delete headers["x-frame-options"];
-          delete headers["content-security-policy"];
-          res.writeHead(up.statusCode ?? 200, { ...headers, "content-length": Buffer.byteLength(body) });
+          res.writeHead(status, { ...headers, "content-length": body.length });
           res.end(body);
         });
       },
@@ -347,14 +502,15 @@ export async function startPreviewProxy(target: string, host = "127.0.0.1"): Pro
   server.on("upgrade", (req, socket, head) => {
     upgraded.add(socket);
     socket.on("close", () => upgraded.delete(socket));
-    const up = http.request({
-      host: to.hostname,
-      port: to.port || 80,
+    const up = lib.request({
+      host: upstreamHost,
+      port: upstreamPort,
       method: req.method,
       path: req.url,
-      headers: { ...req.headers, host: to.host },
+      headers: forwardHeaders(req),
       // A pooled agent never surfaces the upgrade — the socket has to be ours.
       agent: false,
+      ...tls,
     });
     up.on("upgrade", (upRes, upSocket, upHead) => {
       socket.write(
@@ -373,6 +529,11 @@ export async function startPreviewProxy(target: string, host = "127.0.0.1"): Pro
       upSocket.on("error", () => socket.destroy());
       socket.on("error", () => upSocket.destroy());
     });
+    // Refused the upgrade: hand its answer back rather than hanging up mute.
+    up.on("response", (upRes) => {
+      socket.end(`HTTP/1.1 ${upRes.statusCode ?? 502} ${upRes.statusMessage ?? ""}\r\nconnection: close\r\n\r\n`);
+      upRes.resume();
+    });
     up.on("error", () => socket.destroy());
     if (head?.length) up.write(head);
     up.end();
@@ -382,6 +543,7 @@ export async function startPreviewProxy(target: string, host = "127.0.0.1"): Pro
     server.once("error", reject);
     server.listen(0, host, () => resolve((server.address() as net.AddressInfo).port));
   });
+  ownPort = port;
 
   return {
     port,

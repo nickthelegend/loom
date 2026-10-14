@@ -1,7 +1,12 @@
 # Agent Teams — feature spec
 
-**Status:** proposal, ready to build · **Owner:** Harsha (@igharsha7) · **Author:** Nivesh (@nickthelegend) · **Date:** 2026-10-01
+**Status:** Phase 1 built (crew core + one-link onboarding) · **Owner:** Harsha (@igharsha7) · **Author:** Nivesh (@nickthelegend) · **Date:** 2026-10-01
 **Branch:** `feat/agent-teams` (off `main`, never directly on `main`)
+
+> **Built on `feat/agent-teams` (2026-10-08):**
+> - **Phase 1:** `core/crew.ts`, `core/crew-protocol.ts`, `daemon/routes/crews.ts`, the Crew tab and `loom crew`. One person's crew works one card at a time: the Lead plans, you approve, then build → review (rounds of changes) → test → apply. Goal worktrees, trailers, the channel, asks, replan on feedback, stop/resume across restarts.
+> - **Onboarding, ahead of Phase 4:** `daemon/onboard.ts` and `core/invite-link.ts`. *Invite* (or `loom invite`) gives one https link (`site/join/`). It signs the teammate in, joins the team, clones the repo (granting and accepting GitHub access for private repos), opens it with their agents, shares it, and sets up your crews from their roster.
+> - **Still to build:** persistent teammate sessions through continuity (P2), parallel builders and leases (P3), crews across people (P4), polish and the phone (P5).
 
 ---
 
