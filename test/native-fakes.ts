@@ -158,6 +158,8 @@ export interface FakeCodexOptions {
   model?: string;
   /** What model/list answers (the sign-in's models); unset, it's an unknown method like an old codex. */
   models?: Array<{ id: string; model?: string; isDefault?: boolean }>;
+  /** Let notifications finish before turn/start's response (valid app-server ordering). */
+  turnReplyDelayMs?: number;
   version?: string;
 }
 
@@ -185,7 +187,7 @@ export function fakeCodex(options: FakeCodexOptions = {}): string {
   const dir = tmpDir("fake-codex"), bin = path.join(dir, "codex");
   const config = { script: options.script ?? CODEX_OK, scripts: options.scripts ?? [], missingThread: options.missingThread ?? false,
     refuseTurn: options.refuseTurn ?? null, dieAtStart: options.dieAtStart ?? null, model: options.model ?? "gpt-test",
-    version: options.version ?? "codex-cli 0.155.0", models: options.models ?? null };
+    version: options.version ?? "codex-cli 0.155.0", models: options.models ?? null, turnReplyDelayMs: options.turnReplyDelayMs ?? 0 };
   fs.writeFileSync(bin, `#!/usr/bin/env node
 ${RUNNER}
 const config = ${JSON.stringify(config)};
@@ -236,7 +238,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
       vars.TURN = "turn-" + process.pid + "-" + turns;
       interrupted = false;
       record("turns.jsonl", { turn: turns, pid: process.pid, thread: vars.THREAD });
-      reply(m.id, { turn: { id: vars.TURN, items: [], status: "inProgress", error: null } });
+      const turnReply = { turn: { id: vars.TURN, items: [], status: "inProgress", error: null } };
+      if (config.turnReplyDelayMs) setTimeout(() => reply(m.id, turnReply), config.turnReplyDelayMs);
+      else reply(m.id, turnReply);
       void run(config.scripts[turns - 1] || config.script);
       return;
     case "model/list":

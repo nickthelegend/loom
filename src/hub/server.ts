@@ -150,6 +150,11 @@ export async function startHubServer(opts: HubServerOptions = {}): Promise<{
   });
 
   const server = http.createServer(app);
+  // A client can be busy in a synchronous Git operation longer than Node's
+  // five-second idle default. Keep the socket alive through that work so its
+  // next POST does not race a stale pooled socket (ECONNRESET on Windows).
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 70_000;
   const wss = new WebSocketServer({ server, path: "/hub/subscribe" });
   wss.on("connection", (ws: WebSocket, req) => {
     const proto = String(req.headers["sec-websocket-protocol"] ?? "")

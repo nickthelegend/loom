@@ -395,6 +395,9 @@ export class CodexProviderAdapter implements ProviderAdapter {
     if (s.rerouting) { await s.rerouting; s.rerouting = undefined; }
     const asked = input.modelSelection?.model;
     const model = asked && !s.refused?.has(asked) ? asked : s.info.model;
+    // Notifications may arrive before turn/start's response. They must see
+    // the model this turn asked for, including a refusal that reroutes it.
+    if (model) s.info = { ...s.info, model };
     const effort = input.modelSelection?.effort;
     s.baseline = null;
     s.turnUsage = null;
@@ -425,8 +428,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
     const turnId = String((response.turn as Json | undefined)?.id ?? "");
     if (!turnId) throw new ProviderError("request", "sendTurn", "codex app-server returned no turn id",
       { provider: this.provider, instanceId: this.instanceId, threadId: input.threadId, mayHaveStarted: true });
-    if (!s.finished.has(turnId)) s.info = { ...s.info, status: "running", activeTurnId: turnId, updatedAt: Date.now(), ...(model ? { model } : {}) };
-    else if (model) s.info = { ...s.info, model };
+    if (!s.finished.has(turnId)) s.info = { ...s.info, status: "running", activeTurnId: turnId, updatedAt: Date.now() };
     return { threadId: input.threadId, turnId, resumeCursor: s.providerThreadId };
   }
 

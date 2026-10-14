@@ -165,7 +165,7 @@ describe("codex · a model the ChatGPT plan doesn't have", () => {
 
   it("a refused turn switches the chat to a model the plan has for the next turn", async () => {
     const refusal = "The 'gpt-custom' model is not supported when using Codex with a ChatGPT account.";
-    const bin = fakeCodex({ models: PLAN, scripts: [[started, codexDone("failed", refusal)]], script: CODEX_OK });
+    const bin = fakeCodex({ models: PLAN, turnReplyDelayMs: 100, scripts: [[started, codexDone("failed", refusal)]], script: CODEX_OK });
     const agent = new CodexAdapter("codex", makeProjectDir({ name: "cx" }), { bin, model: "gpt-custom" });
     const events: AdapterEvent[] = [];
     agent.onEvent((e) => events.push(e));
