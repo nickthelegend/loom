@@ -56,7 +56,11 @@ export async function waitUntil(
   predicate: () => Promise<boolean> | boolean,
   { timeoutMs = 20_000, intervalMs = 40 } = {},
 ): Promise<void> {
-  const deadline = performance.now() + timeoutMs;
+  // Hosted Windows runners repeatedly exceed short state-polling budgets
+  // while starting real Git/Node children. Keep CI polling below the 90s
+  // test limit without changing the application's own operation deadlines.
+  const budgetMs = process.platform === "win32" && process.env.CI ? Math.max(timeoutMs, 30_000) : timeoutMs;
+  const deadline = performance.now() + budgetMs;
   while (performance.now() < deadline) {
     if (await predicate()) return;
     await new Promise((r) => setTimeout(r, intervalMs));

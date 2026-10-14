@@ -17,6 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         node: [22, 24]
+        terminal: [pty, pipe]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,6 +26,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # Isolate terminal modes on separate runners so Windows can serialize
+      # test files without doubling one job's time. Both run the full suite.
       # node-pty ships no Linux prebuild, so this runner compiles it — and
       # because it's an optionalDependency, a failed build is silent. Without
       # LOOM_EXPECT_PTY the pty tests would skip themselves and the whole
@@ -32,13 +35,8 @@ jobs:
       - run: npm test
         env:
           LOOM_NO_NOTIFY: "1"
-          LOOM_EXPECT_PTY: "1"
-      # And again with the pty forced off. The pipe fallback is what a machine
-      # without a toolchain runs, so it can't be allowed to rot untested.
-      - run: npm test
-        env:
-          LOOM_NO_NOTIFY: "1"
-          LOOM_NO_PTY: "1"
+          LOOM_EXPECT_PTY: ${{ matrix.terminal == 'pty' && '1' || '' }}
+          LOOM_NO_PTY: ${{ matrix.terminal == 'pipe' && '1' || '' }}
 
   # The phone app has its own dependency tree and never gets built by the job
   # above, so nothing here noticed when it broke. It can't be rendered in CI —

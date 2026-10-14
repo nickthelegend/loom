@@ -96,7 +96,9 @@ describe("prompts sent to a busy agent", () => {
     expect(c.queued).toBe(2);
     // queued, not in the thread: it enters the conversation when it's sent
     expect(prompts(r)).toEqual(["sleep:600 first"]);
-    await waitUntil(() => replies(r).length >= 3, { timeoutMs: 10_000 });
+    // Each queued turn performs real Git/checkpoint work. Cold Windows
+    // process startup can take longer than the echo agent's own delay.
+    await waitUntil(() => replies(r).length >= 3, { timeoutMs: process.platform === "win32" ? 30_000 : 10_000 });
     const got = replies(r);
     expect(got.findIndex((t) => t.includes("first"))).toBeLessThan(got.findIndex((t) => t.includes("second")));
     expect(got.findIndex((t) => t.includes("second"))).toBeLessThan(got.findIndex((t) => t.includes("third")));
