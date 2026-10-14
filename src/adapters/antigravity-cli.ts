@@ -66,6 +66,10 @@ const INSTALLED = [
  */
 export function agyBin(override?: string): string | null {
   if (override) return fs.existsSync(override) ? override : null;
+  if (process.platform === "win32") {
+    const native = path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "agy", "bin", "agy.exe");
+    if (fs.existsSync(native)) return native;
+  }
   for (const p of INSTALLED) {
     if (fs.existsSync(p)) return p;
   }

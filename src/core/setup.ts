@@ -315,7 +315,10 @@ export async function setupReport(): Promise<SetupReport> {
         kind: a.kind,
         label: a.label,
         found,
-        install: p === "win32" && a.kind === "opencode" ? "npm i -g opencode-ai" : p === "win32" && a.kind === "codex" ? "npm i -g @openai/codex" : INSTALL[a.kind] ?? "",
+        install: p === "win32" && a.kind === "opencode" ? "npm i -g opencode-ai"
+          : p === "win32" && a.kind === "codex" ? "npm i -g @openai/codex"
+          : p === "win32" && a.kind === "antigravity-cli" ? "irm https://antigravity.google/cli/install.ps1 | iex"
+          : INSTALL[a.kind] ?? "",
         authed: auth.authed,
         ...(auth.detail ? { authDetail: auth.detail } : {}),
         auth: AUTH[a.kind] ?? "",

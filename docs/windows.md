@@ -20,6 +20,9 @@ supported; prompts are passed as literal arguments, including quotes,
 newlines, spaces and shell characters. Commands you configure for tests and
 transcription use `cmd.exe` on Windows, so write them in Windows shell syntax.
 
+Antigravity's Windows installer and default `%LOCALAPPDATA%\agy\bin` location
+follow its [official installation guide](https://www.antigravity.google/docs/cli/install/).
+
 The terminal uses ConPTY when node-pty loads, with a pipe fallback otherwise.
 Both paths are exercised in CI. The pipe terminal preserves its shell session
 when interrupting a foreground process. Windows console hosts are excluded
