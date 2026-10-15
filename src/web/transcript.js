@@ -336,6 +336,13 @@ import { shortModel } from './permissions.js';
       return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
     }
     if (e.kind === "status" && p.state === "loop_detected") return loopCard(e);
+    // Blast-Radius Shield (core/shield.ts): a command that can't be taken back
+    if (e.kind === "status" && p.state === "shield_tripped") {
+      return '<div class="shieldcard" data-agent="' + esc(e.agentId || "") + '"><div class="sdh">\u26d4 <b>' + esc(labelOf(e.agentId)) + " ran " + esc(String(p.what || "a dangerous command")) + "</b></div>" +
+        '<code class="sdc">' + esc(String(p.command || "").slice(0, 300)) + "</code>" +
+        '<div class="sdw">' + esc(String(p.why || "")) + (p.stopped ? ". Loom stopped the turn." : ".") + " Rewind on the turn\u2019s card puts the files back." + "</div>" +
+        (p.stopped ? "" : '<div class="sdb"><button type="button" class="btn xs" data-shield-stop="' + esc(e.chat || "") + '">' + ICONS.stop + "Stop the turn</button></div>") + "</div>";
+    }
     // Quota Relay: an agent ran out of quota and the work changed hands (or waits for the reset)
     if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_redirect" || p.state === "quota_limit" || p.state === "quota_reset")) {
       var qcls = p.state === "quota_reset" ? "ok" : p.state === "quota_relay" && p.to ? "warn" : "warn";

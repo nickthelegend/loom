@@ -306,6 +306,14 @@
     border:1px solid color-mix(in srgb, var(--tr) 40%, var(--border));color:var(--tr);--tr:var(--warn)}
   .trbadge.lv-high{--tr:var(--err)}
   .dfile.dffocus{outline:2px solid color-mix(in srgb, var(--warn) 55%, transparent);outline-offset:-2px;border-radius:6px}
+  /* Blast-Radius Shield: a command that can't be taken back */
+  .shieldcard{max-width:88%;margin:6px 0;background:color-mix(in srgb, var(--err) 6%, var(--card));border:1px solid color-mix(in srgb, var(--err) 30%, var(--border));
+    border-left:3px solid var(--err);border-radius:var(--radius);padding:8px 10px;font-size:12.5px}
+  .shieldcard .sdh b{font-weight:650}
+  .shieldcard .sdc{display:block;margin-top:5px;font-family:var(--font-mono);font-size:11.5px;white-space:pre-wrap;word-break:break-all;background:var(--muted);border-radius:6px;padding:5px 7px}
+  .shieldcard .sdw{margin-top:5px;color:var(--muted-foreground)}
+  .shieldcard .sdb{margin-top:7px}
+  .shieldcard .sdb .btn svg{width:11px;height:11px;margin-right:4px}
   /* Night Shift: the morning report */
   .shiftcard{max-width:88%;margin:8px 0;background:var(--card);border:1px solid var(--border);border-left:3px solid var(--foreground);border-radius:var(--radius);padding:9px 11px;font-size:12.5px}
   .shiftcard .shh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}

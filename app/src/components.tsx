@@ -4,7 +4,7 @@ import { createContext, useContext, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { Alert, Image, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
-import { actOnLoop, stopShift, type Creds, type LoomEvent, type TaskItem } from "./api";
+import { actOnLoop, interrupt, stopShift, type Creds, type LoomEvent, type TaskItem } from "./api";
 import { useConnRoute } from "./brand";
 import type { LiveMap } from "./live-model";
 import { AgentIcon, agentLabel } from "./agents";
@@ -710,6 +710,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
   }
   if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
   if (e.kind === "shift") return <ShiftCard e={e} />;
+  if (e.kind === "status" && p.state === "shield_tripped") return <ShieldCard e={e} />;
   // Quota Relay: an agent ran out of quota and the work changed hands (or waits for the reset)
   if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_redirect" || p.state === "quota_limit" || p.state === "quota_reset")) {
     return (
@@ -836,6 +837,28 @@ function ShiftCard(props: { e: LoomEvent }) {
           </View>
         );
       })}
+    </View>
+  );
+}
+
+/** Blast-Radius Shield: a command that can't be taken back — what it was, why it matters, and Stop. */
+function ShieldCard(props: { e: LoomEvent }) {
+  const ctx = useContext(ThreadCtx);
+  const [done, setDone] = useState<string | null>(null);
+  const p = props.e.payload as Record<string, unknown>;
+  return (
+    <View style={{ marginLeft: 30, marginVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: T.line, borderLeftWidth: 3, borderLeftColor: T.err, backgroundColor: T.panel, padding: 11, gap: 6 }}>
+      <Text style={{ color: T.text, fontSize: 13, fontWeight: "600" }}>⛔ {props.e.agentId} ran {String(p.what ?? "a dangerous command")}</Text>
+      <Text style={{ color: T.text, fontFamily: T.mono, fontSize: 11.5 }} numberOfLines={3}>{String(p.command ?? "")}</Text>
+      <Text style={{ color: T.dim, fontSize: 12, lineHeight: 17 }}>{String(p.why ?? "")}{p.stopped ? ". Loom stopped the turn." : "."} Rewind on the turn's card puts the files back.</Text>
+      {p.stopped || !ctx ? null : done ? <Text style={{ color: T.faint, fontSize: 12 }}>{done}</Text> : (
+        <View style={{ flexDirection: "row" }}>
+          <Btn small label="Stop the turn" onPress={() => {
+            haptic.tap();
+            interrupt(ctx.creds, ctx.projectId, props.e.chat).then((r) => setDone(r.interrupted ? "stopped" : "its turn had already ended")).catch((err: Error) => Alert.alert("Couldn't stop it", err.message));
+          }} />
+        </View>
+      )}
     </View>
   );
 }

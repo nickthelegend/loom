@@ -36,6 +36,10 @@ export class EchoAdapter extends AdapterBase {
     this.aborted = false;
     const started = Date.now();
     try {
+      // run:<command> — report running that shell command (first, before any sleep:), so what Loom does
+      // with an agent's commands — the Blast-Radius Shield, Proof's evidence — is testable end to end
+      const runMatch = input.text.match(/(?<![a-z])run:\s*([^\n]+?)(?=\s+sleep:\d+|$)/m);
+      if (runMatch) this.emit({ kind: "tool_call", payload: { tool: "shell", summary: `shell: ${runMatch[1]!.trim()}`, command: runMatch[1]!.trim(), exitCode: 0, ok: true } });
       const sleepMatch = input.text.match(/sleep:(\d+)/);
       if (sleepMatch) {
         const ms = Math.min(Number(sleepMatch[1]), 60_000);
