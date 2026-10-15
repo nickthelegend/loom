@@ -3134,6 +3134,33 @@ program
   });
 
 program
+  .command("replay")
+  .description("a chat as one self-contained HTML page to share — prompts, replies, what ran, what changed, what Loom checked")
+  .option("--chat <chat>", "the chat's id or title (default: main)", "main")
+  .option("--out <file>", "where to write it (default: <project>-<chat>.replay.html)")
+  .option("--open", "open it in your browser")
+  .action(async (opts: { chat: string; out?: string; open?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const want = opts.chat.trim().toLowerCase();
+    let chat = { id: "main", title: "Main" };
+    if (want !== "main") {
+      const { chats } = await client.chats(project.id);
+      const found = chats.find((c) => c.id === opts.chat) ?? chats.find((c) => c.title.toLowerCase() === want) ?? chats.find((c) => c.title.toLowerCase().includes(want));
+      if (!found) fail(`no chat "${opts.chat}" in ${project.name} — try one of: ${chats.map((c) => c.title).join(", ")}`);
+      chat = found!;
+    }
+    const html = await client.replay(project.id, chat.id);
+    const out = opts.out ?? `${project.name}-${chat.title}`.replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase() + ".replay.html";
+    fs.writeFileSync(out, html);
+    console.log(pc.green(`✓ ${out}`) + pc.dim(` — opens in any browser, nothing to install`));
+    if (opts.open) {
+      const { spawn: sp } = await import("node:child_process");
+      sp(process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open", [out], { detached: true, stdio: "ignore", shell: process.platform === "win32" }).on("error", () => {}).unref();
+    }
+  });
+
+program
   .command("stats")
   .description("today across every project: turns, how many finished cleanly, spend, busiest agent")
   .option("--days <n>", "look back this many days instead of just today", "1")

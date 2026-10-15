@@ -560,6 +560,23 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 60_000);
 
+  it("Replay: a chat comes back as one self-contained page, and the menu saves it", async () => {
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(makeProjectDir({ name: "replaydom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;
+    await client.send(pid, "hello <b>there</b>");
+    await waitUntil(async () => (await client.chatEvents(pid, "main", { limit: 50 })).events.some((e) => e.kind === "run_complete"));
+    const html = await client.replay(pid, "main");
+    expect(html).toMatch(/^<!doctype html>/);
+    expect(html).toContain("replaydom — Main");
+    expect(html).toContain("hello &lt;b&gt;there&lt;/b&gt;");
+    expect(html).toContain("echo · 1 turn");
+    const cfg = readDaemonConfig()!;
+    const res = await fetch(`http://127.0.0.1:${cfg.port}/api/projects/${pid}/chats/main/replay?download=1`, { headers: { authorization: `Bearer ${cfg.adminToken}` } });
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="replaydom-main.replay.html"');
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect((await fetch(`http://127.0.0.1:${cfg.port}/api/projects/${pid}/chats/nope/replay`, { headers: { authorization: `Bearer ${cfg.adminToken}` } })).status).toBe(404);
+  }, 60_000);
+
   it("Blast-Radius Shield: a force-push gets a red card, and its Stop ends the turn", async () => {
     const client = new DaemonClient(readDaemonConfig()!);
     const pid = (await client.addProject(makeProjectDir({ name: "shielddom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;

@@ -6,8 +6,29 @@ import { readProjectState, writeProjectState } from "../../core/registry.js";
 import { resolveProvider } from "../../core/providers.js";
 import { LoomAskTimeoutError } from "../runtime.js";
 import type { WithRuntime } from './context.js';
+import { threadReplay } from "../../core/replay.js";
+import { MAIN_CHAT } from "../../types.js";
 /** Register chats routes in the order established by LoomDaemon.routes(). */
 export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): void {
+
+  // A chat as one self-contained HTML page — prompts, replies, what ran, what changed, and what
+  // Loom checked (core/replay.ts). ?download=1 asks the browser to save it.
+  app.get(
+    "/api/projects/:id/chats/:chat/replay",
+    withRuntime(async (rt, req, res) => {
+      const chat = String(req.params.chat || MAIN_CHAT);
+      const info = chat === MAIN_CHAT ? { title: "Main" } : rt.chats().find((c) => c.id === chat);
+      if (!info) return void res.status(404).json({ error: "no such chat" });
+      const events = rt.log.list({ chat, limit: 20_000 });
+      const html = threadReplay(events, { project: rt.info.name, chat: info.title || "Chat" });
+      const file = `${rt.info.name}-${info.title || chat}`.replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 80) || "replay";
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
+      res.setHeader("x-content-type-options", "nosniff");
+      if (req.query.download) res.setHeader("content-disposition", `attachment; filename="${file}.replay.html"`);
+      res.send(html);
+    }),
+  );
 
   /**
    * Drive a GUI agent: type into Antigravity's or Kiro's own chat and read

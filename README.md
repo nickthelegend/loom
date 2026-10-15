@@ -1262,6 +1262,29 @@ phone, type them and tap 🌙. `--until` and `--max` stop *new* tasks from
 starting; the one running always finishes. A shift survives a daemon restart.
 A task the restart cut off is reported as failed, and the rest carry on.
 
+## Replay: a run you can send anyone
+
+Export any chat as one self-contained HTML page:
+- what you asked and what the agents said;
+- every command they ran, with its output folded away;
+- every diff, with Review Triage's "read first";
+- what Loom checked along the way: Proof's verdicts, the loop watch, the
+  shield, a Night Shift's report.
+
+Across the top is a one-line summary: who worked, how many turns, how long,
+files changed, checks verified, cost. Send it to a teammate, attach it to a
+PR, or post it. It opens in any browser, offline, with nothing to install.
+
+```bash
+loom replay                       # the main chat → <project>-main.replay.html
+loom replay --chat "night" --open
+```
+
+In the desktop app it's **⋯ → Export as replay**, beside Export as
+Markdown. The page runs no scripts and loads nothing: every value is
+escaped, and a Content-Security-Policy forbids the rest. It does contain the
+code and output from the chat, so share it the way you'd share the repo.
+
 ## Blast-Radius Shield: what can't be taken back
 
 Rewind puts the files back. It can't un-push a force-push, restore a dropped
