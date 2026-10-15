@@ -246,15 +246,22 @@ export function createChanges(view) {
     }
 
     // Show a turn's combined patch (from a turn_diff card in the thread).
-    function openPatchDock(patch, label, cp){
+    // opts.triage: Review Triage for these files (a reason on each header worth a look);
+    // opts.focus: the file to scroll to — a "Review first" chip opens straight onto it
+    function openPatchDock(patch, label, cp, opts){
+      opts = opts || {};
       openDock();
-      tab("p:" + (label || "changes"), ICONS.tree, label || "changes", function(){ openPatchDock(patch, label, cp); });
+      tab("p:" + (label || "changes"), ICONS.tree, label || "changes", function(){ openPatchDock(patch, label, cp, { triage: opts.triage }); });
       var el = document.getElementById("pane-changes");
       var files = splitPatch(patch);
+      var tri = {};
+      (opts.triage || []).forEach(function(t){ if (t && t.path) tri[t.path] = t; });
       el.innerHTML = diffToggle() + '<div class="diffwrap">' + (files.length
         ? files.map(function(f, i){
             return '<div class="dfile" id="df-' + i + '"><div class="dfh">' + ICONS.tree +
               '<span class="p">' + esc(f.path || "patch") + "</span>" +
+              (tri[f.path] && tri[f.path].level !== "low" && (tri[f.path].reasons || []).length
+                ? '<span class="trbadge lv-' + esc(tri[f.path].level) + '" title="' + esc(tri[f.path].reasons.join(" \u00b7 ")) + '">' + esc(tri[f.path].reasons[0]) + "</span>" : "") +
               '<span class="cadd">+' + f.add + '</span><span class="cdel">−' + f.del + "</span>" +
               (cp && f.path ? '<button type="button" class="btn xs ghost dfrevert" data-rvfile="' + esc(f.path) + '" title="put just this file back the way it was before this turn">' + ICONS.rewind + "Revert file</button>" : "") +
               "</div>" +
@@ -262,8 +269,13 @@ export function createChanges(view) {
           }).join("")
         : '<div class="dcode">' + diffBody(String(patch).split("\n")) + "</div>") + "</div>";
       Array.prototype.forEach.call(el.querySelectorAll("[data-dv]"), function(b){
-        b.onclick = function(){ try { localStorage.setItem("loomDiffView", b.getAttribute("data-dv")); } catch (e) {} openPatchDock(patch, label, cp); };
+        b.onclick = function(){ try { localStorage.setItem("loomDiffView", b.getAttribute("data-dv")); } catch (e) {} openPatchDock(patch, label, cp, opts); };
       });
+      if (opts.focus) {
+        var fi = files.findIndex(function(f){ return f.path === opts.focus; });
+        var fel = fi >= 0 ? el.querySelector("#df-" + fi) : null;
+        if (fel) { fel.classList.add("dffocus"); if (fel.scrollIntoView) fel.scrollIntoView({ block: "start" }); }
+      }
       Array.prototype.forEach.call(el.querySelectorAll("[data-rvfile]"), function(b){
         b.onclick = function(){
           var file = b.getAttribute("data-rvfile");

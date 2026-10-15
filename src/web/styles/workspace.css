@@ -292,6 +292,20 @@
   .proofcard .pfr{margin-top:6px}
   .proofcard .pfr summary{cursor:pointer;color:var(--muted-foreground);font-family:var(--font-mono);font-size:11px}
   .proofcard .pfr pre{max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;background:var(--muted);border-radius:6px;font-size:11px;white-space:pre-wrap}
+  /* Review Triage: what to read first in a turn's diff */
+  .turncard .tctri{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px}
+  .turncard .tctl{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin-right:2px}
+  .trchip{display:inline-flex;align-items:baseline;gap:5px;max-width:100%;font:inherit;font-size:11px;cursor:pointer;border-radius:999px;padding:1px 8px;
+    border:1px solid color-mix(in srgb, var(--tr) 40%, var(--border));background:color-mix(in srgb, var(--tr) 8%, var(--card));color:var(--foreground);--tr:var(--warn)}
+  .trchip.lv-high{--tr:var(--err)}
+  .trchip b{font-family:var(--font-mono);font-weight:600;font-size:10.5px}
+  .trchip .trr{color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+  .trchip:hover{border-color:var(--tr)}
+  .turncard .trmore{font-size:11px;color:var(--muted-foreground)}
+  .trbadge{font-size:10.5px;border-radius:999px;padding:0 7px;margin-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;
+    border:1px solid color-mix(in srgb, var(--tr) 40%, var(--border));color:var(--tr);--tr:var(--warn)}
+  .trbadge.lv-high{--tr:var(--err)}
+  .dfile.dffocus{outline:2px solid color-mix(in srgb, var(--warn) 55%, transparent);outline-offset:-2px;border-radius:6px}
   .turncard .tcf{color:var(--muted-foreground);font-size:11px;margin-top:3px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}

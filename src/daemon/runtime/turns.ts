@@ -1,4 +1,5 @@
 import { BatonManager, NotHolderError } from "../../core/baton.js";
+import { triage } from "../../core/review-triage.js";
 import * as checkpoints from "../../core/checkpoint.js";
 import type { EventJournal } from "../../core/eventlog.js";
 import { push as gitPush, stageAndCommitFiles } from "../../core/git.js";
@@ -254,6 +255,8 @@ export class RuntimeTurns {
               removed: diff.removed,
               patch: diff.patch,
               truncated: diff.truncated,
+              // what to read first: the files ranked by what a reviewer would want to see (core/review-triage.ts)
+              triage: triage(diff.patch, diff.files).files.slice(0, 40).map(({ path, level, reasons }) => ({ path, level, reasons: reasons.slice(0, 3) })),
               // The point these changes can be put back to, when there is one
               // — a project that isn't a git repo has no checkpoint to offer.
               ...(checkpoint ? { checkpoint } : {}),

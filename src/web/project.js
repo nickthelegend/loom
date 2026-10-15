@@ -1035,7 +1035,12 @@ import { openMenu } from './menus.js';
       if (ev.target.closest && ev.target.closest(".tcdiff")) return; // let diff text select/scroll
       var enc = t.getAttribute("data-patch"); if (!enc) return;
       var patch = decodeURIComponent(enc);
-      if (desktop) { var rwb = t.querySelector("[data-rewind]"); openPatchDock(patch, t.getAttribute("data-label") || "changes", rwb ? rwb.getAttribute("data-rewind") : null); return; }
+      var triEnc = t.getAttribute("data-triage"), triList = null;
+      try { triList = triEnc ? JSON.parse(decodeURIComponent(triEnc)) : null; } catch (e) { triList = null; }
+      // a "Review first" chip opens the diff on that file
+      var trc = ev.target.closest && ev.target.closest("[data-triage-file]");
+      if (desktop) { var rwb = t.querySelector("[data-rewind]"); openPatchDock(patch, t.getAttribute("data-label") || "changes", rwb ? rwb.getAttribute("data-rewind") : null,
+        { triage: triList, focus: trc ? trc.getAttribute("data-triage-file") : null }); return; }
       var d = t.querySelector(".tcdiff"); if (!d) return;
       var open = d.style.display !== "none" && d.innerHTML;
       if (open) { d.style.display = "none"; }

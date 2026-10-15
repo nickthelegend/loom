@@ -326,7 +326,15 @@ import { shortModel } from './permissions.js';
       var fl = (p.files || []).map(function(f){ return f.path; });
       var enc = p.patch ? encodeURIComponent(String(p.patch)) : "";
       var lbl = "Edited " + fl.length + " file" + (fl.length === 1 ? "" : "s");
-      return '<div class="turncard" data-patch="' + enc + '" data-label="' + esc(lbl) + '">' +
+      // Review Triage: the files worth a careful look, first (core/review-triage.ts)
+      var tri = Array.isArray(p.triage) ? p.triage : [];
+      var look = tri.filter(function(t){ return t.level === "high" || t.level === "medium"; }).slice(0, 3);
+      var triRow = look.length ? '<div class="tctri"><span class="tctl">Review first</span>' + look.map(function(t){
+          var base = String(t.path).split("/").pop();
+          return '<button type="button" class="trchip lv-' + esc(t.level) + '" data-triage-file="' + esc(t.path) + '" title="' + esc(t.path + " \u2014 " + (t.reasons || []).join(" \u00b7 ")) + '">' +
+            "<b>" + esc(base) + "</b>" + ((t.reasons || [])[0] ? '<span class="trr">' + esc(t.reasons[0]) + "</span>" : "") + "</button>";
+        }).join("") + (tri.filter(function(t){ return t.level !== "low"; }).length > look.length ? '<span class="trmore">+' + (tri.filter(function(t){ return t.level !== "low"; }).length - look.length) + " more</span>" : "") + "</div>" : "";
+      return '<div class="turncard" data-patch="' + enc + '" data-label="' + esc(lbl) + '"' + (tri.length ? ' data-triage="' + encodeURIComponent(JSON.stringify(tri)) + '"' : "") + ">" +
         '<div class="tch"><span class="tci">' + ICONS.pencil + "</span><span>" + lbl + "</span>" +
         '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\u2212' + Number(p.removed || 0) + "</span>" +
         (p.checkpoint ? '<button class="tcrw" type="button" data-rewind="' + esc(p.checkpoint) +
@@ -335,6 +343,7 @@ import { shortModel } from './permissions.js';
             '" title="check this turn: what it claimed against what ran, and the tests again in a clean checkout">' + ICONS.shield + "Check it</button>" +
         '<span class="tchev">\u25b8</span></div>' +
         '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \u2026" : "") + "</div>" +
+        triRow +
         artifactChips((p.files || []).filter(function(f){ return f.status !== "deleted" && f.status !== "D"; }).map(function(f){ return f.path; })) +
         '<div class="tcdiff" style="display:none"></div></div>';
     }
