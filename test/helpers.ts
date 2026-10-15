@@ -57,9 +57,9 @@ export async function waitUntil(
   { timeoutMs = 20_000, intervalMs = 40 } = {},
 ): Promise<void> {
   // Hosted Windows runners repeatedly exceed short state-polling budgets
-  // while starting real Git/Node children. Keep CI polling below the 90s
+  // while starting real Git/Node children. Keep CI polling below the 150s
   // test limit without changing the application's own operation deadlines.
-  const budgetMs = process.platform === "win32" && process.env.CI ? Math.max(timeoutMs, 30_000) : timeoutMs;
+  const budgetMs = process.platform === "win32" && process.env.CI ? Math.max(timeoutMs, 45_000) : timeoutMs;
   const deadline = performance.now() + budgetMs;
   while (performance.now() < deadline) {
     if (await predicate()) return;
