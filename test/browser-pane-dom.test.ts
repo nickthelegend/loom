@@ -238,6 +238,30 @@ describe("web app · the Browser pane", () => {
     expect(m.errors).toEqual([]);
   }, 60_000);
 
+  it("Design Mode: a picked element brings its computed styles and its own picture to the composer", async () => {
+    const m = mount(projectA, (pathname) => pathname.endsWith("/preview/screenshot")
+      ? Promise.resolve(new Response(JSON.stringify({ path: ".loom/attachments/element-abc123.png", bytes: 10, width: 120, height: 40, colorScheme: "light", fullPage: false }), { status: 200, headers: { "content-type": "application/json" } }))
+      : null);
+    await openBrowser(m);
+    await typeAndGo(m, `http://localhost:${devPort}/`);
+    const proxy = new URL(frame(m)!.src).origin;
+    const win = frame(m)!.contentWindow;
+    post(m, { source: "loom-preview", kind: "ready", payload: { url: `${proxy}/`, title: "", hmr: false } }, win, proxy);
+    post(m, { source: "loom-preview", kind: "picked", payload: {
+      selector: "button.buy", tag: "button", text: "Buy now", html: '<button class="buy">Buy now</button>',
+      rect: { x: 10, y: 20, w: 120, h: 40 }, viewport: { w: 1024, h: 700 },
+      styles: { "font-size": "16px", "background-color": "rgb(255, 107, 43)", "border-radius": "8px" },
+      url: `${proxy}/` } }, win, proxy);
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    await waitUntil(() => box.value.includes("computed styles:"), { timeoutMs: 5_000 });
+    expect(box.value).toContain("selector: button.buy");
+    expect(box.value).toContain("    background-color: rgb(255, 107, 43)");
+    expect(box.value).toContain("    border-radius: 8px");
+    await waitUntil(() => !!$(m, "#cchips .cchip"), { timeoutMs: 5_000 });
+    expect(text(m, "#cchips .cchip .nm")).toBe(".loom/attachments/element-abc123.png");
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
   it("starts over in another project: no page, no width, that project's own servers and specs", async () => {
     const m = mount(projectA);
     await openBrowser(m);

@@ -395,8 +395,11 @@ and injects one small script. The **Page** pane then shows what that page
 logged and what it fetched, live — and a click puts any line into the composer
 as context, which is the whole point: the loop used to be *see the error,
 select it, retype it*. **Pick** turns the cursor into an element picker: click
-the thing that's wrong and its selector, text, size and markup land in the
-composer. Nothing about the page is rewritten; the script only reports.
+the thing that's wrong and its selector, text, size, markup and computed
+styles (fonts, colours, spacing, layout) land in the composer, along with a
+picture of just that element, so any agent can see what you mean. The picture
+is taken at your width and colour scheme with the project's own Playwright.
+Nothing about the page is rewritten; the script only reports.
 
 **The preview itself** emulates a width (Fit / 375 / 768 / 1280, remembered per
 project, scaled down when the dock is narrower), reloads itself when an agent

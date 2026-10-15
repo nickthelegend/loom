@@ -130,6 +130,9 @@ describe("the bridge, running in a page", () => {
     await waitUntil(() => picked.length > 0, { timeoutMs: 10_000 });
     expect(picked[0]).toMatchObject({ selector: "#hero", tag: "h1", text: "Hello" });
     expect(picked[0]!.rect).toMatchObject({ x: expect.any(Number), w: expect.any(Number) });
+    // Design Mode: what it looks like, from the page's own computed style, and the viewport it was picked at
+    expect(picked[0]!.styles).toMatchObject({ display: "block" });
+    expect(picked[0]!.viewport).toMatchObject({ w: expect.any(Number), h: expect.any(Number) });
     expect(String(picked[0]!.html)).toContain("Hello");
   }, 30_000);
 });
