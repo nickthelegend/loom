@@ -560,6 +560,17 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 60_000);
 
+  it("Pre-flight forecast: the composer says what a turn on this agent usually costs and takes", async () => {
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(makeProjectDir({ name: "fcdom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;
+    for (let i = 1; i <= 3; i++) await client.send(pid, `turn ${i}`);
+    const m = mount({ hash: `#p/${pid}` });
+    await waitUntil(() => !!$(m, "#cctx .fcst"), { timeoutMs: 20_000 });
+    expect(text(m, "#cctx .fcst")).toMatch(/^~\$\d+\.\d+ · \d+s$/);
+    expect($(m, "#cctx .fcst")!.getAttribute("title")).toMatch(/A turn here usually takes .* and costs .* from its last 3 turns/);
+    expect(m.errors.join("\n")).toBe("");
+  }, 60_000);
+
   it("Review Triage: a turn's card says which file to read first, and the chip opens its diff", async () => {
     const dir = makeProjectDir({ name: "triagedom", agents: [{ id: "echo", kind: "echo" }] });
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });

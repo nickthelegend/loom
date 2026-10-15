@@ -3008,6 +3008,7 @@ export class ProjectRuntime {
           ...sampling(cfg),
           ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
           ...(isNativeKind(cfg.kind) ? { context: this.nativeUsage.context(cfg.id), limits: this.nativeUsage.limitsFor(cfg.kind) } : {}),
+          ...((f) => (f ? { forecast: f } : {}))(this.accounting.forecast(cfg.id)),
         };
       }),
     );

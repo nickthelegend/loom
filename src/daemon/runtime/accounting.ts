@@ -9,6 +9,7 @@ import type {
   LoomEvent,
   ProjectInfo
 } from "../../types.js";
+import { Recent, forecastFrom, type Forecast } from "../../core/forecast.js";
 import { BUDGET_PAUSE_REASON, BudgetExceededError, QuarantinedError, startOfDay } from '../runtime-support.js';
 
 /** Dependencies owned by the project coordinator, read live for each operation. */
@@ -33,6 +34,23 @@ export class RuntimeAccounting {
     { usd: number; turns: number; ms: number; tokensIn: number; tokensOut: number }
   >();
 
+  /** Each agent's latest turns — cost and time — for the pre-flight forecast (core/forecast.ts). */
+  private recent = new Map<string, { usd: Recent; ms: Recent }>();
+  private recentFor(agentId: string) {
+    let r = this.recent.get(agentId);
+    if (!r) { r = { usd: new Recent(), ms: new Recent() }; this.recent.set(agentId, r); }
+    return r;
+  }
+
+  /** What a turn on this agent usually costs and takes; null until it has a few turns behind it. */
+  forecast(agentId: string): Forecast | null {
+    const r = this.recent.get(agentId);
+    if (!r) return null;
+    const cap = this.budgets()[agentId];
+    return forecastFrom(r.usd.values(), r.ms.values(),
+      Number.isFinite(cap) && cap! > 0 ? { capUsd: cap!, spentUsd: this.spendTodayFor(agentId) } : undefined);
+  }
+
   rehydrateCosts(): void {
     for (const event of this.host.log.list({ kinds: ["status", "run_complete"] })) {
       this.trackCost(event);
@@ -46,6 +64,7 @@ export class RuntimeAccounting {
     if (event.kind === "status" && event.payload.state === "turn_cost") {
       const usd = Number(event.payload.costUsd ?? 0);
       if (usd > 0) {
+        this.recentFor(agentId).usd.push(usd);
         this.costs.totalUsd += usd;
         entry.usd += usd;
         this.costsByAgent.set(agentId, entry);
@@ -71,6 +90,7 @@ export class RuntimeAccounting {
       }
     } else if (event.kind === "run_complete") {
       const ms = Number(event.payload.durationMs ?? 0);
+      if (ms > 0 && !event.payload.error) this.recentFor(agentId).ms.push(ms);
       // Adapters that report token usage (codex, claude-code, …) carry it on
       // run_complete; cost-only adapters leave these 0. Either way the totals
       // stay honest — an absent number is never invented here.
