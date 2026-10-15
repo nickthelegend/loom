@@ -28,15 +28,21 @@ export type CrewAction =
   | { type: "review"; verdict: "approve" | "changes"; notes: string }
   | { type: "test"; result: "pass" | "fail"; log?: string }
   | { type: "ask"; question: string }
-  | { type: "done"; summary: string };
+  | { type: "done"; summary: string }
+  /** Something the crew should keep knowing on later cards and goals (crew memory, P2). */
+  | { type: "remember"; kind: CrewMemoryKind; text: string };
+
+/** The memory kinds a teammate may save — the project brain's, minus "task" (a card is the task). */
+export type CrewMemoryKind = "decision" | "constraint" | "convention" | "fact" | "failure";
+const MEMORY_KINDS: CrewMemoryKind[] = ["decision", "constraint", "convention", "fact", "failure"];
 
 /** What each role may do. Anything else is refused and said back to it. */
 export const ROLE_ACTIONS: Record<CrewRole, CrewAction["type"][]> = {
-  lead: ["plan", "post", "ask", "done"],
-  builder: ["post", "ask", "done"],
-  reviewer: ["review", "post", "ask"],
-  tester: ["test", "post", "ask"],
-  researcher: ["post", "ask", "done"],
+  lead: ["plan", "post", "ask", "done", "remember"],
+  builder: ["post", "ask", "done", "remember"],
+  reviewer: ["review", "post", "ask", "remember"],
+  tester: ["test", "post", "ask", "remember"],
+  researcher: ["post", "ask", "done", "remember"],
 };
 
 type Json = Record<string, unknown>;
@@ -122,6 +128,11 @@ function toAction(raw: unknown): CrewAction | null {
     return question ? { type, question } : null;
   }
   if (type === "done") return { type, summary: str(a.summary ?? a.text) };
+  if (type === "remember") {
+    const text = str(a.text ?? a.memory, 500);
+    const k = str(a.kind, 20).toLowerCase();
+    return text ? { type, kind: (MEMORY_KINDS as string[]).includes(k) ? (k as CrewMemoryKind) : "fact", text } : null;
+  }
   return null;
 }
 
@@ -146,6 +157,7 @@ export function protocolFor(role: CrewRole): string {
     test: '{"type":"test","result":"pass","log":"…last lines of output…"}',
     ask: '{"type":"ask","question":"Postgres or SQLite for the limiter store?"}',
     done: '{"type":"done","summary":"what you did, in two or three sentences"}',
+    remember: '{"type":"remember","kind":"decision","text":"one sentence the crew should keep knowing, true on its own"}',
   };
   const lines = ROLE_ACTIONS[role].map((t) => `  ${ex[t]}`).join(",\n");
   return [

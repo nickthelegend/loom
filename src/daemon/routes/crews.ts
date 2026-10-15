@@ -92,6 +92,20 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
     }),
   );
 
+  // Start one teammate over: a fresh session (a new continuity epoch, or a new agent instance)
+  app.post(
+    "/api/projects/:id/crews/:crew/teammates/:teammate/refresh",
+    withRuntime(async (rt, req, res) => {
+      const id = String(req.params.crew);
+      try {
+        const session = await rt.crews.refresh(id, String(req.params.teammate));
+        res.json({ session, crew: rt.crews.get(id) });
+      } catch (err) {
+        crewError(res, err);
+      }
+    }),
+  );
+
   // goal | say | approve | stop | resume | apply
   app.post(
     "/api/projects/:id/crews/:crew/:action",

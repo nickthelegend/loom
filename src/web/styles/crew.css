@@ -68,6 +68,13 @@
   .cmtop{display:flex;align-items:baseline;gap:7px}
   .crewmate .cmid{font-size:13px;color:var(--foreground);font-weight:600}
   .cmrole{font-size:9.5px;font-weight:650;letter-spacing:.07em;text-transform:uppercase;color:var(--ri)}
+  .cmsess{font-size:9.5px;font-family:var(--font-mono);color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:0 6px;line-height:15px}
+  .cmsess.on{color:var(--ok, #34d399);border-color:color-mix(in srgb, var(--ok, #34d399) 40%, transparent)}
+  .cmfresh{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted-foreground);cursor:pointer;opacity:0;transition:opacity .15s}
+  .cmfresh svg{width:12px;height:12px}
+  .crewmate:hover .cmfresh,.cmfresh:focus-visible{opacity:1}
+  .cmfresh:hover{background:var(--accent);color:var(--foreground)}
+  @media (hover:none){.cmfresh{opacity:.7}}
   .crewmate .cmagent{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   select.cmswap{appearance:none;-webkit-appearance:none;border:0;padding:0 12px 0 0;margin:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23888'/%3E%3C/svg%3E") no-repeat right center;
     cursor:pointer;max-width:100%;field-sizing:content}

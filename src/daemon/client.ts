@@ -285,6 +285,10 @@ export class DaemonClient {
     return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/crews/${encodeURIComponent(crew)}`);
   }
 
+  refreshTeammate(id: string, crew: string, teammate: string): Promise<Record<string, any>> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/crews/${encodeURIComponent(crew)}/teammates/${encodeURIComponent(teammate)}/refresh`, {});
+  }
+
   crewAction(id: string, crew: string, action: string, body: Record<string, unknown> = {}): Promise<Record<string, any>> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/crews/${encodeURIComponent(crew)}/${action}`, body);
   }

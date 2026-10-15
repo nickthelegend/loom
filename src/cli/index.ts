@@ -1556,7 +1556,7 @@ program
 
 program
   .command("crew [action] [args...]")
-  .description("Agent Teams: status | create [template] [name] | goal <text> | say <text> | approve | stop | resume | apply | diff | remove — crews of agents with roles")
+  .description("Agent Teams: status | create [template] [name] | goal <text> | say <text> | approve | stop | resume | apply | diff | refresh <teammate> | remove — crews of agents with roles")
   .option("--crew <id>", "which crew, when the project has several")
   .option("--to <teammate>", "say: to one teammate")
   .option("--no-approval", "create: the Lead's plan starts without your OK")
@@ -1595,6 +1595,14 @@ program
       console.log(`${pc.green("✓")} removed ${crew.name}`);
       return;
     }
+    if (a === "refresh") {
+      const teammate = (args ?? [])[0];
+      if (!teammate) throw new Error(`loom crew refresh <teammate> — one of ${crew.teammates.map((t: { id: string }) => t.id).join(", ")}`);
+      const out = await client.refreshTeammate(project.id, crew.id, teammate);
+      const s = out.session as { mode: string; epoch?: number };
+      console.log(`${pc.green("✓")} ${teammate} starts its next turn fresh${s.mode === "native" && s.epoch ? pc.dim(` (native session epoch ${s.epoch})`) : ""}`);
+      return;
+    }
     if ((a === "goal" || a === "say") && !words) throw new Error(`loom crew ${a} "<text>"`);
     const out = await client.crewAction(project.id, crew.id, a, { ...(words ? { text: words } : {}), ...(opts.to ? { to: opts.to } : {}) });
     if (a === "say") console.log(`${pc.green("✓")} ${out.routed === "goal" ? "new goal" : out.routed === "answer" ? "answered" : out.routed === "replan" ? "the Lead replans with that" : `noted for ${out.to}`}`);
@@ -1605,7 +1613,10 @@ program
 function printCrew(c: Record<string, any>): void {
   const g = c.state?.goal;
   console.log(`${pc.bold(c.name)} ${pc.dim(`(${c.id})`)}${c.busy ? pc.cyan(" working") : ""}`);
-  console.log(`  ${c.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}${pc.dim(`:${t.role}=${t.agent}`)}`).join("  ")}`);
+  const sessions = (c.sessions ?? {}) as Record<string, { mode: string; lastPacket?: string; resumable?: boolean }>;
+  // under native continuity each teammate shows how its next turn gets context: ↻ resumes (a delta), ○ rebuilds
+  const mark = (id: string) => sessions[id]?.mode === "native" ? pc.dim(sessions[id]!.resumable ? " ↻" : " ○") : "";
+  console.log(`  ${c.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}${pc.dim(`:${t.role}=${t.agent}`)}${mark(t.id)}`).join("  ")}`);
   if (!g) return void console.log(pc.dim("  no goal yet — loom crew goal \"…\""));
   const color = g.status === "completed" ? pc.green : g.status === "failed" ? pc.red : g.status.startsWith("waiting") || g.status === "awaiting_approval" ? pc.yellow : pc.cyan;
   console.log(`  ${color(g.status)} ${g.text.split("\n")[0].slice(0, 80)} ${pc.dim(g.branch)}`);

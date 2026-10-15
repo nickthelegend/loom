@@ -76,7 +76,7 @@ interface Crew {
   id: string;
   name: string;
   teammates: Array<{ id: string; role: string; agent: string }>;
-  state: { channel: string; goal?: { id: string; status: string; branch: string; applied?: { into: string } } };
+  state: { channel: string; generation?: Record<string, number>; goal?: { id: string; status: string; branch: string; applied?: { into: string } } };
 }
 
 async function rest<T = unknown>(method: string, p: string, body?: unknown): Promise<T> {
@@ -285,6 +285,20 @@ describe("web app · crew tab", () => {
     expect(text(m, "#pane-crew .crewapplied")).toMatch(/applied to \S+/);
     expect(act(m, "apply")).toBeNull();
     expect(fs.existsSync(path.join(projectDir, "hello.txt"))).toBe(true);
+
+    // Start fresh: the builder's next turn gets a new session (a new agent
+    // instance here — native continuity is off), said in the channel.
+    const freshBtn = $(m, '#pane-crew .crewmate[data-mate="builder"] [data-crew-fresh]');
+    expect(freshBtn?.getAttribute("aria-label")).toBe("start builder fresh");
+    click(freshBtn);
+    await waitUntil(() => toasts.some((t) => /builder starts its next turn fresh/.test(t)));
+    const after = (await rest<{ crews: Array<Crew & { sessions: Record<string, { mode: string; generation: number }> }> }>("GET", "/crews")).crews[0]!;
+    expect(after.sessions.builder).toEqual({ mode: "agent", generation: 1 });
+    expect(after.state.generation).toEqual({ builder: 1 });
+    await waitUntil(() => !!$(m, '#pane-crew .crewev.cphase[data-phase="refreshed"]'));
+    expect(text(m, '#pane-crew .crewev.cphase[data-phase="refreshed"]')).toContain("builder starts fresh");
+    // an unknown teammate is a 400 with a reason, over HTTP
+    await expect(rest("POST", `/crews/${after.id}/teammates/nobody/refresh`)).rejects.toThrow(/no teammate "nobody"/);
     expect(m.errors.join("\n")).toBe("");
   }, 90_000);
 

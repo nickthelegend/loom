@@ -98,9 +98,23 @@ loom crew apply             # merge the goal's branch into yours
 ```
 
 The **Crew** tab shows the same thing. Every commit carries `Loom-Crew`,
-`Loom-Goal`, `Loom-Card` and `Loom-Teammate` trailers. Phase 1 works one card
-at a time; [docs/proposals/agent-teams.md](docs/proposals/agent-teams.md) has
-the rest of the plan.
+`Loom-Goal`, `Loom-Card` and `Loom-Teammate` trailers.
+
+**Teammates keep their context.** With [native continuity](docs/brain-continuity.md)
+on, each teammate (Codex, Claude Code or OpenCode) gets its own native session
+for the goal. Its first card gets the full context; every later card gets
+only what changed since its last turn, sent into the same session. A goal cut
+off by a restart resumes into that session too. When a crash leaves a turn's
+outcome unknown, the teammate is rebuilt from the record instead.
+
+- `loom crew refresh builder` (or **Start fresh** on a teammate's card) gives
+  the builder a new session on its next turn.
+- A teammate can `remember` a decision, constraint, convention or failure. It
+  goes into the crew's own memory, which every teammate's briefing reads.
+
+Crews work one card at a time;
+[docs/proposals/agent-teams.md](docs/proposals/agent-teams.md) has the rest of
+the plan.
 
 ## Orchestra — one conductor, many agents, in parallel
 

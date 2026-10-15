@@ -381,22 +381,28 @@ export class ProjectRuntime {
           (a) => a.enabled !== false && tierForKind(a.kind) === "adapter" && !isWithdrawnKind(a.kind),
         ),
       makeAgent: (cfg, dir) => {
-        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
         const agent = createAgent({ ...cfg, options: { ...this.policyOptions(cfg), loomProject: info.id } }, dir);
         if (!isAdapter(agent)) throw new Error(`"${cfg.id}" is a bridge — it can't be on a crew`);
         return agent;
+      },
+      // A crew runs one turn at a time in its own worktree, so under native
+      // continuity each teammate gets its own binding (crew.ts, Phase 2) and the
+      // workspace writer lease keeps it apart from this project's own chats.
+      continuity: () => this.continuity,
+      remember: (m) => {
+        this.brain.add({ kind: m.kind, text: m.text, scope: { chat: m.chat }, confidence: 0.85,
+          provenance: { agentId: m.agentId, eventId: m.eventId, ts: Date.now() }, ...(m.evidence ? { evidence: m.evidence } : {}) });
       },
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       createChat: (title, opts) => this.createChat(title, opts?.agentId ? { agentId: opts.agentId } : {}),
       // The decorated sidebar list calls crews.list() to discover groups.
       // Using it to validate a crew's channel recurses back into crew state.
       chatExists: (id) => this.conversations.chats().some((c) => c.id === id),
-      briefingFor: async (query, agentId) =>
-        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
+      briefingFor: async (query, agentId, chat) =>
+        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, ...(chat ? { chat } : {}), limit: 6 }), this.teamBrain?.context([]) ?? ""]
           .filter(Boolean)
           .join("\n\n"),
       gate: (agentId) => {
-        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
         this.enforceQuarantine(agentId);
         this.enforceBudget(agentId);
       },

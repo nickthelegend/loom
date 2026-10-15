@@ -228,6 +228,19 @@ export class ContinuityStore {
   bindingById(id: string): Binding | undefined {
     return decode(this.db.prepare("SELECT data FROM continuity_bindings WHERE id=?").get(id) as Row | undefined);
   }
+  /** Every binding one agent instance has in one conversation (one per workspace and configuration). */
+  bindingsFor(chat: string, agentInstanceId: string): Binding[] {
+    return (this.db.prepare(`SELECT data FROM continuity_bindings
+      WHERE json_extract(data,'$.conversationId')=? AND json_extract(data,'$.agentInstanceId')=?`).all(chat, agentInstanceId) as Row[])
+      .map(r => BindingV1.parse(JSON.parse(String(r.data))));
+  }
+  /** Whether the binding's latest accepted packet was a delta or a reconstruction. */
+  lastPacketMode(bindingId: string): "delta" | "reconstruction" | undefined {
+    const row = this.db.prepare(`SELECT json_extract(p.data,'$.mode') AS mode FROM continuity_receipts r
+      JOIN continuity_packets p ON p.id=r.packet_id WHERE r.binding_id=? AND json_extract(r.data,'$.status')='accepted'
+      ORDER BY r.rowid DESC LIMIT 1`).get(bindingId) as { mode?: string } | undefined;
+    return row?.mode === "delta" || row?.mode === "reconstruction" ? row.mode : undefined;
+  }
   items(chat: string): ContextItem[] {
     return (this.db.prepare("SELECT data FROM continuity_items WHERE chat=? ORDER BY id").all(chat) as Row[])
       .map(r => ContextItemV1.parse(JSON.parse(String(r.data))));

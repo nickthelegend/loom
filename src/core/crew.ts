@@ -15,17 +15,28 @@
  * Everything a teammate does lands in its own thread; the crew's channel gets
  * the plan, the hand-offs, the reviews and anything a teammate posts. You
  * talk to the crew in that channel. Teammates speak the protocol in
- * core/crew-protocol.ts. Parallel builders, per-teammate native sessions and
- * crews across people are later phases (§11).
+ * core/crew-protocol.ts.
+ *
+ * Phase 2 — persistent teammates. With native continuity on, each teammate
+ * has its own binding (its thread × the goal's worktree): the first card is a
+ * full reconstruction, every later card a delta packet into the same native
+ * session, and a restart resumes into it. Refresh starts a teammate over (a
+ * new epoch, or a new instance without native continuity). Teammates save
+ * what the crew should keep knowing with `remember`, scoped to the crew's
+ * channel. Parallel builders and crews across people are later phases (§11).
  */
 
 import { execFile, shellInvocation } from "./process.js";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { Adapter, AgentConfig, ChatInfo, EventKind, LoomEvent } from "../types.js";
+import type { Adapter, AgentConfig, ChatInfo, EventKind, LoomEvent, SendInput } from "../types.js";
+import { isNativeKind } from "./continuity/capabilities.js";
+import { ContinuityError, digest } from "./continuity/contracts.js";
+import type { ContinuityEngine } from "./continuity/engine.js";
 import { loomHome, type BoardTask } from "./registry.js";
-import { parseCrewReply, protocolFor, type CrewAction, type CrewRole, type PlannedCard } from "./crew-protocol.js";
+import { parseCrewReply, protocolFor, type CrewAction, type CrewMemoryKind, type CrewRole, type PlannedCard } from "./crew-protocol.js";
 
 const exec = promisify(execFile);
 
@@ -108,12 +119,33 @@ export interface CrewState {
   history: Array<{ id: string; text: string; status: GoalStatus; summary?: string; finishedAt?: number; branch: string }>;
   /** Messages for a teammate's next turn (from you, or posted by another teammate). */
   notes: Record<string, string[]>;
+  /** Times each teammate was refreshed: a new number is a new agent instance, so a new session. */
+  generation?: Record<string, number>;
+}
+
+/** How a teammate keeps its context (CrewView.sessions). */
+export interface TeammateSession {
+  /** native: a continuity binding per teammate; agent: the agent's own resumable session. */
+  mode: "native" | "agent";
+  generation: number;
+  /** Native only: the binding's epoch, whether it holds a native session, and the last packet sent. */
+  epoch?: number;
+  resumable?: boolean;
+  lastPacket?: "delta" | "reconstruction";
 }
 
 export interface CrewView extends CrewConfig {
   state: CrewState;
   busy: boolean;
+  /** Per teammate id: how it keeps its context between cards. */
+  sessions: Record<string, TeammateSession>;
 }
+
+/**
+ * A crew prompt carries a card, a plan or a diff, so its turn needs more room
+ * than an ordinary chat message (the continuity default is 6,000 estimated tokens).
+ */
+const CREW_CONTEXT_TOKENS = 32_000;
 
 export interface CrewHost {
   projectId: string;
@@ -126,7 +158,12 @@ export interface CrewHost {
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
   createChat(title: string, opts?: { agentId?: string }): ChatInfo;
   chatExists(id: string): boolean;
-  briefingFor(query: string, agentId: string): string | Promise<string>;
+  /** What the brain knows about a query, for one agent; `chat` adds memories scoped to that chat (the crew's). */
+  briefingFor(query: string, agentId: string, chat?: string): string | Promise<string>;
+  /** Native continuity, when the project runs in that mode: each teammate then gets its own binding. */
+  continuity?(): ContinuityEngine | null;
+  /** Save a crew memory, scoped to the crew's channel. */
+  remember?(m: { kind: CrewMemoryKind; text: string; chat: string; agentId: string; eventId: number; evidence?: string }): void;
   gate(agentId: string): void;
   observe(event: LoomEvent): void;
   stream?(f: { agentId: string; chat: string; text: string; reasoning?: boolean }): void;
@@ -249,12 +286,80 @@ export class CrewEngine {
   }
 
   list(): CrewView[] {
-    return this.host.crews().map((c) => ({ ...c, state: this.state(c), busy: this.running.has(c.id) }));
+    return this.host.crews().map((c) => this.view(c));
   }
 
   get(id: string): CrewView {
-    const c = this.config(id);
-    return { ...c, state: this.state(c), busy: this.running.has(c.id) };
+    return this.view(this.config(id));
+  }
+
+  private view(c: CrewConfig): CrewView {
+    const state = this.state(c);
+    return { ...c, state, busy: this.running.has(c.id), sessions: Object.fromEntries(c.teammates.map((t) => [t.id, this.session(c, state, t)])) };
+  }
+
+  /** How a teammate keeps its context: its binding (native continuity) or its agent's own session. */
+  private session(cfg: CrewConfig, st: CrewState, tm: CrewTeammate): TeammateSession {
+    const generation = st.generation?.[tm.id] ?? 0;
+    const brain = this.host.continuity?.() ?? null;
+    const kind = this.host.roster().find((a) => a.id === tm.agent)?.kind;
+    if (!brain || !kind || !isNativeKind(kind)) return { mode: "agent", generation };
+    const binding = this.binding(brain, st, tm);
+    if (!binding) return { mode: "native", generation };
+    const last = brain.store.lastPacketMode(binding.id);
+    return { mode: "native", generation, epoch: binding.sessionEpoch, resumable: Boolean(binding.nativeSessionId) && binding.retention !== "compacted",
+      ...(last ? { lastPacket: last } : {}) };
+  }
+
+  /** This teammate's binding in the current goal's worktree, if it has had a native turn there. */
+  private binding(brain: ContinuityEngine, st: CrewState, tm: CrewTeammate) {
+    const chat = st.threads[tm.id];
+    const dir = st.goal?.dir;
+    if (!chat || !dir || !fs.existsSync(dir)) return undefined;
+    const workspace = digest(fs.realpathSync(dir));
+    return brain.store.bindingsFor(chat, tm.agent).find((b) => b.workspaceId === workspace);
+  }
+
+  /**
+   * With native continuity on, every teammate has to be a native harness: a
+   * crew can't mix continuity bindings with agents that start every card cold.
+   */
+  private assertRunnable(cfg: CrewConfig): void {
+    if (!this.host.continuity?.()) return;
+    for (const t of cfg.teammates) {
+      const kind = this.host.roster().find((a) => a.id === t.agent)?.kind;
+      if (!kind || !isNativeKind(kind))
+        throw new ContinuityError("unsupported", `${t.id} is ${kind ?? t.agent} — with native continuity on, every teammate must be Codex, Claude Code or OpenCode`);
+    }
+  }
+
+  /**
+   * Start a teammate over. Its next turn runs in a fresh session: without
+   * native continuity a new agent instance (the old one's saved session is
+   * left behind); with it, the binding moves to a new epoch, so the next
+   * packet reconstructs what the teammate needs from the crew's record.
+   */
+  async refresh(id: string, teammateId: string): Promise<TeammateSession> {
+    const cfg = this.config(id);
+    const st = this.state(cfg);
+    const tm = cfg.teammates.find((t) => t.id === teammateId);
+    if (!tm) throw new Error(`${cfg.name} has no teammate "${teammateId}"`);
+    const key = `${cfg.id}/${tm.id}/${tm.agent}`;
+    if (this.currentTurn.get(cfg.id) === key) throw new Error(`${tm.id} is mid-turn — stop the crew or wait for the turn to end`);
+    const brain = this.host.continuity?.() ?? null;
+    const binding = brain ? this.binding(brain, st, tm) : undefined;
+    if (brain && binding) {
+      if (brain.store.activeReceipts().some((r) => r.bindingId === binding.id))
+        throw new ContinuityError("recovery_required", `${tm.id} has an unfinished native turn — resume or reconcile it first`);
+      brain.store.updateBinding({ ...binding, nativeSessionId: null, sessionEpoch: binding.sessionEpoch + 1, retention: "unknown" });
+    }
+    const agent = this.agents.get(key);
+    this.agents.delete(key);
+    if (agent) await Promise.resolve(agent.stop()).catch(() => {});
+    (st.generation ??= {})[tm.id] = (st.generation[tm.id] ?? 0) + 1;
+    this.save(st);
+    this.phase(cfg, st, "refreshed", { teammate: tm.id, generation: st.generation[tm.id], ...(binding ? { epoch: binding.sessionEpoch + 1 } : {}) });
+    return this.session(cfg, st, tm);
   }
 
   create(input: { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string }): CrewView {
@@ -340,6 +445,7 @@ export class CrewEngine {
     if (st.goal && !terminal(st.goal.status)) throw new Error(`${cfg.name} is already on a goal — finish, stop or apply it first`);
     if (st.goal) this.archive(st);
     // every teammate must be allowed to run (budget, quarantine, continuity) before anything is set up
+    this.assertRunnable(cfg);
     for (const t of cfg.teammates) this.host.gate(t.agent);
     const gid = newId();
     const baseBranch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], this.host.projectDir).catch(() => "")).trim();
@@ -448,6 +554,8 @@ export class CrewEngine {
     const g = st.goal;
     if (!g || !["interrupted", "stopped", "failed"].includes(g.status)) throw new Error(`${cfg.name} has nothing to resume`);
     if (!fs.existsSync(g.dir)) throw new Error("the goal's worktree is gone — start the goal again");
+    this.assertRunnable(cfg);
+    this.reconcileInterrupted(cfg, g);
     g.status = g.cards.length ? "running" : "planning";
     g.error = undefined;
     g.finishedAt = undefined;
@@ -456,6 +564,27 @@ export class CrewEngine {
     this.phase(cfg, st, "resumed", {});
     this.drive(id);
     return g;
+  }
+
+  /**
+   * A native turn that was running when Loom went down left its outcome
+   * unknown, and continuity keeps the worktree locked until someone says what
+   * happened. For a crew, resuming is that someone: the worktree is Loom's own,
+   * and the teammate's process was Loom's child, so it ended with it. Each
+   * such run is reconciled with that evidence (its binding moves to a new
+   * epoch, so the teammate is rebuilt from the record, not trusted to recall a
+   * turn nobody saw finish). A run that is still live in this process is not.
+   */
+  private reconcileInterrupted(cfg: CrewConfig, g: CrewGoal): void {
+    const brain = this.host.continuity?.() ?? null;
+    if (!brain) return;
+    const workspace = digest(fs.realpathSync(g.dir));
+    for (const r of brain.store.activeReceipts()) {
+      if (r.execution !== "unknown" || brain.isLiveRun(r.runId)) continue;
+      const binding = brain.store.bindingById(r.bindingId);
+      if (binding?.workspaceId !== workspace) continue;
+      brain.store.reconcile(r.id, `crew ${cfg.id} goal ${g.id} resumed by its owner after Loom restarted; the teammate ran as Loom's child process in Loom's own worktree, so it ended with Loom`);
+    }
   }
 
   /** Merge a finished goal's branch into the branch you're on. */
@@ -750,8 +879,10 @@ export class CrewEngine {
     if (!agent) {
       // Its own instance and state slot, so two teammates on one agent kind keep separate sessions.
       // The seat *and* the agent in it: swap a teammate's agent and the old one's
-      // saved session (an opencode ses_…, say) never reaches the new one.
-      agent = this.host.makeAgent({ ...rosterCfg, id: `crew-${cfg.id}-${tm.id}.${rosterCfg.id}`.slice(0, 80), role: tm.role }, g.dir);
+      // saved session (an opencode ses_…, say) never reaches the new one. A
+      // refreshed teammate is a new generation: a new instance, no saved session.
+      const gen = st.generation?.[tm.id] ?? 0;
+      agent = this.host.makeAgent({ ...rosterCfg, id: `crew-${cfg.id}-${tm.id}.${rosterCfg.id}${gen ? `.r${gen}` : ""}`.slice(0, 80), role: tm.role }, g.dir);
       this.agents.set(key, agent);
       this.wire(cfg, st, g, agent, tm, key);
       await agent.start();
@@ -762,10 +893,14 @@ export class CrewEngine {
     const notes = (st.notes[tm.id] ?? []).splice(0);
     this.save(st);
     const briefing = [
-      await this.briefing(cfg, tm, g, fresh),
+      await this.briefing(cfg, st, tm, g, fresh),
       notes.length ? `Messages for you:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
     ].filter(Boolean).join("\n\n");
-    this.host.append({ kind: "message", chat, payload: { text: prompt, author: "loom", crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id, ...(card ? { card: card.id } : {}) } } });
+    // Native continuity: the prompt is captured as this teammate's request (the
+    // capture writes it to the thread), and the briefing rides in the packet.
+    const brain = this.host.continuity?.() ?? null;
+    const native = brain && isNativeKind(rosterCfg.kind) ? brain : null;
+    if (!native) this.host.append({ kind: "message", chat, payload: { text: prompt, author: "loom", crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id, ...(card ? { card: card.id } : {}) } } });
     this.turnText.set(key, "");
     this.turnError.delete(key);
     this.turnQuestion.delete(key);
@@ -784,9 +919,16 @@ export class CrewEngine {
       void agent!.interrupt().catch(() => {});
     }, Math.max(20, Math.min(15_000, stallMs / 4)));
     watchdog.unref?.();
+    let runId: string | undefined;
     try {
-      await agent.send({ text: prompt, briefing });
+      if (native) {
+        const continuity = await this.submitNative(native, rosterCfg, tm, chat, g.dir, prompt, briefing);
+        runId = continuity.runId;
+        await agent.send({ text: prompt, chat, continuity });
+        if (!this.closed) native.settled(runId);
+      } else await agent.send({ text: prompt, briefing });
     } catch (err) {
+      if (runId && !this.closed) native!.settled(runId, err);
       // an agent that throws (it won't start, it can't resume) fails this turn, not the whole goal
       this.turnError.set(key, (err as Error).message.slice(0, 1000));
     } finally {
@@ -813,6 +955,7 @@ export class CrewEngine {
     }
     const parsed = parseCrewReply(text, tm.role);
     for (const a of parsed.allowed) if (a.type === "post") this.post(cfg, st, g, tm, a.text, a.to);
+    for (const a of parsed.allowed) if (a.type === "remember") this.remember(cfg, st, g, tm, a.kind, a.text);
     if (parsed.refused.length) {
       (st.notes[tm.id] ??= []).push(`As ${tm.role} you can't ${[...new Set(parsed.refused.map((a) => a.type))].join(" or ")} — Loom ignored ${parsed.refused.length === 1 ? "that action" : "those actions"}.`);
     }
@@ -826,6 +969,40 @@ export class CrewEngine {
     }
     this.save(st);
     return { text, actions: parsed.allowed, asked: false, ...(error ? { error } : {}) };
+  }
+
+  /**
+   * One native turn's context: capture the prompt as this teammate's request,
+   * assemble what its binding lacks (everything, the first time; a delta after
+   * that), and record the intent to submit. A packet that went stale before
+   * submission (new evidence in the thread) is rebuilt, twice at most.
+   */
+  private async submitNative(brain: ContinuityEngine, rosterCfg: AgentConfig, tm: CrewTeammate, chat: string, dir: string, prompt: string, briefing: string):
+    Promise<NonNullable<SendInput["continuity"]>> {
+    const request = brain.capture({ id: randomUUID(), conversationId: chat, agentInstanceId: tm.agent, text: prompt, source: "route",
+      model: null, plan: false, targetAddedTokens: CREW_CONTEXT_TOKENS }).request;
+    const options = (rosterCfg.options ?? {}) as Record<string, unknown>;
+    for (let attempt = 0; ; attempt++) {
+      const prepared = await brain.prepare(request, rosterCfg.kind, dir, options, briefing);
+      if (prepared.packet.budget.overflow === "mandatory")
+        throw new ContinuityError("overflow", `${tm.id}'s turn needs about ${prepared.packet.budget.estimatedAddedTokens} tokens of context, more than a crew turn allows — review packet ${prepared.packet.id} in the Brain tab`);
+      try { return await brain.submit(prepared); }
+      catch (err) {
+        if (!(err instanceof ContinuityError) || err.code !== "stale" || attempt >= 2) throw err;
+      }
+    }
+  }
+
+  /** A teammate's `remember`: kept in the crew's own memory, which every teammate's briefing reads. */
+  private remember(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, kind: CrewMemoryKind, text: string): void {
+    if (!this.host.remember) return;
+    const event = this.host.append({ kind: "message", agentId: tm.agent, chat: st.channel,
+      payload: { text: `🧠 ${tm.id} remembers (${kind}): ${text}`, crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id, remember: kind } } });
+    try {
+      this.host.remember({ kind, text, chat: st.channel, agentId: tm.agent, eventId: event.id, evidence: text });
+    } catch {
+      /* a memory the brain refuses (a duplicate, a bad line) doesn't stop the card */
+    }
   }
 
   private wire(cfg: CrewConfig, st: CrewState, g: CrewGoal, agent: Adapter, tm: CrewTeammate, key: string): void {
@@ -866,11 +1043,13 @@ export class CrewEngine {
       const event = this.host.append({ kind: e.kind, agentId: tm.agent, chat: this.thread(cfg, st, tm),
         payload: { ...p, ...(structured ? { askAgent: agent.id } : {}), crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id } } });
       if (e.kind === "status" && p.state === "turn_cost") g.costUsd += Number(p.costUsd ?? 0) || 0;
+      // a native turn's events settle its receipt (accepted, complete, the session it ran in)
+      if (event.id > 0) this.host.continuity?.()?.ingest(event);
       this.host.observe(event);
     });
   }
 
-  private async briefing(cfg: CrewConfig, tm: CrewTeammate, g: CrewGoal, fresh: boolean): Promise<string> {
+  private async briefing(cfg: CrewConfig, st: CrewState, tm: CrewTeammate, g: CrewGoal, fresh: boolean): Promise<string> {
     const lines = [
       `You are ${tm.id}, the ${tm.role} on ${cfg.name} — a crew of agents working in the project "${this.host.projectName}".`,
       `The crew: ${cfg.teammates.map((t) => `${t.id} (${t.role})`).join(", ")}.`,
@@ -881,7 +1060,8 @@ export class CrewEngine {
       protocolFor(tm.role),
     ];
     if (fresh) {
-      const brain = await Promise.resolve(this.host.briefingFor(g.text, tm.agent)).catch(() => "");
+      // the project brain, plus what this crew remembered (memories scoped to its channel)
+      const brain = await Promise.resolve(this.host.briefingFor(g.text, tm.agent, st.channel)).catch(() => "");
       if (brain) lines.push(brain);
     }
     return lines.filter(Boolean).join("\n\n");

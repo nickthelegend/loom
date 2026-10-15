@@ -208,13 +208,27 @@ export function createCrew(view) {
         return '<div class="crewmate r-' + esc(t.role) + (live ? " live" : "") + (asking ? " asking" : "") + '" data-mate="' + esc(t.id) + '"' + (t.charter ? ' title="' + esc(t.charter) + '"' : "") + ">" +
           (live ? '<span class="odot live" data-live></span>' : "") +
           avatar(t, 34, live) +
-          '<div class="cmtext"><div class="cmtop"><b class="cmid">' + esc(t.id) + '</b><span class="cmrole">' + esc(t.role) + "</span></div>" +
+          '<div class="cmtext"><div class="cmtop"><b class="cmid">' + esc(t.id) + '</b><span class="cmrole">' + esc(t.role) + "</span>" +
+            sessionMark((c.sessions || {})[t.id]) +
+            (!live && !asking ? '<button type="button" class="cmfresh" data-crew-fresh="' + esc(t.id) + '" title="start fresh: its next turn gets a new session" aria-label="start ' + esc(t.id) + ' fresh">' + ICONS.refresh + "</button>" : "") +
+          "</div>" +
           (!c.busy && crew.roster.length > 1
             ? '<select class="cmagent cmswap" data-crew-swap="' + esc(t.id) + '" title="swap the agent in this seat" aria-label="agent for ' + esc(t.id) + '">' +
                 crew.roster.map(function(a){ return '<option value="' + esc(a.id) + '"' + (a.id === t.agent ? " selected" : "") + ">" + esc(a.id) + "</option>"; }).join("") + "</select>"
             : '<div class="cmagent">' + esc(t.agent) + "</div>") +
           '<div class="cmdoing">' + esc(doing.slice(0, 90)) + "</div></div></div>";
       }).join("") + "</section>";
+    }
+
+    /**
+     * Native continuity: whether this teammate's next card resumes its native
+     * session (a delta) or rebuilds it from the record. Nothing without it.
+     */
+    function sessionMark(s){
+      if (!s || s.mode !== "native") return "";
+      return s.resumable
+        ? '<span class="cmsess on" title="next card resumes its native session' + (s.lastPacket === "delta" ? " — its last turn got only what changed" : "") + '">session</span>'
+        : '<span class="cmsess" title="its next turn rebuilds its session from the crew\u2019s record">fresh</span>';
     }
 
     function cardTitle(g, id){
@@ -353,6 +367,7 @@ export function createCrew(view) {
       retrying: [ICONS.refresh, "warn", function(p){ return (p.teammate || "A teammate") + "\u2019s turn errored" + (p.error ? " (" + p.error + ")" : "") + " \u2014 trying again"; }],
       stopped: [ICONS.stop, "", function(){ return "Stopped"; }],
       resumed: [ICONS.play, "", function(){ return "Resumed"; }],
+      refreshed: [ICONS.refresh, "", function(p){ return (p.teammate || "A teammate") + " starts fresh" + (p.epoch ? " (native session epoch " + p.epoch + ")" : ""); }],
       applied: [ICONS.check, "ok", function(p){ return "Applied to " + (p.into || "your branch"); }],
     };
 
@@ -575,11 +590,21 @@ export function createCrew(view) {
       toast("open the channel from the chat list");
     }
 
+    /** Start one teammate over: a new session for its next turn. */
+    function fresh(id, btn){
+      var c = current(); if (!c || !id) return;
+      btn.disabled = true;
+      api("/api/projects/" + view.pid + "/crews/" + encodeURIComponent(c.id) + "/teammates/" + encodeURIComponent(id) + "/refresh", { method: "POST", body: "{}" })
+        .then(function(j){ merge(j); toast(id + " starts its next turn fresh"); drawCrew(); })
+        .catch(function(err){ btn.disabled = false; toast(err.message); });
+    }
+
     function wire(el){
       el.onclick = function(ev){
         var t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
         var x;
         if ((x = t.closest("[data-crew-refresh]"))) { loadCrews(); return; }
+        if ((x = t.closest("[data-crew-fresh]"))) { fresh(x.getAttribute("data-crew-fresh"), x); return; }
         if ((x = t.closest("[data-crew-new]"))) { crew.making = true; crew.err = ""; drawCrew(); return; }
         if ((x = t.closest("[data-crew-cancel]"))) { crew.making = false; crew.err = ""; drawCrew(); return; }
         if ((x = t.closest("[data-crew-tpl]"))) { crew.tpl = x.getAttribute("data-crew-tpl"); drawCrew(); return; }
