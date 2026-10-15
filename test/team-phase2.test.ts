@@ -16,7 +16,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { registerAgentKind } from "../src/adapters/index.js";
 import { AdapterBase } from "../src/adapters/base.js";
@@ -135,6 +135,15 @@ async function finish(who: string, run: OrchestraRun) {
   });
 }
 
+afterEach(async () => {
+  // A failed assertion must not leave an active goal blocking later cases.
+  for (const who of ["alice", "bob"]) {
+    const active = M[who]?.rt.orchestra.active();
+    if (active) await finish(who, active);
+    scripts[who] = [];
+  }
+});
+
 beforeAll(async () => {
   process.env.LOOM_HOME = tmpDir("home-p2");
   process.env.LOOM_NO_NOTIFY = "1";
@@ -237,9 +246,12 @@ describe("Phase 2: stop colliding", () => {
     // the WIP refs really are on origin, hidden from branches
     expect(git(origin, "for-each-ref", "--format=%(refname)", "refs/loom/wip")).toContain(`refs/loom/wip/alice/${a.id}`);
     expect(git(origin, "branch", "--list")).not.toContain("wip");
-    // bob's orchestrator has it as a note; alice's too, through the feed
-    expect((M.bob!.rt.orchestra.get(b.id)!.notes ?? []).join("\n")).toContain("docs/shared.md");
-    await waitUntil(() => (M.alice!.rt.orchestra.get(a.id)!.notes ?? []).some((n) => n.includes("predicts a merge conflict") && n.includes("docs/shared.md")));
+    // A background prediction may still be posting its note, or the next
+    // orchestrator turn may already have consumed it into its prompt.
+    const heard = (who: string, id: string) => [...(M[who]!.rt.orchestra.get(id)!.notes ?? []), ...told[who]!]
+      .some(n => /(?:predicted|predicts a) merge conflict/i.test(n) && n.includes("docs/shared.md"));
+    await waitUntil(() => heard("bob", b.id));
+    await waitUntil(() => heard("alice", a.id));
     await finish("alice", a);
     await finish("bob", b);
   });
