@@ -556,6 +556,7 @@ export class Runner {
   }
 
   private async finish(a: Active, state: "done" | "failed", result?: unknown, error?: string): Promise<void> {
+    a.finishing = true;
     const hub = this.deps.hub();
     const device = this.deps.deviceId();
     this.active.delete(a.job.id);
@@ -586,7 +587,9 @@ export class Runner {
       await git(["push", "-q", "-f", "origin", `${run.branch}:refs/loom/run/${run.id}/main`], run.dir).catch(() => {});
     }
     if (a.rt) await this.deps.closeProject(a.rt).catch(() => {});
-    if (a.dir) fs.rmSync(a.dir, { recursive: true, force: true });
+    // Windows can retain a child's working-directory handle briefly after
+    // shutdown. Retry transient locks without blocking the daemon's event loop.
+    if (a.dir) await fs.promises.rm(a.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   private async cancel(a: Active): Promise<void> {
