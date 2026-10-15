@@ -257,6 +257,8 @@ export interface ProjectConfig {
   agents: AgentConfig[];
   /** Agent Teams: named crews of roster agents with roles (core/crew.ts). */
   crews?: import("./core/crew.js").CrewConfig[];
+  /** Quota Relay: who carries on when an agent runs out of quota (daemon/runtime/relay.ts). */
+  relay?: import("./daemon/runtime/relay.js").RelayConfig;
   /** Proof: how an agent's "done" is checked (daemon/proof.ts). */
   proof?: import("./daemon/proof.js").ProofConfig;
   /** Agent that receives messages when nobody holds the baton. */

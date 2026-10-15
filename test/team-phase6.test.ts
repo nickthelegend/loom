@@ -374,9 +374,16 @@ describe("Phase 6: the landing train (no merge queue)", () => {
     expect((await L("alice").land(g5.id)).state).toBe("landing");
     expect((await L("bob").land(g6.id)).state).toBe("queued");
 
-    // alice's turn head fails "test" once (it passes on rerun: a flake)
-    const red = headOf(prs.get(run("alice", g5.id).landing!.pr)!.branch);
-    checkAt = (_p, sha, reruns) => (sha === red && reruns === 0 ? "fail" : "pass");
+    // alice's turn head fails "test" once (it passes on rerun: a flake). "Her turn head" is the first
+    // head her checks are read at, not the branch head now: her turn may still bring fresh main in and
+    // push, and a red sha read before that push let the new head pass and merge on a slow runner.
+    const alicePrNo = run("alice", g5.id).landing!.pr;
+    let red = "";
+    checkAt = (p, sha, reruns) => {
+      if (p.n !== alicePrNo) return "pass";
+      red ||= sha;
+      return sha === red && reruns === 0 ? "fail" : "pass";
+    };
     const st: LandingState = await L("alice").pollNow(run("alice", g5.id));
     expect(st).toMatchObject({ state: "failing", slot: false, landRequested: true });
     expect(calls.some((c) => c[0] === "run" && c[1] === "rerun")).toBe(true);
@@ -431,7 +438,10 @@ describe("Phase 6: GitHub webhooks into the hub (D83, D84)", () => {
     });
     expect(res.status).toBe(202);
     await waitUntil(() => feedTypes("bob").some((e) => e.type === "check_failed" && e.meta.number === pr));
-    await waitUntil(() => run("alice", g7.id).landing!.state === "failing");
-    expect(calls.filter((c) => c[0] === "pr" && c[1] === "view" && c[2] === String(pr)).length).toBeGreaterThan(before);
+    // the owner's daemon looked at that PR at once, and read the red check. Not "state is failing":
+    // that state lasts only until the check's one rerun is asked for and the goal goes to fixing, and
+    // a slow machine sampling every 40ms can miss it — the checks it read stay on the landing.
+    await waitUntil(() => calls.filter((c) => c[0] === "pr" && c[1] === "view" && c[2] === String(pr)).length > before);
+    await waitUntil(() => (run("alice", g7.id).landing!.checks?.failing ?? []).includes("test"));
   });
 });
