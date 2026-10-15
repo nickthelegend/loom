@@ -49,6 +49,21 @@ interface OpenCodeOptions {
   model?: string;
   /** opencode agent to use (e.g. "build"). */
   agent?: string;
+  /**
+   * Minutes of no turns before Loom stops the `opencode serve` it started
+   * (default 30, like the Codex/Claude session reaper; 0 keeps it up). The
+   * next turn starts a fresh server, and the session resumes from opencode's
+   * own store — so an idle project doesn't hold a server's memory all day.
+   */
+  idleMinutes?: number;
+}
+
+/** OPENCODE_IDLE_MS overrides it (tests); otherwise the agent's idleMinutes, else 30 minutes. */
+function idleMsFor(options: OpenCodeOptions): number {
+  const env = Number(process.env.LOOM_OPENCODE_IDLE_MS);
+  if (Number.isFinite(env) && env >= 0 && process.env.LOOM_OPENCODE_IDLE_MS !== undefined) return env;
+  const minutes = typeof options.idleMinutes === "number" && options.idleMinutes >= 0 ? options.idleMinutes : 30;
+  return minutes * 60_000;
 }
 
 type Json = Record<string, unknown>;
@@ -119,6 +134,44 @@ export class OpenCodeAdapter extends AdapterBase {
   private started = false;
   /** npm builds expose /session + /global/health; newer builds use /api. */
   private modernApi = false;
+  /** Stops an idle server Loom started (see idleMinutes). */
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private cancelIdle(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  /**
+   * After a turn: stop the server we spawned once nothing has used it for a
+   * while. Never one we were pointed at (baseUrl), never mid-turn, and never
+   * while a question it asked is still waiting for an answer.
+   */
+  private armIdle(): void {
+    this.cancelIdle();
+    const ms = idleMsFor(this.options);
+    if (!ms || this.options.baseUrl || !this.child) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this._busy || this.questions.size || !this.child || !this.started) return void this.armIdle();
+      logbook.info("opencode", `stopping idle opencode serve for "${this.id}" after ${Math.round(ms / 60_000)} min; the next turn restarts it`);
+      void this.sleep().catch(() => {});
+    }, ms);
+    this.idleTimer.unref?.();
+  }
+
+  /** Stop the idle server quietly: not a failure, and not the agent stopping. */
+  private async sleep(): Promise<void> {
+    this.started = false;
+    this.sseAbort?.abort();
+    this.sseAbort = null;
+    const child = this.child;
+    this.child = null;
+    if (!child) return;
+    if (process.platform === "win32") await stopWindowsTree(child);
+    else await interruptProcess(child, true);
+    this.emit({ kind: "status", payload: { state: "idle_stopped" } });
+  }
 
   private api(route: string): string {
     return `${this.baseUrl}${this.modernApi ? "" : "/api"}${route}`;
@@ -753,6 +806,7 @@ export class OpenCodeAdapter extends AdapterBase {
 
   async send(input: SendInput): Promise<void> {
     if (input.continuity) return this.sendContinuity(input);
+    this.cancelIdle();
     if (!this.started) await this.start();
     if (this._busy) throw new Error(`opencode agent "${this.id}" is busy`);
     this._busy = true;
@@ -844,6 +898,7 @@ export class OpenCodeAdapter extends AdapterBase {
       this.lastModel = null;
     } finally {
       this._busy = false;
+      this.armIdle();
     }
   }
 
@@ -856,6 +911,7 @@ export class OpenCodeAdapter extends AdapterBase {
   private async sendContinuity(input: SendInput): Promise<void> {
     const c = input.continuity!;
     if (this._busy) throw new NativeDispatchRejected(`opencode agent "${this.id}" is busy`);
+    this.cancelIdle();
     this._busy = true;
     this.interrupted = false;
     this.beginContinuity(input);
@@ -934,6 +990,7 @@ export class OpenCodeAdapter extends AdapterBase {
       this.activeSid = undefined;
       this._busy = false;
       this.endContinuity();
+      this.armIdle();
     }
   }
 
@@ -1076,6 +1133,7 @@ export class OpenCodeAdapter extends AdapterBase {
   }
 
   async stop(): Promise<void> {
+    this.cancelIdle();
     this.started = false;
     this.sseAbort?.abort();
     this.sseAbort = null;
