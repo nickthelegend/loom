@@ -60,7 +60,8 @@ process.once('message', spec => {
       if (message !== 'launch') return fail(new Error('invalid launch acknowledgement'));
       launching = true;
       process.disconnect();
-      const child = spawn(spec.command, spec.args, { env: spec.env, stdio: ['inherit', 'inherit', 'inherit'], windowsHide: true });
+      const child = spawn(spec.command, spec.args, { env: spec.env, windowsVerbatimArguments: spec.windowsVerbatimArguments,
+        stdio: ['inherit', 'inherit', 'inherit'], windowsHide: true });
       child.once('error', fail);
       child.once('exit', (code, signal) => process.exit(code === null ? 1 : code));
     });
@@ -87,7 +88,7 @@ export function spawnWindowsJob(command: string, args: string[], options: SpawnO
       : Array(3).fill(options.stdio ?? "pipe");
     // User preload hooks belong to the contained target, never the bootstrap.
     const env = { ...(options.env ?? process.env), NODE_OPTIONS: undefined };
-    child = spawn(process.execPath, ["-e", bootstrap], { ...options, env, detached: false, windowsHide: true,
+    child = spawn(process.execPath, ["-e", bootstrap], { ...options, env, detached: false, windowsHide: true, windowsVerbatimArguments: false,
       stdio: [...stdio, "ipc"] as SpawnOptions["stdio"] });
   } catch (error) { w.close(handle); throw error; }
   const ready = new Promise<void>((resolve, reject) => {
@@ -101,7 +102,8 @@ export function spawnWindowsJob(command: string, args: string[], options: SpawnO
       clearTimeout(timer); child.off("exit", failed); child.off("error", failed);
       child.send("launch", error => error ? reject(error) : resolve());
     });
-    child.once("spawn", () => child.send({ name, command, args, env: options.env ?? process.env, koffi: require.resolve("koffi") }, error => { if (error) failed(); }));
+    child.once("spawn", () => child.send({ name, command, args, env: options.env ?? process.env,
+      windowsVerbatimArguments: options.windowsVerbatimArguments ?? false, koffi: require.resolve("koffi") }, error => { if (error) failed(); }));
   });
   void ready.catch(() => {});
   jobs.set(child, { handle, ready });
