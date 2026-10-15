@@ -328,8 +328,9 @@ describe("terminal", () => {
 
   it("keeps cd across commands — it is one shell, not one per command", async () => {
     await runTerm("t1", "cd src/checkout", /\$|%|#|>/);
-    // a later, separate command still sees the new directory
-    const out = await runTerm("t1", (process.platform === "win32" ? "cd" : "pwd"), /src[\\/]checkout/);
+    // a later, separate command still sees the new directory — as the absolute path the shell prints
+    // (a bare "src/checkout" also matches the first command's own echo, which can arrive late)
+    const out = await runTerm("t1", (process.platform === "win32" ? "cd" : "pwd"), process.platform === "win32" ? /\\src\\checkout/ : /\/src\/checkout/);
     expect(out).toContain(path.join("src", "checkout"));
   });
 
