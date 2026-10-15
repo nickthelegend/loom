@@ -30,8 +30,10 @@ opencode.cmd --version
 Native continuity supports Codex, Claude Code and OpenCode on Windows. Enable
 `brain.continuity` for sequential native chats. Loom probes Job Object assignment
 on this host before admitting a native turn; a failed probe leaves it unavailable.
-The native binding and delta context survive a daemon restart. Parallel Orchestra
-and crews use the ordinary project mode, as on macOS.
+The native binding and delta context survive a daemon restart. Ship crews also
+use native continuity when this mode is enabled; each teammate must use Codex,
+Claude Code or OpenCode. Each seat keeps its own binding and a stable crew
+checkout across goals. Parallel Orchestra still uses ordinary project mode.
 
 Loom uses Koffi's packaged native binding; no local C++ toolchain is required on
 supported Windows architectures. A Node bootstrap joins a kill-on-close Job Object

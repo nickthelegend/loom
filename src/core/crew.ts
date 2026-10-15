@@ -22,6 +22,10 @@
 import { execFile, shellInvocation } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { ContinuityEngine } from "./continuity/engine.js";
+import { ContinuityError, NativeDispatchRejected } from "./continuity/contracts.js";
+import { isNativeKind } from "./continuity/capabilities.js";
 import { promisify } from "node:util";
 import type { Adapter, AgentConfig, ChatInfo, EventKind, LoomEvent } from "../types.js";
 import { loomHome, type BoardTask } from "./registry.js";
@@ -108,6 +112,8 @@ export interface CrewState {
   history: Array<{ id: string; text: string; status: GoalStatus; summary?: string; finishedAt?: number; branch: string }>;
   /** Messages for a teammate's next turn (from you, or posted by another teammate). */
   notes: Record<string, string[]>;
+  /** Durable native bindings, keyed by seat rather than roster agent. */
+  sessions?: Record<string, { bindingId: string; epoch: number; nativeSessionId: string | null }>;
 }
 
 export interface CrewView extends CrewConfig {
@@ -126,7 +132,10 @@ export interface CrewHost {
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
   createChat(title: string, opts?: { agentId?: string }): ChatInfo;
   chatExists(id: string): boolean;
-  briefingFor(query: string, agentId: string): string | Promise<string>;
+  briefingFor(query: string, agentId: string, crewId?: string): string | Promise<string>;
+  native?(): ContinuityEngine | null;
+  nativeOptions?(cfg: AgentConfig): Record<string, unknown>;
+  nativeHealth?(id: string): Promise<{ available: boolean; error?: string }>;
   gate(agentId: string): void;
   observe(event: LoomEvent): void;
   stream?(f: { agentId: string; chat: string; text: string; reasoning?: boolean }): void;
@@ -228,6 +237,8 @@ export class CrewEngine {
   private lastActivity = new Map<string, number>();
   private gitChain: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private loops = new Map<string, Promise<void>>();
+  private stopping = new Map<string, Promise<void>>();
 
   constructor(private readonly host: CrewHost) {
     // A goal that was mid-turn when Loom stopped is interrupted, not lost:
@@ -309,6 +320,7 @@ export class CrewEngine {
     const cfg = this.config(id);
     if (this.running.has(id)) throw new Error(`${cfg.name} is working — stop it first`);
     const st = this.load(id);
+    if (st) this.assertNativeIdle(st);
     if (st?.goal?.dir) await this.dropWorktree(st.goal).catch(() => {});
     this.host.saveCrews(this.host.crews().filter((c) => c.id !== id));
     fs.rmSync(this.stateFile(id), { force: true });
@@ -338,17 +350,35 @@ export class CrewEngine {
     const st = this.state(cfg);
     if (!text.trim()) throw new Error("what should the crew do?");
     if (st.goal && !terminal(st.goal.status)) throw new Error(`${cfg.name} is already on a goal — finish, stop or apply it first`);
+    await this.stopping.get(id);
+    await this.stopAgents(id);
+    this.assertNativeIdle(st);
     if (st.goal) this.archive(st);
     // every teammate must be allowed to run (budget, quarantine, continuity) before anything is set up
-    for (const t of cfg.teammates) this.host.gate(t.agent);
+    for (const t of cfg.teammates) {
+      this.host.gate(t.agent);
+      if (this.host.native?.()) {
+        const kind = this.host.roster().find(a => a.id === t.agent)?.kind;
+        if (!kind || !isNativeKind(kind)) throw new ContinuityError("unsupported", `${t.id} needs Codex, Claude Code or OpenCode in native continuity mode`);
+        const health = await this.host.nativeHealth?.(t.agent);
+        if (health && !health.available) throw new ContinuityError("unsupported", health.error ?? `${t.id}'s native harness is unavailable`);
+      }
+    }
     const gid = newId();
     const baseBranch = (await git(["rev-parse", "--abbrev-ref", "HEAD"], this.host.projectDir).catch(() => "")).trim();
     const base = (await git(["rev-parse", "HEAD"], this.host.projectDir).catch(() => "")).trim();
     if (!base) throw new Error("a crew works in git — make a first commit in this project");
     const branch = `loom/crew/${cfg.id}/${gid}`;
-    const dir = path.join(loomHome(), "crews", this.host.projectId, cfg.id, gid);
+    // Native sessions retain their workspace identity between goals. Branches
+    // remain per goal; switching a clean, stopped checkout changes its snapshot.
+    const dir = path.join(loomHome(), "crews", this.host.projectId, cfg.id, this.host.native?.() ? "workspace" : gid);
     fs.mkdirSync(path.dirname(dir), { recursive: true });
-    await this.serial(() => git(["worktree", "add", "-q", "-b", branch, dir, base], this.host.projectDir));
+    await this.serial(async () => {
+      if (fs.existsSync(dir)) {
+        if ((await git(["status", "--porcelain"], dir)).trim()) throw new Error("the crew workspace has uncommitted changes; save them before starting another goal");
+        await git(["checkout", "-q", "-b", branch, base], dir);
+      } else await git(["worktree", "add", "-q", "-b", branch, dir, base], this.host.projectDir);
+    });
     const goal: CrewGoal = { id: gid, text: text.trim().slice(0, 8000), status: "planning", branch, dir, base, baseBranch, cards: [], costUsd: 0, startedAt: Date.now() };
     st.goal = goal;
     st.notes = {};
@@ -436,7 +466,9 @@ export class CrewEngine {
     const key = this.currentTurn.get(id);
     if (key) await this.agents.get(key)?.interrupt().catch(() => {});
     // a commit already under way lands before Stop returns, so nothing writes to the branch after it
+    await this.loops.get(id);
     await this.gitChain;
+    this.assertNativeIdle(st);
     this.phase(cfg, st, "stopped", {});
     return g;
   }
@@ -448,6 +480,7 @@ export class CrewEngine {
     const g = st.goal;
     if (!g || !["interrupted", "stopped", "failed"].includes(g.status)) throw new Error(`${cfg.name} has nothing to resume`);
     if (!fs.existsSync(g.dir)) throw new Error("the goal's worktree is gone — start the goal again");
+    this.assertNativeIdle(st);
     g.status = g.cards.length ? "running" : "planning";
     g.error = undefined;
     g.finishedAt = undefined;
@@ -465,6 +498,8 @@ export class CrewEngine {
     const g = st.goal;
     if (!g || g.status !== "completed") throw new Error(`${cfg.name} has no finished goal to apply`);
     if (g.applied) throw new Error(`already applied to ${g.applied.into}`);
+    await this.stopping.get(id);
+    this.assertNativeIdle(st);
     const into = (await git(["rev-parse", "--abbrev-ref", "HEAD"], this.host.projectDir)).trim();
     await this.serial(async () => {
       try {
@@ -478,14 +513,18 @@ export class CrewEngine {
     g.applied = { into, at: Date.now() };
     this.save(st);
     this.phase(cfg, st, "applied", { into });
-    await this.dropWorktree(g).catch(() => {});
+    if (!this.host.native?.()) await this.dropWorktree(g).catch(() => {});
     return { merged: g.branch, into };
   }
 
   async shutdown(): Promise<void> {
     this.closed = true;
-    for (const a of this.agents.values()) await Promise.resolve(a.stop()).catch(() => {});
+    for (const a of this.agents.values()) {
+      await a.interrupt().catch(() => {});
+      await Promise.resolve(a.stop()).catch(() => {});
+    }
     this.agents.clear();
+    await Promise.all([...this.loops.values()]);
     await this.gitChain; // the next runtime gets the worktree with no commit of ours half-done
   }
 
@@ -494,14 +533,15 @@ export class CrewEngine {
   private drive(id: string): void {
     if (this.running.has(id) || this.closed) return;
     this.running.add(id);
-    void this.loop(id)
+    const loop = this.loop(id)
       .catch((err) => {
         const cfg = this.host.crews().find((c) => c.id === id);
         if (!cfg) return;
         const st = this.state(cfg);
         if (st.goal && !terminal(st.goal.status)) this.finish(cfg, st, "failed", (err as Error).message);
       })
-      .finally(() => this.running.delete(id));
+      .finally(() => { this.running.delete(id); this.loops.delete(id); });
+    this.loops.set(id, loop);
   }
 
   private async loop(id: string): Promise<void> {
@@ -727,7 +767,9 @@ export class CrewEngine {
     this.phase(cfg, st, status === "completed" ? "completed" : "failed", {
       branch: g.branch, cards: g.cards.length, ...(g.summary ? { summary: g.summary } : {}), ...(error ? { error } : {}), costUsd: g.costUsd,
     });
-    void this.stopAgents(cfg.id);
+    const stopping = this.stopAgents(cfg.id).finally(() => this.stopping.delete(cfg.id));
+    this.stopping.set(cfg.id, stopping);
+    void stopping.catch(() => {});
   }
 
   // ── one turn ──
@@ -774,6 +816,7 @@ export class CrewEngine {
     // goal forever: interrupt it, and give the turn one more try.
     const stallMs = this.host.stallMs ?? (cfg.stallMinutes ?? 8) * 60_000;
     let stalled = false;
+    let nativeRun: string | undefined;
     this.lastActivity.set(key, Date.now());
     const watchdog = setInterval(() => {
       // waiting on your answer isn't going silent
@@ -785,7 +828,35 @@ export class CrewEngine {
     }, Math.max(20, Math.min(15_000, stallMs / 4)));
     watchdog.unref?.();
     try {
-      await agent.send({ text: prompt, briefing });
+      const brain = this.host.native?.();
+      if (brain) {
+        const health = await this.host.nativeHealth?.(tm.agent);
+        if (health && !health.available) throw new ContinuityError("unsupported", health.error ?? "native harness unavailable");
+        if (terminal(g.status) || this.closed) return null;
+        const request = brain.capture({ id: randomUUID(), conversationId: chat, agentInstanceId: tm.agent,
+          text: prompt, source: "route", model: typeof rosterCfg.options?.model === "string" ? rosterCfg.options.model : null,
+          plan: false, targetAddedTokens: 12000 }).request;
+        const options = this.host.nativeOptions?.(rosterCfg) ?? rosterCfg.options ?? {};
+        if (Array.isArray(options.extraArgs) && options.extraArgs.length)
+          throw new ContinuityError("unsupported", "arbitrary CLI arguments have unverified native session semantics; remove extraArgs");
+        let prepared = await brain.prepare(request, rosterCfg.kind, g.dir, options, briefing);
+        let continuity;
+        for (let attempt = 0; ; attempt++) {
+          if (terminal(g.status) || this.closed) return null;
+          try { continuity = await brain.submit(prepared); break; }
+          catch (error) {
+            if (!(error instanceof ContinuityError) || error.code !== "stale" || attempt >= 2) throw error;
+            prepared = await brain.prepare(request, rosterCfg.kind, g.dir, options, briefing);
+          }
+        }
+        nativeRun = continuity.runId;
+        (st.sessions ??= {})[tm.id] = { bindingId: continuity.bindingId, epoch: continuity.sessionEpoch, nativeSessionId: continuity.nativeSessionId };
+        this.save(st);
+        if (terminal(g.status) || this.closed) throw new NativeDispatchRejected("crew stopped before native dispatch");
+        try { await agent.send({ text: prompt, chat, continuity, ...(request.model ? { model: request.model } : {}) }); }
+        catch (error) { brain.settled(nativeRun, error); throw error; }
+        brain.settled(nativeRun);
+      } else await agent.send({ text: prompt, briefing });
     } catch (err) {
       // an agent that throws (it won't start, it can't resume) fails this turn, not the whole goal
       this.turnError.set(key, (err as Error).message.slice(0, 1000));
@@ -807,7 +878,7 @@ export class CrewEngine {
     const text = (this.turnText.get(key) ?? "").trim();
     const error = this.turnError.get(key);
     // A provider hiccup (a dropped stream, a 5xx) shouldn't sink a card: one more try.
-    if (error && !stalled && !retried) {
+    if (error && !stalled && !retried && !nativeRun) {
       this.phase(cfg, st, "retrying", { teammate: tm.id, error: error.slice(0, 300), ...(card ? { card: card.id, title: card.title } : {}) });
       return this.turn(cfg, st, g, tm, prompt, step, card, true);
     }
@@ -865,6 +936,14 @@ export class CrewEngine {
       }
       const event = this.host.append({ kind: e.kind, agentId: tm.agent, chat: this.thread(cfg, st, tm),
         payload: { ...p, ...(structured ? { askAgent: agent.id } : {}), crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id } } });
+      const brain = this.host.native?.();
+      brain?.ingest(event);
+      const bindingId = typeof p.loomBindingId === "string" ? p.loomBindingId : undefined;
+      const binding = bindingId ? brain?.store.bindingById(bindingId) : undefined;
+      if (binding) {
+        (st.sessions ??= {})[tm.id] = { bindingId: binding.id, epoch: binding.sessionEpoch, nativeSessionId: binding.nativeSessionId };
+        this.save(st);
+      }
       if (e.kind === "status" && p.state === "turn_cost") g.costUsd += Number(p.costUsd ?? 0) || 0;
       this.host.observe(event);
     });
@@ -880,8 +959,8 @@ export class CrewEngine {
       `Post to a crewmate with a post action ("to": "@id"); it reaches them on their next turn. Ask the person you work for with an ask action when you're truly blocked.`,
       protocolFor(tm.role),
     ];
-    if (fresh) {
-      const brain = await Promise.resolve(this.host.briefingFor(g.text, tm.agent)).catch(() => "");
+    if (fresh || this.host.native?.()) {
+      const brain = await Promise.resolve(this.host.briefingFor(g.text, tm.agent, cfg.id)).catch(() => "");
       if (brain) lines.push(brain);
     }
     return lines.filter(Boolean).join("\n\n");
@@ -996,7 +1075,7 @@ export class CrewEngine {
   private archive(st: CrewState): void {
     const g = st.goal!;
     st.history = [{ id: g.id, text: g.text.slice(0, 300), status: g.status, ...(g.summary ? { summary: g.summary.slice(0, 600) } : {}), ...(g.finishedAt ? { finishedAt: g.finishedAt } : {}), branch: g.branch }, ...st.history].slice(0, 30);
-    if (g.dir && !g.applied) void this.dropWorktree(g).catch(() => {});
+    if (g.dir && !g.applied && !this.host.native?.()) void this.dropWorktree(g).catch(() => {});
     st.goal = undefined;
   }
 
@@ -1011,6 +1090,33 @@ export class CrewEngine {
       this.agents.delete(key);
       await Promise.resolve(a.stop()).catch(() => {});
     }
+  }
+
+  private assertNativeIdle(st: CrewState): void {
+    const brain = this.host.native?.(), threads = new Set(Object.values(st.threads));
+    if (brain?.store.activeReceipts().some(r => threads.has(brain.store.bindingById(r.bindingId)?.conversationId ?? "")))
+      throw new ContinuityError("recovery_required", "the crew has an uncertain native turn; inspect and reconcile its receipt before continuing");
+  }
+
+  /** Explicitly start a fresh native epoch for one stopped teammate. */
+  async refresh(id: string, teammate: string): Promise<CrewView> {
+    const cfg = this.config(id), st = this.state(cfg), brain = this.host.native?.();
+    if (!cfg.teammates.some(t => t.id === teammate)) throw new Error(`no teammate "${teammate}"`);
+    if (!brain) throw new Error("enable brain.continuity to refresh native teammates");
+    if (this.running.has(id)) throw new Error("stop the crew before refreshing a teammate");
+    const session = st.sessions?.[teammate];
+    if (!session) throw new Error("this teammate has no native session yet");
+    if (brain.store.activeReceipts().some(r => r.bindingId === session.bindingId))
+      throw new ContinuityError("recovery_required", "reconcile the teammate's active receipt before refresh");
+    await this.stopping.get(id);
+    await this.stopAgents(id);
+    const binding = brain.store.bindingById(session.bindingId);
+    if (!binding) throw new Error("teammate binding is missing");
+    brain.store.updateBinding({ ...binding, nativeSessionId: null, sessionEpoch: binding.sessionEpoch + 1, retention: "unknown" });
+    st.sessions![teammate] = { ...session, epoch: binding.sessionEpoch + 1, nativeSessionId: null };
+    this.save(st);
+    this.phase(cfg, st, "refreshed", { teammate, epoch: binding.sessionEpoch + 1 });
+    return this.get(id);
   }
 
   private serial<T>(fn: () => Promise<T>): Promise<T> {

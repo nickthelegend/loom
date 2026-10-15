@@ -103,6 +103,8 @@ const KIND_BIAS: Record<MemoryKind, number> = {
 };
 
 export interface RetrieveOpts {
+  /** Crew memories are private to that crew until a human promotes them. */
+  crew?: string;
   /** Free text — a task description, a prompt, a turn. */
   query?: string;
   /** Files in play. From turn_diff, the file tree, or whatever the task names. */
@@ -372,6 +374,7 @@ export function retrieveFrom(memories: Memory[], opts: RetrieveOpts): Hit[] {
     if (opts.minConfidence !== undefined && m.confidence < opts.minConfidence) return false;
     if (opts.agent && m.scope.agent && m.scope.agent !== opts.agent) return false;
     if (opts.chat && m.scope.chat && m.scope.chat !== opts.chat) return false;
+    if (m.scope.crew && m.scope.crew !== opts.crew) return false;
     return true;
   });
   if (!live.length) return [];

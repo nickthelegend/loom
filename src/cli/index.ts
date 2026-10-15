@@ -1556,7 +1556,7 @@ program
 
 program
   .command("crew [action] [args...]")
-  .description("Agent Teams: status | create [template] [name] | goal <text> | say <text> | approve | stop | resume | apply | diff | remove — crews of agents with roles")
+  .description("Agent Teams: status | create [template] [name] | goal <text> | say <text> | approve | stop | resume | refresh --to <teammate> | apply | diff | remove — crews of agents with roles")
   .option("--crew <id>", "which crew, when the project has several")
   .option("--to <teammate>", "say: to one teammate")
   .option("--no-approval", "create: the Lead's plan starts without your OK")

@@ -80,7 +80,7 @@ export interface Memory {
    * `get`. That is the whole reason lexical retrieval is enough here.
    */
   entities: string[];
-  scope: { chat?: string; agent?: string; task?: string };
+  scope: { chat?: string; agent?: string; task?: string; crew?: string };
   provenance: MemoryProvenance;
   /** Below CONFIDENCE_FLOOR: visible in the Brain tab, never injected. */
   confidence: number;
@@ -113,7 +113,7 @@ export interface NewMemory {
   kind: MemoryKind;
   text: string;
   entities?: string[];
-  scope?: { chat?: string; agent?: string; task?: string };
+  scope?: { chat?: string; agent?: string; task?: string; crew?: string };
   provenance: MemoryProvenance;
   confidence?: number;
   evidence?: string;
@@ -123,6 +123,7 @@ export interface NewMemory {
 }
 
 export interface MemoryPatch {
+  scope?: Memory["scope"];
   text?: string;
   kind?: MemoryKind;
   entities?: string[];
@@ -156,10 +157,12 @@ export interface BrainExport {
     confidence?: number;
     chat?: string;
     agent?: string;
+    crew?: string;
   }>;
 }
 
 export interface ListOpts {
+  crew?: string;
   kind?: MemoryKind;
   chat?: string;
   agent?: string;
@@ -317,6 +320,7 @@ export function foldMemories(events: LoomEvent[]): Map<string, Memory> {
       if (patch.expiresAt !== undefined) next.expiresAt = patch.expiresAt;
       if (typeof patch.untrusted === "boolean") next.untrusted = patch.untrusted;
       if (typeof patch.private === "boolean") next.private = patch.private;
+      if (patch.scope) next.scope = { ...patch.scope };
       byId.set(cur.id, next);
       continue;
     }
@@ -395,6 +399,7 @@ export class Brain {
     if (opts.kind) out = out.filter((m) => m.kind === opts.kind);
     if (opts.chat) out = out.filter((m) => !m.scope.chat || m.scope.chat === opts.chat);
     if (opts.agent) out = out.filter((m) => !m.scope.agent || m.scope.agent === opts.agent);
+    if (opts.crew) out = out.filter(m => m.scope.crew === opts.crew);
     if (!opts.includeExpired) out = out.filter((m) => !isExpired(m, now));
     if (opts.minConfidence !== undefined) {
       out = out.filter((m) => m.confidence >= (opts.minConfidence as number));
@@ -423,6 +428,7 @@ export class Brain {
         confidence: m.confidence,
         ...(m.scope.chat ? { chat: m.scope.chat } : {}),
         ...(m.scope.agent ? { agent: m.scope.agent } : {}),
+        ...(m.scope.crew ? { crew: m.scope.crew } : {}),
       })),
     };
   }
@@ -448,8 +454,8 @@ export class Brain {
         text: m.text,
         ...(m.entities?.length ? { entities: m.entities } : {}),
         ...(m.confidence !== undefined ? { confidence: m.confidence } : {}),
-        ...(m.chat || m.agent
-          ? { scope: { ...(m.chat ? { chat: m.chat } : {}), ...(m.agent ? { agent: m.agent } : {}) } }
+        ...(m.chat || m.agent || m.crew
+          ? { scope: { ...(m.chat ? { chat: m.chat } : {}), ...(m.agent ? { agent: m.agent } : {}), ...(m.crew ? { crew: m.crew } : {}) } }
           : {}),
         provenance,
       });
@@ -473,7 +479,7 @@ export class Brain {
     if (!MEMORY_KINDS_SET.has(input.kind)) throw new Error(`unknown memory kind: ${input.kind}`);
 
     const hash = memoryHash(text);
-    const existing = this.findByHash(hash);
+    const existing = [...this.state().values()].find(m => m.hash === hash && m.scope.crew === input.scope?.crew);
     if (existing) return { memory: existing, created: false };
 
     const ts = Date.now();

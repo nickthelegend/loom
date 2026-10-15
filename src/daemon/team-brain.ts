@@ -85,7 +85,7 @@ function run(cmd: string, args: string[], cwd: string): Promise<string> {
 }
 
 export function shareable(m: Memory): boolean {
-  return DURABLE.has(m.kind) && m.confidence >= CONFIDENCE_FLOOR && !m.untrusted && !m.private && !m.expiresAt;
+  return DURABLE.has(m.kind) && m.confidence >= CONFIDENCE_FLOOR && !m.untrusted && !m.private && !m.expiresAt && !m.scope.crew;
 }
 
 export class TeamBrain {
