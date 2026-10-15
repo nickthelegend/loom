@@ -165,7 +165,8 @@ export function loadPty(): PtyModule | null {
     });
     ptyProbeClosed = ptyClosed(probe);
     if (isWin) probe.write("exit\r");
-    else probe.kill();
+    // This disposable probe must not depend on a shell honoring SIGHUP.
+    else probe.kill("SIGKILL");
     ptyModule = mod;
   } catch (err) {
     ptyLoadError = (err as Error).message;
@@ -262,6 +263,17 @@ class PtySession implements TerminalSession {
       this.proc.kill();
     } catch {
       /* already gone */
+    }
+    if (!isWin) {
+      // User shells can trap/ignore hang-up. Keep the ordinary SIGHUP first,
+      // then bound shutdown while still waiting for node-pty's real exit.
+      const force = setTimeout(() => {
+        if (!this.exited) {
+          try { this.proc.kill("SIGKILL"); } catch { /* already gone */ }
+        }
+      }, 500);
+      force.unref();
+      void this.closed.then(() => clearTimeout(force));
     }
   }
   scrollback(): string {
