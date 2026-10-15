@@ -5,7 +5,7 @@
  * (AgentStatus.context / .limits) and kept live from the thread's events —
  * the same fold the daemon does in runtime/native-usage.ts.
  */
-import { esc,tokens } from './format.js';
+import { esc,money,tokens } from './format.js';
 
 var PROVIDER = { codex: "codex", "claude-code": "claude" };
 var CLAUDE_WINDOWS = { five_hour: "5-hour", seven_day: "weekly", seven_day_opus: "weekly Opus",
@@ -95,4 +95,23 @@ function usageMeter(agent){
   return h;
 }
 
-export { observeUsage,usageMeter };
+// Pre-flight forecast (core/forecast.ts): what a turn on this agent usually
+// costs and takes, from its own recent turns — before you send one.
+function approxTime(ms){
+  var s = Math.round(ms / 1000);
+  if (s < 60) return s + "s";
+  var m = Math.floor(s / 60), r = s % 60;
+  return m < 10 && r ? m + "m " + r + "s" : m + "m";
+}
+function forecastChip(agent){
+  var f = agent && agent.forecast;
+  if (!f || !f.ms) return "";
+  var lines = ["A turn here usually takes " + approxTime(f.ms.typical) + " (up to " + approxTime(f.ms.high) + ")"];
+  if (f.usd) lines.push("and costs " + money(f.usd.typical) + " (up to " + money(f.usd.high) + ")");
+  lines.push("— from its last " + f.turns + " turns");
+  if (f.budget) lines.push("\nToday: " + money(f.budget.spentUsd) + " of its " + money(f.budget.capUsd) + " budget" + (f.budget.mayCross ? " — one more long turn could cross it" : ""));
+  var txt = "~" + (f.usd ? money(f.usd.typical) + " \u00b7 " : "") + approxTime(f.ms.typical);
+  return '<span class="ctxm fcst' + (f.budget && f.budget.mayCross ? " warn" : "") + '" title="' + esc(lines.join(" ")) + '">' + esc(txt) + "</span>";
+}
+
+export { forecastChip,observeUsage,usageMeter };

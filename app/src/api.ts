@@ -65,6 +65,8 @@ export interface AgentStatus {
   enabled?: boolean;
   /** The permission mode in effect (bypass | auto | ask). Absent on older daemons. */
   permissions?: PermissionMode;
+  /** What a turn here usually costs and takes, from its recent turns (absent until it has a few). */
+  forecast?: import("./forecast-model").Forecast;
 }
 
 export interface RouteState {

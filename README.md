@@ -1354,6 +1354,17 @@ lives in `.loom/config.json` as `budgets.perGoalUsd`, and there's a word in the
 thread at 80% — hearing about a budget for the first time when the goal halts
 is a bad way to learn it exists.
 
+## Before you send: the forecast
+
+The composer shows what a turn on the chosen agent usually costs and takes:
+`~$0.12 · 1m 40s`. The numbers come from that agent's own recent turns in
+this project, not from a price list. "Typical" is the median of its last 30
+turns, and the tooltip shows the 80th percentile, so one marathon turn doesn't
+skew it. An agent on a subscription reports no spend, so it gets a time-only
+forecast. If the agent has a daily budget, the chip turns amber when one more
+long turn could cross it. The same numbers are on every agent in
+`/api/projects/:id` as `forecast`.
+
 ## The prompt queue — line up the next ones
 
 Type while an agent is mid-turn, or while a goal is still running, and the

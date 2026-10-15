@@ -1,4 +1,4 @@
-import { usageMeter } from '../usage.js';
+import { forecastChip,usageMeter } from '../usage.js';
 import { agentGlyph,agentLabel,agentSub,labelOf } from '../agents.js';
 import { api } from '../connection.js';
 import { copyText } from '../clipboard.js';
@@ -984,7 +984,7 @@ export function createComposer(view) {
       if (mp) mp.style.display = state.auto || state.cmode === "orch" ? "none" : "";
       var meter = document.getElementById("cctx");
       if (meter) {
-        var m = cur && !state.auto && state.cmode !== "orch" ? usageMeter(cur) : "";
+        var m = cur && !state.auto && state.cmode !== "orch" ? usageMeter(cur) + forecastChip(cur) : "";
         meter.innerHTML = m; meter.style.display = m ? "" : "none";
       }
       var chip = document.getElementById("cagent");
