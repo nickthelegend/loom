@@ -19,12 +19,17 @@
  * crews across people are later phases (§11).
  */
 
-import { execFile, shellInvocation } from "./process.js";
+import { execFile, shellInvocation, spawnContained } from "./process.js";
+import { interruptProcess } from "../adapters/base.js";
+import { launched } from "../providers/process.js";
+import { createWorktree, predictMerge } from "./worktrees.js";
+import { scopeOf, overlap, type LeaseScope } from "./team-leases.js";
+import { digest } from "./continuity/contracts.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ContinuityEngine } from "./continuity/engine.js";
-import { ContinuityError, NativeDispatchRejected } from "./continuity/contracts.js";
+import { ContinuityError, NativeDispatchRejected, NativeQuiescenceUnknown } from "./continuity/contracts.js";
 import { isNativeKind } from "./continuity/capabilities.js";
 import { promisify } from "node:util";
 import type { Adapter, AgentConfig, ChatInfo, EventKind, LoomEvent } from "../types.js";
@@ -54,9 +59,11 @@ export interface CrewConfig {
   testCommand?: string;
   /** Minutes a teammate may go silent before its turn is interrupted and retried once (default 8). */
   stallMinutes?: number;
+  play?: "ship" | "fanout" | "race";
+  maxParallel?: number;
 }
 
-export type CardStage = "planned" | "building" | "review" | "testing" | "done" | "failed";
+export type CardStage = "planned" | "building" | "review" | "testing" | "ready" | "done" | "failed";
 
 export interface CrewCard {
   /** The board task id. */
@@ -75,6 +82,8 @@ export interface CrewCard {
   /** What the builder is told next (review notes, test failures, your messages). */
   feedback: string[];
   commits: string[];
+  workspace?: { dir: string; branch: string; base: string; integrated?: boolean };
+  hold?: { reason: string; with: string[] };
   summary?: string;
   error?: string;
 }
@@ -82,6 +91,9 @@ export interface CrewCard {
 export type GoalStatus = "planning" | "awaiting_approval" | "running" | "waiting_human" | "completed" | "failed" | "stopped" | "interrupted";
 
 export interface CrewGoal {
+  play?: "ship" | "fanout" | "race";
+  selected?: string;
+  recovery?: string;
   id: string;
   text: string;
   status: GoalStatus;
@@ -200,16 +212,30 @@ const terminal = (s: GoalStatus) => s === "completed" || s === "failed" || s ===
 const TURN_TEXT_CAP = 40_000;
 
 /** Run a crew's test command in the worktree: ok when it exits 0; the output's tail either way. */
-function runTests(command: string, cwd: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
-  return new Promise((resolve) => {
-    const shell = shellInvocation(command);
-    execFile(shell.command, shell.args, { windowsVerbatimArguments: shell.windowsVerbatimArguments, cwd, timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } },
-      (err, stdout, stderr) => {
-        const output = `${stdout}${stderr ? `\n${stderr}` : ""}`.trim().slice(-8000);
-        const timedOut = Boolean(err && (err as NodeJS.ErrnoException & { killed?: boolean }).killed);
-        resolve({ ok: !err, output: timedOut ? `${output}\n(timed out after ${Math.round(timeoutMs / 1000)}s)` : output || (err ? err.message : "") });
-      });
-  });
+async function runTests(command: string, cwd: string, timeoutMs: number, signal: AbortSignal): Promise<{ ok: boolean; output: string }> {
+  const shell = shellInvocation(command);
+  const child = spawnContained(shell.command, shell.args, { windowsVerbatimArguments: shell.windowsVerbatimArguments, cwd,
+    stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } });
+  let output = "", launchError = "", timedOut = false, stop: Promise<void> | undefined;
+  const append = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-8000); };
+  child.stdout?.on("data", append); child.stderr?.on("data", append);
+  child.on("error", error => { launchError = error.message; });
+  const closed = new Promise<number | null>(resolve => child.once("close", resolve));
+  let failStop!: (error: unknown) => void;
+  const stopped = new Promise<never>((_, reject) => { failStop = reject; });
+  void stopped.catch(() => {});
+  const halt = () => { stop ??= interruptProcess(child, true); void stop.catch(failStop); };
+  signal.addEventListener("abort", halt, { once: true });
+  if (signal.aborted) halt();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    timer = setTimeout(() => { timedOut = true; halt(); }, timeoutMs);
+    await launched(child);
+    const code = await Promise.race([closed, stopped]);
+    await (stop ?? interruptProcess(child, true));
+    return { ok: code === 0 && !timedOut && !signal.aborted,
+      output: `${output.trim() || launchError}${timedOut ? `\n(timed out after ${Math.round(timeoutMs / 1000)}s)` : ""}` };
+  } finally { clearTimeout(timer); signal.removeEventListener("abort", halt); await (stop ?? interruptProcess(child, true)); }
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
@@ -239,6 +265,8 @@ export class CrewEngine {
   private closed = false;
   private loops = new Map<string, Promise<void>>();
   private stopping = new Map<string, Promise<void>>();
+  private seatTurns = new Map<string, Promise<unknown>>();
+  private testControllers = new Map<string, Set<AbortController>>();
 
   constructor(private readonly host: CrewHost) {
     // A goal that was mid-turn when Loom stopped is interrupted, not lost:
@@ -268,7 +296,7 @@ export class CrewEngine {
     return { ...c, state: this.state(c), busy: this.running.has(c.id) };
   }
 
-  create(input: { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string }): CrewView {
+  create(input: { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number }): CrewView {
     const roster = this.host.roster();
     const teammates = input.teammates?.length ? input.teammates : teammatesFromTemplate(input.template ?? "ship", roster);
     this.validate(teammates, roster);
@@ -280,6 +308,8 @@ export class CrewEngine {
       id,
       name: name.slice(0, 60),
       teammates,
+      ...(input.play ? { play: this.validPlay(input.play) } : {}),
+      ...(input.maxParallel !== undefined ? { maxParallel: this.validParallel(input.maxParallel) } : {}),
       ...(input.planApproval === false ? { planApproval: false } : {}),
       ...(input.testCommand ? { testCommand: input.testCommand.slice(0, 300) } : {}),
     };
@@ -287,7 +317,7 @@ export class CrewEngine {
     return this.get(id);
   }
 
-  update(id: string, patch: { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null }): CrewView {
+  update(id: string, patch: { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null; play?: CrewConfig["play"]; maxParallel?: number }): CrewView {
     const crews = this.host.crews();
     const cfg = crews.find((c) => c.id === id);
     if (!cfg) throw new Error(`no crew "${id}"`);
@@ -297,6 +327,8 @@ export class CrewEngine {
       cfg.teammates = patch.teammates;
     }
     if (patch.name?.trim()) cfg.name = patch.name.trim().slice(0, 60);
+    if (patch.play !== undefined) cfg.play = this.validPlay(patch.play);
+    if (patch.maxParallel !== undefined) cfg.maxParallel = this.validParallel(patch.maxParallel);
     if (patch.planApproval !== undefined) {
       if (patch.planApproval) delete cfg.planApproval;
       else cfg.planApproval = false;
@@ -345,11 +377,14 @@ export class CrewEngine {
   // ── talking to it ──
 
   /** Give the crew a goal. It plans in the channel and (by default) waits for your OK. */
-  async goal(id: string, text: string): Promise<CrewGoal> {
+  async goal(id: string, text: string, play?: CrewConfig["play"]): Promise<CrewGoal> {
     const cfg = this.config(id);
     const st = this.state(cfg);
+    const selectedPlay = this.validPlay(play ?? cfg.play ?? "ship");
+    if (selectedPlay === "race" && cfg.teammates.filter(t => t.role === "builder").length < 2) throw new Error("a crew race needs at least two builders");
     if (!text.trim()) throw new Error("what should the crew do?");
     if (st.goal && !terminal(st.goal.status)) throw new Error(`${cfg.name} is already on a goal — finish, stop or apply it first`);
+    if (st.goal?.recovery) throw new Error(`crew test shutdown is unverified: ${st.goal.recovery}`);
     await this.stopping.get(id);
     await this.stopAgents(id);
     this.assertNativeIdle(st);
@@ -377,9 +412,9 @@ export class CrewEngine {
       if (fs.existsSync(dir)) {
         if ((await git(["status", "--porcelain"], dir)).trim()) throw new Error("the crew workspace has uncommitted changes; save them before starting another goal");
         await git(["checkout", "-q", "-b", branch, base], dir);
-      } else await git(["worktree", "add", "-q", "-b", branch, dir, base], this.host.projectDir);
+      } else await createWorktree(this.host.projectDir, dir, branch, base);
     });
-    const goal: CrewGoal = { id: gid, text: text.trim().slice(0, 8000), status: "planning", branch, dir, base, baseBranch, cards: [], costUsd: 0, startedAt: Date.now() };
+    const goal: CrewGoal = { id: gid, text: text.trim().slice(0, 8000), status: "planning", branch, dir, base, baseBranch, cards: [], costUsd: 0, startedAt: Date.now(), play: selectedPlay };
     st.goal = goal;
     st.notes = {};
     this.save(st);
@@ -407,10 +442,13 @@ export class CrewEngine {
       return { routed: "goal" };
     }
     this.host.append({ kind: "message", chat: st.channel, payload: { text: body, author: "user", crew: { crewId: cfg.id, goalId: g.id, ...(target ? { to: target } : {}) } } });
+    if (g.play === "race" && g.status === "waiting_human" && g.question?.teammate === "human" && !target) {
+      await this.pick(id, body); return { routed: "answer" };
+    }
     if (g.status === "waiting_human" && g.question && (!target || target === g.question.teammate)) {
       // a teammate whose turn is blocked on its own question: this message is the answer, delivered now
       const seat = cfg.teammates.find((t) => t.id === g.question!.teammate);
-      const key = seat ? `${cfg.id}/${seat.id}/${seat.agent}` : "";
+      const key = seat ? [...this.waiting.keys()].find(k => k.startsWith(`${cfg.id}/${seat.id}/${seat.agent}/`)) ?? "" : "";
       const open = this.waiting.get(key);
       const live = this.agents.get(key);
       if (open && live?.respondToUserInput) {
@@ -463,8 +501,8 @@ export class CrewEngine {
     g.status = "stopped";
     g.finishedAt = Date.now();
     this.save(st);
-    const key = this.currentTurn.get(id);
-    if (key) await this.agents.get(key)?.interrupt().catch(() => {});
+    for (const controller of this.testControllers.get(id) ?? []) controller.abort();
+    await Promise.all([...this.agents].filter(([key]) => key.startsWith(`${id}/`)).map(([, agent]) => agent.interrupt().catch(() => {})));
     // a commit already under way lands before Stop returns, so nothing writes to the branch after it
     await this.loops.get(id);
     await this.gitChain;
@@ -480,6 +518,7 @@ export class CrewEngine {
     const g = st.goal;
     if (!g || !["interrupted", "stopped", "failed"].includes(g.status)) throw new Error(`${cfg.name} has nothing to resume`);
     if (!fs.existsSync(g.dir)) throw new Error("the goal's worktree is gone — start the goal again");
+    if (g.recovery) throw new Error(`crew test shutdown is unverified: ${g.recovery}`);
     this.assertNativeIdle(st);
     g.status = g.cards.length ? "running" : "planning";
     g.error = undefined;
@@ -498,6 +537,7 @@ export class CrewEngine {
     const g = st.goal;
     if (!g || g.status !== "completed") throw new Error(`${cfg.name} has no finished goal to apply`);
     if (g.applied) throw new Error(`already applied to ${g.applied.into}`);
+    if (g.recovery) throw new Error(`crew test shutdown is unverified: ${g.recovery}`);
     await this.stopping.get(id);
     this.assertNativeIdle(st);
     const into = (await git(["rev-parse", "--abbrev-ref", "HEAD"], this.host.projectDir)).trim();
@@ -519,6 +559,7 @@ export class CrewEngine {
 
   async shutdown(): Promise<void> {
     this.closed = true;
+    for (const set of this.testControllers.values()) for (const controller of set) controller.abort();
     for (const a of this.agents.values()) {
       await a.interrupt().catch(() => {});
       await Promise.resolve(a.stop()).catch(() => {});
@@ -557,6 +598,7 @@ export class CrewEngine {
         continue;
       }
       if (g.status !== "running") return;
+      if (g.play && g.play !== "ship") { await this.parallel(cfg, st, g); continue; }
       const done = new Set(g.cards.filter((c) => c.stage === "done").map((c) => c.id));
       const next = g.cards.find((c) => c.stage !== "done" && c.stage !== "failed" && c.blockedBy.every((b) => done.has(b)));
       if (!next) {
@@ -569,6 +611,14 @@ export class CrewEngine {
   }
 
   private async plan(cfg: CrewConfig, st: CrewState, g: CrewGoal): Promise<void> {
+    if (g.play === "race") {
+      const builders = cfg.teammates.filter(t => t.role === "builder");
+      if (builders.length < 2) throw new Error("a crew race needs at least two builders");
+      this.addCards(cfg, st, g, builders.map(t => ({ title: `${g.text.split("\n")[0]!.slice(0, 90)} (${t.id})`, detail: g.text, assignee: t.id, touches: ["**"] })));
+      g.status = cfg.planApproval === false ? "running" : "awaiting_approval";
+      this.save(st); this.phase(cfg, st, "planned", { play: "race", awaitingApproval: cfg.planApproval !== false });
+      return;
+    }
     const lead = this.lead(cfg);
     if (!lead) {
       // No Lead: the goal is the one card, for the first builder.
@@ -602,6 +652,124 @@ export class CrewEngine {
     g.status = cfg.planApproval === false ? "running" : "awaiting_approval";
     this.save(st);
     this.phase(cfg, st, "planned", { cards: g.cards.map((c) => ({ id: c.id, title: c.title, role: c.role })), awaitingApproval: g.status === "awaiting_approval" });
+  }
+
+  private validPlay(value: unknown): NonNullable<CrewConfig["play"]> {
+    if (value !== "ship" && value !== "fanout" && value !== "race") throw new Error("crew play must be ship, fanout or race");
+    return value;
+  }
+  private validParallel(value: number): number {
+    if (!Number.isInteger(value) || value < 1 || value > 4) throw new Error("crew maxParallel must be an integer from 1 to 4");
+    return value;
+  }
+
+  /** A bounded wave owns its declared file scopes through review and test. */
+  private async parallel(cfg: CrewConfig, st: CrewState, g: CrewGoal): Promise<void> {
+    for (const card of g.cards.filter(c => c.stage === "ready")) {
+      if (g.play !== "race") await this.integrateCard(cfg, st, g, card);
+    }
+    if (g.status !== "running" || this.closed) return;
+    const finished = g.cards.every(c => c.stage === "done" || (g.play === "race" && c.stage === "ready"));
+    if (finished) {
+      if (g.play === "race" && !g.selected) {
+        g.status = "waiting_human";
+        g.question = { teammate: "human", text: "Compare the race entrants and pick a card or builder to integrate.", step: "card" };
+        this.save(st); this.phase(cfg, st, "race_ready", { candidates: g.cards.map(c => ({ id: c.id, builder: c.builder, branch: c.workspace?.branch })) });
+      } else await this.wrapUp(cfg, st, g);
+      return;
+    }
+    const tracked = (await git(["ls-files"], g.dir)).split("\n").filter(Boolean);
+    const done = new Set(g.cards.filter(c => c.stage === "done").map(c => c.id));
+    const used = new Set<string>(), scopes: Array<{ card: CrewCard; scope: LeaseScope }> = [], batch: CrewCard[] = [];
+    for (const card of g.cards) {
+      if (["done", "ready", "failed"].includes(card.stage) || !card.blockedBy.every(id => done.has(id))) continue;
+      const builder = this.builderFor(cfg, g, card);
+      const scope = scopeOf(card.touches?.length ? card.touches : ["**"], tracked);
+      const conflicts = g.play === "race" ? [] : scopes.filter(s => overlap(s.scope, scope).length).map(s => s.card.id);
+      const reason = used.has(builder.id) ? `${builder.id} is already working` : conflicts.length ? "overlapping card leases" : "";
+      if (reason) {
+        if (card.hold?.reason !== reason) this.phase(cfg, st, "held", { card: card.id, reason, with: conflicts });
+        card.hold = { reason, with: conflicts }; continue;
+      }
+      if (batch.length >= (cfg.maxParallel ?? 3)) continue;
+      delete card.hold; card.builder = builder.id;
+      await this.cardWorkspace(cfg, st, g, card);
+      used.add(builder.id); scopes.push({ card, scope }); batch.push(card);
+    }
+    this.save(st);
+    if (!batch.length) {
+      this.finish(cfg, st, "failed", g.cards.some(c => c.stage === "failed") ? "a card failed; its dependants remain blocked" : "no card can be admitted; inspect dependencies and leases");
+      return;
+    }
+    await Promise.all(batch.map(async card => {
+      try { await this.work(cfg, st, g, card); }
+      catch (error) { if (!terminal(g.status) && !this.closed) this.giveUp(cfg, st, card, (error as Error).message); }
+    }));
+    if (g.status !== "running" || this.closed) return;
+    if (g.play !== "race") for (const card of batch) if (card.stage === "ready") await this.integrateCard(cfg, st, g, card);
+  }
+
+  private async cardWorkspace(cfg: CrewConfig, st: CrewState, g: CrewGoal, card: CrewCard): Promise<void> {
+    if (card.workspace) {
+      if (!fs.existsSync(card.workspace.dir)) throw new Error(`worktree for ${card.title} is missing`);
+      return;
+    }
+    const base = (await git(["rev-parse", "HEAD"], g.dir)).trim();
+    const branch = `${g.branch}-card-${card.id}`;
+    const dir = path.join(loomHome(), "crews", this.host.projectId, cfg.id,
+      this.host.native?.() ? `seat-${card.builder}` : `cards-${g.id}`, this.host.native?.() ? "workspace" : card.id);
+    fs.mkdirSync(path.dirname(dir), { recursive: true });
+    await this.serial(async () => {
+      if (fs.existsSync(dir)) {
+        if ((await git(["status", "--porcelain"], dir)).trim()) throw new Error(`${card.builder}'s workspace has uncommitted changes`);
+        await git(["checkout", "-q", "-b", branch, base], dir);
+      } else await createWorktree(this.host.projectDir, dir, branch, base);
+    });
+    card.workspace = { dir, branch, base }; this.save(st);
+  }
+
+  private async integrateCard(cfg: CrewConfig, st: CrewState, g: CrewGoal, card: CrewCard): Promise<void> {
+    const workspace = card.workspace;
+    if (!workspace || workspace.integrated) { card.stage = "done"; return; }
+    await this.serial(async () => {
+      if (terminal(g.status) || this.closed) return;
+      const prediction = await predictMerge(g.dir, "HEAD", workspace.branch);
+      if (!prediction.clean) {
+        if (card.rounds >= (cfg.maxRounds ?? 2)) { this.giveUp(cfg, st, card, "integration conflicts remain after the repair budget"); return; }
+        // Keep the integration tree clean. Put the conflict into its owner's
+        // checkout, where that same builder can resolve it in the next turn.
+        try { await git(["-c", "user.name=Loom Crew", "-c", "user.email=crew@loom.local", "merge", "--no-commit", "--no-ff", g.branch], workspace.dir); }
+        catch (error) {
+          if (!(await git(["rev-parse", "--verify", "MERGE_HEAD"], workspace.dir).catch(() => "")).trim()) throw error;
+        }
+        card.rounds++; card.stage = "building";
+        card.feedback.push(`Integration found a conflict with other completed cards. Resolve the merge in your checkout, preserve both cards, and report for review/test again.\n${prediction.detail}`);
+        this.phase(cfg, st, "integration_conflict", { card: card.id, teammate: card.builder, detail: prediction.detail });
+        this.save(st); return;
+      }
+      try {
+        await git(["-c", "user.name=Loom Crew", "-c", "user.email=crew@loom.local", "merge", "--no-ff", "--no-edit", "-m", `crew ${cfg.id}: ${card.title}`, workspace.branch], g.dir);
+      } catch (error) { await git(["merge", "--abort"], g.dir).catch(() => {}); throw error; }
+      workspace.integrated = true; card.stage = "done"; delete card.hold;
+      this.host.updateTask(card.id, { column: "ready", stage: card.stage });
+      this.save(st); this.phase(cfg, st, "integrated", { card: card.id, teammate: card.builder, branch: workspace.branch });
+    });
+  }
+
+  async pick(id: string, choice: string): Promise<CrewGoal> {
+    const cfg = this.config(id), st = this.state(cfg), g = st.goal;
+    if (!g || g.play !== "race" || g.status !== "waiting_human" || g.question?.teammate !== "human" || g.selected) throw new Error("this crew has no race waiting for your choice");
+    await this.loops.get(id);
+    const card = g.cards.find(c => c.id === choice || c.builder === choice);
+    if (!card || card.stage !== "ready") throw new Error("pick a reviewed and tested race entrant");
+    this.assertNativeIdle(st);
+    g.status = "running"; delete g.question;
+    await this.integrateCard(cfg, st, g, card);
+    if ((card as CrewCard).stage !== "done") { g.status = "waiting_human"; throw new Error("the chosen entrant needs conflict repair"); }
+    g.selected = card.id; g.summary = `Selected ${card.builder}: ${card.summary ?? card.title}`;
+    for (const other of g.cards) if (other !== card) { other.stage = "done"; this.host.updateTask(other.id, { column: "done", stage: "not-selected" }); }
+    this.save(st); this.phase(cfg, st, "race_selected", { card: card.id, teammate: card.builder });
+    this.finish(cfg, st, "completed"); return g;
   }
 
   private addCards(cfg: CrewConfig, st: CrewState, g: CrewGoal, planned: PlannedCard[]): void {
@@ -670,6 +838,7 @@ export class CrewEngine {
       // a review that errored is no review — never an approval
       if (reply.error) return this.giveUp(cfg, st, card, `review didn't happen: ${reply.error}`);
       const review = reply.actions.find((a): a is Extract<CrewAction, { type: "review" }> => a.type === "review");
+      if (!review) return this.giveUp(cfg, st, card, "reviewer returned no explicit review verdict");
       const verdict = review?.verdict ?? "approve";
       this.phase(cfg, st, "reviewed", { card: card.id, title: card.title, teammate: reviewer.id, verdict, notes: review?.notes ?? "" });
       if (verdict === "changes") {
@@ -694,7 +863,12 @@ export class CrewEngine {
         // the tests start — and the exit code decides.
         g.current = { teammate: "loom", card: card.id, step: "testing" };
         this.save(st);
-        const out = await runTests(cfg.testCommand, g.dir, this.host.testTimeoutMs ?? 10 * 60_000);
+        const controller = new AbortController(), controllers = this.testControllers.get(cfg.id) ?? new Set<AbortController>();
+        controllers.add(controller); this.testControllers.set(cfg.id, controllers);
+        let out;
+        try { out = await runTests(cfg.testCommand, card.workspace?.dir ?? g.dir, this.host.testTimeoutMs ?? 10 * 60_000, controller.signal); }
+        catch (error) { if (error instanceof NativeQuiescenceUnknown) { g.recovery = error.message; this.save(st); } throw error; }
+        finally { controllers.delete(controller); if (!controllers.size) this.testControllers.delete(cfg.id); }
         if (terminal(g.status) || this.closed || g.status !== "running") return;
         result = out.ok ? "pass" : "fail";
         log = out.output;
@@ -710,6 +884,7 @@ export class CrewEngine {
         if (reply === null || reply.asked || g.status !== "running") return;
         if (reply.error) return this.giveUp(cfg, st, card, `tests didn't run: ${reply.error}`);
         const test = reply.actions.find((a): a is Extract<CrewAction, { type: "test" }> => a.type === "test");
+        if (!test) return this.giveUp(cfg, st, card, "tester returned no explicit test result");
         result = test?.result ?? "pass";
         log = test?.log ?? "";
         who = tester.id;
@@ -729,7 +904,8 @@ export class CrewEngine {
       card.stage = "done";
     }
     if (card.stage === "done") {
-      this.host.updateTask(card.id, { column: "ready", stage: "done" });
+      if (g.play && g.play !== "ship") card.stage = "ready";
+      this.host.updateTask(card.id, { column: "ready", stage: card.stage });
       this.save(st);
       this.phase(cfg, st, "card_done", { card: card.id, title: card.title, teammate: card.builder });
     }
@@ -779,11 +955,21 @@ export class CrewEngine {
    * Its role, charter, crewmates, protocol and any notes ride in the briefing.
    * Null when the goal stopped meanwhile.
    */
-  private async turn(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, prompt: string, step: "plan" | "card", card?: CrewCard, retried = false):
+  private turn(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, prompt: string, step: "plan" | "card", card?: CrewCard):
+    Promise<{ text: string; actions: CrewAction[]; asked: boolean; error?: string } | null> {
+    const lane = `${cfg.id}/${tm.id}`, previous = this.seatTurns.get(lane) ?? Promise.resolve();
+    const run = previous.catch(() => {}).then(() => this.runTurn(cfg, st, g, tm, prompt, step, card));
+    this.seatTurns.set(lane, run);
+    void run.finally(() => { if (this.seatTurns.get(lane) === run) this.seatTurns.delete(lane); }).catch(() => {});
+    return run;
+  }
+
+  private async runTurn(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, prompt: string, step: "plan" | "card", card?: CrewCard, retried = false):
     Promise<{ text: string; actions: CrewAction[]; asked: boolean; error?: string } | null> {
     // a goal stopped (or an engine closed) between one step of a card and the next starts no new turn
     if (terminal(g.status) || this.closed) return null;
-    const key = `${cfg.id}/${tm.id}/${tm.agent}`;
+    const dir = card?.workspace?.dir ?? g.dir;
+    const key = `${cfg.id}/${tm.id}/${tm.agent}/${digest(dir).slice(0, 16)}`;
     const rosterCfg = this.host.roster().find((a) => a.id === tm.agent);
     if (!rosterCfg) throw new Error(`teammate ${tm.id}'s agent "${tm.agent}" is no longer on the roster`);
     this.host.gate(tm.agent);
@@ -793,7 +979,8 @@ export class CrewEngine {
       // Its own instance and state slot, so two teammates on one agent kind keep separate sessions.
       // The seat *and* the agent in it: swap a teammate's agent and the old one's
       // saved session (an opencode ses_…, say) never reaches the new one.
-      agent = this.host.makeAgent({ ...rosterCfg, id: `crew-${cfg.id}-${tm.id}.${rosterCfg.id}`.slice(0, 80), role: tm.role }, g.dir);
+      const suffix = g.play && g.play !== "ship" ? `.${digest(dir).slice(0, 8)}` : "";
+      agent = this.host.makeAgent({ ...rosterCfg, id: `crew-${cfg.id}-${tm.id}.${rosterCfg.id}${suffix}`.slice(0, 100), role: tm.role }, dir);
       this.agents.set(key, agent);
       this.wire(cfg, st, g, agent, tm, key);
       await agent.start();
@@ -804,7 +991,7 @@ export class CrewEngine {
     const notes = (st.notes[tm.id] ?? []).splice(0);
     this.save(st);
     const briefing = [
-      await this.briefing(cfg, tm, g, fresh),
+      await this.briefing(cfg, tm, g, fresh, card),
       notes.length ? `Messages for you:\n${notes.map((n) => `- ${n}`).join("\n")}` : "",
     ].filter(Boolean).join("\n\n");
     this.host.append({ kind: "message", chat, payload: { text: prompt, author: "loom", crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id, ...(card ? { card: card.id } : {}) } } });
@@ -839,14 +1026,14 @@ export class CrewEngine {
         const options = this.host.nativeOptions?.(rosterCfg) ?? rosterCfg.options ?? {};
         if (Array.isArray(options.extraArgs) && options.extraArgs.length)
           throw new ContinuityError("unsupported", "arbitrary CLI arguments have unverified native session semantics; remove extraArgs");
-        let prepared = await brain.prepare(request, rosterCfg.kind, g.dir, options, briefing);
+        let prepared = await brain.prepare(request, rosterCfg.kind, dir, options, briefing);
         let continuity;
         for (let attempt = 0; ; attempt++) {
           if (terminal(g.status) || this.closed) return null;
           try { continuity = await brain.submit(prepared); break; }
           catch (error) {
             if (!(error instanceof ContinuityError) || error.code !== "stale" || attempt >= 2) throw error;
-            prepared = await brain.prepare(request, rosterCfg.kind, g.dir, options, briefing);
+            prepared = await brain.prepare(request, rosterCfg.kind, dir, options, briefing);
           }
         }
         nativeRun = continuity.runId;
@@ -870,7 +1057,7 @@ export class CrewEngine {
       if (!retried) {
         this.phase(cfg, st, "stalled", { teammate: tm.id, ...(card ? { card: card.id, title: card.title } : {}), retrying: true });
         (st.notes[tm.id] ??= []).push("Your last turn produced nothing and was stopped. Please try again.");
-        return this.turn(cfg, st, g, tm, prompt, step, card, true);
+        return this.runTurn(cfg, st, g, tm, prompt, step, card, true);
       }
       this.phase(cfg, st, "stalled", { teammate: tm.id, ...(card ? { card: card.id, title: card.title } : {}), retrying: false });
       this.turnError.set(key, `${tm.id} went silent twice (no output for ${stallMs < 60_000 ? `${Math.round(stallMs / 1000)}s` : `${mins} min`}) — its agent may be down or rate-limited`);
@@ -880,7 +1067,7 @@ export class CrewEngine {
     // A provider hiccup (a dropped stream, a 5xx) shouldn't sink a card: one more try.
     if (error && !stalled && !retried && !nativeRun) {
       this.phase(cfg, st, "retrying", { teammate: tm.id, error: error.slice(0, 300), ...(card ? { card: card.id, title: card.title } : {}) });
-      return this.turn(cfg, st, g, tm, prompt, step, card, true);
+      return this.runTurn(cfg, st, g, tm, prompt, step, card, true);
     }
     const parsed = parseCrewReply(text, tm.role);
     for (const a of parsed.allowed) if (a.type === "post") this.post(cfg, st, g, tm, a.text, a.to);
@@ -949,13 +1136,13 @@ export class CrewEngine {
     });
   }
 
-  private async briefing(cfg: CrewConfig, tm: CrewTeammate, g: CrewGoal, fresh: boolean): Promise<string> {
+  private async briefing(cfg: CrewConfig, tm: CrewTeammate, g: CrewGoal, fresh: boolean, card?: CrewCard): Promise<string> {
     const lines = [
       `You are ${tm.id}, the ${tm.role} on ${cfg.name} — a crew of agents working in the project "${this.host.projectName}".`,
       `The crew: ${cfg.teammates.map((t) => `${t.id} (${t.role})`).join(", ")}.`,
       ROLE_GUIDE[tm.role],
       tm.charter ? `Your standing instructions: ${tm.charter}` : "",
-      `You work in a worktree on branch ${g.branch}. Loom commits for you after your turn; don't commit or push yourself.`,
+      `You work in ${card?.workspace?.dir ?? g.dir} on branch ${card?.workspace?.branch ?? g.branch}. Loom commits for you after your turn; don't commit or push yourself.`,
       `Post to a crewmate with a post action ("to": "@id"); it reaches them on their next turn. Ask the person you work for with an ask action when you're truly blocked.`,
       protocolFor(tm.role),
     ];
@@ -980,13 +1167,22 @@ export class CrewEngine {
   }
 
   private async commit(cfg: CrewConfig, g: CrewGoal, card: CrewCard, tm: CrewTeammate, what = ""): Promise<string | null> {
+    const dir = card.workspace?.dir ?? g.dir;
     return this.serial(async () => {
       // A turn that finished as the goal was stopped, or as this engine closed
       // (a new runtime may already be working the same worktree), commits nothing.
       if (terminal(g.status) || this.closed) return null;
-      await git(["add", "-A"], g.dir);
-      await git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".loom"], g.dir).catch(() => {});
-      if (!(await git(["diff", "--cached", "--name-only"], g.dir)).trim()) return null;
+      const merging = Boolean((await git(["rev-parse", "--verify", "MERGE_HEAD"], dir).catch(() => "")).trim());
+      if (merging) {
+        const unmerged = (await git(["diff", "--name-only", "--diff-filter=U"], dir)).split("\n").filter(Boolean);
+        for (const file of unmerged) {
+          const content = fs.readFileSync(path.join(dir, file), "utf8");
+          if (/^(?:<{7}|={7}|>{7})(?: |$)/m.test(content)) throw new Error(`merge conflict markers remain in ${file}; the owning builder must resolve them`);
+        }
+      }
+      await git(["add", "-A"], dir);
+      await git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".loom"], dir).catch(() => {});
+      if (!(await git(["diff", "--cached", "--name-only"], dir)).trim() && !merging) return null;
       const member = this.host.member?.() ?? null;
       const kind = this.host.roster().find((a) => a.id === tm.agent)?.kind ?? tm.agent;
       const message = [
@@ -1002,8 +1198,8 @@ export class CrewEngine {
         `Loom-Teammate: ${tm.id}`,
         `Loom-Agent: ${kind}`,
       ].join("\n");
-      await git(["-c", "user.name=Loom Crew", "-c", "user.email=crew@loom.local", "commit", "-q", "--no-verify", "-m", message], g.dir);
-      return (await git(["rev-parse", "HEAD"], g.dir)).trim();
+      await git(["-c", "user.name=Loom Crew", "-c", "user.email=crew@loom.local", "commit", "-q", "--no-verify", "-m", message], dir);
+      return (await git(["rev-parse", "HEAD"], dir)).trim();
     });
   }
 
@@ -1011,7 +1207,7 @@ export class CrewEngine {
   private async cardDiff(g: CrewGoal, card: CrewCard): Promise<string> {
     if (!card.commits.length) return "";
     const from = `${card.commits[0]}^`;
-    const diff = await git(["diff", from, "HEAD"], g.dir).catch(() => "");
+    const diff = await git(["diff", from, card.workspace?.branch ?? "HEAD"], card.workspace?.dir ?? g.dir).catch(() => "");
     return diff.length > 30_000 ? `${diff.slice(0, 30_000)}\n… (truncated)` : diff;
   }
 
@@ -1080,15 +1276,22 @@ export class CrewEngine {
   }
 
   private async dropWorktree(g: CrewGoal): Promise<void> {
-    if (!fs.existsSync(g.dir)) return;
-    await this.serial(() => git(["worktree", "remove", "--force", g.dir], this.host.projectDir));
+    const dirs = new Set([g.dir, ...g.cards.flatMap(c => c.workspace ? [c.workspace.dir] : [])]);
+    for (const dir of dirs) if (fs.existsSync(dir))
+      await this.serial(() => git(["worktree", "remove", "--force", dir], this.host.projectDir));
   }
 
   private async stopAgents(crewId: string): Promise<void> {
+    const errors: unknown[] = [];
     for (const [key, a] of [...this.agents]) {
       if (!key.startsWith(`${crewId}/`)) continue;
-      this.agents.delete(key);
-      await Promise.resolve(a.stop()).catch(() => {});
+      try { await a.stop(); this.agents.delete(key); }
+      catch (error) { errors.push(error); }
+    }
+    if (errors.length) {
+      const st = this.states.get(crewId);
+      if (st?.goal) { st.goal.recovery = `teammate shutdown is unverified: ${(errors[0] as Error).message}`; this.save(st); }
+      throw errors[0];
     }
   }
 

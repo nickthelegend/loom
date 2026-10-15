@@ -33,7 +33,8 @@ on this host before admitting a native turn; a failed probe leaves it unavailabl
 The native binding and delta context survive a daemon restart. Ship crews also
 use native continuity when this mode is enabled; each teammate must use Codex,
 Claude Code or OpenCode. Each seat keeps its own binding and a stable crew
-checkout across goals. Parallel Orchestra still uses ordinary project mode.
+checkout across goals. Native crew Fan-out admits parallel builders only in
+separate workspaces. Parallel Orchestra still uses ordinary project mode.
 
 Loom uses Koffi's packaged native binding; no local C++ toolchain is required on
 supported Windows architectures. A Node bootstrap joins a kill-on-close Job Object
