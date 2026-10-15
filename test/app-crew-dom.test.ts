@@ -357,11 +357,12 @@ describe("web app · crew tab", () => {
 
   it("shows every parallel seat and submits owner approval and runner controls without transcripts", async () => {
     const m = mount(), original = m.window.fetch, calls: Array<{ action: string; body: any }> = [];
+    let requestState = "pending";
     m.window.fetch = (async (input: string, init?: RequestInit) => {
       const route = new URL(String(input), baseUrl).pathname;
-      if (route === "/api/team") return new Response(JSON.stringify({ signedIn: true, github: "alice", teams: [{ crewRequests: [{ id: "request-1", from: "bob", owner: "alice", crew: "fixers", teammate: "tester", text: "Inspect tests", state: "pending" }] }] }));
+      if (route === "/api/team") return new Response(JSON.stringify({ signedIn: true, github: "alice", teams: [{ crewRequests: [{ id: "request-1", from: "bob", owner: "alice", crew: "fixers", teammate: "tester", text: "Inspect tests", state: requestState }] }] }));
       if (route.endsWith("/team/runners")) return new Response(JSON.stringify({ jobs: [{ id: "job-1", mine: true, state: "claimed", progress: { crew: { id: "remote", name: "Remote crew" }, status: "awaiting_approval", goal: "Remote goal" } }] }));
-      if (route.startsWith("/api/team/crew-requests/")) { calls.push({ action: route.split("/").at(-1)!, body: JSON.parse(String(init?.body)) }); return new Response(JSON.stringify({ result: {} })); }
+      if (route.startsWith("/api/team/crew-requests/")) { calls.push({ action: route.split("/").at(-1)!, body: JSON.parse(String(init?.body)) }); requestState = "accepted"; return new Response(JSON.stringify({ result: { delivery: "queued" } })); }
       const response = await original(input, init);
       if (route.endsWith("/crews") && !init?.method) {
         const body = await response.json();
@@ -377,6 +378,8 @@ describe("web app · crew tab", () => {
     click($(m, "[data-crew-team='answer'][data-accept='true']"));
     await waitUntil(() => calls.some(call => call.action === "answer"));
     expect(calls.find(call => call.action === "answer")!.body).toMatchObject({ requestId: "request-1", accept: true, projectId });
+    await waitUntil(() => text(m, "[data-crew-team='answer']") === "Check delivery" && !($(m, "[data-crew-team='answer']") as HTMLButtonElement)?.disabled);
+    click($(m, "[data-crew-team='answer']")); await waitUntil(() => calls.filter(call => call.action === "answer").length === 2);
     await waitUntil(() => !($(m, "[data-crew-team='runner-control']") as HTMLButtonElement)?.disabled);
     click($(m, "[data-crew-team='runner-control'][data-control='approve']"));
     await waitUntil(() => calls.some(call => call.action === "runner-control"));

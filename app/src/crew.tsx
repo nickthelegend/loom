@@ -554,7 +554,7 @@ function CrewTeamPanel(props: { creds: Creds; projectId: string; crew: Crew; goa
   useEffect(() => { if (!expanded) return; const timer = setInterval(() => void load(), 8000); return () => clearInterval(timer); }, [expanded, load]);
   const action = async (kind: "send" | "answer" | "runner-start" | "runner-control", body: Record<string, unknown>) => {
     if (busy) return; setBusy(true); setNotice("");
-    try { await crewTeamAction(props.creds, props.projectId, kind, body); setNotice("Saved"); await load(); }
+    try { const out = await crewTeamAction(props.creds, props.projectId, kind, body); setNotice(out.result.delivery ? `Request delivery: ${out.result.delivery}` : "Saved"); await load(); }
     catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };
@@ -574,6 +574,7 @@ function CrewTeamPanel(props: { creds: Creds; projectId: string; crew: Crew; goa
         {request.owner.toLowerCase() === team.github?.toLowerCase() && request.state === "pending" ? <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
           <Btn label="Accept read-only request" disabled={busy} onPress={() => void action("answer", { requestId: request.id, accept: true })} /><Btn label="Decline" disabled={busy} onPress={() => void action("answer", { requestId: request.id, accept: false })} />
         </View> : null}
+        {request.owner.toLowerCase() === team.github?.toLowerCase() && request.state === "accepted" ? <Btn label="Check delivery" disabled={busy} onPress={() => void action("answer", { requestId: request.id, accept: true })} /> : null}
       </View>)}
       <Btn label="Start composer goal on my runner" disabled={busy || !props.goalText.trim()} onPress={() => void action("runner-start", { crew: props.crew.id, text: props.goalText })} />
       {(runners?.jobs ?? []).filter(job => job.progress?.crew).map(job => <View key={job.id} style={{ gap: 8 }}>

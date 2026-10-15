@@ -6,6 +6,7 @@ import { AdapterBase } from "../src/adapters/base.js";
 import { registerAgentKind } from "../src/adapters/index.js";
 import { writeProjectConfig } from "../src/core/registry.js";
 import { parseCrewPolicy, stricterCrewPolicy, capCrewPermission } from "../src/core/crew-policy.js";
+import type { CrewHost } from "../src/core/crew.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
 import { TeamLink } from "../src/daemon/team.js";
 import { startHubServer } from "../src/hub/server.js";
@@ -88,6 +89,24 @@ describe("crews across two real team members", () => {
     await waitUntil(() => b.rt.crews.get(b.crew).state.inbox?.some(r => r.id === sent.requestId && r.status === "delivered"));
     await b.link.answerCrewRequest(b.rt, sent.requestId, true); expect(requestTurns).toBe(1);
     await waitUntil(() => !b.rt.crews.get(b.crew).busy);
+  });
+  it("recovers a queued owner-approved request after a budget blocks admission without replaying a delivered turn", async () => {
+    const a = members.alice!, b = members.bob!;
+    await waitUntil(() => !b.rt.crews.get(b.crew).busy);
+    const host = (b.rt.crews as unknown as { host: CrewHost }).host;
+    const admission = vi.spyOn(host.coordinator!()!, "canStart").mockReturnValue("daily budget reached");
+    const before = requestTurns;
+    const sent = await a.link.requestCrew(a.rt, { owner: "bob", crew: b.crew, teammate: "reviewer", text: "Inspect the unchanged checkout." });
+    try {
+      await expect(b.link.answerCrewRequest(b.rt, sent.requestId, true)).rejects.toThrow(/daily budget/);
+      expect(requestTurns).toBe(before);
+      expect(b.rt.crews.get(b.crew).state.inbox!.find(r => r.id === sent.requestId)!.status).toBe("queued");
+      admission.mockReturnValue(null);
+      await b.link.answerCrewRequest(b.rt, sent.requestId, true);
+      await waitUntil(() => b.rt.crews.get(b.crew).state.inbox!.find(r => r.id === sent.requestId)!.status === "delivered");
+      await b.link.answerCrewRequest(b.rt, sent.requestId, true); expect(requestTurns).toBe(before + 1);
+      await waitUntil(() => !b.rt.crews.get(b.crew).busy);
+    } finally { admission.mockRestore(); }
   });
   it("tightens permission and budget policy instead of widening reviewed limits", () => {
     const reviewed = parseCrewPolicy({ maxTeammates: 4, budgets: { perCrewDailyUsd: 20 }, roles: { builder: { permissions: "auto" } } });

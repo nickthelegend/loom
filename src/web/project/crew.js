@@ -244,7 +244,8 @@ export function createCrew(view) {
         '<label>Owner <input class="input" id="crew-request-owner" placeholder="GitHub login"></label><label>Crew <input class="input" id="crew-request-crew" placeholder="ship"></label><label>Seat <input class="input" id="crew-request-seat" placeholder="reviewer"></label>' +
         '<label>Read-only request <textarea class="input" id="crew-request-text" maxlength="4000"></textarea></label><button class="btn sm outline" data-crew-team="send">Ask owner</button></div>' +
         requests.map(function(r){ return '<div class="cwtestrow"><span>@' + esc(r.from) + ' → @' + esc(r.owner) + '/' + esc(r.crew) + '/' + esc(r.teammate) + ': ' + esc(r.text) + ' · ' + esc(r.state) + '</span>' +
-          (r.owner.toLowerCase() === crew.team.github.toLowerCase() && r.state === "pending" ? '<button class="btn sm primary" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="true">Accept read-only request</button><button class="btn sm ghost" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="false">Decline</button>' : '') + '</div>'; }).join('') +
+          (r.owner.toLowerCase() === crew.team.github.toLowerCase() && r.state === "pending" ? '<button class="btn sm primary" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="true">Accept read-only request</button><button class="btn sm ghost" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="false">Decline</button>' : '') +
+          (r.owner.toLowerCase() === crew.team.github.toLowerCase() && r.state === "accepted" ? '<button class="btn sm outline" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="true">Check delivery</button>' : '') + '</div>'; }).join('') +
         '<button class="btn sm outline" data-crew-team="runner-start">Start composer goal on my runner</button>' +
         jobs.map(function(job){ var p = job.progress; return '<div class="cwtestrow"><span>' + esc(p.crew.name) + ' · ' + esc(p.goal) + ' · ' + esc(p.status) + '</span>' +
           (p.crew.pr ? '<a class="btn sm outline" href="' + esc(p.crew.pr) + '" target="_blank" rel="noopener">Review PR</a>' : '') +
@@ -259,7 +260,7 @@ export function createCrew(view) {
       if (action === "runner-start") Object.assign(body, { crew: c.id, text: value('crewsaytext') });
       if (action === "runner-control") Object.assign(body, { jobId: button.getAttribute('data-job'), action: button.getAttribute('data-control') });
       crew.busy = action; drawCrew();
-      api('/api/team/crew-requests/' + action, { method: 'POST', body: JSON.stringify(body) }).then(function(){ toast('Saved'); return loadCrews(); }).catch(function(error){ toast(error.message); }).finally(function(){ crew.busy = ''; drawCrew(); });
+      api('/api/team/crew-requests/' + action, { method: 'POST', body: JSON.stringify(body) }).then(function(result){ toast(result.result && result.result.delivery ? 'Request delivery: ' + result.result.delivery : 'Saved'); return loadCrews(); }).catch(function(error){ toast(error.message); }).finally(function(){ crew.busy = ''; drawCrew(); });
     }
 
     function progress(g){

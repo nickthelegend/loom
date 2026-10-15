@@ -53,3 +53,10 @@ before its next turn; native compatibility changes receive a fresh binding.
 The `hub-sql` CI job runs all migrations and authorization checks in a disposable
 PostgreSQL cluster and fails if tools are missing. It never connects to hosted
 Supabase. Migration 0010 and the other SQL checks passed there (26 checks).
+
+
+If an owner-approved request stays queued because a budget or startup check
+blocked admission, Check delivery retries that known unstarted item after the
+block is resolved. A running, delivered or failed request is never executed
+again by this button. An interrupted delivery needs inspection and a new
+explicit request; restarting the daemon does not silently replay it.
