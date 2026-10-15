@@ -90,8 +90,10 @@ describe.each([false, true])("OpenCode native continuity (npm API: %s)", modern 
 
   it("switches the session's model in place rather than starting over", async () => {
     const { dir, log, brain, server } = await setup();
-    await turn(brain, log, dir, server, "first", { model: "opencode/big-pickle" });
-    await turn(brain, log, dir, server, "second", { model: "opencode/other-free" });
+    const first = await turn(brain, log, dir, server, "first", { model: "opencode/big-pickle" });
+    expect(first.error, String(first.error)).toBeUndefined();
+    const second = await turn(brain, log, dir, server, "second", { model: "opencode/other-free" });
+    expect(second.error, String(second.error)).toBeUndefined();
     const session = server.prompts[0]!.session;
     expect(server.prompts[1]!.session).toBe(session);
     expect(server.modelSwitches).toEqual([{ session, model: { providerID: "opencode", id: "other-free" } }]);
@@ -113,6 +115,17 @@ describe.each([false, true])("OpenCode native continuity (npm API: %s)", modern 
     expect(rebuilt.prepared.rendered.text).toContain("tabs, not spaces");
     expect(server.prompts.at(-1)!.session).not.toBe(session);
     expect(rebuilt.receipt).toMatchObject({ status: "accepted", execution: "complete" });
+  });
+
+  it("retries a reset read-only resume preflight without replaying prompt admission", async () => {
+    const { dir, log, brain, server } = await setup({ dropResumeOnce: true });
+    const first = await turn(brain, log, dir, server, "first");
+    expect(first.error).toBeUndefined();
+    const second = await turn(brain, log, dir, server, "second");
+    expect(second.error, String(second.error)).toBeUndefined();
+    expect(server.prompts).toHaveLength(2);
+    expect(server.prompts[1]!.session).toBe(server.prompts[0]!.session);
+    expect(second.receipt).toMatchObject({ status: "accepted", execution: "complete" });
   });
 
   it("a refused prompt is a proven non-launch, and leaves no writer lease behind", async () => {

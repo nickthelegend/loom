@@ -948,10 +948,16 @@ export class OpenCodeAdapter extends AdapterBase {
     const ref = want ? parseModelRef(want) : null;
     if (bound) {
       let res: Response;
-      try {
-        res = await fetch(this.api(`/session/${encodeURIComponent(bound)}`), { signal: AbortSignal.timeout(15_000) });
-      } catch (err) {
-        throw new NativeDispatchRejected(`opencode server unreachable: ${(err as Error).message}`);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          res = await fetch(this.api(`/session/${encodeURIComponent(bound)}`), { signal: AbortSignal.timeout(15_000) });
+          break;
+        } catch (err) {
+          // A stale keep-alive socket can reset between native turns. Only
+          // this read-only preflight is retried; prompt admission never is.
+          if (attempt === 0) continue;
+          throw new NativeDispatchRejected(`opencode server unreachable: ${(err as Error).message}`);
+        }
       }
       if (res.status === 404) throw new NativeSessionMissing(`opencode no longer has session ${bound}`);
       if (!res.ok) throw new NativeDispatchRejected(`opencode answered ${res.status} for session ${bound}`);
