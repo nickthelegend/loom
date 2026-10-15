@@ -112,7 +112,7 @@ export class TeamCoordinator implements OrchestraCoordinator {
     const cap = this.lastShare ? this.policy?.budgets.perMemberDailyUsd : null;
     const me = this.ctx.github();
     if (!cap || !me || !this.lastShare) return null;
-    const running = this.rt.orchestra.list().filter((r) => !isTerminal(r.status)).map((r) => r.costUsd);
+    const running = [...this.rt.orchestra.list(), ...this.rt.crews.coordinationRuns()].filter((r) => !isTerminal(r.status)).map((r) => r.costUsd);
     const spent = spentToday(this.ctx.feed(this.lastShare.teamId), me, running);
     return spent >= cap
       ? `you've spent $${spent.toFixed(2)} of your $${cap.toFixed(2)} daily budget on this team (loom.team.json budgets.perMemberDailyUsd) — new goals start tomorrow, or raise the cap in a reviewed PR`
@@ -141,7 +141,7 @@ export class TeamCoordinator implements OrchestraCoordinator {
     }
     const cap = policy.orchestra.teamMaxConcurrentAgents;
     if (cap) {
-      const live = this.ctx.presence(share.teamId).filter((p) => p.state === "running" && /#t/.test(p.agent)).length;
+      const live = this.ctx.presence(share.teamId).filter((p) => p.state === "running" && /#t|#crew:/.test(p.agent)).length;
       if (live >= cap) return hold("capacity", `the team is at its limit of ${cap} running agents (team policy) — starts when one finishes`);
     }
 
@@ -198,7 +198,11 @@ export class TeamCoordinator implements OrchestraCoordinator {
       repo: share.repo,
       runId: run.id,
       taskId: task.id,
-      hardZones: policy.hardZones,
+      // Crew claims default to atomic exclusion for their declared scopes.
+      // This closes the check-then-claim race between two members' crews.
+      // A human may explicitly permit overlap outside reviewed hard zones.
+      hardZones: run.id.startsWith("crew-") && !decision.startsWith("proceed:")
+        ? [...policy.hardZones, ...task.touches] : policy.hardZones,
       sealed: this.seal(share.teamId, { goal: run.goal.split("\n")[0]!.slice(0, 200), task: task.title.slice(0, 200) }),
     });
     if (!res.lease) {
@@ -215,7 +219,7 @@ export class TeamCoordinator implements OrchestraCoordinator {
   /** D30/D32: where the goal we're waiting on stands. */
   private waitState(teamId: string, target: string): { state: "waiting" | "go"; detail: string } {
     const feed = this.ctx.feed(teamId);
-    const branch = `loom/orchestra/${target}/main`;
+    const branch = String(feed.find(e => e.type === "goal_started" && e.meta.runId === target)?.meta.branch ?? `loom/orchestra/${target}/main`);
     if (feed.some((e) => e.type === "pr_merged" && e.meta.branch === branch)) return { state: "go", detail: "its PR merged" };
     if (feed.some((e) => e.type === "lease_released" && e.meta.runId === target && /merged/i.test(String(e.meta.reason ?? "")))) {
       return { state: "go", detail: "its work landed" };
@@ -235,6 +239,11 @@ export class TeamCoordinator implements OrchestraCoordinator {
 
   onEdit(run: OrchestraRun, task: OrchestraTask, path: string): void {
     if (!task.touches?.length || covered(path, task.touches)) return;
+    if (run.id.startsWith("crew-")) {
+      void this.rt.crews.holdForTeam(run.id, task.id, { kind: "decide", reason: `${path} is outside this card's declared lease; inspect and update touches before continuing`, since: Date.now() })
+        .catch(error => logbook.warn("team", "couldn't settle a crew drift hold", String(error)));
+      return;
+    }
     const key = `${run.id}/${task.id}`;
     const buf = this.driftBuf.get(key) ?? { paths: new Set<string>(), timer: setTimeout(() => void this.flushDrift(run, task), 1500) };
     buf.paths.add(path);
@@ -288,8 +297,7 @@ export class TeamCoordinator implements OrchestraCoordinator {
 
   /** Runs whose leases still stand: running, or finished but not yet landed. */
   private liveRuns(): OrchestraRun[] {
-    return this.rt.orchestra
-      .list()
+    return [...this.rt.orchestra.list(), ...this.rt.crews.coordinationRuns()]
       .filter((r) => r.status !== "failed" && r.status !== "aborted" && !r.applied && !(r.delivered && r.delivered.mode !== "pr"));
   }
 
@@ -332,7 +340,7 @@ export class TeamCoordinator implements OrchestraCoordinator {
 
   /** D34, the other half: a teammate's daemon predicted a conflict with one of our runs. */
   onTeamEvent(e: FeedEvent): void {
-    const mine = new Set(this.rt.orchestra.list().map((r) => r.id));
+    const mine = new Set([...this.rt.orchestra.list(), ...this.rt.crews.coordinationRuns()].map((r) => r.id));
     const runs = (e.meta.runs as string[] | undefined) ?? (e.meta.with as string[] | undefined) ?? [];
     const ours = runs.filter((r) => mine.has(r));
     // "A teammate did X" notes skip our own events; landing and unblocking must
@@ -343,7 +351,7 @@ export class TeamCoordinator implements OrchestraCoordinator {
     }
     if (!fromUs && (e.type === "drift" || e.type === "overlap_decided") && ours.length) {
       const what = e.type === "drift" ? `edited ${(e.meta.paths as string[]).join(", ")}` : `chose to proceed alongside your work`;
-      for (const r of ours) this.rt.orchestra.addNote(r, `${e.github ?? "A teammate"}'s ${String(e.meta.runId)}/${String(e.meta.taskId)} ${what}.`);
+      for (const r of ours) this.tellOwner(r, `${e.github ?? "A teammate"}'s ${String(e.meta.runId)}/${String(e.meta.taskId)} ${what}.`);
     }
     // Anything that can free a hold: look again (D30, D31, D32).
     if (["pr_merged", "lease_released", "goal_finished"].includes(e.type)) {
@@ -353,11 +361,12 @@ export class TeamCoordinator implements OrchestraCoordinator {
     if (e.type === "pr_merged") {
       const m = /^loom\/orchestra\/([^/]+)\/main$/.exec(String(e.meta.branch ?? ""));
       if (m && mine.has(m[1]!)) void this.release(m[1]!, `PR #${String(e.meta.number ?? "")} merged`);
+      for (const r of this.rt.crews.coordinationRuns()) if (r.branch === e.meta.branch) void this.release(r.id, `PR #${String(e.meta.number ?? "")} merged`);
     }
   }
 
   private tellOwner(runId: string, text: string): void {
-    this.rt.orchestra.addNote(runId, text);
+    if (!this.rt.crews.addTeamNote(runId, text)) this.rt.orchestra.addNote(runId, text);
     notify({ title: `Loom · ${this.rt.info.name}`, body: text });
   }
 

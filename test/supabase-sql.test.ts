@@ -26,6 +26,7 @@ const hasPg = (() => {
     return false;
   }
 })();
+if (process.env.LOOM_REQUIRE_POSTGRES === "1" && !hasPg) throw new Error("PostgreSQL tools are required for this CI job; SQL tests must not skip");
 
 let dataDir = "";
 let sockDir = "";
@@ -117,6 +118,7 @@ beforeAll(async () => {
     "0007_runners.sql",
     "0008_key_version_conflict.sql",
     "0009_phase6.sql",
+    "0010_crew_coordination.sql",
   ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
@@ -563,5 +565,21 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL, 0009 (landing train events, GitHub
     );
     // a daemon polling the same fact later adds nothing
     expect(asUser(BOB, `select coalesce(id::text, 'deduped') from public.append_feed('${team}', '{"type":"check_failed","repo":"acme/train","meta":{},"dedupeKey":"gh:acme/train#7:failed:abc:test"}');`)).toBe("deduped");
+  });
+});
+
+
+describe.skipIf(!hasPg)("hosted crew request ownership (0010)", () => {
+  it("accepts sealed requests, refuses another owner's answer, and dedupes the accepted answer", () => {
+    const team = asUser(ALICE, "select id from public.create_team('Crew requests');");
+    const invite = JSON.parse(asUser(ALICE, `select public.create_invite('${team}', 3600);`)).invite;
+    asUser(BOB, `select public.redeem_invite('${invite}');`);
+    asUser(ALICE, `select public.share_repo('${team}', 'acme/crew');`);
+    const request = JSON.stringify({ type: "crew_request", repo: "acme/crew", meta: { requestId: "sql-req", owner: "bob", crew: "ship", teammate: "tester", expiresAt: Date.now()+86400000 }, sealed: { v: 1, c: "encrypted" }, dedupeKey: "crew-request:sql-req" });
+    expect(asUser(ALICE, `select (public.append_feed('${team}', '${request}')).id is not null;`)).toBe("t");
+    const answer = JSON.stringify({ type: "crew_request_answered", repo: "acme/crew", meta: { requestId: "sql-req", state: "accepted" }, dedupeKey: "crew-answer:sql-req" });
+    expect(fails(() => asUser(ALICE, `select public.append_feed('${team}', '${answer}');`))).toMatch(/only the crew owner/);
+    expect(asUser(BOB, `select (public.append_feed('${team}', '${answer}')).id is not null;`)).toBe("t");
+    expect(asUser(BOB, `select coalesce(id::text, 'deduped') from public.append_feed('${team}', '${answer}');`)).toBe("deduped");
   });
 });

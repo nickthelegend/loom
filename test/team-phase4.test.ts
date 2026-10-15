@@ -457,7 +457,11 @@ describe("Phase 4: land safely", () => {
     expect(adopted.from).toMatchObject({ branch: g2.branch, pr, owner: "alice" });
     expect(adopted.goal).toContain(`Make alice's PR #${pr} green`);
     await waitUntil(() => run.landing!.adoptedBy === "bob"); // alice's daemon backs off
-    await waitUntil(() => M.bob!.rt.orchestra.get(adopted.id)!.status === "completed" && headOf(g2.branch) !== stuck, { timeoutMs: 20_000 });
+    // This includes a real worktree, agent turn, integration and push. Slow
+    // hosted Windows Git can exceed the ordinary state-polling budget.
+    await waitUntil(() => M.bob!.rt.orchestra.get(adopted.id)!.status === "completed" && headOf(g2.branch) !== stuck, {
+      timeoutMs: process.platform === "win32" && process.env.CI ? 60_000 : 20_000,
+    }).catch(error => { throw new Error(JSON.stringify({ adopted: M.bob!.rt.orchestra.get(adopted.id), owner: run.landing, head: headOf(g2.branch), stuck }), { cause: error }); });
     expect(git(origin, "log", "-1", "--format=%an", g2.branch).trim()).not.toBe("");
     expect(git(origin, "show", `${g2.branch}:src/api.ts`).split("\n").filter(Boolean)).toHaveLength(12);
     expect(prs.size).toBe(2); // bob pushed to alice's PR, didn't open another

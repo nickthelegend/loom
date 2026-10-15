@@ -20,6 +20,8 @@ import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { crewRequests } from "../core/crew-requests.js";
 
 import { loomHome } from "../core/registry.js";
 import { logbook } from "../core/logbook.js";
@@ -957,6 +959,54 @@ export class TeamLink {
   }
 
   /** Start a new goal on a runner (D69, D73). */
+  async startCrewOnRunner(rt: ProjectRuntime, id: string, text: string, runner?: string): Promise<{ jobId: string }> {
+    if (!text.trim() || text.length > 12000) throw new Error("crew goal must contain 1–12000 characters");
+    const s = await this.jobShare(rt), target = await this.pickRunner(s.teamId, runner), crew = rt.crews.get(id);
+    const payload: JobPayload = { goal: text, nativeCrew: rt.config.brain?.continuity === true, crew: { id: crew.id, name: crew.name, teammates: crew.teammates,
+      play: crew.play, maxParallel: crew.maxParallel, budgetUsd: crew.budgetUsd,
+      agents: rt.config.agents.map(agent => ({ id: agent.id, kind: agent.kind })) }, from: os.hostname() };
+    const job = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "start", target, sealed: sealForTeam(s.key, payload), deviceId: s.device });
+    return { jobId: job.id };
+  }
+  async controlRunnerCrew(rt: ProjectRuntime, jobId: string, action: NonNullable<JobPayload["crewAction"]>["action"], text?: string, to?: string): Promise<{ jobId: string }> {
+    if (!["approve", "say", "pause", "resume", "stop", "pick"].includes(action)) throw new Error("unsupported crew control");
+    const s = await this.jobShare(rt), jobs = await this.hub().jobs(s.teamId, { active: true }), job = jobs.find(j => j.id === jobId);
+    if (!job || job.userId !== this.state.hub?.userId || !job.runnerId || job.repo !== s.repo) throw new Error("this is not your active runner crew job");
+    const progress = openFromTeam<JobProgress>(this.state.teams[s.teamId]!.keys, job.progress);
+    if (!progress?.crew || !progress.runId) throw new Error("the runner has not prepared this crew yet");
+    const payload: JobPayload = { runId: progress.runId, crewAction: { jobId, action, text, to } };
+    const control = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "land", target: job.runnerId, sealed: sealForTeam(s.key, payload), deviceId: s.device });
+    return { jobId: control.id };
+  }
+  async requestCrew(rt: ProjectRuntime, input: { owner: string; crew: string; teammate: string; text: string }): Promise<{ requestId: string }> {
+    if (typeof input.text !== "string" || !input.text.trim() || input.text.length > 4000) throw new Error("request text must contain 1–4000 characters");
+    const s = await this.jobShare(rt), id = randomUUID();
+    const event: FeedIn = { type: "crew_request", repo: s.repo, deviceId: s.device, dedupeKey: `crew-request:${id}`,
+      meta: { requestId: id, owner: input.owner, crew: input.crew, teammate: input.teammate, expiresAt: Date.now() + 86400000 },
+      sealed: sealForTeam(s.key, { text: input.text.trim() }) };
+    event.sig = signPayload(this.device(), event);
+    await this.hub().appendFeed(s.teamId, event);
+    return { requestId: id };
+  }
+  async answerCrewRequest(rt: ProjectRuntime, requestId: string, accept: boolean): Promise<{ delivery: string }> {
+    const s = await this.jobShare(rt);
+    const events = await this.hub().feed(s.teamId, { limit: 1000 });
+    const request = crewRequests(events, e => openFromTeam(this.state.teams[s.teamId]!.keys, e.sealed)).find(r => r.id === requestId);
+    if (!request || request.repo !== s.repo) throw new Error("crew request not found for this project");
+    if (request.owner.toLowerCase() !== this.state.hub?.github.toLowerCase()) throw new Error("only the requested crew's owner may answer");
+    if (request.state === "expired" || request.state === (accept ? "declined" : "accepted")) throw new Error("request expired or already answered differently");
+    if (accept) {
+      const crew = rt.crews.get(request.crew);
+      const seat = crew.teammates.find(t => t.id === request.teammate);
+      if (!seat || !["reviewer", "tester", "researcher"].includes(seat.role)) throw new Error("choose a reviewer, tester or researcher seat");
+    }
+    const event: FeedIn = { type: "crew_request_answered", repo: s.repo, deviceId: s.device,
+      meta: { requestId, state: accept ? "accepted" : "declined" }, dedupeKey: `crew-answer:${requestId}` };
+    event.sig = signPayload(this.device(), event);
+    await this.hub().appendFeed(s.teamId, event);
+    if (!accept) return { delivery: "declined" };
+    return rt.crews.receiveRequest(request.crew, { id: request.id, from: request.from, to: request.teammate, text: request.text, expiresAt: request.expiresAt });
+  }
   async startOnRunner(rt: ProjectRuntime, g: { goal: string; orchestrator?: string; workers?: string[]; plan?: boolean; runner?: string }): Promise<{ jobId: string }> {
     if (!g.goal?.trim()) throw new Error("what's the goal?");
     const s = await this.jobShare(rt);
@@ -1124,6 +1174,20 @@ export class TeamLink {
   }
 
   private async onProjectEvent(rt: ProjectRuntime, e: LoomEvent): Promise<void> {
+    if (e.kind === "crew" && this.hubClient) {
+      const p = e.payload, cfg = String(p.crewId ?? ""), phase = String(p.phase ?? "");
+      const run = rt.crews.coordination(cfg);
+      const type = phase === "goal_started" ? "goal_started" : phase === "delivered" ? "pr_opened" : ["completed", "failed", "stopped"].includes(phase) ? "goal_finished" : null;
+      const share = await this.teamFor(rt);
+      if (type && share && run) await this.hub().appendFeed(share.teamId, {
+        type, repo: share.repo, meta: { runId: run.id, crewId: cfg, status: run.status, branch: run.branch, tasks: run.tasks.length,
+          ...(type === "pr_opened" ? { url: p.url, number: Number(/\/pull\/(\d+)/.exec(String(p.url))?.[1]) } : {}),
+          ...(type === "goal_finished" ? { costUsd: run.costUsd } : {}) },
+        sealed: sealForTeam(this.currentKey(share.teamId), { goal: run.goal.split("\n")[0]!.slice(0, 200) }),
+        deviceId: this.device().id, dedupeKey: `${e.id}@${rt.info.id}`,
+      });
+      return;
+    }
     if (e.kind !== "orchestra" || !this.hubClient) return;
     const p = e.payload as Record<string, unknown>;
     const phase = String(p.phase ?? "");
@@ -1293,6 +1357,7 @@ export class TeamLink {
           feed: v ? v.feed.slice(-100).map((e) => this.decryptFeed(id, e)) : [],
           leases: v ? [...v.leases.values()].map((l) => this.decryptLease(id, l)) : [],
           costs: v ? rollupCosts(v.feed) : null,
+          crewRequests: v ? crewRequests(v.feed, e => openFromTeam(keys, e.sealed)) : [],
         };
       }),
     };
@@ -1345,6 +1410,21 @@ export function sessionsOf(
   repo: string,
 ): Array<{ presence: Omit<PresenceIn, "deviceId">; intent: Record<string, unknown> }> {
   const out: Array<{ presence: Omit<PresenceIn, "deviceId">; intent: Record<string, unknown> }> = [];
+  for (const crew of rt.crews.list()) {
+    const goal = crew.state.goal, run = rt.crews.coordination(crew.id);
+    if (!goal || !run || ["completed", "failed", "stopped"].includes(goal.status)) continue;
+    for (const mate of crew.teammates) {
+      const active = crew.active.find(t => t.teammate === mate.id);
+      const card = active?.card ? goal.cards.find(c => c.id === active.card) : undefined;
+      out.push({ presence: { repo, runId: run.id, ...(card ? { taskId: card.id } : {}),
+        agent: `${mate.agent}#crew:${crew.id}:${mate.id}`, kind: rt.config.agents.find(a => a.id === mate.agent)?.kind ?? mate.agent,
+        branch: card?.workspace?.branch ?? goal.branch, touches: card?.touches ?? [],
+        state: active ? mate.role === "reviewer" ? "reviewing" : "running" : goal.status === "planning" ? "planning" : "waiting_human",
+        since: active?.since ?? goal.startedAt },
+        intent: { crew: crew.id, crewName: crew.name, teammate: mate.id, role: mate.role,
+          goal: goal.text.split("\n")[0]!.slice(0, 200), ...(card ? { card: card.title.slice(0, 200) } : {}) } });
+    }
+  }
   const act = rt.activity() as {
     agents: Array<{ id: string; kind: string; busy: boolean; since: number | null; chatTitle: string | null }>;
     orchestra: null | {

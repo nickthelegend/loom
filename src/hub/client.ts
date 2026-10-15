@@ -187,8 +187,8 @@ export class HttpHubClient implements HubClient {
   createJob(teamId: string, j: JobIn) {
     return this.call<Job>("createJob", teamId, j);
   }
-  claimJob(teamId: string, runnerDeviceId: string) {
-    return this.call<Job | null>("claimJob", teamId, runnerDeviceId);
+  claimJob(teamId: string, runnerDeviceId: string, instantOnly = false) {
+    return this.call<Job | null>("claimJob", teamId, runnerDeviceId, instantOnly);
   }
   heartbeatJob(teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed) {
     return this.call<Job>("heartbeatJob", teamId, jobId, runnerDeviceId, ...(progress === undefined ? [] : [progress]));

@@ -19,7 +19,7 @@ Loom now drains that connection with a compatibility bridge for the pinned
 version, awaits shutdown, and ignores stale terminal callbacks after id reuse.
 45 ConPTY checks and 42 pipe checks passed; a standalone terminal process exits
 normally; production staging verifies Job Objects and ConPTY execution/shutdown.
-The full CI matrix must pass on the current Windows PR head before approval.
+All ten CI jobs passed on Windows PR head bd64d26.
 
 Automatic approval review rejected launching the packaged desktop UI. Do not
 retry that launch. The packaged daemon has CLI acceptance evidence. Installers
@@ -35,7 +35,7 @@ Branch: `feat/crew-persistent-teammates`, stacked on the Windows PR.
   explicit receipt reconciliation before replay.
 - [x] Explicit teammate refresh starts a new epoch.
 - [x] Crew memory scope, retrieval isolation and human promotion to project memory.
-- [ ] Native fake acceptance, HTTP route checks, regression/DOM checks and CI.
+- [x] Native fake acceptance, HTTP route checks, regression/DOM checks and CI (all ten jobs on 2cb501b).
 
 Local validation: build/typecheck passed; native restart/delta/recovery tests
 passed (3), crew/memory HTTP and the Crew DOM acceptance passed, and the existing
@@ -57,12 +57,12 @@ workspace receipts and integrates both results. Full CI is required on the phase
 
 ## P4 — several people
 
-- [ ] Crew/teammate metadata in presence and Fleet, without transcript sharing.
-- [ ] Cross-member requests with owner acceptance/decline.
-- [ ] Runner-hosted crews, policy limits and role permission ceilings.
-- [ ] Per-crew/member/goal budget accounting and visible budget holds.
-- [ ] Two-member overlapping work acceptance using the existing hub harness.
-- [ ] No hosted migration or landing/merge-policy changes without owner approval.
+- [x] Crew/teammate metadata in presence and Fleet, without transcript sharing.
+- [x] Cross-member requests with owner acceptance/decline.
+- [x] Runner-hosted crews, policy limits and role permission ceilings.
+- [x] Per-crew/member/goal budget accounting and visible budget holds.
+- [x] Two-member overlapping work acceptance using the existing hub harness.
+- [x] No hosted migration or landing/merge-policy changes without owner approval.
 
 ## P5 — usable from desktop and phone
 

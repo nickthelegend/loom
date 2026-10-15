@@ -29,6 +29,8 @@ import type { FeedEvent, HubClient, Job, Presence, Runner as RunnerRecord } from
 import { loadPolicy } from "../core/team-policy.js";
 import type { Landing } from "./landing.js";
 import type { ProjectRuntime } from "./runtime.js";
+import type { CrewConfig, CrewGoal } from "../core/crew.js";
+import type { AgentConfig } from "../types.js";
 
 // ── configuration ──
 
@@ -123,6 +125,9 @@ export function dockerCommand(opts: { jobId: string; teamId: string; image: stri
 // ── the job payload ──
 
 export interface JobPayload {
+  nativeCrew?: boolean;
+  crew?: CrewConfig & { agents: Array<Pick<AgentConfig, "id" | "kind">> };
+  crewAction?: { jobId: string; action: "approve" | "say" | "pause" | "resume" | "stop" | "pick"; text?: string; to?: string };
   goal?: string;
   orchestrator?: string;
   workers?: string[];
@@ -141,6 +146,7 @@ export interface JobPayload {
 }
 
 export interface JobProgress {
+  crew?: { id: string; name: string; pr?: string };
   runId: string | null;
   goal: string;
   status: string;
@@ -162,6 +168,13 @@ export function progressOf(run: OrchestraRun | undefined, fallbackGoal = ""): Jo
     ...(run?.question ? { question: run.question.slice(0, 300) } : {}),
     at: Date.now(),
   };
+}
+
+export function crewProgress(id: string, name: string, goal: CrewGoal | undefined, runId: string | null): JobProgress {
+  return { runId, goal: (goal?.text ?? "").split("\n")[0]!.slice(0, 200), status: goal?.status ?? "preparing",
+    tasks: goal?.cards.map(card => ({ id: card.id, title: card.title, status: card.stage, worker: card.builder })) ?? [],
+    costUsd: goal?.costUsd ?? 0, landing: null, crew: { id, name, ...(goal?.pr ? { pr: goal.pr.url } : {}) },
+    ...(goal?.question ? { question: goal.question.text.slice(0, 300) } : {}), at: Date.now() };
 }
 
 // ── the runner ──
@@ -194,6 +207,8 @@ export interface RunnerDeps {
 }
 
 interface Active {
+  finishing?: boolean;
+  crewId?: string;
   job: Job;
   teamId: string;
   payload: JobPayload;
@@ -283,11 +298,10 @@ export class Runner {
     try {
       const cap = this.deps.config().capacity;
       for (const teamId of this.deps.teams()) {
-        while (this.goalCount() < cap || this.hasInstant()) {
-          const job = await hub.claimJob(teamId, device);
+        for (;;) {
+          const job = await hub.claimJob(teamId, device, this.goalCount() >= cap);
           if (!job) break;
           await this.execute(teamId, job);
-          if (this.goalCount() >= cap) break;
         }
       }
     } finally {
@@ -298,10 +312,6 @@ export class Runner {
   /** Goals being worked on (return/land jobs are instant and don't count). */
   private goalCount(): number {
     return [...this.active.values()].filter((a) => a.job.kind === "start" || a.job.kind === "continue" || a.job.kind === "fix").length;
-  }
-
-  private hasInstant(): boolean {
-    return false;
   }
 
   /** Inside a container: the dispatcher claimed this job; run it here, then exit (D70). */
@@ -372,6 +382,27 @@ export class Runner {
         const policy = await loadPolicy(rt.info.dir);
         if (!policy.runners.shared) throw new Error(`${job.repo}'s loom.team.json doesn't allow shared runners (runners.shared)`);
       }
+      if (payload.crew) {
+        if (job.kind !== "start" || !payload.goal) throw new Error("runner crews need a start job and goal");
+        // Only map the sender's roster IDs to locally installed kinds. Sender
+        // executable paths, options, hooks and permission settings are ignored.
+        const roster = rt.config.agents;
+        const teammates = payload.crew.teammates.map(seat => {
+          const kind = payload.crew!.agents.find(agent => agent.id === seat.agent)?.kind;
+          const agent = roster.find(agent => agent.kind === kind);
+          if (!agent) throw new Error(`runner has no installed ${kind ?? seat.agent} agent`);
+          return { id: seat.id, role: seat.role, agent: agent.id, ...(seat.charter ? { charter: seat.charter } : {}) };
+        });
+        const crew = rt.crews.create({ name: payload.crew.name, teammates, planApproval: true, play: payload.crew.play,
+          maxParallel: payload.crew.maxParallel, budgetUsd: payload.crew.budgetUsd });
+        a.crewId = crew.id;
+        const goal = await rt.crews.goal(crew.id, payload.goal, payload.crew.play);
+        a.runId = rt.crews.coordination(crew.id)!.id;
+        a.unsub = rt.log.onEvent(event => {
+          if (event.kind === "crew" && event.payload.crewId === crew.id) void this.beat(a).then(() => this.checkDone(a)).catch(error => this.fail(error));
+        });
+        void goal; await this.beat(a); return;
+      }
       let run: OrchestraRun;
       if (job.kind === "continue") {
         if (!a.payload.record) throw new Error("a continue job needs the run record");
@@ -417,6 +448,22 @@ export class Runner {
     const holder = [...this.active.values()].find((x) => x.runId && x.runId === a.payload.runId);
     try {
       if (!holder?.rt || !holder.runId) throw new Error(`this runner doesn't hold goal ${a.payload.runId ?? "?"}`);
+      if (holder.job.userId !== a.job.userId) throw new Error("only the goal's owner can control this runner job");
+      if (a.payload.crewAction) {
+        const action = a.payload.crewAction;
+        if (!holder.crewId || action.jobId !== holder.job.id) throw new Error("crew job does not match this held goal");
+        const crews = holder.rt.crews, id = holder.crewId;
+        if (action.action === "approve") crews.approve(id);
+        else if (action.action === "say") await crews.say(id, action.text ?? "", action.to);
+        else if (action.action === "pause") crews.pause(id);
+        else if (action.action === "resume") crews.resume(id);
+        else if (action.action === "stop") await crews.stop(id);
+        else if (action.action === "pick") await crews.pick(id, action.to ?? "");
+        else throw new Error("unsupported crew control");
+        await hub.finishJob(a.teamId, a.job.id, device, { state: "done" });
+        await this.beat(holder); return;
+      }
+      if (holder.crewId) throw new Error("crew PRs require human review and merge; use a crew control action");
       if (a.job.kind === "land") {
         const l = await this.deps.landing(holder.rt).land(holder.runId);
         await hub.finishJob(a.teamId, a.job.id, device, { state: "done", result: this.seal(a.teamId, { landing: l }) });
@@ -452,7 +499,7 @@ export class Runner {
     writeProjectConfig(dir, {
       name: `${name} · runner`,
       agents: kinds.map((k, i) => ({ id: k, kind: k, role: i === 0 ? "orchestrator" : "worker" })),
-      brain: { extractor: "off" },
+      brain: { extractor: "off", ...(a.payload.nativeCrew ? { continuity: true } : {}) },
       git: { delivery: "pr" },
       ...({ runner: { job: a.job.id, owner: a.job.github, label: c.label ?? os.hostname() } } as Record<string, unknown>),
     } as Parameters<typeof writeProjectConfig>[1]);
@@ -460,6 +507,7 @@ export class Runner {
     a.rt = await this.deps.openProject(dir, `${name} (runner · ${a.job.github})`);
     a.rt.runnerMode = true;
     await this.deps.share(a.rt, a.teamId);
+    a.rt.teamPolicy = await loadPolicy(dir);
   }
 
   private seal(teamId: string, value: unknown) {
@@ -473,13 +521,28 @@ export class Runner {
     const device = this.deps.deviceId();
     if (!hub || !device) return;
     const run = a.runId ? a.rt?.orchestra.get(a.runId) : undefined;
-    await hub.heartbeatJob(a.teamId, a.job.id, device, this.seal(a.teamId, progressOf(run, a.payload.goal ?? a.payload.record?.goal)));
+    const crew = a.crewId ? a.rt?.crews.get(a.crewId) : undefined;
+    const progress = crew ? crewProgress(crew.id, crew.name, crew.state.goal, a.runId) : progressOf(run, a.payload.goal ?? a.payload.record?.goal);
+    await hub.heartbeatJob(a.teamId, a.job.id, device, this.seal(a.teamId, progress));
     a.lastBeat = Date.now();
   }
 
   /** D76: a job is done when its goal lands, fails, or moves on. */
   private async checkDone(a: Active): Promise<void> {
-    if (!a.rt || !a.runId) return;
+    if (!a.rt || !a.runId || a.finishing) return;
+    if (a.crewId) {
+      const crew = a.rt.crews.get(a.crewId), goal = crew.state.goal;
+      if (!goal || crew.busy) return;
+      if (["failed", "stopped"].includes(goal.status)) return this.finish(a, "failed", crewProgress(crew.id, crew.name, goal, a.runId), goal.error ?? goal.status);
+      if (goal.status !== "completed") return;
+      a.finishing = true;
+      if (goal.recovery || goal.deliveryError) return this.finish(a, "failed", undefined, goal.recovery ?? goal.deliveryError);
+      if (!goal.pr) {
+        try { await a.rt.crews.deliver(crew.id); }
+        catch (error) { return this.finish(a, "failed", undefined, (error as Error).message); }
+      }
+      return this.finish(a, "done", crewProgress(crew.id, crew.name, goal, a.runId));
+    }
     const run = a.rt.orchestra.get(a.runId);
     if (!run) return;
     const l = run.landing;
@@ -493,6 +556,7 @@ export class Runner {
   }
 
   private async finish(a: Active, state: "done" | "failed", result?: unknown, error?: string): Promise<void> {
+    a.finishing = true;
     const hub = this.deps.hub();
     const device = this.deps.deviceId();
     this.active.delete(a.job.id);
@@ -507,17 +571,30 @@ export class Runner {
 
   /** The goal is over here: its branches are pushed; the clone goes (D70). */
   private async cleanup(a: Active): Promise<void> {
+    if (a.crewId && a.rt) {
+      const goal = a.rt.crews.get(a.crewId).state.goal;
+      if (goal && (!goal.pr || goal.status !== "completed" || a.payload.nativeCrew)) {
+        // Failed/uncertain turns may leave uncommitted edits and card refs.
+        // Keep their whole repository and native bindings for inspection.
+        if (!goal.pr) await git(["push", "-q", "origin", `${goal.branch}:refs/loom/crew/${goal.id}/main`], goal.dir).catch(() => {});
+        await this.deps.closeProject(a.rt); return;
+      }
+      await a.rt.crews.remove(a.crewId);
+    }
     const run = a.runId ? a.rt?.orchestra.get(a.runId) : undefined;
     if (run && a.rt && run.status === "failed" && !run.delivered) {
       // a failed goal's work isn't thrown away: keep it on its hidden ref for whoever looks next
       await git(["push", "-q", "-f", "origin", `${run.branch}:refs/loom/run/${run.id}/main`], run.dir).catch(() => {});
     }
     if (a.rt) await this.deps.closeProject(a.rt).catch(() => {});
-    if (a.dir) fs.rmSync(a.dir, { recursive: true, force: true });
+    // Windows can retain a child's working-directory handle briefly after
+    // shutdown. Retry transient locks without blocking the daemon's event loop.
+    if (a.dir) await fs.promises.rm(a.dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   private async cancel(a: Active): Promise<void> {
-    if (a.rt && a.runId) await a.rt.orchestra.abort(a.runId, "the job was cancelled").catch(() => {});
+    if (a.rt && a.crewId) await a.rt.crews.stop(a.crewId);
+    else if (a.rt && a.runId) await a.rt.orchestra.abort(a.runId, "the job was cancelled").catch(() => {});
     this.active.delete(a.job.id);
     a.unsub?.();
     await this.cleanup(a);

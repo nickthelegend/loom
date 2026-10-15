@@ -631,8 +631,8 @@ export class SupabaseHubClient implements HubClient {
     return mapJob(await this.rpc<Row>("create_job", { p_team: teamId, j }));
   }
 
-  async claimJob(teamId: string, runnerDeviceId: string): Promise<Job | null> {
-    const row = await this.rpc<Row | null>("claim_job", { p_team: teamId, p_runner: runnerDeviceId });
+  async claimJob(teamId: string, runnerDeviceId: string, instantOnly = false): Promise<Job | null> {
+    const row = await this.rpc<Row | null>("claim_job", { p_team: teamId, p_runner: runnerDeviceId, ...(instantOnly ? { p_instant_only: true } : {}) });
     // a composite-returning function answers "none" as a row of nulls
     return !row || row.id == null ? null : mapJob(row);
   }

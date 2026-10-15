@@ -16,7 +16,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { registerAgentKind } from "../src/adapters/index.js";
 import { AdapterBase } from "../src/adapters/base.js";
 import { parseCrewReply, protocolFor } from "../src/core/crew-protocol.js";
-import { teammatesFromTemplate } from "../src/core/crew.js";
+import { teammatesFromTemplate, type CrewHost } from "../src/core/crew.js";
+import { parsePolicy } from "../src/core/team-policy.js";
 import { writeProjectConfig } from "../src/core/registry.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
 import type { SendInput } from "../src/types.js";
@@ -357,4 +358,50 @@ describe("a crew works a goal", () => {
     await rt.crews.goal(made.id, "one");
     await expect(rt.crews.goal(made.id, "two")).rejects.toThrow(/already on a goal/);
   });
+
+  it("pauses at a turn boundary and preserves plan approval when resumed", async () => {
+    const { rt, crew } = await project();
+    scripts.lead = () => { rt.crews.pause(crew!.id); return loom([{ type: "plan", cards: [{ title: "Card" }] }]); };
+    const goal = await rt.crews.goal(crew!.id, "pause planning");
+    await waitUntil(() => !rt.crews.get(crew!.id).busy);
+    expect(goal.status).toBe("paused"); expect(turns).toHaveLength(1);
+    rt.crews.resume(crew!.id); expect(goal.status).toBe("awaiting_approval");
+    expect(turns).toHaveLength(1);
+  });
+  it("starts no new turn when the crew daily budget is exhausted", async () => {
+    const { rt, crew } = await project();
+    const host = (rt.crews as unknown as { host: CrewHost }).host;
+    host.policy = () => parsePolicy({ crews: { reviewerMustDifferFromBuilders: false, budgets: { perCrewDailyUsd: 20 } } });
+    host.spentToday = () => 20;
+    const goal = await rt.crews.goal(crew!.id, "budget hold");
+    await waitUntil(() => !rt.crews.get(crew!.id).busy);
+    expect(goal.status).toBe("paused"); expect(goal.pauseReason).toMatch(/daily budget/); expect(turns).toEqual([]);
+  });
+  it("recreates a warm teammate under tightened role permissions before its next card", async () => {
+    const { rt: runtime, crew } = await project();
+    const host = (runtime.crews as unknown as { host: CrewHost }).host;
+    const made = vi.spyOn(host, "makeAgent");
+    runtime.config.agents.find(agent => agent.id === "small")!.options = { permissions: "bypass" };
+    runtime.teamPolicy = parsePolicy({ crews: { reviewerMustDifferFromBuilders: false, planApproval: "optional", roles: { builder: { permissions: "auto" } } } });
+    runtime.crews.update(crew!.id, { planApproval: false });
+    scripts.lead = input => input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "One" }, { title: "Two" }] }]) : loom([{ type: "done", summary: "done" }]);
+    scripts.builder = () => {
+      runtime.teamPolicy = parsePolicy({ crews: { reviewerMustDifferFromBuilders: false, planApproval: "optional", roles: { builder: { permissions: "ask" } } } });
+      return loom([{ type: "done", summary: "done" }]);
+    };
+    const goal = await runtime.crews.goal(crew!.id, "tightened permissions");
+    await waitUntil(() => goal.status === "completed" && !runtime.crews.get(crew!.id).busy);
+    expect(made.mock.calls.filter(([cfg]) => cfg.role === "builder").map(([cfg]) => cfg.options?.permissions)).toEqual(["auto", "ask"]);
+  });
+
+  it("refuses an unsupported team role cap before any teammate starts", async () => {
+    const { rt: runtime } = await project(false);
+    runtime.config.agents.push({ id: "oc", kind: "opencode", options: { permissions: "bypass" } });
+    runtime.teamPolicy = parsePolicy({ crews: { reviewerMustDifferFromBuilders: false } });
+    expect(() => runtime.crews.create({ name: "Blocked", teammates: [
+      { id: "builder", agent: "small", role: "builder" }, { id: "reviewer", agent: "oc", role: "reviewer" },
+    ] })).toThrow(/requires ask.*cannot enforce/);
+    expect(turns).toEqual([]);
+  });
+
 });

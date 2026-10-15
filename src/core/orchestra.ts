@@ -34,6 +34,7 @@ import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
 import { createWorktree } from "./worktrees.js";
+import type { TeamPolicy } from "./team-policy.js";
 
 import { loomHome } from "./registry.js";
 import { blockedBy, type GoalScope } from "./goal-lanes.js";
@@ -315,6 +316,8 @@ export type Admission = { go: true; rebase?: boolean; note?: string } | { go: fa
  * Implemented by the daemon's Team Link; absent for solo projects.
  */
 export interface OrchestraCoordinator {
+  teamPolicy?(): Promise<TeamPolicy | null>;
+  release?(runId: string, reason: string): Promise<void>;
   admit(run: OrchestraRun, task: OrchestraTask): Promise<Admission>;
   onEdit?(run: OrchestraRun, task: OrchestraTask, path: string): void;
   onTaskDone?(run: OrchestraRun, task: OrchestraTask): void;
