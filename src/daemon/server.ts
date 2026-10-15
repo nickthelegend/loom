@@ -647,6 +647,7 @@ export class LoomDaemon {
         kind: event.kind,
         category,
         ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}),
+        ...(typeof event.payload.crewId === "string" ? { crewId: event.payload.crewId } : {}),
         ...(event.chat ? { chat: event.chat } : {}),
       },
     });

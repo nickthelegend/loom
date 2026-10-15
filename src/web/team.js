@@ -89,7 +89,7 @@ import { ORCH_RUN_ST } from './transcript.js';
     var raw = String(p.agent || ""), i = raw.indexOf("#");
     var id = i < 0 ? raw : raw.slice(0, i), tag = i < 0 ? "" : raw.slice(i + 1);
     var label = agentLabel(p.kind, id);
-    var what = tag === "orch" ? "orchestrator" : tag ? "task " + tag : "";
+    var what = p.intent && p.intent.crew ? (p.intent.crewName || p.intent.crew) + " / " + p.intent.teammate + " · " + p.intent.role : tag === "orch" ? "orchestrator" : tag ? "task " + tag : "";
     var bits = [what];
     if (id !== label) bits.push(id);
     return { id: id, label: label, what: what, sub: bits.filter(Boolean).join(" \u00b7 ") };

@@ -967,6 +967,7 @@ export const getTriage = (c: Creds, id: string, agentId: string) =>
   api<{ triage: Triage }>(c, `/api/projects/${id}/triage/${encodeURIComponent(agentId)}`);
 /** One card on the Board: your own task, or a PR/issue from GitHub. */
 export interface BoardCard {
+  crew?: string; stage?: string; claimedBy?: string;
   id: string;
   title: string;
   agent?: string;
@@ -1517,6 +1518,7 @@ export interface ActivityTask {
 }
 
 export interface ActivityProject {
+  crews?: Array<{ id: string; name: string; goal: string; status: string; channel: string; active: Array<{ teammate: string; step: string }>; cards: Array<{ id: string; title: string; stage: string; teammate?: string }> }>;
   project: { id: string; name: string };
   agents: ActivityAgent[];
   orchestra: { id: string; goal: string; status: OrchestraStatus; chat?: string; tasks: ActivityTask[] } | null;
@@ -1536,6 +1538,7 @@ export interface TeamMember {
 
 /** What a teammate's agent is about: titles only, never a transcript. */
 export interface TeamIntent {
+  crew?: string; crewName?: string; teammate?: string; role?: string;
   goal?: string;
   task?: string;
   thread?: string;
@@ -1592,6 +1595,7 @@ export interface TeamLease {
 }
 
 export interface TeamView {
+  crewRequests?: CrewRequest[];
   id: string;
   name: string;
   role: string;
@@ -1824,6 +1828,7 @@ export type RunnerJobState = "queued" | "claimed" | "done" | "failed" | "cancell
 
 /** The runner's latest snapshot of the goal it holds (daemon/runner.ts JobProgress). */
 export interface RunnerJobProgress {
+  crew?: { id: string; name: string; pr?: string };
   runId: string | null;
   goal: string;
   /** The run's OrchestraStatus, or "preparing" before the run exists. */
@@ -2022,12 +2027,14 @@ export function openLiveStream(creds: Creds, projectId: string | undefined, onFr
 // (daemon core/crew.ts). Every step is a `crew` event in the crew's channel.
 
 export type CrewRole = "lead" | "builder" | "reviewer" | "tester" | "researcher";
-export type CrewGoalStatus = "planning" | "awaiting_approval" | "running" | "waiting_human" | "completed" | "failed" | "stopped" | "interrupted";
-export type CrewCardStage = "planned" | "building" | "review" | "testing" | "done" | "failed";
+export type CrewGoalStatus = "planning" | "awaiting_approval" | "running" | "waiting_human" | "waiting_team" | "paused" | "completed" | "failed" | "stopped" | "interrupted";
+export type CrewCardStage = "planned" | "building" | "review" | "testing" | "ready" | "done" | "failed";
 
 export interface CrewTeammate { id: string; agent: string; role: CrewRole; charter?: string }
 
 export interface CrewCard {
+  touches?: string[];
+  teamHold?: { kind: string; reason: string };
   id: string;
   title: string;
   detail?: string;
@@ -2040,6 +2047,13 @@ export interface CrewCard {
 }
 
 export interface CrewGoal {
+  spendBySeat?: Record<string, number>;
+  play?: "ship" | "fanout" | "race";
+  recovery?: string;
+  pauseReason?: string;
+  budgetUsd?: number;
+  pr?: { url: string; at: number };
+  deliveryError?: string;
   id: string;
   text: string;
   status: CrewGoalStatus;
@@ -2055,6 +2069,10 @@ export interface CrewGoal {
 }
 
 export interface Crew {
+  play?: "ship" | "fanout" | "race";
+  maxParallel?: number;
+  active?: Array<{ teammate: string; card?: string; step: string; since: number }>;
+  spentToday?: number;
   id: string;
   name: string;
   teammates: CrewTeammate[];
@@ -2062,7 +2080,7 @@ export interface Crew {
   /** What Loom runs to test each card (exit 0 passes); without one, the tester agent tests. */
   testCommand?: string;
   busy: boolean;
-  state: { channel: string; threads: Record<string, string>; goal?: CrewGoal };
+  state: { channel: string; threads: Record<string, string>; goal?: CrewGoal; sessions?: Record<string, { bindingId: string; epoch: number; nativeSessionId: string | null }> };
 }
 
 export const getCrews = (c: Creds, id: string) =>
@@ -2074,13 +2092,17 @@ export const getCrews = (c: Creds, id: string) =>
 export const createCrew = (c: Creds, id: string, body: { template: string; name?: string; planApproval?: boolean; teammates?: CrewTeammate[] }) =>
   api<{ crew: Crew }>(c, `/api/projects/${id}/crews`, { method: "POST", body: JSON.stringify(body) });
 
-export const updateCrew = (c: Creds, id: string, crew: string, body: { teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string }) =>
+export const updateCrew = (c: Creds, id: string, crew: string, body: { teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string; play?: Crew["play"]; maxParallel?: number }) =>
   api<{ crew: Crew }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}`, { method: "PATCH", body: JSON.stringify(body) });
 
-export type CrewAction = "say" | "approve" | "stop" | "resume" | "apply";
+export type CrewAction = "say" | "approve" | "stop" | "resume" | "apply" | "pause" | "pick" | "refresh" | "budget" | "overlap" | "deliver";
+export interface CrewActionBody { text?: string; to?: string; amount?: number; card?: string; decision?: string; touches?: string[] }
+export interface CrewRequest { id: string; from: string; owner: string; crew: string; teammate: string; repo: string; text: string; state: "pending" | "accepted" | "declined" | "expired" }
+export const crewTeamAction = (c: Creds, projectId: string, action: "send" | "answer" | "runner-start" | "runner-control", body: Record<string, unknown>) =>
+  api<{ result: { jobId?: string; requestId?: string; delivery?: string } }>(c, `/api/team/crew-requests/${action}`, { method: "POST", body: JSON.stringify({ ...body, projectId }) });
 
 /** Answers with the crew as it is now, plus `routed` for say (goal | answer | note | replan) and `into` for apply. */
-export const crewAction = (c: Creds, id: string, crew: string, action: CrewAction, body: { text?: string; to?: string } = {}) =>
+export const crewAction = (c: Creds, id: string, crew: string, action: CrewAction, body: CrewActionBody = {}) =>
   api<{ crew: Crew; routed?: string; to?: string; into?: string }>(c, `/api/projects/${id}/crews/${encodeURIComponent(crew)}/${action}`, {
     method: "POST",
     body: JSON.stringify(body),

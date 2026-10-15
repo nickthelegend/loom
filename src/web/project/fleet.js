@@ -70,6 +70,7 @@ export function createFleet(view) {
       projects.sort(function(a, b){ return ((b.project || {}).id === view.pid) - ((a.project || {}).id === view.pid); });
       var agentsN = 0, busyN = 0;
       projects.forEach(function(pr){
+        (pr.crews || []).forEach(function(crew){ busyN += (crew.active || []).length; });
         (pr.agents || []).forEach(function(a){ agentsN++; if (a.busy) busyN++; });
         // An orchestra's workers run as copies of the roster, so the roster
         // reads idle while they work — the header said "no agents running"
@@ -146,6 +147,10 @@ export function createFleet(view) {
           }).join("") + "</div>";
       }
       // borrowed hands and a pipeline in flight, one line each
+      (pr.crews || []).forEach(function(crew){
+        out += '<div class="forch"><div class="foh"><b>Crew ' + esc(crew.name) + '</b><span>' + esc(crew.status) + '</span><span class="fog">' + esc(crew.goal) + '</span><button class="fthr" data-fchat="' + esc(crew.channel) + '" data-fpid="' + esc(info.id) + '">Channel</button></div>' +
+          (crew.cards || []).map(function(card){ return '<div class="fx">' + esc(card.title) + ' · ' + esc(card.stage) + (card.teammate ? ' · ' + esc(card.teammate) : '') + '</div>'; }).join('') + '</div>';
+      });
       var extra = (pr.subtasks || []).map(function(st){
         return '<div class="fx">\u21b3 <b>' + esc(st.agentId) + "</b> subtask for " + esc(st.parent) + " \u2014 " + esc(String(st.task || "").slice(0, 140)) + "</div>";
       });

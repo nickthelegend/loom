@@ -25,7 +25,7 @@ export function createCrew(view) {
 
     // This mount's reading of the crews. The factory is created per mount, so
     // its own closure is this view's state; nothing here outlives the view.
-    var crew = { editTest: false, list: null, templates: [], previews: {}, roster: [], seats: {}, sel: null, err: "", t: null, events: {}, diff: null, tpl: "ship", making: false, busy: "" };
+    var crew = { editTest: false, list: null, templates: [], previews: {}, roster: [], seats: {}, sel: null, err: "", t: null, events: {}, diff: null, tpl: "ship", making: false, busy: "", team: null, runners: null };
 
     var TEMPLATES = {
       ship: ["Ship", "lead plans, two builders, a reviewer and a tester", "Features end to end, reviewed and tested."],
@@ -46,13 +46,15 @@ export function createCrew(view) {
       awaiting_approval: ["needs your OK", "warn"],
       running: ["working", "live"],
       waiting_human: ["needs you", "warn"],
+      waiting_team: ["waiting on team", "warn"],
+      paused: ["paused", "warn"],
       completed: ["completed", "ok"],
       failed: ["failed", "err"],
       stopped: ["stopped", "off"],
       interrupted: ["interrupted", "warn"],
     };
-    var STAGES = ["planned", "building", "review", "testing", "done"];
-    var STAGE_LBL = { planned: "Planned", building: "Building", review: "In review", testing: "Testing", done: "Done", failed: "Failed" };
+    var STAGES = ["planned", "building", "review", "testing", "ready", "done"];
+    var STAGE_LBL = { planned: "Planned", building: "Building", review: "In review", testing: "Testing", ready: "Ready to integrate", done: "Done", failed: "Failed" };
     var STEP_VERB = { plan: "planning", planned: "starting", building: "building", review: "reviewing", testing: "testing", done: "wrapping up" };
     var SUGGEST = ["Add a health-check endpoint with a test", "Write a README section on how to run the tests", "Find and fix one flaky test"];
     var terminal = function(s){ return s === "completed" || s === "failed" || s === "stopped"; };
@@ -102,6 +104,9 @@ export function createCrew(view) {
         crew.sel = c ? c.id : null;
         drawCrewTabDot();
         drawCrew();
+        Promise.all([api("/api/team").catch(function(){ return null; }), api("/api/projects/" + pid + "/team/runners").catch(function(){ return null; })]).then(function(views){
+          if (state.pid !== pid) return; crew.team = views[0]; crew.runners = views[1]; drawCrew();
+        });
         if (c && crewEl()) return loadChannel(c);
       }).catch(function(err){ crew.err = err.message; drawCrew(); });
     }
@@ -201,9 +206,11 @@ export function createCrew(view) {
       var g = c.state && c.state.goal;
       var liveId = liveMate(c);
       return '<section class="crewroster" aria-label="teammates">' + (c.teammates || []).map(function(t){
-        var live = liveId === t.id;
+        var turn = (c.active || []).filter(function(a){ return a.teammate === t.id; })[0];
+        var live = !!turn || liveId === t.id;
         var asking = g && g.status === "waiting_human" && g.question && g.question.teammate === t.id;
-        var doing = live ? (STEP_VERB[g.current.step] || g.current.step || "working") + (g.current.card ? " " + cardTitle(g, g.current.card) : "")
+        var currentTurn = turn || (g && g.current) || {};
+        var doing = live ? (STEP_VERB[currentTurn.step] || currentTurn.step || "working") + (currentTurn.card ? " " + cardTitle(g, currentTurn.card) : "")
           : asking ? "waiting for your answer" : (ROLE[t.role] || [])[2] || "";
         return '<div class="crewmate r-' + esc(t.role) + (live ? " live" : "") + (asking ? " asking" : "") + '" data-mate="' + esc(t.id) + '"' + (t.charter ? ' title="' + esc(t.charter) + '"' : "") + ">" +
           (live ? '<span class="odot live" data-live></span>' : "") +
@@ -213,13 +220,47 @@ export function createCrew(view) {
             ? '<select class="cmagent cmswap" data-crew-swap="' + esc(t.id) + '" title="swap the agent in this seat" aria-label="agent for ' + esc(t.id) + '">' +
                 crew.roster.map(function(a){ return '<option value="' + esc(a.id) + '"' + (a.id === t.agent ? " selected" : "") + ">" + esc(a.id) + "</option>"; }).join("") + "</select>"
             : '<div class="cmagent">' + esc(t.agent) + "</div>") +
-          '<div class="cmdoing">' + esc(doing.slice(0, 90)) + "</div></div></div>";
+          '<div class="cmdoing">' + esc(doing.slice(0, 90)) + "</div>" +
+          '<div class="cmdoing">' + money((g && g.spendBySeat && g.spendBySeat[t.id]) || 0) + ' this goal</div>' +
+          (c.state.sessions && c.state.sessions[t.id] ? '<div class="cmdoing">Native context · epoch ' + Number(c.state.sessions[t.id].epoch) + '</div><button class="btn sm ghost" data-crew-seat-refresh="' + esc(t.id) + '"' + (c.busy ? " disabled" : "") + '>Refresh context</button>' : "") + "</div></div>";
       }).join("") + "</section>";
     }
 
     function cardTitle(g, id){
       var c = (g.cards || []).filter(function(x){ return x.id === id; })[0];
       return c ? "“" + (c.title.length > 40 ? c.title.slice(0, 39) + "…" : c.title) + "”" : "";
+    }
+
+    function settings(c){
+      return '<details class="ocard" id="crew-settings-panel"><summary>Play and limits · ' + esc(c.play || "ship") + ' · ' + money(c.spentToday || 0) + ' today</summary><div class="cwtestrow">' +
+        '<label>Play <select class="crewsel" id="crewplay"' + (c.busy ? " disabled" : "") + '>' + ["ship", "fanout", "race"].map(function(play){ return '<option value="' + play + '"' + ((c.play || "ship") === play ? " selected" : "") + '>' + play + '</option>'; }).join("") + '</select></label>' +
+        '<label>Parallel builders <input class="input" id="crewparallel" type="number" min="1" max="4" value="' + Number(c.maxParallel || 3) + '"' + (c.busy ? " disabled" : "") + '></label><button class="btn sm outline" data-crew-settings' + (c.busy ? " disabled" : "") + '>Save play</button></div></details>';
+    }
+    function teamPanel(c){
+      if (!crew.team || !crew.team.signedIn) return "";
+      var requests = (crew.team.teams || []).flatMap(function(team){ return team.crewRequests || []; });
+      var jobs = ((crew.runners || {}).jobs || []).filter(function(job){ return job.progress && job.progress.crew; });
+      return '<details class="ocard crewteam" id="crew-team-panel"><summary>Team requests and runner crews</summary><div class="cwtestrow">' +
+        '<label>Owner <input class="input" id="crew-request-owner" placeholder="GitHub login"></label><label>Crew <input class="input" id="crew-request-crew" placeholder="ship"></label><label>Seat <input class="input" id="crew-request-seat" placeholder="reviewer"></label>' +
+        '<label>Read-only request <textarea class="input" id="crew-request-text" maxlength="4000"></textarea></label><button class="btn sm outline" data-crew-team="send">Ask owner</button></div>' +
+        requests.map(function(r){ return '<div class="cwtestrow"><span>@' + esc(r.from) + ' → @' + esc(r.owner) + '/' + esc(r.crew) + '/' + esc(r.teammate) + ': ' + esc(r.text) + ' · ' + esc(r.state) + '</span>' +
+          (r.owner.toLowerCase() === crew.team.github.toLowerCase() && r.state === "pending" ? '<button class="btn sm primary" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="true">Accept read-only request</button><button class="btn sm ghost" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="false">Decline</button>' : '') +
+          (r.owner.toLowerCase() === crew.team.github.toLowerCase() && r.state === "accepted" ? '<button class="btn sm outline" data-crew-team="answer" data-request="' + esc(r.id) + '" data-accept="true">Check delivery</button>' : '') + '</div>'; }).join('') +
+        '<button class="btn sm outline" data-crew-team="runner-start">Start composer goal on my runner</button>' +
+        jobs.map(function(job){ var p = job.progress; return '<div class="cwtestrow"><span>' + esc(p.crew.name) + ' · ' + esc(p.goal) + ' · ' + esc(p.status) + '</span>' +
+          (p.crew.pr ? '<a class="btn sm outline" href="' + esc(p.crew.pr) + '" target="_blank" rel="noopener">Review PR</a>' : '') +
+          (job.mine && job.state === "claimed" ? (p.status === "awaiting_approval" ? ['approve','stop'] : p.status === "paused" ? ['resume','stop'] : ['pause','stop']).map(function(action){ return '<button class="btn sm outline" data-crew-team="runner-control" data-job="' + esc(job.id) + '" data-control="' + action + '">' + esc(action) + '</button>'; }).join('') : '') + '</div>'; }).join('') + '</details>';
+    }
+    function teamAction(el, button){
+      var action = button.getAttribute("data-crew-team"), c = current(); if (!c || crew.busy) return;
+      var value = function(id){ return (el.querySelector('#' + id) || {}).value || ''; };
+      var body = { projectId: view.pid };
+      if (action === "send") Object.assign(body, { owner: value('crew-request-owner'), crew: value('crew-request-crew'), teammate: value('crew-request-seat'), text: value('crew-request-text') });
+      if (action === "answer") Object.assign(body, { requestId: button.getAttribute('data-request'), accept: button.getAttribute('data-accept') === 'true' });
+      if (action === "runner-start") Object.assign(body, { crew: c.id, text: value('crewsaytext') });
+      if (action === "runner-control") Object.assign(body, { jobId: button.getAttribute('data-job'), action: button.getAttribute('data-control') });
+      crew.busy = action; drawCrew();
+      api('/api/team/crew-requests/' + action, { method: 'POST', body: JSON.stringify(body) }).then(function(result){ toast(result.result && result.result.delivery ? 'Request delivery: ' + result.result.delivery : 'Saved'); return loadCrews(); }).catch(function(error){ toast(error.message); }).finally(function(){ crew.busy = ''; drawCrew(); });
     }
 
     function progress(g){
@@ -255,8 +296,9 @@ export function createCrew(view) {
     }
 
     function card(c, g, x){
-      var working = g.current && g.current.card === x.id && moving(g);
-      var who = working ? mateOf(c, g.current.teammate) : mateOf(c, x.builder);
+      var turn = (c.active || []).filter(function(a){ return a.card === x.id; })[0] || (g.current && g.current.card === x.id ? g.current : null);
+      var working = turn && moving(g);
+      var who = working ? mateOf(c, turn.teammate) : mateOf(c, x.builder);
       return '<article class="crewcard' + (working ? " live" : "") + '" data-card="' + esc(x.id) + '">' +
         '<div class="cct">' + esc(x.title) + "</div>" +
         (x.detail ? '<div class="ccd">' + esc(x.detail.slice(0, 220)) + "</div>" : "") +
@@ -264,8 +306,10 @@ export function createCrew(view) {
           (who ? '<span class="ccwho">' + avatar(who, 18, working) + esc(who.id) + "</span>" : "") +
           (x.rounds ? '<span class="ccchip warn" title="sent back to the builder">' + ICONS.rewind + x.rounds + "</span>" : "") +
           ((x.commits || []).length ? '<span class="ccchip">' + ICONS.branch + x.commits.length + "</span>" : "") +
-          (working && g.current.step ? '<span class="live">' + esc(STEP_VERB[g.current.step] || g.current.step) + "…</span>" : "") +
+          (working && turn.step ? '<span class="live">' + esc(STEP_VERB[turn.step] || turn.step) + "…</span>" : "") +
         "</div>" +
+        (x.teamHold ? '<div class="cce">' + esc(x.teamHold.reason) + '</div><label>Revised paths <input class="input" id="crewscope-' + esc(x.id) + '" value="' + esc((x.touches || []).join(", ")) + '"></label><label>Proceed reason <input class="input" id="crewreason-' + esc(x.id) + '"></label><button class="btn sm outline" data-crew-narrow="' + esc(x.id) + '">Narrow scope</button><button class="btn sm ghost" data-crew-proceed="' + esc(x.id) + '">Proceed with reason</button>' : "") +
+        (g.play === "race" && g.status === "waiting_human" && x.stage === "ready" ? '<button class="btn sm primary" data-crew-pick="' + esc(x.id) + '">Choose this result</button>' : "") +
         (x.error ? '<div class="cce">' + esc(x.error.slice(0, 300)) + "</div>" : "") +
       "</article>";
     }
@@ -275,17 +319,23 @@ export function createCrew(view) {
         return '<button type="button" class="btn sm ' + cls + '" data-crew-act="' + act + '"' + (crew.busy ? " disabled" : "") + ">" + (icon || "") + esc(label) + "</button>";
       };
       var out = "";
-      if (/^(planning|running|waiting_human|awaiting_approval)$/.test(g.status)) out += b("stop", "Stop", "ghost", ICONS.stop);
-      if (/^(interrupted|stopped|failed)$/.test(g.status)) out += b("resume", "Resume", "outline", ICONS.play);
+      if (/^(planning|running|waiting_human|awaiting_approval|waiting_team|paused)$/.test(g.status)) out += b("stop", "Stop", "ghost", ICONS.stop);
+      if (/^(planning|running|awaiting_approval|waiting_team)$/.test(g.status)) out += b("pause", "Pause after active turns", "ghost", ICONS.stop);
+      if (/^(interrupted|stopped|failed|paused)$/.test(g.status) && !g.recovery) out += b("resume", "Resume", "outline", ICONS.play);
       if (g.status === "completed" || (g.cards || []).some(function(x){ return (x.commits || []).length; }))
         out += b("diff", crew.diff && crew.diff.goal === g.id ? "Hide changes" : "View changes", "ghost", ICONS.tree);
       if (g.status === "completed" && !g.applied) out += b("apply", "Apply (merge)", "primary", ICONS.check);
+      if (g.status === "completed" && !g.pr && !g.recovery) out += b("deliver", "Open PR", "outline", ICONS.branch);
+      if (g.pr) out += '<a class="btn sm outline" target="_blank" rel="noopener" href="' + esc(g.pr.url) + '">Review PR</a>';
+      if (g.status === "paused") out += '<label>Goal budget $ <input class="input" id="crewbudget" type="number" min="0.01" step="0.01" value="' + Number(g.budgetUsd || 0) + '"></label><button class="btn sm outline" data-crew-budget>Set goal budget</button>';
       if (g.applied) out += '<span class="crewapplied">' + ICONS.check + "applied to " + esc(g.applied.into) + "</span>";
       return out ? '<div class="crewacts">' + out + "</div>" : "";
     }
 
     /** What the crew needs from you, said big: approve the plan, or answer. */
     function banner(c, g){
+      if (g.recovery || g.deliveryError) return '<div class="cwban err" role="alert">' + esc(g.recovery || g.deliveryError) + '</div>';
+      if (g.status === "paused" || g.status === "waiting_team") return '<div class="cwban warn" role="status">' + esc(g.pauseReason || "Waiting for the team lease to be released. Review the card hold below.") + '</div>';
       if (g.status === "awaiting_approval") {
         var n = (g.cards || []).length;
         return '<div class="cwban warn"><div class="cwbi">' + ICONS.plan + "</div>" +
@@ -398,7 +448,7 @@ export function createCrew(view) {
         '<div class="crewsayrow"><label class="cwto">' + ICONS.team + '<select id="crewsayto" class="crewsel" title="who it\'s for"><option value="">' + (fresh ? "everyone" : "the crew") + "</option>" +
           (c.teammates || []).map(function(t){ return '<option value="' + esc(t.id) + '">@' + esc(t.id) + "</option>"; }).join("") + "</select></label>" +
           '<span class="cwhint">Enter to send · Shift+Enter for a new line</span>' +
-          '<span class="spacer"></span><button class="btn sm primary" type="submit" id="crewsend"' + (crew.busy === "say" ? " disabled" : "") + ">" + ICONS.up + esc(label) + "</button></div>" +
+          '<span class="spacer"></span><button class="btn sm primary" type="submit" id="crewsend"' + (crew.busy ? " disabled" : "") + ">" + ICONS.up + esc(label) + "</button></div>" +
       "</form>";
     }
 
@@ -449,15 +499,17 @@ export function createCrew(view) {
     /** Redraws replace the pane; keep what you were typing (and where) across them. */
     function keep(el){
       var kept = {}, act = document.activeElement;
-      ["crewsaytext", "crewsayto", "crewname", "crewtestnew", "crewtestcmd"].forEach(function(id){
+      ["crewsaytext", "crewsayto", "crewname", "crewtestnew", "crewtestcmd", "crewbudget", "crew-request-owner", "crew-request-crew", "crew-request-seat", "crew-request-text"].concat(Array.from(el.querySelectorAll('[id^="crewscope-"],[id^="crewreason-"]')).map(function(x){ return x.id; })).forEach(function(id){
         var x = el.querySelector("#" + id); if (x) kept[id] = x.value;
       });
       var chk = el.querySelector("#crewapprove"); if (chk) kept.crewapprove = chk.checked;
+      var openPanels = Array.from(el.querySelectorAll("details[id][open]")).map(function(panel){ return panel.id; });
       var evs = el.querySelector("#crewevs");
-      return { kept: kept, focus: act && el.contains(act) ? act.id : "", sel: act && typeof act.selectionStart === "number" ? [act.selectionStart, act.selectionEnd] : null,
+      return { kept: kept, openPanels: openPanels, focus: act && el.contains(act) ? act.id : "", sel: act && typeof act.selectionStart === "number" ? [act.selectionStart, act.selectionEnd] : null,
         scroll: el.scrollTop, chanBottom: !evs || evs.scrollHeight - evs.scrollTop - evs.clientHeight < 40, chanTop: evs ? evs.scrollTop : 0 };
     }
     function restore(el, k){
+      (k.openPanels || []).forEach(function(id){ var panel = el.querySelector('#' + id); if (panel) panel.open = true; });
       Object.keys(k.kept).forEach(function(id){
         var x = el.querySelector("#" + id); if (!x) return;
         if (id === "crewapprove") x.checked = k.kept[id];
@@ -485,14 +537,15 @@ export function createCrew(view) {
           : emptyHero()) + err + createForm();
       } else {
         var c = current();
-        body = hero(c) + err + roster(c) +
+        body = hero(c) + err + roster(c) + settings(c) + teamPanel(c) +
           '<div class="crewgrid"><div class="crewmain">' + goalBlock(c) + sayForm(c) + "</div>" + channel(c) + "</div>";
       }
       var html = '<div class="orchview crewview">' + body + "</div>";
       // Nothing changed (a refetch that found the same crew): leave the DOM alone,
       // so a tap that's landing right now lands on the element it started on.
-      if (el._crewHtml === html && el.firstChild) return;
+      if (el._crewHtml === html && el._crewBusy === crew.busy && el.firstChild) return;
       el._crewHtml = html;
+      el._crewBusy = crew.busy;
       el.innerHTML = html;
       restore(el, k);
       wire(el);
@@ -510,7 +563,7 @@ export function createCrew(view) {
       if (i >= 0) crew.list[i] = j.crew; else crew.list.push(j.crew);
     }
 
-    function act(name){
+    function act(name, body){
       var c = current(); if (!c || crew.busy) return;
       var g = c.state && c.state.goal;
       if (name === "diff") {
@@ -522,7 +575,7 @@ export function createCrew(view) {
         return;
       }
       crew.busy = name; drawCrew();
-      post(c, name).then(function(j){
+      post(c, name, body).then(function(j){
         crew.busy = "";
         merge(j);
         if (name === "apply" && j.into) toast("merged into " + j.into);
@@ -576,6 +629,7 @@ export function createCrew(view) {
     }
 
     function wire(el){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-crew-team]"), function(button){ button.disabled = !!crew.busy; });
       el.onclick = function(ev){
         var t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
         var x;
@@ -584,6 +638,21 @@ export function createCrew(view) {
         if ((x = t.closest("[data-crew-cancel]"))) { crew.making = false; crew.err = ""; drawCrew(); return; }
         if ((x = t.closest("[data-crew-tpl]"))) { crew.tpl = x.getAttribute("data-crew-tpl"); drawCrew(); return; }
         if ((x = t.closest("#crewcreate"))) { create(el); return; }
+        if ((x = t.closest("[data-crew-pick]"))) { act("pick", { to: x.getAttribute("data-crew-pick") }); return; }
+        if ((x = t.closest("[data-crew-seat-refresh]"))) { act("refresh", { to: x.getAttribute("data-crew-seat-refresh") }); return; }
+        if ((x = t.closest("[data-crew-budget]"))) { act("budget", { amount: Number(el.querySelector("#crewbudget").value) }); return; }
+        if ((x = t.closest("[data-crew-narrow],[data-crew-proceed]"))) {
+          var cardId = x.getAttribute("data-crew-narrow") || x.getAttribute("data-crew-proceed");
+          var scopes = el.querySelector("#crewscope-" + cardId).value.split(",").map(function(s){ return s.trim(); }).filter(Boolean);
+          act("overlap", { card: cardId, decision: x.hasAttribute("data-crew-narrow") ? "narrow" : "proceed:" + el.querySelector("#crewreason-" + cardId).value, touches: scopes }); return;
+        }
+        if ((x = t.closest("[data-crew-settings]"))) {
+          var cfg = current(); if (!cfg || crew.busy) return;
+          var settingsBody = { play: el.querySelector("#crewplay").value, maxParallel: Number(el.querySelector("#crewparallel").value) };
+          crew.busy = "settings"; drawCrew();
+          api("/api/projects/" + view.pid + "/crews/" + encodeURIComponent(cfg.id), { method: "PATCH", body: JSON.stringify(settingsBody) }).then(function(j){ crew.busy = ""; merge(j); drawCrew(); }).catch(function(err){ crew.busy = ""; toast(err.message); drawCrew(); }); return;
+        }
+        if ((x = t.closest("[data-crew-team]"))) { teamAction(el, x); return; }
         if ((x = t.closest("[data-crew-act]"))) { act(x.getAttribute("data-crew-act")); return; }
         if ((x = t.closest("[data-crew-chan]"))) { ev.preventDefault(); openChannel(x.getAttribute("data-crew-chan")); return; }
         if ((x = t.closest("[data-crew-testedit]"))) { crew.editTest = !crew.editTest; drawCrew(); var ti = el.querySelector("#crewtestcmd"); if (ti) ti.focus(); return; }

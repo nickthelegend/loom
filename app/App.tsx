@@ -36,7 +36,7 @@ type Route =
       chat?: { id: string; title: string };
       from?: "board" | "fleet";
       /** Opened from a tapped push: which tab (and goal), and a nonce so a second tap re-opens it. */
-      focus?: { tab: "thread" | "orchestra"; runId?: string; n: number };
+      focus?: { tab: "thread" | "orchestra" | "crew"; runId?: string; crewId?: string; n: number };
     };
 
 export default function App() {
@@ -94,7 +94,7 @@ export default function App() {
           project,
           from: "board",
           ...(want.chat ? { chat: { id: want.chat, title: "" } } : {}),
-          focus: { tab: want.tab, ...(want.runId ? { runId: want.runId } : {}), n: Date.now() },
+          focus: { tab: want.tab, ...(want.runId ? { runId: want.runId } : {}), ...(want.crewId ? { crewId: want.crewId } : {}), n: Date.now() },
         }),
       )
       .catch(() => {}); // a project this pairing can't see (or one since removed): stay put
@@ -189,6 +189,7 @@ export default function App() {
           project={route.project}
           {...(route.chat ? { initialChat: route.chat } : {})}
           {...(route.focus ? { initialTab: route.focus.tab } : {})}
+          {...(route.focus?.crewId ? { initialCrewId: route.focus.crewId } : {})}
           {...(route.focus?.runId ? { initialRunId: route.focus.runId } : {})}
           onBack={() => setRoute(route.from === "fleet" ? { name: "fleet" } : { name: "board" })}
         />

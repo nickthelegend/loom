@@ -185,12 +185,13 @@ export function deployUrl(d: Pick<TeamDeployment, "url">): string | null {
 
 // ── push notification → where the app opens ──
 
-export type NotificationTab = "thread" | "orchestra";
+export type NotificationTab = "thread" | "orchestra" | "crew";
 
 export interface NotificationRoute {
   projectId: string;
   tab: NotificationTab;
   runId?: string;
+  crewId?: string;
   /** The chat a question or a finished turn happened in (main is the default anyway). */
   chat?: string;
 }
@@ -207,6 +208,7 @@ export function notificationRoute(data: unknown): NotificationRoute | null {
   const d = data as Record<string, unknown>;
   const projectId = typeof d.projectId === "string" ? d.projectId.trim() : "";
   if (!projectId) return null;
+  if (d.kind === "crew") return { projectId, tab: "crew", ...(typeof d.crewId === "string" ? { crewId: d.crewId } : {}) };
   const runId = typeof d.runId === "string" && d.runId.trim() ? d.runId.trim() : undefined;
   if (runId) return { projectId, tab: "orchestra", runId };
   if (d.kind === "orchestra") return { projectId, tab: "orchestra" };

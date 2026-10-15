@@ -824,13 +824,15 @@ export function ProjectScreen(props: {
   /** Open on this thread instead of main — the Fleet screen's rows point at one. */
   initialChat?: { id: string; title: string };
   /** Open on this tab (a tapped push notification: its goal's Orchestra tab). */
-  initialTab?: "thread" | "orchestra";
+  initialTab?: "thread" | "orchestra" | "crew";
+  initialCrewId?: string;
   /** With initialTab "orchestra": open on this run. */
   initialRunId?: string;
 }) {
   const { creds } = props;
   const [project, setProject] = useState(props.project);
   const [tab, setTab] = useState<Tab>(props.initialTab ?? "thread");
+  const [crewFocus, setCrewFocus] = useState(props.initialCrewId);
   const [chatId, setChatId] = useState(props.initialChat?.id ?? "main");
   const [chats, setChats] = useState<Chat[]>([]);
   const [chatMenu, setChatMenu] = useState<Chat | null>(null);
@@ -1879,6 +1881,7 @@ export function ProjectScreen(props: {
           creds={creds}
           project={project}
           pulse={crewPulse}
+          initialCrewId={crewFocus}
           onOpenChat={(id, title) => {
             if (!chats.some((c) => c.id === id)) setExtraChat({ id, title, createdAt: Date.now() });
             setChatId(id);
@@ -1976,7 +1979,7 @@ export function ProjectScreen(props: {
           </View>
 
           {taskKind === "board" ? (
-            <BoardView creds={creds} project={project} />
+            <BoardView creds={creds} project={project} onOpenCrew={id => { setCrewFocus(id); setTab("crew"); }} />
           ) : !tasks ? (
             <Sys text="loading…" />
           ) : !tasks.available ? (

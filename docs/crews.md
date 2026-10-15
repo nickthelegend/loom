@@ -1,91 +1,43 @@
-# Crews
-
-Create a crew with `loom crew create ship`, give it a goal with
-`loom crew goal "add a health check"`, and review the plan before
-`loom crew approve`. Ship builds one card at a time, asks its reviewer and
-tester, and leaves a completed branch for you to inspect with `loom crew diff`.
-`loom crew apply` is an explicit local merge. GitHub PRs are merged by humans.
-
-## Parallel plays
-
-Use `loom crew goal "the goal" --play fanout` to run ready cards in separate
-builder worktrees. A seat runs one turn at a time, and at most four builders
-can run concurrently. Set the crew's cap with `--parallel` when creating it.
-Cards with overlapping `touches` wait; the next card branches from the integrated
-result. Reviewer and tester steps require explicit protocol verdicts. A test
-command's actual exit status also counts as test evidence.
-
-Before integration, Loom uses Git's `merge-tree` prediction. A conflict goes
-back to its owning builder's checkout for repair and another review/test round;
-the integration checkout stays clean. This needs a Git version that supports
-`merge-tree --write-tree` (Git 2.38 or newer).
-
-`--play race` gives every builder the same goal in its own checkout. Compare
-the entrants, then use `loom crew pick builder-1` (or the card id). Only the
-chosen entrant is integrated; apply remains a separate human action.
-
-Native fan-out keeps one binding per seat/workspace and holds independent
-workspace writer leases. Test commands also use process containment, so Stop
-and timeouts wait for detached descendants to exit. An unverified shutdown
-blocks continuation instead of releasing the checkout.
-
-## Persistent teammates
-
-Enable `brain.continuity` in the project to use native sessions for crew seats.
-All seats must use Codex, Claude Code or OpenCode. On Windows, the harness and
-its tools are contained in a verified Job Object before execution.
-
-Each seat gets a separate private thread and native binding, even when seats
-share a roster agent. The second card receives a delta packet. Native crews
-reuse a stable checkout across goals and create a new branch for each goal;
-the prior goal's branch remains available. Save any uncommitted files before
-starting the next goal.
-
-`loom crew stop` waits for the active turn to settle. After a daemon restart,
-`loom crew resume` continues an interrupted goal in the same checkout and
-native session. A hard crash or lost acknowledgement can leave an uncertain
-receipt. Inspect it in Brain diagnostics and explicitly reconcile its outcome;
-Loom refuses to replay the action or refresh the seat while that receipt is active.
-
-`loom crew refresh --to builder-1` starts a new session epoch for a stopped
-teammate. It reconstructs context on that seat's next turn and preserves the
-crew's recorded conversation.
-
-Crew decisions can be stored with `POST /api/projects/:id/crews/:crew/memory`
-and `{ "text": "the decision" }`. They are retrieved only for that crew and
-are not published to the team. A human can promote a decision to project memory
-with `POST /api/projects/:id/crews/:crew/memory/:memory/promote`.
-
-The remaining parallel, multi-person and phone work is tracked in
-[the implementation checklist](refactoring/AGENT-TEAMS-PROGRESS.md).
 
 
-## Team coordination and runners
+## Desktop and phone controls
 
-On shared repositories, `loom.team.json` can cap crew count, roster size,
-role permissions, daily crew spend and goal/member spend. Reviewed policy is
-read from the origin default branch; local policy can only tighten it. New
-turns pause when a budget is exhausted; already active turns finish first.
-`pause` preserves plan approval, and `resume` resumes after an owner review.
+Crew is available beside Orchestra on desktop and in the phone project tabs.
+Pick Ship, Fan-out or Race in Play and limits before starting the next goal.
+Each active seat shows its own work, goal spend and native context epoch. The
+board keeps Planned -> Building -> Review -> Testing -> Ready to integrate -> Done;
+Race waits for Choose this result before integrating a winner.
 
-Cards must declare `touches`. Team claims are atomic for those scopes, and
-another crew waits before writing. Resolve a hold with `narrow` and revised
-scopes, `wait:<goal>` (refreshes the base after it lands), or an explicit
-`proceed:<reason>` outside hard zones. Protected branches require PR delivery.
+Pause finishes active turns and then prevents new turns. Resume keeps a plan
+waiting for approval. Budget and team holds explain why work stopped. A native
+recovery warning requires inspecting/reconciling the action first; Resume is
+not offered while the receipt is uncertain. Refresh context starts a new
+native epoch only when it is safe to do so.
 
-Cross-member requests are encrypted, expire after one day, and require the
-requested owner's accept/decline. Reviewer, tester and researcher requests
-are read-only in the owner's checkout. The inbox records delivery before
-execution and never automatically repeats an interrupted request. A checkout
-change during such a request holds the crew for inspection. Request IDs and
-answers are immutable; teammates cannot answer for another owner.
+Team requests and runner crews contains encrypted requests for owner approval
+and remote runner progress. Start composer goal on my runner queues the goal
+text from the composer; the runner's plan still needs the owner's approval.
+Completed runner goals provide Review PR; humans merge them.
 
-A crew can start on a team runner. It maps roster IDs to installed kinds,
-ignores sender executable/options/hooks, and applies the runner permission
-ceiling. Owners can approve, say, pause, resume, stop or pick remotely. A
-completed build opens one PR for human review; crew controls never merge it.
-Failed or uncertain runner clones and native bindings are kept for inspection.
+Crew cards also appear in the ordinary Board with their crew, stage and seat.
+These are scheduler-owned cards; open Crew to control them. Fleet includes
+active crews, and a crew notification opens the corresponding Crew view.
 
+CLI examples:
+
+```powershell
+loom crew pause --crew ship
+loom crew resume --crew ship
+loom crew pick --crew ship --to builder-2
+loom crew budget --crew ship --amount 15
+loom crew overlap --crew ship --card c12 --decision narrow --touches 'src/api/**'
+loom crew refresh --crew ship --to reviewer
+loom crew deliver --crew ship
+```
+
+Physical native-phone acceptance, hosted migration acceptance and trusted
+installer signing are separate checks. The local browser checks and native
+Windows orchestration evidence do not substitute for them.
 The hosted hub needs migration `0010_crew_coordination.sql` for requests and
 control jobs at full capacity. Review/apply it separately with admin access;
 Loom does not apply it. The self-hosted hub supports these paths directly.
@@ -101,3 +53,10 @@ before its next turn; native compatibility changes receive a fresh binding.
 The `hub-sql` CI job runs all migrations and authorization checks in a disposable
 PostgreSQL cluster and fails if tools are missing. It never connects to hosted
 Supabase. Migration 0010 and the other SQL checks passed there (26 checks).
+
+
+If an owner-approved request stays queued because a budget or startup check
+blocked admission, Check delivery retries that known unstarted item after the
+block is resolved. A running, delivered or failed request is never executed
+again by this button. An interrupted delivery needs inspection and a new
+explicit request; restarting the daemon does not silently replay it.

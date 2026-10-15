@@ -29,6 +29,7 @@ const loom = (actions: unknown[]) => "Sure.\n```loom\n" + JSON.stringify({ actio
 /** What each teammate says, by teammate id: a function of its turn. */
 type Script = (input: SendInput, dir: string, n: number) => string | { text: string; ask?: string } | { silent: true };
 let scripts: Record<string, Script> = {};
+let seatCharges: Record<string, number> = {};
 const turns: Array<{ teammate: string; text: string; briefing: string; instance: string }> = [];
 
 class CrewBot extends AdapterBase {
@@ -55,6 +56,7 @@ class CrewBot extends AdapterBase {
       return;
     }
     const reply = typeof out === "string" ? { text: out } : out;
+    if (seatCharges[teammate]) this.emit({ kind: "status", payload: { state: "turn_cost", costUsd: seatCharges[teammate] } });
     if (reply.ask) this.emit({ kind: "needs_input", payload: { question: reply.ask } });
     else if (reply.text.startsWith("fail:")) this.emit({ kind: "error", payload: { message: reply.text.slice(5) } });
     else this.emit({ kind: "message", payload: { text: reply.text } });
@@ -65,7 +67,7 @@ class CrewBot extends AdapterBase {
 registerAgentKind("crewbot", (cfg, dir) => new CrewBot(cfg.id, "crewbot", dir));
 
 let rt: ProjectRuntime | undefined;
-afterEach(async () => { await rt?.close(); rt = undefined; scripts = {}; turns.length = 0; });
+afterEach(async () => { await rt?.close(); rt = undefined; scripts = {}; seatCharges = {}; turns.length = 0; });
 
 async function project(crew = true) {
   const dir = tmpDir("crew");
@@ -376,6 +378,18 @@ describe("a crew works a goal", () => {
     const goal = await rt.crews.goal(crew!.id, "budget hold");
     await waitUntil(() => !rt.crews.get(crew!.id).busy);
     expect(goal.status).toBe("paused"); expect(goal.pauseReason).toMatch(/daily budget/); expect(turns).toEqual([]);
+  });
+  it("accounts real turn costs per seat and pauses before the next turn exceeds the goal budget", async () => {
+    const { rt: runtime, crew } = await project();
+    runtime.crews.update(crew!.id, { planApproval: false, budgetUsd: 2 }); seatCharges.lead = 2;
+    scripts.lead = () => loom([{ type: "plan", cards: [{ title: "Card" }] }]);
+    const goal = await runtime.crews.goal(crew!.id, "budget accounting");
+    await waitUntil(() => !runtime.crews.get(crew!.id).busy);
+    expect(goal.status).toBe("paused"); expect(goal.costUsd).toBe(2); expect(goal.spendBySeat).toEqual({ lead: 2 });
+    expect(runtime.crews.get(crew!.id).spentToday).toBe(2); expect(turns.map(t => t.teammate)).toEqual(["lead"]);
+    await runtime.close();
+    const reopened = await ProjectRuntime.open({ id: runtime.info.id, name: runtime.info.name, dir: runtime.info.dir });
+    expect(reopened.crews.get(crew!.id).spentToday).toBe(2); rt = reopened;
   });
   it("recreates a warm teammate under tightened role permissions before its next card", async () => {
     const { rt: runtime, crew } = await project();
