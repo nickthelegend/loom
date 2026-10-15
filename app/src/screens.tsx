@@ -29,54 +29,7 @@ import {
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import {
-  claim,
-  clearCreds,
-  getActivity,
-  getApprovals,
-  getChats,
-  getCheckpoints,
-  getImportable,
-  importChat,
-  type ImportableChat,
-  gitCommit,
-  gitPush,
-  gitStage,
-  rewindTo,
-  type Checkpoint,
-  createChat,
-  deleteChat,
-  renameChat,
-  setChatFlags,
-  getEvents,
-  getProject,
-  getProjects,
-  getTasks,
-  getTree,
-  handoff,
-  interrupt,
-  openLiveStream,
-  pingDaemon,
-  saveCreds,
-  sendMessage,
-  getQueue,
-  queueEdit,
-  queueClear,
-  queuePause,
-  queueRemove,
-  type QueueView,
-  cloudFromLink,
-  type Approval,
-  type Chat,
-  type Creds,
-  type DaemonReachability,
-  type LoomEvent,
-  type Project,
-  type TaskItem,
-  type TaskResult,
-  type WorkingTree,
-  kv,
-} from "./api";
+import { claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -1207,6 +1160,26 @@ export function ProjectScreen(props: {
     }
   };
 
+  // Night Shift: each line in the box is a task — they run while you sleep, and one report lands in Main
+  const nightShift = () => {
+    const tasks = text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim()).filter(Boolean);
+    if (!tasks.length) return setErr("type the tasks first, one per line — then 🌙 runs them while you're away");
+    const to = selected ?? project.holder ?? undefined;
+    Alert.alert(
+      "Start a night shift?",
+      `${tasks.length} task${tasks.length === 1 ? "" : "s"}${to ? ` for ${to}` : ""}, one after another, a chat each. Proof checks every “done”; an agent going in circles is nudged. One report in the morning.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Start", onPress: () => {
+          haptic.tap();
+          startShift(creds, project.id, { tasks, ...(to ? { to } : {}) })
+            .then(() => { setText(""); setErr(null); })
+            .catch((e: Error) => setErr(e.message));
+        } },
+      ],
+    );
+  };
+
   const adapters = project.agents.filter((a) => a.tier === "adapter");
   const selectedAgent = project.agents.find((a) => a.id === selected) ?? null;
   const decisions = useMemo(() => approvalDecisions(events), [events]);
@@ -1746,6 +1719,15 @@ export function ProjectScreen(props: {
               <PermissionChip creds={creds} projectId={project.id} agent={selectedAgent} onChanged={refreshProject} />
               {/* grouped so they wrap together, right-aligned, on a narrow phone */}
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginLeft: "auto" }}>
+                <TouchableOpacity
+                  onPress={nightShift}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Night shift: run each line as a task while you're away"
+                  style={{ minHeight: 34, justifyContent: "center", paddingHorizontal: 10, borderRadius: radii.pill, borderWidth: 1, borderColor: T.line, backgroundColor: T.raised }}
+                >
+                  <Text style={{ color: T.dim, fontSize: 12, fontWeight: "600" }}>🌙</Text>
+                </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => setPromptsOpen(true)}
                   activeOpacity={0.7}

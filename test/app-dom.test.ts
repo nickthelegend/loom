@@ -560,6 +560,30 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 60_000);
 
+  it("Night shift: the lines in the box become tasks, and the morning report lands in the thread", async () => {
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(makeProjectDir({ name: "shiftdom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;
+    const m = mount({ hash: `#p/${pid}` });
+    await waitUntil(() => !!$(m, "#box") && !!$(m, "#morebtn"));
+    ($(m, "#box") as HTMLTextAreaElement).value = "- write the notes\n- ask: which license?";
+    ($(m, "#morebtn") as HTMLElement).click();
+    await waitUntil(() => [...m.window.document.querySelectorAll("#loommenu [data-i]")].some((b) => /Night shift/.test(b.textContent ?? "")));
+    ([...m.window.document.querySelectorAll("#loommenu [data-i]")].find((b) => /Night shift/.test(b.textContent ?? "")) as HTMLElement).click();
+    await waitUntil(() => !!$(m, "#cmenu.shiftpick #shgo"));
+    expect(text(m, "#shn")).toBe("2 tasks · one chat each");
+    ($(m, "#shto") as HTMLSelectElement).value = "echo";
+    ($(m, "#shgo") as HTMLElement).dispatchEvent(new m.window.MouseEvent("mousedown", { bubbles: true }));
+    await waitUntil(() => !!$(m, ".sys.shiftline"), { timeoutMs: 20_000 });
+    expect(text(m, ".sys.shiftline")).toMatch(/Night shift started — 2 tasks for echo/);
+    expect(($(m, "#box") as HTMLTextAreaElement).value).toBe("");
+    await waitUntil(() => !!$(m, ".shiftcard"), { timeoutMs: 40_000 });
+    expect(text(m, ".shiftcard .shsum")).toBe("2 tasks: 1 done (not checked), 1 needs you");
+    expect([...m.window.document.querySelectorAll(".shiftcard .shst")].map((x) => x.textContent)).toEqual(["Done", "Needs you"]);
+    expect(text(m, ".shiftcard .sh-needs_you .shwhyl")).toBe("asks: which license?");
+    expect($(m, ".shiftcard .shtask")!.getAttribute("data-gochat")).toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  }, 90_000);
+
   it("Pre-flight forecast: the composer says what a turn on this agent usually costs and takes", async () => {
     const client = new DaemonClient(readDaemonConfig()!);
     const pid = (await client.addProject(makeProjectDir({ name: "fcdom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;

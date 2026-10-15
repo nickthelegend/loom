@@ -306,6 +306,28 @@
     border:1px solid color-mix(in srgb, var(--tr) 40%, var(--border));color:var(--tr);--tr:var(--warn)}
   .trbadge.lv-high{--tr:var(--err)}
   .dfile.dffocus{outline:2px solid color-mix(in srgb, var(--warn) 55%, transparent);outline-offset:-2px;border-radius:6px}
+  /* Night Shift: the morning report */
+  .shiftcard{max-width:88%;margin:8px 0;background:var(--card);border:1px solid var(--border);border-left:3px solid var(--foreground);border-radius:var(--radius);padding:9px 11px;font-size:12.5px}
+  .shiftcard .shh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .shiftcard .shh b{font-weight:650}
+  .shiftcard .shsum{flex:1;min-width:0}
+  .shiftcard .shmeta{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+  .shiftcard .shstop{margin-top:4px;color:var(--warn);font-size:12px}
+  .shiftcard .shl{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+  .shiftcard .shl li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+  .shiftcard .shst{font-size:10px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:999px;padding:0 7px;color:var(--muted-foreground);white-space:nowrap}
+  .shiftcard .shst.ok{color:var(--ok);border-color:color-mix(in srgb, var(--ok) 40%, var(--border))}
+  .shiftcard .shst.err{color:var(--err);border-color:color-mix(in srgb, var(--err) 40%, var(--border))}
+  .shiftcard .shst.warn{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 40%, var(--border))}
+  .shiftcard .shtask{font:inherit;color:var(--foreground);background:none;border:0;padding:0;cursor:pointer;text-align:left;text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:3px}
+  .shiftcard .shtask:hover{text-decoration-color:currentColor}
+  .shiftcard .shwhyl{flex-basis:100%;color:var(--muted-foreground);padding-left:2px}
+  .shiftcard .shbits{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+  .shiftline .btn{margin-left:6px}
+  .shiftpick .shbody{padding:4px 12px 8px;display:flex;flex-direction:column;gap:8px}
+  .shiftpick .shwhy{margin:0;color:var(--muted-foreground);font-size:12px;line-height:1.45}
+  .shiftpick .shf{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px}
+  .shiftpick .shf select,.shiftpick .shf input{font:inherit;font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--foreground);max-width:55%}
   .turncard .tcf{color:var(--muted-foreground);font-size:11px;margin-top:3px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}

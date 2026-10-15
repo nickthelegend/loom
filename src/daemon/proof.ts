@@ -76,10 +76,16 @@ export class ProofRunner {
 
   /** Check the newest finished turn in `chat`. One proof at a time per project; a second ask for the same turn joins the first. */
   prove(chat = MAIN_CHAT, opts: { at?: number; auto?: boolean; testCommand?: string } = {}): Promise<ProofResult & { eventId: number } | null> {
+    this.pending++;
     const run = this.chain.then(() => this.proveNow(chat, opts));
     this.chain = run.catch(() => {});
+    void run.finally(() => { this.pending--; }).catch(() => {});
     return run;
   }
+
+  private pending = 0;
+  /** A check asked for or running — a Night Shift waits for it before it reports. */
+  get busy(): boolean { return this.pending > 0; }
 
   private async proveNow(chat: string, opts: { at?: number; auto?: boolean; testCommand?: string }): Promise<ProofResult & { eventId: number } | null> {
     const t = this.turn(chat, opts.at);

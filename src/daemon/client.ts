@@ -287,6 +287,12 @@ export class DaemonClient {
   }
 
   /** Proof: check the newest finished turn in a chat (daemon/proof.ts). */
+  shift(id: string): Promise<Record<string, any>> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/shift`); }
+  startShift(id: string, body: { tasks: string[]; to?: string; until?: string; maxUsd?: number }): Promise<Record<string, any>> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/shift`, body);
+  }
+  stopShift(id: string): Promise<Record<string, any>> { return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/shift`); }
+
   proof(id: string, body: { chat?: string; at?: number; testCommand?: string } = {}): Promise<Record<string, any>> {
     // it re-runs the project's tests: give it as long as the daemon gives them (10 min default), and a little more
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/proof`, body, 31 * 60_000);

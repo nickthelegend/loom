@@ -22,6 +22,7 @@ import { CrewEngine } from "../core/crew.js";
 import { LoopWatch, nudgeText, type Loop } from "../core/loops.js";
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
+import { NightShift } from "./shift.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
@@ -157,6 +158,8 @@ export class ProjectRuntime {
   readonly relay: QuotaRelay;
   /** Proof: checks an agent's "done" against what ran and a clean re-run of the tests. */
   readonly proofs: ProofRunner;
+  /** Night Shift: a line of tasks run while you're away, then one report (daemon/shift.ts). */
+  readonly shifts: NightShift;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -403,6 +406,25 @@ export class ProjectRuntime {
       config: () => this.config.proof ?? {},
       list: (opts) => this.log.list(opts),
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+    });
+    this.shifts = new NightShift({
+      dir: info.dir,
+      hasAgent: (id) => this.config.agents.some((a) => a.id === id),
+      createChat: (title, agentId) => this.createChat(title, agentId ? { agentId } : {}),
+      enqueue: (input) => this.enqueue(input),
+      queued: () => this.queue.snapshot().items,
+      removeQueued: (id) => this.queue.remove(id),
+      busy: () => this.turns.busySince.size > 0 || [...this.agents.values()].some((a) => isAdapter(a) && a.busy()),
+      proofsBusy: () => this.proofs.busy,
+      resumeAfterRestart: () => {
+        const q = this.queue.snapshot();
+        if (!q.paused || !q.reason?.startsWith("the daemon restarted")) return;
+        this.queue.setPaused(false);
+        void this.drainPromptQueue();
+      },
+      list: (opts) => this.log.list(opts),
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      warn: (message, detail) => logbook.warn("shift", message, String(detail), this.info.id),
     });
     this.crews = new CrewEngine({
       projectId: info.id,
@@ -2004,6 +2026,7 @@ export class ProjectRuntime {
     if (loop) void this.onLoop(loop).catch((err) => logbook.warn("loops", "couldn't act on a loop", String(err), this.info.id));
     // an agent out of quota mid-task hands its work on (core/quota.ts, runtime/relay.ts)
     this.relay.observe(event);
+    if (event.kind === "run_complete") this.shifts.poke();
     // The turn's diff is started before routing hears the turn ended: a step
     // condition reads those numbers, and a route that advanced first would
     // read the turn before this one.
@@ -2389,7 +2412,11 @@ export class ProjectRuntime {
 
   private watchClockConditions(q: QueueState): void { return this.queueCoordinator.watchClockConditions(q); }
 
-  private holdQueueFor(agentId: string): void { return this.queueCoordinator.holdQueueFor(agentId); }
+  private holdQueueFor(agentId: string): void {
+    // a night shift doesn't wait on a question: it stays open for you in its chat (and the report), and the next task goes
+    if (this.shifts.active) return;
+    return this.queueCoordinator.holdQueueFor(agentId);
+  }
 
   private releaseQuestionHold(agentId: string): void { return this.queueCoordinator.releaseQuestionHold(agentId); }
 
@@ -2424,7 +2451,8 @@ export class ProjectRuntime {
    * with watchdog.auto "nudge", also stop the turn and tell it to step back.
    */
   private async onLoop(loop: Loop): Promise<void> {
-    const set = this.config.watchdog?.auto ?? "notify";
+    // on a night shift nobody is watching: nudge by default (an explicit setting still wins)
+    const set = this.config.watchdog?.auto ?? (this.shifts.active ? "nudge" : "notify");
     if (set === "off") return;
     // nudge once; if it's still going in circles after that, it's yours to decide
     const key = `${loop.agentId}\u0000${loop.chat}`;
@@ -3267,6 +3295,7 @@ export class ProjectRuntime {
   async close(): Promise<void> {
     await this.orchestra.shutdown().catch(() => { });
     this.relay.stop();
+    this.shifts.close();
     await this.crews.shutdown().catch(() => { });
     this.closed = true;
     this.harnesses.stop();

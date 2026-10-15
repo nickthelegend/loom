@@ -60,6 +60,40 @@ import { shortModel } from './permissions.js';
       "</div></div>";
   }
 
+  // Night Shift (core/shift.ts): the line when it starts, and the morning report —
+  // each task's outcome, what decided it, and a way into its chat.
+  var SHIFT = {
+    verified: ["ok", "Verified"], done: ["", "Done"], didnt_hold: ["err", "Didn\u2019t hold"], failed: ["err", "Failed"],
+    needs_you: ["warn", "Needs you"], not_started: ["", "Not started"], running: ["", "Still running"],
+  };
+  function shiftCard(e){
+    var p = e.payload || {};
+    if (p.phase === "started") {
+      var k = (p.tasks || []).length;
+      return '<div class="sys shiftline">\ud83c\udf19 Night shift started \u2014 ' + k + " task" + (k === 1 ? "" : "s") +
+        (p.to ? " for " + esc(labelOf(p.to)) : "") + (p.until ? ", no new ones after " + esc(new Date(p.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) : "") +
+        (p.maxUsd ? ", up to " + money(p.maxUsd) : "") + ' <button type="button" class="btn xs outline" data-shift-stop="' + esc(p.shiftId || "") + '">Stop the shift</button></div>';
+    }
+    if (p.phase !== "report") return "";
+    var rows = (p.tasks || []).map(function(t){
+      var st = SHIFT[t.status] || ["", t.status];
+      var why = t.question ? "asks: " + t.question : t.error ? t.error : t.headline || "";
+      var bits = [];
+      if (t.files && t.files.length) bits.push(t.files.length + " file" + (t.files.length === 1 ? "" : "s"));
+      if (t.loops) bits.push("went in circles " + t.loops + "\u00d7");
+      if (t.costUsd) bits.push(money(t.costUsd));
+      return '<li class="sh-' + esc(t.status) + '"><span class="shst ' + st[0] + '">' + st[1] + "</span>" +
+        '<button type="button" class="shtask" data-gochat="' + esc(t.chat) + '" title="open its chat">' + esc(String(t.text).slice(0, 120)) + "</button>" +
+        (why ? '<span class="shwhyl">' + esc(String(why).slice(0, 180)) + "</span>" : "") +
+        (bits.length ? '<span class="shbits">' + esc(bits.join(" \u00b7 ")) + "</span>" : "") + "</li>";
+    }).join("");
+    var took = p.endedAt && p.startedAt ? Math.max(1, Math.round((p.endedAt - p.startedAt) / 60000)) : 0;
+    return '<div class="shiftcard"><div class="shh">\ud83c\udf19 <b>Night shift report</b><span class="shsum">' + esc(String(p.summary || "")) + "</span>" +
+      '<span class="shmeta">' + (took ? took + " min" : "") + (p.costUsd ? " \u00b7 " + money(p.costUsd) : "") + "</span></div>" +
+      (p.stopped ? '<div class="shstop">Stopped early: ' + esc(String(p.stopped)) + "</div>" : "") +
+      '<ul class="shl">' + rows + "</ul></div>";
+  }
+
   function avatarFor(id){
     var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
     // a picture you gave this agent wins over its brand mark
@@ -348,6 +382,7 @@ import { shortModel } from './permissions.js';
         '<div class="tcdiff" style="display:none"></div></div>';
     }
     if (e.kind === "proof") return proofCard(e);
+    if (e.kind === "shift") return shiftCard(e);
     if (e.kind === "checkpoint") {
       if (p.reason !== "rewound") return tview() === "verbose" ? '<div class="sys" style="opacity:.6">\u21ba checkpoint \u00b7 ' + esc(p.label || p.id) + "</div>" : "";
       return '<div class="sys ok">\u21ba Rewound to \u201c' + esc(String(p.label || p.id).slice(0, 80)) + '\u201d \u00b7 ' +
