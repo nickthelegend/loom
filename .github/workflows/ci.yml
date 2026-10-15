@@ -10,6 +10,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Exercise migrations in a disposable database, never against hosted state.
+  # initdb is installed on this image but its bin directory is not on PATH.
+  hub-sql:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Enable installed PostgreSQL tools
+        run: |
+          PG_BINDIR="$(pg_config --bindir)"
+          test -x "$PG_BINDIR/initdb"
+          echo "$PG_BINDIR" >> "$GITHUB_PATH"
+      - run: npx vitest run test/supabase-sql.test.ts --reporter=verbose
+        env:
+          LOOM_REQUIRE_POSTGRES: "1"
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

@@ -391,4 +391,21 @@ describe("a crew works a goal", () => {
     const reopened = await ProjectRuntime.open({ id: runtime.info.id, name: runtime.info.name, dir: runtime.info.dir });
     expect(reopened.crews.get(crew!.id).spentToday).toBe(2); rt = reopened;
   });
+  it("recreates a warm teammate under tightened role permissions before its next card", async () => {
+    const { rt: runtime, crew } = await project();
+    const host = (runtime.crews as unknown as { host: CrewHost }).host;
+    const made = vi.spyOn(host, "makeAgent");
+    runtime.config.agents.find(agent => agent.id === "small")!.options = { permissions: "bypass" };
+    runtime.teamPolicy = parsePolicy({ crews: { reviewerMustDifferFromBuilders: false, planApproval: "optional", roles: { builder: { permissions: "auto" } } } });
+    runtime.crews.update(crew!.id, { planApproval: false });
+    scripts.lead = input => input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "One" }, { title: "Two" }] }]) : loom([{ type: "done", summary: "done" }]);
+    scripts.builder = () => {
+      runtime.teamPolicy = parsePolicy({ crews: { reviewerMustDifferFromBuilders: false, planApproval: "optional", roles: { builder: { permissions: "ask" } } } });
+      return loom([{ type: "done", summary: "done" }]);
+    };
+    const goal = await runtime.crews.goal(crew!.id, "tightened permissions");
+    await waitUntil(() => goal.status === "completed" && !runtime.crews.get(crew!.id).busy);
+    expect(made.mock.calls.filter(([cfg]) => cfg.role === "builder").map(([cfg]) => cfg.options?.permissions)).toEqual(["auto", "ask"]);
+  });
+
 });

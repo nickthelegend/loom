@@ -272,6 +272,7 @@ export class CrewEngine {
   private states = new Map<string, CrewState>();
   /** Live adapters for the active goal: `${crew}/${teammate}`. */
   private agents = new Map<string, Adapter>();
+  private agentOptions = new Map<string, string>();
   /** Teammates blocked on a structured question: key → the request, its question ids, the thread. */
   private waiting = new Map<string, { requestId: string; ids: string[]; chat: string }>();
 
@@ -1255,16 +1256,25 @@ export class CrewEngine {
     const key = `${cfg.id}/${tm.id}/${tm.agent}/${digest(dir).slice(0, 16)}`;
     const rosterCfg = this.host.roster().find((a) => a.id === tm.agent);
     if (!rosterCfg) throw new Error(`teammate ${tm.id}'s agent "${tm.agent}" is no longer on the roster`);
+    const effectiveOptions = this.host.nativeOptions?.({ ...rosterCfg, role: tm.role }) ?? rosterCfg.options ?? {};
+    const optionsStamp = digest(JSON.stringify(effectiveOptions));
     this.host.gate(tm.agent);
     let agent = this.agents.get(key);
+    if (agent && this.agentOptions.get(key) !== optionsStamp) {
+      // A tightened role/runner ceiling must reach the actual adapter, not
+      // just Brain's binding fingerprint. Settle the old service first.
+      await agent.stop(); this.agents.delete(key); this.agentOptions.delete(key); agent = undefined;
+      this.phase(cfg, st, "permissions_refreshed", { teammate: tm.id });
+    }
     const fresh = !agent;
     if (!agent) {
       // Its own instance and state slot, so two teammates on one agent kind keep separate sessions.
       // The seat *and* the agent in it: swap a teammate's agent and the old one's
       // saved session (an opencode ses_…, say) never reaches the new one.
       const suffix = g.play && g.play !== "ship" ? `.${digest(dir).slice(0, 8)}` : "";
-      agent = this.host.makeAgent({ ...rosterCfg, id: `crew-${cfg.id}-${tm.id}.${rosterCfg.id}${suffix}`.slice(0, 100), role: tm.role }, dir);
+      agent = this.host.makeAgent({ ...rosterCfg, options: effectiveOptions, id: `crew-${cfg.id}-${tm.id}.${rosterCfg.id}${suffix}`.slice(0, 100), role: tm.role }, dir);
       this.agents.set(key, agent);
+      this.agentOptions.set(key, optionsStamp);
       this.wire(cfg, st, g, agent, tm, key);
       await agent.start();
     }
@@ -1306,7 +1316,7 @@ export class CrewEngine {
         const request = brain.capture({ id: randomUUID(), conversationId: chat, agentInstanceId: tm.agent,
           text: prompt, source: "route", model: typeof rosterCfg.options?.model === "string" ? rosterCfg.options.model : null,
           plan: false, targetAddedTokens: 12000 }).request;
-        const options = this.host.nativeOptions?.({ ...rosterCfg, role: tm.role }) ?? rosterCfg.options ?? {};
+        const options = effectiveOptions;
         if (Array.isArray(options.extraArgs) && options.extraArgs.length)
           throw new ContinuityError("unsupported", "arbitrary CLI arguments have unverified native session semantics; remove extraArgs");
         let prepared = await brain.prepare(request, rosterCfg.kind, dir, options, briefing);
@@ -1576,7 +1586,7 @@ export class CrewEngine {
     const errors: unknown[] = [];
     for (const [key, a] of [...this.agents]) {
       if (!key.startsWith(`${crewId}/`)) continue;
-      try { await a.stop(); this.agents.delete(key); }
+      try { await a.stop(); this.agents.delete(key); this.agentOptions.delete(key); }
       catch (error) { errors.push(error); }
     }
     if (errors.length) {

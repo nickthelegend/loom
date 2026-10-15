@@ -26,6 +26,7 @@ const hasPg = (() => {
     return false;
   }
 })();
+if (process.env.LOOM_REQUIRE_POSTGRES === "1" && !hasPg) throw new Error("PostgreSQL tools are required for this CI job; SQL tests must not skip");
 
 let dataDir = "";
 let sockDir = "";
