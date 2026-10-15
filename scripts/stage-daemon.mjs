@@ -84,6 +84,7 @@ const required = [
   "dist/web/shell.html",
   "node_modules/express/package.json",
   "node_modules/ws/package.json",
+  "node_modules/koffi/index.cjs",
   "node_modules/@xterm/xterm/lib/xterm.js",
   "node_modules/@xterm/addon-fit/lib/addon-fit.js",
 ];
@@ -93,6 +94,12 @@ if (missing.length) {
   process.exit(1);
 }
 log(`verified ${required.length} runtime paths`);
+if (process.platform === "win32") {
+  execFileSync(process.execPath, ["--input-type=module", "-e",
+    "import { probeWindowsJobs } from './dist/core/windows-jobs.js'; await probeWindowsJobs();"],
+    { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true });
+  log("verified staged Windows Job Object binding and launch");
+}
 log(`staged ${mb(stage)} MB → ${rel(stage)}`);
 
 function rel(p) {

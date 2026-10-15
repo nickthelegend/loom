@@ -70,6 +70,7 @@
     "commander": "^15.0.0",
     "express": "^5.2.1",
     "ink": "^7.1.0",
+    "koffi": "3.3.3",
     "picocolors": "^1.1.1",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",

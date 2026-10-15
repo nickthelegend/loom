@@ -5,7 +5,9 @@
  */
 
 import { type ChildProcess } from "node:child_process";
-import { spawn, stopWindowsTree } from "../core/process.js";
+import { spawnContained } from "../core/process.js";
+import { quiesceWindowsJob, windowsJobReady } from "../core/windows-jobs.js";
+import { NativeQuiescenceUnknown } from "../core/continuity/contracts.js";
 import { agentEnv, quiesceProcessGroup } from "../adapters/base.js";
 
 export interface HarnessProcess {
@@ -18,7 +20,7 @@ export interface HarnessProcess {
 
 /** Spawn a harness CLI in its own process group, with pipes on all three streams. */
 export function spawnHarness(command: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }): HarnessProcess {
-  const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? agentEnv(),
+  const child = spawnContained(command, args, { cwd: options.cwd, env: options.env ?? agentEnv(),
     detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
   let tail = "";
   child.stderr?.on("data", (d: Buffer) => { tail = (tail + d.toString()).slice(-4000); });
@@ -31,6 +33,8 @@ export function spawnHarness(command: string, args: string[], options: { cwd: st
 
 /** Wait for a spawned process to either get a pid or fail to launch. */
 export function launched(child: ChildProcess): Promise<void> {
+  const contained = windowsJobReady(child);
+  if (contained) return contained;
   if (child.pid) return Promise.resolve();
   return new Promise((resolve, reject) => {
     child.once("spawn", () => resolve());
@@ -54,12 +58,12 @@ const signalGroup = (child: ChildProcess, signal: NodeJS.Signals): void => {
 export async function stopHarness(proc: HarnessProcess, graceMs = 2000): Promise<void> {
   const { child } = proc;
   const timeout = (ms: number) => new Promise<"timeout">(resolve => setTimeout(() => resolve("timeout"), ms).unref());
+  if (process.platform === "win32") {
+    await quiesceWindowsJob(child);
+    if (await Promise.race([proc.closed, timeout(6000)]) === "timeout") throw new NativeQuiescenceUnknown("Windows agent process did not close after shutdown");
+    return;
+  }
   if (child.pid && child.exitCode === null && child.signalCode === null) {
-    if (process.platform === "win32") {
-      await stopWindowsTree(child);
-      if (await Promise.race([proc.closed, timeout(6000)]) === "timeout") throw new Error("Windows agent process did not close after shutdown");
-      return;
-    }
     child.stdin?.end();
     if (await Promise.race([proc.closed, timeout(graceMs)]) === "timeout") {
       signalGroup(child, "SIGTERM");
@@ -69,5 +73,5 @@ export async function stopHarness(proc: HarnessProcess, graceMs = 2000): Promise
       }
     }
   }
-  if (child.pid && process.platform !== "win32") await quiesceProcessGroup(child.pid);
+  if (child.pid) await quiesceProcessGroup(child.pid);
 }

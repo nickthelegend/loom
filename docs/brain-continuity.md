@@ -118,7 +118,12 @@ on a resolved receipt. Retry is a new deliberate request. Failed stops block suc
 Native POSIX launches own a process group. Parent exit starts inherited-child cleanup;
 completion waits for containment and output drain. Unknown termination retains the
 writer lease. Escaped/detached children are not fully contained; inspect them during
-manual recovery. Windows native continuity is unsupported until Job Objects are verified.
+manual recovery. Windows native harnesses launch inside kill-on-close Job Objects;
+the launch handshake completes containment before any harness or tool can start.
+Shutdown verifies zero job members, and failed inspection retains the writer lease.
+The daemon probes assignment on the current host (including enclosing jobs) before
+enabling native continuity. OpenCode supports both the legacy `/api/session` API
+and npm 1.19.0's `/session/:id/prompt_async` admission and `/session/status` idle proof.
 App-owned diff/commit work also finishes before the next native turn starts.
 
 The Brain pane lists the latest 100 attempt summaries and loads individual full

@@ -42,17 +42,18 @@ describe("portable CLI launches", () => {
     expect(commandInvocation("agent", ["a&b"], { env })).toEqual({ command: process.execPath, args: [entry, "a&b"] });
     const { stdout } = await promisify(execFile)("agent", ['"quoted" & %PATH%'], { env });
     expect(JSON.parse(stdout)).toEqual(['"quoted" & %PATH%']);
-    const native = path.join(dir, "native.exe");
+    fs.mkdirSync(path.join(dir, "node_modules", "native"));
+    const native = path.join(dir, "node_modules", "native", "native.exe");
     fs.writeFileSync(native, "fixture");
-    fs.writeFileSync(path.join(dir, "native-agent.cmd"), '@echo off\n"%dp0%\\native.exe"   %*\n');
+    fs.writeFileSync(path.join(dir, "native-agent.cmd"), '@echo off\n"%dp0%\\node_modules\\native\\native.exe"   %*\n');
     expect(commandInvocation("native-agent", ["a&b", '"quoted"'], { env })).toEqual({ command: native, args: ["a&b", '"quoted"'] });
     fs.writeFileSync(path.join(dir, "tool.exe"), "");
     expect(findExecutable("tool", env)).toBe(path.join(dir, "tool.exe"));
   });
 
-  it.skipIf(process.platform !== "win32")("refuses native continuity until Windows containment is implemented", async () => {
-    const health = await probeHarness("codex", {});
-    expect(health.available).toBe(false);
-    expect(health.error).toMatch(/Windows Job Objects/);
+  it.skipIf(process.platform !== "win32")("allows native continuity after verifying Job Object containment", async () => {
+    const bin = path.join(tmpDir("native-probe"), "codex");
+    fs.writeFileSync(bin, '#!/usr/bin/env node\nconsole.log("codex-cli 9.9.9");');
+    expect(await probeHarness("codex", { bin })).toMatchObject({ available: true, version: "9.9.9" });
   });
 });

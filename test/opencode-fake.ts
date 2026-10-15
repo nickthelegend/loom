@@ -15,6 +15,10 @@ import type { AddressInfo } from "node:net";
 type Json = Record<string, unknown>;
 
 export interface FakeOpenCodeOptions {
+  /** npm 1.19: unwrapped /session API, async 204 admission and message parts. */
+  modern?: boolean;
+  /** Status endpoint cannot prove that this session stopped. */
+  statusUnavailable?: boolean;
   reply?: string;
   turnMs?: number;
   /** Stay listed as active forever (quiescence never proven). */
@@ -74,7 +78,7 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
   };
   const send = (res: http.ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json" });
-    res.end(JSON.stringify(body));
+    res.end(status === 204 ? undefined : JSON.stringify(opts.modern && body && typeof body === "object" && "data" in body ? body.data : body));
   };
   const body = (req: http.IncomingMessage) => new Promise<Json>((resolve) => {
     let raw = "";
@@ -84,7 +88,13 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
-    const p = url.pathname;
+    let p = url.pathname;
+    if (opts.modern) {
+      if (p.startsWith("/api/")) return send(res, 404, { message: "legacy API unavailable" });
+      if (p === "/global/health") return send(res, 200, { healthy: true, version: "1.19.0" });
+      if (p === "/session/status") p = "/api/session/active";
+      else if (p.startsWith("/session")) p = "/api" + p.replace(/\/prompt_async$/, "/prompt").replace(/\/abort$/, "/interrupt");
+    }
     if (p === "/api/health") return send(res, 200, { healthy: true });
     if (p === "/api/model") return send(res, 200, { data: [{ providerID: "opencode", id: "big-pickle" }, { providerID: "opencode", id: "other-free" }] });
     if (p === "/event") {
@@ -106,7 +116,7 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
       go();
       return;
     }
-    if (p === "/api/session/active") return send(res, 200, { data: Object.fromEntries([...active].map((s) => [s, { type: "running" }])) });
+    if (p === "/api/session/active") return opts.statusUnavailable ? send(res, 503, { message: "status unavailable" }) : send(res, 200, { data: Object.fromEntries([...active].map((s) => [s, { type: opts.modern ? "busy" : "running" }])) });
     if (p === "/api/session" && req.method === "POST") {
       const b = await body(req);
       const id = nextId("ses");
@@ -126,11 +136,12 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
       modelSwitches.push({ session: sid, model: s.model });
       return send(res, 200, { data: { id: sid, model: s.model } });
     }
-    if (rest === "message") return send(res, 200, { data: s.messages });
+    const modernMessage = (msg: Json) => ({ info: { ...msg, role: msg.type }, parts: msg.content ?? [] });
+    if (rest === "message") return send(res, 200, { data: opts.modern ? s.messages.map(modernMessage) : s.messages });
     const mm = /^message\/(.+)$/.exec(rest);
     if (mm) {
       const msg = s.messages.find((x) => x.id === mm[1]);
-      return msg ? send(res, 200, { data: msg }) : send(res, 404, { message: "no message" });
+      return msg ? send(res, 200, { data: opts.modern ? modernMessage(msg) : msg }) : send(res, 404, { message: "no message" });
     }
     if (rest === "interrupt") {
       active.delete(sid);
@@ -138,13 +149,19 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
     }
     if (rest === "prompt" && req.method === "POST") {
       const b = await body(req);
-      const text = String(((b.prompt ?? {}) as Json).text ?? "");
+      const text = opts.modern ? ((b.parts ?? []) as Json[]).filter(p => p.type === "text").map(p => p.text).join("") : String(((b.prompt ?? {}) as Json).text ?? "");
       if (opts.refusePrompt) return send(res, opts.refusePrompt, { message: "refused" });
       prompts.push({ session: sid, text });
+      if (opts.modern && b.model) {
+        const model = b.model as Json;
+        const ref = { providerID: model.providerID, id: model.modelID };
+        if (JSON.stringify(ref) !== JSON.stringify(s.model)) modelSwitches.push({ session: sid, model: ref });
+        s.model = ref;
+      }
       const userId = nextId("msg");
       s.messages.push({ id: userId, type: "user", text, time: { created: Date.now() } });
       active.add(sid);
-      send(res, 200, { data: { admittedSeq: s.messages.length, id: userId, sessionID: sid, delivery: "steer" } });
+      send(res, opts.modern ? 204 : 200, { data: { admittedSeq: s.messages.length, id: userId, sessionID: sid, delivery: "steer" } });
       const asstId = nextId("msg");
       later(20, () => {
         push("session.next.step.started", { sessionID: sid, assistantMessageID: asstId, model: s.model });

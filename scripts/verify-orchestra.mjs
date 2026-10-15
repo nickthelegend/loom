@@ -46,7 +46,7 @@ git("add", "-A");
 git("commit", "-qm", "seed");
 
 const kinds = [...new Set([orchestrator, ...workers])];
-const OC_MODEL = { opencode: { model: "opencode/big-pickle" } };
+const OC_MODEL = { opencode: { model: arg("opencode-model", "opencode/big-pickle") } };
 writeProjectConfig(dir, {
   name: "calc",
   agents: kinds.map((k) => ({ id: k, kind: k, role: k, ...(OC_MODEL[k] ? { options: OC_MODEL[k] } : {}) })),
