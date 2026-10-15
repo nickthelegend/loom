@@ -20,6 +20,7 @@ import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
 import { CrewEngine } from "../core/crew.js";
 import { LoopWatch, nudgeText, type Loop } from "../core/loops.js";
+import { commandOf, dangerOf } from "../core/shield.js";
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
 import { NightShift } from "./shift.js";
@@ -154,6 +155,8 @@ export class ProjectRuntime {
   private readonly loops = new LoopWatch();
   /** agent × chat already nudged since a person last spoke there: a second loop is only reported. */
   private readonly nudged = new Set<string>();
+  /** agent × chat × command already flagged this turn by the shield. */
+  private readonly shielded = new Set<string>();
   /** Quota Relay: an agent out of quota mid-task hands its work to the next. */
   readonly relay: QuotaRelay;
   /** Proof: checks an agent's "done" against what ran and a clean re-run of the tests. */
@@ -2022,6 +2025,7 @@ export class ProjectRuntime {
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
+    this.shield(event);
     const loop = this.loops.observe(event);
     if (loop) void this.onLoop(loop).catch((err) => logbook.warn("loops", "couldn't act on a loop", String(err), this.info.id));
     // an agent out of quota mid-task hands its work on (core/quota.ts, runtime/relay.ts)
@@ -2465,6 +2469,37 @@ export class ProjectRuntime {
         : `${loop.agentId} made the same call ${loop.count} times this turn: \`${loop.call}\``,
     } });
     if (mode === "nudge") await this.actOnLoop(loop.chat, loop.agentId, "nudge", undefined, loop);
+  }
+
+  /**
+   * Blast-Radius Shield (core/shield.ts): a command an agent ran that can't be
+   * taken back — a force-push, a reset --hard, a recursive delete outside the
+   * project, a dropped table. Said at once, in its chat and as a push; with
+   * shield.auto "stop" (the default on a night shift) the turn is stopped too.
+   */
+  private shield(event: LoomEvent): void {
+    if (!event.agentId) return;
+    const chat = event.chat ?? MAIN_CHAT;
+    if (event.kind === "run_complete") {
+      for (const k of [...this.shielded]) if (k.startsWith(`${event.agentId}\u0000${chat}\u0000`)) this.shielded.delete(k);
+      return;
+    }
+    if (event.kind !== "tool_call") return;
+    const command = commandOf(event.payload as Record<string, unknown>);
+    if (!command) return;
+    const mode = this.config.shield?.auto ?? (this.shifts.active ? "stop" : "notify");
+    if (mode === "off") return;
+    const danger = dangerOf(command, this.agentDir(event.agentId));
+    if (!danger) return;
+    const key = `${event.agentId}\u0000${chat}\u0000${command}`;
+    if (this.shielded.has(key)) return;
+    this.shielded.add(key);
+    const stop = mode === "stop";
+    this.log.append({ kind: "status", agentId: event.agentId, ...(chat !== MAIN_CHAT ? { chat } : {}), payload: {
+      state: "shield_tripped", command: command.slice(0, 500), what: danger.what, why: danger.why, ...(stop ? { stopped: true } : {}),
+      text: `${event.agentId} ran ${danger.what}: \`${command.replace(/\s+/g, " ").slice(0, 160)}\` — ${danger.why}`,
+    } });
+    if (stop) void this.interrupt({ chat, source: "route" }).catch((err) => logbook.warn("shield", "couldn't stop the turn", String(err), this.info.id));
   }
 
   /** The loop card's buttons: stop the turn, nudge the agent, or hand the task to another agent. */

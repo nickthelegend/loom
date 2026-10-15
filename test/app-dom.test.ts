@@ -560,6 +560,22 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 60_000);
 
+  it("Blast-Radius Shield: a force-push gets a red card, and its Stop ends the turn", async () => {
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(makeProjectDir({ name: "shielddom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;
+    const m = mount({ hash: `#p/${pid}` });
+    await waitUntil(() => !!$(m, "#box"));
+    ($(m, "#box") as HTMLInputElement).value = "ship it run:git push --force origin main sleep:8000";
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(new m.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitUntil(() => !!$(m, ".shieldcard"), { timeoutMs: 20_000 });
+    expect(text(m, ".shieldcard .sdh")).toBe("⛔ echo ran a force-push");
+    expect(text(m, ".shieldcard .sdc")).toBe("git push --force origin main");
+    expect(text(m, ".shieldcard .sdw")).toMatch(/rewrites the remote's history/);
+    ($(m, ".shieldcard [data-shield-stop]") as HTMLElement).click();
+    await waitUntil(() => text(m, ".shieldcard [data-shield-stop]") === "Stopped", { timeoutMs: 20_000 });
+    expect(m.errors.join("\n")).toBe("");
+  }, 60_000);
+
   it("Night shift: the lines in the box become tasks, and the morning report lands in the thread", async () => {
     const client = new DaemonClient(readDaemonConfig()!);
     const pid = (await client.addProject(makeProjectDir({ name: "shiftdom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;

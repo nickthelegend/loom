@@ -1262,6 +1262,34 @@ phone, type them and tap 🌙. `--until` and `--max` stop *new* tasks from
 starting; the one running always finishes. A shift survives a daemon restart.
 A task the restart cut off is reported as failed, and the rest carry on.
 
+## Blast-Radius Shield: what can't be taken back
+
+Rewind puts the files back. It can't un-push a force-push, restore a dropped
+table, or un-publish a package. The shield watches every command an agent
+runs, and when one can't be taken back it says so at once, with a red card
+in its chat and a push to your phone, naming the command and why it matters:
+
+- **git:** force-push (not `--force-with-lease`), `reset --hard`,
+  `clean -fd`, discarding every change, `branch -D`, history rewrites
+- **files:** a recursive delete outside the project (`/`, your home, `..`,
+  an absolute path elsewhere). Inside the project is fine.
+- **data:** `DROP TABLE`, `TRUNCATE`, a `DELETE` with no `WHERE`, database resets
+- **infrastructure and publishing:** `terraform destroy`, `kubectl delete`,
+  `npm publish`, `docker system prune -a`
+- **the machine:** `sudo`, piping a download into a shell, `chmod 777`,
+  writing to a disk device
+
+Most CLIs report a command after it has run, so the shield can't veto that
+first command. What it can do is stop the turn before it does more:
+
+```json
+{ "shield": { "auto": "stop" } }
+```
+
+`"notify"` (the default) tells you and offers **Stop the turn**. `"stop"`
+stops it immediately, and is the default during a Night Shift, when nobody
+is watching. `"off"` turns the shield off.
+
 ## Loop watch: an agent going in circles
 
 The expensive failure isn't the error. It's the agent that hits the same red

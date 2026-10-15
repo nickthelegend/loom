@@ -260,6 +260,8 @@ export interface ProjectConfig {
   crews?: import("./core/crew.js").CrewConfig[];
   /** Loop watch: an agent re-running the same failing command. "notify" (default), "nudge" (stop it and tell it to step back), or "off". */
   watchdog?: { auto?: "notify" | "nudge" | "off" };
+  /** Blast-Radius Shield: a destructive command an agent runs. "notify" (default), "stop" (stop the turn; the default on a night shift), or "off". */
+  shield?: { auto?: "notify" | "stop" | "off" };
   /** Quota Relay: who carries on when an agent runs out of quota (daemon/runtime/relay.ts). */
   relay?: import("./daemon/runtime/relay.js").RelayConfig;
   /** Proof: how an agent's "done" is checked (daemon/proof.ts). */

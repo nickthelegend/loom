@@ -894,6 +894,16 @@ import { openMenu } from './menus.js';
           .then(function(){ pf.disabled = false; pf.innerHTML = was; });
         return;
       }
+      // the shield's Stop: end the turn that ran a command that can't be taken back
+      var sds = ev.target.closest && ev.target.closest("[data-shield-stop]");
+      if (sds) {
+        ev.preventDefault(); ev.stopPropagation();
+        sds.disabled = true;
+        api("/api/projects/" + pid + "/interrupt", { method: "POST", body: JSON.stringify({ chat: sds.getAttribute("data-shield-stop") || chatId }) })
+          .then(function(j){ sds.textContent = j && j.interrupted ? "Stopped" : "Its turn had already ended"; })
+          .catch(function(err){ sds.disabled = false; toast(err.message); });
+        return;
+      }
       // a night shift's Stop: no new tasks start; the running one finishes and the report follows
       var shs = ev.target.closest && ev.target.closest("[data-shift-stop]");
       if (shs) {
