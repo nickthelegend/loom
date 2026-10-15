@@ -11,6 +11,14 @@ import type { SendInput } from "../src/types.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
 
 const block = (actions: unknown[]) => "```loom\n" + JSON.stringify({ actions }) + "\n```";
+function childRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    // A killed orphan can remain a zombie until the runner's init reaps it.
+    if (process.platform === "linux" && /\) Z /.test(fs.readFileSync(`/proc/${pid}/stat`, "utf8"))) return false;
+    return true;
+  } catch { return false; }
+}
 let plan: Array<Record<string, unknown>> = [];
 let build: (seat: string, dir: string, input: SendInput) => void | Promise<void> = () => {};
 let reviewerText = block([{ type: "review", verdict: "approve", notes: "checked" }]);
@@ -125,23 +133,23 @@ describe("parallel crew plays", () => {
   });
   it("contains a timed-out test command and proves its detached child exited", async () => {
     const helper = path.join(tmpDir("crew-timeout-command"), "command.cjs");
-    fs.writeFileSync(helper, `const fs=require('fs'),{spawn}=require('child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});fs.writeFileSync('timeout-child.pid',String(child.pid));setInterval(()=>{},1000);`);
+    fs.writeFileSync(helper, `const fs=require('fs'),{spawn}=require('child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:process.platform==='win32',stdio:'ignore'});fs.writeFileSync('timeout-child.pid',String(child.pid));setInterval(()=>{},1000);`);
     const { id } = await setup("ship", `node "${helper}"`); plan = [{ title: "A" }];
     (rt!.crews as unknown as { host: CrewHost }).host.testTimeoutMs = 5000;
     rt!.config.crews!.find(c => c.id === id)!.maxRounds = 0;
     await rt!.crews.goal(id, "Test timeout"); const goal = await finished(id);
     expect(goal.status).toBe("failed"); expect(goal.recovery).toBeUndefined();
     const pid = Number(fs.readFileSync(path.join(goal.dir, "timeout-child.pid"), "utf8"));
-    expect(() => process.kill(pid, 0)).toThrow();
+    expect(childRunning(pid)).toBe(false);
     expect(rt!.log.list({ limit: 1000 }).some(e => e.payload.phase === "tested" && String(e.payload.log).includes("timed out"))).toBe(true);
   });
   it("stops configured test commands and their detached descendants before Stop returns", async () => {
     const helper = path.join(tmpDir("crew-test-command"), "command.cjs");
-    fs.writeFileSync(helper, `const fs=require('fs'),{spawn}=require('child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});fs.writeFileSync('test-child.pid',String(child.pid));setInterval(()=>{},1000);`);
+    fs.writeFileSync(helper, `const fs=require('fs'),{spawn}=require('child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:process.platform==='win32',stdio:'ignore'});fs.writeFileSync('test-child.pid',String(child.pid));setInterval(()=>{},1000);`);
     const { id } = await setup("ship", `node "${helper}"`); plan = [{ title: "A" }];
     await rt!.crews.goal(id, "Stop tests");
     const file = () => path.join(rt!.crews.get(id).state.goal!.dir, "test-child.pid");
     await waitUntil(() => fs.existsSync(file())); const pid = Number(fs.readFileSync(file(), "utf8"));
-    await rt!.crews.stop(id); expect(() => process.kill(pid, 0)).toThrow();
+    await rt!.crews.stop(id); expect(childRunning(pid)).toBe(false);
   });
 });
