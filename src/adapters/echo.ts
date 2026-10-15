@@ -50,6 +50,20 @@ export class EchoAdapter extends AdapterBase {
         this.emit({ kind: "status", payload: { state: "interrupted" } });
         return;
       }
+      // loop:<n> — run the same failing test command n times, the way an agent
+      // stuck on a red test does, so Loom's loop watch is testable end to end.
+      const loopMatch = input.text.match(/(?<![a-z])loop:(\d+)/);
+      if (loopMatch) {
+        for (let i = 0; i < Math.min(Number(loopMatch[1]), 50) && !this.aborted; i++) {
+          this.emit({ kind: "tool_call", payload: { tool: "shell", summary: "shell: npm test", command: "npm test", exitCode: 1, ok: false,
+            preview: "FAIL  add.test.js > adds\nAssertionError: expected -1 to be 3\n Tests  1 failed (1)" } });
+          await new Promise((r) => setTimeout(r, 30));
+        }
+        if (this.aborted) {
+          this.emit({ kind: "status", payload: { state: "interrupted" } });
+          return;
+        }
+      }
       // fail:<reason> — the turn errors instead of completing, the way a dead
       // CLI or a refused model call would. Tests of every recovery path (retry,
       // failover, the Console) need an agent that can fail on request; without

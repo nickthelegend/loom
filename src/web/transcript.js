@@ -36,6 +36,30 @@ import { shortModel } from './permissions.js';
     return m + "m" + (s % 60 ? " " + (s % 60) + "s" : "");
   }
   /** The agent's mark in a small tile — its logo, or a monogram in its hue. */
+  // An agent going in circles (core/loops.ts): what it kept doing, and the
+  // three ways out — stop it, nudge it to step back, or give the task to
+  // another agent, who's told what the first one kept getting wrong.
+  function loopCard(e){
+    var p = e.payload || {}, who = e.agentId || "";
+    var others = ((state.project && state.project.agents) || []).filter(function(a){ return a.id !== who; });
+    var what = p.loop === "repeating"
+      ? "the same call, " + Number(p.count || 0) + " times this turn"
+      : Number(p.count || 0) + " times this turn, failing each time";
+    return '<div class="loopcard" data-loop-agent="' + esc(who) + '"' + (e.chat ? ' data-loop-chat="' + esc(e.chat) + '"' : "") + ">" +
+      '<div class="lph"><span class="lpi">' + ICONS.refresh + "</span><b>" + esc(labelOf(who)) + " is going in circles</b>" +
+      (p.nudged ? '<span class="lpauto">nudged</span>' : "") + "</div>" +
+      '<div class="lpt"><code>' + esc(String(p.call || "").slice(0, 200)) + "</code> \u2014 " + esc(what) +
+      (p.nudged ? ". Loom stopped it and asked it to step back." : ".") + "</div>" +
+      (p.output ? '<details class="lpo"><summary>last output</summary><pre>' + esc(String(p.output)) + "</pre></details>" : "") +
+      '<div class="lpb">' +
+        '<button type="button" class="btn xs" data-loop-act="stop">' + ICONS.stop + "Stop</button>" +
+        (p.nudged ? "" : '<button type="button" class="btn xs" data-loop-act="nudge">Nudge it</button>') +
+        (others.length ? '<span class="lph2"><select class="lpto" aria-label="hand to">' + others.map(function(a){
+            return '<option value="' + esc(a.id) + '">' + esc(labelOf(a.id)) + "</option>"; }).join("") + "</select>" +
+          '<button type="button" class="btn xs" data-loop-act="handoff">Hand it off</button></span>' : "") +
+      "</div></div>";
+  }
+
   function avatarFor(id){
     var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
     // a picture you gave this agent wins over its brand mark
@@ -277,6 +301,7 @@ import { shortModel } from './permissions.js';
     if (e.kind === "status" && p.state === "model_fallback") {
       return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
     }
+    if (e.kind === "status" && p.state === "loop_detected") return loopCard(e);
     if (e.kind === "status" && p.state === "stopped_early") return '<div class="sys">\u25a0 ' + esc(labelOf(e.agentId)) + " stopped early" + (p.reason ? " (" + esc(String(p.reason)) + ")" : "") + "</div>";
     // the agent's todo list, as a checklist (the thread keeps the newest one per turn in place)
     if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {

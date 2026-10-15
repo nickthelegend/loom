@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import { listModelsForKind } from '../system.js';
 import type { WithRuntime } from './context.js';
+import { MAIN_CHAT } from '../../types.js';
 /** Register agents routes in the order established by LoomDaemon.routes(). */
 export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): void {
 
@@ -104,6 +105,23 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
     withRuntime(async (rt, req, res) => {
       const chat = typeof req.body?.chat === "string" && req.body.chat ? String(req.body.chat) : undefined;
       res.json(await rt.interrupt(chat ? { chat } : {}));
+    }),
+  );
+
+  // The loop card's buttons: an agent going in circles is stopped, nudged, or handed off.
+  app.post(
+    "/api/projects/:id/loop",
+    withRuntime(async (rt, req, res) => {
+      const b = req.body ?? {};
+      const chat = typeof b.chat === "string" && b.chat ? b.chat : MAIN_CHAT;
+      const agent = String(b.agent ?? "");
+      const action = b.action === "stop" || b.action === "nudge" || b.action === "handoff" ? b.action : null;
+      if (!action) return void res.status(400).json({ error: "action is stop, nudge or handoff" });
+      if (!rt.config.agents.some((a) => a.id === agent)) return void res.status(404).json({ error: "unknown agent" });
+      const to = typeof b.to === "string" && b.to ? b.to : undefined;
+      if (to && !rt.config.agents.some((a) => a.id === to)) return void res.status(404).json({ error: `unknown agent "${to}"` });
+      try { res.json(await rt.actOnLoop(chat, agent, action, to)); }
+      catch (err) { res.status(409).json({ error: err instanceof Error ? err.message : String(err) }); }
     }),
   );
 }

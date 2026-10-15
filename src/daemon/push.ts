@@ -42,6 +42,7 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
     case "run_complete": return "done";
     case "route_completed": case "route_failed": return "goals";
     case "approval": return p.phase === "requested" ? "approvals" : null;
+    case "status": return p.state === "loop_detected" ? "questions" : null;
     case "orchestra":
       if (p.phase === "alert" || p.phase === "completed" || p.phase === "failed" || p.phase === "aborted") return "goals";
       return p.phase === "waiting" ? "questions" : null;
@@ -77,6 +78,10 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
       return { title: `${event.agentId ?? "An agent"} is done · ${projectName}`, body: extra.reply ? clip(extra.reply, 160) : "finished its turn" };
     case "approval":
       return { title: `${event.agentId ?? "An agent"} wants to use ${clip(p.tool, 40)} · ${projectName}`, body: clip(p.input, 140) || "Allow or deny it" };
+    case "status":
+      if (p.state === "loop_detected") return { title: `${event.agentId ?? "An agent"} is going in circles · ${projectName}`,
+        body: `${clip(p.text, 140)}${p.nudged ? " — Loom stopped it and asked it to step back" : " — Stop, Nudge or hand it off"}` };
+      return { title, body: clip(p.text ?? p.state, 160) };
     case "route_completed":
       return { title, body: `✔ route complete (${Number(p.steps ?? 0)} steps)` };
     case "route_failed":

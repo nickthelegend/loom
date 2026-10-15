@@ -256,6 +256,8 @@ export interface ProjectConfig {
   agents: AgentConfig[];
   /** Agent Teams: named crews of roster agents with roles (core/crew.ts). */
   crews?: import("./core/crew.js").CrewConfig[];
+  /** Loop watch: an agent re-running the same failing command. "notify" (default), "nudge" (stop it and tell it to step back), or "off". */
+  watchdog?: { auto?: "notify" | "nudge" | "off" };
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
   /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */

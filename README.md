@@ -1151,6 +1151,30 @@ line without an event behind it doesn't get written.
 The mark is per device, because "when did you last look" is a fact about this
 window. From the terminal: `loom digest --since 8`.
 
+## Loop watch: an agent going in circles
+
+The expensive failure isn't the error. It's the agent that hits the same red
+test eight times while you're away, burning tokens on fixes that don't work.
+Loom counts what each agent runs within a turn, and when the same command has
+failed three times (or the exact same call has been made five times) it says
+so: a card in the thread with the command, its last output, and three ways
+out, plus a push to your phone under Questions.
+
+- **Stop**: end the turn.
+- **Nudge it**: stop the turn and tell the agent to say what's actually
+  failing and try a different approach.
+- **Hand it off**: give the original request to another agent, told what the
+  first one kept getting wrong. The changes stay in the working tree.
+
+```json
+{ "watchdog": { "auto": "nudge" } }
+```
+
+`"notify"` (the default) only tells you. `"nudge"` also nudges on its own,
+once; if the agent is still going in circles after that, it's yours to decide.
+`"off"` turns the watch off. A person speaking in the chat starts every count
+over.
+
 ## Fleet: what every agent is doing
 
 The **Fleet** tab (and the phone's Fleet screen) shows every agent in every open

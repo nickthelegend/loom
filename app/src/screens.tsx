@@ -1220,7 +1220,7 @@ export function ProjectScreen(props: {
     [events],
   );
   const kindOf = (id: string) => project.agents.find((a) => a.id === id)?.kind;
-  const threadCtx = useMemo(() => ({ creds, projectId: project.id }), [creds, project.id]);
+  const threadCtx = useMemo(() => ({ creds, projectId: project.id, agents: project.agents.map((a) => a.id) }), [creds, project.id, project.agents]);
   // one checklist per plan, and no tool line under a card that already says it
   const shownEvents = useMemo(() => {
     const gone = foldedEvents(events);

@@ -515,6 +515,25 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   });
 
+  it("Loop watch: an agent going in circles gets a card, and Nudge it works from there", async () => {
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(makeProjectDir({ name: "loopdom", agents: [{ id: "stuck", kind: "echo" }, { id: "helper", kind: "echo" }], defaultAgent: "stuck" }))).project.id;
+    const m = mount({ hash: `#p/${pid}` });
+    await waitUntil(() => !!$(m, "#box"));
+    // echo runs a failing npm test three times: stuck on a red test
+    ($(m, "#box") as HTMLInputElement).value = "fix the adder loop:3";
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(new m.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitUntil(() => !!$(m, ".loopcard"), { timeoutMs: 20_000 });
+    expect(text(m, ".loopcard")).toMatch(/stuck is going in circles/);
+    expect(text(m, ".loopcard")).toMatch(/npm test.*3 times this turn, failing each time/);
+    // the hand-off picker offers the other agent, not the stuck one
+    expect([...m.window.document.querySelectorAll(".loopcard .lpto option")].map((o) => (o as HTMLOptionElement).value)).toEqual(["helper"]);
+    ($(m, '.loopcard [data-loop-act="nudge"]') as HTMLElement).click();
+    await waitUntil(() => [...m.window.document.querySelectorAll(".bubble")].some((b) => /Stop repeating it/.test(b.textContent ?? "")), { timeoutMs: 20_000 });
+    await waitUntil(() => !!$(m, ".loopcard.lpdone"));
+    expect(m.errors.join("\n")).toBe("");
+  }, 60_000);
+
   it("clears the composer after sending, so you don't send it twice", async () => {
     const m = mount({ hash: `#p/${projectId}` });
     await waitUntil(() => !!$(m, "#box"));

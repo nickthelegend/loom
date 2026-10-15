@@ -429,12 +429,17 @@ export class OpenCodeAdapter extends AdapterBase {
           const output = typeof state.output === "string" ? state.output : "";
           const error = st === "error" ? String(state.error ?? "failed") : "";
           const tool = String(part.tool ?? "tool");
+          // a bash call that ran to the end "completed" even when its command failed: the exit code says which
+          const meta = (state as Json).metadata as Json | undefined;
+          const exitCode = typeof meta?.exit === "number" ? meta.exit : undefined;
           this.emit({
             kind: "tool_call",
             payload: {
               tool,
               summary: String((state as Json).title ?? tool),
-              ok: st === "completed",
+              ok: st === "completed" && (exitCode === undefined || exitCode === 0),
+              ...(exitCode !== undefined ? { exitCode } : {}),
+              ...(tool === "bash" && typeof input?.command === "string" ? { command: input.command.slice(0, 2_000) } : {}),
               ...(input ? { input: Object.fromEntries(Object.entries(input).slice(0, 20).map(([k, v]) => [k, typeof v === "string" && v.length > 600 ? `${v.slice(0, 600)}\u2026` : v])) } : {}),
               ...(output.trim() ? { preview: output.length > 4000 ? `\u2026\n${output.slice(-4000)}` : output } : {}),
               ...(error ? { error: error.slice(0, 1500) } : {}),
@@ -644,10 +649,16 @@ export class OpenCodeAdapter extends AdapterBase {
       const content = Array.isArray(props.content) ? (props.content as Json[]) : [];
       const output = content.filter((c) => c.type === "text" && typeof c.text === "string").map((c) => String(c.text)).join("\n");
       const images = content.filter((c) => c.type === "file" && /^image\//.test(String(c.mime ?? ""))).flatMap((c) => this.keepImage(String(c.uri ?? ""), String(c.mime)));
+      // bash "succeeds" when its command ran, failing or not: the exit code it reports says which
+      const structured = (props.structured ?? {}) as Json;
+      const exitRaw = structured.exit ?? (structured.metadata as Json | undefined)?.exit;
+      const exitCode = typeof exitRaw === "number" ? exitRaw : undefined;
       const input = call.input ? Object.fromEntries(Object.entries(call.input).slice(0, 20).map(([k, v]) => [k, typeof v === "string" && v.length > 600 ? `${v.slice(0, 600)}\u2026` : v])) : undefined;
       this.emit({
         kind: "tool_call",
-        payload: { tool: call.tool, summary: call.title, ok: !type.endsWith("failed"),
+        payload: { tool: call.tool, summary: call.title, ok: !type.endsWith("failed") && (exitCode === undefined || exitCode === 0),
+          ...(exitCode !== undefined ? { exitCode } : {}),
+          ...(call.tool === "bash" && typeof call.input?.command === "string" ? { command: String(call.input.command).slice(0, 2_000) } : {}),
           ...(input && Object.keys(input).length ? { input } : {}),
           ...(output.trim() ? { preview: output.length > 4000 ? `\u2026\n${output.slice(-4000)}` : output } : {}),
           ...(images.length ? { images } : {}),

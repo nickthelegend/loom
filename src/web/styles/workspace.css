@@ -252,6 +252,23 @@
   .turncard .tcrw svg{width:11px;height:11px}
   .turncard:hover .tcrw,.turncard .tcrw:focus-visible{opacity:1}
   .turncard .tcrw:hover{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 45%, transparent)}
+  .loopcard{max-width:88%;margin:6px 0;background:color-mix(in srgb, var(--warn) 5%, var(--card));border:1px solid var(--border);
+    border-left:3px solid var(--warn);border-radius:var(--radius);padding:8px 10px;font-size:12.5px}
+  .loopcard .lph{display:flex;align-items:center;gap:7px}
+  .loopcard .lpi{display:inline-flex;color:var(--warn)}
+  .loopcard .lpi svg{width:14px;height:14px}
+  .loopcard .lph b{font-weight:650}
+  .loopcard .lpauto{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:0 6px}
+  .loopcard .lpt{margin-top:4px;color:var(--muted-foreground)}
+  .loopcard .lpt code{font-family:var(--font-mono);font-size:11.5px;color:var(--foreground);word-break:break-all}
+  .loopcard .lpo{margin-top:6px}
+  .loopcard .lpo summary{cursor:pointer;color:var(--muted-foreground);font-family:var(--font-mono);font-size:11px}
+  .loopcard .lpo pre{max-height:200px;overflow:auto;margin:6px 0 0;padding:8px;background:var(--muted);border-radius:6px;font-size:11px;white-space:pre-wrap}
+  .loopcard .lpb{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center}
+  .loopcard .lpb .btn svg{width:11px;height:11px;margin-right:4px}
+  .loopcard .lph2{display:inline-flex;gap:4px;align-items:center}
+  .loopcard .lpto{font:inherit;font-size:11.5px;padding:2px 4px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--foreground)}
+  .loopcard.lpdone .lpb{opacity:.5}
   .turncard .tcf{color:var(--muted-foreground);font-size:11px;margin-top:3px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}
