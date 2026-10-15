@@ -333,9 +333,9 @@ describe("web app · crew tab", () => {
     const made = await rest<{ crew: Crew }>("POST", "/crews", { name: "Race UI", play: "race", planApproval: false,
       testCommand: "node -e \"process.exit(0)\"", teammates: [{ id: "a", agent: "plannerbot", role: "builder" }, { id: "b", agent: "execbot", role: "builder" }] });
     const m = mount(); await openCrewTab(m);
-    await waitUntil(() => !!$(m, "#crewpick"));
-    const picker = $(m, "#crewpick") as HTMLSelectElement; picker.value = made.crew.id;
-    picker.dispatchEvent(new m.window.Event("change", { bubbles: true }));
+    await waitUntil(() => text(m, ".crewname") === "Race UI" || !!$(m, "#crewpick"));
+    const picker = $(m, "#crewpick") as HTMLSelectElement | null;
+    if (picker) { picker.value = made.crew.id; picker.dispatchEvent(new m.window.Event("change", { bubbles: true })); }
     await waitUntil(() => text(m, ".crewname") === "Race UI");
     say(m, "write:race-ui.txt");
     await waitUntil(() => $$(m, "[data-crew-pick]").length === 2, { timeoutMs: 30000 });
@@ -344,11 +344,15 @@ describe("web app · crew tab", () => {
     await waitUntil(() => pill(m) === "completed");
     expect(act(m, "deliver")).toBeTruthy();
     click(act(m, "apply")); await waitUntil(() => !!$(m, ".crewapplied"));
+    await waitUntil(() => !($(m, "#crewsend") as HTMLButtonElement).disabled);
     const play = $(m, "#crewplay") as HTMLSelectElement; play.value = "ship";
     click($(m, "[data-crew-settings]"));
     await waitUntil(async () => (await client.crews(projectId)).crews.find(c => c.id === made.crew.id)?.play === "ship");
+    await waitUntil(() => !($(m, "#crewsend") as HTMLButtonElement).disabled);
     say(m, "sleep:1500 write:pause-ui.txt");
-    await waitUntil(() => pill(m) === "working" && !!act(m, "pause")); click(act(m, "pause"));
+    await waitUntil(() => pill(m) === "working" && !!act(m, "pause")).catch(async error => {
+      throw new Error(JSON.stringify({ pill: pill(m), toast: text(m, "#toast"), crews: (await client.crews(projectId)).crews, errors: m.errors }), { cause: error });
+    }); click(act(m, "pause"));
     await waitUntil(() => pill(m) === "paused" && !!act(m, "resume"), { timeoutMs: 30000 });
     expect($(m, "#crewbudget")).toBeTruthy(); click(act(m, "resume"));
     await waitUntil(() => pill(m) === "completed", { timeoutMs: 30000 });

@@ -448,7 +448,7 @@ export function createCrew(view) {
         '<div class="crewsayrow"><label class="cwto">' + ICONS.team + '<select id="crewsayto" class="crewsel" title="who it\'s for"><option value="">' + (fresh ? "everyone" : "the crew") + "</option>" +
           (c.teammates || []).map(function(t){ return '<option value="' + esc(t.id) + '">@' + esc(t.id) + "</option>"; }).join("") + "</select></label>" +
           '<span class="cwhint">Enter to send · Shift+Enter for a new line</span>' +
-          '<span class="spacer"></span><button class="btn sm primary" type="submit" id="crewsend"' + (crew.busy === "say" ? " disabled" : "") + ">" + ICONS.up + esc(label) + "</button></div>" +
+          '<span class="spacer"></span><button class="btn sm primary" type="submit" id="crewsend"' + (crew.busy ? " disabled" : "") + ">" + ICONS.up + esc(label) + "</button></div>" +
       "</form>";
     }
 
@@ -647,8 +647,10 @@ export function createCrew(view) {
           act("overlap", { card: cardId, decision: x.hasAttribute("data-crew-narrow") ? "narrow" : "proceed:" + el.querySelector("#crewreason-" + cardId).value, touches: scopes }); return;
         }
         if ((x = t.closest("[data-crew-settings]"))) {
-          var cfg = current(); if (!cfg) return;
-          api("/api/projects/" + view.pid + "/crews/" + encodeURIComponent(cfg.id), { method: "PATCH", body: JSON.stringify({ play: el.querySelector("#crewplay").value, maxParallel: Number(el.querySelector("#crewparallel").value) }) }).then(function(j){ merge(j); drawCrew(); }).catch(function(err){ toast(err.message); }); return;
+          var cfg = current(); if (!cfg || crew.busy) return;
+          var settingsBody = { play: el.querySelector("#crewplay").value, maxParallel: Number(el.querySelector("#crewparallel").value) };
+          crew.busy = "settings"; drawCrew();
+          api("/api/projects/" + view.pid + "/crews/" + encodeURIComponent(cfg.id), { method: "PATCH", body: JSON.stringify(settingsBody) }).then(function(j){ crew.busy = ""; merge(j); drawCrew(); }).catch(function(err){ crew.busy = ""; toast(err.message); drawCrew(); }); return;
         }
         if ((x = t.closest("[data-crew-team]"))) { teamAction(el, x); return; }
         if ((x = t.closest("[data-crew-act]"))) { act(x.getAttribute("data-crew-act")); return; }
