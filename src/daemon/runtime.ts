@@ -59,6 +59,7 @@ import {
 import { type TurnFacts } from "../core/step-conditions.js";
 import { suggestHandoff } from "../core/suggestions.js";
 import { cappedPermission, type TeamPolicy } from "../core/team-policy.js";
+import { capCrewPermission, DEFAULT_CREW_POLICY } from "../core/crew-policy.js";
 import { describeMerge, mergeAgentWork, type MergeOutcome } from "../core/worktree-merge.js";
 import {
   workingTree,
@@ -393,6 +394,10 @@ export class ProjectRuntime {
       native: () => this.continuity,
       nativeOptions: (cfg) => this.policyOptions(cfg),
       nativeHealth: (id) => this.harnesses.ensure(id),
+      coordinator: () => this.coordinator,
+      policy: () => this.teamPolicy,
+      spentToday: (crew) => this.crewSpendToday(crew),
+      gitDelivery: () => this.config.git?.delivery ?? "none",
       briefingFor: async (query, agentId, crewId) =>
         [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, crew: crewId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
           .filter(Boolean)
@@ -3006,6 +3011,20 @@ export class ProjectRuntime {
   teamBrain: TeamBrainHook | null = null;
   /** The effective loom.team.json while shared with a team (D37); null when solo. */
   teamPolicy: TeamPolicy | null = null;
+  private crewSpendLedger = { day: "", after: 0, total: 0, crews: new Map<string, number>() };
+  private crewSpendToday(crew?: string): number {
+    const day = new Date().toISOString().slice(0, 10), start = Date.parse(`${day}T00:00:00Z`);
+    if (this.crewSpendLedger.day !== day) this.crewSpendLedger = { day, after: 0, total: 0, crews: new Map() };
+    const ledger = this.crewSpendLedger;
+    for (const event of this.log.list({ kinds: ["status"], since: ledger.after })) {
+      const id = (event.payload.crew as { crewId?: string } | undefined)?.crewId;
+      const cost = Number(event.payload.costUsd);
+      if (id && event.ts >= start && event.payload.state === "turn_cost" && Number.isFinite(cost) && cost > 0) {
+        ledger.total += cost; ledger.crews.set(id, (ledger.crews.get(id) ?? 0) + cost);
+      }
+    }
+    ledger.after = this.log.lastId(); return crew ? ledger.crews.get(crew) ?? 0 : ledger.total;
+  }
 
   /**
    * An agent's options under the team policy (D38): its permission mode capped
@@ -3021,12 +3040,14 @@ export class ProjectRuntime {
       const ceiling = this.teamPolicy?.runners.permissions ?? "bypass";
       const rank = { ask: 0, auto: 1, bypass: 2 } as const;
       opts.permissions = rank[wanted] > rank[ceiling] ? ceiling : wanted;
+      if (this.teamPolicy) opts.permissions = capCrewPermission(this.teamPolicy.crews ?? DEFAULT_CREW_POLICY, cfg.role, opts.permissions as "ask" | "auto" | "bypass");
       return opts;
     }
     if (!this.teamPolicy) return opts;
     const wanted = permissionFor(cfg.kind, opts);
     const capped = cappedPermission(this.teamPolicy, wanted, false);
-    if (capped !== wanted) opts.permissions = capped;
+    const roleCap = capCrewPermission(this.teamPolicy.crews ?? DEFAULT_CREW_POLICY, cfg.role, capped);
+    if (roleCap !== wanted) opts.permissions = roleCap;
     return opts;
   }
 

@@ -16,7 +16,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { registerAgentKind } from "../src/adapters/index.js";
 import { AdapterBase } from "../src/adapters/base.js";
 import { parseCrewReply, protocolFor } from "../src/core/crew-protocol.js";
-import { teammatesFromTemplate } from "../src/core/crew.js";
+import { teammatesFromTemplate, type CrewHost } from "../src/core/crew.js";
+import { parsePolicy } from "../src/core/team-policy.js";
 import { writeProjectConfig } from "../src/core/registry.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
 import type { SendInput } from "../src/types.js";
@@ -356,5 +357,24 @@ describe("a crew works a goal", () => {
     scripts = { lead: () => ({ text: "", ask: "hmm?" }) };
     await rt.crews.goal(made.id, "one");
     await expect(rt.crews.goal(made.id, "two")).rejects.toThrow(/already on a goal/);
+  });
+
+  it("pauses at a turn boundary and preserves plan approval when resumed", async () => {
+    const { rt, crew } = await project();
+    scripts.lead = () => { rt.crews.pause(crew!.id); return loom([{ type: "plan", cards: [{ title: "Card" }] }]); };
+    const goal = await rt.crews.goal(crew!.id, "pause planning");
+    await waitUntil(() => !rt.crews.get(crew!.id).busy);
+    expect(goal.status).toBe("paused"); expect(turns).toHaveLength(1);
+    rt.crews.resume(crew!.id); expect(goal.status).toBe("awaiting_approval");
+    expect(turns).toHaveLength(1);
+  });
+  it("starts no new turn when the crew daily budget is exhausted", async () => {
+    const { rt, crew } = await project();
+    const host = (rt.crews as unknown as { host: CrewHost }).host;
+    host.policy = () => parsePolicy({ crews: { reviewerMustDifferFromBuilders: false, budgets: { perCrewDailyUsd: 20 } } });
+    host.spentToday = () => 20;
+    const goal = await rt.crews.goal(crew!.id, "budget hold");
+    await waitUntil(() => !rt.crews.get(crew!.id).busy);
+    expect(goal.status).toBe("paused"); expect(goal.pauseReason).toMatch(/daily budget/); expect(turns).toEqual([]);
   });
 });

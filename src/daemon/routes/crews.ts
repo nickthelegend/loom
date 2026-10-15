@@ -31,7 +31,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.post(
     "/api/projects/:id/crews",
     withRuntime(async (rt, req, res) => {
-      const b = (req.body ?? {}) as { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number };
+      const b = (req.body ?? {}) as { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number; budgetUsd?: number };
       try {
         res.json({ crew: rt.crews.create({
           ...(b.name ? { name: String(b.name) } : {}),
@@ -41,6 +41,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
           ...(b.testCommand ? { testCommand: String(b.testCommand) } : {}),
           ...(b.play !== undefined ? { play: b.play } : {}),
           ...(b.maxParallel !== undefined ? { maxParallel: b.maxParallel } : {}),
+          ...(b.budgetUsd !== undefined ? { budgetUsd: b.budgetUsd } : {}),
         }) });
       } catch (err) {
         crewError(res, err);
@@ -62,7 +63,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.patch(
     "/api/projects/:id/crews/:crew",
     withRuntime(async (rt, req, res) => {
-      const b = (req.body ?? {}) as { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null; play?: CrewConfig["play"]; maxParallel?: number };
+      const b = (req.body ?? {}) as { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null; play?: CrewConfig["play"]; maxParallel?: number; budgetUsd?: number | null };
       try {
         res.json({ crew: rt.crews.update(String(req.params.crew), b) });
       } catch (err) {
@@ -124,7 +125,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
     "/api/projects/:id/crews/:crew/:action",
     withRuntime(async (rt, req, res) => {
       const id = String(req.params.crew);
-      const b = (req.body ?? {}) as { text?: string; to?: string; play?: CrewConfig["play"] };
+      const b = (req.body ?? {}) as { text?: string; to?: string; play?: CrewConfig["play"]; card?: string; decision?: string; touches?: string[]; amount?: number };
       try {
         const action = String(req.params.action);
         let out: unknown;
@@ -134,8 +135,12 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
         else if (action === "stop") out = { goal: await rt.crews.stop(id) };
         else if (action === "resume") out = { goal: rt.crews.resume(id) };
         else if (action === "apply") out = await rt.crews.apply(id);
+        else if (action === "deliver") out = await rt.crews.deliver(id);
         else if (action === "refresh") out = { crew: await rt.crews.refresh(id, String(b.to ?? "")) };
         else if (action === "pick") out = { goal: await rt.crews.pick(id, String(b.to ?? b.text ?? "")) };
+        else if (action === "pause") out = { goal: rt.crews.pause(id) };
+        else if (action === "budget") out = { goal: rt.crews.raiseBudget(id, Number(b.amount)) };
+        else if (action === "overlap") out = { goal: rt.crews.decideOverlap(id, String(b.card ?? ""), String(b.decision ?? ""), b.touches) };
         else return void res.status(404).json({ error: `unknown crew action "${action}"` });
         res.json({ ...(out as object), crew: rt.crews.get(id) });
       } catch (err) {

@@ -61,4 +61,14 @@ describe("crew memory and refresh routes", () => {
     expect((await request("POST", `/crews/missing/memory`, { text: "x" })).status).toBe(400);
     expect((await request("POST", `/crews/${one}/refresh`, { to: "builder" })).body.error).toMatch(/continuity/);
   });
+  it("validates pause, budget, overlap and PR delivery actions over HTTP", async () => {
+    expect((await request("POST", `/crews/${one}/pause`)).status).toBe(400);
+    expect((await request("POST", `/crews/${one}/budget`, { amount: -1 })).status).toBe(400);
+    expect((await request("POST", `/crews/${one}/overlap`, { card: "missing", decision: "narrow" })).status).toBe(400);
+    expect((await request("POST", `/crews/${one}/deliver`)).status).toBe(400);
+    for (const action of ["send", "answer", "runner-start", "runner-control"]) {
+      const response = await fetch(`${base}/api/team/crew-requests/${action}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ projectId: project, accept: true }) });
+      expect(response.status).toBe(400); expect(await response.json()).toHaveProperty("error");
+    }
+  });
 });

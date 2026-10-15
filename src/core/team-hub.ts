@@ -156,6 +156,8 @@ export interface TeamMemoryIn {
 }
 
 export type FeedType =
+  | "crew_request"
+  | "crew_request_answered"
   | "member_joined"
   | "member_left"
   | "key_rotated"
@@ -333,7 +335,7 @@ export interface HubClient {
   revokeDevice(deviceId: string): Promise<void>;
   createJob(teamId: string, j: JobIn): Promise<Job>;
   /** The oldest job this runner may take, claimed atomically; null when none. */
-  claimJob(teamId: string, runnerDeviceId: string): Promise<Job | null>;
+  claimJob(teamId: string, runnerDeviceId: string, instantOnly?: boolean): Promise<Job | null>;
   /** The claiming runner is alive; optionally with a progress snapshot. */
   heartbeatJob(teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed): Promise<Job>;
   finishJob(teamId: string, jobId: string, runnerDeviceId: string, outcome: { state: "done" | "failed"; result?: Sealed; error?: string }): Promise<Job>;
@@ -861,7 +863,7 @@ export class MemoryHub {
     return { ...job };
   }
 
-  claimJob(userId: string, teamId: string, runnerDeviceId: string): Job | null {
+  claimJob(userId: string, teamId: string, runnerDeviceId: string, instantOnly = false): Job | null {
     this.requireRole(teamId, userId, "member");
     this.device(runnerDeviceId, userId);
     const r = this.runnersByDevice.get(runnerDeviceId);
@@ -871,6 +873,7 @@ export class MemoryHub {
     const open = [...this.jobMap(teamId).values()]
       .filter((j) => j.state === "queued" || (j.state === "claimed" && now - (j.heartbeatAt ?? 0) > JOB_TTL_MS))
       .filter((j) => this.eligible(r, j))
+      .filter((j) => !instantOnly || j.kind === "return" || j.kind === "land")
       .sort((a, b) => a.createdAt - b.createdAt);
     const j = open[0];
     if (!j) return null;
@@ -1057,6 +1060,31 @@ export class MemoryHub {
   appendFeed(userId: string, teamId: string, e: FeedIn): FeedEvent | null {
     this.requireRole(teamId, userId, "member");
     if (e.deviceId) this.device(e.deviceId, userId);
+    if (e.type === "crew_request" || e.type === "crew_request_answered") {
+      const id = e.meta.requestId;
+      if (typeof id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new HubError("invalid crew request id", 400);
+      const request = (this.feedByTeam.get(teamId) ?? []).find(f => f.type === "crew_request" && f.meta.requestId === id);
+      if (e.type === "crew_request") {
+        if (e.dedupeKey !== `crew-request:${id}`) throw new HubError("invalid crew request dedupe key", 400);
+        if (!e.repo || !this.reposByTeam.get(teamId)?.has(normalizeRepo(e.repo))) throw new HubError("request repo is not shared with this team", 403);
+        const owner = this.members(userId, teamId).find(m => m.user.github.toLowerCase() === String(e.meta.owner).toLowerCase());
+        if (!owner || owner.role === "viewer") throw new HubError("the requested owner is not an active team member", 403);
+        for (const field of ["crew", "teammate"] as const) if (typeof e.meta[field] !== "string" || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(String(e.meta[field]))) throw new HubError(`invalid ${field}`, 400);
+        const expiry = Number(e.meta.expiresAt);
+        if (!Number.isFinite(expiry) || expiry <= this.now() || expiry > this.now() + 7 * 86400000) throw new HubError("crew request expiry must be within seven days", 400);
+        if (!e.sealed || JSON.stringify(e.sealed).length > 16000) throw new HubError("crew request text must be sealed and bounded", 400);
+        if (request && (request.userId !== userId || JSON.stringify(request.meta) !== JSON.stringify(e.meta) || JSON.stringify(request.sealed) !== JSON.stringify(e.sealed)))
+          throw new HubError("crew request id already belongs to another request", 409);
+      } else {
+        if (!request || request.repo !== e.repo) throw new HubError("crew request not found", 404);
+        if (String(request.meta.owner).toLowerCase() !== this.user(userId).github.toLowerCase()) throw new HubError("only the requested crew's owner may answer", 403);
+        if (e.meta.state !== "accepted" && e.meta.state !== "declined") throw new HubError("answer must accept or decline", 400);
+        if (e.dedupeKey !== `crew-answer:${id}`) throw new HubError("invalid crew answer dedupe key", 400);
+        const previous = (this.feedByTeam.get(teamId) ?? []).find(f => f.type === "crew_request_answered" && f.meta.requestId === id);
+        if (previous && previous.meta.state !== e.meta.state) throw new HubError("this request has already been answered", 409);
+        if (!previous && Number(request.meta.expiresAt) <= this.now()) throw new HubError("crew request expired", 409);
+      }
+    }
     return this.appendFeedRaw(teamId, userId, e);
   }
 
@@ -1223,8 +1251,8 @@ class MemoryHubClient implements HubClient {
   createJob(teamId: string, j: JobIn) {
     return this.run(() => this.hub.createJob(this.userId, teamId, j));
   }
-  claimJob(teamId: string, runnerDeviceId: string) {
-    return this.run(() => this.hub.claimJob(this.userId, teamId, runnerDeviceId));
+  claimJob(teamId: string, runnerDeviceId: string, instantOnly = false) {
+    return this.run(() => this.hub.claimJob(this.userId, teamId, runnerDeviceId, instantOnly));
   }
   heartbeatJob(teamId: string, jobId: string, runnerDeviceId: string, progress?: Sealed) {
     return this.run(() => this.hub.heartbeatJob(this.userId, teamId, jobId, runnerDeviceId, progress));

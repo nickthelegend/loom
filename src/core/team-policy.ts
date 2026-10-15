@@ -30,8 +30,10 @@ import path from "node:path";
 import type { PermissionMode } from "./permissions.js";
 import { parseLanes } from "./team-landing.js";
 import { globToRegExp } from "./team-leases.js";
+import { parseCrewPolicy, stricterCrewPolicy, DEFAULT_CREW_POLICY, type CrewPolicy } from "./crew-policy.js";
 
 export interface TeamPolicy {
+  crews?: CrewPolicy;
   hardZones: string[];
   permissions: { ceiling: PermissionMode; bypassRequiresPlan: boolean };
   agents: { allow: string[] | null }; // null = any agent
@@ -46,6 +48,7 @@ export interface TeamPolicy {
 }
 
 export const OPEN_POLICY: TeamPolicy = {
+  crews: DEFAULT_CREW_POLICY,
   hardZones: [],
   permissions: { ceiling: "bypass", bypassRequiresPlan: false },
   agents: { allow: null },
@@ -92,6 +95,7 @@ export function parsePolicy(raw: unknown): TeamPolicy {
   const bud = (o.budgets ?? {}) as Record<string, unknown>;
   const run = (o.runners ?? {}) as Record<string, unknown>;
   return {
+    crews: parseCrewPolicy(o.crews),
     hardZones: strs(o.hardZones),
     permissions: { ceiling, bypassRequiresPlan: perm.bypassRequiresPlan === true },
     agents: { allow },
@@ -126,6 +130,7 @@ export function stricter(base: TeamPolicy, local: TeamPolicy): TeamPolicy {
     base.agents.allow === null ? local.agents.allow : local.agents.allow === null ? base.agents.allow
       : base.agents.allow.filter((x) => local.agents.allow!.includes(x));
   return {
+    crews: stricterCrewPolicy(base.crews ?? DEFAULT_CREW_POLICY, local.crews ?? DEFAULT_CREW_POLICY),
     hardZones: [...new Set([...base.hardZones, ...local.hardZones])],
     permissions: {
       ceiling: RANK[local.permissions.ceiling] < RANK[base.permissions.ceiling] ? local.permissions.ceiling : base.permissions.ceiling,

@@ -6,6 +6,23 @@ import type { RouteContext } from './context.js';
 export function registerTeamRoutes(app: Express, ctx: Pick<RouteContext, "auth" | "team" | "runtimes">): void {
 
   // ---- Loom Teams: this daemon on a Team Hub (daemon/team.ts) -------------
+  app.post("/api/team/crew-requests/:action", (req, res) => {
+    if (ctx.auth.allowedProjects(bearerToken(req.headers.authorization) ?? "")) return void res.status(403).json({ error: "crew requests need a full client" });
+    void (async () => {
+      try {
+        const b = req.body ?? {}, rt = ctx.runtimes.get(String(b.projectId ?? ""));
+        if (!rt) throw new Error("open the team project before requesting its crew");
+        const action = String(req.params.action);
+        let result: unknown;
+        if (action === "runner-start") result = await ctx.team.startCrewOnRunner(rt, String(b.crew ?? ""), String(b.text ?? ""), b.runner);
+        else if (action === "runner-control") result = await ctx.team.controlRunnerCrew(rt, String(b.jobId ?? ""), b.action, b.text, b.to);
+        else if (action === "send") result = await ctx.team.requestCrew(rt, { owner: String(b.owner ?? ""), crew: String(b.crew ?? ""), teammate: String(b.teammate ?? ""), text: String(b.text ?? "") });
+        else if (action === "answer" && typeof b.accept === "boolean") result = await ctx.team.answerCrewRequest(rt, String(b.requestId ?? ""), b.accept);
+        else throw new Error("choose send or answer with accept true/false");
+        res.json({ result });
+      } catch (error) { res.status(400).json({ error: (error as Error).message }); }
+    })();
+  });
   // Reading the team view is for any full client; changing membership,
   // keys or sign-in is admin-only — it's this machine's identity.
   app.get("/api/team", (req, res) => {
