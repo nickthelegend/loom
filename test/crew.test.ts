@@ -20,6 +20,7 @@ import { teammatesFromTemplate, type CrewHost } from "../src/core/crew.js";
 import { parsePolicy } from "../src/core/team-policy.js";
 import { writeProjectConfig } from "../src/core/registry.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
+import { retrieve } from "../src/core/brain-index.js";
 import type { SendInput } from "../src/types.js";
 import { tmpDir, waitUntil } from "./helpers.js";
 
@@ -326,6 +327,28 @@ describe("a crew works a goal", () => {
     await waitUntil(() => rt.crews.get(crew!.id).state.goal?.status === "completed", { timeoutMs: 20_000 });
     const testers = [...new Set(turns.filter((t) => t.teammate === "tester").map((t) => t.instance))];
     expect(testers).toEqual(["crew-ship-tester.small", "crew-ship-tester.big"]);
+  });
+
+  it("a teammate's remember keeps a crew-scoped memory — said in the channel, private to the crew until promoted", async () => {
+    const { rt } = await project(false);
+    const made = rt.crews.create({ name: "Mem", teammates: [{ id: "lead", agent: "big", role: "lead" }, { id: "builder", agent: "small", role: "builder" }], planApproval: false });
+    scripts = {
+      lead: (input) => (input.text.startsWith("New goal") ? loom([{ type: "plan", cards: [{ title: "Pick the queue" }] }]) : loom([{ type: "done", summary: "x" }])),
+      builder: () => loom([{ type: "remember", kind: "decision", text: "The queue uses Postgres LISTEN, not Redis." }, { type: "remember", kind: "nonsense", text: "Ports below 1024 need root." }, { type: "done", summary: "did" }]),
+    };
+    await rt.crews.goal(made.id, "decide the queue");
+    await waitUntil(() => ["completed", "failed"].includes(rt.crews.get(made.id).state.goal?.status ?? ""), { timeoutMs: 20_000 });
+    expect(rt.crews.get(made.id).state.goal!.status).toBe("completed");
+    const mine = rt.brain.list({ crew: made.id });
+    expect(mine.map((m) => [m.kind, m.text]).sort()).toEqual([["decision", "The queue uses Postgres LISTEN, not Redis."], ["fact", "Ports below 1024 need root."]]);
+    expect(mine.every((m) => m.scope.crew === made.id && m.provenance.agentId === "small")).toBe(true);
+    // crew memories stay out of everyone else's retrieval until a human promotes them
+    const found = (crew?: string) => retrieve(rt.brain, { query: "queue Postgres LISTEN Redis", ...(crew ? { crew } : {}) }).some((h) => h.memory.text.includes("Postgres LISTEN"));
+    expect(found()).toBe(false);
+    expect(found(made.id)).toBe(true);
+    const channel = rt.crews.get(made.id).state.channel;
+    expect(rt.log.list({ chat: channel }).some((e) => String(e.payload.text ?? "").includes("builder remembers (decision)"))).toBe(true);
+    expect(parseCrewReply(loom([{ type: "remember", text: "x" }]), "tester").allowed).toEqual([{ type: "remember", kind: "fact", text: "x" }]);
   });
 
   it("with a test command, Loom runs the tests itself and the exit code decides — no tester agent needed", async () => {
