@@ -12,7 +12,7 @@ const started = codexNotify("turn/started", { turn: { id: "$TURN", items: [], st
 let rt: ProjectRuntime | undefined;
 afterEach(async () => { await rt?.close(); rt = undefined; });
 
-async function setup(delay = 0) {
+async function setup(delay = 0, parallel = false) {
   process.env.LOOM_HOME = tmpDir("crew-native-home");
   const dir = makeProjectDir();
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
@@ -20,15 +20,22 @@ async function setup(delay = 0) {
   fs.writeFileSync(path.join(dir, "README.md"), "seed\n");
   execFileSync("git", ["add", "-A"], { cwd: dir });
   execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@test", "commit", "-qm", "seed"], { cwd: dir });
-  const lead = fakeCodex({ script: [started, codexMessage(block([{ type: "plan", cards: [{ title: "First card" }, { title: "Second card" }] }])), codexDone()] });
+  const lead = fakeCodex({ script: [started, codexMessage(block([{ type: "plan", cards: [
+    { title: "First card", touches: ["result.txt"], ...(parallel ? { assignee: "builder" } : {}) },
+    { title: "Second card", touches: ["result2.txt"], ...(parallel ? { assignee: "builder-two" } : {}) },
+  ] }])), codexDone()] });
   const builder = fakeCodex({ script: [started, ...(delay ? [{ sleep: delay }] : []), { write: { file: "result.txt", text: "$TURN" } },
     codexMessage(block([{ type: "done", summary: "built" }])), codexDone()] });
+  const second = parallel ? fakeCodex({ script: [started, { sleep: delay }, { write: { file: "result2.txt", text: "$TURN" } },
+    codexMessage(block([{ type: "done", summary: "built second" }])), codexDone()] }) : undefined;
   writeProjectConfig(dir, { name: "native crew", brain: { continuity: true, extractor: "off" },
-    agents: [{ id: "lead", kind: "codex", options: { bin: lead } }, { id: "builder", kind: "codex", options: { bin: builder } }] });
+    agents: [{ id: "lead", kind: "codex", options: { bin: lead } }, { id: "builder", kind: "codex", options: { bin: builder } },
+      ...(second ? [{ id: "two", kind: "codex", options: { bin: second } }] : [])] });
   const info = { id: `native-crew-${path.basename(dir)}`, name: "native crew", dir };
   rt = await ProjectRuntime.open(info);
-  const crew = rt.crews.create({ name: "Ship", planApproval: false,
-    teammates: [{ id: "lead", agent: "lead", role: "lead" }, { id: "builder", agent: "builder", role: "builder" }] });
+  const crew = rt.crews.create({ name: "Ship", planApproval: false, play: parallel ? "fanout" : "ship",
+    teammates: [{ id: "lead", agent: "lead", role: "lead" }, { id: "builder", agent: "builder", role: "builder" },
+      ...(second ? [{ id: "builder-two", agent: "two", role: "builder" as const }] : [])] });
   return { info, crewId: crew.id };
 }
 async function completed(id: string) {
@@ -37,6 +44,19 @@ async function completed(id: string) {
 }
 
 describe("persistent native crew teammates", () => {
+  it("admits two native builders only in separate workspaces and integrates both results", async () => {
+    const { crewId } = await setup(1500, true);
+    await rt!.crews.goal(crewId, "Parallel native cards");
+    await waitUntil(() => rt!.continuity!.store.activeReceipts().length === 2, { timeoutMs: 60_000 });
+    const active = rt!.continuity!.store.activeReceipts();
+    const workspaces = active.map(r => rt!.continuity!.store.bindingById(r.bindingId)!.workspaceId);
+    expect(new Set(workspaces).size).toBe(2);
+    await completed(crewId);
+    const goal = rt!.crews.get(crewId).state.goal!;
+    expect(fs.existsSync(path.join(goal.dir, "result.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(goal.dir, "result2.txt"))).toBe(true);
+    expect(rt!.continuity!.store.activeReceipts()).toEqual([]);
+  }, 120_000);
   it("uses deltas on the second card and keeps each seat's native session through restart and another goal", async () => {
     const { info, crewId } = await setup();
     await rt!.crews.goal(crewId, "Build two cards");

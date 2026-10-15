@@ -42,7 +42,9 @@ class CrewBot extends AdapterBase {
     this._busy = true;
     const teammate = this.id.split(".")[0]!.split("-").slice(2).join("-"); // crew-<crew>-<teammate>.<agent>
     turns.push({ teammate, text: input.text, briefing: input.briefing ?? "", instance: this.id });
-    const out = (scripts[teammate] ?? (() => loom([{ type: "done", summary: "ok" }])))(input, this.projectDir, this.n++);
+    const defaultReply = () => loom(teammate === "reviewer" ? [{ type: "review", verdict: "approve", notes: "checked" }]
+      : teammate === "tester" ? [{ type: "test", result: "pass", log: "checked" }] : [{ type: "done", summary: "ok" }]);
+    const out = (scripts[teammate] ?? defaultReply)(input, this.projectDir, this.n++);
     if (typeof out === "object" && "silent" in out) {
       // a model that never answers: nothing until interrupted
       this.stopped = false;

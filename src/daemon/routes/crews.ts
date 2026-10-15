@@ -1,6 +1,6 @@
 import type { Express } from 'express';
 import express from "express";
-import { CREW_TEMPLATES, teammatesFromTemplate, type CrewTeammate } from "../../core/crew.js";
+import { CREW_TEMPLATES, teammatesFromTemplate, type CrewTeammate, type CrewConfig } from "../../core/crew.js";
 import type { WithRuntime } from './context.js';
 /** Register crew routes (Agent Teams, core/crew.ts) in the order established by LoomDaemon.routes(). */
 export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): void {
@@ -31,7 +31,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.post(
     "/api/projects/:id/crews",
     withRuntime(async (rt, req, res) => {
-      const b = (req.body ?? {}) as { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string };
+      const b = (req.body ?? {}) as { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number };
       try {
         res.json({ crew: rt.crews.create({
           ...(b.name ? { name: String(b.name) } : {}),
@@ -39,6 +39,8 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
           ...(Array.isArray(b.teammates) ? { teammates: b.teammates } : {}),
           ...(typeof b.planApproval === "boolean" ? { planApproval: b.planApproval } : {}),
           ...(b.testCommand ? { testCommand: String(b.testCommand) } : {}),
+          ...(b.play !== undefined ? { play: b.play } : {}),
+          ...(b.maxParallel !== undefined ? { maxParallel: b.maxParallel } : {}),
         }) });
       } catch (err) {
         crewError(res, err);
@@ -60,7 +62,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.patch(
     "/api/projects/:id/crews/:crew",
     withRuntime(async (rt, req, res) => {
-      const b = (req.body ?? {}) as { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null };
+      const b = (req.body ?? {}) as { name?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string | null; stallMinutes?: number | null; play?: CrewConfig["play"]; maxParallel?: number };
       try {
         res.json({ crew: rt.crews.update(String(req.params.crew), b) });
       } catch (err) {
@@ -122,17 +124,18 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
     "/api/projects/:id/crews/:crew/:action",
     withRuntime(async (rt, req, res) => {
       const id = String(req.params.crew);
-      const b = (req.body ?? {}) as { text?: string; to?: string };
+      const b = (req.body ?? {}) as { text?: string; to?: string; play?: CrewConfig["play"] };
       try {
         const action = String(req.params.action);
         let out: unknown;
-        if (action === "goal") out = { goal: await rt.crews.goal(id, String(b.text ?? "")) };
+        if (action === "goal") out = { goal: await rt.crews.goal(id, String(b.text ?? ""), b.play) };
         else if (action === "say") out = await rt.crews.say(id, String(b.text ?? ""), b.to ? String(b.to) : undefined);
         else if (action === "approve") out = { goal: rt.crews.approve(id) };
         else if (action === "stop") out = { goal: await rt.crews.stop(id) };
         else if (action === "resume") out = { goal: rt.crews.resume(id) };
         else if (action === "apply") out = await rt.crews.apply(id);
         else if (action === "refresh") out = { crew: await rt.crews.refresh(id, String(b.to ?? "")) };
+        else if (action === "pick") out = { goal: await rt.crews.pick(id, String(b.to ?? b.text ?? "")) };
         else return void res.status(404).json({ error: `unknown crew action "${action}"` });
         res.json({ ...(out as object), crew: rt.crews.get(id) });
       } catch (err) {

@@ -43,12 +43,17 @@ crew/brain regressions passed. Full CI remains a separate release gate.
 
 ## P3 — parallel and safe
 
-- [ ] Builder worktrees and in-crew leases, with overlap holds and resolution.
-- [ ] Race and Fan-out plays reuse Orchestra/worktree mechanisms.
-- [ ] Merge-tree prediction before integration; conflicts return to the owner.
-- [ ] Explicit reviewer/tester results; absent protocol output cannot approve.
-- [ ] Stop and test timeout quiesce all tool descendants on Windows.
-- [ ] Overlap, conflict, stop, race and fan-out integration tests.
+- [x] Builder worktrees and in-crew leases, with overlap holds and resolution.
+- [x] Race and Fan-out plays reuse Orchestra/worktree mechanisms.
+- [x] Merge-tree prediction before integration; conflicts return to the owner.
+- [x] Explicit reviewer/tester results; absent protocol output cannot approve.
+- [x] Stop and test timeout quiesce all tool descendants on Windows.
+- [x] Overlap, conflict, stop, race and fan-out integration tests.
+
+Local validation: build/typecheck passed. Nine parallel-flow checks and the
+existing crew/HTTP suites passed (24 checks). Orchestra, native continuity and
+Crew DOM acceptance passed (30 more checks). Native fan-out holds two distinct
+workspace receipts and integrates both results. Full CI is required on the phase PR.
 
 ## P4 — several people
 

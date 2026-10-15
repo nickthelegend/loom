@@ -1560,7 +1560,9 @@ program
   .option("--crew <id>", "which crew, when the project has several")
   .option("--to <teammate>", "say: to one teammate")
   .option("--no-approval", "create: the Lead's plan starts without your OK")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean }) => {
+  .option("--play <play>", "ship, fanout or race")
+  .option("--parallel <n>", "create: maximum concurrent builders (1–4)")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const a = (action ?? "status").toLowerCase();
@@ -1570,7 +1572,8 @@ program
       const [first, ...rest] = args ?? [];
       const template = first && templates.includes(first.toLowerCase()) ? first.toLowerCase() : "ship";
       const name = (first && templates.includes(first.toLowerCase()) ? rest : args ?? []).join(" ");
-      const { crew } = await client.createCrew(project.id, { template, ...(name ? { name } : {}), ...(opts.approval === false ? { planApproval: false } : {}) });
+      const { crew } = await client.createCrew(project.id, { template, ...(name ? { name } : {}), ...(opts.approval === false ? { planApproval: false } : {}),
+        ...(opts.play ? { play: opts.play } : {}), ...(opts.parallel ? { maxParallel: Number(opts.parallel) } : {}) });
       console.log(`${pc.green("✓")} ${pc.bold(crew.name)} (${crew.id}) — ${crew.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}=${t.agent}`).join(", ")}`);
       console.log(pc.dim(`  give it a goal: loom crew goal "…"${crews.length ? ` --crew ${crew.id}` : ""}`));
       return;
@@ -1596,7 +1599,7 @@ program
       return;
     }
     if ((a === "goal" || a === "say") && !words) throw new Error(`loom crew ${a} "<text>"`);
-    const out = await client.crewAction(project.id, crew.id, a, { ...(words ? { text: words } : {}), ...(opts.to ? { to: opts.to } : {}) });
+    const out = await client.crewAction(project.id, crew.id, a, { ...(words ? { text: words } : {}), ...(opts.to ? { to: opts.to } : {}), ...(opts.play ? { play: opts.play } : {}) });
     if (a === "say") console.log(`${pc.green("✓")} ${out.routed === "goal" ? "new goal" : out.routed === "answer" ? "answered" : out.routed === "replan" ? "the Lead replans with that" : `noted for ${out.to}`}`);
     else if (a === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(out.merged)} into ${pc.bold(out.into)}`);
     else printCrew(out.crew);

@@ -233,6 +233,10 @@ describe("web app · crew tab", () => {
 
     // The roster strip: who's on it, in which role, as which agent.
     await waitUntil(() => $$(m, "#pane-crew .crewmate").length === 3);
+    // Echo is a transport fixture, not a tester verdict. Use a real configured
+    // command so this UI acceptance has explicit test evidence.
+    const made = (await client.crews(projectId)).crews[0]!;
+    await rest("PATCH", `/crews/${made.id}`, { testCommand: "node -e \"process.exit(0)\"" });
     expect($$(m, "#pane-crew .crewmate").map((c) => c.getAttribute("data-mate"))).toEqual(["lead", "builder", "tester"]);
     expect(text(m, '#pane-crew .crewmate[data-mate="tester"]')).toMatch(/tester.*tester.*plannerbot/);
     expect(text(m, "#pane-crew .crewname")).toBe("Fixers");

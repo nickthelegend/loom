@@ -33,6 +33,7 @@
 import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
+import { createWorktree } from "./worktrees.js";
 
 import { loomHome } from "./registry.js";
 import { blockedBy, type GoalScope } from "./goal-lanes.js";
@@ -994,7 +995,7 @@ export class OrchestraEngine {
     const wtRoot = path.join(loomHome(), "orchestra", this.host.projectId, id);
     const integration = path.join(wtRoot, "integration");
     fs.mkdirSync(wtRoot, { recursive: true });
-    await this.gitLock.run(() => git(["worktree", "add", "-q", "-b", branch, integration, baseCommit], dir));
+    await this.gitLock.run(() => createWorktree(dir, integration, branch, baseCommit));
 
     // Orchestrating from a thread used to abandon it: the run opened a thread
     // of its own and the UI walked you into it, so the goal you typed in Main
@@ -2020,7 +2021,7 @@ export class OrchestraEngine {
         await this.gitLock.run(async () => {
           // Branch from the integration tip, so dependencies' work is there.
           const tip = (await git(["rev-parse", "HEAD"], run.dir)).trim();
-          await git(["worktree", "add", "-q", "-b", branch, dir, tip], this.host.projectDir);
+          await createWorktree(this.host.projectDir, dir, branch, tip);
         });
         task.branch = branch;
         task.dir = dir;

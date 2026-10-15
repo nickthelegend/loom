@@ -6,6 +6,29 @@ Create a crew with `loom crew create ship`, give it a goal with
 tester, and leaves a completed branch for you to inspect with `loom crew diff`.
 `loom crew apply` is an explicit local merge. GitHub PRs are merged by humans.
 
+## Parallel plays
+
+Use `loom crew goal "the goal" --play fanout` to run ready cards in separate
+builder worktrees. A seat runs one turn at a time, and at most four builders
+can run concurrently. Set the crew's cap with `--parallel` when creating it.
+Cards with overlapping `touches` wait; the next card branches from the integrated
+result. Reviewer and tester steps require explicit protocol verdicts. A test
+command's actual exit status also counts as test evidence.
+
+Before integration, Loom uses Git's `merge-tree` prediction. A conflict goes
+back to its owning builder's checkout for repair and another review/test round;
+the integration checkout stays clean. This needs a Git version that supports
+`merge-tree --write-tree` (Git 2.38 or newer).
+
+`--play race` gives every builder the same goal in its own checkout. Compare
+the entrants, then use `loom crew pick builder-1` (or the card id). Only the
+chosen entrant is integrated; apply remains a separate human action.
+
+Native fan-out keeps one binding per seat/workspace and holds independent
+workspace writer leases. Test commands also use process containment, so Stop
+and timeouts wait for detached descendants to exit. An unverified shutdown
+blocks continuation instead of releasing the checkout.
+
 ## Persistent teammates
 
 Enable `brain.continuity` in the project to use native sessions for crew seats.
