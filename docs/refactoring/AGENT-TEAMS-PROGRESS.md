@@ -53,7 +53,7 @@ crew/brain regressions passed. Full CI remains a separate release gate.
 Local validation: build/typecheck passed. Nine parallel-flow checks and the
 existing crew/HTTP suites passed (24 checks). Orchestra, native continuity and
 Crew DOM acceptance passed (30 more checks). Native fan-out holds two distinct
-workspace receipts and integrates both results. Full CI is required on the phase PR.
+workspace receipts and integrates both results. All ten CI jobs passed on P3 head 7e1b326; the corrected POSIX fixture retains detached-child coverage on Windows.
 
 ## P4 — several people
 
@@ -66,10 +66,16 @@ workspace receipts and integrates both results. Full CI is required on the phase
 
 ## P5 — usable from desktop and phone
 
-- [ ] Templates, roster/state/context/spend and board lane.
-- [ ] Phone Crew sheet: start goal, approve plan, watch cards, pause/resume/stop.
-- [ ] Meaningful notifications, native refresh/recovery and docs.
-- [ ] HTTP, DOM and phone model checks; build and complete CI.
+- [x] Templates, parallel seat activity, native epochs, per-seat/goal/daily spend, and crew metadata on the shared board.
+- [x] Phone Crew view: start/approve/watch, pause/resume/stop, race selection, refresh, budget and team/runner controls.
+- [x] Crew deep links and notifications for budget/lease holds, race choices and incoming owner requests; docs.
+- [x] Build/typecheck, HTTP, four Crew DOM flows and 76 phone model checks.
+- [ ] Complete exact-head CI and physical native phone acceptance. Browser mobile layout inspected at 390x844; it does not establish native-device acceptance.
+
+P5 local evidence: 96 existing board/shell/team regressions and 24 cost/crew/parallel checks passed. Four Crew
+DOM flows cover planning/approval/apply, Stop/Resume, Race/pick/play/pause, and
+parallel-seat/owner-request/runner-control UI. Both app and daemon compile.
+Mechanical UI scan is clear; desktop and phone browser layouts inspected.
 
 ## Separate open issues
 

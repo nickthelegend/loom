@@ -452,6 +452,17 @@ export class TeamLink {
       }
     } else if (e.type === "feed") {
       v.feed.push(e.event);
+      if (e.event.type === "crew_request" && String(e.event.meta.owner).toLowerCase() === this.state.hub?.github.toLowerCase()) {
+        for (const rt of this.host.runtimes()) {
+          const share = await this.teamFor(rt);
+          if (share?.teamId !== e.teamId || share.repo !== e.event.repo) continue;
+          try {
+            const crew = rt.crews.get(String(e.event.meta.crew));
+            rt.log.append({ kind: "crew", chat: crew.state.channel, payload: { phase: "request_received", crewId: crew.id,
+              requestId: e.event.meta.requestId, from: e.event.github, teammate: e.event.meta.teammate } });
+          } catch { /* absent local crew: request stays in the team inbox */ }
+        }
+      }
       for (const c of this.coordinators.values()) {
         try {
           c.onTeamEvent(e.event);

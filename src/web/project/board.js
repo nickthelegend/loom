@@ -151,6 +151,7 @@ export function createBoard(view) {
         '<div class="bct"' + (c.own ? ' data-edit="' + esc(c.id) + '" title="click to edit"' : "") + ">" +
           esc(c.title) + "</div>" +
         (c.branch ? '<div class="bcbr">' + esc(c.branch) + "</div>" : "") +
+        (c.crew ? '<button class="btn ghost xs" data-board-crew="' + esc(c.crew) + '">Crew ' + esc(c.crew) + ' · ' + esc(c.stage || 'planned') + (c.claimedBy ? ' · ' + esc(c.claimedBy) : '') + '</button>' : '') +
         '<div class="bcf">' +
           (c.own
             ? cardMeta(c) + (c.blocked ? '<span class="bblocked" title="waiting on ' + c.blocked + ' other card' + (c.blocked === 1 ? "" : "s") + '">⛔ ' + c.blocked + "</span> yours" : "yours")
@@ -250,6 +251,9 @@ export function createBoard(view) {
     }
 
     function wireBoardTasks(el){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-board-crew]"), function(button){
+        button.onclick = function(ev){ ev.stopPropagation(); if (state.showTab) state.showTab("crew"); };
+      });
       // retitle in place — it's your card
       Array.prototype.forEach.call(el.querySelectorAll("[data-edit]"), function(t){
         t.onclick = function(ev){

@@ -46,6 +46,8 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
       if (p.phase === "alert" || p.phase === "completed" || p.phase === "failed" || p.phase === "aborted") return "goals";
       return p.phase === "waiting" ? "questions" : null;
     case "crew":
+      if (p.phase === "paused" || p.phase === "team_hold" || p.phase === "race_ready") return "questions";
+      if (p.phase === "request_received") return "approvals";
       if (p.phase === "completed" || p.phase === "failed") return "goals";
       if (p.phase === "asks") return "questions";
       return p.phase === "planned" && p.awaitingApproval ? "approvals" : null;
@@ -88,6 +90,10 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
       if (p.phase === "waiting") return { title: `A goal needs you · ${projectName}`, body: clip(p.question, 160) };
       return { title, body: String(p.text ?? "a goal needs you").slice(0, 160) };
     case "crew":
+      if (p.phase === "paused") return { title: `Crew paused · ${projectName}`, body: clip(p.reason, 160) || "Review its budget and resume when ready" };
+      if (p.phase === "team_hold") return { title: `Crew held · ${projectName}`, body: clip((p.hold as { reason?: string } | undefined)?.reason, 160) || "Review the overlapping card before continuing" };
+      if (p.phase === "race_ready") return { title: `Choose a crew result · ${projectName}`, body: "The race results are ready for your review" };
+      if (p.phase === "request_received") return { title: `Crew request · ${projectName}`, body: `${clip(p.from, 40)} requests ${clip(p.teammate, 40)}. Accept or decline in Crew.` };
       if (p.phase === "completed") return { title: `${clip(p.crew, 40) || "Crew"} finished · ${projectName}`, body: clip(p.summary ?? p.text, 160) || "the goal is done — apply it when you're ready" };
       if (p.phase === "failed") return { title: `${clip(p.crew, 40) || "Crew"} stopped · ${projectName}`, body: clip(p.error, 160) || "the goal failed" };
       if (p.phase === "asks") return { title: `${clip(p.teammate, 30) || "A teammate"} asks · ${projectName}`, body: clip(p.question, 160) };

@@ -99,6 +99,11 @@ describe("what pushes, under which switch", () => {
     expect(pushCategory(ev("crew", { phase: "asks" }))).toBe("questions");
     expect(pushCategory(ev("crew", { phase: "planned", awaitingApproval: true }))).toBe("approvals");
     expect(pushCategory(ev("crew", { phase: "planned", awaitingApproval: false }))).toBeNull();
+    expect(pushCategory(ev("crew", { phase: "paused" }))).toBe("questions");
+    expect(pushCategory(ev("crew", { phase: "team_hold" }))).toBe("questions");
+    expect(pushCategory(ev("crew", { phase: "race_ready" }))).toBe("questions");
+    expect(pushCategory(ev("crew", { phase: "request_received" }))).toBe("approvals");
+    expect(pushCategory(ev("crew", { phase: "claimed" }))).toBeNull();
     expect(pushCategory(ev("message", { text: "hi" }))).toBeNull();
     expect(wantsPush(undefined, "done")).toBe(true);
     expect(wantsPush(["goals"], "done")).toBe(false);
@@ -107,6 +112,7 @@ describe("what pushes, under which switch", () => {
     expect(pushContent("buzz", ev("orchestra", { phase: "completed", summary: "Dark mode shipped" }))).toEqual({ title: "Goal done · buzz", body: "Dark mode shipped" });
     expect(pushContent("buzz", { ...ev("approval", { phase: "requested", tool: "Bash", input: "rm -rf build" }), agentId: "cody" } as LoomEvent).title).toBe("cody wants to use Bash · buzz");
     expect(pushContent("buzz", { ...ev("run_complete", {}), agentId: "cody" } as LoomEvent, { reply: "All   done\n now" }).body).toBe("All done now");
+    expect(pushContent("buzz", ev("crew", { phase: "paused", reason: "daily budget reached" })).body).toBe("daily budget reached");
   });
 });
 

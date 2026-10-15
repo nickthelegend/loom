@@ -329,4 +329,59 @@ describe("web app · crew tab", () => {
     await waitUntil(() => $$(m, '#pane-crew .crewev.cphase[data-phase="asks"]').length >= 2);
     expect(m.errors.join("\n")).toBe("");
   }, 90_000);
+  it("chooses a race result, changes play, and pauses/resumes through real phone-compatible routes", async () => {
+    const made = await rest<{ crew: Crew }>("POST", "/crews", { name: "Race UI", play: "race", planApproval: false,
+      testCommand: "node -e \"process.exit(0)\"", teammates: [{ id: "a", agent: "plannerbot", role: "builder" }, { id: "b", agent: "execbot", role: "builder" }] });
+    const m = mount(); await openCrewTab(m);
+    await waitUntil(() => !!$(m, "#crewpick"));
+    const picker = $(m, "#crewpick") as HTMLSelectElement; picker.value = made.crew.id;
+    picker.dispatchEvent(new m.window.Event("change", { bubbles: true }));
+    await waitUntil(() => text(m, ".crewname") === "Race UI");
+    say(m, "write:race-ui.txt");
+    await waitUntil(() => $$(m, "[data-crew-pick]").length === 2, { timeoutMs: 30000 });
+    expect($$(m, '.crewstage[data-stage="ready"] .crewcard')).toHaveLength(2);
+    click($$(m, "[data-crew-pick]")[1]!);
+    await waitUntil(() => pill(m) === "completed");
+    expect(act(m, "deliver")).toBeTruthy();
+    click(act(m, "apply")); await waitUntil(() => !!$(m, ".crewapplied"));
+    const play = $(m, "#crewplay") as HTMLSelectElement; play.value = "ship";
+    click($(m, "[data-crew-settings]"));
+    await waitUntil(async () => (await client.crews(projectId)).crews.find(c => c.id === made.crew.id)?.play === "ship");
+    say(m, "sleep:1500 write:pause-ui.txt");
+    await waitUntil(() => pill(m) === "working" && !!act(m, "pause")); click(act(m, "pause"));
+    await waitUntil(() => pill(m) === "paused" && !!act(m, "resume"), { timeoutMs: 30000 });
+    expect($(m, "#crewbudget")).toBeTruthy(); click(act(m, "resume"));
+    await waitUntil(() => pill(m) === "completed", { timeoutMs: 30000 });
+    expect(m.errors).toEqual([]);
+  }, 90000);
+
+  it("shows every parallel seat and submits owner approval and runner controls without transcripts", async () => {
+    const m = mount(), original = m.window.fetch, calls: Array<{ action: string; body: any }> = [];
+    m.window.fetch = (async (input: string, init?: RequestInit) => {
+      const route = new URL(String(input), baseUrl).pathname;
+      if (route === "/api/team") return new Response(JSON.stringify({ signedIn: true, github: "alice", teams: [{ crewRequests: [{ id: "request-1", from: "bob", owner: "alice", crew: "fixers", teammate: "tester", text: "Inspect tests", state: "pending" }] }] }));
+      if (route.endsWith("/team/runners")) return new Response(JSON.stringify({ jobs: [{ id: "job-1", mine: true, state: "claimed", progress: { crew: { id: "remote", name: "Remote crew" }, status: "awaiting_approval", goal: "Remote goal" } }] }));
+      if (route.startsWith("/api/team/crew-requests/")) { calls.push({ action: route.split("/").at(-1)!, body: JSON.parse(String(init?.body)) }); return new Response(JSON.stringify({ result: {} })); }
+      const response = await original(input, init);
+      if (route.endsWith("/crews") && !init?.method) {
+        const body = await response.json();
+        const crew = body.crews[0];
+        crew.active = [{ teammate: "lead", step: "plan", since: Date.now() }, { teammate: "builder", step: "building", since: Date.now() }];
+        return new Response(JSON.stringify(body));
+      }
+      return response;
+    }) as typeof m.window.fetch;
+    await openCrewTab(m);
+    await waitUntil(() => !!$(m, "[data-crew-team='answer']"));
+    expect($$(m, ".crewmate.live")).toHaveLength(2);
+    click($(m, "[data-crew-team='answer'][data-accept='true']"));
+    await waitUntil(() => calls.some(call => call.action === "answer"));
+    expect(calls.find(call => call.action === "answer")!.body).toMatchObject({ requestId: "request-1", accept: true, projectId });
+    await waitUntil(() => !($(m, "[data-crew-team='runner-control']") as HTMLButtonElement)?.disabled);
+    click($(m, "[data-crew-team='runner-control'][data-control='approve']"));
+    await waitUntil(() => calls.some(call => call.action === "runner-control"));
+    expect(calls.find(call => call.action === "runner-control")!.body).toMatchObject({ jobId: "job-1", action: "approve", projectId });
+    expect(m.errors).toEqual([]);
+  });
+
 });

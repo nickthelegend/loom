@@ -18,7 +18,7 @@ export const BOARD_COLS: ReadonlyArray<{ key: string; label: string; color: () =
   { key: "ready", label: "Ready to merge", color: () => T.ok },
 ];
 
-export function BoardView(props: { creds: Creds; project: Project; onOpenChat?: (chat: string, title: string) => void }) {
+export function BoardView(props: { creds: Creds; project: Project; onOpenChat?: (chat: string, title: string) => void; onOpenCrew?: (id: string) => void }) {
   const { creds, project } = props;
   const [cards, setCards] = useState<BoardCard[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -106,14 +106,14 @@ export function BoardView(props: { creds: Creds; project: Project; onOpenChat?: 
               </View>
               {here.length ? (
                 here.map((c) => (
-                  <TouchableOpacity key={c.id} onPress={() => actions(c)} disabled={!c.own} activeOpacity={0.7} accessibilityRole="button"
+                  <TouchableOpacity key={c.id} onPress={() => c.crew ? props.onOpenCrew?.(c.crew) : actions(c)} disabled={!c.own && !c.crew} activeOpacity={0.7} accessibilityRole="button"
                     accessibilityHint={c.own ? "start it, move it or delete it" : undefined}
                     style={{ flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: T.panel, borderWidth: 1, borderColor: T.line, borderRadius: radii.card, padding: 11 }}>
                     {c.agent ? <AgentIcon kind={c.kind ?? c.agent} size={22} /> : <View style={{ width: 22, height: 22, borderRadius: 7, borderWidth: 1, borderColor: T.line2, borderStyle: "dashed" }} />}
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={{ color: T.text, fontSize: 13.5, lineHeight: 19 }} numberOfLines={3}>{c.title}</Text>
                       <Text style={{ color: T.faint, fontSize: 11, marginTop: 2 }}>
-                        {c.own ? (c.agent ? agentLabel(c.kind ?? c.agent) : "unassigned") : c.pr ? `PR #${c.pr}` : "GitHub"}
+                        {c.crew ? `Crew ${c.crew} · ${c.stage ?? "planned"}${c.claimedBy ? ` · ${c.claimedBy}` : ""}` : c.own ? (c.agent ? agentLabel(c.kind ?? c.agent) : "unassigned") : c.pr ? `PR #${c.pr}` : "GitHub"}
                         {c.priority ? ` · ${c.priority}` : ""}
                       </Text>
                     </View>

@@ -266,6 +266,12 @@ export function FleetScreen(props: {
                   }
                 />
               ))}
+              {(p.crews ?? []).map(crew => <View key={crew.id} style={{ gap: 6, marginTop: 4 }}>
+                <TouchableOpacity accessibilityRole="button" onPress={() => props.onOpen(p.project.id, { id: crew.channel, title: crew.name })}>
+                  <Text style={{ color: T.thread }}>Crew {crew.name} · {crew.status.replace(/_/g, " ")}</Text><Text style={{ color: T.dim }}>{crew.goal}</Text>
+                </TouchableOpacity>
+                {crew.cards.map(card => <Text key={card.id} style={{ color: T.dim }}>{card.title} · {card.stage}{card.teammate ? ` · ${card.teammate}` : ""}</Text>)}
+              </View>)}
               {p.orchestra ? (
                 <View style={{ gap: 6, marginTop: 4 }}>
                   <TouchableOpacity

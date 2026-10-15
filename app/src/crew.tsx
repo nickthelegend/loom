@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Linking, ScrollView, Text, TextInput, TouchableOpacity, View } from "react-native";
 import {
   createCrew,
   crewAction,
@@ -19,6 +19,7 @@ import {
   getCrews,
   getEvents,
   updateCrew,
+  crewTeamAction, getTeam, getTeamRunners, type TeamStatus, type TeamRunners, type CrewActionBody,
   type Creds,
   type Crew,
   type CrewAction,
@@ -32,10 +33,11 @@ import {
   type Project,
 } from "./api";
 import { AgentIcon } from "./agents";
-import { Empty, Panel, SectionLabel, TAP, Unreachable } from "./components";
+import { Empty, Panel, SectionLabel, TAP, Unreachable, field } from "./components";
 import { haptic } from "./haptics";
 import { Markdown } from "./markdown";
 import { T, radii, spacing, usd } from "./theme";
+import { crewControls, crewSeatActivity, runnerCrewControls } from "./crew-model";
 
 const ROLE: Record<CrewRole, { label: string; color: () => string; does: string }> = {
   lead: { label: "Lead", color: () => T.shuttle, does: "plans the goal into cards" },
@@ -50,15 +52,17 @@ const GOAL_LOOK: Record<CrewGoalStatus, { label: string; color: () => string }> 
   awaiting_approval: { label: "needs your OK", color: () => T.warn },
   running: { label: "working", color: () => T.thread },
   waiting_human: { label: "needs you", color: () => T.warn },
+  waiting_team: { label: "waiting on team", color: () => T.warn },
+  paused: { label: "paused", color: () => T.warn },
   completed: { label: "completed", color: () => T.ok },
   failed: { label: "failed", color: () => T.err },
   stopped: { label: "stopped", color: () => T.dim },
   interrupted: { label: "interrupted", color: () => T.warn },
 };
 
-const STAGE_ORDER: CrewCardStage[] = ["building", "review", "testing", "planned", "done", "failed"];
+const STAGE_ORDER: CrewCardStage[] = ["building", "review", "testing", "ready", "planned", "done", "failed"];
 const STAGE_LABEL: Record<CrewCardStage, string> = {
-  planned: "Planned", building: "Building", review: "In review", testing: "Testing", done: "Done", failed: "Failed",
+  planned: "Planned", building: "Building", review: "In review", testing: "Testing", ready: "Ready to integrate", done: "Done", failed: "Failed",
 };
 const STEP_VERB: Record<string, string> = { plan: "planning", planned: "starting", building: "building", review: "reviewing", testing: "testing", done: "wrapping up" };
 
@@ -131,12 +135,12 @@ function Btn(props: { label: string; onPress: () => void; kind?: "primary" | "ou
   );
 }
 
-export function CrewView(props: { creds: Creds; project: Project; pulse: number; onOpenChat: (chatId: string, title: string) => void }) {
+export function CrewView(props: { creds: Creds; project: Project; pulse: number; initialCrewId?: string; onOpenChat: (chatId: string, title: string) => void }) {
   const { creds, project } = props;
   const [crews, setCrews] = useState<Crew[] | null>(null);
   const [previews, setPreviews] = useState<Record<string, CrewTeammate[]>>({});
   const [roster, setRoster] = useState<Array<{ id: string; kind: string }>>([]);
-  const [sel, setSel] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(props.initialCrewId ?? null);
   const [err, setErr] = useState<string | null>(null);
   const [events, setEvents] = useState<LoomEvent[]>([]);
   const [busy, setBusy] = useState<string>("");
@@ -197,7 +201,7 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
     return () => clearInterval(t);
   }, [goal?.status, load]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const act = useCallback(async (action: CrewAction, body: { text?: string; to?: string } = {}) => {
+  const act = useCallback(async (action: CrewAction, body: CrewActionBody = {}) => {
     if (!crew) return;
     setBusy(action);
     try {
@@ -377,9 +381,10 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
       {/* teammates */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8 }}>
         {c.teammates.map((m) => {
-          const live = liveId === m.id;
+          const turn = crewSeatActivity(c, m.id);
+          const live = !!turn || liveId === m.id;
           const asking = goal?.status === "waiting_human" && goal.question?.teammate === m.id;
-          const doing = live ? `${STEP_VERB[goal!.current!.step] ?? "working"}…` : asking ? "waiting for you" : ROLE[m.role]?.does ?? "";
+          const doing = live ? `${STEP_VERB[turn?.step ?? goal?.current?.step ?? ""] ?? "working"}…` : asking ? "waiting for you" : ROLE[m.role]?.does ?? "";
           return (
             <TouchableOpacity
               key={m.id}
@@ -397,11 +402,18 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
               </View>
               <Text style={{ color: T.faint, fontSize: 11, fontFamily: T.mono }} numberOfLines={1}>{m.agent}</Text>
               <Text style={{ color: live ? ROLE[m.role].color() : asking ? T.warn : T.dim, fontSize: 11.5 }} numberOfLines={2}>{doing}</Text>
+              {c.state.sessions?.[m.id] ? <Text style={{ color: T.dim, fontSize: 11 }}>Native context · epoch {c.state.sessions[m.id]!.epoch}</Text> : null}
+              <Text style={{ color: T.dim, fontSize: 11 }}>{usd(goal?.spendBySeat?.[m.id] ?? 0)} this goal</Text>
             </TouchableOpacity>
           );
         })}
       </ScrollView>
       <Text style={{ color: T.faint, fontSize: 11 }}>Tap a teammate for its thread · hold to swap its agent</Text>
+      <Text style={{ color: T.dim, fontSize: 12 }}>{usd(c.spentToday ?? 0)} today · {c.play ?? "ship"} · up to {c.maxParallel ?? 3} builders</Text>
+      {!c.busy ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {(["ship", "fanout", "race"] as const).map(play => <Btn key={play} label={play} disabled={!!busy || c.play === play} onPress={() => void updateCrew(creds, project.id, c.id, { play }).then(load).catch(error => say(String(error), "err"))} />)}
+        {c.teammates.filter(m => c.state.sessions?.[m.id]).map(m => <Btn key={m.id} label={`Refresh ${m.id}`} disabled={!!busy} onPress={() => void act("refresh", { to: m.id })} />)}
+      </View> : null}
 
       {/* the goal */}
       {goal ? (
@@ -428,12 +440,13 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
               </View>
             ) : null}
             <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-              {moving(goal) || goal.status === "waiting_human" || goal.status === "awaiting_approval" ? <Btn testID="crew-stop" label="Stop" kind="ghost" disabled={!!busy} onPress={() => void act("stop")} /> : null}
-              {goal.status === "interrupted" || goal.status === "stopped" || goal.status === "failed" ? <Btn testID="crew-resume" label="Resume" disabled={!!busy} onPress={() => void act("resume")} /> : null}
+              {crewControls(goal).filter(action => action !== "approve").map(action => <Btn key={action} testID={`crew-${action}`} label={action === "pause" ? "Pause after active turns" : action === "deliver" ? "Open PR" : action.replace(/^./, x => x.toUpperCase())} disabled={!!busy} onPress={() => void act(action as CrewAction)} />)}
+              {goal.pr ? <Btn label="Review PR" onPress={() => void Linking.openURL(goal.pr!.url)} /> : null}
               {goal.cards.some((x) => x.commits.length) ? <Btn label={showDiff ? "Hide changes" : "View changes"} kind="ghost" onPress={() => void toggleDiff()} /> : null}
               {goal.status === "completed" && !goal.applied ? <Btn testID="crew-apply" label="Apply (merge)" kind="primary" disabled={!!busy} onPress={() => void act("apply")} /> : null}
               {goal.applied ? <Text style={{ color: T.ok, fontWeight: "600", alignSelf: "center" }}>✓ applied to {goal.applied.into}</Text> : null}
             </View>
+            {goal.status === "paused" ? <CrewBudget goal={goal} onSet={amount => void act("budget", { amount })} /> : null}
             {showDiff ? <Diff text={diff} /> : null}
           </View>
         </Panel>
@@ -441,7 +454,7 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
         <Empty text={`No goal yet. Tell ${c.name} what to build — the lead plans it, you approve, the crew builds, reviews and tests it.`} />
       )}
 
-      {goal && goal.cards.length ? <Cards goal={goal} crew={c} kindOf={kindOf} /> : goal?.status === "planning" ? (
+      {goal && goal.cards.length ? <Cards goal={goal} crew={c} kindOf={kindOf} onAct={(action, body) => void act(action, body)} /> : goal?.status === "planning" ? (
         <Text style={{ color: T.dim, fontSize: 13 }}>The lead is planning the goal into cards…</Text>
       ) : null}
 
@@ -469,6 +482,7 @@ export function CrewView(props: { creds: Creds; project: Project; pulse: number;
         </View>
       </View>
 
+      <CrewTeamPanel creds={creds} projectId={project.id} crew={c} goalText={text} pulse={props.pulse} />
       {/* channel */}
       <SectionLabel text="CHANNEL" />
       {events.length ? (
@@ -510,6 +524,8 @@ function Banner(props: { goal: CrewGoal; busy: string; onAct: (a: CrewAction) =>
   if (g.status === "awaiting_approval") {
     return box(T.warn, `The plan is ready: ${g.cards.length} card${g.cards.length === 1 ? "" : "s"}.`, "Nobody builds until you OK it. Not right? Say what to change below and the lead plans again.", { label: "Approve plan", act: "approve", testID: "crew-approve" });
   }
+  if (g.recovery || g.deliveryError) return box(T.err, "Needs inspection", g.recovery ?? g.deliveryError!);
+  if (g.status === "paused" || g.status === "waiting_team") return box(T.warn, GOAL_LOOK[g.status].label, g.pauseReason ?? "A teammate holds this card's files. Review the hold below.");
   if (g.status === "waiting_human" && g.question) return box(T.warn, `${g.question.teammate} asks:`, g.question.text);
   if (g.status === "completed" && !g.applied) return box(T.ok, "Done: every card built, reviewed and tested.", "Look at the changes, then apply them to your branch.");
   if (g.status === "failed") {
@@ -521,7 +537,56 @@ function Banner(props: { goal: CrewGoal; busy: string; onAct: (a: CrewAction) =>
   return null;
 }
 
-function Cards(props: { goal: CrewGoal; crew: Crew; kindOf: (agent: string) => string }) {
+function CrewBudget(props: { goal: CrewGoal; onSet: (amount: number) => void }) {
+  const [amount, setAmount] = useState(String(props.goal.budgetUsd ?? ""));
+  return <View style={{ gap: 8 }}><Text style={{ color: T.dim }}>Goal budget in USD (team limits still apply)</Text><TextInput accessibilityLabel="Goal budget in USD" style={field} keyboardType="decimal-pad" value={amount} onChangeText={setAmount} /><Btn label="Set goal budget" onPress={() => props.onSet(Number(amount))} /></View>;
+}
+
+function CrewTeamPanel(props: { creds: Creds; projectId: string; crew: Crew; goalText: string; pulse: number }) {
+  const [team, setTeam] = useState<TeamStatus | null>(null), [runners, setRunners] = useState<TeamRunners | null>(null);
+  const [owner, setOwner] = useState(""), [crew, setCrew] = useState(""), [seat, setSeat] = useState("reviewer"), [text, setText] = useState("");
+  const [expanded, setExpanded] = useState(false), [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
+  const load = useCallback(async () => {
+    const [teamView, runnerView] = await Promise.all([getTeam(props.creds).catch(() => null), getTeamRunners(props.creds, props.projectId).catch(() => null)]);
+    setTeam(teamView); setRunners(runnerView);
+  }, [props.creds, props.projectId]);
+  useEffect(() => { void load(); }, [load, props.pulse]);
+  useEffect(() => { if (!expanded) return; const timer = setInterval(() => void load(), 8000); return () => clearInterval(timer); }, [expanded, load]);
+  const action = async (kind: "send" | "answer" | "runner-start" | "runner-control", body: Record<string, unknown>) => {
+    if (busy) return; setBusy(true); setNotice("");
+    try { await crewTeamAction(props.creds, props.projectId, kind, body); setNotice("Saved"); await load(); }
+    catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
+    finally { setBusy(false); }
+  };
+  if (!team?.signedIn) return null;
+  const requests = team.teams.flatMap(t => t.crewRequests ?? []);
+  return <Panel><View style={{ gap: 10 }}>
+    <Btn label={expanded ? "Hide team requests and runners" : "Team requests and runner crews"} onPress={() => setExpanded(!expanded)} />
+    {expanded ? <>
+      <Text style={{ color: T.dim }}>Ask another owner to lend a read-only reviewer, tester or researcher.</Text>
+      <TextInput accessibilityLabel="Crew owner's GitHub login" placeholder="Owner GitHub login" placeholderTextColor={T.dim} style={field} value={owner} onChangeText={setOwner} autoCapitalize="none" />
+      <TextInput accessibilityLabel="Requested crew" placeholder="Crew ID" placeholderTextColor={T.dim} style={field} value={crew} onChangeText={setCrew} autoCapitalize="none" />
+      <TextInput accessibilityLabel="Requested teammate seat" style={field} value={seat} onChangeText={setSeat} autoCapitalize="none" />
+      <TextInput accessibilityLabel="Read-only crew request" placeholder="What should they inspect?" placeholderTextColor={T.dim} style={field} value={text} onChangeText={setText} multiline maxLength={4000} />
+      <Btn label="Ask owner" disabled={busy || !owner || !crew || !text.trim()} onPress={() => void action("send", { owner, crew, teammate: seat, text })} />
+      {requests.map(request => <View key={request.id} style={{ gap: 8 }}>
+        <Text style={{ color: T.text }}>@{request.from} → @{request.owner}/{request.crew}/{request.teammate} · {request.state}</Text><Text style={{ color: T.dim }}>{request.text}</Text>
+        {request.owner.toLowerCase() === team.github?.toLowerCase() && request.state === "pending" ? <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          <Btn label="Accept read-only request" disabled={busy} onPress={() => void action("answer", { requestId: request.id, accept: true })} /><Btn label="Decline" disabled={busy} onPress={() => void action("answer", { requestId: request.id, accept: false })} />
+        </View> : null}
+      </View>)}
+      <Btn label="Start composer goal on my runner" disabled={busy || !props.goalText.trim()} onPress={() => void action("runner-start", { crew: props.crew.id, text: props.goalText })} />
+      {(runners?.jobs ?? []).filter(job => job.progress?.crew).map(job => <View key={job.id} style={{ gap: 8 }}>
+        <Text style={{ color: T.text }}>{job.progress!.crew!.name} · {job.progress!.goal} · {job.progress!.status}</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>{runnerCrewControls(job).map(control => <Btn key={control} label={control} disabled={busy} onPress={() => void action("runner-control", { jobId: job.id, action: control })} />)}
+        {job.progress!.crew!.pr ? <Btn label="Review PR" onPress={() => void Linking.openURL(job.progress!.crew!.pr!)} /> : null}</View>
+      </View>)}
+      {notice ? <Text accessibilityLiveRegion="polite" style={{ color: T.text }}>{notice}</Text> : null}
+    </> : null}
+  </View></Panel>;
+}
+
+function Cards(props: { goal: CrewGoal; crew: Crew; kindOf: (agent: string) => string; onAct: (action: CrewAction, body: CrewActionBody) => void }) {
   const g = props.goal;
   return (
     <View style={{ gap: spacing.md }}>
@@ -531,7 +596,7 @@ function Cards(props: { goal: CrewGoal; crew: Crew; kindOf: (agent: string) => s
         return (
           <View key={s} style={{ gap: 6 }}>
             <SectionLabel text={`${STAGE_LABEL[s].toUpperCase()} · ${here.length}`} />
-            {here.map((x) => <CardRow key={x.id} card={x} goal={g} crew={props.crew} kindOf={props.kindOf} />)}
+            {here.map((x) => <CardRow key={x.id} card={x} goal={g} crew={props.crew} kindOf={props.kindOf} onAct={props.onAct} />)}
           </View>
         );
       })}
@@ -539,10 +604,12 @@ function Cards(props: { goal: CrewGoal; crew: Crew; kindOf: (agent: string) => s
   );
 }
 
-function CardRow(props: { card: CrewCard; goal: CrewGoal; crew: Crew; kindOf: (agent: string) => string }) {
+function CardRow(props: { card: CrewCard; goal: CrewGoal; crew: Crew; kindOf: (agent: string) => string; onAct: (action: CrewAction, body: CrewActionBody) => void }) {
   const { card: x, goal: g } = props;
-  const working = moving(g) && g.current?.card === x.id;
-  const whoId = working ? g.current!.teammate : x.builder;
+  const [scopes, setScopes] = useState((x.touches ?? []).join(", "));
+  const turn = props.crew.active?.find(t => t.card === x.id) ?? (g.current?.card === x.id ? g.current : undefined);
+  const working = moving(g) && !!turn;
+  const whoId = working ? turn!.teammate : x.builder;
   const who = props.crew.teammates.find((m) => m.id === whoId);
   return (
     <View
@@ -560,9 +627,11 @@ function CardRow(props: { card: CrewCard; goal: CrewGoal; crew: Crew; kindOf: (a
         ) : null}
         {x.rounds ? <Text style={{ color: T.warn, fontSize: 11.5 }}>↺ {x.rounds}</Text> : null}
         {x.commits.length ? <Text style={{ color: T.dim, fontSize: 11.5 }}>{x.commits.length} commit{x.commits.length === 1 ? "" : "s"}</Text> : null}
-        {working ? <Text style={{ color: T.thread, fontSize: 11.5, fontWeight: "600" }}>{STEP_VERB[g.current!.step] ?? "working"}…</Text> : null}
+        {working ? <Text style={{ color: T.thread, fontSize: 11.5, fontWeight: "600" }}>{STEP_VERB[turn!.step] ?? "working"}…</Text> : null}
       </View>
       {x.error ? <Text style={{ color: T.err, fontSize: 12 }}>{x.error.slice(0, 240)}</Text> : null}
+      {x.teamHold ? <View style={{ gap: 8 }}><Text style={{ color: T.warn }}>{x.teamHold.reason}</Text><TextInput accessibilityLabel="Revised card paths" style={field} value={scopes} onChangeText={setScopes} /><Btn label="Narrow scope and retry" onPress={() => props.onAct("overlap", { card: x.id, decision: "narrow", touches: scopes.split(",").map(s => s.trim()).filter(Boolean) })} /></View> : null}
+      {g.play === "race" && g.status === "waiting_human" && x.stage === "ready" ? <Btn label="Choose this result" kind="primary" onPress={() => props.onAct("pick", { to: x.id })} /> : null}
     </View>
   );
 }

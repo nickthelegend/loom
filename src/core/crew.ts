@@ -128,6 +128,7 @@ export interface CrewGoal {
   /** Plan turns that came back without a plan. */
   rounds?: number;
   costUsd: number;
+  spendBySeat?: Record<string, number>;
   startedAt: number;
   finishedAt?: number;
   applied?: { into: string; at: number };
@@ -1006,7 +1007,7 @@ export class CrewEngine {
     await this.integrateCard(cfg, st, g, card);
     if ((card as CrewCard).stage !== "done") { g.status = "waiting_human"; throw new Error("the chosen entrant needs conflict repair"); }
     g.selected = card.id; g.summary = `Selected ${card.builder}: ${card.summary ?? card.title}`;
-    for (const other of g.cards) if (other !== card) { other.stage = "done"; this.host.updateTask(other.id, { column: "done", stage: "not-selected" }); }
+    for (const other of g.cards) if (other !== card) { other.stage = "done"; this.host.updateTask(other.id, { column: "ready", stage: "not-selected" }); }
     this.save(st); this.phase(cfg, st, "race_selected", { card: card.id, teammate: card.builder });
     this.finish(cfg, st, "completed"); return g;
   }
@@ -1418,7 +1419,10 @@ export class CrewEngine {
         (st.sessions ??= {})[tm.id] = { bindingId: binding.id, epoch: binding.sessionEpoch, nativeSessionId: binding.nativeSessionId };
         this.save(st);
       }
-      if (e.kind === "status" && p.state === "turn_cost") g.costUsd += Number(p.costUsd ?? 0) || 0;
+      if (e.kind === "status" && p.state === "turn_cost") {
+        const cost = Number(p.costUsd ?? 0);
+        if (Number.isFinite(cost) && cost > 0) { g.costUsd += cost; const spend = g.spendBySeat ??= {}; spend[tm.id] = (spend[tm.id] ?? 0) + cost; this.save(st); }
+      }
       this.host.observe(event);
     });
   }

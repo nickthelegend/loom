@@ -2998,6 +2998,10 @@ export class ProjectRuntime {
       project: { id: this.info.id, name: this.info.name },
       agents,
       orchestra,
+      crews: this.crews.list().filter(c => c.state.goal && !["completed", "failed", "stopped"].includes(c.state.goal.status)).map(c => ({
+        id: c.id, name: c.name, goal: c.state.goal!.text, status: c.state.goal!.status, channel: c.state.channel, active: c.active,
+        cards: c.state.goal!.cards.map(card => ({ id: card.id, title: card.title, stage: card.stage, teammate: card.builder })),
+      })),
       subtasks: this.liveSubtasks(),
       route: this.routes.state(),
     };

@@ -57,6 +57,7 @@ const stateOf = (s: string) => STATE[s] ?? { label: s.replace(/_/g, " "), color:
 function agentName(p: TeamPresence): string {
   const [, tag] = p.agent.split("#");
   const label = agentLabel(p.kind || p.agent.split("#")[0]!);
+  if (p.intent?.crew) return `${p.intent.crewName ?? p.intent.crew} / ${p.intent.teammate} · ${label}`;
   return tag ? `${label} · ${tag}` : label;
 }
 

@@ -1556,13 +1556,17 @@ program
 
 program
   .command("crew [action] [args...]")
-  .description("Agent Teams: status | create [template] [name] | goal <text> | say <text> | approve | stop | resume | refresh --to <teammate> | apply | diff | remove — crews of agents with roles")
+  .description("Agent Teams: status | create | goal | say | approve | pause | stop | resume | pick | refresh | budget | overlap | deliver | apply | diff | remove")
   .option("--crew <id>", "which crew, when the project has several")
   .option("--to <teammate>", "say: to one teammate")
   .option("--no-approval", "create: the Lead's plan starts without your OK")
   .option("--play <play>", "ship, fanout or race")
   .option("--parallel <n>", "create: maximum concurrent builders (1–4)")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string }) => {
+  .option("--amount <usd>", "budget: new goal budget in USD")
+  .option("--card <id>", "overlap: held card id")
+  .option("--decision <decision>", "overlap: narrow, wait:<goal>, or proceed:<reason>")
+  .option("--touches <globs>", "overlap: comma-separated revised paths")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string; amount?: string; card?: string; decision?: string; touches?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const a = (action ?? "status").toLowerCase();
@@ -1599,7 +1603,9 @@ program
       return;
     }
     if ((a === "goal" || a === "say") && !words) throw new Error(`loom crew ${a} "<text>"`);
-    const out = await client.crewAction(project.id, crew.id, a, { ...(words ? { text: words } : {}), ...(opts.to ? { to: opts.to } : {}), ...(opts.play ? { play: opts.play } : {}) });
+    const out = await client.crewAction(project.id, crew.id, a, { ...(words ? { text: words } : {}), ...(opts.to ? { to: opts.to } : {}), ...(opts.play ? { play: opts.play } : {}),
+      ...(opts.amount ? { amount: Number(opts.amount) } : {}), ...(opts.card ? { card: opts.card } : {}), ...(opts.decision ? { decision: opts.decision } : {}),
+      ...(opts.touches ? { touches: opts.touches.split(",").map(s => s.trim()).filter(Boolean) } : {}) });
     if (a === "say") console.log(`${pc.green("✓")} ${out.routed === "goal" ? "new goal" : out.routed === "answer" ? "answered" : out.routed === "replan" ? "the Lead replans with that" : `noted for ${out.to}`}`);
     else if (a === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(out.merged)} into ${pc.bold(out.into)}`);
     else printCrew(out.crew);

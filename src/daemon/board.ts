@@ -38,6 +38,7 @@ export type BoardState =
   | "ready"; // approved and CI green — nothing left but the button
 
 export interface BoardCard {
+  crew?: string; stage?: string; claimedBy?: string;
   /** Stable across refreshes: "pr-51", "agent-claude", "task-a1b2". Drag keys on it. */
   id: string;
   title: string;
@@ -199,7 +200,8 @@ export async function buildBoard(
       ...(t.agent ? { kind: agents.find((a) => a.id === t.agent)?.kind } : {}),
       state: TASK_STATE[column],
       column,
-      own: true,
+      own: !t.crew,
+      ...(t.crew ? { crew: t.crew, stage: t.stage, claimedBy: t.claimedBy } : {}),
       ...(blocked ? { blocked } : {}),
       ...(t.priority ? { priority: t.priority } : {}),
       ...(t.due ? { due: t.due } : {}),
