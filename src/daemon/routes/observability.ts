@@ -7,7 +7,7 @@ import { buildSnapshots } from "../../observability/snapshots.js";
 import { triageAgent } from "../../observability/triage.js";
 import { kairoMetrics } from '../system.js';
 import type { WithRuntime } from './context.js';
-import { leaderboard, perDay, turnRows, turnsCsv } from "../../core/turn-stats.js";
+import { leaderboard, perDay, turnRows, turnsCsv, trustByAgent } from "../../core/turn-stats.js";
 /** Register observability routes in the order established by LoomDaemon.routes(). */
 export function registerObservabilityRoutes(app: Express, withRuntime: WithRuntime): void {
 
@@ -244,7 +244,16 @@ export function registerObservabilityRoutes(app: Express, withRuntime: WithRunti
       const board = leaderboard(since ? rows.filter((r) => r.ts >= since) : rows);
       // your 👍/👎, beside what the log says
       const rated = rt.ratingsByAgent();
-      res.json({ leaderboard: board.map((a) => (rated[a.agentId] ? { ...a, rated: rated[a.agentId] } : a)), days: perDay(rows, days), total: rows.length });
+      // what Loom checked: Proof's verdicts, loops, shield trips — and what a "done" that held costs
+      const trust = trustByAgent(rt.log.list({ kinds: ["proof", "status"], limit: 50_000, ...(since ? { sinceTs: since } : {}) }));
+      res.json({
+        leaderboard: board.map((a) => {
+          const t = trust[a.agentId];
+          return { ...a, ...(rated[a.agentId] ? { rated: rated[a.agentId] } : {}),
+            ...(t ? { trust: { ...t, costPerVerifiedUsd: t.verified ? a.totalCostUsd / t.verified : null } } : {}) };
+        }),
+        days: perDay(rows, days), total: rows.length,
+      });
     }),
   );
   app.get(

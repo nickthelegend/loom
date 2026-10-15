@@ -1,7 +1,7 @@
 /** The leaderboard, heatmap and CSV — straight off run_complete and error events. */
 
 import { describe, expect, it } from "vitest";
-import { leaderboard, perDay, turnRows, turnsCsv } from "../src/core/turn-stats.js";
+import { leaderboard, perDay, trustByAgent, turnRows, turnsCsv } from "../src/core/turn-stats.js";
 import type { LoomEvent } from "../src/types.js";
 
 const DAY = 86_400_000;
@@ -47,5 +47,22 @@ describe("turn stats", () => {
     const csv = turnsCsv(turnRows(events)).trim().split("\n");
     expect(csv[0]).toBe("time,agent,chat,ok,duration_ms,cost_usd,input_tokens,output_tokens,model,error");
     expect(csv[3]).toContain('"quota, ""exceeded"""');
+  });
+});
+
+describe("trust: did its done hold up?", () => {
+  it("counts Proof's verdicts on each agent's turns, and the times the loop watch and the shield caught it", () => {
+    const t = trustByAgent([
+      ev("proof", "", { about: "codex", verdict: "verified" }),
+      ev("proof", "", { about: "codex", verdict: "verified" }),
+      ev("proof", "", { about: "codex", verdict: "contradicted" }),
+      ev("proof", "", { about: "opencode", verdict: "unverified" }),
+      ev("status", "opencode", { state: "loop_detected" }),
+      ev("status", "codex", { state: "shield_tripped" }),
+      ev("status", "codex", { state: "turn_cost", costUsd: 1 }),
+    ]);
+    expect(t.codex).toEqual({ verified: 2, contradicted: 1, unverified: 0, holdRate: 2 / 3, loops: 0, shield: 1 });
+    // nothing checked either way: no rate to give
+    expect(t.opencode).toEqual({ verified: 0, contradicted: 0, unverified: 1, holdRate: null, loops: 1, shield: 0 });
   });
 });

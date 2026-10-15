@@ -1118,6 +1118,15 @@ export const getSpans = (c: Creds, id: string, agentId?: string, limit = 200) =>
   );
 
 /** Fleet health: one score per agent plus the overall, scored from their own spans. */
+/** One agent's record: turns and how often it finished — and, from what Loom checked, how often its "done" held up. */
+export interface Standing {
+  agentId: string;
+  turns: number;
+  successRate: number;
+  totalCostUsd: number;
+  trust?: { verified: number; contradicted: number; unverified: number; holdRate: number | null; loops: number; shield: number; costPerVerifiedUsd: number | null };
+}
+export const getTurnStats = (c: Creds, id: string) => api<{ leaderboard: Standing[]; total: number }>(c, `/api/projects/${id}/insights/turns?days=7`);
 export const getHealth = (c: Creds, id: string) =>
   api<{ from: SpanSource; overall: Health; byAgent: Record<string, Health> }>(
     c,
