@@ -356,6 +356,7 @@ describe("web app · crew tab", () => {
   }, 90000);
 
   it("shows every parallel seat and submits owner approval and runner controls without transcripts", async () => {
+    if (!(await client.crews(projectId)).crews.length) await rest("POST", "/crews", { name: "Fixers", template: "fix" });
     const m = mount(), original = m.window.fetch, calls: Array<{ action: string; body: any }> = [];
     let requestState = "pending";
     m.window.fetch = (async (input: string, init?: RequestInit) => {
