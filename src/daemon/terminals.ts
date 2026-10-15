@@ -21,6 +21,7 @@ import { spawn, stopWindowsTree, stopWindowsChildren } from "../core/process.js"
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import type { Worker } from "node:worker_threads";
 
 const require_ = createRequire(import.meta.url);
 
@@ -85,6 +86,27 @@ let ptyModule: PtyModule | null | undefined;
 let ptyLoadError: string | null = null;
 let ptyProbeClosed: Promise<void> = Promise.resolve();
 
+/** node-pty's DLL path can leave its output worker alive after onExit (#887).
+ * With the exact pinned version, drain and dispose that connection ourselves.
+ * The public exit alone does not mean the native resources have been released.
+ */
+function ptyClosed(proc: PtyProcess, onExit = () => {}): Promise<void> {
+  const connection = isWin ? (proc as PtyProcess & { _agent?: {
+    _conoutSocketWorker?: { dispose(): void; _worker: Worker };
+    _inSocket?: { destroy(): void };
+  } })._agent : undefined;
+  if (isWin && (!connection?._conoutSocketWorker?._worker || !connection._inSocket))
+    throw new Error("node-pty Windows cleanup layout changed; update the pinned compatibility bridge");
+  return new Promise(resolve => proc.onExit(() => {
+    onExit();
+    const output = connection?._conoutSocketWorker;
+    if (!output || output._worker.threadId === -1) { resolve(); return; }
+    output._worker.once("exit", () => resolve());
+    connection!._inSocket!.destroy();
+    output.dispose();
+  }));
+}
+
 /**
  * node-pty's macOS/Linux prebuilds ship `spawn-helper` without the executable
  * bit (npm doesn't preserve it through the prebuild archive), and node-pty
@@ -141,7 +163,7 @@ export function loadPty(): PtyModule | null {
       env: process.env,
       ...(isWin ? { useConptyDll: true } : {}),
     });
-    ptyProbeClosed = new Promise(resolve => probe.onExit(resolve));
+    ptyProbeClosed = ptyClosed(probe);
     if (isWin) probe.write("exit\r");
     else probe.kill();
     ptyModule = mod;
@@ -212,11 +234,10 @@ class PtySession implements TerminalSession {
       if (titleMatch?.[1]) events.onTitle(projectId, termId, titleMatch[1]);
       events.onData(projectId, termId, d);
     });
-    this.closed = new Promise(resolve => this.proc.onExit(() => {
+    this.closed = ptyClosed(this.proc, () => {
       this.exited = true;
-      resolve();
       events.onExit(projectId, termId);
-    }));
+    });
   }
   write(data: string): void {
     if (this.killed || this.exited) return;
