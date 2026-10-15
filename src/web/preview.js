@@ -41,7 +41,14 @@ import { state } from './state.js';
     var pid = state.pid;
     api("/api/projects/" + pid + "/servers").then(function(j){
       if (pid !== state.pid) return; // the project we just left
-      srv.list = j.servers || [];
+      // a live frame may have told us something newer than this list (a crash
+      // that happened while it was in flight): keep the newer of the two
+      var before = {};
+      (srv.list || []).forEach(function(x){ before[x.name] = x; });
+      srv.list = (j.servers || []).map(function(x){
+        var had = before[x.name];
+        return had && Number(had.changed || 0) > Number(x.changed || 0) ? had : x;
+      });
       srv.suggested = j.suggested || [];
       srv.err = "";
       drawServers();
@@ -160,7 +167,8 @@ import { state } from './state.js';
       srv.list = srv.list.map(function(x){
         if (x.name !== f.name) return x;
         found = true;
-        return f.status;
+        // frames can arrive out of order with a fetched list: never step back
+        return Number(x.changed || 0) > Number(f.status.changed || 0) ? x : f.status;
       });
       if (!found) srv.list.push(f.status);
       drawServers();
@@ -460,16 +468,19 @@ import { state } from './state.js';
       var box = document.getElementById("box");
       var rect = p.rect || {};
       if (box) {
+        var styles = p.styles || {};
+        var styleLines = Object.keys(styles).map(function(k){ return "    " + k + ": " + styles[k]; });
         var lines = ["About this element on " + (toUpstream(p.url) || "the page") + " (" + conditions() + "):",
           "  selector: " + p.selector,
           "  text: " + (p.text || "(none)"),
           "  box: " + rect.w + "×" + rect.h + " at " + rect.x + "," + rect.y,
-          "  html: " + String(p.html || "").slice(0, 400)].join("\n");
+          "  html: " + String(p.html || "").slice(0, 400)].concat(styleLines.length ? ["  computed styles:"].concat(styleLines) : []).join("\n");
         box.value = box.value ? box.value.replace(/\s*$/, "") + "\n\n" + lines : lines;
         if (state.composer) state.composer.autosize();
         box.focus();
       }
       toast("element added to the composer");
+      shootElement(p);
     } else if (d.kind === "ready") {
       brow.ready = true;
       brow.hmr = !!p.hmr;
@@ -952,6 +963,26 @@ import { state } from './state.js';
     shootWithPlaywright(composer, btn, host, pid);
   }
 
+
+  /**
+   * Design Mode: a picture of just the picked element, at the width and in the
+   * scheme you're looking at, added beside its description. It takes the
+   * project's own Playwright; without it, the description stands alone.
+   */
+  function shootElement(p){
+    var composer = state.composer, pid = state.pid;
+    if (!composer || !composer.addAttachment || !pid || !p.selector || !brow.url) return;
+    var vp = p.viewport || {};
+    api("/api/projects/" + pid + "/preview/screenshot", {
+      method: "POST",
+      body: JSON.stringify({ url: brow.url, selector: p.selector, width: brow.width || vp.w || 1280, height: vp.h || 800,
+        colorScheme: brow.scheme === "dark" ? "dark" : "light" }),
+    }).then(function(j){
+      if (state.composer !== composer) return; // navigation replaced the recipient
+      composer.addAttachment({ name: "element.png", kind: "image", uploading: false, thumb: null, path: j.path });
+      toast("its picture too");
+    }).catch(function(){ /* no Playwright, or the element is gone: the description is enough */ });
+  }
 
   function shootWithPlaywright(composer, btn, host, pid){
     var w = brow.width || (host ? Math.max(320, host.clientWidth) : 1280);

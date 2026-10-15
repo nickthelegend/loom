@@ -869,6 +869,19 @@ import { openMenu } from './menus.js';
       // card, and opening a diff dock instead of asking would be a surprise.
       var rw = ev.target.closest && ev.target.closest("[data-rewind]");
       if (rw) { ev.preventDefault(); ev.stopPropagation(); askRewind(rw.getAttribute("data-rewind"), rw); return; }
+      // a loop card's way out: stop, nudge, or hand the task to another agent
+      var lp = ev.target.closest && ev.target.closest("[data-loop-act]");
+      if (lp) {
+        ev.preventDefault(); ev.stopPropagation();
+        var lcard = lp.closest(".loopcard"), lact = lp.getAttribute("data-loop-act");
+        var lto = lact === "handoff" && lcard.querySelector(".lpto") ? lcard.querySelector(".lpto").value : undefined;
+        Array.prototype.forEach.call(lcard.querySelectorAll("button,select"), function(b){ b.disabled = true; });
+        api("/api/projects/" + pid + "/loop", { method: "POST", body: JSON.stringify({ chat: lcard.getAttribute("data-loop-chat") || chatId,
+          agent: lcard.getAttribute("data-loop-agent"), action: lact, to: lto }) })
+          .then(function(j){ lcard.classList.add("lpdone"); toast(j.done === "handed off" ? "handed to " + labelOf(j.to) : j.done); })
+          .catch(function(err){ Array.prototype.forEach.call(lcard.querySelectorAll("button,select"), function(b){ b.disabled = false; }); toast(err.message); });
+        return;
+      }
       // Check it: Proof for the turn this card ends (runs the tests again, so it can take a while)
       var pf = ev.target.closest && ev.target.closest("[data-proof-at]");
       if (pf) {

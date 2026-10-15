@@ -19,6 +19,7 @@ import { NativeUsage } from "./runtime/native-usage.js";
 import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
 import { CrewEngine } from "../core/crew.js";
+import { LoopWatch, nudgeText, type Loop } from "../core/loops.js";
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
@@ -148,6 +149,10 @@ export class ProjectRuntime {
   readonly orchestra: OrchestraEngine;
   /** Agent Teams: crews of agents with roles, one goal at a time (core/crew.ts). */
   readonly crews: CrewEngine;
+  /** Loop watch: an agent stuck re-running the same failing command (core/loops.ts). */
+  private readonly loops = new LoopWatch();
+  /** agent × chat already nudged since a person last spoke there: a second loop is only reported. */
+  private readonly nudged = new Set<string>();
   /** Quota Relay: an agent out of quota mid-task hands its work to the next. */
   readonly relay: QuotaRelay;
   /** Proof: checks an agent's "done" against what ran and a clean re-run of the tests. */
@@ -1995,6 +2000,8 @@ export class ProjectRuntime {
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
+    const loop = this.loops.observe(event);
+    if (loop) void this.onLoop(loop).catch((err) => logbook.warn("loops", "couldn't act on a loop", String(err), this.info.id));
     // an agent out of quota mid-task hands its work on (core/quota.ts, runtime/relay.ts)
     this.relay.observe(event);
     // The turn's diff is started before routing hears the turn ended: a step
@@ -2396,6 +2403,12 @@ export class ProjectRuntime {
     agentId?: string,
     opts: TurnOptions = {},
   ): Promise<TurnResult> {
+    // a person speaking in a chat is a new start: nobody there is "stuck" any more
+    if ((opts.source ?? "user") === "user") {
+      const chat = opts.chat ?? MAIN_CHAT;
+      this.loops.reset(chat);
+      for (const k of [...this.nudged]) if (k.endsWith(`\u0000${chat}`)) this.nudged.delete(k);
+    }
     // a prompt for an agent that's out of quota goes to whoever is carrying its work
     const target = agentId ?? this.validHolder() ?? undefined;
     if (target && this.relay.cappedUntil(target)) {
@@ -2403,6 +2416,53 @@ export class ProjectRuntime {
       if (routed !== target) agentId = routed;
     }
     return this.turns.sendMessage(text, agentId, opts);
+  }
+
+  /**
+   * An agent is re-running the same failing command (or the same call over and
+   * over). Say so in its chat — a card with Stop / Nudge / Hand off — and push;
+   * with watchdog.auto "nudge", also stop the turn and tell it to step back.
+   */
+  private async onLoop(loop: Loop): Promise<void> {
+    const set = this.config.watchdog?.auto ?? "notify";
+    if (set === "off") return;
+    // nudge once; if it's still going in circles after that, it's yours to decide
+    const key = `${loop.agentId}\u0000${loop.chat}`;
+    const mode = set === "nudge" && !this.nudged.has(key) ? "nudge" : "notify";
+    if (mode === "nudge") this.nudged.add(key);
+    this.log.append({ kind: "status", agentId: loop.agentId, ...(loop.chat !== MAIN_CHAT ? { chat: loop.chat } : {}), payload: {
+      state: "loop_detected", loop: loop.kind, call: loop.call, count: loop.count, ...(loop.output ? { output: loop.output } : {}),
+      ...(mode === "nudge" ? { nudged: true } : {}),
+      text: loop.kind === "failing" ? `${loop.agentId} ran \`${loop.call}\` ${loop.count} times this turn, failing each time`
+        : `${loop.agentId} made the same call ${loop.count} times this turn: \`${loop.call}\``,
+    } });
+    if (mode === "nudge") await this.actOnLoop(loop.chat, loop.agentId, "nudge", undefined, loop);
+  }
+
+  /** The loop card's buttons: stop the turn, nudge the agent, or hand the task to another agent. */
+  async actOnLoop(chat: string, agentId: string, action: "stop" | "nudge" | "handoff", to?: string, loop?: Loop): Promise<{ done: string; to?: string }> {
+    const card = loop ?? this.lastLoop(chat, agentId);
+    await this.interrupt({ chat, source: "route" });
+    if (action === "stop") return { done: "stopped" };
+    if (action === "nudge") {
+      if (!card) throw new Error("no loop to nudge about in this chat");
+      await this.turns.sendMessage(nudgeText(card), agentId, { chat, source: "route" });
+      return { done: "nudged" };
+    }
+    if (!to || to === agentId) throw new Error("hand it to which agent?");
+    const request = [...this.log.list({ chat, limit: 200 })].reverse().find((e) => e.kind === "message" && !e.agentId && String(e.payload.text ?? "").trim() && !String(e.payload.text).startsWith("[Loom]"));
+    if (!request) throw new Error("couldn't find the request this chat was working on");
+    await this.handoff(to, { source: "user" });
+    const prior = this.briefings.pendingBriefings.get(to);
+    this.briefings.pendingBriefings.set(to, [prior, `[Loom] "${agentId}" got stuck on this${card ? `, running \`${card.call}\` ${card.count} times (${card.kind})` : ""}. Its changes are in the working tree: read them, find what it kept getting wrong, and finish the task a different way.`].filter(Boolean).join("\n"));
+    await this.turns.sendMessage(String(request.payload.text), to, { chat, source: "route" });
+    return { done: "handed off", to };
+  }
+
+  private lastLoop(chat: string, agentId: string): Loop | undefined {
+    const e = [...this.log.list({ chat, kinds: ["status"], limit: 100 })].reverse().find((x) => x.payload.state === "loop_detected" && x.agentId === agentId);
+    if (!e) return undefined;
+    return { agentId, chat, kind: e.payload.loop === "repeating" ? "repeating" : "failing", call: String(e.payload.call ?? ""), count: Number(e.payload.count ?? 0) };
   }
 
   // -------------------------------------------------------------------------

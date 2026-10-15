@@ -44,7 +44,8 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
     case "proof": return p.verdict === "contradicted" ? "done" : null;
     case "route_completed": case "route_failed": return "goals";
     // an agent out of quota: the work changed hands, or waits for the reset
-    case "status": return p.state === "quota_relay" || p.state === "quota_limit" ? "done" : null;
+    // an agent out of quota: the work changed hands, or waits for the reset; an agent going in circles needs you
+    case "status": return p.state === "quota_relay" || p.state === "quota_limit" ? "done" : p.state === "loop_detected" ? "questions" : null;
     case "approval": return p.phase === "requested" ? "approvals" : null;
     case "orchestra":
       if (p.phase === "alert" || p.phase === "completed" || p.phase === "failed" || p.phase === "aborted") return "goals";
@@ -80,7 +81,9 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
     case "status":
       if (p.state === "quota_relay" || p.state === "quota_limit")
         return { title: `${String(p.from ?? event.agentId ?? "An agent")} ran out of quota · ${projectName}`, body: clip(p.text, 160) };
-      return { title, body: String(p.state ?? "status") };
+      if (p.state === "loop_detected") return { title: `${event.agentId ?? "An agent"} is going in circles · ${projectName}`,
+        body: `${clip(p.text, 140)}${p.nudged ? " — Loom stopped it and asked it to step back" : " — Stop, Nudge or hand it off"}` };
+      return { title, body: clip(p.text ?? p.state, 160) };
     case "proof":
       return { title: `⚠ ${String(p.about ?? "An agent")}'s “done” didn't hold · ${projectName}`, body: clip(p.headline, 160) };
     case "run_complete":

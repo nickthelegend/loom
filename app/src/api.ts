@@ -1094,6 +1094,9 @@ export const setAgentModel = (c: Creds, id: string, agentId: string, model: stri
 /** Stop the turn in `chat` (the desktop's Stop); without one, whatever the baton holder is doing. */
 export const interrupt = (c: Creds, id: string, chat?: string) =>
   api<{ interrupted: string | null }>(c, `/api/projects/${id}/interrupt`, { method: "POST", body: JSON.stringify(chat ? { chat } : {}) });
+/** A loop card's way out: stop the agent going in circles, nudge it to step back, or hand its task to another agent. */
+export const actOnLoop = (c: Creds, id: string, body: { chat?: string; agent: string; action: "stop" | "nudge" | "handoff"; to?: string }) =>
+  api<{ done: string; to?: string }>(c, `/api/projects/${id}/loop`, { method: "POST", body: JSON.stringify(body) });
 export const startRoute = (c: Creds, id: string, task: string, spec: string) =>
   api(c, `/api/projects/${id}/route`, { method: "POST", body: JSON.stringify({ task, spec }) });
 export const abortRoute = (c: Creds, id: string) =>

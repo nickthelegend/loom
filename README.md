@@ -450,8 +450,11 @@ and injects one small script. The **Page** pane then shows what that page
 logged and what it fetched, live — and a click puts any line into the composer
 as context, which is the whole point: the loop used to be *see the error,
 select it, retype it*. **Pick** turns the cursor into an element picker: click
-the thing that's wrong and its selector, text, size and markup land in the
-composer. Nothing about the page is rewritten; the script only reports.
+the thing that's wrong and its selector, text, size, markup and computed
+styles (fonts, colours, spacing, layout) land in the composer, along with a
+picture of just that element, so any agent can see what you mean. The picture
+is taken at your width and colour scheme with the project's own Playwright.
+Nothing about the page is rewritten; the script only reports.
 
 **The preview itself** emulates a width (Fit / 375 / 768 / 1280, remembered per
 project, scaled down when the dock is narrower), reloads itself when an agent
@@ -1205,6 +1208,30 @@ line without an event behind it doesn't get written.
 
 The mark is per device, because "when did you last look" is a fact about this
 window. From the terminal: `loom digest --since 8`.
+
+## Loop watch: an agent going in circles
+
+The expensive failure isn't the error. It's the agent that hits the same red
+test eight times while you're away, burning tokens on fixes that don't work.
+Loom counts what each agent runs within a turn, and when the same command has
+failed three times (or the exact same call has been made five times) it says
+so: a card in the thread with the command, its last output, and three ways
+out, plus a push to your phone under Questions.
+
+- **Stop**: end the turn.
+- **Nudge it**: stop the turn and tell the agent to say what's actually
+  failing and try a different approach.
+- **Hand it off**: give the original request to another agent, told what the
+  first one kept getting wrong. The changes stay in the working tree.
+
+```json
+{ "watchdog": { "auto": "nudge" } }
+```
+
+`"notify"` (the default) only tells you. `"nudge"` also nudges on its own,
+once; if the agent is still going in circles after that, it's yours to decide.
+`"off"` turns the watch off. A person speaking in the chat starts every count
+over.
 
 ## Fleet: what every agent is doing
 

@@ -116,7 +116,18 @@ describe("opencode's tool results", () => {
     await adapter.send({ text: "list it" });
     const tools = events.filter((e) => e.kind === "tool_call").map((e) => e.payload);
     expect(tools).toHaveLength(1);
-    expect(tools[0]).toMatchObject({ tool: "bash", ok: true, input: { command: "ls -la demo2" }, preview: "total 8\nhello.html" });
+    expect(tools[0]).toMatchObject({ tool: "bash", ok: true, command: "ls -la demo2", input: { command: "ls -la demo2" }, preview: "total 8\nhello.html" });
+    await adapter.stop();
+  });
+
+  it("a bash command that ran but failed is a failure, with its exit code — what Proof and the loop watch read", async () => {
+    server = await fakeOpenCode({ tool: { tool: "bash", input: { command: "npm test" }, structured: { metadata: { exit: 1, output: "1 failed" } } } });
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "octf" }), { baseUrl: server.url, pollMs: 30 });
+    const events: AdapterEvent[] = [];
+    adapter.onEvent((e) => events.push(e));
+    await adapter.start();
+    await adapter.send({ text: "test it" });
+    expect(events.filter((e) => e.kind === "tool_call").map((e) => e.payload)).toEqual([expect.objectContaining({ tool: "bash", command: "npm test", exitCode: 1, ok: false })]);
     await adapter.stop();
   });
 });

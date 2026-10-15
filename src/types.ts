@@ -257,6 +257,8 @@ export interface ProjectConfig {
   agents: AgentConfig[];
   /** Agent Teams: named crews of roster agents with roles (core/crew.ts). */
   crews?: import("./core/crew.js").CrewConfig[];
+  /** Loop watch: an agent re-running the same failing command. "notify" (default), "nudge" (stop it and tell it to step back), or "off". */
+  watchdog?: { auto?: "notify" | "nudge" | "off" };
   /** Quota Relay: who carries on when an agent runs out of quota (daemon/runtime/relay.ts). */
   relay?: import("./daemon/runtime/relay.js").RelayConfig;
   /** Proof: how an agent's "done" is checked (daemon/proof.ts). */

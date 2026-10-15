@@ -32,7 +32,7 @@ export interface FakeOpenCodeOptions {
   /** Emit a compaction (started, ended) during the turn. */
   compact?: boolean;
   /** Emit a tool call during the turn. */
-  tool?: { tool: string; input: Json };
+  tool?: { tool: string; input: Json; structured?: Json };
   /**
    * A two-step turn: a first assistant message that finishes on tool calls,
    * then this long a pause (the session still running) before the answer.
@@ -173,7 +173,7 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
         push("session.next.step.started", { sessionID: sid, assistantMessageID: asstId, model: s.model });
         if (opts.tool) {
           push("session.next.tool.called", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", tool: opts.tool.tool, input: opts.tool.input });
-          push("session.next.tool.success", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", result: {}, structured: {},
+          push("session.next.tool.success", { sessionID: sid, assistantMessageID: asstId, callID: "call_1", result: {}, structured: opts.tool.structured ?? {},
             content: [{ type: "text", text: "total 8\nhello.html" }], provider: { executed: true } });
         }
         if (opts.compact) {

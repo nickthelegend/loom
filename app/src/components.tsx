@@ -4,7 +4,7 @@ import { createContext, useContext, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { Alert, Image, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
-import type { Creds, LoomEvent, TaskItem } from "./api";
+import { actOnLoop, type Creds, type LoomEvent, type TaskItem } from "./api";
 import { useConnRoute } from "./brand";
 import type { LiveMap } from "./live-model";
 import { AgentIcon, agentLabel } from "./agents";
@@ -446,7 +446,7 @@ function messageActions(text: string, who: string): void {
  * Which daemon and project the thread belongs to, so a picture in it can be
  * fetched with your token (an <img> can't send one on its own).
  */
-export const ThreadCtx = createContext<{ creds: Creds; projectId: string } | null>(null);
+export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[] } | null>(null);
 
 /**
  * A picture from the project: something you attached (.loom/attachments) or a
@@ -699,6 +699,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       </View>
     );
   }
+  if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
   // Quota Relay: an agent ran out of quota and the work changed hands (or waits for the reset)
   if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_redirect" || p.state === "quota_limit" || p.state === "quota_reset")) {
     return (
@@ -787,6 +788,41 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
 }
 
 /** "2 hours ago" — the phone has no room for a timestamp. */
+/** An agent going in circles (the desktop's loop card): stop it, nudge it, or hand its task on. */
+function LoopCard(props: { e: LoomEvent }) {
+  const ctx = useContext(ThreadCtx);
+  const [done, setDone] = useState<string | null>(null);
+  const p = props.e.payload as Record<string, unknown>;
+  const who = props.e.agentId ?? "";
+  const others = (ctx?.agents ?? []).filter((a) => a !== who);
+  const act = (action: "stop" | "nudge" | "handoff", to?: string) => {
+    if (!ctx) return;
+    haptic.tap();
+    actOnLoop(ctx.creds, ctx.projectId, { chat: props.e.chat, agent: who, action, to })
+      .then((r) => setDone(r.done === "handed off" ? `handed to ${r.to}` : r.done))
+      .catch((err: Error) => Alert.alert("Couldn't do that", err.message));
+  };
+  const handOff = () => Alert.alert("Hand it to…", `${who}'s changes stay in the working tree; the next agent is told what it kept getting wrong.`,
+    [...others.slice(0, 4).map((a) => ({ text: a, onPress: () => act("handoff", a) })), { text: "Cancel", style: "cancel" as const }]);
+  const what = p.loop === "repeating" ? `the same call, ${Number(p.count ?? 0)} times this turn` : `${Number(p.count ?? 0)} times this turn, failing each time`;
+  return (
+    <View style={{ marginLeft: 30, marginVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: T.line, borderLeftWidth: 3, borderLeftColor: T.warn,
+      backgroundColor: T.panel, padding: 11, gap: 6 }}>
+      <Text style={{ color: T.text, fontSize: 13, fontWeight: "600" }}>↻ {who} is going in circles{p.nudged ? " · nudged" : ""}</Text>
+      <Text style={{ color: T.dim, fontSize: 12.5, lineHeight: 18 }}>
+        <Text style={{ fontFamily: T.mono, color: T.text }}>{trunc(String(p.call ?? ""), 120)}</Text> — {what}{p.nudged ? ". Loom stopped it and asked it to step back." : "."}
+      </Text>
+      {done ? <Text style={{ color: T.faint, fontSize: 12 }}>{done}</Text> : (
+        <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+          <Btn small label="Stop" onPress={() => act("stop")} />
+          {p.nudged ? null : <Btn small label="Nudge it" onPress={() => act("nudge")} />}
+          {others.length ? <Btn small label="Hand it off…" onPress={handOff} /> : null}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function ago(iso: string): string {
   const t = new Date(iso).getTime();
   // an unparseable date compares false against every bound below and would

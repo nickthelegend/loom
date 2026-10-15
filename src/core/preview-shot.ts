@@ -24,13 +24,15 @@ export interface ShotRequest {
   /** What the page should think the OS is set to. */
   colorScheme?: "light" | "dark";
   fullPage?: boolean;
+  /** Just this element (a CSS selector from the preview's picker): its own picture, cropped. */
+  selector?: string;
   timeoutMs?: number;
 }
 
 export const MAX_SHOT_MS = 45_000;
 
 /** The little script Playwright runs. Kept here so what it does is readable. */
-export function shotScript(req: Required<Omit<ShotRequest, "timeoutMs">> & { out: string }): string {
+export function shotScript(req: Required<Omit<ShotRequest, "timeoutMs" | "selector">> & { selector?: string; out: string }): string {
   return `const { chromium } = require("playwright");
 (async () => {
   const browser = await chromium.launch();
@@ -43,7 +45,11 @@ export function shotScript(req: Required<Omit<ShotRequest, "timeoutMs">> & { out
     await page.goto(${JSON.stringify(req.url)}, { waitUntil: "load", timeout: 20000 });
     // Settle: fonts and the first paint of whatever loaded late.
     await page.waitForTimeout(400);
-    await page.screenshot({ path: ${JSON.stringify(req.out)}, fullPage: ${req.fullPage} });
+    ${req.selector
+      ? `const el = page.locator(${JSON.stringify(req.selector)}).first();
+    await el.scrollIntoViewIfNeeded({ timeout: 8000 });
+    await el.screenshot({ path: ${JSON.stringify(req.out)}, timeout: 8000 });`
+      : `await page.screenshot({ path: ${JSON.stringify(req.out)}, fullPage: ${req.fullPage} });`}
   } finally {
     await browser.close();
   }
@@ -80,7 +86,8 @@ export async function capture(projectDir: string, req: ShotRequest, spawnImpl: t
   fs.mkdirSync(scriptDir, { recursive: true });
   const script = path.join(scriptDir, `preview-shot-${process.pid}-${Date.now()}.cjs`);
   const out = path.join(tmp, "shot.png");
-  fs.writeFileSync(script, shotScript({ url, width, height, colorScheme, fullPage, out }));
+  const selector = typeof req.selector === "string" && req.selector.trim() ? req.selector.trim().slice(0, 500) : undefined;
+  fs.writeFileSync(script, shotScript({ url, width, height, colorScheme, fullPage, out, ...(selector ? { selector } : {}) }));
 
   const code = await new Promise<{ code: number; err: string }>((resolve) => {
     const child = spawnImpl("npx", ["--no-install", "node", script], {
