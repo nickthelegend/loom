@@ -40,6 +40,8 @@ export class SqliteStore implements EventStore {
       this.db.exec("ALTER TABLE events ADD COLUMN chat TEXT");
     }
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_chat ON events(chat, id)");
+    // time windows over one kind: today's spend, the cost/usage charts
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_kind_ts ON events(kind, ts)");
     this.continuity = new ContinuityStore(this.db, file);
   }
 
@@ -120,7 +122,8 @@ export class SqliteStore implements EventStore {
     };
   }
 
-  list(opts: ListOpts = {}): LoomEvent[] {
+  /** The WHERE clause every read shares (list and count). */
+  private where(opts: ListOpts): { where: string; params: (string | number)[] } {
     const clauses: string[] = [];
     const params: (string | number)[] = [];
     if (opts.since !== undefined) {
@@ -135,6 +138,10 @@ export class SqliteStore implements EventStore {
       clauses.push(`kind IN (${opts.kinds.map(() => "?").join(",")})`);
       params.push(...opts.kinds);
     }
+    if (opts.sinceTs !== undefined) {
+      clauses.push("ts >= ?");
+      params.push(opts.sinceTs);
+    }
     if (opts.chat !== undefined) {
       if (opts.chat === MAIN_CHAT) {
         // pre-chat history has no id and belongs to the main conversation
@@ -144,7 +151,25 @@ export class SqliteStore implements EventStore {
       }
       params.push(opts.chat);
     }
-    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    if (opts.agentId !== undefined) {
+      clauses.push("agent_id = ?");
+      params.push(opts.agentId);
+    }
+    return { where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
+  }
+
+  count(opts: ListOpts = {}): number {
+    const { where, params } = this.where(opts);
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM events ${where}`).get(...params) as { n: number | bigint };
+    return Number(row.n);
+  }
+
+  list(opts: ListOpts = {}): LoomEvent[] {
+    const { where, params } = this.where(opts);
+    return this.listWhere(opts, where, params);
+  }
+
+  private listWhere(opts: ListOpts, where: string, params: (string | number)[]): LoomEvent[] {
     // When limiting, we want the *most recent* N in ascending order.
     const sql = opts.limit
       ? `SELECT * FROM (SELECT * FROM events ${where} ORDER BY id DESC LIMIT ?) ORDER BY id ASC`

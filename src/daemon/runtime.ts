@@ -2022,7 +2022,7 @@ export class ProjectRuntime {
 
   /** How many turns this agent has completed (for the decision's turnIndex). */
   private turnCountFor(agentId: string): number {
-    return this.log.list({ kinds: ["run_complete"] }).filter((e) => e.agentId === agentId).length;
+    return this.log.count({ kinds: ["run_complete"], agentId });
   }
 
   /**
@@ -2063,7 +2063,7 @@ export class ProjectRuntime {
     const turnText = this.turns.turnText.get(agentId) ?? "";
     this.turns.turnText.delete(agentId);
     if (turnText.trim().length < 100) return;
-    const lastTurn = this.log.list({ kinds: ["run_complete"] }).filter((e) => e.agentId === agentId).slice(-1)[0];
+    const lastTurn = this.log.list({ kinds: ["run_complete"], agentId, limit: 1 })[0];
     const p = (lastTurn?.payload ?? {}) as Record<string, unknown>;
     let filesChanged: string[] = [];
     try {
@@ -3020,7 +3020,8 @@ export class ProjectRuntime {
     const day = new Date().toISOString().slice(0, 10), start = Date.parse(`${day}T00:00:00Z`);
     if (this.crewSpendLedger.day !== day) this.crewSpendLedger = { day, after: 0, total: 0, crews: new Map() };
     const ledger = this.crewSpendLedger;
-    for (const event of this.log.list({ kinds: ["status"], since: ledger.after })) {
+    // a new day starts its ledger at the day's first event, not at the first event ever written
+    for (const event of this.log.list({ kinds: ["status"], since: ledger.after, ...(ledger.after === 0 ? { sinceTs: start } : {}) })) {
       const id = (event.payload.crew as { crewId?: string } | undefined)?.crewId;
       const cost = Number(event.payload.costUsd);
       if (id && event.ts >= start && event.payload.state === "turn_cost" && Number.isFinite(cost) && cost > 0) {

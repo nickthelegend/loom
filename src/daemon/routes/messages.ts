@@ -12,7 +12,9 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
       const since = req.query.since ? Number(req.query.since) : undefined;
       // ?before= pages backwards: the thread's "earlier messages"
       const before = req.query.before ? Number(req.query.before) : undefined;
-      const limit = req.query.limit ? Number(req.query.limit) : 200;
+      // 1–1000: ?limit=0 or a non-number used to mean the whole log in one response
+      const asked = req.query.limit ? Number(req.query.limit) : 200;
+      const limit = Number.isFinite(asked) ? Math.min(1000, Math.max(1, Math.floor(asked))) : 200;
       // no ?chat= means the whole project — old clients keep seeing the
       // whole thread, which is what they've always shown
       const chat = req.query.chat ? String(req.query.chat) : undefined;

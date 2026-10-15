@@ -30,6 +30,7 @@ import { pageGone } from './format.js';
 
 
   function clearTimers(){ state.timers.forEach(clearInterval); state.timers = [];
+    if (state.disposeView) { var d = state.disposeView; state.disposeView = null; try { d(); } catch (e) {} }
     if (state.ws) {
       // Closing a socket that is still CONNECTING doesn't throw — it emits an
       // async error event ("closed before the connection was established"), so

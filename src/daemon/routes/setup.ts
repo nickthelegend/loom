@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import { findProject } from "../../core/registry.js";
 import { setupReport } from "../../core/setup.js";
+import { forgetProbes } from "../../adapters/base.js";
 /** Register setup routes in the order established by LoomDaemon.routes(). */
 export function registerSetupRoutes(app: Express): void {
 
@@ -17,6 +18,7 @@ export function registerSetupRoutes(app: Express): void {
    * the app polls.
    */
   app.get("/api/setup", (_req, res) => {
+    forgetProbes(); // Setup is "look at this machine again": an agent just installed shows up now
     void setupReport()
       .then((report) => res.json(report))
       .catch((err) => res.status(500).json({ error: String(err?.message ?? err) }));
@@ -29,6 +31,7 @@ export function registerSetupRoutes(app: Express): void {
    * module-init time.
    */
   app.get("/api/doctor", (req, res) => {
+    forgetProbes();
     void (async () => {
       try {
         const { envChecks, projectChecks } = await import("../../cli/doctor.js");

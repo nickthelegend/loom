@@ -812,7 +812,21 @@ import { openMenu } from './menus.js';
       });
       var savedH = Number(localStorage.getItem("loomTermH"));
       if (savedH) document.getElementById("termdock").style.height = savedH + "px";
-      window.addEventListener("resize", fitActive);
+      // One window listener for the app's life, calling through the current
+      // view: one added per render kept every old view (and its xterms) alive.
+      state.fitActive = fitActive;
+      if (!state.termResizeBound) {
+        state.termResizeBound = true;
+        window.addEventListener("resize", function(){ if (state.fitActive) state.fitActive(); });
+      }
+      // Leaving this view (another chat or project re-renders) frees its
+      // terminals' buffers; the shells live on in the daemon and replay.
+      state.disposeView = function(){
+        terms.forEach(function(t){
+          if (t.ro) { try { t.ro.disconnect(); } catch (e) {} }
+          if (t.xterm) { try { t.xterm.dispose(); } catch (e) {} }
+        });
+      };
       state.toggleTerm = toggleTerm;
       state.retheme = function(){
         terms.forEach(function(t){ if (t.xterm) t.xterm.options.theme = xtermTheme(); });

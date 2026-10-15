@@ -134,6 +134,22 @@ export class OpenCodeAdapter extends AdapterBase {
   private started = false;
   /** npm builds expose /session + /global/health; newer builds use /api. */
   private modernApi = false;
+  /**
+   * Before a turn: whatever a previous turn left in flight (an interrupted
+   * reply's parts, a prompt's echo) is never coming back, and the dedupe sets
+   * only need recent ids — so they're trimmed, not kept for the agent's life.
+   */
+  private trimTurnState(): void {
+    this.textParts.clear();
+    this.reasoningParts.clear();
+    const keep = <T>(set: Set<T> | Map<T, unknown>, max = 500) => {
+      if (set.size <= max) return;
+      let drop = set.size - max;
+      for (const k of set.keys()) { if (drop-- <= 0) break; set.delete(k); }
+    };
+    keep(this.roles); keep(this.emittedText); keep(this.toolsDone);
+  }
+
   /** Stops an idle server Loom started (see idleMinutes). */
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -511,6 +527,8 @@ export class OpenCodeAdapter extends AdapterBase {
       const messageID = String(info.id ?? "");
       const role = String(info.role ?? "");
       if (role) this.roles.set(messageID, role);
+      // the echo of our own prompt (briefing and all) is never emitted: don't keep it
+      if (role === "user") this.textParts.delete(messageID);
       const time = (info.time ?? {}) as Json;
       if (role === "assistant" && time.completed) {
         const thought = [...this.reasoningParts.entries()].filter(([k]) => k.startsWith(`${messageID}:`)).map(([, v]) => v).join("\n").trim();
@@ -810,6 +828,7 @@ export class OpenCodeAdapter extends AdapterBase {
     if (!this.started) await this.start();
     if (this._busy) throw new Error(`opencode agent "${this.id}" is busy`);
     this._busy = true;
+    this.trimTurnState();
     this.interrupted = false;
     const started = Date.now();
     const timeoutMs = 60 * 60 * 1000;
@@ -913,6 +932,7 @@ export class OpenCodeAdapter extends AdapterBase {
     if (this._busy) throw new NativeDispatchRejected(`opencode agent "${this.id}" is busy`);
     this.cancelIdle();
     this._busy = true;
+    this.trimTurnState();
     this.interrupted = false;
     this.beginContinuity(input);
     const started = Date.now();
