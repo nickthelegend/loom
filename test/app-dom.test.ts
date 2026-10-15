@@ -527,6 +527,19 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   });
 
+  it("Quota Relay: an agent out of quota hands the work on, and the thread says so", async () => {
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(makeProjectDir({ name: "relaydom", agents: [{ id: "first", kind: "echo" }, { id: "second", kind: "echo" }], defaultAgent: "first" }))).project.id;
+    const m = mount({ hash: `#p/${pid}` });
+    await waitUntil(() => !!$(m, "#box"));
+    // echo fails with your words: a usage-limit error, as Codex words it
+    ($(m, "#box") as HTMLInputElement).value = "fail: You've hit your usage limit. Try again at 11:59 PM.";
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(new m.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitUntil(() => !!$(m, '.sys.quota[data-quota="quota_relay"]'), { timeoutMs: 20_000 });
+    expect(text(m, '.sys.quota[data-quota="quota_relay"]')).toMatch(/first hit its usage limit — second carries on; first is back around/);
+    expect(m.errors.join("\n")).toBe("");
+  }, 60_000);
+
   it("renders an agent reply as markdown, not literal characters", async () => {
     // The echo agent replies with your text, so a markdown message round-trips
     // into an agent bubble we can inspect for real rendering.

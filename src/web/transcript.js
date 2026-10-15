@@ -277,6 +277,11 @@ import { shortModel } from './permissions.js';
     if (e.kind === "status" && p.state === "model_fallback") {
       return '<div class="sys">\u21aa ' + esc(String(p.from || "")) + " \u2192 " + esc(String(p.to || "")) + (p.reason ? ' <span style="opacity:.7">\u2014 ' + esc(String(p.reason).slice(0, 160)) + "</span>" : "") + "</div>";
     }
+    // Quota Relay: an agent ran out of quota and the work changed hands (or waits for the reset)
+    if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_redirect" || p.state === "quota_limit" || p.state === "quota_reset")) {
+      var qcls = p.state === "quota_reset" ? "ok" : p.state === "quota_relay" && p.to ? "warn" : "warn";
+      return '<div class="sys ' + qcls + ' quota" data-quota="' + esc(p.state) + '" title="' + esc(String(p.reason || "")) + '">\u21c4 ' + esc(String(p.text || "")) + "</div>";
+    }
     if (e.kind === "status" && p.state === "stopped_early") return '<div class="sys">\u25a0 ' + esc(labelOf(e.agentId)) + " stopped early" + (p.reason ? " (" + esc(String(p.reason)) + ")" : "") + "</div>";
     // the agent's todo list, as a checklist (the thread keeps the newest one per turn in place)
     if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {

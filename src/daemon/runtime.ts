@@ -19,6 +19,7 @@ import { NativeUsage } from "./runtime/native-usage.js";
 import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
 import { CrewEngine } from "../core/crew.js";
+import { QuotaRelay } from "./runtime/relay.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
@@ -146,6 +147,8 @@ export class ProjectRuntime {
   readonly orchestra: OrchestraEngine;
   /** Agent Teams: crews of agents with roles, one goal at a time (core/crew.ts). */
   readonly crews: CrewEngine;
+  /** Quota Relay: an agent out of quota mid-task hands its work to the next. */
+  readonly relay: QuotaRelay;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -367,6 +370,24 @@ export class ProjectRuntime {
       coordinator: () => this.coordinator,
     });
 
+    this.relay = new QuotaRelay({
+      config: () => this.config,
+      busy: (id) => { const a = this.agents.get(id); return Boolean(a && isAdapter(a) && a.busy()) || this.turns.busySince.has(id); },
+      turnChat: (id) => this.turns.turnChat.get(id),
+      available: async (id) => { const a = this.agents.get(id); return Boolean(a && isAdapter(a) && (await a.available())); },
+      interrupt: (chat) => this.interrupt({ chat, source: "route" }),
+      handoff: (to) => this.handoff(to, { source: "route" }),
+      holder: () => this.validHolder(),
+      setBriefing: (id, text) => {
+        const prior = this.briefings.pendingBriefings.get(id);
+        this.briefings.pendingBriefings.set(id, [prior, text].filter(Boolean).join("\n"));
+      },
+      send: (text, id, chat) => this.sendMessage(text, id, { chat, source: "route" }),
+      enqueue: (input) => this.enqueue(input),
+      list: (opts) => this.log.list(opts),
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      warn: (message, detail) => logbook.warn("relay", message, String(detail), this.info.id),
+    });
     this.crews = new CrewEngine({
       projectId: info.id,
       projectName: info.name,
@@ -1963,6 +1984,8 @@ export class ProjectRuntime {
   /** Fire-and-notify hooks + routing + suggested handoffs, off the log. */
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
+    // an agent out of quota mid-task hands its work on (core/quota.ts, runtime/relay.ts)
+    this.relay.observe(event);
     // The turn's diff is started before routing hears the turn ended: a step
     // condition reads those numbers, and a route that advanced first would
     // read the turn before this one.
@@ -2356,7 +2379,15 @@ export class ProjectRuntime {
     text: string,
     agentId?: string,
     opts: TurnOptions = {},
-  ): Promise<TurnResult> { return this.turns.sendMessage(text, agentId, opts); }
+  ): Promise<TurnResult> {
+    // a prompt for an agent that's out of quota goes to whoever is carrying its work
+    const target = agentId ?? this.validHolder() ?? undefined;
+    if (target && this.relay.cappedUntil(target)) {
+      const routed = await this.relay.route(target, opts.chat ?? MAIN_CHAT);
+      if (routed !== target) agentId = routed;
+    }
+    return this.turns.sendMessage(text, agentId, opts);
+  }
 
   // -------------------------------------------------------------------------
   // Named routes
@@ -3157,6 +3188,7 @@ export class ProjectRuntime {
 
   async close(): Promise<void> {
     await this.orchestra.shutdown().catch(() => { });
+    this.relay.stop();
     await this.crews.shutdown().catch(() => { });
     this.closed = true;
     this.harnesses.stop();

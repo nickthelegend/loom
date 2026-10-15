@@ -665,6 +665,15 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       </View>
     );
   }
+  // Quota Relay: an agent ran out of quota and the work changed hands (or waits for the reset)
+  if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_redirect" || p.state === "quota_limit" || p.state === "quota_reset")) {
+    return (
+      <Text style={{ color: p.state === "quota_reset" ? T.ok : T.warn, fontSize: 12, marginVertical: 4, textAlign: "center" }}>
+        ⇄ {String(p.text ?? "")}
+      </Text>
+    );
+  }
+
   if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {
     // the desktop's checklist: filled when done, a ring while waiting, half while on it
     const plan = p.plan as Array<{ step?: string; status?: string }>;

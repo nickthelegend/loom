@@ -81,6 +81,31 @@ The invite is the part of the link after `#`. Browsers never send that part to
 a server, including the join page's. A link works once and expires in a day.
 It carries the team key, so send it the way you'd send a password.
 
+## Quota Relay — a limit doesn't stop the work
+
+Hit Claude's 5-hour window halfway through a task, and the work normally
+stops: Claude Code parks the turn until the reset, and Codex ends it with
+"try again at 3:04 PM". Loom recognises the limit and responds:
+
+- **It hands the work on.** It stops the parked turn and passes the baton to
+  the next agent, with a briefing: "claude ran out of quota; its changes are in
+  the working tree, continue from them". It re-sends the same request in the
+  same chat.
+- **It routes new prompts.** While an agent is out, anything sent to it goes
+  to the agent standing in.
+- **It gives the chat back.** When the window resets, the baton returns.
+- **It waits if it has to.** If no other agent is free, the request is queued
+  for the moment the limit lifts.
+
+The thread records each step ("claude hit its usage limit — codex carries on;
+claude is back around 19:00"), and your phone gets a push. By default only
+your other CLI agents take over, never a metered API model. Set the order
+with `relay.to`. `relay.auto: false` only reports the limit, and
+`relay.handBack: false` keeps the stand-in. Limits are read from what Claude
+and Codex report about their usage windows, and from the error text any CLI
+gives ("usage limit", "rate limited", "quota exceeded", with "try again at…"
+or "resets in…").
+
 ## Crews — agents with roles, on one goal
 
 A crew is a few of your agents with jobs: a **lead** who plans, **builders**, a
