@@ -543,8 +543,9 @@ export function createCrew(view) {
       var html = '<div class="orchview crewview">' + body + "</div>";
       // Nothing changed (a refetch that found the same crew): leave the DOM alone,
       // so a tap that's landing right now lands on the element it started on.
-      if (el._crewHtml === html && el.firstChild) return;
+      if (el._crewHtml === html && el._crewBusy === crew.busy && el.firstChild) return;
       el._crewHtml = html;
+      el._crewBusy = crew.busy;
       el.innerHTML = html;
       restore(el, k);
       wire(el);
