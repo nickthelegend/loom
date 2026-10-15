@@ -426,14 +426,20 @@ export class Runner {
       }
       a.runId = run.id;
       let debounce: ReturnType<typeof setTimeout> | null = null;
-      a.unsub = rt.log.onEvent((e) => {
-        if (e.kind !== "orchestra" || (e.payload as { runId?: string }).runId !== run.id) return;
+      // a heartbeat the hub didn't take (it was slow, the network blinked) is sent again
+      // shortly — otherwise the job's progress (its PR, its status) waits for the next
+      // event or the minute's beat, and the team sees a goal stuck short of where it is
+      const report = (delayMs: number) => {
         if (debounce) return;
         debounce = setTimeout(() => {
           debounce = null;
-          void this.beat(a).then(() => this.checkDone(a)).catch(() => {});
-        }, 1000);
+          void this.beat(a).then(() => this.checkDone(a)).catch(() => { if (this.active.has(a.job.id)) report(5_000); });
+        }, delayMs);
         debounce.unref?.();
+      };
+      a.unsub = rt.log.onEvent((e) => {
+        if (e.kind !== "orchestra" || (e.payload as { runId?: string }).runId !== run.id) return;
+        report(1000);
       });
       await this.beat(a);
     } catch (e) {
