@@ -40,11 +40,21 @@ export class JsonlStore implements EventStore {
     return ev;
   }
 
+  count(opts: ListOpts = {}): number {
+    return this.filtered({ ...opts, limit: undefined }).length;
+  }
+
   list(opts: ListOpts = {}): LoomEvent[] {
+    return structuredClone(this.filtered(opts));
+  }
+
+  private filtered(opts: ListOpts): LoomEvent[] {
     let out = this.cache;
     if (opts.since !== undefined) out = out.filter((e) => e.id > opts.since!);
     if (opts.before !== undefined) out = out.filter((e) => e.id < opts.before!);
     if (opts.kinds?.length) out = out.filter((e) => opts.kinds!.includes(e.kind));
+    if (opts.sinceTs !== undefined) out = out.filter((e) => e.ts >= opts.sinceTs!);
+    if (opts.agentId !== undefined) out = out.filter((e) => e.agentId === opts.agentId);
     // must match SqliteStore exactly: an event with no chat is main's
     if (opts.chat !== undefined) {
       out = out.filter((e) =>
@@ -52,7 +62,7 @@ export class JsonlStore implements EventStore {
       );
     }
     if (opts.limit && out.length > opts.limit) out = out.slice(-opts.limit);
-    return structuredClone(out);
+    return out;
   }
 
   lastId(): number {

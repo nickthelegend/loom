@@ -700,7 +700,23 @@ function proofCard(e){
     "</div>";
 }
 
-var attCache = {};
+/**
+ * Recent images by "pid|path" → a promise of their blob URL. An LRU: past 64
+ * the oldest is dropped and its blob URL revoked (an image already drawn
+ * stays drawn; shown again, it is fetched again) — keeping every screenshot
+ * of the session alive was megabytes each.
+ */
+var attCache = new Map();
+var ATT_CACHE_MAX = 64;
+function attRemember(key, promise){
+  attCache.set(key, promise);
+  while (attCache.size > ATT_CACHE_MAX) {
+    var oldest = attCache.keys().next().value;
+    var gone = attCache.get(oldest);
+    attCache.delete(oldest);
+    gone.then(function(url){ if (url) { try { URL.revokeObjectURL(url); } catch (e) {} } });
+  }
+}
 /**
  * Images the thread can't load by URL, because the API wants your token:
  * attachments (data-att) and files in the project (data-projimg — a screenshot
@@ -717,11 +733,13 @@ function loadAttachment(img){
     if (proj) { var miss = document.createElement("span"); miss.className = "mdimgmiss"; miss.textContent = "\ud83d\uddbc " + rel + " (not found)"; img.replaceWith(miss); }
     else if (img.parentNode) img.parentNode.classList.add("gone");
   };
-  if (attCache[key]) { attCache[key].then(done); return; }
-  attCache[key] = fetch("/api/projects/" + state.pid + (att ? "/attachment" : "/image") + "?path=" + encodeURIComponent(rel), {
+  var hit = attCache.get(key);
+  if (hit) { attCache.delete(key); attCache.set(key, hit); hit.then(done); return; }
+  var loading = fetch("/api/projects/" + state.pid + (att ? "/attachment" : "/image") + "?path=" + encodeURIComponent(rel), {
     headers: { Authorization: "Bearer " + state.token },
   }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){ return b ? URL.createObjectURL(b) : null; }).catch(function(){ return null; });
-  attCache[key].then(done);
+  attRemember(key, loading);
+  loading.then(done);
 }
 if (typeof document !== "undefined" && document.addEventListener && typeof MutationObserver !== "undefined") {
   var attScan = function(){

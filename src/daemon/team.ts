@@ -786,6 +786,24 @@ export class TeamLink {
     }
   }
 
+  /**
+   * Called by the daemon before it drops a runtime (config hot-reload, project
+   * removal, a runner's finished clone). Without it the closed runtime stayed
+   * pinned here — its landing loop ticking against a closed log — and the
+   * reopened one never got a coordinator, team brain or feed of its own.
+   */
+  detachRuntime(projectId: string): void {
+    this.landings.get(projectId)?.stop();
+    this.landings.delete(projectId);
+    this.brains.get(projectId)?.stop();
+    this.brains.delete(projectId);
+    this.coordinators.get(projectId)?.stop();
+    this.coordinators.delete(projectId);
+    this.deploys.delete(projectId);
+    this.logSubs.get(projectId)?.();
+    this.logSubs.delete(projectId);
+  }
+
   /** Called by the daemon when it opens a runtime. */
   attachRuntime(rt: ProjectRuntime): void {
     rt.memberLogin = this.state.hub?.github ?? null;
@@ -819,14 +837,7 @@ export class TeamLink {
         presence: (teamId) => [...(this.views.get(teamId)?.presence.values() ?? [])],
         openProject: this.host.openProject.bind(this.host),
         closeProject: async (rt) => {
-          this.landings.get(rt.info.id)?.stop();
-          this.landings.delete(rt.info.id);
-          this.brains.get(rt.info.id)?.stop();
-          this.brains.delete(rt.info.id);
-          this.coordinators.get(rt.info.id)?.stop();
-          this.coordinators.delete(rt.info.id);
-          this.logSubs.get(rt.info.id)?.();
-          this.logSubs.delete(rt.info.id);
+          this.detachRuntime(rt.info.id);
           await this.host.closeProject!(rt);
         },
         share: async (rt, teamId) => {

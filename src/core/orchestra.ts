@@ -1112,6 +1112,7 @@ export class OrchestraEngine {
     }
     this.save(run);
     await this.stopAll(run);
+    this.forgetRun(run.id);
     this.emit(run, "aborted", { reason });
     this.host.coordinator?.()?.onRunEnd?.(run);
     return run;
@@ -1578,6 +1579,7 @@ export class OrchestraEngine {
       });
       await agent.send({ text, ...(briefing ? { briefing } : {}) } satisfies SendInput);
       reply = this.turnText.get(key) ?? "";
+      this.turnText.delete(key); // read once per turn; reset before the next
     } catch (err) {
       this.orchestratorBusy.delete(run.id);
       return this.finish(run, "failed", `orchestrator failed: ${(err as Error).message}`);
@@ -2079,6 +2081,7 @@ export class OrchestraEngine {
       }
 
       const reply = (this.turnText.get(key) ?? "").trim();
+      this.turnText.delete(key); // kept on the task (task.result), not here, once the turn is read
       task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
       const turnError = this.lastError.get(key);
       this.lastError.delete(key);
@@ -2215,11 +2218,19 @@ export class OrchestraEngine {
     });
   }
 
+  /** A finished or aborted run's per-turn scratch (reply text, errors, questions) goes with it. */
+  private forgetRun(runId: string): void {
+    const prefix = `${runId}/`;
+    for (const map of [this.turnText, this.lastError, this.workerQuestion] as Map<string, string>[])
+      for (const k of [...map.keys()]) if (k.startsWith(prefix)) map.delete(k);
+  }
+
   private async finish(run: OrchestraRun, status: "completed" | "failed", error?: string, summary?: string): Promise<void> {
     // Do the slow parts first, then flip the status and announce it in one
     // synchronous step: a client that sees "completed" must also find the
     // completed event (polling status in the gap raced this).
     await this.stopAll(run);
+    this.forgetRun(run.id);
     if (run.plan) {
       // The plan's final state — statuses and results — rides the branch too.
       const final = { ...run, status, ...(error ? { error } : {}), ...(summary ? { summary } : {}) };
