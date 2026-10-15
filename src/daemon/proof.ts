@@ -124,9 +124,11 @@ export class ProofRunner {
         const from = path.join(repo, dep), to = path.join(dir, dep);
         if (fs.existsSync(from) && !fs.existsSync(to)) fs.symlinkSync(from, to, process.platform === "win32" ? "junction" : "dir");
       }
-      // git names the root by its real path (/private/var/… on macOS for /var/…): compare like with like
-      const sub = path.relative(fs.realpathSync(repo), fs.realpathSync(this.host.dir));
-      const r = await runCommand(command, sub ? path.join(dir, sub) : dir, { timeoutMs, keep: 64_000 });
+      // where the project sits in the repo, as git sees it — comparing paths ourselves trips on
+      // /private/var vs /var (macOS) and short 8.3 names like RUNNER~1 (Windows)
+      const { stdout: prefix } = await exec("git", ["rev-parse", "--show-prefix"], { cwd: this.host.dir });
+      const sub = prefix.trim().replace(/\/$/, "");
+      const r = await runCommand(command, sub ? path.join(dir, ...sub.split("/")) : dir, { timeoutMs, keep: 64_000 });
       return this.toRerun(command, r, true);
     } finally {
       await exec("git", ["worktree", "remove", "--force", dir], { cwd: repo }).catch(() => fs.rmSync(dir, { recursive: true, force: true }));
