@@ -96,7 +96,8 @@ describe("relaying the work", () => {
   });
 
   it("while it's out, a prompt for it goes to the stand-in; when it resets, the baton goes back", async () => {
-    resetIn = 1500;
+    // long enough that a slow machine can't let it lapse before the second prompt — the redirect is what's tested
+    resetIn = 6000;
     await project();
     await rt!.sendMessage("first task");
     await waitUntil(() => statuses("quota_relay").length === 1 && rt!.log.list({ kinds: ["run_complete"] }).some((e) => e.agentId === "helper"), { timeoutMs: 10_000 });
@@ -104,9 +105,31 @@ describe("relaying the work", () => {
     await waitUntil(() => statuses("quota_redirect").length === 1, { timeoutMs: 5000 });
     expect(statuses("quota_redirect")[0]!.payload).toMatchObject({ from: "claude", to: "helper" });
     await waitUntil(() => rt!.log.list({ kinds: ["message"] }).filter((e) => e.agentId === "helper").length === 2, { timeoutMs: 10_000 });
-    await waitUntil(() => statuses("quota_reset").length === 1, { timeoutMs: 10_000 });
+    await waitUntil(() => statuses("quota_reset").length === 1, { timeoutMs: 20_000 });
     expect(String(statuses("quota_reset")[0]!.payload.text)).toMatch(/claude's usage limit reset/);
     expect(rt!.relay.cappedUntil("claude")).toBeNull();
+  });
+
+  it("a stand-in mid-turn at the reset isn't cut off: the baton goes back when it finishes", async () => {
+    resetIn = 300;
+    await project();
+    await rt!.sendMessage("first task sleep:1500");
+    await waitUntil(() => statuses("quota_reset").length === 1, { timeoutMs: 10_000 });
+    expect(String(statuses("quota_reset")[0]!.payload.text)).toMatch(/the baton goes back to claude when helper finishes/);
+    await waitUntil(() => rt!.log.list({ kinds: ["run_complete"] }).some((e) => e.agentId === "helper"), { timeoutMs: 10_000 });
+    await waitUntil(async () => (await rt!.status()).holder === "claude", { timeoutMs: 10_000 });
+  });
+
+  it("a prompt that arrives after the reset, before the baton is back, still reaches the agent it was for", async () => {
+    resetIn = 400;
+    await project();
+    await rt!.sendMessage("first task");
+    await waitUntil(() => statuses("quota_relay").length === 1 && rt!.log.list({ kinds: ["run_complete"] }).some((e) => e.agentId === "helper"), { timeoutMs: 10_000 });
+    // the window is over; whether or not the hand-back timer has fired yet, claude gets it
+    await waitUntil(() => !rt!.relay.cappedUntil("claude"));
+    await rt!.sendMessage("third task", "claude");
+    expect(statuses("quota_redirect")).toHaveLength(0);
+    expect(rt!.log.list({ kinds: ["message"] }).some((e) => !e.agentId && e.payload.text === "third task")).toBe(true);
   });
 
   it("with nobody to hand to, the request is queued for the reset", async () => {

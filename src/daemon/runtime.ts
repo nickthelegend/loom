@@ -2442,7 +2442,7 @@ export class ProjectRuntime {
     }
     // a prompt for an agent that's out of quota goes to whoever is carrying its work
     const target = agentId ?? this.validHolder() ?? undefined;
-    if (target && this.relay.cappedUntil(target)) {
+    if (target && this.relay.holds(target)) {
       const routed = await this.relay.route(target, opts.chat ?? MAIN_CHAT);
       if (routed !== target) agentId = routed;
     }
