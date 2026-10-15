@@ -431,7 +431,10 @@ describe("Phase 6: GitHub webhooks into the hub (D83, D84)", () => {
     });
     expect(res.status).toBe(202);
     await waitUntil(() => feedTypes("bob").some((e) => e.type === "check_failed" && e.meta.number === pr));
-    await waitUntil(() => run("alice", g7.id).landing!.state === "failing");
-    expect(calls.filter((c) => c[0] === "pr" && c[1] === "view" && c[2] === String(pr)).length).toBeGreaterThan(before);
+    // the owner's daemon looked at that PR at once, and read the red check. Not "state is failing":
+    // that state lasts only until the check's one rerun is asked for and the goal goes to fixing, and
+    // a slow machine sampling every 40ms can miss it — the checks it read stay on the landing.
+    await waitUntil(() => calls.filter((c) => c[0] === "pr" && c[1] === "view" && c[2] === String(pr)).length > before);
+    await waitUntil(() => (run("alice", g7.id).landing!.checks?.failing ?? []).includes("test"));
   });
 });
