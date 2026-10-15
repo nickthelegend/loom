@@ -7,6 +7,7 @@
  * it is actually about.
  */
 
+import { forecastLine } from "./forecast-model";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { INSTALL_URL, open as openLink } from "./links";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1780,6 +1781,16 @@ export function ProjectScreen(props: {
                 </View>
               </View>
             </View>
+            {(() => {
+              // pre-flight: what a turn on whoever gets this message usually costs and takes
+              const to = project.agents.find((a) => a.id === (selected ?? project.holder));
+              const line = plan ? null : forecastLine(to?.forecast);
+              return line ? (
+                <Text style={{ color: line.warn ? T.warn : T.faint, fontSize: 11.5, paddingHorizontal: spacing.sm + 4, paddingTop: 4 }} numberOfLines={2}>
+                  {line.text}
+                </Text>
+              ) : null;
+            })()}
             <AttachBar items={attach.items} onRemove={attach.remove} />
             <View
               style={{
