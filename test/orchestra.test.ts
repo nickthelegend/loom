@@ -115,8 +115,10 @@ async function openProject(): Promise<void> {
 
 const settle = (id: string) =>
   waitUntil(() => ["completed", "failed", "aborted", "waiting_human"].includes(rt.orchestra.get(id)!.status), {
-    timeoutMs: 30_000,
-  });
+    // This wait includes three real worktrees, commits and merges. Hosted
+    // Windows Git can exceed 30s even with test files serialized.
+    timeoutMs: process.platform === "win32" && process.env.CI ? 60_000 : 30_000,
+  }).catch(error => { throw new Error(JSON.stringify(rt.orchestra.get(id)), { cause: error }); });
 
 beforeAll(() => {
   process.env.LOOM_HOME = tmpDir("home-orch");
