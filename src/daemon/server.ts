@@ -983,7 +983,7 @@ export class LoomDaemon {
     this.unstreamLogs?.();
     this.unstreamLogs = null;
     this.specRunner.closeAll();
-    this.terminals.closeAll();
+    await this.terminals.closeAll();
     for (const rt of this.runtimes.values()) await rt.close();
     this.runtimes.clear();
     for (const { server, wss } of this.extra.values()) {

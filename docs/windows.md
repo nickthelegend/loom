@@ -45,6 +45,10 @@ Antigravity's Windows installer and default `%LOCALAPPDATA%\agy\bin` location
 follow its [official installation guide](https://www.antigravity.google/docs/cli/install/).
 
 The terminal uses ConPTY when node-pty loads, with a pipe fallback otherwise.
+The dependency is pinned to `node-pty` 1.2.0-beta.15, which includes Microsoft's
+[fix for simultaneous Windows terminal exits](https://github.com/microsoft/node-pty/pull/922).
+The stable 1.1.0 release still contains that native race. Terminal shutdown waits
+for shell exit, and late callbacks from an old shell cannot close its replacement.
 Both paths are exercised in CI. The pipe terminal preserves its shell session
 when interrupting a foreground process. Windows console hosts are excluded
 from ordinary process-tree shutdown.

@@ -56,6 +56,8 @@ export interface TerminalSession {
   resize(cols: number, rows: number): void;
   interrupt(): void;
   kill(): void;
+  /** Resolves after the shell's exit event, so shutdown can drain native callbacks. */
+  readonly closed: Promise<void>;
   scrollback(): string;
 }
 
@@ -81,6 +83,7 @@ interface PtyModule {
 
 let ptyModule: PtyModule | null | undefined;
 let ptyLoadError: string | null = null;
+let ptyProbeClosed: Promise<void> = Promise.resolve();
 
 /**
  * node-pty's macOS/Linux prebuilds ship `spawn-helper` without the executable
@@ -138,6 +141,7 @@ export function loadPty(): PtyModule | null {
       env: process.env,
       ...(isWin ? { useConptyDll: true } : {}),
     });
+    ptyProbeClosed = new Promise(resolve => probe.onExit(resolve));
     if (isWin) probe.write("exit\r");
     else probe.kill();
     ptyModule = mod;
@@ -175,6 +179,9 @@ class PtySession implements TerminalSession {
   readonly mode = "pty" as const;
   private buf = "";
   private proc: PtyProcess;
+  readonly closed: Promise<void>;
+  private killed = false;
+  private exited = false;
   constructor(
     readonly projectId: string,
     readonly termId: string,
@@ -205,12 +212,18 @@ class PtySession implements TerminalSession {
       if (titleMatch?.[1]) events.onTitle(projectId, termId, titleMatch[1]);
       events.onData(projectId, termId, d);
     });
-    this.proc.onExit(() => events.onExit(projectId, termId));
+    this.closed = new Promise(resolve => this.proc.onExit(() => {
+      this.exited = true;
+      resolve();
+      events.onExit(projectId, termId);
+    }));
   }
   write(data: string): void {
+    if (this.killed || this.exited) return;
     this.proc.write(data);
   }
   resize(cols: number, rows: number): void {
+    if (this.killed || this.exited) return;
     try {
       this.proc.resize(Math.max(2, cols), Math.max(1, rows));
     } catch {
@@ -222,6 +235,8 @@ class PtySession implements TerminalSession {
     this.write("\u0003");
   }
   kill(): void {
+    if (this.killed || this.exited) return;
+    this.killed = true;
     try {
       this.proc.kill();
     } catch {
@@ -239,6 +254,8 @@ class PipeSession implements TerminalSession {
   private pending = "";
   private buf = "";
   private sent = 0;
+  readonly closed: Promise<void>;
+  private killed = false;
   constructor(
     readonly projectId: string,
     readonly termId: string,
@@ -262,7 +279,10 @@ class PipeSession implements TerminalSession {
     this.child.stdout?.on("data", onData);
     this.child.stderr?.on("data", onData);
     this.child.on("error", (err) => events.onData(projectId, termId, `loom: ${err.message}\n`));
-    this.child.on("close", () => events.onExit(projectId, termId));
+    this.closed = new Promise(resolve => this.child.once("close", () => {
+      resolve();
+      events.onExit(projectId, termId);
+    }));
   }
   write(data: string): void {
     this.sent = 0;
@@ -291,9 +311,11 @@ class PipeSession implements TerminalSession {
     }
   }
   kill(): void {
+    if (this.killed) return;
+    this.killed = true;
     try {
       if (this.child.pid && !isWin) process.kill(-this.child.pid, "SIGKILL");
-      else void stopWindowsTree(this.child);
+      else void stopWindowsTree(this.child).catch(error => this.events.onData(this.projectId, this.termId, `loom: ${error.message}\n`));
     } catch {
       /* gone */
     }
@@ -380,6 +402,7 @@ export class TerminalManager {
   private typed = new Set<string>();
   private saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private events: TermEvents;
+  private closing = new Set<Promise<void>>();
 
   /**
    * The PROCESS dies with the daemon — a pty cannot outlive it — but the TEXT
@@ -486,14 +509,28 @@ export class TerminalManager {
     if (this.sessions.size >= this.maxSessions) throw new TooManySessionsError(this.maxSessions);
     const mod = loadPty();
     const seed = this.loadSeed(projectId, termId);
-    const sess: TerminalSession = mod
-      ? new PtySession(projectId, termId, dir, mod, this.events, cols, rows, seed)
-      : new PipeSession(projectId, termId, dir, this.events, seed);
     const key = this.key(projectId, termId);
+    // A closed shell can emit late data/exit after another shell reuses its id.
+    // Those callbacks must neither save into nor forget the replacement.
+    const current = () => this.sessions.get(key) === sess;
+    const events: TermEvents = {
+      onData: (...args) => { if (current()) this.events.onData(...args); },
+      onCommandEnd: (...args) => { if (current()) this.events.onCommandEnd(...args); },
+      onTitle: (...args) => { if (current()) this.events.onTitle(...args); },
+      onExit: (...args) => {
+        const replacement = this.sessions.get(key);
+        if (!replacement || replacement === sess) this.events.onExit(...args);
+      },
+    };
+    const sess: TerminalSession = mod
+      ? new PtySession(projectId, termId, dir, mod, events, cols, rows, seed)
+      : new PipeSession(projectId, termId, dir, events, seed);
     this.seeds.set(key, seed);
     const write = sess.write.bind(sess);
     sess.write = data => { this.typed.add(key); write(data); };
     this.sessions.set(key, sess);
+    this.closing.add(sess.closed);
+    void sess.closed.then(() => this.closing.delete(sess.closed));
     return sess;
   }
 
@@ -501,6 +538,9 @@ export class TerminalManager {
     const key = this.key(projectId, termId);
     const sess = this.sessions.get(key);
     if (!sess) return;
+    const timer = this.saveTimers.get(key);
+    if (timer) clearTimeout(timer);
+    this.saveTimers.delete(key);
     // A deliberate close forgets the scrollback too: the person shut this
     // terminal, and replaying its history into a future one with the same id
     // would be a haunting, not a restore. Only a daemon death preserves.
@@ -526,7 +566,7 @@ export class TerminalManager {
     this.typed.delete(key);
   }
 
-  closeAll(): void {
+  async closeAll(): Promise<void> {
     // Daemon shutdown: save everything first — this is exactly the moment the
     // persistence exists for.
     for (const [key, sess] of this.sessions) {
@@ -542,5 +582,14 @@ export class TerminalManager {
     }
     this.seeds.clear();
     this.typed.clear();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.all([ptyProbeClosed, ...this.closing]),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("terminal shutdown timed out waiting for shell exit")), 10_000); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }

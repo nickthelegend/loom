@@ -99,6 +99,22 @@ if (process.platform === "win32") {
     "import { probeWindowsJobs } from './dist/core/windows-jobs.js'; await probeWindowsJobs();"],
     { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true });
   log("verified staged Windows Job Object binding and launch");
+  execFileSync(process.execPath, ["--input-type=module", "-e", `
+    import { TerminalManager } from './dist/daemon/terminals.js';
+    const terminals = new TerminalManager({ onData() {}, onCommandEnd() {}, onExit() {}, onTitle() {} });
+    if (terminals.mode !== 'pty') throw new Error('staged Windows ConPTY binding is unavailable');
+    const shell = terminals.open('stage', 'probe', process.cwd());
+    shell.write('node -p "String.fromCharCode(76,79,79,77,45,83,84,65,71,69,68,45,80,84,89)"\\r');
+    try {
+      const deadline = Date.now() + 15000;
+      while (!shell.scrollback().includes('LOOM-STAGED-PTY')) {
+        if (Date.now() > deadline) throw new Error('staged ConPTY shell did not execute the probe');
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    } finally { await terminals.closeAll(); }
+  `], { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true,
+    env: { ...process.env, LOOM_NO_PTY: "" } });
+  log("verified staged Windows ConPTY execution and shutdown");
 }
 log(`staged ${mb(stage)} MB → ${rel(stage)}`);
 
