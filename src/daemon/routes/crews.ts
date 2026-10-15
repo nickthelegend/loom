@@ -92,7 +92,32 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
     }),
   );
 
-  // goal | say | approve | stop | resume | apply
+  app.get("/api/projects/:id/crews/:crew/memory", withRuntime(async (rt, req, res) => {
+    try {
+      const crew = rt.crews.get(String(req.params.crew));
+      res.json({ memories: rt.brain.list({ crew: crew.id }) });
+    } catch (error) { crewError(res, error); }
+  }));
+  app.post("/api/projects/:id/crews/:crew/memory", withRuntime(async (rt, req, res) => {
+    try {
+      const crew = rt.crews.get(String(req.params.crew));
+      const text = req.body?.text;
+      if (typeof text !== "string" || !text.trim() || text.length > 4000) throw new Error("memory text must contain 1–4000 characters");
+      res.json(rt.brain.add({ kind: "decision", text, scope: { crew: crew.id },
+        provenance: { agentId: "user", eventId: rt.log.lastId(), ts: Date.now() } }));
+    } catch (error) { crewError(res, error); }
+  }));
+  app.post("/api/projects/:id/crews/:crew/memory/:memory/promote", withRuntime(async (rt, req, res) => {
+    try {
+      const crew = rt.crews.get(String(req.params.crew));
+      const memory = rt.brain.get(String(req.params.memory));
+      if (!memory || memory.scope.crew !== crew.id) throw new Error("memory does not belong to this crew");
+      const { crew: _crew, ...scope } = memory.scope;
+      res.json({ memory: rt.brain.update(memory.id, { scope }, "user") });
+    } catch (error) { crewError(res, error); }
+  }));
+
+  // goal | say | approve | stop | resume | apply | refresh
   app.post(
     "/api/projects/:id/crews/:crew/:action",
     withRuntime(async (rt, req, res) => {
@@ -107,6 +132,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
         else if (action === "stop") out = { goal: await rt.crews.stop(id) };
         else if (action === "resume") out = { goal: rt.crews.resume(id) };
         else if (action === "apply") out = await rt.crews.apply(id);
+        else if (action === "refresh") out = { crew: await rt.crews.refresh(id, String(b.to ?? "")) };
         else return void res.status(404).json({ error: `unknown crew action "${action}"` });
         res.json({ ...(out as object), crew: rt.crews.get(id) });
       } catch (err) {

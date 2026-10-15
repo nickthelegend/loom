@@ -381,7 +381,6 @@ export class ProjectRuntime {
           (a) => a.enabled !== false && tierForKind(a.kind) === "adapter" && !isWithdrawnKind(a.kind),
         ),
       makeAgent: (cfg, dir) => {
-        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
         const agent = createAgent({ ...cfg, options: { ...this.policyOptions(cfg), loomProject: info.id } }, dir);
         if (!isAdapter(agent)) throw new Error(`"${cfg.id}" is a bridge — it can't be on a crew`);
         return agent;
@@ -391,12 +390,14 @@ export class ProjectRuntime {
       // The decorated sidebar list calls crews.list() to discover groups.
       // Using it to validate a crew's channel recurses back into crew state.
       chatExists: (id) => this.conversations.chats().some((c) => c.id === id),
-      briefingFor: async (query, agentId) =>
-        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
+      native: () => this.continuity,
+      nativeOptions: (cfg) => this.policyOptions(cfg),
+      nativeHealth: (id) => this.harnesses.ensure(id),
+      briefingFor: async (query, agentId, crewId) =>
+        [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, crew: crewId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
           .filter(Boolean)
           .join("\n\n"),
       gate: (agentId) => {
-        if (this.continuity) throw new ContinuityError("unsupported", "crews run outside sequential native continuity for now");
         this.enforceQuarantine(agentId);
         this.enforceBudget(agentId);
       },
@@ -1856,7 +1857,7 @@ export class ProjectRuntime {
   anyBusy(): boolean {
     // A live orchestra run counts: reloading the project would close it, and
     // closing aborts the run — a config edit must not kill a fleet mid-flight.
-    if (this.orchestra.active() || this.routes.isActive() || this.turns.busySince.size > 0) return true;
+    if (this.orchestra.active() || this.routes.isActive() || this.turns.busySince.size > 0 || this.crews.list().some(c => c.busy)) return true;
     return [...this.agents.values()].some((a) => isAdapter(a) && a.busy());
   }
 
