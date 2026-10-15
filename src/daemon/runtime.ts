@@ -3045,12 +3045,18 @@ export class ProjectRuntime {
       const rank = { ask: 0, auto: 1, bypass: 2 } as const;
       opts.permissions = rank[wanted] > rank[ceiling] ? ceiling : wanted;
       if (this.teamPolicy) opts.permissions = capCrewPermission(this.teamPolicy.crews ?? DEFAULT_CREW_POLICY, cfg.role, opts.permissions as "ask" | "auto" | "bypass");
+      if (this.teamPolicy) {
+        const reason = unsupportedReason(cfg.kind, opts.permissions as "ask" | "auto" | "bypass");
+        if (reason) throw new Error(`team policy requires ${opts.permissions} for ${cfg.id}, but ${cfg.kind} cannot enforce it: ${reason}`);
+      }
       return opts;
     }
     if (!this.teamPolicy) return opts;
     const wanted = permissionFor(cfg.kind, opts);
     const capped = cappedPermission(this.teamPolicy, wanted, false);
     const roleCap = capCrewPermission(this.teamPolicy.crews ?? DEFAULT_CREW_POLICY, cfg.role, capped);
+    const unsupported = unsupportedReason(cfg.kind, roleCap);
+    if (unsupported) throw new Error(`team policy requires ${roleCap} for ${cfg.id}, but ${cfg.kind} cannot enforce it: ${unsupported}`);
     if (roleCap !== wanted) opts.permissions = roleCap;
     return opts;
   }

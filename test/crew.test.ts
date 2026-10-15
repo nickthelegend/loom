@@ -408,4 +408,14 @@ describe("a crew works a goal", () => {
     expect(made.mock.calls.filter(([cfg]) => cfg.role === "builder").map(([cfg]) => cfg.options?.permissions)).toEqual(["auto", "ask"]);
   });
 
+  it("refuses an unsupported team role cap before any teammate starts", async () => {
+    const { rt: runtime } = await project(false);
+    runtime.config.agents.push({ id: "oc", kind: "opencode", options: { permissions: "bypass" } });
+    runtime.teamPolicy = parsePolicy({ crews: { reviewerMustDifferFromBuilders: false } });
+    expect(() => runtime.crews.create({ name: "Blocked", teammates: [
+      { id: "builder", agent: "small", role: "builder" }, { id: "reviewer", agent: "oc", role: "reviewer" },
+    ] })).toThrow(/requires ask.*cannot enforce/);
+    expect(turns).toEqual([]);
+  });
+
 });
