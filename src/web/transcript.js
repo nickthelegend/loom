@@ -306,11 +306,14 @@ import { shortModel } from './permissions.js';
         '<span class="tca">+' + Number(p.added || 0) + '</span><span class="tcd">\u2212' + Number(p.removed || 0) + "</span>" +
         (p.checkpoint ? '<button class="tcrw" type="button" data-rewind="' + esc(p.checkpoint) +
             '" title="put these files back the way they were before this turn">' + ICONS.rewind + "Rewind</button>" : "") +
+        '<button class="tcrw tcproof" type="button" data-proof-at="' + esc(String(e.id)) +
+            '" title="check this turn: what it claimed against what ran, and the tests again in a clean checkout">' + ICONS.shield + "Check it</button>" +
         '<span class="tchev">\u25b8</span></div>' +
         '<div class="tcf">' + esc(fl.slice(0, 4).join(", ")) + (fl.length > 4 ? " \u2026" : "") + "</div>" +
         artifactChips((p.files || []).filter(function(f){ return f.status !== "deleted" && f.status !== "D"; }).map(function(f){ return f.path; })) +
         '<div class="tcdiff" style="display:none"></div></div>';
     }
+    if (e.kind === "proof") return proofCard(e);
     if (e.kind === "checkpoint") {
       if (p.reason !== "rewound") return tview() === "verbose" ? '<div class="sys" style="opacity:.6">\u21ba checkpoint \u00b7 ' + esc(p.label || p.id) + "</div>" : "";
       return '<div class="sys ok">\u21ba Rewound to \u201c' + esc(String(p.label || p.id).slice(0, 80)) + '\u201d \u00b7 ' +
@@ -676,7 +679,49 @@ function splitAttachments(text){
   return { html: html, text: lines.slice(n).join("\n") };
 }
 
-var attCache = {};
+/**
+ * Proof: is "done" true? One card per check — the verdict, each claim the
+ * agent made and what decided it, and the clean re-run's output folded away.
+ */
+var PROOF = {
+  verified: { icon: "check", label: "Verified" },
+  contradicted: { icon: "alert", label: "Didn\u2019t hold" },
+  unverified: { icon: "help", label: "Unverified" },
+};
+function proofCard(e){
+  var p = e.payload || {};
+  var v = PROOF[p.verdict] || PROOF.unverified;
+  var r = p.rerun || null;
+  var meta = r ? esc(String(r.command || "")) + " \u00b7 " + durfmt(Number(r.ms) || 0) + (r.clean === false ? " \u00b7 in place" : " \u00b7 clean checkout") : "";
+  var claims = (p.claims || []).map(function(c){
+    return '<li class="pf-' + esc(c.status || "unchecked") + '"><span class="pfq">\u201c' + esc(String(c.text || "").slice(0, 140)) + '\u201d</span><span class="pfw">' + esc(String(c.why || "")) + "</span></li>";
+  }).join("");
+  var counts = r && r.counts ? '<span class="pfn">' + Number(r.counts.passed || 0) + " passed" + (r.counts.failed ? " \u00b7 " + Number(r.counts.failed) + " failed" : "") + "</span>" : "";
+  return '<div class="proofcard v-' + esc(p.verdict || "unverified") + '" data-agent="' + esc(p.about || "") + '">' +
+    '<div class="pfh"><span class="pfi">' + ICONS[v.icon] + "</span><b>" + v.label + "</b>" +
+      '<span class="pfhl">' + esc(String(p.headline || "")) + "</span>" + counts + (p.auto ? '<span class="pfauto" title="checked automatically: the reply claimed it">auto</span>' : "") + "</div>" +
+    (claims ? '<ul class="pfc">' + claims + "</ul>" : "") +
+    (r ? '<details class="pfr"><summary>' + meta + (r.timedOut ? " \u00b7 timed out" : "") + "</summary><pre>" + esc(String(r.tail || "")) + "</pre></details>" : "") +
+    "</div>";
+}
+
+/**
+ * Recent images by "pid|path" → a promise of their blob URL. An LRU: past 64
+ * the oldest is dropped and its blob URL revoked (an image already drawn
+ * stays drawn; shown again, it is fetched again) — keeping every screenshot
+ * of the session alive was megabytes each.
+ */
+var attCache = new Map();
+var ATT_CACHE_MAX = 64;
+function attRemember(key, promise){
+  attCache.set(key, promise);
+  while (attCache.size > ATT_CACHE_MAX) {
+    var oldest = attCache.keys().next().value;
+    var gone = attCache.get(oldest);
+    attCache.delete(oldest);
+    gone.then(function(url){ if (url) { try { URL.revokeObjectURL(url); } catch (e) {} } });
+  }
+}
 /**
  * Images the thread can't load by URL, because the API wants your token:
  * attachments (data-att) and files in the project (data-projimg — a screenshot
@@ -693,11 +738,13 @@ function loadAttachment(img){
     if (proj) { var miss = document.createElement("span"); miss.className = "mdimgmiss"; miss.textContent = "\ud83d\uddbc " + rel + " (not found)"; img.replaceWith(miss); }
     else if (img.parentNode) img.parentNode.classList.add("gone");
   };
-  if (attCache[key]) { attCache[key].then(done); return; }
-  attCache[key] = fetch("/api/projects/" + state.pid + (att ? "/attachment" : "/image") + "?path=" + encodeURIComponent(rel), {
+  var hit = attCache.get(key);
+  if (hit) { attCache.delete(key); attCache.set(key, hit); hit.then(done); return; }
+  var loading = fetch("/api/projects/" + state.pid + (att ? "/attachment" : "/image") + "?path=" + encodeURIComponent(rel), {
     headers: { Authorization: "Bearer " + state.token },
   }).then(function(r){ return r.ok ? r.blob() : null; }).then(function(b){ return b ? URL.createObjectURL(b) : null; }).catch(function(){ return null; });
-  attCache[key].then(done);
+  attRemember(key, loading);
+  loading.then(done);
 }
 if (typeof document !== "undefined" && document.addEventListener && typeof MutationObserver !== "undefined") {
   var attScan = function(){

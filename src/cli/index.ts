@@ -1555,6 +1555,26 @@ program
   });
 
 program
+  .command("proof")
+  .description("is \"done\" true? check the newest finished turn: its claims, what it ran, and the tests again in a clean checkout")
+  .option("--chat <id>", "which chat (default: main)")
+  .option("--test <command>", "test with this instead of the project's own command")
+  .action(async (opts: { chat?: string; test?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    process.stdout.write(pc.dim("checking… (it runs the tests again, so it takes as long as they do)\n"));
+    const r = await client.proof(project.id, { ...(opts.chat ? { chat: opts.chat } : {}), ...(opts.test ? { testCommand: opts.test } : {}) });
+    const mark = r.verdict === "verified" ? pc.green("✓ verified") : r.verdict === "contradicted" ? pc.red("✗ didn't hold") : pc.yellow("? unverified");
+    console.log(`${mark}  ${r.headline}`);
+    for (const c of r.claims ?? []) console.log(`  ${c.status === "supported" ? pc.green("●") : c.status === "contradicted" ? pc.red("●") : pc.dim("●")} “${c.text}” ${pc.dim(`— ${c.why}`)}`);
+    if (r.rerun) {
+      console.log(pc.dim(`  ${r.rerun.command} · exit ${r.rerun.exitCode ?? "?"} · ${(r.rerun.ms / 1000).toFixed(1)}s${r.rerun.clean === false ? " · in place" : " · clean checkout"}`));
+      if (!r.rerun.ok) console.log(pc.dim(String(r.rerun.tail).split("\n").slice(-12).map((l: string) => `    ${l}`).join("\n")));
+    }
+    if (r.verdict === "contradicted") process.exitCode = 1;
+  });
+
+program
   .command("crew [action] [args...]")
   .description("Agent Teams: status | create | goal | say | approve | pause | stop | resume | pick | refresh | budget | overlap | deliver | apply | diff | remove")
   .option("--crew <id>", "which crew, when the project has several")

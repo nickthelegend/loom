@@ -89,6 +89,12 @@ export class EventLog implements EventJournal {
     return this.store.list(opts);
   }
 
+  /** How many events match, without reading them. */
+  count(opts?: ListOpts): number {
+    if (this.closed) throw new Error("event log is closed");
+    return this.store.count(opts);
+  }
+
   lastId(): number {
     if (this.closed) throw new Error("event log is closed");
     return this.store.lastId();

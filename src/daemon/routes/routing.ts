@@ -56,7 +56,8 @@ export function registerRoutingRoutes(app: Express, withRuntime: WithRuntime): v
         kinds[a.id] = a.kind;
         if (a.model) models[a.id] = a.model;
       }
-      const events = rt.log.list({ kinds: ["status", "run_complete", "tool_call", "error", "message", "needs_input", "turn_diff"] });
+      // the report skips everything before `since`: don't read (and parse) it
+      const events = rt.log.list({ kinds: ["status", "run_complete", "tool_call", "error", "message", "needs_input", "turn_diff"], sinceTs: since });
       const usage = usageReport(events, { since, kinds, models });
       const titles = new Map(rt.chats().map((c) => [c.id, c.title]));
       res.json({ days, usage: { ...usage, byChat: usage.byChat.map((c) => ({ ...c, title: titles.get(c.chat) ?? (c.chat === "main" ? "Main" : c.chat) })) } });

@@ -637,6 +637,40 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
     );
   }
 
+  // Proof: was the agent's "done" true? (the daemon checked its claims and re-ran the tests)
+  if (e.kind === "proof") {
+    const verdict = String(p.verdict ?? "unverified");
+    const tone = verdict === "verified" ? T.ok : verdict === "contradicted" ? T.err : T.dim;
+    const label = verdict === "verified" ? "✓ Verified" : verdict === "contradicted" ? "✕ Didn’t hold" : "? Unverified";
+    const claims = (p.claims as Array<{ text: string; status: string; why: string }> | undefined) ?? [];
+    const rerun = p.rerun as { command?: string; counts?: { passed: number; failed: number }; tail?: string } | undefined;
+    return (
+      <TouchableOpacity
+        onPress={() => setOpen(!open)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Proof: ${label}. ${String(p.headline ?? "")}`}
+        style={{ backgroundColor: T.panel, borderColor: T.line, borderWidth: 1, borderLeftWidth: 3, borderLeftColor: tone,
+          borderRadius: radii.card, padding: 11, marginVertical: 6, gap: 4 }}
+      >
+        <Text style={{ color: tone, fontSize: 12, fontWeight: "700" }}>
+          {label}
+          {rerun?.counts ? <Text style={{ color: T.faint, fontWeight: "400" }}>{`  ${rerun.counts.passed} passed${rerun.counts.failed ? ` · ${rerun.counts.failed} failed` : ""}`}</Text> : null}
+        </Text>
+        <Text style={{ color: T.text, fontSize: 12.5, lineHeight: 18 }}>{String(p.headline ?? "")}</Text>
+        {open && claims.map((c, i) => (
+          <Text key={i} style={{ color: T.dim, fontSize: 11.5, lineHeight: 16 }}>
+            <Text style={{ color: c.status === "supported" ? T.ok : c.status === "contradicted" ? T.err : T.faint }}>● </Text>
+            “{c.text}” — {c.why}
+          </Text>
+        ))}
+        {open && rerun?.tail ? (
+          <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }} numberOfLines={12}>{`${rerun.command ?? ""}\n${rerun.tail.split("\n").slice(-12).join("\n")}`}</Text>
+        ) : null}
+      </TouchableOpacity>
+    );
+  }
+
   if (e.kind === "tool_call") return <ToolLine p={p} />;
   if ((e.kind as string) === "tool_group") {
     const calls = (p.calls as LoomEvent[] | undefined) ?? [];

@@ -195,7 +195,8 @@ export function searchChats(
   if (!q) return { hits: [], truncated: false };
   const limit = opts.limit ?? 100;
 
-  const events = log.list({ limit: 20_000 });
+  // one chat's search reads that chat, not the newest 20,000 events of the project
+  const events = log.list({ limit: 20_000, ...(opts.chat ? { chat: opts.chat } : {}) });
   const hits: ChatHit[] = [];
   let truncated = false;
 

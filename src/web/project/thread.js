@@ -810,7 +810,13 @@ export function createThread(view) {
       };
       ws.onclose = function(){
         state.wsLive = false; drawStatusbar();
-        if (state.pid === view.pid) state.timers.push(setTimeout(connect, 3000));
+        if (state.pid !== view.pid) return;
+        // one pending reconnect, not one more id per drop for as long as the daemon is down
+        var t = setTimeout(function(){
+          state.timers = state.timers.filter(function(x){ return x !== t; });
+          connect();
+        }, 3000);
+        state.timers.push(t);
       };
     }
 return { drawStatus, refresh, loadHistory, connect, drawEmpty, threadScroller, wantScroll, stickOrFlag, toBottom, liveFor, nearBottom, loadEarlier };

@@ -40,6 +40,8 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
   switch (event.kind) {
     case "needs_input": return "questions";
     case "run_complete": return "done";
+    // a "done" that didn't hold is news; a verified one repeats the done push
+    case "proof": return p.verdict === "contradicted" ? "done" : null;
     case "route_completed": case "route_failed": return "goals";
     // an agent out of quota: the work changed hands, or waits for the reset
     case "status": return p.state === "quota_relay" || p.state === "quota_limit" ? "done" : null;
@@ -79,6 +81,8 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
       if (p.state === "quota_relay" || p.state === "quota_limit")
         return { title: `${String(p.from ?? event.agentId ?? "An agent")} ran out of quota · ${projectName}`, body: clip(p.text, 160) };
       return { title, body: String(p.state ?? "status") };
+    case "proof":
+      return { title: `⚠ ${String(p.about ?? "An agent")}'s “done” didn't hold · ${projectName}`, body: clip(p.headline, 160) };
     case "run_complete":
       return { title: `${event.agentId ?? "An agent"} is done · ${projectName}`, body: extra.reply ? clip(extra.reply, 160) : "finished its turn" };
     case "approval":

@@ -54,7 +54,8 @@ import {
   type ResolvedProvider,
 } from "../core/providers.js";
 import { closeModel, countFreeRequest, dailyCapMessage, freeModels, freeUsage, isClosedToUs, isDailyCap, isFreeModel, isPool, noteCapped, resetAt, rest, rotation } from "../core/free-pool.js";
-import { AdapterBase, type AgentCheck } from "./base.js";
+import { createHash } from "node:crypto";
+import { AdapterBase, rememberedProbe, type AgentCheck } from "./base.js";
 
 /** One turn of the conversation, as the wire wants it. */
 interface WireMessage {
@@ -161,12 +162,17 @@ export class ModelAdapter extends AdapterBase {
     const p = this.provider();
     if (!p) return false;
     if (!p.key && p.id !== "ollama") return false;
+    // the model list is megabytes on some providers: fetched once a minute, not per status call
+    const want = this.chain();
+    return rememberedProbe(`models\0${modelsUrl(p)}\0${createHash("sha256").update(p.key ?? "").digest("hex").slice(0, 12)}\0${want.join(",")}`, () => this.probeModels(p, want));
+  }
+
+  private async probeModels(p: NonNullable<ReturnType<ModelAdapter["provider"]>>, want: string[]): Promise<boolean> {
     try {
-      const res = await fetch(modelsUrl(p), { headers: requestHeaders(p) });
+      const res = await fetch(modelsUrl(p), { headers: requestHeaders(p), signal: AbortSignal.timeout(10_000) });
       if (!res.ok) return false;
       const body = (await res.json()) as { data?: Array<{ id?: string }> };
       const ids = (body.data ?? []).map((m) => String(m.id));
-      const want = this.chain();
       if (want.some(isPool)) return (await freeModels(p).catch(() => [])).length > 0;
       return want.length === 0 || want.some((m) => ids.includes(m));
     } catch {

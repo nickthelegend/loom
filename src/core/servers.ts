@@ -317,7 +317,8 @@ export class Servers {
   private ingest(name: string, stream: "out" | "err", chunk: Buffer): void {
     for (const text of String(chunk).split("\n")) {
       if (!text.trim()) continue;
-      this.append(name, { at: Date.now(), stream, text: text.replace(/\r$/, "") });
+      // 2,000 lines are kept; a minified bundle or a JSON dump makes one line megabytes
+      this.append(name, { at: Date.now(), stream, text: text.replace(/\r$/, "").slice(0, 4000) });
       if (!this.announced.has(name)) {
         const cfg = this.deps.configs().find((c) => c.name === name);
         const url = cfg && !cfg.url && !cfg.port ? urlFromOutput(text) : null;

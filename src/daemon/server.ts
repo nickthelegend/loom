@@ -100,6 +100,7 @@ import { TeamLink } from "./team.js";
 import { Onboarding } from "./onboard.js";
 import { addProjectAt } from "./routes/projects.js";
 import { registerCrewsRoutes } from "./routes/crews.js";
+import { registerProofRoutes } from "./routes/proof.js";
 import { registerOnboardRoutes } from "./routes/onboard.js";
 import { TerminalManager } from "./terminals.js";
 export { BUILD_REV, DEFAULT_PORT, fingerprintBuild, isLoopback, isLoopbackHost, lanIp, listModelsForKind, type ModelList, type ModelSource, tailscaleFunnel, tailscaleIp, tailscaleState, tailscaleUp } from './system.js';
@@ -458,6 +459,7 @@ export class LoomDaemon {
     registerApprovalsRoutes(app, ctx, withRuntime);
     registerOrchestraRoutes(app, withRuntime);
     registerCrewsRoutes(app, withRuntime);
+    registerProofRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
     registerAgentsRoutes(app, withRuntime);
     registerBrainRoutes(app, withRuntime);
@@ -497,6 +499,7 @@ export class LoomDaemon {
     if (existing) {
       // Hot-reload edited .loom/config.json once the project is quiet.
       if (existing.configStale() && !existing.anyBusy()) {
+        this.team.detachRuntime(info.id);
         await existing.close();
         this.runtimes.delete(info.id);
       } else {
@@ -738,6 +741,16 @@ export class LoomDaemon {
    */
   private attachWs(server: Server): WebSocketServer {
     const wss = new WebSocketServer({ server, path: "/ws" });
+    const heartbeat = setInterval(() => {
+      for (const ws of wss.clients) {
+        const live = ws as WebSocket & { loomAlive?: boolean };
+        if (live.loomAlive === false) { try { ws.terminate(); } catch { /* gone */ } continue; }
+        live.loomAlive = false;
+        try { ws.ping(); } catch { /* closing */ }
+      }
+    }, 30_000);
+    heartbeat.unref();
+    wss.on("close", () => clearInterval(heartbeat));
     wss.on("connection", (ws, req) => {
       const url = new URL(req.url ?? "/ws", `http://${this.host}:${this.port}`);
       // Prefer the token in the `Sec-WebSocket-Protocol` header (a header isn't
@@ -790,6 +803,10 @@ export class LoomDaemon {
           sess.resize(Number(msg.cols) || 80, Number(msg.rows) || 24);
         }
       });
+      // heartbeat: a socket that misses a pong is half-open (a sleeping laptop,
+      // a phone off its network) and is dropped instead of buffering for minutes
+      (ws as WebSocket & { loomAlive?: boolean }).loomAlive = true;
+      ws.on("pong", () => { (ws as WebSocket & { loomAlive?: boolean }).loomAlive = true; });
       ws.on("close", () => this.sockets.delete(ws));
     });
     return wss;
