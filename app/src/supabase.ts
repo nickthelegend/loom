@@ -1,5 +1,5 @@
 /**
- * Loom accounts: sign in with Google through Supabase Auth, plus the one piece
+ * Loom accounts: sign in with GitHub through Supabase Auth, plus the one piece
  * of analytics the app sends — a country-only "the app was opened today".
  *
  * An account is optional. Everything Loom does over the LAN, the tailnet or
@@ -20,12 +20,13 @@ import * as WebBrowser from "expo-web-browser";
 import { useEffect, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { kv } from "./api";
+import { oauthOptions, redirectParams } from "./auth-model";
 
 // Must be `process.env.EXPO_PUBLIC_…` literally — Expo inlines only that form.
 const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? "").trim();
 const SUPABASE_ANON_KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 
-/** False in a build without Supabase env: the Google button explains itself instead. */
+/** False in a build without Supabase env: the GitHub button explains itself instead. */
 export const supabaseConfigured = /^https:\/\/\S+$/.test(SUPABASE_URL) && SUPABASE_ANON_KEY.length > 20;
 
 // On web the OAuth popup lands back on this bundle; this closes it and hands the
@@ -109,50 +110,30 @@ if (supabase && Platform.OS !== "web") {
 }
 
 // ---------------------------------------------------------------------------
-// Google sign-in
+// GitHub sign-in
 // ---------------------------------------------------------------------------
 
 export type SignInResult = { ok: true } | { ok: false; cancelled: true } | { ok: false; cancelled: false; error: string };
 
-/** Query + fragment params of a redirect URL, without trusting URL polyfills. */
-function redirectParams(url: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const q = url.indexOf("?");
-  const h = url.indexOf("#");
-  const query = q >= 0 ? url.slice(q + 1, h > q ? h : undefined) : "";
-  const frag = h >= 0 ? url.slice(h + 1) : "";
-  for (const part of `${query}&${frag}`.split("&")) {
-    if (!part) continue;
-    const eq = part.indexOf("=");
-    const k = decodeURIComponent((eq < 0 ? part : part.slice(0, eq)).replace(/\+/g, " "));
-    const v = eq < 0 ? "" : decodeURIComponent(part.slice(eq + 1).replace(/\+/g, " "));
-    out[k] = v;
-  }
-  return out;
-}
-
 /**
- * Supabase's hosted Google flow in an auth session browser:
- * signInWithOAuth → openAuthSessionAsync → exchange the PKCE code (or, for an
- * implicit-flow project, adopt the tokens from the fragment). Never throws.
+ * Supabase's hosted GitHub flow in an auth session browser:
+ * signInWithOAuth → openAuthSessionAsync → exchange the PKCE code. The client
+ * uses PKCE; unsolicited token fragments are not accepted. Never throws.
  */
-export async function signInWithGoogle(): Promise<SignInResult> {
+export async function signInWithGitHub(): Promise<SignInResult> {
   if (!supabase) return { ok: false, cancelled: false, error: "Sign-in isn't configured in this build." };
   try {
     const redirectTo = makeRedirectUri({ scheme: "loom", path: "auth-callback" });
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo, skipBrowserRedirect: true },
-    });
+    const { data, error } = await supabase.auth.signInWithOAuth(oauthOptions(redirectTo));
     if (error || !data?.url) return { ok: false, cancelled: false, error: error?.message ?? "Couldn't start sign-in." };
 
     const res = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
     if (res.type === "cancel" || res.type === "dismiss") return { ok: false, cancelled: true };
     if (res.type !== "success") return { ok: false, cancelled: false, error: "Sign-in didn't finish." };
 
-    const p = redirectParams(res.url);
+    const p = redirectParams(res.url, redirectTo);
     if (p.error || p.error_description) {
-      // "access_denied" is the user backing out on Google's consent screen
+      // "access_denied" is the user backing out on GitHub's consent screen
       if (p.error === "access_denied") return { ok: false, cancelled: true };
       return { ok: false, cancelled: false, error: p.error_description || p.error || "Sign-in failed." };
     }
@@ -160,14 +141,7 @@ export async function signInWithGoogle(): Promise<SignInResult> {
       const { error: xErr } = await supabase.auth.exchangeCodeForSession(p.code);
       return xErr ? { ok: false, cancelled: false, error: xErr.message } : { ok: true };
     }
-    if (p.access_token && p.refresh_token) {
-      const { error: sErr } = await supabase.auth.setSession({
-        access_token: p.access_token,
-        refresh_token: p.refresh_token,
-      });
-      return sErr ? { ok: false, cancelled: false, error: sErr.message } : { ok: true };
-    }
-    return { ok: false, cancelled: false, error: "Google sent us back without a session." };
+    return { ok: false, cancelled: false, error: "GitHub sent us back without a session." };
   } catch (e) {
     return { ok: false, cancelled: false, error: e instanceof Error ? e.message : String(e) };
   }
@@ -201,7 +175,7 @@ export function useAuth(): { ready: boolean; session: Session | null; user: User
   return { ready: state.ready, session: state.session, user: state.session?.user ?? null };
 }
 
-/** What the profile UI shows. Google puts the name and picture in user_metadata. */
+/** What the profile UI shows. GitHub puts the name and picture in user_metadata. */
 export function profileOf(user: User | null): { email: string; name: string; avatarUrl: string | null } | null {
   if (!user) return null;
   const m = (user.user_metadata ?? {}) as Record<string, unknown>;
@@ -210,7 +184,7 @@ export function profileOf(user: User | null): { email: string; name: string; ava
   const avatar = str(m.avatar_url) || str(m.picture);
   return {
     email,
-    name: str(m.full_name) || str(m.name) || email.split("@")[0] || "Signed in",
+    name: str(m.full_name) || str(m.name) || str(m.user_name) || str(m.preferred_username) || email.split("@")[0] || "Signed in",
     avatarUrl: /^https:\/\//.test(avatar) ? avatar : null,
   };
 }

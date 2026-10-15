@@ -1,7 +1,7 @@
 /**
  * Welcome — the first thing a signed-out phone sees.
  *
- * One primary action (Continue with Google, the near-white key) and one quiet
+ * One primary action (Continue with GitHub, the near-white key) and one quiet
  * way past it. An account is only for cloud features; Loom itself runs on your
  * own network with none, and the screen says so rather than implying a wall.
  *
@@ -23,8 +23,9 @@ import {
   View,
 } from "react-native";
 import Svg, { Defs, RadialGradient, Rect, Stop } from "react-native-svg";
-import { GoogleMark, LoomMark } from "./brand";
-import { signInWithGoogle, supabaseConfigured } from "./supabase";
+import { GitHubMark, LoomMark } from "./brand";
+import { signInWithGitHub, supabaseConfigured } from "./supabase";
+import { OAUTH_LABEL } from "./auth-model";
 import { T, spacing } from "./theme";
 
 const AGENTS = ["Claude Code", "Codex", "Antigravity", "Grok", "OpenCode"];
@@ -73,11 +74,11 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
     };
   }, [mark, copy, actions, halo]);
 
-  const google = async () => {
+  const github = async () => {
     if (busy || !supabaseConfigured) return;
     setErr(null);
     setBusy(true);
-    const r = await signInWithGoogle();
+    const r = await signInWithGitHub();
     setBusy(false);
     if (r.ok) props.onSignedIn();
     else if (!r.cancelled) setErr(r.error);
@@ -195,12 +196,12 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
         {/* A build without sign-in (the store build, a fork) has one way in: start. */}
         <Animated.View style={{ transform: [{ scale: press }] }}>
           <Pressable
-            onPress={supabaseConfigured ? google : props.onSkip}
+            onPress={supabaseConfigured ? github : props.onSkip}
             onPressIn={() => Animated.spring(press, { toValue: 0.97, useNativeDriver: true, speed: 40 }).start()}
             onPressOut={() => Animated.spring(press, { toValue: 1, useNativeDriver: true, speed: 30 }).start()}
             disabled={busy}
             accessibilityRole="button"
-            accessibilityLabel={supabaseConfigured ? "Continue with Google" : "Get started"}
+            accessibilityLabel={supabaseConfigured ? OAUTH_LABEL : "Get started"}
             accessibilityState={{ busy }}
             style={{
               height: 54,
@@ -216,9 +217,9 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
               <ActivityIndicator color={T.onBright} />
             ) : supabaseConfigured ? (
               <>
-                <GoogleMark size={20} />
+                <GitHubMark size={20} />
                 <Text style={{ color: T.onBright, fontSize: 16, fontWeight: "700", letterSpacing: -0.2 }}>
-                  Continue with Google
+                  {OAUTH_LABEL}
                 </Text>
               </>
             ) : (

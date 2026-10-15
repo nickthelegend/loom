@@ -12,7 +12,8 @@ import { ActivityIndicator, Image, Switch, Text, TouchableOpacity, View } from "
 import { getUpdates, type Creds, type UpdateStatus } from "./api";
 import { DESKTOP_URL, INSTALL_URL, PRIVACY_URL, REPO_URL, appVersion, canRate, open as openLink, rateLoom } from "./links";
 import { PUSH_KINDS, lastPushState, loadPushKinds, setPushKinds, type PushKind, type PushState } from "./push";
-import { ConnectionBadge, GoogleMark, routeHint, useConnRoute } from "./brand";
+import { ConnectionBadge, GitHubMark, routeHint, useConnRoute } from "./brand";
+import { OAUTH_LABEL } from "./auth-model";
 import { Panel, SectionLabel, TAP } from "./components";
 import { Sheet } from "./observatory";
 import { useTeamSummary } from "./team";
@@ -20,13 +21,13 @@ import {
   loadUsageStatsEnabled,
   profileOf,
   setUsageStatsEnabled,
-  signInWithGoogle,
+  signInWithGitHub,
   signOut,
   supabaseConfigured,
 } from "./supabase";
 import { T, pickTheme, radii, type ThemePref } from "./theme";
 
-/** The round avatar: Google's picture when there is one, otherwise an initial. */
+/** The round avatar: the account picture when there is one, otherwise an initial. */
 export function Avatar(props: { user: User | null; size?: number }) {
   const size = props.size ?? 32;
   const p = profileOf(props.user);
@@ -130,10 +131,10 @@ export function AccountSheet(props: {
     void setUsageStatsEnabled(on);
   };
 
-  const google = async () => {
+  const github = async () => {
     setErr(null);
     setBusy(true);
-    const r = await signInWithGoogle();
+    const r = await signInWithGitHub();
     setBusy(false);
     if (!r.ok && !r.cancelled) setErr(r.error);
   };
@@ -159,11 +160,11 @@ export function AccountSheet(props: {
         {/* a build without sign-in (the store build, a fork) just doesn't offer it */}
         {!profile && supabaseConfigured && (
           <TouchableOpacity
-            onPress={google}
+            onPress={github}
             disabled={!supabaseConfigured || busy}
             activeOpacity={0.75}
             accessibilityRole="button"
-            accessibilityLabel="Continue with Google"
+            accessibilityLabel={OAUTH_LABEL}
             style={{
               minHeight: TAP,
               marginTop: 4,
@@ -180,8 +181,8 @@ export function AccountSheet(props: {
               <ActivityIndicator color={T.onBright} />
             ) : (
               <>
-                <GoogleMark size={18} />
-                <Text style={{ color: T.onBright, fontSize: 14.5, fontWeight: "700" }}>Continue with Google</Text>
+                <GitHubMark size={18} />
+                <Text style={{ color: T.onBright, fontSize: 14.5, fontWeight: "700" }}>{OAUTH_LABEL}</Text>
               </>
             )}
           </TouchableOpacity>

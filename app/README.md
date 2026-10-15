@@ -117,3 +117,25 @@ names one), whether the app was running or not. Test from the computer:
 - If dependency versions drift from your Expo SDK: `npx expo install --fix`.
 - Remote push in **Expo Go** works on SDK 52 (this app's pin); for store builds use a
   dev build / EAS as usual.
+
+
+## Hosted account sign-in acceptance (#200)
+
+The phone uses GitHub OAuth, matching Loom Teams. The auth client uses PKCE
+with S256, stores the verifier/session in the keychain, and only exchanges a
+code returned to the exact callback requested by the browser session. Cancel
+and access_denied leave the user signed out. Signed-out pairing remains usable.
+
+Before hosted acceptance, a Supabase administrator must enable the existing
+GitHub OAuth application and allow the callback generated for the actual
+build (normally `loom://auth-callback` for the installed app). Development/web
+builds may generate a different callback and need their own exact entry. This
+change does not edit hosted settings or create OAuth credentials.
+
+Test on physical Android and iOS: complete GitHub consent, return to Loom,
+verify the account, force-close/reopen and confirm persistence; sign out;
+cancel consent and confirm the error/retry path; pair and use a daemon while
+signed out. Keep #200 open until these checks and the hosted redirect setup
+are complete.
+
+Reference: [Supabase native mobile deep linking](https://supabase.com/docs/guides/auth/native-mobile-deep-linking?platform=react-native).
