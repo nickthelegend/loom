@@ -381,9 +381,13 @@ describe("Phase 6: the landing train (no merge queue)", () => {
     expect(st).toMatchObject({ state: "failing", slot: false, landRequested: true });
     expect(calls.some((c) => c[0] === "run" && c[1] === "rerun")).toBe(true);
 
-    // bob was waiting on the lane: he hears it's free and lands, without a tick
+    // bob was waiting on the lane: he hears it's free and lands, without a tick.
+    // (Not "alice isn't merged yet": her own poll may already see the rerun go
+    // green on a slow runner. That she landed *after* bob is what matters, and
+    // the merge order below says exactly that.)
     await waitUntil(() => run("bob", g6.id).landing!.state === "merged", { timeoutMs: 20_000 });
-    expect(run("alice", g5.id).landing!.state).not.toBe("merged");
+    const alicePr = run("alice", g5.id).landing!.pr;
+    expect(merges.indexOf(alicePr) === -1 || merges.indexOf(alicePr) > merges.indexOf(run("bob", g6.id).landing!.pr)).toBe(true);
 
     // alice's check passes on rerun: labelled flaky, back in the train, landed on top of bob's
     await L("alice").pollNow(run("alice", g5.id));

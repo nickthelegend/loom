@@ -262,6 +262,8 @@ export function postOtlp(url: string, headers: Record<string, string>, payload: 
         method: "POST",
         headers,
         body: JSON.stringify(payload),
+        // a collector that accepts and stalls would hold every payload for minutes
+        signal: AbortSignal.timeout(10_000),
       });
       // Drain the response even though we don't care what it says. undici keeps
       // a pooled socket checked out until its body is consumed, so a fire-and-

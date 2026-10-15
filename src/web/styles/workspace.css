@@ -252,6 +252,29 @@
   .turncard .tcrw svg{width:11px;height:11px}
   .turncard:hover .tcrw,.turncard .tcrw:focus-visible{opacity:1}
   .turncard .tcrw:hover{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 45%, transparent)}
+  .turncard .tcproof:hover{color:var(--ok);border-color:color-mix(in srgb, var(--ok) 45%, transparent)}
+  /* Proof: a turn's "done", checked */
+  .proofcard{max-width:88%;margin:6px 0;background:var(--card);border:1px solid var(--border);border-left:3px solid var(--pf);
+    border-radius:var(--radius);padding:8px 10px;font-size:12.5px;--pf:var(--muted-foreground)}
+  .proofcard.v-verified{--pf:var(--ok)}
+  .proofcard.v-contradicted{--pf:var(--err);background:color-mix(in srgb, var(--err) 5%, var(--card))}
+  .proofcard .pfh{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .proofcard .pfi{display:inline-flex;color:var(--pf)}
+  .proofcard .pfi svg{width:14px;height:14px}
+  .proofcard .pfh b{color:var(--pf);font-weight:650}
+  .proofcard .pfhl{color:var(--foreground);flex:1;min-width:0}
+  .proofcard .pfn{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
+  .proofcard .pfauto{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);border:1px solid var(--border);border-radius:999px;padding:0 6px}
+  .proofcard .pfc{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:3px}
+  .proofcard .pfc li{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  .proofcard .pfc li::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted-foreground);flex:none;transform:translateY(-1px)}
+  .proofcard .pfc li.pf-supported::before{background:var(--ok)}
+  .proofcard .pfc li.pf-contradicted::before{background:var(--err)}
+  .proofcard .pfq{color:var(--foreground)}
+  .proofcard .pfw{color:var(--muted-foreground)}
+  .proofcard .pfr{margin-top:6px}
+  .proofcard .pfr summary{cursor:pointer;color:var(--muted-foreground);font-family:var(--font-mono);font-size:11px}
+  .proofcard .pfr pre{max-height:220px;overflow:auto;margin:6px 0 0;padding:8px;background:var(--muted);border-radius:6px;font-size:11px;white-space:pre-wrap}
   .turncard .tcf{color:var(--muted-foreground);font-size:11px;margin-top:3px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .turncard .tcdiff{margin-top:8px;border-top:1px solid var(--border);max-height:320px;overflow:auto;cursor:auto}

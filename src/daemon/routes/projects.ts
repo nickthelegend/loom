@@ -46,7 +46,7 @@ export async function addProjectAt(resolved: string, name?: string): Promise<{ i
 }
 
 /** Register projects routes in the order established by LoomDaemon.routes(). */
-export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "runtime" | "runtimes" | "specRunner">): void {
+export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "runtime" | "runtimes" | "specRunner" | "team">): void {
 
   app.get("/api/projects", (req, res) => {
     void (async () => {
@@ -115,6 +115,7 @@ export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "ru
       if (!info) return void res.status(404).json({ error: "no such project" });
       const rt = ctx.runtimes.get(id);
       if (rt) {
+        ctx.team.detachRuntime(id);
         await rt.close();
         ctx.runtimes.delete(id);
       }

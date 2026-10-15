@@ -637,6 +637,40 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
     );
   }
 
+  // Proof: was the agent's "done" true? (the daemon checked its claims and re-ran the tests)
+  if (e.kind === "proof") {
+    const verdict = String(p.verdict ?? "unverified");
+    const tone = verdict === "verified" ? T.ok : verdict === "contradicted" ? T.err : T.dim;
+    const label = verdict === "verified" ? "✓ Verified" : verdict === "contradicted" ? "✕ Didn’t hold" : "? Unverified";
+    const claims = (p.claims as Array<{ text: string; status: string; why: string }> | undefined) ?? [];
+    const rerun = p.rerun as { command?: string; counts?: { passed: number; failed: number }; tail?: string } | undefined;
+    return (
+      <TouchableOpacity
+        onPress={() => setOpen(!open)}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Proof: ${label}. ${String(p.headline ?? "")}`}
+        style={{ backgroundColor: T.panel, borderColor: T.line, borderWidth: 1, borderLeftWidth: 3, borderLeftColor: tone,
+          borderRadius: radii.card, padding: 11, marginVertical: 6, gap: 4 }}
+      >
+        <Text style={{ color: tone, fontSize: 12, fontWeight: "700" }}>
+          {label}
+          {rerun?.counts ? <Text style={{ color: T.faint, fontWeight: "400" }}>{`  ${rerun.counts.passed} passed${rerun.counts.failed ? ` · ${rerun.counts.failed} failed` : ""}`}</Text> : null}
+        </Text>
+        <Text style={{ color: T.text, fontSize: 12.5, lineHeight: 18 }}>{String(p.headline ?? "")}</Text>
+        {open && claims.map((c, i) => (
+          <Text key={i} style={{ color: T.dim, fontSize: 11.5, lineHeight: 16 }}>
+            <Text style={{ color: c.status === "supported" ? T.ok : c.status === "contradicted" ? T.err : T.faint }}>● </Text>
+            “{c.text}” — {c.why}
+          </Text>
+        ))}
+        {open && rerun?.tail ? (
+          <Text style={{ color: T.faint, fontSize: 10.5, fontFamily: T.mono }} numberOfLines={12}>{`${rerun.command ?? ""}\n${rerun.tail.split("\n").slice(-12).join("\n")}`}</Text>
+        ) : null}
+      </TouchableOpacity>
+    );
+  }
+
   if (e.kind === "tool_call") return <ToolLine p={p} />;
   if ((e.kind as string) === "tool_group") {
     const calls = (p.calls as LoomEvent[] | undefined) ?? [];
@@ -665,6 +699,15 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       </View>
     );
   }
+  // Quota Relay: an agent ran out of quota and the work changed hands (or waits for the reset)
+  if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_redirect" || p.state === "quota_limit" || p.state === "quota_reset")) {
+    return (
+      <Text style={{ color: p.state === "quota_reset" ? T.ok : T.warn, fontSize: 12, marginVertical: 4, textAlign: "center" }}>
+        ⇄ {String(p.text ?? "")}
+      </Text>
+    );
+  }
+
   if (e.kind === "status" && p.state === "plan_updated" && Array.isArray(p.plan) && p.plan.length) {
     // the desktop's checklist: filled when done, a ring while waiting, half while on it
     const plan = p.plan as Array<{ step?: string; status?: string }>;
