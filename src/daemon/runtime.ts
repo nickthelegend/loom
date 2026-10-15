@@ -398,6 +398,11 @@ export class ProjectRuntime {
       policy: () => this.teamPolicy,
       spentToday: (crew) => this.crewSpendToday(crew),
       gitDelivery: () => this.config.git?.delivery ?? "none",
+      // agent-asserted, so below a human's word, and private to the crew until promoted
+      remember: (m) => {
+        this.brain.add({ kind: m.kind, text: m.text, scope: { crew: m.crewId }, confidence: 0.85, evidence: m.text,
+          provenance: { agentId: m.agentId, eventId: m.eventId, ts: Date.now() } });
+      },
       briefingFor: async (query, agentId, crewId) =>
         [this.activeSkillsBlock(), await this.brainBriefFor({ query, agent: agentId, crew: crewId, limit: 6 }), this.teamBrain?.context([]) ?? ""]
           .filter(Boolean)

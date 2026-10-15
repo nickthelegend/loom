@@ -39,7 +39,7 @@ import { isNativeKind } from "./continuity/capabilities.js";
 import { promisify } from "node:util";
 import type { Adapter, AgentConfig, ChatInfo, EventKind, LoomEvent } from "../types.js";
 import { loomHome, type BoardTask } from "./registry.js";
-import { parseCrewReply, protocolFor, type CrewAction, type CrewRole, type PlannedCard } from "./crew-protocol.js";
+import { parseCrewReply, protocolFor, type CrewAction, type CrewMemoryKind, type CrewRole, type PlannedCard } from "./crew-protocol.js";
 
 const exec = promisify(execFile);
 
@@ -178,6 +178,8 @@ export interface CrewHost {
   stream?(f: { agentId: string; chat: string; text: string; reasoning?: boolean }): void;
   createTask(input: { title: string; column?: string; agent?: string; blockedBy?: string[] }): BoardTask;
   updateTask(id: string, patch: Record<string, unknown>): BoardTask | null;
+  /** Save a memory a teammate asked the crew to keep (scope: this crew, until a human promotes it). */
+  remember?(m: { crewId: string; kind: CrewMemoryKind; text: string; agentId: string; eventId: number }): void;
   /** The GitHub login running this daemon, when on a team (commit trailers). */
   member?(): string | null;
   /** Tests: how long silence counts as a stall, in ms (else the crew's stallMinutes, else 8 min). */
@@ -1374,6 +1376,7 @@ export class CrewEngine {
     }
     const parsed = parseCrewReply(text, tm.role);
     for (const a of parsed.allowed) if (a.type === "post") this.post(cfg, st, g, tm, a.text, a.to);
+    for (const a of parsed.allowed) if (a.type === "remember") this.remember(cfg, st, g, tm, a.kind, a.text);
     if (parsed.refused.length) {
       (st.notes[tm.id] ??= []).push(`As ${tm.role} you can't ${[...new Set(parsed.refused.map((a) => a.type))].join(" or ")} — Loom ignored ${parsed.refused.length === 1 ? "that action" : "those actions"}.`);
     }
@@ -1465,6 +1468,18 @@ export class CrewEngine {
   }
 
   // ── helpers ──
+
+  /** A teammate's `remember`: said in the channel, kept in the crew's memory that every teammate's briefing reads. */
+  private remember(cfg: CrewConfig, st: CrewState, g: CrewGoal, tm: CrewTeammate, kind: CrewMemoryKind, text: string): void {
+    if (!this.host.remember) return;
+    const event = this.host.append({ kind: "message", agentId: tm.agent, chat: st.channel,
+      payload: { text: `🧠 ${tm.id} remembers (${kind}): ${text}`, crew: { crewId: cfg.id, goalId: g.id, teammate: tm.id, remember: kind } } });
+    try {
+      this.host.remember({ crewId: cfg.id, kind, text, agentId: tm.agent, eventId: event.id });
+    } catch {
+      /* a memory the brain refuses (a duplicate, a bad line) doesn't stop the card */
+    }
+  }
 
   private post(cfg: CrewConfig, st: CrewState, g: CrewGoal, from: CrewTeammate, text: string, to?: string): void {
     const target = to && cfg.teammates.some((t) => t.id === to) ? to : undefined;
