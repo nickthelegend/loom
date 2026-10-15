@@ -828,6 +828,7 @@ export class CrewEngine {
       const diff = await this.cardDiff(g, card);
       const prompt = [
         `Review "${card.title}" (built by ${card.builder}).`,
+        "Review ONLY this card in this turn. Other cards have separate review turns; do not wait for their diffs. Return an explicit review action for this card.",
         card.detail ?? "",
         card.summary ? `What the builder says it did: ${card.summary}` : "",
         "",
@@ -1357,7 +1358,7 @@ export class CrewEngine {
 const ROLE_GUIDE: Record<CrewRole, string> = {
   lead: "As the lead you turn goals into cards for the builders, answer their questions when you can, and write the goal's summary at the end. You plan; you don't edit files.",
   builder: "As a builder you make the change your card asks for, in this worktree, and keep it to that card. Run what you need to check it. Say what you did in a done action.",
-  reviewer: "As the reviewer you read a card's diff and decide: approve, or ask for changes with notes that cite file:line. You don't edit files. Ask for changes only for real problems.",
+  reviewer: "As the reviewer you read the CURRENT card's diff and decide: approve, or ask for changes with notes that cite file:line. Review one card per turn; other cards are sent separately. You don't edit files. Ask for changes only for real problems.",
   tester: "As the tester you run the project's tests in this worktree and report pass or fail with the last lines of output. Don't change source files to make tests pass.",
   researcher: "As a researcher you investigate what your card asks and write up what you found in a done action, with sources and file:line references.",
 };
