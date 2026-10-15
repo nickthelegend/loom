@@ -272,7 +272,9 @@ describe("Phase 5: runners", () => {
     await waitUntil(async () => (await jobs()).find((x) => x.id === jobId)?.state === "done");
     // The hub marks the job done before the runner closes its runtime and
     // removes the clone. A background tick may already be doing that cleanup.
-    await waitUntil(() => !fs.existsSync(path.join(process.env.LOOM_HOME!, "runner", "work", jobId)));
+    await waitUntil(() => !fs.existsSync(path.join(process.env.LOOM_HOME!, "runner", "work", jobId))).catch(error => {
+      throw new Error(JSON.stringify({ runnerError: LR.runner?.lastError, logs: logbook.list().filter(record => record.scope === "runner") }), { cause: error });
+    });
     expect(runnerRts).toHaveLength(0);
   });
 
