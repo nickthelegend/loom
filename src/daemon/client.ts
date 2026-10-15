@@ -287,6 +287,12 @@ export class DaemonClient {
   }
 
   /** Proof: check the newest finished turn in a chat (daemon/proof.ts). */
+  /** A chat as one self-contained HTML page (core/replay.ts). */
+  async replay(id: string, chat: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/replay`, { headers: { authorization: `Bearer ${this.cfg.adminToken}` }, signal: AbortSignal.timeout(60_000) });
+    if (!res.ok) throw new Error(`couldn't build the replay (${res.status})`);
+    return res.text();
+  }
   shift(id: string): Promise<Record<string, any>> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/shift`); }
   startShift(id: string, body: { tasks: string[]; to?: string; until?: string; maxUsd?: number }): Promise<Record<string, any>> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/shift`, body);

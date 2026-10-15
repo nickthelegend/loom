@@ -602,6 +602,25 @@ export function createComposer(view) {
       });
     }
 
+    // Replay (core/replay.ts): this chat as one self-contained page — prompts, replies, what ran, what
+    // changed and what Loom checked — that opens in any browser. Fetched with your token, saved as a file.
+    function exportReplay(){
+      toast("building the replay\u2026");
+      fetch("/api/projects/" + view.pid + "/chats/" + encodeURIComponent(view.chatId || "main") + "/replay", { headers: { Authorization: "Bearer " + state.token } })
+        .then(function(r){ if (!r.ok) throw new Error("couldn\u2019t build the replay (" + r.status + ")"); return r.text(); })
+        .then(function(html){
+          var c = ((state.project && state.project.chats) || []).filter(function(q){ return q.id === view.chatId; })[0];
+          var name = (((state.project && state.project.name) || "loom") + "-" + ((c && c.title) || "main")).replace(/[^\w.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+          a.download = name + ".replay.html";
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+          toast("saved " + a.download + " \u2014 it opens in any browser");
+        })
+        .catch(function(err){ toast(err.message); });
+    }
+
     // Night Shift (daemon/shift.ts): every line in the box is a task. They run one after
     // another, a chat each, while you're away; Proof checks every "done", an agent going in
     // circles is nudged, and one report says how it went.
@@ -895,6 +914,7 @@ export function createComposer(view) {
           { sep: true },
           { label: "Starred messages", icon: ICONS.star, hint: String(Object.keys(state.starSet || {}).length || ""), run: function(){ state.showStarred(); } },
           { label: "Export as Markdown", icon: ICONS.download, hint: ".md", run: function(){ view.exportThread(); } },
+          { label: "Export as replay", icon: ICONS.download, hint: ".html to share", run: function(){ exportReplay(); } },
           { sep: true },
           { label: "Rewind…", icon: ICONS.rewind, hint: "put the files back", run: function(){ view.openRewindMenu(); } },
           { sep: true },
