@@ -79,9 +79,9 @@ Mechanical UI scan is clear; desktop and phone browser layouts inspected.
 
 ## Separate open issues
 
-- #200: phone currently selects Google while hosted Auth enables GitHub. Code
-  parity can be fixed locally; redirect allow-list and phone acceptance need
-  hosted/admin and device access.
+- #200: PR #224 aligns phone GitHub sign-in and validates PKCE callbacks.
+  Hosted redirect allow-list and physical phone acceptance still need
+  hosted/admin and device access. The issue stays open.
 - #199: public read-only links require dedicated authorization, viewer,
   expiry/revocation and hosted acceptance; paired encrypted relay is not public sharing.
 - #70: trusted signing certificates and installed release-to-release acceptance.
