@@ -240,7 +240,7 @@ describe("Brain cleanup regressions", () => {
     expect(runtime.routes.read()).toBeUndefined();
   });
   it("waits for app-owned turn commits before dispatching the next native writer", async () => {
-    const bin = fakeCodex({ script: [{ spawn: "" }, { sleep: 400 }, ...CODEX_OK] });
+    const bin = fakeCodex({ script: [{ write: { file: "commit-file", text: "change-$TURN" } }, ...CODEX_OK] });
     const dir = makeProjectDir({ brain: { continuity: true }, git: { commitPerTurn: true }, agents: [{ id: "codex", kind: "codex", options: { bin } }] });
     const configFile = path.join(dir, ".loom", "config.json");
     fs.writeFileSync(configFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(configFile, "utf8")), git: { commitPerTurn: true } }));
@@ -252,8 +252,7 @@ describe("Brain cleanup regressions", () => {
     const marker = path.join(dir, ".git", "hook-running"), release = path.join(dir, ".git", "hook-release");
     fs.writeFileSync(path.join(dir, ".git", "hooks", "pre-commit"), `#!/bin/sh\ntouch '${marker}'\nwhile [ ! -f '${release}' ]; do sleep 0.05; done\n`, { mode: 0o755 });
     // Each turn edits the tracked file, so each turn has something to commit.
-    fs.writeFileSync(bin, fs.readFileSync(bin, "utf8").replace('{"spawn":""}',
-      JSON.stringify({ spawn: `require('node:fs').writeFileSync(${JSON.stringify(path.join(dir, "file"))},'change-'+Date.now())` })));
+    fs.writeFileSync(bin, fs.readFileSync(bin, "utf8").replace('"commit-file"', JSON.stringify(path.join(dir, "file"))));
     const runtime = await ProjectRuntime.open({ id: "project", name: "test", dir }); open.push(runtime);
     try {
       await runtime.sendMessage("change first", "codex", { requestId: "commit-first" });
@@ -265,7 +264,7 @@ describe("Brain cleanup regressions", () => {
     // Both turns ran on one warm app-server.
     expect(turnsOf(bin)).toHaveLength(2); expect(calls(bin)).toHaveLength(1);
     expect(execFileSync("git", ["log", "--oneline"], { cwd: dir, encoding: "utf8" }).trim().split("\n")).toHaveLength(3);
-  }, 10_000);
+  }, process.platform === "win32" ? 60_000 : 10_000);
   it("bounds native output records before importing oversized partial responses", async () => {
     const { brain, log, dir } = await setup();
     const oversized = `process.stdout.write('{"method":"item/completed","params":{"item":{"type":"agentMessage","text":"' + 'x'.repeat(32_000_001) + '"}}}\\n')`;

@@ -21,6 +21,7 @@
  *   { ask: method, params }         Codex: a server request, awaits the answer
  *   { exit: code }                  exit now
  *   { spawn: "js" }                 start a child in the fake's process group
+ *   { write: { file, text } }       synchronously edit before reporting done
  */
 
 import fs from "node:fs";
@@ -101,6 +102,7 @@ async function run(script) {
     else if ("raw" in step) process.stdout.write(step.raw + "\\n");
     else if ("stderr" in step) process.stderr.write(step.stderr + "\\n");
     else if ("sleep" in step) await sleep(step.sleep);
+    else if ("write" in step) { const edit = fill(step.write, vars); fs.writeFileSync(edit.file, edit.text); }
     else if ("exit" in step) process.exit(step.exit);
     else if ("spawn" in step) require("node:child_process").spawn(process.execPath, ["-e", step.spawn], { stdio: ["ignore", "inherit", "inherit"] }).unref();
     else if ("ask" in step) {
@@ -207,6 +209,7 @@ async function run(script) {
     else if ("raw" in step) process.stdout.write(step.raw + "\\n");
     else if ("stderr" in step) process.stderr.write(step.stderr + "\\n");
     else if ("sleep" in step) await sleep(step.sleep);
+    else if ("write" in step) { const edit = fill(step.write, vars); fs.writeFileSync(edit.file, edit.text); }
     else if ("exit" in step) process.exit(step.exit);
     else if ("spawn" in step) require("node:child_process").spawn(process.execPath, ["-e", step.spawn], { stdio: ["ignore", "inherit", "inherit"] }).unref();
     else if ("ask" in step) {

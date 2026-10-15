@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn as rawSpawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { spawnContained } from "../src/core/process.js";
 import { hasWindowsJob, quiesceWindowsJob, windowsJobReady } from "../src/core/windows-jobs.js";
@@ -9,6 +10,7 @@ import { tmpDir, waitUntil } from "./helpers.js";
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const require = createRequire(import.meta.url);
 const descendant = (file: string) => `const fs=require('fs');fs.writeFileSync(${JSON.stringify(file)},String(process.pid));setInterval(()=>{},1000);`;
 
 describe.skipIf(process.platform !== "win32")("Windows Job Object containment", () => {
@@ -51,6 +53,36 @@ describe.skipIf(process.platform !== "win32")("Windows Job Object containment", 
     expect(result.code, proc.stderr()).toBe(0);
     expect(fs.readFileSync(marker, "utf8").trim()).toBe(out.trim());
     expect(Number(out)).not.toBe(proc.child.pid);
+  });
+
+  it("keeps explicit CREATE_BREAKAWAY_FROM_JOB attempts contained", async () => {
+    const script = `
+      const koffi = require(${JSON.stringify(require.resolve("koffi"))}), k = koffi.load('kernel32.dll');
+      const create = k.func('int __stdcall CreateProcessW(const char16_t *app, void *cmd, void *pa, void *ta, int inherit, uint32_t flags, void *env, void *cwd, void *startup, void *info)');
+      const error = k.func('uint32_t __stdcall GetLastError()');
+      const startup = Buffer.alloc(process.arch === 'ia32' ? 68 : 104), info = Buffer.alloc(24);
+      startup.writeUInt32LE(startup.length);
+      const cmd = Buffer.from('"'+process.execPath+'" -e "setInterval(()=>{},1000)"\\0','utf16le');
+      const created = create(process.execPath,cmd,null,null,0,0x01000000|0x08000000,null,null,startup,info), code=error();
+      const pid = created ? info.readUInt32LE(process.arch === 'ia32' ? 8 : 16) : null;
+      if (created) {
+        const close = k.func('int __stdcall CloseHandle(void *handle)'), size = process.arch === 'ia32' ? 4 : 8;
+        close(koffi.decode(info, 'void *')); close(koffi.decode(info.subarray(size), 'void *'));
+      }
+      console.log(JSON.stringify({created,code,pid}));setInterval(()=>{},1000);`;
+    const proc = spawnHarness(process.execPath, ["-e", script], { cwd: process.cwd() });
+    let out = ""; proc.child.stdout!.on("data", d => out += d);
+    let pid: number | null = null;
+    try {
+      await launched(proc.child); await waitUntil(() => out.includes("\n"));
+      const result = JSON.parse(out); pid = result.pid;
+      // In nested jobs Windows may ignore breakaway and still create the tool.
+      // The invariant is membership and termination, not CreateProcess failure.
+      if (!result.created) expect(result.code).toBe(5);
+      else expect(alive(pid!)).toBe(true);
+      await stopHarness(proc);
+      if (pid) expect(alive(pid)).toBe(false);
+    } finally { await stopHarness(proc); if (pid && alive(pid)) process.kill(pid); }
   });
 
   it("kills tools holding inherited output pipes when the harness exits naturally", async () => {
