@@ -180,7 +180,35 @@ export class QuotaRelay {
   /** Is the relay still holding this agent's work — out of quota, or not yet handed back? */
   holds(agentId: string): boolean { return this.capped.has(agentId) || this.lifting.has(agentId) || this.waitingBack.has(agentId); }
 
+  private backTimers = new Map<string, ReturnType<typeof setInterval>>();
+
+  /**
+   * Give the baton back once the stand-in is idle. Its run_complete usually says when (observe), but
+   * a turn winds down a moment after that event — a reset landing in between saw it "busy" with no
+   * run_complete left to come — so it is also looked at twice a second until then.
+   */
+  private waitBack(agentId: string, standIn: string): void {
+    this.waitingBack.set(agentId, standIn);
+    if (this.backTimers.has(agentId)) return;
+    const t = setInterval(() => {
+      if (this.waitingBack.get(agentId) !== standIn) return this.stopWaitingBack(agentId);
+      if (this.host.busy(standIn)) return;
+      this.stopWaitingBack(agentId);
+      this.waitingBack.delete(agentId);
+      if (this.host.holder() === standIn) void this.giveBack(agentId);
+    }, 500);
+    t.unref?.();
+    this.backTimers.set(agentId, t);
+  }
+
+  private stopWaitingBack(agentId: string): void {
+    const t = this.backTimers.get(agentId);
+    if (t) clearInterval(t);
+    this.backTimers.delete(agentId);
+  }
+
   private giveBack(agentId: string): Promise<void> {
+    this.stopWaitingBack(agentId);
     const back = this.host.handoff(agentId).then(() => {}, () => {}).finally(() => this.lifting.delete(agentId));
     this.lifting.set(agentId, back);
     return back;
@@ -198,7 +226,7 @@ export class QuotaRelay {
       text: `${agentId}'s usage limit reset${wants ? busy ? ` — the baton goes back to ${agentId} when ${c.handedTo} finishes` : ` — the baton is back with ${agentId}` : ""}` } });
     if (!wants) return Promise.resolve();
     // the stand-in is mid-turn: don't cut it off — hand back when that turn ends (observe), or sooner if you ask for this agent
-    if (busy) { this.waitingBack.set(agentId, c.handedTo!); return Promise.resolve(); }
+    if (busy) { this.waitBack(agentId, c.handedTo!); return Promise.resolve(); }
     return this.giveBack(agentId);
   }
 
@@ -217,5 +245,7 @@ export class QuotaRelay {
     for (const c of this.capped.values()) if (c.timer) clearTimeout(c.timer);
     this.capped.clear();
     this.waitingBack.clear();
+    for (const t of this.backTimers.values()) clearInterval(t);
+    this.backTimers.clear();
   }
 }
