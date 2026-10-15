@@ -53,6 +53,20 @@ function make(dir: string, configs: ServerConfig[]) {
 }
 
 describe("reading a project", () => {
+  it("detects a server bound only to IPv6 localhost", async ({ skip }) => {
+    const server = net.createServer();
+    try {
+      await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen({ port: 0, host: "::1", ipv6Only: true }, resolve); });
+    } catch (error) {
+      if (["EAFNOSUPPORT", "EADDRNOTAVAIL"].includes((error as NodeJS.ErrnoException).code ?? "")) { skip(); return; }
+      throw error;
+    }
+    try {
+      const port = (server.address() as net.AddressInfo).port;
+      expect(await portListening(port, "127.0.0.1")).toBe(false);
+      expect(await portListening(port)).toBe(true);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
   it("suggests the scripts that are servers, with a port only when the script says one", () => {
     const dir = tmpDir("suggest");
     fs.writeFileSync(
@@ -99,7 +113,11 @@ describe("running one", () => {
     const started = await servers.start("web");
     expect(started.state).toBe("starting");
     expect(started.pid).toBeGreaterThan(0);
-    await waitUntil(() => servers.status(servers.mustConfig("web")).state === "running", { timeoutMs: 20_000 });
+    await waitUntil(() => {
+      const status = servers.status(servers.mustConfig("web"));
+      if (status.state === "crashed") throw new Error(JSON.stringify({ status, log: servers.log("web") }));
+      return status.state === "running";
+    }, { timeoutMs: 20_000 }).catch(error => { throw new Error(JSON.stringify({ status: servers.status(servers.mustConfig("web")), log: servers.log("web") }), { cause: error }); });
     expect(changes.map((c) => c.state)).toEqual(["starting", "running"]);
     expect(await portListening(port)).toBe(true);
 

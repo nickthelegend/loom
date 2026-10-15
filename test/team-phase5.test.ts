@@ -30,6 +30,7 @@ import { TeamLink } from "../src/daemon/team.js";
 import { startHubServer } from "../src/hub/server.js";
 import type { SendInput } from "../src/types.js";
 import { tmpDir, waitUntil } from "./helpers.js";
+import { logbook } from "../src/core/logbook.js";
 
 const git = (dir: string, ...a: string[]) => execFileSync("git", a, { cwd: dir, encoding: "utf8" });
 const loom = (actions: unknown[]) => "```loom\n" + JSON.stringify({ actions }) + "\n```";
@@ -244,7 +245,9 @@ describe("Phase 5: runners", () => {
     scripts.runner.push(() => loom([{ type: "done", summary: "feature on the runner" }]));
     const { jobId } = await LA.startOnRunner(M.laptop!, { goal: "Add the feature" });
     await LR.runner!.tick();
-    await waitUntil(async () => (await jobs()).find((j) => j.id === jobId)?.progress?.landing?.pr !== undefined, { timeoutMs: 20_000 });
+    await waitUntil(async () => (await jobs()).find((j) => j.id === jobId)?.progress?.landing?.pr !== undefined, { timeoutMs: 20_000 })
+      .catch(async error => { throw new Error(JSON.stringify({ runnerError: LR.runner?.lastError, jobs: (await jobs()).map(j => ({ id: j.id, state: j.state, error: j.error, progress: j.progress })),
+        logs: logbook.list().filter(record => record.scope === "runner") }), { cause: error }); });
     const j = (await jobs()).find((x) => x.id === jobId)!;
     expect(j).toMatchObject({ state: "claimed", kind: "start", runnerGithub: "alice", goal: "Add the feature" });
     expect(j.progress).toMatchObject({ status: "completed" });

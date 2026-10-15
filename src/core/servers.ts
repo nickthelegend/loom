@@ -16,8 +16,9 @@
  * are elsewhere; nothing here starts anything by itself.
  */
 
-import { type ChildProcess } from "node:child_process";
-import { spawn, stopWindowsTree } from "./process.js";
+import { type ChildProcess, type SpawnOptions } from "node:child_process";
+import { spawn, spawnContained, shellInvocation, stopWindowsTree } from "./process.js";
+import { hasWindowsJob, quiesceWindowsJob } from "./windows-jobs.js";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -59,7 +60,11 @@ export interface LogLine {
 }
 
 /** Is something listening on this port? The only honest test of "running". */
-export function portListening(port: number, host = "127.0.0.1", timeoutMs = 500): Promise<boolean> {
+export function portListening(port: number, host?: string, timeoutMs = 500): Promise<boolean> {
+  // Frameworks can bind localhost on IPv6 only. Probe both loopback families;
+  // an IPv4-only check leaves a healthy IPv6 server permanently "starting".
+  if (!host) return Promise.all([portListening(port, "127.0.0.1", timeoutMs), portListening(port, "::1", timeoutMs)])
+    .then(results => results.some(Boolean));
   return new Promise((resolve) => {
     const socket = new net.Socket();
     const done = (answer: boolean) => {
@@ -131,6 +136,7 @@ export function urlFor(cfg: ServerConfig): string | null {
 
 interface Running {
   child: ChildProcess;
+  closed: Promise<void>;
   startedAt: number;
   /** Cleared when the port answers, so "starting" can't last for ever silently. */
   poll: ReturnType<typeof setInterval> | null;
@@ -198,19 +204,21 @@ export class Servers {
     const cfg = this.mustConfig(name);
     if (this.live.has(name)) return this.status(cfg);
     const cwd = cfg.cwd ? path.resolve(this.deps.projectDir, cfg.cwd) : this.deps.projectDir;
-    const spawnImpl = this.deps.spawnImpl ?? spawn;
-    const child = spawnImpl(cfg.command, {
+    const options: SpawnOptions = {
       cwd,
-      shell: true, // `npm run dev` is a command line, not an argv
       // Its own process group, so stopping it stops what it started: the shell
       // is the parent, and killing only the shell leaves the real server
-      // holding the port. (Windows has no groups; there the child is killed
-      // directly and its tree is the OS's business.)
+      // holding the port. Windows uses an owned Job Object for the same tree.
       detached: process.platform !== "win32",
       env: { ...process.env, ...(cfg.env ?? {}), FORCE_COLOR: "0" },
       stdio: ["ignore", "pipe", "pipe"],
-    });
-    const run: Running = { child, startedAt: Date.now(), poll: null };
+    };
+    const launch = shellInvocation(cfg.command);
+    const child = this.deps.spawnImpl ? this.deps.spawnImpl(cfg.command, { ...options, shell: true })
+      : spawnContained(launch.command, launch.args, { ...options, windowsVerbatimArguments: launch.windowsVerbatimArguments });
+    let resolveClosed!: () => void;
+    const closed = new Promise<void>(resolve => { resolveClosed = resolve; });
+    const run: Running = { child, closed, startedAt: Date.now(), poll: null };
     this.live.set(name, run);
     this.announced.delete(name);
     this.setState(cfg, "starting", null);
@@ -218,7 +226,7 @@ export class Servers {
 
     child.stdout?.on("data", (d: Buffer) => this.ingest(name, "out", d));
     child.stderr?.on("data", (d: Buffer) => this.ingest(name, "err", d));
-    child.on("exit", (code, signal) => {
+    const exited = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (run.poll) clearInterval(run.poll);
       this.live.delete(name);
       // A server we stopped is stopped; one that went on its own has crashed,
@@ -231,6 +239,14 @@ export class Servers {
         text: asked ? "stopped" : `exited with ${signal ? `signal ${signal}` : `code ${exitCode ?? "?"}`}`,
       });
       this.setState(cfg, asked ? "stopped" : "crashed", exitCode);
+      resolveClosed();
+    };
+    child.on("exit", (code, signal) => {
+      if (run.poll) clearInterval(run.poll);
+      if (hasWindowsJob(child)) void quiesceWindowsJob(child).then(() => exited(code, signal), error => {
+        this.append(name, { at: Date.now(), stream: "loom", text: `shutdown could not be verified: ${(error as Error).message}` });
+      });
+      else exited(code, signal);
     });
     child.on("error", (err) => {
       this.append(name, { at: Date.now(), stream: "loom", text: `could not start: ${err.message}` });
@@ -241,7 +257,7 @@ export class Servers {
     if (cfg.port) {
       run.poll = setInterval(() => {
         void portListening(cfg.port!).then((up) => {
-          if (!up || !this.live.has(name)) return;
+          if (!up || this.live.get(name) !== run || child.exitCode != null || child.signalCode != null) return;
           if (run.poll) clearInterval(run.poll);
           run.poll = null;
           this.setState(cfg, "running", null);
@@ -262,7 +278,12 @@ export class Servers {
     const run = this.live.get(name);
     if (!run) return this.status(cfg);
     this.stopping.add(name);
-    const gone = new Promise<void>((resolve) => run.child.once("exit", () => resolve()));
+    if (hasWindowsJob(run.child)) {
+      await quiesceWindowsJob(run.child);
+      await run.closed;
+      return this.status(cfg);
+    }
+    const gone = run.closed;
     try {
       // The whole group: `npm run dev` spawns the server that holds the port.
       if (run.child.pid && process.platform !== "win32") process.kill(-run.child.pid, "SIGTERM");
