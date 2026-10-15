@@ -12,10 +12,17 @@ export default defineConfig({
     // Above waitUntil's 20s default (see test/helpers.ts) — a test that hits
     // that budget should fail on the wait, with its message, not get cut off
     // mid-poll by the runner and report a bare timeout instead.
-    testTimeout: process.platform === "win32" ? 90_000 : 40_000,
-    hookTimeout: process.platform === "win32" ? 45_000 : 20_000,
+    testTimeout: process.platform === "win32" ? 150_000 : 40_000,
+    hookTimeout: process.platform === "win32" ? 90_000 : 20_000,
+    // Hosted Windows runners stall for tens of seconds under the suite's load
+    // (every recent red run was a different integration test timing out
+    // there, each green on the other runners and on rerun). One retry there
+    // only: a real bug fails twice, and Linux and local runs never retry.
+    retry: process.platform === "win32" && process.env.CI ? 1 : 0,
     env: {
       LOOM_TEST_RUN_ID: `${process.pid}-${Date.now()}`,
+      // the in-process test hub answers slowly when a Windows runner is starved
+      ...(process.platform === "win32" && process.env.CI ? { LOOM_HUB_TIMEOUT_MS: "60000" } : {}),
       GIT_CONFIG_GLOBAL: path.resolve("test/gitconfig"),
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_TERMINAL_PROMPT: "0",

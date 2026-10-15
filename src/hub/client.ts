@@ -24,6 +24,9 @@ import {
 import type { Sealed } from "../core/team-crypto.js";
 import type { LeaseScope } from "../core/team-leases.js";
 
+/** How long a hub call may take: its own default, or LOOM_HUB_TIMEOUT_MS (CI on a starved runner sets more). */
+const hubTimeoutMs = (fallback: number) => Number(process.env.LOOM_HUB_TIMEOUT_MS) || fallback;
+
 /**
  * A hub call that never got an answer, said in words. Node's fetch throws a
  * bare "fetch failed" and hides the reason (refused, DNS, timeout) in `cause`.
@@ -58,7 +61,7 @@ export async function hubSignIn(
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ github, ...opts }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(hubTimeoutMs(15_000)),
   });
   const body = (await res.json().catch(() => ({}))) as { token?: string; user?: never; error?: string };
   if (!res.ok || !body.token) throw new HubError(body.error ?? `hub sign-in failed (${res.status})`, res.status);
@@ -79,7 +82,7 @@ export class HttpHubClient implements HubClient {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.token}` },
       body: JSON.stringify({ args }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(hubTimeoutMs(20_000)),
     });
     const body = (await res.json().catch(() => ({}))) as { result?: T; error?: string };
     if (!res.ok) throw new HubError(body.error ?? `hub ${method} failed (${res.status})`, res.status);
