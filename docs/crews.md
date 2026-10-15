@@ -89,3 +89,15 @@ Failed or uncertain runner clones and native bindings are kept for inspection.
 The hosted hub needs migration `0010_crew_coordination.sql` for requests and
 control jobs at full capacity. Review/apply it separately with admin access;
 Loom does not apply it. The self-hosted hub supports these paths directly.
+
+
+A reviewed role/runner permission ceiling is checked against the actual harness
+before work starts. OpenCode's `ask` mode is currently unverified/unsupported,
+so a team role requiring it must use Codex/Claude (or a separately reviewed,
+supported role setting). Loom refuses the seat instead of silently using auto.
+Tightening permissions during a goal settles and recreates the warm adapter
+before its next turn; native compatibility changes receive a fresh binding.
+
+The `hub-sql` CI job runs all migrations and authorization checks in a disposable
+PostgreSQL cluster and fails if tools are missing. It never connects to hosted
+Supabase. Migration 0010 and the other SQL checks passed there (26 checks).

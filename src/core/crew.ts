@@ -417,6 +417,9 @@ export class CrewEngine {
       const authors = new Set(builders.map(t => vendorOf(roster.find(a => a.id === t.agent)!.kind)));
       if (rules.reviewerMustDifferFromBuilders && builders.length && !teammates.some(t => t.role === "reviewer" && !authors.has(vendorOf(roster.find(a => a.id === t.agent)!.kind))))
         throw new Error("team policy requires a reviewer from a vendor different from the builders");
+      // Fail before building anything when a seat's required permission mode
+      // is unsupported by its harness; never fall back to a broader mode.
+      for (const mate of teammates) this.host.nativeOptions?.({ ...roster.find(agent => agent.id === mate.agent)!, role: mate.role });
     }
   }
 
