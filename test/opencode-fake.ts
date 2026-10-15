@@ -17,6 +17,8 @@ type Json = Record<string, unknown>;
 export interface FakeOpenCodeOptions {
   /** npm 1.19: unwrapped /session API, async 204 admission and message parts. */
   modern?: boolean;
+  /** Reset the first session-resume GET before sending a response. */
+  dropResumeOnce?: boolean;
   /** Status endpoint cannot prove that this session stopped. */
   statusUnavailable?: boolean;
   reply?: string;
@@ -61,6 +63,7 @@ const nextId = (prefix: string) => `${prefix}_${Date.now().toString(16)}${(seq++
 export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<FakeOpenCode> {
   const sessions = new Map<string, { model: Json; messages: Json[] }>();
   const active = new Set<string>();
+  let droppedResume = false;
   const sse = new Set<http.ServerResponse>();
   const prompts: FakeOpenCode["prompts"] = [];
   const modelSwitches: FakeOpenCode["modelSwitches"] = [];
@@ -129,7 +132,10 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
     const sid = decodeURIComponent(m[1]!), rest = m[2] ?? "";
     const s = sessions.get(sid);
     if (!s) return send(res, 404, { _tag: "SessionNotFoundError", sessionID: sid, message: `Session not found: ${sid}` });
-    if (rest === "" && req.method === "GET") return send(res, 200, { data: { id: sid, model: s.model } });
+    if (rest === "" && req.method === "GET") {
+      if (opts.dropResumeOnce && !droppedResume) { droppedResume = true; req.socket.destroy(); return; }
+      return send(res, 200, { data: { id: sid, model: s.model } });
+    }
     if (rest === "model" && req.method === "POST") {
       const b = await body(req);
       s.model = b.model as Json;
