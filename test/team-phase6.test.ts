@@ -374,27 +374,28 @@ describe("Phase 6: the landing train (no merge queue)", () => {
     expect((await L("alice").land(g5.id)).state).toBe("landing");
     expect((await L("bob").land(g6.id)).state).toBe("queued");
 
-    // alice's turn head fails "test" once (it passes on rerun: a flake). "Her turn head" is the first
-    // head her checks are read at, not the branch head now: her turn may still bring fresh main in and
-    // push, and a red sha read before that push let the new head pass and merge on a slow runner.
+    // alice's turn head fails "test" once; its rerun stays running until bob has landed, then passes
+    // (a flake). "Her turn head" is the first head her checks are read at — her turn may still bring
+    // fresh main in and push. Holding the rerun is what D82 is about: the lane moves on while she
+    // reruns. Left to race, her own background polls could see red and green before bob claimed it.
     const alicePrNo = run("alice", g5.id).landing!.pr;
+    const bobMerged = () => run("bob", g6.id).landing!.state === "merged";
     let red = "";
     checkAt = (p, sha, reruns) => {
       if (p.n !== alicePrNo) return "pass";
       red ||= sha;
-      return sha === red && reruns === 0 ? "fail" : "pass";
+      if (sha === red && reruns === 0) return "fail";
+      return bobMerged() ? "pass" : "pending";
     };
-    const st: LandingState = await L("alice").pollNow(run("alice", g5.id));
-    expect(st).toMatchObject({ state: "failing", slot: false, landRequested: true });
+    await L("alice").pollNow(run("alice", g5.id));
+    // the red check gave the lane back and asked for its rerun
+    await waitUntil(() => run("alice", g5.id).landing!.reruns.includes(`${red}:test`));
+    expect(run("alice", g5.id).landing!).toMatchObject({ slot: false, landRequested: true });
     expect(calls.some((c) => c[0] === "run" && c[1] === "rerun")).toBe(true);
 
-    // bob was waiting on the lane: he hears it's free and lands, without a tick.
-    // (Not "alice isn't merged yet": her own poll may already see the rerun go
-    // green on a slow runner. That she landed *after* bob is what matters, and
-    // the merge order below says exactly that.)
-    await waitUntil(() => run("bob", g6.id).landing!.state === "merged", { timeoutMs: 20_000 });
-    const alicePr = run("alice", g5.id).landing!.pr;
-    expect(merges.indexOf(alicePr) === -1 || merges.indexOf(alicePr) > merges.indexOf(run("bob", g6.id).landing!.pr)).toBe(true);
+    // bob was waiting on the lane: he hears it's free and lands, without a tick — before alice
+    await waitUntil(() => bobMerged(), { timeoutMs: 20_000 });
+    expect(merges).not.toContain(run("alice", g5.id).landing!.pr);
 
     // alice's check passes on rerun: labelled flaky, back in the train, landed on top of bob's
     await L("alice").pollNow(run("alice", g5.id));
