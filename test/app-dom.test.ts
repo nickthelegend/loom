@@ -560,6 +560,32 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 60_000);
 
+  it("Review Triage: a turn's card says which file to read first, and the chip opens its diff", async () => {
+    const dir = makeProjectDir({ name: "triagedom", agents: [{ id: "echo", kind: "echo" }] });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+    fs.writeFileSync(`${dir}/.gitignore`, ".loom/\n");
+    execFileSync("git", ["add", "-A"], { cwd: dir });
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed"], { cwd: dir });
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(dir)).project.id;
+    const m = mount({ hash: `#p/${pid}`, desktop: true });
+    await waitUntil(() => !!$(m, "#box"));
+    // echo writes into the auth code: worth a look before anything else
+    ($(m, "#box") as HTMLInputElement).value = "write:src/auth/session.ts";
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(new m.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitUntil(() => !!$(m, ".turncard .trchip"), { timeoutMs: 20_000 });
+    const chip = $(m, ".turncard .trchip") as HTMLElement;
+    expect(chip.getAttribute("data-triage-file")).toBe("src/auth/session.ts");
+    expect(chip.textContent).toBe("session.tstouches auth or security code");
+    expect(text(m, ".turncard .tctri")).toMatch(/^Review first/);
+    chip.click();
+    // the diff dock opens on that file, its header saying why it's first
+    await waitUntil(() => !!$(m, "#pane-changes .dfile.dffocus"));
+    expect($(m, "#pane-changes .dfile.dffocus .p")?.textContent).toBe("src/auth/session.ts");
+    expect($(m, "#pane-changes .dfile.dffocus .trbadge")?.textContent).toBe("touches auth or security code");
+    expect(m.errors.join("\n")).toBe("");
+  }, 60_000);
+
   it("Proof: a claim that didn't hold shows as a card, and Check it re-checks a turn on demand", async () => {
     // its own git project, so a turn that edits a file gets a turn card
     const dir = makeProjectDir({ name: "proofdom", agents: [{ id: "echo", kind: "echo" }] });

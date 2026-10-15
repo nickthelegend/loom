@@ -632,6 +632,15 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
           {files.slice(0, 4).map((f) => f.path).join(", ")}
           {files.length > 4 ? " …" : ""}
         </Text>
+        {/* Review Triage: the files worth a careful look, first */}
+        {((p.triage as Array<{ path: string; level: string; reasons?: string[] }> | undefined) ?? [])
+          .filter((t) => t.level === "high" || t.level === "medium").slice(0, 3).map((t) => (
+            <Text key={t.path} style={{ fontSize: 11.5, color: T.dim }} numberOfLines={1}>
+              <Text style={{ color: t.level === "high" ? T.err : T.warn }}>● </Text>
+              <Text style={{ color: T.text, fontFamily: T.mono }}>{t.path.split("/").pop()}</Text>
+              {t.reasons?.[0] ? ` — ${t.reasons[0]}` : ""}
+            </Text>
+          ))}
         {open && <DiffView patch={String(p.patch ?? "")} maxHeight={280} />}
       </TouchableOpacity>
     );

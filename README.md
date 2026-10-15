@@ -1190,6 +1190,31 @@ loom rewind cm8x2k1p        # go back to one (asks first)
 Checkpoints live on hidden refs under `refs/loom/checkpoints/`, so no branch
 listing, no stash and no `git log` ever shows them. The newest 60 are kept.
 
+## Review Triage: what to read first
+
+An agent hands back twelve changed files and you have five minutes. Most are
+fine to skim; one deleted a test, one touched the auth middleware, one added a
+dependency. Every turn card now ranks its files by what a reviewer would want
+to see first and puts the top ones up front, each with its reason:
+
+> **Review first** `session.ts` touches auth or security code · `ci.yml` changes CI, build or deploy
+
+A chip opens the diff on that file, and its header carries the reason. What it
+flags, most serious first:
+
+- an added secret key or hard-coded credential
+- a deleted test file, a skipped or focused test, or test assertions removed
+- a database migration or schema change
+- auth, session, token, permission or other security code
+- CI, build and deploy files; new or changed dependencies; project config
+- added risky calls: `eval`, shell commands, `rm -rf` or `git push --force`,
+  raw HTML injection, TLS checks turned off, a silenced type or lint check
+- a large source change in a turn that touched no test
+
+Lockfiles and generated files sink to the bottom. Triage reads only what the
+diff shows and never guesses why: it says "a test was removed", not "the agent
+cheated". The phone's turn card lists the same files.
+
 ## Opening a PR from a card
 
 With `git.branchPerTask` on, dragging a card to **Working** cuts its branch.
