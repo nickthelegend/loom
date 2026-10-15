@@ -6,6 +6,7 @@ import { buildBriefing, buildProjection, type ProjectionInput } from "../../core
 import type { EventJournal } from "../../core/eventlog.js";
 import { logbook } from "../../core/logbook.js";
 import {
+  RECENT_DECISIONS,
   buildUnifiedMemory,
   hashContent,
   readNativeMemory,
@@ -126,7 +127,9 @@ export class RuntimeBriefings {
 
   /** The merged brain: decisions + imported ADE memories + shared context. */
   unifiedMemory(): UnifiedMemory {
-    return buildUnifiedMemory(this.host.info.name, this.host.log.list(), this.importedMemory());
+    // Only the newest decisions are used: read those, not the whole log (every
+    // handoff and every Memory view built this, parsing every event ever written).
+    return buildUnifiedMemory(this.host.info.name, this.host.log.list({ kinds: ["decision"], limit: RECENT_DECISIONS * 2 }), this.importedMemory());
   }
 
   /**

@@ -26,10 +26,18 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import {
-  query, type CanUseTool, type McpServerConfig, type Options, type PermissionResult, type PermissionUpdate, type Query, type SDKMessage,
-  type SDKUserMessage, type SpawnedProcess,
+import type {
+  CanUseTool, McpServerConfig, Options, PermissionResult, PermissionUpdate, Query, SDKMessage,
+  SDKUserMessage, SpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
+
+/**
+ * The Agent SDK is ~30 MB resident once loaded. Every daemon imports this
+ * adapter (and continuity's harness probe imports claudeBin from it), but most
+ * never start a Claude session — so the SDK loads on the first one, not at boot.
+ */
+let sdk: Promise<typeof import("@anthropic-ai/claude-agent-sdk")> | null = null;
+const loadSdk = () => (sdk ??= import("@anthropic-ai/claude-agent-sdk").catch((error) => { sdk = null; throw error; }));
 import { guardNativeOutput } from "../../adapters/base.js";
 import { EventHub, type ProviderAdapter } from "../adapter.js";
 import type {
@@ -277,7 +285,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
 
     this.emit(input.threadId, "session.state.changed", { state: "starting" });
     let q: Query;
-    try { q = query({ prompt: prompts, options }); }
+    try { q = (await loadSdk()).query({ prompt: prompts, options }); }
     catch (error) { throw fail("transport", `claude could not start: ${(error as Error).message}`, error); }
     session.query = q;
     session.done = this.consume(session);
