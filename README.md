@@ -1262,6 +1262,27 @@ phone, type them and tap 🌙. `--until` and `--max` stop *new* tasks from
 starting; the one running always finishes. A shift survives a daemon restart.
 A task the restart cut off is reported as failed, and the rest carry on.
 
+## Scorecards: which agent can you trust with this?
+
+"Finished without an error" isn't the same as "did what it said". Proof, the
+loop watch and the shield record, per agent, whether its work held up, and
+the Observatory's leaderboard (and the phone's) has a **Held up** column:
+
+- how many of its checked "done"s were verified, out of all it claimed (for
+  example `9/10`, green above 90%)
+- the times the loop watch caught it going in circles (↻) and the shield
+  caught a command that can't be taken back (⛔)
+- **cost per verified result**: its spend over the "done"s that held, which
+  is what a result you can trust costs from that agent
+
+```bash
+loom scorecard            # every agent's record in this project
+loom scorecard --days 7
+```
+
+The same numbers are on every agent in `/api/projects/:id/insights/turns` as
+`trust`.
+
 ## Replay: a run you can send anyone
 
 Export any chat as one self-contained HTML page:

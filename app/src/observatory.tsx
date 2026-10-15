@@ -35,34 +35,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import {
-  getDecisions,
-  getEvents,
-  getHealth,
-  getLogs,
-  getMetrics,
-  getProject,
-  getSnapshots,
-  getSpans,
-  getTriage,
-  getUsage,
-  liftQuarantine,
-  type AgentDecision,
-  type Creds,
-  type DecisionStats,
-  type Health,
-  type InsightLog,
-  type InsightSpan,
-  type LogSource,
-  type LoomEvent,
-  type Metrics,
-  type Project,
-  type QuarantineMap,
-  type TimeSnapshot,
-  type Triage,
-  type UsageReport,
-  type UsageSlice,
-} from "./api";
+import { getDecisions, getEvents, getHealth, getLogs, getMetrics, getProject, getSnapshots, getSpans, getTriage, getUsage, liftQuarantine, type AgentDecision, type Creds, type DecisionStats, type Health, type InsightLog, type InsightSpan, type LogSource, type LoomEvent, type Metrics, type Project, type QuarantineMap, type TimeSnapshot, type Triage, type UsageReport, type UsageSlice, getTurnStats, type Standing } from "./api";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AgentIcon } from "./agents";
 import { LineChart, Meter, RankedBars, StackedBar, gradeColor, type Slice } from "./charts";
@@ -239,6 +212,7 @@ export function ObservatoryView(props: { creds: Creds; project: Project }) {
     pollMs: 5000,
   });
   const health = useResource(() => getHealth(creds, project.id), `h:${project.id}`, { pollMs: 15000 });
+  const standings = useResource(() => getTurnStats(creds, project.id), `ts:${project.id}`, { pollMs: 30000 });
   const spans = useResource(() => getSpans(creds, project.id, undefined, 200), `s:${project.id}`, {
     pollMs: 15000,
   });
@@ -277,6 +251,7 @@ export function ObservatoryView(props: { creds: Creds; project: Project }) {
             metrics={metrics}
             health={health}
             spans={spans}
+            standings={standings}
             onTriage={setTriageFor}
           />
         ) : view === "usage" ? (
@@ -460,6 +435,7 @@ function MetricsView(props: {
   metrics: Res<{ metrics: Metrics }>;
   health: Res<{ from: string; overall: Health; byAgent: Record<string, Health> }>;
   spans: Res<{ from: string; spans: InsightSpan[] }>;
+  standings: Res<{ leaderboard: Standing[]; total: number }>;
   onTriage: (agentId: string) => void;
 }) {
   const { project } = props;
@@ -537,6 +513,34 @@ function MetricsView(props: {
                 {d.from === "backend" ? "from backend spans" : "from the local event log — the backend had nothing"}
               </Text>
             </>
+          )}
+        </Load>
+      </Panel>
+
+      {/* trust: how often each agent's "done" held up when Proof checked it (the desktop leaderboard's Held up) */}
+      <Panel>
+        <SectionLabel text="Trust · did its done hold up?" />
+        <Load res={props.standings} what="the scorecard">
+          {(d) => !d.leaderboard.length ? (
+            <Empty text="No finished turns yet. Each agent's record fills in as it works — and Proof's checks say whether its done held up." />
+          ) : (
+            <View style={{ gap: 10 }}>
+              {d.leaderboard.map((a) => {
+                const t = a.trust;
+                const checked = t ? t.verified + t.contradicted : 0;
+                const tint = !t || t.holdRate == null ? T.dim : t.holdRate >= 0.9 ? T.ok : t.holdRate >= 0.7 ? T.warn : T.err;
+                const extra = [t?.loops ? `↻ ${t.loops}` : "", t?.shield ? `⛔ ${t.shield}` : "", t?.costPerVerifiedUsd != null ? `${usd(t.costPerVerifiedUsd)}/verified` : ""].filter(Boolean).join("  ");
+                return (
+                  <View key={a.agentId} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Text style={{ color: T.text, fontSize: 13, flex: 1 }} numberOfLines={1}>{a.agentId}</Text>
+                    <Text style={{ color: T.dim, fontSize: 11.5, fontFamily: T.mono }}>{a.turns} · {Math.round(a.successRate * 100)}%</Text>
+                    <Text style={{ color: tint, fontSize: 13, fontWeight: "700", minWidth: 44, textAlign: "right" }}>{checked ? `${t!.verified}/${checked}` : "—"}</Text>
+                    {extra ? <Text style={{ color: T.faint, fontSize: 11 }}>{extra}</Text> : null}
+                  </View>
+                );
+              })}
+              <Text style={{ color: T.faint, fontSize: 10.5 }}>turns · finished cleanly · held up when checked</Text>
+            </View>
           )}
         </Load>
       </Panel>

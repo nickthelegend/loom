@@ -477,6 +477,21 @@ export function createObservatory(view) {
       var b = backendBase();
       return b ? '<a class="obtraceui" href="' + b + '" target="_blank" rel="noreferrer">' + ICONS.route + " View traces</a>" : "";
     }
+    // Trust (core/turn-stats.ts trustByAgent): Proof's verdicts on this agent's "done"s, the times the
+    // loop watch and the shield caught it, and what a result that held up cost.
+    function trustCell(t){
+      if (!t || !(t.verified + t.contradicted + t.unverified + t.loops + t.shield)) return '<td class="num lbtrust">\u2014</td>';
+      var checked = t.verified + t.contradicted;
+      var tone = t.holdRate == null ? "" : t.holdRate >= 0.9 ? "ok" : t.holdRate >= 0.7 ? "warn" : "bad";
+      var bits = [];
+      if (t.unverified) bits.push(t.unverified + " unverified");
+      if (t.loops) bits.push("in circles " + t.loops + "\u00d7");
+      if (t.shield) bits.push(t.shield + " shield trip" + (t.shield === 1 ? "" : "s"));
+      if (t.costPerVerifiedUsd != null) bits.push(money(t.costPerVerifiedUsd) + " per verified done");
+      return '<td class="num lbtrust" title="' + esc(bits.join(" \u00b7 ")) + '">' + (checked ? '<span class="' + tone + '">' + t.verified + "/" + checked + "</span>" : "\u2014") +
+        (t.loops || t.shield ? ' <span class="lbflags">' + (t.loops ? "\u21bb" + t.loops : "") + (t.shield ? " \u26d4" + t.shield : "") + "</span>" : "") + "</td>";
+    }
+
     // LEADERBOARD + HEATMAP: every turn off the log — who finishes, how fast,
     // what a turn costs — and twelve weeks of activity, a square a day.
     function observatoryBoard(p){
@@ -491,8 +506,9 @@ export function createObservatory(view) {
             '<td class="num">' + a.turns + '</td><td><span class="lbbar ' + tone + '"><i style="width:' + pct + '%"></i></span><span class="num">' + pct + "%</span></td>" +
             '<td class="num">' + (a.medianMs != null ? durfmt(a.medianMs) : "—") + "</td>" +
             '<td class="num">' + (a.avgCostUsd != null ? money(a.avgCostUsd) : "—") + '</td><td class="num">' + money(a.totalCostUsd || 0) + "</td>" +
-            '<td class="num lbrated">' + (a.rated ? '<span class="up">' + a.rated.up + '</span> · <span class="dn">' + a.rated.down + "</span>" : "—") + "</td></tr>";
-        }).join("") : '<tr><td colspan="8" class="lbempty">No finished turns yet — the table fills in as agents work.</td></tr>';
+            '<td class="num lbrated">' + (a.rated ? '<span class="up">' + a.rated.up + '</span> · <span class="dn">' + a.rated.down + "</span>" : "—") + "</td>" +
+            trustCell(a.trust) + "</tr>";
+        }).join("") : '<tr><td colspan="9" class="lbempty">No finished turns yet — the table fills in as agents work.</td></tr>';
         // the heatmap: weeks as columns, Monday on top
         var max = 1; days.forEach(function(d){ if (d.turns > max) max = d.turns; });
         var first = days.length ? new Date(days[0].date + "T00:00:00") : new Date();
@@ -517,7 +533,7 @@ export function createObservatory(view) {
             '<div class="obminicard" title="this month’s spend so far, plus the daily average for the days left"><div class="obcl">Month-end at this pace</div><div class="obcv sm">' + money(forecast) + "</div></div></div>" +
           '<div class="obmlabel lbhead">Agent leaderboard<span class="spacer"></span>' +
             '<button type="button" class="btn xs outline" id="turnscsv">' + ICONS.download + "Export turns (CSV)</button></div>" +
-          '<div class="lbwrap"><table class="lbtable"><thead><tr><th>#</th><th>Agent</th><th class="num">Turns</th><th>Finished cleanly</th><th class="num">Median time</th><th class="num">Per turn</th><th class="num">Total</th><th class="num" title="your thumbs up and down on its replies">You rated</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
+          '<div class="lbwrap"><table class="lbtable"><thead><tr><th>#</th><th>Agent</th><th class="num">Turns</th><th>Finished cleanly</th><th class="num">Median time</th><th class="num">Per turn</th><th class="num">Total</th><th class="num" title="your thumbs up and down on its replies">You rated</th><th class="num" title="how often its &quot;done&quot; held up when Proof checked it — and what a result that held cost">Held up</th></tr></thead><tbody>' + rows + "</tbody></table></div>" +
           '<div class="obmlabel" style="margin-top:18px">Activity · last 12 weeks<span class="hmsum">' + (r.total || 0) + " turns · active " + active + " of " + days.length + " days</span></div>" +
           '<div class="hmgrid" role="img" aria-label="turns per day for twelve weeks">' + cells.join("") + "</div>" +
           '<div class="hmkey">Less <i class="hm l0"></i><i class="hm l1"></i><i class="hm l2"></i><i class="hm l3"></i><i class="hm l4"></i> More<span class="spacer"></span><i class="hm l2 err"></i> a day with a failed turn</div>';

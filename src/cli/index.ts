@@ -3161,6 +3161,28 @@ program
   });
 
 program
+  .command("scorecard")
+  .description("each agent's record here: turns, how often it finished, how often its \"done\" held up when Proof checked, circles, shield trips, and cost per verified result")
+  .option("--days <n>", "only the last n days (default: everything)")
+  .action(async (opts: { days?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const since = opts.days ? Date.now() - Math.max(1, Number(opts.days) || 1) * 86_400_000 : undefined;
+    const t = await client.turnStats(project.id, { ...(since ? { since } : {}), days: 7 });
+    if (!t.leaderboard.length) return void console.log(pc.dim("no finished turns yet — the scorecard fills in as agents work"));
+    const pct = (x: number | null | undefined) => (x == null ? "—" : `${Math.round(x * 100)}%`);
+    console.log(pc.bold(`${project.name}${opts.days ? ` · last ${opts.days} days` : ""}`));
+    console.log(pc.dim(`  ${"agent".padEnd(16)}${"turns".padStart(6)}${"finished".padStart(10)}${"held up".padStart(10)}${"circles".padStart(9)}${"shield".padStart(8)}  per verified`));
+    for (const a of t.leaderboard as Array<Record<string, any>>) {
+      const tr = a.trust ?? {};
+      const checked = (tr.verified ?? 0) + (tr.contradicted ?? 0);
+      const held = checked ? `${tr.verified}/${checked}` : "—";
+      const tone = tr.holdRate == null ? (x: string) => x : tr.holdRate >= 0.9 ? pc.green : tr.holdRate >= 0.7 ? pc.yellow : pc.red;
+      console.log(`  ${String(a.agentId).padEnd(16)}${String(a.turns).padStart(6)}${pct(a.successRate).padStart(10)}${tone(held.padStart(10))}${String(tr.loops ?? 0).padStart(9)}${String(tr.shield ?? 0).padStart(8)}  ${tr.costPerVerifiedUsd != null ? `$${Number(tr.costPerVerifiedUsd).toFixed(2)}` : "—"}`);
+    }
+  });
+
+program
   .command("stats")
   .description("today across every project: turns, how many finished cleanly, spend, busiest agent")
   .option("--days <n>", "look back this many days instead of just today", "1")

@@ -1063,6 +1063,8 @@
   .msg .who .msgrate.on{color:var(--ok)} .msg .who .msgrate.on.down{color:var(--err)}
   .msg .who .msgrate.on svg{fill:color-mix(in srgb,currentColor 22%,transparent)}
   .lbrated .up{color:var(--ok)} .lbrated .dn{color:var(--err)}
+  .lbtrust .ok{color:var(--ok)} .lbtrust .warn{color:var(--warn)} .lbtrust .bad{color:var(--err)}
+  .lbtrust .lbflags{color:var(--muted-foreground);font-size:11px}
   .lenpill{border:1px solid color-mix(in srgb,var(--thread) 45%,var(--border));background:color-mix(in srgb,var(--thread) 10%,transparent);
     color:var(--foreground);font:inherit;font-size:11.5px;padding:2px 9px;border-radius:99px;cursor:pointer;margin-right:6px}
   .emptyart{display:block;width:136px;height:100px;margin:6px auto 14px;color:var(--muted-foreground)}

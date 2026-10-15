@@ -91,6 +91,40 @@ export function leaderboard(rows: TurnRow[]): AgentStanding[] {
   return out.sort((a, b) => b.successRate - a.successRate || b.turns - a.turns || a.agentId.localeCompare(b.agentId));
 }
 
+/**
+ * Trust: how often an agent's "done" held up. Read from what Loom checked —
+ * Proof's verdicts on its turns (verified / didn't hold / unverified), the
+ * loop watch catching it in circles, the shield catching a command that can't
+ * be taken back. Cost per verified "done" is its spend over the checks that
+ * held: what a result you can trust costs from this agent.
+ */
+export interface Trust {
+  verified: number;
+  contradicted: number;
+  unverified: number;
+  /** verified / (verified + contradicted); null until something was checked either way. */
+  holdRate: number | null;
+  loops: number;
+  shield: number;
+}
+
+export function trustByAgent(events: LoomEvent[]): Record<string, Trust> {
+  const out: Record<string, Trust> = {};
+  const of = (id: string) => (out[id] ??= { verified: 0, contradicted: 0, unverified: 0, holdRate: null, loops: 0, shield: 0 });
+  for (const e of events) {
+    const p = e.payload as Record<string, unknown>;
+    if (e.kind === "proof" && typeof p.about === "string" && p.about) {
+      const t = of(p.about);
+      if (p.verdict === "verified") t.verified++;
+      else if (p.verdict === "contradicted") t.contradicted++;
+      else t.unverified++;
+    } else if (e.kind === "status" && e.agentId && p.state === "loop_detected") of(e.agentId).loops++;
+    else if (e.kind === "status" && e.agentId && p.state === "shield_tripped") of(e.agentId).shield++;
+  }
+  for (const t of Object.values(out)) t.holdRate = t.verified + t.contradicted ? t.verified / (t.verified + t.contradicted) : null;
+  return out;
+}
+
 function dayKey(ts: number): string {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

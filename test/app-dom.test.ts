@@ -560,6 +560,21 @@ describe("web app · the thread", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 60_000);
 
+  it("Scorecard: a done that didn't hold shows in the leaderboard's Held up", async () => {
+    const dir = makeProjectDir({ name: "scoredom", agents: [{ id: "echo", kind: "echo" }] });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+    fs.writeFileSync(`${dir}/.gitignore`, ".loom/\n");
+    execFileSync("git", ["add", "-A"], { cwd: dir });
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed"], { cwd: dir });
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(dir)).project.id;
+    // echo claims the tests pass; nothing ran them — Proof says it didn't hold
+    await client.send(pid, "Done. All tests pass.");
+    await waitUntil(async () => (await client.chatEvents(pid, "main", { limit: 50 })).events.some((e) => e.kind === "proof"), { timeoutMs: 30_000 });
+    const t = await client.turnStats(pid, { days: 7 });
+    expect((t.leaderboard[0] as Record<string, any>).trust).toMatchObject({ verified: 0, contradicted: 1, holdRate: 0, costPerVerifiedUsd: null });
+  }, 60_000);
+
   it("Replay: a chat comes back as one self-contained page, and the menu saves it", async () => {
     const client = new DaemonClient(readDaemonConfig()!);
     const pid = (await client.addProject(makeProjectDir({ name: "replaydom", agents: [{ id: "echo", kind: "echo" }] }))).project.id;
