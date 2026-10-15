@@ -21,6 +21,8 @@ export default defineConfig({
     retry: process.platform === "win32" && process.env.CI ? 1 : 0,
     env: {
       LOOM_TEST_RUN_ID: `${process.pid}-${Date.now()}`,
+      // the in-process test hub answers slowly when a Windows runner is starved
+      ...(process.platform === "win32" && process.env.CI ? { LOOM_HUB_TIMEOUT_MS: "60000" } : {}),
       GIT_CONFIG_GLOBAL: path.resolve("test/gitconfig"),
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_TERMINAL_PROMPT: "0",
