@@ -1099,6 +1099,10 @@ export const interrupt = (c: Creds, id: string, chat?: string) =>
 /** A loop card's way out: stop the agent going in circles, nudge it to step back, or hand its task to another agent. */
 export const actOnLoop = (c: Creds, id: string, body: { chat?: string; agent: string; action: "stop" | "nudge" | "handoff"; to?: string }) =>
   api<{ done: string; to?: string }>(c, `/api/projects/${id}/loop`, { method: "POST", body: JSON.stringify(body) });
+/** Night Shift: a line of tasks run one after another, a chat each; one report when it's done. */
+export const startShift = (c: Creds, id: string, body: { tasks: string[]; to?: string; until?: string; maxUsd?: number }) =>
+  api<{ shift: { id: string; tasks: Array<{ text: string; chat: string }> } }>(c, `/api/projects/${id}/shift`, { method: "POST", body: JSON.stringify(body) });
+export const stopShift = (c: Creds, id: string) => api<{ shift: unknown }>(c, `/api/projects/${id}/shift`, { method: "DELETE" });
 export const startRoute = (c: Creds, id: string, task: string, spec: string) =>
   api(c, `/api/projects/${id}/route`, { method: "POST", body: JSON.stringify({ task, spec }) });
 export const abortRoute = (c: Creds, id: string) =>

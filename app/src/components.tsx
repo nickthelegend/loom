@@ -4,7 +4,7 @@ import { createContext, useContext, useState } from "react";
 import * as Clipboard from "expo-clipboard";
 import { Alert, Image, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
-import { actOnLoop, type Creds, type LoomEvent, type TaskItem } from "./api";
+import { actOnLoop, stopShift, type Creds, type LoomEvent, type TaskItem } from "./api";
 import { useConnRoute } from "./brand";
 import type { LiveMap } from "./live-model";
 import { AgentIcon, agentLabel } from "./agents";
@@ -709,6 +709,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
     );
   }
   if (e.kind === "status" && p.state === "loop_detected") return <LoopCard e={e} />;
+  if (e.kind === "shift") return <ShiftCard e={e} />;
   // Quota Relay: an agent ran out of quota and the work changed hands (or waits for the reset)
   if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_redirect" || p.state === "quota_limit" || p.state === "quota_reset")) {
     return (
@@ -797,6 +798,48 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
 }
 
 /** "2 hours ago" — the phone has no room for a timestamp. */
+const SHIFT_WORD: Record<string, [string, string]> = {
+  verified: ["Verified", "ok"], done: ["Done", "dim"], didnt_hold: ["Didn't hold", "err"], failed: ["Failed", "err"],
+  needs_you: ["Needs you", "warn"], not_started: ["Not started", "faint"], running: ["Still running", "dim"],
+};
+
+/** Night Shift: the line when it starts (with Stop), and the morning report — each task and how it went. */
+function ShiftCard(props: { e: LoomEvent }) {
+  const ctx = useContext(ThreadCtx);
+  const [stopping, setStopping] = useState(false);
+  const p = props.e.payload as Record<string, any>;
+  if (p.phase === "started") {
+    const n = Array.isArray(p.tasks) ? p.tasks.length : 0;
+    return (
+      <View style={{ alignItems: "center", marginVertical: 6, gap: 6 }}>
+        <Text style={{ color: T.dim, fontSize: 12, textAlign: "center" }}>🌙 Night shift started — {n} task{n === 1 ? "" : "s"}{p.to ? ` for ${p.to}` : ""}</Text>
+        {ctx && !stopping ? <Btn small label="Stop the shift" onPress={() => { setStopping(true); stopShift(ctx.creds, ctx.projectId).catch((err: Error) => { setStopping(false); Alert.alert("Couldn't stop it", err.message); }); }} /> : null}
+      </View>
+    );
+  }
+  if (p.phase !== "report") return null;
+  const tint = (k: string) => (k === "ok" ? T.ok : k === "err" ? T.err : k === "warn" ? T.warn : k === "faint" ? T.faint : T.dim);
+  return (
+    <View style={{ marginVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: T.line, borderLeftWidth: 3, borderLeftColor: T.text, backgroundColor: T.panel, padding: 12, gap: 8 }}>
+      <Text style={{ color: T.text, fontSize: 13.5, fontWeight: "700" }}>🌙 Night shift report</Text>
+      <Text style={{ color: T.text, fontSize: 13 }}>{String(p.summary ?? "")}</Text>
+      {p.stopped ? <Text style={{ color: T.warn, fontSize: 12 }}>Stopped early: {String(p.stopped)}</Text> : null}
+      {((p.tasks as Array<Record<string, any>>) ?? []).map((t, i) => {
+        const [word, k] = SHIFT_WORD[String(t.status)] ?? [String(t.status), "dim"];
+        const why = t.question ? `asks: ${t.question}` : t.error ? String(t.error) : t.headline ? String(t.headline) : "";
+        return (
+          <View key={i} style={{ gap: 2 }}>
+            <Text style={{ fontSize: 12.5, color: T.text }} numberOfLines={2}>
+              <Text style={{ color: tint(k), fontWeight: "700" }}>{word}  </Text>{String(t.text ?? "")}
+            </Text>
+            {why ? <Text style={{ color: T.dim, fontSize: 11.5 }} numberOfLines={2}>{why}</Text> : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 /** An agent going in circles (the desktop's loop card): stop it, nudge it, or hand its task on. */
 function LoopCard(props: { e: LoomEvent }) {
   const ctx = useContext(ThreadCtx);

@@ -1574,6 +1574,48 @@ program
     if (r.verdict === "contradicted") process.exitCode = 1;
   });
 
+const SHIFT_MARK: Record<string, (s: string) => string> = {
+  verified: (s) => pc.green(s), done: (s) => s, didnt_hold: (s) => pc.red(s), failed: (s) => pc.red(s),
+  needs_you: (s) => pc.yellow(s), not_started: (s) => pc.dim(s), running: (s) => pc.dim(s),
+};
+const SHIFT_WORD: Record<string, string> = { verified: "verified", done: "done", didnt_hold: "didn't hold", failed: "failed", needs_you: "needs you", not_started: "not started", running: "running" };
+const shiftLine = (t: Record<string, any>) => {
+  const why = t.question ? `asks: ${t.question}` : t.error ?? t.headline ?? "";
+  return `  ${(SHIFT_MARK[t.status] ?? ((x: string) => x))(String(SHIFT_WORD[t.status] ?? t.status).padEnd(11))} ${t.text}${why ? pc.dim(` — ${why}`) : ""}`;
+};
+
+program
+  .command("shift [tasks...]")
+  .description("Night Shift: run these tasks one after another while you're away, a chat each, then one report. No tasks: show the running shift or the last report")
+  .option("--to <agent>", "who takes them (default: the router picks)")
+  .option("--until <time>", "start no new task after this (7:00, 6:30am, an ISO time)")
+  .option("--max <usd>", "stop starting new tasks once the shift has spent this")
+  .option("--file <path>", "read the tasks from a file, one per line")
+  .option("--stop", "stop the running shift: the current task finishes, then the report")
+  .action(async (tasks: string[] | undefined, opts: { to?: string; until?: string; max?: string; file?: string; stop?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    if (opts.stop) {
+      await client.stopShift(project.id);
+      console.log("night shift stopping — no new tasks start; the report follows the one running");
+      return;
+    }
+    const list = [...(tasks ?? []), ...(opts.file ? fs.readFileSync(opts.file, "utf8").split("\n") : [])].map((t) => t.trim()).filter(Boolean);
+    if (list.length) {
+      const r = await client.startShift(project.id, { tasks: list, ...(opts.to ? { to: opts.to } : {}), ...(opts.until ? { until: opts.until } : {}), ...(opts.max ? { maxUsd: Number(opts.max) } : {}) });
+      console.log(`🌙 night shift started — ${r.shift.tasks.length} task${r.shift.tasks.length === 1 ? "" : "s"}${opts.to ? ` for ${opts.to}` : ""}. \`loom shift\` shows how it's going; the report lands in the thread and on your phone.`);
+      return;
+    }
+    const s = await client.shift(project.id);
+    if (s.active) {
+      console.log(`🌙 night shift running${s.shift.stopped ? pc.yellow(` (stopping: ${s.shift.stopped})`) : ""}`);
+      for (const t of s.tasks) console.log(shiftLine(t));
+    } else if (s.last) {
+      console.log(`🌙 last night shift: ${s.last.summary}${s.last.stopped ? pc.dim(` — stopped: ${s.last.stopped}`) : ""}`);
+      for (const t of s.last.tasks) console.log(shiftLine(t));
+    } else console.log(pc.dim("no night shift yet — `loom shift \"task one\" \"task two\" --to codex --until 7:00`"));
+  });
+
 program
   .command("crew [action] [args...]")
   .description("Agent Teams: status | create | goal | say | approve | pause | stop | resume | pick | refresh | budget | overlap | deliver | apply | diff | remove")

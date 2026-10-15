@@ -58,6 +58,7 @@ export type EventKind =
   | "memory_forget"
   | "status" // adapter/bridge lifecycle info
   | "proof" // is "done" true? a turn's claims checked against what ran and a clean re-run (core/proof.ts)
+  | "shift" // Night Shift: a line of tasks run while you're away, and the morning report (core/shift.ts)
   | "error";
 
 /**

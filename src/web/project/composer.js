@@ -602,6 +602,49 @@ export function createComposer(view) {
       });
     }
 
+    // Night Shift (daemon/shift.ts): every line in the box is a task. They run one after
+    // another, a chat each, while you're away; Proof checks every "done", an agent going in
+    // circles is nudged, and one report says how it went.
+    function openNightShift(){
+      var m = document.getElementById("cmenu"); if (!m) return;
+      var box = document.getElementById("box");
+      var lines = function(){ return String(box ? box.value : "").split("\n").map(function(l){ return l.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s+/, "").trim(); }).filter(Boolean); };
+      var agents = ((state.project && state.project.agents) || []).filter(function(a){ return a.enabled !== false && a.tier !== "bridge"; });
+      view.menuState = { kind: "shiftmenu", at: 0, sel: 0, items: [] };
+      m.style.display = "block"; m.className = "cmenu picker shiftpick"; fitMenu(m);
+      m.innerHTML = '<div class="cmhead">' + (ICONS.moon) + "<span>Night shift</span></div>" +
+        '<div class="shbody"><p class="shwhy">Each line in the box is a task. They run one after another, a chat each, while you\u2019re away. Proof checks every \u201cdone\u201d, an agent going in circles is nudged, and you get one report in the morning.</p>' +
+        '<label class="shf"><span>Agent</span><select id="shto"><option value="">Auto (the router picks)</option>' + agents.map(function(a){
+          return '<option value="' + esc(a.id) + '"' + (a.id === state.selected ? " selected" : "") + ">" + esc(labelOf(a.id)) + "</option>"; }).join("") + "</select></label>" +
+        '<label class="shf"><span>Stop starting new tasks at</span><input id="shuntil" type="time"></label>' +
+        '<label class="shf"><span>Budget for the shift ($)</span><input id="shmax" type="number" min="0" step="0.5" placeholder="no cap"></label></div>' +
+        '<div class="askfoot"><span id="shn" class="askn"></span><button class="btn xs primary" id="shgo" type="button" disabled>Start</button></div>';
+      setTimeout(function(){ document.addEventListener("mousedown", menuAway); }, 0);
+      var go = document.getElementById("shgo"), n = document.getElementById("shn");
+      function foot(){
+        var k = lines().length;
+        if (n) n.textContent = k ? k + " task" + (k === 1 ? "" : "s") + " \u00b7 one chat each" : "Type the tasks in the box, one per line";
+        if (go) go.disabled = !k;
+      }
+      foot();
+      if (box) box.addEventListener("input", foot);
+      if (go) go.onmousedown = function(ev){
+        ev.preventDefault();
+        var tasks = lines(); if (!tasks.length) return;
+        var to = document.getElementById("shto").value, until = document.getElementById("shuntil").value, max = document.getElementById("shmax").value;
+        go.disabled = true; go.textContent = "Starting\u2026";
+        api("/api/projects/" + view.pid + "/shift", { method: "POST", body: JSON.stringify({ tasks: tasks, ...(to ? { to: to } : {}), ...(until ? { until: until } : {}), ...(max ? { maxUsd: Number(max) } : {}) }) })
+          .then(function(j){
+            closeMenu();
+            if (box) { box.removeEventListener("input", foot); box.value = ""; autosizeBox(); }
+            var k = (j && j.shift && j.shift.tasks || []).length;
+            toast("night shift started \u2014 " + k + " task" + (k === 1 ? "" : "s") + "; the report lands here");
+            if (state.refreshShell) state.refreshShell();
+          })
+          .catch(function(err){ toast(err.message); go.disabled = false; go.textContent = "Start"; });
+      };
+    }
+
     /**
      * Who this chat talks to: every agent in the project with its mark, the
      * model it's on and what it may do, the current one ticked. Selecting one
@@ -842,6 +885,7 @@ export function createComposer(view) {
             run: function(){ setTView("verbose"); } },
           { sep: true },
           { label: "Ask several models…", icon: ICONS.sparkles, hint: "a thread each", run: function(){ openAskSeveral(); } },
+          { label: "Night shift…", icon: ICONS.moon, hint: "run the list while you sleep", run: function(){ openNightShift(); } },
           { sep: true },
           { label: "Find in this chat", icon: ICONS.search, hint: KMOD + "F", run: function(){ view.openFind(); } },
           { head: "reply length" },

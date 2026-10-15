@@ -1234,6 +1234,34 @@ line without an event behind it doesn't get written.
 The mark is per device, because "when did you last look" is a fact about this
 window. From the terminal: `loom digest --since 8`.
 
+## Night Shift: run the list while you sleep
+
+Line up work before bed and wake up to a report you can trust. Each task runs
+in its own chat, one after another, through the queue. While the shift runs:
+
+- **Proof** checks every "done" against what ran and a clean re-run of the tests.
+- **Loop watch** nudges an agent going in circles (on by default during a shift).
+- **Quota Relay** hands the work on if an agent runs out.
+- **A question doesn't hold up the line.** It stays open in its chat, and the
+  next task goes.
+
+When the last task settles, one report card lands in the thread and on your
+phone: each task marked **Verified**, **Done**, **Didn't hold**, **Failed**,
+**Needs you** or **Not started**, with what decided it, the files it changed,
+and what it cost. Click a task to open its chat.
+
+```bash
+loom shift "fix the flaky date test" "add a --json flag to loom costs" --to codex --until 7:00 --max 5
+loom shift            # how it's going, or the last report
+loom shift --stop     # the running task finishes; nothing new starts
+```
+
+In the desktop app, type the tasks in the composer, one per line, and choose
+**⋯ → Night shift…** to pick the agent, a stop-by time and a budget. On the
+phone, type them and tap 🌙. `--until` and `--max` stop *new* tasks from
+starting; the one running always finishes. A shift survives a daemon restart.
+A task the restart cut off is reported as failed, and the rest carry on.
+
 ## Loop watch: an agent going in circles
 
 The expensive failure isn't the error. It's the agent that hits the same red

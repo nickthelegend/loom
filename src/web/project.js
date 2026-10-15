@@ -894,6 +894,16 @@ import { openMenu } from './menus.js';
           .then(function(){ pf.disabled = false; pf.innerHTML = was; });
         return;
       }
+      // a night shift's Stop: no new tasks start; the running one finishes and the report follows
+      var shs = ev.target.closest && ev.target.closest("[data-shift-stop]");
+      if (shs) {
+        ev.preventDefault(); ev.stopPropagation();
+        shs.disabled = true;
+        api("/api/projects/" + pid + "/shift", { method: "DELETE" })
+          .then(function(){ shs.textContent = "Stopping \u2014 report after the current task"; toast("night shift stopping: no new tasks start"); })
+          .catch(function(err){ shs.disabled = false; toast(err.message); });
+        return;
+      }
       var go = ev.target.closest && ev.target.closest("[data-gochat]");
       if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
       // A message's own actions: the ⋯ menu, your prompt's edit/copy/star,

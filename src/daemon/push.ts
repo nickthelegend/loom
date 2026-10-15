@@ -47,6 +47,8 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
     // an agent out of quota: the work changed hands, or waits for the reset; an agent going in circles needs you
     case "status": return p.state === "quota_relay" || p.state === "quota_limit" ? "done" : p.state === "loop_detected" ? "questions" : null;
     case "approval": return p.phase === "requested" ? "approvals" : null;
+    // the morning report: a night shift's work, done
+    case "shift": return p.phase === "report" ? "goals" : null;
     case "orchestra":
       if (p.phase === "alert" || p.phase === "completed" || p.phase === "failed" || p.phase === "aborted") return "goals";
       return p.phase === "waiting" ? "questions" : null;
@@ -90,6 +92,9 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
       return { title: `${event.agentId ?? "An agent"} is done · ${projectName}`, body: extra.reply ? clip(extra.reply, 160) : "finished its turn" };
     case "approval":
       return { title: `${event.agentId ?? "An agent"} wants to use ${clip(p.tool, 40)} · ${projectName}`, body: clip(p.input, 140) || "Allow or deny it" };
+    case "shift":
+      if (p.phase === "report") return { title: `🌙 Night shift done · ${projectName}`, body: `${clip(p.summary, 140)}${p.stopped ? ` — stopped: ${clip(p.stopped, 60)}` : ""}` };
+      return { title, body: "night shift started" };
     case "route_completed":
       return { title, body: `✔ route complete (${Number(p.steps ?? 0)} steps)` };
     case "route_failed":
