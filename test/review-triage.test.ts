@@ -114,14 +114,10 @@ describe("on a turn", () => {
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed");
     writeProjectConfig(dir, { name: "triage", agents: [{ id: "echo", kind: "echo" }], brain: { extractor: "off" } });
     rt = await ProjectRuntime.open({ id: `triage-${path.basename(dir)}`, name: "triage", dir });
-    // echo writes notes.txt; the auth file changes during the same turn
-    const sent = rt.sendMessage("write:notes.txt sleep:200");
-    await new Promise((r) => setTimeout(r, 80));
-    fs.writeFileSync(path.join(dir, "src", "auth", "session.ts"), "export const ttl = 6000000;\n");
-    await sent;
+    // the agent's turn rewrites the auth code (echo writes the file itself, so it's this turn's change, on any machine)
+    await rt.sendMessage("write:src/auth/session.ts");
     await waitUntil(() => rt!.log.list({ kinds: ["turn_diff"] }).length === 1);
     const card = rt.log.list({ kinds: ["turn_diff"] })[0]!.payload as { triage: Array<{ path: string; level: string; reasons: string[] }> };
-    expect(card.triage[0]).toEqual({ path: "src/auth/session.ts", level: "medium", reasons: ["touches auth or security code"] });
-    expect(card.triage.map((f) => f.path)).toContain("notes.txt");
+    expect(card.triage).toEqual([{ path: "src/auth/session.ts", level: "medium", reasons: ["touches auth or security code"] }]);
   });
 });
