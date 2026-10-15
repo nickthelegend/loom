@@ -69,6 +69,15 @@ export class QuotaRelay {
    * quota and relaying is on — whoever would pick up its work.
    */
   async route(agentId: string, chat = MAIN_CHAT): Promise<string> {
+    // the window reset but the baton isn't back yet (its timer hasn't fired, or the hand-back is
+    // mid-flight): finish giving it back first, so the prompt goes to the agent it was meant for
+    const c = this.capped.get(agentId);
+    if (c && !this.cappedUntil(agentId)) {
+      if (c.timer) clearTimeout(c.timer);
+      await this.lift(agentId);
+    }
+    const lifting = this.lifting.get(agentId);
+    if (lifting) await lifting;
     if (!this.cappedUntil(agentId) || this.host.config().relay?.auto === false) return agentId;
     const next = await this.next(agentId);
     if (!next) return agentId;
@@ -145,21 +154,30 @@ export class QuotaRelay {
     const prev = this.capped.get(agentId);
     if (prev?.timer) clearTimeout(prev.timer);
     const delay = Math.max(0, Math.min(resetAt - Date.now(), 2 ** 31 - 1));
-    const timer = setTimeout(() => this.lift(agentId), delay);
+    const timer = setTimeout(() => void this.lift(agentId), delay);
     timer.unref?.();
     this.capped.set(agentId, { resetAt, timer, ...(prev?.handedTo ? { handedTo: prev.handedTo } : {}), chat: prev?.chat ?? chat });
   }
 
   /** The limit lifted: say so, and (by default) give the chat back if the stand-in is idle and still holds it. */
-  private lift(agentId: string): void {
+  /** Hand-backs under way, so a prompt that arrives mid-way waits for the baton instead of missing it. */
+  private lifting = new Map<string, Promise<void>>();
+
+  /** Is the relay still holding this agent's work — out of quota, or not yet handed back? */
+  holds(agentId: string): boolean { return this.capped.has(agentId) || this.lifting.has(agentId); }
+
+  private lift(agentId: string): Promise<void> {
     const c = this.capped.get(agentId);
     this.capped.delete(agentId);
-    if (!c) return;
+    if (!c) return this.lifting.get(agentId) ?? Promise.resolve();
     const chat = c.chat && c.chat !== MAIN_CHAT ? c.chat : undefined;
     const giveBack = this.host.config().relay?.handBack !== false && c.handedTo && this.host.holder() === c.handedTo && !this.host.busy(c.handedTo);
     this.host.append({ kind: "status", agentId, chat, payload: { state: "quota_reset", agentId,
       text: `${agentId}'s usage limit reset${giveBack ? ` — the baton is back with ${agentId}` : ""}` } });
-    if (giveBack) void this.host.handoff(agentId).catch(() => {});
+    if (!giveBack) return Promise.resolve();
+    const back = this.host.handoff(agentId).then(() => {}, () => {}).finally(() => this.lifting.delete(agentId));
+    this.lifting.set(agentId, back);
+    return back;
   }
 
   /** The request the turn was answering: the last message in the chat from a person (or a route), before `at`. */
