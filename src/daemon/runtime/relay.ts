@@ -76,6 +76,13 @@ export class QuotaRelay {
       if (c.timer) clearTimeout(c.timer);
       await this.lift(agentId);
     }
+    // its stand-in was mid-turn at the reset, so the baton was going back when that turn ended;
+    // a prompt for this agent now is you choosing it — give it back now, as picking it and sending does
+    const standIn = this.waitingBack.get(agentId);
+    if (standIn) {
+      this.waitingBack.delete(agentId);
+      if (this.host.holder() === standIn) await this.giveBack(agentId);
+    }
     const lifting = this.lifting.get(agentId);
     if (lifting) await lifting;
     if (!this.cappedUntil(agentId) || this.host.config().relay?.auto === false) return agentId;
@@ -90,6 +97,11 @@ export class QuotaRelay {
   /** Every agent event passes through: a limit starts a relay. */
   observe(event: LoomEvent): void {
     if (!event.agentId) return;
+    if (event.kind === "run_complete") for (const [agentId, standIn] of [...this.waitingBack]) {
+      if (standIn !== event.agentId) continue;
+      this.waitingBack.delete(agentId);
+      if (this.host.holder() === standIn) this.giveBack(agentId);
+    }
     const hit = quotaHit(event);
     if (hit) void this.onLimit(event.agentId, event, hit).catch((err) => this.host.warn("quota relay failed", err));
   }
@@ -159,25 +171,35 @@ export class QuotaRelay {
     this.capped.set(agentId, { resetAt, timer, ...(prev?.handedTo ? { handedTo: prev.handedTo } : {}), chat: prev?.chat ?? chat });
   }
 
-  /** The limit lifted: say so, and (by default) give the chat back if the stand-in is idle and still holds it. */
   /** Hand-backs under way, so a prompt that arrives mid-way waits for the baton instead of missing it. */
   private lifting = new Map<string, Promise<void>>();
 
-  /** Is the relay still holding this agent's work — out of quota, or not yet handed back? */
-  holds(agentId: string): boolean { return this.capped.has(agentId) || this.lifting.has(agentId); }
+  /** Reset, but its stand-in was mid-turn: the baton goes back when that turn ends (agent → stand-in). */
+  private waitingBack = new Map<string, string>();
 
+  /** Is the relay still holding this agent's work — out of quota, or not yet handed back? */
+  holds(agentId: string): boolean { return this.capped.has(agentId) || this.lifting.has(agentId) || this.waitingBack.has(agentId); }
+
+  private giveBack(agentId: string): Promise<void> {
+    const back = this.host.handoff(agentId).then(() => {}, () => {}).finally(() => this.lifting.delete(agentId));
+    this.lifting.set(agentId, back);
+    return back;
+  }
+
+  /** The limit lifted: say so, and (by default) give the chat back — now if the stand-in is idle, else when its turn ends. */
   private lift(agentId: string): Promise<void> {
     const c = this.capped.get(agentId);
     this.capped.delete(agentId);
     if (!c) return this.lifting.get(agentId) ?? Promise.resolve();
     const chat = c.chat && c.chat !== MAIN_CHAT ? c.chat : undefined;
-    const giveBack = this.host.config().relay?.handBack !== false && c.handedTo && this.host.holder() === c.handedTo && !this.host.busy(c.handedTo);
+    const wants = this.host.config().relay?.handBack !== false && c.handedTo && this.host.holder() === c.handedTo;
+    const busy = Boolean(wants && this.host.busy(c.handedTo!));
     this.host.append({ kind: "status", agentId, chat, payload: { state: "quota_reset", agentId,
-      text: `${agentId}'s usage limit reset${giveBack ? ` — the baton is back with ${agentId}` : ""}` } });
-    if (!giveBack) return Promise.resolve();
-    const back = this.host.handoff(agentId).then(() => {}, () => {}).finally(() => this.lifting.delete(agentId));
-    this.lifting.set(agentId, back);
-    return back;
+      text: `${agentId}'s usage limit reset${wants ? busy ? ` — the baton goes back to ${agentId} when ${c.handedTo} finishes` : ` — the baton is back with ${agentId}` : ""}` } });
+    if (!wants) return Promise.resolve();
+    // the stand-in is mid-turn: don't cut it off — hand back when that turn ends (observe), or sooner if you ask for this agent
+    if (busy) { this.waitingBack.set(agentId, c.handedTo!); return Promise.resolve(); }
+    return this.giveBack(agentId);
   }
 
   /** The request the turn was answering: the last message in the chat from a person (or a route), before `at`. */
@@ -194,5 +216,6 @@ export class QuotaRelay {
   stop(): void {
     for (const c of this.capped.values()) if (c.timer) clearTimeout(c.timer);
     this.capped.clear();
+    this.waitingBack.clear();
   }
 }

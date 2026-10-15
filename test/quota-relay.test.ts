@@ -110,6 +110,16 @@ describe("relaying the work", () => {
     expect(rt!.relay.cappedUntil("claude")).toBeNull();
   });
 
+  it("a stand-in mid-turn at the reset isn't cut off: the baton goes back when it finishes", async () => {
+    resetIn = 300;
+    await project();
+    await rt!.sendMessage("first task sleep:1500");
+    await waitUntil(() => statuses("quota_reset").length === 1, { timeoutMs: 10_000 });
+    expect(String(statuses("quota_reset")[0]!.payload.text)).toMatch(/the baton goes back to claude when helper finishes/);
+    await waitUntil(() => rt!.log.list({ kinds: ["run_complete"] }).some((e) => e.agentId === "helper"), { timeoutMs: 10_000 });
+    await waitUntil(async () => (await rt!.status()).holder === "claude", { timeoutMs: 10_000 });
+  });
+
   it("a prompt that arrives after the reset, before the baton is back, still reaches the agent it was for", async () => {
     resetIn = 400;
     await project();
