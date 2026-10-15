@@ -40,6 +40,18 @@ afterEach(async () => {
 });
 
 describe("scrollback survives the daemon", () => {
+  it.skipIf(process.platform === "win32" || process.env.LOOM_NO_PTY === "1")("closes a real PTY shell that ignores hang-up", async context => {
+    const m = manager();
+    const shell = m.open("proj", "ignore-hup", tmpDir("term-ignore-hup"));
+    if (shell.mode !== "pty") { context.skip(); return; }
+    shell.write("trap '' HUP; printf '%s%s\\n' 'HUP-' 'ARMED'\n");
+    await waitUntil(() => shell.scrollback().includes("HUP-ARMED"));
+    let exited = false;
+    void shell.closed.then(() => { exited = true; });
+    await m.closeAll();
+    expect(exited).toBe(true);
+  });
+
   it("does not forget a replacement terminal when the old shell exits late", async () => {
     const work = tmpDir("term-replace");
     const m = new TerminalManager({ ...quietEvents(), onExit: (project, term) => m.forget(project, term) }, 12, persistDir);
