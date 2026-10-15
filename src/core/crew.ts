@@ -750,12 +750,19 @@ export class CrewEngine {
   }
   async receiveRequest(id: string, request: { id: string; from: string; to: string; text: string; expiresAt: number }): Promise<{ delivery: string }> {
     const cfg = this.config(id), st = this.state(cfg), mate = cfg.teammates.find(t => t.id === request.to);
-    if (!mate || !["reviewer", "tester", "researcher"].includes(mate.role)) throw new Error("cross-member requests can target reviewer, tester or researcher seats");
-    if (request.text.length > 4000 || !request.text.trim() || request.expiresAt <= Date.now()) throw new Error("request is empty, too large or expired");
     const prior = st.inbox?.find(r => r.id === request.id);
     if (prior) {
       if (prior.text !== request.text || prior.from !== request.from || prior.to !== request.to) throw new Error("request id has different content");
-      return { delivery: prior.status };
+      if (prior.status !== "queued") return { delivery: prior.status };
+    }
+    if (!mate || !["reviewer", "tester", "researcher"].includes(mate.role)) throw new Error("cross-member requests can target reviewer, tester or researcher seats");
+    if (request.text.length > 4000 || !request.text.trim() || request.expiresAt <= Date.now()) throw new Error("request is empty, too large or expired");
+    if (prior) {
+      // Queued means no turn was admitted. An owner retry can recover a
+      // budget/start failure; running, failed and delivered never replay.
+      if (!st.goal || terminal(st.goal.status)) await this.goal(id, `Request from ${request.from}: ${request.text}`, "ship", request);
+      else this.drive(id);
+      return { delivery: "queued" };
     }
     const inbox = st.inbox ??= [];
     if (inbox.filter(r => ["queued", "running", "waiting_human"].includes(r.status)).length >= 20) throw new Error("the crew request inbox is full");
