@@ -57,6 +57,7 @@ export type EventKind =
   | "memory_update"
   | "memory_forget"
   | "status" // adapter/bridge lifecycle info
+  | "proof" // is "done" true? a turn's claims checked against what ran and a clean re-run (core/proof.ts)
   | "error";
 
 /**
@@ -256,6 +257,8 @@ export interface ProjectConfig {
   agents: AgentConfig[];
   /** Agent Teams: named crews of roster agents with roles (core/crew.ts). */
   crews?: import("./core/crew.js").CrewConfig[];
+  /** Proof: how an agent's "done" is checked (daemon/proof.ts). */
+  proof?: import("./daemon/proof.js").ProofConfig;
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
   /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */

@@ -81,6 +81,36 @@ The invite is the part of the link after `#`. Browsers never send that part to
 a server, including the join page's. A link works once and expires in a day.
 It carries the team key, so send it the way you'd send a password.
 
+## Proof — is "done" true?
+
+Agents say "all tests pass" when three of fourteen ran, or when none did. When
+an agent's reply claims the tests, build, typecheck or lint pass, Loom checks
+the claim three ways:
+
+- **What it said.** The claims in its final message, including any numbers
+  ("all 14 tests pass").
+- **What it ran.** The commands from that turn and their exit codes. A claim
+  with no test run behind it, or with a failed one, doesn't hold.
+- **A clean re-run.** Loom runs your tests again in a fresh worktree containing
+  exactly the agent's uncommitted changes and new files. Dependency folders
+  are linked, not reinstalled. Your working tree is never touched.
+
+The verdict goes into the thread as a card: **Verified**, **Didn't hold** (with
+the reason, such as "said 14 pass; 11 did"), or **Unverified**. If a "done"
+doesn't hold, your phone gets a push. Every turn card also has **Check it**,
+to verify any turn on demand.
+
+```bash
+loom proof                   # check the newest turn (exits 1 if it didn't hold)
+loom proof --test "npm run test:unit"
+```
+
+The test command is detected from the project (`npm test`, `cargo test`,
+`go test ./...`, `pytest`, `make test`). Override it with `proof.testCommand`
+in `.loom/config.json`; `proof.auto: "off"` turns off automatic checks.
+Pass/fail counts are read from vitest, jest, node:test, mocha, pytest, cargo,
+go test, rspec and phpunit output.
+
 ## Crews — agents with roles, on one goal
 
 A crew is a few of your agents with jobs: a **lead** who plans, **builders**, a

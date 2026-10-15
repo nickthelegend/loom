@@ -100,6 +100,7 @@ import { TeamLink } from "./team.js";
 import { Onboarding } from "./onboard.js";
 import { addProjectAt } from "./routes/projects.js";
 import { registerCrewsRoutes } from "./routes/crews.js";
+import { registerProofRoutes } from "./routes/proof.js";
 import { registerOnboardRoutes } from "./routes/onboard.js";
 import { TerminalManager } from "./terminals.js";
 export { BUILD_REV, DEFAULT_PORT, fingerprintBuild, isLoopback, isLoopbackHost, lanIp, listModelsForKind, type ModelList, type ModelSource, tailscaleFunnel, tailscaleIp, tailscaleState, tailscaleUp } from './system.js';
@@ -458,6 +459,7 @@ export class LoomDaemon {
     registerApprovalsRoutes(app, ctx, withRuntime);
     registerOrchestraRoutes(app, withRuntime);
     registerCrewsRoutes(app, withRuntime);
+    registerProofRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
     registerAgentsRoutes(app, withRuntime);
     registerBrainRoutes(app, withRuntime);

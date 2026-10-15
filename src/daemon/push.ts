@@ -40,6 +40,8 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
   switch (event.kind) {
     case "needs_input": return "questions";
     case "run_complete": return "done";
+    // a "done" that didn't hold is news; a verified one repeats the done push
+    case "proof": return p.verdict === "contradicted" ? "done" : null;
     case "route_completed": case "route_failed": return "goals";
     case "approval": return p.phase === "requested" ? "approvals" : null;
     case "orchestra":
@@ -73,6 +75,8 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
   switch (event.kind) {
     case "needs_input":
       return { title: `${event.agentId ?? "An agent"} needs you · ${projectName}`, body: clip(p.question, 160) || "it's waiting on your answer" };
+    case "proof":
+      return { title: `⚠ ${String(p.about ?? "An agent")}'s “done” didn't hold · ${projectName}`, body: clip(p.headline, 160) };
     case "run_complete":
       return { title: `${event.agentId ?? "An agent"} is done · ${projectName}`, body: extra.reply ? clip(extra.reply, 160) : "finished its turn" };
     case "approval":
