@@ -99,7 +99,10 @@ if (process.platform === "win32") {
     "import { probeWindowsJobs } from './dist/core/windows-jobs.js'; await probeWindowsJobs();"],
     { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true });
   log("verified staged Windows Job Object binding and launch");
-  execFileSync(process.execPath, ["--input-type=module", "-e", `
+  // node-pty's output worker inherits execArgv; --input-type is invalid for
+  // that file-backed worker. Run a file, as the installed daemon does.
+  const ptyProbe = path.join(stage, ".verify-windows-pty.mjs");
+  fs.writeFileSync(ptyProbe, `
     import { TerminalManager } from './dist/daemon/terminals.js';
     const terminals = new TerminalManager({ onData() {}, onCommandEnd() {}, onExit() {}, onTitle() {} });
     if (terminals.mode !== 'pty') throw new Error('staged Windows ConPTY binding is unavailable');
@@ -112,8 +115,11 @@ if (process.platform === "win32") {
         await new Promise(resolve => setTimeout(resolve, 25));
       }
     } finally { await terminals.closeAll(); }
-  `], { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true,
-    env: { ...process.env, LOOM_NO_PTY: "" } });
+  `);
+  try {
+    execFileSync(process.execPath, [ptyProbe], { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true,
+      env: { ...process.env, LOOM_NO_PTY: "" }, timeout: 30_000 });
+  } finally { fs.rmSync(ptyProbe, { force: true }); }
   log("verified staged Windows ConPTY execution and shutdown");
 }
 log(`staged ${mb(stage)} MB → ${rel(stage)}`);
