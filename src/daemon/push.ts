@@ -40,9 +40,13 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
   switch (event.kind) {
     case "needs_input": return "questions";
     case "run_complete": return "done";
+    // a "done" that didn't hold is news; a verified one repeats the done push
+    case "proof": return p.verdict === "contradicted" ? "done" : null;
     case "route_completed": case "route_failed": return "goals";
+    // an agent out of quota: the work changed hands, or waits for the reset
+    // an agent out of quota: the work changed hands, or waits for the reset; an agent going in circles needs you
+    case "status": return p.state === "quota_relay" || p.state === "quota_limit" ? "done" : p.state === "loop_detected" ? "questions" : null;
     case "approval": return p.phase === "requested" ? "approvals" : null;
-    case "status": return p.state === "loop_detected" ? "questions" : null;
     case "orchestra":
       if (p.phase === "alert" || p.phase === "completed" || p.phase === "failed" || p.phase === "aborted") return "goals";
       return p.phase === "waiting" ? "questions" : null;
@@ -74,14 +78,18 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
   switch (event.kind) {
     case "needs_input":
       return { title: `${event.agentId ?? "An agent"} needs you · ${projectName}`, body: clip(p.question, 160) || "it's waiting on your answer" };
+    case "status":
+      if (p.state === "quota_relay" || p.state === "quota_limit")
+        return { title: `${String(p.from ?? event.agentId ?? "An agent")} ran out of quota · ${projectName}`, body: clip(p.text, 160) };
+      if (p.state === "loop_detected") return { title: `${event.agentId ?? "An agent"} is going in circles · ${projectName}`,
+        body: `${clip(p.text, 140)}${p.nudged ? " — Loom stopped it and asked it to step back" : " — Stop, Nudge or hand it off"}` };
+      return { title, body: clip(p.text ?? p.state, 160) };
+    case "proof":
+      return { title: `⚠ ${String(p.about ?? "An agent")}'s “done” didn't hold · ${projectName}`, body: clip(p.headline, 160) };
     case "run_complete":
       return { title: `${event.agentId ?? "An agent"} is done · ${projectName}`, body: extra.reply ? clip(extra.reply, 160) : "finished its turn" };
     case "approval":
       return { title: `${event.agentId ?? "An agent"} wants to use ${clip(p.tool, 40)} · ${projectName}`, body: clip(p.input, 140) || "Allow or deny it" };
-    case "status":
-      if (p.state === "loop_detected") return { title: `${event.agentId ?? "An agent"} is going in circles · ${projectName}`,
-        body: `${clip(p.text, 140)}${p.nudged ? " — Loom stopped it and asked it to step back" : " — Stop, Nudge or hand it off"}` };
-      return { title, body: clip(p.text ?? p.state, 160) };
     case "route_completed":
       return { title, body: `✔ route complete (${Number(p.steps ?? 0)} steps)` };
     case "route_failed":

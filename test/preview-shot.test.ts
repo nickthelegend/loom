@@ -48,6 +48,16 @@ describe("the script Playwright is handed", () => {
     expect(js).toContain("browser.close()"); // never leave chromium running
   });
 
+  it("Design Mode: with a selector, photographs just that element (quoted, not pasted)", () => {
+    const js = shotScript({ url: "http://localhost:3000/", width: 800, height: 600, colorScheme: "light", fullPage: false, selector: 'button[data-testid="buy"]', out: "/tmp/e.png" });
+    expect(js).toContain(`page.locator(${JSON.stringify('button[data-testid="buy"]')}).first()`);
+    expect(js).toContain("await el.screenshot(");
+    expect(js).not.toContain("page.screenshot(");
+    const page = shotScript({ url: "http://localhost:3000/", width: 800, height: 600, colorScheme: "light", fullPage: false, out: "/tmp/p.png" });
+    expect(page).toContain("page.screenshot(");
+    expect(page).not.toContain("locator(");
+  });
+
   it("quotes the url rather than pasting it into the script", () => {
     const js = shotScript({ url: 'http://x/"); process.exit(1); //', width: 100, height: 100, colorScheme: "light", fullPage: false, out: "/tmp/a.png" });
     expect(js).toContain(JSON.stringify('http://x/"); process.exit(1); //'));

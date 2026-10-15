@@ -46,6 +46,12 @@ export interface ServerStatus extends ServerConfig {
   exitCode: number | null;
   /** Its last lines, newest last — the same buffer the log pane reads. */
   lines: number;
+  /**
+   * Bumped on every state change. A client hearing about one server over two
+   * channels (a live frame, a list it fetched) keeps the newer: a list read
+   * just before a crash must not repaint "crashed" back to "running".
+   */
+  changed: number;
 }
 
 /** How much of each server's output is kept in memory. */
@@ -151,7 +157,8 @@ interface Running {
 export class Servers {
   private live = new Map<string, Running>();
   private logs = new Map<string, LogLine[]>();
-  private state = new Map<string, { state: ServerState; exitCode: number | null }>();
+  private state = new Map<string, { state: ServerState; exitCode: number | null; changed: number }>();
+  private changes = 0;
   /** URLs servers announced in their output, for configs that name no port. */
   private announced = new Map<string, string>();
 
@@ -185,6 +192,7 @@ export class Servers {
       startedAt: run?.startedAt ?? null,
       exitCode: known?.exitCode ?? null,
       lines: this.logs.get(cfg.name)?.length ?? 0,
+      changed: known?.changed ?? 0,
     };
   }
 
@@ -317,7 +325,8 @@ export class Servers {
   private ingest(name: string, stream: "out" | "err", chunk: Buffer): void {
     for (const text of String(chunk).split("\n")) {
       if (!text.trim()) continue;
-      this.append(name, { at: Date.now(), stream, text: text.replace(/\r$/, "") });
+      // 2,000 lines are kept; a minified bundle or a JSON dump makes one line megabytes
+      this.append(name, { at: Date.now(), stream, text: text.replace(/\r$/, "").slice(0, 4000) });
       if (!this.announced.has(name)) {
         const cfg = this.deps.configs().find((c) => c.name === name);
         const url = cfg && !cfg.url && !cfg.port ? urlFromOutput(text) : null;
@@ -340,7 +349,7 @@ export class Servers {
   private setState(cfg: ServerConfig, state: ServerState, exitCode: number | null): void {
     const prev = this.state.get(cfg.name);
     if (prev?.state === state && prev.exitCode === exitCode) return;
-    this.state.set(cfg.name, { state, exitCode });
+    this.state.set(cfg.name, { state, exitCode, changed: ++this.changes });
     this.deps.onChange(cfg.name, this.status(cfg));
   }
 }

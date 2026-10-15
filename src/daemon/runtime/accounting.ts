@@ -129,8 +129,8 @@ export class RuntimeAccounting {
   spendTodayFor(agentId: string, now = Date.now()): number {
     const since = startOfDay(now);
     let usd = 0;
-    for (const e of this.host.log.list({ kinds: ["status"] })) {
-      if (e.agentId !== agentId || e.ts < since) continue;
+    for (const e of this.host.log.list({ kinds: ["status"], sinceTs: since })) {
+      if (e.agentId !== agentId) continue;
       if (e.payload.state !== "turn_cost") continue;
       usd += Number(e.payload.costUsd ?? 0) || 0;
     }
@@ -190,8 +190,7 @@ export class RuntimeAccounting {
       }
       return s;
     };
-    for (const e of this.host.log.list({ kinds: ["status", "run_complete"] })) {
-      if (e.ts < since) continue;
+    for (const e of this.host.log.list({ kinds: ["status", "run_complete"], sinceTs: since })) {
       const agentId = e.agentId ?? "unknown";
       if (e.kind === "status" && e.payload.state === "turn_cost") {
         const usd = Number(e.payload.costUsd ?? 0) || 0;

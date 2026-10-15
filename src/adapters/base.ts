@@ -341,6 +341,32 @@ export const firstLine = (s: string): string => (s.split("\n").map((l) => l.trim
  * forever with no response. A CLI that can't say its own version inside the
  * timeout is unavailable as far as callers are concerned.
  */
+/**
+ * A remembered yes/no probe. Status is asked for constantly (every project's,
+ * by every open window and the desktop pet), and each ask probed every agent
+ * afresh — a `--version` process per CLI agent, a full model list per model
+ * agent. A yes is trusted for a minute and a no for 15 s (so a fresh install
+ * shows up quickly); callers asking at once share the probe in flight.
+ */
+const probes = new Map<string, { at: number; value: boolean; pending?: Promise<boolean> }>();
+export function rememberedProbe(key: string, probe: () => Promise<boolean>, ttl = { yes: 60_000, no: 15_000 }): Promise<boolean> {
+  const hit = probes.get(key);
+  if (hit?.pending) return hit.pending;
+  if (hit && Date.now() - hit.at < (hit.value ? ttl.yes : ttl.no)) return Promise.resolve(hit.value);
+  const pending = probe().catch(() => false).then((value) => {
+    probes.set(key, { at: Date.now(), value });
+    if (probes.size > 256) probes.delete(probes.keys().next().value!);
+    return value;
+  });
+  probes.set(key, { at: hit?.at ?? 0, value: hit?.value ?? false, pending });
+  return pending;
+}
+/** Forget remembered probes (a key, or all): after installing or signing in, ask afresh. */
+export function forgetProbes(key?: string): void {
+  if (key === undefined) probes.clear();
+  else probes.delete(key);
+}
+
 export function cliAvailable(
   cmd: string,
   args: string[] = ["--version"],
@@ -348,6 +374,10 @@ export function cliAvailable(
   // OpenCode version probe takes over six seconds on an otherwise usable disk.
   timeoutMs = process.platform === "win32" ? 15_000 : 5_000,
 ): Promise<boolean> {
+  return rememberedProbe(`cli\0${cmd}\0${args.join("\0")}`, () => spawnProbe(cmd, args, timeoutMs));
+}
+
+function spawnProbe(cmd: string, args: string[], timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     try {
       const child = spawn(cmd, args, { stdio: "ignore" });

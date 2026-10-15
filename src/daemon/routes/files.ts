@@ -165,7 +165,7 @@ export function registerFilesRoutes(app: Express): void {
     void (async () => {
       const dir = projectPath(String(req.params.id), ".");
       if (!dir) return void res.status(404).json({ error: "not found" });
-      const b = (req.body ?? {}) as { url?: string; width?: number; height?: number; colorScheme?: string; fullPage?: boolean };
+      const b = (req.body ?? {}) as { url?: string; width?: number; height?: number; colorScheme?: string; fullPage?: boolean; selector?: string };
       try {
         const shot = await capture(dir, {
           url: String(b.url ?? ""),
@@ -173,11 +173,13 @@ export function registerFilesRoutes(app: Express): void {
           ...(b.height ? { height: Number(b.height) } : {}),
           colorScheme: b.colorScheme === "dark" ? "dark" : "light",
           fullPage: Boolean(b.fullPage),
+          // Design Mode: just the element the picker chose
+          ...(typeof b.selector === "string" && b.selector.trim() ? { selector: b.selector } : {}),
         });
         const buf = fs.readFileSync(shot.file);
         fs.rmSync(path.dirname(shot.file), { recursive: true, force: true });
         const hash = crypto.createHash("sha1").update(buf).digest("hex").slice(0, 12);
-        const rel = path.join(".loom", "attachments", `preview-${hash}.png`);
+        const rel = path.join(".loom", "attachments", `${typeof b.selector === "string" && b.selector.trim() ? "element" : "preview"}-${hash}.png`);
         const abs = projectPath(String(req.params.id), rel);
         if (!abs) return void res.status(400).json({ error: "bad attachment path" });
         fs.mkdirSync(path.dirname(abs), { recursive: true });

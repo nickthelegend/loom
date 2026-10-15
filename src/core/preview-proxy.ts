@@ -135,6 +135,22 @@ const BRIDGE_SOURCE = `<script data-${BRIDGE_MARK}="1">(function(){
     }
     return parts.join(" > ");
   };
+  var STYLE_KEYS = ["display", "position", "width", "height", "margin", "padding", "gap", "font-family", "font-size", "font-weight",
+    "line-height", "letter-spacing", "color", "background-color", "background-image", "border", "border-radius", "box-shadow",
+    "opacity", "flex-direction", "justify-content", "align-items", "grid-template-columns", "text-align", "z-index"];
+  var styleOf = function(el){
+    var out = {};
+    try {
+      var cs = getComputedStyle(el);
+      for (var i = 0; i < STYLE_KEYS.length; i++) {
+        var k = STYLE_KEYS[i], v = cs.getPropertyValue(k);
+        // the defaults say nothing: keep what this element actually sets
+        if (!v || v === "none" || v === "normal" || v === "auto" || v === "0px" || v === "static" || v === "rgba(0, 0, 0, 0)") continue;
+        out[k] = String(v).slice(0, 160);
+      }
+    } catch (e) {}
+    return out;
+  };
   var onMove = function(e){
     if (!picking) return;
     var el = e.target;
@@ -155,6 +171,9 @@ const BRIDGE_SOURCE = `<script data-${BRIDGE_MARK}="1">(function(){
       text: String(el.innerText || el.textContent || "").trim().slice(0, 300),
       html: (el.outerHTML || "").slice(0, 1200),
       rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
+      // Design Mode: what the agent needs to change how it looks, not just what it is
+      styles: styleOf(el),
+      viewport: { w: window.innerWidth, h: window.innerHeight },
       url: location.href,
     });
     stopPicking();

@@ -25,7 +25,7 @@ import type {
 } from "../types.js";
 
 const MAX_IMPORT_CHARS = 8_000; // per source, keeps the brain bounded
-const RECENT_DECISIONS = 40;
+export const RECENT_DECISIONS = 40;
 
 /**
  * Where each ADE keeps its native, project-local memory. Project-scoped only

@@ -20,6 +20,8 @@ import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
 import { CrewEngine } from "../core/crew.js";
 import { LoopWatch, nudgeText, type Loop } from "../core/loops.js";
+import { QuotaRelay } from "./runtime/relay.js";
+import { ProofRunner } from "./proof.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
@@ -151,6 +153,10 @@ export class ProjectRuntime {
   private readonly loops = new LoopWatch();
   /** agent × chat already nudged since a person last spoke there: a second loop is only reported. */
   private readonly nudged = new Set<string>();
+  /** Quota Relay: an agent out of quota mid-task hands its work to the next. */
+  readonly relay: QuotaRelay;
+  /** Proof: checks an agent's "done" against what ran and a clean re-run of the tests. */
+  readonly proofs: ProofRunner;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -372,6 +378,32 @@ export class ProjectRuntime {
       coordinator: () => this.coordinator,
     });
 
+    this.relay = new QuotaRelay({
+      config: () => this.config,
+      busy: (id) => { const a = this.agents.get(id); return Boolean(a && isAdapter(a) && a.busy()) || this.turns.busySince.has(id); },
+      turnChat: (id) => this.turns.turnChat.get(id),
+      available: async (id) => { const a = this.agents.get(id); return Boolean(a && isAdapter(a) && (await a.available())); },
+      interrupt: (chat) => this.interrupt({ chat, source: "route" }),
+      handoff: (to) => this.handoff(to, { source: "route" }),
+      holder: () => this.validHolder(),
+      setBriefing: (id, text) => {
+        const prior = this.briefings.pendingBriefings.get(id);
+        this.briefings.pendingBriefings.set(id, [prior, text].filter(Boolean).join("\n"));
+      },
+      send: (text, id, chat) => this.sendMessage(text, id, { chat, source: "route" }),
+      enqueue: (input) => this.enqueue(input),
+      list: (opts) => this.log.list(opts),
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      warn: (message, detail) => logbook.warn("relay", message, String(detail), this.info.id),
+    });
+
+    this.proofs = new ProofRunner({
+      projectId: info.id,
+      dir: info.dir,
+      config: () => this.config.proof ?? {},
+      list: (opts) => this.log.list(opts),
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+    });
     this.crews = new CrewEngine({
       projectId: info.id,
       projectName: info.name,
@@ -1970,11 +2002,18 @@ export class ProjectRuntime {
     this.trackCost(event);
     const loop = this.loops.observe(event);
     if (loop) void this.onLoop(loop).catch((err) => logbook.warn("loops", "couldn't act on a loop", String(err), this.info.id));
+    // an agent out of quota mid-task hands its work on (core/quota.ts, runtime/relay.ts)
+    this.relay.observe(event);
     // The turn's diff is started before routing hears the turn ended: a step
     // condition reads those numbers, and a route that advanced first would
     // read the turn before this one.
     if (event.kind === "run_complete" && event.agentId) {
       this.captureTurnDiff(event.agentId);
+      // A reply that claims the tests (or build, or lint) pass gets checked —
+      // against what the turn ran, and a clean re-run — without being asked.
+      if (!event.payload.error && this.proofs.wantsAuto(event))
+        void this.proofs.prove(event.chat ?? MAIN_CHAT, { at: event.id, auto: true }).catch((err) =>
+          logbook.warn("proof", "couldn't check the turn", String(err), this.info.id));
       if (!this.continuity) void this.captureAgentDecisions(event.agentId).catch(() => { });
     }
     this.routes.handleAgentEvent(event);
@@ -2034,7 +2073,7 @@ export class ProjectRuntime {
 
   /** How many turns this agent has completed (for the decision's turnIndex). */
   private turnCountFor(agentId: string): number {
-    return this.log.list({ kinds: ["run_complete"] }).filter((e) => e.agentId === agentId).length;
+    return this.log.count({ kinds: ["run_complete"], agentId });
   }
 
   /**
@@ -2075,7 +2114,7 @@ export class ProjectRuntime {
     const turnText = this.turns.turnText.get(agentId) ?? "";
     this.turns.turnText.delete(agentId);
     if (turnText.trim().length < 100) return;
-    const lastTurn = this.log.list({ kinds: ["run_complete"] }).filter((e) => e.agentId === agentId).slice(-1)[0];
+    const lastTurn = this.log.list({ kinds: ["run_complete"], agentId, limit: 1 })[0];
     const p = (lastTurn?.payload ?? {}) as Record<string, unknown>;
     let filesChanged: string[] = [];
     try {
@@ -2369,6 +2408,12 @@ export class ProjectRuntime {
       const chat = opts.chat ?? MAIN_CHAT;
       this.loops.reset(chat);
       for (const k of [...this.nudged]) if (k.endsWith(`\u0000${chat}`)) this.nudged.delete(k);
+    }
+    // a prompt for an agent that's out of quota goes to whoever is carrying its work
+    const target = agentId ?? this.validHolder() ?? undefined;
+    if (target && this.relay.cappedUntil(target)) {
+      const routed = await this.relay.route(target, opts.chat ?? MAIN_CHAT);
+      if (routed !== target) agentId = routed;
     }
     return this.turns.sendMessage(text, agentId, opts);
   }
@@ -3087,7 +3132,8 @@ export class ProjectRuntime {
     const day = new Date().toISOString().slice(0, 10), start = Date.parse(`${day}T00:00:00Z`);
     if (this.crewSpendLedger.day !== day) this.crewSpendLedger = { day, after: 0, total: 0, crews: new Map() };
     const ledger = this.crewSpendLedger;
-    for (const event of this.log.list({ kinds: ["status"], since: ledger.after })) {
+    // a new day starts its ledger at the day's first event, not at the first event ever written
+    for (const event of this.log.list({ kinds: ["status"], since: ledger.after, ...(ledger.after === 0 ? { sinceTs: start } : {}) })) {
       const id = (event.payload.crew as { crewId?: string } | undefined)?.crewId;
       const cost = Number(event.payload.costUsd);
       if (id && event.ts >= start && event.payload.state === "turn_cost" && Number.isFinite(cost) && cost > 0) {
@@ -3219,6 +3265,7 @@ export class ProjectRuntime {
 
   async close(): Promise<void> {
     await this.orchestra.shutdown().catch(() => { });
+    this.relay.stop();
     await this.crews.shutdown().catch(() => { });
     this.closed = true;
     this.harnesses.stop();

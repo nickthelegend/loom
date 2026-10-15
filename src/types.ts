@@ -57,6 +57,7 @@ export type EventKind =
   | "memory_update"
   | "memory_forget"
   | "status" // adapter/bridge lifecycle info
+  | "proof" // is "done" true? a turn's claims checked against what ran and a clean re-run (core/proof.ts)
   | "error";
 
 /**
@@ -258,6 +259,10 @@ export interface ProjectConfig {
   crews?: import("./core/crew.js").CrewConfig[];
   /** Loop watch: an agent re-running the same failing command. "notify" (default), "nudge" (stop it and tell it to step back), or "off". */
   watchdog?: { auto?: "notify" | "nudge" | "off" };
+  /** Quota Relay: who carries on when an agent runs out of quota (daemon/runtime/relay.ts). */
+  relay?: import("./daemon/runtime/relay.js").RelayConfig;
+  /** Proof: how an agent's "done" is checked (daemon/proof.ts). */
+  proof?: import("./daemon/proof.js").ProofConfig;
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
   /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */

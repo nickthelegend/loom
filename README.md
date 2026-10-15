@@ -81,6 +81,61 @@ The invite is the part of the link after `#`. Browsers never send that part to
 a server, including the join page's. A link works once and expires in a day.
 It carries the team key, so send it the way you'd send a password.
 
+## Quota Relay — a limit doesn't stop the work
+
+Hit Claude's 5-hour window halfway through a task, and the work normally
+stops: Claude Code parks the turn until the reset, and Codex ends it with
+"try again at 3:04 PM". Loom recognises the limit and responds:
+
+- **It hands the work on.** It stops the parked turn and passes the baton to
+  the next agent, with a briefing: "claude ran out of quota; its changes are in
+  the working tree, continue from them". It re-sends the same request in the
+  same chat.
+- **It routes new prompts.** While an agent is out, anything sent to it goes
+  to the agent standing in.
+- **It gives the chat back.** When the window resets, the baton returns.
+- **It waits if it has to.** If no other agent is free, the request is queued
+  for the moment the limit lifts.
+
+The thread records each step ("claude hit its usage limit — codex carries on;
+claude is back around 19:00"), and your phone gets a push. By default only
+your other CLI agents take over, never a metered API model. Set the order
+with `relay.to`. `relay.auto: false` only reports the limit, and
+`relay.handBack: false` keeps the stand-in. Limits are read from what Claude
+and Codex report about their usage windows, and from the error text any CLI
+gives ("usage limit", "rate limited", "quota exceeded", with "try again at…"
+or "resets in…").
+
+## Proof — is "done" true?
+
+Agents say "all tests pass" when three of fourteen ran, or when none did. When
+an agent's reply claims the tests, build, typecheck or lint pass, Loom checks
+the claim three ways:
+
+- **What it said.** The claims in its final message, including any numbers
+  ("all 14 tests pass").
+- **What it ran.** The commands from that turn and their exit codes. A claim
+  with no test run behind it, or with a failed one, doesn't hold.
+- **A clean re-run.** Loom runs your tests again in a fresh worktree containing
+  exactly the agent's uncommitted changes and new files. Dependency folders
+  are linked, not reinstalled. Your working tree is never touched.
+
+The verdict goes into the thread as a card: **Verified**, **Didn't hold** (with
+the reason, such as "said 14 pass; 11 did"), or **Unverified**. If a "done"
+doesn't hold, your phone gets a push. Every turn card also has **Check it**,
+to verify any turn on demand.
+
+```bash
+loom proof                   # check the newest turn (exits 1 if it didn't hold)
+loom proof --test "npm run test:unit"
+```
+
+The test command is detected from the project (`npm test`, `cargo test`,
+`go test ./...`, `pytest`, `make test`). Override it with `proof.testCommand`
+in `.loom/config.json`; `proof.auto: "off"` turns off automatic checks.
+Pass/fail counts are read from vitest, jest, node:test, mocha, pytest, cargo,
+go test, rspec and phpunit output.
+
 ## Crews — agents with roles, on one goal
 
 A crew is a few of your agents with jobs: a **lead** who plans, **builders**, a
@@ -395,8 +450,11 @@ and injects one small script. The **Page** pane then shows what that page
 logged and what it fetched, live — and a click puts any line into the composer
 as context, which is the whole point: the loop used to be *see the error,
 select it, retype it*. **Pick** turns the cursor into an element picker: click
-the thing that's wrong and its selector, text, size and markup land in the
-composer. Nothing about the page is rewritten; the script only reports.
+the thing that's wrong and its selector, text, size, markup and computed
+styles (fonts, colours, spacing, layout) land in the composer, along with a
+picture of just that element, so any agent can see what you mean. The picture
+is taken at your width and colour scheme with the project's own Playwright.
+Nothing about the page is rewritten; the script only reports.
 
 **The preview itself** emulates a width (Fit / 375 / 768 / 1280, remembered per
 project, scaled down when the dock is narrower), reloads itself when an agent
