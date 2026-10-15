@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { codexBin } from "../../providers/codex/adapter.js";
 import { claudeBin } from "../../providers/claude/adapter.js";
 import { digest } from "./contracts.js";
+import { probeWindowsJobs } from "../windows-jobs.js";
 
 const exec = promisify(execFile);
 /** Protocol each adapter speaks. Any installed version may run; drift in the
@@ -11,7 +12,7 @@ const exec = promisify(execFile);
 export const NATIVE_PROTOCOLS = {
   codex: { protocol: "codex-app-server-v2", acceptance: "turn/start response or turn/started", compaction: "contextCompaction item", tested: ["0.153.4"] },
   "claude-code": { protocol: "claude-agent-sdk-stream-json-v1", acceptance: "status requesting or assistant/result output", compaction: "status compacting + compact_boundary", tested: ["2.1.278"] },
-  opencode: { protocol: "opencode-serve-api-v2", acceptance: "prompt admitted (POST /api/session/{id}/prompt)", compaction: "session.next.compaction.ended", tested: ["1.18.31"] },
+  opencode: { protocol: "opencode-serve-api-v2", acceptance: "prompt admitted (/api/session/{id}/prompt or /session/{id}/prompt_async 204)", compaction: "session.next.compaction.ended or session.compacted", tested: ["1.18.31", "1.19.0"] },
 } as const;
 export type NativeKind = keyof typeof NATIVE_PROTOCOLS;
 /** The harnesses native continuity speaks to, in one place. */
@@ -35,14 +36,19 @@ export async function probeHarness(kind: string, options: Record<string, unknown
   const checkedAt = Date.now();
   const down = (error: string, binary: string | null = null): HarnessHealth =>
     ({ kind, available: false, version: null, tested: false, binary, fingerprint: null, error, checkedAt });
-  if (process.platform === "win32") return down("native continuity requires verified process containment; Windows Job Objects are not implemented yet");
+  if (process.platform === "win32") {
+    try { await probeWindowsJobs(); }
+    catch (error) { return down(`Windows Job Object containment is unavailable: ${(error as Error).message}`); }
+  }
   if (!isNativeKind(kind)) return down(`no native continuity protocol for ${kind}`);
   const override = typeof options.bin === "string" ? options.bin : undefined;
   // An opencode agent pointed at a running server is as reachable as that server.
   if (kind === "opencode" && typeof options.baseUrl === "string" && options.baseUrl) {
     try {
-      const res = await fetch(`${options.baseUrl.replace(/\/$/, "")}/api/health`, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) return down(`opencode server at ${options.baseUrl} answered ${res.status}`);
+      const url = options.baseUrl.replace(/\/$/, "");
+      let res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok || !res.headers.get("content-type")?.includes("application/json")) res = await fetch(`${url}/global/health`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok || !(await res.json() as { healthy?: boolean }).healthy) return down(`opencode server at ${options.baseUrl} did not report healthy`);
     } catch (error) {
       return down(`opencode server at ${options.baseUrl} is not reachable: ${error instanceof Error ? error.message.slice(0, 200) : String(error)}`);
     }

@@ -12,7 +12,7 @@
  * the project didn't ask for.
  */
 
-import { spawn, fileCommand, stopWindowsTree } from "../core/process.js";
+import { spawnContained, fileCommand, stopWindowsTree } from "../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -216,17 +216,25 @@ export class SpecRunner {
     // Its own process group, so Stop reaches what npx started (the test
     // runner, its workers, the browsers) and not only npx itself.
     const group = process.platform !== "win32";
-    const child = spawn(launch.command, launch.args, {
+    const child = spawnContained(launch.command, launch.args, {
       cwd: projectDir,
       env: { ...launch.env, CI: "1", FORCE_COLOR: "0" },
       stdio: ["ignore", "pipe", "pipe"],
       detached: group,
       windowsVerbatimArguments: launch.windowsVerbatimArguments,
     });
+    let containmentError = false;
+    const unproven = (error: unknown): void => {
+      if (containmentError) return;
+      containmentError = true;
+      const line = `could not verify spec process shutdown: ${error instanceof Error ? error.message : String(error)}`;
+      run.lines.push(line); events.onLine(run, line);
+      // Keep the run live: another test writer must not start without proof.
+    };
     const signal = (sig: NodeJS.Signals): void => {
       try {
         if (group && child.pid) process.kill(-child.pid, sig);
-        else void stopWindowsTree(child);
+        else void stopWindowsTree(child).catch(unproven);
       } catch {
         try { child.kill(sig); } catch { /* already gone */ }
       }
@@ -273,13 +281,17 @@ export class SpecRunner {
       this.live.delete(projectId);
       events.onDone(run);
     });
-    child.on("close", (code) => {
+    const finished = (code: number | null): void => {
       if (run.exitCode !== undefined) return; // error path already settled it
       // killed by a signal: no code, and not a pass
       run.exitCode = code ?? (run.stopped ? 130 : 1);
       settle();
       this.live.delete(projectId);
       events.onDone(run);
+    };
+    child.on("close", code => {
+      if (process.platform === "win32") void stopWindowsTree(child).then(() => finished(code), unproven);
+      else finished(code);
     });
 
     this.live.set(projectId, { run, kill: () => kill("stop") });

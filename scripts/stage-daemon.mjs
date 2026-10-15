@@ -84,6 +84,7 @@ const required = [
   "dist/web/shell.html",
   "node_modules/express/package.json",
   "node_modules/ws/package.json",
+  "node_modules/koffi/index.cjs",
   "node_modules/@xterm/xterm/lib/xterm.js",
   "node_modules/@xterm/addon-fit/lib/addon-fit.js",
 ];
@@ -93,6 +94,34 @@ if (missing.length) {
   process.exit(1);
 }
 log(`verified ${required.length} runtime paths`);
+if (process.platform === "win32") {
+  execFileSync(process.execPath, ["--input-type=module", "-e",
+    "import { probeWindowsJobs } from './dist/core/windows-jobs.js'; await probeWindowsJobs();"],
+    { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true });
+  log("verified staged Windows Job Object binding and launch");
+  // node-pty's output worker inherits execArgv; --input-type is invalid for
+  // that file-backed worker. Run a file, as the installed daemon does.
+  const ptyProbe = path.join(stage, ".verify-windows-pty.mjs");
+  fs.writeFileSync(ptyProbe, `
+    import { TerminalManager } from './dist/daemon/terminals.js';
+    const terminals = new TerminalManager({ onData() {}, onCommandEnd() {}, onExit() {}, onTitle() {} });
+    if (terminals.mode !== 'pty') throw new Error('staged Windows ConPTY binding is unavailable');
+    const shell = terminals.open('stage', 'probe', process.cwd());
+    shell.write('node -p "String.fromCharCode(76,79,79,77,45,83,84,65,71,69,68,45,80,84,89)"\\r');
+    try {
+      const deadline = Date.now() + 15000;
+      while (!shell.scrollback().includes('LOOM-STAGED-PTY')) {
+        if (Date.now() > deadline) throw new Error('staged ConPTY shell did not execute the probe');
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    } finally { await terminals.closeAll(); }
+  `);
+  try {
+    execFileSync(process.execPath, [ptyProbe], { cwd: stage, stdio: ["ignore", "inherit", "inherit"], windowsHide: true,
+      env: { ...process.env, LOOM_NO_PTY: "" }, timeout: 30_000 });
+  } finally { fs.rmSync(ptyProbe, { force: true }); }
+  log("verified staged Windows ConPTY execution and shutdown");
+}
 log(`staged ${mb(stage)} MB → ${rel(stage)}`);
 
 function rel(p) {

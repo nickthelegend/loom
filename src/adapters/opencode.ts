@@ -22,13 +22,14 @@
 
 import { attachedImages } from "../providers/attachments.js";
 import { type ChildProcess } from "node:child_process";
-import { execFile, spawn, stopWindowsTree, stopWindowsPid } from "../core/process.js";
+import { execFile, spawnContained, stopWindowsTree, stopWindowsPid } from "../core/process.js";
+import { windowsJobReady } from "../core/windows-jobs.js";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { SendInput } from "../types.js";
 import { readProjectState, writeProjectState } from "../core/registry.js";
-import { AdapterBase, agentEnv, cliAvailable, cliOutput, fetchJson, firstLine, frameBriefing, freePort, waitFor, type AgentCheck } from "./base.js";
+import { AdapterBase, agentEnv, cliAvailable, cliOutput, fetchJson, firstLine, frameBriefing, freePort, interruptProcess, waitFor, type AgentCheck } from "./base.js";
 import { requestApproval } from "../core/approvals.js";
 import { logbook } from "../core/logbook.js";
 import { permissionFor } from "../core/permissions.js";
@@ -233,7 +234,7 @@ export class OpenCodeAdapter extends AdapterBase {
       await this.reapOrphanServe();
       const port = await freePort();
       this.baseUrl = `http://127.0.0.1:${port}`;
-      const child = spawn(
+      const child = spawnContained(
         "opencode",
         ["serve", "--port", String(port), "--hostname", "127.0.0.1", ...(this.options.extraArgs ?? [])],
         { cwd: this.projectDir, stdio: "ignore", env: { ...agentEnv(), ...opencodePermissionEnv(this.options) } },
@@ -241,6 +242,7 @@ export class OpenCodeAdapter extends AdapterBase {
       this.child = child;
       child.on("error", (error) => this.emit({ kind: "error", payload: { message: `opencode serve could not start: ${error.message}` } }));
       this.recordServePid(child.pid);
+      if (process.platform === "win32") await windowsJobReady(child);
       child.on("close", (code, signal) => {
         if (!this.started) return;
         this.started = false;
@@ -690,8 +692,11 @@ export class OpenCodeAdapter extends AdapterBase {
   private async sessionActive(sid: string): Promise<boolean | null> {
     const res = await fetchJson<Json>(this.modernApi ? this.api("/session/status") : this.api("/session/active")).catch(() => null);
     const active = res ? ((res.data ?? res) as Json) : null;
-    if (!active || typeof active !== "object") return null;
-    return Object.prototype.hasOwnProperty.call(active, sid) && (!this.modernApi || (active[sid] as Json)?.type !== "idle");
+    if (!active || typeof active !== "object" || Array.isArray(active)) return null;
+    if (!Object.prototype.hasOwnProperty.call(active, sid)) return false;
+    if (!this.modernApi) return true;
+    const type = (active[sid] as Json | undefined)?.type;
+    return type === "idle" ? false : type === "busy" || type === "retry" ? true : null;
   }
 
   private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
@@ -864,7 +869,6 @@ export class OpenCodeAdapter extends AdapterBase {
           throw new NativeDispatchRejected(`opencode didn't start: ${(err as Error).message}`);
         }
       }
-      if (this.modernApi) throw new NativeDispatchRejected("native continuity requires OpenCode's verified /api/session admission and quiescence endpoints");
       const sid = await this.continuitySession(c.nativeSessionId, input.model);
       this.activeSid = sid;
       this.emit({ kind: "status", payload: { state: "turn_started", session: sid } });
@@ -873,10 +877,10 @@ export class OpenCodeAdapter extends AdapterBase {
       const text = [c.context, input.briefing, input.text].filter(Boolean).join("\n\n");
       let res: Response;
       try {
-        res = await fetch(`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/prompt`, {
+        res = await fetch(this.api(`/session/${encodeURIComponent(sid)}/${this.modernApi ? "prompt_async" : "prompt"}`), {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt: promptWithFiles(text, this.projectDir) }),
+          body: JSON.stringify(this.modernApi ? { ...this.promptBody(text), ...(input.model ? { model: { providerID: parseModelRef(input.model)?.providerID, modelID: parseModelRef(input.model)?.id } } : {}) } : { prompt: promptWithFiles(text, this.projectDir) }),
           signal: AbortSignal.timeout(30_000),
         });
       } catch (err) {
@@ -887,6 +891,7 @@ export class OpenCodeAdapter extends AdapterBase {
         const body = await res.text().catch(() => "");
         throw new NativeDispatchRejected(`opencode refused the prompt (${res.status}): ${body.slice(0, 300)}`);
       }
+      if (this.modernApi && res.status !== 204) throw new Error(`opencode prompt returned unexpected admission status ${res.status}; native outcome is unknown`);
       const ack = ((await res.json().catch(() => ({}))) as Json).data as Json | undefined;
       admitted = true;
       this.emit({ kind: "status", payload: { state: "native_turn_accepted", session: sid, ...(ack?.id ? { messageId: String(ack.id) } : {}) } });
@@ -944,7 +949,7 @@ export class OpenCodeAdapter extends AdapterBase {
     if (bound) {
       let res: Response;
       try {
-        res = await fetch(`${this.baseUrl}/api/session/${encodeURIComponent(bound)}`, { signal: AbortSignal.timeout(15_000) });
+        res = await fetch(this.api(`/session/${encodeURIComponent(bound)}`), { signal: AbortSignal.timeout(15_000) });
       } catch (err) {
         throw new NativeDispatchRejected(`opencode server unreachable: ${(err as Error).message}`);
       }
@@ -953,7 +958,7 @@ export class OpenCodeAdapter extends AdapterBase {
       const info = (((await res.json().catch(() => ({}))) as Json).data ?? {}) as Json;
       const cur = (info.model ?? {}) as Json;
       // A model change keeps the session, as it does for the other harnesses.
-      if (ref && (cur.providerID !== ref.providerID || cur.id !== ref.id)) {
+      if (!this.modernApi && ref && (cur.providerID !== ref.providerID || cur.id !== ref.id)) {
         try {
           await fetchJson(`${this.baseUrl}/api/session/${encodeURIComponent(bound)}/model`, {
             method: "POST",
@@ -970,10 +975,10 @@ export class OpenCodeAdapter extends AdapterBase {
     if (ref) body.model = ref;
     if (this.options.agent) body.agent = this.options.agent;
     try {
-      const created = await fetchJson<Json>(`${this.baseUrl}/api/session`, {
+      const created = await fetchJson<Json>(this.api("/session"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(this.modernApi ? {} : body),
       });
       const id = String(((created.data ?? created) as Json).id ?? "");
       if (!id) throw new Error("no session id in the reply");
@@ -993,10 +998,9 @@ export class OpenCodeAdapter extends AdapterBase {
     const deadline = Date.now() + timeoutMs;
     let sawRunning = false;
     while (Date.now() < deadline) {
-      const res = await fetchJson<Json>(`${this.baseUrl}/api/session/active`).catch(() => null);
-      const active = res ? ((res.data ?? res) as Json) : null;
-      if (active && Object.prototype.hasOwnProperty.call(active, sid)) sawRunning = true;
-      else if (active) {
+      const active = await this.sessionActive(sid);
+      if (active === true) sawRunning = true;
+      else if (active === false) {
         if (sawRunning || this.interrupted) return true;
         const messages = await this.listMessages(sid).catch(() => [] as Json[]);
         if (messages.some((m) => (m.type ?? m.role) === "assistant" && !baseline.has(String(m.id)) && (m.time as Json | undefined)?.completed)) return true;
@@ -1013,7 +1017,7 @@ export class OpenCodeAdapter extends AdapterBase {
    */
   private async reportTurn(sid: string, turn: Json): Promise<string | null> {
     const turnId = String(turn.id);
-    const detail = await fetchJson<Json>(`${this.baseUrl}/api/session/${sid}/message/${turnId}`).catch(() => null);
+    const detail = await this.messageDetail(sid, turnId);
     const info = ((detail?.data ?? detail ?? turn) as Json) ?? turn;
     if (info.finish === "error" || info.error) {
       const err = (info.error ?? {}) as Json;
@@ -1071,7 +1075,7 @@ export class OpenCodeAdapter extends AdapterBase {
     this.sseAbort = null;
     if (this.child) {
       if (process.platform === "win32") await stopWindowsTree(this.child);
-      else this.child.kill("SIGTERM");
+      else await interruptProcess(this.child, true);
       this.child = null;
     }
     this.emit({ kind: "status", payload: { state: "stopped" } });

@@ -5,6 +5,7 @@
 
 import { type ChildProcess } from "node:child_process";
 import { spawn } from "../core/process.js";
+import { quiesceWindowsJob } from "../core/windows-jobs.js";
 import net from "node:net";
 import type {
   Adapter,
@@ -172,27 +173,34 @@ export function trackNativeExit(child: ChildProcess, fail: (error: Error) => voi
   let group: Promise<void> | undefined, deadline: NodeJS.Timeout | undefined;
   child.once("exit", () => {
     if (!child.pid) return;
-    group = quiesceProcessGroup(child.pid);
+    group = quiesceProcessGroup(child);
     void group.catch(() => {});
     deadline = setTimeout(() => fail(new NativeQuiescenceUnknown("native parent exited but tool streams did not close; inspect descendants")), 6500);
   });
   return async () => {
     clearTimeout(deadline);
-    if (child.pid) await (group ?? quiesceProcessGroup(child.pid));
+    if (child.pid) await (group ?? quiesceProcessGroup(child));
   };
 }
 
 /** SIGKILL submission is not proof of quiescence. Wait for process close and
  * propagate a timeout so a successor cannot acquire the same working tree. */
 export async function interruptProcess(child: ChildProcess, processGroup = false): Promise<void> {
+  if (process.platform === "win32" && processGroup) {
+    const closed = child.exitCode !== null || child.signalCode !== null ? Promise.resolve()
+      : new Promise<void>(resolve => child.once("close", () => resolve()));
+    await quiesceWindowsJob(child);
+    await Promise.race([closed, new Promise<void>((_, reject) => setTimeout(() => reject(new NativeQuiescenceUnknown("Windows native process streams did not close")), 6000).unref())]);
+    return;
+  }
   if (child.exitCode !== null || child.signalCode !== null) {
-    if (processGroup && child.pid) await quiesceProcessGroup(child.pid);
+    if (processGroup && child.pid) await quiesceProcessGroup(child);
     return;
   }
   await new Promise<void>((resolve, reject) => {
     let force: NodeJS.Timeout, deadline: NodeJS.Timeout;
     const cleanup = () => { clearTimeout(force); clearTimeout(deadline); child.off("close", closed); };
-    const closed = () => { cleanup(); if (processGroup && child.pid) void quiesceProcessGroup(child.pid).then(resolve, reject); else resolve(); };
+    const closed = () => { cleanup(); if (processGroup && child.pid) void quiesceProcessGroup(child).then(resolve, reject); else resolve(); };
     child.once("close", closed);
     const signal = (value: NodeJS.Signals) => { if (processGroup && child.pid) { try { process.kill(-child.pid, value); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; } } else child.kill(value); };
     force = setTimeout(() => { try { signal("SIGKILL"); } catch (error) { cleanup(); reject(error); } }, 3000);
@@ -203,9 +211,14 @@ export async function interruptProcess(child: ChildProcess, processGroup = false
 
 /** Native POSIX launches own a process group so inherited tool children cannot
  * keep editing after their parent reports completion. Escaped/detached children
- * are outside this guarantee; Windows needs a Job Object before native mode. */
-export async function quiesceProcessGroup(pid: number): Promise<void> {
-  if (process.platform === "win32") throw new NativeQuiescenceUnknown("native process containment is unavailable on Windows");
+ * are outside this POSIX guarantee. Windows verifies the owned Job Object. */
+export async function quiesceProcessGroup(target: number | ChildProcess): Promise<void> {
+  if (process.platform === "win32") {
+    if (typeof target === "number") throw new NativeQuiescenceUnknown("a PID alone cannot prove Windows Job Object ownership");
+    return quiesceWindowsJob(target);
+  }
+  const pid = typeof target === "number" ? target : target.pid;
+  if (!pid) throw new NativeQuiescenceUnknown("native process has no PID");
   const alive = () => {
     try { process.kill(-pid, 0); return true; }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw new NativeQuiescenceUnknown(`cannot inspect native process group ${pid}; quiescence unknown`); }

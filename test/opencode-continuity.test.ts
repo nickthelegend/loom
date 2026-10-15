@@ -22,7 +22,7 @@ import { fakeOpenCode, type FakeOpenCode } from "./opencode-fake.js";
 const open: Array<{ close: () => void | Promise<void> }> = [];
 afterEach(async () => { for (const item of open.splice(0).reverse()) await item.close(); });
 
-async function setup(fakeOpts: Parameters<typeof fakeOpenCode>[0] = {}) {
+async function setupProtocol(fakeOpts: Parameters<typeof fakeOpenCode>[0] = {}) {
   const dir = makeProjectDir(), log = await EventLog.open(path.join(dir, ".loom")); open.push(log);
   const server = await fakeOpenCode(fakeOpts); open.push(server);
   return { dir, log, brain: new ContinuityEngine(log, "project"), server };
@@ -52,7 +52,8 @@ async function turn(brain: ContinuityEngine, log: EventLog, dir: string, server:
   return { prepared, events: during, error, receipt: brain.store.receipts(req.id).at(-1)! };
 }
 
-describe("OpenCode native continuity", () => {
+describe.each([false, true])("OpenCode native continuity (npm API: %s)", modern => {
+  const setup = (options: Parameters<typeof fakeOpenCode>[0] = {}) => setupProtocol({ ...options, modern });
   it("is a native harness with a pinned protocol profile", () => {
     expect(isNativeKind("opencode")).toBe(true);
     expect(NATIVE_KINDS).toEqual(expect.arrayContaining(["codex", "claude-code", "opencode"]));
@@ -131,6 +132,13 @@ describe("OpenCode native continuity", () => {
     expect(stuck.receipt).toMatchObject({ status: "accepted", execution: "unknown" });
   });
 
+  it("retains the writer lease when the status endpoint cannot prove idle", async () => {
+    const { dir, log, brain, server } = await setup({ statusUnavailable: true });
+    const result = await turn(brain, log, dir, server, "work", { turnTimeoutMs: 300 });
+    expect(result.error).toBeInstanceOf(NativeQuiescenceUnknown);
+    expect(result.receipt).toMatchObject({ status: "accepted", execution: "unknown" });
+  });
+
   it("a failed turn is accepted work that failed, with the provider's reason", async () => {
     const { dir, log, brain, server } = await setup({ fail: "Model is unavailable" });
     const failed = await turn(brain, log, dir, server, "go");
@@ -150,8 +158,8 @@ describe("OpenCode native continuity", () => {
     expect(server.prompts[1]!.session).toBe(server.prompts[0]!.session); // same session, rebuilt state
   });
 
-  it.skipIf(process.platform === "win32")("probes an opencode agent pointed at a running server by that server's health", async () => {
-    const server = await fakeOpenCode(); open.push(server);
+  it("probes an opencode agent pointed at a running server by that server's health", async () => {
+    const server = await fakeOpenCode({ modern }); open.push(server);
     const monitor = new HarnessMonitor(() => [{ id: "oc", kind: "opencode", options: { baseUrl: server.url } }]);
     expect(await monitor.ensure("oc")).toMatchObject({ kind: "opencode", available: true });
     await server.close(); open.pop();
@@ -194,9 +202,9 @@ describe("OpenCode without continuity: interrupting a turn that never answered",
   });
 });
 
-describe.skipIf(process.platform === "win32")("OpenCode through the project runtime with continuity on", () => {
+describe.each([false, true])("OpenCode through the project runtime with continuity on (npm API: %s)", modern => {
   it("sends a continuity turn to OpenCode instead of refusing it", async () => {
-    const server = await fakeOpenCode({ reply: "from the runtime" }); open.push(server);
+    const server = await fakeOpenCode({ reply: "from the runtime", modern }); open.push(server);
     const dir = makeProjectDir({
       brain: { continuity: true, extractor: "off" },
       agents: [{ id: "oc", kind: "opencode", options: { baseUrl: server.url, pollMs: 20 } }],

@@ -20,10 +20,35 @@ supported; prompts are passed as literal arguments, including quotes,
 newlines, spaces and shell characters. Commands you configure for tests and
 transcription use `cmd.exe` on Windows, so write them in Windows shell syntax.
 
+For OpenCode's current native Windows release:
+
+```powershell
+npm.cmd install -g opencode-ai@1.19.0
+opencode.cmd --version
+```
+
+Native continuity supports Codex, Claude Code and OpenCode on Windows. Enable
+`brain.continuity` for sequential native chats. Loom probes Job Object assignment
+on this host before admitting a native turn; a failed probe leaves it unavailable.
+The native binding and delta context survive a daemon restart. Parallel Orchestra
+and crews use the ordinary project mode, as on macOS.
+
+Loom uses Koffi's packaged native binding; no local C++ toolchain is required on
+supported Windows architectures. A Node bootstrap joins a kill-on-close Job Object
+before it can launch the harness. Only the daemon retains a job handle. Shutdown
+waits for Windows to report zero job members, including detached tool children;
+a failed verification retains the continuity writer lease. Daemon crashes close
+the handle and terminate contained processes. Shared pre-existing console hosts
+are outside the job.
+
 Antigravity's Windows installer and default `%LOCALAPPDATA%\agy\bin` location
 follow its [official installation guide](https://www.antigravity.google/docs/cli/install/).
 
 The terminal uses ConPTY when node-pty loads, with a pipe fallback otherwise.
+The dependency is pinned to `node-pty` 1.2.0-beta.15, which includes Microsoft's
+[fix for simultaneous Windows terminal exits](https://github.com/microsoft/node-pty/pull/922).
+The stable 1.1.0 release still contains that native race. Terminal shutdown waits
+for shell exit, and late callbacks from an old shell cannot close its replacement.
 Both paths are exercised in CI. The pipe terminal preserves its shell session
 when interrupting a foreground process. Windows console hosts are excluded
 from ordinary process-tree shutdown.
@@ -49,10 +74,6 @@ from ordinary process-tree shutdown.
   and 24, with both ConPTY/PTY and pipe terminal modes.
 
 ## Support limits
-
-Native continuity remains unavailable on Windows until provider processes
-have verified Windows Job Object containment. Loom reports this explicitly;
-ordinary chats, routes, Orchestra and sequential crews remain available.
 
 Desktop installers are currently unsigned. Trusted signing and an installed
 release-to-release update check are still required for issue #70. Hosted
