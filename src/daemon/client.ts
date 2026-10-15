@@ -97,6 +97,7 @@ export class DaemonClient {
     method: string,
     pathName: string,
     body?: Record<string, unknown>,
+    timeoutMs = 30_000,
   ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${pathName}`, {
       method,
@@ -105,7 +106,7 @@ export class DaemonClient {
         ...(body ? { "content-type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (!res.ok) {
@@ -283,6 +284,12 @@ export class DaemonClient {
 
   removeCrew(id: string, crew: string): Promise<{ ok: boolean }> {
     return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/crews/${encodeURIComponent(crew)}`);
+  }
+
+  /** Proof: check the newest finished turn in a chat (daemon/proof.ts). */
+  proof(id: string, body: { chat?: string; at?: number; testCommand?: string } = {}): Promise<Record<string, any>> {
+    // it re-runs the project's tests: give it as long as the daemon gives them (10 min default), and a little more
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/proof`, body, 31 * 60_000);
   }
 
   crewAction(id: string, crew: string, action: string, body: Record<string, unknown> = {}): Promise<Record<string, any>> {

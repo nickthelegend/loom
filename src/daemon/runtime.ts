@@ -19,6 +19,7 @@ import { NativeUsage } from "./runtime/native-usage.js";
 import { notify } from "../core/notify.js";
 import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js";
 import { CrewEngine } from "../core/crew.js";
+import { ProofRunner } from "./proof.js";
 import { isPermissionMode, permissionFor, unsupportedReason, type PermissionMode } from "../core/permissions.js";
 import { startPreviewProxy, type PreviewProxy } from "../core/preview-proxy.js";
 import {
@@ -146,6 +147,8 @@ export class ProjectRuntime {
   readonly orchestra: OrchestraEngine;
   /** Agent Teams: crews of agents with roles, one goal at a time (core/crew.ts). */
   readonly crews: CrewEngine;
+  /** Proof: checks an agent's "done" against what ran and a clean re-run of the tests. */
+  readonly proofs: ProofRunner;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -367,6 +370,13 @@ export class ProjectRuntime {
       coordinator: () => this.coordinator,
     });
 
+    this.proofs = new ProofRunner({
+      projectId: info.id,
+      dir: info.dir,
+      config: () => this.config.proof ?? {},
+      list: (opts) => this.log.list(opts),
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+    });
     this.crews = new CrewEngine({
       projectId: info.id,
       projectName: info.name,
@@ -1963,6 +1973,11 @@ export class ProjectRuntime {
     // read the turn before this one.
     if (event.kind === "run_complete" && event.agentId) {
       this.captureTurnDiff(event.agentId);
+      // A reply that claims the tests (or build, or lint) pass gets checked —
+      // against what the turn ran, and a clean re-run — without being asked.
+      if (!event.payload.error && this.proofs.wantsAuto(event))
+        void this.proofs.prove(event.chat ?? MAIN_CHAT, { at: event.id, auto: true }).catch((err) =>
+          logbook.warn("proof", "couldn't check the turn", String(err), this.info.id));
       if (!this.continuity) void this.captureAgentDecisions(event.agentId).catch(() => { });
     }
     this.routes.handleAgentEvent(event);

@@ -20,6 +20,7 @@
  */
 
 import { execFile, shellInvocation, spawnContained } from "./process.js";
+import { runCommand } from "./run-command.js";
 import { interruptProcess } from "../adapters/base.js";
 import { launched } from "../providers/process.js";
 import { createWorktree, predictMerge } from "./worktrees.js";
@@ -238,29 +239,8 @@ const TURN_TEXT_CAP = 40_000;
 
 /** Run a crew's test command in the worktree: ok when it exits 0; the output's tail either way. */
 async function runTests(command: string, cwd: string, timeoutMs: number, signal: AbortSignal): Promise<{ ok: boolean; output: string }> {
-  const shell = shellInvocation(command);
-  const child = spawnContained(shell.command, shell.args, { windowsVerbatimArguments: shell.windowsVerbatimArguments, cwd,
-    stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" } });
-  let output = "", launchError = "", timedOut = false, stop: Promise<void> | undefined;
-  const append = (chunk: Buffer) => { output = (output + chunk.toString()).slice(-8000); };
-  child.stdout?.on("data", append); child.stderr?.on("data", append);
-  child.on("error", error => { launchError = error.message; });
-  const closed = new Promise<number | null>(resolve => child.once("close", resolve));
-  let failStop!: (error: unknown) => void;
-  const stopped = new Promise<never>((_, reject) => { failStop = reject; });
-  void stopped.catch(() => {});
-  const halt = () => { stop ??= interruptProcess(child, true); void stop.catch(failStop); };
-  signal.addEventListener("abort", halt, { once: true });
-  if (signal.aborted) halt();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    timer = setTimeout(() => { timedOut = true; halt(); }, timeoutMs);
-    await launched(child);
-    const code = await Promise.race([closed, stopped]);
-    await (stop ?? interruptProcess(child, true));
-    return { ok: code === 0 && !timedOut && !signal.aborted,
-      output: `${output.trim() || launchError}${timedOut ? `\n(timed out after ${Math.round(timeoutMs / 1000)}s)` : ""}` };
-  } finally { clearTimeout(timer); signal.removeEventListener("abort", halt); await (stop ?? interruptProcess(child, true)); }
+  const r = await runCommand(command, cwd, { timeoutMs, signal });
+  return { ok: r.ok, output: r.output };
 }
 
 async function git(args: string[], cwd: string): Promise<string> {

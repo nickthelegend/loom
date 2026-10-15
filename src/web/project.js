@@ -855,6 +855,18 @@ import { openMenu } from './menus.js';
       // card, and opening a diff dock instead of asking would be a surprise.
       var rw = ev.target.closest && ev.target.closest("[data-rewind]");
       if (rw) { ev.preventDefault(); ev.stopPropagation(); askRewind(rw.getAttribute("data-rewind"), rw); return; }
+      // Check it: Proof for the turn this card ends (runs the tests again, so it can take a while)
+      var pf = ev.target.closest && ev.target.closest("[data-proof-at]");
+      if (pf) {
+        ev.preventDefault(); ev.stopPropagation();
+        if (pf.disabled) return;
+        pf.disabled = true; var was = pf.innerHTML; pf.innerHTML = ICONS.shield + "Checking\u2026";
+        api("/api/projects/" + pid + "/proof", { method: "POST", body: JSON.stringify({ chat: chatId, at: Number(pf.getAttribute("data-proof-at")) }) })
+          .then(function(r){ toast(r.headline || "checked"); })
+          .catch(function(err){ toast(err.message); })
+          .then(function(){ pf.disabled = false; pf.innerHTML = was; });
+        return;
+      }
       var go = ev.target.closest && ev.target.closest("[data-gochat]");
       if (go) { ev.preventDefault(); openOrchChat(go.getAttribute("data-gochat")); return; }
       // A message's own actions: the ⋯ menu, your prompt's edit/copy/star,

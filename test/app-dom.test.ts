@@ -15,6 +15,7 @@
  * developer is running, and the loser serves someone a stale app.
  */
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { JSDOM, VirtualConsole } from "jsdom";
 import WebSocket from "ws";
@@ -526,6 +527,33 @@ describe("web app · the thread", () => {
     await waitUntil(() => box.value === "");
     expect(m.errors.join("\n")).toBe("");
   });
+
+  it("Proof: a claim that didn't hold shows as a card, and Check it re-checks a turn on demand", async () => {
+    // its own git project, so a turn that edits a file gets a turn card
+    const dir = makeProjectDir({ name: "proofdom", agents: [{ id: "echo", kind: "echo" }] });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+    fs.writeFileSync(`${dir}/.gitignore`, ".loom/\n");
+    execFileSync("git", ["add", "-A"], { cwd: dir });
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed"], { cwd: dir });
+    const client = new DaemonClient(readDaemonConfig()!);
+    const pid = (await client.addProject(dir)).project.id;
+    const m = mount({ hash: `#p/${pid}` });
+    await waitUntil(() => !!$(m, "#box"));
+    // echo repeats you: its reply claims the tests pass, in a project with no test command
+    ($(m, "#box") as HTMLInputElement).value = "write:notes.txt Done. All tests pass.";
+    ($(m, "#cform") as HTMLFormElement).dispatchEvent(new m.window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitUntil(() => !!$(m, ".proofcard"), { timeoutMs: 20_000 });
+    const card = $(m, ".proofcard") as HTMLElement;
+    expect(card.classList.contains("v-contradicted")).toBe(true);
+    expect(card.querySelector(".pfh b")?.textContent).toBe("Didn\u2019t hold");
+    expect(card.querySelector(".pfc li.pf-contradicted .pfw")?.textContent).toBe("no test command ran this turn");
+    expect(card.querySelector(".pfauto")).toBeTruthy();
+    // Check it, on the turn's card, asks again (over HTTP) and the thread gets a second card
+    await waitUntil(() => !!$(m, ".turncard [data-proof-at]"), { timeoutMs: 20_000 });
+    ($(m, ".turncard [data-proof-at]") as HTMLElement).click();
+    await waitUntil(() => m.window.document.querySelectorAll(".proofcard").length === 2, { timeoutMs: 20_000 });
+    expect(m.errors.join("\n")).toBe("");
+  }, 60_000);
 
   it("renders an agent reply as markdown, not literal characters", async () => {
     // The echo agent replies with your text, so a markdown message round-trips
