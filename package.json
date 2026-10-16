@@ -47,7 +47,7 @@
     "./sdk": "./dist/sdk.js"
   },
   "scripts": {
-    "build": "npm run build:web && tsc",
+    "build": "npm run build:web && tsc && node scripts/prune-dist.mjs",
     "prepare": "npm run build",
     "dev": "tsx src/cli/index.ts",
     "typecheck": "tsc --noEmit",
