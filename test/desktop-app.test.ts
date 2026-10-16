@@ -13,7 +13,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error — plain ESM JS, no types; that's the point of the seam
-import { isStaleDaemon, localBuildRev, openDaemonLog, prepareAppUrl } from "../desktop/loom-app.js";
+import { daemonProcessAlive, isStaleDaemon, localBuildRev, openDaemonLog, prepareAppUrl } from "../desktop/loom-app.js";
+import { failedPage, startingPage } from "../desktop/pages.js";
 import { tmpDir } from "./helpers.js";
 
 /**
@@ -320,5 +321,49 @@ describe("desktop · the folder picker", () => {
     expect(main, "you should be able to start a project in a folder that doesn't exist yet").toContain(
       "createDirectory",
     );
+  });
+});
+
+describe("starting up, from an installed app", () => {
+  const html = (u: string) => decodeURIComponent(u.replace(/^data:text\/html;charset=utf-8,/, ""));
+
+  it("says it's starting, and if it's slow, that macOS may be asking for permission", () => {
+    const page = html(startingPage("#0a0a0a"));
+    expect(page).toContain("Starting Loom…");
+    expect(page).toMatch(/class="later">Still waiting .* choose <b>Allow<\/b>/s);
+    expect(page).toContain("animation:show .4s ease 6s forwards");
+    expect(page).not.toMatch(/<script/i);
+  });
+
+  it("an installed app's error page gives an installed app's advice, and escapes the error", () => {
+    const packaged = html(failedPage("#000", "Error: <boom>", { packaged: true, logPath: "/Users/me/.loom/daemon.log" }));
+    expect(packaged).toContain("Error: &lt;boom&gt;");
+    expect(packaged).toContain("Quit Loom and open it again");
+    expect(packaged).toContain("/Users/me/.loom/daemon.log");
+    expect(packaged).not.toContain("npm run build");
+    expect(html(failedPage("#000", "x", { packaged: false, logPath: "l" }))).toContain("npm run build");
+  });
+
+  it("knows a live loom daemon from a dead or reused pid", () => {
+    expect(daemonProcessAlive(0)).toBe(false);
+    expect(daemonProcessAlive(2 ** 22 + 12345)).toBe(false); // nobody
+    const ps = (out: string) => (() => out) as never;
+    expect(daemonProcessAlive(process.pid, "darwin", ps("/opt/homebrew/bin/node /App/daemon/dist/cli/index.js daemon\n"))).toBe(true);
+    expect(daemonProcessAlive(process.pid, "darwin", ps("/usr/bin/vim notes.txt\n"))).toBe(false);
+    expect(daemonProcessAlive(process.pid, "win32", ps(""))).toBe(true);
+  });
+
+  it("every local file the shell imports is packaged", () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join("desktop", "package.json"), "utf8")) as { build: { files: string[] } };
+    const shipped = new Set(pkg.build.files);
+    const seen = new Set<string>(), queue = ["main.js"];
+    while (queue.length) {
+      const f = queue.shift()!;
+      if (seen.has(f)) continue;
+      seen.add(f);
+      const src = fs.readFileSync(path.join("desktop", f), "utf8");
+      for (const m of src.matchAll(/from\s+["']\.\/([\w.-]+\.(?:js|cjs|mjs))["']/g)) queue.push(m[1]!);
+    }
+    for (const f of seen) expect(shipped.has(f) || [...shipped].some((g) => g.endsWith("/**/*") && f.startsWith(g.slice(0, -5))), `${f} is imported but not in build.files`).toBe(true);
   });
 });
