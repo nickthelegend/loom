@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-10-16
+
+### Can you trust what your agents did?
+
+- **Proof**: when a reply claims the tests, build, typecheck or lint pass,
+  Loom checks the claim against what that turn actually ran, and re-runs the
+  tests in a clean worktree holding exactly the agent's changes. The verdict
+  is a card in the thread: Verified, Didn't hold (with why), or Unverified.
+  Every turn card has **Check it**; `loom proof` from a terminal.
+- **Loop watch**: the same command failing three times in a turn (or the same
+  call five times) gets a card with Stop / Nudge it / Hand it off, and a push.
+  `watchdog.auto: "nudge"` also stops it and tells it to step back, once.
+- **Blast-Radius Shield**: a force-push, `reset --hard`, a recursive delete
+  outside the project, `DROP TABLE`, `terraform destroy`, `npm publish`,
+  `sudo`, `curl | sh`, and the like get a red card and a push the moment an
+  agent runs them. `shield.auto: "stop"` (the default on a night shift) stops
+  the turn.
+- **Review Triage**: every turn card says which files to read first, and why:
+  an added secret, a deleted or skipped test, auth code, a migration, CI,
+  dependencies, risky calls, a big change with no test.
+- **Scorecards**: each agent's record of how often its "done" held up, its
+  circles and shield trips, and cost per verified result, in the
+  Observatory leaderboard, the phone, and `loom scorecard`.
+
+### Work that carries on without you
+
+- **Night Shift**: line up tasks, one per line. They run one after another, a
+  chat each, while you're away, guarded by Proof, the loop watch and the
+  shield, and stop at a stop-by time or a budget. One morning report says how
+  each went. Desktop ⋯ → Night shift, phone 🌙, or `loom shift`.
+- **Quota Relay**: an agent that hits its usage limit mid-task hands its work
+  (and a briefing) to the next agent, routes new prompts there while it's out,
+  and takes the baton back when the window resets.
+- **Pre-flight forecast**: the composer shows what a turn on the chosen agent
+  usually costs and takes, from its own recent turns, and turns amber when
+  one more could cross its daily budget.
+- **Replay**: export any chat as one self-contained HTML page to share, with
+  no scripts and nothing to load. ⋯ → Export as replay, or `loom replay`.
+- **Design Mode**: a picked element in the Browser tab brings its computed
+  styles and its own screenshot into the composer.
+
+### Agent Teams
+
+- **Persistent teammates** (P2) with their own native sessions and **crew
+  memory**. Teammates can now `remember` decisions, constraints and
+  conventions themselves.
+- **Parallel builders** in isolated worktrees, and **races** where you pick
+  the result (P3).
+- **Team coordination**: crews across teammates' daemons, owner requests, and
+  runners that execute crew goals. Full crew controls on desktop and phone.
+
+### Windows and a lighter daemon
+
+- Windows **Job Object** containment, native continuity on Windows, and
+  OpenCode 1.19 continuity. Fixes for ConPTY exit races and CLI launching.
+- **Memory**: the daemon starts ~25 MB lighter (the Claude SDK loads on first
+  use), idle OpenCode servers stop after 30 minutes, CLI probes are cached,
+  event reads are indexed, and long sessions no longer leak turn text,
+  attachments or socket backlogs.
+- OpenCode bash calls report their exit code, so a failing command no longer
+  reads as a success.
+
+### Fixed
+
+- A prompt sent to an agent just after its usage window reset, before the
+  baton came back, failed with "does not hold the baton". A stand-in that was
+  mid-turn at the reset kept the baton for good.
+- A runner's dropped progress heartbeat left a goal's PR invisible to the
+  team for up to a minute; it's re-sent after 5 seconds.
+- Phone sign-in aligned with GitHub; OAuth callbacks are validated.
+
+
 ### One link to bring a teammate in, and crews of agents
 
 - **Invite** (a project's header, or `loom invite`) gives you one https link.

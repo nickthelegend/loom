@@ -336,9 +336,11 @@ detected under `%USERPROFILE%\.local\bin`.
 
 Normal chat, shared memory, routes, Orchestra worktrees and crews use the
 standard runtime on Windows. The optional **native continuity** mode
-(`brain.continuity: true`) requires verified process containment and remains
-unavailable on Windows until Job Objects are implemented. Leave it off for
-Orchestra and crews, which also run outside native continuity on other OSes.
+(`brain.continuity: true`) needs verified process containment. On Windows,
+every harness runs inside a Job Object, and Loom checks the containment
+works on this machine before it offers the mode; if the check fails, the
+agent says why and stays on the standard runtime. Leave it off for Orchestra
+and crews, which also run outside native continuity on other OSes.
 
 ```bash
 npm install -g @loompad/cli          # → `loom` on your PATH
