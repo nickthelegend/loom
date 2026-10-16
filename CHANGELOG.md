@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-10-16
+
+Found installing 1.1.0 on a Mac whose projects live on an external drive.
+
+### Fixed
+
+- **Loom Desktop explains a slow start instead of sitting blank.** The first
+  time it reads projects on an external drive (or in Documents or Desktop),
+  macOS asks whether Loom Desktop may access those files, and the background
+  service waits for the answer. The window now says *Starting Loom…* at once,
+  and after a few seconds that macOS may be asking, and to choose Allow.
+- **It no longer starts a second background service** onto a port that's
+  taken when the first is running but waiting on that prompt. It waits for
+  the first one, up to five minutes.
+- **The error page gives an installed app's advice**: quit and reopen, where
+  the permission lives in System Settings, and where the log is. It no longer
+  says "run npm run build". The pairing request has a timeout.
+- **Builds prune compiled files whose source is gone.** Leftovers in a
+  long-lived checkout changed the build fingerprint the desktop app and the
+  CLI compare, so the same release could look like two builds and each would
+  restart the other's background service.
+
+
 ## [1.1.0] — 2026-10-16
 
 ### Can you trust what your agents did?
