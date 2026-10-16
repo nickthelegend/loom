@@ -24,9 +24,9 @@
 cask "loom-desktop" do
   arch arm: "arm64", intel: "x64"
 
-  version "1.0.1"
-  sha256 arm:   "f3f154dd89fbccc62f13b30fae9c9ebd275cc6a0289e974ff49bcf5940417778",
-         intel: "aacfe13b1ac3254c5a08af3237b6b754786f38b304586557e3baa7db3ba8330d"
+  version "1.1.0"
+  sha256 arm:   "f18f4b9a4939a5710051a8eec209020c9b97e3eeda0153cda5dfea7e9df5ca04",
+         intel: "698bf8bc0c0d80fe15271b97a698ff0e5375aaad6f8c5e5e3ad29bda867bf3bf"
 
   url "https://github.com/nickthelegend/loom/releases/download/v#{version}/Loom-Desktop-#{version}-#{arch}.dmg"
   name "Loom Desktop"
