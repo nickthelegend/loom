@@ -29,6 +29,7 @@
     "files": [
       "main.js",
       "loom-app.js",
+      "pages.js",
       "updater.js",
       "updater-mac.js",
       "preload.cjs",

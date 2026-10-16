@@ -5,7 +5,7 @@
 // Reuses the exact same daemon + pairing flow as the CLI and phone app —
 // the desktop window is just another paired client, on the same machine.
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -114,9 +114,40 @@ export function isStaleDaemon(aliveRev, localRev) {
   return aliveRev !== localRev;
 }
 
+/** Is this pid a running loom daemon (not a reused pid of something else)? */
+export function daemonProcessAlive(pid, platform = process.platform, run = execFileSync) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  if (platform === "win32") return true;
+  try {
+    return /index\.js["']?\s+daemon\b/.test(String(run("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" })));
+  } catch {
+    return false;
+  }
+}
+
+export function daemonLogPath() {
+  return path.join(loomHome(), "daemon.log");
+}
+
 async function ensureDaemon() {
   let cfg = readDaemonConfig();
   const alive = cfg ? await health(cfg) : null;
+  // Running but not answering: usually it's blocked on a macOS permission prompt (files on an
+  // external drive, in Documents…) and carries on once it's answered. Starting a second daemon
+  // can't help — the port is taken — so wait for this one, longer than a cold start takes.
+  if (!alive && cfg?.pid && daemonProcessAlive(cfg.pid)) {
+    const until = Date.now() + 5 * 60_000;
+    while (Date.now() < until) {
+      if (await health(cfg)) return cfg;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error("the loom daemon is running but not answering — it may be waiting on a macOS permission prompt");
+  }
   if (alive) {
     if (!isStaleDaemon(alive.rev, localBuildRev())) return cfg;
     // A healthy daemon from an older build would serve the old app — restart
@@ -161,7 +192,7 @@ const LOG_MAX_BYTES = 5 * 1024 * 1024;
  * desktop app that won't start because of it is worse.
  */
 export function openDaemonLog() {
-  const file = path.join(loomHome(), "daemon.log");
+  const file = daemonLogPath();
   try {
     fs.mkdirSync(loomHome(), { recursive: true });
     if (fs.statSync(file).size > LOG_MAX_BYTES) fs.renameSync(file, `${file}.1`);
@@ -240,6 +271,7 @@ export async function prepareAppUrl() {
   const res = await fetch(`${base}/api/pair/new`, {
     method: "POST",
     headers: { authorization: `Bearer ${cfg.adminToken}` },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`could not mint pairing token (${res.status})`);
   const { token } = await res.json();

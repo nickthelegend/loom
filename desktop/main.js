@@ -6,7 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, screen, shell } from "electron";
-import { prepareAppUrl, readDaemonConfig } from "./loom-app.js";
+import { daemonLogPath, prepareAppUrl, readDaemonConfig } from "./loom-app.js";
+import { failedPage, startingPage } from "./pages.js";
 import { createPet, petEnabled } from "./pet-window.js";
 import { checkForUpdates } from "./updater.js";
 
@@ -127,21 +128,13 @@ async function createWindow() {
     return { action: "deny" };
   });
 
+  // something to look at while the daemon starts — and, if it's slow, why (a macOS permission prompt, usually)
+  await win.loadURL(startingPage(BG)).catch(() => {});
   try {
     const { url } = await prepareAppUrl();
     await win.loadURL(url);
   } catch (err) {
-    await win.loadURL(
-      "data:text/html," +
-        encodeURIComponent(
-          `<body style="background:${BG};color:#fafafa;font:14px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.01em;padding:48px">` +
-            `<h2 style="font-weight:650;font-size:22px;margin:0 0 4px">loom</h2>` +
-            `<div style="width:48px;height:2px;border-radius:1px;background:linear-gradient(90deg,transparent,#67e8f9,transparent);margin:0 0 18px"></div>` +
-            `<p style="color:#a1a1a1">Could not start the loom daemon.</p>` +
-            `<pre style="color:#ff6568;background:#171717;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:12px 14px;white-space:pre-wrap">${String(err)}</pre>` +
-            `<p style="color:#a1a1a1">Make sure the project is built (<code style="background:#262626;border-radius:5px;padding:1px 6px">npm run build</code>) and try again.</p></body>`,
-        ),
-    );
+    await win.loadURL(failedPage(BG, err, { packaged: app.isPackaged, logPath: daemonLogPath() }));
   }
 }
 
