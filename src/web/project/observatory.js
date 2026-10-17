@@ -52,7 +52,7 @@ export function createObservatory(view) {
         canvas: "<b>Right now.</b> Who is running this second, who is idle, and where the " + fx + "baton</b> is \u2014 the ring pulses on whoever holds it. Every agent hangs off the <b>one shared brain</b> in the middle: that is the memory they all read and write, which is the whole point of the fleet. Updates live as turns start and finish. " + drag,
         graph: "<b>What already happened.</b> The baton\u2019s actual route through the fleet, left to right, oldest handoff first. Each " + fx + "\u2192</b> is one real handoff from the event log; <code>19t</code> under a name is turns that agent took. Live view is the <b>Live fleet</b> tab \u2014 this one is history. " + drag,
         timeline: "<b>The run, in the order it happened.</b> Every turn, handoff, route, memory fold, budget pause and self-heal line on one spine \u2014 so \u201cwhy did it do that?\u201d is answered by scrolling rather than by guessing. The \ud83d\udca1 lines are <b>decisions</b>; click one to read the reasoning behind it.",
-        usage: "<b>What it cost, and what it used.</b> Spend and tokens split by agent, model, chat, day and tool, beside the turn metrics. Each turn\u2019s dollars are counted once, on the turn that spent them. An agent that reports no price (a subscription CLI, a free model) shows its tokens at $0 and is flagged, so the total is the least you spent, not an estimate.",
+        usage: "<b>What it cost, and what it used.</b> Spend and tokens split by agent, model, chat, day and tool, beside the turn metrics. Each turn\u2019s dollars are counted once, on the turn that spent them. An agent that reports no price (a subscription CLI, a free model) shows its tokens at $0 and is flagged, so the total is the least you spent; beside it, \u201cest.\u201d is what those tokens would cost at the model\u2019s API price, when Loom knows it \u2014 an estimate, never added to the total.",
         metrics: "<b>Where the run\u2019s time and money actually went.</b> Nothing here is estimated: tokens and cost are what each agent\u2019s own CLI reported for the turn, and the durations are the spans Loom exports. Every agent carries a 0\u2013100 <b>health score</b>, and <b>\u26a0 Triage</b> root-causes a bad one from that agent\u2019s own spans.",
         decisions: "<b>The reasoning, not just the result.</b> Every choice an agent made, with what it weighed and rejected \u2014 mined out of its own prose after each turn, so it survives the agent that made it. A confidence it actually measured and one merely pattern-matched are labelled differently, because a number you cannot source is worse than no number.",
         alerts: "<b>What your monitoring told Loom, and what Loom did about it.</b> A firing alert takes the named agent out of rotation \u2014 it is refused the baton until the alert resolves \u2014 and a resolved one puts it back. This is the part your dashboards cannot show you: they know the alert fired, only Loom knows the fleet reacted.",
@@ -581,7 +581,7 @@ export function createObservatory(view) {
       }).join("") + "</div>";
       var tile = function(label, val, sub){ return '<div class="obminicard"><div class="obcl">' + esc(label) + '</div><div class="obcv sm">' + val + "</div>" + (sub ? '<div class="usub">' + sub + "</div>" : "") + "</div>"; };
       var tiles =
-        tile("Spend", money(t.usd || 0), (t.unpriced ? t.unpriced + " unpriced turn" + (t.unpriced === 1 ? "" : "s") : "every turn priced")) +
+        tile("Spend", money(t.usd || 0), (t.unpriced ? (t.estUsd ? '<span title="tokens at the model\u2019s API price, for agents that report tokens but no cost">+ ~' + money(t.estUsd) + " est.</span> \u00b7 " : "") + t.unpriced + " unpriced turn" + (t.unpriced === 1 ? "" : "s") : "every turn priced")) +
         tile("Per turn", money(t.usdPerTurn || 0), (t.turns || 0) + " turns") +
         tile("Tokens in", tok(t.tokensIn), pct(t.cachedIn, t.tokensIn) + " from cache") +
         tile("Tokens out", tok(t.tokensOut), t.reasoning ? tok(t.reasoning) + " thinking" : "") +
@@ -607,15 +607,17 @@ export function createObservatory(view) {
       }).join("") + "</div>" : '<div class="obnote">No turns in this period.</div>';
       var share = function(x){ return t.usd > 0 ? pct(x.usd, t.usd) : pct(x.tokensIn + x.tokensOut, (t.tokensIn || 0) + (t.tokensOut || 0)); };
       var shareBar = function(x){ var v = t.usd > 0 ? x.usd / t.usd : (x.tokensIn + x.tokensOut) / (((t.tokensIn || 0) + (t.tokensOut || 0)) || 1); return '<span class="ushare"><i style="width:' + Math.round(v * 100) + '%"></i></span>'; };
+      // an estimate sits beside the reported spend, never in it
+      var estNote = function(x){ return x.estUsd ? ' <span class="uest" title="tokens at the model\u2019s API price \u2014 this agent reports tokens but no cost">~' + money(x.estUsd) + " est.</span>" : ""; };
       var agentRows = (u.byAgent || []).map(function(a){
         return "<tr><td>" + avatarFor(a.agentId) + " " + esc(labelOf(a.agentId)) + (a.unpriced ? ' <span class="uflag" title="reports tokens but no price">unpriced</span>' : "") + "</td>" +
-          '<td class="num">' + money(a.usd) + "</td><td>" + shareBar(a) + " " + share(a) + "</td>" +
+          '<td class="num">' + money(a.usd) + estNote(a) + "</td><td>" + shareBar(a) + " " + share(a) + "</td>" +
           '<td class="num">' + a.turns + '</td><td class="num">' + tok(a.tokensIn) + '</td><td class="num">' + tok(a.tokensOut) + '</td><td class="num">' + pct(a.cachedIn, a.tokensIn) + "</td>" +
           '<td class="num">' + (a.turns ? durfmt(a.ms / a.turns) : "\u2014") + '</td><td class="num">' + a.toolCalls + (a.toolFailures ? ' <span class="cdel">(' + a.toolFailures + ")</span>" : "") + '</td><td class="num">' + a.errors + "</td>" +
           '<td class="umodels">' + esc((a.models || []).join(", ")) + "</td></tr>";
       }).join("");
       var modelRows = (u.byModel || []).map(function(m){
-        return "<tr><td><code>" + esc(m.model) + '</code></td><td class="num">' + money(m.usd) + "</td><td>" + shareBar(m) + " " + share(m) + '</td><td class="num">' + m.turns + '</td><td class="num">' + tok(m.tokensIn) + '</td><td class="num">' + tok(m.tokensOut) + '</td><td class="num">' + money(m.turns ? m.usd / m.turns : 0) + "</td></tr>";
+        return "<tr><td><code>" + esc(m.model) + '</code></td><td class="num">' + money(m.usd) + estNote(m) + "</td><td>" + shareBar(m) + " " + share(m) + '</td><td class="num">' + m.turns + '</td><td class="num">' + tok(m.tokensIn) + '</td><td class="num">' + tok(m.tokensOut) + '</td><td class="num">' + money(m.turns ? m.usd / m.turns : 0) + "</td></tr>";
       }).join("");
       var chatRows = (u.byChat || []).map(function(c){
         return '<tr class="uclick" data-uchat="' + esc(c.chat) + '"><td>' + esc(c.title || c.chat) + '</td><td class="num">' + money(c.usd) + '</td><td class="num">' + c.turns + '</td><td class="num">' + tok(c.tokensIn + c.tokensOut) + "</td></tr>";
