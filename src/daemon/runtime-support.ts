@@ -151,7 +151,7 @@ export function planModeBriefing(prompt: string): string {
   const day = new Date().toISOString().slice(0, 10);
   return [
     "[Loom · Plan mode] Do NOT change any code in this turn. Investigate the repository, then write a",
-    `complete implementation plan to plans/${day}-${slug}.md (create the plans/ folder if needed). Structure:`,
+    `complete implementation plan to .loom/plans/${day}-${slug}.md (create the folder if needed — it's Loom's, kept out of the repo). Structure:`,
     "front matter (title, status: proposed), then ## Goal, ## Context (relevant files by path and what they do),",
     "## Approach, ## Tasks — each task self-contained with its files, steps and acceptance criteria, written so",
     "a different coding agent could execute it with no other context — ## Risks, ## Verification (exact commands).",

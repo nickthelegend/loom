@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import type { RouteContext } from './context.js';
 import { readProjectConfig } from "../../core/registry.js";
 import { findProject } from "../../core/registry.js";
-import { setupReport } from "../../core/setup.js";
+import { setupReport, signInCommand } from "../../core/setup.js";
 import { forgetProbes } from "../../adapters/base.js";
 /** Register setup routes in the order established by LoomDaemon.routes(). */
 export function registerSetupRoutes(app: Express, ctx: Pick<RouteContext, "runtimes">): void {
@@ -38,6 +38,13 @@ export function registerSetupRoutes(app: Express, ctx: Pick<RouteContext, "runti
       try {
         const { envChecks, projectChecks, providerChecks, freeModelTrouble, envFacts } = await import("../../cli/doctor.js");
         const [checks, providers] = await Promise.all([envChecks(), providerChecks()]);
+        // a turn that failed "not signed in" outranks the CLI's own sign-in file (#274)
+        for (const rt of ctx.runtimes.values()) {
+          for (const s of rt.learnedSignOuts()) {
+            const i = checks.findIndex((c) => c.name === s.kind);
+            if (i >= 0 && checks[i]!.status !== "fail") checks[i] = { name: s.kind, status: "fail", detail: `a turn by ${s.agentId} failed: “${s.message}”${signInCommand(s.kind) ? ` — ${signInCommand(s.kind)}` : ""}` };
+          }
+        }
         checks.push(...providers);
         const projId = (req.query as Record<string, string>).project;
         if (projId) {

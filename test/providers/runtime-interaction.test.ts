@@ -29,7 +29,7 @@ async function runtimeWith(bin: string) {
 }
 
 describe("runtime · provider interaction", () => {
-  it("plans natively and keeps the proposed plan under plans/", async () => {
+  it("plans natively and keeps the proposed plan under .loom/plans/, not in the repo", async () => {
     const bin = fakeCodex({ script: [started, codexItem({ type: "plan", text: "# Add a cache layer\n\n- step one" }), codexTokens(10, 0, 1), codexDone()] });
     const { rt, dir } = await runtimeWith(bin);
     await rt.sendMessage("plan a cache", "codex", { plan: true });
@@ -40,8 +40,24 @@ describe("runtime · provider interaction", () => {
     // Loom's own plan briefing (write a file) is not sent to a native planner
     expect(JSON.stringify(turn.input)).not.toContain("[Loom · Plan mode]");
     const saved = rt.log.list().find((e) => e.payload.state === "plan_saved")!;
+    expect(String(saved.payload.path)).toMatch(/^\.loom[\\/]plans[\\/]\d{4}-\d{2}-\d{2}-add-a-cache-layer\.md$/);
+    expect(fs.existsSync(path.join(dir, "plans"))).toBe(false);
     const file = path.join(dir, String(saved.payload.path));
     expect(fs.readFileSync(file, "utf8")).toMatch(/^---\ntitle: "Add a cache layer"\nstatus: proposed[\s\S]*- step one/);
+  });
+
+  it("a fresh send starts the chat's session over instead of resuming it (#280)", async () => {
+    const bin = fakeCodex();
+    const { rt } = await runtimeWith(bin);
+    await rt.sendMessage("first", "codex");
+    await until(() => !rt.anyBusy() && rt.log.list({ kinds: ["run_complete"] }).length === 1);
+    await rt.sendMessage("second, same session", "codex");
+    await until(() => !rt.anyBusy() && rt.log.list({ kinds: ["run_complete"] }).length === 2);
+    expect(rpcOf(bin, "thread/start")).toHaveLength(1);
+    await rt.sendMessage("a short question", "codex", { fresh: true });
+    await until(() => !rt.anyBusy() && rt.log.list({ kinds: ["run_complete"] }).length === 3);
+    expect(rpcOf(bin, "thread/start")).toHaveLength(2);
+    expect(rpcOf(bin, "thread/resume")).toHaveLength(0);
   });
 
   it("takes the answer to a structured question and lets the turn finish", async () => {
