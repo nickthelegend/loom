@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-10-17
+
+### Fixed
+
+- **A working agent's row in the Fleet spun over the row below it.** The
+  spinner's style applied to anything marked busy, so a busy Fleet row
+  shrank to a spinning dot with its name and status spilling over the next
+  row. The same thing happened to the terminal's input while a command ran,
+  the ✨ commit-message button while it worked, and busy nodes in the
+  Observatory graph. Only the spinner spins now.
+
+
 ## [1.1.1] — 2026-10-16
 
 Found installing 1.1.0 on a Mac whose projects live on an external drive.

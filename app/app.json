@@ -2,7 +2,7 @@
   "expo": {
     "name": "Loom",
     "slug": "loom",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "scheme": "loom",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -30,7 +30,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1B1D21"
       },
-      "versionCode": 5,
+      "versionCode": 6,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
