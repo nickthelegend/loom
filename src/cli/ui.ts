@@ -132,7 +132,9 @@ export function formatEvent(e: LoomEvent): string | null {
 }
 
 export function formatProjectRow(p: ProjectStatus): string {
-  const flag = p.needsInput ? pc.yellow("● needs input") : pc.dim("○ idle");
+  // an agent mid-turn is working, whatever the last event was (#252)
+  const working = (p.agents ?? []).filter((a) => a.busy).map((a) => a.id);
+  const flag = p.needsInput ? pc.yellow("● needs input") : working.length ? pc.cyan(`◐ working (${working.join(", ")})`) : pc.dim("○ idle");
   const holder = p.holder ? agentColor(p.holder)(p.holder) : pc.dim("—");
   const last = p.lastEvent
     ? pc.dim(`${timeShort(p.lastEvent.ts)} ${p.lastEvent.kind}`)
@@ -148,20 +150,23 @@ export function formatProjectRow(p: ProjectStatus): string {
   return `${flag}  ${pc.bold(p.name)} ${pc.dim(`(${p.id})`)}  baton: ${holder}${route}${cost}  ${last}`;
 }
 
+/** Installed and signed in is ready; installed and signed out isn't — it would fail its first turn (#251). */
+const readyMark = (a: ProjectStatus["agents"][number]) => (a.available && !a.signedOut ? pc.green("●") : pc.red("○"));
+const signInNote = (a: ProjectStatus["agents"][number]) => (a.signedOut ? pc.red(`  not signed in: ${a.signedOut}`) : "");
+
 export function formatAgentRow(a: ProjectStatus["agents"][number]): string {
   const paint = agentColor(a.id);
   const baton = a.holdsBaton ? pc.magenta(" ⟵ baton") : "";
-  const avail = a.available ? pc.green("●") : pc.red("○");
   const busy = a.busy ? pc.yellow(" (busy)") : "";
-  const tier = a.tier === "bridge" ? pc.dim(" [bridge]") : "";
-  return ` ${avail} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)} — ${a.role}${tier}${busy}${baton}`;
+  const tier = a.tier === "bridge" ? pc.dim(" [bridge]") : a.readOnly ? pc.dim(" [read-only]") : "";
+  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)} — ${a.role}${tier}${busy}${baton}${signInNote(a)}`;
 }
 
 /** A complete agent roster entry for `loom agents`. */
 export function formatAgentRosterRow(a: ProjectStatus["agents"][number]): string {
   const paint = agentColor(a.id);
-  const avail = a.available ? pc.green("●") : pc.red("○");
   const model = a.model || "default";
-  const baton = a.tier === "adapter" ? pc.green("can hold") : pc.dim("cannot hold");
-  return ` ${avail} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}`;
+  // a read-only model agent can answer, not change files — say that, not "can hold" (#257)
+  const baton = a.tier !== "adapter" ? pc.dim("cannot hold") : a.readOnly ? pc.yellow("read-only (answers, can't edit)") : pc.green("can hold");
+  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}${signInNote(a)}`;
 }

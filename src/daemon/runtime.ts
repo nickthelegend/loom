@@ -21,6 +21,10 @@ import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js
 import { CrewEngine } from "../core/crew.js";
 import { LoopWatch, nudgeText, type Loop } from "../core/loops.js";
 import { commandOf, dangerOf } from "../core/shield.js";
+import { knownAuth, signInCommand } from "../core/setup.js";
+
+/** What a CLI says when it isn't signed in. */
+const SIGNED_OUT = /\b(?:not signed in|not logged in|please (?:run )?\S*\s*\/?login|run `?[\w-]+ (?:auth )?login|sign in (?:first|again)|authentication (?:required|failed)|unauthori[sz]ed|invalid (?:api key|credentials)|401\b)/i;
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
 import { NightShift } from "./shift.js";
@@ -2081,6 +2085,7 @@ export class ProjectRuntime {
   private afterAgentEvent(event: LoomEvent): void {
     this.trackCost(event);
     this.shield(event);
+    this.noteSignIn(event);
     const loop = this.loops.observe(event);
     if (loop) void this.onLoop(loop).catch((err) => logbook.warn("loops", "couldn't act on a loop", String(err), this.info.id));
     // an agent out of quota mid-task hands its work on (core/quota.ts, runtime/relay.ts)
@@ -2532,6 +2537,25 @@ export class ProjectRuntime {
    * project, a dropped table. Said at once, in its chat and as a push; with
    * shield.auto "stop" (the default on a night shift) the turn is stopped too.
    */
+  /** Agents whose last turn failed on sign-in, and the message — until a turn succeeds (#251). */
+  private readonly signedOutAgents = new Map<string, string>();
+
+  private noteSignIn(event: LoomEvent): void {
+    if (!event.agentId) return;
+    if (event.kind === "run_complete" && !event.payload.error) { this.signedOutAgents.delete(event.agentId); return; }
+    const message = event.kind === "error" ? String(event.payload.message ?? "") : event.kind === "run_complete" ? String(event.payload.error ?? "") : "";
+    if (message && SIGNED_OUT.test(message)) this.signedOutAgents.set(event.agentId, message.split("\n")[0]!.slice(0, 200));
+  }
+
+  /** What status says about an agent's sign-in: a real failure beats the CLI's own (cached) check. */
+  private signInState(agentId: string, kind: string): { signedOut?: string } {
+    const learned = this.signedOutAgents.get(agentId);
+    if (learned) return { signedOut: `${learned}${signInCommand(kind) ? ` — ${signInCommand(kind)}` : ""}` };
+    if (!signInCommand(kind) || process.env.LOOM_NO_AUTH_PROBE) return {};
+    const auth = knownAuth(kind);
+    return auth?.authed === false ? { signedOut: `${auth.detail ?? "not signed in"} — ${signInCommand(kind)}` } : {};
+  }
+
   private shield(event: LoomEvent): void {
     if (!event.agentId) return;
     const chat = event.chat ?? MAIN_CHAT;
@@ -3176,6 +3200,8 @@ export class ProjectRuntime {
           // which chat that turn is in, so a client shows Stop only where it applies
           ...(isAdapter(live) && (live.busy() || this.turns.busySince.has(cfg.id)) ? { chat: this.turns.turnChat.get(cfg.id) ?? MAIN_CHAT } : {}),
           holdsBaton: holder === cfg.id,
+          ...this.signInState(cfg.id, cfg.kind),
+          ...(cfg.kind === "model" && !cfg.options?.write ? { readOnly: true } : {}),
           model,
           permissions: permissionFor(cfg.kind, cfg.options),
           enabled: true,

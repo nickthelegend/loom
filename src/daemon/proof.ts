@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { execFile } from "../core/process.js";
 import { runCommand } from "../core/run-command.js";
-import { detectTestCommand, evidenceFrom, extractClaims, judge, parseCounts, type ProofResult, type Rerun } from "../core/proof.js";
+import { detectTestCommand, evidenceFrom, extractClaims, isPlanRequest, judge, parseCounts, type ProofResult, type Rerun } from "../core/proof.js";
 import { loomHome } from "../core/registry.js";
 import type { EventKind, LoomEvent } from "../types.js";
 import { MAIN_CHAT } from "../types.js";
@@ -49,7 +49,7 @@ export class ProofRunner {
   constructor(private readonly host: ProofHost) {}
 
   /** The newest finished turn in a chat: its agent, final reply, and every event since the request it answered. */
-  turn(chat = MAIN_CHAT, at?: number): { agentId: string; reply: LoomEvent | null; done: LoomEvent; events: LoomEvent[] } | null {
+  turn(chat = MAIN_CHAT, at?: number): { agentId: string; reply: LoomEvent | null; done: LoomEvent; events: LoomEvent[]; request: LoomEvent | null } | null {
     const recent = this.host.list({ chat, limit: 600, ...(at ? { before: at + 1 } : {}) });
     const doneAt = [...recent].reverse().findIndex((e) => e.kind === "run_complete" && e.agentId);
     if (doneAt < 0) return null;
@@ -64,14 +64,24 @@ export class ProofRunner {
     }
     const events = recent.slice(start, di + 1).filter((e) => !e.agentId || e.agentId === agentId);
     const reply = [...events].reverse().find((e) => e.kind === "message" && e.agentId === agentId && !e.payload.reasoning && typeof e.payload.text === "string") ?? null;
-    return { agentId, reply, done, events };
+    const before = recent[start - 1];
+    const request = before && before.kind === "message" && !before.agentId ? before : null;
+    return { agentId, reply, done, events, request };
+  }
+
+  /** A turn that was asked for a plan and changed nothing: there's no work to check yet (#245). */
+  planOnly(t: { events: LoomEvent[]; request: LoomEvent | null }): boolean {
+    const edited = t.events.some((e) => e.kind === "file_edit" || e.kind === "turn_diff");
+    const asked = t.request ? isPlanRequest(String(t.request.payload.text ?? "")) || t.request.payload.plan === true : false;
+    return asked && !edited;
   }
 
   /** Should this finished turn be checked without being asked? (Its reply claims something.) */
   wantsAuto(done: LoomEvent): boolean {
     if ((this.host.config().auto ?? "claims") === "off" || !done.agentId) return false;
     const t = this.turn(done.chat ?? MAIN_CHAT, done.id);
-    return Boolean(t?.reply && extractClaims(String(t.reply.payload.text)).length);
+    if (!t || this.planOnly(t)) return false;
+    return Boolean(t.reply && extractClaims(String(t.reply.payload.text)).length);
   }
 
   /** Check the newest finished turn in `chat`. One proof at a time per project; a second ask for the same turn joins the first. */
@@ -94,6 +104,14 @@ export class ProofRunner {
     if (this.running.has(key)) return null;
     this.running.add(key);
     try {
+      // asked for a plan, and nothing changed: say so — "the tests fail" about a plan is noise
+      if (this.planOnly(t)) {
+        const result: ProofResult = { verdict: "unverified", headline: "A plan, not a change — nothing to check until it's built", claims: [], ran: evidenceFrom(t.events), rerun: null };
+        const event = this.host.append({ kind: "proof", chat: chat === MAIN_CHAT ? undefined : chat, payload: {
+          verdict: result.verdict, headline: result.headline, about: t.agentId, turn: { done: t.done.id, ...(t.reply ? { reply: t.reply.id } : {}) },
+          claims: [], ran: result.ran.slice(-12), plan: true, ...(opts.auto ? { auto: true } : {}) } });
+        return { ...result, eventId: event.id };
+      }
       const text = t.reply ? String(t.reply.payload.text) : "";
       const claims = extractClaims(text);
       const ran = evidenceFrom(t.events);
