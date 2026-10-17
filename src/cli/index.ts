@@ -1185,6 +1185,93 @@ program
   });
 
 program
+  .command("review <agents...>")
+  .description("several agents review the same change at once — read-only, off the baton — and their findings land in one place")
+  .option("--file <path>", "review this file")
+  .option("--diff", "review the uncommitted changes (the default)")
+  .option("--text <ask>", "review something you describe instead")
+  .option("--focus <what>", "what to look hardest at, e.g. \"error handling\"")
+  .option("--no-wait", "start it and return; the summary lands in the thread")
+  .option("--json", "print the finished review as JSON")
+  .option("--timeout <seconds>", "stop waiting after this long", "1800")
+  .action(async (agentArgs: string[], opts: { file?: string; diff?: boolean; text?: string; focus?: string; wait: boolean; json?: boolean; timeout: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const agents = agentArgs.flatMap((a) => a.split(",")).map((a) => a.trim()).filter(Boolean);
+    let review;
+    try {
+      ({ review } = await client.startReview(project.id, { agents, ...(opts.file ? { file: opts.file } : {}), ...(opts.text ? { text: opts.text } : {}), ...(opts.focus ? { focus: opts.focus } : {}) }));
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
+    }
+    if (!opts.json) console.error(pc.cyan(`🔍 ${agents.join(", ")} reviewing ${review.target.kind === "file" ? review.target.file : review.target.kind === "diff" ? "the uncommitted changes" : `“${review.target.label ?? "your request"}”`} · read-only, nobody takes the baton`));
+    if (!opts.wait) return void console.log(pc.dim(`review ${review.reviewId} — the summary lands in its chat (loom reviews ${review.reviewId})`));
+    const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;
+    while (review.status !== "done" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500));
+      review = (await client.review(project.id, review.reviewId)).review;
+    }
+    if (review.status !== "done") {
+      process.exitCode = 124;
+      return void console.error(pc.yellow(`still reviewing after ${opts.timeout}s — loom reviews ${review.reviewId} later`));
+    }
+    if (opts.json) return void console.log(JSON.stringify(review));
+    printReview(review);
+  });
+
+program
+  .command("reviews [reviewId]")
+  .description("the latest reviews, or one review's findings")
+  .action(async (reviewId?: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    if (reviewId) {
+      try { return void printReview((await client.review(project.id, reviewId)).review); } catch (err) { return fail(err instanceof Error ? err.message : String(err)); }
+    }
+    const { reviews } = await client.reviews(project.id);
+    if (!reviews.length) return void console.log(pc.dim("no reviews yet — loom review <agents…>"));
+    for (const r of reviews) {
+      const open = (r.findings ?? []).filter((f) => !f.decision).length;
+      console.log(`${pc.bold(r.reviewId)}  ${r.status === "done" ? r.summary : pc.yellow("running…")}  ${pc.dim(r.agents.join(", "))}${open ? pc.dim(` · ${open} undecided`) : ""}`);
+    }
+  });
+
+for (const [verb, decision] of [["accept", "accepted"], ["reject", "rejected"]] as const) {
+  program
+    .command(`review:${verb} <findings...>`)
+    .description(verb === "accept" ? "accept review findings — each becomes a project decision every agent is briefed with" : "reject review findings")
+    .option("--note <why>", "say why")
+    .action(async (ids: string[], opts: { note?: string }) => {
+      const client = await ensureDaemon();
+      const project = await currentProject(client);
+      for (const id of ids) {
+        try {
+          const { finding } = await client.decideFinding(project.id, id, decision, opts.note);
+          console.log(`${verb === "accept" ? pc.green("✓ accepted") : pc.red("✕ rejected")} ${pc.dim(id)} ${finding.text.slice(0, 100)}`);
+        } catch (err) {
+          console.error(pc.red(`${id}: ${err instanceof Error ? err.message : String(err)}`));
+          process.exitCode = 1;
+        }
+      }
+    });
+}
+
+function printReview(review: Awaited<ReturnType<DaemonClient["review"]>>["review"]): void {
+  if (review.status !== "done") return void console.log(pc.yellow(`review ${review.reviewId} is still running (${review.agents.join(", ")})`));
+  console.log(pc.bold(`review ${review.reviewId}`) + pc.dim(` · ${review.summary}`));
+  const sev = (s: string | null) => (s === "high" ? pc.red("high  ") : s === "medium" ? pc.yellow("medium") : pc.dim((s ?? "note").padEnd(6)));
+  for (const f of review.findings ?? []) {
+    const mark = f.decision === "accepted" ? pc.green(" ✓") : f.decision === "rejected" ? pc.red(" ✕") : "";
+    console.log(`  ${sev(f.severity)} ${pc.dim(f.id.padEnd(10))} ${pc.cyan([f.agent, ...(f.agreed ?? []).map((a) => a.agent)].join("+").padEnd(12))} ${f.file ? pc.bold(`${f.file}${f.line ? `:${f.line}` : ""}`) + " — " : ""}${f.text}${mark}`);
+  }
+  for (const r of review.results ?? []) {
+    if (r.status === "failed") console.log(pc.red(`  ✗ ${r.agent} didn't finish: ${r.error}`));
+    else if (!(review.findings ?? []).some((f) => f.agent === r.agent || (f.agreed ?? []).some((a) => a.agent === r.agent))) console.log(pc.dim(`  ${r.agent}: ${r.reply.split("\n").find((l) => l.trim())?.slice(0, 160) ?? "(no reply)"}`));
+  }
+  if ((review.findings ?? []).some((f) => !f.decision)) console.log(pc.dim(`\naccept or reject: loom review:accept <id…>  ·  loom review:reject <id…> [--note why]  ·  or on the card in the app`));
+}
+
+program
   .command("spawn <task>")
   .description("fan a subtask out to a child agent — the parent keeps the baton")
   .option("--agent <id>", "which agent runs the subtask")

@@ -733,6 +733,8 @@ detects at least two roles.
 | `loom runner [status\|pair\|join\|start\|stop\|token\|doctor\|install\|revoke\|goal\|move\|back\|jobs]` | Runners: your always-on Loom that takes goals while you're away |
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
+| `loom review <agents…> [--file f \| --diff \| --text "…"] [--focus "…"]` | Several agents review the same change at once — **read-only** (their own plan mode where they have one), **nobody takes the baton**, so nobody is asked to hand off for a read. It waits and prints every finding in one list, worst first; two reviewers on the same line show as one finding they agree on. The same card lands in the app with Accept / Reject on each finding. `--diff` (the uncommitted changes) is the default; `--no-wait`, `--json` |
+| `loom review:accept <id…>` / `loom review:reject <id…> [--note why]` | Decide on review findings — an accepted one becomes a project decision every agent is briefed with. `loom reviews [id]` lists them |
 | `loom subtasks` | Subtasks running right now |
 | `loom agents:add <kind> [--as name] [--role r]` | Add an agent session — repeat for a second session of the same kind, same brain |
 | `loom agents:add model --model <id> [--tools --write --run "npm test"]` | An agent that *is* a model: no CLI, and what it may read, write or run |

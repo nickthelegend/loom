@@ -94,6 +94,48 @@ import { shortModel } from './permissions.js';
       '<ul class="shl">' + rows + "</ul></div>";
   }
 
+  // Review: several agents read the same change, read-only; their findings in one card to accept or reject (daemon/review.ts)
+  var SEV_WORD = { high: "high", medium: "medium", low: "low" };
+  function reviewCard(e){
+    var p = e.payload || {}, t = p.target || {};
+    var what = t.kind === "file" ? t.file : t.kind === "diff" ? "the uncommitted changes" : t.label || "your request";
+    if (p.phase === "started") {
+      return '<div class="sys reviewline">\ud83d\udd0d ' + esc((p.agents || []).map(labelOf).join(", ")) + " reviewing " + esc(what) +
+        " \u2014 read-only, nobody takes the baton" + (p.focus ? " \u00b7 focus: " + esc(p.focus) : "") + "</div>";
+    }
+    if (p.phase !== "done") return "";
+    var rows = (p.findings || []).map(function(f){
+      var loc = f.file ? '<code class="rvloc">' + esc(f.file + (f.line ? ":" + f.line : "")) + "</code>" : "";
+      return '<li class="rvf" data-finding="' + esc(f.id) + '"><span class="rvsev sev-' + esc(f.severity || "note") + '">' + esc(SEV_WORD[f.severity] || "note") + "</span>" +
+        avatarFor(f.agent) + (f.agreed || []).map(function(a){ return avatarFor(a.agent); }).join("") +
+        (f.agreed && f.agreed.length ? '<span class="rvagree" title="' + esc((f.agreed || []).map(function(a){ return labelOf(a.agent) + ": " + a.text; }).join("\n")) + '">' + (f.agreed.length + 1) + " agree</span>" : "") +
+        loc + '<span class="rvtext">' + esc(f.text) + "</span>" +
+        '<span class="rvact"><button type="button" class="btn xs outline" data-finding-decide="' + esc(f.id) + '" data-decision="accepted" title="accept: it becomes a project decision every agent is briefed with">Accept</button>' +
+        '<button type="button" class="btn xs ghost" data-finding-decide="' + esc(f.id) + '" data-decision="rejected">Reject</button></span>' +
+        '<span class="rvdone"></span></li>';
+    }).join("");
+    var quiet = (p.results || []).map(function(r){
+      if (r.status === "failed") return '<div class="rvquiet err">' + esc(labelOf(r.agent)) + " didn\u2019t finish: " + esc(String(r.error || "").slice(0, 200)) + "</div>";
+      if ((p.findings || []).some(function(f){ return f.agent === r.agent || (f.agreed || []).some(function(a){ return a.agent === r.agent; }); })) return "";
+      var first = String(r.reply || "").split("\n").filter(function(l){ return l.trim(); })[0] || "(no reply)";
+      return '<div class="rvquiet">' + esc(labelOf(r.agent)) + ": " + esc(first.slice(0, 220)) + "</div>";
+    }).join("");
+    return '<div class="reviewcard" data-review="' + esc(p.reviewId) + '"><div class="rvh">\ud83d\udd0d <b>Review</b><span class="rvsum">' + esc(p.summary || "") + "</span>" +
+      '<span class="rvwhat">' + esc(what) + "</span></div>" + (rows ? '<ul class="rvl">' + rows + "</ul>" : "") + quiet + "</div>";
+  }
+  /** A finding someone accepted or rejected: say so on its row, keep the other way open. */
+  function settleFinding(root, findingId, decision){
+    var done = false;
+    Array.prototype.forEach.call((root || document).querySelectorAll('.rvf[data-finding="' + String(findingId).replace(/"/g, "") + '"]'), function(row){
+      row.classList.remove("fd-accepted", "fd-rejected");
+      row.classList.add("fd-" + decision);
+      var lbl = row.querySelector(".rvdone"); if (lbl) lbl.textContent = decision === "accepted" ? "\u2713 accepted \u2014 recorded as a decision" : "\u2715 rejected";
+      Array.prototype.forEach.call(row.querySelectorAll("[data-finding-decide]"), function(b){ b.disabled = false; b.hidden = b.getAttribute("data-decision") === decision; });
+      done = true;
+    });
+    return done;
+  }
+
   function avatarFor(id){
     var s = String(id || "?"), k = kindOf(s) || (AGENT_LABELS[s] ? s : null);
     // a picture you gave this agent wins over its brand mark
@@ -390,6 +432,7 @@ import { shortModel } from './permissions.js';
     }
     if (e.kind === "proof") return proofCard(e);
     if (e.kind === "shift") return shiftCard(e);
+    if (e.kind === "review") return reviewCard(e);
     if (e.kind === "checkpoint") {
       if (p.reason !== "rewound") return tview() === "verbose" ? '<div class="sys" style="opacity:.6">\u21ba checkpoint \u00b7 ' + esc(p.label || p.id) + "</div>" : "";
       return '<div class="sys ok">\u21ba Rewound to \u201c' + esc(String(p.label || p.id).slice(0, 80)) + '\u201d \u00b7 ' +
@@ -892,4 +935,4 @@ function settleQuestionCard(card, answers){
   return true;
 }
 
-export { ARTIFACT_EXT,artifactChips,settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };
+export { ARTIFACT_EXT,artifactChips,settleFinding,settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };
