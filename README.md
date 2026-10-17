@@ -363,7 +363,7 @@ npm install && npm run build && npm link
 Then verify the setup:
 
 ```bash
-loom doctor        # checks node, agents, tailscale, daemon, and your project
+loom doctor        # checks node, agents, tailscale, daemon (and what it sees vs your shell), providers, and your project
 ```
 
 Surfaces, all talking to the same daemon:
@@ -714,7 +714,7 @@ detects at least two roles.
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
 | `loom clients [--revoke <id>] [--ping]` | Paired devices: list, revoke, or send a test push |
-| `loom doctor [--json] [--fix]` | Diagnose env, daemon, binding, and project config — `--fix` repairs what has exactly one safe repair |
+| `loom doctor [--json] [--fix]` | Diagnose env, daemon, binding, and project config — and where the daemon sees something different from your shell (an agent missing from its PATH, a sign-in, an API key exported only in a terminal), whether each provider answers with the daemon's key, and whether a model agent pinned to a `:free` model keeps getting 429/503 (it suggests `pool:free`). `--fix` repairs what has exactly one safe repair |
 | `loom orchestrate "<goal>"` | One orchestrator plans, many workers build in parallel worktrees (`-o`, `-w`, `-p`, `--no-watch`) |
 | `loom orchestrate --plan "<goal>"` | Plan mode: the plan and each task's spec land as markdown under `plans/<run>/` for any agent to pick up |
 | `loom orchestra [run] [--watch]` | Orchestra runs in this project, or one run's task graph live |

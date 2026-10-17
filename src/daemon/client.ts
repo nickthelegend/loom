@@ -147,6 +147,11 @@ export class DaemonClient {
     return this.request("GET", "/api/providers");
   }
 
+  /** `loom doctor` as the daemon sees it: its checks, plus its PATH and key names to compare with the shell's. */
+  doctor(project?: string): Promise<{ checks: import("../cli/doctor.js").Check[]; facts?: import("../cli/doctor.js").EnvFacts }> {
+    return this.request("GET", `/api/doctor${project ? `?project=${encodeURIComponent(project)}` : ""}`, undefined, 45_000);
+  }
+
   health(): Promise<{ ok: boolean }> {
     return this.request("GET", "/api/health");
   }

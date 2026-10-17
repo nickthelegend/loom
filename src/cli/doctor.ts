@@ -1,7 +1,10 @@
 /**
  * loom doctor — one command that answers "why is nothing working?".
  * Checks the environment (node, agent CLIs, tailscale), the daemon (health,
- * build freshness, binding), and the current project's config.
+ * build freshness, binding), and the current project's config — and, since
+ * the daemon is often started by the desktop app rather than this shell,
+ * whether the daemon sees what this shell sees (PATH, keys, sign-ins), whether
+ * each provider answers, and whether a free model keeps getting refused.
  */
 
 import { execFile } from "../core/process.js";
@@ -18,7 +21,10 @@ import {
   writeProjectState,
 } from "../core/registry.js";
 import { resolveSteps, stepName } from "../core/routes.js";
-import { isAdapter } from "../types.js";
+import { isAdapter, type AgentConfig, type LoomEvent } from "../types.js";
+import { ADES } from "../core/ades.js";
+import { isPool } from "../core/free-pool.js";
+import { BUILTIN_PROVIDERS, listProviders, modelsUrl, requestHeaders, resolveProvider } from "../core/providers.js";
 import { BUILD_REV } from "../daemon/server.js";
 
 export interface Check {
@@ -300,4 +306,120 @@ export async function envChecks(): Promise<Check[]> {
   checks.push(ok("devices", `${cfg.clients.length} paired`));
 
   return checks;
+}
+
+// ---------------------------------------------------------------------------
+// The daemon's view vs this shell's (#field-test: a key exported in a terminal
+// never reaches a daemon the desktop app started; neither does a PATH entry)
+// ---------------------------------------------------------------------------
+
+/** What one process can see: its PATH, and which key variables are set — names only, never values. */
+export interface EnvFacts { node: string; path: string[]; keys: string[] }
+
+const KEY_VAR = /^[A-Z][A-Z0-9_]*_(API_KEY|AUTH_TOKEN)$/;
+
+export function envFacts(env: NodeJS.ProcessEnv = process.env): EnvFacts {
+  return {
+    node: process.versions.node,
+    path: (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean),
+    keys: Object.keys(env).filter((k) => KEY_VAR.test(k) && Boolean(env[k])).sort(),
+  };
+}
+
+const AGENT_KINDS = new Set(ADES.filter((a) => a.tier === "adapter").map((a) => a.kind));
+const providerOfVar = (v: string) => BUILTIN_PROVIDERS.find((p) => p.envKeys.includes(v))?.id;
+
+/** The command each CLI agent runs, to say which PATH dir the daemon is missing. */
+const AGENT_BIN: Record<string, string> = { "claude-code": "claude", codex: "codex", opencode: "opencode", "grok-code": "grok", "antigravity-cli": "agy" };
+
+/** Where the daemon and this shell disagree, as checks. Pure but for `exists`, which looks for an agent's command. */
+export function compareWithDaemon(
+  shell: { checks: Check[]; facts: EnvFacts },
+  daemon: { checks: Check[]; facts: EnvFacts },
+  exists: (file: string) => boolean = fs.existsSync,
+): Check[] {
+  const out: Check[] = [];
+  const missingDirs = shell.facts.path.filter((d) => !daemon.facts.path.includes(d));
+  // the dir an agent's command lives in, among those the daemon lacks; else the likely ones (not per-package node_modules/.bin)
+  const whereMissing = (kind: string): string[] => {
+    const bin = AGENT_BIN[kind];
+    const home = bin ? missingDirs.find((d) => exists(path.join(d, bin)) || exists(path.join(d, `${bin}.cmd`)) || exists(path.join(d, `${bin}.exe`))) : undefined;
+    return home ? [home] : missingDirs.filter((d) => !/node_modules[\\/]\.bin$/.test(d)).slice(0, 3);
+  };
+  const restart = "restart it from this terminal (loom up --restart) so it inherits this shell's environment";
+  const theirs = new Map(daemon.checks.map((c) => [c.name, c]));
+  for (const mine of shell.checks) {
+    if (!AGENT_KINDS.has(mine.name) || /^not found/.test(mine.detail)) continue;
+    const d = theirs.get(mine.name);
+    if (!d) continue;
+    if (/^not found/.test(d.detail)) {
+      const dirs = whereMissing(mine.name);
+      out.push(fail(`daemon:${mine.name}`, `installed here, but the daemon can't find it — it runs with a different PATH${dirs.length ? ` (missing ${dirs.join(", ")})` : ""}; ${restart}`));
+    } else if (mine.status === "ok" && d.status === "fail") {
+      out.push(fail(`daemon:${mine.name}`, `signed in here, signed out for the daemon — ${d.detail}`));
+    }
+  }
+  const keysHere = shell.facts.keys.filter((k) => !daemon.facts.keys.includes(k));
+  for (const k of keysHere) {
+    const id = providerOfVar(k);
+    out.push(warn("daemon:keys", `${k} is set in this shell but not in the daemon — ${id ? `loom providers:set ${id} --key … stores it for both, or ` : ""}${restart}`));
+  }
+  if (daemon.facts.node !== shell.facts.node) out.push(ok("daemon:node", `the daemon runs Node ${daemon.facts.node}; this shell has ${shell.facts.node}`));
+  if (!out.some((c) => c.status !== "ok")) {
+    out.push(ok("daemon:env", missingDirs.length ? `sees every agent and key this shell does (its PATH lacks ${missingDirs.length} of your dirs, none an agent needs)` : "same PATH and keys as this shell"));
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Providers: does each configured one answer, with the key the daemon holds?
+// ---------------------------------------------------------------------------
+
+export async function providerChecks(opts: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch } = {}): Promise<Check[]> {
+  const env = opts.env ?? process.env;
+  const doFetch = opts.fetchImpl ?? fetch;
+  const rows = listProviders(env).filter((r) => r.configured);
+  return Promise.all(rows.map(async (row): Promise<Check> => {
+    const p = resolveProvider(row.id, env);
+    const name = `provider:${row.id}`;
+    if (!p) return warn(name, "configured but can't be resolved");
+    try {
+      const res = await doFetch(modelsUrl(p), { headers: requestHeaders(p), signal: AbortSignal.timeout(8000) });
+      if (res.status === 401 || res.status === 403) return fail(name, `${p.label} refused the key (${res.status}) — loom providers:set ${row.id} --key …`);
+      if (res.status === 429) return warn(name, `${p.label} is rate-limiting this key right now (429)`);
+      if (!res.ok) return warn(name, `${p.label} answered ${res.status}`);
+      if (row.id !== "openrouter") return ok(name, `${p.label} answers`);
+      // OpenRouter says what the key has left without spending a request
+      const key = await doFetch("https://openrouter.ai/api/v1/key", { headers: requestHeaders(p), signal: AbortSignal.timeout(8000) })
+        .then((r) => (r.ok ? (r.json() as Promise<{ data?: { is_free_tier?: boolean; limit_remaining?: number | null } }>) : null)).catch(() => null);
+      const d = key?.data;
+      if (d && typeof d.limit_remaining === "number" && d.limit_remaining <= 0) return fail(name, "OpenRouter answers, but this key's credit limit is used up");
+      return ok(name, `OpenRouter answers${d?.is_free_tier ? " · free tier: :free models share 50 requests a day across the account" : ""}`);
+    } catch (err) {
+      // Ollama counts as set up without a key; not running is only a problem for an agent that uses it
+      if (row.id === "ollama") return ok(name, "not running here — only needed for a local model");
+      return warn(name, `couldn't reach ${p.label}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+}
+
+/**
+ * A model agent pinned to one free model that keeps being refused — 429
+ * (that model is busy, or the day's free requests are spent) or 503 (no
+ * capacity) — is better off on the free pool, which rotates. Pure over the log.
+ */
+export function freeModelTrouble(events: readonly LoomEvent[], agents: readonly AgentConfig[], now = Date.now()): Check[] {
+  const out: Check[] = [];
+  const since = now - 24 * 60 * 60_000;
+  for (const a of agents) {
+    const model = String((a as { model?: unknown }).model ?? "");
+    if (a.kind !== "model" || !/:free$/.test(model) || isPool(model)) continue; // the pool already rotates
+    const refused = events.filter((e) => e.kind === "error" && e.agentId === a.id && e.ts >= since && /\b(429|503)\b|rate.?limit|no capacity|overloaded/i.test(String(e.payload?.message ?? "")));
+    if (!refused.length) continue;
+    const daily = refused.some((e) => /free-models-per-day|per[- ]day/i.test(String(e.payload?.message ?? "")));
+    out.push(warn(`model:${a.id}`, daily
+      ? `${model} hit OpenRouter's daily free-request cap ${refused.length}× in 24h — it resets daily; credits raise it`
+      : `${model} was refused (429/503) ${refused.length}× in 24h — set this agent's model to pool:free to rotate across free models`));
+  }
+  return out;
 }

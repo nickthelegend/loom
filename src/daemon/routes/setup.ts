@@ -1,9 +1,11 @@
 import type { Express } from 'express';
+import type { RouteContext } from './context.js';
+import { readProjectConfig } from "../../core/registry.js";
 import { findProject } from "../../core/registry.js";
 import { setupReport } from "../../core/setup.js";
 import { forgetProbes } from "../../adapters/base.js";
 /** Register setup routes in the order established by LoomDaemon.routes(). */
-export function registerSetupRoutes(app: Express): void {
+export function registerSetupRoutes(app: Express, ctx: Pick<RouteContext, "runtimes">): void {
 
   /**
    * What this machine still needs — the same answer `loom doctor` gives.
@@ -34,14 +36,21 @@ export function registerSetupRoutes(app: Express): void {
     forgetProbes();
     void (async () => {
       try {
-        const { envChecks, projectChecks } = await import("../../cli/doctor.js");
-        const checks = await envChecks();
+        const { envChecks, projectChecks, providerChecks, freeModelTrouble, envFacts } = await import("../../cli/doctor.js");
+        const [checks, providers] = await Promise.all([envChecks(), providerChecks()]);
+        checks.push(...providers);
         const projId = (req.query as Record<string, string>).project;
         if (projId) {
           const info = findProject(projId);
-          if (info) checks.push(...projectChecks(info.dir));
+          if (info) {
+            checks.push(...projectChecks(info.dir));
+            const rt = ctx.runtimes.get(info.id);
+            const agents = readProjectConfig(info.dir)?.agents ?? [];
+            if (rt) checks.push(...freeModelTrouble(rt.log.list({ kinds: ["error"], sinceTs: Date.now() - 86_400_000 }), agents));
+          }
         }
-        res.json({ checks });
+        // what this daemon process sees — PATH and key NAMES, never values — so `loom doctor` can compare it with the shell
+        res.json({ checks, facts: envFacts() });
       } catch (err) {
         res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
       }
