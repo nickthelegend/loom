@@ -243,7 +243,7 @@ describe("claude-code · Auto runs the project's commands (#260, #244)", () => {
     const answers = stdinOf(bin).filter((m) => m.type === "control_response")
       .map((m) => (m.response as Record<string, unknown>).response as Record<string, unknown>);
     expect(answers.map((a) => a.behavior)).toEqual(["allow", "allow", "deny"]);
-    expect(String(answers[2]!.message)).toMatch(/^Loom's Auto mode refused a path outside the project: `\/etc\/passwd` resolves to \/etc\/passwd/);
+    expect(String(answers[2]!.message)).toMatch(/^Loom's Auto mode refused a path outside the project: `\/etc\/passwd` resolves to \S*[\\/]etc[\\/]passwd/);
   });
 });
 

@@ -45,7 +45,7 @@ describe("and refuses what leaves it, naming the rule and the path", () => {
   it("a path outside the project", () => {
     const d = bash("cat /Users/me/.ssh/id_rsa");
     expect(d).toMatchObject({ allow: false, rule: "a path outside the project" });
-    expect(refusalText(d as never)).toMatch(/refused a path outside the project: `\/Users\/me\/\.ssh\/id_rsa` resolves to \/Users\/me\/\.ssh\/id_rsa/);
+    expect(refusalText(d as never)).toMatch(/refused a path outside the project: `\/Users\/me\/\.ssh\/id_rsa` resolves to \S*[\\/]Users[\\/]me[\\/]\.ssh[\\/]id_rsa/); // C:\Users\… on Windows
     expect(bash("cd /etc && ls")).toMatchObject({ allow: false, rule: "a command run outside the project", detail: "it changes directory to /etc" });
     expect(bash("ls ../other-project")).toMatchObject({ allow: false, rule: "a path outside the project" });
   });
