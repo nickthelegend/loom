@@ -142,6 +142,11 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/events?${q}`);
   }
 
+  /** The daemon's providers: what it can actually use (keys masked). */
+  providers(): Promise<{ providers: import("../core/providers.js").ProviderSummary[] }> {
+    return this.request("GET", "/api/providers");
+  }
+
   health(): Promise<{ ok: boolean }> {
     return this.request("GET", "/api/health");
   }

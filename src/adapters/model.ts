@@ -305,7 +305,7 @@ export class ModelAdapter extends AdapterBase {
       );
     }
     if (!p.key && p.id !== "ollama") {
-      throw new Error(`${p.label} has no key — \`loom providers set ${p.id} --key …\``);
+      throw new Error(`${p.label} has no key — \`loom providers:set ${p.id} --key …\` (a key exported in a terminal doesn't reach a daemon the desktop app started)`);
     }
     // A thread can pin a model (types.ts SendInput.model): it takes the place
     // of the configured one for this turn, and the fallbacks still apply.

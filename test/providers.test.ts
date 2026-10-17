@@ -10,6 +10,7 @@ import fs from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  mergeProviderViews,
   BUILTIN_PROVIDERS,
   chatUrl,
   explainStatus,
@@ -142,5 +143,18 @@ describe("what a refusal means", () => {
     expect(isExhausted(429)).toBe(true);
     expect(isExhausted(503)).toBe(false);
     expect(isExhausted(401)).toBe(false);
+  });
+});
+
+describe("the daemon's view (#249)", () => {
+  it("a key only this shell has is called out, not shown as configured", () => {
+    const daemon = listProviders({});
+    const shell = listProviders({ OPENROUTER_API_KEY: "sk-or-v1-abcdefabcdefe5ec" });
+    const merged = mergeProviderViews(daemon, shell);
+    const or = merged.find((p) => p.id === "openrouter")!;
+    expect(or).toMatchObject({ configured: false, shellOnly: true });
+    expect(or.hint).toMatch(/e5ec$/);
+    // where the daemon has it too, nothing to say
+    expect(mergeProviderViews(shell, shell).find((p) => p.id === "openrouter")).not.toHaveProperty("shellOnly");
   });
 });

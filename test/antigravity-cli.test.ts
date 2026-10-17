@@ -23,7 +23,7 @@ import type { AdapterEvent } from "../src/types.js";
 import { makeProjectDir, tmpDir } from "./helpers.js";
 
 /** A fake `agy` that records its argv and prints a fixed message. */
-function fakeAgy(stdout: string, { code = 0, stderr = "" } = {}): string {
+function fakeAgy(stdout: string, { code = 0, stderr = "", delayMs = 0 } = {}): string {
   const dir = tmpDir("fake-agy");
   const bin = path.join(dir, "agy");
   fs.writeFileSync(
@@ -31,8 +31,7 @@ function fakeAgy(stdout: string, { code = 0, stderr = "" } = {}): string {
     `#!/usr/bin/env node
 require("node:fs").writeFileSync(${JSON.stringify(path.join(dir, "argv.json"))}, JSON.stringify(process.argv.slice(2)));
 ${stderr ? `console.error(${JSON.stringify(stderr)});` : ""}
-process.stdout.write(${JSON.stringify(stdout)});
-process.exit(${code});
+setTimeout(() => { process.stdout.write(${JSON.stringify(stdout)}); process.exit(${code}); }, ${delayMs});
 `,
     { mode: 0o755 },
   );
@@ -133,6 +132,30 @@ describe("AntigravityCliAdapter", () => {
     const bin = fakeAgy("I can do that. Should I also update the tests?");
     const { events } = await run(bin, dir);
     expect(events.some((e) => e.kind === "needs_input")).toBe(true);
+  });
+
+  it("a turn with no reply is a failure, not a silent success (#246)", async () => {
+    const dir = makeProjectDir({ name: "ag" });
+    const { events, error } = await run(fakeAgy(""), dir);
+    expect(error?.message).toBe("agy finished without a reply");
+    expect(events.find((e) => e.kind === "error")?.payload).toMatchObject({ message: "agy finished without a reply" });
+    expect(events.some((e) => e.kind === "run_complete")).toBe(false);
+  });
+
+  it("a print timeout says it timed out, and after how long (#246)", async () => {
+    const dir = makeProjectDir({ name: "ag" });
+    const { events, error } = await run(fakeAgy("", { delayMs: 2800 }), dir, { timeoutMs: 3000 });
+    expect(error?.message).toMatch(/^agy timed out after 3s with no reply — raise this agent's timeoutMs/);
+    expect(events.find((e) => e.kind === "error")?.payload).toMatchObject({ timedOut: true, timeoutMs: 3000 });
+    expect(events.some((e) => e.kind === "run_complete")).toBe(false);
+  });
+
+  it("gives a turn 15 minutes by default, not agy's 5", async () => {
+    const dir = makeProjectDir({ name: "ag" });
+    const bin = fakeAgy("ok");
+    await run(bin, dir);
+    const argv = argvOf(bin);
+    expect(argv[argv.indexOf("--print-timeout") + 1]).toBe("900s");
   });
 
   it("fails the turn on a non-zero exit with no output", async () => {

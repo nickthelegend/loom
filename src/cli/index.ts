@@ -46,14 +46,7 @@ import { VERSION } from "../version.js";
 import { makeBackup } from "../core/backup.js";
 import { threadMarkdown } from "../core/thread-md.js";
 import { EventLog } from "../core/eventlog.js";
-import {
-  allModels,
-  fetchModels,
-  forgetProvider,
-  listProviders,
-  resolveProvider,
-  setProvider,
-} from "../core/providers.js";
+import { allModels, fetchModels, forgetProvider, listProviders, resolveProvider, setProvider, mergeProviderViews, type ProviderView } from "../core/providers.js";
 import { serviceFile, tokenFindings } from "../core/runner-setup.js";
 import { readRunnerConfig, readRunnerToken, scrubEnv, writeRunnerToken } from "../daemon/runner.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
@@ -355,15 +348,27 @@ program
 
 program
   .command("providers")
-  .description("where model agents send their turns, and whether each has a key")
-  .action(() => {
-    const rows = listProviders();
+  .description("where model agents send their turns, and whether each has a key — as the daemon sees it")
+  .action(async () => {
+    // the daemon makes the calls, so its view is the true one; a key only this shell has is called out (#249)
+    const local = listProviders();
+    const cfg = await daemonRunning();
+    let rows: ProviderView[] = local;
+    if (cfg) {
+      try { rows = mergeProviderViews((await new DaemonClient(cfg).providers()).providers, local); }
+      catch { console.log(pc.yellow("couldn't ask the daemon — showing this shell's view")); }
+    } else console.log(pc.dim("the daemon isn't running — this is this shell's view; a daemon started elsewhere (the desktop app) may see different keys"));
+    let shellOnly = 0;
     for (const p of rows) {
-      const mark = p.configured ? pc.green("\u2713") : pc.dim("\u00b7");
-      const key = p.configured ? pc.dim(p.hint ? `${p.hint} (${p.source})` : "no key needed") : pc.dim("not configured");
+      const mark = p.configured ? pc.green("\u2713") : p.shellOnly ? pc.yellow("!") : pc.dim("\u00b7");
+      const key = p.configured ? pc.dim(p.hint ? `${p.hint} (${p.source})` : "no key needed")
+        : p.shellOnly ? pc.yellow(`${p.hint} in your shell, not in the daemon`) : pc.dim("not configured");
       console.log(`${mark} ${pc.bold(p.id.padEnd(13))} ${pc.dim(p.baseUrl.padEnd(34))} ${key}`);
       if (p.note) console.log(pc.dim(`    ${p.note}`));
+      if (p.shellOnly) shellOnly++;
     }
+    if (shellOnly) console.log(pc.yellow(`\n${shellOnly === 1 ? "a key is" : `${shellOnly} keys are`} set in this shell but not in the daemon, so its calls fail with "no key".`) +
+      pc.dim(`\n    Save it where the daemon reads it: loom providers:set <id> --key …   (or restart the daemon from this shell: loom up --restart)`));
     const fu = freeUsage();
     console.log(
       `\n${pc.bold("free models")} ${fu.used} request${fu.used === 1 ? "" : "s"} from this machine today (UTC)` +
