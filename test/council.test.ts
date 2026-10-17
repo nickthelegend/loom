@@ -109,12 +109,12 @@ describe("the council's stages", () => {
     // plan and decide are plan-mode turns; build and fix aren't
     expect(h.sent.map((x) => x.plan)).toEqual([true, true, false, false]);
     expect(h.sent[2]!.text).toContain("Fold in the findings you accepted:\nr1.1");
-    // the fix round only gets the findings worth fixing (not the low one)
+    // the fix round gets every finding, the low one too (#277)
     expect(h.sent[3]!.text).toContain("r2.1");
-    expect(h.sent[3]!.text).not.toContain("r2.3");
+    expect(h.sent[3]!.text).toContain("r2.3 [low]");
     expect(h.decided).toEqual([["r1.1", "accepted", "lock it"], ["r1.2", "rejected", "out of scope"], ["r2.1", "accepted", "handled null"], ["r2.2", "rejected", "style"]]);
     expect(s.stages.find((x) => x.key === "decide")!.detail).toBe("1 accepted · 1 rejected");
-    expect(s.summary).toBe("built · Proof verified · plan: 1 accepted · 1 rejected · diff: 1 fixed · 1 rejected");
+    expect(s.summary).toBe("built · Proof verified · plan: 1 accepted · 1 rejected · diff: 1 fixed · 1 rejected · 1 undecided");
     const done = h.events.find((e) => e.kind === "council" && e.payload.phase === "done")!;
     expect(pushCategory(done)).toBe("goals");
   });

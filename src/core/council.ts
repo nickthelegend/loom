@@ -19,7 +19,10 @@ export const STAGES = [
 ] as const;
 
 export type StageKey = (typeof STAGES)[number]["key"];
-export type StageStatus = "waiting" | "running" | "done" | "skipped" | "failed";
+export type StageStatus = "waiting" | "running" | "done" | "skipped" | "failed" | "unverified";
+
+/** How a Proof verdict shows on the Prove stage: only a verified one is a tick (#276). */
+export const proofStage = (verdict: string | undefined): StageStatus => verdict === "verified" ? "done" : verdict === "contradicted" ? "failed" : "unverified";
 
 /** A plan a reviewer brief can carry: the subtask limit is 10k, and the review's own instructions need room. */
 export const PLAN_ROOM = 6_500;
@@ -63,7 +66,7 @@ export function buildPrompt(goal: string, accepted: Finding[], rejected: Finding
 export function fixPrompt(findings: Finding[], proofHeadline?: string): string {
   return [
     "[Loom council] Fix round. The reviewers read your diff" + (proofHeadline ? `, and Proof said: ${proofHeadline}` : "") + ".",
-    findings.length ? `Their findings:\n${findings.map(line).join("\n")}` : "",
+    findings.length ? `Their findings — every one, low ones included (a low one can still be something you promised):\n${findings.map(line).join("\n")}` : "",
     "Fix what you agree with. Then answer with one line per finding: FIXED <id> — what you changed, or REJECT <id> — why. Run the tests again before you finish.",
   ].filter(Boolean).join("\n\n");
 }
@@ -73,7 +76,9 @@ export function parseVerdicts(reply: string, ids: string[]): Map<string, { decis
   const known = new Set(ids);
   const out = new Map<string, { decision: "accepted" | "rejected"; note?: string }>();
   for (const raw of reply.split("\n")) {
-    const m = raw.replace(/[*_`]/g, "").match(/^\s*(?:[-*•]|\d+[.)])?\s*(ACCEPT(?:ED)?|REJECT(?:ED)?|FIXED)\s*:?\s*([\w-]+\.\d+)\b\s*[:—–-]*\s*(.*)$/i);
+    // the verdict and the id may be dressed in Markdown (**ACCEPT** `r1.2`); the note is kept exactly as written —
+    // stripping `_` from it turned test_reach.py into testreach.py in project memory (#275)
+    const m = raw.match(/^\s*(?:[-*•]|\d+[.)])?\s*(?:[*_`]+\s*)?(ACCEPT(?:ED)?|REJECT(?:ED)?|FIXED)(?:\s*[*_`]+)?\s*:?\s*[*_`]*([\w-]+\.\d+)[*_`]*\s*[:—–-]*\s*(.*)$/i);
     if (!m || !known.has(m[2]!)) continue;
     const note = m[3]!.trim();
     out.set(m[2]!, { decision: /^reject/i.test(m[1]!) ? "rejected" : "accepted", ...(note ? { note: note.slice(0, 300) } : {}) });
@@ -81,5 +86,3 @@ export function parseVerdicts(reply: string, ids: string[]): Map<string, { decis
   return out;
 }
 
-/** Findings worth a fix round: high or medium, or unrated. */
-export const worthFixing = (f: Finding) => f.severity !== "low";

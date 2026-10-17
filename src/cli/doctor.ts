@@ -356,7 +356,7 @@ export function compareWithDaemon(
       const dirs = whereMissing(mine.name);
       out.push(fail(`daemon:${mine.name}`, `installed here, but the daemon can't find it — it runs with a different PATH${dirs.length ? ` (missing ${dirs.join(", ")})` : ""}; ${restart}`));
     } else if (mine.status === "ok" && d.status === "fail") {
-      out.push(fail(`daemon:${mine.name}`, `signed in here, signed out for the daemon — ${d.detail}`));
+      out.push(fail(`daemon:${mine.name}`, /^a turn by /.test(d.detail) ? `looks signed in, but ${d.detail}` : `signed in here, signed out for the daemon — ${d.detail}`));
     }
   }
   const keysHere = shell.facts.keys.filter((k) => !daemon.facts.keys.includes(k));

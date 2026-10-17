@@ -35,6 +35,8 @@ import { isNativeKind } from "../../core/continuity/capabilities.js";
 
 export interface TurnOptions {
   source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean;
+  /** A new native session for this chat instead of resuming the old one (#280). */
+  fresh?: boolean;
   /** How long you asked this one answer to be. */
   length?: "brief" | "detailed";
   requestId?: string; capturedModel?: string | null; resume?: boolean; contextTarget?: number;
@@ -436,6 +438,7 @@ export class RuntimeTurns {
         text,
         chat,
         ...(nativePlan ? { interactionMode: "plan" as const } : {}),
+        ...(opts.fresh ? { freshSession: true } : {}),
         ...(briefing ? { briefing } : {}),
         ...(perTurnModel ? { model: perTurnModel } : {}),
         ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),

@@ -1292,7 +1292,7 @@ program
   });
 
 function councilMark(status: string): string {
-  return status === "done" ? pc.green("✓") : status === "running" ? pc.cyan("◐") : status === "failed" ? pc.red("✗") : status === "skipped" ? pc.dim("–") : pc.dim("·");
+  return status === "done" ? pc.green("✓") : status === "running" ? pc.cyan("◐") : status === "failed" ? pc.red("✗") : status === "unverified" ? pc.yellow("?") : status === "skipped" ? pc.dim("–") : pc.dim("·");
 }
 
 program
@@ -2439,6 +2439,9 @@ program
 // send / chat / handoff / interrupt / decision / log
 // ---------------------------------------------------------------------------
 
+/** A session this big, resumed cold, is worth a warning before a turn re-reads it (#280). */
+const HEAVY_SESSION = 100_000;
+
 /**
  * .loom/ is this machine's runtime state — the event log, attachments, a 0600 config — not something
  * to commit (a team's shared memory lives in AGENTS.md). In a git repo that doesn't ignore it yet,
@@ -2465,9 +2468,10 @@ async function sendWithHandoffConfirm(
   text: string,
   agentId?: string,
   interactive = true,
+  fresh = false,
 ): Promise<{ agentId: string } | null> {
   try {
-    return await client.send(projectId, text, agentId);
+    return await client.send(projectId, text, agentId, { fresh });
   } catch (err) {
     if (err instanceof DaemonError && err.status === 409 && agentId) {
       const holder = String(err.body?.holder ?? "another agent");
@@ -2477,7 +2481,7 @@ async function sendWithHandoffConfirm(
       );
       if (!yes) return null;
       await client.handoff(projectId, agentId);
-      return await client.send(projectId, text, agentId);
+      return await client.send(projectId, text, agentId, { fresh });
     }
     throw err;
   }
@@ -2490,12 +2494,27 @@ program
   .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 124 timed out")
   .option("--json", "with --wait: print the outcome as one JSON object")
   .option("--timeout <seconds>", "with --wait: give up after this long", "1800")
-  .action(async (words: string[], opts: { agent?: string; wait?: boolean; json?: boolean; timeout: string }) => {
+  .option("--fresh", "start the agent's session in this chat over — a short question needn't re-read a long one")
+  .action(async (words: string[], opts: { agent?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
+    // a long session whose prompt cache has gone cold is re-read in full: say so before spending it (#280)
+    const target = opts.agent ?? project.holder ?? undefined;
+    if (!opts.fresh && target) {
+      const weight = await client.sessionWeight(project.id, target).then((r) => r.session).catch(() => null);
+      if (weight && weight.cold && weight.tokens >= HEAVY_SESSION) {
+        const ago = weight.ageMs >= 3_600_000 ? `${Math.round(weight.ageMs / 3_600_000)}h` : `${Math.round(weight.ageMs / 60_000)}m`;
+        console.error(pc.yellow(`⚠ ${target}'s session here is ${Math.round(weight.tokens / 1000)}k tokens, last used ${ago} ago — its cache has likely expired, so this turn re-reads all of it` +
+          `${weight.estUsd !== undefined ? ` (~${fmtUsd(weight.estUsd)} est.)` : ""}. --fresh starts a new session instead.`));
+        if (process.stdin.isTTY && !opts.wait) {
+          const go = await confirm(pc.yellow("send it to the existing session anyway?"));
+          if (!go) return void console.log(pc.dim(`not sent — loom send --fresh${opts.agent ? ` -a ${opts.agent}` : ""} "…"`));
+        }
+      }
+    }
     // where the log is now, so the wait reads only what this send causes (#254)
     const since = opts.wait ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
-    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, !opts.wait || process.stdin.isTTY);
+    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, !opts.wait || process.stdin.isTTY, Boolean(opts.fresh));
     if (!result) return;
     if (!opts.wait) return void console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
     const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;

@@ -117,7 +117,10 @@ export class ReviewRunner {
       const s = settled.get(agent);
       const reply = this.replyOf(chat, agent, since);
       const edited = this.editsOf(chat, agent, since);
-      const base = s?.ok ? { agent, status: "done" as const, reply: reply.slice(0, 6000) } : { agent, status: "failed" as const, error: s?.message ?? "no answer", reply: reply.slice(0, 6000) };
+      // a turn that ended without a word didn't review anything (#278)
+      const answered = s?.ok && reply.trim().length > 0;
+      const base = answered ? { agent, status: "done" as const, reply: reply.slice(0, 6000) }
+        : { agent, status: "failed" as const, error: s?.ok ? "it finished without a reply" : s?.message ?? "no answer", reply: reply.slice(0, 6000) };
       return edited.length ? { ...base, edited } : base;
     });
     const findings = collectFindings(reviewId, results.filter((r) => r.status === "done").map((r) => ({ agent: r.agent, reply: r.reply })));

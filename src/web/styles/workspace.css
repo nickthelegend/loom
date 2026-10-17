@@ -372,6 +372,7 @@
   .councilcard .cs-running .csm{color:var(--primary)}
   .councilcard .cs-done .csm{color:var(--ok)}
   .councilcard .cs-failed .csm,.councilcard .cs-failed .csd{color:var(--err)}
+  .councilcard .cs-unverified .csm{color:var(--warn);font-weight:650}
   .councilcard .ccsum{margin-top:6px;font-weight:550}
   .councilcard .ccsum:empty{display:none}
   .shiftpick .shbody{padding:4px 12px 8px;display:flex;flex-direction:column;gap:8px}

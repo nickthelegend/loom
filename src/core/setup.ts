@@ -178,10 +178,7 @@ async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail
       // the shape is read — no token leaves the file.
       const file = path.join(os.homedir(), ".grok", "auth.json");
       if (!fs.existsSync(file)) return { authed: false, detail: "no grok session on this machine" };
-      const entries = Object.values(JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, { refresh_token?: string; key?: string }>);
-      if (entries.some((e) => typeof e?.refresh_token === "string" && e.refresh_token.length > 0)) return { authed: true };
-      if (entries.some((e) => typeof e?.key === "string" && e.key.length > 0)) return { authed: true };
-      return { authed: false, detail: "grok's auth file has no session" };
+      return grokAuth(JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, GrokEntry>);
     }
     if (kind === "model") {
       // There is nothing to log in to: a model agent is usable when some
@@ -321,6 +318,29 @@ export function signInCommand(kind: string): string { return AUTH[kind] ?? ""; }
 export function nodeOk(version = process.versions.node): boolean {
   const [major, minor] = version.split(".").map(Number);
   return (major ?? 0) > 22 || ((major ?? 0) === 22 && (minor ?? 0) >= 5);
+}
+
+interface GrokEntry { refresh_token?: string; key?: string; expires_at?: string }
+
+/** How long past its expiry a grok session can sit unrefreshed and still be one it renews (a used session is rewritten with a new expiry). */
+const GROK_STALE_MS = 3 * 24 * 60 * 60_000;
+
+/**
+ * Is there a grok session it can use? A refresh token alone isn't enough: a
+ * session expired weeks ago and never rewritten is one grok no longer renews —
+ * it answers "Not signed in" while the file still holds a token (#274).
+ */
+export function grokAuth(entries: Record<string, GrokEntry>, now = Date.now()): { authed: boolean; detail?: string } {
+  const all = Object.values(entries).filter((e) => e && typeof e === "object");
+  const usable = all.filter((e) => (typeof e.refresh_token === "string" && e.refresh_token.length > 0) || (typeof e.key === "string" && e.key.length > 0));
+  if (!usable.length) return { authed: false, detail: "grok's auth file has no session" };
+  const fresh = usable.filter((e) => {
+    const exp = e.expires_at ? Date.parse(e.expires_at) : NaN;
+    return !Number.isFinite(exp) || exp + GROK_STALE_MS > now;
+  });
+  if (fresh.length) return { authed: true };
+  const latest = Math.max(...usable.map((e) => Date.parse(e.expires_at!)));
+  return { authed: false, detail: `grok's session expired ${new Date(latest).toISOString().slice(0, 10)} and hasn't renewed` };
 }
 
 export async function setupReport(): Promise<SetupReport> {

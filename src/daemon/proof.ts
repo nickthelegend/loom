@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { execFile } from "../core/process.js";
 import { runCommand } from "../core/run-command.js";
-import { detectTestCommand, evidenceFrom, extractClaims, isPlanRequest, judge, parseCounts, type ProofResult, type Rerun } from "../core/proof.js";
+import { detectTestCommand, ranTestCommand, evidenceFrom, extractClaims, isPlanRequest, judge, parseCounts, type ProofResult, type Rerun } from "../core/proof.js";
 import { loomHome } from "../core/registry.js";
 import type { EventKind, LoomEvent } from "../types.js";
 import { MAIN_CHAT } from "../types.js";
@@ -115,7 +115,8 @@ export class ProofRunner {
       const text = t.reply ? String(t.reply.payload.text) : "";
       const claims = extractClaims(text);
       const ran = evidenceFrom(t.events);
-      const command = opts.testCommand ?? this.host.config().testCommand ?? detectTestCommand(this.host.dir);
+      // what was asked, what's configured, the test command this turn ran and passed, then a guess (#276)
+      const command = opts.testCommand ?? this.host.config().testCommand ?? ranTestCommand(ran, this.host.dir) ?? detectTestCommand(this.host.dir);
       const rerun = command ? await this.rerun(command) : null;
       const result = judge(claims, ran, rerun);
       const event = this.host.append({ kind: "proof", chat: chat === MAIN_CHAT ? undefined : chat, payload: {
@@ -144,14 +145,16 @@ export class ProofRunner {
     await exec("git", ["worktree", "add", "--detach", "-q", dir, "HEAD"], { cwd: repo });
     try {
       await this.copyWorkingTree(repo, dir);
-      for (const dep of DEP_DIRS) {
-        const from = path.join(repo, dep), to = path.join(dir, dep);
-        if (fs.existsSync(from) && !fs.existsSync(to)) fs.symlinkSync(from, to, process.platform === "win32" ? "junction" : "dir");
-      }
       // where the project sits in the repo, as git sees it — comparing paths ourselves trips on
       // /private/var vs /var (macOS) and short 8.3 names like RUNNER~1 (Windows)
       const { stdout: prefix } = await exec("git", ["rev-parse", "--show-prefix"], { cwd: this.host.dir });
       const sub = prefix.trim().replace(/\/$/, "");
+      // dependency folders are gitignored, so the checkout borrows them — from the repo root, and from the project's own folder when it's deeper
+      const pairs: Array<[string, string]> = [[repo, dir], ...(sub ? [[this.host.dir, path.join(dir, ...sub.split("/"))] as [string, string]] : [])];
+      for (const [base, into] of pairs) for (const dep of DEP_DIRS) {
+        const from = path.join(base, dep), to = path.join(into, dep);
+        if (fs.existsSync(from) && !fs.existsSync(to)) fs.symlinkSync(from, to, process.platform === "win32" ? "junction" : "dir");
+      }
       const r = await runCommand(command, sub ? path.join(dir, ...sub.split("/")) : dir, { timeoutMs, keep: 64_000 });
       return this.toRerun(command, r, true);
     } finally {

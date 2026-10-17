@@ -467,6 +467,8 @@ export interface SendInput {
    * permission mode). Provider agents only.
    */
   interactionMode?: "default" | "plan";
+  /** Start this chat's native session over instead of resuming it — a short question needn't re-read a long, cold session (#280). Provider agents only. */
+  freshSession?: boolean;
   /** App-owned conversation binding; native IDs never cross chat/workspace scopes.
    * Context is injected into the ordinary input on every invocation. */
   continuity?: { runId: string; bindingId: string; sessionEpoch: number;

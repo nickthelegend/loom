@@ -31,19 +31,29 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
     }),
   );
 
+  // How heavy an agent's session in a chat is, and whether its cache has likely gone cold —
+  // so a short question can be warned before it re-reads 170k tokens (#280)
+  app.get(
+    "/api/projects/:id/agents/:agentId/session",
+    withRuntime(async (rt, req, res) => {
+      res.json({ session: rt.sessionWeight(String(req.params.agentId), String(req.query.chat ?? "main")) });
+    }),
+  );
+
   app.post(
     "/api/projects/:id/messages",
     withRuntime(async (rt, req, res) => {
       if (rt.continuity) {
         try { parseBounded(z.strictObject({ text: Text.min(1), agentId: Id.optional(), chat: Id.optional(),
-          plan: z.boolean().optional(), requestId: Id.optional(), length: z.enum(["brief", "normal", "detailed"]).optional() }), req.body); }
+          plan: z.boolean().optional(), fresh: z.boolean().optional(), requestId: Id.optional(), length: z.enum(["brief", "normal", "detailed"]).optional() }), req.body); }
         catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "invalid continuity request", code: "invalid" }); return; }
       }
-      const { text, agentId, chat, plan, requestId, length } = (req.body ?? {}) as {
+      const { text, agentId, chat, plan, fresh, requestId, length } = (req.body ?? {}) as {
         text?: string;
         agentId?: string;
         chat?: string;
         plan?: boolean;
+        fresh?: boolean;
         requestId?: string;
         length?: string;
       };
@@ -53,6 +63,7 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
         result = await rt.sendMessage(text, agentId, {
           ...(chat ? { chat } : {}),
           ...(plan ? { plan: true } : {}),
+          ...(fresh ? { fresh: true } : {}),
           ...(requestId ? { requestId } : {}),
           ...(length === "brief" || length === "detailed" ? { length } : {}),
         });

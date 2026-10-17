@@ -633,11 +633,17 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/events${qs ? `?${qs}` : ""}`);
   }
 
-  send(id: string, text: string, agentId?: string): Promise<{ agentId: string }> {
+  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean } = {}): Promise<{ agentId: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/messages`, {
       text,
       ...(agentId ? { agentId } : {}),
+      ...(opts.fresh ? { fresh: true } : {}),
     });
+  }
+
+  /** How big an agent's session in a chat is, and whether resuming it would re-read it cold. */
+  sessionWeight(id: string, agentId: string, chat = "main"): Promise<{ session: { tokens: number; ageMs: number; model?: string; cold: boolean; estUsd?: number } | null }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/session?chat=${encodeURIComponent(chat)}`);
   }
 
   handoff(id: string, to: string): Promise<{ from: string | null; to: string }> {

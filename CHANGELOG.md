@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+From the 1.2.0 field test: a full `loom council` run on a real project.
+
+### Fixed
+
+- **Proof no longer says "the tests fail" when it couldn't run them.** It re-runs the test command the turn itself ran and passed (or `proof.testCommand`), guesses pytest through the project's `.venv` or `python3` rather than a bare `python`, borrows dependency folders from the project's own folder too, and treats exit 126/127 or "command not found" as unverified. The council's Prove stage is a ✓ only when verified (#276).
+- **Council decisions keep the planner's words** — underscores, backticks and paths were stripped from the notes stored in project memory (#275).
+- **The council's fix round gets every finding**, low ones included; the planner rejects what it won't do, out loud (#277).
+- **A reviewer that answers with nothing is a failed reviewer**, not a finished one (#278).
+- **Plans go to `.loom/plans/`**, not a new `plans/` folder in your repo (#279).
+- **Grok shows as signed out when its session has expired**, and `loom doctor` reports a sign-in failure a real turn hit, remembered across restarts (#274).
+
+### Added
+
+- `loom send` warns before resuming a 100k+ token session whose prompt cache has likely expired, with the re-read's estimated cost; `--fresh` starts the agent's session in that chat over (#280).
+
 ## [1.2.0] — 2026-10-17
 
 From a full field test of 1.1 on a real project (#244–#261), and the workflow it asked for.

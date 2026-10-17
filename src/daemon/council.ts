@@ -19,7 +19,7 @@
 import { randomUUID } from "node:crypto";
 import type { ListOpts } from "../core/events/contracts.js";
 import {
-  BACKTEST_FOCUS, FORWARD_FOCUS, STAGES, backtestText, buildPrompt, decidePrompt, fixPrompt, parseVerdicts, planPrompt, worthFixing,
+  BACKTEST_FOCUS, FORWARD_FOCUS, STAGES, backtestText, buildPrompt, decidePrompt, fixPrompt, parseVerdicts, planPrompt, proofStage,
   type StageKey, type StageStatus,
 } from "../core/council.js";
 import type { Finding, ReviewTarget } from "../core/review.js";
@@ -205,7 +205,8 @@ export class CouncilRunner {
 
       go("prove");
       let proof = await this.host.prove(chat);
-      this.stage(councilId, chat, "prove", proof ? "done" : "skipped", proof?.headline ?? "nothing to check");
+      // a "didn't hold" is marked as one, and the council carries on to the fix round with it
+      this.stage(councilId, chat, "prove", proof ? proofStage(proof.verdict) : "skipped", proof?.headline ?? "nothing to check");
 
       let target: ReviewTarget | null = null;
       try { target = this.host.diffTarget(); } catch { /* the build changed nothing */ }
@@ -214,7 +215,8 @@ export class CouncilRunner {
       else {
         go("forward");
         const fwd = await this.review(councilId, chat, reviewers, target, FORWARD_FOCUS);
-        toFix = (fwd.findings ?? []).filter(worthFixing);
+        // every finding goes to the fix round: the planner rejects what it won't do, out loud (#277)
+        toFix = fwd.findings ?? [];
         this.stage(councilId, chat, "forward", "done", fwd.summary);
       }
 

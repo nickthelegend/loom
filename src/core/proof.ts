@@ -246,15 +246,46 @@ export function detectTestCommand(dir: string): string | null {
   }
   if (has("Cargo.toml")) return "cargo test";
   if (has("go.mod")) return "go test ./...";
-  if (has("pytest.ini") || has("conftest.py") || (has("pyproject.toml") && /\[tool\.pytest/.test(fs.readFileSync(path.join(dir, "pyproject.toml"), "utf8")))) return "python -m pytest -q";
+  if (has("pytest.ini") || has("conftest.py") || (has("pyproject.toml") && /\[tool\.pytest/.test(fs.readFileSync(path.join(dir, "pyproject.toml"), "utf8")))) {
+    // the project's own interpreter when it has one; a bare `python` often isn't on PATH (macOS ships python3 only) (#276)
+    const venv = [".venv", "venv"].map((v) => path.join(v, process.platform === "win32" ? "Scripts/python.exe" : "bin/python")).find(has);
+    return `${venv ?? (process.platform === "win32" ? "python" : "python3")} -m pytest -q`;
+  }
   if (has("Makefile") && /^test:/m.test(fs.readFileSync(path.join(dir, "Makefile"), "utf8"))) return "make test";
   return null;
+}
+
+/**
+ * The test command the turn itself ran and passed — better than a guess, since
+ * it's the one that works on this machine. A leading `cd <the project> &&` is
+ * dropped so it runs in the clean checkout instead.
+ */
+export function ranTestCommand(ran: Ran[], projectDir: string): string | null {
+  const last = [...ran].reverse().find((r) => r.kind === "tests" && r.ok && (r.exitCode === 0 || r.exitCode === null));
+  if (!last) return null;
+  let cmd = last.command.trim();
+  const cd = /^cd\s+("([^"]+)"|'([^']+)'|(\S+))\s*&&\s*/.exec(cmd);
+  if (cd) {
+    const target = (cd[2] ?? cd[3] ?? cd[4] ?? "").replace(/\\ /g, " ");
+    if (target === "." || path.resolve(projectDir, target) === path.resolve(projectDir)) cmd = cmd.slice(cd[0].length);
+    else return null; // it ran somewhere else: not this project's tests
+  }
+  return cmd || null;
+}
+
+/** A re-run that never got as far as the tests: the command (or its interpreter) wasn't found or couldn't execute. */
+export function couldNotRun(r: Rerun): boolean {
+  if (r.ok) return false;
+  return r.exitCode === 126 || r.exitCode === 127 || /command not found|is not recognized as an internal or external command|cannot execute binary/i.test(r.tail);
 }
 
 // ── the verdict ──
 
 /** Weigh what was claimed against what ran and what the clean re-run showed. */
-export function judge(claims: Claim[], ran: Ran[], rerun: Rerun | null): ProofResult {
+export function judge(claims: Claim[], ran: Ran[], given: Rerun | null): ProofResult {
+  // a re-run that couldn't start says nothing about the tests: weigh the claims on what the turn ran, and say so (#276)
+  const unrunnable = given && couldNotRun(given) ? given : null;
+  const rerun = unrunnable ? null : given;
   const checks: ClaimCheck[] = claims.map((c) => {
     const same = ran.filter((r) => r.kind === c.kind);
     const last = same.at(-1);
@@ -282,6 +313,7 @@ export function judge(claims: Claim[], ran: Ran[], rerun: Rerun | null): ProofRe
     ? contradicted[0] ? `Claimed “${contradicted[0].text.slice(0, 60)}” — ${contradicted[0].why}` : `The tests fail in a clean checkout${rerun?.counts ? `: ${rerun.counts.failed} failed` : ""}`
     : verdict === "verified"
       ? rerun?.ok ? `Verified: ${rerun.counts ? `${rerun.counts.passed} tests pass` : "the tests pass"} in a clean checkout` : "Verified against the commands it ran"
-      : rerun === null && !claims.length ? "Nothing to verify: no claims and no test command" : "Unverified: no test command to check it against";
-  return { verdict, headline, claims: checks, ran, rerun };
+      : unrunnable ? "Unverified" : rerun === null && !claims.length ? "Nothing to verify: no claims and no test command" : "Unverified: no test command to check it against";
+  const why = unrunnable ? `couldn't run \`${unrunnable.command.slice(0, 60)}\` in a clean checkout (${unrunnable.tail.trim().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? `exit ${unrunnable.exitCode}`}) — set proof.testCommand in .loom/config.json` : "";
+  return { verdict, headline: why ? `${headline} — ${why}` : headline, claims: checks, ran, rerun: given };
 }
