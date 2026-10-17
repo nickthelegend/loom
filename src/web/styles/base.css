@@ -189,7 +189,10 @@
   .chip:hover{background:var(--accent);color:var(--foreground)}
   .chip.sel{color:var(--primary-foreground);background:var(--primary);border-color:transparent;font-weight:600}
   .chip .role{opacity:.65;font-size:11px}
-  .busy{width:10px;height:10px;border-radius:50%;flex:none;display:inline-block;
+  /* The spinner is the empty <span class="busy"></span>. "busy" is also a state class on rows, buttons
+     and graph nodes (.frow.busy, .terminput.busy, .scmgen.busy, .obnode.busy); a bare .busy turned each
+     of those into a 10px spinning circle — a working agent's Fleet row spun over the row below it. */
+  span.busy:empty{width:10px;height:10px;border-radius:50%;flex:none;display:inline-block;
     border:1.5px solid currentColor;border-top-color:transparent;animation:spin 1s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   /* Native context meter: on an agent chip (phone) and in the composer row (usage.js) */
