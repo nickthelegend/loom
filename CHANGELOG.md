@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-17
+
+From a full field test of 1.1 on a real project (#244–#261), and the workflow it asked for.
+
+### Added
+
+- **`loom council "<goal>" --planner <id> --reviewers <ids>`** — plan → backtest → decide → build → prove → forward-test → fix, in one chat and one card in the app. Only the planner writes; every finding it accepts or rejects is recorded as a decision; Proof re-runs the tests (#272).
+- **`loom review <agents…>`** — several agents review the uncommitted changes (or `--file`, `--text`) at once, read-only, without taking the baton. Findings land on one card, worst first, with agreement merged; accept one and it becomes a project decision (`loom review:accept|reject`, `loom reviews`). A reviewer that edits files anyway is flagged (#253, #271).
+- **`loom send --wait [--json] [--timeout s]`** — blocks until the turn ends and prints the reply and cost; exit 0 done, 1 failed, 2 asked, 124 timed out (#254).
+- **`loom doctor`** compares the daemon's PATH, sign-ins and keys with your shell (naming the missing PATH folder), checks every provider answers with the daemon's key, and suggests `pool:free` for a free model that keeps getting 429/503 (#270).
+- **Cost estimates** — agents that report tokens but no price (Codex, Grok) show `~$x est.` in `loom costs` and the Usage view, priced from OpenRouter's public model list; never added to totals or budgets (#269).
+- Per-project `readPaths` and `permissions.allow` in `.loom/config.json` (#255).
+- `loom init` offers to add `.loom/` to `.gitignore` (#256).
+
+### Fixed
+
+- **Claude's Auto mode runs the project's commands** — the test command, `cd <project> && …`, quoted paths with spaces — and refuses paths outside the project and commands that can't be undone, saying which rule fired and how to allow it. The permission badge explains each mode (#244, #260, #261).
+- **Failed runs are reported as failed**: an Antigravity turn that timed out or returned nothing, and a failed subtask, read as success (#246, #247).
+- `loom providers` shows the daemon's view; a key only your shell has is called out (#249, #250).
+- Proof doesn't check a plan-only turn or count a refused command (#245); memory is credited only to a successful turn's reply (#248).
+- Signed-out agents show as signed out in `loom init`, the roster and Desktop (#251); `loom status` says working (#252); a model agent without write shows as read-only (#257).
+- `loom ask` checks provider keys before sending anything (#258).
+- The app is "Loom Desktop" in Spotlight, the menu bar and the window (#259).
+- A spawned subtask's reply lands in the chat it was asked in.
+
 ## [1.1.2] — 2026-10-17
 
 ### Fixed
