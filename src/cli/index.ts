@@ -42,7 +42,7 @@ import {
 } from "../daemon/client.js";
 import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
-import { ensureLoomHome, loomHome } from "../core/registry.js";
+import { ensureLoomHome, findProject, loomHome, readDaemonConfig } from "../core/registry.js";
 import { VERSION } from "../version.js";
 import { makeBackup } from "../core/backup.js";
 import { threadMarkdown } from "../core/thread-md.js";
@@ -3036,7 +3036,7 @@ program
   .option("--json", "print machine-readable diagnostic results")
   .option("--fix", "repair what has exactly one safe repair; report the rest")
   .action(async (opts: { json: boolean; fix?: boolean }) => {
-    const { doctorReport, envChecks, projectChecks, fixProject } = await import("./doctor.js");
+    const { doctorReport, envChecks, projectChecks, fixProject, compareWithDaemon, envFacts } = await import("./doctor.js");
     const dir = currentProjectDir();
     if (opts.fix) {
       if (!dir) {
@@ -3053,6 +3053,21 @@ program
     const checks = await envChecks();
     if (dir) checks.push(...projectChecks(dir));
     else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
+    // The daemon is often the desktop app's, started without this shell's PATH or keys:
+    // ask it what it sees, and say where the two differ. Its provider and free-model
+    // checks run there because its keys are the ones turns use. Never starts a daemon.
+    const dcfg = readDaemonConfig();
+    if (dcfg && checks.some((c) => c.name === "daemon" && !/not responding|never started/.test(c.detail))) {
+      try {
+        const dclient = new DaemonClient(dcfg);
+        const pid = dir ? findProject(dir)?.id : undefined;
+        const theirs = await dclient.doctor(pid);
+        if (theirs.facts) checks.push(...compareWithDaemon({ checks, facts: envFacts() }, { checks: theirs.checks, facts: theirs.facts }));
+        checks.push(...theirs.checks.filter((c) => /^(provider|model):/.test(c.name)));
+      } catch (err) {
+        checks.push({ name: "daemon:env", status: "warn", detail: `couldn't ask the daemon what it sees: ${err instanceof Error ? err.message : String(err)}` });
+      }
+    }
 
     const report = doctorReport(checks);
     if (opts.json) {
@@ -3064,7 +3079,7 @@ program
     for (const c of checks) {
       const icon =
         c.status === "ok" ? pc.green("✓") : c.status === "warn" ? pc.yellow("⚠") : pc.red("✗");
-      console.log(` ${icon} ${pc.bold(c.name.padEnd(11))} ${c.status === "ok" ? pc.dim(c.detail) : c.detail}`);
+      console.log(` ${icon} ${pc.bold(c.name.padEnd(15))} ${c.status === "ok" ? pc.dim(c.detail) : c.detail}`);
     }
     if (report.summary.failures) {
       console.log(pc.red(`\n${report.summary.failures} problem${report.summary.failures > 1 ? "s" : ""} found`));

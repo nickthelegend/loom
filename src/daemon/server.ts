@@ -427,7 +427,7 @@ export class LoomDaemon {
       if (scope.includes(resolved)) return void next();
       res.status(403).json({ error: "this token is not scoped to that project" });
     });
-    registerSetupRoutes(app);
+    registerSetupRoutes(app, ctx);
     registerProvidersRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);
