@@ -40,6 +40,9 @@ import type { SendInput } from "../types.js";
 import { AdapterBase, agentEnv, cliAvailable, frameBriefing } from "./base.js";
 import { permissionFor } from "../core/permissions.js";
 
+/** agy's own --print-timeout is 5 minutes; a review of a real diff took longer (#246). */
+const DEFAULT_TIMEOUT_MS = 15 * 60_000;
+
 interface AntigravityOptions {
   /** Model the CLI runs, e.g. "gemini-3.6-flash-medium" or "claude-sonnet-4-6". */
   model?: string;
@@ -124,9 +127,14 @@ export class AntigravityCliAdapter extends AdapterBase {
     await this.interrupt();
   }
 
+  /** How long one print turn may run. A review-sized turn needs more than agy's 5 minutes (#246). */
+  private timeoutMs(): number {
+    return this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  }
+
   /** agy wants a Go-style duration; ms → "<n>s". */
   private timeoutArg(): string {
-    const ms = this.options.timeoutMs ?? 300_000;
+    const ms = this.timeoutMs();
     return `${Math.max(1, Math.round(ms / 1000))}s`;
   }
 
@@ -199,6 +207,19 @@ export class AntigravityCliAdapter extends AdapterBase {
           if (code !== 0 && !message) {
             this.emit({ kind: "error", payload: { message: `agy exited ${code}`, stderr: stderrTail } });
             reject(new Error(`agy exited ${code}: ${stderrTail.slice(0, 200)}`));
+            return;
+          }
+          // agy's --print-timeout exits 0 with nothing on stdout: a turn with no reply is a failure, not a
+          // success — and saying it timed out beats a silent "finished" with nothing in the thread (#246)
+          if (!message) {
+            const took = Date.now() - started;
+            const limit = this.timeoutMs();
+            const timedOut = took >= Math.max(limit - 2_000, limit * 0.9);
+            const why = timedOut
+              ? `agy timed out after ${Math.round(took / 1000)}s with no reply — raise this agent's timeoutMs for turns this size`
+              : `agy finished without a reply${stderrTail.trim() ? `: ${stderrTail.trim().split("\n").pop()!.slice(0, 200)}` : ""}`;
+            this.emit({ kind: "error", payload: { message: why, ...(timedOut ? { timedOut: true, timeoutMs: this.timeoutMs() } : {}), ...(stderrTail ? { stderr: stderrTail } : {}) } });
+            reject(new Error(why));
             return;
           }
 

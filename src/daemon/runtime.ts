@@ -2775,10 +2775,20 @@ export class ProjectRuntime {
       ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),
     };
 
+    const startedAt = Date.now();
     void child
       .send(input)
       .then(() => {
         this.subtasks.delete(id);
+        // an adapter can report a failed turn as an error event and still resolve: that subtask
+        // failed — it isn't "done" (#247)
+        const failed = this.log.list({ chat, agentId: opts.agentId, kinds: ["error", "run_complete"], sinceTs: startedAt })
+          .reverse().find((e) => e.kind === "error" || Boolean(e.payload.error));
+        if (failed) {
+          this.appendIfOpen({ kind: "subtask_failed", agentId: opts.agentId, chat, payload: { subtaskId: id, parent: parentAgentId, task,
+            message: String(failed.payload.message ?? failed.payload.error ?? "the turn failed").slice(0, 500) } });
+          return;
+        }
         this.appendIfOpen({
           kind: "subtask_done",
           agentId: opts.agentId,
