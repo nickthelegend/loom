@@ -46,6 +46,7 @@ import type {
   SessionStartInput, ThreadId, TurnId, TurnStartResult, UserInputAnswers, UserInputQuestion,
 } from "../contracts.js";
 import { ProviderError } from "../errors.js";
+import { decideAuto, policyIn, refusalText, type AutoPolicy } from "../../core/auto-policy.js";
 import { spawnHarness, stopHarness, type HarnessProcess } from "../process.js";
 
 export interface ClaudeAdapterOptions {
@@ -61,6 +62,8 @@ export interface ClaudeAdapterOptions {
   canAsk?: () => boolean;
   /** How long to wait for the CLI to initialize. */
   startTimeoutMs?: number;
+  /** Loom's Auto policy (core/auto-policy.ts), read live: what Auto lets this agent run beyond file edits. */
+  autoPolicy?: () => AutoPolicy | undefined;
 }
 
 /**
@@ -266,6 +269,8 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       ...(model ? { model } : {}),
       ...(input.modelSelection?.effort ? { effort: input.modelSelection.effort as NonNullable<Options["effort"]> } : {}),
       ...(mcpServers && Object.keys(mcpServers).length ? { mcpServers } : {}),
+      // sibling folders the project lets agents read (readPaths), so Claude's own checks admit them too
+      ...((dirs) => (dirs.length ? { additionalDirectories: dirs } : {}))(this.options.autoPolicy?.()?.readPaths ?? []),
       ...(extraArgs ? { extraArgs } : {}),
       spawnClaudeCodeProcess: spawnOptions => {
         const proc = spawnHarness(spawnOptions.command, spawnOptions.args, { cwd: spawnOptions.cwd ?? input.cwd,
@@ -346,8 +351,19 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     }
     const base = s.basePermissionMode;
     if (base === "bypassPermissions") return { behavior: "allow", updatedInput: toolInput };
+    // Auto: Claude's acceptEdits asks about everything past file edits; Loom answers with its Auto
+    // policy — commands and reads inside the project run, the rest is refused naming the rule that fired
+    const policy = base === "acceptEdits" ? this.options.autoPolicy?.() : undefined;
+    if (policy) {
+      const d = decideAuto(tool, toolInput, policyIn(policy, s.info.cwd));
+      if (d.allow) return { behavior: "allow", updatedInput: toolInput };
+      if (toolUseId) { const t = s.tools.get(toolUseId); if (t) t.declined = true; }
+      return { behavior: "deny", message: refusalText(d) };
+    }
     if (base === "acceptEdits" || base === "plan" || base === "dontAsk")
-      return { behavior: "deny", message: `${tool} is not allowed in this permission mode. Loom's Auto mode never stops to ask; allow the tool in Claude's settings or switch this agent to Always ask.` };
+      return { behavior: "deny", message: base === "plan"
+        ? `${tool} isn't available in plan mode: this agent proposes and makes no changes.`
+        : `Loom's Auto mode refused ${tool}: it isn't covered by this agent's Auto policy. Switch this agent to Always ask or Bypass to use it.` };
     const requestId = randomUUID();
     const requestType = requestTypeFor(tool);
     const turnId = s.turn?.id;

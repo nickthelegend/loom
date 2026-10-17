@@ -20,6 +20,7 @@
  * turn, as in t3code.
  */
 
+import { autoPolicyFor } from "../core/auto-policy.js";
 import path from "node:path";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { AdapterBase, ADAPTER_CAPABILITIES, cliAvailable, cliOutput, firstLine, frameBriefing, type AgentCheck } from "../adapters/base.js";
@@ -245,6 +246,8 @@ export class ProviderAgent extends AdapterBase {
       : new ClaudeProviderAdapter(this.id, { ...(this.options.bin ? { bin: this.options.bin } : {}),
         ...(this.options.extraArgs ? { extraArgs: this.options.extraArgs } : {}),
         ...(this.options.permissionMode ? { permissionMode: this.options.permissionMode } : {}),
+        // looked up by project id: options stay plain data (native continuity clones them)
+        autoPolicy: () => autoPolicyFor(String(this.options.loomProject ?? "")),
         mcpServers: () => Object.fromEntries(mcpServers().map(s => [s.key, claudeMcpServer(s.entry)])), canAsk: hasApprovalBroker });
     providers.service.register(adapter);
     providers.owners.set(this.id, this);

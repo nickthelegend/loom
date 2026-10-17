@@ -1253,6 +1253,7 @@
   .rail .frow .role{flex:0 1 auto;max-width:42%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     padding:1px 6px;border-radius:5px;background:color-mix(in srgb, var(--muted-foreground) 10%, transparent)}
   .rail .frow .abadge{flex:none}
+  .rail .frow .pbdg{flex:none;font-size:9px;padding:0 5px}
   /* a role that only repeats the agent's name shows on hover, still click-to-rename */
   .rail .frow .role.same{opacity:0;transition:opacity .12s}
   .rail .frow:hover .role.same,.rail .frow .role.same:focus{opacity:1}

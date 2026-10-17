@@ -358,9 +358,9 @@ describe("web app · picking models in Orchestrate", () => {
     expect(APP_HTML).toContain("function modelBadge(");
     expect(APP_HTML).toContain('data-modelof="');
     // On the orchestrator button…
-    expect(APP_HTML).toContain("permBadge(permOf(lead), lead.id) + modelBadge(lead)");
+    expect(APP_HTML).toContain("permBadge(permOf(lead), lead.id, lead.kind) + modelBadge(lead)");
     // …and on each worker chip, in the chip's own settings zone.
-    expect(APP_HTML).toContain('<span class="cwset">\' + modelBadge(a) + permBadge(permOf(a), a.id)');
+    expect(APP_HTML).toContain('<span class="cwset">\' + modelBadge(a) + permBadge(permOf(a), a.id, a.kind)');
     expect(APP_HTML).toContain("function wireModelBadges(");
     expect(APP_HTML).toContain("wireModelBadges(el);");
   });

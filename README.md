@@ -1113,12 +1113,24 @@ real CLI with `node scripts/verify-permissions.mjs`, not read off `--help`.
 
 | | Bypass | Auto | Always ask |
 |---|---|---|---|
-| Claude Code | `bypassPermissions` | `acceptEdits` *(default)* | **real approvals**: each tool call waits for your Allow / Deny in Loom, on desktop or phone |
+| Claude Code | `bypassPermissions` | `acceptEdits` + Loom's Auto policy *(default)* | **real approvals**: each tool call waits for your Allow / Deny in Loom, on desktop or phone |
 | Codex | no sandbox | `workspace-write` *(default)* | **real approvals**: a `read-only` sandbox, and each command or edit waits for your Allow / Deny in Loom |
 | Antigravity | `--dangerously-skip-permissions` *(default)* | ✗ unavailable: agy 1.2.6 headless writes into its own scratch folder, not your project | `--mode plan` |
 | Grok | `bypassPermissions` *(default)* | `auto` | `plan` |
 | OpenCode | allow-all | its defaults *(default)* | ✗ unavailable: opencode 1.18.31 ignores read-only settings on its headless API |
 
+- **What Auto lets Claude Code do.** It edits files and runs commands inside the
+  project, its tests included, the same as Codex's `workspace-write`. Refused,
+  with the rule that fired named in the refusal: a path outside the project, a
+  command that can't be undone (the [shield](#blast-radius-shield-what-cant-be-taken-back)'s
+  list), and MCP tools nobody allowed. The project's test command
+  (`proof.testCommand` or the detected one) always runs. To allow more, add
+  `.loom/config.json` → `permissions.allow`: command prefixes (`"docker compose up"`),
+  tool names (`"WebFetch"`) or globs (`"mcp__github__*"`). Add folders an
+  agent may read but not write with `readPaths` (`["../chatterbox-api"]`).
+- An agent whose Auto is unavailable runs in its default instead (Antigravity
+  runs Bypass). Hover a permission badge to see what that agent's mode actually
+  allows.
 - "Unavailable" cells are shown disabled with the reason, and the API refuses them.
 - **Always ask** is answered inside the daemon: Claude Code's permission prompts
   arrive through the Agent SDK's `canUseTool`, and Codex's through app-server
