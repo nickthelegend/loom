@@ -127,12 +127,14 @@ export function collectFindings(reviewId: string, replies: Array<{ agent: string
 }
 
 /** One line for the card and the CLI: "3 reviewers · 7 findings (2 high)". */
-export function reviewSummary(results: Array<{ status: string }>, findings: Finding[]): string {
+export function reviewSummary(results: Array<{ status: string; edited?: string[] }>, findings: Finding[]): string {
   const failed = results.filter((r) => r.status !== "done").length;
+  const wrote = results.filter((r) => r.edited?.length).length;
   const high = findings.filter((f) => f.severity === "high").length;
   const agreed = findings.filter((f) => f.agreed?.length).length;
   return `${results.length} reviewer${results.length === 1 ? "" : "s"}${failed ? ` (${failed} failed)` : ""} · ` +
-    (findings.length ? `${findings.length} finding${findings.length === 1 ? "" : "s"}${high ? ` (${high} high)` : ""}${agreed ? ` · ${agreed} flagged by more than one` : ""}` : "no findings");
+    (findings.length ? `${findings.length} finding${findings.length === 1 ? "" : "s"}${high ? ` (${high} high)` : ""}${agreed ? ` · ${agreed} flagged by more than one` : ""}` : "no findings") +
+    (wrote ? ` · ⚠ ${wrote} changed files in a read-only review` : "");
 }
 
 /** How an accepted finding reads as a project decision. */

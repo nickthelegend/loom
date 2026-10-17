@@ -111,6 +111,7 @@ import { HarnessMonitor, isNativeKind } from "../core/continuity/capabilities.js
 import { ProviderAgent } from "../providers/agent.js";
 import { READ_ONLY_RULE, type ReviewTarget } from "../core/review.js";
 import { ReviewRunner } from "./review.js";
+import { CouncilRunner } from "./council.js";
 import { LiveDeltaThrottle, type LiveFrame } from "../providers/live.js";
 import { AdapterBase, type AgentCheck } from "../adapters/base.js";
 import type { LiveText } from "../types.js";
@@ -174,6 +175,7 @@ export class ProjectRuntime {
   /** Night Shift: a line of tasks run while you're away, then one report (daemon/shift.ts). */
   readonly shifts: NightShift;
   readonly reviews: ReviewRunner;
+  readonly councils: CouncilRunner;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -459,6 +461,37 @@ export class ProjectRuntime {
         this.brain.add({ kind: "decision", text, provenance: { agentId: "user", eventId: event.id, ts: event.ts } });
       },
       maxReviewers: ProjectRuntime.MAX_CONCURRENT_SUBTASKS,
+    });
+    this.councils = new CouncilRunner({
+      hasAgent: (id) => this.config.agents.some((a) => a.id === id),
+      canWrite: (id) => {
+        const cfg = this.config.agents.find((a) => a.id === id);
+        if (!cfg || cfg.enabled === false || !this.agents.has(id) || !isAdapter(this.agent(id))) return false;
+        return cfg.kind !== "model" || Boolean(cfg.options?.write); // a model agent without write only answers
+      },
+      createChat: (title) => this.createChat(title),
+      holder: () => this.baton.holder() ?? undefined,
+      handoff: (to) => this.handoff(to, { source: "route" }),
+      send: (agentId, text, opts) => this.sendMessage(text, agentId, { chat: opts.chat, plan: opts.plan, source: "route" }),
+      interrupt: (chat) => this.interrupt({ chat, source: "route" }),
+      checkReviewers: (ids) => this.reviews.check(ids),
+      startReview: (input) => this.reviews.start(input),
+      reviewStatus: (id) => this.reviews.status(id),
+      diffTarget: () => this.reviewTarget({}),
+      decide: (id, decision, note) => void this.reviews.decide(id, decision, note),
+      // the turn may already be being checked (Proof checks a reply that claims something by itself): use that one
+      prove: async (chat) => {
+        const t = this.proofs.turn(chat);
+        if (!t) return null;
+        for (let i = 0; i < 1200 && this.proofs.busy; i++) await new Promise((r) => setTimeout(r, 250));
+        const had = this.log.list({ kinds: ["proof"], chat }).reverse().find((e) => (e.payload.turn as { done?: number } | undefined)?.done === t.done.id);
+        if (had) return { verdict: String(had.payload.verdict), headline: String(had.payload.headline) };
+        return this.proofs.prove(chat);
+      },
+      list: (opts) => this.log.list(opts),
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      lastId: () => this.log.list({ limit: 1 }).at(-1)?.id ?? 0,
+      warn: (message, detail) => logbook.warn("council", message, String(detail), this.info.id),
     });
     this.crews = new CrewEngine({
       projectId: info.id,
@@ -2883,8 +2916,14 @@ export class ProjectRuntime {
    * the baton (daemon/review.ts). The target is a file, free text, or —
    * by default — the uncommitted changes.
    */
-  async startReview(input: { agents: string[]; file?: string; text?: string; focus?: string }) {
+  async startReview(input: { agents: string[]; file?: string; text?: string; focus?: string; chat?: string }) {
     this.reviews.check(input.agents); // who, before reading any diff
+    const target = this.reviewTarget(input);
+    return this.reviews.start({ agents: input.agents, target, ...(input.focus ? { focus: input.focus } : {}), ...(input.chat ? { chat: input.chat } : {}) });
+  }
+
+  /** What a review reads: a file, free text, or the uncommitted changes. Throws when there's nothing to read. */
+  reviewTarget(input: { file?: string; text?: string }): ReviewTarget {
     let target: ReviewTarget;
     if (input.file?.trim()) {
       const rel = path.relative(this.info.dir, path.resolve(this.info.dir, input.file.trim()));
@@ -2903,7 +2942,7 @@ export class ProjectRuntime {
       if (!diff.trim() && !untracked.length) throw new Error("there are no uncommitted changes to review — name a --file instead");
       target = { kind: "diff", diff, untracked };
     }
-    return this.reviews.start({ agents: input.agents, target, ...(input.focus ? { focus: input.focus } : {}) });
+    return target;
   }
 
   private subtaskBriefing(parent: string, childId: string, task: string): string { return this.briefings.subtaskBriefing(parent, childId, task); }
@@ -3448,6 +3487,7 @@ export class ProjectRuntime {
     await this.orchestra.shutdown().catch(() => { });
     this.relay.stop();
     this.shifts.close();
+    this.councils.close();
     await this.crews.shutdown().catch(() => { });
     this.closed = true;
     this.harnesses.stop();

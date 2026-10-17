@@ -8,7 +8,7 @@ import { maybeReloadPreview,onServerFrame,onSpecFrame } from '../preview.js';
 import { state } from '../state.js';
 import { drawStatusbar } from '../statusbar.js';
 import { onTeamFrame } from '../team.js';
-import { actSummary,avatarFor,durfmt,lineFor,relClock,settleFinding,settleQuestionCard,untilText,whoHtml } from '../transcript.js';
+import { actSummary,avatarFor,durfmt,lineFor,relClock,settleCouncil,settleFinding,settleQuestionCard,untilText,whoHtml } from '../transcript.js';
 import { observeUsage,usageMeter } from '../usage.js';
 import { ICONS } from '../icons.js';
 
@@ -349,6 +349,8 @@ export function createThread(view) {
         }
         // a review finding accepted or rejected: its row on the card says so, rather than a line of its own
         if (e.kind === "review" && pl.phase === "decided") { settleFinding(feed, pl.findingId, pl.decision); return; }
+        // a council's stages fill in on its card
+        if (e.kind === "council" && (pl.phase === "stage" || pl.phase === "done")) { settleCouncil(feed, pl); return; }
         if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
         }

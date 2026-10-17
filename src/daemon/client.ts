@@ -731,6 +731,23 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/reviews`);
   }
 
+  /** A goal through plan → backtest → decide → build → prove → forward-test → fix (daemon/council.ts). */
+  startCouncil(id: string, body: { goal: string; planner: string; reviewers: string[] }): Promise<{ council: import("./council.js").CouncilState }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/councils`, body);
+  }
+
+  council(id: string, councilId: string): Promise<{ council: import("./council.js").CouncilState }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/councils/${encodeURIComponent(councilId)}`);
+  }
+
+  councils(id: string): Promise<{ active: boolean; councils: import("./council.js").CouncilState[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/councils`);
+  }
+
+  stopCouncil(id: string): Promise<{ council: import("./council.js").CouncilState }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/councils`);
+  }
+
   decideFinding(id: string, findingId: string, decision: "accepted" | "rejected", note?: string): Promise<{ finding: import("../core/review.js").Finding; decision: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}`, { decision, ...(note ? { note } : {}) });
   }

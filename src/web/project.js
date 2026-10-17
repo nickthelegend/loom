@@ -904,6 +904,16 @@ import { openMenu } from './menus.js';
           .catch(function(err){ sds.disabled = false; toast(err.message); });
         return;
       }
+      // a council's Stop: it ends after the current stage
+      var cst = ev.target.closest && ev.target.closest("[data-council-stop]");
+      if (cst) {
+        ev.preventDefault(); ev.stopPropagation();
+        cst.disabled = true;
+        api("/api/projects/" + pid + "/councils", { method: "DELETE" })
+          .then(function(){ cst.textContent = "Stopping\u2026"; })
+          .catch(function(err){ cst.disabled = false; toast(err.message); });
+        return;
+      }
       // a review finding: accept (it becomes a decision) or reject
       var fdb = ev.target.closest && ev.target.closest("[data-finding-decide]");
       if (fdb) {

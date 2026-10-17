@@ -29,7 +29,11 @@ export interface ReviewHost {
   maxReviewers: number;
 }
 
-export interface ReviewResult { agent: string; status: "done" | "failed"; error?: string; reply: string }
+export interface ReviewResult {
+  agent: string; status: "done" | "failed"; error?: string; reply: string;
+  /** Files it changed anyway. A review is read-only: an agent without a plan mode is only told so, and this is how you'd know it didn't listen. */
+  edited?: string[];
+}
 export interface ReviewState {
   reviewId: string;
   chat: string;
@@ -70,12 +74,12 @@ export class ReviewRunner {
     return agents;
   }
 
-  async start(input: { agents: string[]; target: ReviewTarget; focus?: string }): Promise<ReviewState> {
+  async start(input: { agents: string[]; target: ReviewTarget; focus?: string; chat?: string }): Promise<ReviewState> {
     const agents = this.check(input.agents);
     if (input.target.kind === "file" && !input.target.file.trim()) throw new Error("which file?");
     const reviewId = randomUUID().slice(0, 6);
     const label = targetLabel(input.target);
-    const chat = this.host.createChat(`🔍 Review · ${label}`.slice(0, 60)).id;
+    const chat = input.chat ?? this.host.createChat(`🔍 Review · ${label}`.slice(0, 60)).id;
     const target = slim(input.target);
     // the parent a child is filed under: whoever holds the baton, which a review never takes
     const parent = this.host.holder() ?? agents[0]!;
@@ -103,11 +107,18 @@ export class ReviewRunner {
     return String(msgs.at(-1)?.payload.text ?? "");
   }
 
+  private editsOf(chat: string, agent: string, since: number): string[] {
+    const paths = this.host.list({ chat, agentId: agent, kinds: ["file_edit"], sinceTs: since }).map((e) => String(e.payload.path ?? "")).filter(Boolean);
+    return [...new Set(paths)];
+  }
+
   private finish(reviewId: string, chat: string, target: ReviewState["target"], agents: string[], settled: Map<string, { ok: boolean; message?: string }>, since: number): void {
     const results: ReviewResult[] = agents.map((agent) => {
       const s = settled.get(agent);
       const reply = this.replyOf(chat, agent, since);
-      return s?.ok ? { agent, status: "done", reply: reply.slice(0, 6000) } : { agent, status: "failed", error: s?.message ?? "no answer", reply: reply.slice(0, 6000) };
+      const edited = this.editsOf(chat, agent, since);
+      const base = s?.ok ? { agent, status: "done" as const, reply: reply.slice(0, 6000) } : { agent, status: "failed" as const, error: s?.message ?? "no answer", reply: reply.slice(0, 6000) };
+      return edited.length ? { ...base, edited } : base;
     });
     const findings = collectFindings(reviewId, results.filter((r) => r.status === "done").map((r) => ({ agent: r.agent, reply: r.reply })));
     this.host.append({ kind: "review", chat, payload: { phase: "done", reviewId, chat, target, results, findings, summary: reviewSummary(results, findings) } });
