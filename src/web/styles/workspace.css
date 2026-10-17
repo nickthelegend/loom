@@ -99,6 +99,7 @@
     color:var(--muted-foreground);border:1px solid var(--border);border-radius:5px;
     padding:0 5px;line-height:14px;text-transform:uppercase}
   .arow.cur .abadge{color:var(--sidebar-accent-foreground)}
+  .abadge.err{color:var(--err);border-color:color-mix(in srgb, var(--err) 40%, transparent)}
   /* ── chats: a project's conversations, nested under it ── */
   .crow{display:flex;align-items:center;gap:7px;padding:5px 8px 5px 24px;margin-top:1px;
     border-radius:var(--radius-sm);cursor:pointer;color:var(--sidebar-foreground);

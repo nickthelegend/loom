@@ -95,7 +95,7 @@ const CLAIM_PATTERNS: Array<{ kind: ClaimKind; re: RegExp }> = [
  * ("should pass once CI…", "if the tests pass"), a negation ("haven't run"),
  * an instruction ("Run the tests to check").
  */
-const HEDGE = /\b(?:should|would|could|might|may|will|once|until|if|unless|hopefully|expect(?:ed|s)?|to make sure|to verify|to confirm|supposed to)\b/i;
+const HEDGE = /\b(?:should|would|could|can|might|may|will|once|until|if|unless|hopefully|expect(?:ed|s)?|to make sure|to verify|to confirm|supposed to)\b/i;
 const NEGATED = /\b(?:not|never|no longer|not yet|haven'?t|hasn'?t|didn'?t|don'?t|doesn'?t|couldn'?t|can'?t|cannot|won'?t|unable|without)\b/i;
 const INSTRUCTION = /^(?:please\s+)?(?:run|try|make sure|check|verify|ensure)\b/i;
 
@@ -126,16 +126,36 @@ export function extractClaims(text: string): Claim[] {
 
 // ── what ran ──
 
-const KIND_OF: Array<{ kind: ClaimKind; re: RegExp }> = [
-  { kind: "typecheck", re: /\b(?:tsc\b(?!.*--build)|vue-tsc|mypy|pyright|typecheck|type-check|check-types)\b/i },
-  { kind: "lint", re: /\b(?:eslint|lint|ruff\s+check|flake8|pylint|clippy|golangci-lint|biome\s+(?:check|lint))\b/i },
-  { kind: "tests", re: /\b(?:test|tests|vitest|jest|mocha|ava|pytest|py\.test|unittest|rspec|phpunit|go\s+test|cargo\s+test|cargo\s+nextest|dotnet\s+test|mvn\s+test|gradle\w*\s+test|swift\s+test|bun\s+test|deno\s+test|node\s+--test|playwright\s+test|cypress\s+run)\b/i },
-  { kind: "build", re: /\b(?:build|compile|cargo\s+build|go\s+build|tsc\s+--build|make\b|webpack|vite\s+build|next\s+build|gradle\w*\s+assemble)\b/i },
+/**
+ * What a shell command does, read from the program each segment runs — never
+ * from words in its arguments: `wc -l tests/*.py` and `git ls-files` are not
+ * test runs, however often they say "tests" (#245).
+ */
+const RUNS: Array<{ kind: ClaimKind; re: RegExp }> = [
+  { kind: "tests", re: /^(?:(?:npx|pnpm\s+(?:exec|dlx)|yarn\s+dlx|bunx|uvx|poetry\s+run|uv\s+run|pipenv\s+run)\s+)?(?:\S*\/)?(?:vitest|jest|mocha|ava|pytest|py\.test|rspec|phpunit|tap|karma|nyc)\b|^(?:npm|pnpm|yarn|bun)(?:\s+run)?\s+test(?::\S+)?\b|^(?:\S*\/)?python[\d.]*\s+-m\s+(?:pytest|unittest)\b|^(?:go|cargo|dotnet|mvn|swift|deno|bun|mix)\s+test\b|^cargo\s+nextest\b|^(?:\S*\/)?gradlew?\s+(?:\S+\s+)*test\b|^node\s+(?:\S+\s+)*--test\b|^(?:\S*\/)?playwright\s+test\b|^(?:\S*\/)?cypress\s+run\b|^make\s+(?:test|check)\b|^(?:\S*\/)?(?:bundle\s+exec\s+)?rake\s+(?:test|spec)\b/i },
+  { kind: "typecheck", re: /^(?:(?:npx|pnpm\s+exec|bunx|uv\s+run|poetry\s+run)\s+)?(?:\S*\/)?(?:tsc|vue-tsc|mypy|pyright)\b(?!.*--build)|^(?:npm|pnpm|yarn|bun)(?:\s+run)?\s+(?:typecheck|type-check|check-types|tsc)\b/i },
+  { kind: "lint", re: /^(?:(?:npx|pnpm\s+exec|bunx|uv\s+run|poetry\s+run)\s+)?(?:\S*\/)?(?:eslint|flake8|pylint|golangci-lint|stylelint)\b|^(?:\S*\/)?ruff\s+check\b|^cargo\s+clippy\b|^(?:npx\s+)?biome\s+(?:check|lint)\b|^(?:npm|pnpm|yarn|bun)(?:\s+run)?\s+lint(?::\S+)?\b/i },
+  { kind: "build", re: /^(?:npm|pnpm|yarn|bun)(?:\s+run)?\s+build(?::\S+)?\b|^(?:cargo|go|swift|dotnet)\s+build\b|^(?:\S*\/)?tsc\s+(?:\S+\s+)*--build\b|^make\b(?!\s+(?:test|check)\b)|^(?:npx\s+)?(?:vite|next|webpack|tsup|esbuild)\s+build\b|^(?:\S*\/)?gradlew?\s+(?:\S+\s+)*assemble/i },
 ];
+const ORDER: Array<ClaimKind> = ["tests", "typecheck", "lint", "build"];
+
+/** Each command a shell line runs: split on && || ; |, minus env assignments and a leading cd/time/sudo-less wrapper. */
+function segments(command: string): string[] {
+  return command.split(/&&|\|\||;|\|/).map((seg) => seg.trim()
+    .replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "")
+    .replace(/^(?:time|env|nice|exec|timeout\s+\S+)\s+/, "")
+    .replace(/^\(\s*/, "")).filter((seg) => seg && !/^cd\b/.test(seg));
+}
 
 export function commandKind(command: string): ClaimKind | "other" {
-  for (const { kind, re } of KIND_OF) if (re.test(command)) return kind;
-  return "other";
+  const found = new Set<ClaimKind>();
+  for (const seg of segments(command)) for (const { kind, re } of RUNS) if (re.test(seg)) found.add(kind);
+  return ORDER.find((k) => found.has(k)) ?? "other";
+}
+
+/** A request for a plan, not a change: "PLAN ONLY", "do not edit any files", "review only"… */
+export function isPlanRequest(text: string): boolean {
+  return /\b(?:plan[\s-]*only|just (?:a )?plan|only (?:a )?plan|review[\s-]*only|read[\s-]*only|no (?:file )?(?:edits|changes)|(?:do not|don'?t|without) (?:edit|change|modify|write|touch)(?:ing)?\b)/i.test(text) || /^\s*plan\s*:/i.test(text);
 }
 
 /**
@@ -198,6 +218,9 @@ export function evidenceFrom(events: LoomEvent[]): Ran[] {
         ? String((p.input as Record<string, unknown> | undefined)?.command ?? p.summary ?? "").replace(/^shell:\s*/, "") : "";
     if (!command.trim()) continue;
     const exitCode = typeof p.exitCode === "number" ? p.exitCode : null;
+    // refused before it ran (a permission rule, a declined approval): no exit code, no output — it is
+    // evidence of nothing, and certainly not a failed test run (#245)
+    if (exitCode === null && p.ok === false && !String(p.preview ?? p.output ?? "").trim()) continue;
     const output = [p.output, p.preview].filter((x): x is string => typeof x === "string").join("\n");
     const counts = output ? parseCounts(output) : null;
     const ok = exitCode !== null ? exitCode === 0 : p.ok !== false && !(counts && counts.failed > 0);

@@ -572,6 +572,8 @@ export function createExplorer(view) {
           (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") +
           // its effective mode, and on hover what that mode lets this agent do (#261)
           permBadge(permOf(a), undefined, a.kind) +
+          (a.signedOut ? ' <span class="abadge err" title="' + esc(a.signedOut) + '">signed out</span>' : "") +
+          (a.readOnly ? ' <span class="abadge" title="can answer, can\u2019t change files">read-only</span>' : "") +
           // your project decides what jobs exist — click and type
           '<span class="role edit' + (!a.role || a.role === a.id || a.role === a.kind ? " same" : "") + '" data-role-p="' + esc(view.pid) + '" data-role-a="' + esc(a.id) +
           '" title="click to rename this job">' + esc(a.role || "\u2026") + "</span></div>";

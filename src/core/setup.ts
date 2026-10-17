@@ -298,6 +298,26 @@ function permissionsFor(p: Platform): PermissionItem[] {
 }
 
 /** Is this Node new enough for the event log to be real? */
+type Auth = { authed: boolean | null; detail?: string };
+const authCache = new Map<string, { at: number; value?: Auth; pending?: Promise<void> }>();
+/**
+ * One agent kind's sign-in, without waiting: the last answer (undefined until the first probe lands),
+ * refreshed in the background once it's a minute old. A project's status is polled often, and a
+ * probe spawns the CLI — it must never sit in that path (#251).
+ */
+export function knownAuth(kind: string, ttlMs = 60_000): Auth | undefined {
+  const hit = authCache.get(kind) ?? { at: 0 };
+  if (!hit.pending && Date.now() - hit.at >= ttlMs) {
+    hit.pending = probeAuth(kind).catch((): Auth => ({ authed: null }))
+      .then((value) => { hit.value = value; hit.at = Date.now(); hit.pending = undefined; });
+    authCache.set(kind, hit);
+  }
+  return hit.value;
+}
+
+/** What to run to sign a kind in. */
+export function signInCommand(kind: string): string { return AUTH[kind] ?? ""; }
+
 export function nodeOk(version = process.versions.node): boolean {
   const [major, minor] = version.split(".").map(Number);
   return (major ?? 0) > 22 || ((major ?? 0) === 22 && (minor ?? 0) >= 5);
