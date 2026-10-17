@@ -8,6 +8,7 @@ import { copyText } from '../clipboard.js';
 import { toast } from '../notifications.js';
 import { state } from '../state.js';
 import { openTaskModal } from '../tasks.js';
+import { permBadge,permOf } from '../permissions.js';
 import { relClock } from '../transcript.js';
 
 /** explorer behavior for one mounted project.
@@ -569,6 +570,8 @@ export function createExplorer(view) {
           brandMark(a.kind) +
           '<span class="fp" style="color:hsl(' + hh + ',55%,var(--agent-l))">' + esc(a.id) + "</span>" +
           (a.id === p.holder ? ' <span class="abadge">baton</span>' : "") +
+          // its effective mode, and on hover what that mode lets this agent do (#261)
+          permBadge(permOf(a), undefined, a.kind) +
           // your project decides what jobs exist — click and type
           '<span class="role edit' + (!a.role || a.role === a.id || a.role === a.kind ? " same" : "") + '" data-role-p="' + esc(view.pid) + '" data-role-a="' + esc(a.id) +
           '" title="click to rename this job">' + esc(a.role || "\u2026") + "</span></div>";

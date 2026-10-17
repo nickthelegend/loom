@@ -21,6 +21,8 @@ import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js
 import { CrewEngine } from "../core/crew.js";
 import { LoopWatch, nudgeText, type Loop } from "../core/loops.js";
 import { commandOf, dangerOf } from "../core/shield.js";
+import type { AutoPolicy } from "../core/auto-policy.js";
+import { detectTestCommand } from "../core/proof.js";
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
 import { NightShift } from "./shift.js";
@@ -3212,8 +3214,20 @@ export class ProjectRuntime {
    * at the ceiling. Plan mode can't be known when an agent is built, so
    * `bypassRequiresPlan` treats it as off — the stricter reading.
    */
+  /** Loom's Auto policy for this project, read live by agents (core/auto-policy.ts). */
+  autoPolicy(): AutoPolicy {
+    const dir = this.info.dir;
+    const test = this.config.proof?.testCommand ?? detectTestCommand(dir);
+    return {
+      projectDir: dir,
+      readPaths: (this.config.readPaths ?? []).filter((p) => typeof p === "string" && p.trim()).map((p) => path.resolve(dir, p)),
+      // the project's own test command always runs: an agent has to be able to check its work
+      allow: [...(this.config.permissions?.allow ?? []).filter((a) => typeof a === "string"), ...(test ? [test] : [])],
+    };
+  }
+
   private policyOptions(cfg: AgentConfig): Record<string, unknown> {
-    const opts = { ...(cfg.options ?? {}) };
+    const opts: Record<string, unknown> = { ...(cfg.options ?? {}), autoPolicy: () => this.autoPolicy() };
     if (this.runnerMode) {
       // A runner is its own trust tier (D70): agents bypass inside the sandbox,
       // capped by the team's runners.permissions rather than the laptop ceiling.

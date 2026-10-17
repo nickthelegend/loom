@@ -227,6 +227,24 @@ describe("claude-code · always ask", () => {
   });
 });
 
+describe("claude-code · Auto runs the project's commands (#260, #244)", () => {
+  it("answers Claude's permission prompts with Loom's Auto policy: inside the project runs, outside is refused by name", async () => {
+    const dir = makeProjectDir({ name: "auto-policy" });
+    const autoPolicy = () => ({ projectDir: dir, readPaths: [], allow: [] });
+    const { bin, error } = await run([claudeInit,
+      { ask: { tool_name: "Bash", input: { command: ".venv/bin/python --version" } } },
+      { ask: { tool_name: "Bash", input: { command: `cd "${dir}" && git ls-files` } } },
+      { ask: { tool_name: "Bash", input: { command: "cat /etc/passwd" } } },
+      claudeResult()], {}, {}, { permissions: "auto", loomProject: "p1", autoPolicy });
+    expect(error).toBeUndefined();
+    expect(flag(callsOf(bin)[0]!, "--permission-mode")).toBe("acceptEdits");
+    const answers = stdinOf(bin).filter((m) => m.type === "control_response")
+      .map((m) => (m.response as Record<string, unknown>).response as Record<string, unknown>);
+    expect(answers.map((a) => a.behavior)).toEqual(["allow", "allow", "deny"]);
+    expect(String(answers[2]!.message)).toMatch(/^Loom's Auto mode refused a path outside the project: `\/etc\/passwd` resolves to \/etc\/passwd/);
+  });
+});
+
 describe("claude-code · when it needs you", () => {
   it("flags a turn that ended on a question", async () => {
     const { events } = await run([claudeInit, claudeText("Which database should I use?"), claudeResult()]);

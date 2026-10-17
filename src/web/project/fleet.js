@@ -177,7 +177,7 @@ export function createFleet(view) {
           (a.chat ? '<button class="fthr" type="button" data-fchat="' + esc(a.chat) + '" data-fpid="' + esc(info.id) + '" title="open this thread">' + ICONS.thread + "<span>" + esc(chatName) + "</span></button>" : "") +
           (last && last.line ? '<span class="fline">' + esc(last.line) + '<span class="ft">' + rel(last.ts) + "</span></span>" : (a.chat ? "" : '<span class="fline">no activity yet</span>')) +
         "</span>" +
-        '<span class="fb">' + (a.holdsBaton ? '<span class="fbaton" title="holds the baton">baton</span>' : "") + permBadge(a.permissions || "auto") + "</span></div>";
+        '<span class="fb">' + (a.holdsBaton ? '<span class="fbaton" title="holds the baton">baton</span>' : "") + permBadge(a.permissions || "auto", undefined, a.kind) + "</span></div>";
     }
 
     /** Jump to a project's thread — this one or another; setChat handles both. */

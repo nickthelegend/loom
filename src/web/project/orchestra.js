@@ -116,7 +116,7 @@ export function createOrchestra(view) {
           '<span class="cowk" id="cowk">' + roster.map(function(a){
             var on = !c.off[a.id];
             return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
-              agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + '</span><span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id) + "</span></button>";
+              agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + '</span><span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id, a.kind) + "</span></button>";
           }).join("") + "</span>";
         Array.prototype.forEach.call(el.querySelectorAll("[data-wk]"), function(b){
           b.onclick = function(){ var id = b.getAttribute("data-wk"); c.off[id] = !c.off[id]; drawOrchControls(); };
@@ -132,7 +132,7 @@ export function createOrchestra(view) {
         '<span class="colbl" title="plans the goal, splits it into tasks, reviews the results">Lead</span>' +
         '<button class="cagent" id="corchpick" type="button" title="who plans the goal and reviews the results">' +
           agentGlyph(lead.kind, lead.id) + '<span class="can">' + esc(agentLabel(lead.kind, lead.id)) + "</span>" +
-          permBadge(permOf(lead), lead.id) + modelBadge(lead) +
+          permBadge(permOf(lead), lead.id, lead.kind) + modelBadge(lead) +
           '<span class="cchev">' + ICONS.chevron + "</span></button>" +
         '<span class="colbl" title="who can be given tasks \u2014 click to include or leave out">Team</span>' +
         '<span class="cowk" id="cowk">' + roster.map(function(a){
@@ -141,7 +141,7 @@ export function createOrchestra(view) {
             esc((on ? "included \u2014 click to leave out" : "left out \u2014 click to include") + " \u00b7 " + a.id) + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
             agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + "</span>" +
             // each worker's model and mode, in their own zone of the chip
-            '<span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id) + "</span></button>";
+            '<span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id, a.kind) + "</span></button>";
         }).join("") +
           // A roster of CLIs is whatever you happen to have installed. An API
           // model is a name off a list, so it can be added here, in the row
@@ -255,7 +255,7 @@ export function createOrchestra(view) {
         var lbl = agentLabel(a.kind, a.id);
         var sub = agentSub(a, lbl);
         return '<div class="cmi" data-oi="' + i + '"><span class="ic">' + agentGlyph(a.kind, a.id) + "</span><span>" + esc(lbl) + "</span>" +
-          permBadge(permOf(a), a.id) +
+          permBadge(permOf(a), a.id, a.kind) +
           (a.busy ? '<span class="cmbusy">working</span>' : "") +
           (a.id === c.orchestrator ? '<span class="tick"' + (a.busy ? ' style="margin-left:6px"' : "") + ">" + ICONS.info + "</span>"
             : (sub && !a.busy ? '<span class="sub">' + esc(sub) + "</span>" : "")) + "</div>";

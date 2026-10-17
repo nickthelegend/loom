@@ -65,9 +65,13 @@ import { state } from './state.js';
     return v.length > 24 ? v.slice(0, 23) + "…" : v;
   }
 
-  function permBadge(mode, agentId){
+  function permBadge(mode, agentId, kind){
+    // with the agent's kind, the tooltip says what this mode actually lets *this* agent do — "Auto"
+    // isn't the same for every CLI, and the badge alone can't say so
+    var cell = kind && permProfile(kind).modes ? permProfile(kind).modes[mode] : null;
+    var what = cell && cell.label ? cell.label : "permissions: " + (PERM_NAMES[mode] || mode);
     return '<span class="pbdg ' + esc(mode) + '"' + (agentId ? ' data-permof="' + esc(agentId) + '"' : "") +
-      ' title="permissions: ' + esc(PERM_NAMES[mode] || mode) + (agentId ? " \u2014 click to change" : "") + '">' + esc(mode) + "</span>";
+      ' title="' + esc(what) + (agentId ? " \u2014 click to change" : "") + '">' + esc(mode) + "</span>";
   }
 
   // What the platform calls the command key, for the shortcuts we print.

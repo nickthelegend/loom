@@ -53,7 +53,7 @@ export const PERMISSION_PROFILES: Record<string, PermissionProfile> = {
     default: "auto",
     modes: {
       bypass: { flags: "permissionMode: bypassPermissions", label: "Bypass — runs any tool, never asks" },
-      auto: { flags: "permissionMode: acceptEdits", label: "Auto — edits files; other tools only if pre-allowed" },
+      auto: { flags: "permissionMode: acceptEdits + Loom's Auto policy", label: "Auto — edits files and runs commands inside the project; refuses paths outside it and commands that can't be undone" },
       ask: {
         flags: "permissionMode: default, canUseTool → Loom approvals",
         label: "Always ask — every tool call waits for your approval in Loom",
@@ -65,7 +65,7 @@ export const PERMISSION_PROFILES: Record<string, PermissionProfile> = {
     default: "auto",
     modes: {
       bypass: { flags: "sandbox: danger-full-access, approvalPolicy: never", label: "Bypass — no sandbox, no approvals" },
-      auto: { flags: "sandbox: workspace-write, approvalPolicy: never", label: "Auto — writes inside the project, sandboxed" },
+      auto: { flags: "sandbox: workspace-write, approvalPolicy: never", label: "Auto — edits files and runs commands inside the project, sandboxed" },
       ask: { flags: "sandbox: read-only, approvalPolicy: untrusted", label: "Always ask — commands and edits wait for your approval in Loom", ask: "approvals" },
     },
   },

@@ -260,6 +260,14 @@ export interface ProjectConfig {
   crews?: import("./core/crew.js").CrewConfig[];
   /** Loop watch: an agent re-running the same failing command. "notify" (default), "nudge" (stop it and tell it to step back), or "off". */
   watchdog?: { auto?: "notify" | "nudge" | "off" };
+  /**
+   * What Loom's Auto mode lets an agent do beyond editing files in the project
+   * (core/auto-policy.ts): `allow` — command prefixes ("docker compose up"),
+   * tool names ("WebFetch") or globs ("mcp__github__*") it may also use.
+   */
+  permissions?: { allow?: string[] };
+  /** Folders outside the project agents may read (never write), e.g. a sibling repo: ["../chatterbox-api"]. */
+  readPaths?: string[];
   /** Blast-Radius Shield: a destructive command an agent runs. "notify" (default), "stop" (stop the turn; the default on a night shift), or "off". */
   shield?: { auto?: "notify" | "stop" | "off" };
   /** Quota Relay: who carries on when an agent runs out of quota (daemon/runtime/relay.ts). */
