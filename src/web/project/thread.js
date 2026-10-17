@@ -8,7 +8,7 @@ import { maybeReloadPreview,onServerFrame,onSpecFrame } from '../preview.js';
 import { state } from '../state.js';
 import { drawStatusbar } from '../statusbar.js';
 import { onTeamFrame } from '../team.js';
-import { actSummary,avatarFor,durfmt,lineFor,relClock,settleQuestionCard,untilText,whoHtml } from '../transcript.js';
+import { actSummary,avatarFor,durfmt,lineFor,relClock,settleFinding,settleQuestionCard,untilText,whoHtml } from '../transcript.js';
 import { observeUsage,usageMeter } from '../usage.js';
 import { ICONS } from '../icons.js';
 
@@ -347,6 +347,8 @@ export function createThread(view) {
             if (c.getAttribute("data-niwho") === e.agentId) settleQuestionCard(c, null);
           });
         }
+        // a review finding accepted or rejected: its row on the card says so, rather than a line of its own
+        if (e.kind === "review" && pl.phase === "decided") { settleFinding(feed, pl.findingId, pl.decision); return; }
         if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
         }

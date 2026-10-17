@@ -32,7 +32,7 @@ import { loadGitDelivery } from './statusbar.js';
 import { loadTeam,loadTeamRunners,runnerHooks,teamEditing,teamHooks } from './team.js';
 import { bindTheme } from './theme.js';
 import { agentGlyph,agentLabel,labelOf } from './agents.js';
-import { durfmt } from './transcript.js';
+import { durfmt, settleFinding } from './transcript.js';
 import { openBoardTaskModal } from './tasks.js';
 import { openMenu } from './menus.js';
 
@@ -902,6 +902,17 @@ import { openMenu } from './menus.js';
         api("/api/projects/" + pid + "/interrupt", { method: "POST", body: JSON.stringify({ chat: sds.getAttribute("data-shield-stop") || chatId }) })
           .then(function(j){ sds.textContent = j && j.interrupted ? "Stopped" : "Its turn had already ended"; })
           .catch(function(err){ sds.disabled = false; toast(err.message); });
+        return;
+      }
+      // a review finding: accept (it becomes a decision) or reject
+      var fdb = ev.target.closest && ev.target.closest("[data-finding-decide]");
+      if (fdb) {
+        ev.preventDefault(); ev.stopPropagation();
+        var fid = fdb.getAttribute("data-finding-decide"), dec = fdb.getAttribute("data-decision");
+        fdb.disabled = true;
+        api("/api/projects/" + pid + "/findings/" + encodeURIComponent(fid), { method: "POST", body: JSON.stringify({ decision: dec }) })
+          .then(function(){ settleFinding(document, fid, dec); if (dec === "accepted") toast("recorded as a decision \u2014 every agent is briefed with it"); })
+          .catch(function(err){ fdb.disabled = false; toast(err.message); });
         return;
       }
       // a night shift's Stop: no new tasks start; the running one finishes and the report follows
