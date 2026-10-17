@@ -137,10 +137,13 @@ describe("packaging · the desktop app", () => {
    * BUNDLE's Info.plist, not from app.setName() — which is why setting the
    * name in main.js never fixed it. CFBundleDisplayName is the lever, and it
    * leaves the .app filename alone, so the Homebrew cask's `app` stanza and
-   * the zap paths keep working.
+   * the zap paths keep working. It is the same name as the bundle, so
+   * Spotlight, the menu bar, the window and the docs all say one thing (#259).
    */
-  it("calls itself Loom in the menu bar, without renaming the bundle", () => {
-    expect(build.mac.extendInfo?.CFBundleDisplayName).toBe("Loom");
+  it("calls itself Loom Desktop everywhere, without renaming the bundle", () => {
+    expect(build.mac.extendInfo?.CFBundleDisplayName).toBe("Loom Desktop");
+    expect(build.mac.extendInfo?.CFBundleDisplayName).toBe(build.productName);
+    expect(fs.readFileSync(path.join(root, "desktop/main.js"), "utf8")).toContain('title: "Loom Desktop"');
     // The file stays "Loom Desktop.app" — the cask names it, and renaming it
     // would break every install that already has one.
     expect(build.productName).toBe("Loom Desktop");

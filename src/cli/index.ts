@@ -47,7 +47,7 @@ import { VERSION } from "../version.js";
 import { makeBackup } from "../core/backup.js";
 import { threadMarkdown } from "../core/thread-md.js";
 import { EventLog } from "../core/eventlog.js";
-import { allModels, fetchModels, forgetProvider, listProviders, resolveProvider, setProvider, mergeProviderViews, type ProviderView } from "../core/providers.js";
+import { allModels, fetchModels, forgetProvider, listProviders, resolveProvider, setProvider, mergeProviderViews, providerOfModel, type ProviderView } from "../core/providers.js";
 import { serviceFile, tokenFindings } from "../core/runner-setup.js";
 import { readRunnerConfig, readRunnerToken, scrubEnv, writeRunnerToken } from "../daemon/runner.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
@@ -444,7 +444,7 @@ program
     // every provider these models need must have a key in the daemon — check once, before sending any (#258)
     try {
       const keyed = new Map((await client.providers()).providers.map((p) => [p.id, p.configured]));
-      const missing = [...new Set(models.map((m) => (m.includes("/") ? m.split("/")[0]! : "openrouter")))].filter((p) => keyed.has(p) && !keyed.get(p));
+      const missing = [...new Set(models.map((m) => providerOfModel(m, keyed)))].filter((p) => keyed.has(p) && !keyed.get(p));
       if (missing.length) fail(`${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no key in the daemon — nothing was sent. loom providers:set ${missing[0]} --key …  (loom providers shows what the daemon sees)`);
     } catch (err) {
       if (err instanceof DaemonError) { /* an older daemon without /api/providers: let the asks say it */ } else throw err;
