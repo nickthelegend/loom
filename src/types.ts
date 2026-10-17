@@ -687,9 +687,13 @@ export interface AgentCost {
   ms: number;
   tokensIn: number;
   tokensOut: number;
+  /** Turns that reported tokens but no price, at their model's API price — an estimate, not in usd (core/prices.ts). */
+  estUsd?: number;
 }
 
 export interface CostSummary {
+  /** The agents' estUsd added up; absent when nothing could be estimated. */
+  estUsd?: number;
   totalUsd: number;
   turns: number;
   totalMs: number;

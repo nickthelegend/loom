@@ -11,9 +11,12 @@
  *
  * Nothing is invented: an adapter that reports no price (a subscription CLI, a
  * free model) shows tokens and $0, and `unpriced` counts those turns so the UI
- * can say the total is a floor, not the bill.
+ * can say the total is a floor, not the bill. Given a price book
+ * (core/prices.ts), those turns also get `estUsd` — their tokens at the
+ * model's API price — kept apart from `usd`, which stays what was reported.
  */
 
+import { estimateUsd, type PriceBook } from "./prices.js";
 import type { LoomEvent } from "../types.js";
 
 export interface UsageSlice {
@@ -26,6 +29,8 @@ export interface UsageSlice {
   /** The part of tokensOut spent thinking. */
   reasoning: number;
   ms: number;
+  /** Unpriced turns' tokens at their model's API price — an estimate, never in usd. */
+  estUsd: number;
 }
 
 export interface UsageAgent extends UsageSlice {
@@ -63,7 +68,7 @@ export interface UsageReport {
   byTool: Array<{ tool: string; calls: number; failures: number }>;
 }
 
-const blank = (): UsageSlice => ({ usd: 0, turns: 0, tokensIn: 0, tokensOut: 0, cachedIn: 0, reasoning: 0, ms: 0 });
+const blank = (): UsageSlice => ({ usd: 0, turns: 0, tokensIn: 0, tokensOut: 0, cachedIn: 0, reasoning: 0, ms: 0, estUsd: 0 });
 
 function add(into: UsageSlice, t: UsageSlice): void {
   into.usd += t.usd;
@@ -73,6 +78,7 @@ function add(into: UsageSlice, t: UsageSlice): void {
   into.cachedIn += t.cachedIn;
   into.reasoning += t.reasoning;
   into.ms += t.ms;
+  into.estUsd += t.estUsd;
 }
 
 const num = (v: unknown): number => {
@@ -88,7 +94,7 @@ function dayOf(ts: number): string {
 
 export function usageReport(
   events: readonly LoomEvent[],
-  opts: { since?: number; kinds?: Record<string, string>; models?: Record<string, string> } = {},
+  opts: { since?: number; kinds?: Record<string, string>; models?: Record<string, string>; prices?: PriceBook | null } = {},
 ): UsageReport {
   const since = opts.since ?? 0;
   const agents = new Map<string, UsageAgent>();
@@ -135,9 +141,12 @@ export function usageReport(
         cachedIn: num(p.cachedInputTokens),
         reasoning: num(p.reasoningTokens),
         ms: num(p.durationMs),
+        estUsd: 0,
       };
+      const named = String(p.model ?? opts.models?.[who] ?? "");
+      if (!usd && (t.tokensIn || t.tokensOut)) t.estUsd = estimateUsd({ model: named, ...t }, opts.prices ?? null) ?? 0;
       // a turn that didn't name its model ran on whatever the agent defaults to
-      const model = String(p.model ?? opts.models?.[who] ?? "") || (opts.kinds?.[who] ? `${opts.kinds[who]} · default model` : "unknown");
+      const model = named || (opts.kinds?.[who] ? `${opts.kinds[who]} · default model` : "unknown");
       const a = agent(who);
       add(a, t);
       if (!a.models.includes(model)) a.models.push(model);

@@ -2868,14 +2868,16 @@ program
     console.log(
       pc.bold(`${project.name}`) +
         pc.dim(
-          `  total ${fmtUsd(costs.totalUsd)} · ${costs.turns} turns · ${(costs.totalMs / 1000).toFixed(0)}s agent time`,
+          `  total ${fmtUsd(costs.totalUsd)}${costs.estUsd !== undefined ? ` (+ ~${fmtUsd(costs.estUsd)} est.)` : ""} · ${costs.turns} turns · ${(costs.totalMs / 1000).toFixed(0)}s agent time`,
         ),
     );
     for (const a of costs.byAgent) {
+      const est = a.estUsd !== undefined ? pc.dim(`  ~${fmtUsd(a.estUsd)} est.`) : !a.usd && a.tokensIn + a.tokensOut ? pc.dim("  no price reported") : "";
       console.log(
-        `  ${pc.bold(a.agentId.padEnd(14))} ${fmtUsd(a.usd).padStart(9)}  ${String(a.turns).padStart(4)} turns  ${(a.ms / 1000).toFixed(0).padStart(5)}s`,
+        `  ${pc.bold(a.agentId.padEnd(14))} ${fmtUsd(a.usd).padStart(9)}  ${String(a.turns).padStart(4)} turns  ${(a.ms / 1000).toFixed(0).padStart(5)}s${est}`,
       );
     }
+    if (costs.estUsd !== undefined) console.log(pc.dim(`  est. = tokens at the model's API price, for agents that report tokens but no cost (a subscription sign-in may bill you differently)`));
     if (!costs.byAgent.length) console.log(pc.dim("  no turns recorded yet"));
     console.log(pc.dim("\n(costs come from agents that report them — claude-code and opencode do)"));
   });
