@@ -28,6 +28,8 @@ export default defineConfig({
       // an otherwise sub-second file. Off everywhere; the tests that exercise
       // those paths turn them back on and inject a fake CLI.
       LOOM_DECISIONS_NO_CLI: "1",
+      // agent status asks each CLI whether it's signed in (in the background); a test never spawns the real ones
+      LOOM_NO_AUTH_PROBE: "1",
       LOOM_TRIAGE_NO_LLM: "1",
       // Skill discovery reads the user's real ~/.claude (skills and plugin
       // caches) — which is the point in production and poison in a test: the

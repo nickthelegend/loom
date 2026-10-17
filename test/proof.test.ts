@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { commandKind, detectTestCommand, evidenceFrom, extractClaims, judge, parseCounts } from "../src/core/proof.js";
+import { commandKind, detectTestCommand, evidenceFrom, extractClaims, isPlanRequest, judge, parseCounts } from "../src/core/proof.js";
 import { writeProjectConfig } from "../src/core/registry.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
 import { pushCategory, pushContent } from "../src/daemon/push.js";
@@ -63,6 +63,34 @@ describe("runner counts", () => {
     expect(commandKind("npm run lint")).toBe("lint");
     expect(commandKind("npm run build")).toBe("build");
     expect(commandKind("ls -la")).toBe("other");
+  });
+});
+
+describe("what isn't evidence (#245)", () => {
+  it("a command is classified by the program it runs, not by words in its paths", () => {
+    expect(commandKind(`cd "/Volumes/Extreme SSD/x" && git ls-files | head -80 && wc -l reach/*.py tests/*.py`)).toBe("other");
+    expect(commandKind("find tests -name '*.py'")).toBe("other");
+    expect(commandKind("ls tests/ && cat test_plan.md")).toBe("other");
+    expect(commandKind(".venv/bin/python -m pytest -q")).toBe("tests");
+    expect(commandKind("./.venv/bin/pytest -q tests/test_tts.py")).toBe("tests");
+    expect(commandKind("cd web && npm run test:unit")).toBe("tests");
+    expect(commandKind("CI=1 npx vitest run")).toBe("tests");
+    expect(commandKind("npm run build && npm test")).toBe("tests");
+    expect(commandKind("uv run mypy src")).toBe("typecheck");
+  });
+
+  it("a refused command (no exit code, no output) is not a run at all", () => {
+    const ev = (id: number, payload: Record<string, unknown>) => ({ id, ts: 0, kind: "tool_call", agentId: "a", payload }) as LoomEvent;
+    expect(evidenceFrom([ev(1, { tool: "shell", command: ".venv/bin/pytest -q", exitCode: null, ok: false })])).toEqual([]);
+    expect(evidenceFrom([ev(2, { tool: "shell", command: ".venv/bin/pytest -q", exitCode: 1, ok: false, preview: "1 failed" })])).toHaveLength(1);
+  });
+
+  it("a plan's sentence isn't a claim, and a plan request is recognised", () => {
+    expect(extractClaims("A constructor argument `transport: httpx.AsyncBaseTransport | None = None`, so tests can pass `httpx.MockTransport`.")).toEqual([]);
+    expect(isPlanRequest("PLAN ONLY, do not edit any files. Write the integration plan.")).toBe(true);
+    expect(isPlanRequest("Review only: read the diff and list problems")).toBe(true);
+    expect(isPlanRequest("Plan: add retries to the client")).toBe(true);
+    expect(isPlanRequest("Implement the plan we agreed and run the tests")).toBe(false);
   });
 });
 
@@ -161,6 +189,17 @@ describe("proof against a real checkout", () => {
     const asked = await rt.proofs.prove();
     expect(asked).toMatchObject({ verdict: "verified", headline: "Verified: 2 tests pass in a clean checkout" });
     expect(rt.log.list({ kinds: ["proof"] })).toHaveLength(2);
+  });
+
+  it("a plan-only turn isn't checked automatically, and on demand it says it's a plan (#245)", async () => {
+    const dir = project();
+    rt = await ProjectRuntime.open({ id: `proof-${path.basename(dir)}`, name: "proof", dir });
+    await rt.sendMessage("PLAN ONLY, do not edit any files. All tests pass once we add retries.");
+    await waitUntil(() => rt!.log.list({ kinds: ["run_complete"] }).length === 1);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(rt.log.list({ kinds: ["proof"] })).toHaveLength(0);
+    const asked = await rt.proofs.prove();
+    expect(asked).toMatchObject({ verdict: "unverified", headline: "A plan, not a change — nothing to check until it's built", rerun: null });
   });
 
   it("is off when the project says so, and uses the project's own test command", async () => {
