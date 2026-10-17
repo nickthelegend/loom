@@ -618,6 +618,10 @@ export interface AgentStatus {
   context?: AgentContextUsage | null;
   /** Native harnesses: the provider account's usage-limit windows, from the last report. */
   limits?: ProviderLimits | null;
+  /** Not signed in, and why — from a turn that failed on sign-in, or the CLI's own sign-in check (#251). */
+  signedOut?: string;
+  /** Can answer but not change files (a model agent without --write): it holds the baton read-only (#257). */
+  readOnly?: boolean;
 }
 
 export interface AgentContextUsage {
