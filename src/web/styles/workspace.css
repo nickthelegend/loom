@@ -333,6 +333,27 @@
   .shiftcard .shwhyl{flex-basis:100%;color:var(--muted-foreground);padding-left:2px}
   .shiftcard .shbits{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}
   .shiftline .btn{margin-left:6px}
+  .reviewcard{max-width:92%;margin:8px 0;background:var(--card);border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:var(--radius);padding:9px 11px;font-size:12.5px}
+  .reviewcard .rvh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .reviewcard .rvh b{font-weight:650}
+  .reviewcard .rvsum{flex:1;min-width:0}
+  .reviewcard .rvwhat{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}
+  .reviewcard .rvl{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:7px}
+  .reviewcard .rvf{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+  .reviewcard .rvf .av{width:16px;height:16px}
+  .reviewcard .rvsev{font-size:10px;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--border);border-radius:999px;padding:0 7px;color:var(--muted-foreground);white-space:nowrap}
+  .reviewcard .rvsev.sev-high{color:var(--err);border-color:color-mix(in srgb, var(--err) 40%, var(--border))}
+  .reviewcard .rvsev.sev-medium{color:var(--warn);border-color:color-mix(in srgb, var(--warn) 40%, var(--border))}
+  .reviewcard .rvloc{font-size:11.5px}
+  .reviewcard .rvagree{font-size:10.5px;color:var(--ok);border:1px solid color-mix(in srgb, var(--ok) 40%, var(--border));border-radius:999px;padding:0 6px;white-space:nowrap}
+  .reviewcard .rvtext{flex:1 1 260px;min-width:0}
+  .reviewcard .rvact{display:inline-flex;gap:4px;margin-left:auto}
+  .reviewcard .rvdone{flex-basis:100%;font-size:11.5px;color:var(--muted-foreground);padding-left:2px}
+  .reviewcard .rvdone:empty{display:none}
+  .reviewcard .rvf.fd-accepted .rvdone{color:var(--ok)}
+  .reviewcard .rvf.fd-rejected .rvtext{color:var(--muted-foreground);text-decoration:line-through;text-decoration-color:var(--border)}
+  .reviewcard .rvquiet{margin-top:6px;color:var(--muted-foreground);font-size:12px}
+  .reviewcard .rvquiet.err{color:var(--err)}
   .shiftpick .shbody{padding:4px 12px 8px;display:flex;flex-direction:column;gap:8px}
   .shiftpick .shwhy{margin:0;color:var(--muted-foreground);font-size:12px;line-height:1.45}
   .shiftpick .shf{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px}

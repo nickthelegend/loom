@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../adapters/index.js";
@@ -109,6 +109,8 @@ import { ContinuityEngine } from "../core/continuity/engine.js";
 import { ContinuityError } from "../core/continuity/contracts.js";
 import { HarnessMonitor, isNativeKind } from "../core/continuity/capabilities.js";
 import { ProviderAgent } from "../providers/agent.js";
+import { READ_ONLY_RULE, type ReviewTarget } from "../core/review.js";
+import { ReviewRunner } from "./review.js";
 import { LiveDeltaThrottle, type LiveFrame } from "../providers/live.js";
 import { AdapterBase, type AgentCheck } from "../adapters/base.js";
 import type { LiveText } from "../types.js";
@@ -171,6 +173,7 @@ export class ProjectRuntime {
   private readonly unregisterAutoPolicy: () => void;
   /** Night Shift: a line of tasks run while you're away, then one report (daemon/shift.ts). */
   readonly shifts: NightShift;
+  readonly reviews: ReviewRunner;
   /** Adapter kinds installed on this machine, probed once at open. */
   private installedKinds: string[] = [];
   /** Memory as units — see core/brain.ts. Reads and writes through `log`. */
@@ -437,6 +440,25 @@ export class ProjectRuntime {
       list: (opts) => this.log.list(opts),
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       warn: (message, detail) => logbook.warn("shift", message, String(detail), this.info.id),
+    });
+    this.reviews = new ReviewRunner({
+      hasAgent: (id) => this.config.agents.some((a) => a.id === id),
+      canReview: (id) => {
+        const cfg = this.config.agents.find((a) => a.id === id);
+        return Boolean(cfg && cfg.enabled !== false && this.agents.has(id) && isAdapter(this.agent(id)));
+      },
+      holder: () => this.baton.holder() ?? undefined,
+      createChat: (title) => this.createChat(title),
+      spawn: (parent, opts) => this.spawnSubAgent(parent, opts),
+      list: (opts) => this.log.list(opts),
+      append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
+      // an accepted finding is a decision like `loom decision`: the event, and the memory every briefing carries
+      decide: (text) => {
+        if (this.closed) return;
+        const event = this.log.append({ kind: "decision", payload: { text, source: "review" } });
+        this.brain.add({ kind: "decision", text, provenance: { agentId: "user", eventId: event.id, ts: event.ts } });
+      },
+      maxReviewers: ProjectRuntime.MAX_CONCURRENT_SUBTASKS,
     });
     this.crews = new CrewEngine({
       projectId: info.id,
@@ -2708,7 +2730,7 @@ export class ProjectRuntime {
    * each child is a real CLI process with its own model calls. The cap is per
    * project rather than global so one busy project can't starve the others.
    */
-  private static readonly MAX_CONCURRENT_SUBTASKS = 4;
+  static readonly MAX_CONCURRENT_SUBTASKS = 4;
 
   /** In-flight subtasks, by the id minted when they started. */
   private subtasks = new Map<
@@ -2749,7 +2771,13 @@ export class ProjectRuntime {
    */
   async spawnSubAgent(
     parentAgentId: string,
-    opts: { agentId: string; task: string; chat?: string },
+    opts: {
+      agentId: string; task: string; chat?: string;
+      /** Investigate and report, change nothing: the agent's own plan mode where it has one, and said in the brief either way (a review). */
+      readOnly?: boolean;
+      /** Told once the child's turn has ended, however it ended. */
+      onSettled?: (outcome: { ok: boolean; message?: string }) => void;
+    },
   ): Promise<{ id: string; agentId: string }> {
     if (this.continuity) throw new ContinuityError("unsupported", "parallel subagents are outside sequential native continuity; finish this turn or use legacy mode");
     const task = opts.task?.trim();
@@ -2797,14 +2825,18 @@ export class ProjectRuntime {
 
     await this.ensureStarted(opts.agentId);
     const mcp = child.capabilities.mcp ? writeMcpSession(this.healthyMcps()) : null;
+    const brief = this.subtaskBriefing(parentAgentId, opts.agentId, task);
     const input: SendInput = {
       text: task,
       chat,
-      briefing: this.subtaskBriefing(parentAgentId, opts.agentId, task),
+      briefing: opts.readOnly ? `${brief}\n\n${READ_ONLY_RULE}` : brief,
+      ...(opts.readOnly && child instanceof ProviderAgent ? { interactionMode: "plan" as const } : {}),
       ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),
     };
 
     const startedAt = Date.now();
+    // the child's reply belongs to the chat it was asked in, not wherever it last talked
+    this.turns.turnChat.set(opts.agentId, chat);
     void child
       .send(input)
       .then(() => {
@@ -2814,8 +2846,9 @@ export class ProjectRuntime {
         const failed = this.log.list({ chat, agentId: opts.agentId, kinds: ["error", "run_complete"], sinceTs: startedAt })
           .reverse().find((e) => e.kind === "error" || Boolean(e.payload.error));
         if (failed) {
-          this.appendIfOpen({ kind: "subtask_failed", agentId: opts.agentId, chat, payload: { subtaskId: id, parent: parentAgentId, task,
-            message: String(failed.payload.message ?? failed.payload.error ?? "the turn failed").slice(0, 500) } });
+          const message = String(failed.payload.message ?? failed.payload.error ?? "the turn failed").slice(0, 500);
+          this.appendIfOpen({ kind: "subtask_failed", agentId: opts.agentId, chat, payload: { subtaskId: id, parent: parentAgentId, task, message } });
+          opts.onSettled?.({ ok: false, message });
           return;
         }
         this.appendIfOpen({
@@ -2824,9 +2857,11 @@ export class ProjectRuntime {
           chat,
           payload: { subtaskId: id, parent: parentAgentId, task },
         });
+        opts.onSettled?.({ ok: true });
       })
       .catch((err) => {
         this.subtasks.delete(id);
+        opts.onSettled?.({ ok: false, message: String(err instanceof Error ? err.message : err) });
         this.appendIfOpen({
           kind: "subtask_failed",
           agentId: opts.agentId,
@@ -2843,6 +2878,34 @@ export class ProjectRuntime {
 
     return { id, agentId: opts.agentId };
   }
+  /**
+   * `loom review`: these agents read the same thing at once, read-only, off
+   * the baton (daemon/review.ts). The target is a file, free text, or —
+   * by default — the uncommitted changes.
+   */
+  async startReview(input: { agents: string[]; file?: string; text?: string; focus?: string }) {
+    this.reviews.check(input.agents); // who, before reading any diff
+    let target: ReviewTarget;
+    if (input.file?.trim()) {
+      const rel = path.relative(this.info.dir, path.resolve(this.info.dir, input.file.trim()));
+      if (rel.startsWith("..") || path.isAbsolute(rel)) throw new Error(`${input.file} is outside the project`);
+      if (!fs.existsSync(path.join(this.info.dir, rel))) throw new Error(`no file ${rel} in this project`);
+      target = { kind: "file", file: rel.split(path.sep).join("/") };
+    } else if (input.text?.trim()) {
+      target = { kind: "text", text: input.text.trim() };
+    } else {
+      const git = (...args: string[]) => execFileSync("git", args, { cwd: this.info.dir, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout: 15_000, stdio: ["ignore", "pipe", "ignore"] });
+      let diff = "", untracked: string[] = [];
+      try {
+        try { diff = git("diff", "HEAD"); } catch { diff = git("diff"); } // no commits yet
+        untracked = git("ls-files", "--others", "--exclude-standard").split("\n").filter(Boolean);
+      } catch { throw new Error("--diff needs a git repository — review a --file instead"); }
+      if (!diff.trim() && !untracked.length) throw new Error("there are no uncommitted changes to review — name a --file instead");
+      target = { kind: "diff", diff, untracked };
+    }
+    return this.reviews.start({ agents: input.agents, target, ...(input.focus ? { focus: input.focus } : {}) });
+  }
+
   private subtaskBriefing(parent: string, childId: string, task: string): string { return this.briefings.subtaskBriefing(parent, childId, task); }
 
   private defaultAdapterId(): string {

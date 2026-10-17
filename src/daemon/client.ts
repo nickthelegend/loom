@@ -718,6 +718,23 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/queue/pause`, { paused });
   }
 
+  /** Read-only reviews by several agents at once (daemon/review.ts). No file and no text: the uncommitted changes. */
+  startReview(id: string, body: { agents: string[]; file?: string; text?: string; focus?: string }): Promise<{ review: import("./review.js").ReviewState }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/reviews`, body);
+  }
+
+  review(id: string, reviewId: string): Promise<{ review: import("./review.js").ReviewState }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/reviews/${encodeURIComponent(reviewId)}`);
+  }
+
+  reviews(id: string): Promise<{ reviews: import("./review.js").ReviewState[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/reviews`);
+  }
+
+  decideFinding(id: string, findingId: string, decision: "accepted" | "rejected", note?: string): Promise<{ finding: import("../core/review.js").Finding; decision: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}`, { decision, ...(note ? { note } : {}) });
+  }
+
   decision(id: string, text: string): Promise<{ event: LoomEvent }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/decisions`, { text });
   }
