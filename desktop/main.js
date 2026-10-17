@@ -89,7 +89,7 @@ async function createWindow() {
     minWidth: 600,
     minHeight: 400,
     backgroundColor: BG,
-    title: "Loom",
+    title: "Loom Desktop",
     icon: ICON,
     acceptFirstMouse: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",

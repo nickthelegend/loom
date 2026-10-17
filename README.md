@@ -685,9 +685,9 @@ detects at least two roles.
 | Command | What it does |
 |---|---|
 | `loom` | **The TUI** — tabbed workspace (Thread · Board · Brain · Diff), `shift+tab` switches view, `tab` shifts agents, `/`-commands + `ctrl+p` palette inline |
-| `loom init` | Make the current directory a Loom project (auto-detects agents) |
+| `loom init` | Make the current directory a Loom project (auto-detects agents); in a git repo it offers to add `.loom/` to `.gitignore` (`--gitignore` / `--no-gitignore` to skip the question) |
 | `loom chat` | Same thread as a plain line REPL (`/handoff`, `/interrupt`, `@agent`) |
-| `loom send <text>` | One-shot message (`-a <agent>` to address someone specific) |
+| `loom send <text>` | One-shot message (`-a <agent>` to address someone specific). `--wait` blocks until the turn ends and prints the reply and cost (`--json` for one object, `--timeout <s>`); it exits 0 done, 1 failed, 2 the agent asked a question, 124 timed out — so a script can drive an agent without reading `.loom/log.db` |
 | `loom handoff <agent>` | Pass the baton — interrupts, projects memory, briefs the target |
 | `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
 | `loom routes` | List named pipelines defined for this project |

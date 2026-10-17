@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import type { WithRuntime } from './context.js';
 import { usageReport } from '../../core/usage.js';
+import { priceBook } from '../../core/prices.js';
 /** Register routing routes in the order established by LoomDaemon.routes(). */
 export function registerRoutingRoutes(app: Express, withRuntime: WithRuntime): void {
 
@@ -58,7 +59,7 @@ export function registerRoutingRoutes(app: Express, withRuntime: WithRuntime): v
       }
       // the report skips everything before `since`: don't read (and parse) it
       const events = rt.log.list({ kinds: ["status", "run_complete", "tool_call", "error", "message", "needs_input", "turn_diff"], sinceTs: since });
-      const usage = usageReport(events, { since, kinds, models });
+      const usage = usageReport(events, { since, kinds, models, prices: priceBook() });
       const titles = new Map(rt.chats().map((c) => [c.id, c.title]));
       res.json({ days, usage: { ...usage, byChat: usage.byChat.map((c) => ({ ...c, title: titles.get(c.chat) ?? (c.chat === "main" ? "Main" : c.chat) })) } });
     }),

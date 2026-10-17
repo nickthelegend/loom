@@ -16,6 +16,8 @@ export default defineConfig({
     hookTimeout: process.platform === "win32" ? 120_000 : 20_000,
     env: {
       LOOM_TEST_RUN_ID: `${process.pid}-${Date.now()}`,
+      // cost estimates read a saved price list; tests never fetch one
+      LOOM_NO_PRICE_FETCH: "1",
       // the in-process test hub answers slowly when a Windows runner is starved
       ...(process.platform === "win32" && process.env.CI ? { LOOM_HUB_TIMEOUT_MS: "60000" } : {}),
       GIT_CONFIG_GLOBAL: path.resolve("test/gitconfig"),
@@ -28,6 +30,8 @@ export default defineConfig({
       // an otherwise sub-second file. Off everywhere; the tests that exercise
       // those paths turn them back on and inject a fake CLI.
       LOOM_DECISIONS_NO_CLI: "1",
+      // agent status asks each CLI whether it's signed in (in the background); a test never spawns the real ones
+      LOOM_NO_AUTH_PROBE: "1",
       LOOM_TRIAGE_NO_LLM: "1",
       // Skill discovery reads the user's real ~/.claude (skills and plugin
       // caches) — which is the point in production and poison in a test: the
