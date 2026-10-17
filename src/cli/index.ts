@@ -32,6 +32,7 @@ import type { LoomEvent, ProjectStatus } from "../types.js";
   }
 }
 import type { QueueItem } from "../core/prompt-queue.js";
+import { exitCodeFor, turnOutcome, type TurnOutcome } from "../core/turn-wait.js";
 import {
   DaemonClient,
   DaemonError,
@@ -46,7 +47,7 @@ import { VERSION } from "../version.js";
 import { makeBackup } from "../core/backup.js";
 import { threadMarkdown } from "../core/thread-md.js";
 import { EventLog } from "../core/eventlog.js";
-import { allModels, fetchModels, forgetProvider, listProviders, resolveProvider, setProvider, mergeProviderViews, type ProviderView } from "../core/providers.js";
+import { allModels, fetchModels, forgetProvider, listProviders, resolveProvider, setProvider, mergeProviderViews, providerOfModel, type ProviderView } from "../core/providers.js";
 import { serviceFile, tokenFindings } from "../core/runner-setup.js";
 import { readRunnerConfig, readRunnerToken, scrubEnv, writeRunnerToken } from "../daemon/runner.js";
 import { NoProjectError, currentProjectDir, resolveCurrentProject } from "./common.js";
@@ -290,13 +291,16 @@ program
   .command("init")
   .description("make the current directory a Loom project")
   .option("--name <name>", "project name (default: directory name)")
-  .action(async (opts: { name?: string }) => {
+  .option("--gitignore", "add .loom/ to .gitignore without asking")
+  .option("--no-gitignore", "leave .gitignore alone")
+  .action(async (opts: { name?: string; gitignore?: boolean }) => {
     const client = await ensureDaemon();
     const dir = process.cwd();
     const res = await client.addProject(dir, opts.name);
     const { project } = await client.project(res.project.id);
     console.log(pc.green(`✓ project "${project.name}" (${project.id})`));
     for (const a of project.agents) console.log(formatAgentRow(a));
+    await offerGitignore(dir, opts.gitignore);
     console.log(pc.dim("\nedit .loom/config.json to add/remove agents or change roles"));
     console.log(pc.dim("then: loom chat"));
   });
@@ -437,6 +441,14 @@ program
       if (!models.length) fail("no free models — loom models --refresh, or name them with --models");
     }
     if (!models.length) fail('which models? e.g. loom ask --models "a,b" "your question"');
+    // every provider these models need must have a key in the daemon — check once, before sending any (#258)
+    try {
+      const keyed = new Map((await client.providers()).providers.map((p) => [p.id, p.configured]));
+      const missing = [...new Set(models.map((m) => providerOfModel(m, keyed)))].filter((p) => keyed.has(p) && !keyed.get(p));
+      if (missing.length) fail(`${missing.join(", ")} ${missing.length === 1 ? "has" : "have"} no key in the daemon — nothing was sent. loom providers:set ${missing[0]} --key …  (loom providers shows what the daemon sees)`);
+    } catch (err) {
+      if (err instanceof DaemonError) { /* an older daemon without /api/providers: let the asks say it */ } else throw err;
+    }
     try {
       const { asked } = await client.askModels(project.id, words.join(" "), models, {
         ...(opts.title ? { title: opts.title } : {}),
@@ -2275,6 +2287,26 @@ program
 // send / chat / handoff / interrupt / decision / log
 // ---------------------------------------------------------------------------
 
+/**
+ * .loom/ is this machine's runtime state — the event log, attachments, a 0600 config — not something
+ * to commit (a team's shared memory lives in AGENTS.md). In a git repo that doesn't ignore it yet,
+ * offer to (#256).
+ */
+async function offerGitignore(dir: string, choice: boolean | undefined): Promise<void> {
+  if (choice === false || !fs.existsSync(path.join(dir, ".git"))) return;
+  try {
+    const { execFileSync } = await import("node:child_process");
+    execFileSync("git", ["check-ignore", "-q", ".loom/"], { cwd: dir, stdio: "ignore" });
+    return; // already ignored
+  } catch { /* not ignored (exit 1), or no git: fall through */ }
+  const yes = choice === true || (process.stdin.isTTY && (await confirm(pc.yellow("add .loom/ to .gitignore? it's this machine's state (event log, attachments) — not for the repo"))));
+  if (!yes) return void console.log(pc.dim("tip: .loom/ is local state — add it to .gitignore (loom init --gitignore)"));
+  const file = path.join(dir, ".gitignore");
+  const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+  fs.writeFileSync(file, `${before}${before && !before.endsWith("\n") ? "\n" : ""}# Loom's local state (event log, attachments, machine config)\n.loom/\n`);
+  console.log(pc.green("✓ added .loom/ to .gitignore"));
+}
+
 async function sendWithHandoffConfirm(
   client: DaemonClient,
   projectId: string,
@@ -2303,11 +2335,33 @@ program
   .command("send <text...>")
   .description("send one message into the shared thread")
   .option("-a, --agent <id>", "address a specific agent (may require a handoff)")
-  .action(async (words: string[], opts: { agent?: string }) => {
+  .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 124 timed out")
+  .option("--json", "with --wait: print the outcome as one JSON object")
+  .option("--timeout <seconds>", "with --wait: give up after this long", "1800")
+  .action(async (words: string[], opts: { agent?: string; wait?: boolean; json?: boolean; timeout: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
-    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent);
-    if (result) console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
+    // where the log is now, so the wait reads only what this send causes (#254)
+    const since = opts.wait ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
+    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, !opts.wait || process.stdin.isTTY);
+    if (!result) return;
+    if (!opts.wait) return void console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
+    const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;
+    let seen: LoomEvent[] = [], outcome: TurnOutcome | null = null, cursor = since;
+    while (Date.now() < deadline && !outcome) {
+      const { events } = await client.events(project.id, cursor, 500);
+      if (events.length) { seen = seen.concat(events); cursor = events.at(-1)!.id; }
+      outcome = turnOutcome(seen, result.agentId, since);
+      if (!outcome) await new Promise((r) => setTimeout(r, 400));
+    }
+    process.exitCode = exitCodeFor(outcome);
+    if (opts.json) return void console.log(JSON.stringify(outcome ?? { status: "timeout", agent: result.agentId }));
+    if (!outcome) return void console.error(pc.yellow(`timed out after ${opts.timeout}s — ${result.agentId} is still working (loom log --follow)`));
+    if (outcome.reply) console.log(outcome.reply);
+    const tail = [outcome.durationMs ? `${(outcome.durationMs / 1000).toFixed(1)}s` : "", outcome.costUsd ? `$${outcome.costUsd.toFixed(4)}` : ""].filter(Boolean).join(" · ");
+    if (outcome.status === "error") console.error(pc.red(`✗ ${outcome.agent}: ${outcome.error}`));
+    else if (outcome.status === "needs_input") console.error(pc.yellow(`? ${outcome.agent} asks: ${outcome.question}`));
+    else console.error(pc.dim(`✓ ${outcome.agent}${tail ? ` · ${tail}` : ""}`));
   });
 
 program

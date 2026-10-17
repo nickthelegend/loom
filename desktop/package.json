@@ -69,7 +69,7 @@
       ],
       "icon": "build/icon.png",
       "extendInfo": {
-        "CFBundleDisplayName": "Loom"
+        "CFBundleDisplayName": "Loom Desktop"
       },
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
