@@ -115,14 +115,52 @@ import { shortModel } from './permissions.js';
         '<span class="rvdone"></span></li>';
     }).join("");
     var quiet = (p.results || []).map(function(r){
+      var wrote = r.edited && r.edited.length ? '<div class="rvquiet err">\u26a0 ' + esc(labelOf(r.agent)) + " changed files in a read-only review: " + esc(r.edited.slice(0, 6).join(", ")) + (r.edited.length > 6 ? ", \u2026" : "") + "</div>" : "";
+      return wrote + reviewQuiet(r);
+    }).join("");
+    function reviewQuiet(r){
       if (r.status === "failed") return '<div class="rvquiet err">' + esc(labelOf(r.agent)) + " didn\u2019t finish: " + esc(String(r.error || "").slice(0, 200)) + "</div>";
       if ((p.findings || []).some(function(f){ return f.agent === r.agent || (f.agreed || []).some(function(a){ return a.agent === r.agent; }); })) return "";
       var first = String(r.reply || "").split("\n").filter(function(l){ return l.trim(); })[0] || "(no reply)";
       return '<div class="rvquiet">' + esc(labelOf(r.agent)) + ": " + esc(first.slice(0, 220)) + "</div>";
-    }).join("");
+    }
     return '<div class="reviewcard" data-review="' + esc(p.reviewId) + '"><div class="rvh">\ud83d\udd0d <b>Review</b><span class="rvsum">' + esc(p.summary || "") + "</span>" +
       '<span class="rvwhat">' + esc(what) + "</span></div>" + (rows ? '<ul class="rvl">' + rows + "</ul>" : "") + quiet + "</div>";
   }
+  // Council: one planner, several reviewers, seven stages in one card that fills in as they go (daemon/council.ts)
+  var CSTAGE_MARK = { waiting: "\u00b7", running: "\u25d0", done: "\u2713", skipped: "\u2013", failed: "\u2717" };
+  function councilCard(e){
+    var p = e.payload || {};
+    if (p.phase !== "started") return "";
+    var rows = (p.stages || []).map(function(st){
+      return '<li class="cst cs-waiting" data-cstage="' + esc(st.key) + '"><span class="csm">' + CSTAGE_MARK.waiting + "</span>" +
+        '<span class="csn">' + esc(st.name) + '</span><span class="csd" title="' + esc(st.what || "") + '">' + esc(st.what || "") + "</span></li>";
+    }).join("");
+    return '<div class="councilcard cc-running" data-council="' + esc(p.councilId) + '"><div class="cch">\ud83c\udfdb <b>Council</b>' +
+      '<span class="ccgoal">' + esc(p.goal || "") + "</span>" +
+      '<button type="button" class="btn xs outline" data-council-stop="' + esc(p.councilId) + '">Stop</button></div>' +
+      '<div class="ccwho">' + avatarFor(p.planner) + " " + esc(labelOf(p.planner)) + " plans and builds \u00b7 " +
+      (p.reviewers || []).map(function(r){ return avatarFor(r) + " " + esc(labelOf(r)); }).join(" ") + " review</div>" +
+      '<ol class="ccl">' + rows + '</ol><div class="ccsum"></div></div>';
+  }
+  /** A council moved on: its card's stage row, or its ending. */
+  function settleCouncil(root, p){
+    var cards = (root || document).querySelectorAll('.councilcard[data-council="' + String(p.councilId).replace(/"/g, "") + '"]');
+    Array.prototype.forEach.call(cards, function(card){
+      if (p.phase === "stage") {
+        var row = card.querySelector('[data-cstage="' + String(p.stage).replace(/"/g, "") + '"]'); if (!row) return;
+        row.className = "cst cs-" + p.status;
+        row.querySelector(".csm").textContent = CSTAGE_MARK[p.status] || "\u00b7";
+        if (p.detail || p.status !== "running") { var d = row.querySelector(".csd"); d.textContent = p.detail || (p.status === "running" ? d.textContent : ""); }
+      } else if (p.phase === "done") {
+        card.classList.remove("cc-running"); card.classList.add("cc-" + p.status);
+        var btn = card.querySelector("[data-council-stop]"); if (btn) btn.remove();
+        card.querySelector(".ccsum").textContent = p.summary || "";
+      }
+    });
+    return cards.length > 0;
+  }
+
   /** A finding someone accepted or rejected: say so on its row, keep the other way open. */
   function settleFinding(root, findingId, decision){
     var done = false;
@@ -433,6 +471,7 @@ import { shortModel } from './permissions.js';
     if (e.kind === "proof") return proofCard(e);
     if (e.kind === "shift") return shiftCard(e);
     if (e.kind === "review") return reviewCard(e);
+    if (e.kind === "council") return councilCard(e);
     if (e.kind === "checkpoint") {
       if (p.reason !== "rewound") return tview() === "verbose" ? '<div class="sys" style="opacity:.6">\u21ba checkpoint \u00b7 ' + esc(p.label || p.id) + "</div>" : "";
       return '<div class="sys ok">\u21ba Rewound to \u201c' + esc(String(p.label || p.id).slice(0, 80)) + '\u201d \u00b7 ' +
@@ -935,4 +974,4 @@ function settleQuestionCard(card, answers){
   return true;
 }
 
-export { ARTIFACT_EXT,artifactChips,settleFinding,settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };
+export { ARTIFACT_EXT,artifactChips,settleCouncil,settleFinding,settleQuestionCard,splitAttachments,actSummary,avatarFor,durfmt,emptyArt,LAND_ST,landPill,lineFor,ORCH_RUN_ST,ORCH_TASK_ST,orchLine,plainPreview,planCardHtml,questionChoices,rawBlock,relClock,setTView,tview,TVIEWS,unesc,untilText,whoHtml };

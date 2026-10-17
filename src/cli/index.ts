@@ -1232,6 +1232,70 @@ program
   });
 
 program
+  .command("council <goal...>")
+  .description("one planner, several reviewers: plan → backtest → decide → build → prove → forward-test → fix; only the planner writes")
+  .requiredOption("--planner <id>", "the agent that plans, decides and builds")
+  .requiredOption("--reviewers <ids>", "comma-separated agents that test the plan and the diff, read-only")
+  .option("--no-watch", "start it and return; follow it in the app or with loom council:status")
+  .action(async (words: string[], opts: { planner: string; reviewers: string; watch: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let council;
+    try {
+      ({ council } = await client.startCouncil(project.id, { goal: words.join(" "), planner: opts.planner, reviewers: opts.reviewers.split(",").map((r) => r.trim()).filter(Boolean) }));
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
+    }
+    console.log(pc.cyan(`🏛 council ${council.councilId}: ${council.planner} plans and builds; ${council.reviewers.join(", ")} review — in its own chat`));
+    if (!opts.watch) return void console.log(pc.dim(`loom council:status ${council.councilId} · loom council:stop`));
+    const shown = new Map<string, string>();
+    while (true) {
+      council = (await client.council(project.id, council.councilId)).council;
+      for (const st of council.stages) {
+        const key = `${st.status}:${st.detail ?? ""}`;
+        if (st.status === "waiting" || shown.get(st.key) === key) continue;
+        shown.set(st.key, key);
+        console.log(`${councilMark(st.status)} ${pc.bold(st.name.padEnd(13))}${st.detail ? pc.dim(st.detail) : st.status === "running" ? pc.dim("…") : ""}`);
+      }
+      if (council.status !== "running") break;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    console.log((council.status === "done" ? pc.green : council.status === "stopped" ? pc.yellow : pc.red)(`\n${council.summary ?? council.status}`));
+    if (council.status === "failed") process.exitCode = 1;
+  });
+
+program
+  .command("council:status [councilId]")
+  .description("where a council is, stage by stage (default: the latest)")
+  .action(async (councilId?: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const council = councilId ? (await client.council(project.id, councilId)).council : (await client.councils(project.id)).councils[0];
+    if (!council) return void console.log(pc.dim('no councils yet — loom council "<goal>" --planner <id> --reviewers <ids>'));
+    console.log(pc.bold(`council ${council.councilId}`) + pc.dim(` · ${council.goal} · ${council.planner} → ${council.reviewers.join(", ")}`));
+    for (const st of council.stages) console.log(`${councilMark(st.status)} ${st.name.padEnd(13)}${st.detail ? pc.dim(st.detail) : ""}`);
+    if (council.summary) console.log(pc.dim(`\n${council.summary}`));
+  });
+
+program
+  .command("council:stop")
+  .description("stop the running council after its current stage")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      const { council } = await client.stopCouncil(project.id);
+      console.log(pc.yellow(`stopping council ${council.councilId}`));
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
+  });
+
+function councilMark(status: string): string {
+  return status === "done" ? pc.green("✓") : status === "running" ? pc.cyan("◐") : status === "failed" ? pc.red("✗") : status === "skipped" ? pc.dim("–") : pc.dim("·");
+}
+
+program
   .command("reviews [reviewId]")
   .description("the latest reviews, or one review's findings")
   .action(async (reviewId?: string) => {
@@ -1277,6 +1341,7 @@ function printReview(review: Awaited<ReturnType<DaemonClient["review"]>>["review
     console.log(`  ${sev(f.severity)} ${pc.dim(f.id.padEnd(10))} ${pc.cyan([f.agent, ...(f.agreed ?? []).map((a) => a.agent)].join("+").padEnd(12))} ${f.file ? pc.bold(`${f.file}${f.line ? `:${f.line}` : ""}`) + " — " : ""}${f.text}${mark}`);
   }
   for (const r of review.results ?? []) {
+    if (r.edited?.length) console.log(pc.yellow(`  ⚠ ${r.agent} changed files in a read-only review: ${r.edited.join(", ")}`));
     if (r.status === "failed") console.log(pc.red(`  ✗ ${r.agent} didn't finish: ${r.error}`));
     else if (!(review.findings ?? []).some((f) => f.agent === r.agent || (f.agreed ?? []).some((a) => a.agent === r.agent))) console.log(pc.dim(`  ${r.agent}: ${r.reply.split("\n").find((l) => l.trim())?.slice(0, 160) ?? "(no reply)"}`));
   }

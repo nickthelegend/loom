@@ -87,6 +87,10 @@ function item(e: LoomEvent): string {
       if (p.phase !== "report") return "";
       return `<div class="card shift"><b>🌙 Night shift report</b> ${esc(p.summary)}${p.stopped ? ` <span class="m">— stopped: ${esc(p.stopped)}</span>` : ""}<ul>${((p.tasks as Array<Record<string, any>>) ?? []).map((t) =>
         `<li><span class="tag s-${esc(t.status)}">${esc(SHIFT_WORD[t.status] ?? t.status)}</span> ${esc(t.text)}${t.question ? ` <span class="m">— asks: ${esc(t.question)}</span>` : t.error ? ` <span class="m">— ${esc(t.error)}</span>` : t.headline ? ` <span class="m">— ${esc(t.headline)}</span>` : ""}</li>`).join("")}</ul></div>`;
+    case "council":
+      if (p.phase === "started") return `<div class="card council"><b>🏛 Council</b> ${esc(p.goal)} <span class="m">— ${esc(p.planner)} plans and builds; ${esc(((p.reviewers as string[]) ?? []).join(", "))} review</span></div>`;
+      if (p.phase === "stage") return p.status === "running" ? "" : `<div class="sys">${p.status === "done" ? "✓" : p.status === "failed" ? "✗" : "–"} ${esc(p.stage)}${p.detail ? ` — ${esc(p.detail)}` : ""}</div>`;
+      return p.phase === "done" ? `<div class="sys">🏛 ${esc(p.summary)}</div>` : "";
     case "review":
       if (p.phase === "started") return `<div class="sys">🔍 ${esc(((p.agents as string[]) ?? []).join(", "))} reviewing ${esc(p.target?.file ?? (p.target?.kind === "diff" ? "the uncommitted changes" : "a request"))} — read-only</div>`;
       if (p.phase === "decided") return `<div class="sys">${p.decision === "accepted" ? "✓ accepted" : "✕ rejected"} finding ${esc(p.findingId)}: ${esc(p.text)}</div>`;

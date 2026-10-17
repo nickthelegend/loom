@@ -51,6 +51,7 @@ export function pushCategory(event: LoomEvent): PushCategory | null {
     case "shift": return p.phase === "report" ? "goals" : null;
     // the reviewers have all answered: findings to accept or reject
     case "review": return p.phase === "done" ? "goals" : null;
+    case "council": return p.phase === "done" ? "goals" : null;
     case "orchestra":
       if (p.phase === "alert" || p.phase === "completed" || p.phase === "failed" || p.phase === "aborted") return "goals";
       return p.phase === "waiting" ? "questions" : null;
@@ -99,6 +100,8 @@ export function pushContent(projectName: string, event: LoomEvent, extra: { repl
     case "shift":
       if (p.phase === "report") return { title: `🌙 Night shift done · ${projectName}`, body: `${clip(p.summary, 140)}${p.stopped ? ` — stopped: ${clip(p.stopped, 60)}` : ""}` };
       return { title, body: "night shift started" };
+    case "council":
+      return { title: `🏛 Council ${p.status === "done" ? "done" : String(p.status ?? "ended")} · ${projectName}`, body: clip(p.summary, 160) };
     case "review":
       return { title: `🔍 Review done · ${projectName}`, body: clip(p.summary, 160) || "the reviewers answered" };
     case "route_completed":
