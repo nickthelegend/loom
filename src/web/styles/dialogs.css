@@ -872,6 +872,7 @@
   .ushare{display:inline-block;width:56px;height:5px;border-radius:3px;background:var(--muted);vertical-align:middle;overflow:hidden}
   .ushare i{display:block;height:100%;background:var(--shuttle, var(--primary))}
   .uflag{font-size:10px;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);border-radius:4px;padding:0 4px;margin-left:4px}
+  .uest{display:block;font-size:10px;color:var(--muted-foreground);white-space:nowrap}
   .umodels{color:var(--muted-foreground);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis}
   .lbtable tr.uclick{cursor:pointer}
   .lbtable tr.uclick:hover td{background:var(--accent)}

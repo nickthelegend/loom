@@ -304,7 +304,10 @@ export class RuntimeBriefings {
   extractMemory(agentId: string, files: string[]): void {
     if (this.lifetime.signal.aborted || this.host.config.brain?.continuity || this.host.config.brain?.extractor === "off") return;
     const chat = this.host.turnChat.get(agentId) ?? MAIN_CHAT;
-    const turn = this.gatherTurnText(chat);
+    // only this agent's own turn, and only if it answered: memories are credited to whoever wrote the
+    // text — never to an agent whose run failed or said nothing while others talked in the chat (#248)
+    const { text: turn, replyId, failed } = this.gatherAgentTurn(chat, agentId);
+    if (failed || replyId === null) return;
     if (turn.length < 40) return; // nothing substantial to learn from
     const model = this.host.config.brain?.model ?? "haiku";
     const engine = this.host.extractionEngine(model);
@@ -315,7 +318,7 @@ export class RuntimeBriefings {
       agentId,
       chat,
       ...(files.length ? { files } : {}),
-      eventId: this.host.log.lastId(),
+      eventId: replyId,
       ...(readExternalContent(recent) ? { untrusted: true } : {}),
     })
       .then((res) => {
@@ -337,31 +340,31 @@ export class RuntimeBriefings {
   }
 
   /**
-   * The transcript of the most recent turn in a chat: from the last human
-   * message to now — the user's ask and what the agent did in reply.
+   * One agent's most recent turn in a chat: the ask, and what *this* agent said and did — not the other
+   * agents talking in the same chat (a subtask's reviewer, a teammate). `replyId` is its last reply
+   * (null when it said nothing); `failed` when that turn ended in an error.
    */
-  gatherTurnText(chat: string): string {
-    const events = this.host.log.list({ chat, limit: 40 });
+  gatherAgentTurn(chat: string, agentId: string): { text: string; replyId: number | null; failed: boolean } {
+    const events = this.host.log.list({ chat, limit: 120 });
     let start = 0;
     for (let i = events.length - 1; i >= 0; i--) {
-      if (events[i]!.kind === "message" && (!events[i]!.agentId || events[i]!.payload.author === "user")) {
-        start = i;
-        break;
-      }
+      const e = events[i]!;
+      if (e.kind === "message" && (!e.agentId || e.payload.author === "user")) { start = i; break; }
     }
     const lines: string[] = [];
+    let replyId: number | null = null, failed = false, lastEnd: LoomEvent | undefined;
     for (const e of events.slice(start)) {
       const p = e.payload;
+      if (e.agentId && e.agentId !== agentId) continue;
       if (e.kind === "message") {
         lines.push(`${e.agentId ?? "user"}: ${String(p.text ?? "").slice(0, 2000)}`);
-      } else if (e.kind === "tool_call") {
-        lines.push(`[${e.agentId} used ${String(p.tool ?? "a tool")}] ${String(p.summary ?? "")}`.trim());
-      } else if (e.kind === "file_edit") {
-        lines.push(`[${e.agentId} edited ${String(p.path ?? "")}]`);
-      } else if (e.kind === "decision") {
-        lines.push(`decision: ${String(p.text ?? "")}`);
-      }
+        if (e.agentId === agentId && !p.reasoning && String(p.text ?? "").trim()) replyId = e.id;
+      } else if (e.kind === "tool_call") lines.push(`[${e.agentId} used ${String(p.tool ?? "a tool")}] ${String(p.summary ?? "")}`.trim());
+      else if (e.kind === "file_edit") lines.push(`[${e.agentId} edited ${String(p.path ?? "")}]`);
+      else if (e.kind === "decision") lines.push(`decision: ${String(p.text ?? "")}`);
+      else if (e.agentId === agentId && (e.kind === "run_complete" || e.kind === "error")) lastEnd = e;
     }
-    return lines.join("\n").trim();
+    if (lastEnd && (lastEnd.kind === "error" || lastEnd.payload.error)) failed = true;
+    return { text: lines.join("\n").trim(), replyId, failed };
   }
 }

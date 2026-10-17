@@ -10,6 +10,7 @@ import type {
   ProjectInfo
 } from "../../types.js";
 import { Recent, forecastFrom, type Forecast } from "../../core/forecast.js";
+import { estimateUsd, priceBook } from "../../core/prices.js";
 import { BUDGET_PAUSE_REASON, BudgetExceededError, QuarantinedError, startOfDay } from '../runtime-support.js';
 
 /** Dependencies owned by the project coordinator, read live for each operation. */
@@ -33,6 +34,11 @@ export class RuntimeAccounting {
     string,
     { usd: number; turns: number; ms: number; tokensIn: number; tokensOut: number }
   >();
+
+  /** Whether an agent's current turn has reported money yet — a turn that ends without any is unpriced. */
+  private pricedTurn = new Map<string, boolean>();
+  /** Unpriced turns' tokens, per agent per model, priced only when asked (the price list may arrive later). */
+  private unpriced = new Map<string, Map<string, { tokensIn: number; tokensOut: number; cachedIn: number }>>();
 
   /** Each agent's latest turns — cost and time — for the pre-flight forecast (core/forecast.ts). */
   private recent = new Map<string, { usd: Recent; ms: Recent }>();
@@ -64,6 +70,7 @@ export class RuntimeAccounting {
     if (event.kind === "status" && event.payload.state === "turn_cost") {
       const usd = Number(event.payload.costUsd ?? 0);
       if (usd > 0) {
+        this.pricedTurn.set(agentId, true);
         this.recentFor(agentId).usd.push(usd);
         this.costs.totalUsd += usd;
         entry.usd += usd;
@@ -105,14 +112,43 @@ export class RuntimeAccounting {
       entry.tokensIn += tin;
       entry.tokensOut += tout;
       this.costsByAgent.set(agentId, entry);
+      const priced = this.pricedTurn.get(agentId) || Number(event.payload.costUsd ?? 0) > 0;
+      this.pricedTurn.delete(agentId);
+      if (!priced && (tin || tout) && event.payload.model) {
+        const byModel = this.unpriced.get(agentId) ?? new Map();
+        const m = byModel.get(String(event.payload.model)) ?? { tokensIn: 0, tokensOut: 0, cachedIn: 0 };
+        m.tokensIn += tin;
+        m.tokensOut += tout;
+        m.cachedIn += Number(event.payload.cachedInputTokens ?? 0) || 0;
+        byModel.set(String(event.payload.model), m);
+        this.unpriced.set(agentId, byModel);
+      }
     }
+  }
+
+  /** An agent's unpriced tokens at API prices; undefined when there are none, or no price for them. */
+  private estimateFor(agentId: string): number | undefined {
+    const byModel = this.unpriced.get(agentId);
+    if (!byModel) return undefined;
+    const book = priceBook();
+    let usd: number | undefined;
+    for (const [model, t] of byModel) {
+      const est = estimateUsd({ model, ...t }, book);
+      if (est !== undefined) usd = (usd ?? 0) + est;
+    }
+    return usd;
   }
 
   costSummary(): CostSummary {
     const byAgent: AgentCost[] = [...this.costsByAgent.entries()]
-      .map(([agentId, c]) => ({ agentId, ...c }))
+      .map(([agentId, c]) => {
+        const estUsd = this.estimateFor(agentId);
+        return { agentId, ...c, ...(estUsd !== undefined ? { estUsd } : {}) };
+      })
       .sort((a, b) => b.usd - a.usd || b.turns - a.turns);
+    const estimated = byAgent.filter((a) => a.estUsd !== undefined);
     return {
+      ...(estimated.length ? { estUsd: estimated.reduce((sum, a) => sum + a.estUsd!, 0) } : {}),
       totalUsd: this.costs.totalUsd,
       turns: this.costs.turns,
       totalMs: this.costs.totalMs,

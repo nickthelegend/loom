@@ -256,6 +256,12 @@ export function listProviders(env: NodeJS.ProcessEnv = process.env): ProviderSum
  * each key your shell has that the daemon can't see called out (#249). A key
  * exported in this terminal never reaches a daemon the desktop app started.
  */
+/** The provider a model id goes to — the first segment when it names one, else OpenRouter (ids carry slashes too); as the daemon's ask route reads it. */
+export function providerOfModel(model: string, known: { has(id: string): boolean }): string {
+  const [head, ...rest] = model.split("/");
+  return head && rest.length && known.has(head) ? head : "openrouter";
+}
+
 export interface ProviderView extends ProviderSummary { shellOnly?: boolean }
 
 export function mergeProviderViews(daemon: ProviderSummary[], local: ProviderSummary[]): ProviderView[] {
