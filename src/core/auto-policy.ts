@@ -29,6 +29,25 @@ export interface AutoPolicy {
   allow: string[];
 }
 
+/**
+ * Each open project's live policy, by project id. Agents' options must stay plain data (native
+ * continuity clones them), so the policy is looked up here rather than carried in them.
+ */
+const policies = new Map<string, () => AutoPolicy>();
+export function registerAutoPolicy(projectId: string, get: () => AutoPolicy): () => void {
+  policies.set(projectId, get);
+  return () => { if (policies.get(projectId) === get) policies.delete(projectId); };
+}
+export function autoPolicyFor(projectId: string | undefined): AutoPolicy | undefined {
+  return projectId ? policies.get(projectId)?.() : undefined;
+}
+
+/** The policy as it applies in `cwd` — an agent's own worktree is its project; the main checkout stays readable. */
+export function policyIn(policy: AutoPolicy, cwd: string | undefined): AutoPolicy {
+  if (!cwd || path.resolve(cwd) === path.resolve(policy.projectDir)) return policy;
+  return { ...policy, projectDir: path.resolve(cwd), readPaths: [...policy.readPaths, policy.projectDir] };
+}
+
 export type AutoDecision = { allow: true; rule?: string } | { allow: false; rule: string; detail: string };
 
 const READ_TOOLS = new Set(["Read", "Glob", "Grep", "LS", "NotebookRead"]);

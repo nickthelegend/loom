@@ -12,6 +12,7 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { ClaudeCodeAdapter, stopAllProviderSessions } from "../src/providers/agent.js";
 import { setApprovalBroker, type ApprovalRequest } from "../src/core/approvals.js";
+import { registerAutoPolicy } from "../src/core/auto-policy.js";
 import { NativeSessionMissing } from "../src/core/continuity/contracts.js";
 import type { AdapterEvent, SendInput } from "../src/types.js";
 import { makeProjectDir } from "./helpers.js";
@@ -230,12 +231,13 @@ describe("claude-code · always ask", () => {
 describe("claude-code · Auto runs the project's commands (#260, #244)", () => {
   it("answers Claude's permission prompts with Loom's Auto policy: inside the project runs, outside is refused by name", async () => {
     const dir = makeProjectDir({ name: "auto-policy" });
-    const autoPolicy = () => ({ projectDir: dir, readPaths: [], allow: [] });
+    const off = registerAutoPolicy("p1", () => ({ projectDir: dir, readPaths: [], allow: [] }));
     const { bin, error } = await run([claudeInit,
       { ask: { tool_name: "Bash", input: { command: ".venv/bin/python --version" } } },
       { ask: { tool_name: "Bash", input: { command: `cd "${dir}" && git ls-files` } } },
       { ask: { tool_name: "Bash", input: { command: "cat /etc/passwd" } } },
-      claudeResult()], {}, {}, { permissions: "auto", loomProject: "p1", autoPolicy });
+      claudeResult()], {}, {}, { permissions: "auto", loomProject: "p1" });
+    off();
     expect(error).toBeUndefined();
     expect(flag(callsOf(bin)[0]!, "--permission-mode")).toBe("acceptEdits");
     const answers = stdinOf(bin).filter((m) => m.type === "control_response")

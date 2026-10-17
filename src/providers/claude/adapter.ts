@@ -46,7 +46,7 @@ import type {
   SessionStartInput, ThreadId, TurnId, TurnStartResult, UserInputAnswers, UserInputQuestion,
 } from "../contracts.js";
 import { ProviderError } from "../errors.js";
-import { decideAuto, refusalText, type AutoPolicy } from "../../core/auto-policy.js";
+import { decideAuto, policyIn, refusalText, type AutoPolicy } from "../../core/auto-policy.js";
 import { spawnHarness, stopHarness, type HarnessProcess } from "../process.js";
 
 export interface ClaudeAdapterOptions {
@@ -63,7 +63,7 @@ export interface ClaudeAdapterOptions {
   /** How long to wait for the CLI to initialize. */
   startTimeoutMs?: number;
   /** Loom's Auto policy (core/auto-policy.ts), read live: what Auto lets this agent run beyond file edits. */
-  autoPolicy?: () => AutoPolicy;
+  autoPolicy?: () => AutoPolicy | undefined;
 }
 
 /**
@@ -270,7 +270,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       ...(input.modelSelection?.effort ? { effort: input.modelSelection.effort as NonNullable<Options["effort"]> } : {}),
       ...(mcpServers && Object.keys(mcpServers).length ? { mcpServers } : {}),
       // sibling folders the project lets agents read (readPaths), so Claude's own checks admit them too
-      ...((dirs) => (dirs.length ? { additionalDirectories: dirs } : {}))(this.options.autoPolicy?.().readPaths ?? []),
+      ...((dirs) => (dirs.length ? { additionalDirectories: dirs } : {}))(this.options.autoPolicy?.()?.readPaths ?? []),
       ...(extraArgs ? { extraArgs } : {}),
       spawnClaudeCodeProcess: spawnOptions => {
         const proc = spawnHarness(spawnOptions.command, spawnOptions.args, { cwd: spawnOptions.cwd ?? input.cwd,
@@ -353,8 +353,9 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     if (base === "bypassPermissions") return { behavior: "allow", updatedInput: toolInput };
     // Auto: Claude's acceptEdits asks about everything past file edits; Loom answers with its Auto
     // policy — commands and reads inside the project run, the rest is refused naming the rule that fired
-    if (base === "acceptEdits" && this.options.autoPolicy) {
-      const d = decideAuto(tool, toolInput, this.options.autoPolicy());
+    const policy = base === "acceptEdits" ? this.options.autoPolicy?.() : undefined;
+    if (policy) {
+      const d = decideAuto(tool, toolInput, policyIn(policy, s.info.cwd));
       if (d.allow) return { behavior: "allow", updatedInput: toolInput };
       if (toolUseId) { const t = s.tools.get(toolUseId); if (t) t.declined = true; }
       return { behavior: "deny", message: refusalText(d) };

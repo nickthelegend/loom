@@ -21,7 +21,7 @@ import { OrchestraEngine, type OrchestraCoordinator } from "../core/orchestra.js
 import { CrewEngine } from "../core/crew.js";
 import { LoopWatch, nudgeText, type Loop } from "../core/loops.js";
 import { commandOf, dangerOf } from "../core/shield.js";
-import type { AutoPolicy } from "../core/auto-policy.js";
+import { registerAutoPolicy, type AutoPolicy } from "../core/auto-policy.js";
 import { detectTestCommand } from "../core/proof.js";
 import { QuotaRelay } from "./runtime/relay.js";
 import { ProofRunner } from "./proof.js";
@@ -163,6 +163,8 @@ export class ProjectRuntime {
   readonly relay: QuotaRelay;
   /** Proof: checks an agent's "done" against what ran and a clean re-run of the tests. */
   readonly proofs: ProofRunner;
+  /** Loom's Auto policy, registered by project id for this project's agents (core/auto-policy.ts). */
+  private readonly unregisterAutoPolicy: () => void;
   /** Night Shift: a line of tasks run while you're away, then one report (daemon/shift.ts). */
   readonly shifts: NightShift;
   /** Adapter kinds installed on this machine, probed once at open. */
@@ -405,6 +407,7 @@ export class ProjectRuntime {
       warn: (message, detail) => logbook.warn("relay", message, String(detail), this.info.id),
     });
 
+    this.unregisterAutoPolicy = registerAutoPolicy(info.id, () => this.autoPolicy());
     this.proofs = new ProofRunner({
       projectId: info.id,
       dir: info.dir,
@@ -3227,7 +3230,7 @@ export class ProjectRuntime {
   }
 
   private policyOptions(cfg: AgentConfig): Record<string, unknown> {
-    const opts: Record<string, unknown> = { ...(cfg.options ?? {}), autoPolicy: () => this.autoPolicy() };
+    const opts: Record<string, unknown> = { ...(cfg.options ?? {}) };
     if (this.runnerMode) {
       // A runner is its own trust tier (D70): agents bypass inside the sandbox,
       // capped by the team's runners.permissions rather than the laptop ceiling.
@@ -3342,6 +3345,7 @@ export class ProjectRuntime {
   }
 
   async close(): Promise<void> {
+    this.unregisterAutoPolicy();
     await this.orchestra.shutdown().catch(() => { });
     this.relay.stop();
     this.shifts.close();
