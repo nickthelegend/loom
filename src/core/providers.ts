@@ -251,6 +251,21 @@ export function listProviders(env: NodeJS.ProcessEnv = process.env): ProviderSum
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * What `loom providers` shows: the daemon's view — it makes the calls — with
+ * each key your shell has that the daemon can't see called out (#249). A key
+ * exported in this terminal never reaches a daemon the desktop app started.
+ */
+export interface ProviderView extends ProviderSummary { shellOnly?: boolean }
+
+export function mergeProviderViews(daemon: ProviderSummary[], local: ProviderSummary[]): ProviderView[] {
+  const mine = new Map(local.map((p) => [p.id, p]));
+  return daemon.map((d) => {
+    const l = mine.get(d.id);
+    return !d.configured && l?.configured && l.source === "env" ? { ...d, shellOnly: true, hint: l.hint } : d;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // The wire
 // ---------------------------------------------------------------------------
