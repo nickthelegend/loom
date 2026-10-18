@@ -45,6 +45,7 @@ export interface CouncilHost {
   append(e: NewEvent): LoomEvent;
   lastId(): number;
   warn(message: string, detail: unknown): void;
+  noteDirtyStart?(chat: string, what: string): void;
 }
 
 export interface StartCouncil { goal: string; planner: string; reviewers: string[] }
@@ -56,6 +57,9 @@ export interface CouncilState {
 }
 
 class Stopped extends Error {}
+
+/** What finished stages left behind, for a resume. */
+interface Saved { done: Set<StageKey>; plan?: string; backId?: string; fwdId?: string; accepted?: string[]; rejected?: string[]; proof?: { verdict: string; headline: string } }
 
 /** How long one turn or one review may take before the council gives up on it. */
 const STEP_MS = 45 * 60_000;
@@ -74,7 +78,7 @@ export class CouncilRunner {
       if (!s || s.status !== "running") continue;
       const at = s.stages.find((x) => x.status === "running");
       if (at) this.stage(id, s.chat, at.key, "failed", "Loom restarted during this stage");
-      this.host.append({ kind: "council", chat: s.chat, payload: { phase: "done", councilId: id, status: "failed", summary: `stopped at ${at?.name ?? "the start"}: Loom restarted` } });
+      this.host.append({ kind: "council", chat: s.chat, payload: { phase: "done", councilId: id, status: "failed", resumable: true, summary: `stopped at ${at?.name ?? "the start"}: Loom restarted — resume carries on from there` } });
     }
   }
 
@@ -97,6 +101,7 @@ export class CouncilRunner {
     const chat = this.host.createChat(`🏛 Council · ${goal.replace(/\s+/g, " ")}`.slice(0, 60)).id;
     this.running = { id: councilId, chat, stop: false };
     this.host.append({ kind: "council", chat, payload: { phase: "started", councilId, goal, planner: input.planner, reviewers, chat, stages: STAGES.map((s) => ({ key: s.key, name: s.name, what: s.what })) } });
+    this.host.noteDirtyStart?.(chat, "This council");
     void this.run(councilId, chat, goal, input.planner, reviewers)
       .catch((err) => this.host.warn("council failed", err))
       .finally(() => { if (this.running?.id === councilId) this.running = null; });
@@ -112,8 +117,8 @@ export class CouncilRunner {
     return this.status(r.id);
   }
 
-  private stage(councilId: string, chat: string, stage: StageKey, status: StageStatus, detail?: string): void {
-    this.host.append({ kind: "council", chat, payload: { phase: "stage", councilId, stage, status, ...(detail ? { detail: detail.slice(0, 400) } : {}) } });
+  private stage(councilId: string, chat: string, stage: StageKey, status: StageStatus, detail?: string, out?: Record<string, unknown>): void {
+    this.host.append({ kind: "council", chat, payload: { phase: "stage", councilId, stage, status, ...(detail ? { detail: detail.slice(0, 400) } : {}), ...(out ? { out } : {}) } });
   }
 
   private async sleep(): Promise<void> {
@@ -170,58 +175,115 @@ export class CouncilRunner {
     return { accepted, rejected, open: findings.length - accepted.length - rejected.length };
   }
 
-  private async run(councilId: string, chat: string, goal: string, planner: string, reviewers: string[]): Promise<void> {
+  /**
+   * What the stages that finished left for the ones after: read back from their
+   * events, so a council a restart cut off picks up where it stopped (#304).
+   */
+  private saved(councilId: string): Saved {
+    const out: Saved = { done: new Set() };
+    for (const e of this.host.list({ kinds: ["council"] }).filter((x) => x.payload.councilId === councilId && x.payload.phase === "stage")) {
+      const k = e.payload.stage as StageKey, st = String(e.payload.status);
+      // a Prove that didn't hold still moves on to the fix round
+      if (st === "done" || st === "skipped" || st === "unverified" || (k === "prove" && st === "failed")) out.done.add(k);
+      else out.done.delete(k);
+      const o = (e.payload.out ?? {}) as Record<string, unknown>;
+      if (k === "plan" && typeof o.reply === "string") out.plan = o.reply;
+      if ((k === "backtest" || k === "forward") && typeof o.reviewId === "string") out[k === "backtest" ? "backId" : "fwdId"] = o.reviewId;
+      if (k === "decide" && Array.isArray(o.accepted)) { out.accepted = o.accepted.map(String); out.rejected = ((o.rejected as unknown[]) ?? []).map(String); }
+      if (k === "prove" && typeof o.verdict === "string") out.proof = { verdict: o.verdict, headline: String(o.headline ?? "") };
+    }
+    return out;
+  }
+
+  /** Carry on a council a restart (or a failed turn, or Stop) ended, from the first stage that didn't finish. */
+  resume(councilId: string): CouncilState {
+    if (this.running) throw new Error("a council is already running in this project");
+    const s = this.status(councilId);
+    if (!s) throw new Error(`no council "${councilId}"`);
+    if (s.status === "running") throw new Error("that council is still running");
+    if (s.status === "done") throw new Error("that council finished — start a new one");
+    this.running = { id: councilId, chat: s.chat, stop: false };
+    const from = this.saved(councilId);
+    const next = STAGES.find((x) => !from.done.has(x.key))?.name ?? "the end";
+    this.host.append({ kind: "council", chat: s.chat, payload: { phase: "resumed", councilId, from: next } });
+    void this.run(councilId, s.chat, s.goal, s.planner, s.reviewers, from)
+      .catch((err) => this.host.warn("council failed", err))
+      .finally(() => { if (this.running?.id === councilId) this.running = null; });
+    return this.status(councilId)!;
+  }
+
+  private async run(councilId: string, chat: string, goal: string, planner: string, reviewers: string[], from: Saved = { done: new Set() }): Promise<void> {
     let current: StageKey = "plan";
     const go = (k: StageKey) => { current = k; this.check(councilId); this.stage(councilId, chat, k, "running"); };
     const tally = (r: { accepted: Finding[]; rejected: Finding[]; open: number }) =>
       [`${r.accepted.length} accepted`, `${r.rejected.length} rejected`, r.open ? `${r.open} undecided` : ""].filter(Boolean).join(" · ");
     const failed = (o: TurnOutcome) => o.status === "error" ? o.error ?? "the turn failed" : o.status === "needs_input" ? `${planner} asked: ${o.question} — answer it in this chat` : "";
     const summary: string[] = [];
+    const findingsOf = (reviewId?: string) => (reviewId ? this.host.reviewStatus(reviewId)?.findings ?? [] : []);
     try {
       if (this.host.holder() !== planner) await this.host.handoff(planner);
 
-      go("plan");
-      const planned = await this.turn(councilId, chat, planner, planPrompt(goal), true);
-      if (failed(planned) || !planned.reply.trim()) throw Object.assign(new Error(failed(planned) || `${planner} answered with no plan`), { stage: "plan" });
-      this.stage(councilId, chat, "plan", "done", `${planned.reply.split("\n").filter((l) => l.trim()).length} lines`);
+      let plan = from.plan ?? "";
+      if (!from.done.has("plan") || !plan) {
+        go("plan");
+        const planned = await this.turn(councilId, chat, planner, planPrompt(goal), true);
+        if (failed(planned) || !planned.reply.trim()) throw Object.assign(new Error(failed(planned) || `${planner} answered with no plan`), { stage: "plan" });
+        plan = planned.reply;
+        this.stage(councilId, chat, "plan", "done", `${plan.split("\n").filter((l) => l.trim()).length} lines`, { reply: plan.slice(0, 20_000) });
+      }
 
-      go("backtest");
-      const back = await this.review(councilId, chat, reviewers, { kind: "text", text: backtestText(goal, planned.reply) }, BACKTEST_FOCUS);
-      this.stage(councilId, chat, "backtest", "done", back.summary);
+      let found: Finding[];
+      if (from.done.has("backtest") && from.backId) found = findingsOf(from.backId);
+      else {
+        go("backtest");
+        const back = await this.review(councilId, chat, reviewers, { kind: "text", text: backtestText(goal, plan) }, BACKTEST_FOCUS);
+        found = back.findings ?? [];
+        this.stage(councilId, chat, "backtest", "done", back.summary, { reviewId: back.reviewId });
+      }
 
       let accepted: Finding[] = [], rejected: Finding[] = [];
-      const found = back.findings ?? [];
-      if (!found.length) this.stage(councilId, chat, "decide", "skipped", "the reviewers found nothing to decide");
+      if (from.done.has("decide") && from.accepted) {
+        accepted = found.filter((f) => from.accepted!.includes(f.id));
+        rejected = found.filter((f) => (from.rejected ?? []).includes(f.id));
+      } else if (!found.length) this.stage(councilId, chat, "decide", "skipped", "the reviewers found nothing to decide");
       else {
         go("decide");
         const decided = await this.turn(councilId, chat, planner, decidePrompt(found), true);
         if (failed(decided)) throw Object.assign(new Error(failed(decided)), { stage: "decide" });
         const r = this.record(found, decided.reply);
         ({ accepted, rejected } = r);
-        this.stage(councilId, chat, "decide", "done", tally(r));
+        this.stage(councilId, chat, "decide", "done", tally(r), { accepted: accepted.map((f) => f.id), rejected: rejected.map((f) => f.id) });
         summary.push(`plan: ${tally(r)}`);
       }
 
-      go("build");
-      const built = await this.turn(councilId, chat, planner, buildPrompt(goal, accepted, rejected), false);
-      if (failed(built)) throw Object.assign(new Error(failed(built)), { stage: "build" });
-      this.stage(councilId, chat, "build", "done");
+      if (!from.done.has("build")) {
+        go("build");
+        const built = await this.turn(councilId, chat, planner, buildPrompt(goal, accepted, rejected), false);
+        if (failed(built)) throw Object.assign(new Error(failed(built)), { stage: "build" });
+        this.stage(councilId, chat, "build", "done");
+      }
 
-      go("prove");
-      let proof = await this.host.prove(chat);
-      // a "didn't hold" is marked as one, and the council carries on to the fix round with it
-      this.stage(councilId, chat, "prove", proof ? proofStage(proof.verdict) : "skipped", proof?.headline ?? "nothing to check");
+      let proof = from.proof ?? null;
+      if (!from.done.has("prove")) {
+        go("prove");
+        proof = await this.host.prove(chat);
+        // a "didn't hold" is marked as one, and the council carries on to the fix round with it
+        this.stage(councilId, chat, "prove", proof ? proofStage(proof.verdict) : "skipped", proof?.headline ?? "nothing to check", proof ? { verdict: proof.verdict, headline: proof.headline } : undefined);
+      }
 
-      let target: ReviewTarget | null = null;
-      try { target = this.host.diffTarget(); } catch { /* the build changed nothing */ }
       let toFix: Finding[] = [];
-      if (!target) this.stage(councilId, chat, "forward", "skipped", "the build changed no files");
+      if (from.done.has("forward")) toFix = findingsOf(from.fwdId);
       else {
-        go("forward");
-        const fwd = await this.review(councilId, chat, reviewers, target, FORWARD_FOCUS);
-        // every finding goes to the fix round: the planner rejects what it won't do, out loud (#277)
-        toFix = fwd.findings ?? [];
-        this.stage(councilId, chat, "forward", "done", fwd.summary);
+        let target: ReviewTarget | null = null;
+        try { target = this.host.diffTarget(); } catch { /* the build changed nothing */ }
+        if (!target) this.stage(councilId, chat, "forward", "skipped", "the build changed no files");
+        else {
+          go("forward");
+          const fwd = await this.review(councilId, chat, reviewers, target, FORWARD_FOCUS);
+          // every finding goes to the fix round: the planner rejects what it won't do, out loud (#277)
+          toFix = fwd.findings ?? [];
+          this.stage(councilId, chat, "forward", "done", fwd.summary, { reviewId: fwd.reviewId });
+        }
       }
 
       const contradicted = proof?.verdict === "contradicted";
@@ -258,7 +320,9 @@ export class CouncilRunner {
       const st = stages.find((s) => s.key === e.payload.stage);
       if (st) { st.status = e.payload.status as StageStatus; if (e.payload.detail) st.detail = String(e.payload.detail); else delete st.detail; }
     }
-    const done = evs.find((e) => e.payload.phase === "done");
+    // a resumed council runs again: only an ending after the last resume counts
+    let done: LoomEvent | undefined;
+    for (const e of evs) { if (e.payload.phase === "resumed") done = undefined; else if (e.payload.phase === "done") done = e; }
     return { councilId, goal: String(p.goal), planner: String(p.planner), reviewers: p.reviewers as string[], chat: String(p.chat), stages,
       status: done ? (done.payload.status as CouncilState["status"]) : "running", ...(done ? { summary: String(done.payload.summary) } : {}) };
   }

@@ -750,12 +750,20 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/councils`);
   }
 
+  resumeCouncil(id: string, councilId: string): Promise<{ council: import("./council.js").CouncilState }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/councils/${encodeURIComponent(councilId)}/resume`);
+  }
+
   stopCouncil(id: string): Promise<{ council: import("./council.js").CouncilState }> {
     return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/councils`);
   }
 
   decideFinding(id: string, findingId: string, decision: "accepted" | "rejected", note?: string): Promise<{ finding: import("../core/review.js").Finding; decision: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}`, { decision, ...(note ? { note } : {}) });
+  }
+
+  repairDecisions(id: string): Promise<{ repaired: number; checked: number }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/repair-decisions`);
   }
 
   decision(id: string, text: string): Promise<{ event: LoomEvent }> {
@@ -845,7 +853,7 @@ export class DaemonClient {
   }
 
   pairedClients(): Promise<{
-    clients: Array<{ id: string; name: string; createdAt: number; push?: boolean }>;
+    clients: Array<{ id: string; name: string; createdAt: number; push?: boolean; lastSeen?: number | null; owner?: boolean }>;
   }> {
     return this.request("GET", "/api/pair/clients");
   }
@@ -907,6 +915,25 @@ async function healthy(cfg: DaemonConfig): Promise<boolean> {
 }
 
 /**
+ * Is the running daemon Loom Desktop's own (its bundled copy)? Then the CLI
+ * mustn't replace it with its own: Desktop would attach to the CLI's build
+ * silently and the two would go on restarting each other (#306).
+ */
+export async function desktopOwnsDaemon(cfg: DaemonConfig | null = readDaemonConfig()): Promise<boolean> {
+  const pid = cfg?.pid;
+  if (!pid) return false;
+  try {
+    const { execFileSync } = await import("node:child_process");
+    const cmd = process.platform === "win32"
+      ? execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${Number(pid)}').CommandLine`], { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] })
+      : execFileSync("ps", ["-p", String(Number(pid)), "-o", "command="], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+    return /Loom Desktop|loom-desktop/i.test(cmd) && /[\\/]daemon[\\/]/.test(cmd);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Get a client for a running daemon, starting one (detached) if needed.
  * A healthy daemon running an OLDER BUILD than this CLI is restarted —
  * stale daemons are the classic "failed to fetch / missing route" cause.
@@ -917,6 +944,11 @@ export async function ensureDaemon(): Promise<DaemonClient> {
     const probe = await healthProbe(cfg);
     if (probe.ok && probe.rev === BUILD_REV) return new DaemonClient(cfg);
     if (probe.ok && probe.rev !== BUILD_REV) {
+      // Loom Desktop's daemon is Desktop's to restart: say they differ, and use it (#306)
+      if (await desktopOwnsDaemon(cfg)) {
+        process.stderr.write(`loom: Loom Desktop runs a different build (${probe.rev ?? "?"}) than this CLI (${BUILD_REV}) — update one so they match; using Desktop's\n`);
+        return new DaemonClient(cfg);
+      }
       // Stale build — restart it in place.
       await stopDaemon();
       const gone = Date.now() + 5000;

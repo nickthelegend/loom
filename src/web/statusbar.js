@@ -117,10 +117,12 @@ import { railOpen,toggleRail } from './layout.js';
     var el = document.getElementById("statusbar"); if (!el) return;
     var p = state.project;
     checkBudget(p);
+    // "● 4 working" counts projects at work, as loom status does: an agent mid-turn, or a crew,
+    // orchestra, council, shift or review in flight (#322)
     var busy = 0, total = 0;
     (state.projects || []).forEach(function(pr){
       total += pr.costUsd > 0 ? pr.costUsd : 0;
-      (pr.agents || []).forEach(function(a){ if (a.busy) busy++; });
+      if ((pr.agents || []).some(function(a){ return a.busy; }) || (pr.activity || []).length) busy++;
     });
     updateAmbient(busy, (state.projects || []).some(function(pr){ return pr.needsInput; }));
     var share = p && p.costUsd > 0 && total > 0 ? Math.min(100, Math.round((p.costUsd / total) * 100)) : 0;

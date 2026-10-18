@@ -86,6 +86,10 @@ export interface CrewCard {
   builder?: string;
   /** Times it went back to the builder. */
   rounds: number;
+  /** Merge-conflict repairs: their own budget, not the card's review rounds (#308). */
+  conflicts?: number;
+  /** Set while the card is back for a conflict repair: the next review judges the resolution, not the whole card again. */
+  conflictReview?: boolean;
   /** What the builder is told next (review notes, test failures, your messages). */
   feedback: string[];
   commits: string[];
@@ -607,6 +611,30 @@ export class CrewEngine {
     return g;
   }
 
+  /**
+   * The owner's override: take a failed card as it stands — its builder's work
+   * is merged and its dependants run — and carry the goal on (#309). The
+   * review's notes stay on the card for the record.
+   */
+  async accept(id: string, cardId: string): Promise<CrewGoal> {
+    const cfg = this.config(id), st = this.state(cfg), g = st.goal;
+    if (!g || terminal(g.status) && g.status !== "failed") throw new Error(`${cfg.name} has no goal to change`);
+    const card = g.cards.find((c) => c.id === cardId || c.title === cardId);
+    if (!card) throw new Error(`no card "${cardId}" in ${cfg.name}`);
+    if (card.stage !== "failed") throw new Error(`"${card.title}" didn't fail — nothing to accept`);
+    if (!fs.existsSync(g.dir)) throw new Error("the goal's worktree is gone — start the goal again");
+    this.assertNativeIdle(st);
+    const why = card.error ?? "";
+    card.stage = card.workspace && !card.workspace.integrated ? "ready" : "done";
+    card.error = undefined;
+    this.phase(cfg, st, "card_accepted", { card: card.id, title: card.title, overruled: why.slice(0, 300) });
+    if (card.stage === "ready" && g.play !== "race") await this.integrateCard(cfg, st, g, card);
+    if (g.status === "failed") { g.status = "running"; g.error = undefined; g.finishedAt = undefined; }
+    this.save(st);
+    this.drive(id);
+    return g;
+  }
+
   /** Merge a finished goal's branch into the branch you're on. */
   async apply(id: string): Promise<{ merged: string; into: string }> {
     const cfg = this.config(id);
@@ -999,14 +1027,14 @@ export class CrewEngine {
       if (terminal(g.status) || this.closed) return;
       const prediction = await predictMerge(g.dir, "HEAD", workspace.branch);
       if (!prediction.clean) {
-        if (card.rounds >= (cfg.maxRounds ?? 2)) { this.giveUp(cfg, st, card, "integration conflicts remain after the repair budget"); return; }
+        if ((card.conflicts ?? 0) >= (cfg.maxRounds ?? 2)) { this.giveUp(cfg, st, card, "integration conflicts remain after the repair budget"); return; }
         // Keep the integration tree clean. Put the conflict into its owner's
         // checkout, where that same builder can resolve it in the next turn.
         try { await git(["-c", "user.name=Loom Crew", "-c", "user.email=crew@loom.local", "merge", "--no-commit", "--no-ff", g.branch], workspace.dir); }
         catch (error) {
           if (!(await git(["rev-parse", "--verify", "MERGE_HEAD"], workspace.dir).catch(() => "")).trim()) throw error;
         }
-        card.rounds++; card.stage = "building";
+        card.conflicts = (card.conflicts ?? 0) + 1; card.conflictReview = true; card.stage = "building";
         card.feedback.push(`Integration found a conflict with other completed cards. Resolve the merge in your checkout, preserve both cards, and report for review/test again.\n${prediction.detail}`);
         this.phase(cfg, st, "integration_conflict", { card: card.id, teammate: card.builder, detail: prediction.detail });
         this.save(st); return;
@@ -1093,6 +1121,8 @@ export class CrewEngine {
       const prompt = [
         `Review "${card.title}" (built by ${card.builder}).`,
         "Review ONLY this card in this turn. Other cards have separate review turns; do not wait for their diffs. Return an explicit review action for this card.",
+        // after a merge-conflict repair, the question is the resolution — not issues the card was already approved with (#308)
+        card.conflictReview ? "This card was already approved; it came back only to resolve a merge conflict with other finished cards. Judge the conflict resolution: approve unless the merge broke this card or another. Problems outside this card's scope, or that were there before, are not reasons to send it back." : "",
         card.detail ?? "",
         card.summary ? `What the builder says it did: ${card.summary}` : "",
         "",
@@ -1105,9 +1135,11 @@ export class CrewEngine {
       const review = reply.actions.find((a): a is Extract<CrewAction, { type: "review" }> => a.type === "review");
       if (!review) return this.giveUp(cfg, st, card, "reviewer returned no explicit review verdict");
       const verdict = review?.verdict ?? "approve";
+      const afterConflict = Boolean(card.conflictReview);
+      delete card.conflictReview;
       this.phase(cfg, st, "reviewed", { card: card.id, title: card.title, teammate: reviewer.id, verdict, notes: review?.notes ?? "" });
       if (verdict === "changes") {
-        if (card.rounds >= maxRounds) return this.giveUp(cfg, st, card, `review still wants changes after ${card.rounds} rounds: ${review?.notes ?? ""}`);
+        if (card.rounds >= maxRounds && !afterConflict) return this.giveUp(cfg, st, card, `review still wants changes after ${card.rounds} rounds: ${review?.notes ?? ""}`);
         card.rounds++;
         card.feedback.push(`The reviewer (${reviewer.id}) asks for changes:\n${review?.notes ?? ""}`);
         card.stage = "building";

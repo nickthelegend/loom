@@ -64,7 +64,7 @@ function fail(name: string, detail: string): Check {
 // Project checks (pure over a directory — unit tested)
 // ---------------------------------------------------------------------------
 
-export function projectChecks(dir: string): Check[] {
+export function projectChecks(dir: string, signedOutKinds: string[] = []): Check[] {
   const checks: Check[] = [];
   const config = readProjectConfig(dir);
   if (!config) {
@@ -105,7 +105,11 @@ export function projectChecks(dir: string): Check[] {
     // as able to hold the baton overstated what this project can run.
     const off = config.agents.filter((a) => a.enabled === false).map((a) => a.id);
     for (const id of off) adapterIds.delete(id);
-    checks.push(ok("agents", `${config.agents.length} configured, ${adapterIds.size} can hold the baton${off.length ? ` (${off.join(", ")} switched off)` : ""}`));
+    // a signed-out agent can't take a turn either (#319)
+    const out = config.agents.filter((a) => adapterIds.has(a.id) && signedOutKinds.includes(a.kind)).map((a) => a.id);
+    for (const id of out) adapterIds.delete(id);
+    const why = [off.length ? `${off.join(", ")} switched off` : "", out.length ? `${out.join(", ")} signed out` : ""].filter(Boolean).join("; ");
+    checks.push(ok("agents", `${config.agents.length} configured, ${adapterIds.size} can hold the baton${why ? ` (${why})` : ""}`));
   }
   if (!adapterIds.size) {
     checks.push(fail("agents", "no full-duplex adapters — nothing can take a turn"));

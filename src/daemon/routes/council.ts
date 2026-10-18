@@ -28,6 +28,18 @@ export function registerCouncilRoutes(app: Express, withRuntime: WithRuntime): v
     }),
   );
 
+  // Carry on a council that ended early (a restart, a failed turn, Stop) from the first unfinished stage (#304).
+  app.post(
+    "/api/projects/:id/councils/:councilId/resume",
+    withRuntime(async (rt, req, res) => {
+      try {
+        res.json({ council: rt.councils.resume(String(req.params.councilId)) });
+      } catch (err) {
+        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    }),
+  );
+
   // Stop after the current stage (a turn in progress is interrupted).
   app.delete(
     "/api/projects/:id/councils",

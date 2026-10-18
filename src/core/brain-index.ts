@@ -533,10 +533,18 @@ function negationPair(a: string, b: string): boolean {
  * exempt from the divergent signal — two facts about one file are usually both
  * true — but not from negation.
  */
+/** Review findings accepted as decisions share a template ("Review finding accepted (codex, medium): src/a.py:12 — …"). */
+const ACCEPTED = /^Review finding accepted \([^)]*\):\s*/;
+
+/** The words that carry a memory's meaning: no accepted-finding template, no file:line — which made two findings on one file look alike (#317). */
+function topicText(text: string): string {
+  return text.replace(ACCEPTED, "").replace(/(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z]\w{0,6}(?::\d+(?:-\d+)?)?/g, " ").replace(/\s+/g, " ").trim();
+}
+
 export function findConflicts(memories: Memory[]): Conflict[] {
   const live = memories.filter((m) => !isExpired(m));
   const out: Conflict[] = [];
-  const vecs = new Map(live.map((m) => [m.id, trigramVector(m.text)]));
+  const vecs = new Map(live.map((m) => [m.id, trigramVector(topicText(m.text))]));
   for (let i = 0; i < live.length; i++) {
     for (let j = i + 1; j < live.length; j++) {
       const a = live[i]!;
@@ -550,7 +558,9 @@ export function findConflicts(memories: Memory[]): Conflict[] {
       // brain with nothing flagging them — dedupe only merges exact text.
       if (negationPair(a.text, b.text)) {
         out.push({ a, b, similarity: round(sim), signal: "negation" });
-      } else if (sim >= 0.6 && sim < 0.92 && (a.kind === "decision" || a.kind === "convention" || a.kind === "constraint")) {
+      } else if (sim >= 0.6 && sim < 0.92 && (a.kind === "decision" || a.kind === "convention" || a.kind === "constraint")
+        // two accepted review findings were each decided on their own merits: complementary, not a reversal
+        && !(ACCEPTED.test(a.text) && ACCEPTED.test(b.text))) {
         out.push({ a, b, similarity: round(sim), signal: "same-topic-divergent" });
       }
     }

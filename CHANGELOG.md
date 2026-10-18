@@ -21,6 +21,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Invite and join said "admin only" in Loom Desktop.** The desktop window paired itself like a phone; it now holds an owner session (minted only with the admin token, one per machine — re-launches replace it instead of piling up "phone" entries). A phone or browser that tries is told where inviting works.
 
+### Fixed (round-3 stress test)
+
+- **The cold-session warning prices what you'll really pay** — from this agent's own past cold turns (or its blended rate), with the cache write on top. It showed $0.34 for a re-read that cost $6.03; it now says ~$4.80. In a terminal it asks, `--wait` or not (#300).
+- **A night shift after a restart runs each task once, in order**: a queued prompt is sent once, never over a turn in progress (it goes back first in line), and the report waits until the tasks' chats have been quiet for 15s — no report written while a task was still running (#302, #303).
+- **Councils resume**: `loom council:resume <id>` (and Resume on the card) carries on from the first unfinished stage, reusing the plan, the backtest, the verdicts and Proof (#304). `loom orchestra` says "interrupted (resumable)", not "aborted" (#305).
+- **`loom up --restart` no longer swaps Loom Desktop's daemon for the CLI's** — it says Desktop runs it (`--force` to replace); a CLI with a different build uses Desktop's daemon and says the builds differ instead of restarting it (#306).
+- **A window reloads itself when the daemon restarts under it**, instead of showing a daemon that's gone until you reload (#307).
+- **Crew: a merge-conflict repair has its own budget**, and the re-review judges the resolution, not the whole card again (#308). **Accept it anyway** — a failed card's work is merged as it stands and the cards waiting on it run (`loom crew accept --card <id>`) (#309).
+- **Reviews**: a review sent to a reviewer mid-turn waits for it (#310); a reviewer that has never finished a review here is named up front (#311); a reviewer left out at its time limit is stopped, process and all, and an interrupted OpenCode turn lets go within 20s (#312).
+- **A shift or council starting on uncommitted edits says so** and points to Rewind (#313).
+- `loom watch --json` keeps its banner off stdout (#314); `loom projects --json` and `loom status --json` (#315).
+- **Files changed through the shell are logged as edits**, from the turn's diff (#316).
+- `brain:conflicts` no longer flags two accepted review findings on one file (#317). **`loom memory:repair`** mends decisions whose underscores were stripped before 1.2.1, from the planner's own reply (#318).
+- `loom doctor` and `loom agents` don't count a signed-out agent as able to hold the baton (#319).
+- **`loom clients --prune [--days 30]`** retires devices that never came back (never one with push, nor Loom Desktop) (#320).
+- **A turn that would cross an agent's daily budget doesn't start** (its typical turn cost is checked first): $8.47 of an $8.00 cap won't happen (#321).
+- The window's "● N working" counts working projects, as `loom status` does (#322).
+
 ## [1.2.1] — 2026-10-18
 
 From two field tests of 1.2.0: a full `loom council` run on a real project, and six projects running at once.

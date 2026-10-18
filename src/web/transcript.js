@@ -101,7 +101,8 @@ import { shortModel } from './permissions.js';
     var what = t.kind === "file" ? t.file : t.kind === "diff" ? "the uncommitted changes" : t.label || "your request";
     if (p.phase === "started") {
       return '<div class="sys reviewline">\ud83d\udd0d ' + esc((p.agents || []).map(labelOf).join(", ")) + " reviewing " + esc(what) +
-        " \u2014 read-only, nobody takes the baton" + (p.focus ? " \u00b7 focus: " + esc(p.focus) : "") + "</div>";
+        " \u2014 read-only, nobody takes the baton" + (p.focus ? " \u00b7 focus: " + esc(p.focus) : "") +
+        ((p.unreliable || []).length ? ' <span class="rvwarn">\u26a0 ' + esc(p.unreliable.map(labelOf).join(", ")) + " hasn\u2019t finished a review here yet</span>" : "") + "</div>";
     }
     if (p.phase !== "done") return "";
     var rows = (p.findings || []).map(function(f){
@@ -156,6 +157,14 @@ import { shortModel } from './permissions.js';
         card.classList.remove("cc-running"); card.classList.add("cc-" + p.status);
         var btn = card.querySelector("[data-council-stop]"); if (btn) btn.remove();
         card.querySelector(".ccsum").textContent = p.summary || "";
+        // ended early: carry on from the stage it stopped at (#304)
+        if (p.status !== "done" && !card.querySelector("[data-council-resume]")) {
+          card.querySelector(".cch").insertAdjacentHTML("beforeend", '<button type="button" class="btn xs outline" data-council-resume="' + esc(p.councilId) + '">Resume</button>');
+        }
+      } else if (p.phase === "resumed") {
+        card.classList.remove("cc-failed", "cc-stopped"); card.classList.add("cc-running");
+        var rb = card.querySelector("[data-council-resume]"); if (rb) rb.remove();
+        card.querySelector(".ccsum").textContent = "";
       }
     });
     return cards.length > 0;
@@ -468,6 +477,8 @@ import { shortModel } from './permissions.js';
         artifactChips((p.files || []).filter(function(f){ return f.status !== "deleted" && f.status !== "D"; }).map(function(f){ return f.path; })) +
         '<div class="tcdiff" style="display:none"></div></div>';
     }
+    // starting on someone else's unfinished edits: say so (#313)
+    if (e.kind === "status" && p.state === "dirty_start") return '<div class="sys warnline">\u26a0 ' + esc(String(p.text || "")) + "</div>";
     if (e.kind === "proof") return proofCard(e);
     if (e.kind === "shift") return shiftCard(e);
     if (e.kind === "review") return reviewCard(e);

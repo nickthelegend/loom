@@ -106,6 +106,8 @@ import { registerReviewRoutes } from "./routes/review.js";
 import { registerCouncilRoutes } from "./routes/council.js";
 import { registerOnboardRoutes } from "./routes/onboard.js";
 import { TerminalManager } from "./terminals.js";
+/** This daemon process, for windows to notice a restart: its pid and when it started. */
+const BOOT_ID = `${process.pid}-${Date.now().toString(36)}`;
 export { BUILD_REV, DEFAULT_PORT, fingerprintBuild, isLoopback, isLoopbackHost, lanIp, listModelsForKind, type ModelList, type ModelSource, tailscaleFunnel, tailscaleIp, tailscaleState, tailscaleUp } from './system.js';
 
 export interface DaemonOptions {
@@ -331,6 +333,8 @@ export class LoomDaemon {
     app.use((req: Request, res: Response, next: NextFunction) => {
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Referrer-Policy", "no-referrer");
+      // which daemon answered: a window that sees it change knows the daemon restarted under it (#307)
+      res.setHeader("X-Loom-Boot", BOOT_ID);
       res.setHeader("Permissions-Policy", "geolocation=(), payment=(), usb=(), serial=(), bluetooth=()");
       if (req.path === "/app" || req.path === "/") {
         res.setHeader("X-Frame-Options", "SAMEORIGIN");

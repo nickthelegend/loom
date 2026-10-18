@@ -81,6 +81,7 @@ import { pageGone } from './format.js';
       throw e;
     }).then(function(r){
       daemonReached(true);
+      noteBoot(r.headers && r.headers.get ? r.headers.get("X-Loom-Boot") : null);
       if (r.status === 401 && !retried) {
         return reauth().then(function(ok){
           if (!ok) { logout(); throw new Error("session revoked — pair again"); }
@@ -93,6 +94,20 @@ import { pageGone } from './format.js';
         return j;
       });
     });
+  }
+
+  /**
+   * The daemon restarted under this window — fast enough that no request
+   * failed in between, so nothing noticed, and Insights and the rest went on
+   * showing a daemon that's gone until you reloaded (#307). Reload once:
+   * drafts are kept in localStorage, so nothing typed is lost.
+   */
+  function noteBoot(boot){
+    if (!boot) return;
+    if (!state.daemonBoot) { state.daemonBoot = boot; return; }
+    if (boot === state.daemonBoot || state.reloadingForBoot) return;
+    state.reloadingForBoot = true;
+    setTimeout(function(){ location.reload(); }, 300);
   }
 
   /** Whether the daemon answered the last request — the status bar's "live" when no project socket is open. */

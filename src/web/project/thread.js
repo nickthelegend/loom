@@ -350,7 +350,7 @@ export function createThread(view) {
         // a review finding accepted or rejected: its row on the card says so, rather than a line of its own
         if (e.kind === "review" && pl.phase === "decided") { settleFinding(feed, pl.findingId, pl.decision); return; }
         // a council's stages fill in on its card
-        if (e.kind === "council" && (pl.phase === "stage" || pl.phase === "done")) { settleCouncil(feed, pl); return; }
+        if (e.kind === "council" && (pl.phase === "stage" || pl.phase === "done" || pl.phase === "resumed")) { settleCouncil(feed, pl); return; }
         if (e.kind === "approval" && e.payload && e.payload.phase === "decided") {
           if (settleApprovalCards(e.payload.approvalId, e.payload.behavior, e.payload.message)) return;
         }

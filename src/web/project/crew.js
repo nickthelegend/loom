@@ -356,7 +356,10 @@ export function createCrew(view) {
         var bad = (g.cards || []).filter(function(x){ return x.stage === "failed"; })[0];
         return '<div class="cwban err"><div class="cwbi">' + ICONS.alert + "</div>" +
           '<div class="cwbt"><b>' + (bad ? "\u201c" + esc(bad.title) + "\u201d failed." : "The goal failed.") + "</b>" +
-          "<span>" + esc(((bad && bad.error) || g.error || "").slice(0, 300).replace(/([^.!?])$/, "$1.")) + " Resume tries it again from where it stopped; what\u2019s done stays done.</span></div></div>";
+          "<span>" + esc(((bad && bad.error) || g.error || "").slice(0, 300).replace(/([^.!?])$/, "$1.")) + " Resume tries it again from where it stopped; what\u2019s done stays done.</span>" +
+          // the owner's override: take the card as it stands, merge it, and let the cards waiting on it run (#309)
+          (bad ? '<span class="cwbacts"><button type="button" class="btn xs outline" data-crew-accept="' + esc(bad.id) + '"' + (crew.busy ? " disabled" : "") + ">" + ICONS.check + "Accept it anyway</button>" +
+            " its work is merged as it is, and the cards waiting on it run</span>" : "") + "</div></div>";
       }
       if (g.status === "interrupted") {
         return '<div class="cwban warn"><div class="cwbi">' + ICONS.alert + '</div><div class="cwbt"><b>Interrupted.</b><span>Loom stopped while the crew was mid-turn. Resume picks up at the step it was on.</span></div></div>';
@@ -653,6 +656,7 @@ export function createCrew(view) {
           api("/api/projects/" + view.pid + "/crews/" + encodeURIComponent(cfg.id), { method: "PATCH", body: JSON.stringify(settingsBody) }).then(function(j){ crew.busy = ""; merge(j); drawCrew(); }).catch(function(err){ crew.busy = ""; toast(err.message); drawCrew(); }); return;
         }
         if ((x = t.closest("[data-crew-team]"))) { teamAction(el, x); return; }
+        if ((x = t.closest("[data-crew-accept]"))) { act("accept", { card: x.getAttribute("data-crew-accept") }); return; }
         if ((x = t.closest("[data-crew-act]"))) { act(x.getAttribute("data-crew-act")); return; }
         if ((x = t.closest("[data-crew-chan]"))) { ev.preventDefault(); openChannel(x.getAttribute("data-crew-chan")); return; }
         if ((x = t.closest("[data-crew-testedit]"))) { crew.editTest = !crew.editTest; drawCrew(); var ti = el.querySelector("#crewtestcmd"); if (ti) ti.focus(); return; }

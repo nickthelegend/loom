@@ -142,6 +142,7 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
         else if (action === "pick") out = { goal: await rt.crews.pick(id, String(b.to ?? b.text ?? "")) };
         else if (action === "pause") out = { goal: rt.crews.pause(id) };
         else if (action === "budget") out = { goal: rt.crews.raiseBudget(id, Number(b.amount)) };
+        else if (action === "accept") out = { goal: await rt.crews.accept(id, String(b.card ?? "")) };
         else if (action === "overlap") out = { goal: rt.crews.decideOverlap(id, String(b.card ?? ""), String(b.decision ?? ""), b.touches) };
         else return void res.status(404).json({ error: `unknown crew action "${action}"` });
         res.json({ ...(out as object), crew: rt.crews.get(id) });

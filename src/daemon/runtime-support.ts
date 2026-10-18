@@ -38,9 +38,12 @@ export class BudgetExceededError extends Error {
     public readonly agentId: string,
     public readonly budgetUsd: number,
     public readonly spentUsd: number,
+    /** Set when it's under the cap, but a typical turn would cross it. */
+    public readonly typicalTurnUsd?: number,
   ) {
-    super(
-      `agent "${agentId}" has spent $${spentUsd.toFixed(4)} today, at or over its $${budgetUsd.toFixed(2)}/day budget — raise the budget or wait for the day to roll over`,
+    super(typicalTurnUsd
+      ? `agent "${agentId}" has spent $${spentUsd.toFixed(2)} of its $${budgetUsd.toFixed(2)}/day budget, and a turn here usually costs ~$${typicalTurnUsd.toFixed(2)} — that would cross it. Raise the budget or wait for the day to roll over`
+      : `agent "${agentId}" has spent $${spentUsd.toFixed(4)} today, at or over its $${budgetUsd.toFixed(2)}/day budget — raise the budget or wait for the day to roll over`,
     );
     this.name = "BudgetExceededError";
   }

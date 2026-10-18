@@ -37,6 +37,7 @@ import {
   DaemonClient,
   DaemonError,
   daemonRunning,
+  desktopOwnsDaemon,
   ensureDaemon,
   stopDaemon,
 } from "../daemon/client.js";
@@ -219,8 +220,14 @@ program
   .description("start the loom daemon in the background")
   .option("--tailnet", "bind to this machine's Tailscale IP", false)
   .option("--restart", "restart even if a daemon is already running", false)
-  .action(async (opts: { tailnet: boolean; restart: boolean }) => {
+  .option("--force", "with --restart: replace even Loom Desktop's daemon with this CLI's")
+  .action(async (opts: { tailnet: boolean; restart: boolean; force?: boolean }) => {
     const running = await daemonRunning();
+    if (running && !opts.force && (await desktopOwnsDaemon(running))) {
+      // replacing it swapped Desktop onto the CLI's build without a word (#306)
+      console.log(pc.yellow("Loom Desktop runs this daemon — quit and reopen Loom Desktop to restart it (or loom up --restart --force to replace it with this CLI's)"));
+      return;
+    }
     if (running) {
       const { BUILD_REV } = await import("../daemon/server.js");
       const health = (await fetch(`http://${running.host}:${running.port}/api/health`)
@@ -270,15 +277,18 @@ program
 program
   .command("status")
   .description("daemon health and project board")
-  .action(async () => {
+  .option("--json", "print the projects as JSON")
+  .action(async (opts: { json?: boolean }) => {
     const cfg = await daemonRunning();
     if (!cfg) {
+      if (opts.json) return void console.log(JSON.stringify({ daemon: null, projects: [] }));
       console.log(pc.dim("daemon: not running (loom up)"));
       return;
     }
-    console.log(pc.green(`daemon: http://${cfg.host}:${cfg.port}`));
+    if (!opts.json) console.log(pc.green(`daemon: http://${cfg.host}:${cfg.port}`));
     const client = new DaemonClient(cfg);
     const { projects } = await client.listProjects();
+    if (opts.json) return void console.log(JSON.stringify(projects)); // #315
     if (!projects.length) console.log(pc.dim("no projects yet — loom init"));
     for (const p of projects) console.log(formatProjectRow(p));
   });
@@ -309,7 +319,8 @@ program
   .command("projects")
   .description("board of all projects")
   .option("--forget <idOrName>", "stop tracking a project (its .loom/ stays on disk)")
-  .action(async (opts: { forget?: string }) => {
+  .option("--json", "print the projects as JSON")
+  .action(async (opts: { forget?: string; json?: boolean }) => {
     const client = await ensureDaemon();
     if (opts.forget) {
       const { projects } = await client.listProjects();
@@ -328,6 +339,7 @@ program
       return;
     }
     const { projects } = await client.listProjects();
+    if (opts.json) return void console.log(JSON.stringify(projects)); // #315
     if (!projects.length) console.log(pc.dim("no projects yet — loom init"));
     for (const p of projects) console.log(formatProjectRow(p));
   });
@@ -1125,7 +1137,8 @@ program
       }
     };
 
-    console.log(
+    // the banner is for people: stderr, so --json's stdout is events and nothing else (#314)
+    console.error(
       pc.dim(
         project
           ? `watching ${project.name} — ^C to stop`
@@ -1217,6 +1230,8 @@ program
       if (opts.json) { process.exitCode = 1; return void console.log(JSON.stringify({ status: "error", error: err instanceof Error ? err.message : String(err) })); }
       return fail(err instanceof Error ? err.message : String(err));
     }
+    const shaky = (review as { unreliable?: string[] }).unreliable ?? [];
+    if (!opts.json && shaky.length) console.error(pc.yellow(`⚠ ${shaky.join(", ")} hasn't finished a review in this project yet (left out each time) — it may wait out review.timeoutMin`));
     if (!opts.json) console.error(pc.cyan(`🔍 ${agents.join(", ")} reviewing ${review.target.kind === "file" ? review.target.file : review.target.kind === "diff" ? "the uncommitted changes" : `“${review.target.label ?? "your request"}”`} · read-only, nobody takes the baton`));
     if (!opts.wait) return void console.log(pc.dim(`review ${review.reviewId} — the summary lands in its chat (loom reviews ${review.reviewId})`));
     const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;
@@ -1264,7 +1279,7 @@ program
       await new Promise((r) => setTimeout(r, 1500));
     }
     console.log((council.status === "done" ? pc.green : council.status === "stopped" ? pc.yellow : pc.red)(`\n${council.summary ?? council.status}`));
-    if (council.status === "failed") process.exitCode = 1;
+    if (council.status === "failed") { process.exitCode = 1; console.log(pc.dim(`carry on from where it stopped: loom council:resume ${council.councilId}`)); }
   });
 
 program
@@ -1278,6 +1293,21 @@ program
     console.log(pc.bold(`council ${council.councilId}`) + pc.dim(` · ${council.goal} · ${council.planner} → ${council.reviewers.join(", ")}`));
     for (const st of council.stages) console.log(`${councilMark(st.status)} ${st.name.padEnd(13)}${st.detail ? pc.dim(st.detail) : ""}`);
     if (council.summary) console.log(pc.dim(`\n${council.summary}`));
+  });
+
+program
+  .command("council:resume <councilId>")
+  .description("carry on a council that a restart, a failed turn or Stop ended — from the first stage that didn't finish")
+  .action(async (councilId: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      const { council } = await client.resumeCouncil(project.id, councilId);
+      const next = council.stages.find((st) => !["done", "skipped", "unverified"].includes(st.status) && !(st.key === "prove" && st.status === "failed"));
+      console.log(pc.cyan(`🏛 resuming council ${council.councilId} from ${next?.name ?? "the end"} — loom council:status ${council.councilId}`));
+    } catch (err) {
+      fail(err instanceof Error ? err.message : String(err));
+    }
   });
 
 program
@@ -1390,6 +1420,9 @@ program
 // ── orchestra: one orchestrator, many parallel workers (core/orchestra.ts) ──
 
 const RUN_DONE = new Set(["completed", "failed", "aborted", "waiting_human"]);
+/** A run a restart cut off is "aborted" on disk but resumable: say so, and how (#305). */
+const runStatus = (r: { status: string; interrupted?: unknown; id?: string }) =>
+  r.status === "aborted" && r.interrupted ? "interrupted (resumable)" : r.status;
 const TASK_COLOR: Record<string, (s: string) => string> = {
   done: pc.green,
   running: pc.cyan,
@@ -1404,8 +1437,8 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   const done = run.tasks.filter((t) => t.status === "done").length;
   console.log(
     run.race
-      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(run.status)}  race · ${done}/${run.tasks.length} finished · ${fmtUsd(run.costUsd)}`
-      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(run.status)}  ${done}/${run.tasks.length} tasks · ` +
+      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  race · ${done}/${run.tasks.length} finished · ${fmtUsd(run.costUsd)}`
+      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  ${done}/${run.tasks.length} tasks · ` +
           `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
@@ -1510,7 +1543,7 @@ program
       for (const r of runs.slice(0, 15)) {
         const done = r.tasks.filter((t) => t.status === "done").length;
         console.log(
-          `${pc.bold(r.id)}  ${r.status.padEnd(13)} ${String(done).padStart(2)}/${String(r.tasks.length).padEnd(2)} ` +
+          `${pc.bold(r.id)}  ${runStatus(r).padEnd(13)} ${String(done).padStart(2)}/${String(r.tasks.length).padEnd(2)} ` +
             `${pc.dim(new Date(r.createdAt).toLocaleString())}  ${r.goal.slice(0, 70)}`,
         );
       }
@@ -1790,7 +1823,7 @@ program
 
 program
   .command("crew [action] [args...]")
-  .description("Agent Teams: status | create | goal | say | approve | pause | stop | resume | pick | refresh | budget | overlap | deliver | apply | diff | remove")
+  .description("Agent Teams: status | create | goal | say | approve | pause | stop | resume | accept | pick | refresh | budget | overlap | deliver | apply | diff | remove")
   .option("--crew <id>", "which crew, when the project has several")
   .option("--to <teammate>", "say: to one teammate")
   .option("--no-approval", "create: the Lead's plan starts without your OK")
@@ -1801,7 +1834,7 @@ program
   .option("--reviewer <agent>", "create: who reviews")
   .option("--tester <agent>", "create: who tests")
   .option("--amount <usd>", "budget: new goal budget in USD")
-  .option("--card <id>", "overlap: held card id")
+  .option("--card <id>", "overlap: held card id; accept: the failed card to take as it stands")
   .option("--decision <decision>", "overlap: narrow, wait:<goal>, or proceed:<reason>")
   .option("--touches <globs>", "overlap: comma-separated revised paths")
   .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string; amount?: string; card?: string; decision?: string; touches?: string; lead?: string; builders?: string; reviewer?: string; tester?: string }) => {
@@ -2517,7 +2550,8 @@ program
         const ago = weight.ageMs >= 3_600_000 ? `${Math.round(weight.ageMs / 3_600_000)}h` : `${Math.round(weight.ageMs / 60_000)}m`;
         console.error(pc.yellow(`⚠ ${target}'s session here is ${Math.round(weight.tokens / 1000)}k tokens, last used ${ago} ago — its cache has likely expired, so this turn re-reads all of it` +
           `${weight.estUsd !== undefined ? ` (~${fmtUsd(weight.estUsd)} est.)` : ""}. --fresh starts a new session instead.`));
-        if (process.stdin.isTTY && !opts.wait) {
+        // a person at a terminal is asked, --wait or not; a script only gets the warning (#300)
+        if (process.stdin.isTTY && process.stdout.isTTY) {
           const go = await confirm(pc.yellow("send it to the existing session anyway?"));
           if (!go) return void console.log(pc.dim(`not sent — loom send --fresh${opts.agent ? ` -a ${opts.agent}` : ""} "…"`));
         }
@@ -3070,6 +3104,16 @@ program
   });
 
 program
+  .command("memory:repair")
+  .description("mend decisions recorded before 1.2.1 whose underscores and paths were stripped, from the planner's own words")
+  .action(async () => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { repaired, checked } = await client.repairDecisions(project.id);
+    console.log(repaired ? pc.green(`✓ mended ${repaired} of ${checked} review decisions`) : pc.dim(`nothing to mend among ${checked} review decisions`));
+  });
+
+program
   .command("decision <text...>")
   .description("record a decision into shared memory (projected on every handoff)")
   .action(async (words: string[]) => {
@@ -3239,7 +3283,8 @@ program
     }
     const checks = await envChecks();
     checks.push(...(await (await import("./doctor.js")).diskChecks()));
-    if (dir) checks.push(...projectChecks(dir));
+    const signedOut = checks.filter((c) => c.status === "fail" && /signed out/.test(c.detail)).map((c) => c.name);
+    if (dir) checks.push(...projectChecks(dir, signedOut));
     else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
     // The daemon is often the desktop app's, started without this shell's PATH or keys:
     // ask it what it sees, and say where the two differ. Its provider and free-model
@@ -3307,8 +3352,23 @@ program
   .description("list paired devices, revoke one, or ping them with a test push")
   .option("--revoke <id>", "revoke a paired device's access")
   .option("--ping", "send a test push notification to all registered devices", false)
-  .action(async (opts: { revoke?: string; ping: boolean }) => {
+  .option("--prune", "revoke devices not seen for --days (never one registered for push, nor Loom Desktop)")
+  .option("--days <n>", "with --prune: how long unseen counts as gone", "30")
+  .option("--dry-run", "with --prune: only list what would go")
+  .action(async (opts: { revoke?: string; ping: boolean; prune?: boolean; days: string; dryRun?: boolean }) => {
     const client = await ensureDaemon();
+    if (opts.prune) {
+      // every pairing made a device and nothing retired them: 86 piled up in a day of testing (#320)
+      const { clients } = await client.pairedClients();
+      const cutoff = Date.now() - Math.max(1, Number(opts.days) || 30) * 86_400_000;
+      const gone = clients.filter((c) => !c.push && !(c as { owner?: boolean }).owner && (c.lastSeen ?? c.createdAt) < cutoff);
+      for (const c of gone) {
+        if (!opts.dryRun) await client.revokeClient(c.id);
+        console.log(`${opts.dryRun ? pc.dim("would revoke") : pc.green("✓ revoked")} ${c.name} ${pc.dim(`(${c.id}) last seen ${new Date(c.lastSeen ?? c.createdAt).toLocaleDateString()}`)}`);
+      }
+      console.log(pc.dim(gone.length ? `${gone.length} of ${clients.length} devices${opts.dryRun ? " would go" : " revoked"}` : `nothing unseen for ${opts.days} days among ${clients.length} devices`));
+      return;
+    }
     if (opts.revoke) {
       await client.revokeClient(opts.revoke);
       console.log(pc.green(`✓ revoked ${opts.revoke}`));
@@ -3328,10 +3388,12 @@ program
     for (const c of clients) {
       console.log(
         ` ${pc.bold(c.name)} ${pc.dim(`(${c.id})`)} paired ${new Date(c.createdAt).toLocaleString()}` +
+          pc.dim(`  ·seen ${c.lastSeen ? new Date(c.lastSeen).toLocaleDateString() : "never"}`) +
+          ((c as { owner?: boolean }).owner ? pc.cyan("  ·owner") : "") +
           (c.push ? pc.green("  ·push✓") : pc.dim("  ·no push")),
       );
     }
-    console.log(pc.dim("\nrevoke: loom clients --revoke <id> · test push: loom clients --ping"));
+    console.log(pc.dim("\nrevoke: loom clients --revoke <id> · tidy up: loom clients --prune [--days 30] [--dry-run] · test push: loom clients --ping"));
   });
 
 program

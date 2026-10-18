@@ -100,10 +100,39 @@ export function setPriceBook(next: PriceBook | null | undefined): void { book = 
 /** Prompt caches go cold this long after the last turn (Anthropic's default TTL): after it, a resumed session is re-read at full price. */
 export const CACHE_TTL_MS = 5 * 60_000;
 
+/** Writing a prompt into the cache costs more than reading plain input (Anthropic: 1.25×). */
+export const CACHE_WRITE = 1.25;
+
+/**
+ * What this agent really pays per input token, read off its own recent turns:
+ * their reported cost spread over uncached input, cached input (a tenth) and
+ * output (five times). A list price misses what the CLI actually bills —
+ * long-context premiums, cache writes — and was 18× low on a cold Claude
+ * session (#300). Null without priced turns to learn from.
+ */
+export function observedInputRate(turns: Array<{ costUsd: number; tokensIn: number; cachedIn: number; tokensOut: number }>): number | null {
+  // turns that already were cold (most input uncached) say it best: what a cold re-read really cost, per token
+  const cold = turns.filter((t) => t.costUsd > 0 && t.tokensIn >= 20_000 && Math.min(t.cachedIn, t.tokensIn) / t.tokensIn < 0.3);
+  if (cold.length) {
+    const c = cold.reduce((n, t) => n + t.costUsd, 0), tok = cold.reduce((n, t) => n + t.tokensIn, 0);
+    return c / tok / CACHE_WRITE; // coldResume multiplies the write back in
+  }
+  let cost = 0, weight = 0;
+  for (const t of turns) {
+    if (!(t.costUsd > 0) || !(t.tokensIn > 0)) continue;
+    const cached = Math.min(t.cachedIn, t.tokensIn);
+    cost += t.costUsd;
+    weight += (t.tokensIn - cached) + cached * 0.1 + t.tokensOut * 5;
+  }
+  return weight > 0 ? cost / weight : null;
+}
+
 /** What resuming a session of this size, this long after its last turn, would cost to re-read — when the cache has likely expired. */
-export function coldResume(s: { tokens: number; ageMs: number; model?: string }, book: PriceBook | null): { cold: boolean; estUsd?: number } {
+export function coldResume(s: { tokens: number; ageMs: number; model?: string; rate?: number | null }, book: PriceBook | null): { cold: boolean; estUsd?: number } {
   const cold = s.ageMs > CACHE_TTL_MS;
   if (!cold) return { cold };
-  const est = estimateUsd({ model: s.model ?? "", tokensIn: s.tokens, tokensOut: 0 }, book);
+  // the whole context is written to the cache again: at the rate this agent is really billed, else the list price
+  const listed = estimateUsd({ model: s.model ?? "", tokensIn: s.tokens, tokensOut: 0 }, book);
+  const est = s.rate ? s.tokens * s.rate * CACHE_WRITE : listed !== undefined ? listed * CACHE_WRITE : undefined;
   return { cold, ...(est !== undefined ? { estUsd: est } : {}) };
 }
