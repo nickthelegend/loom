@@ -6,6 +6,7 @@ import { toast } from '../notifications.js';
 import { permBadge } from '../permissions.js';
 import { openSettingsModal } from '../settings.js';
 import { state } from '../state.js';
+import { openInvite } from '../invite.js';
 import { fleetSince,loadTeam,loadTeamLanding,teamAct,teamEditing,teamFleetHtml,teamHeadHtml,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare } from '../team.js';
 import { ORCH_TASK_ST } from '../transcript.js';
 
@@ -51,10 +52,11 @@ export function createFleet(view) {
 
     function openFleetSheet(){
       var el = document.getElementById("routesheet"); if (!el) return;
-      el.innerHTML = '<div class="sheet"><div id="fleetsheet"></div></div>';
+      // the phone has no tab bar: its sheet carries this project's agents, and the team under them
+      el.innerHTML = '<div class="sheet"><div id="fleetsheet"></div><div class="teampane insheet" id="fteam"></div></div>';
       // the sheet sits at the head of the thread, which is usually scrolled to its end
       var sc = document.getElementById("pane-thread"); if (sc) sc.scrollTop = 0;
-      drawFleet(); loadFleet(); loadTeam(); fleetPoll(true);
+      drawFleet(); loadFleet(); loadTeam().then(function(){ drawTeamBlock(true); }); fleetPoll(true);
     }
 
     function closeFleetSheet(){
@@ -65,9 +67,8 @@ export function createFleet(view) {
 
     function drawFleet(){
       var el = fleetEl(); if (!el) return;
-      var d = view.fleet.data, projects = ((d && d.projects) || []).slice();
-      // this project first; the rest as the daemon lists them
-      projects.sort(function(a, b){ return ((b.project || {}).id === view.pid) - ((a.project || {}).id === view.pid); });
+      // this project's agents only: other projects are on the home screen, and teammates are in the Team tab
+      var d = view.fleet.data, projects = ((d && d.projects) || []).filter(function(pr){ return (pr.project || {}).id === view.pid; });
       var agentsN = 0, busyN = 0;
       projects.forEach(function(pr){
         (pr.crews || []).forEach(function(crew){ busyN += (crew.active || []).length; });
@@ -81,8 +82,8 @@ export function createFleet(view) {
           if (/^(planning|reviewing|starting)$/.test(String(o.status))) busyN++;
         }
       });
-      var head = '<div class="ohead"><span class="ot">Fleet</span>' +
-        '<span class="os">What every agent in every open project is doing, right now.</span><span class="spacer"></span>' +
+      var head = '<div class="ohead"><span class="ot">Agents</span>' +
+        '<span class="os">What every agent in this project is doing, right now.</span><span class="spacer"></span>' +
         (d ? '<span class="fsum"><span class="fchip' + (busyN ? " live" : "") + '">' + busyN + " working</span>" +
           '<span class="fchip">' + agentsN + " agent" + (agentsN === 1 ? "" : "s") + "</span>" +
           (d.approvals ? '<span class="fchip warn">' + Number(d.approvals) + " to approve</span>" : "") + "</span>" : "") +
@@ -92,7 +93,7 @@ export function createFleet(view) {
       // invite link you're typing or reading.
       var local = el.querySelector("#flocal");
       if (!local) {
-        el.innerHTML = '<div class="fleetview"><div class="flocal" id="flocal"></div><div class="fteam" id="fteam"></div></div>';
+        el.innerHTML = '<div class="fleetview"><div class="flocal" id="flocal"></div></div>';
         local = el.querySelector("#flocal");
       }
       if (!d) {
@@ -105,8 +106,7 @@ export function createFleet(view) {
           (busyN ? "" : '<div class="fnote">No agents running right now \u2014 everyone below is idle.</div>') +
           projects.map(fleetProject).join("");
       }
-      drawTeamBlock();
-      var rf = el.querySelector("#frefresh"); if (rf) rf.onclick = function(){ loadFleet(); loadTeam(); };
+      var rf = el.querySelector("#frefresh"); if (rf) rf.onclick = function(){ loadFleet(); };
       Array.prototype.forEach.call(el.querySelectorAll("[data-fchat]"), function(b){
         b.onclick = function(){ openFleetThread(b.getAttribute("data-fpid"), b.getAttribute("data-fchat")); };
       });
@@ -199,8 +199,8 @@ export function createFleet(view) {
     // "running · 4m" keeps counting — unless you're typing into one of its
     // forms, which a redraw would wipe.
     function drawTeamBlock(force){
-      var el = fleetEl(); if (!el) return;
-      var host = el.querySelector("#fteam"); if (!host) return;
+      // the Team tab's own pane now, not a block under Fleet
+      var host = document.getElementById("fteam"); if (!host) return;
       if (!force && teamEditing(host)) return;
       var t = state.team;
       if (!t) {
@@ -217,6 +217,9 @@ export function createFleet(view) {
     function wireTeamBlock(host){
       var mg = host.querySelector("[data-tmanage]");
       if (mg) mg.onclick = function(){ openSettingsModal("team"); };
+      // the header's Invite: one link that brings a teammate in with this repo and their own agents
+      var ip = host.querySelector("[data-tinvitep]");
+      if (ip) ip.onclick = function(){ openInvite(view.pid); };
       wireTeamForms(host, teamAct);
       wireTeamInvites(host, teamAct);
       wireTeamShare(host, function(){ drawTeamBlock(true); });

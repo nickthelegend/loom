@@ -136,8 +136,13 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
         }
         resolvedScope.push(info.id);
       }
+      // an owner session (Loom Desktop's window) is minted only with the admin token itself
+      const bearer = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+      const owner = req.body?.owner === true && ctx.auth.isRootAdmin(bearer);
+      if (req.body?.owner === true && !owner) return void res.status(403).json({ error: "an owner session needs the admin token" });
       const { token, expiresAt } = ctx.auth.newPairingToken(
         resolvedScope.length ? resolvedScope : undefined,
+        { owner },
       );
       const url = `http://${host}:${ctx.port}`;
       // Deep link: scanning it with any camera opens the app, which claims the

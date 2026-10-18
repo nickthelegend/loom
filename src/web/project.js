@@ -392,6 +392,7 @@ import { openMenu } from './menus.js';
         '<div class="pane scroll" id="pane-orchestra" style="display:none"></div>' +
         '<div class="pane scroll" id="pane-crew" style="display:none"></div>' +
         '<div class="pane scroll" id="pane-fleet" style="display:none"></div>' +
+        '<div class="pane scroll" id="pane-team" style="display:none"><div class="teampane" id="fteam"></div></div>' +
                 composerHtml +
         "</div>" +
         '<div class="dockpane" id="dockpane">' +
@@ -530,23 +531,25 @@ import { openMenu } from './menus.js';
     // mobile has no #tabsbox, so this is a no-op there by construction
     function drawTabs(){
       var box = document.getElementById("tabsbox"); if (!box) return;
-      var tabs = ["thread", "board", "brain", "observatory"];
+      // Team sits right after Chat: your teammates' agents and goals are the reason Loom is a team tool
+      var tabs = ["thread", "team", "board", "brain", "observatory"];
       // Orchestra sits beside Thread: a run is a conversation that fanned out,
       // and its tasks are threads of their own.
-      tabs.splice(1, 0, "orchestra");
+      tabs.splice(2, 0, "orchestra");
       // Crew sits beside Orchestra: agents with roles working one goal together.
-      tabs.splice(2, 0, "crew");
+      tabs.splice(3, 0, "crew");
       // Fleet sits beside them: the same question — who is doing what —
       // asked of every agent in every open project, not one run's workers.
-      tabs.splice(3, 0, "fleet");
+      tabs.splice(4, 0, "fleet");
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
       // Plain words, each with a line saying what's behind it: "Brain",
       // "Fleet" and "Observatory" were names you had to learn before you
       // could guess what they did.
       var LBL = { thread: [ICONS.thread, "Chat", "talk to an agent in this thread"],
                   orchestra: [ICONS.orchestra, "Orchestra", "one agent plans, a team builds in parallel"],
-                  crew: [ICONS.team, "Crew", "agents with roles plan, build, review and test a goal"],
-                  fleet: [ICONS.fleet, "Agents", "what every agent is doing right now"],
+                  team: [ICONS.team, "Team", "your teammates' agents and goals, and who's touching which files"],
+                  crew: [ICONS.bot, "Crew", "agents with roles plan, build, review and test a goal"],
+                  fleet: [ICONS.fleet, "Agents", "what this project's agents are doing right now"],
                   board: [ICONS.board, "Board", "issues, PRs and tasks"],
                   brain: [ICONS.memory, "Memory", "what every agent here remembers"],
                   observatory: [ICONS.telescope, "Insights", "time, tokens and cost"] };
@@ -581,7 +584,7 @@ import { openMenu } from './menus.js';
     function showTabNow(name){
       state.tab = name;
       (state.tabByProject || (state.tabByProject = {}))[pid] = name;
-      ["thread", "orchestra", "crew", "fleet", "board", "brain", "observatory"].forEach(function(t){
+      ["thread", "team", "orchestra", "crew", "fleet", "board", "brain", "observatory"].forEach(function(t){
         var p = document.getElementById("pane-" + t);
         if (p) p.style.display = t === name ? "" : "none";
       });
@@ -598,7 +601,8 @@ import { openMenu } from './menus.js';
       if (name === "orchestra") { drawOrch(); loadOrch(); }
       if (name === "crew") { drawCrew(); loadCrews(); }
       // Fleet polls only while you can see it.
-      if (name === "fleet") { drawFleet(); loadFleet(); loadTeam(); }
+      if (name === "fleet") { drawFleet(); loadFleet(); }
+      if (name === "team") { drawTeamBlock(true); loadTeam(); }
       fleetPoll(name === "fleet");
       if (name === "thread") {
         var sc = document.getElementById("pane-thread");

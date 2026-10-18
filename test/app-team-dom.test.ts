@@ -183,26 +183,35 @@ const type = (m: Mounted, sel: string, value: string) => {
 };
 
 /** Open the Fleet tab and wait for its Team block to have drawn. */
-async function openFleet(m: Mounted) {
-  await ready(m, '.tab[data-tab="fleet"]');
-  click($(m, '.tab[data-tab="fleet"]'));
-  await waitUntil(() => !!$(m, "#pane-fleet #fteam .tmh"));
+async function openTeam(m: Mounted) {
+  await ready(m, '.tab[data-tab="team"]');
+  click($(m, '.tab[data-tab="team"]'));
+  await waitUntil(() => !!$(m, "#pane-team #fteam .tmh") || !!$(m, "#pane-team #fteam .thero"));
 }
 
 describe("web app · Loom Teams", () => {
-  it("signs in and creates a team from Fleet, shares the project, and shows an invite like a password", async () => {
+  it("signs in and creates a team from the Team tab, shares the project, and shows an invite like a password", async () => {
     const m = mount();
-    await openFleet(m);
-    // not on a team: join or create, side by side
-    expect(text(m, "#fteam .tjoin")).toContain("Join your team");
-    expect(text(m, "#fteam .tjoin")).toContain("Create a team");
+    await openTeam(m);
+    // signed out: what Teams is, one GitHub button, an invite box, and a self-hosted hub behind a disclosure
+    expect(text(m, "#fteam .thero")).toContain("Loom Teams");
+    expect($(m, "#fteam [data-tghsign]")).toBeTruthy();
     expect($(m, '#fteam [data-tf="link"]')).toBeTruthy();
+    // the Agents tab is this project's agents only — the team isn't under it any more
+    expect($(m, "#pane-fleet #fteam")).toBeFalsy();
 
+    // a self-hosted hub: sign in there, then name the team
     type(m, '#fteam [data-tf="hub"]', hub.url);
     type(m, '#fteam [data-tf="cgh"]', "alice");
     type(m, '#fteam [data-tf="csec"]', SECRET);
+    await ready(m, "#fteam [data-tsignin]");
+    click($(m, "#fteam [data-tsignin]"));
+    await waitUntil(() => !!$(m, '#fteam .thme') && !!$(m, '#fteam [data-tf="name"]'), { timeoutMs: 15_000 });
+    expect(text(m, "#fteam .thme")).toContain("@alice");
+    expect(text(m, "#fteam .tjoin")).toContain("Join your team");
+    expect(text(m, "#fteam .tjoin")).toContain("Create a team");
     type(m, '#fteam [data-tf="name"]', "Acme");
-    // a Fleet poll mid-typing must not wipe the form
+    // a poll mid-typing must not wipe the form
     await new Promise((r) => setTimeout(r, 2300));
     expect(($(m, '#fteam [data-tf="name"]') as HTMLInputElement).value).toBe("Acme");
     await ready(m, "#fteam [data-tcreate]");
@@ -364,13 +373,29 @@ describe("web app · Loom Teams", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 120_000);
 
-  it("the phone shows the Team block in the Fleet sheet", async () => {
+  it("the phone shows the Team block in the Fleet sheet (it has no tab bar)", async () => {
     const m = mount({ desktop: false });
     await ready(m, "#fleetbtn");
     click($(m, "#fleetbtn"));
-    await waitUntil(() => !!$(m, "#fleetsheet #fteam .tcard[data-tteam]"));
-    expect(text(m, "#fleetsheet #fteam .tchd .tcn")).toBe("Acme");
-    expect($(m, "#fleetsheet #fteam .tfe")).toBeTruthy();
+    await waitUntil(() => !!$(m, ".sheet #fteam .tcard[data-tteam]"));
+    expect(text(m, ".sheet #fteam .tchd .tcn")).toBe("Acme");
+    expect($(m, ".sheet #fteam .tfe")).toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  }, 30_000);
+
+  it("signs out from the Team tab: the session goes, the agents keep working, and the sign-in page is back", async () => {
+    const m = mount();
+    await openTeam(m);
+    await waitUntil(() => !!$(m, "#fteam .tcard[data-tteam]"));
+    // the header names who you're signed in as, beside Invite
+    expect(text(m, "#fteam .tmh .tmwho")).toContain("@alice");
+    expect($(m, "#fteam .tmh [data-tinvitep]")).toBeTruthy();
+    // sign out (as Settings → Team does): the session goes; the page shows the sign-in again
+    const out = await new DaemonClient(readDaemonConfig()!).teamAction("signout", {});
+    expect(out.team.signedIn).toBe(false);
+    click($(m, '.tab[data-tab="thread"]'));
+    await openTeam(m);
+    await waitUntil(() => !!$(m, "#fteam [data-tghsign]"), { timeoutMs: 10_000 });
     expect(m.errors.join("\n")).toBe("");
   }, 30_000);
 });

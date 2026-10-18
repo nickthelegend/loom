@@ -54,6 +54,8 @@ import { toast } from './notifications.js';
     }
 
     function showError(msg){
+      // a paired phone or browser isn't the owner's Loom: say where inviting works, not "admin only"
+      if (/admin only/i.test(msg)) msg = "Inviting is done from the owner\u2019s own Loom \u2014 open Loom Desktop on that computer (or run `loom team invite` there). This window is a paired device.";
       var html = esc(msg).replace(/`([^`]+)`/g, "<code>$1</code>");
       body('<div class="ivstate"><div class="ivbad">' + ICONS.alert + '</div><p class="ivwarn">' + html + '</p><button class="btn outline sm" id="ivretry">Try again</button></div>');
       q("ivretry").onclick = mint;

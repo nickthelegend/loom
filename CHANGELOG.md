@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A Team tab.** Teams were a block at the bottom of Agents; they're Loom's reason to exist, so they get their own tab, right after Chat. Signed out it says what Teams does, with one **Sign in with GitHub** button, a box for an invite link, and a self-hosted hub behind a disclosure; signed in it's your team — members (with their GitHub pictures), Invite, live sessions, who's touching which files, the feed and costs. The phone keeps the team in its Fleet sheet.
+- **Loom Desktop opens on "Sign in with GitHub"** until you sign in, or choose "Continue without an account" (Loom works alone; the account is for Teams). Sign out from the Team tab's account chip.
+
+### Changed
+
+- **Agents shows this project's agents only.** Other projects are on the home screen; teammates are in the Team tab.
+- **Accounts are GitHub only.** The hosted hub refuses any other sign-up at the database, and a profile's GitHub login comes from GitHub itself — an email sign-up could claim someone else's login (migration 0011, applied).
+
+### Fixed
+
+- **Invite and join said "admin only" in Loom Desktop.** The desktop window paired itself like a phone; it now holds an owner session (minted only with the admin token, one per machine — re-launches replace it instead of piling up "phone" entries). A phone or browser that tries is told where inviting works.
+
 ## [1.2.1] — 2026-10-18
 
 From two field tests of 1.2.0: a full `loom council` run on a real project, and six projects running at once.

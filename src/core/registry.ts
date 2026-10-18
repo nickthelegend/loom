@@ -267,6 +267,13 @@ export interface PairedClient {
   name: string;
   token: string;
   createdAt: number;
+  /**
+   * The owner's own window on this machine (Loom Desktop): as able as the
+   * admin token — inviting teammates, joining a team, pairing a phone — because
+   * only the admin token can mint one and only Desktop, which reads that token
+   * from disk, asks for one.
+   */
+  owner?: boolean;
   /** When this device last made a request (written at most every 10 min). */
   lastSeen?: number;
   /** Expo push token, when the device registered for notifications. */

@@ -1,4 +1,5 @@
 /** Browser navigation module. See README.md for ownership and startup. */
+import { signInGate } from './signin.js';
 import { renderPair } from './connection.js';
 import { joinFromHash,renderJoin } from './join.js';
 import { renderBoard } from './home.js';
@@ -31,6 +32,8 @@ import { esc } from './format.js';
     // An invite link opened here: what it sets up, then one click (join.js).
     var invite = joinFromHash();
     if (invite) return renderJoin(invite);
+    // Loom Desktop opens on "Sign in with GitHub" until you sign in or say you'd rather not
+    if (signInGate(route)) return;
     takePermalink();
     document.documentElement.classList.toggle("desk", isDesktop());
     if (isDesktop()) return renderShell();

@@ -77,8 +77,10 @@ import { ORCH_RUN_ST } from './transcript.js';
   /** A person, as hue initials \u2014 the same hash the agents' monograms use. */
   function teamAvatar(login, cls){
     var h = hue(String(login || "?"));
+    // their GitHub picture when it loads; the initial underneath when it doesn't (offline, no such user)
+    var gh = /^[A-Za-z0-9-]{1,39}$/.test(String(login || "")) ? '<img alt="" loading="lazy" src="https://github.com/' + encodeURIComponent(login) + '.png?size=64" onerror="this.remove()">' : "";
     return '<span class="tav' + (cls ? " " + cls : "") + '" aria-hidden="true" style="background:color-mix(in srgb, hsl(' + h + ',60%,50%) 20%, transparent);color:hsl(' + h + ',60%,var(--agent-l))">' +
-      esc(String(login || "?").slice(0, 1)) + "</span>";
+      esc(String(login || "?").slice(0, 1)) + gh + "</span>";
   }
 
   /**
@@ -502,26 +504,74 @@ import { ORCH_RUN_ST } from './transcript.js';
     return '<div class="field"><label>' + label + '</label><input data-tf="' + key + '" aria-label="' + esc(String(label).replace(/<[^>]+>/g, "").trim()) + '" autocomplete="off" spellcheck="false" ' + (attrs || "") + "></div>";
   }
 
+  /**
+   * Sign in to the hosted hub with GitHub: the daemon opens the GitHub page in
+   * your browser and finishes the OAuth itself; this resolves once /api/team
+   * says you're signed in (or rejects with what went wrong). One flow for the
+   * Team tab, the invite dialog and the desktop's sign-in screen.
+   */
+  function githubSignIn(onUrl){
+    return api("/api/team/hosted-signin", { method: "POST", body: "{}" }).catch(function(err){
+      throw /admin only/i.test(err.message) ? new Error("Sign in from Loom Desktop on the computer Loom runs on \u2014 this window is a paired device.") : err;
+    }).then(function(r){
+      if (r && r.url) { window.open(r.url, "_blank", "noopener"); if (onUrl) onUrl(r.url); }
+      return new Promise(function(resolve, reject){
+        var t0 = Date.now();
+        var tick = setInterval(function(){
+          if (Date.now() - t0 > 10 * 60 * 1000) { clearInterval(tick); reject(new Error("sign-in timed out — try again")); return; }
+          api("/api/team").then(function(t){
+            if (t && t.signedIn) { clearInterval(tick); state.team = t; teamNotify(true); resolve(t); }
+          }).catch(function(){});
+          api("/api/team/hosted-signin").then(function(st){
+            if (st && st.error) { clearInterval(tick); reject(new Error(st.error)); }
+          }).catch(function(){});
+        }, 1500);
+      });
+    });
+  }
+
+  var TEAM_POINTS = [
+    ["See who\u2019s on what", "your teammates\u2019 live agents and goals \u2014 their intent, never their transcripts"],
+    ["No collisions", "file leases flag two agents heading for the same code before they clash"],
+    ["One memory", "decisions every agent is briefed with; the team\u2019s canon lives in AGENTS.md"],
+    ["One PR per goal", "reviewed by another vendor\u2019s agent before it lands"],
+  ];
+
   function teamJoinCardHtml(){
     var t = state.team || {}, signed = !!t.signedIn;
-    return '<div class="tcard tjoincard"><div class="tjoin">' +
-      "<div>" +
-        '<div class="tjh">' + ICONS.team + "Join your team</div>" +
-        '<div class="tjd">Paste the invite link a teammate sent you \u2014 Loom signs you in, clones the repo and sets up your agents. It carries the hub\u2019s address and the team key.</div>' +
-        teamField("Invite link", "link", 'class="mono" placeholder="https://\u2026/join/#\u2026"') +
-        '<div class="tjgo"><button class="btn primary sm" type="button" data-tjoin>Join team</button></div>' +
-      "</div>" +
-      "<div>" +
-        '<div class="tjh">' + ICONS.plus + "Create a team</div>" +
-        '<div class="tjd">' + (signed
-          ? "Signed in as <b>" + esc(t.github) + "</b> on " + esc(t.hub) + ". Name the team, then invite people."
-          : "Sign in to a Loom Team Hub (run one with <b>loom hub</b>), then name the team.") + "</div>" +
-        (signed ? "" : teamField("Hub URL", "hub", 'class="mono" placeholder="https://hub.example.com"') +
+    var joinRow = '<div class="thjoin">' + teamField("Have an invite link?", "link", 'class="mono" placeholder="paste it here \u2014 https://\u2026/join/#\u2026"') +
+      '<button class="btn outline sm" type="button" data-tjoin>Join</button></div>';
+    if (!signed) {
+      return '<div class="thero">' +
+        '<div class="thhead"><span class="thlogo">' + ICONS.team + '</span><div><div class="tht">Loom Teams</div>' +
+          '<div class="thsub">Your agents and your teammates\u2019, on one repo \u2014 without stepping on each other.</div></div></div>' +
+        '<ul class="thpts">' + TEAM_POINTS.map(function(p){ return "<li><b>" + p[0] + "</b><span>" + p[1] + "</span></li>"; }).join("") + "</ul>" +
+        '<div class="thcta"><button class="btn primary" type="button" data-tghsign>' + ICONS.github + "Sign in with GitHub</button>" +
+          '<span class="thnote">Teams use your GitHub account. Loom asks for your name and email \u2014 not your code.</span></div>' +
+        joinRow +
+        '<details class="thself"><summary>Use a self-hosted hub instead</summary><div class="thselfb">' +
+          teamField("Hub URL", "hub", 'class="mono" placeholder="https://hub.example.com"') +
           teamField("GitHub login", "cgh", 'placeholder="your GitHub username"') +
-          teamField('Join secret <span class="opt">optional</span>', "csec", 'type="password"')) +
-        teamField("Team name", "name", 'placeholder="e.g. Acme"') +
-        '<div class="tjgo"><button class="btn outline sm" type="button" data-tcreate>Create team</button></div>' +
-      "</div></div>" +
+          teamField('Join secret <span class="opt">optional</span>', "csec", 'type="password"') +
+          '<div class="tjgo"><button class="btn outline sm" type="button" data-tsignin>Sign in to this hub</button></div></div></details>' +
+        '<div class="tjfoot">Goal and task titles are encrypted with a key only your team holds. Prompts and transcripts never leave this machine.</div></div>';
+    }
+    return '<div class="thero">' +
+      '<div class="thme">' + teamAvatar(t.github) + '<span>Signed in as <b>@' + esc(t.github || "") + "</b></span>" +
+        '<span class="spacer"></span><button class="btn ghost xs" type="button" data-tsignout>Sign out</button></div>' +
+      '<div class="tjoin">' +
+        "<div>" +
+          '<div class="tjh">' + ICONS.plus + "Create a team</div>" +
+          '<div class="tjd">Name it, then invite people from any project \u2014 one link brings them in with the repo and their own agents.</div>' +
+          teamField("Team name", "name", 'placeholder="e.g. Acme"') +
+          '<div class="tjgo"><button class="btn primary sm" type="button" data-tcreate>Create team</button></div>' +
+        "</div>" +
+        "<div>" +
+          '<div class="tjh">' + ICONS.team + "Join your team</div>" +
+          '<div class="tjd">Paste the invite link a teammate sent you \u2014 Loom joins the team, clones the repo and sets up your agents.</div>' +
+          teamField("Invite link", "link", 'class="mono" placeholder="https://\u2026/join/#\u2026"') +
+          '<div class="tjgo"><button class="btn outline sm" type="button" data-tjoin>Join team</button></div>' +
+        "</div></div>" +
       '<div class="tjfoot">Teammates see each other\u2019s live agents and goals. Titles are encrypted with a key only members hold; prompts and transcripts never leave this machine.</div></div>';
   }
 
@@ -548,6 +598,18 @@ import { ORCH_RUN_ST } from './transcript.js';
       first.then(function(){ return act("create", { name: name }); })
         .then(function(r){ toast("created " + ((r && r.name) || name) + " \u2014 now invite your teammates"); })
         .catch(function(err){ cb.disabled = false; toast(err.message); });
+    };
+    var gh = host.querySelector("[data-tghsign]");
+    if (gh) gh.onclick = function(){
+      gh.disabled = true; gh.innerHTML = '<span class="obspin"></span>Finish in your browser\u2026';
+      githubSignIn().then(function(t){ toast("signed in as @" + t.github); })
+        .catch(function(err){ gh.disabled = false; gh.innerHTML = ICONS.github + "Sign in with GitHub"; toast(err.message); });
+    };
+    var so = host.querySelector("[data-tsignout]");
+    if (so) so.onclick = function(){
+      if (!window.confirm("Sign out of Loom Teams on this machine? Your agents keep working; the team view goes quiet until you sign back in.")) return;
+      so.disabled = true;
+      act("signout", {}).then(function(){ toast("signed out"); }).catch(function(err){ so.disabled = false; toast(err.message); });
     };
     var sb = host.querySelector("[data-tsignin]");
     if (sb) sb.onclick = function(){
@@ -901,8 +963,11 @@ import { ORCH_RUN_ST } from './transcript.js';
 
   // ---- the Team block under Fleet ------------------------------------------
   function teamHeadHtml(){
+    var t = state.team || {};
     return '<div class="tmh"><span class="ot">Team</span>' +
       '<span class="os">Your teammates\u2019 live agents and goals \u2014 intent, never transcripts.</span><span class="spacer"></span>' +
+      (t.signedIn ? '<button type="button" class="tmwho" data-tsignout title="signed in with GitHub \u2014 click to sign out">' + teamAvatar(t.github) + "@" + esc(t.github || "") + "</button>" : "") +
+      (t.signedIn && (t.teams || []).length ? '<button class="btn primary xs" type="button" data-tinvitep>' + ICONS.plus + "Invite</button>" : "") +
       '<button class="btn ghost xs" type="button" data-tmanage>' + ICONS.gear + "Manage</button></div>";
   }
 
@@ -928,7 +993,8 @@ import { ORCH_RUN_ST } from './transcript.js';
   }
 
   function teamFleetHtml(st, pid){
-    var teams = st.teams || [];
+    // signed out, the teams' keys stay on disk for signing back in — but there's no team to show until you do
+    var teams = st.signedIn ? (st.teams || []) : [];
     if (!teams.length) return teamHeadHtml() + teamJoinCardHtml();
     var down = st.connected === false
       ? '<div class="tinvw thubdown">' + ICONS.alert + "<span><b>Can\u2019t reach the team hub.</b> " + esc(st.lastError || "") +
@@ -936,4 +1002,4 @@ import { ORCH_RUN_ST } from './transcript.js';
       : "";
     return teamHeadHtml() + down + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
   }
-export { DEPLOY_ST,fleetSince,ghRepo,JOB_KIND,JOB_ST,jobProgressText,LEASE_STALE_MS,leaseClash,leasePill,leasePrefix,leaseStale,leaseUnder,loadTeam,loadTeamLanding,loadTeamPolicy,loadTeamRunners,loadTeamShare,onlineRunners,onTeamFrame,orchGoalName,runnerAct,runnerFrameT,runnerHooks,runnerName,runnersChanged,setTeamRunners,setTeamShare,TEAM_LANDING_EVENTS,TEAM_POLICY_SAMPLE,TEAM_ST,teamAct,teamAgentOf,teamAvatar,teamCardHtml,teamClaimMap,teamClaimRows,teamCostsHtml,teamDeploys,teamDeploysHtml,teamEditing,teamFeedGoal,teamFeedHtml,teamFeedLine,teamField,teamFleetHtml,teamFrameT,teamGlobs,teamGoalOf,teamHeadHtml,teamHooks,teamInviteHtml,teamInvites,teamJoinCardHtml,teamLandings,teamLeaseRow,teamLeasesHtml,teamMembersHtml,teamMyRuns,teamNeedsHtml,teamNotify,teamOthers,teamPaths,teamPill,teamPolicies,teamPolicyHtml,teamPresenceLeasesHtml,teamRow,teamRunners,teamRunnersHtml,teamSessionsHtml,teamShareHtml,teamShareOf,teamShares,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare };
+export { DEPLOY_ST,fleetSince,ghRepo,githubSignIn,JOB_KIND,JOB_ST,jobProgressText,LEASE_STALE_MS,leaseClash,leasePill,leasePrefix,leaseStale,leaseUnder,loadTeam,loadTeamLanding,loadTeamPolicy,loadTeamRunners,loadTeamShare,onlineRunners,onTeamFrame,orchGoalName,runnerAct,runnerFrameT,runnerHooks,runnerName,runnersChanged,setTeamRunners,setTeamShare,TEAM_LANDING_EVENTS,TEAM_POLICY_SAMPLE,TEAM_ST,teamAct,teamAgentOf,teamAvatar,teamCardHtml,teamClaimMap,teamClaimRows,teamCostsHtml,teamDeploys,teamDeploysHtml,teamEditing,teamFeedGoal,teamFeedHtml,teamFeedLine,teamField,teamFleetHtml,teamFrameT,teamGlobs,teamGoalOf,teamHeadHtml,teamHooks,teamInviteHtml,teamInvites,teamJoinCardHtml,teamLandings,teamLeaseRow,teamLeasesHtml,teamMembersHtml,teamMyRuns,teamNeedsHtml,teamNotify,teamOthers,teamPaths,teamPill,teamPolicies,teamPolicyHtml,teamPresenceLeasesHtml,teamRow,teamRunners,teamRunnersHtml,teamSessionsHtml,teamShareHtml,teamShareOf,teamShares,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare };

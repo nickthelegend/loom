@@ -140,7 +140,8 @@ import { pageGone } from './format.js';
   function claim(tok){
     return fetch("/api/pair/claim", { method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: tok, name: "phone" }) })
+      // the desktop window is "Loom Desktop", not one more "phone" (49 of those piled up)
+      body: JSON.stringify({ token: tok, name: isElectron() ? "Loom Desktop" : /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? "phone" : "browser" }) })
     .then(function(r){ return r.json().then(function(j){
       if (!r.ok) throw new Error(j.error || "pairing failed");
       state.token = j.clientToken; localStorage.setItem(TOKEN_KEY, state.token);
