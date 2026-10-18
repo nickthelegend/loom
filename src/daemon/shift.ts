@@ -33,12 +33,17 @@ export interface ShiftHost {
   list(opts: ListOpts): LoomEvent[];
   append(e: NewEvent): LoomEvent;
   warn(message: string, detail: unknown): void;
+  /** Say when the tree has uncommitted changes as the shift starts. */
+  noteDirtyStart?(chat: string, what: string): void;
 }
 
 export interface StartShift { tasks: string | string[]; to?: string; until?: string | number; maxUsd?: number }
 
 /** How long everything must stay quiet before the shift calls it a night — a turn's diff, proof or nudge lands just after it ends. */
 export const SETTLE_MS = 3000;
+/** ...and the tasks' own chats must have been quiet this long: a task can be between an interrupt and its next start (#302). */
+export const CHAT_QUIET_MS = 15_000;
+const chatQuietMs = () => Number(process.env.LOOM_SHIFT_QUIET_MS) || CHAT_QUIET_MS;
 const CHECK_MS = 1000;
 
 interface Saved { current?: ShiftConfig | null; last?: ShiftReport | null }
@@ -80,6 +85,7 @@ export class NightShift {
     }
     this.shift = shift;
     this.save();
+    this.host.noteDirtyStart?.(shift.tasks[0]!.chat, "This night shift");
     this.host.append({ kind: "shift", payload: { phase: "started", shiftId: shift.id, tasks: shift.tasks.map((t) => ({ text: t.text, chat: t.chat })),
       ...(shift.to ? { to: shift.to } : {}), ...(shift.until ? { until: shift.until } : {}), ...(shift.maxUsd ? { maxUsd: shift.maxUsd } : {}) } });
     this.watch();
@@ -130,11 +136,17 @@ export class NightShift {
     if (!s.stopped) this.host.resumeAfterRestart();
     const waiting = new Set(this.host.queued().map((q) => q.id));
     const pending = s.tasks.some((t) => !t.skipped && t.queueId && waiting.has(t.queueId));
-    if (pending || this.host.busy() || this.host.proofsBusy()) { this.quietSince = 0; return; }
+    if (pending || this.host.busy() || this.host.proofsBusy() || this.chatsBusy(s)) { this.quietSince = 0; return; }
     const now = Date.now();
     if (!this.quietSince) { this.quietSince = now; return; }
     if (now - this.quietSince < SETTLE_MS) return;
     this.finish(s);
+  }
+
+  /** Has any task's chat moved in the last CHAT_QUIET_MS? Then the shift isn't over, whatever "busy" said a moment ago. */
+  private chatsBusy(s: ShiftConfig): boolean {
+    const since = Date.now() - chatQuietMs();
+    return s.tasks.some((t) => !t.skipped && this.host.list({ chat: t.chat, sinceTs: since, limit: 1 }).length > 0);
   }
 
   private outcomes(s: ShiftConfig): TaskOutcome[] {

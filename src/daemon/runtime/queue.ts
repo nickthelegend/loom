@@ -186,6 +186,8 @@ export class RuntimeQueue {
   }
 
   private holds = 0;
+  /** Queue items being sent right now (by id): a second dispatch of the same one is dropped. */
+  private dispatching = new Set<string>();
 
   /**
    * Keep the queue still while a follow-up to the turn just stopped goes in (a loop nudge, a hand-off):
@@ -248,8 +250,16 @@ export class RuntimeQueue {
     }
     // one agent: the baton moves to it first, as when you pick it and send
     const to = t.kind === "agent" ? t.agentId : undefined;
+    // A queued prompt goes once. After a restart one task went twice in the same millisecond, and each
+    // send cut the other's turn short — five starts and stops in nine seconds (#302).
+    if (this.dispatching.has(item.id)) return;
     const holder = this.host.validHolder();
     if (to && holder && holder !== to) await this.host.handoff(to, { source: item.source });
+    // ...and never over a turn: an agent that's mid-turn by the time we get here gets it back, first in line
+    const target = to ?? this.host.validHolder();
+    if (target && this.host.busySince.has(target)) { this.host.queue.unshift(item); return; }
+    this.dispatching.add(item.id);
+    setTimeout(() => this.dispatching.delete(item.id), 60_000).unref?.();
     await this.host.sendMessage(item.text, to, { source: item.source, chat: item.chat, fromQueue: true,
       requestId: item.continuity?.requestId ?? (item.editedAt ? `queue:${item.id}:edit:${item.editedAt}` : `queue:${item.id}`),
       ...(item.continuity ? { capturedModel: item.continuity.model } : {}),

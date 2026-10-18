@@ -167,6 +167,7 @@ export function formatAgentRosterRow(a: ProjectStatus["agents"][number]): string
   const paint = agentColor(a.id);
   const model = a.model || "default";
   // a read-only model agent can answer, not change files — say that, not "can hold" (#257)
-  const baton = a.tier !== "adapter" ? pc.dim("cannot hold") : a.readOnly ? pc.yellow("read-only (answers, can't edit)") : pc.green("can hold");
+  const baton = a.tier !== "adapter" ? pc.dim("cannot hold") : a.signedOut ? pc.red("signed out — can't hold until you sign in")
+    : a.readOnly ? pc.yellow("read-only (answers, can't edit)") : pc.green("can hold");
   return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}${signInNote(a)}`;
 }

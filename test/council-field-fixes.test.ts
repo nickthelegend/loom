@@ -104,7 +104,7 @@ describe("#274 Grok's sign-in", () => {
 describe("#280 a short question shouldn't re-read a cold session unannounced", () => {
   it("cold after the cache's life, priced when Loom knows the model", () => {
     const book = priceBookFrom([{ id: "anthropic/claude-opus-5.5", pricing: { prompt: "0.000015", completion: "0.000075" } }]);
-    expect(coldResume({ tokens: 170_068, ageMs: 3 * 3_600_000, model: "claude-opus-5-5" }, book)).toEqual({ cold: true, estUsd: 170_068 * 0.000015 });
+    expect(coldResume({ tokens: 170_068, ageMs: 3 * 3_600_000, model: "claude-opus-5-5" }, book)).toEqual({ cold: true, estUsd: 170_068 * 0.000015 * 1.25 }); // the whole context is written to the cache again
     expect(coldResume({ tokens: 170_068, ageMs: 60_000, model: "claude-opus-5-5" }, book)).toEqual({ cold: false });
   });
 });

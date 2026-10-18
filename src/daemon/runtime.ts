@@ -109,10 +109,11 @@ import { ContinuityEngine } from "../core/continuity/engine.js";
 import { ContinuityError } from "../core/continuity/contracts.js";
 import { HarnessMonitor, isNativeKind } from "../core/continuity/capabilities.js";
 import { ProviderAgent } from "../providers/agent.js";
-import { READ_ONLY_RULE, type ReviewTarget } from "../core/review.js";
+import { READ_ONLY_RULE, decisionText, type Finding, type ReviewTarget } from "../core/review.js";
+import { parseVerdicts } from "../core/council.js";
 import { ReviewRunner } from "./review.js";
 import { CouncilRunner } from "./council.js";
-import { coldResume, priceBook } from "../core/prices.js";
+import { coldResume, observedInputRate, priceBook } from "../core/prices.js";
 import { LiveDeltaThrottle, type LiveFrame } from "../providers/live.js";
 import { AdapterBase, type AgentCheck } from "../adapters/base.js";
 import type { LiveText } from "../types.js";
@@ -445,6 +446,7 @@ export class ProjectRuntime {
       list: (opts) => this.log.list(opts),
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       warn: (message, detail) => logbook.warn("shift", message, String(detail), this.info.id),
+      noteDirtyStart: (chat, what) => this.noteDirtyStart(chat, what),
     });
     this.reviews = new ReviewRunner({
       hasAgent: (id) => this.config.agents.some((a) => a.id === id),
@@ -465,9 +467,13 @@ export class ProjectRuntime {
       },
       maxReviewers: ProjectRuntime.MAX_CONCURRENT_SUBTASKS,
       reviewerTimeoutMs: () => Math.max(1, Number(this.config.review?.timeoutMin) || 15) * 60_000,
+      // a reviewer left out at its time limit is stopped, and its process with it — an opencode serve
+      // outlived a left-out review by 42 minutes (#312); its next turn starts it again
       stopReviewer: async (agentId) => {
         const a = this.agents.get(agentId);
-        if (a && isAdapter(a) && a.busy()) await a.interrupt();
+        if (!a || !isAdapter(a)) return;
+        if (a.busy()) await a.interrupt();
+        setTimeout(() => { if (!this.closed && !a.busy()) void a.stop().catch(() => {}); }, 30_000).unref?.();
       },
     });
     this.councils = new CouncilRunner({
@@ -500,6 +506,7 @@ export class ProjectRuntime {
       append: (e) => (this.closed ? ({ ...e, id: -1, ts: Date.now() } as LoomEvent) : this.log.append(e)),
       lastId: () => this.log.list({ limit: 1 }).at(-1)?.id ?? 0,
       warn: (message, detail) => logbook.warn("council", message, String(detail), this.info.id),
+      noteDirtyStart: (chat, what) => this.noteDirtyStart(chat, what),
     });
     this.crews = new CrewEngine({
       projectId: info.id,
@@ -2574,7 +2581,72 @@ export class ProjectRuntime {
     const tokens = Number(last.payload.inputTokens ?? 0) || 0;
     const model = typeof last.payload.model === "string" ? last.payload.model : undefined;
     const ageMs = Date.now() - last.ts;
-    return { tokens, ageMs, ...(model ? { model } : {}), ...coldResume({ tokens, ageMs, ...(model ? { model } : {}) }, priceBook()) };
+    // what this agent is really billed per token, from its own recent priced turns (any chat)
+    const rate = observedInputRate(this.log.list({ agentId, kinds: ["run_complete"], limit: 40 }).map((e) => ({
+      costUsd: Number(e.payload.costUsd ?? 0) || 0, tokensIn: Number(e.payload.inputTokens ?? 0) || 0,
+      cachedIn: Number(e.payload.cachedInputTokens ?? 0) || 0, tokensOut: Number(e.payload.outputTokens ?? 0) || 0 })));
+    return { tokens, ageMs, ...(model ? { model } : {}), ...coldResume({ tokens, ageMs, rate, ...(model ? { model } : {}) }, priceBook()) };
+  }
+
+  /**
+   * Uncommitted changes in the tree right now (Loom's own .loom/ aside) —
+   * a shift or council starting on top of an interrupted turn's edits says so,
+   * rather than building on them silently (#313).
+   */
+  dirtyFiles(): string[] {
+    try {
+      const out = execFileSync("git", ["status", "--porcelain", "--", ".", ":(exclude).loom"], { cwd: this.info.dir, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] });
+      return out.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
+    } catch { return []; }
+  }
+
+  /** Say, in the chat that's starting, that the tree isn't clean — and how to put it back. */
+  noteDirtyStart(chat: string, what: string): void {
+    const files = this.dirtyFiles();
+    if (!files.length) return;
+    this.log.append({ kind: "status", ...(chat !== MAIN_CHAT ? { chat } : {}), payload: { state: "dirty_start", files: files.slice(0, 40),
+      text: `${what} starts on ${files.length} uncommitted change${files.length === 1 ? "" : "s"} already in the tree (${files.slice(0, 4).join(", ")}${files.length > 4 ? ", …" : ""}) — commit them first, or Rewind to a turn's checkpoint to put them back` } });
+  }
+
+  /**
+   * Decisions recorded from a council's verdicts before #275 lost every `_`
+   * ("test_reach.py" became "testreach.py") and briefings carried them on.
+   * Rebuild each from the review finding (kept intact) and the planner's own
+   * reply, still in the chat — the note exactly as written (#318). Returns
+   * how many memories were mended.
+   */
+  repairDecisions(): { repaired: number; checked: number } {
+    const findings: Finding[] = [];
+    const chats = new Map<string, string>(); // finding id → the review's chat
+    for (const e of this.log.list({ kinds: ["review"] })) {
+      if (e.payload.phase !== "done") continue;
+      for (const f of (e.payload.findings as Finding[] | undefined) ?? []) { findings.push(f); chats.set(f.id, String(e.chat ?? e.payload.chat ?? MAIN_CHAT)); }
+    }
+    let repaired = 0, checked = 0;
+    for (const m of this.brain.all()) {
+      if (m.kind !== "decision" || !m.text.startsWith("Review finding accepted (")) continue;
+      checked++;
+      const f = findings.find((x) => m.text.startsWith(decisionText(x)));
+      if (!f) continue;
+      // the planner's raw verdict line for this finding, anywhere in that chat
+      let note: string | undefined;
+      for (const msg of this.log.list({ chat: chats.get(f.id) ?? MAIN_CHAT, kinds: ["message"], limit: 2000 }).reverse()) {
+        if (!msg.agentId || typeof msg.payload.text !== "string") continue;
+        const v = parseVerdicts(msg.payload.text, [f.id]).get(f.id);
+        if (v) { note = v.note; break; }
+      }
+      const fixed = decisionText(f, note);
+      if (fixed === m.text) continue;
+      this.brain.update(m.id, { text: fixed }, "loom");
+      repaired++;
+    }
+    return { repaired, checked };
+  }
+
+  /** Resolves once the agent isn't mid-turn (or after `maxMs`, when the send gets the adapter's own answer). */
+  private async whenIdle(agentId: string, maxMs = 20 * 60_000): Promise<void> {
+    const busy = () => { const a = this.agents.get(agentId); return Boolean(a && isAdapter(a) && a.busy()) || this.turns.busySince.has(agentId); };
+    for (const end = Date.now() + maxMs; busy() && Date.now() < end && !this.closed;) await new Promise((r) => setTimeout(r, 1000));
   }
 
   /** The agents a real turn found signed out, with what the CLI said (for `loom doctor`). */
@@ -2913,8 +2985,9 @@ export class ProjectRuntime {
     const startedAt = Date.now();
     // the child's reply belongs to the chat it was asked in, not wherever it last talked
     this.turns.turnChat.set(opts.agentId, chat);
-    void child
-      .send(input)
+    // an agent that's mid-turn finishes it first: a review sent to a busy reviewer used to fail at once (#310)
+    void this.whenIdle(opts.agentId)
+      .then(() => { this.turns.turnChat.set(opts.agentId, chat); return child.send(input); })
       .then(() => {
         this.subtasks.delete(id);
         // an adapter can report a failed turn as an error event and still resolve: that subtask

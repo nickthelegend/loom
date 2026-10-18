@@ -98,6 +98,7 @@ function item(e: LoomEvent): string {
       return `<div class="card review"><b>🔍 Review</b> ${esc(p.summary)}<ul>${((p.findings as Array<Record<string, any>>) ?? []).map((f) =>
         `<li><span class="tag sev-${esc(f.severity ?? "note")}">${esc(f.severity ?? "note")}</span> <span class="m">${esc([f.agent, ...((f.agreed as Array<{ agent: string }>) ?? []).map((a) => a.agent)].join(" + "))}</span> ${f.file ? `<code>${esc(f.file)}${f.line ? `:${esc(f.line)}` : ""}</code> — ` : ""}${esc(f.text)}</li>`).join("")}</ul></div>`;
     case "status":
+      if (p.state === "dirty_start") return `<div class="sys">⚠ ${esc(p.text)}</div>`;
       if (p.state === "loop_detected") return `<div class="card warn"><b>↻ ${who} was going in circles</b> <code>${esc(p.call)}</code> — ${esc(p.count)}× this turn${p.nudged ? "; Loom stopped it and asked it to step back" : ""}</div>`;
       if (p.state === "shield_tripped") return `<div class="card bad"><b>⛔ ${who} ran ${esc(p.what)}</b> <code>${esc(p.command)}</code> — ${esc(p.why)}${p.stopped ? ". Loom stopped the turn." : ""}</div>`;
       if (typeof p.state === "string" && p.state.startsWith("quota_") && p.text) return `<div class="sys">⇄ ${esc(p.text)}</div>`;

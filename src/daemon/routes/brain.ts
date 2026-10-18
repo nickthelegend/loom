@@ -117,6 +117,14 @@ export function registerBrainRoutes(app: Express, withRuntime: WithRuntime): voi
     }),
   );
 
+  // Mend decisions whose underscores were stripped before #275, from the planner's own words (#318).
+  app.post(
+    "/api/projects/:id/brain/repair-decisions",
+    withRuntime(async (rt, _req, res) => {
+      res.json(rt.repairDecisions());
+    }),
+  );
+
   // --- the brain ---------------------------------------------------------
 
   app.get(

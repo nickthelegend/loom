@@ -44,6 +44,8 @@ export interface ReviewState {
   target: { kind: string; file?: string; label?: string };
   agents: string[];
   status: "running" | "done";
+  /** Reviewers that have never finished a review here (left out each time). */
+  unreliable?: string[];
   results?: ReviewResult[];
   findings?: Array<Finding & { decision?: FindingDecision; note?: string }>;
   summary?: string;
@@ -92,7 +94,10 @@ export class ReviewRunner {
     const parent = this.host.holder() ?? agents[0]!;
     const run = { chat, target, agents, settled: new Map<string, { ok: boolean; message?: string }>(), startedAt: Date.now() };
     this.pending.set(reviewId, run);
-    this.host.append({ kind: "review", chat, payload: { phase: "started", reviewId, chat, target, agents, ...(input.focus ? { focus: input.focus } : {}) } });
+    // a reviewer that has never finished a review here and was left out again and again: say so up front (#311)
+    const unreliable = this.unreliable(agents);
+    this.host.append({ kind: "review", chat, payload: { phase: "started", reviewId, chat, target, agents, ...(input.focus ? { focus: input.focus } : {}),
+      ...(unreliable.length ? { unreliable } : {}) } });
     const task = reviewPrompt(input.target, input.focus);
     const limit = this.host.reviewerTimeoutMs?.() ?? 15 * 60_000;
     for (const agentId of agents) {
@@ -116,7 +121,21 @@ export class ReviewRunner {
         settle({ ok: false, message: err instanceof Error ? err.message : String(err) });
       }
     }
-    return { reviewId, chat, target, agents, status: "running" };
+    return { reviewId, chat, target, agents, status: "running", ...(unreliable.length ? { unreliable } : {}) };
+  }
+
+  /** Reviewers with no finished review in this project and at least two left out. */
+  unreliable(agents: string[]): string[] {
+    const tally = new Map<string, { ok: number; out: number }>();
+    for (const e of this.host.list({ kinds: ["review"] })) {
+      if (e.payload.phase !== "done") continue;
+      for (const r of (e.payload.results as ReviewResult[] | undefined) ?? []) {
+        const t = tally.get(r.agent) ?? { ok: 0, out: 0 };
+        if (r.status === "done") t.ok++; else t.out++;
+        tally.set(r.agent, t);
+      }
+    }
+    return agents.filter((a) => { const t = tally.get(a); return Boolean(t && t.ok === 0 && t.out >= 2); });
   }
 
   /** The reviewer's answer: its last reply in the review's chat. */

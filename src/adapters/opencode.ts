@@ -781,6 +781,9 @@ export class OpenCodeAdapter extends AdapterBase {
     return type === "idle" ? false : type === "busy" || type === "retry" ? true : null;
   }
 
+  /** When the current turn was interrupted (the wait gives up 20s later, whatever opencode says). */
+  private interruptedAt: number | null = null;
+
   /** Set when the last wait gave up on a turn opencode never began. */
   private neverStarted = false;
 
@@ -805,8 +808,11 @@ export class OpenCodeAdapter extends AdapterBase {
     let stableId: string | null = null;
     while (Date.now() < deadline) {
       // Interrupted: done as soon as opencode stops running it, answer or not
-      // (one that never answered would otherwise be waited on for the hour).
-      if (this.interrupted && (await this.sessionActive(sid)) !== true) {
+      // (one that never answered would otherwise be waited on for the hour) —
+      // and at most 20s after the interrupt, even if opencode still calls it
+      // busy: a stuck model kept the turn, and its server, alive 42 min (#312).
+      if (this.interrupted && !this.interruptedAt) this.interruptedAt = Date.now();
+      if (this.interrupted && ((await this.sessionActive(sid)) !== true || Date.now() - (this.interruptedAt ?? Date.now()) > 20_000)) {
         const after = await this.listMessages(sid).catch(() => [] as Json[]);
         const last = after.filter((m) => (m.type ?? m.role) === "assistant" && !baseline.has(String(m.id))).at(-1);
         return last ?? null;
@@ -857,6 +863,7 @@ export class OpenCodeAdapter extends AdapterBase {
     this._busy = true;
     this.trimTurnState();
     this.interrupted = false;
+    this.interruptedAt = null;
     const started = Date.now();
     const timeoutMs = 60 * 60 * 1000;
     try {

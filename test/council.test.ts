@@ -156,6 +156,25 @@ describe("the council's stages", () => {
     expect(s.summary).toBe("failed at Build: agent crashed");
   });
 
+  it("resumes where it stopped: the plan, the backtest and the verdicts aren't asked for again (#304)", async () => {
+    const h = fakeHost({ replies: ["the plan", "ACCEPT r1.1 — yes", "x", "Built.", "FIXED r2.1 — ok"], backtest: [f("x")], forward: [f("y", { severity: "medium" })],
+      proofs: [{ verdict: "verified", headline: "ok" }, { verdict: "verified", headline: "ok" }], diff: true, failTurn: 2 });
+    const runner = new CouncilRunner(h.host); runner.pollMs = 5;
+    const c = runner.start({ goal: "g", planner: "lead", reviewers: ["codex"] });
+    await waitUntil(() => runner.status(c.councilId)!.status !== "running", { timeoutMs: 10_000 });
+    expect(runner.status(c.councilId)).toMatchObject({ status: "failed", summary: "failed at Build: agent crashed" });
+    expect(h.sent).toHaveLength(3); // plan, decide, build
+    runner.resume(c.councilId);
+    await waitUntil(() => runner.status(c.councilId)!.status !== "running", { timeoutMs: 10_000 });
+    const s = runner.status(c.councilId)!;
+    expect(s.status).toBe("done");
+    // the resume went straight to Build (no second plan or decide turn), then on through forward and fix
+    expect(h.sent.slice(3).map((x) => x.text.split("\n")[0])).toEqual([expect.stringMatching(/^\[Loom council\] Build it now/), expect.stringMatching(/^\[Loom council\] Fix round/)]);
+    expect(h.sent[3]!.text).toContain("Fold in the findings you accepted:\nr1.1");
+    expect(s.stages.map((x) => x.status)).toEqual(["done", "done", "done", "done", "done", "done", "done"]);
+    expect(() => runner.resume(c.councilId)).toThrow(/finished/);
+  });
+
   it("refuses what it can't run, one at a time, and closes a council a restart cut off", async () => {
     const h = fakeHost({ replies: [], backtest: [], forward: [], proofs: [] });
     const runner = new CouncilRunner(h.host);
@@ -165,7 +184,7 @@ describe("the council's stages", () => {
     h.host.append({ kind: "council", chat: "c9", payload: { phase: "started", councilId: "old", goal: "g", planner: "lead", reviewers: ["codex"], chat: "c9", stages: [] } });
     h.host.append({ kind: "council", chat: "c9", payload: { phase: "stage", councilId: "old", stage: "build", status: "running" } });
     const after = new CouncilRunner(h.host);
-    expect(after.status("old")).toMatchObject({ status: "failed", summary: "stopped at Build: Loom restarted" });
+    expect(after.status("old")).toMatchObject({ status: "failed", summary: "stopped at Build: Loom restarted — resume carries on from there" });
   });
 });
 

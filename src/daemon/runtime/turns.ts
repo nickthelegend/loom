@@ -1,4 +1,5 @@
 import { BatonManager, NotHolderError } from "../../core/baton.js";
+import path from "node:path";
 import { triage } from "../../core/review-triage.js";
 import * as checkpoints from "../../core/checkpoint.js";
 import type { EventJournal } from "../../core/eventlog.js";
@@ -264,6 +265,9 @@ export class RuntimeTurns {
               ...(checkpoint ? { checkpoint } : {}),
             },
           });
+          // files changed through the shell (sed, a script, git apply) never came as a file_edit: log them from the diff,
+          // so cards and counts match what changed (#316)
+          this.backfillEdits(agentId, turnChat, diff.files.map((f) => f.path));
           await this.commitTurn(agentId, diff.files.map((f) => f.path));
         }
         // Learn from the turn once we know which files it touched — the files
@@ -273,6 +277,24 @@ export class RuntimeTurns {
       })
       .catch(() => this.host.extractMemory(agentId, []));
     this.postTurn.set(agentId, finalized);
+  }
+
+  /** A file_edit for each file the turn's diff shows that the agent didn't report editing (tool "shell"). */
+  private backfillEdits(agentId: string, chat: string | undefined, files: string[]): void {
+    if (!files.length || this.host.closed) return;
+    // this turn's own reports: the file_edits since the agent's previous turn ended
+    const recent = this.host.log.list({ agentId, kinds: ["file_edit", "run_complete"], limit: 400 });
+    let start = recent.length - 1;
+    while (start >= 0 && recent[start]!.kind === "run_complete") start--; // this turn's own end
+    let from = 0;
+    for (let i = start; i >= 0; i--) if (recent[i]!.kind === "run_complete") { from = i + 1; break; }
+    const dir = this.host.agentDir(agentId);
+    const reported = new Set(recent.slice(from).filter((e) => e.kind === "file_edit")
+      .map((e) => { const p = String(e.payload.path ?? ""); return path.isAbsolute(p) ? path.relative(dir, p) : p; }).map((p) => p.split(path.sep).join("/")));
+    for (const f of files) {
+      if (reported.has(f)) continue;
+      this.host.log.append({ kind: "file_edit", agentId, ...(chat && chat !== MAIN_CHAT ? { chat } : {}), payload: { path: f, tool: "shell", fromDiff: true } });
+    }
   }
 
   /**

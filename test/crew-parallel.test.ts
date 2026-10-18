@@ -100,7 +100,9 @@ describe("parallel crew plays", () => {
     plan = [{ title: "A", assignee: "a", touches: ["a.txt"] }, { title: "B", assignee: "b", touches: ["b.txt"] }];
     build = (seat, wd, input) => fs.writeFileSync(path.join(wd, "shared.txt"), input.text.startsWith("Back to you") ? "a+b\n" : `${seat}\n`);
     await rt!.crews.goal(id, "Repair conflict"); const goal = await finished(id);
-    expect(goal.status, goal.error).toBe("completed"); expect(goal.cards[1]!.rounds).toBe(1);
+    expect(goal.status, goal.error).toBe("completed");
+    // a conflict repair spends its own budget, not the card's review rounds (#308)
+    expect(goal.cards[1]!.conflicts).toBe(1); expect(goal.cards[1]!.rounds).toBe(0);
     expect(fs.readFileSync(path.join(goal.dir, "shared.txt"), "utf8")).toBe("a+b\n");
     expect(rt!.log.list({ limit: 1000 }).some(e => e.kind === "crew" && e.payload.phase === "integration_conflict")).toBe(true);
   });

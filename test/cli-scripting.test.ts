@@ -133,6 +133,16 @@ describe("loom init and .gitignore", () => {
   }, 30_000);
 });
 
+describe("JSON for scripts (#314, #315)", () => {
+  it("projects and status print one JSON value on stdout, nothing else", async () => {
+    const p = await runCli(["projects", "--json"]);
+    expect(p.code).toBe(0);
+    expect(JSON.parse(p.out).some((x: { agents: unknown[] }) => Array.isArray(x.agents))).toBe(true);
+    const st = await runCli(["status", "--json"]);
+    expect(Array.isArray(JSON.parse(st.out))).toBe(true);
+  }, 30_000);
+});
+
 describe("loom ask", () => {
   it("refuses before sending anything when a provider it needs has no key", async () => {
     const r = await runCli(["ask", "--models", "meta-llama/llama-3.3-70b:free", "what is 2+2"]);

@@ -324,7 +324,11 @@ export class RuntimeAccounting {
       return;
     }
     const spentUsd = this.spendTodayFor(agentId, now);
-    if (spentUsd < budgetUsd) {
+    // a turn's cost only lands when it ends, so the cap was crossed by a whole turn ($8.47 of $8.00, #321):
+    // under the cap but with less left than this agent's typical turn costs, it doesn't start one
+    const typical = this.forecast(agentId)?.usd?.typical ?? 0;
+    const wouldCross = typical > 0 && spentUsd < budgetUsd && spentUsd + typical > budgetUsd;
+    if (spentUsd < budgetUsd && !wouldCross) {
       this.liftBudgetPause(agentId, now);
       return;
     }
@@ -336,9 +340,9 @@ export class RuntimeAccounting {
     this.host.log.append({
       kind: "status",
       agentId,
-      payload: { state: "budget_exceeded", budgetUsd, spentTodayUsd: spentUsd },
+      payload: { state: "budget_exceeded", budgetUsd, spentTodayUsd: spentUsd, ...(wouldCross ? { wouldCross: true, typicalTurnUsd: typical } : {}) },
     });
-    throw new BudgetExceededError(agentId, budgetUsd, spentUsd);
+    throw new BudgetExceededError(agentId, budgetUsd, spentUsd, wouldCross ? typical : undefined);
   }
 
   /**

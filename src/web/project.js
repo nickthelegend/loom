@@ -918,6 +918,16 @@ import { openMenu } from './menus.js';
           .catch(function(err){ cst.disabled = false; toast(err.message); });
         return;
       }
+      // a council that ended early: carry on from its unfinished stage
+      var crs = ev.target.closest && ev.target.closest("[data-council-resume]");
+      if (crs) {
+        ev.preventDefault(); ev.stopPropagation();
+        crs.disabled = true;
+        api("/api/projects/" + pid + "/councils/" + encodeURIComponent(crs.getAttribute("data-council-resume")) + "/resume", { method: "POST" })
+          .then(function(){ crs.textContent = "Resuming\u2026"; })
+          .catch(function(err){ crs.disabled = false; toast(err.message); });
+        return;
+      }
       // a review finding: accept (it becomes a decision) or reject
       var fdb = ev.target.closest && ev.target.closest("[data-finding-decide]");
       if (fdb) {
