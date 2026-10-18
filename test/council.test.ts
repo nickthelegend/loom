@@ -46,7 +46,7 @@ describe("what the planner is asked, and how its verdicts are read", () => {
 });
 
 /** A host with scripted replies: the planner's turn n gets replies[n]; reviews return the given findings. */
-function fakeHost(script: { replies: string[]; backtest: Finding[]; forward: Finding[]; proofs: Array<{ verdict: string; headline: string }>; diff?: boolean; failTurn?: number }) {
+function fakeHost(script: { replies: string[]; backtest: Finding[]; forward: Finding[]; proofs: Array<{ verdict: string; headline: string }>; diff?: boolean; failTurn?: number; busyBefore?: number }) {
   const events: LoomEvent[] = [];
   let id = 0, turnNo = 0, reviewNo = 0;
   const reviews = new Map<string, ReviewState>();
@@ -63,6 +63,13 @@ function fakeHost(script: { replies: string[]; backtest: Finding[]; forward: Fin
     send: async (agentId, text, opts) => {
       sent.push({ text, plan: opts.plan });
       const n = turnNo++;
+      // the runtime logs the request when the turn starts — after any turn the planner is still finishing
+      const busyFirst = script.busyBefore === n;
+      if (busyFirst) {
+        append({ kind: "message", agentId, chat: "c1", payload: { text: "a relay turn's reply — not the answer" } });
+        append({ kind: "run_complete", agentId, chat: "c1", payload: {} });
+      }
+      append({ kind: "message", chat: "c1", payload: { text } });
       setTimeout(() => {
         if (script.failTurn === n) { append({ kind: "error", agentId, chat: "c1", payload: { message: "agent crashed" } }); return; }
         append({ kind: "message", agentId, chat: "c1", payload: { text: script.replies[n] ?? "ok" } });
@@ -117,6 +124,19 @@ describe("the council's stages", () => {
     expect(s.summary).toBe("built · Proof verified · plan: 1 accepted · 1 rejected · diff: 1 fixed · 1 rejected · 1 undecided");
     const done = h.events.find((e) => e.kind === "council" && e.payload.phase === "done")!;
     expect(pushCategory(done)).toBe("goals");
+  });
+
+  it("waits for the turn that answers its own prompt, not one the planner was already finishing (#289)", async () => {
+    const h = fakeHost({
+      replies: ["the plan", "ACCEPT r1.1 — ok", "Built.", "FIXED r2.1 — done"],
+      backtest: [f("x")], forward: [f("y", { severity: "medium" })],
+      proofs: [{ verdict: "verified", headline: "ok" }, { verdict: "verified", headline: "ok" }], diff: true,
+      busyBefore: 3, // a relay turn ends just before the fix prompt is taken up
+    });
+    const runner = new CouncilRunner(h.host); runner.pollMs = 5;
+    const c = runner.start({ goal: "g", planner: "lead", reviewers: ["codex"] });
+    await waitUntil(() => runner.status(c.councilId)!.status !== "running", { timeoutMs: 10_000 });
+    expect(runner.status(c.councilId)!.stages.find((x) => x.key === "fix")!.detail).toMatch(/^1 fixed · 0 rejected/);
   });
 
   it("skips what has nothing to do, and a failed turn stops the council where it failed", async () => {

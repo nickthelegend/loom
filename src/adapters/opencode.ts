@@ -781,6 +781,15 @@ export class OpenCodeAdapter extends AdapterBase {
     return type === "idle" ? false : type === "busy" || type === "retry" ? true : null;
   }
 
+  /** Set when the last wait gave up on a turn opencode never began. */
+  private neverStarted = false;
+
+  /** How long a prompt may sit with nothing in the session before it counts as never started (options.startTimeoutMs, default 3 min). */
+  private startTimeoutMs(): number {
+    const v = (this.options as { startTimeoutMs?: unknown }).startTimeoutMs;
+    return typeof v === "number" && v > 0 ? v : 180_000;
+  }
+
   private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
     try {
       if (!this.modernApi) await fetchJson(
@@ -792,6 +801,7 @@ export class OpenCodeAdapter extends AdapterBase {
       // 503 "not available yet" on 1.17 — fall through to polling.
     }
     const deadline = Date.now() + timeoutMs;
+    const startBy = Date.now() + this.startTimeoutMs();
     let stableId: string | null = null;
     while (Date.now() < deadline) {
       // Interrupted: done as soon as opencode stops running it, answer or not
@@ -802,6 +812,12 @@ export class OpenCodeAdapter extends AdapterBase {
         return last ?? null;
       }
       const messages = await this.listMessages(sid).catch(() => [] as Json[]);
+      // accepted but never begun: not even our own message reached the session, and opencode isn't working on it —
+      // don't wait the hour out (a review sat 30 minutes on one, #291)
+      if (Date.now() > startBy && !messages.some((m) => !baseline.has(String(m.id))) && (await this.sessionActive(sid)) !== true) {
+        this.neverStarted = true;
+        return null;
+      }
       const newest = messages[messages.length - 1];
       const newAssistants = messages.filter(
         (m) =>
@@ -865,9 +881,12 @@ export class OpenCodeAdapter extends AdapterBase {
         if (!admission.ok) throw new Error(`opencode prompt failed (${admission.status}): ${(await admission.text()).slice(0, 500)}`);
         await admission.arrayBuffer();
 
+        this.neverStarted = false;
         const turn = await this.waitForTurn(sid, baseline, timeoutMs);
         if (!turn && this.interrupted) {
           this.emit({ kind: "status", payload: { state: "interrupted" } });
+        } else if (!turn && this.neverStarted) {
+          this.emit({ kind: "error", payload: { message: `opencode accepted the prompt but never started the turn (nothing in ${Math.round(this.startTimeoutMs() / 1000)}s) — its model may be unavailable; try another model, or restart the agent` } });
         } else if (!turn) {
           this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
         } else {

@@ -130,8 +130,12 @@ export class CouncilRunner {
     const since = this.host.lastId();
     await this.host.send(planner, text, { chat, plan });
     const deadline = Date.now() + STEP_MS;
+    // the answer is the turn after OUR request: the planner may be finishing another turn first (a relay, a
+    // queued message), and that turn's end isn't this one's (#289)
+    let asked: number | null = null;
     while (Date.now() < deadline) {
-      const out = turnOutcome(this.host.list({ chat, agentId: planner, limit: 2000 }).filter((e) => e.id > since), planner, since);
+      asked ??= this.host.list({ chat, kinds: ["message"], limit: 500 }).find((e) => e.id > since && !e.agentId && String(e.payload.text ?? "").trim() === text.trim())?.id ?? null;
+      const out = asked === null ? null : turnOutcome(this.host.list({ chat, agentId: planner, limit: 2000 }).filter((e) => e.id > asked!), planner, asked);
       if (out) return out;
       if (this.running?.stop) {
         // a stopped turn ends with an interrupted status, not run_complete

@@ -402,6 +402,7 @@ export class ProjectRuntime {
       config: () => this.config,
       busy: (id) => { const a = this.agents.get(id); return Boolean(a && isAdapter(a) && a.busy()) || this.turns.busySince.has(id); },
       turnChat: (id) => this.turns.turnChat.get(id),
+      inSubtask: (id) => [...this.subtasks.values()].some((t) => t.agentId === id),
       available: async (id) => { const a = this.agents.get(id); return Boolean(a && isAdapter(a) && (await a.available())); },
       interrupt: (chat) => this.interrupt({ chat, source: "route" }),
       handoff: (to) => this.handoff(to, { source: "route" }),
