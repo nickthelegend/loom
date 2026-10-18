@@ -144,7 +144,7 @@ export class NightShift {
 
   private finish(s: ShiftConfig): void {
     // nothing is running any more: a task that never finished was cut off (a restart, a crash)
-    const outcomes = this.outcomes(s).map((o) => o.status === "running" ? { ...o, status: "failed" as const, error: "it stopped before finishing (was Loom restarted?)" } : o);
+    const outcomes = this.outcomes(s).map((o) => o.status === "running" ? { ...o, status: "failed" as const, error: o.stopped ?? "it stopped before finishing (was Loom restarted?)" } : o);
     const r = report(s, outcomes);
     s.reportedAt = r.endedAt;
     this.last = r;

@@ -149,7 +149,8 @@ back to the same builder), and tested, in the goal's own worktree and branch.
 When it's done, you apply it.
 
 ```bash
-loom crew create ship       # templates: ship · fix · research · solo
+loom crew create ship       # templates: ship · fix · research · solo — seats follow your agents' roles
+loom crew create ship --builders claude-code,claude-2 --reviewer codex   # or name them
 loom crew goal "Add rate limiting to the public API"
 loom crew approve           # or: loom crew say "smaller cards, please"
 loom crew                   # cards by stage; questions a teammate asked you
@@ -718,6 +719,7 @@ detects at least two roles.
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
 | `loom clients [--revoke <id>] [--ping]` | Paired devices: list, revoke, or send a test push |
+| `loom orchestra:clean [--dry-run]` | Remove orchestra worktrees left by projects that are no longer registered (`loom doctor` points them out). Finished runs' worktrees are removed by themselves after 7 days; a project on another disk keeps its worktrees beside it (`orchestra.worktreeDir` to choose) |
 | `loom doctor [--json] [--fix]` | Diagnose env, daemon, binding, and project config — and where the daemon sees something different from your shell (an agent missing from its PATH, a sign-in, an API key exported only in a terminal), whether each provider answers with the daemon's key, and whether a model agent pinned to a `:free` model keeps getting 429/503 (it suggests `pool:free`). `--fix` repairs what has exactly one safe repair |
 | `loom orchestrate "<goal>"` | One orchestrator plans, many workers build in parallel worktrees (`-o`, `-w`, `-p`, `--no-watch`) |
 | `loom orchestrate --plan "<goal>"` | Plan mode: the plan and each task's spec land as markdown under `plans/<run>/` for any agent to pick up |

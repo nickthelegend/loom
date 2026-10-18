@@ -38,7 +38,25 @@ export function signature(p: Record<string, unknown>): string | null {
   if (command.trim()) return command.replace(/\s+/g, " ").trim().slice(0, 300);
   const tool = String(p.tool ?? p.name ?? "").trim();
   if (!tool) return null;
-  return `${tool}: ${String(p.summary ?? "").replace(/\s+/g, " ").trim().slice(0, 200)}`;
+  const summary = String(p.summary ?? "").replace(/\s+/g, " ").trim();
+  // "Edit: Edit: tests/x.py" said the tool twice when the summary already names it
+  const label = summary.toLowerCase().startsWith(`${tool.toLowerCase()}:`) ? summary.slice(0, 200) : `${tool}: ${summary.slice(0, 200)}`;
+  // an edit is the same call only if it changes the same thing the same way: five edits to one file are work
+  const input = p.input as Record<string, unknown> | undefined;
+  if (isWrite(tool) && input) {
+    const change = [input.old_string, input.new_string, input.content, input.edits, input.patch].filter((x) => x !== undefined);
+    if (change.length) return `${label} #${hash(JSON.stringify(change))}`;
+  }
+  return label;
+}
+
+const WRITE_TOOLS = /^(?:edit|multiedit|write|str_replace(?:_editor)?|apply_patch|write_file|notebookedit|file_change|patch)$/i;
+const isWrite = (tool: string) => WRITE_TOOLS.test(tool);
+
+function hash(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(36);
 }
 
 export class LoopWatch {
@@ -69,7 +87,9 @@ export class LoopWatch {
       turn.said.add(`f:${sig}`);
       return { agentId: e.agentId, chat, kind: "failing", call: sig, count: c.failed, ...(output ? { output } : {}) };
     }
-    if (c.n === REPEATING_AT && !turn.said.has(`f:${sig}`) && !turn.said.has(`r:${sig}`)) {
+    // an edit we can't tell apart from the last (no input logged) never counts as repeating — only failing does (#286)
+    const blindWrite = isWrite(String(p.tool ?? p.name ?? "").trim()) && !/ #[0-9a-z]+$/.test(sig);
+    if (!blindWrite && c.n === REPEATING_AT && !turn.said.has(`f:${sig}`) && !turn.said.has(`r:${sig}`)) {
       turn.said.add(`r:${sig}`);
       return { agentId: e.agentId, chat, kind: "repeating", call: sig, count: c.n };
     }

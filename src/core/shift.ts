@@ -51,6 +51,8 @@ export interface TaskOutcome {
   ms: number;
   error?: string;
   question?: string;
+  /** What cut its turn short, when something did (the shield, the loop watch, Stop, a quota). */
+  stopped?: string;
 }
 
 export interface ShiftReport {
@@ -71,6 +73,8 @@ export function outcomeOf(task: ShiftTask, events: LoomEvent[], opts: { queued?:
   if (opts.queued || task.skipped) return base;
   const files = new Set<string>();
   let lastDone: LoomEvent | undefined, lastProof: LoomEvent | undefined, lastAsk: LoomEvent | undefined, lastSay: LoomEvent | undefined, lastAnswer: LoomEvent | undefined, lastError: LoomEvent | undefined;
+  // what stopped a turn short, said plainly — not "was Loom restarted?" when the shield did it (#288)
+  let stoppedBy: { id: number; why: string } | undefined;
   for (const e of events) {
     const p = e.payload ?? {};
     if (e.kind === "run_complete" && e.agentId) { lastDone = e; base.ms += Number(p.durationMs ?? 0) || 0; base.agent = e.agentId; }
@@ -80,7 +84,10 @@ export function outcomeOf(task: ShiftTask, events: LoomEvent[], opts: { queued?:
     else if (e.kind === "error" && e.agentId) lastError = e;
     else if (e.kind === "turn_diff") for (const f of (p.files as Array<{ path: string }> | undefined) ?? []) files.add(f.path);
     else if (e.kind === "status" && p.state === "question_answered") lastAnswer = e;
-    else if (e.kind === "status" && p.state === "loop_detected") base.loops++;
+    else if (e.kind === "status" && p.state === "loop_detected") { base.loops++; if (p.nudged) stoppedBy = { id: e.id, why: `the loop watch stopped it to nudge it (${String(p.call ?? "").slice(0, 80)})` }; }
+    else if (e.kind === "status" && p.state === "shield_tripped" && p.stopped) stoppedBy = { id: e.id, why: `the Blast-Radius Shield stopped it: it ran ${String(p.what ?? "something that can't be undone")}` };
+    else if (e.kind === "status" && (p.state === "interrupted" || p.state === "stopped") && (!stoppedBy || stoppedBy.id < Math.max(lastSay?.id ?? 0, lastDone?.id ?? 0))) stoppedBy = { id: e.id, why: "its turn was stopped" };
+    else if (e.kind === "status" && (p.state === "quota_relay" || p.state === "quota_limit")) stoppedBy = { id: e.id, why: String(p.text ?? "it ran out of quota") };
     else if (e.kind === "status" && p.state === "turn_cost") base.costUsd += Number(p.costUsd ?? 0) || 0;
   }
   base.files = [...files];
@@ -95,7 +102,8 @@ export function outcomeOf(task: ShiftTask, events: LoomEvent[], opts: { queued?:
   if (lastAsk && (!lastSay || lastAsk.id > lastSay.id) && (!lastAnswer || lastAsk.id > lastAnswer.id)) {
     return { ...base, status: "needs_you", agent: lastAsk.agentId ?? base.agent, question: String(lastAsk.payload.question ?? "") };
   }
-  if (!lastDone) return { ...base, status: lastSay ? "running" : "not_started" };
+  const cut = stoppedBy && (!lastDone || stoppedBy.id > lastDone.id) ? { stopped: stoppedBy.why } : {};
+  if (!lastDone) return { ...base, status: lastSay ? "running" : "not_started", ...cut };
   // Proof only counts when it checked the last turn (a nudge can come after it)
   if (lastProof && lastProof.id > lastDone.id) {
     const v = String(lastProof.payload.verdict ?? "");

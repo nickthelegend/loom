@@ -481,6 +481,12 @@ export class RouteEngine {
     if (note) r.reason = note;
     r.costUsd = this.routeCost(r);
     this.write(r);
+    // a route that ends on a reviewer gives the baton back to the step before it that did the work — the
+    // conversation is the builder's, not left with whoever checked it last (#292)
+    const reviewing = (i: number) => /review|test|qa|audit|check/i.test(String(r.stepRoles?.[i] ?? ""));
+    const lastAt = Math.min(r.current, r.steps.length - 1);
+    let giveBack: string | undefined;
+    if (reviewing(lastAt)) for (let i = lastAt - 1; i >= 0; i--) if (!reviewing(i) && r.steps[i] !== r.steps[lastAt]) { giveBack = r.steps[i]; break; }
     this.host.log.append({
       kind: "route_completed",
       payload: {
@@ -489,8 +495,10 @@ export class RouteEngine {
         task: r.task,
         costUsd: r.costUsd,
         ...(note ? { note } : {}),
+        ...(giveBack ? { batonTo: giveBack } : {}),
       },
     });
+    if (giveBack) void this.host.handoff(giveBack).catch(() => { /* the baton stays where it is: still a finished route */ });
     notify({
       title: `Loom · ${this.host.projectName}`,
       body: `route complete: ${r.steps.join(" → ")}`,

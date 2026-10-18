@@ -57,6 +57,23 @@ describe("the watch", () => {
     expect(signature({ tool: "bash", input: { command: "pytest -x" } })).toBe("pytest -x");
   });
 
+  it("five different edits to one file are work, not a loop — and the label names the tool once (#286)", () => {
+    const w = new LoopWatch();
+    const edit = (extra: Record<string, unknown> = {}) => ev("tool_call", { tool: "Edit", summary: "Edit: tests/test_mimic.py", ok: true, ...extra });
+    for (let i = 0; i < 8; i++) expect(w.observe(edit())).toBeNull();
+    // the same change made over and over, when the input says so, is a loop
+    const same = new LoopWatch();
+    let hit = null;
+    for (let i = 0; i < REPEATING_AT; i++) hit = same.observe(edit({ input: { old_string: "a", new_string: "b" } }));
+    expect(hit).toMatchObject({ kind: "repeating" });
+    expect(hit!.call).toMatch(/^Edit: tests\/test_mimic\.py #/);
+    // and a failing edit still counts as failing
+    const failing = new LoopWatch();
+    let f = null;
+    for (let i = 0; i < FAILING_AT; i++) f = failing.observe(edit({ ok: false, error: "old_string not found" }));
+    expect(f).toMatchObject({ kind: "failing" });
+  });
+
   it("starts over when the turn ends, it's stopped, or a person speaks", () => {
     const w = new LoopWatch();
     w.observe(failing()); w.observe(failing());

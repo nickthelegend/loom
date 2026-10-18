@@ -55,6 +55,9 @@ const slim = (t: ReviewTarget): ReviewState["target"] => (t.kind === "file" ? { 
 export class ReviewRunner {
   private pending = new Map<string, { chat: string; target: ReviewState["target"]; agents: string[]; settled: Map<string, { ok: boolean; message?: string }>; startedAt: number }>();
 
+  /** Reviews still waiting on a reviewer. */
+  get running(): number { return this.pending.size; }
+
   constructor(private readonly host: ReviewHost) {
     // a review the daemon restarted under will never hear back: close it, saying so
     for (const e of host.list({ kinds: ["review"] })) {

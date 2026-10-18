@@ -40,6 +40,8 @@ export interface RelayHost {
   list(opts: { chat?: string; limit?: number; kinds?: EventKind[] }): LoomEvent[];
   append(e: { kind: EventKind; agentId?: string; chat?: string; payload: Record<string, unknown> }): LoomEvent;
   warn(message: string, detail?: unknown): void;
+  /** Is this agent running a subtask (a review) rather than a turn of its own? */
+  inSubtask?(agentId: string): boolean;
 }
 
 /** Kinds that are subscriptions with windows, not metered APIs — safe to hand work to by default. */
@@ -118,6 +120,13 @@ export class QuotaRelay {
     const where = chat === MAIN_CHAT ? undefined : chat;
     const back = backAt(hit.resetAt);
 
+    // a reviewer out of quota is just a reviewer that didn't finish: its read-only review isn't
+    // handed to another agent as a turn of that agent's own — the planner, in a council (#289)
+    if (this.host.inSubtask?.(agentId)) {
+      this.host.append({ kind: "status", agentId, chat: where, payload: { state: "quota_limit", resetAt: hit.resetAt, known: hit.known,
+        reason: hit.reason, text: `${agentId} ran out of quota during its review${hit.known ? ` (back ${back})` : ""} — it's left out of this one` } });
+      return;
+    }
     if (this.host.config().relay?.auto === false || !request) {
       this.host.append({ kind: "status", agentId, chat: where, payload: { state: "quota_limit", resetAt: hit.resetAt, known: hit.known,
         reason: hit.reason, text: `${agentId} is out of quota${hit.known ? ` until ${back}` : ""}; the work waits${request ? " (relay is off)" : ""}` } });

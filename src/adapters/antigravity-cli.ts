@@ -225,7 +225,7 @@ export class AntigravityCliAdapter extends AdapterBase {
 
           if (message) {
             this.emit({ kind: "message", payload: { text: message } });
-            this.emitFileEdits(message);
+            this.emitFileEdits(message, started);
           }
 
           // Capture the conversation id agy just wrote for this dir, so the next
@@ -264,12 +264,12 @@ export class AntigravityCliAdapter extends AdapterBase {
    * without a structured stream. Surface each once as a file_edit so the diff
    * view and activity feed aren't blind to what changed.
    */
-  private emitFileEdits(message: string): void {
+  private emitFileEdits(message: string, since: number): void {
     const seen = new Set<string>();
     const re = /\[[^\]]+\]\(file:\/\/([^)\s]+)\)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(message)) !== null) {
-      let p = m[1]!;
+      let p = m[1]!.replace(/#.*$/, ""); // a #L174 anchor points into the file; it isn't part of it
       try {
         p = decodeURIComponent(p);
       } catch {
@@ -277,6 +277,9 @@ export class AntigravityCliAdapter extends AdapterBase {
       }
       if (seen.has(p)) continue;
       seen.add(p);
+      // agy links every file it talks about, read or written: only one it changed this turn is an edit (#290)
+      const stat = fs.statSync(p, { throwIfNoEntry: false });
+      if (!stat?.isFile() || stat.mtimeMs < since - 1000) continue;
       this.emit({ kind: "file_edit", payload: { path: p, tool: "agy" } });
     }
   }

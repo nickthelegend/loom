@@ -220,18 +220,44 @@ export function teammatesFromTemplate(template: string, roster: AgentConfig[]): 
   const slots = TEMPLATES[template];
   if (!slots) throw new Error(`no crew template "${template}" (${CREW_TEMPLATES.join(", ")})`);
   if (!roster.length) throw new Error("this project has no agents to put on a crew");
-  const byKind = (kind: string) => roster.find((a) => a.kind === kind);
+  const byKind = (kind: string, among = roster) => among.find((a) => a.kind === kind);
+  // the project already said who does what: writers build and lead, reviewers review (#283)
+  const said = (a: AgentConfig) => String(a.role ?? "").toLowerCase();
+  const writes = (a: AgentConfig) => a.kind !== "model" || Boolean((a.options as { write?: unknown } | undefined)?.write);
+  const reviews = (a: AgentConfig) => /review|test|qa|audit/.test(said(a)) && !/execut|build|implement|lead|plan/.test(said(a));
+  const fits = (role: CrewRole): AgentConfig[] => {
+    if (role === "builder" || role === "lead") return roster.filter((a) => writes(a) && /execut|build|implement|lead|plan|writ|cod/.test(said(a)));
+    if (role === "reviewer" || role === "tester") return roster.filter(reviews);
+    return [];
+  };
   const out: CrewTeammate[] = [];
   for (const s of slots) {
-    let pick = s.prefer.map(byKind).find(Boolean) ?? roster[0]!;
+    const fit = fits(s.role);
+    let pick = (fit.length ? s.prefer.map((k) => byKind(k, fit)).find(Boolean) ?? fit[0] : undefined)
+      ?? s.prefer.map((k) => byKind(k, s.role === "builder" || s.role === "lead" ? roster.filter((a) => writes(a) && !reviews(a)) : roster)).find(Boolean)
+      ?? s.prefer.map((k) => byKind(k)).find(Boolean) ?? roster[0]!;
     if (s.role === "reviewer") {
       const builderKinds = new Set(out.filter((t) => t.role === "builder").map((t) => roster.find((a) => a.id === t.agent)?.kind));
-      const other = roster.find((a) => !builderKinds.has(a.kind) && s.prefer.includes(a.kind)) ?? roster.find((a) => !builderKinds.has(a.kind));
+      const pool = fit.length ? fit : roster;
+      const other = pool.find((a) => !builderKinds.has(a.kind) && s.prefer.includes(a.kind)) ?? pool.find((a) => !builderKinds.has(a.kind));
       if (other) pick = other;
     }
     out.push({ id: s.id, agent: pick.id, role: s.role, ...(s.charter ? { charter: s.charter } : {}) });
   }
   return out;
+}
+
+/** Who sits where, when you say so: `--lead`, `--builders a,b`, `--reviewer`, `--tester` on create. */
+export interface CrewSeats { lead?: string; builders?: string[]; reviewer?: string; tester?: string }
+
+/** The template's seats, with the ones you named filled by those agents (builders in turn). */
+export function seatCrew(teammates: CrewTeammate[], seats?: CrewSeats): CrewTeammate[] {
+  if (!seats) return teammates;
+  let b = 0;
+  return teammates.map((t) => {
+    const agent = t.role === "lead" ? seats.lead : t.role === "builder" && seats.builders?.length ? seats.builders[b++ % seats.builders.length] : t.role === "reviewer" ? seats.reviewer : t.role === "tester" ? seats.tester : undefined;
+    return agent ? { ...t, agent } : t;
+  });
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "crew";
@@ -263,6 +289,8 @@ export class CrewEngine {
     return [...this.agents.values()].find((a) => a.id === instanceId);
   }
   private running = new Set<string>();
+  /** Crews working right now (for "is this project busy"). */
+  get workingCrews(): string[] { return [...this.running]; }
   private turnText = new Map<string, string>();
   private turnError = new Map<string, string>();
   private turnQuestion = new Map<string, string>();
@@ -311,9 +339,9 @@ export class CrewEngine {
       active: [...this.activeTurns.values()].filter(t => t.crew === id).map(({ crew: _crew, ...turn }) => turn) };
   }
 
-  create(input: { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number; budgetUsd?: number }): CrewView {
+  create(input: { name?: string; template?: string; teammates?: CrewTeammate[]; seats?: CrewSeats; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number; budgetUsd?: number }): CrewView {
     const roster = this.host.roster();
-    const teammates = input.teammates?.length ? input.teammates : teammatesFromTemplate(input.template ?? "ship", roster);
+    const teammates = input.teammates?.length ? input.teammates : seatCrew(teammatesFromTemplate(input.template ?? "ship", roster), input.seats);
     this.validate(teammates, roster);
     const name = (input.name ?? "").trim() || `${(input.template ?? "ship").replace(/^./, (c) => c.toUpperCase())} crew`;
     const existing = this.host.crews();
@@ -878,9 +906,12 @@ export class CrewEngine {
     const timer = this.teamRechecks.get(id); if (timer) clearTimeout(timer); this.teamRechecks.delete(id);
     this.save(st); this.phase(cfg, st, "pause_requested", {}); return g;
   }
-  raiseBudget(id: string, amount: number): CrewGoal {
+  raiseBudget(id: string, amount: number): CrewGoal | null {
     const cfg = this.config(id), st = this.state(cfg), g = st.goal;
-    if (!g || !Number.isFinite(amount) || amount <= g.costUsd || amount > 100000) throw new Error("the new budget must exceed the goal's current spend");
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) throw new Error("a budget is a dollar amount above 0");
+    // no goal yet (or the last one is over): it's the budget the next goal starts with (#284)
+    if (!g || ["completed", "failed", "stopped"].includes(g.status)) { this.update(id, { budgetUsd: amount }); return g ?? null; }
+    if (amount <= g.costUsd) throw new Error(`the goal has already spent $${g.costUsd.toFixed(2)} — a new budget must be more than that`);
     const cap = this.host.policy?.()?.budgets.perGoalUsd;
     if (cap && amount > cap) throw new Error("the requested budget exceeds reviewed team policy");
     g.budgetUsd = amount; this.save(st); this.phase(cfg, st, "budget_changed", { budgetUsd: amount }); return g;

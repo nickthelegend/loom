@@ -133,7 +133,7 @@ export function formatEvent(e: LoomEvent): string | null {
 
 export function formatProjectRow(p: ProjectStatus): string {
   // an agent mid-turn is working, whatever the last event was (#252)
-  const working = (p.agents ?? []).filter((a) => a.busy).map((a) => a.id);
+  const working = [...(p.agents ?? []).filter((a) => a.busy).map((a) => a.id), ...(p.activity ?? [])];
   const flag = p.needsInput ? pc.yellow("● needs input") : working.length ? pc.cyan(`◐ working (${working.join(", ")})`) : pc.dim("○ idle");
   const holder = p.holder ? agentColor(p.holder)(p.holder) : pc.dim("—");
   const last = p.lastEvent

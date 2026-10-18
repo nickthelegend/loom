@@ -21,6 +21,8 @@ export interface DigestLine {
   /** The event this came from, so a click can go there. */
   eventId: number;
   chat?: string;
+  /** The same thing happened this many times (shown once, newest moment). */
+  count?: number;
 }
 
 export interface Digest {
@@ -102,6 +104,15 @@ export function digest(events: LoomEvent[], since: number, agentLabel: (id: stri
 
   // Newest first: the last thing that happened is the thing you want first.
   lines.sort((a, b) => b.at - a.at);
+  // the same error three times is one line that says ×3 (#297)
+  for (let i = 0; i < lines.length; i++) {
+    for (let j = lines.length - 1; j > i; j--) {
+      if (lines[j]!.kind === lines[i]!.kind && lines[j]!.text === lines[i]!.text) {
+        lines[i]!.count = (lines[i]!.count ?? 1) + (lines[j]!.count ?? 1);
+        lines.splice(j, 1);
+      }
+    }
+  }
   if (costUsd > 0 || turns > 0) {
     lines.unshift({
       at: Date.now(),
