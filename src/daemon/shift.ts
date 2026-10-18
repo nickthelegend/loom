@@ -43,6 +43,7 @@ export interface StartShift { tasks: string | string[]; to?: string; until?: str
 export const SETTLE_MS = 3000;
 /** ...and the tasks' own chats must have been quiet this long: a task can be between an interrupt and its next start (#302). */
 export const CHAT_QUIET_MS = 15_000;
+const chatQuietMs = () => Number(process.env.LOOM_SHIFT_QUIET_MS) || CHAT_QUIET_MS;
 const CHECK_MS = 1000;
 
 interface Saved { current?: ShiftConfig | null; last?: ShiftReport | null }
@@ -144,7 +145,7 @@ export class NightShift {
 
   /** Has any task's chat moved in the last CHAT_QUIET_MS? Then the shift isn't over, whatever "busy" said a moment ago. */
   private chatsBusy(s: ShiftConfig): boolean {
-    const since = Date.now() - CHAT_QUIET_MS;
+    const since = Date.now() - chatQuietMs();
     return s.tasks.some((t) => !t.skipped && this.host.list({ chat: t.chat, sinceTs: since, limit: 1 }).length > 0);
   }
 

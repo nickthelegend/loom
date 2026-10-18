@@ -18,6 +18,8 @@ export default defineConfig({
       LOOM_TEST_RUN_ID: `${process.pid}-${Date.now()}`,
       // cost estimates read a saved price list; tests never fetch one
       LOOM_NO_PRICE_FETCH: "1",
+      // a night shift waits for its chats to go quiet before it reports; 15s in life, 2s here
+      LOOM_SHIFT_QUIET_MS: "2000",
       // the in-process test hub answers slowly when a Windows runner is starved
       ...(process.platform === "win32" && process.env.CI ? { LOOM_HUB_TIMEOUT_MS: "60000" } : {}),
       GIT_CONFIG_GLOBAL: path.resolve("test/gitconfig"),
