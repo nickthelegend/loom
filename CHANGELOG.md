@@ -16,10 +16,12 @@ From the 1.2.0 field test: a full `loom council` run on a real project.
 - **The council's fix round gets every finding**, low ones included; the planner rejects what it won't do, out loud (#277).
 - **A reviewer that answers with nothing is a failed reviewer**, not a finished one (#278).
 - **Plans go to `.loom/plans/`**, not a new `plans/` folder in your repo (#279).
+- **Proof re-runs only the test part of the command the turn ran**: `pytest | tail -3` exits with tail's status, so re-running it whole would pass whatever the tests did. Pytest's `-q` summary line ("52 passed in 24.43s") is now counted (#276).
 - **Grok shows as signed out when its session has expired**, and `loom doctor` reports a sign-in failure a real turn hit, remembered across restarts (#274).
 
 ### Added
 
+- A reviewer that takes longer than `review.timeoutMin` (default 15 minutes) is stopped and left out of the review, so one slow free model doesn't hold up a council.
 - `loom send` warns before resuming a 100k+ token session whose prompt cache has likely expired, with the re-read's estimated cost; `--fresh` starts the agent's session in that chat over (#280).
 
 ## [1.2.0] — 2026-10-17

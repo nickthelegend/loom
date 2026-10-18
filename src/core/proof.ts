@@ -180,8 +180,8 @@ export function parseCounts(output: string): Counts | null {
     const n = (w: string) => Number(new RegExp(String.raw`(?:#|ℹ)\s+${w}\s+(\d+)`).exec(o)?.[1] ?? 0);
     return { passed: n("pass"), failed: n("fail"), skipped: n("skipped"), total: n("tests") || undefined };
   }
-  // pytest: "=== 3 passed, 1 failed, 2 skipped in 0.12s ==="
-  if ((m = /=+\s*((?:\d+\s+\w+(?:,\s*)?)+)\s+in\s+[\d.]+s/.exec(o))) {
+  // pytest: "=== 3 passed, 1 failed, 2 skipped in 0.12s ===", or with -q just "52 passed in 24.43s"
+  if ((m = /(?:=+\s*|^\s*)((?:\d+\s+(?:passed|failed|skipped|errors?|warnings?|xfailed|xpassed|deselected)(?:,\s*)?)+)\s+in\s+[\d.]+s/m.exec(o))) {
     const part = (w: string) => Number(new RegExp(String.raw`(\d+)\s+${w}`).exec(m![1]!)?.[1] ?? 0);
     return { passed: part("passed"), failed: part("failed") + part("error"), skipped: part("skipped") };
   }
@@ -257,20 +257,38 @@ export function detectTestCommand(dir: string): string | null {
 
 /**
  * The test command the turn itself ran and passed — better than a guess, since
- * it's the one that works on this machine. A leading `cd <the project> &&` is
- * dropped so it runs in the clean checkout instead.
+ * it's the one that works on this machine. Only the test segment is kept: a
+ * `cd <the project> &&` before it is dropped so it runs in the clean checkout,
+ * and so is everything piped after it — `pytest | tail -3` exits with tail's
+ * status, so re-running it whole would pass whatever the tests did (#276).
  */
 export function ranTestCommand(ran: Ran[], projectDir: string): string | null {
-  const last = [...ran].reverse().find((r) => r.kind === "tests" && r.ok && (r.exitCode === 0 || r.exitCode === null));
-  if (!last) return null;
-  let cmd = last.command.trim();
-  const cd = /^cd\s+("([^"]+)"|'([^']+)'|(\S+))\s*&&\s*/.exec(cmd);
-  if (cd) {
-    const target = (cd[2] ?? cd[3] ?? cd[4] ?? "").replace(/\\ /g, " ");
-    if (target === "." || path.resolve(projectDir, target) === path.resolve(projectDir)) cmd = cmd.slice(cd[0].length);
-    else return null; // it ran somewhere else: not this project's tests
+  for (const r of [...ran].reverse()) {
+    if (r.kind !== "tests" || !r.ok || (r.exitCode !== 0 && r.exitCode !== null)) continue;
+    const seg = testSegment(r.command, projectDir);
+    if (seg) return seg;
   }
-  return cmd || null;
+  return null;
+}
+
+const TESTS_RE = RUNS.find((x) => x.kind === "tests")!.re;
+
+/** The part of a shell line that runs the tests, in the project — or null. */
+function testSegment(command: string, projectDir: string): string | null {
+  let elsewhere = false, found: string | null = null;
+  for (const raw of command.split(/\s*(?:&&|\|\||;|\|)\s*/)) {
+    const part = raw.trim();
+    const cd = /^cd\s+("([^"]+)"|'([^']+)'|(\S+))$/.exec(part);
+    if (cd) {
+      const target = (cd[2] ?? cd[3] ?? cd[4] ?? "").replace(/\\ /g, " ");
+      elsewhere = !(target === "." || path.resolve(projectDir, target) === path.resolve(projectDir));
+      continue;
+    }
+    const bare = part.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "").replace(/^(?:time|env|nice|exec|timeout\s+\S+)\s+/, "");
+    if (!elsewhere && TESTS_RE.test(bare)) found = part;
+  }
+  // its output redirections go too: the re-run captures output itself
+  return found ? found.replace(/\s*\d?>&\d\b/g, "").replace(/\s*(?:\d|&)?>>?\s*\S+/g, "").trim() || null : null;
 }
 
 /** A re-run that never got as far as the tests: the command (or its interpreter) wasn't found or couldn't execute. */

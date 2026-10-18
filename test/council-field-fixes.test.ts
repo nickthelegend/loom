@@ -10,7 +10,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { compareWithDaemon, type Check } from "../src/cli/doctor.js";
 import { fixPrompt, parseVerdicts, proofStage } from "../src/core/council.js";
 import { coldResume, priceBookFrom } from "../src/core/prices.js";
-import { couldNotRun, detectTestCommand, judge, ranTestCommand, type Ran } from "../src/core/proof.js";
+import { couldNotRun, detectTestCommand, judge, parseCounts, ranTestCommand, type Ran } from "../src/core/proof.js";
 import { writeProjectConfig } from "../src/core/registry.js";
 import { grokAuth } from "../src/core/setup.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
@@ -46,6 +46,10 @@ describe("#276 Proof runs the tests that work here, and can tell 'couldn't run' 
     expect(ranTestCommand([ran("npm test"), ran("npm run lint", true, "lint")], project)).toBe("npm test");
     expect(ranTestCommand([ran("npm test", false)], project)).toBeNull();
     expect(ranTestCommand([ran("cd /elsewhere && npm test")], project)).toBeNull();
+    // only the test segment: a pipe into tail would pass whatever the tests did; other steps and redirections go too
+    expect(ranTestCommand([ran(`cd "${project}" && git status --short && .venv/bin/python -m pytest -q 2>&1 | tail -3`)], project)).toBe(".venv/bin/python -m pytest -q");
+    expect(ranTestCommand([ran("CI=1 npx vitest run > out.txt; echo done")], project)).toBe("CI=1 npx vitest run");
+    expect(ranTestCommand([ran("npm run build && npm test")], project)).toBe("npm test");
   });
 
   it("a guessed Python command uses the project's venv, else python3", () => {
@@ -55,6 +59,11 @@ describe("#276 Proof runs the tests that work here, and can tell 'couldn't run' 
     fs.mkdirSync(path.join(dir, ".venv", process.platform === "win32" ? "Scripts" : "bin"), { recursive: true });
     fs.writeFileSync(path.join(dir, ".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python"), "");
     expect(detectTestCommand(dir)).toBe(path.join(".venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python") + " -m pytest -q");
+  });
+
+  it("reads pytest -q's bare summary line", () => {
+    expect(parseCounts("....\n52 passed in 24.43s\n")).toEqual({ passed: 52, failed: 0, skipped: 0 });
+    expect(parseCounts("FF.\n2 failed, 1 passed, 3 warnings in 0.50s\n")).toEqual({ passed: 1, failed: 2, skipped: 0 });
   });
 
   it("command not found is unverified, never 'the tests fail'", () => {
@@ -142,6 +151,29 @@ describe("in a project", () => {
     expect(res.summary).toBe("1 reviewer (1 failed) · no findings");
     void r;
   }, 30_000);
+
+  it("a reviewer that takes too long is stopped and left out; the others' findings still land", async () => {
+    const { ReviewRunner } = await import("../src/daemon/review.js");
+    const appended: Array<{ payload: Record<string, unknown> }> = [];
+    const stopped: string[] = [];
+    const host = { hasAgent: () => true, canReview: () => true, holder: () => undefined, createChat: () => ({ id: "c" }), maxReviewers: 4, decide: () => {},
+      reviewerTimeoutMs: () => 80, stopReviewer: async (a: string) => { stopped.push(a); },
+      // codex answers at once; openrouter never does (and answers late, after it was left out)
+      spawn: async (_p: string, o: { agentId: string; onSettled: (x: { ok: boolean }) => void }) => {
+        setTimeout(() => o.onSettled({ ok: true }), o.agentId === "codex" ? 5 : 400);
+      },
+      list: (opts: { agentId?: string }) => (opts.agentId === "codex" ? [{ id: 1, ts: Date.now(), kind: "message", agentId: "codex", payload: { text: "- [high] a.ts:1 — bug" } }] : []) as never[],
+      append: (e: never) => { appended.push(e); return e; } };
+    await new ReviewRunner(host as never).start({ agents: ["codex", "openrouter"], target: { kind: "text", text: "x" } });
+    await waitUntil(() => appended.some((e) => e.payload.phase === "done"));
+    const res = appended.find((e) => e.payload.phase === "done")!.payload as { results: Array<{ agent: string; status: string; error?: string }>; findings: unknown[] };
+    expect(res.results.map((r) => [r.agent, r.status])).toEqual([["codex", "done"], ["openrouter", "failed"]]);
+    expect(res.results[1]!.error).toMatch(/took longer than 0s — left out/);
+    expect(res.findings).toHaveLength(1);
+    expect(stopped).toEqual(["openrouter"]);
+    await new Promise((r) => setTimeout(r, 450)); // its late answer changes nothing
+    expect(appended.filter((e) => e.payload.phase === "done")).toHaveLength(1);
+  });
 
   it("#274 a sign-in failure is remembered across a restart, until a turn succeeds", async () => {
     const info = await project();

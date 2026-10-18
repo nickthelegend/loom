@@ -27,6 +27,10 @@ export interface ReviewHost {
   append(e: NewEvent): LoomEvent;
   decide(text: string): void;
   maxReviewers: number;
+  /** How long one reviewer may take (ms); past it, it's stopped and left out so the others' findings land. */
+  reviewerTimeoutMs?: () => number;
+  /** Stop a reviewer that ran out of time. */
+  stopReviewer?: (agentId: string) => Promise<unknown>;
 }
 
 export interface ReviewResult {
@@ -87,11 +91,22 @@ export class ReviewRunner {
     this.pending.set(reviewId, run);
     this.host.append({ kind: "review", chat, payload: { phase: "started", reviewId, chat, target, agents, ...(input.focus ? { focus: input.focus } : {}) } });
     const task = reviewPrompt(input.target, input.focus);
+    const limit = this.host.reviewerTimeoutMs?.() ?? 15 * 60_000;
     for (const agentId of agents) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const settle = (o: { ok: boolean; message?: string }) => {
+        if (timer) clearTimeout(timer);
+        if (run.settled.has(agentId)) return; // a late answer after the time ran out
         run.settled.set(agentId, o);
         if (run.settled.size === agents.length && this.pending.delete(reviewId)) this.finish(reviewId, chat, target, agents, run.settled, run.startedAt);
       };
+      // one slow reviewer (a free model in a queue) shouldn't hold everyone's findings hostage
+      timer = setTimeout(() => {
+        const took = limit >= 60_000 ? `${Math.round(limit / 60_000)} min` : `${Math.round(limit / 1000)}s`;
+        settle({ ok: false, message: `took longer than ${took} — left out (review.timeoutMin in .loom/config.json)` });
+        void this.host.stopReviewer?.(agentId).catch(() => {});
+      }, limit);
+      timer.unref?.();
       try {
         await this.host.spawn(parent, { agentId, task, chat, readOnly: true, onSettled: settle });
       } catch (err) {

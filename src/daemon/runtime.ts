@@ -462,6 +462,11 @@ export class ProjectRuntime {
         this.brain.add({ kind: "decision", text, provenance: { agentId: "user", eventId: event.id, ts: event.ts } });
       },
       maxReviewers: ProjectRuntime.MAX_CONCURRENT_SUBTASKS,
+      reviewerTimeoutMs: () => Math.max(1, Number(this.config.review?.timeoutMin) || 15) * 60_000,
+      stopReviewer: async (agentId) => {
+        const a = this.agents.get(agentId);
+        if (a && isAdapter(a) && a.busy()) await a.interrupt();
+      },
     });
     this.councils = new CouncilRunner({
       hasAgent: (id) => this.config.agents.some((a) => a.id === id),
