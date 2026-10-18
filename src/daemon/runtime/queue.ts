@@ -185,9 +185,22 @@ export class RuntimeQueue {
     queueMicrotask(() => void this.drainPromptQueue());
   }
 
+  private holds = 0;
+
+  /**
+   * Keep the queue still while a follow-up to the turn just stopped goes in (a loop nudge, a hand-off):
+   * otherwise the next queued task starts in the gap, on the same tree, and the follow-up lands after it (#285).
+   * Returns the release.
+   */
+  hold(): () => void {
+    this.holds++;
+    let released = false;
+    return () => { if (released) return; released = true; this.holds--; this.kickQueue(); };
+  }
+
   /** Send the head of the queue if it may go; then look again. */
   async drainPromptQueue(): Promise<void> {
-    if (this.host.closed || this.draining || this.host.queue.paused) return;
+    if (this.host.closed || this.draining || this.holds > 0 || this.host.queue.paused) return;
     const head = this.host.queue.peek();
     if (!head || this.queueBlocker(head)) return;
     this.draining = true;

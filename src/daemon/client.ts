@@ -668,7 +668,7 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/servers/${encodeURIComponent(name)}/log?limit=${limit}`);
   }
 
-  digest(id: string, since: number): Promise<{ since: number; lines: Array<{ at: number; kind: string; text: string; eventId: number; chat?: string }>; turns: number; costUsd: number; waiting: string[] }> {
+  digest(id: string, since: number): Promise<{ since: number; lines: Array<{ at: number; kind: string; text: string; eventId: number; chat?: string; count?: number }>; turns: number; costUsd: number; waiting: string[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/digest?since=${since}`);
   }
 

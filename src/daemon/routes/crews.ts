@@ -31,10 +31,12 @@ export function registerCrewsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.post(
     "/api/projects/:id/crews",
     withRuntime(async (rt, req, res) => {
-      const b = (req.body ?? {}) as { name?: string; template?: string; teammates?: CrewTeammate[]; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number; budgetUsd?: number };
+      const b = (req.body ?? {}) as { name?: string; template?: string; teammates?: CrewTeammate[]; seats?: { lead?: string; builders?: string[]; reviewer?: string; tester?: string }; planApproval?: boolean; testCommand?: string; play?: CrewConfig["play"]; maxParallel?: number; budgetUsd?: number };
       try {
         res.json({ crew: rt.crews.create({
           ...(b.name ? { name: String(b.name) } : {}),
+          ...(b.seats && typeof b.seats === "object" ? { seats: { ...(b.seats.lead ? { lead: String(b.seats.lead) } : {}), ...(Array.isArray(b.seats.builders) ? { builders: b.seats.builders.map(String) } : {}),
+            ...(b.seats.reviewer ? { reviewer: String(b.seats.reviewer) } : {}), ...(b.seats.tester ? { tester: String(b.seats.tester) } : {}) } } : {}),
           ...(b.template ? { template: String(b.template) } : {}),
           ...(Array.isArray(b.teammates) ? { teammates: b.teammates } : {}),
           ...(typeof b.planApproval === "boolean" ? { planApproval: b.planApproval } : {}),

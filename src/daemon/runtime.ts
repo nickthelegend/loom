@@ -350,6 +350,7 @@ export class ProjectRuntime {
       projectId: info.id,
       projectName: info.name,
       projectDir: info.dir,
+      worktreeDir: () => (this.config as { orchestra?: { worktreeDir?: string } }).orchestra?.worktreeDir,
       roster: () =>
         this.config.agents.filter(
           (a) => a.enabled !== false && tierForKind(a.kind) === "adapter" && !isWithdrawnKind(a.kind),
@@ -595,6 +596,8 @@ export class ProjectRuntime {
     rt.configMtime = configMtimeOf(info.dir);
     rt.rehydrateCosts();
     rt.rehydrateSignIns();
+    // finished orchestra runs older than a week give their disk back (#295)
+    setTimeout(() => void (rt.closed ? Promise.resolve([] as string[]) : rt.orchestra.sweep()).then((ids) => { if (ids.length) logbook.info("orchestra", `removed the worktrees of ${ids.length} finished run(s)`, ids.join(", "), rt.info.id); }).catch(() => {}), 30_000).unref?.();
     // Pull each connected ADE's native memory into the shared brain on open.
     try {
       rt.importMemories();
@@ -2620,6 +2623,14 @@ export class ProjectRuntime {
 
   /** The loop card's buttons: stop the turn, nudge the agent, or hand the task to another agent. */
   async actOnLoop(chat: string, agentId: string, action: "stop" | "nudge" | "handoff", to?: string, loop?: Loop): Promise<{ done: string; to?: string }> {
+    if (action !== "stop") {
+      const release = this.queueCoordinator.hold();
+      try { return await this.actOnLoopNow(chat, agentId, action, to, loop); } finally { release(); }
+    }
+    return this.actOnLoopNow(chat, agentId, action, to, loop);
+  }
+
+  private async actOnLoopNow(chat: string, agentId: string, action: "stop" | "nudge" | "handoff", to?: string, loop?: Loop): Promise<{ done: string; to?: string }> {
     const card = loop ?? this.lastLoop(chat, agentId);
     await this.interrupt({ chat, source: "route" });
     if (action === "stop") return { done: "stopped" };
@@ -3285,7 +3296,19 @@ export class ProjectRuntime {
       // "the self-heal did nothing".
       quarantine: this.quarantined(),
       orchestra: this.orchestraSummary(),
+      activity: this.inFlight(),
     };
+  }
+
+  /** What's in flight besides an agent's own turn — an orchestra planning, a crew, a council — so "idle" isn't said of a busy project (#294). */
+  inFlight(): string[] {
+    const out: string[] = [];
+    if (this.orchestra.active()) out.push("orchestra");
+    for (const c of this.crews.workingCrews) out.push(`crew ${c}`);
+    if (this.councils.active) out.push("council");
+    if (this.shifts.active) out.push("night shift");
+    if (this.reviews.running) out.push("review");
+    return out;
   }
 
   /**

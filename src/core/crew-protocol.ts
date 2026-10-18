@@ -113,7 +113,10 @@ function toAction(raw: unknown): CrewAction | null {
   }
   if (type === "review") {
     const v = str(a.verdict, 20).toLowerCase();
-    const verdict = /^(approve|approved|lgtm|pass|ok)$/.test(v) ? "approve" : /^(changes|request_changes|reject|fail)$/.test(v) ? "changes" : null;
+    // reviewers spell it many ways — GitHub's "changes_requested" among them (#282)
+    const w = v.replace(/[\s-]+/g, "_");
+    const verdict = /^(approve|approved|lgtm|pass|passed|ok|accept|accepted|ship_it)$/.test(w) ? "approve"
+      : /^(changes|changes_requested|request_changes|requested_changes|needs_changes|needs_work|revise|reject|rejected|fail|failed|block|blocked)$/.test(w) ? "changes" : null;
     return verdict ? { type, verdict, notes: str(a.notes ?? a.text) } : null;
   }
   if (type === "test") {

@@ -41,6 +41,11 @@ describe("what can't be taken back", () => {
     expect(what("rm -rf /work/app/dist", dir)).toBeNull();
     expect(what("rm -fr /tmp/x", dir)).toBe("a recursive delete outside the project");
     expect(what("rm notes.txt", dir)).toBeNull();
+    // rm's own arguments only: a later command's /dev/null (or any path) isn't something rm deletes (#287)
+    expect(what(`$SP/cleansh 'rm -rf samples runs; python gen.py && curl -s -o /dev/null http://localhost:8000/'`, dir)).toBeNull();
+    expect(what("rm -rf build && cp -r src /tmp/backup", dir)).toBeNull();
+    expect(what("rm -rf build 2>/dev/null", dir)).toBeNull();
+    expect(what("rm -rf build; rm -rf /etc/nginx", dir)).toBe("a recursive delete outside the project"); // the second rm is still read
   });
 
   it("data, infrastructure, publishing and the machine", () => {

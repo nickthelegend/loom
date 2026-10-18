@@ -7,13 +7,15 @@
  * each provider answers, and whether a free model keeps getting refused.
  */
 
-import { execFile } from "../core/process.js";
+import { execFile, execFileSync } from "../core/process.js";
 import { codexBin, codexVersion } from "../providers/codex/adapter.js";
 import fs from "node:fs";
 import path from "node:path";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { setupReport } from "../core/setup.js";
 import {
+  listProjects,
+  loomHome,
   readDaemonConfig,
   readProjectConfig,
   readProjectState,
@@ -422,4 +424,40 @@ export function freeModelTrouble(events: readonly LoomEvent[], agents: readonly 
       : `${model} was refused (429/503) ${refused.length}× in 24h — set this agent's model to pool:free to rotate across free models`));
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Disk: orchestra worktrees of projects no longer registered (#295)
+// ---------------------------------------------------------------------------
+
+/** How big a folder is, in bytes (`du`, so a 2 GB tree is quick); 0 when it can't say. */
+async function sizeOf(dir: string): Promise<number> {
+  try {
+    const stdout = execFileSync("du", ["-sk", dir], { timeout: 20_000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return (Number(String(stdout).split(/\s+/)[0]) || 0) * 1024;
+  } catch { return 0; }
+}
+
+export const fmtBytes = (n: number) => n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.round(n / 1e3)} KB`;
+
+/** Orchestra folders under ~/.loom whose project isn't registered any more: nothing will ever clean them up. */
+export async function orchestraOrphans(): Promise<Array<{ id: string; dir: string; bytes: number }>> {
+  const root = path.join(loomHome(), "orchestra");
+  if (!fs.existsSync(root)) return [];
+  const known = new Set(listProjects().map((p) => p.id));
+  const out: Array<{ id: string; dir: string; bytes: number }> = [];
+  for (const id of fs.readdirSync(root)) {
+    const dir = path.join(root, id);
+    if (known.has(id) || !fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) continue;
+    out.push({ id, dir, bytes: await sizeOf(dir) });
+  }
+  return out;
+}
+
+export async function diskChecks(): Promise<Check[]> {
+  if (process.platform === "win32") return [];
+  const orphans = await orchestraOrphans();
+  if (!orphans.length) return [ok("orchestra", "no orphaned worktrees")];
+  const total = orphans.reduce((n, o) => n + o.bytes, 0);
+  return [warn("orchestra", `${orphans.length} orchestra folder${orphans.length === 1 ? "" : "s"} from projects no longer registered (${fmtBytes(total)}): ${orphans.map((o) => `${o.id} ${fmtBytes(o.bytes)}`).join(", ")} — loom orchestra:clean removes them`)];
 }

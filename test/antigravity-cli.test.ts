@@ -68,7 +68,12 @@ afterEach(() => {
 describe("AntigravityCliAdapter", () => {
   it("runs a turn headless and reports the message + the files it touched", async () => {
     const dir = makeProjectDir({ name: "ag" });
-    const bin = fakeAgy("Done. Created [note.txt](file:///tmp/ag/note.txt) as asked.");
+    // a file it wrote this turn, and one it only talks about (older, untouched) — only the first is an edit (#290)
+    const note = path.join(dir, "note.txt"), old = path.join(dir, "geometry.py");
+    fs.writeFileSync(note, "hi\n");
+    fs.writeFileSync(old, "x\n");
+    fs.utimesSync(old, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000));
+    const bin = fakeAgy(`Done. Created [note.txt](file://${note}) as asked; see [geometry.py:174](file://${old}#L174).`);
     const { events, error } = await run(bin, dir, { model: "gemini-3.6-flash-medium" });
 
     expect(error).toBeUndefined();
@@ -82,8 +87,8 @@ describe("AntigravityCliAdapter", () => {
     const msg = events.find((e) => e.kind === "message");
     expect((msg?.payload as { text: string }).text).toMatch(/Done\. Created/);
 
-    const edit = events.find((e) => e.kind === "file_edit");
-    expect((edit?.payload as { path: string }).path).toBe("/tmp/ag/note.txt");
+    const edits = events.filter((e) => e.kind === "file_edit").map((e) => (e.payload as { path: string }).path);
+    expect(edits).toEqual([note]);
 
     const done = events.find((e) => e.kind === "run_complete");
     expect((done?.payload as { model?: string }).model).toBe("gemini-3.6-flash-medium");

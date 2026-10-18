@@ -276,6 +276,8 @@ export interface ProjectConfig {
   relay?: import("./daemon/runtime/relay.js").RelayConfig;
   /** Proof: how an agent's "done" is checked (daemon/proof.ts). */
   proof?: import("./daemon/proof.js").ProofConfig;
+  /** Where orchestra worktrees go (default: ~/.loom/orchestra, or beside the project when it's on another disk). */
+  orchestra?: { worktreeDir?: string };
   /** `loom review` and the council's reviews: how long one reviewer may take before it's left out (default 15 minutes). */
   review?: { timeoutMin?: number };
   /** Agent that receives messages when nobody holds the baton. */
@@ -659,6 +661,8 @@ export interface ProviderLimits {
 
 export interface ProjectStatus {
   continuity?: boolean;
+  /** Work in flight that isn't one agent's turn: "orchestra", "crew <id>", "council", "night shift", "review" (#294). */
+  activity?: string[];
   id: string;
   name: string;
   dir: string;

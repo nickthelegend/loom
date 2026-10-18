@@ -1214,6 +1214,7 @@ program
     try {
       ({ review } = await client.startReview(project.id, { agents, ...(opts.file ? { file: opts.file } : {}), ...(opts.text ? { text: opts.text } : {}), ...(opts.focus ? { focus: opts.focus } : {}) }));
     } catch (err) {
+      if (opts.json) { process.exitCode = 1; return void console.log(JSON.stringify({ status: "error", error: err instanceof Error ? err.message : String(err) })); }
       return fail(err instanceof Error ? err.message : String(err));
     }
     if (!opts.json) console.error(pc.cyan(`🔍 ${agents.join(", ")} reviewing ${review.target.kind === "file" ? review.target.file : review.target.kind === "diff" ? "the uncommitted changes" : `“${review.target.label ?? "your request"}”`} · read-only, nobody takes the baton`));
@@ -1225,6 +1226,8 @@ program
     }
     if (review.status !== "done") {
       process.exitCode = 124;
+      // valid JSON on every exit path: who has answered so far, and who hasn't (#291)
+      if (opts.json) return void console.log(JSON.stringify({ ...review, status: "timeout", waitingOn: review.agents }));
       return void console.error(pc.yellow(`still reviewing after ${opts.timeout}s — loom reviews ${review.reviewId} later`));
     }
     if (opts.json) return void console.log(JSON.stringify(review));
@@ -1793,11 +1796,15 @@ program
   .option("--no-approval", "create: the Lead's plan starts without your OK")
   .option("--play <play>", "ship, fanout or race")
   .option("--parallel <n>", "create: maximum concurrent builders (1–4)")
+  .option("--lead <agent>", "create: who leads")
+  .option("--builders <agents>", "create: comma-separated agents that build")
+  .option("--reviewer <agent>", "create: who reviews")
+  .option("--tester <agent>", "create: who tests")
   .option("--amount <usd>", "budget: new goal budget in USD")
   .option("--card <id>", "overlap: held card id")
   .option("--decision <decision>", "overlap: narrow, wait:<goal>, or proceed:<reason>")
   .option("--touches <globs>", "overlap: comma-separated revised paths")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string; amount?: string; card?: string; decision?: string; touches?: string }) => {
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string; amount?: string; card?: string; decision?: string; touches?: string; lead?: string; builders?: string; reviewer?: string; tester?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const a = (action ?? "status").toLowerCase();
@@ -1808,7 +1815,10 @@ program
       const template = first && templates.includes(first.toLowerCase()) ? first.toLowerCase() : "ship";
       const name = (first && templates.includes(first.toLowerCase()) ? rest : args ?? []).join(" ");
       const { crew } = await client.createCrew(project.id, { template, ...(name ? { name } : {}), ...(opts.approval === false ? { planApproval: false } : {}),
-        ...(opts.play ? { play: opts.play } : {}), ...(opts.parallel ? { maxParallel: Number(opts.parallel) } : {}) });
+        ...(opts.play ? { play: opts.play } : {}), ...(opts.parallel ? { maxParallel: Number(opts.parallel) } : {}),
+        ...(opts.lead || opts.builders || opts.reviewer || opts.tester ? { seats: { ...(opts.lead ? { lead: opts.lead } : {}),
+          ...(opts.builders ? { builders: opts.builders.split(",").map((x) => x.trim()).filter(Boolean) } : {}),
+          ...(opts.reviewer ? { reviewer: opts.reviewer } : {}), ...(opts.tester ? { tester: opts.tester } : {}) } } : {}) });
       console.log(`${pc.green("✓")} ${pc.bold(crew.name)} (${crew.id}) — ${crew.teammates.map((t: { id: string; agent: string; role: string }) => `${t.id}=${t.agent}`).join(", ")}`);
       console.log(pc.dim(`  give it a goal: loom crew goal "…"${crews.length ? ` --crew ${crew.id}` : ""}`));
       return;
@@ -1839,6 +1849,7 @@ program
       ...(opts.touches ? { touches: opts.touches.split(",").map(s => s.trim()).filter(Boolean) } : {}) });
     if (a === "say") console.log(`${pc.green("✓")} ${out.routed === "goal" ? "new goal" : out.routed === "answer" ? "answered" : out.routed === "replan" ? "the Lead replans with that" : `noted for ${out.to}`}`);
     else if (a === "apply") console.log(`${pc.green("✓")} merged ${pc.bold(out.merged)} into ${pc.bold(out.into)}`);
+    else if (a === "budget" && !out.goal?.status?.match(/running|planning|awaiting|waiting|paused/)) console.log(`${pc.green("✓")} the next goal starts with a $${Number(opts.amount).toFixed(2)} budget`);
     else printCrew(out.crew);
   });
 
@@ -2665,9 +2676,14 @@ program
       cost: pc.dim,
       turn: pc.dim,
     };
+    // a stretch that crosses midnight says which day each moment was; the totals row has no moment (#297)
+    const day = (t: number) => new Date(t).toDateString();
+    const spans = d.lines.some((l) => l.kind !== "cost" && day(l.at) !== day(Date.now()));
+    const stamp = (l: { at: number; kind: string }) => l.kind === "cost" ? "in all"
+      : `${spans ? `${new Date(l.at).toLocaleDateString([], { month: "short", day: "numeric" })} ` : ""}${new Date(l.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    const width = Math.max(...d.lines.map((l) => stamp(l).length));
     for (const line of d.lines) {
-      const when = new Date(line.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      console.log(`${pc.dim(when)}  ${(paint[line.kind] ?? ((x: string) => x))(line.text)}`);
+      console.log(`${pc.dim(stamp(line).padEnd(width))}  ${(paint[line.kind] ?? ((x: string) => x))(line.text)}${line.count && line.count > 1 ? pc.dim(` ×${line.count}`) : ""}`);
     }
     if (d.waiting.length) console.log(pc.yellow(`\nwaiting on you: ${d.waiting.join(", ")}`));
   });
@@ -3222,6 +3238,7 @@ program
       // fall through to a fresh diagnosis, so the report reflects the repairs
     }
     const checks = await envChecks();
+    checks.push(...(await (await import("./doctor.js")).diskChecks()));
     if (dir) checks.push(...projectChecks(dir));
     else checks.push({ name: "project", status: "warn", detail: "not inside a Loom project (loom init)" });
     // The daemon is often the desktop app's, started without this shell's PATH or keys:
@@ -3268,6 +3285,21 @@ program
       return;
     }
     console.log(pc.green("\nall clear"));
+  });
+
+program
+  .command("orchestra:clean")
+  .description("remove orchestra worktrees left by projects that are no longer registered")
+  .option("--dry-run", "only say what would go")
+  .action(async (opts: { dryRun?: boolean }) => {
+    const { orchestraOrphans, fmtBytes } = await import("./doctor.js");
+    const orphans = await orchestraOrphans();
+    if (!orphans.length) return void console.log(pc.dim("no orphaned orchestra worktrees"));
+    for (const o of orphans) {
+      if (!opts.dryRun) fs.rmSync(o.dir, { recursive: true, force: true });
+      console.log(`${opts.dryRun ? pc.dim("would remove") : pc.green("✓ removed")} ${o.dir} ${pc.dim(fmtBytes(o.bytes))}`);
+    }
+    if (!opts.dryRun) console.log(pc.dim("their branches stay in each repo: git worktree prune there tidies git's own list"));
   });
 
 program

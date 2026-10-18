@@ -195,6 +195,7 @@
   .dgrow[data-dgchat]{cursor:pointer}
   .dgrow[data-dgchat]:hover{background:var(--sidebar-accent)}
   .dgrow .dgt{flex:none;font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
+  .dgrow .dgn{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground)}
   .dgrow.question{color:var(--warn)}
   .dgrow.answered{color:var(--muted-foreground)}
   .dgrow.failed,.dgrow.server{color:var(--err)}

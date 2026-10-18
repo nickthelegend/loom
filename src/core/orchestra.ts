@@ -267,10 +267,33 @@ export interface OrchestraStartOptions {
 }
 
 /** What orchestra needs from the project that owns it. */
+/**
+ * Where a project's orchestra worktrees go: under ~/.loom — unless the project
+ * lives on another volume (an external drive), where a sibling folder keeps
+ * the gigabytes on the project's own disk rather than the one that's tight
+ * (#295). `orchestra.worktreeDir` in .loom/config.json decides outright.
+ */
+export function orchestraWorktreeRoot(projectDir: string, projectId: string, override?: string): string {
+  if (override?.trim()) return path.resolve(projectDir, override.trim(), projectId);
+  const home = path.join(loomHome(), "orchestra", projectId);
+  try {
+    const sameDisk = fs.statSync(projectDir).dev === fs.statSync(loomHome()).dev;
+    if (sameDisk) return home;
+    return path.join(path.dirname(projectDir), ".loom-worktrees", `${path.basename(projectDir)}-${projectId}`);
+  } catch {
+    return home;
+  }
+}
+
+/** Finished runs keep their worktrees this long, then they're removed (the branches stay). */
+export const ORCHESTRA_KEEP_DAYS = 7;
+
 export interface OrchestraHost {
   projectId: string;
   projectName: string;
   projectDir: string;
+  /** `orchestra.worktreeDir` from the project's config, if set. */
+  worktreeDir?(): string | undefined;
   /** Adapter entries of the roster (enabled only). */
   roster(): AgentConfig[];
   /** Kinds installed on this machine but not on the roster, usable as workers. */
@@ -995,7 +1018,7 @@ export class OrchestraEngine {
     // Integration and task branches are siblings under one prefix: git can't
     // hold both `a/b` and `a/b/c` as refs.
     const branch = `loom/orchestra/${id}/main`;
-    const wtRoot = path.join(loomHome(), "orchestra", this.host.projectId, id);
+    const wtRoot = path.join(orchestraWorktreeRoot(this.host.projectDir, this.host.projectId, this.host.worktreeDir?.()), id);
     const integration = path.join(wtRoot, "integration");
     fs.mkdirSync(wtRoot, { recursive: true });
     await this.gitLock.run(() => createWorktree(dir, integration, branch, baseCommit));
@@ -1231,7 +1254,7 @@ export class OrchestraEngine {
     const existing = this.runs.get(id);
     if (existing && !isTerminal(existing.status)) throw new Error(`run ${id} is active here already`);
     await git(["fetch", "-q", "origin", `+refs/loom/run/${id}/*:refs/remotes/loom-run/${id}/*`], dir);
-    const wtRoot = path.join(loomHome(), "orchestra", this.host.projectId, id);
+    const wtRoot = path.join(orchestraWorktreeRoot(this.host.projectDir, this.host.projectId, this.host.worktreeDir?.()), id);
     // a copy left here by an earlier move goes first
     if (existing) {
       const old = [existing.dir, ...existing.tasks.map((t) => t.dir).filter((d): d is string => !!d)];
@@ -1453,6 +1476,24 @@ export class OrchestraEngine {
     if (!task.branch) return "";
     const patch = await git(["diff", `${run.baseCommit}...${task.branch}`], this.host.projectDir).catch(() => "");
     return patch.length > 400_000 ? `${patch.slice(0, 400_000)}\n… (truncated)` : patch;
+  }
+
+  /**
+   * Remove the worktrees of runs that finished more than `days` ago — they're
+   * on their branches; the checkouts are only disk (#295). Returns the runs swept.
+   */
+  async sweep(days = ORCHESTRA_KEEP_DAYS, now = Date.now()): Promise<string[]> {
+    const swept: string[] = [];
+    for (const run of [...this.runs.values()]) {
+      if (!isTerminal(run.status) || now - (run.updatedAt ?? 0) < days * 86_400_000) continue;
+      if (!run.dir || !fs.existsSync(run.dir)) continue;
+      await this.cleanup(run.id).catch(() => {});
+      // the run's folder goes too once its worktrees are out of it
+      const root = path.dirname(run.dir);
+      if (path.basename(root) === run.id) fs.rmSync(root, { recursive: true, force: true });
+      swept.push(run.id);
+    }
+    return swept;
   }
 
   /** Remove a finished run's worktrees (the branch stays for the record). */

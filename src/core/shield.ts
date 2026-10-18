@@ -24,9 +24,12 @@ export function dangerOf(command: string, projectDir?: string): Danger | null {
   if (/\bgit\s+branch\s+-D\b/.test(c)) return { what: "force-deleting a branch", why: "commits only on that branch become unreachable" };
   if (/\bgit\s+(?:filter-branch|filter-repo)\b|\bgit\s+rebase\b[^|;&]*\s(?:origin\/)?(?:main|master)\b.*--onto/.test(c)) return { what: "rewriting git history", why: "every commit after the change gets a new id" };
   // files: deleting outside the project, or everything
-  const rm = /\brm\s+(?:-[a-zA-Z]*\s+)*-[a-zA-Z]*[rR][a-zA-Z]*\b(.*)$/.exec(c) ?? /\brm\s+(?:-[a-zA-Z]*\s+)*-[a-zA-Z]*f[a-zA-Z]*[rR]\b(.*)$/.exec(c);
-  if (rm) {
-    const target = rm[1] ?? "";
+  // every rm on the line, each with only its own arguments — they end at the next command (; && || |) or a
+  // closing quote; the "/dev/null" of a curl later on the line was read as a delete target (#287)
+  for (const piece of c.split(/[;&|'"`)\n]/)) {
+    const rm = /\brm\s+((?:-[a-zA-Z]+\s+)*)(.*)$/.exec(piece);
+    if (!rm || !/^(?:-[a-zA-Z]+\s+)*$/.test(rm[1]!) || !/-[a-zA-Z]*[rR]/.test(rm[1]!)) continue;
+    const target = rm[2]!.split(/\s+/).filter((t) => t && !/^\/dev\//.test(t) && !/^\d?>/.test(t)).join(" ");
     if (/(?:^|\s)\/(?:\s|$|\*)/.test(target) || HOME.test(` ${target} `) || /(?:^|\s)\.\.(?:\/|\s|$)/.test(target) || /(?:^|\s)\*(?:\s|$)/.test(target))
       return { what: "a recursive delete outside the work", why: "it deletes beyond the project (/, your home, .., or everything here)" };
     for (const p of target.split(/\s+/).filter((x) => x.startsWith("/"))) {
