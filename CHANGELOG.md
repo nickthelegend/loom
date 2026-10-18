@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-10-18
+
+The Team tab and GitHub sign-in, and everything a third stress test (5 projects at once, restarts mid-run) found.
+
 ### Added
 
 - **A Team tab.** Teams were a block at the bottom of Agents; they're Loom's reason to exist, so they get their own tab, right after Chat. Signed out it says what Teams does, with one **Sign in with GitHub** button, a box for an invite link, and a self-hosted hub behind a disclosure; signed in it's your team — members (with their GitHub pictures), Invite, live sessions, who's touching which files, the feed and costs. The phone keeps the team in its Fleet sheet.
