@@ -2,8 +2,8 @@
 // Ensures a loom daemon is running, mints a one-time pairing token via the
 // admin API, and returns the /app URL the desktop window should load.
 //
-// Reuses the exact same daemon + pairing flow as the CLI and phone app —
-// the desktop window is just another paired client, on the same machine.
+// Reuses the same daemon + pairing flow as the CLI and phone app — but the
+// window claims an owner session, since it's the owner's own machine.
 
 import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -268,9 +268,12 @@ async function spawnDaemon() {
 export async function prepareAppUrl() {
   const cfg = await ensureDaemon();
   const base = `http://${cfg.host}:${cfg.port}`;
+  // an owner session: the window on the owner's own machine can invite, join a team and pair phones,
+  // which a device token can't ("admin only")
   const res = await fetch(`${base}/api/pair/new`, {
     method: "POST",
-    headers: { authorization: `Bearer ${cfg.adminToken}` },
+    headers: { authorization: `Bearer ${cfg.adminToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ owner: true }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) throw new Error(`could not mint pairing token (${res.status})`);

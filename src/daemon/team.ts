@@ -296,6 +296,21 @@ export class TeamLink {
     await this.ensureDevice();
   }
 
+  /**
+   * Sign out of the hub on this machine: the session goes; the device keys and
+   * the teams' keys stay, so signing back in as the same account picks up
+   * where it was. Your agents keep working — only the team view goes quiet.
+   */
+  async signOut(): Promise<void> {
+    const old = this.hubClient;
+    if (old instanceof SupabaseHubClient) await old.close().catch(() => {});
+    this.hubClient = null;
+    const { hub: _gone, ...rest } = this.state;
+    this.state = rest as typeof this.state;
+    writeState(this.file, this.state);
+    this.hubOk = { ok: true, at: 0 } as typeof this.hubOk;
+  }
+
   /** The hosted hub (D65): a Supabase session from GitHub OAuth, kept as its refresh token. */
   private async signInHosted(supabaseUrl: string, refreshToken?: string): Promise<void> {
     const url = hostedHubUrl(supabaseUrl);

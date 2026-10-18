@@ -23,6 +23,8 @@ interface PendingPair {
   projects?: string[];
   token: string;
   expiresAt: number;
+  /** Claims as an owner session (Loom Desktop), not a device. */
+  owner?: boolean;
 }
 
 export class AuthManager {
@@ -68,8 +70,16 @@ export class AuthManager {
     }
   }
 
-  isAdmin(token: string | undefined): boolean {
+  /** The admin token itself (the CLI and Desktop's main process on this machine) — not a session claimed from it. */
+  isRootAdmin(token: string | undefined): boolean {
     return Boolean(token && timingSafeEqualStr(token, this.config.adminToken));
+  }
+
+  /** The admin token, or an owner session (Loom Desktop's window on this machine). */
+  isAdmin(token: string | undefined): boolean {
+    if (!token) return false;
+    if (timingSafeEqualStr(token, this.config.adminToken)) return true;
+    return this.config.clients.some((c) => c.owner === true && timingSafeEqualStr(token, c.token));
   }
 
   /** The admin token, for handing to a same-machine (loopback) caller only. */
@@ -85,13 +95,15 @@ export class AuthManager {
    * the claimer cannot widen it — scope is chosen by the admin who mints, not
    * the device that claims.
    */
-  newPairingToken(projects?: string[]): { token: string; expiresAt: number } {
+  newPairingToken(projects?: string[], opts: { owner?: boolean } = {}): { token: string; expiresAt: number } {
     this.gc();
     const token = crypto.randomBytes(16).toString("hex");
-    const entry = {
+    const entry: PendingPair = {
       token,
       expiresAt: Date.now() + PAIR_TTL_MS,
       ...(projects?.length ? { projects } : {}),
+      // an owner session is never scoped: it's the owner
+      ...(opts.owner && !projects?.length ? { owner: true } : {}),
     };
     this.pending.set(token, entry);
     return { token: entry.token, expiresAt: entry.expiresAt };
@@ -109,10 +121,13 @@ export class AuthManager {
       token: crypto.randomBytes(32).toString("hex"),
       createdAt: Date.now(),
       ...(entry.projects?.length ? { projects: entry.projects } : {}),
+      ...(entry.owner ? { owner: true } : {}),
     };
     // Read-modify-write: never clobber fields (pid, host, port) that the
     // daemon wrote after this manager snapshotted the config.
     this.reload();
+    // Desktop pairs on every launch: its new session replaces the last one rather than piling up
+    if (entry.owner) this.config.clients = this.config.clients.filter((c) => !(c.owner && c.name === name));
     this.config.clients.push(client);
     writeDaemonConfig(this.config);
     return { clientToken: client.token, clientId: client.id };
@@ -129,13 +144,14 @@ export class AuthManager {
     return false;
   }
 
-  clients(): Array<{ id: string; name: string; createdAt: number; lastSeen: number | null; push: boolean }> {
-    return this.config.clients.map(({ id, name, createdAt, lastSeen, pushToken }) => ({
+  clients(): Array<{ id: string; name: string; createdAt: number; lastSeen: number | null; push: boolean; owner?: boolean }> {
+    return this.config.clients.map(({ id, name, createdAt, lastSeen, pushToken, owner }) => ({
       id,
       name,
       createdAt,
       lastSeen: lastSeen ?? null,
       push: Boolean(pushToken),
+      ...(owner ? { owner: true } : {}),
     }));
   }
 

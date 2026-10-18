@@ -102,7 +102,7 @@ beforeAll(async () => {
     create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
     create schema auth; create schema extensions;
     create extension pgcrypto schema extensions;
-    create table auth.users (id uuid primary key, raw_user_meta_data jsonb default '{}');
+    create table auth.users (id uuid primary key, raw_user_meta_data jsonb default '{}', raw_app_meta_data jsonb default '{}');
     create function auth.uid() returns uuid language sql stable as
       $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     grant usage on schema public, auth, extensions to anon, authenticated, service_role;
@@ -119,13 +119,14 @@ beforeAll(async () => {
     "0008_key_version_conflict.sql",
     "0009_phase6.sql",
     "0010_crew_coordination.sql",
+    "0011_github_only.sql",
   ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
-  psql(`insert into auth.users (id, raw_user_meta_data) values
-    ('${ALICE}', '{"user_name":"Alice","full_name":"Alice A"}'),
-    ('${BOB}', '{"user_name":"bob"}'),
-    ('${CAROL}', '{"user_name":"carol"}');`);
+  psql(`insert into auth.users (id, raw_user_meta_data, raw_app_meta_data) values
+    ('${ALICE}', '{"user_name":"Alice","full_name":"Alice A"}', '{"provider":"github"}'),
+    ('${BOB}', '{"user_name":"bob"}', '{"provider":"github"}'),
+    ('${CAROL}', '{"user_name":"carol"}', '{"provider":"github"}');`);
 }, 60_000);
 
 afterAll(async () => {
@@ -144,6 +145,13 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
 
   it("creates profiles from GitHub sign-up metadata", () => {
     expect(psql("select github from public.profiles order by github;")).toBe("alice\nbob\ncarol");
+  });
+
+  it("accounts are GitHub only: an email sign-up claiming someone's login is refused, and no profile is made", () => {
+    expect(() => psql(`insert into auth.users (id, raw_user_meta_data, raw_app_meta_data) values
+      ('00000000-0000-0000-0000-00000000e0e0', '{"user_name":"alice"}', '{"provider":"email"}');`)).toThrow(/GitHub only/);
+    expect(() => psql(`insert into auth.users (id, raw_user_meta_data) values ('00000000-0000-0000-0000-00000000e0e1', '{"user_name":"bob"}');`)).toThrow(/GitHub only/);
+    expect(psql("select count(*) from public.profiles where github in ('alice','bob');")).toBe("2");
   });
 
   it("the creator owns the team; invites are single-use", () => {

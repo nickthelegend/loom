@@ -513,6 +513,25 @@
     padding:9px 15px;font-size:13px;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;max-width:86%;
     box-shadow:0 10px 24px rgb(0 0 0 / .18), inset 0 1px 0 var(--glass-highlight)}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  /* ── Desktop sign-in (signin.js) ─────────────────────────── */
+  .signwrap{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:28px;position:relative}
+  .signwrap::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;
+    background-image:radial-gradient(circle, color-mix(in srgb, var(--foreground) 7%, transparent) 1px, transparent 1.2px);
+    background-size:5px 5px;mask-image:radial-gradient(60% 50% at 50% 45%, #000, transparent);
+    -webkit-mask-image:radial-gradient(60% 50% at 50% 45%, #000, transparent)}
+  .signcard{width:100%;max-width:380px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center}
+  .signcard .biglogo{font-size:40px;font-weight:650;letter-spacing:-.02em;color:var(--foreground);margin-bottom:6px}
+  .signt{font-size:18px;font-weight:650;color:var(--foreground)}
+  .signd{font-size:13px;line-height:1.55;color:var(--muted-foreground);max-width:340px}
+  .signgh{width:100%;height:42px;font-size:14px;gap:9px;margin-top:8px}
+  .signgh svg{width:17px;height:17px}
+  .signst{font-size:12px;color:var(--muted-foreground);min-height:16px}
+  .signst a{color:var(--foreground)}
+  .signerr{color:var(--err)}
+  .signskip{background:none;border:0;color:var(--muted-foreground);font:inherit;font-size:12.5px;cursor:pointer;text-decoration:underline;
+    text-decoration-color:var(--border);text-underline-offset:3px;padding:4px}
+  .signskip:hover{color:var(--foreground)}
+  .signfoot{font-size:11.5px;color:var(--muted-foreground);opacity:.8}
   /* ── Pair screen ──────────────────────────────────────── */
   .pairwrap{display:flex;flex-direction:column;gap:16px;align-items:center;justify-content:center;
     min-height:92dvh;padding:28px;text-align:center;max-width:420px;margin:0 auto;position:relative}

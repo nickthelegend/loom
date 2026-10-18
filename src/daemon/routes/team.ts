@@ -99,7 +99,8 @@ export function registerTeamRoutes(app: Express, ctx: Pick<RouteContext, "auth" 
             ...(b.token ? { token: b.token } : {}),
           });
           await ctx.team.connect();
-        } else if (action === "create") out = await ctx.team.createTeam(String(b.name ?? ""));
+        } else if (action === "signout") await ctx.team.signOut();
+        else if (action === "create") out = await ctx.team.createTeam(String(b.name ?? ""));
         else if (action === "invite") out = await ctx.team.invite(b.teamId || undefined);
         else if (action === "join") {
           if (!b.link) throw new Error("missing invite link");

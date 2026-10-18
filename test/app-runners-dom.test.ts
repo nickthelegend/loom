@@ -224,10 +224,10 @@ const type = (m: Mounted, sel: string, value: string) => {
 };
 
 describe("web app · runners (Phase 5)", () => {
-  it("Fleet's Team block lists runners, jobs and the feed's new sentences; deploys and release notes on request", async () => {
+  it("the Team tab lists runners, jobs and the feed's new sentences; deploys and release notes on request", async () => {
     const m = mount();
-    await ready(m, '.tab[data-tab="fleet"]');
-    click($(m, '.tab[data-tab="fleet"]'));
+    await ready(m, '.tab[data-tab="team"]');
+    click($(m, '.tab[data-tab="team"]'));
     await waitUntil(() => $$(m, "#fteam .trunners [data-trunner]").length === 2, { timeoutMs: 15_000 });
 
     expect(text(m, "#fteam .trunners .tsech")).toContain("1/2 online");

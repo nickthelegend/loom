@@ -61,4 +61,29 @@ describe("auth + pairing", () => {
     expect(after.port).toBe(9999);
     expect(after.clients).toHaveLength(1);
   });
+
+  it("Loom Desktop's window is an owner session: as able as the admin token, minted only with it, one at a time", () => {
+    const { cfg, auth } = fresh();
+    // a phone: a device, not the owner — inviting teammates is "admin only"
+    const phone = auth.claim(auth.newPairingToken().token, "phone")!;
+    expect(auth.isAdmin(phone.clientToken)).toBe(false);
+    // Desktop asks for an owner session
+    const desk = auth.claim(auth.newPairingToken(undefined, { owner: true }).token, "Loom Desktop")!;
+    expect(auth.isAdmin(desk.clientToken)).toBe(true);
+    expect(auth.isRootAdmin(desk.clientToken), "a session isn't the admin token itself").toBe(false);
+    expect(auth.isRootAdmin(cfg.adminToken)).toBe(true);
+    // every launch pairs again: the new session replaces the last, they don't pile up
+    const desk2 = auth.claim(auth.newPairingToken(undefined, { owner: true }).token, "Loom Desktop")!;
+    expect(auth.isAdmin(desk2.clientToken)).toBe(true);
+    expect(auth.isAuthorized(desk.clientToken)).toBe(false);
+    expect(readDaemonConfig()!.clients.filter((c) => c.owner)).toHaveLength(1);
+    expect(auth.clients().find((c) => c.id === desk2.clientId)).toMatchObject({ name: "Loom Desktop", owner: true });
+    // a project-scoped pairing is never an owner
+    const scoped = auth.claim(auth.newPairingToken(["p1"], { owner: true }).token, "x")!;
+    expect(auth.isAdmin(scoped.clientToken)).toBe(false);
+    // and revoking it takes it away
+    auth.revoke(desk2.clientId);
+    expect(auth.isAdmin(desk2.clientToken)).toBe(false);
+    expect(auth.isAdmin(phone.clientToken)).toBe(false);
+  });
 });

@@ -210,9 +210,9 @@ describe("web app · crew tab", () => {
   it("creates a crew from the empty state, then takes a goal through approve, diff and apply", async () => {
     const m = mount();
     await openCrewTab(m);
-    // Right after Orchestra in the strip.
+    // Chat, then Team (the selling point gets its own tab), then Orchestra, Crew and Agents.
     const tabs = $$(m, "#tabsbox .tab").map((t) => t.getAttribute("data-tab"));
-    expect(tabs.slice(0, 4)).toEqual(["thread", "orchestra", "crew", "fleet"]);
+    expect(tabs.slice(0, 5)).toEqual(["thread", "team", "orchestra", "crew", "fleet"]);
 
     // Empty state: a template picker, a name and Create.
     await waitUntil(() => !!$(m, "#pane-crew .crewempty"));
