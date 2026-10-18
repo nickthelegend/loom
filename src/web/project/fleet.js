@@ -199,7 +199,8 @@ export function createFleet(view) {
     // "running · 4m" keeps counting — unless you're typing into one of its
     // forms, which a redraw would wipe.
     function drawTeamBlock(force){
-      // the Team tab's own pane now, not a block under Fleet
+      // the Team tab's own pane now, not a block under Fleet; a team frame can land after the window is gone
+      if (pageGone()) return;
       var host = document.getElementById("fteam"); if (!host) return;
       if (!force && teamEditing(host)) return;
       var t = state.team;

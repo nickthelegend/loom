@@ -674,16 +674,16 @@ describe("web app · approvals", () => {
 });
 
 describe("web app · fleet", () => {
-  it("has its own tab listing every open project's agents", async () => {
+  it("has its own tab listing this project's agents", async () => {
     const m = await opened();
     await ready(m, '.tab[data-tab="fleet"]');
     const tabs = $$(m, "#tabsbox .tab").map((t) => t.getAttribute("data-tab"));
-    expect(tabs.slice(0, 4)).toEqual(["thread", "orchestra", "crew", "fleet"]);
+    expect(tabs.slice(0, 5)).toEqual(["thread", "team", "orchestra", "crew", "fleet"]);
     click($(m, '.tab[data-tab="fleet"]'));
     await waitUntil(() => shown($(m, "#pane-fleet")) && !!$(m, '#pane-fleet .frow[data-fagent="plannerbot"]'));
-    // this project leads, marked as such; the other open project is there too
+    // this project only: other projects live on the home screen, teammates in the Team tab
     expect($(m, "#pane-fleet .fproj .fcur")?.closest(".fproj")?.getAttribute("data-fproj")).toBe(projectId);
-    expect($(m, `#pane-fleet .fproj[data-fproj="${ocProjectId}"]`)).toBeTruthy();
+    expect($(m, `#pane-fleet .fproj[data-fproj="${ocProjectId}"]`)).toBeFalsy();
     const row = $(m, '#pane-fleet .frow[data-fagent="plannerbot"]')!;
     expect(row.querySelector(".fn b")?.textContent).toBe("plannerbot");
     expect(row.querySelector(".pbdg")?.textContent).toMatch(/^(bypass|auto|ask)$/);
