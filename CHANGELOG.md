@@ -7,28 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-From the 1.2.0 stress test: six projects at once (council, orchestra, route, night shift, crew, review).
-
-### Fixed
-
-- **A council read another turn's reply as the planner's fix answer.** When a reviewer ran out of quota, its review was relayed to the planner as a turn of its own; the council's fix prompt queued behind it and took that turn's end for its answer ("0 fixed · 2 undecided"). A council now waits for the turn after its own request, and a reviewer out of quota is just left out (#289).
-- **Crew: a reviewer's `changes_requested` is read** (and needs-changes, revise, approved…), so the card goes back to its builder instead of the goal failing (#282). **Seats follow the project's roles** — writers build and lead, reviewers review — and `--lead/--builders/--reviewer/--tester` name them (#283). `loom crew budget` before any goal sets the next goal's budget (#284).
-- **Night shift tasks no longer interleave**: the queue holds while a loop nudge goes in, so the next task can't start in the gap (#285). **The report says what stopped a task** — the shield, the loop watch, Stop, a quota — not "was Loom restarted?" (#288).
-- **Loop watch: five different edits to one file aren't a loop** (and the label names the tool once) (#286).
-- **Shield: rm's arguments end at the next command** — a later `curl -o /dev/null` was read as a delete target, and every rm on a line is checked (#287).
-- **Antigravity: only files it changed that turn are edits** — every `file://` link in a review was logged as one (#290).
-- **OpenCode: a prompt accepted but never begun fails after 3 minutes** instead of an hour; `loom review --json` prints JSON on every exit path, partial results included (#291).
-- **A route that ends on a reviewer gives the baton back** to the step that did the work (#292).
-- **Web: "While you were away" is the open project's**, names it, and closes on Escape (#293). **`loom status` counts an orchestra, crew, council, shift or review as working** (#294), and **the phone board shows a working dot** (#296).
-- **`loom digest` across midnight shows dates, and repeats collapse into ×N** (#297).
-
-### Added
-
-- Orchestra disk hygiene: worktrees of a project on another disk live beside it (`orchestra.worktreeDir` to choose); finished runs' worktrees go after 7 days; `loom doctor` names orphaned run folders and `loom orchestra:clean` removes them (#295).
-
 ## [1.2.1] — 2026-10-18
 
-From the 1.2.0 field test: a full `loom council` run on a real project.
+From two field tests of 1.2.0: a full `loom council` run on a real project, and six projects running at once.
 
 ### Fixed
 
@@ -44,6 +25,23 @@ From the 1.2.0 field test: a full `loom council` run on a real project.
 
 - A reviewer that takes longer than `review.timeoutMin` (default 15 minutes) is stopped and left out of the review, so one slow free model doesn't hold up a council.
 - `loom send` warns before resuming a 100k+ token session whose prompt cache has likely expired, with the re-read's estimated cost; `--fresh` starts the agent's session in that chat over (#280).
+
+### Fixed (stress test)
+
+- **A council read another turn's reply as the planner's fix answer.** When a reviewer ran out of quota, its review was relayed to the planner as a turn of its own; the council's fix prompt queued behind it and took that turn's end for its answer ("0 fixed · 2 undecided"). A council now waits for the turn after its own request, and a reviewer out of quota is just left out (#289).
+- **Crew: a reviewer's `changes_requested` is read** (and needs-changes, revise, approved…), so the card goes back to its builder instead of the goal failing (#282). **Seats follow the project's roles** — writers build and lead, reviewers review — and `--lead/--builders/--reviewer/--tester` name them (#283). `loom crew budget` before any goal sets the next goal's budget (#284).
+- **Night shift tasks no longer interleave**: the queue holds while a loop nudge goes in, so the next task can't start in the gap (#285). **The report says what stopped a task** — the shield, the loop watch, Stop, a quota — not "was Loom restarted?" (#288).
+- **Loop watch: five different edits to one file aren't a loop** (and the label names the tool once) (#286).
+- **Shield: rm's arguments end at the next command** — a later `curl -o /dev/null` was read as a delete target, and every rm on a line is checked (#287).
+- **Antigravity: only files it changed that turn are edits** — every `file://` link in a review was logged as one (#290).
+- **OpenCode: a prompt accepted but never begun fails after 3 minutes** instead of an hour; `loom review --json` prints JSON on every exit path, partial results included (#291).
+- **A route that ends on a reviewer gives the baton back** to the step that did the work (#292).
+- **Web: "While you were away" is the open project's**, names it, and closes on Escape (#293). **`loom status` counts an orchestra, crew, council, shift or review as working** (#294), and **the phone board shows a working dot** (#296).
+- **`loom digest` across midnight shows dates, and repeats collapse into ×N** (#297).
+
+### Added (stress test)
+
+- Orchestra disk hygiene: worktrees of a project on another disk live beside it (`orchestra.worktreeDir` to choose); finished runs' worktrees go after 7 days; `loom doctor` names orphaned run folders and `loom orchestra:clean` removes them (#295).
 
 ## [1.2.0] — 2026-10-17
 
