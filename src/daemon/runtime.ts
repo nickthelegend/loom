@@ -512,6 +512,7 @@ export class ProjectRuntime {
       projectId: info.id,
       projectName: info.name,
       projectDir: info.dir,
+      worktreeDir: () => (this.config as { orchestra?: { worktreeDir?: string } }).orchestra?.worktreeDir,
       crews: () => this.config.crews ?? [],
       saveCrews: (crews) => {
         if (crews.length) this.config.crews = crews;
@@ -2613,9 +2614,9 @@ export class ProjectRuntime {
    * ("test_reach.py" became "testreach.py") and briefings carried them on.
    * Rebuild each from the review finding (kept intact) and the planner's own
    * reply, still in the chat — the note exactly as written (#318). Returns
-   * how many memories were mended.
+   * how many memories were mended, and each change; `dryRun` only reports (#326).
    */
-  repairDecisions(): { repaired: number; checked: number } {
+  repairDecisions(opts: { dryRun?: boolean } = {}): { repaired: number; checked: number; changes: Array<{ id: string; before: string; after: string }> } {
     const findings: Finding[] = [];
     const chats = new Map<string, string>(); // finding id → the review's chat
     for (const e of this.log.list({ kinds: ["review"] })) {
@@ -2623,6 +2624,7 @@ export class ProjectRuntime {
       for (const f of (e.payload.findings as Finding[] | undefined) ?? []) { findings.push(f); chats.set(f.id, String(e.chat ?? e.payload.chat ?? MAIN_CHAT)); }
     }
     let repaired = 0, checked = 0;
+    const changes: Array<{ id: string; before: string; after: string }> = [];
     for (const m of this.brain.all()) {
       if (m.kind !== "decision" || !m.text.startsWith("Review finding accepted (")) continue;
       checked++;
@@ -2637,10 +2639,11 @@ export class ProjectRuntime {
       }
       const fixed = decisionText(f, note);
       if (fixed === m.text) continue;
-      this.brain.update(m.id, { text: fixed }, "loom");
+      changes.push({ id: m.id, before: m.text, after: fixed });
+      if (!opts.dryRun) this.brain.update(m.id, { text: fixed }, "loom");
       repaired++;
     }
-    return { repaired, checked };
+    return { repaired, checked, changes };
   }
 
   /** Resolves once the agent isn't mid-turn (or after `maxMs`, when the send gets the adapter's own answer). */

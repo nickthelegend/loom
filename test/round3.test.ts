@@ -97,10 +97,25 @@ describe("in a project", () => {
     const finding = { id: "r1.1", agent: "codex", severity: "medium", file: "tests/test_reach.py", line: 36, text: "clear REACH_BEDROCK_MODEL in the fixture" };
     rt!.log.append({ kind: "review", chat: "c1", payload: { phase: "done", reviewId: "r1", findings: [finding], results: [] } });
     rt!.log.append({ kind: "message", agentId: "lead", chat: "c1", payload: { text: "ACCEPT r1.1 — set REACH_BEDROCK_MODEL to \"\" in tests/test_reach.py" } });
-    const broken = rt!.brain.add({ kind: "decision", text: "Review finding accepted (codex, medium): tests/test_reach.py:36 — clear REACH_BEDROCK_MODEL in the fixture — set REACHBEDROCKMODEL to \"\" in tests/testreach.py", provenance: { agentId: "user", ts: Date.now() } }).memory;
-    expect(rt!.repairDecisions()).toEqual({ repaired: 1, checked: 1 });
-    expect(rt!.brain.get(broken.id)!.text).toBe("Review finding accepted (codex, medium): tests/test_reach.py:36 — clear REACH_BEDROCK_MODEL in the fixture — set REACH_BEDROCK_MODEL to \"\" in tests/test_reach.py");
+    // a decision is written twice, as it is in the wild: the event, and the memory that points at it
+    const brokenText = "Review finding accepted (codex, medium): tests/test_reach.py:36 — clear REACH_BEDROCK_MODEL in the fixture — set REACHBEDROCKMODEL to \"\" in tests/testreach.py";
+    const fixedText = "Review finding accepted (codex, medium): tests/test_reach.py:36 — clear REACH_BEDROCK_MODEL in the fixture — set REACH_BEDROCK_MODEL to \"\" in tests/test_reach.py";
+    const event = rt!.log.append({ kind: "decision", payload: { text: brokenText, source: "review" } });
+    const broken = rt!.brain.add({ kind: "decision", text: brokenText, provenance: { agentId: "user", eventId: event.id, ts: Date.now() } }).memory;
+
+    // #326 a dry run says what it would change, and changes nothing
+    const dry = rt!.repairDecisions({ dryRun: true });
+    expect(dry).toMatchObject({ repaired: 1, checked: 1 });
+    expect(dry.changes).toEqual([{ id: broken.id, before: brokenText, after: fixedText }]);
+    expect(rt!.brain.get(broken.id)!.text).toBe(brokenText);
+
+    expect(rt!.repairDecisions()).toMatchObject({ repaired: 1, checked: 1 });
+    expect(rt!.brain.get(broken.id)!.text).toBe(fixedText);
     expect(rt!.repairDecisions().repaired).toBe(0);
+    // #325 and what `loom memory` and every briefing read shows the mended text, not the record's
+    const doc = rt!.unifiedMemory().document;
+    expect(doc).toContain("set REACH_BEDROCK_MODEL to");
+    expect(doc).not.toContain("REACHBEDROCKMODEL");
   });
 
   it("#321 a turn that would cross the daily budget doesn't start", async () => {

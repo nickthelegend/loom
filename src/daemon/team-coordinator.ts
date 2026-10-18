@@ -20,7 +20,7 @@ import { isTerminal, type Admission, type OrchestraCoordinator, type OrchestraRu
 import { openFromTeam, sealForTeam, type TeamKey } from "../core/team-crypto.js";
 import type { FeedEvent, FeedIn, HubClient, Lease, Presence } from "../core/team-hub.js";
 import { spentToday } from "../core/team-landing.js";
-import { covered, overlap, scopeOf, zoneOf } from "../core/team-leases.js";
+import { covered, overlap, repoRelative, scopeOf, zoneOf } from "../core/team-leases.js";
 import { agentAllowed, isProtected, loadPolicy, type TeamPolicy } from "../core/team-policy.js";
 import type { ProjectRuntime } from "./runtime.js";
 
@@ -237,7 +237,9 @@ export class TeamCoordinator implements OrchestraCoordinator {
 
   // ── drift (D33) ──
 
-  onEdit(run: OrchestraRun, task: OrchestraTask, path: string): void {
+  onEdit(run: OrchestraRun, task: OrchestraTask, edited: string): void {
+    // leases are repo-relative; the agent may have said where in its worktree (#327)
+    const path = repoRelative(edited, [task.dir, this.rt.info.dir]);
     if (!task.touches?.length || covered(path, task.touches)) return;
     if (run.id.startsWith("crew-")) {
       void this.rt.crews.holdForTeam(run.id, task.id, { kind: "decide", reason: `${path} is outside this card's declared lease; inspect and update touches before continuing`, since: Date.now() })
