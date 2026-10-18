@@ -180,8 +180,8 @@ export function parseCounts(output: string): Counts | null {
     const n = (w: string) => Number(new RegExp(String.raw`(?:#|ℹ)\s+${w}\s+(\d+)`).exec(o)?.[1] ?? 0);
     return { passed: n("pass"), failed: n("fail"), skipped: n("skipped"), total: n("tests") || undefined };
   }
-  // pytest: "=== 3 passed, 1 failed, 2 skipped in 0.12s ==="
-  if ((m = /=+\s*((?:\d+\s+\w+(?:,\s*)?)+)\s+in\s+[\d.]+s/.exec(o))) {
+  // pytest: "=== 3 passed, 1 failed, 2 skipped in 0.12s ===", or with -q just "52 passed in 24.43s"
+  if ((m = /(?:=+\s*|^\s*)((?:\d+\s+(?:passed|failed|skipped|errors?|warnings?|xfailed|xpassed|deselected)(?:,\s*)?)+)\s+in\s+[\d.]+s/m.exec(o))) {
     const part = (w: string) => Number(new RegExp(String.raw`(\d+)\s+${w}`).exec(m![1]!)?.[1] ?? 0);
     return { passed: part("passed"), failed: part("failed") + part("error"), skipped: part("skipped") };
   }
@@ -246,15 +246,64 @@ export function detectTestCommand(dir: string): string | null {
   }
   if (has("Cargo.toml")) return "cargo test";
   if (has("go.mod")) return "go test ./...";
-  if (has("pytest.ini") || has("conftest.py") || (has("pyproject.toml") && /\[tool\.pytest/.test(fs.readFileSync(path.join(dir, "pyproject.toml"), "utf8")))) return "python -m pytest -q";
+  if (has("pytest.ini") || has("conftest.py") || (has("pyproject.toml") && /\[tool\.pytest/.test(fs.readFileSync(path.join(dir, "pyproject.toml"), "utf8")))) {
+    // the project's own interpreter when it has one; a bare `python` often isn't on PATH (macOS ships python3 only) (#276)
+    const venv = [".venv", "venv"].map((v) => path.join(v, process.platform === "win32" ? "Scripts/python.exe" : "bin/python")).find(has);
+    return `${venv ?? (process.platform === "win32" ? "python" : "python3")} -m pytest -q`;
+  }
   if (has("Makefile") && /^test:/m.test(fs.readFileSync(path.join(dir, "Makefile"), "utf8"))) return "make test";
   return null;
+}
+
+/**
+ * The test command the turn itself ran and passed — better than a guess, since
+ * it's the one that works on this machine. Only the test segment is kept: a
+ * `cd <the project> &&` before it is dropped so it runs in the clean checkout,
+ * and so is everything piped after it — `pytest | tail -3` exits with tail's
+ * status, so re-running it whole would pass whatever the tests did (#276).
+ */
+export function ranTestCommand(ran: Ran[], projectDir: string): string | null {
+  for (const r of [...ran].reverse()) {
+    if (r.kind !== "tests" || !r.ok || (r.exitCode !== 0 && r.exitCode !== null)) continue;
+    const seg = testSegment(r.command, projectDir);
+    if (seg) return seg;
+  }
+  return null;
+}
+
+const TESTS_RE = RUNS.find((x) => x.kind === "tests")!.re;
+
+/** The part of a shell line that runs the tests, in the project — or null. */
+function testSegment(command: string, projectDir: string): string | null {
+  let elsewhere = false, found: string | null = null;
+  for (const raw of command.split(/\s*(?:&&|\|\||;|\|)\s*/)) {
+    const part = raw.trim();
+    const cd = /^cd\s+("([^"]+)"|'([^']+)'|(\S+))$/.exec(part);
+    if (cd) {
+      const target = (cd[2] ?? cd[3] ?? cd[4] ?? "").replace(/\\ /g, " ");
+      elsewhere = !(target === "." || path.resolve(projectDir, target) === path.resolve(projectDir));
+      continue;
+    }
+    const bare = part.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "").replace(/^(?:time|env|nice|exec|timeout\s+\S+)\s+/, "");
+    if (!elsewhere && TESTS_RE.test(bare)) found = part;
+  }
+  // its output redirections go too: the re-run captures output itself
+  return found ? found.replace(/\s*\d?>&\d\b/g, "").replace(/\s*(?:\d|&)?>>?\s*\S+/g, "").trim() || null : null;
+}
+
+/** A re-run that never got as far as the tests: the command (or its interpreter) wasn't found or couldn't execute. */
+export function couldNotRun(r: Rerun): boolean {
+  if (r.ok) return false;
+  return r.exitCode === 126 || r.exitCode === 127 || /command not found|is not recognized as an internal or external command|cannot execute binary/i.test(r.tail);
 }
 
 // ── the verdict ──
 
 /** Weigh what was claimed against what ran and what the clean re-run showed. */
-export function judge(claims: Claim[], ran: Ran[], rerun: Rerun | null): ProofResult {
+export function judge(claims: Claim[], ran: Ran[], given: Rerun | null): ProofResult {
+  // a re-run that couldn't start says nothing about the tests: weigh the claims on what the turn ran, and say so (#276)
+  const unrunnable = given && couldNotRun(given) ? given : null;
+  const rerun = unrunnable ? null : given;
   const checks: ClaimCheck[] = claims.map((c) => {
     const same = ran.filter((r) => r.kind === c.kind);
     const last = same.at(-1);
@@ -282,6 +331,7 @@ export function judge(claims: Claim[], ran: Ran[], rerun: Rerun | null): ProofRe
     ? contradicted[0] ? `Claimed “${contradicted[0].text.slice(0, 60)}” — ${contradicted[0].why}` : `The tests fail in a clean checkout${rerun?.counts ? `: ${rerun.counts.failed} failed` : ""}`
     : verdict === "verified"
       ? rerun?.ok ? `Verified: ${rerun.counts ? `${rerun.counts.passed} tests pass` : "the tests pass"} in a clean checkout` : "Verified against the commands it ran"
-      : rerun === null && !claims.length ? "Nothing to verify: no claims and no test command" : "Unverified: no test command to check it against";
-  return { verdict, headline, claims: checks, ran, rerun };
+      : unrunnable ? "Unverified" : rerun === null && !claims.length ? "Nothing to verify: no claims and no test command" : "Unverified: no test command to check it against";
+  const why = unrunnable ? `couldn't run \`${unrunnable.command.slice(0, 60)}\` in a clean checkout (${unrunnable.tail.trim().split("\n").filter(Boolean).at(-1)?.slice(0, 80) ?? `exit ${unrunnable.exitCode}`}) — set proof.testCommand in .loom/config.json` : "";
+  return { verdict, headline: why ? `${headline} — ${why}` : headline, claims: checks, ran, rerun: given };
 }

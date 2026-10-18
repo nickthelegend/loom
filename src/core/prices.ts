@@ -96,3 +96,14 @@ export function priceBook(): PriceBook | null {
 
 /** For tests: forget the book in memory, or set one. */
 export function setPriceBook(next: PriceBook | null | undefined): void { book = next; lastTry = 0; }
+
+/** Prompt caches go cold this long after the last turn (Anthropic's default TTL): after it, a resumed session is re-read at full price. */
+export const CACHE_TTL_MS = 5 * 60_000;
+
+/** What resuming a session of this size, this long after its last turn, would cost to re-read — when the cache has likely expired. */
+export function coldResume(s: { tokens: number; ageMs: number; model?: string }, book: PriceBook | null): { cold: boolean; estUsd?: number } {
+  const cold = s.ageMs > CACHE_TTL_MS;
+  if (!cold) return { cold };
+  const est = estimateUsd({ model: s.model ?? "", tokensIn: s.tokens, tokensOut: 0 }, book);
+  return { cold, ...(est !== undefined ? { estUsd: est } : {}) };
+}

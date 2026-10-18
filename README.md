@@ -130,9 +130,13 @@ loom proof                   # check the newest turn (exits 1 if it didn't hold)
 loom proof --test "npm run test:unit"
 ```
 
-The test command is detected from the project (`npm test`, `cargo test`,
-`go test ./...`, `pytest`, `make test`). Override it with `proof.testCommand`
-in `.loom/config.json`; `proof.auto: "off"` turns off automatic checks.
+The test command is the one the turn itself ran and passed (a leading
+`cd <project> &&` dropped), else one detected from the project (`npm test`,
+`cargo test`, `go test ./...`, pytest through the project's `.venv` or
+`python3`, `make test`). Override it with `proof.testCommand` in
+`.loom/config.json`; `proof.auto: "off"` turns off automatic checks. A re-run
+that can't start (exit 126/127, "command not found") is **unverified**, never
+"the tests fail".
 Pass/fail counts are read from vitest, jest, node:test, mocha, pytest, cargo,
 go test, rspec and phpunit output.
 
@@ -687,7 +691,7 @@ detects at least two roles.
 | `loom` | **The TUI** — tabbed workspace (Thread · Board · Brain · Diff), `shift+tab` switches view, `tab` shifts agents, `/`-commands + `ctrl+p` palette inline |
 | `loom init` | Make the current directory a Loom project (auto-detects agents); in a git repo it offers to add `.loom/` to `.gitignore` (`--gitignore` / `--no-gitignore` to skip the question) |
 | `loom chat` | Same thread as a plain line REPL (`/handoff`, `/interrupt`, `@agent`) |
-| `loom send <text>` | One-shot message (`-a <agent>` to address someone specific). `--wait` blocks until the turn ends and prints the reply and cost (`--json` for one object, `--timeout <s>`); it exits 0 done, 1 failed, 2 the agent asked a question, 124 timed out — so a script can drive an agent without reading `.loom/log.db` |
+| `loom send <text>` | One-shot message (`-a <agent>` to address someone specific). `--wait` blocks until the turn ends and prints the reply and cost (`--json` for one object, `--timeout <s>`); it exits 0 done, 1 failed, 2 the agent asked a question, 124 timed out — so a script can drive an agent without reading `.loom/log.db`. Before resuming a session of 100k+ tokens whose prompt cache has likely expired, it warns with the re-read's estimated cost; `--fresh` starts the agent's session in that chat over |
 | `loom handoff <agent>` | Pass the baton — interrupts, projects memory, briefs the target |
 | `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
 | `loom routes` | List named pipelines defined for this project |
@@ -733,7 +737,7 @@ detects at least two roles.
 | `loom runner [status\|pair\|join\|start\|stop\|token\|doctor\|install\|revoke\|goal\|move\|back\|jobs]` | Runners: your always-on Loom that takes goals while you're away |
 | `loom cloud [status\|enable\|disable\|rotate]` | Loom Cloud relay: reach this daemon from any network, end-to-end encrypted |
 | `loom spawn "<task>"` | Fan a subtask out to a child agent — the parent keeps the baton |
-| `loom review <agents…> [--file f \| --diff \| --text "…"] [--focus "…"]` | Several agents review the same change at once — **read-only** (their own plan mode where they have one), **nobody takes the baton**, so nobody is asked to hand off for a read. It waits and prints every finding in one list, worst first; two reviewers on the same line show as one finding they agree on. The same card lands in the app with Accept / Reject on each finding. `--diff` (the uncommitted changes) is the default; `--no-wait`, `--json` |
+| `loom review <agents…> [--file f \| --diff \| --text "…"] [--focus "…"]` | Several agents review the same change at once — **read-only** (their own plan mode where they have one), **nobody takes the baton**, so nobody is asked to hand off for a read. It waits and prints every finding in one list, worst first; two reviewers on the same line show as one finding they agree on. The same card lands in the app with Accept / Reject on each finding. `--diff` (the uncommitted changes) is the default; `--no-wait`, `--json`. A reviewer that takes longer than `review.timeoutMin` (default 15) is stopped and left out, so the others' findings still land |
 | `loom council "<goal>" --planner <id> --reviewers <ids>` | One planner, several reviewers, seven stages in one chat (and one card in the app that fills in as they go): the **planner plans** (no edits) → the **reviewers backtest the plan** in parallel, read-only → the **planner accepts or rejects** each finding, recorded as decisions → **only the planner builds** → **Proof** re-runs the tests in a clean checkout → the **reviewers forward-test the diff** → the **planner fixes** what it agrees with, and Proof again. `loom council:status [id]`, `loom council:stop` |
 | `loom review:accept <id…>` / `loom review:reject <id…> [--note why]` | Decide on review findings — an accepted one becomes a project decision every agent is briefed with. `loom reviews [id]` lists them |
 | `loom subtasks` | Subtasks running right now |
@@ -1147,7 +1151,7 @@ real CLI with `node scripts/verify-permissions.mjs`, not read off `--help`.
 Turn on **Plan** in the composer and agents write plans, not code.
 
 - **In a chat:** the agent investigates, then writes
-  `plans/<date>-<slug>.md` (Goal, Context, Approach, self-contained Tasks, Risks,
+  `.loom/plans/<date>-<slug>.md` — Loom's folder, not a new one in your repo — (Goal, Context, Approach, self-contained Tasks, Risks,
   Verification) and stops.
 - **In an orchestra** (`loom orchestrate --plan "<goal>"`):
   - the orchestrator's plan becomes `plans/<run>/PLAN.md` plus one spec file per

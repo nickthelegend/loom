@@ -112,6 +112,7 @@ import { ProviderAgent } from "../providers/agent.js";
 import { READ_ONLY_RULE, type ReviewTarget } from "../core/review.js";
 import { ReviewRunner } from "./review.js";
 import { CouncilRunner } from "./council.js";
+import { coldResume, priceBook } from "../core/prices.js";
 import { LiveDeltaThrottle, type LiveFrame } from "../providers/live.js";
 import { AdapterBase, type AgentCheck } from "../adapters/base.js";
 import type { LiveText } from "../types.js";
@@ -461,6 +462,11 @@ export class ProjectRuntime {
         this.brain.add({ kind: "decision", text, provenance: { agentId: "user", eventId: event.id, ts: event.ts } });
       },
       maxReviewers: ProjectRuntime.MAX_CONCURRENT_SUBTASKS,
+      reviewerTimeoutMs: () => Math.max(1, Number(this.config.review?.timeoutMin) || 15) * 60_000,
+      stopReviewer: async (agentId) => {
+        const a = this.agents.get(agentId);
+        if (a && isAdapter(a) && a.busy()) await a.interrupt();
+      },
     });
     this.councils = new CouncilRunner({
       hasAgent: (id) => this.config.agents.some((a) => a.id === id),
@@ -587,6 +593,7 @@ export class ProjectRuntime {
     catch (error) { log.close(); throw error; }
     rt.configMtime = configMtimeOf(info.dir);
     rt.rehydrateCosts();
+    rt.rehydrateSignIns();
     // Pull each connected ADE's native memory into the shared brain on open.
     try {
       rt.importMemories();
@@ -2426,8 +2433,8 @@ export class ProjectRuntime {
 
   /**
    * A plan turn on a provider agent runs in the agent's own plan mode, which
-   * changes nothing; Loom keeps the plan it proposes under plans/, as its plan
-   * mode always has.
+   * changes nothing; Loom keeps the plan it proposes under .loom/plans/ — its
+   * own folder, not a new untracked one in your repo (#279).
    */
   private saveProposedPlan(agentId: string, chat: string | undefined, markdown: string): void {
     if (!markdown.trim()) return;
@@ -2435,7 +2442,7 @@ export class ProjectRuntime {
       const heading = /^#+\s*(.+)$/m.exec(markdown)?.[1] ?? markdown.split("\n")[0] ?? "plan";
       const slug = heading.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "plan";
       const day = new Date().toISOString().slice(0, 10);
-      const dir = path.join(this.agentDir(agentId), "plans");
+      const dir = path.join(projectLoomDir(this.agentDir(agentId)), "plans");
       fs.mkdirSync(dir, { recursive: true });
       let file = path.join(dir, `${day}-${slug}.md`);
       for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `${day}-${slug}-${n}.md`);
@@ -2550,6 +2557,30 @@ export class ProjectRuntime {
     if (event.kind === "run_complete" && !event.payload.error) { this.signedOutAgents.delete(event.agentId); return; }
     const message = event.kind === "error" ? String(event.payload.message ?? "") : event.kind === "run_complete" ? String(event.payload.error ?? "") : "";
     if (message && SIGNED_OUT.test(message)) this.signedOutAgents.set(event.agentId, message.split("\n")[0]!.slice(0, 200));
+  }
+
+  /**
+   * The size of an agent's native session in a chat — the context its last
+   * turn sent — and how long ago that was; a resumed session past the cache's
+   * life is re-read in full (#280).
+   */
+  sessionWeight(agentId: string, chat = MAIN_CHAT): { tokens: number; ageMs: number; model?: string; cold: boolean; estUsd?: number } | null {
+    const last = this.log.list({ chat, agentId, kinds: ["run_complete"], limit: 50 }).at(-1);
+    if (!last) return null;
+    const tokens = Number(last.payload.inputTokens ?? 0) || 0;
+    const model = typeof last.payload.model === "string" ? last.payload.model : undefined;
+    const ageMs = Date.now() - last.ts;
+    return { tokens, ageMs, ...(model ? { model } : {}), ...coldResume({ tokens, ageMs, ...(model ? { model } : {}) }, priceBook()) };
+  }
+
+  /** The agents a real turn found signed out, with what the CLI said (for `loom doctor`). */
+  learnedSignOuts(): Array<{ agentId: string; kind: string; message: string }> {
+    return [...this.signedOutAgents.entries()].map(([agentId, message]) => ({ agentId, kind: this.config.agents.find((a) => a.id === agentId)?.kind ?? "", message }));
+  }
+
+  /** What a restart would forget: each agent's latest sign-in failure that no successful turn has cleared since. */
+  private rehydrateSignIns(): void {
+    for (const e of this.log.list({ kinds: ["error", "run_complete"], limit: 3000 })) this.noteSignIn(e);
   }
 
   /** What status says about an agent's sign-in: a real failure beats the CLI's own (cached) check. */

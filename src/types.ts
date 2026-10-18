@@ -276,6 +276,8 @@ export interface ProjectConfig {
   relay?: import("./daemon/runtime/relay.js").RelayConfig;
   /** Proof: how an agent's "done" is checked (daemon/proof.ts). */
   proof?: import("./daemon/proof.js").ProofConfig;
+  /** `loom review` and the council's reviews: how long one reviewer may take before it's left out (default 15 minutes). */
+  review?: { timeoutMin?: number };
   /** Agent that receives messages when nobody holds the baton. */
   defaultAgent?: string;
   /** Named multi-hop pipelines; steps are agent ids/roles, optionally with instructions. */
@@ -467,6 +469,8 @@ export interface SendInput {
    * permission mode). Provider agents only.
    */
   interactionMode?: "default" | "plan";
+  /** Start this chat's native session over instead of resuming it — a short question needn't re-read a long, cold session (#280). Provider agents only. */
+  freshSession?: boolean;
   /** App-owned conversation binding; native IDs never cross chat/workspace scopes.
    * Context is injected into the ordinary input on every invocation. */
   continuity?: { runId: string; bindingId: string; sessionEpoch: number;

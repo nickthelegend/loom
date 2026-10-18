@@ -336,6 +336,8 @@ export class ProviderAgent extends AdapterBase {
       const model = input.model ?? this.options.model;
       const effort = this.options.effort;
       if (input.continuity) await this.bindContinuity(service, chat, input.continuity.nativeSessionId);
+      // forget this chat's native session: the turn starts a new one with nothing to re-read (#280)
+      else if (input.freshSession) await this.bindContinuity(service, chat, null);
       await this.applyMcp(service, chat, input.mcp);
       if (cur.interrupted) throw new NativeDispatchRejected("interrupted before the turn started");
       // Codex has no per-turn system channel and a warm Claude session's system

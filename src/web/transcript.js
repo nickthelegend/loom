@@ -128,7 +128,7 @@ import { shortModel } from './permissions.js';
       '<span class="rvwhat">' + esc(what) + "</span></div>" + (rows ? '<ul class="rvl">' + rows + "</ul>" : "") + quiet + "</div>";
   }
   // Council: one planner, several reviewers, seven stages in one card that fills in as they go (daemon/council.ts)
-  var CSTAGE_MARK = { waiting: "\u00b7", running: "\u25d0", done: "\u2713", skipped: "\u2013", failed: "\u2717" };
+  var CSTAGE_MARK = { waiting: "\u00b7", running: "\u25d0", done: "\u2713", skipped: "\u2013", failed: "\u2717", unverified: "?" };
   function councilCard(e){
     var p = e.payload || {};
     if (p.phase !== "started") return "";
