@@ -123,6 +123,7 @@ function mount({
   token = clientToken as string | null,
   bootstrap = true,
   firstRun = false,
+  simple = false,
 } = {}): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
@@ -207,6 +208,9 @@ function mount({
         }
       } as unknown as typeof window.WebSocket;
       if (token) window.localStorage.setItem("loomClientToken", token);
+      // most of these exercise Developer mode's tools (Orchestra, Crew, the panel, the graph);
+      // `simple` boots the app the way a new install sees it
+      if (!simple) window.localStorage.setItem("loomDevMode", "1");
       // the first-run Setup dialog opens 400ms in and covers whatever a test is clicking
       if (!firstRun) window.localStorage.setItem("loomSetupSeen", "1");
     },
@@ -1096,6 +1100,47 @@ describe("web app · settings", () => {
     expect(text(m, "#setpane")).toContain(PKG_VERSION);
     const repo = $(m, '#setpane a[href*="github.com"]');
     expect(repo, "a GitHub link").toBeTruthy();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
+  /**
+   * Simple is what a new install sees: five plain tabs and none of the
+   * developer furniture. Developer mode, one switch in Preferences, brings
+   * every tool back without a reload — and survives one.
+   */
+  it("boots in Simple mode, and Preferences' Developer switch brings every tool back", async () => {
+    const m = mount({ simple: true, hash: `#p/${projectId}` });
+    const doc = m.window.document;
+    const tabs = () => [...doc.querySelectorAll("#tabsbox .tab")].map((t) => t.getAttribute("data-tab"));
+    await waitUntil(() => tabs().length > 0);
+    expect(doc.documentElement.classList.contains("simple")).toBe(true);
+    expect(tabs()).toEqual(["thread", "team", "fleet", "board", "brain"]);
+    // the developer furniture is marked, so html.simple hides it
+    for (const sel of ["#termbtn", "#consolebtn", "#railbtn", "#cmode", "#modelpick", "#morebtn"]) {
+      expect($(m, sel)?.classList.contains("devonly"), `${sel} should be developer-only`).toBe(true);
+    }
+    // and ⌘K doesn't offer what Simple mode hides
+    await waitUntil(() => !!$(m, "#slist .srow"));
+    m.window.document.dispatchEvent(new m.window.KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true }));
+    await waitUntil(() => doc.querySelectorAll(".palette .prow").length > 0);
+    expect(text(m, ".palette")).toContain("Go to Memory");
+    expect(text(m, ".palette")).not.toMatch(/Go to Orchestra|New crew goal|Toggle terminal|Go to Insights/);
+    m.window.document.dispatchEvent(new m.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitUntil(() => !$(m, ".palette"));
+
+    await openSection(m, "preferences");
+    await waitUntil(() => !!$(m, '#setpane [data-seg="devmode"]'));
+    expect($(m, '#setpane [data-seg="devmode"] [data-val="simple"]')?.classList.contains("on")).toBe(true);
+    click($(m, '#setpane [data-seg="devmode"] [data-val="dev"]'));
+    await waitUntil(() => tabs().includes("orchestra"));
+    expect(tabs()).toEqual(expect.arrayContaining(["orchestra", "crew", "observatory"]));
+    expect(doc.documentElement.classList.contains("simple")).toBe(false);
+    expect(m.window.localStorage.getItem("loomDevMode")).toBe("1");
+
+    // and back: Simple again, the extra tabs gone
+    click($(m, '#setpane [data-seg="devmode"] [data-val="simple"]'));
+    await waitUntil(() => !tabs().includes("orchestra"));
+    expect(doc.documentElement.classList.contains("simple")).toBe(true);
     expect(m.errors.join("\n")).toBe("");
   });
 

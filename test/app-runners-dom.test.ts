@@ -183,6 +183,8 @@ function mount(): Mounted {
         }
       } as unknown as typeof window.WebSocket;
       window.localStorage.setItem("loomClientToken", adminToken);
+      // these exercise Developer mode's tools (Orchestra, Crew, the panel, the graph)
+      window.localStorage.setItem("loomDevMode", "1");
     },
   });
   const m: Mounted = {

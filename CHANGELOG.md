@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Simple mode, and it's the default.** A project opens on five plain tabs — Chat, Team, Agents, Board, Memory — and a composer that's just a box, the agent and Plan. No Orchestra or Crew tabs, no Insights metrics, no terminal, console, browser or right-hand panel, no model, permission or context chips, no cost meter or baton in the status bar, no MCP/skills menu; ⌘K and the menu shortcuts leave those out too, and a stray link to one says where it is instead of half-opening it.
+- **Developer mode** (Settings → Preferences → Mode) turns every one of those back on, instantly and per device. Nothing was removed — it's all where it was.
+
+### Fixed
+
+- A workspace tab could fail to switch when the window wasn't painting (backgrounded), because its crossfade never ran; the click now switches it regardless.
+
 ## [1.2.2] — 2026-10-18
 
 The Team tab and GitHub sign-in, and everything a third stress test (5 projects at once, restarts mid-run) found.

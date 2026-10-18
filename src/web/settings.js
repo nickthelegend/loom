@@ -9,6 +9,7 @@ import { state } from './state.js';
 import { JOB_KIND,loadTeam,loadTeamPolicy,loadTeamRunners,loadTeamShare,runnerName,teamAvatar,teamEditing,teamField,teamHooks,teamInviteHtml,teamInvites,teamNotify,teamPolicyHtml,teamRunners,teamShareHtml,teamShareOf,teamShares,wireTeamForms,wireTeamInvites,wireTeamShare } from './team.js';
 import { ACCENTS,appearancePref,applyAppearance,isElectron,setThemePref,themePref } from './theme.js';
 import { durfmt } from './transcript.js';
+import { devMode, setDevMode } from './mode.js';
 
 
   /**
@@ -198,6 +199,13 @@ import { durfmt } from './transcript.js';
     }
     function renderPrefs(){
       var h = '<div class="setphead">Preferences</div>';
+      // Simple by default; Developer mode turns on the rest of what Loom has (mode.js)
+      h += '<div class="sgrouph">Mode</div>';
+      h += '<div class="prow"><div class="pl"><div class="pt">Developer mode</div>' +
+        '<div class="pd">' + (devMode()
+          ? "On: Orchestra, Crew, Insights and its metrics, the terminal, console, browser, the right-hand panel, MCPs and skills, and the cost meter."
+          : "Off: Loom shows chat, your team, your agents, the board and memory. Turn it on for Orchestra, Crew, metrics, the terminal and the rest.") + "</div></div>" +
+        '<div class="pc">' + seg("devmode", [{ v: "simple", l: "Simple" }, { v: "dev", l: "Developer" }], devMode() ? "dev" : "simple") + "</div></div>";
       h += '<div class="sgrouph">Appearance</div>';
       h += '<div class="prow"><div class="pl"><div class="pt">Theme</div>' +
         '<div class="pd">Light or dark. Open terminals repaint to match.</div></div>' +
@@ -223,6 +231,13 @@ import { durfmt } from './transcript.js';
         '<div class="pc">' + seg("chime", [{ v: "on", l: "On" }, { v: "off", l: "Off" }], devicePref("chime", false) ? "on" : "off") + "</div></div>";
       h += '<div id="projprefs"></div>';
       pane.innerHTML = h;
+      bindSeg("devmode", function(v){
+        setDevMode(v === "dev");
+        toast(v === "dev" ? "Developer mode on \u2014 every tool is back" : "Simple mode \u2014 just what you need");
+        // redraw the app around the settings window, then this section with its new words
+        if (state.rerender) state.rerender();
+        renderPrefs();
+      });
       bindSeg("notifydone", function(v){
         setDevicePref("notifyDone", v === "on");
         if (v === "on" && !window.loomNative && window.Notification && Notification.permission === "default") {

@@ -6,7 +6,11 @@
 
   // Open by default only where there's room for it beside a readable thread;
   // on a laptop the chat is the point, and the panel is one click away.
-  function railOpen(){ var v = localStorage.getItem(RAIL_KEY); return v === null ? (window.innerWidth || 0) >= 1440 : v === "1"; }
+  function railOpen(){
+    // Simple mode has no right-hand panel: the conversation is the point
+    if (document.documentElement.classList.contains("simple")) return false;
+    var v = localStorage.getItem(RAIL_KEY); return v === null ? (window.innerWidth || 0) >= 1440 : v === "1";
+  }
 
   function applyRail(){
     var shell = document.querySelector(".dshell");

@@ -215,6 +215,8 @@ function mount({
         }
       } as unknown as typeof window.WebSocket;
       if (token) window.localStorage.setItem("loomClientToken", token);
+      // these exercise Developer mode's tools (Orchestra, Crew, the panel, the graph)
+      window.localStorage.setItem("loomDevMode", "1");
       // open straight onto a conversation, the way a reload remembers one
       if (chat) window.localStorage.setItem(`loomChat:${projectId}`, chat);
       // Abort asks first; jsdom has no dialogs, and a test always means yes

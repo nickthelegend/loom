@@ -12,6 +12,7 @@ import { state } from './state.js';
 import { openTaskModal } from './tasks.js';
 import { setThemePref } from './theme.js';
 import { ICONS } from './icons.js';
+import { devMode, SIMPLE_TABS } from './mode.js';
 
   /**
    * One menu-bar item, by name. Each presses the button (or calls the
@@ -29,6 +30,8 @@ import { ICONS } from './icons.js';
       return false;
     };
     var needProject = function(){ if (!state.pid || !state.showTab) { toast("open a project first"); return false; } return true; };
+    // a menu shortcut for a Developer tool, pressed in Simple mode: say where it is rather than half-open it
+    if (!devMode() && devOnly(item)) { toast("That\u2019s a Developer mode tool \u2014 turn it on in Settings \u2192 Preferences"); return; }
     if (item.indexOf("tab:") === 0) { if (needProject()) state.showTab(item.slice(4)); return; }
     if (item.indexOf("theme:") === 0) {
       setThemePref(item.slice(6)); // "system" follows the OS from here on
@@ -178,4 +181,11 @@ import { ICONS } from './icons.js';
     ["shortcuts", "Keyboard shortcuts", "⌘/", ICONS.keyboard, false],
   ].map(function(c){ return { id: c[0], label: c[1], keys: c[2], icon: c[3], needsProject: c[4] }; });
 
-export { COMMANDS,runCommand };
+  /** Commands that open a Developer mode tool (mode.js); Simple mode leaves them out. */
+  var DEV_COMMANDS = { orchestrate: 1, crew: 1, prompts: 1, tools: 1, "toggle-rail": 1, "toggle-terminal": 1, "toggle-browser": 1, console: 1 };
+  function devOnly(id){
+    if (id.indexOf("tab:") === 0) return SIMPLE_TABS.indexOf(id.slice(4)) < 0;
+    return !!DEV_COMMANDS[id];
+  }
+
+export { COMMANDS,devOnly,runCommand };

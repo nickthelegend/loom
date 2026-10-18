@@ -185,6 +185,8 @@ function mount({ desktop = true, hash = "", chat = "", pid = projectId } = {}): 
         }
       } as unknown as typeof window.WebSocket;
       window.localStorage.setItem("loomClientToken", clientToken);
+      // these exercise Developer mode's tools (Orchestra, Crew, the panel, the graph)
+      window.localStorage.setItem("loomDevMode", "1");
       // the first-run setup dialog is a modal, and shortcuts rightly defer to it
       window.localStorage.setItem("loomSetupSeen", "1");
       if (chat) window.localStorage.setItem(`loomChat:${pid}`, chat);
