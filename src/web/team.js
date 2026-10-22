@@ -837,6 +837,8 @@ import { ORCH_RUN_ST } from './transcript.js';
     h += rs.map(function(r){
       return '<div class="trn" data-trunner="' + esc(r.deviceId) + '"><span class="tnt"><span class="odot ' + (r.online ? "ok" : "off") + '" title="' + (r.online ? "online" : "offline") + '"></span>' +
         "<b>" + esc(runnerName(r)) + "</b>" + (r.shared ? '<span class="tbdg">shared</span>' : "") +
+        // a teammate's shared runner is where your goals' team:<agent> tasks run
+        (r.shared && !r.mine && r.online ? '<span class="tbdg" title="your goals can send tasks here: team:' + esc((r.kinds || []).join(", team:")) + '">takes your tasks</span>' : "") +
         "<small>" + (r.mine ? "yours" : esc(r.github || "a teammate") + "\u2019s") + " \u00b7 " + (esc((r.kinds || []).join(", ")) || "no agents yet") +
           (r.capacity ? " \u00b7 " + Number(r.capacity) + " at a time" : "") + (r.online ? "" : " \u00b7 seen " + rel(r.lastSeen)) + "</small></span></div>";
     }).join("");

@@ -2123,93 +2123,9 @@ export class OrchestraEngine {
         await this.runRemoteTask(run, task);
         if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
         await this.integrate(run, task);
-        throw { settled: true };
-      }
-      let agent = this.live.get(key);
-      const freshSession = !agent;
-      if (!agent) {
-        const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
-        agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
-        this.live.set(key, agent);
-        this.wire(run, agent, cfg.id, task.chat, key);
-        await agent.start();
-      }
-
-      // The first attempt always sends the task itself — a follow-up the
-      // orchestrator queued in the same breath waits its turn behind it.
-      const first = task.attempts === 1;
-      // A later attempt sends the orchestrator's next follow-up. With none
-      // queued, this is a task picking back up after Loom restarted (resume,
-      // or a goal moved here): say so, and give it the task again — its
-      // session is new, its worktree still has everything it did.
-      const followUp = first ? undefined : task.queued.shift();
-      const text =
-        first
-          ? task.prompt
-          : (followUp ??
-            `Loom was restarted while you were on this task (${task.title}). Everything you'd done is still in this worktree. ` +
-              `Check where it stands, finish the task, and report back.\n\nThe task, again:\n${task.prompt}`);
-      this.host.append({
-        kind: "message",
-        chat: task.chat,
-        payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
-      });
-      this.turnText.set(key, "");
-      const briefing = first || freshSession
-        ? workerBriefing({
-            project: this.host.projectName,
-            runGoal: run.goal,
-            task,
-            branch: task.branch!,
-            brain: await this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
-            ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
-          })
-        : undefined;
-      await agent.send({ text, ...(briefing ? { briefing } : {}) });
-      if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
-      // paused mid-turn (pauseTask): not finished, nothing to integrate yet
-      if ((task.status as TaskStatus) === "pending") {
-        this.schedule(run);
-        return;
-      }
-
-      const reply = (this.turnText.get(key) ?? "").trim();
-      this.turnText.delete(key); // kept on the task (task.result), not here, once the turn is read
-      task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
-      const turnError = this.lastError.get(key);
-      this.lastError.delete(key);
-      const asked = this.workerQuestion.get(key);
-      this.workerQuestion.delete(key);
-      if (asked) {
-        // Its work so far stays in the worktree, unmerged; the orchestrator
-        // answers with a `send` (the task resumes there) or asks the human.
-        task.status = "needs_input";
-        task.result = `The worker stopped to ask: ${asked}${reply ? `\n\nWhat it said before asking:\n${task.result}` : ""}`;
-        task.finishedAt = Date.now();
-        task.reported = false;
-        this.save(run);
-        this.emit(run, "task", { task: taskSummary(task) });
-        this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
-        this.schedule(run);
-        return;
-      }
-      if (turnError) task.error = turnError;
-
-      // A turn that errored and said nothing died — it is not "done", and a
-      // task depending on it must not start on top of it. (An error event
-      // alongside a real report is a warning the orchestrator gets to read.)
-      if (turnError && !reply) {
-        task.status = "failed";
-      } else if (task.queued.length) {
-        // The orchestrator already queued a follow-up: keep going on the same
-        // worktree before merging.
-        task.status = "pending";
-      } else {
-        await this.integrate(run, task);
-      }
+      } else if (!(await this.runLocalTurn(run, task, key))) return;
     } catch (err) {
-      if ((err as { settled?: boolean })?.settled) { /* a teammate's task, integrated above */ }
-      else if ((task.status as TaskStatus) !== "cancelled") {
+      if ((task.status as TaskStatus) !== "cancelled") {
         task.status = "failed";
         task.error = (err as Error).message.slice(0, 1000);
       }
@@ -2221,6 +2137,97 @@ export class OrchestraEngine {
     this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
     if ((task.status as TaskStatus) === "done") this.host.coordinator?.()?.onTaskDone?.(run, task);
     this.schedule(run);
+  }
+
+  /**
+   * One turn of a local worker on its task, through to integration. False when the
+   * task stopped short (cancelled, paused, or the worker asked a question and the
+   * task already reported itself) — runTask then has nothing more to record.
+   */
+  private async runLocalTurn(run: OrchestraRun, task: OrchestraTask, key: string): Promise<boolean> {
+    let agent = this.live.get(key);
+    const freshSession = !agent;
+    if (!agent) {
+      const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
+      agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
+      this.live.set(key, agent);
+      this.wire(run, agent, cfg.id, task.chat, key);
+      await agent.start();
+    }
+
+    // The first attempt always sends the task itself — a follow-up the
+    // orchestrator queued in the same breath waits its turn behind it.
+    const first = task.attempts === 1;
+    // A later attempt sends the orchestrator's next follow-up. With none
+    // queued, this is a task picking back up after Loom restarted (resume,
+    // or a goal moved here): say so, and give it the task again — its
+    // session is new, its worktree still has everything it did.
+    const followUp = first ? undefined : task.queued.shift();
+    const text =
+      first
+        ? task.prompt
+        : (followUp ??
+          `Loom was restarted while you were on this task (${task.title}). Everything you'd done is still in this worktree. ` +
+            `Check where it stands, finish the task, and report back.\n\nThe task, again:\n${task.prompt}`);
+    this.host.append({
+      kind: "message",
+      chat: task.chat,
+      payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
+    });
+    this.turnText.set(key, "");
+    const briefing = first || freshSession
+      ? workerBriefing({
+          project: this.host.projectName,
+          runGoal: run.goal,
+          task,
+          branch: task.branch!,
+          brain: await this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
+          ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
+        })
+      : undefined;
+    await agent.send({ text, ...(briefing ? { briefing } : {}) });
+    if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return false;
+    // paused mid-turn (pauseTask): not finished, nothing to integrate yet
+    if ((task.status as TaskStatus) === "pending") {
+      this.schedule(run);
+      return false;
+    }
+
+    const reply = (this.turnText.get(key) ?? "").trim();
+    this.turnText.delete(key); // kept on the task (task.result), not here, once the turn is read
+    task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
+    const turnError = this.lastError.get(key);
+    this.lastError.delete(key);
+    const asked = this.workerQuestion.get(key);
+    this.workerQuestion.delete(key);
+    if (asked) {
+      // Its work so far stays in the worktree, unmerged; the orchestrator
+      // answers with a `send` (the task resumes there) or asks the human.
+      task.status = "needs_input";
+      task.result = `The worker stopped to ask: ${asked}${reply ? `\n\nWhat it said before asking:\n${task.result}` : ""}`;
+      task.finishedAt = Date.now();
+      task.reported = false;
+      this.save(run);
+      this.emit(run, "task", { task: taskSummary(task) });
+      this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+      this.schedule(run);
+      return false;
+    }
+    if (turnError) task.error = turnError;
+
+    // A turn that errored and said nothing died — it is not "done", and a
+    // task depending on it must not start on top of it. (An error event
+    // alongside a real report is a warning the orchestrator gets to read.)
+    if (turnError && !reply) {
+      task.status = "failed";
+    } else if (task.queued.length) {
+      // The orchestrator already queued a follow-up: keep going on the same
+      // worktree before merging.
+      task.status = "pending";
+    } else {
+      await this.integrate(run, task);
+    }
+    return true;
   }
 
   /**

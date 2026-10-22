@@ -969,7 +969,7 @@ export class TeamLink {
         const p = openFromTeam<JobPayload>(keys, sealed);
         return {
           ...rest,
-          goal: (p?.goal ?? p?.record?.goal ?? "").split("\n")[0]!.slice(0, 200),
+          goal: (p?.goal ?? p?.record?.goal ?? (p?.task ? `${p.task.title} — part of “${p.task.goal}”` : "")).split("\n")[0]!.slice(0, 200),
           runId: p?.runId ?? p?.record?.id ?? null,
           progress: openFromTeam<JobProgress>(keys, progress) ?? null,
           mine: j.userId === me,

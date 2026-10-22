@@ -148,6 +148,8 @@ beforeAll(async () => {
   });
   await LB.join((await LA.invite(teamId)).link, { github: "bob", secret: "ta" });
   await LB.startRunner();
+  // the runner registers on its first tick; a goal started before that would simply stay solo
+  await waitUntil(async () => { await LB.runner!.tick(); return (await LA.runnersView(laptop)).runners.some((r) => r.github === "bob" && r.online); }, { timeoutMs: 20_000 });
 }, 60_000);
 
 afterAll(async () => {
