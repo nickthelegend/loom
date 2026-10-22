@@ -1,4 +1,5 @@
 /** Browser shell module. See README.md for ownership and startup. */
+import { devMode } from './mode.js';
 import { agentGlyph,agentLabel,brandMark } from './agents.js';
 import { copyText } from './clipboard.js';
 import { api,clearTimers,logout } from './connection.js';
@@ -264,7 +265,9 @@ import { shortModel } from './permissions.js';
           '<button class="psetbtn" data-pset="' + esc(p.id) + '" title="project settings" aria-label="settings for ' + esc(p.name) + '">' + ICONS.gear + "</button></div>" +
           (p.error
             ? '<div class="m merr">' + ICONS.alert + (p.missing ? "folder missing" : "needs loom init") + "</div></div>"
-            : '<div class="m">baton ' + esc(p.holder || "—") + (p.costUsd > 0 ? " · " + money(p.costUsd) : "") + "</div></div>");
+            // Simple mode says working or idle; the baton and the spend are Developer mode's words
+            : devMode() ? '<div class="m">baton ' + esc(p.holder || "—") + (p.costUsd > 0 ? " · " + money(p.costUsd) : "") + "</div></div>"
+              : '<div class="m">' + ((p.agents || []).some(function(a){ return a.busy; }) || (p.activity || []).length ? '<span class="mwork">working</span>' : "idle") + "</div></div>");
         if (open && !p.error) {
           // A project holds conversations. The agents that work them live in
           // the rail's roster — they belong to the project, not to one chat.

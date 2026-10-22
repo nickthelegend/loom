@@ -33,6 +33,7 @@ import { loadTeam,loadTeamRunners,runnerHooks,teamEditing,teamHooks } from './te
 import { bindTheme } from './theme.js';
 import { agentGlyph,agentLabel,labelOf } from './agents.js';
 import { durfmt, settleFinding } from './transcript.js';
+import { devMode, SIMPLE_TABS } from './mode.js';
 import { openBoardTaskModal } from './tasks.js';
 import { openMenu } from './menus.js';
 
@@ -275,10 +276,10 @@ import { openMenu } from './menus.js';
       // this strip is about the window, not about the turn.
       (desktop ? "" :
         '<button id="brainbtn" class="iconbtn" title="unified memory">' + ICONS.memory + "</button>" +
-        '<button id="treebtn" class="iconbtn" title="working tree">' + ICONS.tree + "</button>" +
-        '<button id="routebtn" class="iconbtn" title="routes">' + ICONS.route + "</button>" +
-        '<button id="orchbtn" class="iconbtn" title="orchestra">' + ICONS.orchestra + "</button>" +
-        '<button id="crewbtn" class="iconbtn" title="crew \u00b7 agents with roles on one goal">' + ICONS.team + "</button>" +
+        '<button id="treebtn" class="iconbtn devonly" title="working tree">' + ICONS.tree + "</button>" +
+        '<button id="routebtn" class="iconbtn devonly" title="routes">' + ICONS.route + "</button>" +
+        '<button id="orchbtn" class="iconbtn devonly" title="orchestra">' + ICONS.orchestra + "</button>" +
+        '<button id="crewbtn" class="iconbtn devonly" title="crew \u00b7 agents with roles on one goal">' + ICONS.team + "</button>" +
         '<button id="fleetbtn" class="iconbtn" title="fleet \u00b7 what every agent is doing">' + ICONS.fleet + "</button>" +
         '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>');
 
@@ -303,7 +304,7 @@ import { openMenu } from './menus.js';
       // Drawn by drawOrchControls(); hidden in Chat mode.
       '<div class="corch" id="corch" style="display:none"></div>' +
       '<div class="crow">' +
-      '<div class="cmode" id="cmode" role="tablist" aria-label="composer mode">' +
+      '<div class="cmode devonly" id="cmode" role="tablist" aria-label="composer mode">' +
       '<button type="button" role="tab" data-cmode="chat" title="talk to one agent">' + ICONS.chat + "Chat</button>" +
       '<button type="button" role="tab" data-cmode="orch" title="one agent plans, many work in parallel">' + ICONS.orchestra + "Orchestrate</button></div>" +
       '<button class="ctool iconly" id="attach" type="button" title="attach an image or file" aria-label="attach a file">' + ICONS.plus + '</button>' +
@@ -312,21 +313,21 @@ import { openMenu } from './menus.js';
       // used to read as two unrelated settings.
       '<span class="cpick" id="cpick">' +
       '<button class="cagent" id="cagent" type="button" title="who runs this turn \u2014 AUTO routes it, or pick an agent" aria-label="who runs this turn"><span class="cadot" id="cadot"></span><span class="can">agent</span><span class="cchev">' + ICONS.chevron + "</span></button>" +
-      '<button class="ctool" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.updown + "</span></button>" +
+      '<button class="ctool devonly" id="modelpick" type="button" title="pick a model" aria-label="pick a model">' + '<span class="cmodel" id="cmodellabel">model</span>' + '<span class="cchev">' + ICONS.updown + "</span></button>" +
       "</span>" +
       // What the chosen agent may do without asking. Drawn by drawPermChip().
-      '<button class="cperm" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
+      '<button class="cperm devonly" id="cperm" type="button" aria-haspopup="menu" style="display:none"></button>' +
       // The chosen agent's context meter and usage limits (usage.js).
-      '<span class="cctx" id="cctx" style="display:none"></span>' +
+      '<span class="cctx devonly" id="cctx" style="display:none"></span>' +
       // MCPs and Skills live behind this rather than beside it: they are
       // occasional settings, and the row they were on has to hold the model,
       // the agent, the permission chip, prompts and send — on a narrow window
       // it wrapped. The count badge stays on the outside, because "two skills
       // are on" is the part you need without opening anything.
-      '<button class="cslot" id="morebtn" type="button" aria-haspopup="menu" aria-expanded="false" title="MCPs, skills and more"><span class="cslotico">' + ICONS.dots + '</span><span class="cslotlbl">More</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
+      '<button class="cslot devonly" id="morebtn" type="button" aria-haspopup="menu" aria-expanded="false" title="MCPs, skills and more"><span class="cslotico">' + ICONS.dots + '</span><span class="cslotlbl">More</span><span class="skcount" id="skcount" style="display:none">0</span></button>' +
       '<button class="cslot" id="micbtn" type="button" aria-label="hold to talk" title="hold to talk — transcribed by LOOM_STT_CMD on the daemon, or by this browser when that isn’t set"><span class="cslotico">' + ICONS.mic + "</span></button>" +
       // Saved and recent prompts, a clipboard manager's worth (⌘⇧V).
-      '<button class="cprompt" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \u2014 saved and recent (' + KMOD + '\u21e7V)">' +
+      '<button class="cprompt devonly" id="promptbtn" type="button" aria-haspopup="dialog" title="prompts \u2014 saved and recent (' + KMOD + '\u21e7V)">' +
         ICONS.clipboard + '<span class="cslotlbl">Prompts</span><kbd>' + KMOD + "\u21e7V</kbd></button>" +
       '<span style="flex:1"></span>' +
       // Plan and send travel together: when a narrow row wraps, the switch that
@@ -366,7 +367,7 @@ import { openMenu } from './menus.js';
         // &#96; is a backtick — a literal one would close this template literal
         // One link brings a teammate in: the team, this repo, their agents, the crews.
         '<button id="invitebtn" class="btn outline sm invitebtn" type="button" title="invite a teammate \u2014 one link sets up the team, this repo and their agents">' + ICONS.team + "<span>Invite</span></button>" +
-        '<button id="termbtn" class="iconbtn" title="toggle terminal (\u2303&#96;)">' + ICONS.terminal + "</button>" +
+        '<button id="termbtn" class="iconbtn devonly" title="toggle terminal (\u2303&#96;)">' + ICONS.terminal + "</button>" +
         // Connect a phone: a QR (or copy link) that pairs the native app over the
         // LAN or the tailnet. Sits by the terminal because both are "reach this
         // machine from somewhere else".
@@ -375,11 +376,11 @@ import { openMenu } from './menus.js';
         // bottom where output goes", and giving errors their own panel would
         // mean two drawers fighting for the same edge. The dot appears when
         // something has gone wrong since you last looked.
-        '<button id="consolebtn" class="iconbtn" title="console \u00b7 errors and logs">' +
+        '<button id="consolebtn" class="iconbtn devonly" title="console \u00b7 errors and logs">' +
         ICONS.console + '<span class="errdot" id="errdot"></span></button>' +
-        '<button id="browserbtn" class="iconbtn" title="browser \u00b7 live page and Playwright specs">' + ICONS.globe + "</button>" +
-        '<button id="subagentsbtn" class="iconbtn" title="subagents \u00b7 every agent an orchestrator or crew put to work">' + ICONS.agents + "</button>" +
-        '<button id="railbtn" class="iconbtn" title="toggle right panel">' + ICONS.panelRight + "</button>" +
+        '<button id="browserbtn" class="iconbtn devonly" title="browser \u00b7 live page and Playwright specs">' + ICONS.globe + "</button>" +
+        '<button id="subagentsbtn" class="iconbtn devonly" title="subagents \u00b7 every agent an orchestrator or crew put to work">' + ICONS.agents + "</button>" +
+        '<button id="railbtn" class="iconbtn devonly" title="toggle right panel">' + ICONS.panelRight + "</button>" +
         headerActions +
         "</div>" +
         '<div class="paneswrap">' +
@@ -541,6 +542,8 @@ import { openMenu } from './menus.js';
       // Fleet sits beside them: the same question — who is doing what —
       // asked of every agent in every open project, not one run's workers.
       tabs.splice(4, 0, "fleet");
+      // Simple mode: chat, team, agents, board and memory — Orchestra, Crew and Insights are Developer mode's
+      if (!devMode()) tabs = SIMPLE_TABS.filter(function(t){ return tabs.indexOf(t) >= 0; });
       if (tabs.indexOf(state.tab) < 0) state.tab = "thread";
       // Plain words, each with a line saying what's behind it: "Brain",
       // "Fleet" and "Observatory" were names you had to learn before you
@@ -563,12 +566,18 @@ import { openMenu } from './menus.js';
       });
     }
     function showTab(name){
+      // Orchestra, Crew and Insights are Developer mode's: a stray link to one says where it is
+      if (!devMode() && SIMPLE_TABS.indexOf(name) < 0) { toast("That\u2019s in Developer mode \u2014 turn it on in Settings \u2192 Preferences"); return; }
       // a quick crossfade between workspace tabs, where the browser can
       var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (document.startViewTransition && state.tab && state.tab !== name && !still && !showTab.inTransition) {
         showTab.inTransition = true;
         try {
-          var vt = document.startViewTransition(function(){ showTabNow(name); });
+          var swapped = false;
+          var vt = document.startViewTransition(function(){ if (swapped) return; swapped = true; showTabNow(name); });
+          // A page that isn't painting (a backgrounded window) holds the
+          // callback indefinitely; the click still has to switch the tab.
+          setTimeout(function(){ if (!swapped) { swapped = true; showTab.inTransition = false; showTabNow(name); } }, 400);
           // A transition skipped (hidden tab, a second one on top) rejects
           // ready and updateCallbackDone too; the tab still switches, so
           // those are nothing to report.
@@ -1410,8 +1419,8 @@ import { openMenu } from './menus.js';
           '<span class="recapt"><b>Since you were here</b> <span class="dim">' + esc(newDay ? relDay(last) : rel(last)) + "</span> · " +
           turns + " turn" + (turns === 1 ? "" : "s") + " (" + who + ")" +
           (errs ? ' · <span class="recaperr">' + errs + " failed</span>" : "") +
-          (cost > 0 ? " · " + money(cost) : "") + "</span>" +
-          '<button type="button" class="btn xs ghost" id="recapgo">Insights</button>' +
+          (cost > 0 && devMode() ? " · " + money(cost) : "") + "</span>" +
+          '<button type="button" class="btn xs ghost devonly" id="recapgo">Insights</button>' +
           '<button type="button" class="iconbtn xs" id="recapx" aria-label="dismiss" title="dismiss">' + ICONS.x + "</button>";
         host.insertBefore(el, feed);
         el.querySelector("#recapx").onclick = function(){ el.remove(); };

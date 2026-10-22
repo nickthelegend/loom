@@ -130,12 +130,12 @@ import { railOpen,toggleRail } from './layout.js';
     // logged in, so it lives in the corner you glance at, with a one-click
     // Connect when it isn't.
     var gh = state.github, ghSeg = "";
-    if (gh && gh.connected) ghSeg = '<span class="sit ghok" title="GitHub connected as ' + esc(gh.user || "") + '">' + ICONS.github + " " + esc(gh.user || "connected") + "</span>";
-    else if (gh && gh.installed) ghSeg = '<button class="sit ghconnect" id="ghconnect" title="sign in to GitHub in a terminal">' + ICONS.github + " Connect GitHub</button>";
+    if (gh && gh.connected) ghSeg = '<span class="sit ghok devonly" title="GitHub connected as ' + esc(gh.user || "") + '">' + ICONS.github + " " + esc(gh.user || "connected") + "</span>";
+    else if (gh && gh.installed) ghSeg = '<button class="sit ghconnect devonly" id="ghconnect" title="sign in to GitHub in a terminal">' + ICONS.github + " Connect GitHub</button>";
     // LoomPad voice backend — when it's up, the physical pad gets its spoken
     // replies. Green pill = connected; grey = offline. Click to re-check.
     var lp = state.loompad, lpUp = !!(lp && lp.up);
-    var lpSeg = '<button class="sit lppill' + (lpUp ? " on" : "") + '" id="lppill" title="' +
+    var lpSeg = '<button class="sit lppill devonly' + (lpUp ? " on" : "") + '" id="lppill" title="' +
       (lpUp
         ? "LoomPad voice backend connected" + (lp && lp.brain ? " \u00b7 brain " + esc(String(lp.brain)) : "") + " \u2014 the pad can speak"
         : "LoomPad voice backend offline \u2014 start it so the pad can speak") +
@@ -145,7 +145,7 @@ import { railOpen,toggleRail } from './layout.js';
     var gd = state.gitDel, gdSeg = "";
     if (p && gd && gd.pid === p.id) {
       var gi = gitDeliveryInfo(gd.mode);
-      gdSeg = '<button class="sit gitdel ' + esc(gi.mode) + '" id="gitdel" type="button" aria-haspopup="menu" title="git delivery for ' +
+      gdSeg = '<button class="sit gitdel devonly ' + esc(gi.mode) + '" id="gitdel" type="button" aria-haspopup="menu" title="git delivery for ' +
         esc(p.name || p.id) + ": " + esc(gi.name) + ' \u2014 click to change">' + gi.icon + esc(gi.short) + "</button>";
     }
     el.innerHTML =
@@ -154,8 +154,8 @@ import { railOpen,toggleRail } from './layout.js';
         var up = p ? state.wsLive : state.daemonUp !== false;
         return '<span class="sit"><span class="sdot' + (up ? "" : " off") + '"></span>' + (up ? "live" : "offline") + "</span>";
       })() +
-      '<span class="sit">' + esc(location.host) + "</span>" +
-      (p ? '<span class="sit">baton ' + esc(p.holder || "\u2014") + "</span>" : "") +
+      '<span class="sit devonly">' + esc(location.host) + "</span>" +
+      (p ? '<span class="sit devonly">baton ' + esc(p.holder || "\u2014") + "</span>" : "") +
       (p && p.costUsd > 0
         ? (function(){
             // With a budget set the meter measures spend against the cap, not
@@ -166,7 +166,7 @@ import { railOpen,toggleRail } from './layout.js';
             var w = b ? Math.min(100, Math.round((p.costUsd / b) * 100)) : share;
             var label = b ? money(p.costUsd) + " / $" + b.toFixed(2) : money(p.costUsd) + " \u00b7 " + share + "% of \u03a3";
             var tip = b ? "spend vs budget \u2014 click to adjust" : "usage breakdown \u2014 click to set a budget";
-            return '<button class="sit usagepill' + cls + '" id="usagepill" title="' + tip + '"><span class="meter"><i style="width:' + w + '%"></i></span>' + label + "</button>";
+            return '<button class="sit usagepill devonly' + cls + '" id="usagepill" title="' + tip + '"><span class="meter"><i style="width:' + w + '%"></i></span>' + label + "</button>";
           })()
         : "") +
       '<span class="spacer"></span>' +

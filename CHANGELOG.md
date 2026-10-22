@@ -7,17 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Simple mode, and it's the default.** A project opens on five plain tabs — Chat, Team, Agents, Board, Memory — and a composer that's just a box, the agent and Plan. No Orchestra or Crew tabs, no Insights metrics, no terminal, console, browser or right-hand panel, no model, permission or context chips, no cost meter or baton in the status bar, no MCP/skills menu; ⌘K and the menu shortcuts leave those out too, and a stray link to one says where it is instead of half-opening it.
+- **Developer mode** (Settings → Preferences → Mode) turns every one of those back on, instantly and per device. Nothing was removed — it's all where it was.
+- `loom memory:repair --dry-run` shows each memory it would change, before → after, and writes nothing (#326).
+- `loom crew status --json`: crews, goals and every card with its id, stage, touches and hold (#329).
+
 ### Fixed
 
+- A workspace tab could fail to switch when the window wasn't painting (backgrounded), because its crossfade never ran; the click now switches it regardless.
 - **`memory:repair` now shows in `loom memory` and briefings** (#325). A decision is kept twice: an event (the record) and a memory (the live copy). The repair fixed the memory, but the Memory view and every handoff briefing read the record, so the old text stayed. They now read the live copy.
 - **A crew card no longer loops on its own lease** (#327). Codex reports edits by absolute path inside the card's worktree, and leases are repo-relative globs, so every edit looked out of bounds. The card re-held within a minute of each `crew overlap`, and the builder never ran a turn. Paths are now made repo-relative before matching.
 - **Crew checkouts follow orchestra's** (#328). A project on another disk keeps them in `.loom-worktrees` beside it, not on the internal disk; `orchestra.worktreeDir` decides for both. A checkout that already exists stays where it is.
 - **`crew status` shows card ids** (#329), plus a hint per failed card (`loom crew accept --card <id>`). A lease hold now points at `crew overlap` rather than `crew say`. The goal's `failed` event lists `failedCards`.
 
-### Added
-
-- `loom memory:repair --dry-run` shows each memory it would change, before → after, and writes nothing (#326).
-- `loom crew status --json`: crews, goals and every card with its id, stage, touches and hold (#329).
 
 ## [1.2.2] — 2026-10-18
 

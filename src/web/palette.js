@@ -1,7 +1,8 @@
 /** Browser palette module. See README.md for ownership and startup. */
 import { openImportChats } from './import-chats.js';
 import { agentLabel,brandMark } from './agents.js';
-import { COMMANDS,runCommand } from './commands.js';
+import { COMMANDS,devOnly,runCommand } from './commands.js';
+import { devMode } from './mode.js';
 import { api } from './connection.js';
 import { esc } from './format.js';
 import { ICONS } from './icons.js';
@@ -63,16 +64,17 @@ import { state } from './state.js';
      * its shortcut — plus the project-scoped panels and a jump to any project.
      */
     function buildCommands(){
-      var C = COMMANDS.filter(function(c){ return !c.needsProject || pid; }).map(function(c){
+      var dev = devMode();
+      var C = COMMANDS.filter(function(c){ return (!c.needsProject || pid) && (dev || !devOnly(c.id)); }).map(function(c){
         return { icon: c.icon, label: c.label, sub: c.keys || "", run: function(){ runCommand(c.id); } };
       });
-      if (pid && state.showRail) {
+      if (pid && state.showRail && dev) {
         C.push({ icon: ICONS.files, label: "Explorer", sub: "panel", run: function(){ state.showRail("explorer"); } });
         C.push({ icon: ICONS.search, label: "Search in files", sub: "panel", run: function(){ state.showRail("search"); } });
         C.push({ icon: ICONS.branch, label: "Source Control", sub: "panel", run: function(){ state.showRail("scm"); } });
         if (state.openSubagents) C.push({ icon: ICONS.agents, label: "Subagents", sub: "dock", run: function(){ state.openSubagents(); } });
-        if (state.pid) C.push({ icon: ICONS.download, label: "Import chats from your agents", sub: "Claude, Codex, OpenCode", run: function(){ openImportChats(state.pid); } });
       }
+      if (pid) C.push({ icon: ICONS.download, label: "Import chats from your agents", sub: "Claude, Codex, OpenCode", run: function(){ openImportChats(pid); } });
       C.push({ icon: ICONS.console, label: "Diagnostics", sub: "loom doctor", run: function(){ openSettingsModal("diagnostics"); } });
       (state.projects || []).forEach(function(p){
         if (p.id === pid || !state.selectProject) return;

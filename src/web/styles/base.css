@@ -513,6 +513,9 @@
     padding:9px 15px;font-size:13px;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;max-width:86%;
     box-shadow:0 10px 24px rgb(0 0 0 / .18), inset 0 1px 0 var(--glass-highlight)}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  /* ── Simple mode (mode.js): Developer mode's tools stay out of the way ── */
+  html.simple .devonly{display:none!important}
+  .mwork{color:var(--primary)}
   /* ── Desktop sign-in (signin.js) ─────────────────────────── */
   .signwrap{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:28px;position:relative}
   .signwrap::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;

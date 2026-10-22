@@ -1,5 +1,6 @@
 /** Browser navigation module. See README.md for ownership and startup. */
 import { signInGate } from './signin.js';
+import { applyMode } from './mode.js';
 import { renderPair } from './connection.js';
 import { joinFromHash,renderJoin } from './join.js';
 import { renderBoard } from './home.js';
@@ -13,7 +14,9 @@ import { esc } from './format.js';
 
 
   function route(){
+    state.rerender = route;
     applyTheme();
+    applyMode();
     // drop every hook the old view installed — each closes over that render's
     // DOM and state (retheme holds its terminals), and the next view reinstalls
     // whichever ones it owns
