@@ -492,8 +492,9 @@ import { shortModel } from './permissions.js';
     // The baton changing hands: a chip with both agents, not a bare glyph the font may not have.
     if (e.kind === "handoff") {
       var who = function(id, c){ return '<span class="' + c + '">' + (id ? agentGlyph(kindOf(id), id, "brand") : "") + esc(id ? labelOf(id) : "\u2014") + "</span>"; };
-      return '<div class="handoff" title="the baton passed ' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '"><span class="hochip">' +
-        '<span class="hok">baton</span>' + who(p.from, "a") + '<span class="shuttle">' + ICONS.arrowRight + "</span>" + who(p.to, "b") + "</span></div>";
+      // Simple mode drops the word "baton", and the opening hand-out from nobody (devonly)
+      return '<div class="handoff' + (p.from ? "" : " devonly") + '" title="the baton passed ' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '"><span class="hochip">' +
+        '<span class="hok devonly">baton</span>' + who(p.from, "a") + '<span class="shuttle">' + ICONS.arrowRight + "</span>" + who(p.to, "b") + "</span></div>";
     }
     // Sub-agents: indent under the turn, marked as borrowed hands — the parent
     // kept the baton, and the thread should read that way.
@@ -863,7 +864,7 @@ function proofCard(e){
   var r = p.rerun || null;
   var meta = r ? esc(String(r.command || "")) + " \u00b7 " + durfmt(Number(r.ms) || 0) + (r.clean === false ? " \u00b7 in place" : " \u00b7 clean checkout") : "";
   var claims = (p.claims || []).map(function(c){
-    return '<li class="pf-' + esc(c.status || "unchecked") + '"><span class="pfq">\u201c' + esc(String(c.text || "").slice(0, 140)) + '\u201d</span><span class="pfw">' + esc(String(c.why || "")) + "</span></li>";
+    return '<li class="pf-' + esc(c.status || "unchecked") + '"><span class="pfq">\u201c' + esc(String(c.text || "").replace(/\*\*|__|`/g, "").slice(0, 140)) + '\u201d</span><span class="pfw">' + esc(String(c.why || "")) + "</span></li>";
   }).join("");
   var counts = r && r.counts ? '<span class="pfn">' + Number(r.counts.passed || 0) + " passed" + (r.counts.failed ? " \u00b7 " + Number(r.counts.failed) + " failed" : "") + "</span>" : "";
   return '<div class="proofcard v-' + esc(p.verdict || "unverified") + '" data-agent="' + esc(p.about || "") + '">' +

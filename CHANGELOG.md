@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Simple mode no longer shows Developer vocabulary: the chat's handoff chip drops the word "baton" (and the opening hand-out from nobody), and the Agents tab hides the baton and permission badges.
+- The Verified card quoted an agent's claim with its raw `**`/backticks; it quotes the words.
 - A workspace tab could fail to switch when the window wasn't painting (backgrounded), because its crossfade never ran; the click now switches it regardless.
 - **`memory:repair` now shows in `loom memory` and briefings** (#325). A decision is kept twice: an event (the record) and a memory (the live copy). The repair fixed the memory, but the Memory view and every handoff briefing read the record, so the old text stayed. They now read the live copy.
 - **A crew card no longer loops on its own lease** (#327). Codex reports edits by absolute path inside the card's worktree, and leases are repo-relative globs, so every edit looked out of bounds. The card re-held within a minute of each `crew overlap`, and the builder never ran a turn. Paths are now made repo-relative before matching.
