@@ -1497,8 +1497,9 @@ program
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
   .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
   .option("--race", "race: every worker takes the whole goal in its own worktree; pick one with orchestra:apply <run> --task race-<agent>")
+  .option("--solo", "keep every task on this machine, even when teammates' runners could take some")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1511,7 +1512,10 @@ program
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.maxUsd ? { maxUsd: Number(opts.maxUsd) } : {}),
         ...(opts.race ? { race: true } : {}),
+        ...(opts.solo ? { team: false } : {}),
       });
+      const mates = run.workers.filter((w) => w.startsWith("team:"));
+      if (mates.length) console.log(pc.dim(`  teammates' machines can take tasks too: ${mates.join(", ")}`));
       console.log(
         run.race
           ? `${pc.magenta("🏁")} ${pc.bold(run.id)} started — ${run.workers.join(", ")} racing on the same goal`
@@ -1837,12 +1841,23 @@ program
   .option("--card <id>", "overlap: held card id; accept: the failed card to take as it stands")
   .option("--decision <decision>", "overlap: narrow, wait:<goal>, or proceed:<reason>")
   .option("--touches <globs>", "overlap: comma-separated revised paths")
-  .action(async (action: string | undefined, args: string[] | undefined, opts: { crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string; amount?: string; card?: string; decision?: string; touches?: string; lead?: string; builders?: string; reviewer?: string; tester?: string }) => {
+  .option("--json", "status: machine-readable")
+  .action(async (action: string | undefined, args: string[] | undefined, opts: { json?: boolean; crew?: string; to?: string; approval?: boolean; play?: string; parallel?: string; amount?: string; card?: string; decision?: string; touches?: string; lead?: string; builders?: string; reviewer?: string; tester?: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     const a = (action ?? "status").toLowerCase();
     const words = (args ?? []).join(" ").trim();
     const { crews, templates } = await client.crews(project.id);
+    if (a === "status" && opts.json) {
+      // every crew, its goal and each card with its id — what accept/overlap take (#329)
+      const pick = opts.crew ? crews.filter((c) => c.id === opts.crew || c.name === opts.crew) : crews;
+      console.log(JSON.stringify({ crews: pick.map((c) => ({ id: c.id, name: c.name, busy: Boolean(c.busy), teammates: c.teammates,
+        goal: c.state?.goal ? { id: c.state.goal.id, status: c.state.goal.status, text: c.state.goal.text, branch: c.state.goal.branch,
+          question: c.state.goal.question ?? null, costUsd: c.state.goal.costUsd ?? null,
+          cards: (c.state.goal.cards ?? []).map((k: Record<string, any>) => ({ id: k.id, title: k.title, stage: k.stage, builder: k.builder ?? null,
+            touches: k.touches ?? [], blockedBy: k.blockedBy ?? [], error: k.error ?? null, hold: k.teamHold ?? k.hold ?? null })) } : null })) }, null, 2));
+      return;
+    }
     if (a === "create") {
       const [first, ...rest] = args ?? [];
       const template = first && templates.includes(first.toLowerCase()) ? first.toLowerCase() : "ship";
@@ -1895,9 +1910,14 @@ function printCrew(c: Record<string, any>): void {
   console.log(`  ${color(g.status)} ${g.text.split("\n")[0].slice(0, 80)} ${pc.dim(g.branch)}`);
   for (const card of g.cards ?? []) {
     const m = card.stage === "done" ? pc.green("✓") : card.stage === "failed" ? pc.red("✗") : card.stage === "planned" ? pc.dim("·") : pc.cyan("→");
-    console.log(`   ${m} ${card.title}${card.builder ? pc.dim(` ${card.builder}`) : ""}${card.stage !== "done" && card.stage !== "planned" ? pc.dim(` [${card.stage}]`) : ""}${card.error ? pc.red(` ${card.error.slice(0, 80)}`) : ""}`);
+    console.log(`   ${m} ${pc.dim(card.id)} ${card.title}${card.builder ? pc.dim(` ${card.builder}`) : ""}${card.stage !== "done" && card.stage !== "planned" ? pc.dim(` [${card.stage}]`) : ""}${card.error ? pc.red(` ${card.error.slice(0, 80)}`) : ""}`);
   }
-  if (g.question) console.log(pc.yellow(`  ${g.question.teammate} asks: ${g.question.text}`) + pc.dim("  (loom crew say \"…\")"));
+  // a lease hold is settled with overlap (widen or narrow the card's paths), not by answering it
+  const leaseHold = (g.cards ?? []).find((k: Record<string, any>) => k.teamHold?.kind === "decide");
+  if (g.question) console.log(pc.yellow(`  ${g.question.teammate} asks: ${g.question.text}`) + pc.dim(leaseHold
+    ? `  (loom crew overlap --card ${leaseHold.id} --decision "proceed: <why>" --touches "<paths>")`
+    : "  (loom crew say \"…\")"));
+  for (const k of (g.cards ?? []).filter((x: Record<string, any>) => x.stage === "failed")) console.log(pc.dim(`  take ${k.id} as it stands: loom crew accept --card ${k.id}`));
   if (g.status === "awaiting_approval") console.log(pc.dim("  loom crew approve — or loom crew say \"…\" to change the plan"));
   if (g.status === "completed" && !g.applied) console.log(pc.dim("  loom crew apply — merge it into your branch · loom crew diff"));
   if (g.summary && g.status === "completed") console.log(`  ${g.summary.split("\n")[0].slice(0, 120)}`);
@@ -3106,10 +3126,16 @@ program
 program
   .command("memory:repair")
   .description("mend decisions recorded before 1.2.1 whose underscores and paths were stripped, from the planner's own words")
-  .action(async () => {
+  .option("--dry-run", "show what would change, and change nothing")
+  .action(async (opts: { dryRun?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
-    const { repaired, checked } = await client.repairDecisions(project.id);
+    const { repaired, checked, changes } = await client.repairDecisions(project.id, { dryRun: opts.dryRun });
+    if (opts.dryRun) {
+      for (const c of changes ?? []) console.log(`${pc.dim(c.id)}\n  ${pc.red("- " + c.before)}\n  ${pc.green("+ " + c.after)}`);
+      console.log(repaired ? pc.yellow(`would mend ${repaired} of ${checked} review decisions — nothing written (run without --dry-run to apply)`) : pc.dim(`nothing to mend among ${checked} review decisions`));
+      return;
+    }
     console.log(repaired ? pc.green(`✓ mended ${repaired} of ${checked} review decisions`) : pc.dim(`nothing to mend among ${checked} review decisions`));
   });
 

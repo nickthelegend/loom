@@ -7,14 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] — 2026-10-22
+
+Teams that work together on their own: one goal splits across teammates' machines. Plus Simple mode, hub hardening, and the fourth field round.
+
 ### Added
 
+- **Team auto-orchestration: two people, one goal, both machines.** With a teammate's Loom running as a shared runner (`loom runner start --shared`, and `runners.shared` in the repo's `loom.team.json`), the goal you start splits across both of you: your orchestrator gets their agents as `team:<agent>` workers, a task sent to one is claimed by their runner on its own and run with *their* agent in a fresh clone, and its commits come back through origin into your goal's integration branch — still one PR, from your machine. `loom orchestrate --solo` keeps a goal local. A task no teammate's machine claims within 10 minutes goes back to the orchestrator to hand to someone else. Hub jobs gain a `task` kind (migration 0012).
 - **Simple mode, and it's the default.** A project opens on five plain tabs — Chat, Team, Agents, Board, Memory — and a composer that's just a box, the agent and Plan. No Orchestra or Crew tabs, no Insights metrics, no terminal, console, browser or right-hand panel, no model, permission or context chips, no cost meter or baton in the status bar, no MCP/skills menu; ⌘K and the menu shortcuts leave those out too, and a stray link to one says where it is instead of half-opening it.
 - **Developer mode** (Settings → Preferences → Mode) turns every one of those back on, instantly and per device. Nothing was removed — it's all where it was.
+- `loom memory:repair --dry-run` shows each memory it would change, before → after, and writes nothing (#326).
+- `loom crew status --json`: crews, goals and every card with its id, stage, touches and hold (#329).
+
+### Security
+
+- **Hub hardening (migration 0012).** Presence rows get an opaque key, so a disconnect no longer broadcasts another team's repo names to every signed-in subscriber (Realtime skips RLS on deletes); a member can no longer overwrite a teammate's key envelope; the membership helpers aren't callable by anonymous users; stale presence, expired leases and invites, and feed older than 90 days are pruned hourly.
 
 ### Fixed
 
+- **`loom runner stop` really stops taking work.** A stopped runner still claimed a job the hub pushed to it; it now takes nothing new until it's started again.
+- Simple mode no longer shows Developer vocabulary: the chat's handoff chip drops the word "baton" (and the opening hand-out from nobody), and the Agents tab hides the baton and permission badges.
+- The Verified card quoted an agent's claim with its raw `**`/backticks; it quotes the words.
 - A workspace tab could fail to switch when the window wasn't painting (backgrounded), because its crossfade never ran; the click now switches it regardless.
+- **`memory:repair` now shows in `loom memory` and briefings** (#325). A decision is kept twice: an event (the record) and a memory (the live copy). The repair fixed the memory, but the Memory view and every handoff briefing read the record, so the old text stayed. They now read the live copy.
+- **A crew card no longer loops on its own lease** (#327). Codex reports edits by absolute path inside the card's worktree, and leases are repo-relative globs, so every edit looked out of bounds. The card re-held within a minute of each `crew overlap`, and the builder never ran a turn. Paths are now made repo-relative before matching.
+- **Crew checkouts follow orchestra's** (#328). A project on another disk keeps them in `.loom-worktrees` beside it, not on the internal disk; `orchestra.worktreeDir` decides for both. A checkout that already exists stays where it is.
+- **`crew status` shows card ids** (#329), plus a hint per failed card (`loom crew accept --card <id>`). A lease hold now points at `crew overlap` rather than `crew say`. The goal's `failed` event lists `failedCards`.
+
 
 ## [1.2.2] — 2026-10-18
 

@@ -29,6 +29,24 @@ export function normPath(p: string): string {
 }
 
 /**
+ * An agent's path as the repo sees it. Agents report edits as they like — Codex
+ * gives the absolute path inside its worktree — and leases are repo-relative
+ * globs, so an absolute path under one of `roots` (the card's worktree, the
+ * project) loses that prefix. Anything else is only normalised (#327).
+ */
+export function repoRelative(p: string, roots: Array<string | undefined>): string {
+  const abs = p.trim().replace(/\\/g, "/");
+  for (const r of roots) {
+    if (!r) continue;
+    const root = r.replace(/\\/g, "/").replace(/\/+$/, "");
+    const caseless = /^[a-z]:\//i.test(root);
+    const a = caseless ? abs.toLowerCase() : abs, b = caseless ? root.toLowerCase() : root;
+    if (a.startsWith(b + "/")) return normPath(abs.slice(root.length + 1));
+  }
+  return normPath(abs);
+}
+
+/**
  * A glob as a RegExp: `**` spans directories, `*` and `?` don't, `{a,b}`
  * alternates. Enough of git's pathspec-ish syntax for declaring touches.
  */

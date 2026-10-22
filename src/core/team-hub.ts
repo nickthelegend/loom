@@ -233,7 +233,8 @@ export interface Runner {
   lastSeen: number;
 }
 
-export type JobKind = "start" | "continue" | "fix" | "return" | "land";
+/** `task`: one task of a teammate's goal, run here with this machine's own agent (team auto-orchestration). */
+export type JobKind = "start" | "continue" | "fix" | "return" | "land" | "task";
 export type JobState = "queued" | "claimed" | "done" | "failed" | "cancelled";
 
 /** Work for a runner (D71). Everything but routing metadata is sealed to the team. */
@@ -837,7 +838,7 @@ export class MemoryHub {
     this.device(j.deviceId, userId);
     const repo = normalizeRepo(j.repo);
     if (!this.reposByTeam.get(teamId)?.has(repo)) throw new HubError(`${repo} isn't shared with this team`, 403);
-    if (!["start", "continue", "fix", "return", "land"].includes(j.kind)) throw new HubError("bad job kind");
+    if (!["start", "continue", "fix", "return", "land", "task"].includes(j.kind)) throw new HubError("bad job kind");
     if (!j.sealed?.c) throw new HubError("a job needs its sealed payload");
     if (j.target) {
       const r = this.runnersByDevice.get(j.target);

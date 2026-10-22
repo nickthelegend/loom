@@ -129,7 +129,16 @@ export class RuntimeBriefings {
   unifiedMemory(): UnifiedMemory {
     // Only the newest decisions are used: read those, not the whole log (every
     // handoff and every Memory view built this, parsing every event ever written).
-    return buildUnifiedMemory(this.host.info.name, this.host.log.list({ kinds: ["decision"], limit: RECENT_DECISIONS * 2 }), this.importedMemory());
+    // A decision is written twice: an event (the record, never rewritten) and a memory with that
+    // event as provenance (the live copy, which memory:repair and edits change). Show the live one,
+    // or the Memory view and every briefing keep the text the repair just fixed (#325).
+    const live = new Map<number, string>();
+    for (const m of this.host.brain.all()) if (m.kind === "decision" && m.provenance?.eventId != null) live.set(Number(m.provenance.eventId), m.text);
+    const decisions = this.host.log.list({ kinds: ["decision"], limit: RECENT_DECISIONS * 2 }).map((e) => {
+      const text = live.get(Number(e.id));
+      return text !== undefined && text !== e.payload.text ? { ...e, payload: { ...e.payload, text } } : e;
+    });
+    return buildUnifiedMemory(this.host.info.name, decisions, this.importedMemory());
   }
 
   /**

@@ -127,6 +127,9 @@ describe("parallel crew plays", () => {
     const { id } = await setup(); plan = [{ title: "A", touches: ["a.txt"] }]; reviewerText = "looks good";
     await rt!.crews.goal(id, "Review required"); const goal = await finished(id);
     expect(goal.status).toBe("failed"); expect(goal.cards[0]!.error).toMatch(/explicit review verdict/);
+    // #329 the goal's failed event names the card, so `crew accept --card` has an id to take
+    const failed = rt!.log.list({ kinds: ["crew"] }).find((e) => e.payload.phase === "failed");
+    expect(failed?.payload.failedCards).toEqual([expect.objectContaining({ id: goal.cards[0]!.id, title: "A" })]);
   });
   it("refuses to mark a missing tester result green", async () => {
     const { id } = await setup(); plan = [{ title: "A", touches: ["a.txt"] }]; testerText = "I think it is fine";

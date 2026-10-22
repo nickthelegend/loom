@@ -30,7 +30,7 @@ import { coordinationRun, crewRunId } from "./crew-coordination.js";
 import { DEFAULT_CREW_POLICY } from "./crew-policy.js";
 import { vendorOf } from "./team-landing.js";
 import type { TeamPolicy } from "./team-policy.js";
-import type { OrchestraCoordinator, TaskHold, OrchestraRun } from "./orchestra.js";
+import { orchestraWorktreeRoot, type OrchestraCoordinator, type TaskHold, type OrchestraRun } from "./orchestra.js";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -163,6 +163,8 @@ export interface CrewHost {
   projectId: string;
   projectName: string;
   projectDir: string;
+  /** `orchestra.worktreeDir` from the project config — crews share orchestra's root (#328). */
+  worktreeDir?: () => string | undefined;
   crews(): CrewConfig[];
   saveCrews(crews: CrewConfig[]): void;
   roster(): AgentConfig[];
@@ -280,6 +282,17 @@ async function git(args: string[], cwd: string): Promise<string> {
   return stdout;
 }
 
+/**
+ * Where a project's crew worktrees go: orchestra's root (#295) — under ~/.loom
+ * on the same disk, beside the project when it lives on another volume, or
+ * `orchestra.worktreeDir` — so a crew's checkouts don't fill the internal disk
+ * either (#328).
+ */
+export function crewWorktreeRoot(projectDir: string, projectId: string, override?: string): string {
+  const orchestra = orchestraWorktreeRoot(projectDir, projectId, override);
+  return orchestra === path.join(loomHome(), "orchestra", projectId) ? path.join(loomHome(), "crews", projectId) : path.join(orchestra, "crews");
+}
+
 export class CrewEngine {
   private states = new Map<string, CrewState>();
   /** Live adapters for the active goal: `${crew}/${teammate}`. */
@@ -309,6 +322,17 @@ export class CrewEngine {
   private testControllers = new Map<string, Set<AbortController>>();
   private teamRechecks = new Map<string, ReturnType<typeof setTimeout>>();
   private deliveries = new Map<string, Promise<{ url: string }>>();
+
+  /**
+   * A crew checkout's folder under the worktree root. One a crew already has at
+   * the old ~/.loom/crews spot stays where it is — a native seat's workspace
+   * lives across goals — so only new checkouts move.
+   */
+  private worktreePath(crewId: string, ...parts: string[]): string {
+    const legacy = path.join(loomHome(), "crews", this.host.projectId, crewId, ...parts);
+    if (fs.existsSync(legacy)) return legacy;
+    return path.join(crewWorktreeRoot(this.host.projectDir, this.host.projectId, this.host.worktreeDir?.()), crewId, ...parts);
+  }
 
   constructor(private readonly host: CrewHost) {
     // A goal that was mid-turn when Loom stopped is interrupted, not lost:
@@ -475,7 +499,7 @@ export class CrewEngine {
     const branch = `loom/crew/${cfg.id}/${gid}`;
     // Native sessions retain their workspace identity between goals. Branches
     // remain per goal; switching a clean, stopped checkout changes its snapshot.
-    const dir = path.join(loomHome(), "crews", this.host.projectId, cfg.id, this.host.native?.() ? "workspace" : gid);
+    const dir = this.worktreePath(cfg.id, this.host.native?.() ? "workspace" : gid);
     fs.mkdirSync(path.dirname(dir), { recursive: true });
     await this.serial(async () => {
       if (fs.existsSync(dir)) {
@@ -1008,8 +1032,7 @@ export class CrewEngine {
     }
     const base = (await git(["rev-parse", "HEAD"], g.dir)).trim();
     const branch = `${g.branch}-card-${card.id}`;
-    const dir = path.join(loomHome(), "crews", this.host.projectId, cfg.id,
-      this.host.native?.() ? `seat-${card.builder}` : `cards-${g.id}`, this.host.native?.() ? "workspace" : card.id);
+    const dir = this.worktreePath(cfg.id, this.host.native?.() ? `seat-${card.builder}` : `cards-${g.id}`, this.host.native?.() ? "workspace" : card.id);
     fs.mkdirSync(path.dirname(dir), { recursive: true });
     await this.serial(async () => {
       if (fs.existsSync(dir)) {
@@ -1240,6 +1263,8 @@ export class CrewEngine {
     this.save(st);
     this.phase(cfg, st, status === "completed" ? "completed" : "failed", {
       branch: g.branch, cards: g.cards.length, ...(g.summary ? { summary: g.summary } : {}), ...(error ? { error } : {}), costUsd: g.costUsd,
+      // which cards failed, by id — what `loom crew accept --card` takes (#329)
+      ...(status === "failed" ? { failedCards: g.cards.filter(c => c.stage === "failed").map(c => ({ id: c.id, title: c.title, ...(c.error ? { error: c.error.slice(0, 300) } : {}) })) } : {}),
     });
     const stopping = this.stopAgents(cfg.id).finally(() => this.stopping.delete(cfg.id));
     this.stopping.set(cfg.id, stopping);

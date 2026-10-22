@@ -49,6 +49,8 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
         chat?: string;
         /** Every worker gets the same prompt; you pick the best. */
         race?: boolean;
+        /** false: no teammates' agents, even with their runners online. */
+        team?: boolean;
       };
       if (!b.goal?.trim()) return void res.status(400).json({ error: "missing goal" });
       const workers = Array.isArray(b.workers) ? b.workers.map(String).filter(Boolean) : undefined;
@@ -63,6 +65,7 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
           ...(b.plan ? { plan: true } : {}),
           ...(Number(b.maxUsd) > 0 ? { maxUsd: Number(b.maxUsd) } : {}),
           ...(b.race ? { race: true } : {}),
+          ...(b.team === false ? { team: false } : {}),
         });
         recordRecent(b.goal, { project: rt.info.name, mode: "orchestrate" });
         res.json({ run });

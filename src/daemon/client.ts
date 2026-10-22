@@ -232,7 +232,7 @@ export class DaemonClient {
 
   startOrchestra(
     id: string,
-    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean },
+    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean; team?: boolean },
   ): Promise<{ run: OrchestraRun }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, body);
   }
@@ -762,8 +762,8 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}`, { decision, ...(note ? { note } : {}) });
   }
 
-  repairDecisions(id: string): Promise<{ repaired: number; checked: number }> {
-    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/repair-decisions`);
+  repairDecisions(id: string, opts: { dryRun?: boolean } = {}): Promise<{ repaired: number; checked: number; changes: Array<{ id: string; before: string; after: string }> }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/repair-decisions`, opts.dryRun ? { dryRun: true } : {});
   }
 
   decision(id: string, text: string): Promise<{ event: LoomEvent }> {

@@ -63,7 +63,7 @@ import type { ProjectRuntime } from "./runtime.js";
 import { DEPLOY_POLL_MS, Deploys } from "./deploys.js";
 import { defaultExec, Landing, type Exec } from "./landing.js";
 import { TeamBrain } from "./team-brain.js";
-import { TeamCoordinator } from "./team-coordinator.js";
+import { TeamCoordinator, type TeamTaskPayload } from "./team-coordinator.js";
 import type { OrchestraRun } from "../core/orchestra.js";
 import { Runner, readRunnerConfig, writeRunnerConfig, type JobPayload, type JobProgress, type RunnerConfig } from "./runner.js";
 import { rollupCosts } from "../core/team-landing.js";
@@ -183,6 +183,8 @@ interface TeamView {
 const HEARTBEAT_MS = 15_000;
 const GH_POLL_MS = 60_000;
 const BRAIN_SYNC_MS = 60_000;
+/** A team task no teammate's runner has claimed by then goes back to the orchestrator (LOOM_TEAM_TASK_UNCLAIMED_MS in tests). */
+const teamTaskUnclaimedMs = () => Number(process.env.LOOM_TEAM_TASK_UNCLAIMED_MS) || 10 * 60_000;
 
 export class TeamLink {
   private file: string;
@@ -201,6 +203,8 @@ export class TeamLink {
   runner: Runner | null = null;
   /** Return jobs we asked for → the project whose goal comes home (D76). */
   private pendingReturns = new Map<string, string>();
+  /** Team tasks this machine posted, waiting for a teammate's runner to settle them. */
+  private pendingTasks = new Map<string, (job: import("../core/team-hub.js").Job) => void>();
   private started = false;
 
   constructor(private host: TeamLinkHost) {
@@ -890,6 +894,7 @@ export class TeamLink {
 
   private onJob(teamId: string, job: import("../core/team-hub.js").Job): void {
     this.runner?.onJob(teamId, job);
+    this.pendingTasks.get(job.id)?.(job);
     // Bring back (D76): the runner handed the goal over; rebuild it here.
     const projectId = this.pendingReturns.get(job.id);
     if (!projectId || (job.state !== "done" && job.state !== "failed")) return;
@@ -966,7 +971,7 @@ export class TeamLink {
         const p = openFromTeam<JobPayload>(keys, sealed);
         return {
           ...rest,
-          goal: (p?.goal ?? p?.record?.goal ?? "").split("\n")[0]!.slice(0, 200),
+          goal: (p?.goal ?? p?.record?.goal ?? (p?.task ? `${p.task.title} — part of “${p.task.goal}”` : "")).split("\n")[0]!.slice(0, 200),
           runId: p?.runId ?? p?.record?.id ?? null,
           progress: openFromTeam<JobProgress>(keys, progress) ?? null,
           mine: j.userId === me,
@@ -1051,6 +1056,42 @@ export class TeamLink {
     const payload: JobPayload = { goal: g.goal.trim(), ...(g.orchestrator ? { orchestrator: g.orchestrator } : {}), ...(g.workers?.length ? { workers: g.workers } : {}), ...(g.plan ? { plan: true } : {}), from: os.hostname() };
     const job = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "start", ...(target ? { target } : {}), sealed: sealForTeam(s.key, payload), deviceId: s.device });
     return { jobId: job.id };
+  }
+
+  /**
+   * Team auto-orchestration: one task of this machine's goal, posted for any teammate's
+   * shared runner to claim (no target) — it settles when that runner finishes or fails it.
+   * Hub events settle it at once; a poll covers a missed event.
+   */
+  async runTeamTask(rt: ProjectRuntime, task: TeamTaskPayload): Promise<import("../core/team-hub.js").Job> {
+    const s = await this.jobShare(rt);
+    const job = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "task", sealed: sealForTeam(s.key, { task, from: os.hostname() } satisfies JobPayload), deviceId: s.device });
+    const posted = Date.now(), unclaimed = teamTaskUnclaimedMs();
+    return new Promise((resolve) => {
+      const settle = (j: import("../core/team-hub.js").Job) => {
+        if (j.state !== "done" && j.state !== "failed" && j.state !== "cancelled") return;
+        this.pendingTasks.delete(job.id);
+        clearInterval(poll);
+        resolve(j);
+      };
+      this.pendingTasks.set(job.id, settle);
+      const poll = setInterval(() => {
+        void this.hub().jobs(s.teamId).then(async (js) => {
+          const j = js.find((x) => x.id === job.id);
+          if (!j) return;
+          // nobody took it (the teammate went offline after the goal started): give it back to the
+          // orchestrator now rather than hours later, so it can hand the task to someone else
+          if (j.state === "queued" && Date.now() - posted > unclaimed) {
+            // settle first: cancelling makes the hub push a bare "cancelled", which must not win
+            settle({ ...j, state: "failed", error: `no teammate's machine took it within ${unclaimed >= 60_000 ? `${Math.round(unclaimed / 60_000)} minutes` : `${Math.round(unclaimed / 1000)}s`} — give it to another worker` });
+            await this.hub().cancelJob(s.teamId, job.id).catch(() => {});
+            return;
+          }
+          settle(j);
+        }).catch(() => {});
+      }, Math.min(15_000, Math.max(250, unclaimed / 2)));
+      poll.unref?.();
+    });
   }
 
   /** Move a running goal to a runner at a safe point (D75). */
@@ -1176,6 +1217,7 @@ export class TeamLink {
         keys: (teamId) => this.state.teams[teamId]?.keys ?? [],
         feed: (teamId) => this.views.get(teamId)?.feed ?? [],
         presence: (teamId) => [...(this.views.get(teamId)?.presence.values() ?? [])],
+        runTask: (r, payload) => this.runTeamTask(r, payload),
       });
       this.coordinators.set(rt.info.id, c);
       rt.coordinator = c;

@@ -258,6 +258,8 @@ export interface OrchestraStartOptions {
   race?: boolean;
   /** The paths this goal expects to touch, when the caller already knows. */
   touches?: string[];
+  /** false: keep every task on this machine, even with teammates' runners online. */
+  team?: boolean;
   /**
    * The thread the goal was given in. The orchestrator answers there instead
    * of in a thread of its own, so orchestrating from Main leaves you in Main.
@@ -357,7 +359,31 @@ export interface OrchestraCoordinator {
   goalBudgetUsd?(): number | null;
   /** Stacked delivery for big goals (D59). */
   stackMode?(): "auto" | "off";
+  /**
+   * Team auto-orchestration: the agent kinds teammates' shared runners offer
+   * right now. Each becomes a `team:<kind>` worker the orchestrator can assign.
+   */
+  remoteWorkers?(): Promise<string[]>;
+  /**
+   * Run one task on a teammate's machine: `base` is the commit it starts from.
+   * Resolves with the ref its work was pushed to (on origin), once it's done.
+   */
+  runRemote?(run: OrchestraRun, task: OrchestraTask, base: string): Promise<RemoteTaskResult>;
 }
+
+/** What a teammate's machine hands back for one task. */
+export interface RemoteTaskResult {
+  /** A ref on origin holding the task's commits, on top of the base. */
+  ref: string;
+  summary: string;
+  files: string[];
+  costUsd?: number;
+  /** Whose machine ran it, for the thread. */
+  by?: string;
+}
+
+/** A worker on a teammate's machine (team auto-orchestration). */
+export const isRemoteWorker = (agent: string): boolean => agent.startsWith("team:");
 
 // ---------------------------------------------------------------------------
 // The orchestrator protocol
@@ -550,8 +576,9 @@ export function orchestratorBriefing(opts: {
   planDir?: string;
 }): string {
   const roster = opts.workers
-    .map((w) => `- "${w.id}" — ${KIND_BLURBS[w.kind] ?? w.kind}${w.role && w.role !== w.id ? ` (role: ${w.role})` : ""}`)
+    .map((w) => `- "${w.id}" — ${KIND_BLURBS[w.kind] ?? w.kind}${isRemoteWorker(w.id) ? " — on a teammate's machine" : w.role && w.role !== w.id ? ` (role: ${w.role})` : ""}`)
     .join("\n");
+  const team = opts.workers.some((w) => isRemoteWorker(w.id));
   return [
     `[Loom Orchestra] You are the ORCHESTRATOR for project "${opts.project}".`,
     "Your job is to coordinate, not to implement. Break the goal into concrete, independently",
@@ -572,6 +599,14 @@ export function orchestratorBriefing(opts: {
     "",
     "Available workers:",
     roster,
+    ...(team
+      ? [
+          "",
+          'Workers named "team:<agent>" run on a TEAMMATE\'S machine with their own agent, in parallel with yours.',
+          "Use them for self-contained tasks with clear touches (they start from the integration branch and",
+          "can't ask you questions mid-task); keep tightly coupled or exploratory work on local workers.",
+        ]
+      : []),
     "",
     "End EVERY reply with exactly one fenced block tagged loom containing your actions:",
     "```loom",
@@ -929,6 +964,11 @@ export class OrchestraEngine {
   resolveAgent(name: string): AgentConfig | null {
     const roster = this.host.roster();
     const n = name.trim().toLowerCase();
+    // a teammate's agent (team auto-orchestration): runs on their machine, not this roster
+    if (isRemoteWorker(n)) {
+      const kind = n.slice(5).trim();
+      return kind ? { id: `team:${kind}`, kind, role: "teammate" } : null;
+    }
     const byId = roster.find((a) => a.id.toLowerCase() === n);
     if (byId) return byId;
     const alias: Record<string, string> = {
@@ -984,6 +1024,12 @@ export class OrchestraEngine {
       if (!workers.some((x) => x.id === cfg.id)) workers.push(cfg);
     }
     if (!workers.length) throw new Error("an orchestra needs at least one worker agent");
+    // Team auto-orchestration: with teammates' shared runners online, their agents join the
+    // run as team:<kind> workers — the orchestrator splits the goal across both machines.
+    if (!opts.workers?.length && !opts.race && opts.team !== false) {
+      const kinds = await this.host.coordinator?.()?.remoteWorkers?.().catch(() => [] as string[]) ?? [];
+      for (const k of kinds) { const cfg = this.resolveAgent(`team:${k}`); if (cfg && !workers.some((x) => x.id === cfg.id)) workers.push(cfg); }
+    }
     if (opts.race && workers.length < 2) throw new Error("a race needs at least two agents");
     this.host.gate(orchCfg.id);
     const blocked = this.host.coordinator?.()?.canStart?.();
@@ -2059,7 +2105,7 @@ export class OrchestraEngine {
 
     const key = `${run.id}/${task.id}`;
     try {
-      this.host.gate(task.agent);
+      if (!isRemoteWorker(task.agent)) this.host.gate(task.agent);
       if (!task.dir) {
         const slug = task.id;
         const branch = `${run.branch.replace(/\/main$/, "")}/${slug}`;
@@ -2073,88 +2119,11 @@ export class OrchestraEngine {
         task.dir = dir;
         this.save(run);
       }
-      let agent = this.live.get(key);
-      const freshSession = !agent;
-      if (!agent) {
-        const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
-        agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
-        this.live.set(key, agent);
-        this.wire(run, agent, cfg.id, task.chat, key);
-        await agent.start();
-      }
-
-      // The first attempt always sends the task itself — a follow-up the
-      // orchestrator queued in the same breath waits its turn behind it.
-      const first = task.attempts === 1;
-      // A later attempt sends the orchestrator's next follow-up. With none
-      // queued, this is a task picking back up after Loom restarted (resume,
-      // or a goal moved here): say so, and give it the task again — its
-      // session is new, its worktree still has everything it did.
-      const followUp = first ? undefined : task.queued.shift();
-      const text =
-        first
-          ? task.prompt
-          : (followUp ??
-            `Loom was restarted while you were on this task (${task.title}). Everything you'd done is still in this worktree. ` +
-              `Check where it stands, finish the task, and report back.\n\nThe task, again:\n${task.prompt}`);
-      this.host.append({
-        kind: "message",
-        chat: task.chat,
-        payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
-      });
-      this.turnText.set(key, "");
-      const briefing = first || freshSession
-        ? workerBriefing({
-            project: this.host.projectName,
-            runGoal: run.goal,
-            task,
-            branch: task.branch!,
-            brain: await this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
-            ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
-          })
-        : undefined;
-      await agent.send({ text, ...(briefing ? { briefing } : {}) });
-      if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
-      // paused mid-turn (pauseTask): not finished, nothing to integrate yet
-      if ((task.status as TaskStatus) === "pending") {
-        this.schedule(run);
-        return;
-      }
-
-      const reply = (this.turnText.get(key) ?? "").trim();
-      this.turnText.delete(key); // kept on the task (task.result), not here, once the turn is read
-      task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
-      const turnError = this.lastError.get(key);
-      this.lastError.delete(key);
-      const asked = this.workerQuestion.get(key);
-      this.workerQuestion.delete(key);
-      if (asked) {
-        // Its work so far stays in the worktree, unmerged; the orchestrator
-        // answers with a `send` (the task resumes there) or asks the human.
-        task.status = "needs_input";
-        task.result = `The worker stopped to ask: ${asked}${reply ? `\n\nWhat it said before asking:\n${task.result}` : ""}`;
-        task.finishedAt = Date.now();
-        task.reported = false;
-        this.save(run);
-        this.emit(run, "task", { task: taskSummary(task) });
-        this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
-        this.schedule(run);
-        return;
-      }
-      if (turnError) task.error = turnError;
-
-      // A turn that errored and said nothing died — it is not "done", and a
-      // task depending on it must not start on top of it. (An error event
-      // alongside a real report is a warning the orchestrator gets to read.)
-      if (turnError && !reply) {
-        task.status = "failed";
-      } else if (task.queued.length) {
-        // The orchestrator already queued a follow-up: keep going on the same
-        // worktree before merging.
-        task.status = "pending";
-      } else {
+      if (isRemoteWorker(task.agent)) {
+        await this.runRemoteTask(run, task);
+        if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return;
         await this.integrate(run, task);
-      }
+      } else if (!(await this.runLocalTurn(run, task, key))) return;
     } catch (err) {
       if ((task.status as TaskStatus) !== "cancelled") {
         task.status = "failed";
@@ -2168,6 +2137,120 @@ export class OrchestraEngine {
     this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
     if ((task.status as TaskStatus) === "done") this.host.coordinator?.()?.onTaskDone?.(run, task);
     this.schedule(run);
+  }
+
+  /**
+   * One turn of a local worker on its task, through to integration. False when the
+   * task stopped short (cancelled, paused, or the worker asked a question and the
+   * task already reported itself) — runTask then has nothing more to record.
+   */
+  private async runLocalTurn(run: OrchestraRun, task: OrchestraTask, key: string): Promise<boolean> {
+    let agent = this.live.get(key);
+    const freshSession = !agent;
+    if (!agent) {
+      const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
+      agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
+      this.live.set(key, agent);
+      this.wire(run, agent, cfg.id, task.chat, key);
+      await agent.start();
+    }
+
+    // The first attempt always sends the task itself — a follow-up the
+    // orchestrator queued in the same breath waits its turn behind it.
+    const first = task.attempts === 1;
+    // A later attempt sends the orchestrator's next follow-up. With none
+    // queued, this is a task picking back up after Loom restarted (resume,
+    // or a goal moved here): say so, and give it the task again — its
+    // session is new, its worktree still has everything it did.
+    const followUp = first ? undefined : task.queued.shift();
+    const text =
+      first
+        ? task.prompt
+        : (followUp ??
+          `Loom was restarted while you were on this task (${task.title}). Everything you'd done is still in this worktree. ` +
+            `Check where it stands, finish the task, and report back.\n\nThe task, again:\n${task.prompt}`);
+    this.host.append({
+      kind: "message",
+      chat: task.chat,
+      payload: { text, author: first ? "orchestrator" : "orchestrator", orchestra: { runId: run.id, taskId: task.id } },
+    });
+    this.turnText.set(key, "");
+    const briefing = first || freshSession
+      ? workerBriefing({
+          project: this.host.projectName,
+          runGoal: run.goal,
+          task,
+          branch: task.branch!,
+          brain: await this.host.briefingFor(task.prompt, task.agent, task.touches ?? task.files ?? []),
+          ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
+        })
+      : undefined;
+    await agent.send({ text, ...(briefing ? { briefing } : {}) });
+    if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return false;
+    // paused mid-turn (pauseTask): not finished, nothing to integrate yet
+    if ((task.status as TaskStatus) === "pending") {
+      this.schedule(run);
+      return false;
+    }
+
+    const reply = (this.turnText.get(key) ?? "").trim();
+    this.turnText.delete(key); // kept on the task (task.result), not here, once the turn is read
+    task.result = reply.length > RESULT_CHARS ? `${reply.slice(0, RESULT_CHARS)}\n… (truncated)` : reply || "(no report)";
+    const turnError = this.lastError.get(key);
+    this.lastError.delete(key);
+    const asked = this.workerQuestion.get(key);
+    this.workerQuestion.delete(key);
+    if (asked) {
+      // Its work so far stays in the worktree, unmerged; the orchestrator
+      // answers with a `send` (the task resumes there) or asks the human.
+      task.status = "needs_input";
+      task.result = `The worker stopped to ask: ${asked}${reply ? `\n\nWhat it said before asking:\n${task.result}` : ""}`;
+      task.finishedAt = Date.now();
+      task.reported = false;
+      this.save(run);
+      this.emit(run, "task", { task: taskSummary(task) });
+      this.emit(run, "task_finished", { taskId: task.id, status: task.status, files: task.files ?? [] }, task.chat);
+      this.schedule(run);
+      return false;
+    }
+    if (turnError) task.error = turnError;
+
+    // A turn that errored and said nothing died — it is not "done", and a
+    // task depending on it must not start on top of it. (An error event
+    // alongside a real report is a warning the orchestrator gets to read.)
+    if (turnError && !reply) {
+      task.status = "failed";
+    } else if (task.queued.length) {
+      // The orchestrator already queued a follow-up: keep going on the same
+      // worktree before merging.
+      task.status = "pending";
+    } else {
+      await this.integrate(run, task);
+    }
+    return true;
+  }
+
+  /**
+   * A team:<kind> task: a teammate's machine runs it with its own agent from this
+   * task's starting commit, pushes its work to a ref on origin, and the commits come
+   * back onto the task's branch here — then it integrates like any other task.
+   */
+  private async runRemoteTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    const coord = this.host.coordinator?.();
+    if (!coord?.runRemote) throw new Error("no teammate's machine can take this task (Loom Teams isn't set up here)");
+    const base = (await git(["rev-parse", "HEAD"], task.dir!)).trim();
+    this.host.append({ kind: "message", chat: task.chat, payload: { text: task.prompt, author: "orchestrator", orchestra: { runId: run.id, taskId: task.id } } });
+    this.host.append({ kind: "status", chat: task.chat, payload: { state: "team_task", runId: run.id, taskId: task.id,
+      text: `Sent to a teammate's machine (${task.kind}) — it runs there with their agent and comes back here to merge.` } });
+    const res = await coord.runRemote(run, task, base);
+    await this.gitLock.run(async () => {
+      await git(["fetch", "-q", "origin", res.ref], task.dir!);
+      await git(["merge", "-q", "--ff-only", "FETCH_HEAD"], task.dir!);
+    });
+    task.result = `${res.by ? `Done on ${res.by}'s machine. ` : ""}${res.summary || "(no report)"}`.slice(0, RESULT_CHARS);
+    if (res.files.length) task.files = res.files;
+    this.host.append({ kind: "message", agentId: task.agent, chat: task.chat,
+      payload: { text: task.result, orchestra: { runId: run.id, taskId: task.id }, ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}) } });
   }
 
   private lastError = new Map<string, string>();
