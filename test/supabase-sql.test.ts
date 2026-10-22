@@ -120,6 +120,7 @@ beforeAll(async () => {
     "0009_phase6.sql",
     "0010_crew_coordination.sql",
     "0011_github_only.sql",
+    "0012_hardening.sql",
   ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
@@ -191,6 +192,22 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
     );
   });
 
+  it("0012: a presence row's key is an opaque id — a delete names no team or repo", () => {
+    // what Realtime broadcasts on DELETE is the replica identity: the primary key
+    expect(psql(`select string_agg(a.attname, ',') from pg_index i join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey) where i.indrelid = 'public.presence'::regclass and i.indisprimary;`)).toBe("id");
+    // and the identity is still unique, so a heartbeat upserts rather than piling up
+    const beat = `select public.heartbeat('${team}', '{"deviceId":"${bobDev}","repo":"git@github.com:Acme/App.git","agent":"codex#t1","kind":"codex","touches":["src/**"],"state":"running","since":0,"sealed":{"v":1,"c":"xx"}}');`;
+    asUser(BOB, beat); asUser(BOB, beat);
+    expect(psql(`select count(*) from public.presence where team_id = '${team}' and agent = 'codex#t1';`)).toBe("1");
+  });
+
+  it("0012: anon can't call the membership helpers; prune_ephemeral is service-only", () => {
+    expect(fails(() => psql(`select public.team_role('${team}', '${ALICE}');`, { as: "anon" }))).toMatch(/permission denied/);
+    expect(fails(() => asUser(ALICE, `select public.prune_ephemeral();`))).toMatch(/permission denied/);
+    psql(`update public.presence set ts = now() - interval '2 hours' where team_id = '${team}';`);
+    expect(JSON.parse(psql(`select public.prune_ephemeral();`)).presence).toBeGreaterThan(0);
+  });
+
   it("key versions only move forward; envelopes are readable only by their device's owner", () => {
     asUser(BOB, `select public.put_key_envelopes('${team}', 1, '[{"deviceId":"${bobDev}","box":"b1"}]');`);
     expect(fails(() => asUser(BOB, `select public.put_key_envelopes('${team}', 2, '[{"deviceId":"${bobDev}","box":"b2"}]');`))).toMatch(
@@ -203,6 +220,13 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL (Postgres, RLS as `authenticated`)"
     expect(asUser(BOB, `select string_agg(box, ',' order by version) from public.key_envelopes where team_id = '${team}';`)).toBe("b1,b2");
     expect(asUser(ALICE, `select string_agg(box, ',' order by version) from public.key_envelopes where team_id = '${team}';`)).toBe("a2");
     expect(asUser(ALICE, `select key_version from public.teams where id = '${team}';`)).toBe("2");
+  });
+
+  it("0012: a member can't replace a teammate's key envelope; the owner can", () => {
+    asUser(BOB, `select public.put_key_envelopes('${team}', 2, '[{"deviceId":"${aliceDev}","box":"evil"}]');`);
+    expect(asUser(ALICE, `select box from public.key_envelopes where team_id = '${team}' and device_id = '${aliceDev}' and version = 2;`)).toBe("a2");
+    asUser(ALICE, `select public.put_key_envelopes('${team}', 2, '[{"deviceId":"${bobDev}","box":"b2-resealed"}]');`);
+    expect(asUser(BOB, `select box from public.key_envelopes where team_id = '${team}' and device_id = '${bobDev}' and version = 2;`)).toBe("b2-resealed");
   });
 
   it("globs and overlap match the TypeScript rules (D28)", () => {

@@ -684,8 +684,10 @@ export class SupabaseHubClient implements HubClient {
    * Realtime `postgres_changes` on feed, presence, leases, team_memories and jobs,
    * as the HubEvents MemoryHub emits. Inserts and updates are filtered to the
    * team and RLS-checked per member. Deletes can't be filtered and carry only
-   * the primary key, so: presence's key includes the team, and lease ids are
-   * matched against the leases this subscription has seen.
+   * the primary key, so lease ids — and, since migration 0012, presence ids — are
+   * matched against the rows this subscription has seen. (Before 0012 presence's
+   * key was the whole identity, team and repo included, which every subscriber
+   * could read on a delete; both shapes are handled.)
    */
   async subscribe(teamId: string, cb: (e: HubEvent) => void): Promise<() => void> {
     const sb = await this.sb();
@@ -695,6 +697,10 @@ export class SupabaseHubClient implements HubClient {
 
     const runOf = new Map<string, string>(); // lease id → run id
     for (const l of await this.leases(teamId).catch(() => [] as Lease[])) runOf.set(l.id, l.runId);
+    // presence id → who it was, for a delete that carries only the id (0012)
+    const seen = new Map<string, { userId: string; deviceId: string; agent: string; repo: string }>();
+    const remember = (r: Row) => { if (r.id) seen.set(str(r.id), { userId: str(r.user_id), deviceId: str(r.device_id), agent: str(r.agent), repo: str(r.repo) }); };
+    for (const r of await this.select((s) => s.from("presence").select("id, user_id, device_id, agent, repo").eq("team_id", teamId)).catch(() => [] as Row[])) remember(r);
 
     // one event at a time, in arrival order, even when a login lookup has to wait
     let chain = Promise.resolve();
@@ -723,20 +729,19 @@ export class SupabaseHubClient implements HubClient {
     on("feed", "INSERT", (p) =>
       emit(async () => ({ type: "feed", teamId, event: mapFeed(p.new, p.new.user_id ? await this.login(str(p.new.user_id)) : null) })),
     );
-    const presence = (p: Change) =>
+    const presence = (p: Change) => {
+      remember(p.new);
       emit(async () => ({ type: "presence", teamId, presence: mapPresence(p.new, await this.login(str(p.new.user_id))) }));
+    };
     on("presence", "INSERT", presence);
     on("presence", "UPDATE", presence);
     on("presence", "DELETE", (p) => {
-      if (str(p.old.team_id) !== teamId) return;
-      emit(async () => ({
-        type: "presence_gone",
-        teamId,
-        userId: str(p.old.user_id),
-        deviceId: str(p.old.device_id),
-        agent: str(p.old.agent),
-        repo: str(p.old.repo),
-      }));
+      // 0012: only the id arrives — known if this team's row passed through here
+      const who = p.old.id !== undefined ? seen.get(str(p.old.id))
+        : str(p.old.team_id) === teamId ? { userId: str(p.old.user_id), deviceId: str(p.old.device_id), agent: str(p.old.agent), repo: str(p.old.repo) } : undefined;
+      if (!who) return;
+      if (p.old.id !== undefined) seen.delete(str(p.old.id));
+      emit(async () => ({ type: "presence_gone", teamId, ...who }));
     });
     const lease = (p: Change) => {
       runOf.set(str(p.new.id), str(p.new.run_id));
