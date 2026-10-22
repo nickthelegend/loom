@@ -235,6 +235,22 @@ function git(args: string[], cwd: string): Promise<string> {
   });
 }
 
+/**
+ * git in a clone Loom itself is also working in: the runtime takes its end-of-turn
+ * checkpoint and diff right as a task commits, and one of them finds index.lock held.
+ * Wait the other out rather than fail the task.
+ */
+async function gitWaiting(args: string[], cwd: string): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await git(args, cwd);
+    } catch (e) {
+      if (attempt >= 20 || !/index\.lock/.test((e as Error).message)) throw e;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+}
+
 export class Runner {
   private active = new Map<string, Active>();
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -466,9 +482,9 @@ export class Runner {
     const t = a.payload.task;
     if (!t?.baseRef || !t.prompt) throw new Error("a task job needs its task");
     const rt = a.rt!, dir = rt.info.dir;
-    await git(["fetch", "-q", "origin", t.baseRef], dir);
-    const base = (await git(["rev-parse", "FETCH_HEAD"], dir)).trim();
-    await git(["checkout", "-q", "-B", `loom/task/${t.runId}-${t.taskId}`, base], dir);
+    await gitWaiting(["fetch", "-q", "origin", t.baseRef], dir);
+    const base = (await gitWaiting(["rev-parse", "FETCH_HEAD"], dir)).trim();
+    await gitWaiting(["checkout", "-q", "-B", `loom/task/${t.runId}-${t.taskId}`, base], dir);
     const agent = rt.config.agents.find((x) => x.kind === t.kind) ?? rt.config.agents[0];
     if (!agent) throw new Error("this runner has no agents");
     a.runId = null;
@@ -480,14 +496,14 @@ export class Runner {
       "", `Task: ${t.title}`, "", t.prompt,
     ].join("\n"));
     // everything the agent changed, never this clone's own .loom (its config, its log)
-    await git(["add", "-A"], dir);
-    await git(["reset", "-q", "--", ".loom"], dir).catch(() => {});
-    if ((await git(["diff", "--cached", "--name-only"], dir)).trim()) {
-      await git(["commit", "-q", "-m", `${t.title}\n\nLoom task ${t.taskId} of ${t.runId}, done by ${agent.kind} on ${this.deps.github() ?? "a teammate"}'s machine.`], dir);
+    await gitWaiting(["add", "-A"], dir);
+    await gitWaiting(["reset", "-q", "--", ".loom"], dir).catch(() => {});
+    if ((await gitWaiting(["diff", "--cached", "--name-only"], dir)).trim()) {
+      await gitWaiting(["commit", "-q", "-m", `${t.title}\n\nLoom task ${t.taskId} of ${t.runId}, done by ${agent.kind} on ${this.deps.github() ?? "a teammate"}'s machine.`], dir);
     }
-    const files = (await git(["diff", "--name-only", base, "HEAD"], dir)).split("\n").map((f) => f.trim()).filter(Boolean);
+    const files = (await gitWaiting(["diff", "--name-only", base, "HEAD"], dir)).split("\n").map((f) => f.trim()).filter(Boolean);
     const ref = teamTaskRef(t.runId, t.taskId);
-    await git(["push", "-q", "-f", "origin", `HEAD:${ref}`], dir);
+    await gitWaiting(["push", "-q", "-f", "origin", `HEAD:${ref}`], dir);
     await this.finish(a, "done", { ref, summary: text.slice(0, 4000), files, ...(costUsd ? { costUsd } : {}), by: this.deps.github() ?? undefined });
   }
 
