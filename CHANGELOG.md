@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] — 2026-10-22
+
+Teams that work together on their own: one goal splits across teammates' machines. Plus Simple mode, hub hardening, and the fourth field round.
+
 ### Added
 
 - **Team auto-orchestration: two people, one goal, both machines.** With a teammate's Loom running as a shared runner (`loom runner start --shared`, and `runners.shared` in the repo's `loom.team.json`), the goal you start splits across both of you: your orchestrator gets their agents as `team:<agent>` workers, a task sent to one is claimed by their runner on its own and run with *their* agent in a fresh clone, and its commits come back through origin into your goal's integration branch — still one PR, from your machine. `loom orchestrate --solo` keeps a goal local. Hub jobs gain a `task` kind (migration 0012).
