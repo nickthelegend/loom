@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Team auto-orchestration: two people, one goal, both machines.** With a teammate's Loom running as a shared runner (`loom runner start --shared`, and `runners.shared` in the repo's `loom.team.json`), the goal you start splits across both of you: your orchestrator gets their agents as `team:<agent>` workers, a task sent to one is claimed by their runner on its own and run with *their* agent in a fresh clone, and its commits come back through origin into your goal's integration branch — still one PR, from your machine. `loom orchestrate --solo` keeps a goal local. Hub jobs gain a `task` kind (migration 0012).
 - **Simple mode, and it's the default.** A project opens on five plain tabs — Chat, Team, Agents, Board, Memory — and a composer that's just a box, the agent and Plan. No Orchestra or Crew tabs, no Insights metrics, no terminal, console, browser or right-hand panel, no model, permission or context chips, no cost meter or baton in the status bar, no MCP/skills menu; ⌘K and the menu shortcuts leave those out too, and a stray link to one says where it is instead of half-opening it.
 - **Developer mode** (Settings → Preferences → Mode) turns every one of those back on, instantly and per device. Nothing was removed — it's all where it was.
 - `loom memory:repair --dry-run` shows each memory it would change, before → after, and writes nothing (#326).
 - `loom crew status --json`: crews, goals and every card with its id, stage, touches and hold (#329).
+
+### Security
+
+- **Hub hardening (migration 0012).** Presence rows get an opaque key, so a disconnect no longer broadcasts another team's repo names to every signed-in subscriber (Realtime skips RLS on deletes); a member can no longer overwrite a teammate's key envelope; the membership helpers aren't callable by anonymous users; stale presence, expired leases and invites, and feed older than 90 days are pruned hourly.
 
 ### Fixed
 

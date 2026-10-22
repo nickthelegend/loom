@@ -16,9 +16,9 @@ import { execFile } from "../core/process.js";
 
 import { logbook } from "../core/logbook.js";
 import { notify } from "../core/notify.js";
-import { isTerminal, type Admission, type OrchestraCoordinator, type OrchestraRun, type OrchestraTask } from "../core/orchestra.js";
+import { isTerminal, type Admission, type OrchestraCoordinator, type OrchestraRun, type OrchestraTask, type RemoteTaskResult } from "../core/orchestra.js";
 import { openFromTeam, sealForTeam, type TeamKey } from "../core/team-crypto.js";
-import type { FeedEvent, FeedIn, HubClient, Lease, Presence } from "../core/team-hub.js";
+import type { FeedEvent, FeedIn, HubClient, Job, Lease, Presence } from "../core/team-hub.js";
 import { spentToday } from "../core/team-landing.js";
 import { covered, overlap, repoRelative, scopeOf, zoneOf } from "../core/team-leases.js";
 import { agentAllowed, isProtected, loadPolicy, type TeamPolicy } from "../core/team-policy.js";
@@ -33,7 +33,27 @@ export interface CoordinatorContext {
   keys(teamId: string): TeamKey[];
   feed(teamId: string): FeedEvent[];
   presence(teamId: string): Presence[];
+  /** Team auto-orchestration: post a `task` job for teammates' runners and wait for it to settle. */
+  runTask?(rt: ProjectRuntime, payload: TeamTaskPayload): Promise<Job>;
 }
+
+/** What a teammate's runner needs to run one task of this machine's goal. */
+export interface TeamTaskPayload {
+  runId: string;
+  taskId: string;
+  title: string;
+  prompt: string;
+  kind: string;
+  touches: string[];
+  /** The ref on origin the task starts from. */
+  baseRef: string;
+  goal: string;
+}
+
+/** A task's commits come back on this ref; its starting point sits beside it. */
+export const teamTaskRef = (runId: string, taskId: string) => `refs/loom/run/${runId}/${taskId}`;
+/** How long a teammate's machine has before a task counts as lost. */
+const TEAM_TASK_MS = 2 * 60 * 60_000;
 
 const POLICY_TTL_MS = 60_000;
 const WIP_EVERY_MS = 5 * 60_000;
@@ -373,6 +393,45 @@ export class TeamCoordinator implements OrchestraCoordinator {
   }
 
   // ── lease lifecycle (D36) ──
+
+  // ── team auto-orchestration ──
+
+  /**
+   * The agent kinds teammates' shared runners offer right now — online, shared, not
+   * this machine, and only when the repo's reviewed policy lets runners take others'
+   * work (runners.shared). Each becomes a team:<kind> worker of a new goal.
+   */
+  async remoteWorkers(): Promise<string[]> {
+    const hub = this.ctx.hub(), share = await this.ctx.share(this.rt), me = this.ctx.deviceId();
+    if (!hub || !share || !this.ctx.runTask) return [];
+    const policy = await this.teamPolicy();
+    if (!policy?.runners.shared) return [];
+    const runners = await hub.runners(share.teamId);
+    const fresh = Date.now() - 2 * 60_000;
+    const kinds = new Set<string>();
+    for (const r of runners) if (r.deviceId !== me && r.shared && r.lastSeen > fresh) for (const k of r.kinds) kinds.add(k);
+    return [...kinds].sort();
+  }
+
+  /** Run one task on a teammate's machine: push its starting commit, post the job, wait. */
+  async runRemote(run: OrchestraRun, task: OrchestraTask, base: string): Promise<RemoteTaskResult> {
+    const share = await this.ctx.share(this.rt);
+    if (!share || !this.ctx.runTask) throw new Error("this project isn't shared with a team");
+    const baseRef = `${teamTaskRef(run.id, task.id)}-base`;
+    const pushed = await git(["push", "-q", "-f", "origin", `${base}:${baseRef}`], this.rt.info.dir);
+    if (pushed.code !== 0) throw new Error(`couldn't push the task's starting point to origin: ${pushed.out.trim().slice(0, 300)}`);
+    const job = await Promise.race([
+      this.ctx.runTask(this.rt, { runId: run.id, taskId: task.id, title: task.title, prompt: task.prompt, kind: task.kind,
+        touches: task.touches ?? [], baseRef, goal: run.goal.split("\n")[0]!.slice(0, 300) }),
+      new Promise<never>((_, reject) => { const t = setTimeout(() => reject(new Error("no teammate's machine finished this task within 2 hours")), TEAM_TASK_MS); t.unref?.(); }),
+    ]);
+    if (job.state !== "done") throw new Error(`a teammate's machine couldn't do it: ${job.error ?? job.state}`);
+    const res = openFromTeam<Partial<RemoteTaskResult>>(this.ctx.keys(share.teamId), job.result);
+    if (!res?.ref) throw new Error("the teammate's machine finished without handing back its work");
+    // drift: what it changed against what the task declared
+    for (const f of res.files ?? []) this.onEdit(run, task, f);
+    return { ref: res.ref, summary: res.summary ?? "", files: res.files ?? [], ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}), by: job.runnerGithub ?? res.by };
+  }
 
   onRunEnd(run: OrchestraRun): void {
     void (async () => {

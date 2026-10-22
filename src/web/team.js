@@ -816,7 +816,7 @@ import { ORCH_RUN_ST } from './transcript.js';
 
   var JOB_ST = { queued: ["queued", "off"], claimed: ["running", "live"], done: ["done", "ok"], failed: ["failed", "err"], cancelled: ["cancelled", "off"] };
 
-  var JOB_KIND = { start: "Start", "continue": "Continue", fix: "CI fix", "return": "Bring back", land: "Land" };
+  var JOB_KIND = { start: "Start", "continue": "Continue", fix: "CI fix", "return": "Bring back", land: "Land", task: "Task" };
 
   /** A job's sealed progress as a line: its run's status, tasks done/total, cost. */
   function jobProgressText(p){

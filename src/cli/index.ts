@@ -1497,8 +1497,9 @@ program
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
   .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
   .option("--race", "race: every worker takes the whole goal in its own worktree; pick one with orchestra:apply <run> --task race-<agent>")
+  .option("--solo", "keep every task on this machine, even when teammates' runners could take some")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1511,7 +1512,10 @@ program
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.maxUsd ? { maxUsd: Number(opts.maxUsd) } : {}),
         ...(opts.race ? { race: true } : {}),
+        ...(opts.solo ? { team: false } : {}),
       });
+      const mates = run.workers.filter((w) => w.startsWith("team:"));
+      if (mates.length) console.log(pc.dim(`  teammates' machines can take tasks too: ${mates.join(", ")}`));
       console.log(
         run.race
           ? `${pc.magenta("🏁")} ${pc.bold(run.id)} started — ${run.workers.join(", ")} racing on the same goal`

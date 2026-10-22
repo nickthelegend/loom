@@ -31,6 +31,7 @@ import type { Landing } from "./landing.js";
 import type { ProjectRuntime } from "./runtime.js";
 import type { CrewConfig, CrewGoal } from "../core/crew.js";
 import type { AgentConfig } from "../types.js";
+import { teamTaskRef, type TeamTaskPayload } from "./team-coordinator.js";
 
 // ── configuration ──
 
@@ -143,6 +144,8 @@ export interface JobPayload {
   ownerRunId?: string;
   /** A human-readable "from" (the laptop's name). */
   from?: string;
+  /** task: one task of a teammate's goal (team auto-orchestration). */
+  task?: TeamTaskPayload;
 }
 
 export interface JobProgress {
@@ -311,7 +314,7 @@ export class Runner {
 
   /** Goals being worked on (return/land jobs are instant and don't count). */
   private goalCount(): number {
-    return [...this.active.values()].filter((a) => a.job.kind === "start" || a.job.kind === "continue" || a.job.kind === "fix").length;
+    return [...this.active.values()].filter((a) => a.job.kind === "start" || a.job.kind === "continue" || a.job.kind === "fix" || a.job.kind === "task").length;
   }
 
   /** Inside a container: the dispatcher claimed this job; run it here, then exit (D70). */
@@ -372,7 +375,8 @@ export class Runner {
     const a: Active = { job, teamId, payload, rt: null, dir: null, runId: null, lastBeat: 0 };
     try {
       if (job.kind === "return" || job.kind === "land") return await this.instant(a);
-      if (!opts.inline && (await this.useDocker())) return await this.dispatchDocker(teamId, job);
+      // one task is one agent turn in a fresh clone — no container to stand up for it
+      if (job.kind !== "task" && !opts.inline && (await this.useDocker())) return await this.dispatchDocker(teamId, job);
       this.active.set(job.id, a);
       await this.beat(a);
       await this.prepare(a);
@@ -381,6 +385,11 @@ export class Runner {
       if (job.userId !== this.deps.userId()) {
         const policy = await loadPolicy(rt.info.dir);
         if (!policy.runners.shared) throw new Error(`${job.repo}'s loom.team.json doesn't allow shared runners (runners.shared)`);
+      }
+      // a task is a whole agent turn: run it alongside, so this runner keeps claiming up to capacity
+      if (job.kind === "task") {
+        void this.runTask(a).catch((e) => this.finish(a, "failed", undefined, e instanceof Error ? e.message : String(e)));
+        return;
       }
       if (payload.crew) {
         if (job.kind !== "start" || !payload.goal) throw new Error("runner crews need a start job and goal");
@@ -445,6 +454,62 @@ export class Runner {
     } catch (e) {
       await this.finish(a, "failed", undefined, e instanceof Error ? e.message : String(e));
     }
+  }
+
+  /**
+   * A teammate's task (team auto-orchestration): start from the commit they pushed,
+   * give it to this machine's own agent of that kind for one turn, then push the
+   * result to the task's ref for their orchestra to merge.
+   */
+  private async runTask(a: Active): Promise<void> {
+    const t = a.payload.task;
+    if (!t?.baseRef || !t.prompt) throw new Error("a task job needs its task");
+    const rt = a.rt!, dir = rt.info.dir;
+    await git(["fetch", "-q", "origin", t.baseRef], dir);
+    const base = (await git(["rev-parse", "FETCH_HEAD"], dir)).trim();
+    await git(["checkout", "-q", "-B", `loom/task/${t.runId}-${t.taskId}`, base], dir);
+    const agent = rt.config.agents.find((x) => x.kind === t.kind) ?? rt.config.agents[0];
+    if (!agent) throw new Error("this runner has no agents");
+    a.runId = null;
+    await this.beat(a).catch(() => {});
+    const { text, costUsd } = await this.oneTurn(rt, agent.id, [
+      `[Loom Teams] A task from ${a.job.github}'s goal: "${t.goal}". You're working on their branch in a fresh clone;`,
+      `your commits go back to their machine to merge. Stay inside these paths: ${t.touches.length ? t.touches.join(", ") : "(none declared — keep the change small)"}.`,
+      `Finish the task, run the relevant tests, and end with a short report of what you changed and how you checked it.`,
+      "", `Task: ${t.title}`, "", t.prompt,
+    ].join("\n"));
+    // everything the agent changed, never this clone's own .loom (its config, its log)
+    await git(["add", "-A"], dir);
+    await git(["reset", "-q", "--", ".loom"], dir).catch(() => {});
+    if ((await git(["diff", "--cached", "--name-only"], dir)).trim()) {
+      await git(["commit", "-q", "-m", `${t.title}\n\nLoom task ${t.taskId} of ${t.runId}, done by ${agent.kind} on ${this.deps.github() ?? "a teammate"}'s machine.`], dir);
+    }
+    const files = (await git(["diff", "--name-only", base, "HEAD"], dir)).split("\n").map((f) => f.trim()).filter(Boolean);
+    const ref = teamTaskRef(t.runId, t.taskId);
+    await git(["push", "-q", "-f", "origin", `HEAD:${ref}`], dir);
+    await this.finish(a, "done", { ref, summary: text.slice(0, 4000), files, ...(costUsd ? { costUsd } : {}), by: this.deps.github() ?? undefined });
+  }
+
+  /** One agent turn through this clone's Loom: the reply's text and what it cost. */
+  private oneTurn(rt: ProjectRuntime, agentId: string, prompt: string): Promise<{ text: string; costUsd: number }> {
+    return new Promise((resolve, reject) => {
+      let text = "", costUsd = 0, settled = false;
+      const done = (err?: Error) => {
+        if (settled) return;
+        settled = true; off(); clearTimeout(timer);
+        if (err) reject(err); else resolve({ text: text.trim(), costUsd });
+      };
+      const off = rt.log.onEvent((e) => {
+        if (e.agentId !== agentId) return;
+        const p = e.payload as Record<string, unknown>;
+        if (e.kind === "message" && !p.reasoning && !p.partial && p.author !== "user" && typeof p.text === "string") text += `\n${p.text}`;
+        if (e.kind === "run_complete") { costUsd += Number(p.costUsd ?? 0) || 0; done(); }
+        if (e.kind === "error" && !text) done(new Error(String(p.message ?? "the agent failed")));
+      });
+      const timer = setTimeout(() => done(new Error("the agent didn't finish within 90 minutes")), 90 * 60_000);
+      timer.unref?.();
+      void rt.handoff(agentId).catch(() => {}).then(() => rt.sendMessage(prompt, agentId)).catch((err) => done(err instanceof Error ? err : new Error(String(err))));
+    });
   }
 
   /** return and land: act on a goal this runner holds, answer at once. */

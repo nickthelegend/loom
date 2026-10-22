@@ -63,7 +63,7 @@ import type { ProjectRuntime } from "./runtime.js";
 import { DEPLOY_POLL_MS, Deploys } from "./deploys.js";
 import { defaultExec, Landing, type Exec } from "./landing.js";
 import { TeamBrain } from "./team-brain.js";
-import { TeamCoordinator } from "./team-coordinator.js";
+import { TeamCoordinator, type TeamTaskPayload } from "./team-coordinator.js";
 import type { OrchestraRun } from "../core/orchestra.js";
 import { Runner, readRunnerConfig, writeRunnerConfig, type JobPayload, type JobProgress, type RunnerConfig } from "./runner.js";
 import { rollupCosts } from "../core/team-landing.js";
@@ -201,6 +201,8 @@ export class TeamLink {
   runner: Runner | null = null;
   /** Return jobs we asked for → the project whose goal comes home (D76). */
   private pendingReturns = new Map<string, string>();
+  /** Team tasks this machine posted, waiting for a teammate's runner to settle them. */
+  private pendingTasks = new Map<string, (job: import("../core/team-hub.js").Job) => void>();
   private started = false;
 
   constructor(private host: TeamLinkHost) {
@@ -890,6 +892,7 @@ export class TeamLink {
 
   private onJob(teamId: string, job: import("../core/team-hub.js").Job): void {
     this.runner?.onJob(teamId, job);
+    this.pendingTasks.get(job.id)?.(job);
     // Bring back (D76): the runner handed the goal over; rebuild it here.
     const projectId = this.pendingReturns.get(job.id);
     if (!projectId || (job.state !== "done" && job.state !== "failed")) return;
@@ -1053,6 +1056,29 @@ export class TeamLink {
     return { jobId: job.id };
   }
 
+  /**
+   * Team auto-orchestration: one task of this machine's goal, posted for any teammate's
+   * shared runner to claim (no target) — it settles when that runner finishes or fails it.
+   * Hub events settle it at once; a poll covers a missed event.
+   */
+  async runTeamTask(rt: ProjectRuntime, task: TeamTaskPayload): Promise<import("../core/team-hub.js").Job> {
+    const s = await this.jobShare(rt);
+    const job = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "task", sealed: sealForTeam(s.key, { task, from: os.hostname() } satisfies JobPayload), deviceId: s.device });
+    return new Promise((resolve) => {
+      const settle = (j: import("../core/team-hub.js").Job) => {
+        if (j.state !== "done" && j.state !== "failed" && j.state !== "cancelled") return;
+        this.pendingTasks.delete(job.id);
+        clearInterval(poll);
+        resolve(j);
+      };
+      this.pendingTasks.set(job.id, settle);
+      const poll = setInterval(() => {
+        void this.hub().jobs(s.teamId).then((js) => { const j = js.find((x) => x.id === job.id); if (j) settle(j); }).catch(() => {});
+      }, 15_000);
+      poll.unref?.();
+    });
+  }
+
   /** Move a running goal to a runner at a safe point (D75). */
   async continueOnRunner(rt: ProjectRuntime, runId: string, opts: { runner?: string; graceMs?: number } = {}): Promise<{ jobId: string }> {
     const s = await this.jobShare(rt);
@@ -1176,6 +1202,7 @@ export class TeamLink {
         keys: (teamId) => this.state.teams[teamId]?.keys ?? [],
         feed: (teamId) => this.views.get(teamId)?.feed ?? [],
         presence: (teamId) => [...(this.views.get(teamId)?.presence.values() ?? [])],
+        runTask: (r, payload) => this.runTeamTask(r, payload),
       });
       this.coordinators.set(rt.info.id, c);
       rt.coordinator = c;

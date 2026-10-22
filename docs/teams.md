@@ -163,6 +163,34 @@ Each goal gets a fresh clone (a fresh container when Docker runs), and agents
 get a scrubbed environment with only their logins and the token. If a goal of
 yours needs a CI fix and you've been offline 15 minutes, your runner takes it.
 
+### Two people, one goal: team auto-orchestration
+
+When teammates' Looms are shared runners, a goal you start doesn't stay on your
+machine. Your orchestrator sees each teammate's agents as `team:<agent>` workers
+(`team:codex`, `team:opencode`, …) and splits the goal across both machines:
+self-contained tasks go to a teammate, tightly coupled ones stay with you. Nobody
+on their side clicks anything.
+
+```bash
+# once, in the repo: let teammates' runners take its work (reviewed like any policy change)
+echo '{ "runners": { "shared": true } }' > loom.team.json
+# each teammate, once: their daemon takes tasks with their own agents
+loom runner start --shared
+# you: start a goal as usual — teammates' agents are in it when their runners are online
+loom orchestrate "Add rate limiting and its admin page"
+loom orchestrate "…" --solo   # keep this one on your machine
+```
+
+How a task travels: Loom pushes the task's starting commit to
+`refs/loom/run/<run>/<task>-base` on origin and posts a `task` job on the hub. The
+first teammate's runner with that agent claims it, runs it in a fresh clone with
+**their** agent (their subscription, their limits), commits, and pushes to
+`refs/loom/run/<run>/<task>`. Your Loom fetches it, merges it into the goal's
+integration branch next to your own tasks, and checks what it touched against the
+task's lease. The goal still lands as **one PR** from your machine. A task no
+teammate finishes within two hours fails back to your orchestrator, which can
+reassign it.
+
 ## 7. Deploys and release notes
 
 `loom team deploys` lists deployments; results show in the team feed, and a

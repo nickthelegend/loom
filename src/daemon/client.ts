@@ -232,7 +232,7 @@ export class DaemonClient {
 
   startOrchestra(
     id: string,
-    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean },
+    body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean; team?: boolean },
   ): Promise<{ run: OrchestraRun }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/orchestra`, body);
   }
