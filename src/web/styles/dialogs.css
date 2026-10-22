@@ -977,6 +977,7 @@
   .psrolewrap .psinstr.on{border-color:color-mix(in srgb,var(--thread) 45%,var(--border))}
   .bsort{display:flex;align-items:center;gap:4px;margin:8px 0 2px;font-size:11.5px;color:var(--muted-foreground)}
   .bsort button{border:1px solid transparent;background:none;color:var(--muted-foreground);font:inherit;padding:2px 9px;border-radius:99px;cursor:pointer}
+  .bsort .bview{margin-left:auto;display:flex;align-items:center;gap:4px}
   .bsort button.on{border-color:var(--border);background:var(--secondary);color:var(--foreground)}
   .bused{margin-left:6px;font-size:11px;padding:0 7px;border-radius:99px;background:color-mix(in srgb,var(--thread) 16%,transparent);color:var(--thread-ink,var(--foreground))}
   .monthstats{margin-bottom:16px}

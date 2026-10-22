@@ -1,3 +1,4 @@
+import { devMode } from '../mode.js';
 import { forecastChip,usageMeter } from '../usage.js';
 import { agentGlyph,agentLabel,agentSub,labelOf } from '../agents.js';
 import { api } from '../connection.js';
@@ -25,7 +26,7 @@ export function createComposer(view) {
 
 
     function send(){
-      if (state.cmode === "orch") return view.sendOrchestra();
+      if (state.cmode === "orch" && devMode()) return view.sendOrchestra();
       var box = document.getElementById("box");
       var text = (box.value || "").trim();
       // A message can be pure attachments — "look at this" with an image.
@@ -929,6 +930,8 @@ export function createComposer(view) {
       if (view.desktop) setTimeout(function(){ if (!pageGone() && state.startTour) state.startTour(false); }, 1200);
       // "Run again" from a run's own thread lands here, in Main, ready to orchestrate
       try { if (view.chatId === "main" && localStorage.getItem("loomOrchNext:" + view.pid)) { localStorage.removeItem("loomOrchNext:" + view.pid); state.cmode = "orch"; } } catch (e) {}
+      // Simple mode has no Orchestrate: the composer is a chat
+      if (!devMode()) state.cmode = "chat";
       view.setComposerMode(state.cmode || "chat");
       refreshSkillCount();
 
@@ -1082,7 +1085,7 @@ export function createComposer(view) {
       if (!cur || state.auto || state.cmode === "orch" || cur.tier === "bridge") { pc.style.display = "none"; return; }
       var mode = permOf(cur), cell = permProfile(cur.kind).modes[mode] || {};
       pc.style.display = "";
-      pc.className = "cperm " + mode;
+      pc.className = "cperm devonly " + mode;
       pc.setAttribute("data-mode", mode);
       pc.title = "permissions \u00b7 " + (cell.label || PERM_NAMES[mode]) + " \u2014 click to change";
       pc.setAttribute("aria-label", "permissions: " + (PERM_NAMES[mode] || mode));

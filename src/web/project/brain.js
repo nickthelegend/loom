@@ -6,6 +6,7 @@ import { askText,toast } from '../notifications.js';
 import { openSettingsModal } from '../settings.js';
 import { teamShareHtml,wireTeamShare } from '../team.js';
 import { showContinuityOverflow } from './continuity.js';
+import { devMode } from '../mode.js';
 import { emptyArt } from '../transcript.js';
 import { state } from '../state.js';
 
@@ -49,8 +50,8 @@ export function createBrain(view) {
           '<input type="file" id="bimportf" accept="application/json,.json" hidden></div></div>' +
           '<div class="bsort"><span>Sort</span><button type="button" data-bsort="new" class="' + (state.brainSort !== "used" ? "on" : "") + '">Newest</button>' +
           '<button type="button" data-bsort="used" class="' + (state.brainSort === "used" ? "on" : "") + '" title="how often each memory reached an agent’s prompt">Most used</button>' +
-          '<span style="margin-left:auto">View</span><button type="button" data-bgv="list" class="' + (!state.brainGraph ? "on" : "") + '">List</button>' +
-          '<button type="button" data-bgv="graph" class="' + (state.brainGraph ? "on" : "") + '" title="memories joined by the files and symbols they share">Graph</button></div>';
+          '<span class="bview devonly"><span>View</span><button type="button" data-bgv="list" class="' + (!state.brainGraph ? "on" : "") + '">List</button>' +
+          '<button type="button" data-bgv="graph" class="' + (state.brainGraph ? "on" : "") + '" title="memories joined by the files and symbols they share">Graph</button></span></div>';
         if (continuity.enabled) head += '<div class="bsec">Native continuity <button class="lnk" id="continuity-inspect">Inspect packets and delivery</button></div><div class="bsec">Legacy memories below are retained for compatibility and are not injected by native continuity.</div>';
 
         // The memory list — the learned units. This is what phase 2 fills.
@@ -63,7 +64,7 @@ export function createBrain(view) {
           list = '<div class="bempty">' + (memories.length ? "" : emptyArt("brain")) + (memories.length
             ? "No " + esc(view.brainKind) + " memories yet."
             : continuity.enabled ? "Your original user messages are protected automatically. Review packets and source-backed checkpoints through native continuity diagnostics." : "Nothing learned yet. As agents finish turns, Loom reads each one and records what's worth keeping — constraints, decisions, and the failures worth not repeating. Add a decision below to seed it, or let an agent take a turn.") + "</div>";
-        } else if (state.brainGraph) {
+        } else if (state.brainGraph && devMode()) {
           list = '<div class="bgraph" id="bgraph"></div>';
         } else {
           list = '<div class="bmems">' + shown.map(function(x){
@@ -106,7 +107,7 @@ export function createBrain(view) {
 
         el.innerHTML = '<div class="pane-inner brain">' + head + seed + '<div id="bconflicts"></div>' + list + src + "</div>";
         wireBrainSwitch(el);
-        if (state.brainGraph && shown.length) view.drawMemGraph(document.getElementById("bgraph"), shown, usage);
+        if (state.brainGraph && devMode() && shown.length) view.drawMemGraph(document.getElementById("bgraph"), shown, usage);
         Array.prototype.forEach.call(el.querySelectorAll("[data-bgv]"), function(b){
           b.onclick = function(){ state.brainGraph = b.getAttribute("data-bgv") === "graph"; refreshBrain(); };
         });
