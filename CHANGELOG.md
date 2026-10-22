@@ -18,6 +18,7 @@ Team auto-orchestration, set up in one step and steadier on a teammate's machine
 ### Fixed
 
 - **A teammate's task could still fail to commit on their machine.** The clone's own Loom takes its end-of-turn checkpoint in the git index at the same moment the task commits, and could undo the task's staging ("nothing to commit"). The runner now builds the task's commit in a private index, so nothing else in the clone can disturb it.
+- `loom crew status` in a project with several crews said "which crew?" instead of listing them; it lists every crew unless you name one.
 - **A follow-up to a teammate's task re-ran the original prompt.** When the orchestrator sent a follow-up ("also fix the test"), the teammate's machine got the task from scratch. It now gets the follow-up, on top of the first attempt's work, with the original task for context.
 
 ## [1.2.3] — 2026-10-22

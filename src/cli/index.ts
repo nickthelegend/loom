@@ -1875,10 +1875,15 @@ program
       console.log(pc.dim(`no crews here yet — loom crew create [${templates.join("|")}] [name]`));
       return;
     }
+    // status shows every crew unless one is named; everything else needs to know which
+    if (a === "status" && !opts.crew) {
+      for (const c of crews) printCrew(c);
+      return;
+    }
     const crew = opts.crew ? crews.find((c) => c.id === opts.crew || c.name === opts.crew) : crews.length === 1 ? crews[0] : undefined;
     if (!crew) throw new Error(`which crew? --crew ${crews.map((c) => c.id).join(" | ")}`);
     if (a === "status") {
-      for (const c of opts.crew ? [crew] : crews) printCrew(c);
+      printCrew(crew);
       return;
     }
     if (a === "diff") {
