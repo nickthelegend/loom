@@ -13,7 +13,7 @@ Teams that work together on their own: one goal splits across teammates' machine
 
 ### Added
 
-- **Team auto-orchestration: two people, one goal, both machines.** With a teammate's Loom running as a shared runner (`loom runner start --shared`, and `runners.shared` in the repo's `loom.team.json`), the goal you start splits across both of you: your orchestrator gets their agents as `team:<agent>` workers, a task sent to one is claimed by their runner on its own and run with *their* agent in a fresh clone, and its commits come back through origin into your goal's integration branch — still one PR, from your machine. `loom orchestrate --solo` keeps a goal local. Hub jobs gain a `task` kind (migration 0012).
+- **Team auto-orchestration: two people, one goal, both machines.** With a teammate's Loom running as a shared runner (`loom runner start --shared`, and `runners.shared` in the repo's `loom.team.json`), the goal you start splits across both of you: your orchestrator gets their agents as `team:<agent>` workers, a task sent to one is claimed by their runner on its own and run with *their* agent in a fresh clone, and its commits come back through origin into your goal's integration branch — still one PR, from your machine. `loom orchestrate --solo` keeps a goal local. A task no teammate's machine claims within 10 minutes goes back to the orchestrator to hand to someone else. Hub jobs gain a `task` kind (migration 0012).
 - **Simple mode, and it's the default.** A project opens on five plain tabs — Chat, Team, Agents, Board, Memory — and a composer that's just a box, the agent and Plan. No Orchestra or Crew tabs, no Insights metrics, no terminal, console, browser or right-hand panel, no model, permission or context chips, no cost meter or baton in the status bar, no MCP/skills menu; ⌘K and the menu shortcuts leave those out too, and a stray link to one says where it is instead of half-opening it.
 - **Developer mode** (Settings → Preferences → Mode) turns every one of those back on, instantly and per device. Nothing was removed — it's all where it was.
 - `loom memory:repair --dry-run` shows each memory it would change, before → after, and writes nothing (#326).
@@ -25,6 +25,7 @@ Teams that work together on their own: one goal splits across teammates' machine
 
 ### Fixed
 
+- **`loom runner stop` really stops taking work.** A stopped runner still claimed a job the hub pushed to it; it now takes nothing new until it's started again.
 - Simple mode no longer shows Developer vocabulary: the chat's handoff chip drops the word "baton" (and the opening hand-out from nobody), and the Agents tab hides the baton and permission badges.
 - The Verified card quoted an agent's claim with its raw `**`/backticks; it quotes the words.
 - A workspace tab could fail to switch when the window wasn't painting (backgrounded), because its crossfade never ran; the click now switches it regardless.

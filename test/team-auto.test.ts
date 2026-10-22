@@ -197,6 +197,26 @@ describe("team auto-orchestration", () => {
     expect(jobs.find((j) => j.kind === "task")).toMatchObject({ state: "done", runnerGithub: "bob" });
   }, 60_000);
 
+  it("a task no teammate's machine takes goes back to the orchestrator, and its job is cancelled", async () => {
+    process.env.LOOM_TEAM_TASK_UNCLAIMED_MS = "1500";
+    await LB.stopRunner(); // bob closes his laptop right after the goal starts
+    plan.length = 0;
+    plan.push(() => loom([{ type: "spawn", id: "t1", title: "bob's part", agent: "team:ta-writer", prompt: "write:src/late.ts:bob", touches: ["src/late.ts"] }]));
+    for (let i = 0; i < 4; i++) plan.push(() => loom([]));
+    const run = await laptop.orchestra.start({ goal: "A part for bob" });
+    try {
+    expect(run.workers).toContain("team:ta-writer");
+    await waitUntil(() => laptop.orchestra.get(run.id)!.tasks[0]?.status === "failed", { timeoutMs: 20_000 })
+      .catch(async (e) => { const js = await (LA as unknown as { hub(): { jobs(t: string): Promise<unknown[]> } }).hub().jobs(teamId); throw new Error(JSON.stringify({ run: laptop.orchestra.get(run.id), jobs: js }).slice(0, 3000), { cause: e }); });
+    expect(laptop.orchestra.get(run.id)!.tasks[0]!.error).toMatch(/no teammate's machine took it/);
+    const jobs = await (LA as unknown as { hub(): { jobs(t: string): Promise<Array<{ kind: string; state: string; createdAt: number }>> } }).hub().jobs(teamId);
+    expect(jobs.filter((j) => j.kind === "task").sort((a, b) => b.createdAt - a.createdAt)[0]).toMatchObject({ state: "cancelled" });
+    } finally {
+      await laptop.orchestra.abort(run.id);
+      delete process.env.LOOM_TEAM_TASK_UNCLAIMED_MS;
+    }
+  }, 30_000);
+
   it("a goal stays on this machine when the caller says team: false", async () => {
     plan.length = 0;
     plan.push(() => loom([{ type: "done", summary: "nothing to do" }]));

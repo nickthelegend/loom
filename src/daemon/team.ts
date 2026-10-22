@@ -183,6 +183,8 @@ interface TeamView {
 const HEARTBEAT_MS = 15_000;
 const GH_POLL_MS = 60_000;
 const BRAIN_SYNC_MS = 60_000;
+/** A team task no teammate's runner has claimed by then goes back to the orchestrator (LOOM_TEAM_TASK_UNCLAIMED_MS in tests). */
+const teamTaskUnclaimedMs = () => Number(process.env.LOOM_TEAM_TASK_UNCLAIMED_MS) || 10 * 60_000;
 
 export class TeamLink {
   private file: string;
@@ -1064,6 +1066,7 @@ export class TeamLink {
   async runTeamTask(rt: ProjectRuntime, task: TeamTaskPayload): Promise<import("../core/team-hub.js").Job> {
     const s = await this.jobShare(rt);
     const job = await this.hub().createJob(s.teamId, { repo: s.repo, kind: "task", sealed: sealForTeam(s.key, { task, from: os.hostname() } satisfies JobPayload), deviceId: s.device });
+    const posted = Date.now(), unclaimed = teamTaskUnclaimedMs();
     return new Promise((resolve) => {
       const settle = (j: import("../core/team-hub.js").Job) => {
         if (j.state !== "done" && j.state !== "failed" && j.state !== "cancelled") return;
@@ -1073,8 +1076,20 @@ export class TeamLink {
       };
       this.pendingTasks.set(job.id, settle);
       const poll = setInterval(() => {
-        void this.hub().jobs(s.teamId).then((js) => { const j = js.find((x) => x.id === job.id); if (j) settle(j); }).catch(() => {});
-      }, 15_000);
+        void this.hub().jobs(s.teamId).then(async (js) => {
+          const j = js.find((x) => x.id === job.id);
+          if (!j) return;
+          // nobody took it (the teammate went offline after the goal started): give it back to the
+          // orchestrator now rather than hours later, so it can hand the task to someone else
+          if (j.state === "queued" && Date.now() - posted > unclaimed) {
+            // settle first: cancelling makes the hub push a bare "cancelled", which must not win
+            settle({ ...j, state: "failed", error: `no teammate's machine took it within ${unclaimed >= 60_000 ? `${Math.round(unclaimed / 60_000)} minutes` : `${Math.round(unclaimed / 1000)}s`} — give it to another worker` });
+            await this.hub().cancelJob(s.teamId, job.id).catch(() => {});
+            return;
+          }
+          settle(j);
+        }).catch(() => {});
+      }, Math.min(15_000, Math.max(250, unclaimed / 2)));
       poll.unref?.();
     });
   }

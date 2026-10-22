@@ -425,7 +425,7 @@ export class TeamCoordinator implements OrchestraCoordinator {
         touches: task.touches ?? [], baseRef, goal: run.goal.split("\n")[0]!.slice(0, 300) }),
       new Promise<never>((_, reject) => { const t = setTimeout(() => reject(new Error("no teammate's machine finished this task within 2 hours")), TEAM_TASK_MS); t.unref?.(); }),
     ]);
-    if (job.state !== "done") throw new Error(`a teammate's machine couldn't do it: ${job.error ?? job.state}`);
+    if (job.state !== "done") throw new Error(job.error?.startsWith("no teammate") ? job.error : `a teammate's machine couldn't do it: ${job.error ?? job.state}`);
     const res = openFromTeam<Partial<RemoteTaskResult>>(this.ctx.keys(share.teamId), job.result);
     if (!res?.ref) throw new Error("the teammate's machine finished without handing back its work");
     // drift: what it changed against what the task declared

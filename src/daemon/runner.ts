@@ -281,7 +281,8 @@ export class Runner {
   onJob(teamId: string, job: Job): void {
     const mine = this.active.get(job.id);
     if (mine && job.state === "cancelled") void this.cancel(mine);
-    if (job.state === "queued") void this.tick().catch((e) => this.fail(e));
+    // a stopped runner (`loom runner stop`) takes nothing new, even when the hub pushes a job
+    if (job.state === "queued" && this.running) void this.tick().catch((e) => this.fail(e));
     void teamId;
   }
 
