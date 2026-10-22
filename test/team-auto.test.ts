@@ -206,6 +206,27 @@ describe("team auto-orchestration", () => {
     expect(jobs.find((j) => j.kind === "task")).toMatchObject({ state: "done", runnerGithub: "bob" });
   }, 60_000);
 
+  it("a follow-up to a teammate's task runs on their machine on top of the first attempt", async () => {
+    plan.length = 0;
+    let runId = "", sent = false;
+    plan.push(() => loom([{ type: "spawn", id: "t1", title: "bob's part", agent: "team:ta-writer", prompt: "write:docs/first.md:bob", touches: ["docs/**"] }]));
+    const next = () => {
+      const t = laptop.orchestra.get(runId)!.tasks[0]!;
+      if (t.status === "running" || t.status === "pending") return loom([]);
+      if (!sent) { sent = true; return loom([{ type: "send", task: "t1", message: "Also write:docs/second.md:bob" }]); }
+      return loom([{ type: "done", summary: "both" }]);
+    };
+    for (let i = 0; i < 8; i++) plan.push(next);
+    const run = await laptop.orchestra.start({ goal: "Bob's two files" });
+    runId = run.id;
+    await waitUntil(async () => { await LB.runner!.tick(); return laptop.orchestra.get(run.id)!.status === "completed"; }, { timeoutMs: 40_000, intervalMs: 300 })
+      .catch((e) => { const r = laptop.orchestra.get(run.id)!; throw new Error(JSON.stringify({ status: r.status, error: r.error, question: r.question, tasks: r.tasks.map((t) => ({ s: t.status, a: t.attempts, q: t.queued, e: t.error, r: t.result })) }), { cause: e }); });
+    const done = laptop.orchestra.get(run.id)!;
+    expect(done.tasks[0]).toMatchObject({ status: "done", attempts: 2 });
+    expect(git(laptop.info.dir, "show", `${done.branch}:docs/first.md`)).toBe("written by bob\n");
+    expect(git(laptop.info.dir, "show", `${done.branch}:docs/second.md`)).toBe("written by bob\n");
+  }, 60_000);
+
   it("a task no teammate's machine takes goes back to the orchestrator, and its job is cancelled", async () => {
     process.env.LOOM_TEAM_TASK_UNCLAIMED_MS = "1500";
     await LB.stopRunner(); // bob closes his laptop right after the goal starts

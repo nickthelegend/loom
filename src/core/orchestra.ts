@@ -368,7 +368,7 @@ export interface OrchestraCoordinator {
    * Run one task on a teammate's machine: `base` is the commit it starts from.
    * Resolves with the ref its work was pushed to (on origin), once it's done.
    */
-  runRemote?(run: OrchestraRun, task: OrchestraTask, base: string): Promise<RemoteTaskResult>;
+  runRemote?(run: OrchestraRun, task: OrchestraTask, base: string, prompt?: string): Promise<RemoteTaskResult>;
 }
 
 /** What a teammate's machine hands back for one task. */
@@ -2239,10 +2239,15 @@ export class OrchestraEngine {
     const coord = this.host.coordinator?.();
     if (!coord?.runRemote) throw new Error("no teammate's machine can take this task (Loom Teams isn't set up here)");
     const base = (await git(["rev-parse", "HEAD"], task.dir!)).trim();
-    this.host.append({ kind: "message", chat: task.chat, payload: { text: task.prompt, author: "orchestrator", orchestra: { runId: run.id, taskId: task.id } } });
+    // a later attempt is the orchestrator's follow-up, on top of what the first one did
+    const followUp = task.attempts > 1 ? task.queued.shift() : undefined;
+    const prompt = followUp
+      ? `${followUp}\n\n(Your earlier work on this task is already in this branch. The task, for context:\n${task.prompt})`
+      : task.prompt;
+    this.host.append({ kind: "message", chat: task.chat, payload: { text: followUp ?? task.prompt, author: "orchestrator", orchestra: { runId: run.id, taskId: task.id } } });
     this.host.append({ kind: "status", chat: task.chat, payload: { state: "team_task", runId: run.id, taskId: task.id,
       text: `Sent to a teammate's machine (${task.kind}) — it runs there with their agent and comes back here to merge.` } });
-    const res = await coord.runRemote(run, task, base);
+    const res = await coord.runRemote(run, task, base, prompt);
     await this.gitLock.run(async () => {
       await git(["fetch", "-q", "origin", res.ref], task.dir!);
       await git(["merge", "-q", "--ff-only", "FETCH_HEAD"], task.dir!);
