@@ -994,6 +994,36 @@ import { ORCH_RUN_ST } from './transcript.js';
     "</div>";
   }
 
+  // ---- team auto-orchestration: one goal, both machines ----
+  // pid -> the daemon's readiness report (GET /team/auto), or {loading}/{err}
+  var teamAuto = {};
+  function loadTeamAuto(pid, force){
+    var cur = teamAuto[pid];
+    if (cur && (cur.loading || !force)) return;
+    teamAuto[pid] = Object.assign({}, cur, { loading: true });
+    api("/api/projects/" + pid + "/team/auto").then(function(j){ teamAuto[pid] = j; }, function(err){ teamAuto[pid] = { err: err.message || String(err) }; })
+      .then(function(){ runnersChanged(pid); });
+  }
+  /** The "Two machines, one goal" card: is it on, which teammates' agents a goal gets, the one button to take part. */
+  function teamAutoHtml(pid){
+    if (!pid) return "";
+    if (!teamAuto[pid]) loadTeamAuto(pid);
+    var a = teamAuto[pid] || {};
+    if (a.err || a.shared === undefined) return "";
+    var line = function(ok, text){ return '<div class="tal' + (ok ? " ok" : "") + '"><span class="odot ' + (ok ? "ok" : "off") + '"></span>' + text + "</div>"; };
+    var on = (a.teammates || []).filter(function(t){ return t.online; });
+    var mine = a.myRunner && a.myRunner.running && a.myRunner.shared;
+    return '<div class="tcard tauto"><div class="tsec" style="border-top:0"><div class="tsech">Two machines, one goal' +
+      '<span class="n">' + (a.ready ? "on" : "not yet") + "</span></div>" +
+      '<div class="tad">Goals you start split across teammates\u2019 machines \u2014 each task runs with their own agent and comes back into one PR.</div>' +
+      line(a.policyShared, "Repo policy lets teammates\u2019 runners help" + (a.policyShared ? "" : ' <small>(loom.team.json \u2192 runners.shared)</small>')) +
+      line(mine, mine ? "Your agents can take teammates\u2019 tasks" : "Your machine isn\u2019t taking teammates\u2019 tasks") +
+      line(on.length > 0, on.length ? "Online: " + on.map(function(t){ return "<b>" + esc(t.github) + "</b> (" + esc(t.kinds.join(", ")) + ")"; }).join(", ") : "No teammate\u2019s machine is online for it yet") +
+      (a.ready ? '<div class="tad">A goal gets <b>' + esc((a.workers || []).join(", ")) + "</b> as workers. Keep one local with <code>--solo</code>.</div>" : "") +
+      (mine ? "" : '<div class="tact"><button class="btn primary xs" type="button" data-tautoon>Turn on</button></div>') +
+      "</div></div>";
+  }
+
   function teamFleetHtml(st, pid){
     // signed out, the teams' keys stay on disk for signing back in — but there's no team to show until you do
     var teams = st.signedIn ? (st.teams || []) : [];
@@ -1002,6 +1032,6 @@ import { ORCH_RUN_ST } from './transcript.js';
       ? '<div class="tinvw thubdown">' + ICONS.alert + "<span><b>Can\u2019t reach the team hub.</b> " + esc(st.lastError || "") +
           " \u2014 your agents keep working here; Loom tries again every 15 seconds.</span></div>"
       : "";
-    return teamHeadHtml() + down + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
+    return teamHeadHtml() + down + teamShareHtml(pid, true) + teamNeedsHtml(pid) + teamAutoHtml(pid) + teamRunnersHtml(pid) + teams.map(teamCardHtml).join("") + teamDeploysHtml(pid);
   }
-export { DEPLOY_ST,fleetSince,ghRepo,githubSignIn,JOB_KIND,JOB_ST,jobProgressText,LEASE_STALE_MS,leaseClash,leasePill,leasePrefix,leaseStale,leaseUnder,loadTeam,loadTeamLanding,loadTeamPolicy,loadTeamRunners,loadTeamShare,onlineRunners,onTeamFrame,orchGoalName,runnerAct,runnerFrameT,runnerHooks,runnerName,runnersChanged,setTeamRunners,setTeamShare,TEAM_LANDING_EVENTS,TEAM_POLICY_SAMPLE,TEAM_ST,teamAct,teamAgentOf,teamAvatar,teamCardHtml,teamClaimMap,teamClaimRows,teamCostsHtml,teamDeploys,teamDeploysHtml,teamEditing,teamFeedGoal,teamFeedHtml,teamFeedLine,teamField,teamFleetHtml,teamFrameT,teamGlobs,teamGoalOf,teamHeadHtml,teamHooks,teamInviteHtml,teamInvites,teamJoinCardHtml,teamLandings,teamLeaseRow,teamLeasesHtml,teamMembersHtml,teamMyRuns,teamNeedsHtml,teamNotify,teamOthers,teamPaths,teamPill,teamPolicies,teamPolicyHtml,teamPresenceLeasesHtml,teamRow,teamRunners,teamRunnersHtml,teamSessionsHtml,teamShareHtml,teamShareOf,teamShares,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare };
+export { loadTeamAuto,teamAuto,teamAutoHtml,DEPLOY_ST,fleetSince,ghRepo,githubSignIn,JOB_KIND,JOB_ST,jobProgressText,LEASE_STALE_MS,leaseClash,leasePill,leasePrefix,leaseStale,leaseUnder,loadTeam,loadTeamLanding,loadTeamPolicy,loadTeamRunners,loadTeamShare,onlineRunners,onTeamFrame,orchGoalName,runnerAct,runnerFrameT,runnerHooks,runnerName,runnersChanged,setTeamRunners,setTeamShare,TEAM_LANDING_EVENTS,TEAM_POLICY_SAMPLE,TEAM_ST,teamAct,teamAgentOf,teamAvatar,teamCardHtml,teamClaimMap,teamClaimRows,teamCostsHtml,teamDeploys,teamDeploysHtml,teamEditing,teamFeedGoal,teamFeedHtml,teamFeedLine,teamField,teamFleetHtml,teamFrameT,teamGlobs,teamGoalOf,teamHeadHtml,teamHooks,teamInviteHtml,teamInvites,teamJoinCardHtml,teamLandings,teamLeaseRow,teamLeasesHtml,teamMembersHtml,teamMyRuns,teamNeedsHtml,teamNotify,teamOthers,teamPaths,teamPill,teamPolicies,teamPolicyHtml,teamPresenceLeasesHtml,teamRow,teamRunners,teamRunnersHtml,teamSessionsHtml,teamShareHtml,teamShareOf,teamShares,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare };

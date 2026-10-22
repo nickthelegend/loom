@@ -415,3 +415,11 @@
   .jacts{display:flex;gap:8px;justify-content:flex-end}
   .jok{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--ok);justify-content:center}
   .jok svg{width:16px;height:16px}
+
+  /* team auto-orchestration: "Two machines, one goal" */
+  .tauto .tad{font-size:12px;color:var(--muted-foreground);margin:2px 0 8px;line-height:1.45}
+  .tauto .tad code{font-size:11px}
+  .tauto .tal{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0;color:var(--muted-foreground)}
+  .tauto .tal.ok{color:var(--foreground)}
+  .tauto .tal small{color:var(--muted-foreground)}
+  .tauto .tact{margin-top:8px}

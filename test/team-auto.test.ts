@@ -161,6 +161,15 @@ afterAll(async () => {
 });
 
 describe("team auto-orchestration", () => {
+  it("loom team auto says it's ready, which teammate agents a goal gets, and what's still missing", async () => {
+    const st = await LA.teamAutoStatus(laptop);
+    expect(st).toMatchObject({ shared: true, policyShared: true, ready: true, workers: ["team:ta-writer"] });
+    expect(st.teammates).toEqual([{ github: "bob", kinds: ["ta-writer"], online: true }]);
+    // alice hasn't turned her own runner on, so bob's goals can't use her agents yet
+    expect(st.myRunner.running).toBe(false);
+    expect(st.missing.join(" ")).toMatch(/turn on your shared runner/);
+  });
+
   it("one goal on alice's laptop runs a task on bob's machine with bob's agent, and both land in one branch", async () => {
     plan.push(() => loom([
       { type: "spawn", id: "t1", title: "alice's part", agent: "writer", prompt: "write:src/alice.ts:alice", touches: ["src/alice.ts"] },
@@ -183,7 +192,7 @@ describe("team auto-orchestration", () => {
       .catch((e) => { throw new Error(JSON.stringify({ run: laptop.orchestra.get(run.id), runner: LB.runner?.lastError }), { cause: e }); });
 
     const done = laptop.orchestra.get(run.id)!;
-    expect(done.tasks.map((t) => [t.id, t.status])).toEqual([["t1", "done"], ["t2", "done"]]);
+    expect(done.tasks.map((t) => [t.id, t.status]), JSON.stringify(done.tasks.map((t) => ({ id: t.id, status: t.status, error: t.error, result: t.result })))).toEqual([["t1", "done"], ["t2", "done"]]);
     // bob's task really ran on bob's machine — in his runner's clone, not alice's worktree
     expect(wroteOn.some((d) => d.includes(path.join("runner", "work")))).toBe(true);
     const t2 = done.tasks.find((t) => t.id === "t2")!;

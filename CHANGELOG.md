@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`loom team auto` — two machines, one goal, set up in one step.** `loom team auto` says whether team auto-orchestration is ready in this project, which teammates' agents a goal would get, and what's missing; `loom team auto on` shares the project, writes `loom.team.json` with `runners.shared` when the repo has none (commit and merge it), and turns on this machine's shared runner. The Team tab shows the same as a **Two machines, one goal** card with a **Turn on** button.
+
 ## [1.2.3] — 2026-10-22
 
 Teams that work together on their own: one goal splits across teammates' machines. Plus Simple mode, hub hardening, and the fourth field round.

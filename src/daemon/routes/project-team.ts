@@ -175,6 +175,20 @@ export function registerProjectTeamRoutes(app: Express, ctx: Pick<RouteContext, 
     }),
   );
 
+  // Team auto-orchestration: is it ready here, and one step to take part (loom team auto [on])
+  app.get(
+    "/api/projects/:id/team/auto",
+    withRuntime(async (rt, _req, res) => {
+      try { res.json(await ctx.team.teamAutoStatus(rt)); } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+    }),
+  );
+  app.post(
+    "/api/projects/:id/team/auto",
+    withRuntime(async (rt, _req, res) => {
+      try { res.json(await ctx.team.teamAutoOn(rt)); } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+    }),
+  );
+
   app.post(
     "/api/projects/:id/team/runners/:action",
     withRuntime(async (rt, req, res) => {

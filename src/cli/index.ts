@@ -1925,7 +1925,7 @@ function printCrew(c: Record<string, any>): void {
 
 program
   .command("team [action] [args...]")
-  .description("Loom Teams: status | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | deploys | release-notes <since> | webhook [--repo r] [--install] | remove <github> | leave")
+  .description("Loom Teams: status | auto [on] | signin [hub] | create <name> | invite | join <link> | share | unshare | brain [inbox|promote|resolve|correct|trust|private] | landing | doctor [fix] | adopt <pr> | deploys | release-notes <since> | webhook [--repo r] [--install] | remove <github> | leave")
   .option("--github <login>", "your GitHub login (defaults to the gh CLI's)")
   .option("--repo <owner/name>", "webhook: which repo (defaults to this project's)")
   .option("--install", "webhook: create it on the repo with gh (needs repo admin)")
@@ -1940,6 +1940,21 @@ program
     const extra = { ...(opts.github ? { github: opts.github } : {}), ...(opts.secret ? { secret: opts.secret } : {}), ...(opts.team ? { teamId: opts.team } : {}) };
     try {
       if (a === "status") return void printTeam(await client.team());
+      if (a === "auto") {
+        // team auto-orchestration: your goals split across teammates' machines, theirs across yours
+        const project = await currentProject(client);
+        const st = await client.teamAuto(project.id, arg === "on");
+        if (st.wrotePolicy) console.log(`${pc.green("✓")} wrote loom.team.json (runners.shared) — commit and merge it; policy is reviewed like code`);
+        const mark = (ok: boolean) => (ok ? pc.green("✓") : pc.dim("·"));
+        console.log(`${mark(st.shared)} project shared with your team`);
+        console.log(`${mark(st.policyShared)} repo policy lets teammates' runners take its work`);
+        console.log(`${mark(st.myRunner.running && st.myRunner.shared)} your runner is on and shared (teammates' goals can use your agents)`);
+        const on = st.teammates.filter((t) => t.online);
+        console.log(`${mark(on.length > 0)} teammates' runners online: ${on.length ? on.map((t) => `${t.github} (${t.kinds.join(", ")})`).join(", ") : "none yet"}`);
+        if (st.ready) console.log(`\n${pc.green("ready")} — goals you start get ${st.workers.join(", ")} as workers. ${pc.dim("loom orchestrate \"…\" (--solo to keep one local)")}`);
+        else console.log(`\n${pc.yellow("not yet")} — ${st.missing.join("; ")}`);
+        return;
+      }
       if (a === "signin") {
         const { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } = await import("../core/hosted.js");
         const supabaseUrl = hostedSupabaseUrl(arg);
