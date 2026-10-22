@@ -227,9 +227,9 @@ const BEAT_MS = 60_000;
 /** A goal of the owner's needing a CI fix, owner offline this long: the runner takes it (D69). */
 const OWNER_AWAY_MS = 15 * 60_000;
 
-function git(args: string[], cwd: string): Promise<string> {
+function git(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, timeout: 300_000, maxBuffer: 16 * 1024 * 1024 }, (err, out, errOut) =>
+    execFile("git", args, { cwd, timeout: 300_000, maxBuffer: 16 * 1024 * 1024, ...(env ? { env } : {}) }, (err, out, errOut) =>
       err ? reject(new Error(String(errOut || err.message).trim())) : resolve(String(out)),
     );
   });
@@ -495,15 +495,27 @@ export class Runner {
       `Finish the task, run the relevant tests, and end with a short report of what you changed and how you checked it.`,
       "", `Task: ${t.title}`, "", t.prompt,
     ].join("\n"));
-    // everything the agent changed, never this clone's own .loom (its config, its log)
-    await gitWaiting(["add", "-A"], dir);
-    await gitWaiting(["reset", "-q", "--", ".loom"], dir).catch(() => {});
-    if ((await gitWaiting(["diff", "--cached", "--name-only"], dir)).trim()) {
-      await gitWaiting(["commit", "-q", "-m", `${t.title}\n\nLoom task ${t.taskId} of ${t.runId}, done by ${agent.kind} on ${this.deps.github() ?? "a teammate"}'s machine.`], dir);
+    // Commit what the agent changed through a private index: this clone's own Loom takes its
+    // end-of-turn checkpoint in the shared index at the same moment, and staging there raced it
+    // (an add undone before the commit, or index.lock held). Never this clone's .loom.
+    const idx = path.join(os.tmpdir(), `loom-task-${t.runId}-${t.taskId}-${process.pid}.idx`);
+    const env = { ...process.env, GIT_INDEX_FILE: idx };
+    let head = base;
+    try {
+      await git(["read-tree", base], dir, env);
+      await git(["add", "-A", "--", "."], dir, env);
+      await git(["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".loom"], dir, env);
+      const tree = (await git(["write-tree"], dir, env)).trim();
+      if (tree !== (await git(["rev-parse", `${base}^{tree}`], dir)).trim()) {
+        const msg = `${t.title}\n\nLoom task ${t.taskId} of ${t.runId}, done by ${agent.kind} on ${this.deps.github() ?? "a teammate"}'s machine.`;
+        head = (await git(["commit-tree", tree, "-p", base, "-m", msg], dir)).trim();
+      }
+    } finally {
+      fs.rmSync(idx, { force: true });
     }
-    const files = (await gitWaiting(["diff", "--name-only", base, "HEAD"], dir)).split("\n").map((f) => f.trim()).filter(Boolean);
+    const files = (await git(["diff", "--name-only", base, head], dir)).split("\n").map((f) => f.trim()).filter(Boolean);
     const ref = teamTaskRef(t.runId, t.taskId);
-    await gitWaiting(["push", "-q", "-f", "origin", `HEAD:${ref}`], dir);
+    await gitWaiting(["push", "-q", "-f", "origin", `${head}:${ref}`], dir);
     await this.finish(a, "done", { ref, summary: text.slice(0, 4000), files, ...(costUsd ? { costUsd } : {}), by: this.deps.github() ?? undefined });
   }
 

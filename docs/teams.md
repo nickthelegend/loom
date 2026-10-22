@@ -171,6 +171,9 @@ machine. Your orchestrator sees each teammate's agents as `team:<agent>` workers
 self-contained tasks go to a teammate, tightly coupled ones stay with you. Nobody
 on their side clicks anything.
 
+`loom team auto` checks it's ready and says what's missing; `loom team auto on` does the
+setup below for you (the Team tab's **Turn on** is the same thing).
+
 ```bash
 # once, in the repo: let teammates' runners take its work (reviewed like any policy change)
 echo '{ "runners": { "shared": true } }' > loom.team.json
