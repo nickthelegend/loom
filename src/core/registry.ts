@@ -307,6 +307,12 @@ export interface PairedClient {
   owner?: boolean;
   /** When this device last made a request (written at most every 10 min). */
   lastSeen?: number;
+  /**
+   * This device's own Loom Cloud key (base64url), handed over in its pairing
+   * link. Revoking the device drops it from the relay's keyring, so a phone
+   * you've removed can't read replies meant for the ones you kept.
+   */
+  relayKey?: string;
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
   platform?: string;

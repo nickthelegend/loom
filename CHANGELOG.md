@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Each phone gets its own Loom Cloud key.** Every phone paired to a computer shared one relay key, so a phone you revoked could still read the replies meant for the others until `loom cloud rotate` re-paired everyone. A new pairing link now carries a key for that phone alone, and revoking the phone drops it: it can't send anything the daemon will open or read anyone else's replies. The wire format is unchanged, so every phone build works; phones paired earlier keep the channel's key until you run `loom cloud rotate` once.
+
+### Changed
+
+- **The phone sends no usage ping before the welcome screen,** and the welcome now says what is sent (the region's country, once a day) and where to turn it off.
+
 ## [1.2.7] — 2026-10-25
 
 ### Added

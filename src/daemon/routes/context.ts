@@ -19,7 +19,8 @@ export interface RouteContext {
   host: string;
   port: number;
   expose: (ip: string) => Promise<void>;
-  cloudLinkParams: () => string;
+  /** The link's cloud part, carrying this device's own relay key. */
+  cloudLinkParams: (relayKey: string) => string;
   team: TeamLink;
   runtimes: Map<string, ProjectRuntime>;
   cloudStatus: () => Record<string, unknown>;

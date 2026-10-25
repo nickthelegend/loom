@@ -99,7 +99,10 @@ describe("Loom Cloud relay", () => {
     expect(cloud.supabaseUrl).toBe("https://example.supabase.co");
     expect(cloud.anonKey).toBe("anon-test-key");
     creds = unpackCredentials(cloud.relay)!;
-    expect(creds).toEqual({ channel: s.channel, key: s.key });
+    // the channel is the daemon's; the key is this device's own, not the channel's
+    expect(creds.channel).toBe(s.channel);
+    expect(creds.key).not.toBe(s.key);
+    expect(fromB64(creds.key)).toHaveLength(32);
   });
 
   it("a phone pairs, reads and writes entirely through the relay", async () => {
@@ -204,6 +207,48 @@ describe("Loom Cloud relay", () => {
     const r = await intruder.request("GET", "/api/health", { timeoutMs: 800 });
     expect(r.status).toBe(504);
     await intruder.close();
+  });
+
+  it("a phone paired before per-device keys still reaches the daemon with the channel's key", async () => {
+    const s = readCloudSettings();
+    const old = new RelayClient(bus.connect(), { channel: s.channel!, key: s.key! });
+    expect(await old.ping()).not.toBeNull();
+    await old.close();
+  });
+
+  it("revoking a device locks its key out: it can't ask, and can't read another phone's replies", async () => {
+    const pairOver = async (name: string) => {
+      const link = String((await post("/api/pair/new")).link);
+      const fragment = link.split("#")[1]!;
+      const c = unpackCredentials(parseCloudFragment(fragment)!.relay)!;
+      const phone = new RelayClient(bus.connect(), c);
+      const claim = await phone.request("POST", "/api/pair/claim", { body: { token: new URLSearchParams(fragment).get("pair"), name } });
+      const body = claim.body as { clientToken: string; clientId: string };
+      return { phone, key: c.key, id: body.clientId, auth: `Bearer ${body.clientToken}` };
+    };
+    const a = await pairOver("lost phone");
+    const b = await pairOver("kept phone");
+    expect(a.key).not.toBe(b.key);
+    expect((await a.phone.request("GET", "/api/projects", { auth: a.auth })).status).toBe(200);
+    // stored with the device, never handed back by the API
+    expect(readDaemonConfig()!.clients.find((c) => c.id === a.id)?.relayKey).toBe(a.key);
+    const listed = await fetch(`${baseUrl}/api/pair/clients`, { headers: { authorization: `Bearer ${adminToken}` } }).then((r) => r.text());
+    expect(listed).not.toContain(a.key);
+
+    const revoked = await fetch(`${baseUrl}/api/pair/clients/${a.id}`, { method: "DELETE", headers: { authorization: `Bearer ${adminToken}` } });
+    expect(revoked.status).toBe(200);
+    expect(await a.phone.ping(800)).toBeNull();
+
+    const mark = bus.wire.length;
+    expect((await b.phone.request("GET", "/api/projects", { auth: b.auth })).status).toBe(200);
+    const replies = bus.wire.slice(mark).filter((e) => (e as { d?: string }).d === "d");
+    expect(replies.length).toBeGreaterThan(0);
+    const asLost = new RelayDecoder(fromB64(a.key), "d");
+    const asKept = new RelayDecoder(fromB64(b.key), "d");
+    expect(replies.map((e) => asLost.push(e)).filter(Boolean)).toEqual([]);
+    expect(replies.map((e) => asKept.push(e)).filter(Boolean).length).toBeGreaterThan(0);
+    await a.phone.close();
+    await b.phone.close();
   });
 
   it("rotating the key locks out phones that paired with the old one", async () => {

@@ -914,13 +914,17 @@ export class LoomDaemon {
   // Loom Cloud
   // -------------------------------------------------------------------------
 
-  /** `&relay=<channel.key>&sb=<url>&sbk=<anon key>` when the relay is on, else "". */
-  private cloudLinkParams(): string {
+  /**
+   * `&relay=<channel.key>&sb=<url>&sbk=<anon key>` when the relay is on, else "". The key is the
+   * device's own (see PairedClient.relayKey), not the channel's: the wire format is unchanged, so
+   * every phone build reads it, and the daemon tries each key it holds.
+   */
+  private cloudLinkParams(relayKey: string): string {
     const s = readCloudSettings();
     const target = supabaseTarget(s);
     if (!s.enabled || !s.channel || !s.key || !target) return "";
     const b64 = (v: string) => toB64(new TextEncoder().encode(v));
-    return `&relay=${packCredentials({ channel: s.channel, key: s.key })}&sb=${b64(target.url)}&sbk=${b64(target.anonKey)}`;
+    return `&relay=${packCredentials({ channel: s.channel, key: relayKey })}&sb=${b64(target.url)}&sbk=${b64(target.anonKey)}`;
   }
 
   cloudStatus(): Record<string, unknown> {
@@ -960,7 +964,8 @@ export class LoomDaemon {
       ]);
       this.relay = new RelayBridge({
         transport,
-        key: creds.key,
+        // the channel's own key still opens it for phones paired before per-device keys; `loom cloud rotate` retires it
+        keys: () => [creds.key, ...this.auth.relayKeys()],
         localBase: () => `http://127.0.0.1:${this.port}`,
         identity: () => ({ version: BUILD_REV, name: os.hostname() }),
       });
@@ -980,6 +985,7 @@ export class LoomDaemon {
     if (opts.rotate) {
       delete s.channel;
       delete s.key;
+      this.auth.dropRelayKeys();
     }
     writeCloudSettings(s);
   }

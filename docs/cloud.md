@@ -26,7 +26,7 @@ box the relay and the Team Hub use Loom's hosted Supabase project (see
 
 The relay uses **broadcast** channels named `loom-relay:<random id>`. Nothing is
 stored, and every message is end-to-end encrypted with a key that exists only in
-your pairing QR.
+your pairing QR — each phone gets a key of its own.
 
 - **Realtime → Settings**: keep **public channels allowed**. This is the default.
   If "private channels only" is on, the relay can't join.
@@ -41,8 +41,9 @@ loom pair       # the QR now carries the relay credentials in its #fragment
 Or set `LOOM_SUPABASE_URL` / `LOOM_SUPABASE_ANON_KEY` in the daemon's environment
 and use **Settings → Loom Cloud** in the desktop app.
 
-- `loom cloud rotate` mints a new key. Phones that paired through the cloud must
-  pair again.
+- `loom cloud rotate` mints a new channel and drops every phone's relay key.
+  Phones that paired through the cloud must pair again. You rarely need it:
+  revoking one phone already locks that phone out (below).
 - `loom cloud disable` leaves the channel.
 
 ## 3. Sign in with Google
@@ -92,14 +93,16 @@ select country, count(*) from app_opens group by 1 order by 2 desc;
 ## Security model, in one paragraph
 
 - **Supabase relays but cannot read.** Every relay message is
-  XChaCha20-Poly1305-sealed with a 32-byte key minted on your computer. That key
-  travels only in the pairing link's URL fragment, which is never sent to a server.
+  XChaCha20-Poly1305-sealed with a 32-byte key minted on your computer for that
+  phone alone. It travels only in the pairing link's URL fragment, which is never
+  sent to a server.
 - **Requests are authorized exactly as on the LAN.** Your computer runs each
   relayed request against itself, with the phone's own paired token. Revoking a
-  phone (`loom clients --revoke`) stops its requests the same way over the cloud.
-  Every phone paired to one computer shares one relay key, though, so a revoked
-  phone that kept the key can still *read* the others' traffic until you run
-  `loom cloud rotate` (which re-pairs everyone).
+  phone (`loom clients --revoke`) stops its requests the same way over the cloud,
+  and drops its relay key: it can't send anything your computer will open, and
+  replies to your other phones are sealed with their keys, not its. (Phones
+  paired before Loom 1.2.8 share the channel's key until you run
+  `loom cloud rotate` once.)
 - **A captured request can't be replayed.** Each one carries its send time
   inside the seal; your computer refuses anything stamped more than ten minutes
   off and never runs the same request id twice.

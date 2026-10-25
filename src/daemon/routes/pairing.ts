@@ -140,7 +140,7 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
       const bearer = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
       const owner = req.body?.owner === true && ctx.auth.isRootAdmin(bearer);
       if (req.body?.owner === true && !owner) return void res.status(403).json({ error: "an owner session needs the admin token" });
-      const { token, expiresAt } = ctx.auth.newPairingToken(
+      const { token, expiresAt, relayKey } = ctx.auth.newPairingToken(
         resolvedScope.length ? resolvedScope : undefined,
         { owner },
       );
@@ -150,7 +150,7 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
       // With Loom Cloud on, the fragment also carries the relay channel + key
       // and the Supabase project, so the phone can reach this daemon from any
       // network. Fragment only: none of it is ever sent to a server.
-      const cloud = ctx.cloudLinkParams();
+      const cloud = ctx.cloudLinkParams(relayKey);
       const link = `${url}/app#pair=${token}${cloud}`;
       let qrSvg: string | undefined;
       try {
