@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Phones paired before this keep their computer, which becomes the first entry.
 - **Phone: Allow / Deny on the approval alert.** Approval pushes carry the `loom-approval` category, the approval id and the computer's hostname. The phone answers on the computer that asked, without opening the app.
 
+- **Search every session:** `loom find --all "<words>"` (`GET /api/search`) searches every project's chats, newest first. A scoped token searches only its projects. Unloaded projects are read without being started.
+- **Audit trail:** `loom audit --since 7d` (`GET /api/audit`, owner only) lists approvals answered and by whom, shared-chat messages, Slack and Discord messages, triggers fired or skipped, and baton handoffs.
+- **/compact from the composer:** the "/" menu sends the agent its own `/compact`.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.

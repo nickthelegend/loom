@@ -323,6 +323,12 @@ export class DaemonClient {
   fireTrigger(id: string, tid: string, payload?: unknown): Promise<{ run: { ok: boolean; note: string } }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers/${encodeURIComponent(tid)}/fire`, payload === undefined ? {} : { payload });
   }
+  searchAll(q: string): Promise<{ hits: Array<{ project: string; projectName: string; chat: string; chatTitle: string; eventId: number; at: number; agent?: string; snippet: string }>; truncated: boolean }> {
+    return this.request("GET", `/api/search?q=${encodeURIComponent(q)}`);
+  }
+  audit(since?: number): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
+    return this.request("GET", `/api/audit${since ? `?since=${since}` : ""}`);
+  }
   bridges(): Promise<Record<"slack" | "discord", Record<string, any> | null>> { return this.request("GET", "/api/bridges"); }
   setBridge(platform: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: Record<string, any> | null }> { return this.request("PUT", `/api/bridges/${platform}`, body); }
   removeBridge(platform: string): Promise<{ removed: boolean }> { return this.request("DELETE", `/api/bridges/${platform}`); }

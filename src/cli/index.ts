@@ -636,9 +636,22 @@ program
 
 program
   .command("find <query...>")
-  .description("search this project's thread — messages, decisions, questions")
-  .action(async (words: string[]) => {
+  .description("search this project's thread — messages, decisions, questions (--all: every chat in every project)")
+  .option("--all", "every project's chats, newest first")
+  .option("--json", "print as JSON")
+  .action(async (words: string[], opts: { all?: boolean; json?: boolean }) => {
     const client = await ensureDaemon();
+    if (opts.all) {
+      const { hits, truncated } = await client.searchAll(words.join(" "));
+      if (opts.json) return void console.log(JSON.stringify({ hits, truncated }));
+      if (!hits.length) return void console.log(pc.dim("nothing matches in any project"));
+      for (const h of hits) {
+        const t = new Date(h.at).toISOString().slice(0, 16).replace("T", " ");
+        console.log(`${pc.dim(t)} ${pc.bold(h.projectName)} ${pc.dim("›")} ${h.chatTitle}  ${h.agent ? pc.cyan(h.agent) : pc.dim("you")}  ${h.snippet.replace(/\s+/g, " ").slice(0, 100)}`);
+      }
+      if (truncated) console.log(pc.dim("…more — narrow the search"));
+      return;
+    }
     const project = await currentProject(client);
     const { hits } = await client.searchEvents(project.id, words.join(" "));
     if (!hits.length) return void console.log(pc.dim("nothing matches"));
@@ -646,6 +659,24 @@ program
       const t = new Date(e.ts).toISOString().slice(0, 16).replace("T", " ");
       const who = e.agentId ? pc.cyan(e.agentId) : pc.dim("you");
       console.log(`${pc.dim(t)} ${who}  ${String(e.payload.text ?? e.payload.question ?? "").slice(0, 110)}`);
+    }
+  });
+
+program
+  .command("audit")
+  .description("who let what happen, across projects: approvals answered (and by whom), teammates' messages in shared chats, Slack / Discord, triggers, baton handoffs (approach: Nuphos)")
+  .option("--since <when>", "how far back: 24h, 7d (default), 30d", "7d")
+  .option("--json", "print as JSON")
+  .action(async (opts: { since: string; json?: boolean }) => {
+    const m = /^(\d+)\s*(h|d)$/i.exec(opts.since.trim());
+    if (!m) fail("--since is like 24h or 7d");
+    const since = Date.now() - Number(m[1]) * (m[2]!.toLowerCase() === "h" ? 3_600_000 : 86_400_000);
+    const client = await ensureDaemon();
+    const { entries } = await client.audit(since);
+    if (opts.json) return void console.log(JSON.stringify(entries));
+    if (!entries.length) return void console.log(pc.dim(`nothing to report since ${new Date(since).toLocaleString()}`));
+    for (const e of entries) {
+      console.log(`${pc.dim(new Date(e.at).toLocaleString())}  ${pc.bold(e.projectName)}  ${pc.cyan(e.who)} ${e.what}${e.detail ? pc.dim(` — ${e.detail.replace(/\s+/g, " ").slice(0, 90)}`) : ""}`);
     }
   });
 

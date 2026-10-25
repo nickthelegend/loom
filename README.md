@@ -1399,6 +1399,18 @@ loom bridge slack --off   # or --remove to forget the tokens
   `connections:write`.
 - **Discord bot setup:** turn on the Message Content intent.
 
+## Search every session, and the audit trail
+
+```bash
+loom find --all "rate limit"   # every chat in every project, newest first, with where each hit is
+loom audit --since 7d          # who let what happen
+```
+
+The audit trail covers approvals answered (and by whom), teammates' messages in shared chats,
+messages from Slack and Discord, triggers that fired or didn't, and baton handoffs. Only this
+machine's owner can read it. A token scoped to some projects searches only those. In the
+composer, **/ ▸ Compact the agent's context** sends the agent its own `/compact`.
+
 ## Scorecards: which agent can you trust with this?
 
 "Finished without an error" isn't the same as "did what it said". Proof, the
