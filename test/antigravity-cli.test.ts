@@ -157,12 +157,12 @@ describe("AntigravityCliAdapter", () => {
     expect(events.some((e) => e.kind === "run_complete")).toBe(false);
   });
 
-  it("gives a turn 15 minutes by default, not agy's 5", async () => {
+  it("gives a turn 30 minutes by default, not agy's 5 (an e2e-sized turn ran past 15)", async () => {
     const dir = makeProjectDir({ name: "ag" });
     const bin = fakeAgy("ok");
     await run(bin, dir);
     const argv = argvOf(bin);
-    expect(argv[argv.indexOf("--print-timeout") + 1]).toBe("900s");
+    expect(argv[argv.indexOf("--print-timeout") + 1]).toBe("1800s");
   });
 
   it("fails the turn on a non-zero exit with no output", async () => {

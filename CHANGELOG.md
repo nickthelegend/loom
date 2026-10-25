@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A `loom` command run during a daemon restart waits for it.** When one command swaps a stale daemon for the newer build (only ever while no turns run), another command that lands in that second — a script's next step — waited for nothing and reached the daemon going away, or started a second one. The restarting command now holds a short lock, and others wait for the new daemon.
+- **A task that recovers frees the ones waiting on it.** When a task failed (an agent timed out) and the orchestrator's follow-up then got it done, the task depending on it stayed failed with "a dependency failed" — the run showed the same task as done and as failed. Tasks failed only on a dependency's account now go back to pending, and run, once it's done.
+- **antigravity gets 30 minutes a turn by default**, up from 15: an e2e-sized turn ran past 15 and timed out (`timeoutMs` on the agent still decides).
 - **A run says what happened to every task** (#342). "completed 9/13" left the other four a mystery; the list and the run now show "9 done · 2 failed · 2 cancelled".
 
 ## [1.2.5] — 2026-10-25

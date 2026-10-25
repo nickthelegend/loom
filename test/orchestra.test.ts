@@ -448,6 +448,26 @@ describe("orchestra runs", () => {
     expect(rt.orchestra.get(run.id)!.status).toBe("completed");
   });
 
+  it("a dependency that recovers on a follow-up frees the task that was failed on its account", async () => {
+    await openProject();
+    script = [
+      loom([
+        { type: "spawn", id: "t1", title: "flaky", agent: "alpha", prompt: "fail:timed out" },
+        { type: "spawn", id: "t2", title: "after it", agent: "beta", prompt: "write:after.txt", dependsOn: ["t1"] },
+      ]),
+      // t1 failed (and t2 with it): send t1 a follow-up that works
+      loom([{ type: "send", task: "t1", message: "try again: write:fixed.txt" }]),
+      loom([]),
+      loom([{ type: "done", summary: "both in" }]),
+    ];
+    const run = await rt.orchestra.start({ goal: "recover", orchestrator: "conductor" });
+    await settle(run.id);
+    const r = rt.orchestra.get(run.id)!;
+    expect(r.tasks.map((t) => [t.id, t.status])).toEqual([["t1", "done"], ["t2", "done"]]);
+    expect(r.tasks[1]!.attempts).toBe(1);
+    expect(r.tasks[1]!.error).toBeUndefined();
+  });
+
   it("fails a task whose dependency failed, and aborts cleanly", async () => {
     await openProject();
     script = [
