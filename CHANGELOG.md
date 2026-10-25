@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.6] — 2026-10-25
+
+A cap that keeps a busy machine from falling over, chained goals across projects, read-only thread links, and orchestras scripts can trust.
+
+### Added
+
+- **A read-only link to a thread** (#199). `loom share [chat]` gives a link a teammate opens in a browser to read that chat — prompts, replies, what ran, what changed — with no pairing. It expires (`--hours`, default 24, up to 30 days), `loom share --list` shows yours and `--revoke <id>` ends one; only a hash of each link's token is kept. It works for anyone who can reach the daemon (`loom up --tailnet` for another computer).
+- **Goals across several projects, one after another, merged as they finish** (#340). `loom chain plan.txt` takes one `<project> :: <goal>` per line (project by name or folder): each runs as an orchestra, and when it completes its changes are scanned for secrets and merged into that project's branch before the next starts — `--push` pushes each, `--keep-going` carries on past a failure, `--json` summarises. `loom orchestrate "…" --apply` does the same for one goal. The secret scan (keys, tokens, hard-coded credentials, `.env`/private-key files) is the one review triage already used.
+- **A daemon-wide cap on turns at once, and a free-memory floor** (#339). Six agent turns at once — each with a dev server and headless Chrome — exhausted 16 GB and reset a Mac. Every agent turn, from any project (chats, orchestra workers, crews, reviews), now passes one gate: past the cap (one turn per 4 GB by default, so 4 on 16 GB) or with less than 15% of memory free, it waits for a slot and says so in its thread. `loom limits --turns 2 --min-free 25` changes it without a restart; a turn that's waited 10 minutes starts anyway, so nothing deadlocks.
+- **`loom orchestra --json` and `--wait`** (#341). `--json` gives each run's `status` — one of starting, planning, running, reviewing, waiting_human, completed, failed, aborted, moved — whether that's `terminal`, and its tasks by outcome. `loom orchestra <run> --wait` waits for the end (reviewing isn't the end — a script took it for one and skipped the apply) and exits 0 completed, 1 failed/aborted, 2 waiting on you, 124 timed out.
+
+### Fixed
+
+- **A `loom` command run during a daemon restart waits for it.** When one command swaps a stale daemon for the newer build (only ever while no turns run), another command that lands in that second — a script's next step — waited for nothing and reached the daemon going away, or started a second one. The restarting command now holds a short lock, and others wait for the new daemon.
+- **A task that recovers frees the ones waiting on it.** When a task failed (an agent timed out) and the orchestrator's follow-up then got it done, the task depending on it stayed failed with "a dependency failed" — the run showed the same task as done and as failed. Tasks failed only on a dependency's account now go back to pending, and run, once it's done.
+- **antigravity gets 30 minutes a turn by default**, up from 15: an e2e-sized turn ran past 15 and timed out (`timeoutMs` on the agent still decides).
+- **A run says what happened to every task** (#342). "completed 9/13" left the other four a mystery; the list and the run now show "9 done · 2 failed · 2 cancelled".
+
 ## [1.2.5] — 2026-10-25
 
 Fixes from a day of real use farming builds out to codex, antigravity and opencode: Loom no longer kills turns when it updates, every agent starts (and says why when it can't), and scripts get honest exits.

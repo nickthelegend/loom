@@ -51,7 +51,7 @@ export const HEADLESS_NOTE =
   "Run tests, builds and servers in the foreground and wait for them to finish before you answer — don't start them in the background to check on later.)";
 
 /** agy's own --print-timeout is 5 minutes; a review of a real diff took longer (#246). */
-const DEFAULT_TIMEOUT_MS = 15 * 60_000;
+const DEFAULT_TIMEOUT_MS = 30 * 60_000; // an e2e-sized turn ran past 15 min in the field
 
 interface AntigravityOptions {
   /** Model the CLI runs, e.g. "gemini-3.6-flash-medium" or "claude-sonnet-4-6". */

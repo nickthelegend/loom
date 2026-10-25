@@ -1,3 +1,4 @@
+import { SECRET_PATTERNS } from "./secret-scan.js";
 /**
  * Review Triage: what to read first in a turn's diff.
  *
@@ -61,8 +62,8 @@ const CONFIG = /(^|\/)(\.env[^/]*|tsconfig[^/]*\.json|\.eslintrc[^/]*|eslint\.co
 
 /** What an added line can do that deserves eyes, said the way a reviewer would. */
 const RISKY: Array<[RegExp, string]> = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\b(sk|rk|pk)_(live|test)_[0-9a-zA-Z]{16,}|\bsk-[A-Za-z0-9_-]{20,}|\bgh[pousr]_[A-Za-z0-9]{30,}|\bxox[baprs]-[A-Za-z0-9-]{10,}/, "what looks like a secret key"],
-  [/\b(password|passwd|secret|api[_-]?key|token)\b\s*[:=]\s*["'][^"'\s]{6,}["']/i, "a hard-coded credential"],
+  // the same secret patterns `loom orchestrate --apply` and `loom chain` check before applying
+  ...SECRET_PATTERNS,
   [/\beval\s*\(|new Function\s*\(/, "eval of a string"],
   [/\b(child_process|execSync|spawnSync|os\.system|subprocess\.(call|run|Popen)|shell\s*=\s*True)\b/, "running shell commands"],
   [/\brm\s+-[a-z]*r[a-z]*f|\bgit\s+push\b.*--force|\bgit\s+reset\s+--hard|\bDROP\s+(TABLE|DATABASE)\b|\bTRUNCATE\s+TABLE\b/i, "a destructive command"],

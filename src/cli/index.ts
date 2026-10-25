@@ -1460,12 +1460,36 @@ const TASK_COLOR: Record<string, (s: string) => string> = {
   cancelled: pc.dim,
 };
 
+/**
+ * A run's tasks by outcome (#342: "completed 9/13" said nothing about the other four — dropped,
+ * merged elsewhere, failed?). Only the non-zero ones, done first.
+ */
+function taskCounts(run: { tasks: Array<{ status: string }> }): Record<string, number> {
+  const order = ["done", "running", "pending", "needs_input", "conflict", "failed", "cancelled"];
+  const n: Record<string, number> = {};
+  for (const t of run.tasks) n[t.status] = (n[t.status] ?? 0) + 1;
+  return Object.fromEntries(order.filter((k) => n[k]).map((k) => [k, n[k]!]).concat(Object.entries(n).filter(([k]) => !order.includes(k))));
+}
+const countsLine = (run: { tasks: Array<{ status: string }> }) => {
+  const c = taskCounts(run);
+  return Object.keys(c).length ? Object.entries(c).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(" · ") : "no tasks";
+};
+
+/** What `loom orchestra --json` says about a run — status is one of OrchestraStatus (#341). */
+function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<string, unknown> {
+  return {
+    id: run.id, goal: run.goal, status: run.status, ...(run.status === "aborted" && (run as { interrupted?: unknown }).interrupted ? { resumable: true } : {}),
+    terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, ...taskCounts(run) }, branch: run.branch, costUsd: run.costUsd,
+    ...(run.landing?.pr ? { pr: run.landing.pr } : {}), ...(run.question ? { question: run.question } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
+  };
+}
+const isTerminalStatus = (s: string) => s === "completed" || s === "failed" || s === "aborted" || s === "moved";
+
 function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
-  const done = run.tasks.filter((t) => t.status === "done").length;
   console.log(
     run.race
-      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  race · ${done}/${run.tasks.length} finished · ${fmtUsd(run.costUsd)}`
-      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  ${done}/${run.tasks.length} tasks · ` +
+      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  race · ${countsLine(run)} · ${fmtUsd(run.costUsd)}`
+      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  ${countsLine(run)} · ` +
           `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
@@ -1489,6 +1513,54 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
     } else console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
   }
   if (run.race && run.applied?.task) console.log(`   ${pc.green("kept:")} ${run.applied.task} → ${run.applied.into}`);
+}
+
+interface ApplyResult {
+  ok: boolean;
+  runId: string;
+  status: string;
+  merged?: string;
+  into?: string;
+  pushed?: boolean;
+  secrets?: import("../core/secret-scan.js").SecretFinding[];
+  error?: string;
+}
+
+/**
+ * #340: wait for a run to end; if it completed, scan everything it changed for secrets, merge it
+ * into the project's current branch, and (asked to) push. Stops at the first thing that's wrong,
+ * and says what — a run that failed, a key in the diff, a merge or push that didn't go.
+ */
+async function waitScanApply(client: DaemonClient, projectId: string, dir: string, runId: string, opts: { push: boolean }): Promise<ApplyResult> {
+  let run = (await client.orchestraRun(projectId, runId)).run;
+  while (!isTerminalStatus(run.status) && run.status !== "waiting_human") {
+    await new Promise((r) => setTimeout(r, 3000));
+    run = (await client.orchestraRun(projectId, runId)).run;
+  }
+  if (run.status !== "completed") return { ok: false, runId, status: run.status, error: run.status === "waiting_human" ? `it's waiting on you: ${run.question ?? "a question"}` : (run.error ?? run.status) };
+  const { execFileSync } = await import("node:child_process");
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  let diff = "";
+  try { diff = git("diff", `${run.baseCommit}..${run.branch}`); }
+  catch (e) { return { ok: false, runId, status: run.status, error: `couldn't read the run's changes: ${(e as Error).message.split("\n")[0]}` }; }
+  const { findSecrets } = await import("../core/secret-scan.js");
+  const secrets = findSecrets(diff);
+  if (secrets.length) return { ok: false, runId, status: run.status, secrets, error: "secrets in the run's changes — not applied" };
+  let out: Record<string, unknown>;
+  try { out = await client.orchestraAction(projectId, runId, "apply"); }
+  catch (e) { return { ok: false, runId, status: run.status, error: `merge failed: ${(e as Error).message}` }; }
+  const res: ApplyResult = { ok: true, runId, status: run.status, merged: String(out.merged ?? run.branch), into: String(out.into ?? "") };
+  if (opts.push) {
+    try { git("push", "origin", "HEAD"); res.pushed = true; }
+    catch (e) { return { ...res, ok: false, pushed: false, error: `merged, but the push failed: ${(e as Error).message.split("\n")[0]}` }; }
+  }
+  return res;
+}
+
+function printApplyResult(r: ApplyResult): void {
+  if (r.ok) return void console.log(`${pc.green("✓")} ${r.runId} merged into ${pc.bold(r.into || "your branch")}${r.pushed ? " and pushed" : ""} — no secrets in its changes`);
+  console.log(`${pc.red("✗")} ${r.runId} (${r.status}): ${r.error}`);
+  for (const s of r.secrets ?? []) console.log(pc.red(`    ${s.file}${s.line ? `:${s.line}` : ""} — ${s.what}`));
 }
 
 async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string): Promise<void> {
@@ -1525,8 +1597,10 @@ program
   .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
   .option("--race", "race: every worker takes the whole goal in its own worktree; pick one with orchestra:apply <run> --task race-<agent>")
   .option("--solo", "keep every task on this machine, even when teammates' runners could take some")
+  .option("--apply", "when the run completes, scan its changes for secrets and merge it into your branch (#340)")
+  .option("--push", "with --apply: push the branch after merging")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; apply?: boolean; push?: boolean; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1550,7 +1624,12 @@ program
               `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
       );
       if (opts.watch) await watchRun(client, project.id, run.id);
-      else console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
+      else if (!opts.apply) console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
+      if (opts.apply) {
+        const res = await waitScanApply(client, project.id, project.dir, run.id, { push: Boolean(opts.push) });
+        printApplyResult(res);
+        if (!res.ok) process.exitCode = 1;
+      }
     } catch (err) {
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
@@ -1559,23 +1638,39 @@ program
 
 program
   .command("orchestra [runId]")
-  .description("orchestra runs in this project — or one run in detail")
+  .description("orchestra runs in this project — or one run in detail. Status: starting | planning | running | reviewing | waiting_human | completed | failed | aborted | moved")
   .option("--watch", "follow the run until it finishes")
-  .action(async (runId: string | undefined, opts: { watch?: boolean }) => {
+  .option("--json", "print runs (or one run) as JSON")
+  .option("--wait", "with a run id: wait until it's completed, failed or aborted (or asks you something); exit 0 completed, 1 failed/aborted, 2 waiting on you")
+  .option("--timeout <seconds>", "with --wait: give up after this long (exit 124)", "7200")
+  .action(async (runId: string | undefined, opts: { watch?: boolean; json?: boolean; wait?: boolean; timeout: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
       if (runId) {
+        if (opts.wait) {
+          // "reviewing" is the orchestrator reading results, not the end (#341) — only these are
+          const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 7200) * 1000;
+          let run = (await client.orchestraRun(project.id, runId)).run;
+          while (!isTerminalStatus(run.status) && run.status !== "waiting_human" && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 2000));
+            run = (await client.orchestraRun(project.id, runId)).run;
+          }
+          const done = isTerminalStatus(run.status) || run.status === "waiting_human";
+          process.exitCode = !done ? 124 : run.status === "completed" ? 0 : run.status === "waiting_human" ? 2 : 1;
+          return void (opts.json ? console.log(JSON.stringify(runJson(run))) : printRun(run));
+        }
         if (opts.watch) return void (await watchRun(client, project.id, runId));
-        return void printRun((await client.orchestraRun(project.id, runId)).run);
+        const { run } = await client.orchestraRun(project.id, runId);
+        return void (opts.json ? console.log(JSON.stringify(runJson(run))) : printRun(run));
       }
       const { runs } = await client.orchestraRuns(project.id);
+      if (opts.json) return void console.log(JSON.stringify(runs.map(runJson)));
       if (!runs.length) return void console.log(pc.dim('no orchestra runs yet — loom orchestrate "<goal>"'));
       for (const r of runs.slice(0, 15)) {
-        const done = r.tasks.filter((t) => t.status === "done").length;
         console.log(
-          `${pc.bold(r.id)}  ${runStatus(r).padEnd(13)} ${String(done).padStart(2)}/${String(r.tasks.length).padEnd(2)} ` +
-            `${pc.dim(new Date(r.createdAt).toLocaleString())}  ${r.goal.slice(0, 70)}`,
+          `${pc.bold(r.id)}  ${runStatus(r).padEnd(13)} ${countsLine(r).padEnd(30)} ` +
+            `${pc.dim(new Date(r.createdAt).toLocaleString())}  ${r.goal.slice(0, 60)}`,
         );
       }
     } catch (err) {
@@ -2478,6 +2573,104 @@ program
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
     }
+  });
+
+program
+  .command("share [chat]")
+  .description("a read-only link to a chat (default: main) for a teammate: prompts, replies, what ran and changed. It expires; --list shows yours, --revoke ends one (#199)")
+  .option("--hours <n>", "how long the link works (1 to 720, default 24)")
+  .option("--list", "the links that still work")
+  .option("--revoke <id>", "end a link now")
+  .option("--json", "print as JSON")
+  .action(async (chat: string | undefined, opts: { hours?: string; list?: boolean; revoke?: string; json?: boolean }) => {
+    const client = await ensureDaemon();
+    if (opts.revoke) {
+      const { revoked } = await client.revokeShare(opts.revoke);
+      if (!revoked) fail(`no link ${opts.revoke} — loom share --list`);
+      return void console.log(`${pc.green("✓")} link ${opts.revoke} no longer opens`);
+    }
+    if (opts.list) {
+      const { shares } = await client.shares();
+      if (opts.json) return void console.log(JSON.stringify(shares));
+      if (!shares.length) return void console.log(pc.dim("no links open — loom share [chat]"));
+      for (const s of shares) console.log(`${pc.bold(s.id)}  ${s.title}  ${pc.dim(`until ${new Date(s.expiresAt).toLocaleString()}`)}`);
+      return;
+    }
+    const project = await currentProject(client);
+    let chatId = "main";
+    if (chat && chat !== "main") {
+      const { chats } = await client.chats(project.id);
+      const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
+      if (!hit) fail(`no chat "${chat}" here — ${chats.slice(0, 6).map((c) => c.title).join(", ") || "only main"}`);
+      chatId = hit.id;
+    }
+    const out = await client.shareChat(project.id, chatId, opts.hours ? Number(opts.hours) : undefined);
+    if (opts.json) return void console.log(JSON.stringify(out));
+    console.log(`${pc.green("✓")} ${out.title} — read-only, until ${new Date(out.expiresAt).toLocaleString()}\n\n  ${out.url}\n`);
+    console.log(pc.dim(`anyone who can reach this machine with the link can read it (on another computer: start the daemon with loom up --tailnet). loom share --revoke ${out.id} ends it`));
+  });
+
+program
+  .command("chain [file]")
+  .description("run goals in several projects, one after another: each line is `<project> :: <goal>` (project = name or folder). Each completed run is scanned for secrets and merged before the next starts (#340)")
+  .option("--push", "push each project's branch after merging its run")
+  .option("--keep-going", "carry on to the next project when one fails")
+  .option("--json", "print a JSON summary at the end")
+  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean }) => {
+    const text = file && file !== "-" ? fs.readFileSync(file, "utf8") : await new Promise<string>((resolve) => {
+      let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (d) => (buf += d)); process.stdin.on("end", () => resolve(buf));
+    });
+    const steps = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).map((l) => {
+      const at = l.indexOf("::");
+      if (at < 0) fail(`each line is "<project> :: <goal>" — got: ${l}`);
+      return { project: l.slice(0, at).trim(), goal: l.slice(at + 2).trim() };
+    });
+    if (!steps.length) fail("nothing to run — one `<project> :: <goal>` per line");
+    const client = await ensureDaemon();
+    const { projects } = await client.listProjects();
+    const results: Array<ApplyResult & { project: string }> = [];
+    for (const step of steps) {
+      const p = projects.find((x) => x.name === step.project || x.id === step.project || path.resolve(x.dir) === path.resolve(step.project));
+      if (!p) { results.push({ project: step.project, ok: false, runId: "-", status: "not started", error: `no project "${step.project}" — loom projects` }); if (!opts.keepGoing) break; continue; }
+      if (!opts.json) console.log(`${pc.magenta("▶")} ${pc.bold(p.name)} — ${step.goal.slice(0, 80)}`);
+      try {
+        const { run } = await client.startOrchestra(p.id, { goal: step.goal });
+        const r = { project: p.name, ...(await waitScanApply(client, p.id, p.dir, run.id, { push: Boolean(opts.push) })) };
+        results.push(r);
+        if (!opts.json) printApplyResult(r);
+        if (!r.ok && !opts.keepGoing) break;
+      } catch (e) {
+        results.push({ project: p.name, ok: false, runId: "-", status: "not started", error: (e as Error).message });
+        if (!opts.json) console.log(`${pc.red("✗")} ${p.name}: ${(e as Error).message}`);
+        if (!opts.keepGoing) break;
+      }
+    }
+    const failed = results.filter((r) => !r.ok).length;
+    if (opts.json) console.log(JSON.stringify({ ok: failed === 0, steps: results }));
+    else console.log(pc.dim(`\n${results.length - failed}/${steps.length} merged${failed ? ` · ${failed} failed` : ""}${results.length < steps.length ? ` · ${steps.length - results.length} not run` : ""}`));
+    if (failed || results.length < steps.length) process.exitCode = 1;
+  });
+
+program
+  .command("limits")
+  .description("how many agent turns run at once across every project, and how much memory stays free — past either, turns queue (#339)")
+  .option("--turns <n>", "turns at once across all projects (0 = no cap)")
+  .option("--min-free <pct>", "don't start a turn while less than this % of memory is free (0 = off)")
+  .option("--json", "print as JSON")
+  .action(async (opts: { turns?: string; minFree?: string; json?: boolean }) => {
+    const { readLimits, writeLimits, availableMemoryPct, defaultLimits } = await import("../core/turn-gate.js");
+    const patch: { maxTurns?: number; minFreePct?: number } = {};
+    if (opts.turns !== undefined) { const n = Number(opts.turns); if (!Number.isInteger(n) || n < 0) fail("--turns takes a whole number (0 = no cap)"); patch.maxTurns = n; }
+    if (opts.minFree !== undefined) { const n = Number(opts.minFree); if (!(n >= 0 && n < 100)) fail("--min-free takes a % from 0 to 99"); patch.minFreePct = n; }
+    const limits = Object.keys(patch).length ? writeLimits(patch) : readLimits();
+    const free = Math.round(availableMemoryPct());
+    const cfg = await daemonRunning();
+    const running = cfg ? await turnsInFlight(new DaemonClient(cfg)) : [];
+    if (opts.json) return void console.log(JSON.stringify({ ...limits, freePct: free, running, defaults: defaultLimits() }));
+    if (Object.keys(patch).length) console.log(pc.green("✓ saved — the daemon picks it up within a few seconds"));
+    console.log(`turns at once   ${limits.maxTurns ? pc.bold(String(limits.maxTurns)) : pc.dim("no cap")}  ${pc.dim(`(running now: ${running.length}${running.length ? ` — ${running.slice(0, 4).join(", ")}` : ""})`)}`);
+    console.log(`memory kept free ${limits.minFreePct ? pc.bold(`${limits.minFreePct}%`) : pc.dim("off")}  ${pc.dim(`(free now: ${free}%)`)}`);
+    console.log(pc.dim("past either, a new turn waits for a slot and says so in its thread; one that waits 10 min starts anyway"));
   });
 
 program

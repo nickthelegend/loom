@@ -382,6 +382,9 @@ export interface RemoteTaskResult {
   by?: string;
 }
 
+/** Why a task that never started was failed: one of its dependencies failed or was cancelled. */
+const DEPENDENCY_FAILED = "a dependency failed or was cancelled";
+
 /** A worker on a teammate's machine (team auto-orchestration). */
 export const isRemoteWorker = (agent: string): boolean => agent.startsWith("team:");
 
@@ -1861,6 +1864,18 @@ export class OrchestraEngine {
   private recheckTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private schedule(run: OrchestraRun): void {
+    // A dependency that failed and then recovered (the orchestrator's follow-up got it done)
+    // frees the tasks that were failed only on its account: they never started, so they run now
+    // (field: a timed-out task finished on its retry, but the task after it stayed failed).
+    for (const task of run.tasks) {
+      if (task.status !== "failed" || task.attempts > 0 || task.error !== DEPENDENCY_FAILED) continue;
+      const deps = task.dependsOn.map((d) => run.tasks.find((t) => t.id === d));
+      if (deps.some((d) => d && (d.status === "failed" || d.status === "cancelled"))) continue;
+      task.status = "pending";
+      task.error = undefined;
+      task.reported = false;
+      this.emit(run, "task", { task: taskSummary(task) });
+    }
     if (run.status !== "running" || run.moving) return;
     if (this.overBudget(run)) return;
     const inFlight = run.tasks.filter((t) => t.status === "running" || this.admitting.has(`${run.id}/${t.id}`)).length;
@@ -1879,7 +1894,7 @@ export class OrchestraEngine {
       const deps = task.dependsOn.map((d) => run.tasks.find((t) => t.id === d));
       if (deps.some((d) => d && (d.status === "failed" || d.status === "cancelled"))) {
         task.status = "failed";
-        task.error = "a dependency failed or was cancelled";
+        task.error = DEPENDENCY_FAILED;
         task.reported = false;
         this.emit(run, "task", { task: taskSummary(task) });
         continue;

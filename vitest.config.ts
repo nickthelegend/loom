@@ -18,6 +18,8 @@ export default defineConfig({
       LOOM_TEST_RUN_ID: `${process.pid}-${Date.now()}`,
       // cost estimates read a saved price list; tests never fetch one
       LOOM_NO_PRICE_FETCH: "1",
+      // the daemon-wide turn gate (#339) would queue the suite's many parallel fake agents; it has its own tests
+      LOOM_TURN_GATE: "off",
       // a night shift waits for its chats to go quiet before it reports; 15s in life, 2s here
       LOOM_SHIFT_QUIET_MS: "2000",
       // the in-process test hub answers slowly when a Windows runner is starved
