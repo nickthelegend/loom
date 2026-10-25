@@ -1486,3 +1486,19 @@
   @media (max-width:600px){.ghead{flex-wrap:wrap}.gmsg.human{max-width:100%}}
   .msg.user .uby{display:flex;align-items:center;gap:4px;justify-content:flex-end;font-size:11.5px;font-weight:600;color:var(--muted-foreground);margin-bottom:3px}
   .msg.user .uby svg{width:12px;height:12px}
+
+  /* ── Triggers (triggers-ui.js) ── */
+  .triggersmodal{max-width:620px}
+  .triggersmodal .modalbody{gap:10px;max-height:72vh;overflow-y:auto}
+  .trempty{font-size:13px;color:var(--muted-foreground);padding:4px 0}
+  .trrow{border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+  .trrow.off{opacity:.6}
+  .trhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-size:13.5px}
+  .trwhen{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted-foreground)}
+  .trnext{font-size:12px;color:var(--muted-foreground);margin-left:auto}
+  .trprompt{font-size:13px;color:var(--foreground);overflow-wrap:anywhere}
+  .trruns{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted-foreground)}
+  .trruns .ok{color:var(--ok, #16a34a)}
+  .trsecret{font-size:12px;display:flex;flex-direction:column;gap:4px;background:var(--muted);padding:8px;border-radius:6px;overflow-wrap:anywhere}
+  .tradd summary{cursor:pointer;font-size:13px;font-weight:600;padding:6px 0}
+  .tradd textarea{font:inherit;font-size:13.5px;color:var(--foreground);background:var(--background);border:1px solid var(--input);border-radius:8px;padding:8px 10px;resize:vertical}

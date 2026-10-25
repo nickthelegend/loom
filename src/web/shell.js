@@ -19,6 +19,7 @@ import { emptyArt } from './transcript.js';
 import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
 import { openShareLive } from './share-live.js';
+import { openTriggers } from './triggers-ui.js';
 
 
   // ---- router ----------------------------------------------------------
@@ -694,6 +695,7 @@ import { openShareLive } from './share-live.js';
           } },
         { label: "Import chats\u2026", icon: ICONS.download, hint: "Claude, Codex, OpenCode", run: function(){ openImportChats(pid); } },
         { sep: true },
+        { label: "Triggers…", icon: ICONS.clock, hint: "schedules & webhooks", run: function(){ openTriggers(pid, p.name); } },
         { label: "Project settings…", icon: ICONS.gear, run: function(){ openProjectSettings(pid); } },
         { label: "Rename…", icon: ICONS.file, run: function(){ renameProject(pid, p.name); } },
         { label: "Copy path", icon: ICONS.copy, hint: "folder", run: function(){ copyText(p.dir || ""); } },

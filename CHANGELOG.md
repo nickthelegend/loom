@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Audit trail:** `loom audit --since 7d` (`GET /api/audit`, owner only) lists approvals answered and by whom, shared-chat messages, Slack and Discord messages, triggers fired or skipped, and baton handoffs.
 - **/compact from the composer:** the "/" menu sends the agent its own `/compact`.
 
+- **Triggers and Slack & Discord in the app.** The project menu ▸ Triggers… (or ⌘K ▸ Triggers) lists each trigger with its schedule, next run and last runs, with Run now, Pause and Remove, and a form to add one. A webhook's URL and secret show once. Settings ▸ Slack & Discord connects either bot, with masked tokens, connection status and heard/ignored counts.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.
