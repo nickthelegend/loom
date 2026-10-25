@@ -41,8 +41,8 @@ import { devMode, setDevMode } from './mode.js';
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
-      { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
       { id: "team", label: "Team", icon: ICONS.team },
+      { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
       { id: "about", label: "About", icon: ICONS.info }
     ];
     var cur = section || "setup";
