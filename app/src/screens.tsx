@@ -20,6 +20,7 @@ import {
   Platform,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -29,7 +30,7 @@ import {
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift } from "./api";
+import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -1468,6 +1469,17 @@ export function ProjectScreen(props: {
             onRename={(title) => chatMenu && void act(() => renameChat(creds, project.id, chatMenu.id, title))}
             onFlags={(flags) => chatMenu && void act(() => setChatFlags(creds, project.id, chatMenu.id, flags))}
             onDelete={() => chatMenu && void act(() => deleteChat(creds, project.id, chatMenu.id), chatMenu.id)}
+            onShareLive={(role) => {
+              const c = chatMenu;
+              if (!c) return;
+              setChatMenu(null);
+              const go = (name?: string) => void shareLive(creds, { project: project.id, chat: c.id, role, name: (name ?? "").trim() || "Teammate", hours: 24 })
+                .then((r) => Share.share({ message: `Join my Loom chat "${c.title}" — ${role === "view" ? "read along" : role === "reply" ? "talk to the agent with me" : "talk and approve with me"} (24 h, one use): ${r.link}` }))
+                .catch((e) => Alert.alert("Couldn't make the link", e instanceof Error ? e.message : String(e)));
+              // iOS can ask for their name in place; elsewhere they join as "Teammate" and the link says so
+              if (Platform.OS === "ios" && Alert.prompt) Alert.prompt("Who's joining?", "Their name, as it shows in the chat.", go, "plain-text", "");
+              else go();
+            }}
           />
           {threadCachedAt ? (
             <View
@@ -2177,6 +2189,8 @@ function LinkStrip(props: { samples: LinkSample[]; via: string }) {
 /** Long-press a chat: rename it, pin or archive it, or delete it — the desktop sidebar's menu. */
 function ChatMenu(props: {
   chat: Chat | null;
+  /** Share live: a teammate joins this chat (read along / talk / talk and approve). */
+  onShareLive?: (role: "view" | "reply" | "approve") => void;
   onClose: () => void;
   onRename: (title: string) => void;
   onFlags: (flags: { pinned?: boolean; archived?: boolean }) => void;
@@ -2204,6 +2218,9 @@ function ChatMenu(props: {
               <Text style={{ color: T.onBright, fontWeight: "700" }}>Rename</Text>
             </TouchableOpacity>
           </View>
+          {props.onShareLive && row("Share live — they read along", () => props.onShareLive!("view"))}
+          {props.onShareLive && row("Share live — they can talk to the agent", () => props.onShareLive!("reply"))}
+          {props.onShareLive && row("Share live — talk and approve", () => props.onShareLive!("approve"))}
           {row(c.pinned ? "Unpin" : "Pin to the front", () => props.onFlags({ pinned: !c.pinned }))}
           {row(c.archived ? "Unarchive" : "Archive", () => props.onFlags({ archived: !c.archived }))}
           {row("Delete chat", () =>

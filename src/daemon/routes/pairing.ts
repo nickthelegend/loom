@@ -107,7 +107,11 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
   });
 
   app.post("/api/pair/new", (req, res) => {
-    if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+    // A device link is the owner's to make. A Share-live link (one chat, for a while) may also come
+    // from the owner's own phone — an unscoped paired device — never from a guest or a scoped token.
+    const r0 = req as Request & { isAdmin?: boolean; guest?: unknown; projectScope?: string[] | null };
+    const ownDevice = !r0.isAdmin && !r0.guest && !r0.projectScope && Boolean(req.body?.guest);
+    if (!r0.isAdmin && !ownDevice) {
       return void res.status(403).json({ error: "admin only" });
     }
     void (async () => {

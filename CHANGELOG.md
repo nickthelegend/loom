@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pairing adds a computer instead of replacing one, and a computer is named by its hostname (`/api/version` now reports it).
   - When a computer revokes the phone, the next paired one carries on.
   - Phones paired before this keep their computer, which becomes the first entry.
+- **Phone: Share live from your pocket.** Long-press a chat ▸ Share live, and choose read along, talk, or talk and approve. That opens the share sheet with a one-use, 24-hour guest link. Your own unscoped phone may mint guest links; device pairing stays the owner's alone.
 - **Phone: Allow / Deny on the approval alert.** Approval pushes carry the `loom-approval` category, the approval id and the computer's hostname. The phone answers on the computer that asked, without opening the app.
 
 - **Search every session:** `loom find --all "<words>"` (`GET /api/search`) searches every project's chats, newest first. A scoped token searches only its projects. Unloaded projects are read without being started.

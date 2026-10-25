@@ -1547,6 +1547,10 @@ export interface Approval {
   sessionOption?: boolean;
 }
 
+/** Share live: a link that lets a teammate into one chat as view / reply / approve (the daemon's guest links). */
+export const shareLive = (c: Creds, guest: { project: string; chat: string; role: "view" | "reply" | "approve"; name: string; hours?: number }) =>
+  api<{ link: string; guest?: { until: number } }>(c, "/api/pair/new", { method: "POST", body: JSON.stringify({ guest }) });
+
 export const getApprovals = (c: Creds, id: string) =>
   api<{ approvals: Approval[] }>(c, `/api/projects/${id}/approvals`);
 

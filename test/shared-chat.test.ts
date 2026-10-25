@@ -133,4 +133,21 @@ describe("Share live", () => {
     (daemon as unknown as { auth: { reload(): void } }).auth.reload();
     expect((await call(old.clientToken, "GET", "/api/guest")).status).toBe(401);
   }, 60_000);
+
+  it("the owner's phone can invite a teammate into a chat; it still can't pair a device, and nor can a guest or a scoped token", async () => {
+    const pairAs = async (body: Record<string, unknown>) => {
+      const p = await (await call(admin, "POST", "/api/pair/new", body)).json() as { token: string };
+      return (await (await fetch(base + "/api/pair/claim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: p.token }) })).json() as { clientToken: string }).clientToken;
+    };
+    const phone = await pairAs({});
+    const scoped = await pairAs({ projects: [pid] });
+    const guest = (await invite("approve", "Lin")).clientToken;
+    const guestLink = { guest: { project: pid, chat: shared, role: "reply", name: "Sam" } };
+    const fromPhone = await call(phone, "POST", "/api/pair/new", guestLink);
+    expect(fromPhone.status).toBe(200);
+    expect(((await fromPhone.json()) as { link: string }).link).toContain("&guest=1");
+    expect((await call(phone, "POST", "/api/pair/new", {})).status).toBe(403);
+    expect((await call(scoped, "POST", "/api/pair/new", guestLink)).status).toBe(403);
+    expect((await call(guest, "POST", "/api/pair/new", guestLink)).status).toBe(403);
+  }, 30_000);
 });
