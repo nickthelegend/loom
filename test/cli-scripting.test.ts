@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { providerOfModel } from "../src/core/providers.js";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { exitCodeFor, turnOutcome } from "../src/core/turn-wait.js";
-import { DaemonClient, turnsInFlight } from "../src/daemon/client.js";
+import { DaemonClient, ensureDaemon, turnsInFlight } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import type { LoomEvent } from "../src/types.js";
 import { makeProjectDir, tmpDir } from "./helpers.js";
@@ -187,6 +187,19 @@ describe("an agent's access (field feedback: codex couldn't commit or push)", ()
     expect(set.code).toBe(0);
     expect(set.out).toMatch(/codex: Bypass — no sandbox, no approvals/);
     expect((await runCli(["agents"], dir)).out).toMatch(/access: Bypass/);
+  }, 30_000);
+});
+
+describe("a restart in progress (field: a script's next step landed mid-restart)", () => {
+  it("another loom command waits for the restarting one instead of reaching the daemon going away", async () => {
+    const lock = path.join(process.env.LOOM_HOME!, "daemon.restarting");
+    fs.writeFileSync(lock, JSON.stringify({ pid: 1, at: Date.now() }));
+    let done = false;
+    const got = ensureDaemon().then((c) => { done = true; return c; });
+    await new Promise((r) => setTimeout(r, 700));
+    expect(done).toBe(false); // still waiting on the lock
+    fs.rmSync(lock);
+    expect(await got).toBeInstanceOf(DaemonClient);
   }, 30_000);
 });
 

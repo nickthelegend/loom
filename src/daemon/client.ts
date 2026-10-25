@@ -4,6 +4,8 @@
  */
 
 import { spawn } from "../core/process.js";
+import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import type {
@@ -20,6 +22,7 @@ import type { OrchestraRun } from "../core/orchestra.js";
 import type { QueueItem } from "../core/prompt-queue.js";
 import type { LogLine, ServerConfig, ServerStatus } from "../core/servers.js";
 import {
+  loomHome,
   readDaemonConfig,
   type DaemonConfig,
 } from "../core/registry.js";
@@ -947,6 +950,9 @@ export async function desktopOwnsDaemon(cfg: DaemonConfig | null = readDaemonCon
  * stale daemons are the classic "failed to fetch / missing route" cause.
  */
 export async function ensureDaemon(): Promise<DaemonClient> {
+  // another loom command is swapping the daemon for a newer build: wait for it rather than
+  // reach the one going away (or start a second) — a script's next step lands mid-restart
+  await waitForRestart();
   let cfg = readDaemonConfig();
   if (cfg) {
     const probe = await healthProbe(cfg);
@@ -966,13 +972,66 @@ export async function ensureDaemon(): Promise<DaemonClient> {
           "using it as it is; restart when they finish: loom up --restart\n");
         return new DaemonClient(cfg);
       }
-      await stopDaemon();
-      const gone = Date.now() + 5000;
-      while (Date.now() < gone && (await healthy(cfg))) {
-        await new Promise((r) => setTimeout(r, 200));
+      // hold the restart lock until the new daemon answers; someone else holding it is restarting already
+      if (!takeRestartLock()) {
+        await waitForRestart();
+        const now = readDaemonConfig();
+        if (now && (await healthy(now))) return new DaemonClient(now);
+      } else {
+        try {
+          await stopDaemon();
+          const gone = Date.now() + 5000;
+          while (Date.now() < gone && (await healthy(cfg))) {
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          return await startDaemon();
+        } finally {
+          releaseRestartLock();
+        }
       }
     }
   }
+  return startDaemon();
+}
+
+const RESTART_LOCK_MS = 30_000;
+const restartLockFile = () => path.join(loomHome(), "daemon.restarting");
+
+/** Mark "this CLI is restarting the daemon"; false when another one already is (a fresh lock). */
+function takeRestartLock(): boolean {
+  const file = restartLockFile();
+  try {
+    fs.writeFileSync(file, JSON.stringify({ pid: process.pid, at: Date.now() }), { flag: "wx" });
+    return true;
+  } catch {
+    // a lock left by a CLI that died mid-restart is stale after RESTART_LOCK_MS: take it over
+    try {
+      if (Date.now() - fs.statSync(file).mtimeMs > RESTART_LOCK_MS) {
+        fs.writeFileSync(file, JSON.stringify({ pid: process.pid, at: Date.now() }));
+        return true;
+      }
+    } catch { /* gone in between: someone finished */ }
+    return false;
+  }
+}
+
+function releaseRestartLock(): void {
+  try { fs.rmSync(restartLockFile(), { force: true }); } catch { /* already gone */ }
+}
+
+/** Wait while another loom command holds a fresh restart lock (at most RESTART_LOCK_MS). */
+async function waitForRestart(): Promise<void> {
+  const file = restartLockFile();
+  const until = Date.now() + RESTART_LOCK_MS;
+  while (Date.now() < until) {
+    try { if (Date.now() - fs.statSync(file).mtimeMs > RESTART_LOCK_MS) return; } catch { return; }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+/** Start a detached daemon and wait for it to answer. */
+async function startDaemon(): Promise<DaemonClient> {
+  let cfg: DaemonConfig | null = null;
 
   const compiled = fileURLToPath(new URL("../cli/index.js", import.meta.url));
   const devSource = fileURLToPath(new URL("../cli/index.ts", import.meta.url));
