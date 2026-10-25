@@ -264,6 +264,7 @@ export class RuntimeQueue {
       requestId: item.continuity?.requestId ?? (item.editedAt ? `queue:${item.id}:edit:${item.editedAt}` : `queue:${item.id}`),
       ...(item.continuity ? { capturedModel: item.continuity.model } : {}),
       ...(item.plan ? { plan: true } : {}),
-      ...(item.length ? { length: item.length } : {}) });
+      ...(item.length ? { length: item.length } : {}),
+      ...(item.by ? { by: item.by } : {}) });
   }
 }
