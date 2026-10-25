@@ -161,6 +161,15 @@ afterAll(async () => {
 });
 
 describe("team auto-orchestration", () => {
+  it("loom team auto says it's ready, which teammate agents a goal gets, and what's still missing", async () => {
+    const st = await LA.teamAutoStatus(laptop);
+    expect(st).toMatchObject({ shared: true, policyShared: true, ready: true, workers: ["team:ta-writer"] });
+    expect(st.teammates).toEqual([{ github: "bob", kinds: ["ta-writer"], online: true }]);
+    // alice hasn't turned her own runner on, so bob's goals can't use her agents yet
+    expect(st.myRunner.running).toBe(false);
+    expect(st.missing.join(" ")).toMatch(/turn on your shared runner/);
+  });
+
   it("one goal on alice's laptop runs a task on bob's machine with bob's agent, and both land in one branch", async () => {
     plan.push(() => loom([
       { type: "spawn", id: "t1", title: "alice's part", agent: "writer", prompt: "write:src/alice.ts:alice", touches: ["src/alice.ts"] },
@@ -183,7 +192,7 @@ describe("team auto-orchestration", () => {
       .catch((e) => { throw new Error(JSON.stringify({ run: laptop.orchestra.get(run.id), runner: LB.runner?.lastError }), { cause: e }); });
 
     const done = laptop.orchestra.get(run.id)!;
-    expect(done.tasks.map((t) => [t.id, t.status])).toEqual([["t1", "done"], ["t2", "done"]]);
+    expect(done.tasks.map((t) => [t.id, t.status]), JSON.stringify(done.tasks.map((t) => ({ id: t.id, status: t.status, error: t.error, result: t.result })))).toEqual([["t1", "done"], ["t2", "done"]]);
     // bob's task really ran on bob's machine — in his runner's clone, not alice's worktree
     expect(wroteOn.some((d) => d.includes(path.join("runner", "work")))).toBe(true);
     const t2 = done.tasks.find((t) => t.id === "t2")!;
@@ -195,6 +204,27 @@ describe("team auto-orchestration", () => {
     // and the task's job is settled on the hub
     const jobs = await (LA as unknown as { hub(): { jobs(t: string): Promise<Array<{ kind: string; state: string; runnerGithub?: string }>> } }).hub().jobs(teamId);
     expect(jobs.find((j) => j.kind === "task")).toMatchObject({ state: "done", runnerGithub: "bob" });
+  }, 60_000);
+
+  it("a follow-up to a teammate's task runs on their machine on top of the first attempt", async () => {
+    plan.length = 0;
+    let runId = "", sent = false;
+    plan.push(() => loom([{ type: "spawn", id: "t1", title: "bob's part", agent: "team:ta-writer", prompt: "write:docs/first.md:bob", touches: ["docs/**"] }]));
+    const next = () => {
+      const t = laptop.orchestra.get(runId)!.tasks[0]!;
+      if (t.status === "running" || t.status === "pending") return loom([]);
+      if (!sent) { sent = true; return loom([{ type: "send", task: "t1", message: "Also write:docs/second.md:bob" }]); }
+      return loom([{ type: "done", summary: "both" }]);
+    };
+    for (let i = 0; i < 8; i++) plan.push(next);
+    const run = await laptop.orchestra.start({ goal: "Bob's two files" });
+    runId = run.id;
+    await waitUntil(async () => { await LB.runner!.tick(); return laptop.orchestra.get(run.id)!.status === "completed"; }, { timeoutMs: 40_000, intervalMs: 300 })
+      .catch((e) => { const r = laptop.orchestra.get(run.id)!; throw new Error(JSON.stringify({ status: r.status, error: r.error, question: r.question, tasks: r.tasks.map((t) => ({ s: t.status, a: t.attempts, q: t.queued, e: t.error, r: t.result })) }), { cause: e }); });
+    const done = laptop.orchestra.get(run.id)!;
+    expect(done.tasks[0]).toMatchObject({ status: "done", attempts: 2 });
+    expect(git(laptop.info.dir, "show", `${done.branch}:docs/first.md`)).toBe("written by bob\n");
+    expect(git(laptop.info.dir, "show", `${done.branch}:docs/second.md`)).toBe("written by bob\n");
   }, 60_000);
 
   it("a task no teammate's machine takes goes back to the orchestrator, and its job is cancelled", async () => {

@@ -1560,6 +1560,16 @@ loom team                   # who's doing what, right now
 - **Worker commits carry `Loom-Goal`, `Loom-Task`, `Loom-Agent` and `Loom-Member`
   trailers.** `git log` alone tells you which goal, task and agent wrote a line.
 
+**Two people, one goal — the agents split it themselves.** When teammates turn
+on team auto-orchestration (`loom team auto on`, or **Turn on** in the Team tab),
+a goal you start splits across both machines. Your orchestrator gets their agents
+as `team:codex`, `team:opencode`…; a task sent to one is claimed by their Loom on
+its own, run with **their** agent and subscription, and merged back into your
+goal's branch — still one PR. A teammate who goes offline doesn't stall you: an
+unclaimed task returns to your orchestrator after 10 minutes. `loom team auto`
+says what's missing; `loom orchestrate "…" --solo` keeps a goal on your machine.
+See [docs/teams.md](docs/teams.md#two-people-one-goal-team-auto-orchestration).
+
 **Phase 2 (stop colliding) is built too:**
 - **Declaring touches.** On a team project, every orchestra task declares the files
   it will `touch`, and Loom takes a lease on them.

@@ -7,7 +7,7 @@ import { permBadge } from '../permissions.js';
 import { openSettingsModal } from '../settings.js';
 import { state } from '../state.js';
 import { openInvite } from '../invite.js';
-import { fleetSince,loadTeam,loadTeamLanding,teamAct,teamEditing,teamFleetHtml,teamHeadHtml,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare } from '../team.js';
+import { fleetSince,loadTeam,loadTeamLanding,teamAct,teamAuto,teamEditing,teamFleetHtml,teamHeadHtml,wireTeamDeploys,wireTeamForms,wireTeamInvites,wireTeamShare } from '../team.js';
 import { ORCH_TASK_ST } from '../transcript.js';
 
 /** fleet behavior for one mounted project.
@@ -226,6 +226,16 @@ export function createFleet(view) {
       wireTeamInvites(host, teamAct);
       wireTeamShare(host, function(){ drawTeamBlock(true); });
       wireTeamDeploys(host);
+      // team auto-orchestration: share, write the policy if the repo has none, start this machine's shared runner
+      var ao = host.querySelector("[data-tautoon]");
+      if (ao) ao.onclick = function(){
+        ao.disabled = true;
+        api("/api/projects/" + view.pid + "/team/auto", { method: "POST", body: "{}" }).then(function(j){
+          teamAuto[view.pid] = j;
+          toast(j.wrotePolicy ? "On — loom.team.json written: commit and merge it so teammates' runners can help" : "On — teammates' goals can use your agents now");
+          drawTeamBlock(true);
+        }).catch(function(err){ ao.disabled = false; toast(err.message); });
+      };
       // D63: take a teammate's stuck goal — a small run here that makes its PR green
       Array.prototype.forEach.call(host.querySelectorAll("[data-tadopt]"), function(b){
         b.onclick = function(){

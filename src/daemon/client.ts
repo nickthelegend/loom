@@ -359,6 +359,10 @@ export class DaemonClient {
     return this.request("GET", "/api/runner");
   }
 
+  teamAuto(id: string, on = false): Promise<import("./team.js").TeamAutoStatus & { wrotePolicy?: boolean }> {
+    return this.request(on ? "POST" : "GET", `/api/projects/${encodeURIComponent(id)}/team/auto`, on ? {} : undefined);
+  }
+
   runnerAction(action: string, body: Record<string, unknown> = {}): Promise<{ result: unknown }> {
     return this.request("POST", `/api/runner/${action}`, body);
   }

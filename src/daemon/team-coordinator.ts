@@ -414,14 +414,14 @@ export class TeamCoordinator implements OrchestraCoordinator {
   }
 
   /** Run one task on a teammate's machine: push its starting commit, post the job, wait. */
-  async runRemote(run: OrchestraRun, task: OrchestraTask, base: string): Promise<RemoteTaskResult> {
+  async runRemote(run: OrchestraRun, task: OrchestraTask, base: string, prompt = task.prompt): Promise<RemoteTaskResult> {
     const share = await this.ctx.share(this.rt);
     if (!share || !this.ctx.runTask) throw new Error("this project isn't shared with a team");
     const baseRef = `${teamTaskRef(run.id, task.id)}-base`;
     const pushed = await git(["push", "-q", "-f", "origin", `${base}:${baseRef}`], this.rt.info.dir);
     if (pushed.code !== 0) throw new Error(`couldn't push the task's starting point to origin: ${pushed.out.trim().slice(0, 300)}`);
     const job = await Promise.race([
-      this.ctx.runTask(this.rt, { runId: run.id, taskId: task.id, title: task.title, prompt: task.prompt, kind: task.kind,
+      this.ctx.runTask(this.rt, { runId: run.id, taskId: task.id, title: task.title, prompt, kind: task.kind,
         touches: task.touches ?? [], baseRef, goal: run.goal.split("\n")[0]!.slice(0, 300) }),
       new Promise<never>((_, reject) => { const t = setTimeout(() => reject(new Error("no teammate's machine finished this task within 2 hours")), TEAM_TASK_MS); t.unref?.(); }),
     ]);

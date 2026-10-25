@@ -64,6 +64,7 @@ import { DEPLOY_POLL_MS, Deploys } from "./deploys.js";
 import { defaultExec, Landing, type Exec } from "./landing.js";
 import { TeamBrain } from "./team-brain.js";
 import { TeamCoordinator, type TeamTaskPayload } from "./team-coordinator.js";
+import { loadPolicy } from "../core/team-policy.js";
 import type { OrchestraRun } from "../core/orchestra.js";
 import { Runner, readRunnerConfig, writeRunnerConfig, type JobPayload, type JobProgress, type RunnerConfig } from "./runner.js";
 import { rollupCosts } from "../core/team-landing.js";
@@ -183,6 +184,18 @@ interface TeamView {
 const HEARTBEAT_MS = 15_000;
 const GH_POLL_MS = 60_000;
 const BRAIN_SYNC_MS = 60_000;
+/** What `loom team auto` reports. */
+export interface TeamAutoStatus {
+  shared: boolean;
+  policyShared: boolean;
+  myRunner: { running: boolean; shared: boolean };
+  teammates: Array<{ github: string; kinds: string[]; online: boolean }>;
+  /** team:<kind> workers a goal started now would get. */
+  workers: string[];
+  ready: boolean;
+  missing: string[];
+}
+
 /** A team task no teammate's runner has claimed by then goes back to the orchestrator (LOOM_TEAM_TASK_UNCLAIMED_MS in tests). */
 const teamTaskUnclaimedMs = () => Number(process.env.LOOM_TEAM_TASK_UNCLAIMED_MS) || 10 * 60_000;
 
@@ -1092,6 +1105,49 @@ export class TeamLink {
       }, Math.min(15_000, Math.max(250, unclaimed / 2)));
       poll.unref?.();
     });
+  }
+
+  /**
+   * Is team auto-orchestration ready for this project, and what's missing? Three things
+   * have to be true: the repo's policy allows shared runners, a teammate's shared runner
+   * is online (their agents become team:<kind> workers), and — for teammates to get
+   * *your* agents in return — your own runner is on and shared.
+   */
+  async teamAutoStatus(rt: ProjectRuntime): Promise<TeamAutoStatus> {
+    const share = await this.teamFor(rt);
+    const policyFile = fs.existsSync(path.join(rt.info.dir, "loom.team.json"));
+    const policyShared = (await loadPolicy(rt.info.dir)).runners.shared;
+    const cfg = this.runnerConfig();
+    const me = this.state.device?.id;
+    const runners = share ? await this.hub().runners(share.teamId).catch(() => []) : [];
+    const fresh = Date.now() - 2 * 60_000;
+    const teammates = runners.filter((r) => r.deviceId !== me && r.shared).map((r) => ({ github: r.github, kinds: r.kinds, online: r.lastSeen > fresh }));
+    const workers = (share ? await this.coordinatorFor(rt).remoteWorkers().catch(() => [] as string[]) : []).map((k) => `team:${k}`);
+    const missing: string[] = [];
+    if (!share) missing.push("share this project with your team (loom team share)");
+    if (!policyShared) missing.push(policyFile ? 'set "runners": { "shared": true } in loom.team.json and merge it' : "add loom.team.json with { \"runners\": { \"shared\": true } } and merge it");
+    if (!(this.runner?.running && cfg.shared)) missing.push("turn on your shared runner so teammates' goals can use your agents (loom team auto on)");
+    if (!teammates.some((t) => t.online)) missing.push("a teammate turns on theirs (loom team auto on, on their machine)");
+    return { shared: Boolean(share), policyShared, myRunner: { running: Boolean(this.runner?.running), shared: cfg.shared }, teammates, workers, ready: workers.length > 0, missing };
+  }
+
+  /**
+   * One step to take part: share the project, write the policy file when the repo has
+   * none (it still needs merging — policy is reviewed like code), and start this
+   * machine's runner, shared. Returns the status after.
+   */
+  async teamAutoOn(rt: ProjectRuntime): Promise<TeamAutoStatus & { wrotePolicy: boolean }> {
+    if (!(await this.teamFor(rt))) await this.share(rt);
+    let wrotePolicy = false;
+    const file = path.join(rt.info.dir, "loom.team.json");
+    if (!fs.existsSync(file)) {
+      fs.writeFileSync(file, JSON.stringify({ runners: { shared: true } }, null, 2) + "\n");
+      wrotePolicy = true;
+    }
+    if (this.runner?.running) await this.runner.stop();
+    await this.startRunner({ shared: true });
+    await this.runner?.register(); // the hub learns it's shared now, not at some later re-register
+    return { ...(await this.teamAutoStatus(rt)), wrotePolicy };
   }
 
   /** Move a running goal to a runner at a safe point (D75). */
