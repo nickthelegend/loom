@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] — 2026-10-25
+
+Fixes from a day of real use farming builds out to codex, antigravity and opencode: Loom no longer kills turns when it updates, every agent starts (and says why when it can't), and scripts get honest exits.
+
 ### Changed
 
 - **`loom init` keeps `.loom/` out of git when no one's there to ask.** In a script (no terminal), it now adds `.loom/` to `.gitignore` instead of printing a tip that agents skim past — the folder holds the event log and transcripts. `--no-gitignore` leaves `.gitignore` alone; in a terminal it still asks.
