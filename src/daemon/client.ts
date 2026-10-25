@@ -329,6 +329,7 @@ export class DaemonClient {
   audit(since?: number): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
     return this.request("GET", `/api/audit${since ? `?since=${since}` : ""}`);
   }
+  resources(): Promise<import("../core/resources.js").Resources> { return this.request("GET", "/api/resources"); }
   bridges(): Promise<Record<"slack" | "discord", Record<string, any> | null>> { return this.request("GET", "/api/bridges"); }
   setBridge(platform: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: Record<string, any> | null }> { return this.request("PUT", `/api/bridges/${platform}`, body); }
   removeBridge(platform: string): Promise<{ removed: boolean }> { return this.request("DELETE", `/api/bridges/${platform}`); }

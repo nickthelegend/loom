@@ -663,6 +663,32 @@ program
   });
 
 program
+  .command("top")
+  .description("what the agents cost this machine right now: each agent CLI, MCP server and dev server the daemon started, with memory and CPU, beside free memory and the turn cap (approach: Nuphos)")
+  .option("--watch", "refresh every 2 seconds")
+  .option("--json", "print as JSON")
+  .action(async (opts: { watch?: boolean; json?: boolean }) => {
+    const client = await ensureDaemon();
+    const draw = async () => {
+      const r = await client.resources();
+      if (opts.json) return void console.log(JSON.stringify(r));
+      if (opts.watch) process.stdout.write("\x1b[2J\x1b[H");
+      const free = r.machine.freePct;
+      const freeTxt = free < r.limits.minFreePct ? pc.red(`${free}% free`) : free < r.limits.minFreePct + 10 ? pc.yellow(`${free}% free`) : pc.green(`${free}% free`);
+      console.log(`${pc.bold("machine")}  ${r.machine.totalGb} GB · ${freeTxt} · load ${r.machine.load1} on ${r.machine.cpus} cores  ${pc.dim(`turns at once: ${r.limits.maxTurns || "no cap"} · keep ${r.limits.minFreePct}% free (loom limits)`)}`);
+      console.log(`${pc.bold("daemon")}   ${r.daemon.rssMb} MB ${pc.dim(`(pid ${r.daemon.pid})`)}`);
+      if (r.note) console.log(pc.dim(r.note));
+      if (!r.groups.length) return void console.log(pc.dim("nothing running under the daemon"));
+      const total = r.groups.reduce((n, g) => n + g.rssMb, 0);
+      console.log(pc.dim(`\n${"MB".padStart(7)} ${"CPU%".padStart(6)}  procs  what`));
+      for (const g of r.groups) console.log(`${String(g.rssMb).padStart(7)} ${g.cpu.toFixed(1).padStart(6)}  ${String(g.processes).padStart(5)}  ${pc.bold(g.name)} ${pc.dim(g.command.slice(0, 70))}`);
+      console.log(pc.dim(`${String(total).padStart(7)} MB in all`));
+    };
+    await draw();
+    if (opts.watch && !opts.json) setInterval(() => void draw().catch(() => {}), 2000);
+  });
+
+program
   .command("audit")
   .description("who let what happen, across projects: approvals answered (and by whom), teammates' messages in shared chats, Slack / Discord, triggers, baton handoffs (approach: Nuphos)")
   .option("--since <when>", "how far back: 24h, 7d (default), 30d", "7d")

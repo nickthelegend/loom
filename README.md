@@ -1399,6 +1399,15 @@ loom bridge slack --off   # or --remove to forget the tokens
   `connections:write`.
 - **Discord bot setup:** turn on the Message Content intent.
 
+## What the agents cost this machine
+
+```bash
+loom top          # each agent CLI / MCP server / dev server the daemon started: MB, CPU, processes
+loom top --watch  # refresh every 2 s
+```
+
+`loom top` shows each one beside free memory, load and the turn cap. When memory runs low, `loom limits` sets how many turns run at once.
+
 ## Search every session, and the audit trail
 
 ```bash

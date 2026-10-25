@@ -108,6 +108,7 @@ import { TriggerRunner } from "./triggers.js";
 import { registerBridgeRoutes } from "./routes/bridges.js";
 import { ChatBridges } from "./chat-bridge.js";
 import { auditTrail, searchSessions } from "./workspace-views.js";
+import { resources } from "../core/resources.js";
 import { registerReviewRoutes } from "./routes/review.js";
 import { registerCouncilRoutes } from "./routes/council.js";
 import { registerOnboardRoutes } from "./routes/onboard.js";
@@ -530,6 +531,11 @@ export class LoomDaemon {
       if (!q) return void res.json({ hits: [], truncated: false });
       const scope = (req as Request & { projectScope?: string[] | null }).projectScope ?? null;
       void searchSessions(q, this.runtimes, scope).then((r) => res.json(r)).catch((e) => res.status(500).json({ error: (e as Error).message }));
+    });
+    // what the agents cost this machine right now (core/resources.ts) — owner only: it lists processes
+    app.get("/api/resources", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can see its processes" });
+      void resources().then((r) => res.json(r)).catch((e) => res.status(500).json({ error: (e as Error).message }));
     });
     app.get("/api/audit", (req, res) => {
       if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can read the audit trail" });

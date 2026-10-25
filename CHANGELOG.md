@@ -58,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Triggers and Slack & Discord in the app.** The project menu ▸ Triggers… (or ⌘K ▸ Triggers) lists each trigger with its schedule, next run and last runs, with Run now, Pause and Remove, and a form to add one. A webhook's URL and secret show once. Settings ▸ Slack & Discord connects either bot, with masked tokens, connection status and heard/ignored counts.
 
+- **`loom top`: what the agents cost this machine.** Each agent CLI, MCP server and dev server the daemon started, with everything it spawned: memory, CPU and process count, heaviest first. Shown beside free memory, load and the turn cap. `--watch` refreshes it; `GET /api/resources` is owner only.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.
