@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Updating the CLI no longer kills running turns.** A `loom` command run with a newer CLI restarted a daemon on an older build automatically — and took every turn in flight down with it (three long `send --wait` runs died this way in the field). It now leaves a busy daemon alone and says how to restart once the turns finish; `loom up --restart` refuses too while turns run, unless you add `--force`.
+- **`send --wait` says when a restart interrupted the turn**, instead of "event log is closed" or "fetch failed": it exits 75, names the agent, and gives the command to carry on (`--json`: `{"status":"interrupted", …, "resume": "…"}`).
+- **`send` to an agent without the baton, from a script, no longer exits 0 having sent nothing.** It printed a yes/no prompt nobody could answer and quietly did nothing. With no terminal (or with `--json`) it now fails with a clear message; **`--handoff`** takes the baton and sends.
+- **opencode says why it didn't start.** "timed out waiting for condition" now names what it waited for and shows the last thing `opencode serve` printed — or that it exited early — with how to check it yourself.
 - `loom agents` (and `agents:available`) outside a project said "no Loom project here" and stopped; it now lists the agents this machine can drive, with `loom init` as the next step (`--json` gives `{ project: null, machine: [...] }`).
 - `loom status` inside a project now lists that project first, marked **← here**, so "is my turn running here?" doesn't mean scanning the whole board.
 

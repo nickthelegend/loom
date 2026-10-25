@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { providerOfModel } from "../src/core/providers.js";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { exitCodeFor, turnOutcome } from "../src/core/turn-wait.js";
-import { DaemonClient } from "../src/daemon/client.js";
+import { DaemonClient, turnsInFlight } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import type { LoomEvent } from "../src/types.js";
 import { makeProjectDir, tmpDir } from "./helpers.js";
@@ -134,6 +134,38 @@ describe("loom init and .gitignore", () => {
     expect(out).toContain("added .loom/ to .gitignore");
     expect(out).toContain("--no-gitignore");
     expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8")).toMatch(/\.loom\/\n$/);
+  }, 30_000);
+});
+
+describe("the baton and a restart, from a script (field feedback)", () => {
+  let pair = "";
+  let client: DaemonClient;
+  beforeAll(async () => {
+    pair = makeProjectDir({ name: "pair", agents: [{ id: "one", kind: "echo" }, { id: "two", kind: "echo" }], brain: { extractor: "off" } } as never);
+    client = new DaemonClient(readDaemonConfig()!);
+    const { project } = await client.addProject(pair);
+    await client.handoff(project.id, "one");
+  });
+
+  it("sending to an agent without the baton fails loudly in a script — no prompt, no quiet exit 0", async () => {
+    const r = await runCli(["send", "-a", "two", "--wait", "--json", "hello"], pair);
+    expect(r.code).not.toBe(0);
+    expect(r.out + r.err).not.toContain("Hand off to");
+    expect(r.err).toMatch(/doesn't hold the baton \(holder: one\) — add --handoff/);
+  }, 30_000);
+
+  it("--handoff takes the baton and sends", async () => {
+    const r = await runCli(["send", "-a", "two", "--wait", "--json", "--handoff", "hello"], pair);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out)).toMatchObject({ status: "ok", agent: "two" });
+  }, 30_000);
+
+  it("knows which turns are running, so nothing restarts the daemon underneath them", async () => {
+    const { projects } = await client.listProjects();
+    const id = projects.find((p) => p.name === "pair")!.id;
+    await client.send(id, "sleep:4000 working", "two");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await turnsInFlight(client)).toContain("pair: two");
   }, 30_000);
 });
 

@@ -291,6 +291,13 @@ export class OpenCodeAdapter extends AdapterBase {
     if (this.nativeState.read().servePid === pid) this.nativeState.patch({ servePid: undefined });
   }
 
+  private serveErr = "";
+  private serveExit: string | null = null;
+  /** The last meaningful line opencode serve wrote to stderr. */
+  private lastServeLine(): string {
+    return this.serveErr.split("\n").map((l) => l.trim()).filter(Boolean).at(-1)?.slice(0, 300) ?? "";
+  }
+
   private recordServePid(pid: number | undefined): void {
     this.nativeState.patch({ servePid: pid });
   }
@@ -306,9 +313,14 @@ export class OpenCodeAdapter extends AdapterBase {
       const child = spawnContained(
         "opencode",
         ["serve", "--port", String(port), "--hostname", "127.0.0.1", ...(this.options.extraArgs ?? [])],
-        { cwd: this.projectDir, stdio: "ignore", env: { ...agentEnv(), ...opencodePermissionEnv(this.options) } },
+        { cwd: this.projectDir, stdio: ["ignore", "ignore", "pipe"], env: { ...agentEnv(), ...opencodePermissionEnv(this.options) } },
       );
       this.child = child;
+      // what it says on stderr, so a server that never comes up can say why
+      this.serveErr = "";
+      this.serveExit = null;
+      child.stderr?.on("data", (d: Buffer) => { this.serveErr = (this.serveErr + d.toString()).slice(-2000); });
+      child.once("exit", (code, signal) => { if (!this.started) this.serveExit = `exited (${code ?? signal})`; });
       child.on("error", (error) => this.emit({ kind: "error", payload: { message: `opencode serve could not start: ${error.message}` } }));
       this.recordServePid(child.pid);
       if (process.platform === "win32") await windowsJobReady(child);
@@ -329,7 +341,11 @@ export class OpenCodeAdapter extends AdapterBase {
       try { await fetchJson(`${this.baseUrl}/api/health`); this.modernApi = false; }
       catch { await fetchJson(`${this.baseUrl}/global/health`); this.modernApi = true; }
       return true;
-    }, { timeoutMs: process.platform === "win32" ? 60_000 : 30_000 });
+    }, {
+      timeoutMs: process.platform === "win32" ? 60_000 : 30_000,
+      what: () => `opencode serve to answer on ${this.baseUrl}${this.serveErr ? ` — it said: ${this.lastServeLine()}` : ""}; check that \`opencode serve\` runs in this folder and that you're signed in (\`opencode auth login\`)`,
+      gaveUp: () => (this.serveExit ? `opencode serve ${this.serveExit} before it was ready${this.serveErr ? `: ${this.lastServeLine()}` : ""} — try \`opencode serve\` in this folder to see why` : null),
+    });
     await this.assertModelAvailable();
     // No session yet: an ordinary turn makes (or reuses) the agent's own when it
     // sends, and a continuity turn runs on its binding's. Creating one here left
