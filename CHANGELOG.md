@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-10-26
+
 ### Added
 
 - **Triggers: a schedule or a webhook starts an agent's turn on its own.** Use `loom triggers:add "<prompt>" --every 2h | --cron "0 9 * * 1-5" | --webhook`.
