@@ -125,11 +125,33 @@ describe("loom init and .gitignore", () => {
     expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8").match(/\.loom\//g)).toHaveLength(1);
   }, 30_000);
 
-  it("without a terminal to ask, it only gives the tip; --no-gitignore says nothing", async () => {
+  it("without a terminal to ask, it adds .loom/ (logs and transcripts never belong in the repo); --no-gitignore leaves it alone", async () => {
+    const off = repo();
+    expect((await runCli(["init", "--no-gitignore"], off)).out).not.toContain(".gitignore");
+    expect(fs.existsSync(path.join(off, ".gitignore"))).toBe(false);
     const dir = repo();
-    expect((await runCli(["init"], dir)).out).toContain("add it to .gitignore (loom init --gitignore)");
-    expect(fs.existsSync(path.join(dir, ".gitignore"))).toBe(false);
-    expect((await runCli(["init", "--no-gitignore"], dir)).out).not.toContain(".gitignore");
+    const out = (await runCli(["init"], dir)).out;
+    expect(out).toContain("added .loom/ to .gitignore");
+    expect(out).toContain("--no-gitignore");
+    expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8")).toMatch(/\.loom\/\n$/);
+  }, 30_000);
+});
+
+describe("outside and inside a project (field feedback)", () => {
+  it("loom agents outside a project shows what this machine can drive instead of failing", async () => {
+    const out = await runCli(["agents"], tmpDir("not-a-project"));
+    expect(out.code).toBe(0);
+    expect(out.out).toContain("not in a Loom project");
+    expect(out.out).toMatch(/codex|claude-code/);
+    expect(out.out).toContain("loom init here");
+    const js = JSON.parse((await runCli(["agents", "--json"], tmpDir("not-a-project-json"))).out);
+    expect(js.project).toBeNull();
+    expect(js.machine.some((a: { kind: string }) => a.kind === "codex")).toBe(true);
+  }, 30_000);
+
+  it("loom status inside a project lists that project first and marks it", async () => {
+    const out = (await runCli(["status"], projectDir)).out.split("\n").filter((l) => l.trim() && !l.startsWith("daemon"));
+    expect(out[0]).toContain("← here");
   }, 30_000);
 });
 

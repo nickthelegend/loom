@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`loom init` keeps `.loom/` out of git when no one's there to ask.** In a script (no terminal), it now adds `.loom/` to `.gitignore` instead of printing a tip that agents skim past — the folder holds the event log and transcripts. `--no-gitignore` leaves `.gitignore` alone; in a terminal it still asks.
+
+### Fixed
+
+- `loom agents` (and `agents:available`) outside a project said "no Loom project here" and stopped; it now lists the agents this machine can drive, with `loom init` as the next step (`--json` gives `{ project: null, machine: [...] }`).
+- `loom status` inside a project now lists that project first, marked **← here**, so "is my turn running here?" doesn't mean scanning the whole board.
+
 ## [1.2.4] — 2026-10-22
 
 Team auto-orchestration, set up in one step and steadier on a teammate's machine.

@@ -290,8 +290,25 @@ program
     const { projects } = await client.listProjects();
     if (opts.json) return void console.log(JSON.stringify(projects)); // #315
     if (!projects.length) console.log(pc.dim("no projects yet — loom init"));
-    for (const p of projects) console.log(formatProjectRow(p));
+    // inside a project, it comes first and says so: "is my turn running here?" is the usual question
+    const here = await resolveCurrentProject(client).catch(() => null);
+    const ordered = here ? [...projects.filter((p) => p.id === here.id), ...projects.filter((p) => p.id !== here.id)] : projects;
+    for (const p of ordered) console.log(formatProjectRow(p) + (here && p.id === here.id ? pc.bold(pc.cyan("  ← here")) : ""));
   });
+
+/**
+ * Outside a project there's no roster, but the question "what can I run?" still has an
+ * answer: the agents installed on this machine (#feedback: agents outside a project).
+ */
+async function printMachineAgents(json: boolean): Promise<void> {
+  const { ADES, detectAdes } = await import("../core/ades.js");
+  const found = await detectAdes();
+  const rows = ADES.map((a) => ({ kind: a.kind, label: a.label, tier: a.tier, installed: a.tier === "adapter" ? Boolean(found[a.kind]) : null }));
+  if (json) return void console.log(JSON.stringify({ project: null, machine: rows }));
+  console.log(pc.dim("not in a Loom project — this machine can drive:"));
+  for (const r of rows) console.log(`  ${r.kind.padEnd(18)} ${r.label.padEnd(20)} ${r.installed === false ? pc.dim("not installed") : r.installed ? pc.green("installed") : pc.dim("app (launch it)")}`);
+  console.log(pc.dim("\nloom init here to make this folder a project with them"));
+}
 
 // ---------------------------------------------------------------------------
 // init / projects / agents
@@ -350,7 +367,8 @@ program
   .option("--json", "print the agent roster as JSON")
   .action(async (opts: { json: boolean }) => {
     const client = await ensureDaemon();
-    const project = await currentProject(client);
+    const project = await resolveCurrentProject(client).catch((err) => { if (err instanceof NoProjectError) return null; throw err; });
+    if (!project) return void (await printMachineAgents(Boolean(opts.json)));
     if (opts.json) {
       console.log(JSON.stringify(project.agents));
       return;
@@ -2459,7 +2477,8 @@ program
   .option("--json", "print as JSON")
   .action(async (opts: { json: boolean }) => {
     const client = await ensureDaemon();
-    const project = await currentProject(client);
+    const project = await resolveCurrentProject(client).catch((err) => { if (err instanceof NoProjectError) return null; throw err; });
+    if (!project) return void (await printMachineAgents(Boolean(opts.json)));
     const { ades } = await client.availableAgents(project.id);
     if (opts.json) return void console.log(JSON.stringify(ades, null, 2));
     for (const a of ades) {
@@ -2538,12 +2557,13 @@ async function offerGitignore(dir: string, choice: boolean | undefined): Promise
     execFileSync("git", ["check-ignore", "-q", ".loom/"], { cwd: dir, stdio: "ignore" });
     return; // already ignored
   } catch { /* not ignored (exit 1), or no git: fall through */ }
-  const yes = choice === true || (process.stdin.isTTY && (await confirm(pc.yellow("add .loom/ to .gitignore? it's this machine's state (event log, attachments) — not for the repo"))));
+  // in a terminal, ask; in a script (no one to ask), do it — .loom/ is never meant for the repo
+  const yes = choice === true || !process.stdin.isTTY || (await confirm(pc.yellow("add .loom/ to .gitignore? it's this machine's state (event log, attachments) — not for the repo")));
   if (!yes) return void console.log(pc.dim("tip: .loom/ is local state — add it to .gitignore (loom init --gitignore)"));
   const file = path.join(dir, ".gitignore");
   const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   fs.writeFileSync(file, `${before}${before && !before.endsWith("\n") ? "\n" : ""}# Loom's local state (event log, attachments, machine config)\n.loom/\n`);
-  console.log(pc.green("✓ added .loom/ to .gitignore"));
+  console.log(pc.green("✓ added .loom/ to .gitignore") + (process.stdin.isTTY ? "" : pc.dim(" (loom init --no-gitignore to leave it alone)")));
 }
 
 async function sendWithHandoffConfirm(
