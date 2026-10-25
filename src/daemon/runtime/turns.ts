@@ -92,6 +92,8 @@ export interface RuntimeTurnsHost {
   activeSkillsBlock: () => string;
   /** The agent's standing instructions block ("" when it has none). */
   agentInstructions: (agentId: string) => string;
+  /** This conversation's standing instructions block ("" when it has none). */
+  chatInstructions: (chat: string) => string;
   healthyMcps: () => McpServerConfig[];
   appendIfOpen: (event: Parameters<EventJournal["append"]>[0]) => void;
   agents: ReadonlyMap<string, AnyAgent>;
@@ -447,7 +449,7 @@ export class RuntimeTurns {
       // saved under plans/ by the runtime. Other agents get Loom's briefing.
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
       const briefing =
-        [this.host.agentInstructions(target), this.host.activeSkillsBlock(), pendingBriefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
+        [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
           .filter(Boolean)
           .join("\n")
           .trim() || undefined;
@@ -564,7 +566,7 @@ export class RuntimeTurns {
       await this.checkpointBefore(target, text);
       assertPrepared();
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
-      const supplement = [this.host.agentInstructions(target), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
+      const supplement = [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
       let prepared = await brain.prepare({ ...request, targetAddedTokens: opts.contextTarget ?? request.targetAddedTokens }, cfg.kind,
         this.host.agentDir(target), options, supplement);
       assertPrepared();

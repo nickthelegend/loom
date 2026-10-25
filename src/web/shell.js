@@ -737,6 +737,17 @@ import { openTriggers } from './triggers-ui.js';
         setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
       } });
       items.push({ label: "Share live…", icon: ICONS.team, hint: "a teammate joins this chat", run: function(){ openShareLive(pid, cid, c.title); } });
+      items.push({ label: "Instructions…", icon: ICONS.file, hint: "standing guidance for this chat", run: function(){
+        api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/instructions").then(function(j){
+          return askText("Instructions for “" + c.title + "”", { value: j.instructions || "", multiline: true, ok: "Save",
+            placeholder: "e.g. Python 3.12. Keep answers short. Never touch the migrations folder.",
+            note: "Sent with every turn in this chat, whichever agent answers. Leave it empty to clear." });
+        }).then(function(text){
+          if (text === null || text === undefined) return;
+          return api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/instructions", { method: "PUT", body: JSON.stringify({ instructions: String(text) }) })
+            .then(function(r){ toast(r.instructions ? "instructions saved for this chat" : "instructions cleared"); });
+        }).catch(function(e){ toast(e.message); });
+      } });
       items.push({ label: "Export as Markdown", icon: ICONS.download, run: function(){
         if (pid === cur && currentChat() === cid && state.exportThread) { state.exportThread(); return; }
         setChat(pid, cid);

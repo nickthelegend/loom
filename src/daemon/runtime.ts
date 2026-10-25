@@ -295,6 +295,7 @@ export class ProjectRuntime {
       consumePendingBriefing: (...args) => this.consumePendingBriefing(...args),
       activeSkillsBlock: (...args) => this.activeSkillsBlock(...args),
       agentInstructions: (id) => this.agentInstructions(id),
+      chatInstructions: (chat) => this.chatInstructions(chat),
       healthyMcps: (...args) => this.healthyMcps(...args),
       appendIfOpen: (...args) => this.appendIfOpen(...args),
       get agents() { return runtime.agents; },
@@ -727,6 +728,28 @@ export class ProjectRuntime {
   agentInstructions(agentId: string): string {
     const text = this.config.agents.find((a) => a.id === agentId)?.instructions?.trim();
     return text ? `Standing instructions for you in this project, from the person you work for:\n${text}\n` : "";
+  }
+
+  /**
+   * Standing guidance for one conversation ("in this thread: Python 3.12, short answers"), sent
+   * with every turn in it, whoever answers. Approach credit: Nuphos's Instructions.
+   */
+  chatInstructions(chat: string): string {
+    const text = readProjectState(this.info.dir).chatInstructions?.[chat]?.trim();
+    return text ? `Standing instructions for this conversation, from the person you work for:\n${text}\n` : "";
+  }
+
+  /** Set (or, empty, clear) a conversation's instructions; null when there's no such chat. */
+  setChatInstructions(chat: string, text: string): { chat: string; instructions: string } | null {
+    if (chat !== MAIN_CHAT && !this.chats().some((c) => c.id === chat)) return null;
+    const state = readProjectState(this.info.dir);
+    const clean = String(text ?? "").trim().slice(0, 4000);
+    const map = { ...(state.chatInstructions ?? {}) };
+    if (clean) map[chat] = clean;
+    else delete map[chat];
+    state.chatInstructions = map;
+    writeProjectState(this.info.dir, state);
+    return { chat, instructions: clean };
   }
 
   setAgentRole(agentId: string, role: string): { id: string; role: string } | null {

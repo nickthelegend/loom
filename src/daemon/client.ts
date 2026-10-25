@@ -330,6 +330,12 @@ export class DaemonClient {
     return this.request("GET", `/api/audit${since ? `?since=${since}` : ""}`);
   }
   resources(): Promise<import("../core/resources.js").Resources> { return this.request("GET", "/api/resources"); }
+  chatInstructions(id: string, chat: string): Promise<{ chat: string; instructions: string }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/instructions`);
+  }
+  setChatInstructions(id: string, chat: string, instructions: string): Promise<{ chat: string; instructions: string }> {
+    return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/instructions`, { instructions });
+  }
   bridges(): Promise<Record<"slack" | "discord", Record<string, any> | null>> { return this.request("GET", "/api/bridges"); }
   setBridge(platform: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: Record<string, any> | null }> { return this.request("PUT", `/api/bridges/${platform}`, body); }
   removeBridge(platform: string): Promise<{ removed: boolean }> { return this.request("DELETE", `/api/bridges/${platform}`); }

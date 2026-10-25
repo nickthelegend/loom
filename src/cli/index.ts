@@ -663,6 +663,29 @@ program
   });
 
 program
+  .command("chat:instructions [text...]")
+  .description("standing guidance for one conversation, sent with every turn in it whichever agent answers (approach: Nuphos). No text: show them")
+  .option("--chat <chat>", "which chat, by id or title (default: main)", "main")
+  .option("--clear", "remove them")
+  .action(async (words: string[], opts: { chat: string; clear?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let chat = opts.chat;
+    if (chat !== "main") {
+      const { chats } = await client.chats(project.id);
+      const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
+      if (!hit) fail(`no chat "${chat}" here`);
+      chat = hit.id;
+    }
+    if (!words.length && !opts.clear) {
+      const { instructions } = await client.chatInstructions(project.id, chat);
+      return void console.log(instructions || pc.dim("none — loom chat:instructions \"…\" [--chat <chat>]"));
+    }
+    const out = await client.setChatInstructions(project.id, chat, opts.clear ? "" : words.join(" ")).catch((e: Error) => fail(e.message));
+    console.log(`${pc.green("✓")} ${out.instructions ? "saved — every turn in this chat carries them" : "cleared"}`);
+  });
+
+program
   .command("top")
   .description("what the agents cost this machine right now: each agent CLI, MCP server and dev server the daemon started, with memory and CPU, beside free memory and the turn cap (approach: Nuphos)")
   .option("--watch", "refresh every 2 seconds")

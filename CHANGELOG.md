@@ -61,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`loom top`: what the agents cost this machine.** Each agent CLI, MCP server and dev server the daemon started, with everything it spawned: memory, CPU and process count, heaviest first. Shown beside free memory, load and the turn cap. `--watch` refreshes it; `GET /api/resources` is owner only.
 
+- **Instructions for a conversation:** a chat's menu ▸ Instructions…, or `loom chat:instructions "…" --chat <chat>`. Standing guidance for one chat (main included) that goes with every turn in it, whichever agent answers.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.
