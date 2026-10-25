@@ -766,6 +766,10 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}`, { decision, ...(note ? { note } : {}) });
   }
 
+  setAgentPermissions(id: string, agentId: string, permissions: string): Promise<{ agent: { permissions?: string } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/permissions`, { permissions });
+  }
+
   repairDecisions(id: string, opts: { dryRun?: boolean } = {}): Promise<{ repaired: number; checked: number; changes: Array<{ id: string; before: string; after: string }> }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/repair-decisions`, opts.dryRun ? { dryRun: true } : {});
   }
@@ -953,7 +957,15 @@ export async function ensureDaemon(): Promise<DaemonClient> {
         process.stderr.write(`loom: Loom Desktop runs a different build (${probe.rev ?? "?"}) than this CLI (${BUILD_REV}) — update one so they match; using Desktop's\n`);
         return new DaemonClient(cfg);
       }
-      // Stale build — restart it in place.
+      // Stale build — restart it in place, unless agents are mid-turn on it: a restart kills
+      // their turns (seen in the field: three long `send --wait` runs died on an update).
+      // Use the old build as it is and say how to restart once they're done.
+      const busy = await turnsInFlight(new DaemonClient(cfg));
+      if (busy.length) {
+        process.stderr.write(`loom: the daemon runs an older build (${probe.rev ?? "?"}) than this CLI (${BUILD_REV}), but ${busy.length} turn${busy.length === 1 ? " is" : "s are"} running (${busy.slice(0, 3).join(", ")}${busy.length > 3 ? ", …" : ""}) — ` +
+          "using it as it is; restart when they finish: loom up --restart\n");
+        return new DaemonClient(cfg);
+      }
       await stopDaemon();
       const gone = Date.now() + 5000;
       while (Date.now() < gone && (await healthy(cfg))) {
@@ -983,6 +995,19 @@ export async function ensureDaemon(): Promise<DaemonClient> {
     if (cfg && (await healthy(cfg))) return new DaemonClient(cfg);
   }
   throw new Error("could not start the loom daemon (try `loom daemon` in the foreground)");
+}
+
+/** "project: agent" for every agent mid-turn on this daemon (none when it can't be asked). */
+export async function turnsInFlight(client: DaemonClient): Promise<string[]> {
+  try {
+    const { projects } = await client.listProjects();
+    return projects.flatMap((p) => [
+      ...(p.agents ?? []).filter((a) => a.busy).map((a) => `${p.name}: ${a.id}`),
+      ...((p as { activity?: string[] }).activity ?? []).map((what) => `${p.name}: ${what}`),
+    ]);
+  } catch {
+    return [];
+  }
 }
 
 export async function daemonRunning(): Promise<DaemonConfig | null> {

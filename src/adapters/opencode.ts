@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 /**
  * OpenCode adapter — manages an `opencode serve` process per project and
  * speaks its HTTP + SSE API.
@@ -127,6 +128,26 @@ export function opencodePermissionEnv(options: object): Record<string, string> {
 }
 
 export class OpenCodeAdapter extends AdapterBase {
+  /**
+   * The Authorization header for this agent's opencode server. With OPENCODE_SERVER_PASSWORD
+   * in the environment, opencode serve answers 401 to anything without it — Loom's own probes
+   * included, so the server never looked ready ("timed out waiting for condition"). A server
+   * Loom starts gets a password of its own; one you run (baseUrl) uses yours.
+   */
+  private auth: string | null = null;
+  private withAuth(init?: RequestInit): RequestInit | undefined {
+    if (!this.auth) return init;
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", this.auth);
+    return { ...init, headers };
+  }
+  private http(url: string, init?: RequestInit): Promise<Response> {
+    return fetch(url, this.withAuth(init));
+  }
+  private json<T>(url: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
+    return fetchJson<T>(url, this.withAuth(init), timeoutMs);
+  }
+
   private child: ChildProcess | null = null;
   private baseUrl: string | null = null;
   private sseAbort: AbortController | null = null;
@@ -206,7 +227,7 @@ export class OpenCodeAdapter extends AdapterBase {
   }
 
   private async messageDetail(sid: string, mid: string): Promise<Json | null> {
-    const detail = await fetchJson<Json>(this.api(`/session/${sid}/message/${mid}`)).catch(() => null);
+    const detail = await this.json<Json>(this.api(`/session/${sid}/message/${mid}`)).catch(() => null);
     if (this.modernApi && detail?.info) return { ...(detail.info as Json), content: detail.parts };
     return detail;
   }
@@ -291,6 +312,13 @@ export class OpenCodeAdapter extends AdapterBase {
     if (this.nativeState.read().servePid === pid) this.nativeState.patch({ servePid: undefined });
   }
 
+  private serveErr = "";
+  private serveExit: string | null = null;
+  /** The last meaningful line opencode serve wrote to stderr. */
+  private lastServeLine(): string {
+    return this.serveErr.split("\n").map((l) => l.trim()).filter(Boolean).at(-1)?.slice(0, 300) ?? "";
+  }
+
   private recordServePid(pid: number | undefined): void {
     this.nativeState.patch({ servePid: pid });
   }
@@ -299,22 +327,40 @@ export class OpenCodeAdapter extends AdapterBase {
     if (this.started) return;
     if (this.options.baseUrl) {
       this.baseUrl = this.options.baseUrl.replace(/\/$/, "");
+      const pw = process.env.OPENCODE_SERVER_PASSWORD;
+      this.auth = pw ? `Basic ${Buffer.from(`${process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${pw}`).toString("base64")}` : null;
     } else {
       await this.reapOrphanServe();
       const port = await freePort();
       this.baseUrl = `http://127.0.0.1:${port}`;
+      // a password only this adapter knows: whatever OPENCODE_SERVER_PASSWORD says, and so no
+      // other process on the machine can drive this agent through its port
+      const password = randomBytes(18).toString("base64url");
+      this.auth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
       const child = spawnContained(
         "opencode",
         ["serve", "--port", String(port), "--hostname", "127.0.0.1", ...(this.options.extraArgs ?? [])],
-        { cwd: this.projectDir, stdio: "ignore", env: { ...agentEnv(), ...opencodePermissionEnv(this.options) } },
+        { cwd: this.projectDir, stdio: ["ignore", "ignore", "pipe"],
+          env: { ...agentEnv(), ...opencodePermissionEnv(this.options), OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password } },
       );
       this.child = child;
+      // what it says on stderr, so a server that never comes up can say why
+      this.serveErr = "";
+      this.serveExit = null;
+      child.stderr?.on("data", (d: Buffer) => { this.serveErr = (this.serveErr + d.toString()).slice(-2000); });
+      child.once("exit", (code, signal) => { if (!this.started) this.serveExit = `exited (${code ?? signal})`; });
       child.on("error", (error) => this.emit({ kind: "error", payload: { message: `opencode serve could not start: ${error.message}` } }));
       this.recordServePid(child.pid);
       if (process.platform === "win32") await windowsJobReady(child);
       child.on("close", (code, signal) => {
         if (!this.started) return;
         this.started = false;
+        // a turn waiting on this server would poll a dead port for its full hour, and the
+        // agent stay "busy" all that time (field: a serve killed mid-start) — end it now
+        if (this._busy) {
+          this.serverGone = `opencode serve ${code !== null ? `exited (${code})` : `was stopped (${signal ?? "killed"})`} mid-turn`;
+          return; // the turn reports it, once
+        }
         // Killed by a signal with no turn running is the daemon shutting down
         // (or restarting) around it — not a failure, and not worth a red card
         // in the thread. The next send starts a fresh server either way.
@@ -326,10 +372,14 @@ export class OpenCodeAdapter extends AdapterBase {
       });
     }
     await waitFor(async () => {
-      try { await fetchJson(`${this.baseUrl}/api/health`); this.modernApi = false; }
-      catch { await fetchJson(`${this.baseUrl}/global/health`); this.modernApi = true; }
+      try { await this.json(`${this.baseUrl}/api/health`); this.modernApi = false; }
+      catch { await this.json(`${this.baseUrl}/global/health`); this.modernApi = true; }
       return true;
-    }, { timeoutMs: process.platform === "win32" ? 60_000 : 30_000 });
+    }, {
+      timeoutMs: process.platform === "win32" ? 60_000 : 30_000,
+      what: () => `opencode serve to answer on ${this.baseUrl}${this.serveErr ? ` — it said: ${this.lastServeLine()}` : ""}; check that \`opencode serve\` runs in this folder and that you're signed in (\`opencode auth login\`)`,
+      gaveUp: () => (this.serveExit ? `opencode serve ${this.serveExit} before it was ready${this.serveErr ? `: ${this.lastServeLine()}` : ""} — try \`opencode serve\` in this folder to see why` : null),
+    });
     await this.assertModelAvailable();
     // No session yet: an ordinary turn makes (or reuses) the agent's own when it
     // sends, and a continuity turn runs on its binding's. Creating one here left
@@ -357,7 +407,7 @@ export class OpenCodeAdapter extends AdapterBase {
    * server can actually run — and fail loudly with suggestions instead.
    */
   private async assertModelAvailable(): Promise<void> {
-    const res = await fetchJson<Json>(this.modernApi ? `${this.baseUrl}/provider` : `${this.baseUrl}/api/model`).catch(() => null);
+    const res = await this.json<Json>(this.modernApi ? `${this.baseUrl}/provider` : `${this.baseUrl}/api/model`).catch(() => null);
     const connected = Array.isArray(res?.connected) ? res.connected as string[] : [];
     const models = this.modernApi && Array.isArray(res?.all)
       ? (res.all as Json[]).filter(p => connected.includes(String(p.id))).flatMap(p => Object.keys((p.models ?? {}) as Json).map(id => ({ providerID: p.id, id })))
@@ -389,7 +439,7 @@ export class OpenCodeAdapter extends AdapterBase {
     const modelChanged = (this.options.model ?? undefined) !== this.sessionModel;
     if (existing && !modelChanged) {
       try {
-        await fetchJson(this.api(`/session/${existing}`));
+        await this.json(this.api(`/session/${existing}`));
         return existing;
       } catch {
         // stale session (server state moved on) — create a fresh one
@@ -401,7 +451,7 @@ export class OpenCodeAdapter extends AdapterBase {
       if (ref) body.model = ref;
     }
     if (this.options.agent) body.agent = this.options.agent;
-    const res = await fetchJson<Json>(this.api("/session"), {
+    const res = await this.json<Json>(this.api("/session"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -420,7 +470,7 @@ export class OpenCodeAdapter extends AdapterBase {
     void (async () => {
       while (!abort.signal.aborted) {
         try {
-          const res = await fetch(`${this.baseUrl}/event`, {
+          const res = await this.http(`${this.baseUrl}/event`, {
             signal: abort.signal,
             headers: { accept: "text/event-stream" },
           });
@@ -661,7 +711,7 @@ export class OpenCodeAdapter extends AdapterBase {
     ];
     let last = "";
     for (const url of routes) {
-      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" },
+      const res = await this.http(url, { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify(dismiss ? {} : { answers: picks }), signal: AbortSignal.timeout(15_000) }).catch((e: Error) => ({ ok: false, status: 0, text: async () => e.message }) as unknown as Response);
       if (res.ok) {
         this.questions.delete(requestId);
@@ -693,7 +743,7 @@ export class OpenCodeAdapter extends AdapterBase {
     const reply = decision.behavior !== "allow" ? "reject" : decision.scope === "session" ? "always" : "once";
     const body = JSON.stringify({ reply, ...(decision.message ? { message: decision.message } : {}) });
     for (const url of this.modernApi ? [`${this.baseUrl}/permission/${encodeURIComponent(id)}/reply`] : [`${this.baseUrl}/api/session/${encodeURIComponent(sid)}/permission/${encodeURIComponent(id)}/reply`, `${this.baseUrl}/permission/${encodeURIComponent(id)}/reply`]) {
-      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(15_000) }).catch(() => null);
+      const res = await this.http(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(15_000) }).catch(() => null);
       if (res?.ok) return;
       if (res && res.status !== 404) break;
     }
@@ -751,7 +801,7 @@ export class OpenCodeAdapter extends AdapterBase {
 
   /** All messages in the session, oldest first (info objects). */
   private async listMessages(sid: string): Promise<Json[]> {
-    const res = await fetchJson<Json>(this.api(`/session/${sid}/message`));
+    const res = await this.json<Json>(this.api(`/session/${sid}/message`));
     const data = (res.data ?? res) as unknown;
     const items = Array.isArray(data) ? (data as Json[]) : [];
     return items
@@ -772,7 +822,7 @@ export class OpenCodeAdapter extends AdapterBase {
    */
   /** Is opencode still running this session? Null when this opencode can't say (older builds). */
   private async sessionActive(sid: string): Promise<boolean | null> {
-    const res = await fetchJson<Json>(this.modernApi ? this.api("/session/status") : this.api("/session/active")).catch(() => null);
+    const res = await this.json<Json>(this.modernApi ? this.api("/session/status") : this.api("/session/active")).catch(() => null);
     const active = res ? ((res.data ?? res) as Json) : null;
     if (!active || typeof active !== "object" || Array.isArray(active)) return null;
     if (!Object.prototype.hasOwnProperty.call(active, sid)) return false;
@@ -783,6 +833,16 @@ export class OpenCodeAdapter extends AdapterBase {
 
   /** When the current turn was interrupted (the wait gives up 20s later, whatever opencode says). */
   private interruptedAt: number | null = null;
+
+  /** "provider/model" a session runs, when opencode says. */
+  private async modelOfSession(sid: string): Promise<string | null> {
+    const s = await this.json<Json>(this.api(`/session/${encodeURIComponent(sid)}`)).catch(() => null);
+    const m = (s?.model ?? null) as Json | null;
+    return m && typeof m.id === "string" ? `${typeof m.providerID === "string" ? `${m.providerID}/` : ""}${m.id}` : null;
+  }
+
+  /** Set when this agent's opencode serve died while a turn was waiting on it. */
+  private serverGone: string | null = null;
 
   /** Set when the last wait gave up on a turn opencode never began. */
   private neverStarted = false;
@@ -795,7 +855,7 @@ export class OpenCodeAdapter extends AdapterBase {
 
   private async waitForTurn(sid: string, baseline: Set<string>, timeoutMs: number): Promise<Json | null> {
     try {
-      if (!this.modernApi) await fetchJson(
+      if (!this.modernApi) await this.json(
         `${this.baseUrl}/api/session/${sid}/wait`,
         { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
         timeoutMs,
@@ -805,8 +865,13 @@ export class OpenCodeAdapter extends AdapterBase {
     }
     const deadline = Date.now() + timeoutMs;
     const startBy = Date.now() + this.startTimeoutMs();
+    // opencode stores the prompt the moment it takes it: nothing at all in the session this long
+    // after an accepted prompt means it never will — even while it reports the session "busy"
+    // (a model its session engine can't run left one busy forever: big-pickle on 1.18, field).
+    const takenBy = Date.now() + Math.min(45_000, this.startTimeoutMs());
     let stableId: string | null = null;
     while (Date.now() < deadline) {
+      if (this.serverGone) return null;
       // Interrupted: done as soon as opencode stops running it, answer or not
       // (one that never answered would otherwise be waited on for the hour) —
       // and at most 20s after the interrupt, even if opencode still calls it
@@ -818,6 +883,10 @@ export class OpenCodeAdapter extends AdapterBase {
         return last ?? null;
       }
       const messages = await this.listMessages(sid).catch(() => [] as Json[]);
+      if (Date.now() > takenBy && !messages.some((m) => !baseline.has(String(m.id)))) {
+        this.neverStarted = true;
+        return null;
+      }
       // accepted but never begun: not even our own message reached the session, and opencode isn't working on it —
       // don't wait the hour out (a review sat 30 minutes on one, #291)
       if (Date.now() > startBy && !messages.some((m) => !baseline.has(String(m.id))) && (await this.sessionActive(sid)) !== true) {
@@ -879,7 +948,7 @@ export class OpenCodeAdapter extends AdapterBase {
         // the prompt — framed as an unmissable authoritative block (frameBriefing)
         // rather than a loose preamble.
         const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
-        const admission = await fetch(this.api(`/session/${sid}/${this.modernApi ? "prompt_async" : "prompt"}`), {
+        const admission = await this.http(this.api(`/session/${sid}/${this.modernApi ? "prompt_async" : "prompt"}`), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(this.promptBody(text)),
@@ -889,11 +958,23 @@ export class OpenCodeAdapter extends AdapterBase {
         await admission.arrayBuffer();
 
         this.neverStarted = false;
+        this.serverGone = null;
         const turn = await this.waitForTurn(sid, baseline, timeoutMs);
-        if (!turn && this.interrupted) {
+        if (!turn && this.serverGone) {
+          this.emit({ kind: "error", payload: { message: `${this.serverGone} — the next send starts it again` } });
+        } else if (!turn && this.interrupted) {
           this.emit({ kind: "status", payload: { state: "interrupted" } });
         } else if (!turn && this.neverStarted) {
-          this.emit({ kind: "error", payload: { message: `opencode accepted the prompt but never started the turn (nothing in ${Math.round(this.startTimeoutMs() / 1000)}s) — its model may be unavailable; try another model, or restart the agent` } });
+          // the session itself may be what's broken (bound to a model opencode can't run now):
+          // once, carry on in a fresh session, which takes opencode's current default model
+          const model = await this.modelOfSession(sid);
+          if (attempt === 0) {
+            this.sessionId = undefined;
+            this.emit({ kind: "status", payload: { state: "session_reset", reason: `opencode never took the prompt in its session${model ? ` (model ${model})` : ""}; carrying on in a fresh session` } });
+            continue;
+          }
+          this.emit({ kind: "error", payload: { message: `opencode accepted the prompt but never started the turn${model ? ` — its session runs ${model}, which may not work with this opencode` : " — its model may be unavailable"}; ` +
+            "pick another model (loom agents, or opencode's own config) and try again. opencode's log (~/.local/share/opencode/log/opencode.log) says why" } });
         } else if (!turn) {
           this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
         } else {
@@ -990,7 +1071,7 @@ export class OpenCodeAdapter extends AdapterBase {
       const text = [c.context, input.briefing, input.text].filter(Boolean).join("\n\n");
       let res: Response;
       try {
-        res = await fetch(this.api(`/session/${encodeURIComponent(sid)}/${this.modernApi ? "prompt_async" : "prompt"}`), {
+        res = await this.http(this.api(`/session/${encodeURIComponent(sid)}/${this.modernApi ? "prompt_async" : "prompt"}`), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(this.modernApi ? { ...this.promptBody(text), ...(input.model ? { model: { providerID: parseModelRef(input.model)?.providerID, modelID: parseModelRef(input.model)?.id } } : {}) } : { prompt: promptWithFiles(text, this.projectDir) }),
@@ -1064,7 +1145,7 @@ export class OpenCodeAdapter extends AdapterBase {
       let res: Response;
       for (let attempt = 0; ; attempt++) {
         try {
-          res = await fetch(this.api(`/session/${encodeURIComponent(bound)}`), { signal: AbortSignal.timeout(15_000) });
+          res = await this.http(this.api(`/session/${encodeURIComponent(bound)}`), { signal: AbortSignal.timeout(15_000) });
           break;
         } catch (err) {
           // A stale keep-alive socket can reset between native turns. Only
@@ -1080,7 +1161,7 @@ export class OpenCodeAdapter extends AdapterBase {
       // A model change keeps the session, as it does for the other harnesses.
       if (!this.modernApi && ref && (cur.providerID !== ref.providerID || cur.id !== ref.id)) {
         try {
-          await fetchJson(`${this.baseUrl}/api/session/${encodeURIComponent(bound)}/model`, {
+          await this.json(`${this.baseUrl}/api/session/${encodeURIComponent(bound)}/model`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ model: ref }),
@@ -1095,7 +1176,7 @@ export class OpenCodeAdapter extends AdapterBase {
     if (ref) body.model = ref;
     if (this.options.agent) body.agent = this.options.agent;
     try {
-      const created = await fetchJson<Json>(this.api("/session"), {
+      const created = await this.json<Json>(this.api("/session"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(this.modernApi ? {} : body),
@@ -1179,7 +1260,7 @@ export class OpenCodeAdapter extends AdapterBase {
     const sid = this.activeSid ?? this.sessionId;
     if (!sid || !this.baseUrl) return;
     try {
-      await fetchJson(this.api(`/session/${sid}/${this.modernApi ? "abort" : "interrupt"}`), {
+      await this.json(this.api(`/session/${sid}/${this.modernApi ? "abort" : "interrupt"}`), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",

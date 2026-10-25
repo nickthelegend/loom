@@ -2,6 +2,7 @@
  * CLI rendering — one place that turns log events into terminal lines.
  */
 
+import { PERMISSION_PROFILES } from "../core/permissions.js";
 import pc from "picocolors";
 import type { LoomEvent, ProjectStatus } from "../types.js";
 
@@ -169,5 +170,14 @@ export function formatAgentRosterRow(a: ProjectStatus["agents"][number]): string
   // a read-only model agent can answer, not change files — say that, not "can hold" (#257)
   const baton = a.tier !== "adapter" ? pc.dim("cannot hold") : a.signedOut ? pc.red("signed out — can't hold until you sign in")
     : a.readOnly ? pc.yellow("read-only (answers, can't edit)") : pc.green("can hold");
-  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}${signInNote(a)}`;
+  return ` ${readyMark(a)} ${paint(pc.bold(a.id))} ${pc.dim(a.kind)}  role: ${a.role}  model: ${model}  baton: ${baton}${signInNote(a)}${accessNote(a)}`;
+}
+
+/** The permission mode in effect and what it lets the agent do here (loom agents:mode to change it). */
+function accessNote(a: ProjectStatus["agents"][number]): string {
+  const profile = PERMISSION_PROFILES[a.kind];
+  if (!profile || a.tier !== "adapter") return "";
+  const mode = (a.permissions ?? profile.default) as keyof typeof profile.modes;
+  const label = profile.modes[mode]?.label ?? mode;
+  return `\n     ${pc.dim(`access: ${label}`)}`;
 }

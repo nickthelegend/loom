@@ -42,6 +42,14 @@ export interface FakeOpenCodeOptions {
   ask?: Json[];
   /** Mid-turn, ask this permission and finish only once replied to. */
   permission?: { permission: string; patterns: string[]; metadata?: Json };
+  /**
+   * A session bound to a model the session engine can't run (opencode 1.18 with big-pickle):
+   * the prompt is admitted but never stored, and the session reports busy forever.
+   * "first": only the first session created; "all": every session.
+   */
+  brokenSessions?: "first" | "all";
+  /** Listen here instead of a random port (a stand-in `opencode serve --port N`). */
+  port?: number;
 }
 
 export interface FakeOpenCode {
@@ -158,6 +166,10 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
       const text = opts.modern ? ((b.parts ?? []) as Json[]).filter(p => p.type === "text").map(p => p.text).join("") : String(((b.prompt ?? {}) as Json).text ?? "");
       if (opts.refusePrompt) return send(res, opts.refusePrompt, { message: "refused" });
       prompts.push({ session: sid, text });
+      if (opts.brokenSessions === "all" || (opts.brokenSessions === "first" && sid === created[0])) {
+        active.add(sid);
+        return send(res, opts.modern ? 204 : 200, { data: { admittedSeq: s.messages.length, sessionID: sid, delivery: "steer" } });
+      }
       if (opts.modern && b.model) {
         const model = b.model as Json;
         const ref = { providerID: model.providerID, id: model.modelID };
@@ -221,7 +233,7 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
     }
     send(res, 404, { message: `no route ${req.method} ${p}` });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
   return {
     url: `http://127.0.0.1:${port}`,

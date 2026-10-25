@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { providerOfModel } from "../src/core/providers.js";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { exitCodeFor, turnOutcome } from "../src/core/turn-wait.js";
-import { DaemonClient } from "../src/daemon/client.js";
+import { DaemonClient, turnsInFlight } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import type { LoomEvent } from "../src/types.js";
 import { makeProjectDir, tmpDir } from "./helpers.js";
@@ -41,6 +41,12 @@ describe("how a turn ended", () => {
     const asked = turnOutcome([ev("message", { text: "Which?" }), ev("needs_input", { question: "Postgres or SQLite?" }), ev("run_complete", {})], "a", 0);
     expect(asked).toMatchObject({ status: "needs_input", question: "Postgres or SQLite?", reply: "Which?" });
     expect([exitCodeFor(failed), exitCodeFor(asked), exitCodeFor(null)]).toEqual([1, 2, 124]);
+  });
+
+  it("a turn that reports no cost (a subscription CLI) says so — null, not $0", () => {
+    n = 0;
+    expect(turnOutcome([ev("message", { text: "done" }), ev("run_complete", { durationMs: 216000 })], "a", 0)).toMatchObject({ status: "ok", costUsd: null });
+    expect(turnOutcome([ev("status", { state: "turn_cost", costUsd: 0 }), ev("run_complete", {})], "a", 0)!.costUsd).toBeNull();
   });
 
   it("only counts the chat it was sent in, when told", () => {
@@ -125,11 +131,80 @@ describe("loom init and .gitignore", () => {
     expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8").match(/\.loom\//g)).toHaveLength(1);
   }, 30_000);
 
-  it("without a terminal to ask, it only gives the tip; --no-gitignore says nothing", async () => {
+  it("without a terminal to ask, it adds .loom/ (logs and transcripts never belong in the repo); --no-gitignore leaves it alone", async () => {
+    const off = repo();
+    expect((await runCli(["init", "--no-gitignore"], off)).out).not.toContain(".gitignore");
+    expect(fs.existsSync(path.join(off, ".gitignore"))).toBe(false);
     const dir = repo();
-    expect((await runCli(["init"], dir)).out).toContain("add it to .gitignore (loom init --gitignore)");
-    expect(fs.existsSync(path.join(dir, ".gitignore"))).toBe(false);
-    expect((await runCli(["init", "--no-gitignore"], dir)).out).not.toContain(".gitignore");
+    const out = (await runCli(["init"], dir)).out;
+    expect(out).toContain("added .loom/ to .gitignore");
+    expect(out).toContain("--no-gitignore");
+    expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8")).toMatch(/\.loom\/\n$/);
+  }, 30_000);
+});
+
+describe("the baton and a restart, from a script (field feedback)", () => {
+  let pair = "";
+  let client: DaemonClient;
+  beforeAll(async () => {
+    pair = makeProjectDir({ name: "pair", agents: [{ id: "one", kind: "echo" }, { id: "two", kind: "echo" }], brain: { extractor: "off" } } as never);
+    client = new DaemonClient(readDaemonConfig()!);
+    const { project } = await client.addProject(pair);
+    await client.handoff(project.id, "one");
+  });
+
+  it("sending to an agent without the baton fails loudly in a script — no prompt, no quiet exit 0", async () => {
+    const r = await runCli(["send", "-a", "two", "--wait", "--json", "hello"], pair);
+    expect(r.code).not.toBe(0);
+    expect(r.out + r.err).not.toContain("Hand off to");
+    expect(r.err).toMatch(/doesn't hold the baton \(holder: one\) — add --handoff/);
+  }, 30_000);
+
+  it("--handoff takes the baton and sends", async () => {
+    const r = await runCli(["send", "-a", "two", "--wait", "--json", "--handoff", "hello"], pair);
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out)).toMatchObject({ status: "ok", agent: "two" });
+  }, 30_000);
+
+  it("knows which turns are running, so nothing restarts the daemon underneath them", async () => {
+    const { projects } = await client.listProjects();
+    const id = projects.find((p) => p.name === "pair")!.id;
+    await client.send(id, "sleep:4000 working", "two");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await turnsInFlight(client)).toContain("pair: two");
+  }, 30_000);
+});
+
+describe("an agent's access (field feedback: codex couldn't commit or push)", () => {
+  it("loom agents shows each agent's access; agents:mode lists the modes and switches one", async () => {
+    const dir = makeProjectDir({ name: "access", agents: [{ id: "codex", kind: "codex" }], brain: { extractor: "off" } } as never);
+    await new DaemonClient(readDaemonConfig()!).addProject(dir);
+    expect((await runCli(["agents"], dir)).out).toMatch(/access: Auto — edits files and runs commands inside the project, sandboxed/);
+    const modes = (await runCli(["agents:mode", "codex"], dir)).out;
+    expect(modes).toMatch(/● auto/);
+    expect(modes).toMatch(/○ bypass .*no sandbox/);
+    const set = await runCli(["agents:mode", "codex", "bypass"], dir);
+    expect(set.code).toBe(0);
+    expect(set.out).toMatch(/codex: Bypass — no sandbox, no approvals/);
+    expect((await runCli(["agents"], dir)).out).toMatch(/access: Bypass/);
+  }, 30_000);
+});
+
+describe("outside and inside a project (field feedback)", () => {
+  it("loom agents outside a project shows what this machine can drive instead of failing", async () => {
+    const out = await runCli(["agents"], tmpDir("not-a-project"));
+    expect(out.code).toBe(0);
+    expect(out.out).toContain("not in a Loom project");
+    expect(out.out).toMatch(/codex|claude-code/);
+    expect(out.out).toContain("loom init here");
+    const js = JSON.parse((await runCli(["agents", "--json"], tmpDir("not-a-project-json"))).out);
+    expect(js.project).toBeNull();
+    expect(js.machine.some((a: { kind: string }) => a.kind === "codex")).toBe(true);
+  }, 30_000);
+
+  it("loom status inside a project lists that project first and marks it", async () => {
+    const out = (await runCli(["status"], projectDir)).out.split("\n").filter((l) => l.trim() && !l.startsWith("daemon"));
+    expect(out[0]).toContain("← here");
   }, 30_000);
 });
 

@@ -40,6 +40,7 @@ import {
   desktopOwnsDaemon,
   ensureDaemon,
   stopDaemon,
+  turnsInFlight,
 } from "../daemon/client.js";
 import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
@@ -220,7 +221,7 @@ program
   .description("start the loom daemon in the background")
   .option("--tailnet", "bind to this machine's Tailscale IP", false)
   .option("--restart", "restart even if a daemon is already running", false)
-  .option("--force", "with --restart: replace even Loom Desktop's daemon with this CLI's")
+  .option("--force", "with --restart: replace even Loom Desktop's daemon with this CLI's, and restart even with turns running")
   .action(async (opts: { tailnet: boolean; restart: boolean; force?: boolean }) => {
     const running = await daemonRunning();
     if (running && !opts.force && (await desktopOwnsDaemon(running))) {
@@ -236,6 +237,14 @@ program
       const stale = health.rev !== BUILD_REV;
       if (!opts.restart && !stale) {
         console.log(pc.dim("daemon already running (loom up --restart to bounce it)"));
+        return;
+      }
+      // a restart kills turns in flight: say whose, and leave them be unless told otherwise
+      const busy = opts.force ? [] : await turnsInFlight(new DaemonClient(running));
+      if (busy.length) {
+        console.log(pc.yellow(`${busy.length} turn${busy.length === 1 ? " is" : "s are"} running (${busy.slice(0, 4).join(", ")}${busy.length > 4 ? ", …" : ""}) — ` +
+          `a restart would kill ${busy.length === 1 ? "it" : "them"}. Try again when they finish, or loom up --restart --force.`));
+        process.exitCode = 1;
         return;
       }
       console.log(pc.dim(stale ? "daemon is running an older build — restarting" : "restarting daemon"));
@@ -290,8 +299,25 @@ program
     const { projects } = await client.listProjects();
     if (opts.json) return void console.log(JSON.stringify(projects)); // #315
     if (!projects.length) console.log(pc.dim("no projects yet — loom init"));
-    for (const p of projects) console.log(formatProjectRow(p));
+    // inside a project, it comes first and says so: "is my turn running here?" is the usual question
+    const here = await resolveCurrentProject(client).catch(() => null);
+    const ordered = here ? [...projects.filter((p) => p.id === here.id), ...projects.filter((p) => p.id !== here.id)] : projects;
+    for (const p of ordered) console.log(formatProjectRow(p) + (here && p.id === here.id ? pc.bold(pc.cyan("  ← here")) : ""));
   });
+
+/**
+ * Outside a project there's no roster, but the question "what can I run?" still has an
+ * answer: the agents installed on this machine (#feedback: agents outside a project).
+ */
+async function printMachineAgents(json: boolean): Promise<void> {
+  const { ADES, detectAdes } = await import("../core/ades.js");
+  const found = await detectAdes();
+  const rows = ADES.map((a) => ({ kind: a.kind, label: a.label, tier: a.tier, installed: a.tier === "adapter" ? Boolean(found[a.kind]) : null }));
+  if (json) return void console.log(JSON.stringify({ project: null, machine: rows }));
+  console.log(pc.dim("not in a Loom project — this machine can drive:"));
+  for (const r of rows) console.log(`  ${r.kind.padEnd(18)} ${r.label.padEnd(20)} ${r.installed === false ? pc.dim("not installed") : r.installed ? pc.green("installed") : pc.dim("app (launch it)")}`);
+  console.log(pc.dim("\nloom init here to make this folder a project with them"));
+}
 
 // ---------------------------------------------------------------------------
 // init / projects / agents
@@ -350,7 +376,8 @@ program
   .option("--json", "print the agent roster as JSON")
   .action(async (opts: { json: boolean }) => {
     const client = await ensureDaemon();
-    const project = await currentProject(client);
+    const project = await resolveCurrentProject(client).catch((err) => { if (err instanceof NoProjectError) return null; throw err; });
+    if (!project) return void (await printMachineAgents(Boolean(opts.json)));
     if (opts.json) {
       console.log(JSON.stringify(project.agents));
       return;
@@ -2454,12 +2481,38 @@ program
   });
 
 program
+  .command("agents:mode <agentId> [mode]")
+  .description("an agent's access: bypass (no sandbox — can commit, push, use the network), auto (the default), or ask. No mode: show what each means for it")
+  .action(async (agentId: string, mode: string | undefined) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const agent = project.agents.find((a) => a.id === agentId);
+    if (!agent) fail(`no agent "${agentId}" here — loom agents`);
+    const { PERMISSION_PROFILES } = await import("../core/permissions.js");
+    const profile = PERMISSION_PROFILES[agent.kind];
+    if (!profile) fail(`${agent.kind} has no access modes to choose from`);
+    const now = (agent.permissions ?? profile.default) as keyof typeof profile.modes;
+    if (!mode) {
+      for (const [m, cell] of Object.entries(profile.modes)) {
+        const off = (cell as { unsupported?: string }).unsupported;
+        console.log(`${m === now ? pc.green("●") : pc.dim("○")} ${pc.bold(m.padEnd(6))} ${off ? pc.dim(`${cell.label} — unavailable: ${off}`) : cell.label}`);
+      }
+      return void console.log(pc.dim(`\nloom agents:mode ${agentId} <bypass|auto|ask>`));
+    }
+    const res = await client.setAgentPermissions(project.id, agentId, mode);
+    const cell = profile.modes[(res.agent.permissions ?? mode) as keyof typeof profile.modes];
+    console.log(`${pc.green("✓")} ${agentId}: ${cell?.label ?? mode}`);
+    if (mode === "bypass") console.log(pc.yellow("  no sandbox: it can commit, push, reach the network and run anything — on this machine, as you"));
+  });
+
+program
   .command("agents:available")
   .description("which agents this machine can drive, and how many sessions are here")
   .option("--json", "print as JSON")
   .action(async (opts: { json: boolean }) => {
     const client = await ensureDaemon();
-    const project = await currentProject(client);
+    const project = await resolveCurrentProject(client).catch((err) => { if (err instanceof NoProjectError) return null; throw err; });
+    if (!project) return void (await printMachineAgents(Boolean(opts.json)));
     const { ades } = await client.availableAgents(project.id);
     if (opts.json) return void console.log(JSON.stringify(ades, null, 2));
     for (const a of ades) {
@@ -2538,12 +2591,13 @@ async function offerGitignore(dir: string, choice: boolean | undefined): Promise
     execFileSync("git", ["check-ignore", "-q", ".loom/"], { cwd: dir, stdio: "ignore" });
     return; // already ignored
   } catch { /* not ignored (exit 1), or no git: fall through */ }
-  const yes = choice === true || (process.stdin.isTTY && (await confirm(pc.yellow("add .loom/ to .gitignore? it's this machine's state (event log, attachments) — not for the repo"))));
+  // in a terminal, ask; in a script (no one to ask), do it — .loom/ is never meant for the repo
+  const yes = choice === true || !process.stdin.isTTY || (await confirm(pc.yellow("add .loom/ to .gitignore? it's this machine's state (event log, attachments) — not for the repo")));
   if (!yes) return void console.log(pc.dim("tip: .loom/ is local state — add it to .gitignore (loom init --gitignore)"));
   const file = path.join(dir, ".gitignore");
   const before = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
   fs.writeFileSync(file, `${before}${before && !before.endsWith("\n") ? "\n" : ""}# Loom's local state (event log, attachments, machine config)\n.loom/\n`);
-  console.log(pc.green("✓ added .loom/ to .gitignore"));
+  console.log(pc.green("✓ added .loom/ to .gitignore") + (process.stdin.isTTY ? "" : pc.dim(" (loom init --no-gitignore to leave it alone)")));
 }
 
 async function sendWithHandoffConfirm(
@@ -2553,17 +2607,23 @@ async function sendWithHandoffConfirm(
   agentId?: string,
   interactive = true,
   fresh = false,
+  handoff = false,
 ): Promise<{ agentId: string } | null> {
   try {
     return await client.send(projectId, text, agentId, { fresh });
   } catch (err) {
     if (err instanceof DaemonError && err.status === 409 && agentId) {
       const holder = String(err.body?.holder ?? "another agent");
-      if (!interactive) fail(`${agentId} doesn't hold the baton (holder: ${holder}) — loom handoff ${agentId}`);
-      const yes = await confirm(
+      // no one to ask (a script, --json) and no --handoff: fail loudly, never a quiet exit 0
+      if (!handoff && !interactive) fail(`${agentId} doesn't hold the baton (holder: ${holder}) — add --handoff, or loom handoff ${agentId}`);
+      const yes = handoff || (await confirm(
         pc.yellow(`⟶ ${holder} holds the baton. Hand off to ${agentId} (interrupts current work)?`),
-      );
-      if (!yes) return null;
+      ));
+      if (!yes) {
+        process.exitCode = 1;
+        console.error(pc.dim(`not sent — ${holder} keeps the baton (--handoff hands it over without asking)`));
+        return null;
+      }
       await client.handoff(projectId, agentId);
       return await client.send(projectId, text, agentId, { fresh });
     }
@@ -2575,11 +2635,12 @@ program
   .command("send <text...>")
   .description("send one message into the shared thread")
   .option("-a, --agent <id>", "address a specific agent (may require a handoff)")
-  .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 124 timed out")
+  .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 75 interrupted (the daemon restarted), 124 timed out")
   .option("--json", "with --wait: print the outcome as one JSON object")
   .option("--timeout <seconds>", "with --wait: give up after this long", "1800")
   .option("--fresh", "start the agent's session in this chat over — a short question needn't re-read a long one")
-  .action(async (words: string[], opts: { agent?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean }) => {
+  .option("--handoff", "with --agent: take the baton from whoever holds it, without asking")
+  .action(async (words: string[], opts: { agent?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean; handoff?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     // a long session whose prompt cache has gone cold is re-read in full: say so before spending it (#280)
@@ -2599,16 +2660,38 @@ program
     }
     // where the log is now, so the wait reads only what this send causes (#254)
     const since = opts.wait ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
-    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, !opts.wait || process.stdin.isTTY, Boolean(opts.fresh));
+    // a question needs a person at a terminal — not a script, and never --json output
+    const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !opts.json;
+    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff));
     if (!result) return;
     if (!opts.wait) return void console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
     const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;
     let seen: LoomEvent[] = [], outcome: TurnOutcome | null = null, cursor = since;
+    // the daemon this turn runs in: if it goes away or comes back as another process, the turn is gone
+    const daemonPid = await client.version().then((v) => v.pid).catch(() => null);
+    let lastPidCheck = Date.now(), interrupted = false;
     while (Date.now() < deadline && !outcome) {
-      const { events } = await client.events(project.id, cursor, 500);
-      if (events.length) { seen = seen.concat(events); cursor = events.at(-1)!.id; }
-      outcome = turnOutcome(seen, result.agentId, since);
+      try {
+        const { events } = await client.events(project.id, cursor, 500);
+        if (events.length) { seen = seen.concat(events); cursor = events.at(-1)!.id; }
+        outcome = turnOutcome(seen, result.agentId, since);
+        if (!outcome && daemonPid && Date.now() - lastPidCheck > 5000) {
+          lastPidCheck = Date.now();
+          if ((await client.version()).pid !== daemonPid) interrupted = true;
+        }
+      } catch {
+        interrupted = true; // the daemon stopped answering (or answered "event log is closed") mid-turn
+      }
+      if (interrupted) break;
       if (!outcome) await new Promise((r) => setTimeout(r, 400));
+    }
+    if (interrupted && !outcome) {
+      // EX_TEMPFAIL: not the agent's failure, and worth trying again
+      process.exitCode = 75;
+      const again = `loom send -a ${result.agentId} --wait "continue where you left off"`;
+      if (opts.json) return void console.log(JSON.stringify({ status: "interrupted", agent: result.agentId, reason: "the Loom daemon restarted or stopped during the turn", resume: again }));
+      return void console.error(pc.yellow(`⚠ the Loom daemon restarted or stopped while ${result.agentId} was working — the turn was interrupted. ` +
+        `What it did so far is still in the working tree. To carry on: ${again}`));
     }
     process.exitCode = exitCodeFor(outcome);
     if (opts.json) return void console.log(JSON.stringify(outcome ?? { status: "timeout", agent: result.agentId }));

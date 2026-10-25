@@ -5,6 +5,9 @@
  * `opencode serve` (opencode-fake.ts), shapes from opencode 1.18's OpenAPI.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { OpenCodeAdapter } from "../src/adapters/opencode.js";
@@ -130,4 +133,65 @@ describe("opencode's tool results", () => {
     expect(events.filter((e) => e.kind === "tool_call").map((e) => e.payload)).toEqual([expect.objectContaining({ tool: "bash", command: "npm test", exitCode: 1, ok: false })]);
     await adapter.stop();
   });
+});
+
+describe("a session opencode can't run (field: big-pickle on 1.18 swallowed every prompt)", () => {
+  let broken: FakeOpenCode | null = null;
+  afterEach(async () => { await broken?.close(); broken = null; });
+
+  it("a prompt that never reaches the session is retried once in a fresh session", async () => {
+    broken = await fakeOpenCode({ brokenSessions: "first", reply: "OK" });
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "ocb" }), { baseUrl: broken.url, pollMs: 20, startTimeoutMs: 400 } as never);
+    const events: AdapterEvent[] = [];
+    adapter.onEvent((e) => events.push(e));
+    await adapter.start();
+    await adapter.send({ text: "Reply OK" });
+    expect(events.some((e) => e.kind === "status" && e.payload.state === "session_reset" && /never took the prompt/.test(String(e.payload.reason)))).toBe(true);
+    expect(new Set(broken.prompts.map((p) => p.session)).size).toBe(2);
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    await adapter.stop();
+  }, 15_000);
+
+  it("when a fresh session can't take it either, the error names the model and where to look", async () => {
+    broken = await fakeOpenCode({ brokenSessions: "all" });
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "ocb2" }), { baseUrl: broken.url, pollMs: 20, startTimeoutMs: 400 } as never);
+    const events: AdapterEvent[] = [];
+    adapter.onEvent((e) => events.push(e));
+    await adapter.start();
+    await adapter.send({ text: "Reply OK" });
+    const err = events.find((e) => e.kind === "error");
+    expect(String(err?.payload.message)).toMatch(/never started the turn.*opencode\.log/);
+    await adapter.stop();
+  }, 15_000);
+});
+
+
+describe("opencode serve dying mid-turn (field: a serve killed mid-start left the agent busy)", () => {
+  // the stand-in `opencode` is a POSIX shell script; Windows starts opencode through a Job Object
+  it.skipIf(process.platform === "win32")("ends the turn at once with why, and the next send starts a new server", async () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const bin = makeProjectDir({ name: "ocbin" });
+    fs.writeFileSync(path.join(bin, "opencode"),
+      `#!/bin/sh\nexec "${process.execPath}" "${path.join(root, "node_modules", "tsx", "dist", "cli.mjs")}" "${path.join(root, "test", "opencode-fake-serve.mts")}" "$@"\n`, { mode: 0o755 });
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "ocdie" }), { pollMs: 20 });
+    try {
+      const events: AdapterEvent[] = [];
+      adapter.onEvent((e) => events.push(e));
+      await adapter.start();
+      const turn = adapter.send({ text: "a long job" });
+      await new Promise((r) => setTimeout(r, 400));
+      const t0 = Date.now();
+      (adapter as unknown as { child: { kill(s: string): void } }).child.kill("SIGTERM");
+      await turn;
+      expect(Date.now() - t0).toBeLessThan(5_000);
+      expect(String(events.find((e) => e.kind === "error")?.payload.message)).toMatch(/opencode serve (exited|was stopped) \(\w+\) mid-turn — the next send starts it again/);
+      expect(events.filter((e) => e.kind === "error")).toHaveLength(1);
+      expect(adapter.busy()).toBe(false);
+    } finally {
+      await adapter.stop().catch(() => {});
+      process.env.PATH = oldPath;
+    }
+  }, 30_000);
 });

@@ -40,6 +40,16 @@ import type { SendInput } from "../types.js";
 import { AdapterBase, agentEnv, cliAvailable, frameBriefing } from "./base.js";
 import { permissionFor } from "../core/permissions.js";
 
+/**
+ * agy --print is one turn: it ends when the agent replies. Agents that start tests in the
+ * background and say they'll "await the completion notification" end the turn right there —
+ * nothing ever wakes them, and the work is left half done and uncommitted (field: 2 of 2
+ * build turns). Said on every turn, after the user's text.
+ */
+export const HEADLESS_NOTE =
+  "(Loom runs you headless: this turn ends the moment you reply, and nothing will notify or wake you later. " +
+  "Run tests, builds and servers in the foreground and wait for them to finish before you answer — don't start them in the background to check on later.)";
+
 /** agy's own --print-timeout is 5 minutes; a review of a real diff took longer (#246). */
 const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 
@@ -148,7 +158,7 @@ export class AntigravityCliAdapter extends AdapterBase {
     // `agy --print` has no system channel, so the handoff briefing rides in
     // front of the text as an unmissable authoritative block (see frameBriefing),
     // exactly as the Codex and OpenCode adapters do.
-    const text = input.briefing ? `${frameBriefing(input.briefing)}\n\n${input.text}` : input.text;
+    const text = `${input.briefing ? `${frameBriefing(input.briefing)}\n\n` : ""}${input.text}\n\n${HEADLESS_NOTE}`;
 
     const resume = this.conversationId;
     // Permissions (core/permissions.ts). Bypass is the default and has to be

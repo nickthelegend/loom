@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] — 2026-10-25
+
+Fixes from a day of real use farming builds out to codex, antigravity and opencode: Loom no longer kills turns when it updates, every agent starts (and says why when it can't), and scripts get honest exits.
+
+### Changed
+
+- **`loom init` keeps `.loom/` out of git when no one's there to ask.** In a script (no terminal), it now adds `.loom/` to `.gitignore` instead of printing a tip that agents skim past — the folder holds the event log and transcripts. `--no-gitignore` leaves `.gitignore` alone; in a terminal it still asks.
+
+### Added
+
+- **`loom agents:mode <agent> [bypass|auto|ask]`** — see what each access mode means for that agent and switch it. Codex's default (Auto) is its `workspace-write` sandbox: no network and a read-only `.git`, so it can edit files but not commit, push or reach a dev server; **Bypass** lifts the sandbox. `loom agents` now shows each agent's access on a second line.
+
+### Fixed
+
+- **A turn that reports no cost says so.** `send --wait --json` gave `costUsd: 0` for a subscription CLI's turn (a 3.6-minute codex run), which reads as "free"; it's now `null` — not reported.
+- **Updating the CLI no longer kills running turns.** A `loom` command run with a newer CLI restarted a daemon on an older build automatically — and took every turn in flight down with it (three long `send --wait` runs died this way in the field). It now leaves a busy daemon alone and says how to restart once the turns finish; `loom up --restart` refuses too while turns run, unless you add `--force`.
+- **`send --wait` says when a restart interrupted the turn**, instead of "event log is closed" or "fetch failed": it exits 75, names the agent, and gives the command to carry on (`--json`: `{"status":"interrupted", …, "resume": "…"}`).
+- **`send` to an agent without the baton, from a script, no longer exits 0 having sent nothing.** It printed a yes/no prompt nobody could answer and quietly did nothing. With no terminal (or with `--json`) it now fails with a clear message; **`--handoff`** takes the baton and sends.
+- **antigravity no longer ends a build turn on "I'll await the notification".** Agents that started tests in the background and said they'd wait to be notified ended the turn right there — nothing wakes a headless agent — leaving the work half done and uncommitted (2 of 2 field build turns). Every antigravity turn now says the turn ends at its reply and to run tests and builds in the foreground.
+- **A dead opencode server ends its turn at once.** If `opencode serve` died mid-turn, the turn kept polling the dead port for up to an hour and the agent answered "busy" until `loom reap`. Now the turn ends with what happened, and the next send starts a new server.
+- **An opencode session that silently swallows prompts no longer hangs every turn.** A session bound to a model opencode's session engine can't run (`opencode/big-pickle` on 1.18.31) took each prompt, stored nothing and stayed "busy" forever, and Loom reused that session every time — every send timed out. Loom now notices within 45s that the prompt never reached the session, carries on once in a fresh session (which takes opencode's current default model), and if that fails too, says which model and where opencode's log is.
+- **opencode never started when `OPENCODE_SERVER_PASSWORD` was set.** opencode serve then requires a password on every request, and Loom's own readiness checks didn't send one — every start ended in "timed out waiting for condition" after 30s. A server Loom starts now gets a random password of its own (so nothing else on the machine can drive the agent through its port), and every request carries it; a server you run (`baseUrl`) uses your `OPENCODE_SERVER_PASSWORD`.
+- **opencode says why it didn't start.** "timed out waiting for condition" now names what it waited for and shows the last thing `opencode serve` printed — or that it exited early — with how to check it yourself.
+- `loom agents` (and `agents:available`) outside a project said "no Loom project here" and stopped; it now lists the agents this machine can drive, with `loom init` as the next step (`--json` gives `{ project: null, machine: [...] }`).
+- `loom status` inside a project now lists that project first, marked **← here**, so "is my turn running here?" doesn't mean scanning the whole board.
+
 ## [1.2.4] — 2026-10-22
 
 Team auto-orchestration, set up in one step and steadier on a teammate's machine.

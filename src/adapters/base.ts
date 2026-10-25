@@ -417,14 +417,18 @@ export function freePort(): Promise<number> {
 
 export async function waitFor(
   probe: () => Promise<boolean>,
-  { timeoutMs = 30_000, intervalMs = 300 } = {},
+  { timeoutMs = 30_000, intervalMs = 300, what, gaveUp }: { timeoutMs?: number; intervalMs?: number; what?: string | (() => string); gaveUp?: () => string | null } = {},
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await probe().catch(() => false)) return;
+    // the thing being waited on can say it's never coming (a server that exited)
+    const why = gaveUp?.();
+    if (why) throw new Error(why);
     await new Promise((r) => setTimeout(r, intervalMs));
   }
-  throw new Error("timed out waiting for condition");
+  const label = typeof what === "function" ? what() : what;
+  throw new Error(label ? `timed out after ${Math.round(timeoutMs / 1000)}s waiting for ${label}` : "timed out waiting for condition");
 }
 
 export async function fetchJson<T>(
