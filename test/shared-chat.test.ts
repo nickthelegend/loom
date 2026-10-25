@@ -57,13 +57,16 @@ describe("Share live", () => {
     const g = await invite("reply");
     const me = await (await call(g.clientToken, "GET", "/api/guest")).json() as { chat: { title: string }; role: string; name: string };
     expect(me).toMatchObject({ chat: { title: "Pairing on the parser" }, role: "reply", name: "Ada" });
-    expect((await call(g.clientToken, "POST", `/api/projects/${pid}/messages`, { text: "hello from Ada", agentId: "bot", chat: privateChat })).status).toBe(200);
+    // the agent is busy, so Ada's message waits in the queue — and keeps her name when it goes (CI caught this)
+    await call(admin, "POST", `/api/projects/${pid}/messages`, { text: "sleep:1500 busy elsewhere", chat: privateChat, agentId: "bot" });
+    const sent = await (await call(g.clientToken, "POST", `/api/projects/${pid}/messages`, { text: "hello from Ada", agentId: "bot", chat: privateChat })).json() as { queued?: number };
+    expect(sent.queued).toBeGreaterThan(0);
     // it landed in the shared chat, not the one it asked for, under Ada's name
     await waitUntil(async () => {
       const { events } = await (await call(admin, "GET", `/api/projects/${pid}/events?chat=${shared}&limit=100`)).json() as { events: Array<{ kind: string; agentId?: string; payload: { text?: string; by?: string } }> };
       return events.some((e) => e.kind === "message" && e.payload.by === "Ada" && e.payload.text === "hello from Ada") &&
         events.some((e) => e.kind === "message" && e.agentId === "bot" && String(e.payload.text).includes("hello from Ada"));
-    }, 20_000);
+    }, 30_000);
     // reading another chat gives its own chat instead
     const read = await (await call(g.clientToken, "GET", `/api/projects/${pid}/events?chat=${privateChat}&limit=200`)).json() as { events: Array<{ payload: { text?: string } }> };
     expect(JSON.stringify(read.events)).not.toContain("a private note");
