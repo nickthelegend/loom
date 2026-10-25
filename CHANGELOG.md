@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Interrupt sends `session/cancel`.
   - Approach credit: Nuphos.
 
+- **Split workspace.** ⌘D splits the window side by side, ⌘⇧D one above the other; each pane is a whole Loom view.
+  - Drag a chat onto a pane's edge to open it there, or drag a pane by its grip to move it.
+  - The layout is saved.
+  - Panes keep their contents when the layout changes.
+  - The desktop menu gets Split Right and Split Down, and other menu commands reach the focused pane.
+  - The layout model is ported from Nuphos (Apache-2.0).
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.

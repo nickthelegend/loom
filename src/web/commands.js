@@ -10,6 +10,7 @@ import { openProjectModal,openProjectSettings,openSettingsModal } from './settin
 import { isDesktop } from './shell.js';
 import { state } from './state.js';
 import { openTaskModal } from './tasks.js';
+import { enterWorkspace,paneId } from './workspace.js';
 import { setThemePref } from './theme.js';
 import { ICONS } from './icons.js';
 import { devMode, SIMPLE_TABS } from './mode.js';
@@ -105,6 +106,12 @@ import { devMode, SIMPLE_TABS } from './mode.js';
         askLink();
         return;
       case "shortcuts": openShortcuts(); return;
+      case "split-right": case "split-down": {
+        var dir = item === "split-down" ? "column" : "row";
+        if (paneId()) { try { window.parent.postMessage({ loom: "pane", id: paneId(), type: "split", dir: dir }, location.origin); } catch (e) {} }
+        else enterWorkspace(dir);
+        return;
+      }
     }
   }
 
@@ -164,6 +171,8 @@ import { devMode, SIMPLE_TABS } from './mode.js';
     ["toggle-browser", "Toggle browser", "⌘⇧B", ICONS.globe, true],
     ["console", "Console · errors and logs", "⌘⇧Y", ICONS.console, true],
     ["focus", "Focus mode", "⌘.", ICONS.target, false],
+    ["split-right", "Split right — another view beside this one", "⌘D", ICONS.panelRight, false],
+    ["split-down", "Split down — another view below this one", "⌘⇧D", ICONS.panelRight, false],
     ["interrupt", "Interrupt the agent", "⌘⇧.", ICONS.stop, true],
     ["pick-agent", "Choose the agent", "⌘⇧A", ICONS.agents, true],
     ["plan", "Toggle plan mode", "⌘⇧M", ICONS.plan, true],

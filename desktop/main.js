@@ -222,6 +222,8 @@ function buildMenu() {
           item("Toggle Browser", "toggle-browser", "CmdOrCtrl+Shift+B"),
           item("Console", "console", "CmdOrCtrl+Shift+Y"),
           item("Focus Mode", "focus", "CmdOrCtrl+."),
+          item("Split Right", "split-right", "CmdOrCtrl+D"),
+          item("Split Down", "split-down", "CmdOrCtrl+Shift+D"),
           { label: "Loom Pet", type: "checkbox", checked: petEnabled(), click: (mi) => pet?.setEnabled(mi.checked) },
           { type: "separator" },
           {

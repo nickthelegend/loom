@@ -625,3 +625,21 @@
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
   .hitrow mark,.chit mark{background:color-mix(in srgb,var(--warn) 35%,transparent);
     color:var(--foreground);border-radius:2px;padding:0 1px}
+
+  /* ── Split workspace (workspace.js; approach: Nuphos) ── */
+  html.workspace, html.workspace body{height:100%;margin:0;overflow:hidden;background:var(--background)}
+  .wsroot{position:fixed;inset:0}
+  .wspane{position:absolute;box-sizing:border-box;display:flex;flex-direction:column;border:1px solid var(--border);background:var(--background);transition:left .16s ease,top .16s ease,width .16s ease,height .16s ease}
+  .wspane.focused{border-color:var(--ring)}
+  .wshead{display:flex;align-items:center;gap:6px;height:26px;padding:0 6px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted-foreground);user-select:none;flex:none}
+  .wsgrip{cursor:grab;padding:0 2px;opacity:.6}
+  .wsgrip:hover{opacity:1}
+  .wstitle{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wsbtn{all:unset;cursor:pointer;width:20px;height:20px;display:grid;place-items:center;border-radius:4px;font-size:12px}
+  .wsbtn:hover{background:var(--accent);color:var(--foreground)}
+  .wsbtn:focus-visible{outline:2px solid var(--ring)}
+  .wsframe{flex:1;width:100%;border:0;display:block;background:var(--background)}
+  .wsdrop{position:fixed;inset:0;z-index:50}
+  .wsdrop[hidden]{display:none}
+  .wszone{position:absolute;display:none;box-sizing:border-box;background:color-mix(in srgb, var(--ring) 22%, transparent);border:2px solid var(--ring);border-radius:6px;pointer-events:none;transition:all .08s ease}
+  @media (prefers-reduced-motion:reduce){.wspane,.wszone{transition:none}}

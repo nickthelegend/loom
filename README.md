@@ -544,6 +544,21 @@ daemon), **Updates** (build rev, and how far the checkout is behind its remote),
   <img src="docs/img/settings.png" alt="Loom's Settings screen — Setup, Diagnostics, Updates, Preferences, Devices, About" width="100%">
 </p>
 
+
+### Split: several views in one window
+
+**⌘D** splits the window side by side, and **⌘⇧D** one above the other. Each pane is a whole
+Loom view (a project, a chat, any tab), so you can follow several agents' threads at once.
+
+- **Arranging:** drag a chat from a pane's sidebar onto another pane's edge to open it there, or
+  drag a pane by its grip to move it.
+- **Closing:** a pane's × closes it, and closing the last but one leaves split mode on the pane
+  that's left.
+- **Saving:** the layout is saved, so it's there when you come back.
+
+Panes keep their contents when the layout changes, so splitting never reloads what you were
+looking at. The approach comes from [Nuphos](https://github.com/nuphos/nuphos); the layout
+model is ported from its desktop app.
 ## GitHub & Linear, native
 
 Browse pull requests, issues, and **GitHub Project boards** in-app; open a worktree from
