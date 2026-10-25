@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`loom chain` takes run options** — `-o/--orchestrator`, `-w/--workers`, `-p/--parallel`, `--solo`, `--max-usd` for every line, and a line can override them in brackets before its goal: `api :: [-o grok-code -w codex,opencode] add rate limiting`. Without them every run was planned by the default orchestrator (claude-code when installed).
+- **`loom doctor` and `loom init` warn on agent keys Loom doesn't read** — a typo or an option written on the agent instead of under `options` (`"model"` → `options.model`) used to do nothing, silently.
 
 ### Fixed
 

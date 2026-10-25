@@ -336,6 +336,9 @@ program
     const { project } = await client.project(res.project.id);
     console.log(pc.green(`✓ project "${project.name}" (${project.id})`));
     for (const a of project.agents) console.log(formatAgentRow(a));
+    const { agentConfigWarnings, readProjectConfig } = await import("../core/registry.js");
+    const cfg = readProjectConfig(dir);
+    for (const w of cfg ? agentConfigWarnings(cfg) : []) console.log(pc.yellow(`! ${w}`));
     await offerGitignore(dir, opts.gitignore);
     console.log(pc.dim("\nedit .loom/config.json to add/remove agents or change roles"));
     console.log(pc.dim("then: loom chat"));

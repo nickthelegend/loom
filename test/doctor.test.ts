@@ -33,6 +33,17 @@ describe("loom doctor — project checks", () => {
     expect(checks.find((c) => c.name === "routes")!.detail).toContain("ship");
   });
 
+  it("warns on agent keys Loom doesn't read, and says where an option belongs", () => {
+    const dir = makeProjectDir({
+      agents: [{ id: "cx", kind: "echo", role: "worker", permissions: "bypass", model: "gpt-5", colour: "red" }],
+    } as never);
+    const warned = projectChecks(dir).filter((c) => c.name === "agents" && c.status === "warn").map((c) => c.detail);
+    expect(warned).toEqual([
+      `"cx" has "model", which Loom doesn't read — put it in options.model`,
+      expect.stringMatching(/^"cx" has "colour", which Loom doesn't read \(known: id, kind/),
+    ]);
+  });
+
   it("accepts a role you made up — they're names, not a menu", () => {
     // Roles went free-form, but doctor kept a planner|executor|reviewer|general
     // whitelist and hard-failed anything else. Calling an agent "architect" is

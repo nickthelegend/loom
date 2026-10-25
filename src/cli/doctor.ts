@@ -14,6 +14,7 @@ import path from "node:path";
 import { createAgent, knownAgentKinds } from "../adapters/index.js";
 import { setupReport } from "../core/setup.js";
 import {
+  agentConfigWarnings,
   listProjects,
   loomHome,
   readDaemonConfig,
@@ -72,6 +73,7 @@ export function projectChecks(dir: string, signedOutKinds: string[] = []): Check
   }
   checks.push(ok("project", `${config.name} (${dir})`));
 
+  for (const w of agentConfigWarnings(config)) checks.push(warn("agents", w));
   const known = new Set(knownAgentKinds());
   const seen = new Set<string>();
   const adapterIds = new Set<string>();
