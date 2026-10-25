@@ -766,6 +766,10 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}`, { decision, ...(note ? { note } : {}) });
   }
 
+  setAgentPermissions(id: string, agentId: string, permissions: string): Promise<{ agent: { permissions?: string } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/permissions`, { permissions });
+  }
+
   repairDecisions(id: string, opts: { dryRun?: boolean } = {}): Promise<{ repaired: number; checked: number; changes: Array<{ id: string; before: string; after: string }> }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/brain/repair-decisions`, opts.dryRun ? { dryRun: true } : {});
   }

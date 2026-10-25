@@ -43,6 +43,12 @@ describe("how a turn ended", () => {
     expect([exitCodeFor(failed), exitCodeFor(asked), exitCodeFor(null)]).toEqual([1, 2, 124]);
   });
 
+  it("a turn that reports no cost (a subscription CLI) says so — null, not $0", () => {
+    n = 0;
+    expect(turnOutcome([ev("message", { text: "done" }), ev("run_complete", { durationMs: 216000 })], "a", 0)).toMatchObject({ status: "ok", costUsd: null });
+    expect(turnOutcome([ev("status", { state: "turn_cost", costUsd: 0 }), ev("run_complete", {})], "a", 0)!.costUsd).toBeNull();
+  });
+
   it("only counts the chat it was sent in, when told", () => {
     n = 0;
     expect(turnOutcome([ev("run_complete", {}, "a", "side")], "a", 0, "main")).toBeNull();
@@ -166,6 +172,21 @@ describe("the baton and a restart, from a script (field feedback)", () => {
     await client.send(id, "sleep:4000 working", "two");
     await new Promise((r) => setTimeout(r, 300));
     expect(await turnsInFlight(client)).toContain("pair: two");
+  }, 30_000);
+});
+
+describe("an agent's access (field feedback: codex couldn't commit or push)", () => {
+  it("loom agents shows each agent's access; agents:mode lists the modes and switches one", async () => {
+    const dir = makeProjectDir({ name: "access", agents: [{ id: "codex", kind: "codex" }], brain: { extractor: "off" } } as never);
+    await new DaemonClient(readDaemonConfig()!).addProject(dir);
+    expect((await runCli(["agents"], dir)).out).toMatch(/access: Auto — edits files and runs commands inside the project, sandboxed/);
+    const modes = (await runCli(["agents:mode", "codex"], dir)).out;
+    expect(modes).toMatch(/● auto/);
+    expect(modes).toMatch(/○ bypass .*no sandbox/);
+    const set = await runCli(["agents:mode", "codex", "bypass"], dir);
+    expect(set.code).toBe(0);
+    expect(set.out).toMatch(/codex: Bypass — no sandbox, no approvals/);
+    expect((await runCli(["agents"], dir)).out).toMatch(/access: Bypass/);
   }, 30_000);
 });
 

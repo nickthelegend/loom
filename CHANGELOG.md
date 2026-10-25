@@ -11,8 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`loom init` keeps `.loom/` out of git when no one's there to ask.** In a script (no terminal), it now adds `.loom/` to `.gitignore` instead of printing a tip that agents skim past — the folder holds the event log and transcripts. `--no-gitignore` leaves `.gitignore` alone; in a terminal it still asks.
 
+### Added
+
+- **`loom agents:mode <agent> [bypass|auto|ask]`** — see what each access mode means for that agent and switch it. Codex's default (Auto) is its `workspace-write` sandbox: no network and a read-only `.git`, so it can edit files but not commit, push or reach a dev server; **Bypass** lifts the sandbox. `loom agents` now shows each agent's access on a second line.
+
 ### Fixed
 
+- **A turn that reports no cost says so.** `send --wait --json` gave `costUsd: 0` for a subscription CLI's turn (a 3.6-minute codex run), which reads as "free"; it's now `null` — not reported.
 - **Updating the CLI no longer kills running turns.** A `loom` command run with a newer CLI restarted a daemon on an older build automatically — and took every turn in flight down with it (three long `send --wait` runs died this way in the field). It now leaves a busy daemon alone and says how to restart once the turns finish; `loom up --restart` refuses too while turns run, unless you add `--force`.
 - **`send --wait` says when a restart interrupted the turn**, instead of "event log is closed" or "fetch failed": it exits 75, names the agent, and gives the command to carry on (`--json`: `{"status":"interrupted", …, "resume": "…"}`).
 - **`send` to an agent without the baton, from a script, no longer exits 0 having sent nothing.** It printed a yes/no prompt nobody could answer and quietly did nothing. With no terminal (or with `--json`) it now fails with a clear message; **`--handoff`** takes the baton and sends.

@@ -2481,6 +2481,31 @@ program
   });
 
 program
+  .command("agents:mode <agentId> [mode]")
+  .description("an agent's access: bypass (no sandbox — can commit, push, use the network), auto (the default), or ask. No mode: show what each means for it")
+  .action(async (agentId: string, mode: string | undefined) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const agent = project.agents.find((a) => a.id === agentId);
+    if (!agent) fail(`no agent "${agentId}" here — loom agents`);
+    const { PERMISSION_PROFILES } = await import("../core/permissions.js");
+    const profile = PERMISSION_PROFILES[agent.kind];
+    if (!profile) fail(`${agent.kind} has no access modes to choose from`);
+    const now = (agent.permissions ?? profile.default) as keyof typeof profile.modes;
+    if (!mode) {
+      for (const [m, cell] of Object.entries(profile.modes)) {
+        const off = (cell as { unsupported?: string }).unsupported;
+        console.log(`${m === now ? pc.green("●") : pc.dim("○")} ${pc.bold(m.padEnd(6))} ${off ? pc.dim(`${cell.label} — unavailable: ${off}`) : cell.label}`);
+      }
+      return void console.log(pc.dim(`\nloom agents:mode ${agentId} <bypass|auto|ask>`));
+    }
+    const res = await client.setAgentPermissions(project.id, agentId, mode);
+    const cell = profile.modes[(res.agent.permissions ?? mode) as keyof typeof profile.modes];
+    console.log(`${pc.green("✓")} ${agentId}: ${cell?.label ?? mode}`);
+    if (mode === "bypass") console.log(pc.yellow("  no sandbox: it can commit, push, reach the network and run anything — on this machine, as you"));
+  });
+
+program
   .command("agents:available")
   .description("which agents this machine can drive, and how many sessions are here")
   .option("--json", "print as JSON")
