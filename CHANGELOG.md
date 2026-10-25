@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.6] — 2026-10-25
+
+A cap that keeps a busy machine from falling over, chained goals across projects, read-only thread links, and orchestras scripts can trust.
+
 ### Added
 
 - **A read-only link to a thread** (#199). `loom share [chat]` gives a link a teammate opens in a browser to read that chat — prompts, replies, what ran, what changed — with no pairing. It expires (`--hours`, default 24, up to 30 days), `loom share --list` shows yours and `--revoke <id>` ends one; only a hash of each link's token is kept. It works for anyone who can reach the daemon (`loom up --tailnet` for another computer).
