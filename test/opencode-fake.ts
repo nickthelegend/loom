@@ -48,6 +48,8 @@ export interface FakeOpenCodeOptions {
    * "first": only the first session created; "all": every session.
    */
   brokenSessions?: "first" | "all";
+  /** Listen here instead of a random port (a stand-in `opencode serve --port N`). */
+  port?: number;
 }
 
 export interface FakeOpenCode {
@@ -231,7 +233,7 @@ export async function fakeOpenCode(opts: FakeOpenCodeOptions = {}): Promise<Fake
     }
     send(res, 404, { message: `no route ${req.method} ${p}` });
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
   return {
     url: `http://127.0.0.1:${port}`,

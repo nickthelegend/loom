@@ -355,6 +355,12 @@ export class OpenCodeAdapter extends AdapterBase {
       child.on("close", (code, signal) => {
         if (!this.started) return;
         this.started = false;
+        // a turn waiting on this server would poll a dead port for its full hour, and the
+        // agent stay "busy" all that time (field: a serve killed mid-start) — end it now
+        if (this._busy) {
+          this.serverGone = `opencode serve ${code !== null ? `exited (${code})` : `was stopped (${signal ?? "killed"})`} mid-turn`;
+          return; // the turn reports it, once
+        }
         // Killed by a signal with no turn running is the daemon shutting down
         // (or restarting) around it — not a failure, and not worth a red card
         // in the thread. The next send starts a fresh server either way.
@@ -835,6 +841,9 @@ export class OpenCodeAdapter extends AdapterBase {
     return m && typeof m.id === "string" ? `${typeof m.providerID === "string" ? `${m.providerID}/` : ""}${m.id}` : null;
   }
 
+  /** Set when this agent's opencode serve died while a turn was waiting on it. */
+  private serverGone: string | null = null;
+
   /** Set when the last wait gave up on a turn opencode never began. */
   private neverStarted = false;
 
@@ -862,6 +871,7 @@ export class OpenCodeAdapter extends AdapterBase {
     const takenBy = Date.now() + Math.min(45_000, this.startTimeoutMs());
     let stableId: string | null = null;
     while (Date.now() < deadline) {
+      if (this.serverGone) return null;
       // Interrupted: done as soon as opencode stops running it, answer or not
       // (one that never answered would otherwise be waited on for the hour) —
       // and at most 20s after the interrupt, even if opencode still calls it
@@ -948,8 +958,11 @@ export class OpenCodeAdapter extends AdapterBase {
         await admission.arrayBuffer();
 
         this.neverStarted = false;
+        this.serverGone = null;
         const turn = await this.waitForTurn(sid, baseline, timeoutMs);
-        if (!turn && this.interrupted) {
+        if (!turn && this.serverGone) {
+          this.emit({ kind: "error", payload: { message: `${this.serverGone} — the next send starts it again` } });
+        } else if (!turn && this.interrupted) {
           this.emit({ kind: "status", payload: { state: "interrupted" } });
         } else if (!turn && this.neverStarted) {
           // the session itself may be what's broken (bound to a model opencode can't run now):

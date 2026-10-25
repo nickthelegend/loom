@@ -5,6 +5,9 @@
  * `opencode serve` (opencode-fake.ts), shapes from opencode 1.18's OpenAPI.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { OpenCodeAdapter } from "../src/adapters/opencode.js";
@@ -160,4 +163,34 @@ describe("a session opencode can't run (field: big-pickle on 1.18 swallowed ever
     expect(String(err?.payload.message)).toMatch(/never started the turn.*opencode\.log/);
     await adapter.stop();
   }, 15_000);
+});
+
+
+describe("opencode serve dying mid-turn (field: a serve killed mid-start left the agent busy)", () => {
+  it("ends the turn at once with why, and the next send starts a new server", async () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const bin = makeProjectDir({ name: "ocbin" });
+    fs.writeFileSync(path.join(bin, "opencode"),
+      `#!/bin/sh\nexec "${process.execPath}" "${path.join(root, "node_modules", "tsx", "dist", "cli.mjs")}" "${path.join(root, "test", "opencode-fake-serve.mts")}" "$@"\n`, { mode: 0o755 });
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "ocdie" }), { pollMs: 20 });
+    try {
+      const events: AdapterEvent[] = [];
+      adapter.onEvent((e) => events.push(e));
+      await adapter.start();
+      const turn = adapter.send({ text: "a long job" });
+      await new Promise((r) => setTimeout(r, 400));
+      const t0 = Date.now();
+      (adapter as unknown as { child: { kill(s: string): void } }).child.kill("SIGTERM");
+      await turn;
+      expect(Date.now() - t0).toBeLessThan(5_000);
+      expect(String(events.find((e) => e.kind === "error")?.payload.message)).toMatch(/opencode serve (exited|was stopped) \(\w+\) mid-turn — the next send starts it again/);
+      expect(events.filter((e) => e.kind === "error")).toHaveLength(1);
+      expect(adapter.busy()).toBe(false);
+    } finally {
+      await adapter.stop().catch(() => {});
+      process.env.PATH = oldPath;
+    }
+  }, 30_000);
 });

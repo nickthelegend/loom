@@ -83,6 +83,8 @@ describe("AntigravityCliAdapter", () => {
     expect(argv[argv.indexOf("--add-dir") + 1]).toBe(dir); // fresh turn opens the workspace
     expect(argv).toContain("--print-timeout");
     expect(argv[argv.indexOf("--model") + 1]).toBe("gemini-3.6-flash-medium");
+    // every turn says the turn ends at the reply: field turns ended early on "I'll await the notification"
+    expect(argv[argv.indexOf("--print") + 1]).toMatch(/this turn ends the moment you reply[\s\S]*foreground/);
 
     const msg = events.find((e) => e.kind === "message");
     expect((msg?.payload as { text: string }).text).toMatch(/Done\. Created/);
