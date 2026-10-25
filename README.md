@@ -1308,6 +1308,28 @@ loom triggers:off <id>   # or :on, :rm
 - **Who can manage triggers:** only this machine's owner can add, change or fire one, because a
   trigger runs your agents, as you, unattended.
 
+## Slack and Discord: your agents in the team conversation
+
+Mention the bot in Slack or Discord and the message goes to a Loom thread. The agent's answer
+comes back in that Slack thread or Discord channel, and replies there need no mention.
+
+The bot runs inside your daemon with your own bot's tokens: Slack over Socket Mode, Discord over
+its gateway. Nothing needs a public URL, and no hosted service sits in between.
+
+```bash
+loom bridge slack --bot-token xoxb-… --app-token xapp-… --user U012ABC --channel C034DEF
+loom bridge discord --bot-token … --user 1234567890 --project api
+loom bridge            # both, connected or not, and how many messages each heard and ignored
+loom bridge slack --off   # or --remove to forget the tokens
+```
+
+- **Who it hears:** only the people you list. Everyone else, and other bots, are ignored.
+- **Approvals:** these stay in Loom and on your phone. The channel is told when a turn is waiting on one.
+- **Slack app setup:** turn on Socket Mode and give the bot the `app_mentions:read`,
+  `channels:history`, `chat:write` and `im:history` scopes, plus an app-level token with
+  `connections:write`.
+- **Discord bot setup:** turn on the Message Content intent.
+
 ## Scorecards: which agent can you trust with this?
 
 "Finished without an error" isn't the same as "did what it said". Proof, the

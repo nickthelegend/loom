@@ -2859,6 +2859,45 @@ program
   });
 
 program
+  .command("bridge [platform]")
+  .description("your agents in Slack or Discord: mention the bot, the answer comes back in the thread. Runs in the daemon with your own bot (Slack Socket Mode / Discord gateway — no public URL). No platform: show both")
+  .option("--bot-token <token>", "the bot token (Slack xoxb-…, Discord bot token)")
+  .option("--app-token <token>", "Slack: the app-level token (xapp-…, connections:write) Socket Mode uses")
+  .option("--user <ids>", "who it listens to — comma-separated user ids (required: it hears nobody otherwise)")
+  .option("--channel <ids>", "where — comma-separated channel ids (default: any channel the bot is in)")
+  .option("--project <name>", "the project its threads run in (default: the only one)")
+  .option("--agent <id>", "who answers (default: whoever holds the baton)")
+  .option("--off", "turn it off (keeps the settings)")
+  .option("--remove", "forget it, tokens included")
+  .action(async (platform: string | undefined, opts: { botToken?: string; appToken?: string; user?: string; channel?: string; project?: string; agent?: string; off?: boolean; remove?: boolean }) => {
+    const client = await ensureDaemon();
+    if (!platform) {
+      const b = await client.bridges();
+      for (const p of ["slack", "discord"] as const) {
+        const c = b[p];
+        if (!c) { console.log(`${pc.dim("○")} ${p.padEnd(8)} ${pc.dim(`not set up — loom bridge ${p} --bot-token … ${p === "slack" ? "--app-token … " : ""}--user <id>`)}`); continue; }
+        const st = c.status as { connected?: boolean; error?: string; heard?: number; ignored?: number } | null;
+        const mark = !c.enabled ? pc.dim("○") : st?.connected ? pc.green("●") : pc.yellow("●");
+        console.log(`${mark} ${p.padEnd(8)} ${!c.enabled ? pc.dim("off") : st?.connected ? "connected" : pc.yellow(st?.error ?? "connecting")}  ${pc.dim(`listens to ${(c.users as string[]).join(", ")}${(c.channels as string[]).length ? ` in ${(c.channels as string[]).join(", ")}` : ""}${c.project ? ` · ${c.project}` : ""}${st ? ` · heard ${st.heard}, ignored ${st.ignored}` : ""}`)}`);
+      }
+      return;
+    }
+    if (platform !== "slack" && platform !== "discord") fail("slack or discord");
+    if (opts.remove) { await client.removeBridge(platform).catch((e: Error) => fail(e.message)); return void console.log(`${pc.green("✓")} ${platform} bridge removed`); }
+    const out = await client.setBridge(platform, {
+      enabled: !opts.off,
+      ...(opts.botToken ? { botToken: opts.botToken } : {}), ...(opts.appToken ? { appToken: opts.appToken } : {}),
+      ...(opts.user !== undefined ? { users: opts.user } : {}), ...(opts.channel !== undefined ? { channels: opts.channel } : {}),
+      ...(opts.project !== undefined ? { project: opts.project } : {}), ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
+    }).catch((e: Error) => fail(e.message));
+    if (opts.off) return void console.log(`${pc.green("✓")} ${platform} bridge off`);
+    console.log(`${pc.green("✓")} ${platform} ${out.status?.connected ? "connected" : "saved — connecting"}`);
+    console.log(pc.dim(platform === "slack"
+      ? "  mention the bot in a channel it's in; replies in that thread need no mention. Approvals stay in Loom and on your phone."
+      : "  mention the bot in a channel it's in (DMs work too). Approvals stay in Loom and on your phone."));
+  });
+
+program
   .command("triggers")
   .description("schedules and webhooks that start a turn on their own — each in its own thread, through the queue (approach credit: Nuphos)")
   .option("--json", "print as JSON")
