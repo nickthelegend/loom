@@ -18,6 +18,8 @@ export interface PushMessage {
   title: string;
   body: string;
   data?: Record<string, unknown>;
+  /** A notification category the phone registered: "loom-approval" shows Allow / Deny on the alert itself. */
+  categoryId?: string;
 }
 
 /**
@@ -141,6 +143,7 @@ export async function sendExpoPush(tokens: string[], message: PushMessage): Prom
     body: message.body,
     sound: "default",
     ...(message.data ? { data: message.data } : {}),
+    ...(message.categoryId ? { categoryId: message.categoryId } : {}),
   }));
   try {
     await fetch(url, {

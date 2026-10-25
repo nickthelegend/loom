@@ -29,7 +29,7 @@ import {
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import { claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift } from "./api";
+import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -116,7 +116,7 @@ function PairStep(props: { n: number; text: string; link?: boolean }) {
   );
 }
 
-export function PairScreen(props: { onPaired: (c: Creds) => void }) {
+export function PairScreen(props: { onPaired: (c: Creds) => void; /** pairing one more computer: back to the one in use */ onCancel?: () => void }) {
   const insets = useSafeAreaInsets();
   const [url, setUrl] = useState("http://");
   const [token, setToken] = useState("");
@@ -138,7 +138,9 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         tokenMatch ? tokenMatch[1]! : token.trim(),
         cloudFromLink(raw),
       );
-      await saveCreds(creds);
+      // named for the computer it is (its hostname), so a second one reads apart from the first
+      const name = await api<{ hostname?: string }>(creds, "/api/version").then((v) => v.hostname).catch(() => undefined);
+      await saveCreds(creds, name);
       props.onPaired(creds);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -182,6 +184,12 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
 
   return (
     <View style={{ flex: 1, justifyContent: "center", padding: spacing.xl, gap: 14 }}>
+      {props.onCancel && (
+        <TouchableOpacity onPress={props.onCancel} accessibilityRole="button" accessibilityLabel="Back to the computer in use"
+          style={{ position: "absolute", top: spacing.lg, left: spacing.lg, minHeight: 44, minWidth: 44, justifyContent: "center" }}>
+          <Text style={{ color: T.dim, fontSize: 14, fontWeight: "600" }}>‹ Back</Text>
+        </TouchableOpacity>
+      )}
       <Text
         style={{
           color: T.text,

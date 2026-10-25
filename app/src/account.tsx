@@ -16,6 +16,7 @@ import { ConnectionBadge, GitHubMark, routeHint, useConnRoute } from "./brand";
 import { OAUTH_LABEL } from "./auth-model";
 import { Panel, SectionLabel, TAP } from "./components";
 import { Sheet } from "./observatory";
+import { MachinesSection } from "./machines";
 import { useTeamSummary } from "./team";
 import {
   loadUsageStatsEnabled,
@@ -96,6 +97,10 @@ export function AccountSheet(props: {
   onSignedOut: () => void;
   /** Open the Fleet screen's Team section. */
   onOpenTeam?: () => void;
+  /** Another paired computer was picked (or the one in use was forgotten: the next one, or null). */
+  onSwitchMachine?: (c: Creds | null) => void;
+  /** Pair one more computer. */
+  onAddMachine?: () => void;
   themePref: ThemePref;
 }) {
   const profile = profileOf(props.user);
@@ -189,6 +194,11 @@ export function AccountSheet(props: {
         )}
         {err && <Text style={{ color: T.err, fontSize: 12.5 }}>{err}</Text>}
       </Panel>
+
+      {/* every computer this phone is paired with — switch in one tap */}
+      {props.onSwitchMachine && props.onAddMachine && (
+        <MachinesSection visible={props.visible} onSwitch={props.onSwitchMachine} onAdd={props.onAddMachine} />
+      )}
 
       {/* appearance — the desktop's three choices */}
       <View style={{ gap: 6 }}>

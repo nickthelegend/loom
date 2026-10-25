@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Works over Loom Cloud.
   - Approach credit: Nuphos's shared sessions.
 
+- **Phone: every computer, one app.** The app pairs with several computers and lists them under Account ▸ Computers: live status and latency, one tap to switch, long-press to rename or forget.
+  - Pairing adds a computer instead of replacing one, and a computer is named by its hostname (`/api/version` now reports it).
+  - When a computer revokes the phone, the next paired one carries on.
+  - Phones paired before this keep their computer, which becomes the first entry.
+- **Phone: Allow / Deny on the approval alert.** Approval pushes carry the `loom-approval` category, the approval id and the computer's hostname. The phone answers on the computer that asked, without opening the app.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.

@@ -1150,6 +1150,15 @@ phone buzzes when an agent **needs input**, when a **route completes or fails**,
 when a solo turn finishes — route hops are deliberately silent (a 5-step pipeline
 buzzes once, not five times). Verify with `loom clients --ping`.
 
+## Your phone, for every computer
+
+The phone app pairs with each computer you run Loom on: your desktop, your laptop, a box in the
+cloud. **Account ▸ Computers** shows them all live (answering or not, and how fast), and one tap
+switches between them. With Loom Cloud on, each answers from any network, through its own key.
+
+**Approve from the lock screen:** when an agent asks to use a tool, the alert has **Allow** and
+**Deny** buttons. The answer goes straight to the computer that asked, without opening the app.
+
 ## Permissions: bypass, auto, or always ask
 
 Every agent CLI has its own idea of "may I?". Loom gives you one dropdown with

@@ -8,6 +8,7 @@ import { AppState, Platform, type AppStateStatus } from "react-native";
 import type { LiveSnapshot } from "./live-model";
 import { RelayClient, parseCloudFragment } from "./relay-client";
 import { unpackCredentials, type RelayCredentials } from "./relay-protocol";
+import { activeMachine, credsOf, nextAfter, removeMachine, renameMachine, upsertMachine, type Machine } from "./machines-model";
 import { supabaseRelayTransport } from "./relay-transport";
 
 // Credentials live in the device keychain on native; on web (Expo web, used for
@@ -439,7 +440,68 @@ const TOKEN_KEY = "loomToken";
 const RELAY_KEY = "loomRelay";
 const RELAY_CLIENT_KEY = "loomRelayClientId";
 
-export async function loadCreds(): Promise<Creds | null> {
+// ── several computers (machines-model.ts) ──
+// The active computer's creds also stay under the original keys, so everything that reads
+// "the" creds keeps working; the list is what makes a second computer possible.
+const MACHINES_KEY = "loomMachines";
+const ACTIVE_KEY = "loomActiveMachine";
+
+export async function listMachines(): Promise<{ machines: Machine[]; activeId: string | null }> {
+  let machines: Machine[] = [];
+  try { machines = JSON.parse((await kv.get(MACHINES_KEY)) || "[]") as Machine[]; } catch { machines = []; }
+  if (!Array.isArray(machines)) machines = [];
+  let activeId = (await kv.get(ACTIVE_KEY)) || null;
+  // phones paired before several computers: their one pairing becomes the first entry
+  if (!machines.length) {
+    const legacy = await loadLegacyCreds();
+    if (legacy) {
+      const up = upsertMachine([], legacy);
+      machines = up.list;
+      activeId = up.id;
+      await Promise.all([kv.set(MACHINES_KEY, JSON.stringify(machines)), kv.set(ACTIVE_KEY, up.id)]);
+    }
+  }
+  return { machines, activeId };
+}
+
+async function writeMachines(machines: Machine[], activeId: string | null): Promise<void> {
+  await kv.set(MACHINES_KEY, JSON.stringify(machines));
+  const active = activeMachine(machines, activeId);
+  if (active) {
+    await kv.set(ACTIVE_KEY, active.id);
+    await writeLegacyCreds(credsOf(active) as Creds);
+  } else {
+    await kv.del(ACTIVE_KEY);
+    await Promise.all([kv.del(URL_KEY), kv.del(TOKEN_KEY), kv.del(RELAY_KEY)]);
+  }
+}
+
+/** Switch to another paired computer; its creds come back for the app to use. */
+export async function switchMachine(id: string): Promise<Creds | null> {
+  const { machines } = await listMachines();
+  const m = machines.find((x) => x.id === id);
+  if (!m) return null;
+  connection.reset();
+  await writeMachines(machines, id);
+  return credsOf(m) as Creds;
+}
+
+export async function renamePairedMachine(id: string, name: string): Promise<void> {
+  const { machines, activeId } = await listMachines();
+  await writeMachines(renameMachine(machines, id, name), activeId);
+}
+
+/** Forget one computer; the next one (if any) becomes active and is returned. */
+export async function forgetMachine(id: string): Promise<Creds | null> {
+  const { machines, activeId } = await listMachines();
+  const left = removeMachine(machines, id);
+  const next = activeId === id ? nextAfter(machines, id) : activeMachine(left, activeId);
+  connection.reset();
+  await writeMachines(left, next?.id ?? null);
+  return next ? (credsOf(next) as Creds) : null;
+}
+
+async function loadLegacyCreds(): Promise<Creds | null> {
   const [url, token, relay] = await Promise.all([kv.get(URL_KEY), kv.get(TOKEN_KEY), kv.get(RELAY_KEY)]);
   if (!url || !token) return null;
   let cloud: CloudCreds | undefined;
@@ -451,7 +513,7 @@ export async function loadCreds(): Promise<Creds | null> {
   return { url, token, ...(cloud ? { relay: cloud } : {}) };
 }
 
-export async function saveCreds(creds: Creds): Promise<void> {
+async function writeLegacyCreds(creds: Creds): Promise<void> {
   await Promise.all([
     kv.set(URL_KEY, creds.url),
     kv.set(TOKEN_KEY, creds.token),
@@ -459,9 +521,27 @@ export async function saveCreds(creds: Creds): Promise<void> {
   ]);
 }
 
+export async function loadCreds(): Promise<Creds | null> {
+  const { machines, activeId } = await listMachines();
+  const m = activeMachine(machines, activeId);
+  return m ? (credsOf(m) as Creds) : null;
+}
+
+/** Pairing saves here: a new computer joins the list (an address paired again is refreshed) and becomes active. */
+export async function saveCreds(creds: Creds, name?: string): Promise<void> {
+  const { machines } = await listMachines();
+  const up = upsertMachine(machines, creds, name ? { name } : {});
+  await writeMachines(up.list, up.id);
+}
+
+/** This computer let go of the phone (revoked, or unpaired here): forget it; another paired one carries on. */
 export async function clearCreds(): Promise<void> {
   connection.reset();
-  await Promise.all([kv.del(URL_KEY), kv.del(TOKEN_KEY), kv.del(RELAY_KEY)]);
+  const { machines, activeId } = await listMachines();
+  const active = activeMachine(machines, activeId);
+  if (!active) { await Promise.all([kv.del(URL_KEY), kv.del(TOKEN_KEY), kv.del(RELAY_KEY)]); return; }
+  const left = removeMachine(machines, active.id);
+  await writeMachines(left, nextAfter(machines, active.id)?.id ?? null);
 }
 
 /**

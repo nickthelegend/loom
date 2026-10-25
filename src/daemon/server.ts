@@ -469,6 +469,8 @@ export class LoomDaemon {
         platform: `${process.platform}-${process.arch}`,
         uptimeSec: Math.round(process.uptime()),
         pid: process.pid,
+        // what a phone paired with several computers calls this one
+        hostname: os.hostname(),
         ...(this.swap ? { swap: this.swap } : {}),
       });
     });
@@ -705,13 +707,17 @@ export class LoomDaemon {
     const tokens = this.pushTokens(category);
     if (!tokens.length) return;
     const name = listProjects().find((p) => p.id === projectId)?.name ?? "project";
+    // a tool approval can be answered on the alert itself: Allow / Deny, on the computer that asked
+    const approval = event.kind === "approval" && event.payload.phase === "requested" && typeof event.payload.approvalId === "string";
     void sendExpoPush(tokens, {
       ...pushContent(name, event, { reply }),
+      ...(approval ? { categoryId: "loom-approval" } : {}),
       // the phone opens this project (and goal, or chat) when the alert is tapped
       data: {
         projectId,
         kind: event.kind,
         category,
+        ...(approval ? { approvalId: event.payload.approvalId, daemon: os.hostname() } : {}),
         ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}),
         ...(typeof event.payload.crewId === "string" ? { crewId: event.payload.crewId } : {}),
         ...(event.chat ? { chat: event.chat } : {}),
