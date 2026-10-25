@@ -690,3 +690,12 @@ describe("which thread the orchestrator answers in", () => {
     expect(summary.inPlace).toBe(true);
   }, 60_000);
 });
+
+describe("a task's own time limit (field: agy cut a browser audit at 30 min)", () => {
+  it("the orchestrator can give a long task timeoutMin, clamped to 5–240", async () => {
+    const { parseOrchestraActions } = await import("../src/core/orchestra.js");
+    const acts = parseOrchestraActions('```loom\n{"actions":[{"type":"spawn","title":"audit","agent":"agy","prompt":"audit every page","timeoutMin":60},' +
+      '{"type":"spawn","title":"x","agent":"agy","prompt":"y","timeoutMin":999},{"type":"spawn","title":"z","agent":"agy","prompt":"w"}]}\n```')!;
+    expect(acts.map((a) => (a as { timeoutMin?: number }).timeoutMin)).toEqual([60, 240, undefined]);
+  });
+});

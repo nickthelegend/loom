@@ -143,8 +143,7 @@ export class AntigravityCliAdapter extends AdapterBase {
   }
 
   /** agy wants a Go-style duration; ms → "<n>s". */
-  private timeoutArg(): string {
-    const ms = this.timeoutMs();
+  private timeoutArg(ms = this.timeoutMs()): string {
     return `${Math.max(1, Math.round(ms / 1000))}s`;
   }
 
@@ -167,7 +166,9 @@ export class AntigravityCliAdapter extends AdapterBase {
     const mode = permissionFor("antigravity-cli", this.options as Record<string, unknown>);
     const permArgs =
       mode === "bypass" ? ["--dangerously-skip-permissions"] : ["--mode", mode === "ask" ? "plan" : "accept-edits"];
-    const args = ["--print", text, ...permArgs, "--print-timeout", this.timeoutArg()];
+    // a turn the orchestrator said would run long gets its own limit
+    const limitMs = input.timeoutMs && input.timeoutMs > 0 ? input.timeoutMs : this.timeoutMs();
+    const args = ["--print", text, ...permArgs, "--print-timeout", this.timeoutArg(limitMs)];
     if (resume) {
       // A resumed conversation keeps its original workspace; --add-dir is only
       // meaningful (and only needed) when opening a fresh one.
@@ -223,12 +224,12 @@ export class AntigravityCliAdapter extends AdapterBase {
           // success — and saying it timed out beats a silent "finished" with nothing in the thread (#246)
           if (!message) {
             const took = Date.now() - started;
-            const limit = this.timeoutMs();
+            const limit = limitMs;
             const timedOut = took >= Math.max(limit - 2_000, limit * 0.9);
             const why = timedOut
               ? `agy timed out after ${Math.round(took / 1000)}s with no reply — raise this agent's timeoutMs for turns this size`
               : `agy finished without a reply${stderrTail.trim() ? `: ${stderrTail.trim().split("\n").pop()!.slice(0, 200)}` : ""}`;
-            this.emit({ kind: "error", payload: { message: why, ...(timedOut ? { timedOut: true, timeoutMs: this.timeoutMs() } : {}), ...(stderrTail ? { stderr: stderrTail } : {}) } });
+            this.emit({ kind: "error", payload: { message: why, ...(timedOut ? { timedOut: true, timeoutMs: limitMs } : {}), ...(stderrTail ? { stderr: stderrTail } : {}) } });
             reject(new Error(why));
             return;
           }

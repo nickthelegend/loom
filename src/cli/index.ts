@@ -1670,6 +1670,8 @@ interface ApplyResult {
   merged?: string;
   into?: string;
   pushed?: boolean;
+  /** The run's work was already on origin (a worker pushed it): local was fast-forwarded to it. */
+  alreadyOnOrigin?: boolean;
   secrets?: import("../core/secret-scan.js").SecretFinding[];
   error?: string;
 }
@@ -1721,10 +1723,28 @@ async function waitScanApply(client: DaemonClient, projectId: string, dir: strin
   const { findSecrets } = await import("../core/secret-scan.js");
   const secrets = findSecrets(diff);
   if (secrets.length) return { ok: false, runId, status: run.status, secrets, error: "secrets in the run's changes — not applied" };
+  // A worker with push rights may have pushed the run's work itself: origin is then ahead of local
+  // with the same tree. Fast-forward to it and say so, instead of merging beside it (field).
+  let alreadyOnOrigin = false;
+  const quiet = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  try {
+    quiet("remote", "get-url", "origin");
+    try { execFileSync("git", ["fetch", "-q", "origin"], { cwd: dir, stdio: "ignore", timeout: 60_000 }); } catch { /* offline: carry on with what we know */ }
+    const branch = quiet("rev-parse", "--abbrev-ref", "HEAD").trim();
+    const upstream = `origin/${branch}`;
+    const has = (a: string, b: string) => { try { quiet("merge-base", "--is-ancestor", a, b); return true; } catch { return false; } };
+    const tree = (ref: string) => { try { return quiet("rev-parse", `${ref}^{tree}`).trim(); } catch { return ""; } };
+    const upTree = tree(upstream);
+    if (upTree && (has(String(run.branch), upstream) || upTree === tree(String(run.branch))) && !has(upstream, "HEAD") && has("HEAD", upstream)) {
+      git("merge", "--ff-only", upstream);
+      alreadyOnOrigin = true;
+    }
+  } catch { /* no origin, or it can't fast-forward: the normal merge below */ }
   let out: Record<string, unknown>;
   try { out = await client.orchestraAction(projectId, runId, "apply"); }
   catch (e) { return { ok: false, runId, status: run.status, error: `merge failed: ${(e as Error).message}` }; }
-  const res: ApplyResult = { ok: true, runId, status: run.status, merged: String(out.merged ?? run.branch), into: String(out.into ?? "") };
+  const res: ApplyResult = { ok: true, runId, status: run.status, merged: String(out.merged ?? run.branch), into: String(out.into ?? ""), ...(alreadyOnOrigin ? { alreadyOnOrigin: true } : {}) };
+  if (opts.push && alreadyOnOrigin) return { ...res, pushed: false };
   if (opts.push) {
     try { git("push", "origin", "HEAD"); res.pushed = true; }
     catch (e) { return { ...res, ok: false, pushed: false, error: `merged, but the push failed: ${(e as Error).message.split("\n")[0]}` }; }
@@ -1819,6 +1839,7 @@ function progressSink(opts: { progress?: boolean; json?: boolean }, label = ""):
 }
 
 function printApplyResult(r: ApplyResult): void {
+  if (r.ok && r.alreadyOnOrigin) return void console.log(`${pc.green("✓")} ${r.runId} was already on origin/${r.into || "your branch"} — fast-forwarded ${pc.bold(r.into || "your branch")} to it, nothing to push`);
   if (r.ok) return void console.log(`${pc.green("✓")} ${r.runId} merged into ${pc.bold(r.into || "your branch")}${r.pushed ? " and pushed" : ""} — no secrets in its changes`);
   console.log(`${pc.red("✗")} ${r.runId} (${r.status}): ${r.error}`);
   for (const s of r.secrets ?? []) console.log(pc.red(`    ${s.file}${s.line ? `:${s.line}` : ""} — ${s.what}`));
@@ -2942,17 +2963,27 @@ program
     const results: Array<ApplyResult & { project: string }> = [];
     for (const step of steps) {
       const p = projects.find((x) => x.name === step.project || x.id === step.project || path.resolve(x.dir) === path.resolve(step.project));
-      if (!p) { results.push({ project: step.project, ok: false, runId: "-", status: "not started", error: `no project "${step.project}" — loom projects` }); if (!opts.keepGoing) break; continue; }
+      if (!p) {
+        const r = { project: step.project, ok: false, runId: "-", status: "not started", error: `no project "${step.project}" — loom projects` };
+        results.push(r);
+        if (opts.json) process.stderr.write(JSON.stringify({ step: r, ts: Date.now() }) + "\n"); else printApplyResult(r);
+        if (!opts.keepGoing) break;
+        continue;
+      }
       if (!opts.json) console.log(`${pc.magenta("▶")} ${pc.bold(p.name)} — ${step.goal.slice(0, 80)}`);
       try {
         const { run } = await client.startOrchestra(p.id, { goal: step.goal, ...runOptions({ ...opts, ...step.flags }) });
         const r = { project: p.name, ...(await waitScanApply(client, p.id, p.dir, run.id, { push: Boolean(opts.push), onProgress: progressSink(opts, p.name) })) };
         results.push(r);
-        if (!opts.json) printApplyResult(r);
+        // every project's outcome is said as it happens — with --json, on stderr (stdout stays the one summary)
+        if (opts.json) process.stderr.write(JSON.stringify({ step: r, ts: Date.now() }) + "\n");
+        else printApplyResult(r);
         if (!r.ok && !opts.keepGoing) break;
       } catch (e) {
-        results.push({ project: p.name, ok: false, runId: "-", status: "not started", error: (e as Error).message });
-        if (!opts.json) console.log(`${pc.red("✗")} ${p.name}: ${(e as Error).message}`);
+        const r = { project: p.name, ok: false, runId: "-", status: "not started", error: (e as Error).message };
+        results.push(r);
+        if (opts.json) process.stderr.write(JSON.stringify({ step: r, ts: Date.now() }) + "\n");
+        else console.log(`${pc.red("✗")} ${p.name}: ${(e as Error).message}`);
         if (!opts.keepGoing) break;
       }
     }

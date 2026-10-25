@@ -63,8 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Instructions for a conversation:** a chat's menu ▸ Instructions…, or `loom chat:instructions "…" --chat <chat>`. Standing guidance for one chat (main included) that goes with every turn in it, whichever agent answers.
 
+- **A task can carry its own time limit.** The orchestrator can give a long task `"timeoutMin": 60` (clamped to 5–240), and that task's turns run that long. Antigravity honours it, where its default stays at 30 min. Field: a browser audit was cut at 30 min twice in one night.
+
 ### Fixed
 
+- **A run a worker already pushed:** `loom chain` and `orchestrate --apply` fetch origin. When `origin/<branch>` already has the run's work, they fast-forward local to it and say "already on origin", with nothing to push. Before, local was left behind and the run still said "apply it". `orchestra:apply` records a run that's already in the branch without an empty merge commit.
+- **`loom chain --json` says each project's outcome as it happens,** as `{"step":…}` lines on stderr, including projects that weren't found or didn't start. Stdout stays the one summary.
 - The alerts webhook now checks its secret in constant time.
 
 ## [1.2.8] — 2026-10-26

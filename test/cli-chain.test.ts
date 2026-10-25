@@ -57,6 +57,28 @@ class Writer extends AdapterBase {
     this._busy = false;
   }
 }
+/** A worker with push rights that pushes its own work to origin/main before Loom applies the run (field). */
+class Pusher extends AdapterBase {
+  async available() { return true; }
+  async start() {}
+  async stop() {}
+  async interrupt() {}
+  async diff() { return ""; }
+  async send(input: SendInput) {
+    this._busy = true;
+    const m = /put:([^:]+):(.+)/.exec(input.text);
+    if (m) {
+      fs.writeFileSync(path.join(this.projectDir, m[1]!), `${m[2]}\n`);
+      const git = (...a: string[]) => execFileSync("git", a, { cwd: this.projectDir, stdio: "ignore" });
+      git("add", "-A");
+      git("-c", "user.name=w", "-c", "user.email=w@w", "commit", "-qm", "worker's own commit");
+      git("push", "-q", "origin", "HEAD:main");
+    }
+    this.emit({ kind: "message", payload: { text: "done, and pushed" } });
+    this._busy = false;
+  }
+}
+registerAgentKind("chain-pusher", (cfg, dir) => new Pusher(cfg.id, "chain-pusher", dir));
 registerAgentKind("chain-conductor", (cfg, dir) => new Conductor(cfg.id, "chain-conductor", dir));
 registerAgentKind("chain-writer", (cfg, dir) => new Writer(cfg.id, "chain-writer", dir));
 
@@ -118,7 +140,7 @@ describe("loom chain (#340)", () => {
     ].join("\n");
     const r = await runCli(["chain", "--json"], plan);
     expect(r.code).toBe(1);
-    const out = JSON.parse(r.out.trim().split("\n").at(-1)!);
+    const out = JSON.parse(r.out.trim().split("\n").filter((l) => l.startsWith('{"ok"')).at(-1)!);
     expect(out.ok).toBe(false);
     expect(out.steps.map((s: { project: string; ok: boolean }) => [s.project, s.ok])).toEqual([["chain-a", true], ["chain-b", false]]);
     expect(out.steps[1].secrets[0]).toMatchObject({ file: "leak.ts", what: "what looks like a secret key" });
@@ -130,7 +152,7 @@ describe("loom chain (#340)", () => {
 
   it("--keep-going carries on past a failure, and an unknown project says so", async () => {
     const r = await runCli(["chain", "--json", "--keep-going"], "nope :: anything\nchain-c :: write two.txt second\n");
-    const out = JSON.parse(r.out.trim().split("\n").at(-1)!);
+    const out = JSON.parse(r.out.trim().split("\n").filter((l) => l.startsWith('{"ok"')).at(-1)!);
     expect(out.steps.map((s: { project: string; ok: boolean }) => [s.project, s.ok])).toEqual([["nope", false], ["chain-c", true]]);
     expect(out.steps[0].error).toMatch(/no project "nope"/);
     expect(fs.readFileSync(path.join(dirs.c!, "two.txt"), "utf8")).toBe("second\n");
@@ -150,7 +172,7 @@ describe("loom chain (#340)", () => {
       const plan = ["chain-a :: [-o c -w w] write x.txt x", "nope :: anything", "chain-b :: write y.txt y", "chain-c :: [-w ghost] write z.txt z"].join("\n");
       const r = await runCli(["chain", "--check", "--json"], plan);
       expect(r.code).toBe(1);
-      const out = JSON.parse(r.out.trim().split("\n").at(-1)!);
+      const out = JSON.parse(r.out.trim().split("\n").filter((l) => l.startsWith('{"ok"')).at(-1)!);
       expect(out.ok).toBe(false);
       const [a, nope, b, c] = out.steps;
       expect(a).toMatchObject({ project: "chain-a", ok: true, orchestrator: "c", workers: [{ agent: "w" }], errors: [] });
@@ -161,6 +183,33 @@ describe("loom chain (#340)", () => {
     } finally {
       execFileSync("git", ["checkout", "--", ".gitignore"], { cwd: dirs.b });
     }
+  }, 120_000);
+
+  it("a run a worker already pushed to origin: local fast-forwards to it, says so, and nothing is merged beside it", async () => {
+    const dir = makeProjectDir({ name: "chain-d", agents: [{ id: "c", kind: "chain-conductor", role: "orchestrator" }, { id: "w", kind: "chain-pusher", role: "worker" }], brain: { extractor: "off" } } as never);
+    const origin = tmpDir("chain-d-origin");
+    const git = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, encoding: "utf8" });
+    git(origin, "init", "-q", "--bare", "-b", "main");
+    git(dir, "init", "-q", "-b", "main");
+    fs.writeFileSync(path.join(dir, ".gitignore"), ".loom/\n");
+    git(dir, "add", "-A");
+    git(dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "seed");
+    git(dir, "remote", "add", "origin", origin);
+    git(dir, "push", "-q", "-u", "origin", "main");
+    await new DaemonClient(readDaemonConfig()!).addProject(dir);
+    const r = await runCli(["chain", "--json", "--push"], "chain-d :: [-o c -w w] write pushed.txt by the worker\n");
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.out.trim().split("\n").filter((l) => l.startsWith('{"ok"')).at(-1)!);
+    expect(out.steps[0]).toMatchObject({ project: "chain-d", ok: true, alreadyOnOrigin: true, pushed: false });
+    // the step was said as it happened (stderr), not only in the summary
+    expect(r.out).toContain('{"step":{"project":"chain-d"');
+    expect(fs.readFileSync(path.join(dir, "pushed.txt"), "utf8")).toBe("by the worker\n");
+    // local main is origin/main exactly — no merge commit beside it
+    expect(git(dir, "rev-parse", "HEAD").trim()).toBe(git(dir, "rev-parse", "origin/main").trim());
+    const client = new DaemonClient(readDaemonConfig()!);
+    const id = (await client.listProjects()).projects.find((p) => p.name === "chain-d")!.id;
+    const run = (await client.orchestraRuns(id)).runs.find((x) => x.goal.includes("pushed.txt"))!;
+    expect(run.applied).toBeTruthy();
   }, 120_000);
 
   it("run options apply to every line, and a line's own [ … ] wins (no claude-code planning unless asked)", async () => {
