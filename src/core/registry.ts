@@ -160,7 +160,38 @@ export function projectLoomDir(projectDir: string): string {
 export function readProjectConfig(projectDir: string): ProjectConfig | null {
   const file = path.join(projectLoomDir(projectDir), "config.json");
   if (!fs.existsSync(file)) return null;
-  return readJson<ProjectConfig>(file, { name: path.basename(projectDir), agents: [] });
+  const cfg = readJson<ProjectConfig>(file, { name: path.basename(projectDir), agents: [] });
+  // An agent's mode lives in options.permissions; `"permissions": "bypass"` on the agent itself is
+  // what a person writes by hand, and was silently ignored — codex stayed sandboxed in every
+  // orchestra worker (field). Read it as the mode; an explicit options.permissions still wins.
+  for (const a of cfg.agents ?? []) {
+    const top = (a as { permissions?: unknown }).permissions;
+    if ((top === "bypass" || top === "auto" || top === "ask") && !(a.options as { permissions?: unknown } | undefined)?.permissions) {
+      a.options = { ...(a.options ?? {}), permissions: top };
+    }
+  }
+  return cfg;
+}
+
+const AGENT_KEYS = new Set(["id", "kind", "role", "options", "memoryFiles", "enabled", "instructions", "avatar", "permissions"]);
+/** Keys an adapter reads from options — someone writing one on the agent itself meant it there. */
+const OPTION_KEYS = new Set(["model", "bin", "extraArgs", "baseUrl", "env", "effort", "sandbox", "timeoutMs", "startTimeoutMs", "permissionMode", "mode", "args"]);
+
+/**
+ * Keys on an agent in .loom/config.json that Loom doesn't read — a typo or a misplaced option
+ * otherwise fails silently (a top-level "permissions" did, on 1.2.6). One line per key.
+ */
+export function agentConfigWarnings(cfg: ProjectConfig): string[] {
+  const out: string[] = [];
+  for (const a of cfg.agents ?? []) {
+    for (const key of Object.keys(a)) {
+      if (AGENT_KEYS.has(key)) continue;
+      const where = key === "mode" ? "options.permissions" : `options.${key}`;
+      out.push(`"${a.id}" has "${key}", which Loom doesn't read` +
+        (OPTION_KEYS.has(key) ? ` — put it in ${where}` : ` (known: ${[...AGENT_KEYS].join(", ")})`));
+    }
+  }
+  return out;
 }
 
 export function writeProjectConfig(projectDir: string, cfg: ProjectConfig): void {

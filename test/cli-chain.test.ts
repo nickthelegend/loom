@@ -135,4 +135,19 @@ describe("loom chain (#340)", () => {
     expect(out.steps[0].error).toMatch(/no project "nope"/);
     expect(fs.readFileSync(path.join(dirs.c!, "two.txt"), "utf8")).toBe("second\n");
   }, 120_000);
+
+  it("run options apply to every line, and a line's own [ … ] wins (no claude-code planning unless asked)", async () => {
+    const r = await runCli(["chain", "--json", "-p", "3"], "chain-a :: [-o c -w w -p 2] write opts.txt chosen\n");
+    expect(r.code).toBe(0);
+    const client = new DaemonClient(readDaemonConfig()!);
+    const { projects } = await client.listProjects();
+    const id = projects.find((p) => p.name === "chain-a")!.id;
+    const run = (await client.orchestraRuns(id)).runs.find((x) => x.goal.includes("opts.txt"))!;
+    expect(run.orchestrator.agent).toBe("c");
+    expect(run.workers).toEqual(["w"]);
+    expect(run.maxParallel).toBe(2);
+    const bad = await runCli(["chain"], "chain-a :: [--nope] write z.txt z\n");
+    expect(bad.code).not.toBe(0);
+    expect(bad.out).toMatch(/unknown run option --nope/);
+  }, 120_000);
 });

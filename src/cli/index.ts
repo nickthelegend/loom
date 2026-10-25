@@ -336,6 +336,9 @@ program
     const { project } = await client.project(res.project.id);
     console.log(pc.green(`✓ project "${project.name}" (${project.id})`));
     for (const a of project.agents) console.log(formatAgentRow(a));
+    const { agentConfigWarnings, readProjectConfig } = await import("../core/registry.js");
+    const cfg = readProjectConfig(dir);
+    for (const w of cfg ? agentConfigWarnings(cfg) : []) console.log(pc.yellow(`! ${w}`));
     await offerGitignore(dir, opts.gitignore);
     console.log(pc.dim("\nedit .loom/config.json to add/remove agents or change roles"));
     console.log(pc.dim("then: loom chat"));
@@ -1479,13 +1482,25 @@ const countsLine = (run: { tasks: Array<{ status: string }> }) => {
 function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<string, unknown> {
   return {
     id: run.id, goal: run.goal, status: run.status, ...(run.status === "aborted" && (run as { interrupted?: unknown }).interrupted ? { resumable: true } : {}),
-    terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, ...taskCounts(run) }, branch: run.branch, costUsd: run.costUsd,
+    // every outcome key, 0 when none: a script reads tasks.failed without checking it exists
+    terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, done: 0, running: 0, pending: 0, needs_input: 0, conflict: 0, failed: 0, cancelled: 0, ...taskCounts(run) },
+    branch: run.branch, costUsd: run.costUsd,
     ...(run.landing?.pr ? { pr: run.landing.pr } : {}), ...(run.question ? { question: run.question } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
   };
 }
 const isTerminalStatus = (s: string) => s === "completed" || s === "failed" || s === "aborted" || s === "moved";
 
-function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
+/** Each worker's access mode (bypass | auto | ask), from the project's roster, for showing beside the run. */
+function workerModes(run: { workers: string[] }, agents: Array<{ id: string; kind: string; permissions?: string }>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const w of run.workers) {
+    const a = agents.find((x) => x.id === w || x.kind === w);
+    if (a) out[w] = a.permissions ?? "default";
+  }
+  return out;
+}
+
+function printRun(run: import("../core/orchestra.js").OrchestraRun, modes: Record<string, string> = {}): void {
   console.log(
     run.race
       ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  race · ${countsLine(run)} · ${fmtUsd(run.costUsd)}`
@@ -1494,7 +1509,7 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
   if (run.race) console.log(`   ${pc.dim("entrants")} ${run.workers.join(", ")}`);
-  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.join(", ")}`);
+  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.map((w) => (modes[w] ? `${w} (${modes[w]})` : w)).join(", ")}`);
   for (const t of run.tasks) {
     const color = TASK_COLOR[t.status] ?? ((x: string) => x);
     const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
@@ -1513,6 +1528,35 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
     } else console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
   }
   if (run.race && run.applied?.task) console.log(`   ${pc.green("kept:")} ${run.applied.task} → ${run.applied.into}`);
+}
+
+/** Run options a chain takes for every line, and a line can override (`[-o grok-code --solo]`). */
+interface RunFlags { orchestrator?: string; workers?: string; parallel?: string; solo?: boolean; maxUsd?: string }
+
+function parseRunFlags(text: string): RunFlags {
+  const t = text.trim().split(/\s+/).filter(Boolean);
+  const f: RunFlags = {};
+  for (let i = 0; i < t.length; i++) {
+    const k = t[i]!, v = () => { const x = t[++i]; if (!x) throw new Error(`${k} needs a value`); return x; };
+    if (k === "-o" || k === "--orchestrator") f.orchestrator = v();
+    else if (k === "-w" || k === "--workers") f.workers = v();
+    else if (k === "-p" || k === "--parallel") f.parallel = v();
+    else if (k === "--max-usd") f.maxUsd = v();
+    else if (k === "--solo") f.solo = true;
+    else throw new Error(`unknown run option ${k} (-o, -w, -p, --solo, --max-usd)`);
+  }
+  return f;
+}
+
+/** RunFlags as startOrchestra's body. */
+function runOptions(f: RunFlags): { orchestrator?: string; workers?: string[]; maxParallel?: number; maxUsd?: number; team?: boolean } {
+  return {
+    ...(f.orchestrator ? { orchestrator: f.orchestrator } : {}),
+    ...(f.workers ? { workers: f.workers.split(",").map((w) => w.trim()).filter(Boolean) } : {}),
+    ...(f.parallel ? { maxParallel: Number(f.parallel) } : {}),
+    ...(f.maxUsd ? { maxUsd: Number(f.maxUsd) } : {}),
+    ...(f.solo ? { team: false } : {}),
+  };
 }
 
 interface ApplyResult {
@@ -1662,7 +1706,9 @@ program
         }
         if (opts.watch) return void (await watchRun(client, project.id, runId));
         const { run } = await client.orchestraRun(project.id, runId);
-        return void (opts.json ? console.log(JSON.stringify(runJson(run))) : printRun(run));
+        // which access each worker runs with: "bypass on the agent" that doesn't reach a worker shows here
+        const modes = workerModes(run, project.agents as Array<{ id: string; kind: string; permissions?: string }>);
+        return void (opts.json ? console.log(JSON.stringify({ ...runJson(run), workerModes: modes })) : printRun(run, modes));
       }
       const { runs } = await client.orchestraRuns(project.id);
       if (opts.json) return void console.log(JSON.stringify(runs.map(runJson)));
@@ -2616,14 +2662,26 @@ program
   .option("--push", "push each project's branch after merging its run")
   .option("--keep-going", "carry on to the next project when one fails")
   .option("--json", "print a JSON summary at the end")
-  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean }) => {
+  .option("-o, --orchestrator <agent>", "who plans every run (a line can say otherwise: `<project> :: [-o grok-code] <goal>`)")
+  .option("-w, --workers <agents>", "comma-separated workers for every run")
+  .option("-p, --parallel <n>", "tasks at once in each run")
+  .option("--solo", "keep every run's tasks on this machine")
+  .option("--max-usd <n>", "stop a run when it has spent this much")
+  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean } & RunFlags) => {
     const text = file && file !== "-" ? fs.readFileSync(file, "utf8") : await new Promise<string>((resolve) => {
       let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (d) => (buf += d)); process.stdin.on("end", () => resolve(buf));
     });
     const steps = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).map((l) => {
       const at = l.indexOf("::");
       if (at < 0) fail(`each line is "<project> :: <goal>" — got: ${l}`);
-      return { project: l.slice(0, at).trim(), goal: l.slice(at + 2).trim() };
+      // a line's own run options, in brackets before its goal, win over the command's
+      const rest = l.slice(at + 2).trim();
+      const own = /^\[([^\]]*)\]\s*/.exec(rest);
+      let flags: RunFlags = {};
+      if (own) {
+        try { flags = parseRunFlags(own[1]!); } catch (e) { fail(`${(e as Error).message} — in: ${l}`); }
+      }
+      return { project: l.slice(0, at).trim(), goal: own ? rest.slice(own[0].length).trim() : rest, flags };
     });
     if (!steps.length) fail("nothing to run — one `<project> :: <goal>` per line");
     const client = await ensureDaemon();
@@ -2634,7 +2692,7 @@ program
       if (!p) { results.push({ project: step.project, ok: false, runId: "-", status: "not started", error: `no project "${step.project}" — loom projects` }); if (!opts.keepGoing) break; continue; }
       if (!opts.json) console.log(`${pc.magenta("▶")} ${pc.bold(p.name)} — ${step.goal.slice(0, 80)}`);
       try {
-        const { run } = await client.startOrchestra(p.id, { goal: step.goal });
+        const { run } = await client.startOrchestra(p.id, { goal: step.goal, ...runOptions({ ...opts, ...step.flags }) });
         const r = { project: p.name, ...(await waitScanApply(client, p.id, p.dir, run.id, { push: Boolean(opts.push) })) };
         results.push(r);
         if (!opts.json) printApplyResult(r);
