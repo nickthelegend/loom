@@ -131,3 +131,33 @@ describe("opencode's tool results", () => {
     await adapter.stop();
   });
 });
+
+describe("a session opencode can't run (field: big-pickle on 1.18 swallowed every prompt)", () => {
+  let broken: FakeOpenCode | null = null;
+  afterEach(async () => { await broken?.close(); broken = null; });
+
+  it("a prompt that never reaches the session is retried once in a fresh session", async () => {
+    broken = await fakeOpenCode({ brokenSessions: "first", reply: "OK" });
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "ocb" }), { baseUrl: broken.url, pollMs: 20, startTimeoutMs: 400 } as never);
+    const events: AdapterEvent[] = [];
+    adapter.onEvent((e) => events.push(e));
+    await adapter.start();
+    await adapter.send({ text: "Reply OK" });
+    expect(events.some((e) => e.kind === "status" && e.payload.state === "session_reset" && /never took the prompt/.test(String(e.payload.reason)))).toBe(true);
+    expect(new Set(broken.prompts.map((p) => p.session)).size).toBe(2);
+    expect(events.some((e) => e.kind === "error")).toBe(false);
+    await adapter.stop();
+  }, 15_000);
+
+  it("when a fresh session can't take it either, the error names the model and where to look", async () => {
+    broken = await fakeOpenCode({ brokenSessions: "all" });
+    const adapter = new OpenCodeAdapter("oc", makeProjectDir({ name: "ocb2" }), { baseUrl: broken.url, pollMs: 20, startTimeoutMs: 400 } as never);
+    const events: AdapterEvent[] = [];
+    adapter.onEvent((e) => events.push(e));
+    await adapter.start();
+    await adapter.send({ text: "Reply OK" });
+    const err = events.find((e) => e.kind === "error");
+    expect(String(err?.payload.message)).toMatch(/never started the turn.*opencode\.log/);
+    await adapter.stop();
+  }, 15_000);
+});

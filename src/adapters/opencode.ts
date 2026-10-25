@@ -828,6 +828,13 @@ export class OpenCodeAdapter extends AdapterBase {
   /** When the current turn was interrupted (the wait gives up 20s later, whatever opencode says). */
   private interruptedAt: number | null = null;
 
+  /** "provider/model" a session runs, when opencode says. */
+  private async modelOfSession(sid: string): Promise<string | null> {
+    const s = await this.json<Json>(this.api(`/session/${encodeURIComponent(sid)}`)).catch(() => null);
+    const m = (s?.model ?? null) as Json | null;
+    return m && typeof m.id === "string" ? `${typeof m.providerID === "string" ? `${m.providerID}/` : ""}${m.id}` : null;
+  }
+
   /** Set when the last wait gave up on a turn opencode never began. */
   private neverStarted = false;
 
@@ -849,6 +856,10 @@ export class OpenCodeAdapter extends AdapterBase {
     }
     const deadline = Date.now() + timeoutMs;
     const startBy = Date.now() + this.startTimeoutMs();
+    // opencode stores the prompt the moment it takes it: nothing at all in the session this long
+    // after an accepted prompt means it never will — even while it reports the session "busy"
+    // (a model its session engine can't run left one busy forever: big-pickle on 1.18, field).
+    const takenBy = Date.now() + Math.min(45_000, this.startTimeoutMs());
     let stableId: string | null = null;
     while (Date.now() < deadline) {
       // Interrupted: done as soon as opencode stops running it, answer or not
@@ -862,6 +873,10 @@ export class OpenCodeAdapter extends AdapterBase {
         return last ?? null;
       }
       const messages = await this.listMessages(sid).catch(() => [] as Json[]);
+      if (Date.now() > takenBy && !messages.some((m) => !baseline.has(String(m.id)))) {
+        this.neverStarted = true;
+        return null;
+      }
       // accepted but never begun: not even our own message reached the session, and opencode isn't working on it —
       // don't wait the hour out (a review sat 30 minutes on one, #291)
       if (Date.now() > startBy && !messages.some((m) => !baseline.has(String(m.id))) && (await this.sessionActive(sid)) !== true) {
@@ -937,7 +952,16 @@ export class OpenCodeAdapter extends AdapterBase {
         if (!turn && this.interrupted) {
           this.emit({ kind: "status", payload: { state: "interrupted" } });
         } else if (!turn && this.neverStarted) {
-          this.emit({ kind: "error", payload: { message: `opencode accepted the prompt but never started the turn (nothing in ${Math.round(this.startTimeoutMs() / 1000)}s) — its model may be unavailable; try another model, or restart the agent` } });
+          // the session itself may be what's broken (bound to a model opencode can't run now):
+          // once, carry on in a fresh session, which takes opencode's current default model
+          const model = await this.modelOfSession(sid);
+          if (attempt === 0) {
+            this.sessionId = undefined;
+            this.emit({ kind: "status", payload: { state: "session_reset", reason: `opencode never took the prompt in its session${model ? ` (model ${model})` : ""}; carrying on in a fresh session` } });
+            continue;
+          }
+          this.emit({ kind: "error", payload: { message: `opencode accepted the prompt but never started the turn${model ? ` — its session runs ${model}, which may not work with this opencode` : " — its model may be unavailable"}; ` +
+            "pick another model (loom agents, or opencode's own config) and try again. opencode's log (~/.local/share/opencode/log/opencode.log) says why" } });
         } else if (!turn) {
           this.emit({ kind: "error", payload: { message: "turn timed out waiting for opencode" } });
         } else {
