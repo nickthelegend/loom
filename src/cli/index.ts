@@ -334,13 +334,16 @@ program
     const client = await ensureDaemon();
     const dir = process.cwd();
     const res = await client.addProject(dir, opts.name);
+    const { agentConfigWarnings, readProjectConfig } = await import("../core/registry.js");
+    const defaults = (await import("../core/user-defaults.js")).readUserDefaults();
+    const applied = await applyUserDefaults(client, res.project.id, dir, defaults);
     const { project } = await client.project(res.project.id);
     console.log(pc.green(`✓ project "${project.name}" (${project.id})`));
     for (const a of project.agents) console.log(formatAgentRow(a));
-    const { agentConfigWarnings, readProjectConfig } = await import("../core/registry.js");
+    for (const line of applied) console.log(pc.dim(`  ${line}`));
     const cfg = readProjectConfig(dir);
     for (const w of cfg ? agentConfigWarnings(cfg) : []) console.log(pc.yellow(`! ${w}`));
-    await offerGitignore(dir, opts.gitignore);
+    await offerGitignore(dir, opts.gitignore ?? defaults.gitignore);
     console.log(pc.dim("\nedit .loom/config.json to add/remove agents or change roles"));
     console.log(pc.dim("then: loom chat"));
   });
@@ -1605,6 +1608,80 @@ async function waitScanApply(client: DaemonClient, projectId: string, dir: strin
   return res;
 }
 
+interface ChainCheck {
+  project: string;
+  dir?: string;
+  ok: boolean;
+  orchestrator?: string;
+  workers: Array<{ agent: string; mode: string }>;
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * `loom chain --check`: everything a chain would trip on, line by line, before an hour of runs —
+ * a project that isn't there, uncommitted changes the merge would hit, an orchestrator or worker
+ * this project doesn't have, a worker still sandboxed, .loom/ about to be committed, a config typo.
+ */
+async function checkChain(client: DaemonClient, projects: Array<{ id: string; name: string; dir: string }>, steps: Array<{ project: string; goal: string; flags: RunFlags }>, opts: RunFlags & { json?: boolean }): Promise<void> {
+  const { execFileSync } = await import("node:child_process");
+  const { agentConfigWarnings, readProjectConfig } = await import("../core/registry.js");
+  const { AGENT_ALIASES } = await import("../core/orchestra.js");
+  const out: ChainCheck[] = [];
+  for (const step of steps) {
+    const c: ChainCheck = { project: step.project, ok: false, workers: [], errors: [], warnings: [] };
+    out.push(c);
+    const p = projects.find((x) => x.name === step.project || x.id === step.project || path.resolve(x.dir) === path.resolve(step.project));
+    if (!p) { c.errors.push(fs.existsSync(step.project) ? `${step.project} isn't a Loom project yet — cd there and loom init` : `no project "${step.project}" — loom projects`); continue; }
+    c.project = p.name; c.dir = p.dir;
+    if (!fs.existsSync(p.dir)) { c.errors.push(`its folder is gone: ${p.dir}`); continue; }
+    const git = (...a: string[]) => execFileSync("git", a, { cwd: p.dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      git("rev-parse", "--is-inside-work-tree");
+      const tracked = git("status", "--porcelain").split("\n").filter((l) => l.trim() && !l.startsWith("??") && !/\s\.loom\//.test(l));
+      if (tracked.length) c.errors.push(`${tracked.length} uncommitted change${tracked.length === 1 ? "" : "s"} — commit or stash first, or the merge at the end can't go in`);
+      try { git("check-ignore", "-q", ".loom/"); } catch { c.warnings.push(".loom/ isn't in .gitignore — runs would commit it (loom init --gitignore)"); }
+    } catch { c.errors.push("not a git repository — orchestra runs need one (git init)"); }
+    const { project } = await client.project(p.id);
+    const roster = project.agents.filter((a) => (a as { enabled?: boolean }).enabled !== false);
+    const installed = new Set((await client.availableAgents(p.id)).ades.filter((a) => a.installed !== false).map((a) => a.kind));
+    const find = (name: string) => {
+      const n = name.trim().toLowerCase();
+      if (n.startsWith("team:")) return { id: n, kind: n.slice(5), permissions: "teammate's" };
+      const kind = AGENT_ALIASES[n] ?? n;
+      return roster.find((a) => a.id.toLowerCase() === n) ?? roster.find((a) => a.kind === kind) ??
+        (installed.has(kind) ? { id: kind, kind, permissions: undefined } : null);
+    };
+    const flags = { ...opts, ...step.flags };
+    const orch = flags.orchestrator ? find(flags.orchestrator) : (roster.find((a) => a.kind === "claude-code") ?? roster[0] ?? null);
+    if (!orch) c.errors.push(flags.orchestrator ? `no agent "${flags.orchestrator}" to orchestrate here` : "no agents here to orchestrate");
+    else c.orchestrator = flags.orchestrator ? orch.id : `${orch.id} (default)`;
+    const names = flags.workers ? flags.workers.split(",").map((w) => w.trim()).filter(Boolean) : roster.map((a) => a.id);
+    for (const w of names) {
+      const a = find(w);
+      if (!a) { c.errors.push(`no worker "${w}" here — loom agents:add ${AGENT_ALIASES[w] ?? w}`); continue; }
+      c.workers.push({ agent: a.id, mode: a.permissions ?? "default" });
+    }
+    if (!names.length) c.errors.push("no workers here");
+    const sandboxed = c.workers.filter((w) => w.mode === "auto" && w.agent.startsWith("codex"));
+    if (sandboxed.length) c.warnings.push(`${sandboxed.map((w) => w.agent).join(", ")} on auto: no network, read-only .git — loom agents:mode <id> bypass if its tasks need either`);
+    const cfg = readProjectConfig(p.dir);
+    for (const w of cfg ? agentConfigWarnings(cfg) : []) c.warnings.push(w);
+    c.ok = !c.errors.length;
+  }
+  const bad = out.filter((c) => !c.ok).length;
+  if (opts.json) console.log(JSON.stringify({ ok: bad === 0, steps: out }));
+  else {
+    for (const c of out) {
+      console.log(`${c.ok ? pc.green("✓") : pc.red("✗")} ${pc.bold(c.project)}${c.orchestrator ? pc.dim(`  o ${c.orchestrator} · w ${c.workers.map((w) => `${w.agent} (${w.mode})`).join(", ")}`) : ""}`);
+      for (const e of c.errors) console.log(pc.red(`    ${e}`));
+      for (const w of c.warnings) console.log(pc.yellow(`    ${w}`));
+    }
+    console.log(pc.dim(`\n${out.length - bad}/${out.length} ready${bad ? ` · fix ${bad === 1 ? "that line" : "those lines"} before running` : " — run it without --check"}`));
+  }
+  if (bad) process.exitCode = 1;
+}
+
 type ProgressSink = (e: ProgressEvent) => void;
 
 /**
@@ -2690,7 +2767,8 @@ program
   .option("--solo", "keep every run's tasks on this machine")
   .option("--max-usd <n>", "stop a run when it has spent this much")
   .option("--progress", "one line per task event as each run goes (with --json: JSON lines on stderr)")
-  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean; progress?: boolean } & RunFlags) => {
+  .option("--check", "check every line and run nothing: project found, clean tree, .loom/ ignored, orchestrator and workers here, each worker's access")
+  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean; progress?: boolean; check?: boolean } & RunFlags) => {
     const text = file && file !== "-" ? fs.readFileSync(file, "utf8") : await new Promise<string>((resolve) => {
       let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (d) => (buf += d)); process.stdin.on("end", () => resolve(buf));
     });
@@ -2709,6 +2787,7 @@ program
     if (!steps.length) fail("nothing to run — one `<project> :: <goal>` per line");
     const client = await ensureDaemon();
     const { projects } = await client.listProjects();
+    if (opts.check) return void (await checkChain(client, projects, steps, opts));
     const results: Array<ApplyResult & { project: string }> = [];
     for (const step of steps) {
       const p = projects.find((x) => x.name === step.project || x.id === step.project || path.resolve(x.dir) === path.resolve(step.project));
@@ -2730,6 +2809,51 @@ program
     if (opts.json) console.log(JSON.stringify({ ok: failed === 0, steps: results }));
     else console.log(pc.dim(`\n${results.length - failed}/${steps.length} merged${failed ? ` · ${failed} failed` : ""}${results.length < steps.length ? ` · ${steps.length - results.length} not run` : ""}`));
     if (failed || results.length < steps.length) process.exitCode = 1;
+  });
+
+program
+  .command("defaults")
+  .description("your defaults for every project — the agents it should have and their access — applied by loom init (~/.loom/defaults.json)")
+  .option("--agents <kinds>", "comma-separated agent kinds every project gets, e.g. grok-code,codex (\"\" to clear)")
+  .option("--mode <mode>", "access for every agent that hasn't chosen its own: bypass, auto or ask (\"\" to clear)")
+  .option("--mode-for <kind=mode...>", "per-kind access, over --mode, e.g. codex=bypass")
+  .option("--gitignore <on|off>", "add .loom/ to .gitignore without asking")
+  .option("--clear", "forget every default")
+  .option("--json", "print as JSON")
+  .action(async (opts: { agents?: string; mode?: string; modeFor?: string[]; gitignore?: string; clear?: boolean; json?: boolean }) => {
+    const { readUserDefaults, writeUserDefaults } = await import("../core/user-defaults.js");
+    const { isPermissionMode } = await import("../core/permissions.js");
+    const { knownAgentKinds } = await import("../adapters/index.js");
+    let d = opts.clear ? {} : readUserDefaults();
+    const changed = opts.clear || [opts.agents, opts.mode, opts.modeFor, opts.gitignore].some((v) => v !== undefined);
+    if (opts.agents !== undefined) {
+      const kinds = opts.agents.split(",").map((k) => k.trim()).filter(Boolean);
+      const known = new Set(knownAgentKinds());
+      const bad = kinds.filter((k) => !known.has(k));
+      if (bad.length) fail(`unknown agent kind ${bad.join(", ")} (known: ${[...known].join(", ")})`);
+      d = { ...d, agents: kinds.length ? kinds : undefined };
+    }
+    if (opts.mode !== undefined) {
+      if (opts.mode && !isPermissionMode(opts.mode)) fail("--mode is bypass, auto or ask");
+      d = { ...d, mode: opts.mode ? (opts.mode as "bypass") : undefined };
+    }
+    for (const pair of opts.modeFor ?? []) {
+      const [kind, mode] = pair.split("=");
+      if (!kind || !isPermissionMode(mode)) fail(`--mode-for takes kind=bypass|auto|ask — got ${pair}`);
+      d = { ...d, modes: { ...(d.modes ?? {}), [kind]: mode } };
+    }
+    if (opts.gitignore !== undefined) {
+      if (!["on", "off"].includes(opts.gitignore)) fail("--gitignore is on or off");
+      d = { ...d, gitignore: opts.gitignore === "on" };
+    }
+    d = JSON.parse(JSON.stringify(d)) as typeof d; // drop the cleared (undefined) keys
+    if (changed) writeUserDefaults(d);
+    if (opts.json) return void console.log(JSON.stringify(d));
+    if (changed) console.log(pc.green("✓ saved — loom init applies them (it adds agents and sets modes; it never removes or overrides one you chose)"));
+    console.log(`agents     ${d.agents?.length ? d.agents.join(", ") : pc.dim("whatever's installed (no default)")}`);
+    console.log(`access     ${d.mode ?? pc.dim("each agent's own default")}${d.modes ? `  ${Object.entries(d.modes).map(([k, m]) => `${k}=${m}`).join(" ")}` : ""}`);
+    console.log(`gitignore  ${d.gitignore === undefined ? pc.dim("ask") : d.gitignore ? "add .loom/" : "leave alone"}`);
+    if (d.mode === "bypass" || Object.values(d.modes ?? {}).includes("bypass")) console.log(pc.yellow("bypass: no sandbox — those agents can commit, push, reach the network and run anything, as you"));
   });
 
 program
@@ -2858,6 +2982,31 @@ const HEAVY_SESSION = 100_000;
  * to commit (a team's shared memory lives in AGENTS.md). In a git repo that doesn't ignore it yet,
  * offer to (#256).
  */
+/** `loom init`: bring a project up to ~/.loom/defaults.json — add its agents, set their modes. Lines saying what changed. */
+async function applyUserDefaults(client: DaemonClient, projectId: string, dir: string, d: import("../core/user-defaults.js").UserDefaults): Promise<string[]> {
+  if (!d.agents?.length && !d.mode && !d.modes) return [];
+  const { readProjectConfig } = await import("../core/registry.js");
+  const { planDefaults } = await import("../core/user-defaults.js");
+  const { PERMISSION_PROFILES } = await import("../core/permissions.js");
+  const { ades } = await client.availableAgents(projectId);
+  const installed = new Set(ades.filter((a) => a.installed !== false).map((a) => a.kind));
+  const plan = planDefaults(readProjectConfig(dir)?.agents ?? [], d, (k) => installed.has(k), (k) => Boolean(PERMISSION_PROFILES[k]));
+  const out: string[] = [];
+  const added = new Map<string, string>();
+  for (const kind of plan.add) {
+    try { const a = await client.addAgent(projectId, kind); added.set(kind, a.id); out.push(`+ ${a.id} (your defaults)`); }
+    catch (e) { out.push(`couldn't add ${kind}: ${(e as Error).message}`); }
+  }
+  for (const m of plan.modes) {
+    const id = m.id ?? added.get(m.kind);
+    if (!id) continue;
+    try { await client.setAgentPermissions(projectId, id, m.mode); out.push(`${id}: ${m.mode} (your defaults)`); }
+    catch (e) { out.push(`couldn't set ${id} to ${m.mode}: ${(e as Error).message}`); }
+  }
+  for (const kind of plan.missing) out.push(`${kind} is in your defaults but isn't installed here — skipped`);
+  return out;
+}
+
 async function offerGitignore(dir: string, choice: boolean | undefined): Promise<void> {
   if (choice === false || !fs.existsSync(path.join(dir, ".git"))) return;
   try {
