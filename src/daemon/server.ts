@@ -25,6 +25,7 @@ import {
   writeDaemonConfig
 } from "../core/registry.js";
 import { packCredentials, toB64, type RelayTransport } from "../core/relay-protocol.js";
+import { describeSwap, readSwapNote, type DaemonSwap } from "../core/daemon-swap.js";
 import type { HubClient } from "../core/team-hub.js";
 import {
   CHECK_TTL_MS,
@@ -245,6 +246,8 @@ export class LoomDaemon {
     });
   }
 
+  /** The swap that started this daemon, when a newer CLI replaced the last one (core/daemon-swap.ts). */
+  private swap: DaemonSwap | null = null;
   /** Loom Cloud relay, when enabled. See daemon/relay.ts. */
   private relay: RelayBridge | null = null;
   private relayError: string | null = null;
@@ -419,6 +422,7 @@ export class LoomDaemon {
         platform: `${process.platform}-${process.arch}`,
         uptimeSec: Math.round(process.uptime()),
         pid: process.pid,
+        ...(this.swap ? { swap: this.swap } : {}),
       });
     });
 
@@ -705,6 +709,10 @@ export class LoomDaemon {
 
     // Fan every log record out to connected clients (the Console tab).
     this.unstreamLogs = this.streamLogs();
+    // brought up by a newer CLI swapping the last daemon out: say so where people look
+    this.swap = readSwapNote(BUILD_REV);
+    if (this.swap && Date.now() - this.swap.at < 120_000) logbook.info("daemon", `updated ${describeSwap(this.swap)} — no turns were interrupted`);
+    else this.swap = null;
     this.writeConfig();
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });

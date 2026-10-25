@@ -558,6 +558,21 @@ program
   });
 
 program
+  .command("config <key> [value]")
+  .description("CLI settings. auto-restart on|off: whether a newer CLI swaps an older daemon for its own build when no turns are running (off keeps a long unattended chain on the build it started with)")
+  .action(async (key: string, value: string | undefined) => {
+    if (key !== "auto-restart") fail(`no setting "${key}" — there's auto-restart`);
+    const { autoRestartEnabled, setAutoRestart } = await import("../core/daemon-swap.js");
+    if (value !== undefined) {
+      if (!["on", "off"].includes(value)) fail("auto-restart is on or off");
+      setAutoRestart(value === "on");
+    }
+    const on = autoRestartEnabled();
+    console.log(`auto-restart ${on ? pc.green("on") : pc.yellow("off")}${process.env.LOOM_AUTO_RESTART ? pc.dim(" (LOOM_AUTO_RESTART is set in this shell)") : ""}`);
+    console.log(pc.dim(on ? "a newer CLI restarts an older daemon when no turns are running, and says so" : "a newer CLI uses an older daemon as it is — loom up --restart when you're ready"));
+  });
+
+program
   .command("version")
   .description("CLI build vs the daemon's — the mismatch loom up --restart fixes")
   .action(async () => {
@@ -568,6 +583,9 @@ program
       const v = await client.version();
       const stale = v.rev !== BUILD_REV;
       console.log(`daemon  ${v.rev}  ${pc.dim(`node ${v.node} · up ${Math.round(v.uptimeSec / 60)}m`)}`);
+      const { describeSwap, autoRestartEnabled } = await import("../core/daemon-swap.js");
+      if (v.swap) console.log(pc.dim(`        updated ${describeSwap(v.swap)} ${Math.round((Date.now() - v.swap.at) / 60_000)}m ago — no turns were interrupted`));
+      if (!autoRestartEnabled()) console.log(pc.dim("        auto-restart is off (loom config auto-restart on)"));
       if (stale) console.log(pc.yellow("daemon is running an older build — loom up --restart"));
     } catch {
       console.log(pc.dim("daemon  not running"));
@@ -1582,8 +1600,16 @@ interface ApplyResult {
 async function waitScanApply(client: DaemonClient, projectId: string, dir: string, runId: string, opts: { push: boolean; onProgress?: ProgressSink }): Promise<ApplyResult> {
   let run = (await client.orchestraRun(projectId, runId)).run;
   let seen: import("../core/orchestra.js").OrchestraRun | null = null;
+  let build: string | undefined;
   for (;;) {
-    if (opts.onProgress) { for (const e of runEvents(seen, run)) opts.onProgress(e); seen = run; }
+    if (opts.onProgress) {
+      for (const e of runEvents(seen, run)) opts.onProgress(e);
+      seen = run;
+      const h = await client.health().catch(() => null);
+      const now = h ? (h.version && h.rev ? `${h.version} (${h.rev})` : h.rev) : undefined;
+      if (now && build && now !== build) opts.onProgress({ kind: "daemon", run: runId, from: build, to: now });
+      if (now) build = now;
+    }
     if (isTerminalStatus(run.status) || run.status === "waiting_human") break;
     await new Promise((r) => setTimeout(r, 3000));
     run = (await client.orchestraRun(projectId, runId)).run;

@@ -29,6 +29,8 @@ import {
 import type { Memory } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
+import { VERSION } from "../version.js";
+import { autoRestartEnabled, describeSwap, writeSwapNote } from "../core/daemon-swap.js";
 
 export class DaemonError extends Error {
   constructor(
@@ -155,7 +157,7 @@ export class DaemonClient {
     return this.request("GET", `/api/doctor${project ? `?project=${encodeURIComponent(project)}` : ""}`, undefined, 45_000);
   }
 
-  health(): Promise<{ ok: boolean }> {
+  health(): Promise<{ ok: boolean; version?: string; rev?: string }> {
     return this.request("GET", "/api/health");
   }
 
@@ -469,7 +471,7 @@ export class DaemonClient {
     );
   }
 
-  version(): Promise<{ rev: string; node: string; platform: string; uptimeSec: number; pid: number }> {
+  version(): Promise<{ rev: string; node: string; platform: string; uptimeSec: number; pid: number; swap?: import("../core/daemon-swap.js").DaemonSwap }> {
     return this.request("GET", "/api/version");
   }
 
@@ -920,14 +922,14 @@ export class DaemonClient {
 // Lifecycle helpers
 // ---------------------------------------------------------------------------
 
-async function healthProbe(cfg: DaemonConfig): Promise<{ ok: boolean; rev?: string }> {
+async function healthProbe(cfg: DaemonConfig): Promise<{ ok: boolean; rev?: string; version?: string }> {
   try {
     const res = await fetch(`http://${cfg.host}:${cfg.port}/api/health`, {
       signal: AbortSignal.timeout(1500),
     });
     if (!res.ok) return { ok: false };
-    const body = (await res.json().catch(() => ({}))) as { rev?: string };
-    return { ok: true, ...(body.rev ? { rev: body.rev } : {}) };
+    const body = (await res.json().catch(() => ({}))) as { rev?: string; version?: string };
+    return { ok: true, ...(body.rev ? { rev: body.rev } : {}), ...(body.version ? { version: body.version } : {}) };
   } catch {
     return { ok: false };
   }
@@ -978,6 +980,11 @@ export async function ensureDaemon(): Promise<DaemonClient> {
       // Stale build — restart it in place, unless agents are mid-turn on it: a restart kills
       // their turns (seen in the field: three long `send --wait` runs died on an update).
       // Use the old build as it is and say how to restart once they're done.
+      // a long unattended chain can keep the build it started with (loom config auto-restart off)
+      if (!autoRestartEnabled()) {
+        process.stderr.write(`loom: the daemon runs an older build (${probe.version ?? probe.rev ?? "?"}) than this CLI (${VERSION}); auto-restart is off — loom up --restart when you're ready\n`);
+        return new DaemonClient(cfg);
+      }
       const busy = await turnsInFlight(new DaemonClient(cfg));
       if (busy.length) {
         process.stderr.write(`loom: the daemon runs an older build (${probe.rev ?? "?"}) than this CLI (${BUILD_REV}), but ${busy.length} turn${busy.length === 1 ? " is" : "s are"} running (${busy.slice(0, 3).join(", ")}${busy.length > 3 ? ", …" : ""}) — ` +
@@ -991,12 +998,16 @@ export async function ensureDaemon(): Promise<DaemonClient> {
         if (now && (await healthy(now))) return new DaemonClient(now);
       } else {
         try {
+          const swap = { ...(probe.version ? { fromVersion: probe.version } : {}), ...(probe.rev ? { fromRev: probe.rev } : {}), toVersion: VERSION, toRev: BUILD_REV, at: Date.now() };
+          writeSwapNote(swap);
           await stopDaemon();
           const gone = Date.now() + 5000;
           while (Date.now() < gone && (await healthy(cfg))) {
             await new Promise((r) => setTimeout(r, 200));
           }
-          return await startDaemon();
+          const client = await startDaemon();
+          process.stderr.write(`loom: updated the daemon ${describeSwap(swap)} — no turns were running\n`);
+          return client;
         } finally {
           releaseRestartLock();
         }

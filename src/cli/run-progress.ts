@@ -10,7 +10,9 @@ export type ProgressEvent =
   | { kind: "run"; run: string; status: string; round: number }
   | { kind: "round"; run: string; round: number }
   | { kind: "planned"; run: string; task: string; agent: string; title: string }
-  | { kind: "task"; run: string; task: string; agent: string; status: string; attempt: number; files?: number; error?: string };
+  | { kind: "task"; run: string; task: string; agent: string; status: string; attempt: number; files?: number; error?: string }
+  /** The daemon was swapped for another build while the run went on (it carries on across restarts). */
+  | { kind: "daemon"; run: string; from: string; to: string };
 
 export function runEvents(prev: OrchestraRun | null, next: OrchestraRun): ProgressEvent[] {
   const out: ProgressEvent[] = [];
@@ -40,6 +42,7 @@ export function formatEvent(e: ProgressEvent, label = ""): string {
   switch (e.kind) {
     case "run": return `${head}${e.run} ${e.status}${e.round ? ` (round ${e.round})` : ""}`;
     case "round": return `${head}${e.run} review round ${e.round}`;
+    case "daemon": return `${head}daemon swapped ${e.from} → ${e.to} — the run carries on`;
     case "planned": return `${head}${e.task} planned for ${e.agent}: ${e.title}`;
     case "task": {
       const again = e.attempt > 1 && e.status === "running" ? ` (attempt ${e.attempt})` : "";
