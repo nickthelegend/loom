@@ -160,7 +160,17 @@ export function projectLoomDir(projectDir: string): string {
 export function readProjectConfig(projectDir: string): ProjectConfig | null {
   const file = path.join(projectLoomDir(projectDir), "config.json");
   if (!fs.existsSync(file)) return null;
-  return readJson<ProjectConfig>(file, { name: path.basename(projectDir), agents: [] });
+  const cfg = readJson<ProjectConfig>(file, { name: path.basename(projectDir), agents: [] });
+  // An agent's mode lives in options.permissions; `"permissions": "bypass"` on the agent itself is
+  // what a person writes by hand, and was silently ignored — codex stayed sandboxed in every
+  // orchestra worker (field). Read it as the mode; an explicit options.permissions still wins.
+  for (const a of cfg.agents ?? []) {
+    const top = (a as { permissions?: unknown }).permissions;
+    if ((top === "bypass" || top === "auto" || top === "ask") && !(a.options as { permissions?: unknown } | undefined)?.permissions) {
+      a.options = { ...(a.options ?? {}), permissions: top };
+    }
+  }
+  return cfg;
 }
 
 export function writeProjectConfig(projectDir: string, cfg: ProjectConfig): void {

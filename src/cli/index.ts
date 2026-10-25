@@ -1487,7 +1487,17 @@ function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<strin
 }
 const isTerminalStatus = (s: string) => s === "completed" || s === "failed" || s === "aborted" || s === "moved";
 
-function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
+/** Each worker's access mode (bypass | auto | ask), from the project's roster, for showing beside the run. */
+function workerModes(run: { workers: string[] }, agents: Array<{ id: string; kind: string; permissions?: string }>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const w of run.workers) {
+    const a = agents.find((x) => x.id === w || x.kind === w);
+    if (a) out[w] = a.permissions ?? "default";
+  }
+  return out;
+}
+
+function printRun(run: import("../core/orchestra.js").OrchestraRun, modes: Record<string, string> = {}): void {
   console.log(
     run.race
       ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  race · ${countsLine(run)} · ${fmtUsd(run.costUsd)}`
@@ -1496,7 +1506,7 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
   if (run.race) console.log(`   ${pc.dim("entrants")} ${run.workers.join(", ")}`);
-  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.join(", ")}`);
+  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.map((w) => (modes[w] ? `${w} (${modes[w]})` : w)).join(", ")}`);
   for (const t of run.tasks) {
     const color = TASK_COLOR[t.status] ?? ((x: string) => x);
     const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
@@ -1693,7 +1703,9 @@ program
         }
         if (opts.watch) return void (await watchRun(client, project.id, runId));
         const { run } = await client.orchestraRun(project.id, runId);
-        return void (opts.json ? console.log(JSON.stringify(runJson(run))) : printRun(run));
+        // which access each worker runs with: "bypass on the agent" that doesn't reach a worker shows here
+        const modes = workerModes(run, project.agents as Array<{ id: string; kind: string; permissions?: string }>);
+        return void (opts.json ? console.log(JSON.stringify({ ...runJson(run), workerModes: modes })) : printRun(run, modes));
       }
       const { runs } = await client.orchestraRuns(project.id);
       if (opts.json) return void console.log(JSON.stringify(runs.map(runJson)));

@@ -188,6 +188,17 @@ describe("an agent's access (field feedback: codex couldn't commit or push)", ()
     expect(set.out).toMatch(/codex: Bypass — no sandbox, no approvals/);
     expect((await runCli(["agents"], dir)).out).toMatch(/access: Bypass/);
   }, 30_000);
+
+  it("\"permissions\": \"bypass\" written on the agent itself counts — it reaches every turn, orchestra workers included", async () => {
+    const dir = makeProjectDir({ name: "access-top", agents: [{ id: "codex", kind: "codex", permissions: "bypass" }], brain: { extractor: "off" } } as never);
+    const { readProjectConfig } = await import("../src/core/registry.js");
+    expect(readProjectConfig(dir)!.agents[0]!.options).toMatchObject({ permissions: "bypass" });
+    await new DaemonClient(readDaemonConfig()!).addProject(dir);
+    expect((await runCli(["agents"], dir)).out).toMatch(/access: Bypass/);
+    // an explicit options.permissions still wins over the top-level one
+    const both = makeProjectDir({ name: "access-both", agents: [{ id: "codex", kind: "codex", permissions: "bypass", options: { permissions: "ask" } }] } as never);
+    expect(readProjectConfig(both)!.agents[0]!.options).toMatchObject({ permissions: "ask" });
+  }, 30_000);
 });
 
 describe("a restart in progress (field: a script's next step landed mid-restart)", () => {

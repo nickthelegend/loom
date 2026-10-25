@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`loom chain` takes run options** — `-o/--orchestrator`, `-w/--workers`, `-p/--parallel`, `--solo`, `--max-usd` for every line, and a line can override them in brackets before its goal: `api :: [-o grok-code -w codex,opencode] add rate limiting`. Without them every run was planned by the default orchestrator (claude-code when installed).
 
+### Fixed
+
+- **`"permissions": "bypass"` on an agent in `.loom/config.json` now counts.** Loom keeps the mode in the agent's `options.permissions`; written on the agent itself — the natural place, and what we told people to do — it was ignored, so codex stayed sandboxed in every orchestra worker (no network, read-only `.git`). Both spellings work now; `options.permissions` wins if both are there. `loom orchestra <run>` shows each worker's mode beside it (`workers codex (bypass), …`; `workerModes` in `--json`).
+
 ### Changed
 
 - **`loom orchestra --json` always lists every task count** — `done`, `running`, `pending`, `needs_input`, `conflict`, `failed`, `cancelled` — with 0 when there are none, so a script can read `tasks.failed` without checking it's there.
