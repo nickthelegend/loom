@@ -10,6 +10,7 @@ import { AntigravityBridge } from "./bridges/antigravity.js";
 import { KiroBridge } from "./bridges/kiro.js";
 import { EchoAdapter } from "./echo.js";
 import { GrokAdapter } from "./grok.js";
+import { AcpAdapter } from "./acp.js";
 import { ModelAdapter } from "./model.js";
 import { OpenCodeAdapter } from "./opencode.js";
 import { ProviderAgent } from "../providers/agent.js";
@@ -56,6 +57,8 @@ registerAgentKind("opencode", (cfg, dir) => new OpenCodeAdapter(cfg.id, dir, cfg
 registerAgentKind("grok-code", (cfg, dir) => new GrokAdapter(cfg.id, dir, cfg.options));
 // An agent that is a model endpoint rather than a command — see adapters/model.ts.
 registerAgentKind("model", (cfg, dir) => new ModelAdapter(cfg.id, dir, cfg.options));
+// Any Agent Client Protocol agent (Claude/Codex ACP adapters, Gemini, OpenCode, Grok) — see adapters/acp.ts.
+registerAgentKind("acp", (cfg, dir) => new AcpAdapter(cfg.id, dir, cfg.options));
 registerAgentKind("antigravity-cli", (cfg, dir) => new AntigravityCliAdapter(cfg.id, dir, cfg.options));
 registerAgentKind("antigravity", (cfg, dir) => new AntigravityBridge(cfg.id, dir, cfg.options), "bridge");
 registerAgentKind("kiro", (cfg, dir) => new KiroBridge(cfg.id, dir, cfg.options), "bridge");

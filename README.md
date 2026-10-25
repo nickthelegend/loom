@@ -841,6 +841,27 @@ projections — they never hold the write lock. That's a design decision, not a 
 agents without a stable API can't be trusted with interrupt-safe writes. See
 [docs/integration-notes.md](docs/integration-notes.md) for the verified surfaces.
 
+## Any ACP agent
+
+One agent kind, `acp`, drives any agent that speaks the
+[Agent Client Protocol](https://agentclientprotocol.com) over stdio. That includes Claude Code
+and Codex through their ACP adapters, Gemini CLI, OpenCode and Grok.
+
+```bash
+loom agents:add acp --preset gemini --as gemini     # gemini --experimental-acp
+loom agents:add acp --preset claude --as claude-acp # npx @agentclientprotocol/claude-agent-acp
+loom agents:add acp --cmd "my-agent --acp" --as mine
+```
+
+- **Sessions:** each Loom chat is one ACP session, and it resumes with `session/load` when the agent supports it.
+- **What you see:** the agent's thoughts, its plan, each tool call and the diffs it reports show
+  up in the thread like any other agent's. Diffs appear as file edits.
+- **Permissions are Loom's:**
+  - Bypass picks the agent's own "allow" option.
+  - Auto runs Loom's Auto policy on the call.
+  - Always ask puts each request on an approval card in Loom and on your phone.
+  - A request that fails or is interrupted is answered "cancelled", never allowed.
+
 ## Agents that are models
 
 Every other agent in Loom wraps a CLI. A `model` agent is an HTTP endpoint:
