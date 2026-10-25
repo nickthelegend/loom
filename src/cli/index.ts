@@ -1515,6 +1515,54 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
   if (run.race && run.applied?.task) console.log(`   ${pc.green("kept:")} ${run.applied.task} → ${run.applied.into}`);
 }
 
+interface ApplyResult {
+  ok: boolean;
+  runId: string;
+  status: string;
+  merged?: string;
+  into?: string;
+  pushed?: boolean;
+  secrets?: import("../core/secret-scan.js").SecretFinding[];
+  error?: string;
+}
+
+/**
+ * #340: wait for a run to end; if it completed, scan everything it changed for secrets, merge it
+ * into the project's current branch, and (asked to) push. Stops at the first thing that's wrong,
+ * and says what — a run that failed, a key in the diff, a merge or push that didn't go.
+ */
+async function waitScanApply(client: DaemonClient, projectId: string, dir: string, runId: string, opts: { push: boolean }): Promise<ApplyResult> {
+  let run = (await client.orchestraRun(projectId, runId)).run;
+  while (!isTerminalStatus(run.status) && run.status !== "waiting_human") {
+    await new Promise((r) => setTimeout(r, 3000));
+    run = (await client.orchestraRun(projectId, runId)).run;
+  }
+  if (run.status !== "completed") return { ok: false, runId, status: run.status, error: run.status === "waiting_human" ? `it's waiting on you: ${run.question ?? "a question"}` : (run.error ?? run.status) };
+  const { execFileSync } = await import("node:child_process");
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  let diff = "";
+  try { diff = git("diff", `${run.baseCommit}..${run.branch}`); }
+  catch (e) { return { ok: false, runId, status: run.status, error: `couldn't read the run's changes: ${(e as Error).message.split("\n")[0]}` }; }
+  const { findSecrets } = await import("../core/secret-scan.js");
+  const secrets = findSecrets(diff);
+  if (secrets.length) return { ok: false, runId, status: run.status, secrets, error: "secrets in the run's changes — not applied" };
+  let out: Record<string, unknown>;
+  try { out = await client.orchestraAction(projectId, runId, "apply"); }
+  catch (e) { return { ok: false, runId, status: run.status, error: `merge failed: ${(e as Error).message}` }; }
+  const res: ApplyResult = { ok: true, runId, status: run.status, merged: String(out.merged ?? run.branch), into: String(out.into ?? "") };
+  if (opts.push) {
+    try { git("push", "origin", "HEAD"); res.pushed = true; }
+    catch (e) { return { ...res, ok: false, pushed: false, error: `merged, but the push failed: ${(e as Error).message.split("\n")[0]}` }; }
+  }
+  return res;
+}
+
+function printApplyResult(r: ApplyResult): void {
+  if (r.ok) return void console.log(`${pc.green("✓")} ${r.runId} merged into ${pc.bold(r.into || "your branch")}${r.pushed ? " and pushed" : ""} — no secrets in its changes`);
+  console.log(`${pc.red("✗")} ${r.runId} (${r.status}): ${r.error}`);
+  for (const s of r.secrets ?? []) console.log(pc.red(`    ${s.file}${s.line ? `:${s.line}` : ""} — ${s.what}`));
+}
+
 async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string): Promise<void> {
   let last = "";
   for (;;) {
@@ -1549,8 +1597,10 @@ program
   .option("--max-usd <n>", "stop this goal when it has spent this much, and say so")
   .option("--race", "race: every worker takes the whole goal in its own worktree; pick one with orchestra:apply <run> --task race-<agent>")
   .option("--solo", "keep every task on this machine, even when teammates' runners could take some")
+  .option("--apply", "when the run completes, scan its changes for secrets and merge it into your branch (#340)")
+  .option("--push", "with --apply: push the branch after merging")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; watch: boolean }) => {
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; apply?: boolean; push?: boolean; watch: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1574,7 +1624,12 @@ program
               `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
       );
       if (opts.watch) await watchRun(client, project.id, run.id);
-      else console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
+      else if (!opts.apply) console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
+      if (opts.apply) {
+        const res = await waitScanApply(client, project.id, project.dir, run.id, { push: Boolean(opts.push) });
+        printApplyResult(res);
+        if (!res.ok) process.exitCode = 1;
+      }
     } catch (err) {
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
@@ -2518,6 +2573,47 @@ program
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;
     }
+  });
+
+program
+  .command("chain [file]")
+  .description("run goals in several projects, one after another: each line is `<project> :: <goal>` (project = name or folder). Each completed run is scanned for secrets and merged before the next starts (#340)")
+  .option("--push", "push each project's branch after merging its run")
+  .option("--keep-going", "carry on to the next project when one fails")
+  .option("--json", "print a JSON summary at the end")
+  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean }) => {
+    const text = file && file !== "-" ? fs.readFileSync(file, "utf8") : await new Promise<string>((resolve) => {
+      let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (d) => (buf += d)); process.stdin.on("end", () => resolve(buf));
+    });
+    const steps = text.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")).map((l) => {
+      const at = l.indexOf("::");
+      if (at < 0) fail(`each line is "<project> :: <goal>" — got: ${l}`);
+      return { project: l.slice(0, at).trim(), goal: l.slice(at + 2).trim() };
+    });
+    if (!steps.length) fail("nothing to run — one `<project> :: <goal>` per line");
+    const client = await ensureDaemon();
+    const { projects } = await client.listProjects();
+    const results: Array<ApplyResult & { project: string }> = [];
+    for (const step of steps) {
+      const p = projects.find((x) => x.name === step.project || x.id === step.project || path.resolve(x.dir) === path.resolve(step.project));
+      if (!p) { results.push({ project: step.project, ok: false, runId: "-", status: "not started", error: `no project "${step.project}" — loom projects` }); if (!opts.keepGoing) break; continue; }
+      if (!opts.json) console.log(`${pc.magenta("▶")} ${pc.bold(p.name)} — ${step.goal.slice(0, 80)}`);
+      try {
+        const { run } = await client.startOrchestra(p.id, { goal: step.goal });
+        const r = { project: p.name, ...(await waitScanApply(client, p.id, p.dir, run.id, { push: Boolean(opts.push) })) };
+        results.push(r);
+        if (!opts.json) printApplyResult(r);
+        if (!r.ok && !opts.keepGoing) break;
+      } catch (e) {
+        results.push({ project: p.name, ok: false, runId: "-", status: "not started", error: (e as Error).message });
+        if (!opts.json) console.log(`${pc.red("✗")} ${p.name}: ${(e as Error).message}`);
+        if (!opts.keepGoing) break;
+      }
+    }
+    const failed = results.filter((r) => !r.ok).length;
+    if (opts.json) console.log(JSON.stringify({ ok: failed === 0, steps: results }));
+    else console.log(pc.dim(`\n${results.length - failed}/${steps.length} merged${failed ? ` · ${failed} failed` : ""}${results.length < steps.length ? ` · ${steps.length - results.length} not run` : ""}`));
+    if (failed || results.length < steps.length) process.exitCode = 1;
   });
 
 program
