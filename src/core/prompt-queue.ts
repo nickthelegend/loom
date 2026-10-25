@@ -56,6 +56,8 @@ export interface QueueItem {
   continuity?: { requestId: string; model: string | null };
   /** Hold it back until this is true — see QueueCondition. */
   when?: QueueCondition;
+  /** A teammate in a shared chat (Share live) who sent it: their name stays on it when it's sent. */
+  by?: string;
 }
 
 /** A condition from the wire, checked. */
@@ -107,6 +109,7 @@ export interface QueueInput {
   source?: "user" | "route";
   when?: QueueCondition;
   continuity?: QueueItem["continuity"];
+  by?: string;
 }
 
 export const MAX_QUEUE = 100;
@@ -190,6 +193,7 @@ export class PromptQueue {
       ...(input.continuity ? { continuity: { ...input.continuity } } : {}),
       at: Date.now(),
       ...(input.when ? { when: input.when } : {}),
+      ...(input.by ? { by: String(input.by).slice(0, 40) } : {}),
     };
     this.state.items.push(item);
     this.changed();

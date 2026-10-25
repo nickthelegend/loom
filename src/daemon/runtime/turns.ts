@@ -415,6 +415,7 @@ export class RuntimeTurns {
         source,
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.length ? { length: opts.length } : {}),
+        ...(opts.by ? { by: opts.by } : {}),
       });
       return { agentId: target, queued: this.host.queue.length, queueId: item.id };
     }
@@ -541,7 +542,7 @@ export class RuntimeTurns {
     if (this.busySince.size) {
       if (opts.fromQueue) throw new ContinuityError("conflict", "another foreground turn is preparing or running");
       const item = this.host.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source,
-        ...(opts.plan ? { plan: true } : {}), ...(opts.length ? { length: opts.length } : {}), continuity: { requestId: request.id, model: request.model } });
+        ...(opts.plan ? { plan: true } : {}), ...(opts.length ? { length: opts.length } : {}), ...(opts.by ? { by: opts.by } : {}), continuity: { requestId: request.id, model: request.model } });
       return { agentId: target, queued: this.host.queue.length, queueId: item.id, requestId: request.id };
     }
     this.busySince.set(target, Date.now()); this.turnChat.set(target, chat);
