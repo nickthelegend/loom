@@ -29,6 +29,8 @@ import {
 import type { Memory } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
+import { VERSION } from "../version.js";
+import { autoRestartEnabled, describeSwap, writeSwapNote } from "../core/daemon-swap.js";
 
 export class DaemonError extends Error {
   constructor(
@@ -155,7 +157,7 @@ export class DaemonClient {
     return this.request("GET", `/api/doctor${project ? `?project=${encodeURIComponent(project)}` : ""}`, undefined, 45_000);
   }
 
-  health(): Promise<{ ok: boolean }> {
+  health(): Promise<{ ok: boolean; version?: string; rev?: string }> {
     return this.request("GET", "/api/health");
   }
 
@@ -469,7 +471,7 @@ export class DaemonClient {
     );
   }
 
-  version(): Promise<{ rev: string; node: string; platform: string; uptimeSec: number; pid: number }> {
+  version(): Promise<{ rev: string; node: string; platform: string; uptimeSec: number; pid: number; swap?: import("../core/daemon-swap.js").DaemonSwap }> {
     return this.request("GET", "/api/version");
   }
 
@@ -920,14 +922,14 @@ export class DaemonClient {
 // Lifecycle helpers
 // ---------------------------------------------------------------------------
 
-async function healthProbe(cfg: DaemonConfig): Promise<{ ok: boolean; rev?: string }> {
+async function healthProbe(cfg: DaemonConfig): Promise<{ ok: boolean; rev?: string; version?: string }> {
   try {
     const res = await fetch(`http://${cfg.host}:${cfg.port}/api/health`, {
       signal: AbortSignal.timeout(1500),
     });
     if (!res.ok) return { ok: false };
-    const body = (await res.json().catch(() => ({}))) as { rev?: string };
-    return { ok: true, ...(body.rev ? { rev: body.rev } : {}) };
+    const body = (await res.json().catch(() => ({}))) as { rev?: string; version?: string };
+    return { ok: true, ...(body.rev ? { rev: body.rev } : {}), ...(body.version ? { version: body.version } : {}) };
   } catch {
     return { ok: false };
   }
@@ -978,10 +980,15 @@ export async function ensureDaemon(): Promise<DaemonClient> {
       // Stale build — restart it in place, unless agents are mid-turn on it: a restart kills
       // their turns (seen in the field: three long `send --wait` runs died on an update).
       // Use the old build as it is and say how to restart once they're done.
-      const busy = await turnsInFlight(new DaemonClient(cfg));
+      // a long unattended chain can keep the build it started with (loom config auto-restart off)
+      if (!autoRestartEnabled()) {
+        process.stderr.write(`loom: the daemon runs an older build (${probe.version ?? probe.rev ?? "?"}) than this CLI (${VERSION}); auto-restart is off — loom up --restart when you're ready\n`);
+        return new DaemonClient(cfg);
+      }
+      const busy = await busyWork(new DaemonClient(cfg));
       if (busy.length) {
-        process.stderr.write(`loom: the daemon runs an older build (${probe.rev ?? "?"}) than this CLI (${BUILD_REV}), but ${busy.length} turn${busy.length === 1 ? " is" : "s are"} running (${busy.slice(0, 3).join(", ")}${busy.length > 3 ? ", …" : ""}) — ` +
-          "using it as it is; restart when they finish: loom up --restart\n");
+        process.stderr.write(`loom: the daemon runs an older build (${probe.version ?? probe.rev ?? "?"}) than this CLI (${VERSION}), but it's busy (${busy.slice(0, 3).join(", ")}${busy.length > 3 ? ", …" : ""}) — ` +
+          "using it as it is; restart when that's done: loom up --restart\n");
         return new DaemonClient(cfg);
       }
       // hold the restart lock until the new daemon answers; someone else holding it is restarting already
@@ -991,12 +998,16 @@ export async function ensureDaemon(): Promise<DaemonClient> {
         if (now && (await healthy(now))) return new DaemonClient(now);
       } else {
         try {
+          const swap = { ...(probe.version ? { fromVersion: probe.version } : {}), ...(probe.rev ? { fromRev: probe.rev } : {}), toVersion: VERSION, toRev: BUILD_REV, at: Date.now() };
+          writeSwapNote(swap);
           await stopDaemon();
           const gone = Date.now() + 5000;
           while (Date.now() < gone && (await healthy(cfg))) {
             await new Promise((r) => setTimeout(r, 200));
           }
-          return await startDaemon();
+          const client = await startDaemon();
+          process.stderr.write(`loom: updated the daemon ${describeSwap(swap)} — no turns were running\n`);
+          return client;
         } finally {
           releaseRestartLock();
         }
@@ -1079,6 +1090,47 @@ export async function turnsInFlight(client: DaemonClient): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+const waitingDir = () => path.join(loomHome(), "waiting");
+
+/**
+ * A CLI following runs to the end — `loom chain`, `orchestrate --apply`, `orchestra --wait` —
+ * marks itself busy for the restart guard while it does, the gaps between runs included: no
+ * turn is running there, but the process is mid-job (field: 1.2.6 → 1.2.7 landed in exactly
+ * that gap). Released on return and on exit; a file left by a process that died is ignored.
+ */
+export function holdWaiting(what: string): () => void {
+  const file = path.join(waitingDir(), `${process.pid}.json`);
+  try {
+    fs.mkdirSync(waitingDir(), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ pid: process.pid, what, since: Date.now() }));
+  } catch { /* the guard is a courtesy, never a failure */ }
+  const release = () => { try { fs.rmSync(file, { force: true }); } catch { /* gone already */ } };
+  process.once("exit", release);
+  return () => { process.off("exit", release); release(); };
+}
+
+/** Other live CLIs following runs ("loom chain (pid 123)"); files left by dead ones are cleared. */
+export function waitingClis(): string[] {
+  let names: string[] = [];
+  try { names = fs.readdirSync(waitingDir()).filter((f) => f.endsWith(".json")); } catch { return []; }
+  const out: string[] = [];
+  for (const f of names) {
+    const file = path.join(waitingDir(), f);
+    try {
+      const w = JSON.parse(fs.readFileSync(file, "utf8")) as { pid: number; what: string };
+      if (w.pid === process.pid) continue;
+      try { process.kill(w.pid, 0); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EPERM") { fs.rmSync(file, { force: true }); continue; } }
+      out.push(`loom ${w.what} (pid ${w.pid})`);
+    } catch { /* half-written: skip */ }
+  }
+  return out;
+}
+
+/** Everything a daemon restart would cut short: turns running, and CLIs following runs. */
+export async function busyWork(client: DaemonClient): Promise<string[]> {
+  return [...(await turnsInFlight(client)), ...waitingClis()];
 }
 
 export async function daemonRunning(): Promise<DaemonConfig | null> {

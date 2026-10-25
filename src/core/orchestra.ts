@@ -45,6 +45,19 @@ import type { Adapter, AgentConfig, ChatInfo, EventKind, GitDelivery, LoomEvent,
 // Types
 // ---------------------------------------------------------------------------
 
+/** Names people (and orchestrators) use for an agent kind. */
+export const AGENT_ALIASES: Record<string, string> = {
+  claude: "claude-code",
+  "claude code": "claude-code",
+  chatgpt: "codex",
+  gpt: "codex",
+  openai: "codex",
+  antigravity: "antigravity-cli",
+  agy: "antigravity-cli",
+  gemini: "antigravity-cli",
+  grok: "grok-code",
+};
+
 export type OrchestraStatus =
   | "starting"
   | "planning" // orchestrator's first turn
@@ -974,18 +987,7 @@ export class OrchestraEngine {
     }
     const byId = roster.find((a) => a.id.toLowerCase() === n);
     if (byId) return byId;
-    const alias: Record<string, string> = {
-      claude: "claude-code",
-      "claude code": "claude-code",
-      chatgpt: "codex",
-      gpt: "codex",
-      openai: "codex",
-      antigravity: "antigravity-cli",
-      agy: "antigravity-cli",
-      gemini: "antigravity-cli",
-      grok: "grok-code",
-    };
-    const kind = alias[n] ?? n;
+    const kind = AGENT_ALIASES[n] ?? n;
     const byKind = roster.find((a) => a.kind === kind);
     if (byKind) return byKind;
     if (this.host.installedKinds().includes(kind)) return { id: kind, kind, role: kind };

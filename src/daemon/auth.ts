@@ -22,6 +22,8 @@ const SEEN_WRITE_MS = 10 * 60 * 1000;
 interface PendingPair {
   projects?: string[];
   token: string;
+  /** The device's own relay key, in its link before it claims (it may claim over the relay). */
+  relayKey: string;
   expiresAt: number;
   /** Claims as an owner session (Loom Desktop), not a device. */
   owner?: boolean;
@@ -95,18 +97,19 @@ export class AuthManager {
    * the claimer cannot widen it — scope is chosen by the admin who mints, not
    * the device that claims.
    */
-  newPairingToken(projects?: string[], opts: { owner?: boolean } = {}): { token: string; expiresAt: number } {
+  newPairingToken(projects?: string[], opts: { owner?: boolean } = {}): { token: string; expiresAt: number; relayKey: string } {
     this.gc();
     const token = crypto.randomBytes(16).toString("hex");
     const entry: PendingPair = {
       token,
+      relayKey: crypto.randomBytes(32).toString("base64url"),
       expiresAt: Date.now() + PAIR_TTL_MS,
       ...(projects?.length ? { projects } : {}),
       // an owner session is never scoped: it's the owner
       ...(opts.owner && !projects?.length ? { owner: true } : {}),
     };
     this.pending.set(token, entry);
-    return { token: entry.token, expiresAt: entry.expiresAt };
+    return { token: entry.token, expiresAt: entry.expiresAt, relayKey: entry.relayKey };
   }
 
   /** Exchange a valid pairing token for a long-lived client token. */
@@ -120,6 +123,7 @@ export class AuthManager {
       name,
       token: crypto.randomBytes(32).toString("hex"),
       createdAt: Date.now(),
+      relayKey: entry.relayKey,
       ...(entry.projects?.length ? { projects: entry.projects } : {}),
       ...(entry.owner ? { owner: true } : {}),
     };
@@ -131,6 +135,23 @@ export class AuthManager {
     this.config.clients.push(client);
     writeDaemonConfig(this.config);
     return { clientToken: client.token, clientId: client.id };
+  }
+
+  /** Relay keys of paired devices and of pairing links not yet claimed. */
+  relayKeys(): string[] {
+    this.gc();
+    return [
+      ...this.config.clients.flatMap((c) => (c.relayKey ? [c.relayKey] : [])),
+      ...[...this.pending.values()].map((p) => p.relayKey),
+    ];
+  }
+
+  /** `loom cloud rotate`: every device pairs again to reach the daemon through the relay. */
+  dropRelayKeys(): void {
+    this.reload();
+    for (const c of this.config.clients) delete c.relayKey;
+    for (const p of this.pending.values()) p.relayKey = crypto.randomBytes(32).toString("base64url");
+    writeDaemonConfig(this.config);
   }
 
   revoke(clientId: string): boolean {

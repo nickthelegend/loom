@@ -25,6 +25,7 @@ import {
   writeDaemonConfig
 } from "../core/registry.js";
 import { packCredentials, toB64, type RelayTransport } from "../core/relay-protocol.js";
+import { describeSwap, readSwapNote, type DaemonSwap } from "../core/daemon-swap.js";
 import type { HubClient } from "../core/team-hub.js";
 import {
   CHECK_TTL_MS,
@@ -245,6 +246,8 @@ export class LoomDaemon {
     });
   }
 
+  /** The swap that started this daemon, when a newer CLI replaced the last one (core/daemon-swap.ts). */
+  private swap: DaemonSwap | null = null;
   /** Loom Cloud relay, when enabled. See daemon/relay.ts. */
   private relay: RelayBridge | null = null;
   private relayError: string | null = null;
@@ -419,6 +422,7 @@ export class LoomDaemon {
         platform: `${process.platform}-${process.arch}`,
         uptimeSec: Math.round(process.uptime()),
         pid: process.pid,
+        ...(this.swap ? { swap: this.swap } : {}),
       });
     });
 
@@ -705,6 +709,10 @@ export class LoomDaemon {
 
     // Fan every log record out to connected clients (the Console tab).
     this.unstreamLogs = this.streamLogs();
+    // brought up by a newer CLI swapping the last daemon out: say so where people look
+    this.swap = readSwapNote(BUILD_REV);
+    if (this.swap && Date.now() - this.swap.at < 120_000) logbook.info("daemon", `updated ${describeSwap(this.swap)} — no turns were interrupted`);
+    else this.swap = null;
     this.writeConfig();
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });
@@ -914,13 +922,17 @@ export class LoomDaemon {
   // Loom Cloud
   // -------------------------------------------------------------------------
 
-  /** `&relay=<channel.key>&sb=<url>&sbk=<anon key>` when the relay is on, else "". */
-  private cloudLinkParams(): string {
+  /**
+   * `&relay=<channel.key>&sb=<url>&sbk=<anon key>` when the relay is on, else "". The key is the
+   * device's own (see PairedClient.relayKey), not the channel's: the wire format is unchanged, so
+   * every phone build reads it, and the daemon tries each key it holds.
+   */
+  private cloudLinkParams(relayKey: string): string {
     const s = readCloudSettings();
     const target = supabaseTarget(s);
     if (!s.enabled || !s.channel || !s.key || !target) return "";
     const b64 = (v: string) => toB64(new TextEncoder().encode(v));
-    return `&relay=${packCredentials({ channel: s.channel, key: s.key })}&sb=${b64(target.url)}&sbk=${b64(target.anonKey)}`;
+    return `&relay=${packCredentials({ channel: s.channel, key: relayKey })}&sb=${b64(target.url)}&sbk=${b64(target.anonKey)}`;
   }
 
   cloudStatus(): Record<string, unknown> {
@@ -960,7 +972,8 @@ export class LoomDaemon {
       ]);
       this.relay = new RelayBridge({
         transport,
-        key: creds.key,
+        // the channel's own key still opens it for phones paired before per-device keys; `loom cloud rotate` retires it
+        keys: () => [creds.key, ...this.auth.relayKeys()],
         localBase: () => `http://127.0.0.1:${this.port}`,
         identity: () => ({ version: BUILD_REV, name: os.hostname() }),
       });
@@ -980,6 +993,7 @@ export class LoomDaemon {
     if (opts.rotate) {
       delete s.channel;
       delete s.key;
+      this.auth.dropRelayKeys();
     }
     writeCloudSettings(s);
   }

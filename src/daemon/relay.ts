@@ -180,15 +180,24 @@ interface ClientState {
 
 export interface RelayBridgeOptions {
   transport: RelayTransport;
-  key: string;
+  /**
+   * Every key that may talk on the channel, base64url: the channel's own key
+   * (phones paired before per-device keys) and one per paired device. Read on
+   * every message, so a revoked device's key stops working at once — it can
+   * neither send a request nor read a reply meant for another phone.
+   */
+  keys: () => string[];
   /** http://127.0.0.1:<port> — where relayed requests are executed. */
   localBase: () => string;
   identity: () => { version: string; name: string };
 }
 
 export class RelayBridge {
-  private key: Uint8Array;
   private decoder: RelayDecoder;
+  /** base64url → bytes, most recently used first (one or two phones are live at a time). */
+  private ring = new Map<string, Uint8Array>();
+  /** Which key each relay client spoke with — its replies are sealed with the same one. */
+  private keyOf = new Map<string, string>();
   private clients = new Map<string, ClientState>();
   private sweeper: ReturnType<typeof setInterval>;
   private closed = false;
@@ -197,14 +206,38 @@ export class RelayBridge {
   stats = { requests: 0, rejected: 0, frames: 0, replayed: 0 };
 
   constructor(private opts: RelayBridgeOptions) {
-    this.key = fromB64(opts.key);
-    this.decoder = new RelayDecoder(this.key, "c");
+    this.decoder = new RelayDecoder(() => this.keys(), "c");
     opts.transport.onEnvelope((env) => {
       const msg = this.decoder.push(env);
-      if (msg) void this.handle(msg).catch((err) => logbook.warn("cloud", "relay message failed", String(err)));
+      if (!msg) return;
+      const used = [...this.ring].find(([, k]) => k === this.decoder.openedWith)?.[0];
+      const from = (msg as { from?: unknown }).from;
+      if (used && typeof from === "string") {
+        this.keyOf.set(from, used);
+        const k = this.ring.get(used)!;
+        this.ring.delete(used);
+        this.ring = new Map([[used, k], ...this.ring]);
+      }
+      void this.handle(msg).catch((err) => logbook.warn("cloud", "relay message failed", String(err)));
     });
     this.sweeper = setInterval(() => this.sweep(), 30_000);
     this.sweeper.unref?.();
+  }
+
+  /** The live keyring, most recently used first; keys no longer allowed fall out. */
+  private keys(): Uint8Array[] {
+    const allowed = new Set(this.opts.keys());
+    for (const b64 of [...this.ring.keys()]) if (!allowed.has(b64)) this.ring.delete(b64);
+    for (const b64 of allowed) {
+      if (this.ring.has(b64)) continue;
+      try {
+        const k = fromB64(b64);
+        if (k.length === 32) this.ring.set(b64, k);
+      } catch {
+        /* a malformed key opens nothing */
+      }
+    }
+    return [...this.ring.values()];
   }
 
   clientCount(): number {
@@ -224,7 +257,16 @@ export class RelayBridge {
 
   private async send(msg: RelayMessage): Promise<void> {
     if (this.closed) return;
-    for (const env of encodeMessage(this.key, "d", msg)) await this.opts.transport.send(env as RelayEnvelope);
+    const to = String((msg as { to?: unknown }).to ?? "");
+    const b64 = this.keyOf.get(to);
+    // its key was revoked since it last spoke: say nothing, and stop streaming to it
+    if (!b64 || !this.opts.keys().includes(b64)) {
+      this.keyOf.delete(to);
+      if (this.clients.has(to)) this.unsubscribe(to);
+      return;
+    }
+    const key = this.ring.get(b64) ?? fromB64(b64);
+    for (const env of encodeMessage(key, "d", msg)) await this.opts.transport.send(env as RelayEnvelope);
   }
 
   private async handle(msg: RelayMessage): Promise<void> {
@@ -359,6 +401,7 @@ export class RelayBridge {
     if (forget && !c.inflight) {
       if (c.timer) clearTimeout(c.timer);
       this.clients.delete(from);
+      this.keyOf.delete(from);
     }
   }
 

@@ -136,6 +136,33 @@ describe("loom chain (#340)", () => {
     expect(fs.readFileSync(path.join(dirs.c!, "two.txt"), "utf8")).toBe("second\n");
   }, 120_000);
 
+  it("--progress prints one line per task event as each run goes", async () => {
+    const r = await runCli(["chain", "--progress"], "chain-c :: write three.txt third\n");
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/chain-c t1 planned for w: write/);
+    expect(r.out).toMatch(/chain-c t1 \[w\] done — 1 file/);
+    expect(r.out).toMatch(/chain-c \S+ completed/);
+  }, 120_000);
+
+  it("--check finds what a chain would trip on, line by line, and runs nothing", async () => {
+    fs.appendFileSync(path.join(dirs.b!, ".gitignore"), "dist/\n"); // a tracked change the merge would hit
+    try {
+      const plan = ["chain-a :: [-o c -w w] write x.txt x", "nope :: anything", "chain-b :: write y.txt y", "chain-c :: [-w ghost] write z.txt z"].join("\n");
+      const r = await runCli(["chain", "--check", "--json"], plan);
+      expect(r.code).toBe(1);
+      const out = JSON.parse(r.out.trim().split("\n").at(-1)!);
+      expect(out.ok).toBe(false);
+      const [a, nope, b, c] = out.steps;
+      expect(a).toMatchObject({ project: "chain-a", ok: true, orchestrator: "c", workers: [{ agent: "w" }], errors: [] });
+      expect(nope.errors[0]).toMatch(/no project "nope"/);
+      expect(b.errors[0]).toMatch(/1 uncommitted change — commit or stash/);
+      expect(c.errors).toEqual([expect.stringMatching(/no worker "ghost" here/)]);
+      for (const f of ["x.txt", "y.txt", "z.txt"]) expect(fs.existsSync(path.join(dirs.a!, f))).toBe(false);
+    } finally {
+      execFileSync("git", ["checkout", "--", ".gitignore"], { cwd: dirs.b });
+    }
+  }, 120_000);
+
   it("run options apply to every line, and a line's own [ … ] wins (no claude-code planning unless asked)", async () => {
     const r = await runCli(["chain", "--json", "-p", "3"], "chain-a :: [-o c -w w -p 2] write opts.txt chosen\n");
     expect(r.code).toBe(0);

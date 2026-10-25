@@ -247,7 +247,8 @@ export function WelcomeScreen(props: { onSignedIn: () => void; onSkip: () => voi
 
         <Text style={{ color: T.faint, fontSize: 11.5, lineHeight: 17, textAlign: "center" }}>
           {supabaseConfigured
-            ? "Loom runs fully on your own network. An account only turns on cloud features."
+            ? "Loom runs fully on your own network. An account only turns on cloud features. " +
+              "Once a day the app notes your region's country, nothing else — turn it off in Account."
             : "Loom runs on your computer and your own network. No account needed."}
         </Text>
       </Animated.View>

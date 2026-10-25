@@ -243,8 +243,14 @@ export function encodeMessage(key: Uint8Array, dir: "c" | "d", msg: RelayMessage
  */
 export class RelayDecoder {
   private parts = new Map<string, { chunks: (Uint8Array | undefined)[]; at: number }>();
+  /** The key that opened the last message push() returned. */
+  openedWith: Uint8Array | null = null;
   constructor(
-    private key: Uint8Array,
+    /**
+     * One key, or a keyring tried in order (the daemon holds one key per paired
+     * device, so revoking a device drops its key and nothing else).
+     */
+    private key: Uint8Array | (() => Uint8Array[]),
     /** Which direction this side reads: the daemon reads "c", the client "d". */
     private reads: "c" | "d",
   ) {}
@@ -253,7 +259,12 @@ export class RelayDecoder {
     if (!env || typeof env !== "object") return null;
     const e = env as RelayEnvelope;
     if (e.v !== RELAY_PROTOCOL || e.d !== this.reads || typeof e.x !== "string") return null;
-    const plain = open(this.key, e.x);
+    let plain: Uint8Array | null = null;
+    let used: Uint8Array | null = null;
+    for (const k of typeof this.key === "function" ? this.key() : [this.key]) {
+      plain = open(k, e.x);
+      if (plain) { used = k; break; }
+    }
     if (!plain) return null;
     let bytes = plain;
     if (e.p) {
@@ -277,7 +288,9 @@ export class RelayDecoder {
     }
     try {
       const msg = JSON.parse(dec.decode(bytes)) as RelayMessage;
-      return msg && typeof msg === "object" && typeof msg.t === "string" ? msg : null;
+      if (!msg || typeof msg !== "object" || typeof msg.t !== "string") return null;
+      this.openedWith = used;
+      return msg;
     } catch {
       return null;
     }

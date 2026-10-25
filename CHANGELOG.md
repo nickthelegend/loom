@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.8] — 2026-10-26
+
+### Security
+
+- **Each phone gets its own Loom Cloud key.** Every phone paired to a computer shared one relay key, so a phone you revoked could still read the replies meant for the others until `loom cloud rotate` re-paired everyone. A new pairing link now carries a key for that phone alone, and revoking the phone drops it: it can't send anything the daemon will open or read anyone else's replies. The wire format is unchanged, so every phone build works; phones paired earlier keep the channel's key until you run `loom cloud rotate` once.
+
+### Added
+
+- **`loom defaults`**: the agents every project should have and their access (`--agents grok-code,codex --mode bypass --mode-for codex=auto --gitignore on`), kept in `~/.loom/defaults.json`. `loom init` applies them. It adds missing agents that are installed here and sets a mode on agents that haven't chosen one. It never removes an agent or overrides a mode you set, and it says what it changed.
+- **`loom chain --check`** checks every line and runs nothing. It confirms the project and its folder exist, there are no uncommitted changes the merge would hit, `.loom/` is ignored, the orchestrator and workers resolve the way the run would resolve them, and the config has no typos. It also shows each worker's access. `--json` is available for scripts, and it exits 1 on any problem.
+- **`--progress` on `loom chain`, `orchestrate --apply` and `orchestra --wait`** prints one line per task event: planned for X, running (attempt n), done with N files, failed with the reason, review round k. With `--json` the events are JSON lines on stderr, so stdout stays the one summary.
+- **Daemon swaps are said out loud.** When a newer CLI replaces an older daemon, it prints `updated the daemon 1.2.7 → 1.2.8 — no turns were running`. The new daemon logs the swap, `loom version` shows it, and a chain's `--progress` notes it. `loom config auto-restart off` (or `LOOM_AUTO_RESTART=off`) keeps a long unattended chain on the build it started with.
+- **A running `loom chain`, `orchestrate --apply`/watch or `orchestra --wait` counts as busy,** gaps between runs included. Before, the guard looked only at running turns, and 1.2.6 → 1.2.7 landed in the gap between two chained projects. A newer CLI now leaves the daemon alone while one is following its runs, and so does `loom up --restart` unless you add `--force`. If a restart happens anyway, their polls ride it out (up to 90 s) instead of failing the step: orchestra runs carry on across restarts.
+
+### Changed
+
+- **The phone sends no usage ping before the welcome screen,** and the welcome now says what is sent (the region's country, once a day) and where to turn it off.
+
 ## [1.2.7] — 2026-10-25
 
 ### Added

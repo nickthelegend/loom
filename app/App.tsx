@@ -60,15 +60,6 @@ export default function App() {
     });
   }, []);
 
-  // Country-only open ping: at most once per UTC day, never blocks anything.
-  useEffect(() => {
-    recordAppOpen();
-    const sub = AppState.addEventListener("change", (s) => {
-      if (s === "active") recordAppOpen();
-    });
-    return () => sub.remove();
-  }, []);
-
   // Register for pushes whenever we have credentials (idempotent).
   useEffect(() => {
     if (creds) void enablePush(creds);
@@ -110,6 +101,18 @@ export default function App() {
   }, []);
 
   const showWelcome = booted && auth.ready && !auth.user && !skipped;
+
+  // Country-only open ping: at most once per UTC day, never blocks anything —
+  // and never before the welcome, which is where a new install is told about it.
+  const pastWelcome = booted && auth.ready && !showWelcome;
+  useEffect(() => {
+    if (!pastWelcome) return;
+    recordAppOpen();
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "active") recordAppOpen();
+    });
+    return () => sub.remove();
+  }, [pastWelcome]);
 
   // Dark by default, as on the desktop; Light, or follow the phone, from the
   // account sheet. The palette swaps in place and the tree below remounts
