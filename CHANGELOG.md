@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A daemon-wide cap on turns at once, and a free-memory floor** (#339). Six agent turns at once — each with a dev server and headless Chrome — exhausted 16 GB and reset a Mac. Every agent turn, from any project (chats, orchestra workers, crews, reviews), now passes one gate: past the cap (one turn per 4 GB by default, so 4 on 16 GB) or with less than 15% of memory free, it waits for a slot and says so in its thread. `loom limits --turns 2 --min-free 25` changes it without a restart; a turn that's waited 10 minutes starts anyway, so nothing deadlocks.
 - **`loom orchestra --json` and `--wait`** (#341). `--json` gives each run's `status` — one of starting, planning, running, reviewing, waiting_human, completed, failed, aborted, moved — whether that's `terminal`, and its tasks by outcome. `loom orchestra <run> --wait` waits for the end (reviewing isn't the end — a script took it for one and skipped the apply) and exits 0 completed, 1 failed/aborted, 2 waiting on you, 124 timed out.
 
 ### Fixed

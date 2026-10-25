@@ -2521,6 +2521,28 @@ program
   });
 
 program
+  .command("limits")
+  .description("how many agent turns run at once across every project, and how much memory stays free — past either, turns queue (#339)")
+  .option("--turns <n>", "turns at once across all projects (0 = no cap)")
+  .option("--min-free <pct>", "don't start a turn while less than this % of memory is free (0 = off)")
+  .option("--json", "print as JSON")
+  .action(async (opts: { turns?: string; minFree?: string; json?: boolean }) => {
+    const { readLimits, writeLimits, availableMemoryPct, defaultLimits } = await import("../core/turn-gate.js");
+    const patch: { maxTurns?: number; minFreePct?: number } = {};
+    if (opts.turns !== undefined) { const n = Number(opts.turns); if (!Number.isInteger(n) || n < 0) fail("--turns takes a whole number (0 = no cap)"); patch.maxTurns = n; }
+    if (opts.minFree !== undefined) { const n = Number(opts.minFree); if (!(n >= 0 && n < 100)) fail("--min-free takes a % from 0 to 99"); patch.minFreePct = n; }
+    const limits = Object.keys(patch).length ? writeLimits(patch) : readLimits();
+    const free = Math.round(availableMemoryPct());
+    const cfg = await daemonRunning();
+    const running = cfg ? await turnsInFlight(new DaemonClient(cfg)) : [];
+    if (opts.json) return void console.log(JSON.stringify({ ...limits, freePct: free, running, defaults: defaultLimits() }));
+    if (Object.keys(patch).length) console.log(pc.green("✓ saved — the daemon picks it up within a few seconds"));
+    console.log(`turns at once   ${limits.maxTurns ? pc.bold(String(limits.maxTurns)) : pc.dim("no cap")}  ${pc.dim(`(running now: ${running.length}${running.length ? ` — ${running.slice(0, 4).join(", ")}` : ""})`)}`);
+    console.log(`memory kept free ${limits.minFreePct ? pc.bold(`${limits.minFreePct}%`) : pc.dim("off")}  ${pc.dim(`(free now: ${free}%)`)}`);
+    console.log(pc.dim("past either, a new turn waits for a slot and says so in its thread; one that waits 10 min starts anyway"));
+  });
+
+program
   .command("agents:mode <agentId> [mode]")
   .description("an agent's access: bypass (no sandbox — can commit, push, use the network), auto (the default), or ask. No mode: show what each means for it")
   .action(async (agentId: string, mode: string | undefined) => {

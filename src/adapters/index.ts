@@ -3,7 +3,8 @@
  * Community adapters register here (or via the SDK entry point).
  */
 
-import type { AgentConfig, AnyAgent } from "../types.js";
+import { turnGate } from "../core/turn-gate.js";
+import { isAdapter, type AgentConfig, type AnyAgent, type SendInput } from "../types.js";
 import { AntigravityCliAdapter } from "./antigravity-cli.js";
 import { AntigravityBridge } from "./bridges/antigravity.js";
 import { KiroBridge } from "./bridges/kiro.js";
@@ -92,7 +93,28 @@ export function createAgent(cfg: AgentConfig, projectDir: string): AnyAgent {
       `unknown agent kind "${cfg.kind}" (known: ${[...factories.keys()].join(", ")})`,
     );
   }
-  return factory(cfg, projectDir);
+  return gated(factory(cfg, projectDir), cfg, projectDir);
+}
+
+/**
+ * Every turn an adapter takes passes the daemon-wide gate (#339): past the cap on turns at
+ * once, or short of free memory, it waits for a slot — and says so in the thread — instead
+ * of piling onto a machine that's already full. LOOM_TURN_GATE=off skips it (tests).
+ */
+function gated(agent: AnyAgent, cfg: AgentConfig, projectDir: string): AnyAgent {
+  if (!isAdapter(agent) || process.env.LOOM_TURN_GATE === "off") return agent;
+  const send = agent.send.bind(agent);
+  const say = (why: string) => (agent as unknown as { emit(e: { kind: "status"; payload: Record<string, unknown> }): void })
+    .emit({ kind: "status", payload: { state: "queued_for_slot", text: `waiting for a free slot — ${why}` } });
+  agent.send = async (input: SendInput) => {
+    const release = await turnGate.acquire(`${projectDir.split(/[\\/]/).pop()}: ${cfg.id}`, say);
+    try {
+      return await send(input);
+    } finally {
+      release();
+    }
+  };
+  return agent;
 }
 
 export function knownAgentKinds(): string[] {
