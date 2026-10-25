@@ -167,7 +167,8 @@ describe("a session opencode can't run (field: big-pickle on 1.18 swallowed ever
 
 
 describe("opencode serve dying mid-turn (field: a serve killed mid-start left the agent busy)", () => {
-  it("ends the turn at once with why, and the next send starts a new server", async () => {
+  // the stand-in `opencode` is a POSIX shell script; Windows starts opencode through a Job Object
+  it.skipIf(process.platform === "win32")("ends the turn at once with why, and the next send starts a new server", async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const bin = makeProjectDir({ name: "ocbin" });
     fs.writeFileSync(path.join(bin, "opencode"),
