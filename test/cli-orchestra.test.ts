@@ -68,7 +68,7 @@ describe("loom orchestrate / orchestra", () => {
     expect(detail.out).toContain("orchestrator solo");
     // #341: JSON with the documented status, and --wait returns at once on a question (exit 2)
     const js = JSON.parse((await runCli(["orchestra", "--json"])).out);
-    expect(js[0]).toMatchObject({ id: runId, status: "waiting_human", terminal: false, tasks: { total: 0 } });
+    expect(js[0]).toMatchObject({ id: runId, status: "waiting_human", terminal: false, tasks: { total: 0, done: 0, failed: 0, cancelled: 0 } });
     const waited = await runCli(["orchestra", runId, "--wait", "--json"]);
     expect(waited.code).toBe(2);
     expect(JSON.parse(waited.out)).toMatchObject({ id: runId, status: "waiting_human" });

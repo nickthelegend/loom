@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.7] — 2026-10-25
+
+### Added
+
+- **`loom chain` takes run options** — `-o/--orchestrator`, `-w/--workers`, `-p/--parallel`, `--solo`, `--max-usd` for every line, and a line can override them in brackets before its goal: `api :: [-o grok-code -w codex,opencode] add rate limiting`. Without them every run was planned by the default orchestrator (claude-code when installed).
+
+### Changed
+
+- **`loom orchestra --json` always lists every task count** — `done`, `running`, `pending`, `needs_input`, `conflict`, `failed`, `cancelled` — with 0 when there are none, so a script can read `tasks.failed` without checking it's there.
+
 ## [1.2.6] — 2026-10-25
 
 A cap that keeps a busy machine from falling over, chained goals across projects, read-only thread links, and orchestras scripts can trust.
