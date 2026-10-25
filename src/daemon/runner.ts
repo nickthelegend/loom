@@ -585,7 +585,9 @@ export class Runner {
     const dir = path.join(base, name);
     fs.mkdirSync(base, { recursive: true });
     const url = this.deps.cloneUrl?.(a.job.repo) ?? `https://github.com/${a.job.repo}.git`;
-    await git(["clone", "-q", url, dir], base);
+    // --no-hardlinks: a clone from a local path hardlinks objects, and on Windows that fails
+    // ("hardlink different from source") when the origin takes a push mid-clone; ignored for URLs
+    await git(["clone", "-q", "--no-hardlinks", url, dir], base);
     await git(["config", "loom.repo", a.job.repo], dir);
     await git(["config", "user.name", `${this.deps.github() ?? "loom"} (runner)`], dir);
     await git(["config", "user.email", `${this.deps.github() ?? "loom"}@users.noreply.github.com`], dir);
