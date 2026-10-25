@@ -1,4 +1,5 @@
 import type { Express } from 'express';
+import { timingSafeEqual } from "node:crypto";
 import { listProjects } from "../../core/registry.js";
 import { isLoopbackHost } from '../system.js';
 import type { RouteContext } from './context.js';
@@ -22,7 +23,8 @@ export function registerAlertsRoutes(app: Express, ctx: Pick<RouteContext, "host
   app.post("/api/webhooks/alerts", (req, res) => {
     void (async () => {
       const secret = process.env.LOOM_WEBHOOK_SECRET;
-      if (secret && req.query.token !== secret && req.headers["x-loom-secret"] !== secret) {
+      const same = (v: unknown) => typeof v === "string" && v.length === secret!.length && timingSafeEqual(Buffer.from(v), Buffer.from(secret!));
+      if (secret && !same(req.query.token) && !same(req.headers["x-loom-secret"])) {
         return void res.status(401).json({ error: "unauthorized" });
       }
       // No secret set is fine on loopback and nowhere else.

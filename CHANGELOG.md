@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Triggers: a schedule or a webhook starts an agent's turn on its own.** Use `loom triggers:add "<prompt>" --every 2h | --cron "0 9 * * 1-5" | --webhook`.
+  - Each trigger has its own thread, and its turns go through the queue.
+  - A trigger whose last run is still waiting skips its next firing.
+  - Webhooks are checked against their secret (HMAC like GitHub's, or the plain secret) and fill the prompt from the payload.
+  - Redeliveries run once, and there's an optional flood guard.
+  - Every run is recorded.
+  - Only the machine's owner can add, change or fire a trigger.
+  - The approach comes from [Nuphos](https://github.com/nuphos/nuphos) (Apache-2.0, credited in THIRD_PARTY_NOTICES.md).
+
+### Fixed
+
+- The alerts webhook now checks its secret in constant time.
+
 ## [1.2.8] — 2026-10-26
 
 ### Security

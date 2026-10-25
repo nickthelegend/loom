@@ -2859,6 +2859,86 @@ program
   });
 
 program
+  .command("triggers")
+  .description("schedules and webhooks that start a turn on their own — each in its own thread, through the queue (approach credit: Nuphos)")
+  .option("--json", "print as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { triggers, runs } = await client.triggers(project.id);
+    if (opts.json) return void console.log(JSON.stringify({ triggers, runs }));
+    if (!triggers.length) return void console.log(pc.dim('no triggers — loom triggers:add "<prompt>" --every 1h | --cron "0 9 * * 1-5" | --webhook'));
+    for (const t of triggers) {
+      const when = t.kind === "webhook" ? `webhook ${pc.dim(`${client.baseUrl}/api/webhooks/trigger/${t.id}`)}` : t.cron ? `cron ${t.cron}` : `every ${t.everyMin}m`;
+      const next = t.nextAt ? pc.dim(` · next ${new Date(t.nextAt).toLocaleString()}`) : "";
+      console.log(`${t.enabled ? pc.green("●") : pc.dim("○")} ${pc.bold(t.id)} ${t.name} — ${when}${next}${t.agent ? pc.dim(` → ${t.agent}`) : ""}`);
+      console.log(pc.dim(`    ${String(t.prompt).split("\n")[0]!.slice(0, 100)}`));
+      for (const r of runs.filter((x) => x.trigger === t.id).slice(0, 3)) console.log(`    ${r.ok ? pc.green("✓") : pc.yellow("·")} ${pc.dim(new Date(r.at).toLocaleString())} ${r.note}`);
+    }
+  });
+
+program
+  .command("triggers:add <prompt>")
+  .description('add a trigger: --every 30m, --cron "0 9 * * 1-5" (local time; @daily, @hourly work), or --webhook (prints its URL and secret once). A webhook\'s prompt can use {{body}}, {{body.some.path}} and {{event}}')
+  .option("--every <interval>", "run every 15m / 2h / 1d")
+  .option("--cron <spec>", "run on a cron schedule (minute hour day month weekday)")
+  .option("--webhook", "run when a POST arrives, signed with its secret (GitHub's X-Hub-Signature-256 works as is)")
+  .option("--name <name>", "what to call it")
+  .option("--agent <id>", "who answers (default: whoever the project routes to)")
+  .option("--min-interval <seconds>", "webhook: ignore deliveries closer together than this")
+  .action(async (prompt: string, opts: { every?: string; cron?: string; webhook?: boolean; name?: string; agent?: string; minInterval?: string }) => {
+    if ([opts.every, opts.cron, opts.webhook].filter(Boolean).length !== 1) fail("say when: one of --every, --cron or --webhook");
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const out = await client.addTrigger(project.id, {
+      kind: opts.webhook ? "webhook" : "schedule", prompt,
+      ...(opts.every ? { every: opts.every } : {}), ...(opts.cron ? { cron: opts.cron } : {}),
+      ...(opts.name ? { name: opts.name } : {}), ...(opts.agent ? { agent: opts.agent } : {}),
+      ...(opts.minInterval ? { minIntervalSec: Number(opts.minInterval) } : {}),
+    }).catch((e: Error) => fail(e.message));
+    console.log(`${pc.green("✓")} ${pc.bold(out.trigger.id)} ${out.trigger.name}${out.trigger.nextAt ? pc.dim(` — first run ${new Date(out.trigger.nextAt).toLocaleString()}`) : ""}`);
+    if (out.secret) {
+      console.log(`\n  URL     ${client.baseUrl}${out.path}`);
+      console.log(`  secret  ${out.secret}  ${pc.yellow("(shown once)")}`);
+      console.log(pc.dim("\n  sign the body: X-Hub-Signature-256: sha256=<HMAC-SHA256 of the body> (GitHub does this when you give it the secret),"));
+      console.log(pc.dim("  or send the secret as X-Loom-Secret. To reach it from the internet: tailscale funnel, or loom up --tailnet."));
+    }
+  });
+
+for (const [name, desc, enabled] of [["triggers:on", "turn a trigger back on", true], ["triggers:off", "pause a trigger (it keeps its settings and history)", false]] as const) {
+  program.command(`${name} <id>`).description(desc).action(async (id: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    await client.updateTrigger(project.id, id, { enabled }).catch((e: Error) => fail(e.message));
+    console.log(`${pc.green("✓")} ${id} ${enabled ? "on" : "off"}`);
+  });
+}
+
+program
+  .command("triggers:rm <id>")
+  .description("remove a trigger (its thread stays)")
+  .action(async (id: string) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    await client.removeTrigger(project.id, id).catch((e: Error) => fail(e.message));
+    console.log(`${pc.green("✓")} removed ${id}`);
+  });
+
+program
+  .command("triggers:fire <id>")
+  .description("run a trigger now (a webhook's with --payload <file.json> as its body)")
+  .option("--payload <file>", "a JSON file to use as the webhook body")
+  .action(async (id: string, opts: { payload?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let payload: unknown;
+    if (opts.payload) { try { payload = JSON.parse(fs.readFileSync(opts.payload, "utf8")); } catch (e) { fail(`couldn't read ${opts.payload}: ${(e as Error).message}`); } }
+    const { run } = await client.fireTrigger(project.id, id, payload).catch((e: Error) => fail(e.message));
+    console.log(`${run.ok ? pc.green("✓") : pc.yellow("·")} ${run.note}`);
+    if (!run.ok) process.exitCode = 1;
+  });
+
+program
   .command("defaults")
   .description("your defaults for every project — the agents it should have and their access — applied by loom init (~/.loom/defaults.json)")
   .option("--agents <kinds>", "comma-separated agent kinds every project gets, e.g. grok-code,codex (\"\" to clear)")
