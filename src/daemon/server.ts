@@ -107,6 +107,8 @@ import { registerTriggerRoutes } from "./routes/triggers.js";
 import { TriggerRunner } from "./triggers.js";
 import { registerBridgeRoutes } from "./routes/bridges.js";
 import { ChatBridges } from "./chat-bridge.js";
+import { auditTrail, searchSessions } from "./workspace-views.js";
+import { resources } from "../core/resources.js";
 import { registerReviewRoutes } from "./routes/review.js";
 import { registerCouncilRoutes } from "./routes/council.js";
 import { registerOnboardRoutes } from "./routes/onboard.js";
@@ -181,8 +183,10 @@ export class LoomDaemon {
       tool: string;
       input: unknown;
       sessionOption?: boolean;
+      /** The chat the asking turn is in — a guest decides only its own chat's. */
+      chat?: string;
       createdAt: number;
-      settle: (d: ApprovalDecision) => void;
+      settle: (d: ApprovalDecision, by?: string) => void;
     }
   >();
 
@@ -219,7 +223,7 @@ export class LoomDaemon {
     });
     return new Promise<ApprovalDecision>((resolve) => {
       const abandoned = () => settle({ behavior: "deny", message: "The agent stopped waiting." });
-      const settle = (d: ApprovalDecision) => {
+      const settle = (d: ApprovalDecision, by?: string) => {
         clearTimeout(timer);
         req.signal?.removeEventListener("abort", abandoned);
         if (!this.approvals.delete(id)) return;
@@ -227,7 +231,7 @@ export class LoomDaemon {
           kind: "approval",
           agentId: req.agent,
           ...(chat ? { chat } : {}),
-          payload: { phase: "decided", approvalId: id, tool, behavior: d.behavior, ...(d.scope === "session" ? { scope: "session" } : {}), ...(d.message ? { message: d.message } : {}) },
+          payload: { phase: "decided", approvalId: id, tool, behavior: d.behavior, ...(d.scope === "session" ? { scope: "session" } : {}), ...(d.message ? { message: d.message } : {}), ...(by ? { by } : {}) },
         });
         resolve(d);
       };
@@ -242,6 +246,7 @@ export class LoomDaemon {
         tool,
         input: req.input ?? {},
         ...(req.sessionOption ? { sessionOption: true } : {}),
+        ...(chat ? { chat } : {}),
         createdAt: Date.now(),
         settle,
       });
@@ -413,7 +418,40 @@ export class LoomDaemon {
       (req as Request & { isAdmin?: boolean }).isAdmin = this.auth.isAdmin(token);
       (req as Request & { projectScope?: string[] | null }).projectScope =
         this.auth.allowedProjects(token);
+      const guest = this.auth.guestOf(token);
+      if (guest) (req as Request & { guest?: typeof guest }).guest = guest;
       next();
+    });
+
+    // A Share-live guest reaches its one chat and nothing else: read it, and — as its role allows —
+    // send, stop, and answer that chat's approvals. Default deny; no terminals, files, git,
+    // settings, other chats, team or cloud.
+    app.use((req: Request, res: Response, next: NextFunction) => {
+      const g = (req as Request & { guest?: { project: string; chat: string; role: string } }).guest;
+      if (!g) return void next();
+      const p = req.path, m = req.method;
+      const proj = /^\/api\/projects\/([^/]+)(\/.*)?$/.exec(p);
+      const here = proj ? (findProject(decodeURIComponent(proj[1]!))?.id ?? decodeURIComponent(proj[1]!)) === g.project : false;
+      const rest = proj?.[2] ?? "";
+      const canSend = g.role === "reply" || g.role === "approve";
+      const ok = (m === "GET" && p === "/api/guest") ||
+        (here && m === "GET" && rest === "/events") ||
+        (here && m === "POST" && rest === "/messages" && canSend) ||
+        (here && m === "POST" && rest === "/interrupt" && canSend) ||
+        (here && m === "GET" && rest === "/approvals" && g.role === "approve") ||
+        (here && m === "POST" && /^\/approvals\/[\w-]+$/.test(rest) && g.role === "approve");
+      if (!ok) return void res.status(403).json({ error: "this shared-chat link reaches only its chat" });
+      next();
+    });
+
+    app.get("/api/guest", (req, res) => {
+      const g = (req as Request & { guest?: { project: string; chat: string; role: string; name: string; expiresAt: number } }).guest;
+      if (!g) return void res.status(404).json({ error: "not a shared-chat link" });
+      void this.runtime(g.project).then((rt) => {
+        const chat = rt.chats().find((c) => c.id === g.chat);
+        res.json({ project: { id: rt.info.id, name: rt.info.name }, chat: { id: g.chat, title: chat?.title ?? (g.chat === "main" ? "Main" : g.chat) },
+          role: g.role, name: g.name, expiresAt: g.expiresAt, agents: rt.config.agents.filter((a) => a.enabled !== false).map((a) => a.id) });
+      }).catch((e) => res.status(500).json({ error: (e as Error).message }));
     });
 
     // Cheap liveness: HEAD answers with no body, for probes that only ask "is
@@ -433,6 +471,8 @@ export class LoomDaemon {
         platform: `${process.platform}-${process.arch}`,
         uptimeSec: Math.round(process.uptime()),
         pid: process.pid,
+        // what a phone paired with several computers calls this one
+        hostname: os.hostname(),
         ...(this.swap ? { swap: this.swap } : {}),
       });
     });
@@ -485,6 +525,23 @@ export class LoomDaemon {
     registerShiftRoutes(app, withRuntime);
     registerTriggerRoutes(app, withRuntime, this.triggers);
     registerBridgeRoutes(app, this.bridges);
+    // every session, every project (a scoped token: its own) — and the audit trail, owner only
+    app.get("/api/search", (req, res) => {
+      const q = String(req.query.q ?? "").trim();
+      if (!q) return void res.json({ hits: [], truncated: false });
+      const scope = (req as Request & { projectScope?: string[] | null }).projectScope ?? null;
+      void searchSessions(q, this.runtimes, scope).then((r) => res.json(r)).catch((e) => res.status(500).json({ error: (e as Error).message }));
+    });
+    // what the agents cost this machine right now (core/resources.ts) — owner only: it lists processes
+    app.get("/api/resources", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can see its processes" });
+      void resources().then((r) => res.json(r)).catch((e) => res.status(500).json({ error: (e as Error).message }));
+    });
+    app.get("/api/audit", (req, res) => {
+      if (!(req as Request & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can read the audit trail" });
+      const since = Number(req.query.since) || Date.now() - 7 * 86_400_000;
+      void auditTrail(since, this.runtimes).then((entries) => res.json({ entries })).catch((e) => res.status(500).json({ error: (e as Error).message }));
+    });
     registerReviewRoutes(app, withRuntime);
     registerCouncilRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
@@ -669,13 +726,17 @@ export class LoomDaemon {
     const tokens = this.pushTokens(category);
     if (!tokens.length) return;
     const name = listProjects().find((p) => p.id === projectId)?.name ?? "project";
+    // a tool approval can be answered on the alert itself: Allow / Deny, on the computer that asked
+    const approval = event.kind === "approval" && event.payload.phase === "requested" && typeof event.payload.approvalId === "string";
     void sendExpoPush(tokens, {
       ...pushContent(name, event, { reply }),
+      ...(approval ? { categoryId: "loom-approval" } : {}),
       // the phone opens this project (and goal, or chat) when the alert is tapped
       data: {
         projectId,
         kind: event.kind,
         category,
+        ...(approval ? { approvalId: event.payload.approvalId, daemon: os.hostname() } : {}),
         ...(typeof event.payload.runId === "string" ? { runId: event.payload.runId } : {}),
         ...(typeof event.payload.crewId === "string" ? { crewId: event.payload.crewId } : {}),
         ...(event.chat ? { chat: event.chat } : {}),
@@ -807,9 +868,12 @@ export class LoomDaemon {
         void this.runtime(project).catch(() => { });
       }
       const wsScope = this.auth.allowedProjects(token);
+      const wsGuest = this.auth.guestOf(token);
+      if (wsGuest && resolvedProject !== wsGuest.project) { ws.close(4403, "this shared-chat link reaches only its chat"); return; }
       this.sockets.set(ws, {
         ...(resolvedProject ? { project: resolvedProject } : {}),
         ...(wsScope ? { scope: wsScope } : {}),
+        ...(wsGuest ? { chat: wsGuest.chat } : {}),
       });
       ws.send(
         JSON.stringify({
@@ -828,7 +892,7 @@ export class LoomDaemon {
         } catch {
           return;
         }
-        if (!resolvedProject || !msg.term) return;
+        if (!resolvedProject || !msg.term || wsGuest) return; // a guest never drives a terminal
         const sess = this.terminals.get(resolvedProject, String(msg.term));
         if (!sess) return;
         if (msg.type === "term-input" && typeof msg.data === "string") sess.write(msg.data);

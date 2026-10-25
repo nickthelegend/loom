@@ -20,6 +20,7 @@ import {
   Platform,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -29,7 +30,7 @@ import {
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import { claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift } from "./api";
+import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -116,7 +117,7 @@ function PairStep(props: { n: number; text: string; link?: boolean }) {
   );
 }
 
-export function PairScreen(props: { onPaired: (c: Creds) => void }) {
+export function PairScreen(props: { onPaired: (c: Creds) => void; /** pairing one more computer: back to the one in use */ onCancel?: () => void }) {
   const insets = useSafeAreaInsets();
   const [url, setUrl] = useState("http://");
   const [token, setToken] = useState("");
@@ -138,7 +139,9 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
         tokenMatch ? tokenMatch[1]! : token.trim(),
         cloudFromLink(raw),
       );
-      await saveCreds(creds);
+      // named for the computer it is (its hostname), so a second one reads apart from the first
+      const name = await api<{ hostname?: string }>(creds, "/api/version").then((v) => v.hostname).catch(() => undefined);
+      await saveCreds(creds, name);
       props.onPaired(creds);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -182,6 +185,12 @@ export function PairScreen(props: { onPaired: (c: Creds) => void }) {
 
   return (
     <View style={{ flex: 1, justifyContent: "center", padding: spacing.xl, gap: 14 }}>
+      {props.onCancel && (
+        <TouchableOpacity onPress={props.onCancel} accessibilityRole="button" accessibilityLabel="Back to the computer in use"
+          style={{ position: "absolute", top: spacing.lg, left: spacing.lg, minHeight: 44, minWidth: 44, justifyContent: "center" }}>
+          <Text style={{ color: T.dim, fontSize: 14, fontWeight: "600" }}>‹ Back</Text>
+        </TouchableOpacity>
+      )}
       <Text
         style={{
           color: T.text,
@@ -1460,6 +1469,17 @@ export function ProjectScreen(props: {
             onRename={(title) => chatMenu && void act(() => renameChat(creds, project.id, chatMenu.id, title))}
             onFlags={(flags) => chatMenu && void act(() => setChatFlags(creds, project.id, chatMenu.id, flags))}
             onDelete={() => chatMenu && void act(() => deleteChat(creds, project.id, chatMenu.id), chatMenu.id)}
+            onShareLive={(role) => {
+              const c = chatMenu;
+              if (!c) return;
+              setChatMenu(null);
+              const go = (name?: string) => void shareLive(creds, { project: project.id, chat: c.id, role, name: (name ?? "").trim() || "Teammate", hours: 24 })
+                .then((r) => Share.share({ message: `Join my Loom chat "${c.title}" — ${role === "view" ? "read along" : role === "reply" ? "talk to the agent with me" : "talk and approve with me"} (24 h, one use): ${r.link}` }))
+                .catch((e) => Alert.alert("Couldn't make the link", e instanceof Error ? e.message : String(e)));
+              // iOS can ask for their name in place; elsewhere they join as "Teammate" and the link says so
+              if (Platform.OS === "ios" && Alert.prompt) Alert.prompt("Who's joining?", "Their name, as it shows in the chat.", go, "plain-text", "");
+              else go();
+            }}
           />
           {threadCachedAt ? (
             <View
@@ -2169,6 +2189,8 @@ function LinkStrip(props: { samples: LinkSample[]; via: string }) {
 /** Long-press a chat: rename it, pin or archive it, or delete it — the desktop sidebar's menu. */
 function ChatMenu(props: {
   chat: Chat | null;
+  /** Share live: a teammate joins this chat (read along / talk / talk and approve). */
+  onShareLive?: (role: "view" | "reply" | "approve") => void;
   onClose: () => void;
   onRename: (title: string) => void;
   onFlags: (flags: { pinned?: boolean; archived?: boolean }) => void;
@@ -2196,6 +2218,9 @@ function ChatMenu(props: {
               <Text style={{ color: T.onBright, fontWeight: "700" }}>Rename</Text>
             </TouchableOpacity>
           </View>
+          {props.onShareLive && row("Share live — they read along", () => props.onShareLive!("view"))}
+          {props.onShareLive && row("Share live — they can talk to the agent", () => props.onShareLive!("reply"))}
+          {props.onShareLive && row("Share live — talk and approve", () => props.onShareLive!("approve"))}
           {row(c.pinned ? "Unpin" : "Pin to the front", () => props.onFlags({ pinned: !c.pinned }))}
           {row(c.archived ? "Unarchive" : "Archive", () => props.onFlags({ archived: !c.archived }))}
           {row("Delete chat", () =>

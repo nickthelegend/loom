@@ -17,9 +17,10 @@ import { useEffect, useState } from "react";
 import { AppState, TouchableOpacity, View, useColorScheme } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AccountSheet, Avatar } from "./src/account";
-import { getProject, kv, loadCreds, setUnauthorizedHandler, type Creds, type Project } from "./src/api";
+import { decideApproval, getProject, kv, listMachines, loadCreds, setUnauthorizedHandler, type Creds, type Project } from "./src/api";
+import { credsOf, machineForPush } from "./src/machines-model";
 import { FleetScreen } from "./src/fleet";
-import { enablePush, onNotificationOpen } from "./src/push";
+import { enablePush, onApprovalAction, onNotificationOpen, registerApprovalActions } from "./src/push";
 import { BoardScreen, PairScreen, ProjectScreen, unpair } from "./src/screens";
 import { loadAuthSkipped, recordAppOpen, setAuthSkipped, useAuth } from "./src/supabase";
 import { notificationRoute, type NotificationRoute } from "./src/team-runners-model";
@@ -60,6 +61,20 @@ export default function App() {
     });
   }, []);
 
+  // Allow / Deny on an approval alert, answered on the computer that asked — the app needn't open.
+  useEffect(() => {
+    void registerApprovalActions();
+    return onApprovalAction((data, decision) => {
+      const projectId = typeof data.projectId === "string" ? data.projectId : "";
+      const approvalId = typeof data.approvalId === "string" ? data.approvalId : "";
+      if (!projectId || !approvalId) return;
+      void listMachines().then(({ machines, activeId }) => {
+        const m = machineForPush(machines, data.daemon, activeId);
+        if (m) void decideApproval(credsOf(m) as Creds, projectId, approvalId, decision).catch(() => {});
+      });
+    });
+  }, []);
+
   // Register for pushes whenever we have credentials (idempotent).
   useEffect(() => {
     if (creds) void enablePush(creds);
@@ -94,8 +109,11 @@ export default function App() {
   // A revoked/expired token anywhere sends us back to the pair screen.
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      setCreds(null);
-      setRoute({ name: "pair" });
+      // that computer let go of this phone — another paired one carries on, else pair again
+      void loadCreds().then((next) => {
+        setCreds(next);
+        setRoute(next ? { name: "board" } : { name: "pair" });
+      });
     });
     return () => setUnauthorizedHandler(null);
   }, []);
@@ -150,6 +168,7 @@ export default function App() {
             setCreds(c);
             setRoute({ name: "board" });
           }}
+          {...(creds ? { onCancel: () => setRoute({ name: "board" }) } : {})}
         />
       ) : route.name === "board" ? (
         <BoardScreen
@@ -206,6 +225,16 @@ export default function App() {
         onOpenTeam={() => {
           setAccountOpen(false);
           setRoute({ name: "fleet", focus: "team" });
+        }}
+        onSwitchMachine={(c) => {
+          // another computer: start fresh on its board (or pair, if none is left)
+          setAccountOpen(false);
+          setCreds(c);
+          setRoute(c ? { name: "board" } : { name: "pair" });
+        }}
+        onAddMachine={() => {
+          setAccountOpen(false);
+          setRoute({ name: "pair" });
         }}
         onSignedOut={() => {
           // back to the welcome, which is where signing out should land you

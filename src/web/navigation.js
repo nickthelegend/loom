@@ -11,6 +11,7 @@ import { applyTheme } from './theme.js';
 import { ICONS } from './icons.js';
 import { KMOD } from './permissions.js';
 import { esc } from './format.js';
+import { isGuest,renderGuest } from './share-live.js';
 
 
   function route(){
@@ -32,6 +33,8 @@ import { esc } from './format.js';
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     state.redrawFeed = null;
     if (!state.token) return renderPair();
+    // a teammate let into one chat sees that chat and nothing else
+    if (isGuest()) return renderGuest();
     // An invite link opened here: what it sets up, then one click (join.js).
     var invite = joinFromHash();
     if (invite) return renderJoin(invite);
@@ -50,9 +53,10 @@ import { esc } from './format.js';
    * which is what the rest of the app routes on.
    */
   function takePermalink(){
-    var m = location.hash.match(/^#p\/([^\/]+)\/c\/([^\/]+)\/m\/(\d+)$/);
+    // #p/<pid>/c/<chat>[/m/<id>] — a pane opens on a chat with no message to scroll to
+    var m = location.hash.match(/^#p\/([^\/]+)\/c\/([^\/]+)(?:\/m\/(\d+))?$/);
     if (!m) return null;
-    var go = { pid: decodeURIComponent(m[1]), chat: decodeURIComponent(m[2]), id: Number(m[3]) };
+    var go = { pid: decodeURIComponent(m[1]), chat: decodeURIComponent(m[2]), id: m[3] ? Number(m[3]) : 0 };
     try { localStorage.setItem("loomChat:" + go.pid, go.chat); } catch (e) {}
     state.pendingGo = go;
     history.replaceState(null, "", "#p/" + go.pid);
@@ -68,6 +72,7 @@ import { esc } from './format.js';
         [K + "K", "Search everything — files, chats, commands"],
         [K + "F", "Find in this chat"],
         [K + ".", "Focus mode: hide the sidebar and panel"],
+        [K + "D / " + K + "⇧D", "Split: another view beside / below (drag a chat onto a pane's edge)"],
         [K + "⇧V", "Prompts you’ve saved"],
         ["Ctrl+\u0060", "Show or hide the terminal"],
         ["N", "New task"], ["P", "New project"], ["[ / ]", "Your previous / next prompt in this chat"],

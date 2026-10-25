@@ -42,6 +42,7 @@ import { devMode, setDevMode } from './mode.js';
       { id: "devices", label: "Devices", icon: ICONS.agents },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "team", label: "Team", icon: ICONS.team },
+      { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
       { id: "about", label: "About", icon: ICONS.info }
     ];
     var cur = section || "setup";
@@ -864,6 +865,55 @@ import { devMode, setDevMode } from './mode.js';
       }).catch(fail);
     }
 
+    // ---- Slack & Discord: your agents in the team conversation (daemon/chat-bridge.ts) ----
+    // The bot runs here, with your own tokens — Slack over Socket Mode, Discord over its gateway —
+    // so nothing needs a public URL. Approach credit: Nuphos / openab.
+    function renderBridges(){
+      busy();
+      sapi("/api/bridges").then(drawBridges).catch(fail);
+    }
+    function drawBridges(b){
+      var h = '<div class="setphead">Slack &amp; Discord</div>' +
+        '<div class="setpsub">Mention the bot and the agent answers in the thread. It runs on this computer with your own bot — nothing hosted in between, no public URL.</div>';
+      [["slack", "Slack", "xoxb-…", true], ["discord", "Discord", "bot token", false]].forEach(function(x){
+        var p = x[0], c = b[p], st = c && c.status;
+        var pill = !c ? '<span class="updpill" style="color:var(--muted-foreground);background:var(--muted)">Not set up</span>'
+          : !c.enabled ? '<span class="updpill" style="color:var(--muted-foreground);background:var(--muted)">Off</span>'
+          : st && st.connected ? '<span class="updpill ok">Connected</span>' : '<span class="updpill warn">' + esc((st && st.error) || "Connecting") + "</span>";
+        h += '<div class="sgrouph">' + x[1] + " " + pill + (st ? '<span class="hintx">heard ' + Number(st.heard || 0) + " · ignored " + Number(st.ignored || 0) + "</span>" : "") + "</div>";
+        h += '<div class="cloudin">' +
+          '<div class="field"><label>Bot token' + (c ? ' <span class="opt">— blank keeps ' + esc(c.botToken) + "</span>" : "") + '</label><input data-b="' + p + '-bot" type="password" placeholder="' + x[2] + '" autocomplete="off" spellcheck="false"></div>' +
+          (x[3] ? '<div class="field"><label>App-level token (Socket Mode)' + (c && c.appToken ? ' <span class="opt">— blank keeps ' + esc(c.appToken) + "</span>" : "") + '</label><input data-b="slack-app" type="password" placeholder="xapp-…" autocomplete="off" spellcheck="false"></div>' : "") +
+          '<div class="field"><label>Listens to <span class="opt">user ids, comma-separated — required</span></label><input data-b="' + p + '-users" value="' + esc(c ? (c.users || []).join(", ") : "") + '" spellcheck="false"></div>' +
+          '<div class="field"><label>In channels <span class="opt">ids; blank = any channel the bot is in</span></label><input data-b="' + p + '-channels" value="' + esc(c ? (c.channels || []).join(", ") : "") + '" spellcheck="false"></div>' +
+          '<div class="field"><label>Project <span class="opt">blank = the only one</span></label><input data-b="' + p + '-project" value="' + esc((c && c.project) || "") + '" spellcheck="false"></div>' +
+          "</div>" +
+          '<div class="pillrow"><button class="btn primary sm" data-save="' + p + '">' + (c && c.enabled ? "Save & reconnect" : "Connect") + "</button>" +
+          (c && c.enabled ? '<button class="btn ghost sm" data-off="' + p + '">Turn off</button>' : "") +
+          (c ? '<button class="btn ghost sm" data-forget="' + p + '">Forget</button>' : "") + "</div>";
+      });
+      h += '<div class="snote">Slack: turn on Socket Mode, give the bot <code>app_mentions:read</code>, <code>channels:history</code>, <code>chat:write</code> and <code>im:history</code>, and make an app-level token with <code>connections:write</code>. Discord: turn on the Message Content intent. Only the people you list are heard; approvals stay in Loom and on your phone.</div>';
+      pane.innerHTML = h;
+      var val = function(k){ var i = pane.querySelector('[data-b="' + k + '"]'); return i ? i.value.trim() : ""; };
+      Array.prototype.forEach.call(pane.querySelectorAll("[data-save]"), function(btn){
+        btn.onclick = function(){
+          var p = btn.getAttribute("data-save"), body = { enabled: true, users: val(p + "-users"), channels: val(p + "-channels"), project: val(p + "-project") };
+          if (val(p + "-bot")) body.botToken = val(p + "-bot");
+          if (p === "slack" && val("slack-app")) body.appToken = val("slack-app");
+          btn.disabled = true;
+          sapi("/api/bridges/" + p, { method: "PUT", body: JSON.stringify(body) })
+            .then(function(r){ toast(r.status && r.status.connected ? p + " connected" : p + " saved — connecting"); renderBridges(); })
+            .catch(function(e){ toast(e.message); btn.disabled = false; });
+        };
+      });
+      Array.prototype.forEach.call(pane.querySelectorAll("[data-off]"), function(btn){
+        btn.onclick = function(){ var p = btn.getAttribute("data-off"); sapi("/api/bridges/" + p, { method: "PUT", body: JSON.stringify({ enabled: false }) }).then(renderBridges).catch(function(e){ toast(e.message); }); };
+      });
+      Array.prototype.forEach.call(pane.querySelectorAll("[data-forget]"), function(btn){
+        btn.onclick = function(){ var p = btn.getAttribute("data-forget"); sapi("/api/bridges/" + p, { method: "DELETE" }).then(renderBridges).catch(function(e){ toast(e.message); }); };
+      });
+    }
+
     function render(){
       gen++;
       if (cur === "diagnostics") renderDiag();
@@ -871,6 +921,7 @@ import { devMode, setDevMode } from './mode.js';
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();
       else if (cur === "cloud") renderCloud();
+      else if (cur === "bridges") renderBridges();
       else if (cur === "team") renderTeam();
       else if (cur === "about") renderAbout();
       else renderSetup();

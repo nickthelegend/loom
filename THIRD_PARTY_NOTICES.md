@@ -94,6 +94,15 @@ Loom's local daemon (no hosted backend):
 - agents behind the Agent Client Protocol (`src/adapters/acp.ts`): one adapter kind for every
   ACP agent, with presets for the adapters and CLIs Nuphos runs (claude-agent-acp, codex-acp,
   Gemini, OpenCode, Grok). Loom's own Auto policy and approval cards answer permission requests.
+- the split workspace (`src/web/workspace.js`). **Code port:** `src/web/splits.js` is ported
+  from Nuphos's `apps/desktop/src/app/workspace/splitLayout.ts` (split, remove, swap, drop and
+  rectangle functions, the quarter-deep drop zones and the split shortcut test). Changes: rewritten
+  in JavaScript, with Loom's drag types, saved per window, and without the ⌘-click and focus helpers.
+  The file carries Nuphos's notice.
+- shared live sessions (`src/web/share-live.js`, the guest wall in `src/daemon/server.ts`): a
+  teammate let into one running chat with view / reply / approve roles, their messages
+  attributed, and approvals recording who decided, as in Nuphos's conversation sharing. Loom's
+  guests reach the host daemon through a chat-scoped pairing token instead of a hosted backend.
 - and, as they land, the rest of its feature set: agents behind the Agent Client Protocol,
   shared live sessions, Slack and Discord, the split workspace, session search and slash
   commands. Each file that adapts Nuphos says so at its top.

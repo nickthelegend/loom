@@ -18,6 +18,8 @@ import { THEME_BTN,bindTheme } from './theme.js';
 import { emptyArt } from './transcript.js';
 import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
+import { openShareLive } from './share-live.js';
+import { openTriggers } from './triggers-ui.js';
 
 
   // ---- router ----------------------------------------------------------
@@ -693,6 +695,7 @@ import { shortModel } from './permissions.js';
           } },
         { label: "Import chats\u2026", icon: ICONS.download, hint: "Claude, Codex, OpenCode", run: function(){ openImportChats(pid); } },
         { sep: true },
+        { label: "Triggers…", icon: ICONS.clock, hint: "schedules & webhooks", run: function(){ openTriggers(pid, p.name); } },
         { label: "Project settings…", icon: ICONS.gear, run: function(){ openProjectSettings(pid); } },
         { label: "Rename…", icon: ICONS.file, run: function(){ renameProject(pid, p.name); } },
         { label: "Copy path", icon: ICONS.copy, hint: "folder", run: function(){ copyText(p.dir || ""); } },
@@ -732,6 +735,18 @@ import { shortModel } from './permissions.js';
       }
       items.push({ label: devicePref("chatsByAgent", false) ? "Stop grouping by agent" : "Group chats by agent", icon: ICONS.agents, run: function(){
         setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
+      } });
+      items.push({ label: "Share live…", icon: ICONS.team, hint: "a teammate joins this chat", run: function(){ openShareLive(pid, cid, c.title); } });
+      items.push({ label: "Instructions…", icon: ICONS.file, hint: "standing guidance for this chat", run: function(){
+        api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/instructions").then(function(j){
+          return askText("Instructions for “" + c.title + "”", { value: j.instructions || "", multiline: true, ok: "Save",
+            placeholder: "e.g. Python 3.12. Keep answers short. Never touch the migrations folder.",
+            note: "Sent with every turn in this chat, whichever agent answers. Leave it empty to clear." });
+        }).then(function(text){
+          if (text === null || text === undefined) return;
+          return api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/instructions", { method: "PUT", body: JSON.stringify({ instructions: String(text) }) })
+            .then(function(r){ toast(r.instructions ? "instructions saved for this chat" : "instructions cleared"); });
+        }).catch(function(e){ toast(e.message); });
       } });
       items.push({ label: "Export as Markdown", icon: ICONS.download, run: function(){
         if (pid === cur && currentChat() === cid && state.exportThread) { state.exportThread(); return; }

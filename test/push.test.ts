@@ -146,6 +146,28 @@ describe("push notifications", () => {
     expect(done.data?.category).toBe("done");
   });
 
+  it("a tool approval arrives with Allow / Deny on the alert, naming the computer that asked", async () => {
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), "acp-fake-agent.mjs");
+    const pid = (await client.addProject(makeProjectDir({ name: "asks", agents: [{ id: "asker", kind: "acp", role: "worker", options: { command: [process.execPath, fake], permissions: "ask" } }] } as never))).project.id;
+    expect(await registerPush("ExponentPushToken[test-device]", ["approvals"])).toBe(200);
+    delivered = [];
+    await client.send(pid, "run: ls", "asker");
+    await waitUntil(() => delivered.some((d) => d.data?.kind === "approval"));
+    const a = delivered.find((d) => d.data?.kind === "approval")! as Delivered & { categoryId?: string };
+    expect(a.categoryId).toBe("loom-approval");
+    expect(a.data).toMatchObject({ projectId: pid, category: "approvals", daemon: os.hostname() });
+    expect(typeof a.data?.approvalId).toBe("string");
+    // and the phone's answer (what the Allow button sends) lets the turn finish
+    const r = await fetch(`${baseUrl}/api/projects/${pid}/approvals/${String(a.data!.approvalId)}`, {
+      method: "POST", headers: { authorization: `Bearer ${clientToken}`, "content-type": "application/json" }, body: JSON.stringify({ decision: "allow" }),
+    });
+    expect(r.status).toBe(200);
+    await registerPush("ExponentPushToken[test-device]");
+  });
+
   it("a device that only wants goals hears no turn ending", async () => {
     expect(await registerPush("ExponentPushToken[test-device]", ["goals", "bogus"])).toBe(200);
     expect(readDaemonConfig()!.clients.find((c) => c.name === "pixel")?.pushKinds).toEqual(["goals"]);

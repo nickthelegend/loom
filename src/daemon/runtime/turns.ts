@@ -36,6 +36,8 @@ import { isNativeKind } from "../../core/continuity/capabilities.js";
 
 export interface TurnOptions {
   source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean;
+  /** A teammate in a shared chat (Share live): their name, on the message they sent. */
+  by?: string;
   /** A new native session for this chat instead of resuming the old one (#280). */
   fresh?: boolean;
   /** How long you asked this one answer to be. */
@@ -90,6 +92,8 @@ export interface RuntimeTurnsHost {
   activeSkillsBlock: () => string;
   /** The agent's standing instructions block ("" when it has none). */
   agentInstructions: (agentId: string) => string;
+  /** This conversation's standing instructions block ("" when it has none). */
+  chatInstructions: (chat: string) => string;
   healthyMcps: () => McpServerConfig[];
   appendIfOpen: (event: Parameters<EventJournal["append"]>[0]) => void;
   agents: ReadonlyMap<string, AnyAgent>;
@@ -413,6 +417,7 @@ export class RuntimeTurns {
         source,
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.length ? { length: opts.length } : {}),
+        ...(opts.by ? { by: opts.by } : {}),
       });
       return { agentId: target, queued: this.host.queue.length, queueId: item.id };
     }
@@ -430,7 +435,7 @@ export class RuntimeTurns {
     this.host.log.append({
       kind: "message",
       chat,
-      payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}) },
+      payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}), ...(opts.by ? { by: opts.by } : {}) },
     });
     let mcp: ReturnType<typeof writeMcpSession> = null;
     try {
@@ -444,7 +449,7 @@ export class RuntimeTurns {
       // saved under plans/ by the runtime. Other agents get Loom's briefing.
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
       const briefing =
-        [this.host.agentInstructions(target), this.host.activeSkillsBlock(), pendingBriefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
+        [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
           .filter(Boolean)
           .join("\n")
           .trim() || undefined;
@@ -539,7 +544,7 @@ export class RuntimeTurns {
     if (this.busySince.size) {
       if (opts.fromQueue) throw new ContinuityError("conflict", "another foreground turn is preparing or running");
       const item = this.host.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source,
-        ...(opts.plan ? { plan: true } : {}), ...(opts.length ? { length: opts.length } : {}), continuity: { requestId: request.id, model: request.model } });
+        ...(opts.plan ? { plan: true } : {}), ...(opts.length ? { length: opts.length } : {}), ...(opts.by ? { by: opts.by } : {}), continuity: { requestId: request.id, model: request.model } });
       return { agentId: target, queued: this.host.queue.length, queueId: item.id, requestId: request.id };
     }
     this.busySince.set(target, Date.now()); this.turnChat.set(target, chat);
@@ -561,7 +566,7 @@ export class RuntimeTurns {
       await this.checkpointBefore(target, text);
       assertPrepared();
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
-      const supplement = [this.host.agentInstructions(target), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
+      const supplement = [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
       let prepared = await brain.prepare({ ...request, targetAddedTokens: opts.contextTarget ?? request.targetAddedTokens }, cfg.kind,
         this.host.agentDir(target), options, supplement);
       assertPrepared();

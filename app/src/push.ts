@@ -55,6 +55,39 @@ if (Platform.OS !== "web") {
   });
 }
 
+/**
+ * Allow / Deny on the alert itself, for a tool approval ("loom-approval" — the daemon sets it on
+ * approval pushes). Neither opens the app: the answer goes straight to the computer that asked.
+ */
+export async function registerApprovalActions(): Promise<void> {
+  if (Platform.OS === "web") return;
+  try {
+    await Notifications.setNotificationCategoryAsync("loom-approval", [
+      { identifier: "allow", buttonTitle: "Allow", options: { opensAppToForeground: false } },
+      { identifier: "deny", buttonTitle: "Deny", options: { isDestructive: true, opensAppToForeground: false } },
+    ]);
+  } catch { /* no native module (Expo Go without notifications): the alert just opens the app */ }
+}
+
+/** An Allow / Deny pressed on an approval alert: the push's data and which one. */
+export function onApprovalAction(cb: (data: Record<string, unknown>, decision: "allow" | "deny") => void): () => void {
+  if (Platform.OS === "web") return () => {};
+  const seen = new Set<string>();
+  let sub: { remove: () => void } | null = null;
+  try {
+    sub = Notifications.addNotificationResponseReceivedListener((r) => {
+      const a = r.actionIdentifier;
+      if (a !== "allow" && a !== "deny") return;
+      const id = r.notification.request.identifier;
+      if (seen.has(id)) return;
+      seen.add(id);
+      cb((r.notification.request.content.data ?? {}) as Record<string, unknown>, a);
+      void Notifications.dismissNotificationAsync(id).catch(() => {});
+    });
+  } catch { /* nothing to listen to */ }
+  return () => sub?.remove();
+}
+
 /** on: registered · denied: the phone's notification setting is off · unavailable: no push here (a simulator, web, a build without push set up). */
 export type PushState = "on" | "denied" | "unavailable";
 

@@ -108,6 +108,8 @@ export interface OrchestraTask {
   touches?: string[];
   /** The orchestrator's answer to a teammate overlap (D29): wait:<goal> | narrow | proceed:<reason>. */
   overlap?: string;
+  /** The orchestrator's estimate for a long task, in minutes: each of its turns may run this long. */
+  timeoutMin?: number;
   /** Set while the task waits on something other than its own dependencies. */
   hold?: TaskHold;
   status: TaskStatus;
@@ -415,6 +417,7 @@ export type OrchestraAction =
       dependsOn?: string[];
       touches?: string[];
       overlap?: string;
+      timeoutMin?: number;
     }
   | { type: "send"; task: string; message: string }
   | { type: "cancel"; task: string }
@@ -544,8 +547,10 @@ function normalizeAction(v: unknown): OrchestraAction | null {
         ? ((a.touches ?? a.files) as unknown[]).map(str).filter(Boolean).slice(0, 50)
         : [];
       const overlapDecision = str(a.overlap);
+      const mins = Number(a.timeoutMin ?? a.timeout_min ?? a.minutes);
       return {
         type: "spawn",
+        ...(Number.isFinite(mins) && mins > 0 ? { timeoutMin: Math.min(240, Math.max(5, Math.round(mins))) } : {}),
         ...(id ? { id } : {}),
         title,
         agent,
@@ -612,6 +617,7 @@ export function orchestratorBriefing(opts: {
     `- At most ${opts.maxParallel} tasks run at once; queue more and they start as slots free up.`,
     "- Match tasks to agents' strengths, and spread work across agents when it helps.",
     '- Give each task "touches": the file globs it will change. Teammates\' agents see them to avoid collisions.',
+    '- A task that will take long (a full browser audit, a big migration) can say "timeoutMin": 60 — a worker\'s turn is otherwise cut at its own limit (Antigravity: 30 min).',
     "",
     "Available workers:",
     roster,
@@ -1471,7 +1477,7 @@ export class OrchestraEngine {
    * Explicit, never automatic: the run's work lands on its own branch, and the
    * human decides when it reaches theirs.
    */
-  async apply(runId: string, taskId?: string): Promise<{ merged: string; into: string }> {
+  async apply(runId: string, taskId?: string): Promise<{ merged: string; into: string; already?: boolean }> {
     const run = this.mustGet(runId);
     if (run.status !== "completed" && run.status !== "waiting_human" && run.status !== "failed" && run.status !== "aborted") {
       throw new Error(`run ${run.id} is still ${run.status} — wait for it to finish`);
@@ -1501,8 +1507,15 @@ export class OrchestraEngine {
       this.emit(run, "applied", { into, task: pick.id, agent: pick.agent });
       return { merged: pick.branch!, into };
     }
+    let already = false;
     await this.gitLock.run(async () => {
       await commitAll(run.dir, `orchestra ${run.id}: final edits`).catch(() => false);
+      // already in this branch (a worker pushed it and you pulled, or it was applied by hand):
+      // record it, without a merge commit that changes nothing (field: a chain left a run "unapplied")
+      const tree = async (ref: string) => (await git(["rev-parse", `${ref}^{tree}`], dir).catch(() => "")).trim();
+      const contained = await git(["merge-base", "--is-ancestor", run.branch, "HEAD"], dir).then(() => true, () => false);
+      const runTree = await tree(run.branch);
+      if (contained || (runTree && runTree === (await tree("HEAD")))) { already = true; return; }
       try {
         await git(
           ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `Merge orchestra run ${run.id}: ${run.goal.slice(0, 60)}`, run.branch],
@@ -1515,8 +1528,8 @@ export class OrchestraEngine {
     });
     run.applied = { at: Date.now(), into };
     this.save(run);
-    this.emit(run, "applied", { into });
-    return { merged: run.branch, into };
+    this.emit(run, "applied", { into, ...(already ? { already: true } : {}) });
+    return { merged: run.branch, into, ...(already ? { already: true } : {}) };
   }
 
   /** What one task changed on its branch since the run began — a race entrant's diff. */
@@ -1830,6 +1843,7 @@ export class OrchestraEngine {
       dependsOn: deps,
       ...(a.touches?.length ? { touches: a.touches } : {}),
       ...(a.overlap ? { overlap: a.overlap } : {}),
+      ...(a.timeoutMin ? { timeoutMin: a.timeoutMin } : {}),
       status: "pending",
       chat: chat.id,
       attempts: 0,
@@ -2202,7 +2216,7 @@ export class OrchestraEngine {
           ...(run.plan ? { planFile: `${planDir(run)}/${task.id}.md` } : {}),
         })
       : undefined;
-    await agent.send({ text, ...(briefing ? { briefing } : {}) });
+    await agent.send({ text, ...(briefing ? { briefing } : {}), ...(task.timeoutMin ? { timeoutMs: task.timeoutMin * 60_000 } : {}) });
     if ((task.status as TaskStatus) === "cancelled" || isTerminal(run.status)) return false;
     // paused mid-turn (pauseTask): not finished, nothing to integrate yet
     if ((task.status as TaskStatus) === "pending") {

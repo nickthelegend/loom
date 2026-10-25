@@ -460,6 +460,11 @@ export interface ProjectInfo {
 export interface SendInput {
   text: string;
   /**
+   * A limit for this one turn, when the default won't do — an orchestrator's estimate for a long
+   * task (a full browser audit). Adapters with a per-turn limit (Antigravity) honour it.
+   */
+  timeoutMs?: number;
+  /**
    * The conversation this turn belongs to (default: the main chat). Provider
    * agents keep one native session per chat, so each conversation has its own
    * native history.

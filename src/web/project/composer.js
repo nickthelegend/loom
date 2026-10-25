@@ -318,6 +318,11 @@ export function createComposer(view) {
         { label: "Plan mode", sub: "write a plan, change no code", icon: ICONS.plan, run: function(){ var b = document.getElementById("planbtn"); if (b) b.click(); } },
         { label: "New chat", sub: "a fresh thread in this project", icon: ICONS.chat, run: function(){ var row = document.querySelector('[data-newchat="' + view.pid + '"]'); if (row) row.click(); else toast("open the project in the sidebar to start a chat"); } },
         { label: "Find in this chat", sub: "\u2318F", icon: ICONS.search, run: function(){ if (state.openFind) state.openFind(); } },
+        // the agent's own slash command (Claude Code, Codex): shrink its context without starting over
+        { label: "Compact the agent's context", sub: "sends /compact to " + (state.selected || "the agent"), icon: ICONS.memory, run: function(){
+            api("/api/projects/" + view.pid + "/messages", { method: "POST", body: JSON.stringify({ text: "/compact", ...(state.selected ? { agentId: state.selected } : {}), ...(state.currentChat ? { chat: state.currentChat() } : {}) }) })
+              .then(function(){ toast("sent /compact"); }).catch(function(err){ toast(err.message); });
+          } },
         { label: "Export this chat", sub: "as Markdown", icon: ICONS.download, run: function(){ if (state.exportThread) state.exportThread(); } },
       ].concat(skillSlashItems());
     }

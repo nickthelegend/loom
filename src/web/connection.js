@@ -148,6 +148,8 @@ import { pageGone } from './format.js';
   function pairFromHash(){
     var m = location.hash.match(/pair=([A-Za-z0-9]+)/);
     if (!m) return Promise.resolve(false);
+    // a Share-live link lets this browser into one chat (share-live.js); any other pairing is a device of yours
+    try { if (/[#&]guest=1(&|$)/.test(location.hash)) localStorage.setItem("loomGuest", "1"); else localStorage.removeItem("loomGuest"); } catch (e) {}
     history.replaceState(null, "", location.pathname);
     return claim(m[1]);
   }

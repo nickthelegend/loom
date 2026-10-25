@@ -544,6 +544,21 @@ daemon), **Updates** (build rev, and how far the checkout is behind its remote),
   <img src="docs/img/settings.png" alt="Loom's Settings screen — Setup, Diagnostics, Updates, Preferences, Devices, About" width="100%">
 </p>
 
+
+### Split: several views in one window
+
+**⌘D** splits the window side by side, and **⌘⇧D** one above the other. Each pane is a whole
+Loom view (a project, a chat, any tab), so you can follow several agents' threads at once.
+
+- **Arranging:** drag a chat from a pane's sidebar onto another pane's edge to open it there, or
+  drag a pane by its grip to move it.
+- **Closing:** a pane's × closes it, and closing the last but one leaves split mode on the pane
+  that's left.
+- **Saving:** the layout is saved, so it's there when you come back.
+
+Panes keep their contents when the layout changes, so splitting never reloads what you were
+looking at. The approach comes from [Nuphos](https://github.com/nuphos/nuphos); the layout
+model is ported from its desktop app.
 ## GitHub & Linear, native
 
 Browse pull requests, issues, and **GitHub Project boards** in-app; open a worktree from
@@ -1135,6 +1150,15 @@ phone buzzes when an agent **needs input**, when a **route completes or fails**,
 when a solo turn finishes — route hops are deliberately silent (a 5-step pipeline
 buzzes once, not five times). Verify with `loom clients --ping`.
 
+## Your phone, for every computer
+
+The phone app pairs with each computer you run Loom on: your desktop, your laptop, a box in the
+cloud. **Account ▸ Computers** shows them all live (answering or not, and how fast), and one tap
+switches between them. With Loom Cloud on, each answers from any network, through its own key.
+
+**Approve from the lock screen:** when an agent asks to use a tool, the alert has **Allow** and
+**Deny** buttons. The answer goes straight to the computer that asked, without opening the app.
+
 ## Permissions: bypass, auto, or always ask
 
 Every agent CLI has its own idea of "may I?". Loom gives you one dropdown with
@@ -1306,6 +1330,30 @@ phone, type them and tap 🌙. `--until` and `--max` stop *new* tasks from
 starting; the one running always finishes. A shift survives a daemon restart.
 A task the restart cut off is reported as failed, and the rest carry on.
 
+## Share live: a teammate in the same chat
+
+Let a teammate into a running chat, so you both talk to the same agent, see the same tool calls
+and steer the work together. Open the chat's menu ▸ **Share live…**, or run:
+
+```bash
+loom share --live --name Priya --role approve --hours 8
+```
+
+Choose what they can do:
+
+- **view:** read along.
+- **reply:** talk to the agent and stop a turn.
+- **approve:** also answer the agent's tool approvals in that chat.
+
+They open the link in a browser, with nothing to install. Their messages carry their name, and
+the thread says who allowed what. The link works once and its access expires. Revoke it any
+time with Settings ▸ Devices or `loom clients --revoke`.
+
+Their token reaches that one chat and nothing else on your machine: no other chats, terminals,
+files, git, settings or team. Over Loom Cloud it works from anywhere.
+
+The approach comes from [Nuphos](https://github.com/nuphos/nuphos)'s shared sessions.
+
 ## Triggers: the next turn starts itself
 
 A schedule or a webhook starts an agent's turn, with nobody sitting in the chat. Each trigger
@@ -1350,6 +1398,27 @@ loom bridge slack --off   # or --remove to forget the tokens
   `channels:history`, `chat:write` and `im:history` scopes, plus an app-level token with
   `connections:write`.
 - **Discord bot setup:** turn on the Message Content intent.
+
+## What the agents cost this machine
+
+```bash
+loom top          # each agent CLI / MCP server / dev server the daemon started: MB, CPU, processes
+loom top --watch  # refresh every 2 s
+```
+
+`loom top` shows each one beside free memory, load and the turn cap. When memory runs low, `loom limits` sets how many turns run at once.
+
+## Search every session, and the audit trail
+
+```bash
+loom find --all "rate limit"   # every chat in every project, newest first, with where each hit is
+loom audit --since 7d          # who let what happen
+```
+
+The audit trail covers approvals answered (and by whom), teammates' messages in shared chats,
+messages from Slack and Discord, triggers that fired or didn't, and baton handoffs. Only this
+machine's owner can read it. A token scoped to some projects searches only those. In the
+composer, **/ ▸ Compact the agent's context** sends the agent its own `/compact`.
 
 ## Scorecards: which agent can you trust with this?
 

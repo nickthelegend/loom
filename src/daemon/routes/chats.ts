@@ -281,6 +281,26 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): voi
     }),
   );
 
+  // A conversation's standing instructions (main included): { instructions } — "" clears them.
+  app.get(
+    "/api/projects/:id/chats/:chatId/instructions",
+    withRuntime(async (rt, req, res) => {
+      const chat = String(req.params.chatId);
+      const text = rt.chatInstructions(chat) ? (await import("../../core/registry.js")).readProjectState(rt.info.dir).chatInstructions?.[chat] ?? "" : "";
+      res.json({ chat, instructions: text });
+    }),
+  );
+  app.put(
+    "/api/projects/:id/chats/:chatId/instructions",
+    withRuntime(async (rt, req, res) => {
+      const text = (req.body ?? {}).instructions;
+      if (typeof text !== "string") return void res.status(400).json({ error: "instructions is text (\"\" clears them)" });
+      const out = rt.setChatInstructions(String(req.params.chatId), text);
+      if (!out) return void res.status(404).json({ error: "no such thread" });
+      res.json(out);
+    }),
+  );
+
   // Rate a reply: { eventId, agentId, value: 1 | -1 | 0 }.
   app.post(
     "/api/projects/:id/chats/:chatId/rate",

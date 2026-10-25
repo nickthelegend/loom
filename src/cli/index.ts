@@ -636,9 +636,22 @@ program
 
 program
   .command("find <query...>")
-  .description("search this project's thread — messages, decisions, questions")
-  .action(async (words: string[]) => {
+  .description("search this project's thread — messages, decisions, questions (--all: every chat in every project)")
+  .option("--all", "every project's chats, newest first")
+  .option("--json", "print as JSON")
+  .action(async (words: string[], opts: { all?: boolean; json?: boolean }) => {
     const client = await ensureDaemon();
+    if (opts.all) {
+      const { hits, truncated } = await client.searchAll(words.join(" "));
+      if (opts.json) return void console.log(JSON.stringify({ hits, truncated }));
+      if (!hits.length) return void console.log(pc.dim("nothing matches in any project"));
+      for (const h of hits) {
+        const t = new Date(h.at).toISOString().slice(0, 16).replace("T", " ");
+        console.log(`${pc.dim(t)} ${pc.bold(h.projectName)} ${pc.dim("›")} ${h.chatTitle}  ${h.agent ? pc.cyan(h.agent) : pc.dim("you")}  ${h.snippet.replace(/\s+/g, " ").slice(0, 100)}`);
+      }
+      if (truncated) console.log(pc.dim("…more — narrow the search"));
+      return;
+    }
     const project = await currentProject(client);
     const { hits } = await client.searchEvents(project.id, words.join(" "));
     if (!hits.length) return void console.log(pc.dim("nothing matches"));
@@ -646,6 +659,73 @@ program
       const t = new Date(e.ts).toISOString().slice(0, 16).replace("T", " ");
       const who = e.agentId ? pc.cyan(e.agentId) : pc.dim("you");
       console.log(`${pc.dim(t)} ${who}  ${String(e.payload.text ?? e.payload.question ?? "").slice(0, 110)}`);
+    }
+  });
+
+program
+  .command("chat:instructions [text...]")
+  .description("standing guidance for one conversation, sent with every turn in it whichever agent answers (approach: Nuphos). No text: show them")
+  .option("--chat <chat>", "which chat, by id or title (default: main)", "main")
+  .option("--clear", "remove them")
+  .action(async (words: string[], opts: { chat: string; clear?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let chat = opts.chat;
+    if (chat !== "main") {
+      const { chats } = await client.chats(project.id);
+      const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
+      if (!hit) fail(`no chat "${chat}" here`);
+      chat = hit.id;
+    }
+    if (!words.length && !opts.clear) {
+      const { instructions } = await client.chatInstructions(project.id, chat);
+      return void console.log(instructions || pc.dim("none — loom chat:instructions \"…\" [--chat <chat>]"));
+    }
+    const out = await client.setChatInstructions(project.id, chat, opts.clear ? "" : words.join(" ")).catch((e: Error) => fail(e.message));
+    console.log(`${pc.green("✓")} ${out.instructions ? "saved — every turn in this chat carries them" : "cleared"}`);
+  });
+
+program
+  .command("top")
+  .description("what the agents cost this machine right now: each agent CLI, MCP server and dev server the daemon started, with memory and CPU, beside free memory and the turn cap (approach: Nuphos)")
+  .option("--watch", "refresh every 2 seconds")
+  .option("--json", "print as JSON")
+  .action(async (opts: { watch?: boolean; json?: boolean }) => {
+    const client = await ensureDaemon();
+    const draw = async () => {
+      const r = await client.resources();
+      if (opts.json) return void console.log(JSON.stringify(r));
+      if (opts.watch) process.stdout.write("\x1b[2J\x1b[H");
+      const free = r.machine.freePct;
+      const freeTxt = free < r.limits.minFreePct ? pc.red(`${free}% free`) : free < r.limits.minFreePct + 10 ? pc.yellow(`${free}% free`) : pc.green(`${free}% free`);
+      console.log(`${pc.bold("machine")}  ${r.machine.totalGb} GB · ${freeTxt} · load ${r.machine.load1} on ${r.machine.cpus} cores  ${pc.dim(`turns at once: ${r.limits.maxTurns || "no cap"} · keep ${r.limits.minFreePct}% free (loom limits)`)}`);
+      console.log(`${pc.bold("daemon")}   ${r.daemon.rssMb} MB ${pc.dim(`(pid ${r.daemon.pid})`)}`);
+      if (r.note) console.log(pc.dim(r.note));
+      if (!r.groups.length) return void console.log(pc.dim("nothing running under the daemon"));
+      const total = r.groups.reduce((n, g) => n + g.rssMb, 0);
+      console.log(pc.dim(`\n${"MB".padStart(7)} ${"CPU%".padStart(6)}  procs  what`));
+      for (const g of r.groups) console.log(`${String(g.rssMb).padStart(7)} ${g.cpu.toFixed(1).padStart(6)}  ${String(g.processes).padStart(5)}  ${pc.bold(g.name)} ${pc.dim(g.command.slice(0, 70))}`);
+      console.log(pc.dim(`${String(total).padStart(7)} MB in all`));
+    };
+    await draw();
+    if (opts.watch && !opts.json) setInterval(() => void draw().catch(() => {}), 2000);
+  });
+
+program
+  .command("audit")
+  .description("who let what happen, across projects: approvals answered (and by whom), teammates' messages in shared chats, Slack / Discord, triggers, baton handoffs (approach: Nuphos)")
+  .option("--since <when>", "how far back: 24h, 7d (default), 30d", "7d")
+  .option("--json", "print as JSON")
+  .action(async (opts: { since: string; json?: boolean }) => {
+    const m = /^(\d+)\s*(h|d)$/i.exec(opts.since.trim());
+    if (!m) fail("--since is like 24h or 7d");
+    const since = Date.now() - Number(m[1]) * (m[2]!.toLowerCase() === "h" ? 3_600_000 : 86_400_000);
+    const client = await ensureDaemon();
+    const { entries } = await client.audit(since);
+    if (opts.json) return void console.log(JSON.stringify(entries));
+    if (!entries.length) return void console.log(pc.dim(`nothing to report since ${new Date(since).toLocaleString()}`));
+    for (const e of entries) {
+      console.log(`${pc.dim(new Date(e.at).toLocaleString())}  ${pc.bold(e.projectName)}  ${pc.cyan(e.who)} ${e.what}${e.detail ? pc.dim(` — ${e.detail.replace(/\s+/g, " ").slice(0, 90)}`) : ""}`);
     }
   });
 
@@ -1590,6 +1670,8 @@ interface ApplyResult {
   merged?: string;
   into?: string;
   pushed?: boolean;
+  /** The run's work was already on origin (a worker pushed it): local was fast-forwarded to it. */
+  alreadyOnOrigin?: boolean;
   secrets?: import("../core/secret-scan.js").SecretFinding[];
   error?: string;
 }
@@ -1641,10 +1723,28 @@ async function waitScanApply(client: DaemonClient, projectId: string, dir: strin
   const { findSecrets } = await import("../core/secret-scan.js");
   const secrets = findSecrets(diff);
   if (secrets.length) return { ok: false, runId, status: run.status, secrets, error: "secrets in the run's changes — not applied" };
+  // A worker with push rights may have pushed the run's work itself: origin is then ahead of local
+  // with the same tree. Fast-forward to it and say so, instead of merging beside it (field).
+  let alreadyOnOrigin = false;
+  const quiet = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  try {
+    quiet("remote", "get-url", "origin");
+    try { execFileSync("git", ["fetch", "-q", "origin"], { cwd: dir, stdio: "ignore", timeout: 60_000 }); } catch { /* offline: carry on with what we know */ }
+    const branch = quiet("rev-parse", "--abbrev-ref", "HEAD").trim();
+    const upstream = `origin/${branch}`;
+    const has = (a: string, b: string) => { try { quiet("merge-base", "--is-ancestor", a, b); return true; } catch { return false; } };
+    const tree = (ref: string) => { try { return quiet("rev-parse", `${ref}^{tree}`).trim(); } catch { return ""; } };
+    const upTree = tree(upstream);
+    if (upTree && (has(String(run.branch), upstream) || upTree === tree(String(run.branch))) && !has(upstream, "HEAD") && has("HEAD", upstream)) {
+      git("merge", "--ff-only", upstream);
+      alreadyOnOrigin = true;
+    }
+  } catch { /* no origin, or it can't fast-forward: the normal merge below */ }
   let out: Record<string, unknown>;
   try { out = await client.orchestraAction(projectId, runId, "apply"); }
   catch (e) { return { ok: false, runId, status: run.status, error: `merge failed: ${(e as Error).message}` }; }
-  const res: ApplyResult = { ok: true, runId, status: run.status, merged: String(out.merged ?? run.branch), into: String(out.into ?? "") };
+  const res: ApplyResult = { ok: true, runId, status: run.status, merged: String(out.merged ?? run.branch), into: String(out.into ?? ""), ...(alreadyOnOrigin ? { alreadyOnOrigin: true } : {}) };
+  if (opts.push && alreadyOnOrigin) return { ...res, pushed: false };
   if (opts.push) {
     try { git("push", "origin", "HEAD"); res.pushed = true; }
     catch (e) { return { ...res, ok: false, pushed: false, error: `merged, but the push failed: ${(e as Error).message.split("\n")[0]}` }; }
@@ -1739,6 +1839,7 @@ function progressSink(opts: { progress?: boolean; json?: boolean }, label = ""):
 }
 
 function printApplyResult(r: ApplyResult): void {
+  if (r.ok && r.alreadyOnOrigin) return void console.log(`${pc.green("✓")} ${r.runId} was already on origin/${r.into || "your branch"} — fast-forwarded ${pc.bold(r.into || "your branch")} to it, nothing to push`);
   if (r.ok) return void console.log(`${pc.green("✓")} ${r.runId} merged into ${pc.bold(r.into || "your branch")}${r.pushed ? " and pushed" : ""} — no secrets in its changes`);
   console.log(`${pc.red("✗")} ${r.runId} (${r.status}): ${r.error}`);
   for (const s of r.secrets ?? []) console.log(pc.red(`    ${s.file}${s.line ? `:${s.line}` : ""} — ${s.what}`));
@@ -2783,8 +2884,11 @@ program
   .option("--hours <n>", "how long the link works (1 to 720, default 24)")
   .option("--list", "the links that still work")
   .option("--revoke <id>", "end a link now")
+  .option("--live", "a live link instead: the teammate joins the chat itself, as --role view | reply | approve (approach: Nuphos)")
+  .option("--role <role>", "with --live: view (read along), reply (talk to the agent, default) or approve (also answer its tool approvals)")
+  .option("--name <name>", "with --live: what they're called in the thread")
   .option("--json", "print as JSON")
-  .action(async (chat: string | undefined, opts: { hours?: string; list?: boolean; revoke?: string; json?: boolean }) => {
+  .action(async (chat: string | undefined, opts: { hours?: string; list?: boolean; revoke?: string; json?: boolean; live?: boolean; role?: string; name?: string }) => {
     const client = await ensureDaemon();
     if (opts.revoke) {
       const { revoked } = await client.revokeShare(opts.revoke);
@@ -2805,6 +2909,16 @@ program
       const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
       if (!hit) fail(`no chat "${chat}" here — ${chats.slice(0, 6).map((c) => c.title).join(", ") || "only main"}`);
       chatId = hit.id;
+    }
+    if (opts.live) {
+      const role = opts.role ?? "reply";
+      if (!["view", "reply", "approve"].includes(role)) fail("--role is view, reply or approve");
+      const live = await client.shareLive({ project: project.id, chat: chatId, role, name: opts.name ?? "Guest", ...(opts.hours ? { hours: Number(opts.hours) } : {}) })
+        .catch((e: Error) => fail(e.message));
+      if (opts.json) return void console.log(JSON.stringify(live));
+      console.log(`${pc.green("✓")} ${opts.name ?? "Guest"} can ${role === "view" ? "read along" : role === "reply" ? "talk to the agent" : "talk and approve"} in this chat${live.guest ? ` until ${new Date(live.guest.until).toLocaleString()}` : ""}\n\n  ${live.link}\n`);
+      console.log(pc.dim("the link works once and reaches this chat only. Revoke it with loom clients --revoke <id> (loom clients lists it)."));
+      return;
     }
     const out = await client.shareChat(project.id, chatId, opts.hours ? Number(opts.hours) : undefined);
     if (opts.json) return void console.log(JSON.stringify(out));
@@ -2849,17 +2963,27 @@ program
     const results: Array<ApplyResult & { project: string }> = [];
     for (const step of steps) {
       const p = projects.find((x) => x.name === step.project || x.id === step.project || path.resolve(x.dir) === path.resolve(step.project));
-      if (!p) { results.push({ project: step.project, ok: false, runId: "-", status: "not started", error: `no project "${step.project}" — loom projects` }); if (!opts.keepGoing) break; continue; }
+      if (!p) {
+        const r = { project: step.project, ok: false, runId: "-", status: "not started", error: `no project "${step.project}" — loom projects` };
+        results.push(r);
+        if (opts.json) process.stderr.write(JSON.stringify({ step: r, ts: Date.now() }) + "\n"); else printApplyResult(r);
+        if (!opts.keepGoing) break;
+        continue;
+      }
       if (!opts.json) console.log(`${pc.magenta("▶")} ${pc.bold(p.name)} — ${step.goal.slice(0, 80)}`);
       try {
         const { run } = await client.startOrchestra(p.id, { goal: step.goal, ...runOptions({ ...opts, ...step.flags }) });
         const r = { project: p.name, ...(await waitScanApply(client, p.id, p.dir, run.id, { push: Boolean(opts.push), onProgress: progressSink(opts, p.name) })) };
         results.push(r);
-        if (!opts.json) printApplyResult(r);
+        // every project's outcome is said as it happens — with --json, on stderr (stdout stays the one summary)
+        if (opts.json) process.stderr.write(JSON.stringify({ step: r, ts: Date.now() }) + "\n");
+        else printApplyResult(r);
         if (!r.ok && !opts.keepGoing) break;
       } catch (e) {
-        results.push({ project: p.name, ok: false, runId: "-", status: "not started", error: (e as Error).message });
-        if (!opts.json) console.log(`${pc.red("✗")} ${p.name}: ${(e as Error).message}`);
+        const r = { project: p.name, ok: false, runId: "-", status: "not started", error: (e as Error).message };
+        results.push(r);
+        if (opts.json) process.stderr.write(JSON.stringify({ step: r, ts: Date.now() }) + "\n");
+        else console.log(`${pc.red("✗")} ${p.name}: ${(e as Error).message}`);
         if (!opts.keepGoing) break;
       }
     }

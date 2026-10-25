@@ -371,6 +371,8 @@ import { shortModel } from './permissions.js';
         // Attachments lead the text as "[image] path" lines: pictures, not paths.
         var att = splitAttachments(String(p.text || ""));
         return '<div class="msg user" data-id="' + Number(e.id || 0) + '" data-ts="' + Number(e.ts || 0) + '" data-raw="' + esc(encodeURIComponent(String(p.text || ""))) + '">' +
+          // a teammate in a shared chat (Share live) is named; your own messages aren't
+          (p.by ? '<div class="uby">' + ICONS.team + esc(String(p.by)) + "</div>" : "") +
           (att.html ? '<div class="uatts">' + att.html + "</div>" : "") +
           (att.text.trim() || !att.html ? '<div class="bubble md">' + mdToHtml(att.text) + "</div>" : "") +
           '<div class="mt"><button type="button" class="uact uedit" title="Edit and send again" aria-label="edit and send again">' + ICONS.pencil + "</button>" +

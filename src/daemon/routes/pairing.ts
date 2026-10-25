@@ -107,7 +107,11 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
   });
 
   app.post("/api/pair/new", (req, res) => {
-    if (!(req as Request & { isAdmin?: boolean }).isAdmin) {
+    // A device link is the owner's to make. A Share-live link (one chat, for a while) may also come
+    // from the owner's own phone — an unscoped paired device — never from a guest or a scoped token.
+    const r0 = req as Request & { isAdmin?: boolean; guest?: unknown; projectScope?: string[] | null };
+    const ownDevice = !r0.isAdmin && !r0.guest && !r0.projectScope && Boolean(req.body?.guest);
+    if (!r0.isAdmin && !ownDevice) {
       return void res.status(403).json({ error: "admin only" });
     }
     void (async () => {
@@ -140,9 +144,21 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
       const bearer = String(req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
       const owner = req.body?.owner === true && ctx.auth.isRootAdmin(bearer);
       if (req.body?.owner === true && !owner) return void res.status(403).json({ error: "an owner session needs the admin token" });
+      // "Share live": a link that lets a teammate into one chat, as view / reply / approve, for a while
+      const g = req.body?.guest as { project?: unknown; chat?: unknown; role?: unknown; name?: unknown; hours?: unknown } | undefined;
+      let guest: { project: string; chat: string; role: "view" | "reply" | "approve"; name: string; expiresAt: number } | undefined;
+      if (g) {
+        const info = findProject(String(g.project ?? ""));
+        if (!info) return void res.status(400).json({ error: `unknown project "${String(g.project ?? "")}"` });
+        const chat = String(g.chat ?? "main");
+        if (!/^[\w-]{1,64}$/.test(chat)) return void res.status(400).json({ error: "bad chat id" });
+        const role = g.role === "view" || g.role === "approve" ? g.role : "reply";
+        const hours = Math.min(24 * 7, Math.max(1, Number(g.hours) || 24));
+        guest = { project: info.id, chat, role, name: String(g.name ?? "Guest").trim().slice(0, 40) || "Guest", expiresAt: Date.now() + hours * 3_600_000 };
+      }
       const { token, expiresAt, relayKey } = ctx.auth.newPairingToken(
         resolvedScope.length ? resolvedScope : undefined,
-        { owner },
+        { owner, ...(guest ? { guest } : {}) },
       );
       const url = `http://${host}:${ctx.port}`;
       // Deep link: scanning it with any camera opens the app, which claims the
@@ -151,7 +167,7 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
       // and the Supabase project, so the phone can reach this daemon from any
       // network. Fragment only: none of it is ever sent to a server.
       const cloud = ctx.cloudLinkParams(relayKey);
-      const link = `${url}/app#pair=${token}${cloud}`;
+      const link = `${url}/app#pair=${token}${guest ? "&guest=1" : ""}${cloud}`;
       let qrSvg: string | undefined;
       try {
         qrSvg = await QRCode.toString(link, {
@@ -163,7 +179,7 @@ export function registerPairingRoutes(app: Express, ctx: Pick<RouteContext, "exp
         // The link still works even if the QR doesn't render — degrade, don't fail.
         logbook.warn("pair", "QR render failed — the copy link still works", err);
       }
-      res.json({ token, expiresAt, url, link, ...(qrSvg ? { qrSvg } : {}) });
+      res.json({ token, expiresAt, url, link, ...(guest ? { guest: { role: guest.role, name: guest.name, until: guest.expiresAt } } : {}), ...(qrSvg ? { qrSvg } : {}) });
     })();
   });
 }

@@ -323,6 +323,19 @@ export class DaemonClient {
   fireTrigger(id: string, tid: string, payload?: unknown): Promise<{ run: { ok: boolean; note: string } }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers/${encodeURIComponent(tid)}/fire`, payload === undefined ? {} : { payload });
   }
+  searchAll(q: string): Promise<{ hits: Array<{ project: string; projectName: string; chat: string; chatTitle: string; eventId: number; at: number; agent?: string; snippet: string }>; truncated: boolean }> {
+    return this.request("GET", `/api/search?q=${encodeURIComponent(q)}`);
+  }
+  audit(since?: number): Promise<{ entries: Array<{ at: number; project: string; projectName: string; chat?: string; what: string; who: string; detail?: string }> }> {
+    return this.request("GET", `/api/audit${since ? `?since=${since}` : ""}`);
+  }
+  resources(): Promise<import("../core/resources.js").Resources> { return this.request("GET", "/api/resources"); }
+  chatInstructions(id: string, chat: string): Promise<{ chat: string; instructions: string }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/instructions`);
+  }
+  setChatInstructions(id: string, chat: string, instructions: string): Promise<{ chat: string; instructions: string }> {
+    return this.request("PUT", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/instructions`, { instructions });
+  }
   bridges(): Promise<Record<"slack" | "discord", Record<string, any> | null>> { return this.request("GET", "/api/bridges"); }
   setBridge(platform: string, body: Record<string, unknown>): Promise<{ ok: boolean; status: Record<string, any> | null }> { return this.request("PUT", `/api/bridges/${platform}`, body); }
   removeBridge(platform: string): Promise<{ removed: boolean }> { return this.request("DELETE", `/api/bridges/${platform}`); }
@@ -893,6 +906,11 @@ export class DaemonClient {
 
   newPairingToken(): Promise<{ token: string; expiresAt: number; url: string; link?: string }> {
     return this.request("POST", "/api/pair/new", {});
+  }
+
+  /** A Share-live link: a teammate let into one chat as view / reply / approve. */
+  shareLive(guest: { project: string; chat: string; role: string; name: string; hours?: number }): Promise<{ link: string; guest?: { until: number } }> {
+    return this.request("POST", "/api/pair/new", { guest });
   }
 
   pairedClients(): Promise<{

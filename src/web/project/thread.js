@@ -727,7 +727,7 @@ export function createThread(view) {
           flushPending(j.live);
           view.markDays(); markSeen();
           var go = state.pendingGo;
-          if (go && go.pid === view.pid && go.chat === view.chatId) { state.pendingGo = null; setTimeout(function(){ if (!pageGone()) view.jumpToMessage(go.id); }, 60); }
+          if (go && go.pid === view.pid && go.chat === view.chatId) { state.pendingGo = null; if (go.id) setTimeout(function(){ if (!pageGone()) view.jumpToMessage(go.id); }, 60); }
           if (state.project) reconcileLive(state.project);
           toBottom();
         })

@@ -32,8 +32,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Interrupt sends `session/cancel`.
   - Approach credit: Nuphos.
 
+- **Split workspace.** ⌘D splits the window side by side, ⌘⇧D one above the other; each pane is a whole Loom view.
+  - Drag a chat onto a pane's edge to open it there, or drag a pane by its grip to move it.
+  - The layout is saved.
+  - Panes keep their contents when the layout changes.
+  - The desktop menu gets Split Right and Split Down, and other menu commands reach the focused pane.
+  - The layout model is ported from Nuphos (Apache-2.0).
+
+- **Share live: a teammate in the same chat.** Use the chat menu ▸ Share live…, or `loom share --live --name … --role view|reply|approve --hours …`. It makes a one-use link for a teammate's browser.
+  - Their token reaches that chat only: its events (whatever chat they ask for), its live socket, and, as their role allows, sending, stopping and that chat's approvals. Everything else gets a 403, and terminals are never reachable from a guest socket.
+  - Messages carry their name, and an approval records who decided it.
+  - Access expires and can be revoked under Devices.
+  - Works over Loom Cloud.
+  - Approach credit: Nuphos's shared sessions.
+
+- **Phone: every computer, one app.** The app pairs with several computers and lists them under Account ▸ Computers: live status and latency, one tap to switch, long-press to rename or forget.
+  - Pairing adds a computer instead of replacing one, and a computer is named by its hostname (`/api/version` now reports it).
+  - When a computer revokes the phone, the next paired one carries on.
+  - Phones paired before this keep their computer, which becomes the first entry.
+- **Phone: Share live from your pocket.** Long-press a chat ▸ Share live, and choose read along, talk, or talk and approve. That opens the share sheet with a one-use, 24-hour guest link. Your own unscoped phone may mint guest links; device pairing stays the owner's alone.
+- **Phone: Allow / Deny on the approval alert.** Approval pushes carry the `loom-approval` category, the approval id and the computer's hostname. The phone answers on the computer that asked, without opening the app.
+
+- **Search every session:** `loom find --all "<words>"` (`GET /api/search`) searches every project's chats, newest first. A scoped token searches only its projects. Unloaded projects are read without being started.
+- **Audit trail:** `loom audit --since 7d` (`GET /api/audit`, owner only) lists approvals answered and by whom, shared-chat messages, Slack and Discord messages, triggers fired or skipped, and baton handoffs.
+- **/compact from the composer:** the "/" menu sends the agent its own `/compact`.
+
+- **Triggers and Slack & Discord in the app.** The project menu ▸ Triggers… (or ⌘K ▸ Triggers) lists each trigger with its schedule, next run and last runs, with Run now, Pause and Remove, and a form to add one. A webhook's URL and secret show once. Settings ▸ Slack & Discord connects either bot, with masked tokens, connection status and heard/ignored counts.
+
+- **`loom top`: what the agents cost this machine.** Each agent CLI, MCP server and dev server the daemon started, with everything it spawned: memory, CPU and process count, heaviest first. Shown beside free memory, load and the turn cap. `--watch` refreshes it; `GET /api/resources` is owner only.
+
+- **Instructions for a conversation:** a chat's menu ▸ Instructions…, or `loom chat:instructions "…" --chat <chat>`. Standing guidance for one chat (main included) that goes with every turn in it, whichever agent answers.
+
+- **A task can carry its own time limit.** The orchestrator can give a long task `"timeoutMin": 60` (clamped to 5–240), and that task's turns run that long. Antigravity honours it, where its default stays at 30 min. Field: a browser audit was cut at 30 min twice in one night.
+
 ### Fixed
 
+- **A run a worker already pushed:** `loom chain` and `orchestrate --apply` fetch origin. When `origin/<branch>` already has the run's work, they fast-forward local to it and say "already on origin", with nothing to push. Before, local was left behind and the run still said "apply it". `orchestra:apply` records a run that's already in the branch without an empty merge commit.
+- **`loom chain --json` says each project's outcome as it happens,** as `{"step":…}` lines on stderr, including projects that weren't found or didn't start. Stdout stays the one summary.
 - The alerts webhook now checks its secret in constant time.
 
 ## [1.2.8] — 2026-10-26

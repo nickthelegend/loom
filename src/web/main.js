@@ -13,6 +13,8 @@ import { clearShell,isDesktop,mq } from './shell.js';
 import { state } from './state.js';
 import { loadLoomPad,loadUpdate } from './statusbar.js';
 import { openTaskModal } from './tasks.js';
+import { enterWorkspace,inWorkspace,installPaneMode,makeChatsDraggable,paneId,renderWorkspace,workspaceCommand } from './workspace.js';
+import { isSplitShortcut } from './splits.js';
 
   document.addEventListener("visibilitychange", function(){ if (!document.hidden) stopTitleFlash(); });
 
@@ -132,6 +134,7 @@ import { openTaskModal } from './tasks.js';
   // build has no loomNative, so this is a no-op there.
   if (window.loomNative && window.loomNative.onMenu) {
     window.loomNative.onMenu(function(item){
+      if (inWorkspace()) return workspaceCommand(item);
       if (!state.token) return;
       // The shell asking for a command to be run where you can see it — the
       // Homebrew upgrade, today. It goes into the terminal you already have
@@ -176,9 +179,20 @@ import { openTaskModal } from './tasks.js';
     });
   }
 
-  bootstrapAdmin().then(function(){
-    return pairFromHash();
-  }).then(function(paired){
-    if (paired) toast("paired \u2713");
-    route();
-  }).catch(function(err){ toast(err.message); route(); });
+  // The split workspace (workspace.js): this window holds panes, each a whole Loom in a frame.
+  if (inWorkspace()) renderWorkspace();
+  else {
+    if (paneId()) installPaneMode(state, runCommand);
+    makeChatsDraggable();
+    // ⌘D / ⌘⇧D in a plain window: split it into the workspace (a pane hands it to the workspace instead)
+    if (!paneId()) document.addEventListener("keydown", function(e){
+      if (!state.token || document.querySelector(".scrim") || !isDesktop()) return;
+      if (isSplitShortcut(e, /Mac|iPhone|iPad/.test(navigator.platform || ""))) { e.preventDefault(); enterWorkspace(e.shiftKey ? "column" : "row"); }
+    });
+    bootstrapAdmin().then(function(){
+      return pairFromHash();
+    }).then(function(paired){
+      if (paired) toast("paired \u2713");
+      route();
+    }).catch(function(err){ toast(err.message); route(); });
+  }
