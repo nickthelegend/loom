@@ -1285,6 +1285,29 @@ phone, type them and tap 🌙. `--until` and `--max` stop *new* tasks from
 starting; the one running always finishes. A shift survives a daemon restart.
 A task the restart cut off is reported as failed, and the rest carry on.
 
+## Triggers: the next turn starts itself
+
+A schedule or a webhook starts an agent's turn, with nobody sitting in the chat. Each trigger
+gets its own thread, and its turns go through the project's queue like anything you type.
+A trigger whose last run is still waiting in the queue skips its next firing instead of piling up.
+
+```bash
+loom triggers:add "Summarise yesterday's merged PRs" --cron "0 9 * * 1-5"
+loom triggers:add "Check the error dashboard" --every 2h --agent codex
+loom triggers:add "CI failed on {{body.workflow_run.head_branch}}: look into it" --webhook --min-interval 60
+loom triggers            # each one, its next run, and its last few runs
+loom triggers:fire <id>  # now (a webhook's with --payload test.json)
+loom triggers:off <id>   # or :on, :rm
+```
+
+- **Webhooks:** each one prints its URL and secret once. The sender signs the body (GitHub's
+  `X-Hub-Signature-256` works as is) or sends the secret as `X-Loom-Secret`.
+- **Prompt templating:** `{{body.path}}`, `{{body}}` and `{{event}}` fill the prompt from the payload.
+- **Duplicates:** a redelivered webhook runs once, and `--min-interval` ignores bursts.
+- **Reaching it from the internet:** `tailscale funnel`, or `loom up --tailnet` for your tailnet.
+- **Who can manage triggers:** only this machine's owner can add, change or fire one, because a
+  trigger runs your agents, as you, unattended.
+
 ## Scorecards: which agent can you trust with this?
 
 "Finished without an error" isn't the same as "did what it said". Proof, the
@@ -2084,6 +2107,11 @@ Loom stands on good open-source work. Full license texts are in
   a fresh connection after the app was backgrounded.
 - **[Orca](https://github.com/stablyai/orca)** (MIT). The design system (see
   [Design](#design)).
+- **[Nuphos](https://github.com/nuphos/nuphos)** (Apache-2.0, © Zeabur Inc.). Loom
+  adopts Nuphos's approach to a team agent workspace, rebuilt on Loom's local daemon:
+  triggers (a schedule or webhook starts a turn), agents behind the Agent Client
+  Protocol, shared live sessions, Slack and Discord, and the split workspace.
+  "Nuphos" is a trademark of Zeabur Inc., used here only to credit the source.
 
 ## License
 

@@ -308,6 +308,21 @@ export class DaemonClient {
     if (!res.ok) throw new Error(`couldn't build the replay (${res.status})`);
     return res.text();
   }
+  triggers(id: string): Promise<{ triggers: Array<Record<string, any>>; runs: Array<{ trigger: string; at: number; ok: boolean; note: string }> }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/triggers`);
+  }
+  addTrigger(id: string, body: Record<string, unknown>): Promise<{ trigger: Record<string, any>; secret?: string; path?: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers`, body);
+  }
+  updateTrigger(id: string, tid: string, body: Record<string, unknown>): Promise<{ trigger: Record<string, any> }> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/triggers/${encodeURIComponent(tid)}`, body);
+  }
+  removeTrigger(id: string, tid: string): Promise<{ removed: boolean }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/triggers/${encodeURIComponent(tid)}`);
+  }
+  fireTrigger(id: string, tid: string, payload?: unknown): Promise<{ run: { ok: boolean; note: string } }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/triggers/${encodeURIComponent(tid)}/fire`, payload === undefined ? {} : { payload });
+  }
   shift(id: string): Promise<Record<string, any>> { return this.request("GET", `/api/projects/${encodeURIComponent(id)}/shift`); }
   startShift(id: string, body: { tasks: string[]; to?: string; until?: string; maxUsd?: number }): Promise<Record<string, any>> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/shift`, body);

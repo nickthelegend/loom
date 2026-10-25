@@ -103,6 +103,8 @@ import { addProjectAt } from "./routes/projects.js";
 import { registerCrewsRoutes } from "./routes/crews.js";
 import { registerProofRoutes } from "./routes/proof.js";
 import { registerShiftRoutes } from "./routes/shift.js";
+import { registerTriggerRoutes } from "./routes/triggers.js";
+import { TriggerRunner } from "./triggers.js";
 import { registerReviewRoutes } from "./routes/review.js";
 import { registerCouncilRoutes } from "./routes/council.js";
 import { registerOnboardRoutes } from "./routes/onboard.js";
@@ -246,6 +248,8 @@ export class LoomDaemon {
     });
   }
 
+  /** Schedules and webhooks that start turns on their own (daemon/triggers.ts). */
+  private triggers = new TriggerRunner((id) => this.runtime(id));
   /** The swap that started this daemon, when a newer CLI replaced the last one (core/daemon-swap.ts). */
   private swap: DaemonSwap | null = null;
   /** Loom Cloud relay, when enabled. See daemon/relay.ts. */
@@ -349,7 +353,10 @@ export class LoomDaemon {
     // 2 MB for every JSON body but an attachment: a 12 MB file is ~16 MB as
     // base64, and the global cap used to refuse a retina screenshot at 413
     // before the route's own 12 MB check ever ran.
-    const smallJson = express.json({ limit: "2mb" });
+    // a webhook's signature is over the bytes it sent, so those routes keep them
+    const smallJson = express.json({ limit: "2mb", verify: (req, _res, buf) => {
+      if ((req as Request).url?.startsWith("/api/webhooks/")) (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+    } });
     const attachmentJson = express.json({ limit: "17mb" });
     app.use((req, res, next) => (/^\/api\/projects\/[^/]+\/attachments$/.test(req.path) ? attachmentJson : smallJson)(req, res, next));
 
@@ -472,6 +479,7 @@ export class LoomDaemon {
     registerCrewsRoutes(app, withRuntime);
     registerProofRoutes(app, withRuntime);
     registerShiftRoutes(app, withRuntime);
+    registerTriggerRoutes(app, withRuntime, this.triggers);
     registerReviewRoutes(app, withRuntime);
     registerCouncilRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
@@ -717,6 +725,7 @@ export class LoomDaemon {
     if (readCloudSettings().enabled) void this.startCloud().catch(() => { });
     void this.team.start().catch(() => { });
     this.watchReleases();
+    this.triggers.start();
 
     return { host: this.host, port: this.port };
   }
@@ -1010,6 +1019,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    this.triggers.stop();
     // A broker pointing at a closed daemon would leave the next adapter
     // waiting on a card nobody will ever see.
     setApprovalBroker(null);

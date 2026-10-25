@@ -68,6 +68,32 @@ The web app's "quiet graphite" design system is adapted from Orca
 
 ---
 
+## Nuphos — Apache License 2.0
+
+- Project: https://github.com/nuphos/nuphos (https://nuphos.ai)
+- Copyright 2026 Zeabur Inc. "Nuphos" and the Nuphos logo are trademarks of Zeabur Inc.;
+  Loom uses the name only to describe where these ideas came from.
+
+Nuphos's NOTICE reads:
+
+> Nuphos
+> Copyright 2026 Zeabur Inc.
+>
+> This product includes software developed at Zeabur Inc.
+
+**What Loom adapted** — Nuphos's approach to an agent workspace for a team, rebuilt on
+Loom's local daemon (no hosted backend):
+- triggers: a schedule or a webhook starts an agent's next turn (`src/core/triggers.ts`,
+  `src/daemon/triggers.ts`), including its shared-secret webhook check, payload templating
+  into the prompt, a per-trigger flood guard and run history;
+- and, as they land, the rest of its feature set: agents behind the Agent Client Protocol,
+  shared live sessions, Slack and Discord, the split workspace, session search and slash
+  commands. Each file that adapts Nuphos says so at its top.
+
+Where Loom ports Nuphos code rather than its design, the file carries this notice and says
+what was changed, as Apache-2.0 §4 asks. The license text is the same Apache License 2.0
+reproduced at the end of this file.
+
 ## Apache License 2.0 (Agent Orchestrator)
 
 ```
