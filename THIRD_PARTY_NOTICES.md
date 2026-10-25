@@ -86,6 +86,11 @@ Loom's local daemon (no hosted backend):
 - triggers: a schedule or a webhook starts an agent's next turn (`src/core/triggers.ts`,
   `src/daemon/triggers.ts`), including its shared-secret webhook check, payload templating
   into the prompt, a per-trigger flood guard and run history;
+- Slack and Discord bridges (`src/daemon/chat-bridge.ts`): one thread per Slack thread or
+  Discord channel, allow-listed users and channels, replies chunked to each platform's limit.
+  The bridge runs in the daemon over Slack Socket Mode and the Discord gateway, the way openab
+  (MIT, © 2026 openabdev, which Nuphos vendors) does. Unlike openab, Loom never auto-approves a
+  permission request.
 - and, as they land, the rest of its feature set: agents behind the Agent Client Protocol,
   shared live sessions, Slack and Discord, the split workspace, session search and slash
   commands. Each file that adapts Nuphos says so at its top.

@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Only the machine's owner can add, change or fire a trigger.
   - The approach comes from [Nuphos](https://github.com/nuphos/nuphos) (Apache-2.0, credited in THIRD_PARTY_NOTICES.md).
 
+- **Slack and Discord bridges.** `loom bridge slack --bot-token … --app-token … --user U…` (or `discord`): mention the bot and the message goes to a Loom thread, and the agent's answer comes back in the Slack thread or Discord channel.
+  - The bot runs in the daemon with your own tokens: Slack over Socket Mode, Discord over its gateway. No public URL is needed.
+  - Only listed users are heard; other bots and un-mentioned chatter are ignored.
+  - Approvals stay in Loom and on your phone, and the channel is told when a turn waits on one.
+  - Tokens are stored 0600 and masked whenever read back.
+  - Approach credit: Nuphos and openab.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.

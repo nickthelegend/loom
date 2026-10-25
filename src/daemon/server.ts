@@ -105,6 +105,8 @@ import { registerProofRoutes } from "./routes/proof.js";
 import { registerShiftRoutes } from "./routes/shift.js";
 import { registerTriggerRoutes } from "./routes/triggers.js";
 import { TriggerRunner } from "./triggers.js";
+import { registerBridgeRoutes } from "./routes/bridges.js";
+import { ChatBridges } from "./chat-bridge.js";
 import { registerReviewRoutes } from "./routes/review.js";
 import { registerCouncilRoutes } from "./routes/council.js";
 import { registerOnboardRoutes } from "./routes/onboard.js";
@@ -250,6 +252,8 @@ export class LoomDaemon {
 
   /** Schedules and webhooks that start turns on their own (daemon/triggers.ts). */
   private triggers = new TriggerRunner((id) => this.runtime(id));
+  /** Slack / Discord (daemon/chat-bridge.ts). */
+  private bridges = new ChatBridges((id) => this.runtime(id));
   /** The swap that started this daemon, when a newer CLI replaced the last one (core/daemon-swap.ts). */
   private swap: DaemonSwap | null = null;
   /** Loom Cloud relay, when enabled. See daemon/relay.ts. */
@@ -480,6 +484,7 @@ export class LoomDaemon {
     registerProofRoutes(app, withRuntime);
     registerShiftRoutes(app, withRuntime);
     registerTriggerRoutes(app, withRuntime, this.triggers);
+    registerBridgeRoutes(app, this.bridges);
     registerReviewRoutes(app, withRuntime);
     registerCouncilRoutes(app, withRuntime);
     registerOnboardRoutes(app, { team: this.team, onboarding: this.onboarding, ...(this.gh ? { gh: this.gh } : {}) }, withRuntime);
@@ -726,6 +731,7 @@ export class LoomDaemon {
     void this.team.start().catch(() => { });
     this.watchReleases();
     this.triggers.start();
+    void this.bridges.startAll().catch(() => { });
 
     return { host: this.host, port: this.port };
   }
@@ -1020,6 +1026,7 @@ export class LoomDaemon {
 
   async close(): Promise<void> {
     this.triggers.stop();
+    await this.bridges.stopAll().catch(() => { });
     // A broker pointing at a closed daemon would leave the next adapter
     // waiting on a card nobody will ever see.
     setApprovalBroker(null);
