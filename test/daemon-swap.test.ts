@@ -8,7 +8,8 @@ import http from "node:http";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { autoRestartEnabled, describeSwap, readSwapNote, setAutoRestart, writeSwapNote } from "../src/core/daemon-swap.js";
-import { DaemonClient, ensureDaemon } from "../src/daemon/client.js";
+import { spawn } from "node:child_process";
+import { DaemonClient, ensureDaemon, holdWaiting, waitingClis } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import { tmpDir } from "./helpers.js";
 
@@ -69,6 +70,46 @@ describe("daemon swaps", () => {
       expect(v.swap).toMatchObject({ fromVersion: "1.2.6", toRev: BUILD_REV });
     } finally {
       await daemon.close();
+    }
+  });
+
+  it("a CLI following runs counts as busy; its file goes when it's released or its process dies", async () => {
+    process.env.LOOM_HOME = tmpDir("home-waiting");
+    const release = holdWaiting("chain");
+    const dir = path.join(process.env.LOOM_HOME, "waiting");
+    expect(fs.readdirSync(dir)).toEqual([`${process.pid}.json`]);
+    expect(waitingClis()).toEqual([]); // not our own
+    release();
+    expect(fs.readdirSync(dir)).toEqual([]);
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+    fs.writeFileSync(path.join(dir, `${child.pid}.json`), JSON.stringify({ pid: child.pid, what: "chain", since: Date.now() }));
+    expect(waitingClis()).toEqual([`loom chain (pid ${child.pid})`]);
+    child.kill();
+    await new Promise((r) => child.once("exit", r));
+    expect(waitingClis()).toEqual([]);
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it("an older daemon isn't swapped out from under a chain between its runs", async () => {
+    process.env.LOOM_HOME = tmpDir("home-waiting-swap");
+    const old = http.createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify(req.url === "/api/health" ? { ok: true, version: "0.0.1", rev: "old-build" } : { projects: [] }));
+    });
+    await new Promise<void>((r) => old.listen(0, "127.0.0.1", r));
+    const port = (old.address() as { port: number }).port;
+    fs.writeFileSync(path.join(process.env.LOOM_HOME, "daemon.json"), JSON.stringify({ host: "127.0.0.1", port, adminToken: "t", clients: [] }));
+    const chain = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+    fs.mkdirSync(path.join(process.env.LOOM_HOME, "waiting"), { recursive: true });
+    fs.writeFileSync(path.join(process.env.LOOM_HOME, "waiting", `${chain.pid}.json`), JSON.stringify({ pid: chain.pid, what: "chain", since: Date.now() }));
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      expect(await ensureDaemon()).toBeInstanceOf(DaemonClient);
+      expect(err.mock.calls.map((c) => String(c[0])).join("")).toMatch(/busy \(loom chain \(pid \d+\)\)/);
+      expect((await fetch(`http://127.0.0.1:${port}/api/health`)).ok).toBe(true);
+    } finally {
+      chain.kill();
+      await new Promise((r) => old.close(r));
     }
   });
 });

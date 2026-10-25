@@ -41,6 +41,8 @@ import {
   ensureDaemon,
   stopDaemon,
   turnsInFlight,
+  busyWork,
+  holdWaiting,
 } from "../daemon/client.js";
 import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
@@ -241,10 +243,10 @@ program
         return;
       }
       // a restart kills turns in flight: say whose, and leave them be unless told otherwise
-      const busy = opts.force ? [] : await turnsInFlight(new DaemonClient(running));
+      const busy = opts.force ? [] : await busyWork(new DaemonClient(running));
       if (busy.length) {
-        console.log(pc.yellow(`${busy.length} turn${busy.length === 1 ? " is" : "s are"} running (${busy.slice(0, 4).join(", ")}${busy.length > 4 ? ", …" : ""}) — ` +
-          `a restart would kill ${busy.length === 1 ? "it" : "them"}. Try again when they finish, or loom up --restart --force.`));
+        console.log(pc.yellow(`busy: ${busy.slice(0, 4).join(", ")}${busy.length > 4 ? ", …" : ""} — ` +
+          `a restart would cut ${busy.length === 1 ? "it" : "them"} short. Try again when that's done, or loom up --restart --force.`));
         process.exitCode = 1;
         return;
       }
@@ -1593,6 +1595,22 @@ interface ApplyResult {
 }
 
 /**
+ * A poll that rides out a daemon restart: while the daemon can't be reached (not an HTTP error —
+ * those are real answers) it's retried for up to 90 s. Orchestra runs carry on across restarts,
+ * so a chain waiting on one shouldn't fail its step for the seconds a swap takes.
+ */
+async function steady<T>(call: () => Promise<T>): Promise<T> {
+  const until = Date.now() + 90_000;
+  for (;;) {
+    try { return await call(); }
+    catch (e) {
+      if (e instanceof DaemonError || Date.now() > until) throw e;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
+
+/**
  * #340: wait for a run to end; if it completed, scan everything it changed for secrets, merge it
  * into the project's current branch, and (asked to) push. Stops at the first thing that's wrong,
  * and says what — a run that failed, a key in the diff, a merge or push that didn't go.
@@ -1612,7 +1630,7 @@ async function waitScanApply(client: DaemonClient, projectId: string, dir: strin
     }
     if (isTerminalStatus(run.status) || run.status === "waiting_human") break;
     await new Promise((r) => setTimeout(r, 3000));
-    run = (await client.orchestraRun(projectId, runId)).run;
+    run = (await steady(() => client.orchestraRun(projectId, runId))).run;
   }
   if (run.status !== "completed") return { ok: false, runId, status: run.status, error: run.status === "waiting_human" ? `it's waiting on you: ${run.question ?? "a question"}` : (run.error ?? run.status) };
   const { execFileSync } = await import("node:child_process");
@@ -1729,7 +1747,7 @@ function printApplyResult(r: ApplyResult): void {
 async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string): Promise<void> {
   let last = "";
   for (;;) {
-    const { run } = await client.orchestraRun(projectId, runId);
+    const { run } = await steady(() => client.orchestraRun(projectId, runId));
     const line = `${run.status}|${run.tasks.map((t) => `${t.id}:${t.status}`).join(",")}`;
     if (line !== last) {
       last = line;
@@ -1787,6 +1805,7 @@ program
           : `${pc.magenta("🎼")} ${pc.bold(run.id)} started — ${pc.bold(run.orchestrator.agent)} orchestrating ` +
               `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
       );
+      if (opts.watch || opts.apply) holdWaiting("orchestrate");
       if (opts.watch) await watchRun(client, project.id, run.id);
       else if (!opts.apply) console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
       if (opts.apply) {
@@ -1816,6 +1835,7 @@ program
         if (opts.wait) {
           // "reviewing" is the orchestrator reading results, not the end (#341) — only these are
           const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 7200) * 1000;
+          holdWaiting("orchestra --wait");
           let run = (await client.orchestraRun(project.id, runId)).run;
           const onProgress = progressSink(opts);
           let seen: typeof run | null = null;
@@ -1823,7 +1843,7 @@ program
             if (onProgress) { for (const e of runEvents(seen, run)) onProgress(e); seen = run; }
             if (isTerminalStatus(run.status) || run.status === "waiting_human" || Date.now() >= deadline) break;
             await new Promise((r) => setTimeout(r, 2000));
-            run = (await client.orchestraRun(project.id, runId)).run;
+            run = (await steady(() => client.orchestraRun(project.id, runId))).run;
           }
           const done = isTerminalStatus(run.status) || run.status === "waiting_human";
           process.exitCode = !done ? 124 : run.status === "completed" ? 0 : run.status === "waiting_human" ? 2 : 1;
@@ -2814,6 +2834,7 @@ program
     const client = await ensureDaemon();
     const { projects } = await client.listProjects();
     if (opts.check) return void (await checkChain(client, projects, steps, opts));
+    holdWaiting("chain"); // released on exit: the whole chain, gaps between runs included, is busy
     const results: Array<ApplyResult & { project: string }> = [];
     for (const step of steps) {
       const p = projects.find((x) => x.name === step.project || x.id === step.project || path.resolve(x.dir) === path.resolve(step.project));

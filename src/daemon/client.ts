@@ -985,10 +985,10 @@ export async function ensureDaemon(): Promise<DaemonClient> {
         process.stderr.write(`loom: the daemon runs an older build (${probe.version ?? probe.rev ?? "?"}) than this CLI (${VERSION}); auto-restart is off — loom up --restart when you're ready\n`);
         return new DaemonClient(cfg);
       }
-      const busy = await turnsInFlight(new DaemonClient(cfg));
+      const busy = await busyWork(new DaemonClient(cfg));
       if (busy.length) {
-        process.stderr.write(`loom: the daemon runs an older build (${probe.rev ?? "?"}) than this CLI (${BUILD_REV}), but ${busy.length} turn${busy.length === 1 ? " is" : "s are"} running (${busy.slice(0, 3).join(", ")}${busy.length > 3 ? ", …" : ""}) — ` +
-          "using it as it is; restart when they finish: loom up --restart\n");
+        process.stderr.write(`loom: the daemon runs an older build (${probe.version ?? probe.rev ?? "?"}) than this CLI (${VERSION}), but it's busy (${busy.slice(0, 3).join(", ")}${busy.length > 3 ? ", …" : ""}) — ` +
+          "using it as it is; restart when that's done: loom up --restart\n");
         return new DaemonClient(cfg);
       }
       // hold the restart lock until the new daemon answers; someone else holding it is restarting already
@@ -1090,6 +1090,47 @@ export async function turnsInFlight(client: DaemonClient): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+const waitingDir = () => path.join(loomHome(), "waiting");
+
+/**
+ * A CLI following runs to the end — `loom chain`, `orchestrate --apply`, `orchestra --wait` —
+ * marks itself busy for the restart guard while it does, the gaps between runs included: no
+ * turn is running there, but the process is mid-job (field: 1.2.6 → 1.2.7 landed in exactly
+ * that gap). Released on return and on exit; a file left by a process that died is ignored.
+ */
+export function holdWaiting(what: string): () => void {
+  const file = path.join(waitingDir(), `${process.pid}.json`);
+  try {
+    fs.mkdirSync(waitingDir(), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ pid: process.pid, what, since: Date.now() }));
+  } catch { /* the guard is a courtesy, never a failure */ }
+  const release = () => { try { fs.rmSync(file, { force: true }); } catch { /* gone already */ } };
+  process.once("exit", release);
+  return () => { process.off("exit", release); release(); };
+}
+
+/** Other live CLIs following runs ("loom chain (pid 123)"); files left by dead ones are cleared. */
+export function waitingClis(): string[] {
+  let names: string[] = [];
+  try { names = fs.readdirSync(waitingDir()).filter((f) => f.endsWith(".json")); } catch { return []; }
+  const out: string[] = [];
+  for (const f of names) {
+    const file = path.join(waitingDir(), f);
+    try {
+      const w = JSON.parse(fs.readFileSync(file, "utf8")) as { pid: number; what: string };
+      if (w.pid === process.pid) continue;
+      try { process.kill(w.pid, 0); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EPERM") { fs.rmSync(file, { force: true }); continue; } }
+      out.push(`loom ${w.what} (pid ${w.pid})`);
+    } catch { /* half-written: skip */ }
+  }
+  return out;
+}
+
+/** Everything a daemon restart would cut short: turns running, and CLIs following runs. */
+export async function busyWork(client: DaemonClient): Promise<string[]> {
+  return [...(await turnsInFlight(client)), ...waitingClis()];
 }
 
 export async function daemonRunning(): Promise<DaemonConfig | null> {
