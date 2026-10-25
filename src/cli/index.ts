@@ -45,6 +45,7 @@ import {
 import { installCrashGuards } from "../daemon/guards.js";
 import { LoomDaemon, DEFAULT_PORT } from "../daemon/server.js";
 import { ensureLoomHome, findProject, loomHome, readDaemonConfig } from "../core/registry.js";
+import { formatEvent as formatProgress, runEvents, type ProgressEvent } from "./run-progress.js";
 import { VERSION } from "../version.js";
 import { makeBackup } from "../core/backup.js";
 import { threadMarkdown } from "../core/thread-md.js";
@@ -1575,9 +1576,12 @@ interface ApplyResult {
  * into the project's current branch, and (asked to) push. Stops at the first thing that's wrong,
  * and says what — a run that failed, a key in the diff, a merge or push that didn't go.
  */
-async function waitScanApply(client: DaemonClient, projectId: string, dir: string, runId: string, opts: { push: boolean }): Promise<ApplyResult> {
+async function waitScanApply(client: DaemonClient, projectId: string, dir: string, runId: string, opts: { push: boolean; onProgress?: ProgressSink }): Promise<ApplyResult> {
   let run = (await client.orchestraRun(projectId, runId)).run;
-  while (!isTerminalStatus(run.status) && run.status !== "waiting_human") {
+  let seen: import("../core/orchestra.js").OrchestraRun | null = null;
+  for (;;) {
+    if (opts.onProgress) { for (const e of runEvents(seen, run)) opts.onProgress(e); seen = run; }
+    if (isTerminalStatus(run.status) || run.status === "waiting_human") break;
     await new Promise((r) => setTimeout(r, 3000));
     run = (await client.orchestraRun(projectId, runId)).run;
   }
@@ -1599,6 +1603,18 @@ async function waitScanApply(client: DaemonClient, projectId: string, dir: strin
     catch (e) { return { ...res, ok: false, pushed: false, error: `merged, but the push failed: ${(e as Error).message.split("\n")[0]}` }; }
   }
   return res;
+}
+
+type ProgressSink = (e: ProgressEvent) => void;
+
+/**
+ * `--progress`: one line per task event. With --json they're JSON lines on stderr, so stdout
+ * stays the one summary a script parses; otherwise readable lines on stdout.
+ */
+function progressSink(opts: { progress?: boolean; json?: boolean }, label = ""): ProgressSink | undefined {
+  if (!opts.progress) return undefined;
+  if (opts.json) return (e) => process.stderr.write(JSON.stringify({ progress: e, ...(label ? { project: label } : {}), ts: Date.now() }) + "\n");
+  return (e) => console.log(pc.dim(formatProgress(e, label)));
 }
 
 function printApplyResult(r: ApplyResult): void {
@@ -1644,7 +1660,8 @@ program
   .option("--apply", "when the run completes, scan its changes for secrets and merge it into your branch (#340)")
   .option("--push", "with --apply: push the branch after merging")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; apply?: boolean; push?: boolean; watch: boolean }) => {
+  .option("--progress", "with --apply: one line per task event while it runs")
+  .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; apply?: boolean; push?: boolean; watch: boolean; progress?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1670,7 +1687,7 @@ program
       if (opts.watch) await watchRun(client, project.id, run.id);
       else if (!opts.apply) console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
       if (opts.apply) {
-        const res = await waitScanApply(client, project.id, project.dir, run.id, { push: Boolean(opts.push) });
+        const res = await waitScanApply(client, project.id, project.dir, run.id, { push: Boolean(opts.push), onProgress: opts.watch ? undefined : progressSink(opts) });
         printApplyResult(res);
         if (!res.ok) process.exitCode = 1;
       }
@@ -1687,7 +1704,8 @@ program
   .option("--json", "print runs (or one run) as JSON")
   .option("--wait", "with a run id: wait until it's completed, failed or aborted (or asks you something); exit 0 completed, 1 failed/aborted, 2 waiting on you")
   .option("--timeout <seconds>", "with --wait: give up after this long (exit 124)", "7200")
-  .action(async (runId: string | undefined, opts: { watch?: boolean; json?: boolean; wait?: boolean; timeout: string }) => {
+  .option("--progress", "with --wait: one line per task event while it runs (with --json: JSON lines on stderr)")
+  .action(async (runId: string | undefined, opts: { watch?: boolean; json?: boolean; wait?: boolean; timeout: string; progress?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
@@ -1696,7 +1714,11 @@ program
           // "reviewing" is the orchestrator reading results, not the end (#341) — only these are
           const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 7200) * 1000;
           let run = (await client.orchestraRun(project.id, runId)).run;
-          while (!isTerminalStatus(run.status) && run.status !== "waiting_human" && Date.now() < deadline) {
+          const onProgress = progressSink(opts);
+          let seen: typeof run | null = null;
+          for (;;) {
+            if (onProgress) { for (const e of runEvents(seen, run)) onProgress(e); seen = run; }
+            if (isTerminalStatus(run.status) || run.status === "waiting_human" || Date.now() >= deadline) break;
             await new Promise((r) => setTimeout(r, 2000));
             run = (await client.orchestraRun(project.id, runId)).run;
           }
@@ -2667,7 +2689,8 @@ program
   .option("-p, --parallel <n>", "tasks at once in each run")
   .option("--solo", "keep every run's tasks on this machine")
   .option("--max-usd <n>", "stop a run when it has spent this much")
-  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean } & RunFlags) => {
+  .option("--progress", "one line per task event as each run goes (with --json: JSON lines on stderr)")
+  .action(async (file: string | undefined, opts: { push?: boolean; keepGoing?: boolean; json?: boolean; progress?: boolean } & RunFlags) => {
     const text = file && file !== "-" ? fs.readFileSync(file, "utf8") : await new Promise<string>((resolve) => {
       let buf = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (d) => (buf += d)); process.stdin.on("end", () => resolve(buf));
     });
@@ -2693,7 +2716,7 @@ program
       if (!opts.json) console.log(`${pc.magenta("▶")} ${pc.bold(p.name)} — ${step.goal.slice(0, 80)}`);
       try {
         const { run } = await client.startOrchestra(p.id, { goal: step.goal, ...runOptions({ ...opts, ...step.flags }) });
-        const r = { project: p.name, ...(await waitScanApply(client, p.id, p.dir, run.id, { push: Boolean(opts.push) })) };
+        const r = { project: p.name, ...(await waitScanApply(client, p.id, p.dir, run.id, { push: Boolean(opts.push), onProgress: progressSink(opts, p.name) })) };
         results.push(r);
         if (!opts.json) printApplyResult(r);
         if (!r.ok && !opts.keepGoing) break;

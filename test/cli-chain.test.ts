@@ -136,6 +136,14 @@ describe("loom chain (#340)", () => {
     expect(fs.readFileSync(path.join(dirs.c!, "two.txt"), "utf8")).toBe("second\n");
   }, 120_000);
 
+  it("--progress prints one line per task event as each run goes", async () => {
+    const r = await runCli(["chain", "--progress"], "chain-c :: write three.txt third\n");
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/chain-c t1 planned for w: write/);
+    expect(r.out).toMatch(/chain-c t1 \[w\] done — 1 file/);
+    expect(r.out).toMatch(/chain-c \S+ completed/);
+  }, 120_000);
+
   it("run options apply to every line, and a line's own [ … ] wins (no claude-code planning unless asked)", async () => {
     const r = await runCli(["chain", "--json", "-p", "3"], "chain-a :: [-o c -w w -p 2] write opts.txt chosen\n");
     expect(r.code).toBe(0);
