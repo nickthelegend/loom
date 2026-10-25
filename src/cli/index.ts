@@ -2701,6 +2701,8 @@ program
   .option("--tools", "for --kind model: let it read the project (read-only)")
   .option("--write", "for --kind model: let it write files too (every write asks you first)")
   .option("--run <list>", 'for --kind model: commands it may run, comma-separated, e.g. "npm test"')
+  .option("--preset <name>", "for acp: claude, codex, gemini, opencode or grok")
+  .option("--cmd <command>", 'for acp: the ACP agent command, e.g. "gemini --experimental-acp"')
   .action(
     async (
       kind: string,
@@ -2712,6 +2714,8 @@ program
         tools?: boolean;
         write?: boolean;
         run?: string;
+        preset?: string;
+        cmd?: string;
       },
     ) => {
     const client = await ensureDaemon();
@@ -2730,7 +2734,14 @@ program
       ...(opts.tools ? { tools: true } : {}),
       ...(opts.write ? { write: true } : {}),
       ...(allowed.length ? { run: allowed } : {}),
+      ...(opts.preset ? { preset: opts.preset } : {}),
+      ...(opts.cmd ? { command: opts.cmd.trim().split(/\s+/) } : {}),
     };
+    if (kind === "acp") {
+      const { ACP_PRESETS } = await import("../adapters/acp.js");
+      if (!opts.preset && !opts.cmd) fail(`an ACP agent needs --preset (${Object.keys(ACP_PRESETS).join(", ")}) or --cmd "<command>"`);
+      if (opts.preset && !ACP_PRESETS[opts.preset]) fail(`no ACP preset "${opts.preset}" — ${Object.keys(ACP_PRESETS).join(", ")}`);
+    }
     if (kind === "model" && !opts.model) {
       fail('a model agent needs a model: --model "<id>" (see loom models)');
     }

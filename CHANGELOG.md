@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tokens are stored 0600 and masked whenever read back.
   - Approach credit: Nuphos and openab.
 
+- **Any ACP agent: the `acp` kind.** `loom agents:add acp --preset gemini|claude|codex|opencode|grok` (or `--cmd "<command>"`) drives any Agent Client Protocol agent over stdio.
+  - Each chat is one ACP session, resumed with `session/load` where supported. Replayed history is kept out of the thread.
+  - Thoughts, plans, tool calls, results and diffs become Loom events.
+  - Permission requests follow the agent's Loom mode: bypass, Auto policy, or a real approval card. They fail closed.
+  - Interrupt sends `session/cancel`.
+  - Approach credit: Nuphos.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.

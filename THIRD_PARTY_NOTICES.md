@@ -91,6 +91,9 @@ Loom's local daemon (no hosted backend):
   The bridge runs in the daemon over Slack Socket Mode and the Discord gateway, the way openab
   (MIT, © 2026 openabdev, which Nuphos vendors) does. Unlike openab, Loom never auto-approves a
   permission request.
+- agents behind the Agent Client Protocol (`src/adapters/acp.ts`): one adapter kind for every
+  ACP agent, with presets for the adapters and CLIs Nuphos runs (claude-agent-acp, codex-acp,
+  Gemini, OpenCode, Grok). Loom's own Auto policy and approval cards answer permission requests.
 - and, as they land, the rest of its feature set: agents behind the Agent Client Protocol,
   shared live sessions, Slack and Discord, the split workspace, session search and slash
   commands. Each file that adapts Nuphos says so at its top.

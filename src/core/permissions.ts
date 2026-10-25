@@ -82,6 +82,14 @@ export const PERMISSION_PROFILES: Record<string, PermissionProfile> = {
       ask: { flags: "--mode plan", label: "Ask — plan mode: proposes, makes no changes", ask: "read-only" },
     },
   },
+  acp: {
+    default: "auto",
+    modes: {
+      bypass: { flags: "picks the agent's allow option on every permission request", label: "Bypass — every permission request allowed" },
+      auto: { flags: "Loom's Auto policy decides each permission request", label: "Auto — edits and commands inside the project; refuses paths outside it and commands that can't be undone" },
+      ask: { flags: "session/request_permission → Loom approvals", label: "Always ask — every permission request waits for your approval in Loom", ask: "approvals" },
+    },
+  },
   "grok-code": {
     default: "bypass",
     modes: {
