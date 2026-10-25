@@ -2576,6 +2576,41 @@ program
   });
 
 program
+  .command("share [chat]")
+  .description("a read-only link to a chat (default: main) for a teammate: prompts, replies, what ran and changed. It expires; --list shows yours, --revoke ends one (#199)")
+  .option("--hours <n>", "how long the link works (1 to 720, default 24)")
+  .option("--list", "the links that still work")
+  .option("--revoke <id>", "end a link now")
+  .option("--json", "print as JSON")
+  .action(async (chat: string | undefined, opts: { hours?: string; list?: boolean; revoke?: string; json?: boolean }) => {
+    const client = await ensureDaemon();
+    if (opts.revoke) {
+      const { revoked } = await client.revokeShare(opts.revoke);
+      if (!revoked) fail(`no link ${opts.revoke} — loom share --list`);
+      return void console.log(`${pc.green("✓")} link ${opts.revoke} no longer opens`);
+    }
+    if (opts.list) {
+      const { shares } = await client.shares();
+      if (opts.json) return void console.log(JSON.stringify(shares));
+      if (!shares.length) return void console.log(pc.dim("no links open — loom share [chat]"));
+      for (const s of shares) console.log(`${pc.bold(s.id)}  ${s.title}  ${pc.dim(`until ${new Date(s.expiresAt).toLocaleString()}`)}`);
+      return;
+    }
+    const project = await currentProject(client);
+    let chatId = "main";
+    if (chat && chat !== "main") {
+      const { chats } = await client.chats(project.id);
+      const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
+      if (!hit) fail(`no chat "${chat}" here — ${chats.slice(0, 6).map((c) => c.title).join(", ") || "only main"}`);
+      chatId = hit.id;
+    }
+    const out = await client.shareChat(project.id, chatId, opts.hours ? Number(opts.hours) : undefined);
+    if (opts.json) return void console.log(JSON.stringify(out));
+    console.log(`${pc.green("✓")} ${out.title} — read-only, until ${new Date(out.expiresAt).toLocaleString()}\n\n  ${out.url}\n`);
+    console.log(pc.dim(`anyone who can reach this machine with the link can read it (on another computer: start the daemon with loom up --tailnet). loom share --revoke ${out.id} ends it`));
+  });
+
+program
   .command("chain [file]")
   .description("run goals in several projects, one after another: each line is `<project> :: <goal>` (project = name or folder). Each completed run is scanned for secrets and merged before the next starts (#340)")
   .option("--push", "push each project's branch after merging its run")

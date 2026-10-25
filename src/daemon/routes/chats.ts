@@ -7,9 +7,30 @@ import { resolveProvider } from "../../core/providers.js";
 import { LoomAskTimeoutError } from "../runtime.js";
 import type { WithRuntime } from './context.js';
 import { threadReplay } from "../../core/replay.js";
+import { createShare, listShares, revokeShare } from "../../core/shares.js";
 import { MAIN_CHAT } from "../../types.js";
 /** Register chats routes in the order established by LoomDaemon.routes(). */
 export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): void {
+
+  // A read-only link to a chat, for a teammate (#199): /share/<token>, expiring, revocable.
+  app.post(
+    "/api/projects/:id/chats/:chat/share",
+    withRuntime(async (rt, req, res) => {
+      const chat = String(req.params.chat || MAIN_CHAT);
+      const info = chat === MAIN_CHAT ? { title: "Main" } : rt.chats().find((c) => c.id === chat);
+      if (!info) return void res.status(404).json({ error: "no such chat" });
+      const { hours } = (req.body ?? {}) as { hours?: number };
+      const { share, token } = createShare({ projectId: rt.info.id, chat, title: `${rt.info.name} · ${info.title || "Chat"}`, ...(Number(hours) > 0 ? { hours: Number(hours) } : {}) });
+      const host = String(req.headers.host ?? "127.0.0.1");
+      res.json({ id: share.id, url: `http://${host}/share/${token}`, expiresAt: share.expiresAt, title: share.title });
+    }),
+  );
+  app.get("/api/shares", (_req, res) => {
+    res.json({ shares: listShares().map(({ hash: _h, ...s }) => s) });
+  });
+  app.delete("/api/shares/:shareId", (req, res) => {
+    res.json({ revoked: revokeShare(String(req.params.shareId)) });
+  });
 
   // A chat as one self-contained HTML page — prompts, replies, what ran, what changed, and what
   // Loom checked (core/replay.ts). ?download=1 asks the browser to save it.

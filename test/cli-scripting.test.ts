@@ -203,6 +203,29 @@ describe("a restart in progress (field: a script's next step landed mid-restart)
   }, 30_000);
 });
 
+describe("a read-only link to a thread (#199)", () => {
+  it("opens the chat without pairing, lists, and stops opening once revoked", async () => {
+    await runCli(["send", "--wait", "a message worth sharing"]);
+    const made = JSON.parse((await runCli(["share", "--json", "--hours", "2"])).out);
+    expect(made.url).toMatch(/\/share\/[A-Za-z0-9_-]{20,}$/);
+    expect(made.expiresAt - Date.now()).toBeGreaterThan(1.9 * 3_600_000);
+    const page = await fetch(made.url); // no bearer token: the link is the credential
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("a message worth sharing");
+    expect(JSON.parse((await runCli(["share", "--list", "--json"])).out).map((x: { id: string }) => x.id)).toContain(made.id);
+    expect((await runCli(["share", "--revoke", made.id])).code).toBe(0);
+    expect((await fetch(made.url)).status).toBe(404);
+    expect((await fetch(made.url.replace(/[^/]+$/, "not-a-real-token-at-all-xx"))).status).toBe(404);
+  }, 60_000);
+
+  it("a link stops working when it expires", async () => {
+    const { createShare, openShare } = await import("../src/core/shares.js");
+    const { token } = createShare({ projectId: "p", chat: "main", title: "t", hours: 1 }, 1_000_000);
+    expect(openShare(token, 1_000_000 + 30 * 60_000)).not.toBeNull();
+    expect(openShare(token, 1_000_000 + 61 * 60_000)).toBeNull();
+  });
+});
+
 describe("outside and inside a project (field feedback)", () => {
   it("loom agents outside a project shows what this machine can drive instead of failing", async () => {
     const out = await runCli(["agents"], tmpDir("not-a-project"));

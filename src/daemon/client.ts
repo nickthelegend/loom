@@ -769,6 +769,18 @@ export class DaemonClient {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}`, { decision, ...(note ? { note } : {}) });
   }
 
+  shareChat(id: string, chat: string, hours?: number): Promise<{ id: string; url: string; expiresAt: number; title: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/share`, hours ? { hours } : {});
+  }
+
+  shares(): Promise<{ shares: Array<{ id: string; projectId: string; chat: string; title: string; createdAt: number; expiresAt: number }> }> {
+    return this.request("GET", "/api/shares");
+  }
+
+  revokeShare(shareId: string): Promise<{ revoked: boolean }> {
+    return this.request("DELETE", `/api/shares/${encodeURIComponent(shareId)}`);
+  }
+
   setAgentPermissions(id: string, agentId: string, permissions: string): Promise<{ agent: { permissions?: string } }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/permissions`, { permissions });
   }

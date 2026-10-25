@@ -1,9 +1,29 @@
+import { openShare } from "../../core/shares.js";
+import { threadReplay } from "../../core/replay.js";
 import type { Express } from 'express';
 import { VERSION } from "../../version.js";
 import { BUILD_REV, isLoopback, isLoopbackHost } from '../system.js';
 import type { RouteContext } from './context.js';
 /** Register public routes in the order established by LoomDaemon.routes(). */
-export function registerPublicRoutes(app: Express, ctx: Pick<RouteContext, "terminals" | "auth">): void {
+export function registerPublicRoutes(app: Express, ctx: Pick<RouteContext, "terminals" | "auth"> & Partial<Pick<RouteContext, "runtime">>): void {
+
+  // A read-only thread link (#199): the token is the only credential, so it's checked against
+  // the stored hash, expires, and opens one chat's replay page — nothing else on this daemon.
+  app.get("/share/:token", async (req, res) => {
+    res.setHeader("cache-control", "no-store");
+    res.setHeader("x-robots-tag", "noindex, nofollow");
+    const share = openShare(String(req.params.token ?? ""));
+    if (!share || !ctx.runtime) return void res.status(404).type("text/plain").send("This link has expired or was revoked.");
+    try {
+      const rt = await ctx.runtime(share.projectId);
+      const events = rt.log.list({ chat: share.chat, limit: 20_000 });
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:");
+      res.send(threadReplay(events, { project: rt.info.name, chat: share.title }));
+    } catch {
+      res.status(404).type("text/plain").send("This thread isn't available any more.");
+    }
+  });
 
   app.get("/api/health", (_req, res) => {
     res.json({
