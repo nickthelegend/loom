@@ -31,6 +31,6 @@ export interface RouteContext {
   specRunner: SpecRunner;
   startHealLoop: (rt: ProjectRuntime, agent: string, alert: string, since: number) => void;
   broadcastTerm: (projectId: string, frame: Record<string, unknown>) => void;
-  approvals: Map<string, { id: string; projectId: string; agent: string; tool: string; input: unknown; sessionOption?: boolean; createdAt: number; settle: (d: ApprovalDecision) => void; }>;
+  approvals: Map<string, { id: string; projectId: string; agent: string; tool: string; input: unknown; sessionOption?: boolean; chat?: string; createdAt: number; settle: (d: ApprovalDecision, by?: string) => void; }>;
 }
 export type WithRuntime = (handler: (rt: ProjectRuntime, req: Request, res: Response) => Promise<void>) => RequestHandler;

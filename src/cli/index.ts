@@ -2783,8 +2783,11 @@ program
   .option("--hours <n>", "how long the link works (1 to 720, default 24)")
   .option("--list", "the links that still work")
   .option("--revoke <id>", "end a link now")
+  .option("--live", "a live link instead: the teammate joins the chat itself, as --role view | reply | approve (approach: Nuphos)")
+  .option("--role <role>", "with --live: view (read along), reply (talk to the agent, default) or approve (also answer its tool approvals)")
+  .option("--name <name>", "with --live: what they're called in the thread")
   .option("--json", "print as JSON")
-  .action(async (chat: string | undefined, opts: { hours?: string; list?: boolean; revoke?: string; json?: boolean }) => {
+  .action(async (chat: string | undefined, opts: { hours?: string; list?: boolean; revoke?: string; json?: boolean; live?: boolean; role?: string; name?: string }) => {
     const client = await ensureDaemon();
     if (opts.revoke) {
       const { revoked } = await client.revokeShare(opts.revoke);
@@ -2805,6 +2808,16 @@ program
       const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
       if (!hit) fail(`no chat "${chat}" here — ${chats.slice(0, 6).map((c) => c.title).join(", ") || "only main"}`);
       chatId = hit.id;
+    }
+    if (opts.live) {
+      const role = opts.role ?? "reply";
+      if (!["view", "reply", "approve"].includes(role)) fail("--role is view, reply or approve");
+      const live = await client.shareLive({ project: project.id, chat: chatId, role, name: opts.name ?? "Guest", ...(opts.hours ? { hours: Number(opts.hours) } : {}) })
+        .catch((e: Error) => fail(e.message));
+      if (opts.json) return void console.log(JSON.stringify(live));
+      console.log(`${pc.green("✓")} ${opts.name ?? "Guest"} can ${role === "view" ? "read along" : role === "reply" ? "talk to the agent" : "talk and approve"} in this chat${live.guest ? ` until ${new Date(live.guest.until).toLocaleString()}` : ""}\n\n  ${live.link}\n`);
+      console.log(pc.dim("the link works once and reaches this chat only. Revoke it with loom clients --revoke <id> (loom clients lists it)."));
+      return;
     }
     const out = await client.shareChat(project.id, chatId, opts.hours ? Number(opts.hours) : undefined);
     if (opts.json) return void console.log(JSON.stringify(out));

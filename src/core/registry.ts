@@ -293,6 +293,16 @@ export function writeMemoryFile(projectDir: string, agentId: string, content: st
 // Daemon config (~/.loom/daemon.json)
 // ---------------------------------------------------------------------------
 
+export interface GuestScope {
+  project: string;
+  chat: string;
+  /** view: read along · reply: also send and stop · approve: also answer tool approvals. */
+  role: "view" | "reply" | "approve";
+  /** What they're called in the thread. */
+  name: string;
+  expiresAt: number;
+}
+
 export interface PairedClient {
   id: string;
   name: string;
@@ -313,6 +323,12 @@ export interface PairedClient {
    * you've removed can't read replies meant for the ones you kept.
    */
   relayKey?: string;
+  /**
+   * A teammate let into one live chat (a "Share live" link) rather than a device of yours: the
+   * token reaches that chat and nothing else, as far as its role allows, until it expires.
+   * Approach credit: Nuphos's shared sessions (Apache-2.0, © Zeabur Inc.).
+   */
+  guest?: GuestScope;
   /** Expo push token, when the device registered for notifications. */
   pushToken?: string;
   platform?: string;

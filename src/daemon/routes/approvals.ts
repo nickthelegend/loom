@@ -24,9 +24,10 @@ export function registerApprovalsRoutes(app: Express, ctx: Pick<RouteContext, "a
 
   app.get(
     "/api/projects/:id/approvals",
-    withRuntime(async (rt, _req, res) => {
+    withRuntime(async (rt, req, res) => {
+      const guest = (req as unknown as { guest?: { chat: string } }).guest;
       const pending = [...ctx.approvals.values()]
-        .filter((a) => a.projectId === rt.info.id)
+        .filter((a) => a.projectId === rt.info.id && (!guest || (a.chat ?? "main") === guest.chat))
         .map(({ settle: _s, ...a }) => a);
       res.json({ approvals: pending });
     }),
@@ -36,7 +37,8 @@ export function registerApprovalsRoutes(app: Express, ctx: Pick<RouteContext, "a
     "/api/projects/:id/approvals/:approvalId",
     withRuntime(async (rt, req, res) => {
       const a = ctx.approvals.get(String(req.params.approvalId));
-      if (!a || a.projectId !== rt.info.id) return void res.status(404).json({ error: "no such approval (already answered?)" });
+      const guest = (req as unknown as { guest?: { chat: string; name: string } }).guest;
+      if (!a || a.projectId !== rt.info.id || (guest && (a.chat ?? "main") !== guest.chat)) return void res.status(404).json({ error: "no such approval (already answered?)" });
       const b = (req.body ?? {}) as { decision?: string; message?: string };
       if (b.decision !== "allow" && b.decision !== "allow_session" && b.decision !== "deny") {
         return void res.status(400).json({ error: 'decision must be "allow", "allow_session" or "deny"' });
@@ -46,6 +48,7 @@ export function registerApprovalsRoutes(app: Express, ctx: Pick<RouteContext, "a
         b.decision === "allow" ? { behavior: "allow" }
           : b.decision === "allow_session" ? { behavior: "allow", scope: "session" }
           : { behavior: "deny", message: String(b.message ?? "Denied in Loom.").slice(0, 500) },
+        guest?.name,
       );
       res.json({ ok: true });
     }),

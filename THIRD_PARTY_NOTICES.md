@@ -99,6 +99,10 @@ Loom's local daemon (no hosted backend):
   rectangle functions, the quarter-deep drop zones and the split shortcut test). Changes: rewritten
   in JavaScript, with Loom's drag types, saved per window, and without the ⌘-click and focus helpers.
   The file carries Nuphos's notice.
+- shared live sessions (`src/web/share-live.js`, the guest wall in `src/daemon/server.ts`): a
+  teammate let into one running chat with view / reply / approve roles, their messages
+  attributed, and approvals recording who decided, as in Nuphos's conversation sharing. Loom's
+  guests reach the host daemon through a chat-scoped pairing token instead of a hosted backend.
 - and, as they land, the rest of its feature set: agents behind the Agent Client Protocol,
   shared live sessions, Slack and Discord, the split workspace, session search and slash
   commands. Each file that adapts Nuphos says so at its top.

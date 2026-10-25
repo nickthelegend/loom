@@ -103,7 +103,9 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
   app.post(
     "/api/projects/:id/interrupt",
     withRuntime(async (rt, req, res) => {
-      const chat = typeof req.body?.chat === "string" && req.body.chat ? String(req.body.chat) : undefined;
+      // a Share-live guest stops what's running in its chat, never the whole project
+      const guest = (req as unknown as { guest?: { chat: string } }).guest;
+      const chat = guest ? guest.chat : typeof req.body?.chat === "string" && req.body.chat ? String(req.body.chat) : undefined;
       res.json(await rt.interrupt(chat ? { chat } : {}));
     }),
   );

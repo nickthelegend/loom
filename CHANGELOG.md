@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The desktop menu gets Split Right and Split Down, and other menu commands reach the focused pane.
   - The layout model is ported from Nuphos (Apache-2.0).
 
+- **Share live: a teammate in the same chat.** Use the chat menu ▸ Share live…, or `loom share --live --name … --role view|reply|approve --hours …`. It makes a one-use link for a teammate's browser.
+  - Their token reaches that chat only: its events (whatever chat they ask for), its live socket, and, as their role allows, sending, stopping and that chat's approvals. Everything else gets a 403, and terminals are never reachable from a guest socket.
+  - Messages carry their name, and an approval records who decided it.
+  - Access expires and can be revoked under Devices.
+  - Works over Loom Cloud.
+  - Approach credit: Nuphos's shared sessions.
+
 ### Fixed
 
 - The alerts webhook now checks its secret in constant time.

@@ -1321,6 +1321,30 @@ phone, type them and tap 🌙. `--until` and `--max` stop *new* tasks from
 starting; the one running always finishes. A shift survives a daemon restart.
 A task the restart cut off is reported as failed, and the rest carry on.
 
+## Share live: a teammate in the same chat
+
+Let a teammate into a running chat, so you both talk to the same agent, see the same tool calls
+and steer the work together. Open the chat's menu ▸ **Share live…**, or run:
+
+```bash
+loom share --live --name Priya --role approve --hours 8
+```
+
+Choose what they can do:
+
+- **view:** read along.
+- **reply:** talk to the agent and stop a turn.
+- **approve:** also answer the agent's tool approvals in that chat.
+
+They open the link in a browser, with nothing to install. Their messages carry their name, and
+the thread says who allowed what. The link works once and its access expires. Revoke it any
+time with Settings ▸ Devices or `loom clients --revoke`.
+
+Their token reaches that one chat and nothing else on your machine: no other chats, terminals,
+files, git, settings or team. Over Loom Cloud it works from anywhere.
+
+The approach comes from [Nuphos](https://github.com/nuphos/nuphos)'s shared sessions.
+
 ## Triggers: the next turn starts itself
 
 A schedule or a webhook starts an agent's turn, with nobody sitting in the chat. Each trigger

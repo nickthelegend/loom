@@ -36,6 +36,8 @@ import { isNativeKind } from "../../core/continuity/capabilities.js";
 
 export interface TurnOptions {
   source?: "user" | "route"; chat?: string; plan?: boolean; fromQueue?: boolean;
+  /** A teammate in a shared chat (Share live): their name, on the message they sent. */
+  by?: string;
   /** A new native session for this chat instead of resuming the old one (#280). */
   fresh?: boolean;
   /** How long you asked this one answer to be. */
@@ -430,7 +432,7 @@ export class RuntimeTurns {
     this.host.log.append({
       kind: "message",
       chat,
-      payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}) },
+      payload: { text, author: source === "route" ? "loom" : "user", ...(opts.fromQueue ? { fromQueue: true } : {}), ...(opts.by ? { by: opts.by } : {}) },
     });
     let mcp: ReturnType<typeof writeMcpSession> = null;
     try {

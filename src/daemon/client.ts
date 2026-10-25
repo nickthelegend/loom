@@ -895,6 +895,11 @@ export class DaemonClient {
     return this.request("POST", "/api/pair/new", {});
   }
 
+  /** A Share-live link: a teammate let into one chat as view / reply / approve. */
+  shareLive(guest: { project: string; chat: string; role: string; name: string; hours?: number }): Promise<{ link: string; guest?: { until: number } }> {
+    return this.request("POST", "/api/pair/new", { guest });
+  }
+
   pairedClients(): Promise<{
     clients: Array<{ id: string; name: string; createdAt: number; push?: boolean; lastSeen?: number | null; owner?: boolean }>;
   }> {

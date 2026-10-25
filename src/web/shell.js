@@ -18,6 +18,7 @@ import { THEME_BTN,bindTheme } from './theme.js';
 import { emptyArt } from './transcript.js';
 import { openImportChats } from './import-chats.js';
 import { shortModel } from './permissions.js';
+import { openShareLive } from './share-live.js';
 
 
   // ---- router ----------------------------------------------------------
@@ -733,6 +734,7 @@ import { shortModel } from './permissions.js';
       items.push({ label: devicePref("chatsByAgent", false) ? "Stop grouping by agent" : "Group chats by agent", icon: ICONS.agents, run: function(){
         setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
       } });
+      items.push({ label: "Share live…", icon: ICONS.team, hint: "a teammate joins this chat", run: function(){ openShareLive(pid, cid, c.title); } });
       items.push({ label: "Export as Markdown", icon: ICONS.download, run: function(){
         if (pid === cur && currentChat() === cid && state.exportThread) { state.exportThread(); return; }
         setChat(pid, cid);

@@ -11,6 +11,7 @@ import { applyTheme } from './theme.js';
 import { ICONS } from './icons.js';
 import { KMOD } from './permissions.js';
 import { esc } from './format.js';
+import { isGuest,renderGuest } from './share-live.js';
 
 
   function route(){
@@ -32,6 +33,8 @@ import { esc } from './format.js';
     state.reloadBoard = null; state.setComposerMode = null; state.openPrompts = null;
     state.redrawFeed = null;
     if (!state.token) return renderPair();
+    // a teammate let into one chat sees that chat and nothing else
+    if (isGuest()) return renderGuest();
     // An invite link opened here: what it sets up, then one click (join.js).
     var invite = joinFromHash();
     if (invite) return renderJoin(invite);

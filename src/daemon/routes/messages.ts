@@ -17,7 +17,9 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
       const limit = Number.isFinite(asked) ? Math.min(1000, Math.max(1, Math.floor(asked))) : 200;
       // no ?chat= means the whole project — old clients keep seeing the
       // whole thread, which is what they've always shown
-      const chat = req.query.chat ? String(req.query.chat) : undefined;
+      // a Share-live guest reads its chat, whatever it asks for
+      const guest = (req as unknown as { guest?: { chat: string; name: string } }).guest;
+      const chat = guest ? guest.chat : req.query.chat ? String(req.query.chat) : undefined;
       const events = rt.log.list({
         since,
         limit,
@@ -48,7 +50,9 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
           plan: z.boolean().optional(), fresh: z.boolean().optional(), requestId: Id.optional(), length: z.enum(["brief", "normal", "detailed"]).optional() }), req.body); }
         catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "invalid continuity request", code: "invalid" }); return; }
       }
-      const { text, agentId, chat, plan, fresh, requestId, length } = (req.body ?? {}) as {
+      const guest = (req as unknown as { guest?: { chat: string; name: string } }).guest;
+      const body = { ...(req.body ?? {}), ...(guest ? { chat: guest.chat, plan: false } : {}) };
+      const { text, agentId, chat, plan, fresh, requestId, length } = body as {
         text?: string;
         agentId?: string;
         chat?: string;
@@ -62,6 +66,7 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
       try {
         result = await rt.sendMessage(text, agentId, {
           ...(chat ? { chat } : {}),
+          ...(guest ? { by: guest.name } : {}),
           ...(plan ? { plan: true } : {}),
           ...(fresh ? { fresh: true } : {}),
           ...(requestId ? { requestId } : {}),

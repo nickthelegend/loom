@@ -12,7 +12,7 @@
  */
 
 import crypto from "node:crypto";
-import type { DaemonConfig } from "../core/registry.js";
+import type { DaemonConfig, GuestScope } from "../core/registry.js";
 import { readDaemonConfig, writeDaemonConfig } from "../core/registry.js";
 
 const PAIR_TTL_MS = 10 * 60 * 1000;
@@ -27,6 +27,8 @@ interface PendingPair {
   expiresAt: number;
   /** Claims as an owner session (Loom Desktop), not a device. */
   owner?: boolean;
+  /** Claims as a guest in one chat (a Share-live link). */
+  guest?: GuestScope;
 }
 
 export class AuthManager {
@@ -42,7 +44,7 @@ export class AuthManager {
   isAuthorized(token: string | undefined): boolean {
     if (!token) return false;
     if (timingSafeEqualStr(token, this.config.adminToken)) return true;
-    const client = this.config.clients.find((c) => timingSafeEqualStr(token, c.token));
+    const client = this.config.clients.find((c) => timingSafeEqualStr(token, c.token) && !(c.guest && c.guest.expiresAt <= Date.now()));
     if (client) this.touch(client.id);
     return Boolean(client);
   }
@@ -97,7 +99,7 @@ export class AuthManager {
    * the claimer cannot widen it — scope is chosen by the admin who mints, not
    * the device that claims.
    */
-  newPairingToken(projects?: string[], opts: { owner?: boolean } = {}): { token: string; expiresAt: number; relayKey: string } {
+  newPairingToken(projects?: string[], opts: { owner?: boolean; guest?: GuestScope } = {}): { token: string; expiresAt: number; relayKey: string } {
     this.gc();
     const token = crypto.randomBytes(16).toString("hex");
     const entry: PendingPair = {
@@ -106,7 +108,8 @@ export class AuthManager {
       expiresAt: Date.now() + PAIR_TTL_MS,
       ...(projects?.length ? { projects } : {}),
       // an owner session is never scoped: it's the owner
-      ...(opts.owner && !projects?.length ? { owner: true } : {}),
+      ...(opts.owner && !projects?.length && !opts.guest ? { owner: true } : {}),
+      ...(opts.guest ? { guest: opts.guest, projects: [opts.guest.project] } : {}),
     };
     this.pending.set(token, entry);
     return { token: entry.token, expiresAt: entry.expiresAt, relayKey: entry.relayKey };
@@ -126,6 +129,7 @@ export class AuthManager {
       relayKey: entry.relayKey,
       ...(entry.projects?.length ? { projects: entry.projects } : {}),
       ...(entry.owner ? { owner: true } : {}),
+      ...(entry.guest ? { guest: entry.guest, name: entry.guest.name } : {}),
     };
     // Read-modify-write: never clobber fields (pid, host, port) that the
     // daemon wrote after this manager snapshotted the config.
@@ -166,7 +170,8 @@ export class AuthManager {
   }
 
   clients(): Array<{ id: string; name: string; createdAt: number; lastSeen: number | null; push: boolean; owner?: boolean }> {
-    return this.config.clients.map(({ id, name, createdAt, lastSeen, pushToken, owner }) => ({
+    return this.config.clients.map(({ id, name, createdAt, lastSeen, pushToken, owner, guest }) => ({
+      ...(guest ? { guest: { project: guest.project, chat: guest.chat, role: guest.role, expiresAt: guest.expiresAt } } : {}),
       id,
       name,
       createdAt,
@@ -184,6 +189,13 @@ export class AuthManager {
     if (!token || this.isAdmin(token)) return null;
     const client = this.config.clients.find((c) => timingSafeEqualStr(token, c.token));
     return client?.projects?.length ? client.projects : null;
+  }
+
+  /** The chat a guest token is let into, or null for anything else (an expired guest is nothing). */
+  guestOf(token: string | undefined): (GuestScope & { clientId: string }) | null {
+    if (!token) return null;
+    const c = this.config.clients.find((x) => x.guest && timingSafeEqualStr(token, x.token));
+    return c?.guest && c.guest.expiresAt > Date.now() ? { ...c.guest, clientId: c.id } : null;
   }
 
   /** Which paired client does this bearer token belong to? (admin → null) */

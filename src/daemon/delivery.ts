@@ -1,5 +1,5 @@
 /** Client transport only: no persistence, Brain or harness dependencies. */
-export interface ClientScope { project?: string; scope?: string[] }
+export interface ClientScope { project?: string; scope?: string[]; /** a guest's one chat (Share live) */ chat?: string }
 export interface FrameConnection {
   readonly readyState: number;
   /** Bytes queued and not yet written (ws). A client this far behind is slow or gone. */
@@ -30,6 +30,13 @@ function visible(scope: ClientScope, audience: FrameAudience): boolean {
   return (!scope.project || scope.project === project) && (!scope.scope || scope.scope.includes(project));
 }
 
+/** The chat a frame belongs to: an event's (main when it names none), or the frame's own. */
+export function frameChat(payload: Record<string, unknown>): string | null {
+  const e = payload.event as { chat?: string } | undefined;
+  if (e && typeof e === "object") return e.chat ?? "main";
+  return typeof payload.chat === "string" ? payload.chat : null;
+}
+
 /** Serialize once, preserve order and isolate failed clients. The caller owns
  * connection registration and replay; this module never drops canonical events.
  */
@@ -44,6 +51,8 @@ export class ClientDelivery<T extends FrameConnection> {
     const disposable = DISPOSABLE.has(String(payload.type));
     for (const [client, scope] of this.clients) {
       if (client.readyState !== 1 || !visible(scope, audience)) continue;
+      // a guest sees its chat's frames and nothing else — no terminals, logs, other threads
+      if (scope.chat && (audience.kind !== "project" || frameChat(payload) !== scope.chat)) continue;
       const failed = (error: unknown) => {
         try { this.onFailure(client, error); } catch { /* diagnostics cannot break delivery */ }
       };
