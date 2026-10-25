@@ -1460,12 +1460,36 @@ const TASK_COLOR: Record<string, (s: string) => string> = {
   cancelled: pc.dim,
 };
 
+/**
+ * A run's tasks by outcome (#342: "completed 9/13" said nothing about the other four — dropped,
+ * merged elsewhere, failed?). Only the non-zero ones, done first.
+ */
+function taskCounts(run: { tasks: Array<{ status: string }> }): Record<string, number> {
+  const order = ["done", "running", "pending", "needs_input", "conflict", "failed", "cancelled"];
+  const n: Record<string, number> = {};
+  for (const t of run.tasks) n[t.status] = (n[t.status] ?? 0) + 1;
+  return Object.fromEntries(order.filter((k) => n[k]).map((k) => [k, n[k]!]).concat(Object.entries(n).filter(([k]) => !order.includes(k))));
+}
+const countsLine = (run: { tasks: Array<{ status: string }> }) => {
+  const c = taskCounts(run);
+  return Object.keys(c).length ? Object.entries(c).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(" · ") : "no tasks";
+};
+
+/** What `loom orchestra --json` says about a run — status is one of OrchestraStatus (#341). */
+function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<string, unknown> {
+  return {
+    id: run.id, goal: run.goal, status: run.status, ...(run.status === "aborted" && (run as { interrupted?: unknown }).interrupted ? { resumable: true } : {}),
+    terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, ...taskCounts(run) }, branch: run.branch, costUsd: run.costUsd,
+    ...(run.landing?.pr ? { pr: run.landing.pr } : {}), ...(run.question ? { question: run.question } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
+  };
+}
+const isTerminalStatus = (s: string) => s === "completed" || s === "failed" || s === "aborted" || s === "moved";
+
 function printRun(run: import("../core/orchestra.js").OrchestraRun): void {
-  const done = run.tasks.filter((t) => t.status === "done").length;
   console.log(
     run.race
-      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  race · ${done}/${run.tasks.length} finished · ${fmtUsd(run.costUsd)}`
-      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  ${done}/${run.tasks.length} tasks · ` +
+      ? `${pc.magenta("🏁")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  race · ${countsLine(run)} · ${fmtUsd(run.costUsd)}`
+      : `${pc.magenta("🎼")} ${pc.bold(run.id)} ${pc.dim(runStatus(run))}  ${countsLine(run)} · ` +
           `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
@@ -1559,23 +1583,39 @@ program
 
 program
   .command("orchestra [runId]")
-  .description("orchestra runs in this project — or one run in detail")
+  .description("orchestra runs in this project — or one run in detail. Status: starting | planning | running | reviewing | waiting_human | completed | failed | aborted | moved")
   .option("--watch", "follow the run until it finishes")
-  .action(async (runId: string | undefined, opts: { watch?: boolean }) => {
+  .option("--json", "print runs (or one run) as JSON")
+  .option("--wait", "with a run id: wait until it's completed, failed or aborted (or asks you something); exit 0 completed, 1 failed/aborted, 2 waiting on you")
+  .option("--timeout <seconds>", "with --wait: give up after this long (exit 124)", "7200")
+  .action(async (runId: string | undefined, opts: { watch?: boolean; json?: boolean; wait?: boolean; timeout: string }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     try {
       if (runId) {
+        if (opts.wait) {
+          // "reviewing" is the orchestrator reading results, not the end (#341) — only these are
+          const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 7200) * 1000;
+          let run = (await client.orchestraRun(project.id, runId)).run;
+          while (!isTerminalStatus(run.status) && run.status !== "waiting_human" && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 2000));
+            run = (await client.orchestraRun(project.id, runId)).run;
+          }
+          const done = isTerminalStatus(run.status) || run.status === "waiting_human";
+          process.exitCode = !done ? 124 : run.status === "completed" ? 0 : run.status === "waiting_human" ? 2 : 1;
+          return void (opts.json ? console.log(JSON.stringify(runJson(run))) : printRun(run));
+        }
         if (opts.watch) return void (await watchRun(client, project.id, runId));
-        return void printRun((await client.orchestraRun(project.id, runId)).run);
+        const { run } = await client.orchestraRun(project.id, runId);
+        return void (opts.json ? console.log(JSON.stringify(runJson(run))) : printRun(run));
       }
       const { runs } = await client.orchestraRuns(project.id);
+      if (opts.json) return void console.log(JSON.stringify(runs.map(runJson)));
       if (!runs.length) return void console.log(pc.dim('no orchestra runs yet — loom orchestrate "<goal>"'));
       for (const r of runs.slice(0, 15)) {
-        const done = r.tasks.filter((t) => t.status === "done").length;
         console.log(
-          `${pc.bold(r.id)}  ${runStatus(r).padEnd(13)} ${String(done).padStart(2)}/${String(r.tasks.length).padEnd(2)} ` +
-            `${pc.dim(new Date(r.createdAt).toLocaleString())}  ${r.goal.slice(0, 70)}`,
+          `${pc.bold(r.id)}  ${runStatus(r).padEnd(13)} ${countsLine(r).padEnd(30)} ` +
+            `${pc.dim(new Date(r.createdAt).toLocaleString())}  ${r.goal.slice(0, 60)}`,
         );
       }
     } catch (err) {

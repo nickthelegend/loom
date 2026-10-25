@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`loom orchestra --json` and `--wait`** (#341). `--json` gives each run's `status` — one of starting, planning, running, reviewing, waiting_human, completed, failed, aborted, moved — whether that's `terminal`, and its tasks by outcome. `loom orchestra <run> --wait` waits for the end (reviewing isn't the end — a script took it for one and skipped the apply) and exits 0 completed, 1 failed/aborted, 2 waiting on you, 124 timed out.
+
+### Fixed
+
+- **A run says what happened to every task** (#342). "completed 9/13" left the other four a mystery; the list and the run now show "9 done · 2 failed · 2 cancelled".
+
 ## [1.2.5] — 2026-10-25
 
 Fixes from a day of real use farming builds out to codex, antigravity and opencode: Loom no longer kills turns when it updates, every agent starts (and says why when it can't), and scripts get honest exits.

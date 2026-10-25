@@ -66,6 +66,12 @@ describe("loom orchestrate / orchestra", () => {
     expect(list.out).toContain("do the thing");
     const detail = await runCli(["orchestra", runId]);
     expect(detail.out).toContain("orchestrator solo");
+    // #341: JSON with the documented status, and --wait returns at once on a question (exit 2)
+    const js = JSON.parse((await runCli(["orchestra", "--json"])).out);
+    expect(js[0]).toMatchObject({ id: runId, status: "waiting_human", terminal: false, tasks: { total: 0 } });
+    const waited = await runCli(["orchestra", runId, "--wait", "--json"]);
+    expect(waited.code).toBe(2);
+    expect(JSON.parse(waited.out)).toMatchObject({ id: runId, status: "waiting_human" });
 
     const reply = await runCli(["orchestra:reply", runId, "just finish please"]);
     expect(reply.out).toContain("sent to the orchestrator");
@@ -74,6 +80,8 @@ describe("loom orchestrate / orchestra", () => {
     const aborted = await runCli(["orchestra:abort", runId]);
     expect(aborted.out).toContain(`abort ${runId}`);
     expect((await client.orchestraRun(projectId, runId)).run.status).toBe("aborted");
+    // aborted is terminal: --wait returns 1
+    expect((await runCli(["orchestra", runId, "--wait"])).code).toBe(1);
   });
 
   it("says why a run can't start", async () => {
