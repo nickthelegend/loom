@@ -57,14 +57,14 @@ export class BatonManager {
    * Move the baton. Caller is responsible for interrupting the current
    * holder and injecting the projection — see ProjectRuntime.handoff().
    */
-  handoff(to: string, meta: Record<string, unknown> = {}): { from: string | null } {
+  handoff(to: string, meta: Record<string, unknown> = {}, chat?: string): { from: string | null } {
     const state = readProjectState(this.projectDir);
     const from = state.holder;
     if (from === to) return { from };
     state.holder = to;
     state.holderSince = Date.now();
     writeProjectState(this.projectDir, state);
-    this.log.append({ kind: "handoff", payload: { from, to, ...meta } });
+    this.log.append({ kind: "handoff", chat, payload: { from, to, ...meta } });
     return { from };
   }
 

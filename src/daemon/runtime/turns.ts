@@ -425,7 +425,7 @@ export class RuntimeTurns {
     // A user reply to a paused route's question resumes the route — and to an
     // agent's own question, the queue it was holding.
     if (source === "user") {
-      this.host.routes.onUserMessage(target);
+      this.host.routes.onUserMessage(target, chat);
       this.host.releaseQuestionHold(target);
     }
 
@@ -600,7 +600,7 @@ export class RuntimeTurns {
         ...(request.model ? { model: request.model } : {}), ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) };
       // Never consume a legacy handoff briefing into the new packet path.
       this.host.pendingBriefings.delete(target);
-      if (source === "user") { this.host.routes.onUserMessage(target); this.host.releaseQuestionHold(target); }
+      if (source === "user") { this.host.routes.onUserMessage(target, chat); this.host.releaseQuestionHold(target); }
       this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started" } });
       void Promise.resolve().then(() => {
         if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))

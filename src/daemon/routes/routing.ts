@@ -8,7 +8,7 @@ export function registerRoutingRoutes(app: Express, withRuntime: WithRuntime): v
   app.post(
     "/api/projects/:id/route",
     withRuntime(async (rt, req, res) => {
-      const { task, spec, router, maxHops } = (req.body ?? {}) as {
+      const { task, spec, router, maxHops, chat } = (req.body ?? {}) as {
         task?: string;
         spec?:
         | string
@@ -17,10 +17,12 @@ export function registerRoutingRoutes(app: Express, withRuntime: WithRuntime): v
         >;
         router?: "rules" | "llm";
         maxHops?: number;
+        chat?: string;
       };
       if (!task?.trim()) return void res.status(400).json({ error: "missing task" });
       const route = await rt.startRoute({
         task,
+        ...(chat ? { chat: String(chat) } : {}),
         ...(spec !== undefined ? { spec } : {}),
         ...(router ? { router } : {}),
         ...(maxHops ? { maxHops: Number(maxHops) } : {}),

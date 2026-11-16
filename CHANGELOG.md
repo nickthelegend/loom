@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Slack and Discord: live turn status and channel approvals.** A status message shows the current tool and is replaced by the final answer. Allow / Deny buttons let configured `approvers` (default: `users`) answer in the channel, with their names recorded in the audit trail. Configure approvers in Settings, the bridge API, or `loom bridge --approvers`.
 
+- Routes keep the chat they were started in. A queued `auto` prompt now sends every hop and its route events to the original thread (#357).
+
 ## [1.3.0] — 2026-10-26
 
 ### Added
