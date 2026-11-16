@@ -20,6 +20,8 @@
  * turn, as in t3code.
  */
 
+import { branchSessionKey } from "../core/chat-branches.js";
+import { readProjectState } from "../core/registry.js";
 import { configDirEnv } from "../core/accounts.js";
 import { autoPolicyFor } from "../core/auto-policy.js";
 import path from "node:path";
@@ -36,7 +38,6 @@ import { ClaudeProviderAdapter, claudeBin } from "./claude/adapter.js";
 import { CodexProviderAdapter, codexBin } from "./codex/adapter.js";
 import type { ProviderKind, ProviderRuntimeEvent, ThreadId, TurnId } from "./contracts.js";
 import { runtimeModeFor } from "./contracts.js";
-import { readProjectState } from "../core/registry.js";
 import { FileSessionDirectory } from "./directory.js";
 import { isProviderError } from "./errors.js";
 import { RuntimeIngestion, type LiveDelta, type LiveItem } from "./ingestion.js";
@@ -154,11 +155,16 @@ export class ProviderAgent extends AdapterBase {
     super(id, provider, projectDir);
     this.options = { ...options, env: { ...(options.env as Record<string, string> | undefined), ...configDirEnv(provider, options.configDir) } } as AgentOptions;
     this.ingestion = new RuntimeIngestion({
-      append: event => this.emit({ kind: event.kind, payload: event.payload }),
-      live: delta => { for (const cb of this.liveListeners) { try { cb(delta); } catch { /* a viewer's problem */ } } },
-      liveItem: item => { for (const cb of this.itemListeners) { try { cb(item); } catch { /* a viewer's problem */ } } },
+      append: event => this.emit({ kind: event.kind, payload: event.payload, chat: event.chat.split(":branch:")[0]!, branch: event.chat.split(":branch:")[1] ?? "0" }),
+      live: delta => { for (const cb of this.liveListeners) { try { cb({ ...delta, chat: delta.chat.split(":branch:")[0]! }); } catch { /* a viewer's problem */ } } },
+      liveItem: item => { for (const cb of this.itemListeners) { try { cb({ ...item, chat: item.chat.split(":branch:")[0]! }); } catch { /* a viewer's problem */ } } },
       artifactDir: () => this.projectDir,
     });
+  }
+
+  private sessionChat(chat: string): string {
+    if (this.current?.chat.split(":branch:")[0] === chat) return this.current.chat;
+    return branchSessionKey(chat, readProjectState(this.projectDir).chats?.find(c => c.id === chat)?.activeBranch);
   }
 
   /** Read the parent's cursor without attaching, migrating or advancing its session. */
@@ -201,12 +207,14 @@ export class ProviderAgent extends AdapterBase {
 
   /** A steer belongs to the current chat and keeps the existing turn lifecycle. */
   async steer(chat: ThreadId, text: string): Promise<boolean> {
+    chat = this.sessionChat(chat);
     if (!this._busy || this.current?.chat !== chat || !this.providers) return false;
     return this.providers.service.steer(chat, this.id, text);
   }
 
   /** Answer a structured question the agent is waiting on (needs_input with a requestId). */
   async respondToUserInput(chat: ThreadId, requestId: string, answers: Record<string, unknown>): Promise<void> {
+    chat = this.sessionChat(chat);
     const service = this.providers?.service;
     if (!service) throw new Error(`${this.provider} agent "${this.id}" has no live session`);
     await service.respondToUserInput(chat, this.id, requestId, answers);
@@ -217,8 +225,9 @@ export class ProviderAgent extends AdapterBase {
    * compacts on its `/compact` command, sent as a turn (t3code's
    * `compaction: { type: "slash-command" }`).
    */
-  async compact(chat: ThreadId = MAIN_CHAT, selection: Pick<SendInput, "model" | "effort"> = {}): Promise<void> {
+  async compact(chat: ThreadId = MAIN_CHAT, selection: Pick<SendInput, "model" | "effort" | "branch"> = {}): Promise<void> {
     if (this.provider === "claude-code") return this.send({ text: "/compact", chat, ...selection });
+    chat = selection.branch !== undefined ? branchSessionKey(chat, selection.branch) : this.sessionChat(chat);
     if (this._busy) throw new Error(`${this.provider} agent "${this.id}" is busy`);
     const { service } = await this.attach();
     await service.ensureSession({ threadId: chat, instanceId: this.id, cwd: this.projectDir, runtimeMode: this.runtimeMode(),
@@ -361,7 +370,7 @@ export class ProviderAgent extends AdapterBase {
       : "claude CLI not found — install Claude Code or set its path");
     this._busy = true;
     this.beginContinuity(input);
-    const chat = input.chat ?? MAIN_CHAT;
+    const chat = branchSessionKey(input.chat ?? MAIN_CHAT, input.branch);
     const cur: CurrentTurn = { chat, interrupted: false, ended: new Map(), watching: false };
     this.current = cur;
     let release!: () => void;
@@ -396,6 +405,7 @@ export class ProviderAgent extends AdapterBase {
       try {
         result = await service.sendTurn({ threadId: chat, instanceId: this.id, input: text, cwd: this.projectDir, runtimeMode,
           model, ...(effort ? { effort } : {}),
+          ...(!input.freshSession && input.branchFork ? { forkFrom: input.branchFork } : {}),
           modelSelection: { model, ...(effort ? { effort } : {}) },
           ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           onMissingSession: input.continuity ? "fail" : "fresh",

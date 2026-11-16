@@ -61,6 +61,9 @@ export interface SessionStartInput {
   modelSelection?: ModelSelection;
   /** Fork resumeCursor into a separate native session; never advance the source cursor. */
   forkSession?: boolean;
+  /** Inclusive native fork boundary. Codex uses a turn id; Claude uses a chain-entry UUID. */
+  lastTurnId?: string;
+  resumeSessionAt?: string;
   /** Resume this native session instead of starting a new one. */
   resumeCursor?: unknown;
 }
@@ -161,6 +164,7 @@ export interface UserInputQuestion {
 }
 
 export interface ItemLifecyclePayload {
+  nativeMessageId?: string;
   itemType: CanonicalItemType;
   status?: RuntimeItemStatus;
   title?: string;

@@ -251,7 +251,7 @@ export class RuntimeIngestion {
         const text = streamed("assistant");
         if (!text.trim()) return;
         if (!p.parentToolUseId) s.lastReply = text;
-        emit("message", { text });
+        emit("message", { text, ...(p.nativeMessageId ? { nativeMessageId: p.nativeMessageId } : {}) });
         return;
       }
       case "reasoning": {
@@ -352,7 +352,7 @@ export class RuntimeIngestion {
       // Blocked-on-human heuristic: the turn ended on a question.
       if (!s.asked && /\?\s*$/.test(s.lastReply.trim())) emit("needs_input", { question: s.lastReply.slice(-500) });
       const usage = p.tokenUsage;
-      emit("run_complete", { durationMs: Math.max(0, event.createdAt - (s.turn?.startedAt ?? event.createdAt)),
+      emit("run_complete", { ...(event.turnId ? { nativeTurnId: event.turnId } : {}), durationMs: Math.max(0, event.createdAt - (s.turn?.startedAt ?? event.createdAt)),
         ...((p.model ?? s.turn?.model) ? { model: p.model ?? s.turn?.model } : {}),
         ...(usage?.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
         ...(usage?.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),

@@ -1,3 +1,5 @@
+import { chatLineage } from "../chat-branches.js";
+import { readProjectState } from "../registry.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +34,16 @@ export class ContinuityStore {
   private active = false;
   private fts = false;
   constructor(private readonly db: DatabaseSync, private readonly file: string) {}
+
+  private chatInfo(chat: string) {
+    return readProjectState(path.dirname(path.dirname(this.file))).chats?.find(c => c.id === chat);
+  }
+
+  activeBranch(chat: string): string { return this.chatInfo(chat)?.activeBranch ?? "0"; }
+
+  lineage(chat: string): (event: LoomEvent) => boolean {
+    return chatLineage(this.chatInfo(chat) ?? { id: chat, title: "", createdAt: 0 });
+  }
 
   activate(): void {
     if (this.active) return;
@@ -175,7 +187,7 @@ export class ContinuityStore {
   event(id: number): LoomEvent | undefined {
     const r = this.db.prepare("SELECT * FROM events WHERE id=?").get(id) as Row | undefined;
     return r ? { id: Number(r.id), ts: Number(r.ts), kind: String(r.kind) as LoomEvent["kind"],
-      ...(r.agent_id ? { agentId: String(r.agent_id) } : {}), ...(r.chat ? { chat: String(r.chat) } : {}),
+      ...(r.agent_id ? { agentId: String(r.agent_id) } : {}), ...(r.chat ? { chat: String(r.chat) } : {}), ...(r.branch ? { branch: String(r.branch) } : {}),
       payload: JSON.parse(String(r.payload)) } : undefined;
   }
   source(event: LoomEvent, projectId: string): SourceRef {
@@ -184,21 +196,22 @@ export class ContinuityStore {
   history(chat: string, through: number, since = 0, limit = 10_001): LoomEvent[] {
     // Bounded ascending pagination. Unlike EventLog.limit this never hides old intent.
     const rows = this.db.prepare(`SELECT id FROM events WHERE coalesce(chat,'${MAIN_CHAT}')=? AND id>? AND id<=?
-      ORDER BY id LIMIT ?`).all(chat, since, through, limit) as Row[];
-    return rows.map(r => this.event(Number(r.id))!);
+      ORDER BY id LIMIT ?`).all(chat, since, through, this.chatInfo(chat)?.branches ? -1 : limit) as Row[];
+    return rows.map(r => this.event(Number(r.id))!).filter(this.lineage(chat)).slice(0, limit < 0 ? undefined : limit);
   }
   protectedEvents(chat: string, through: number): LoomEvent[] {
+    const activeItems = new Set(this.items(chat).filter(i => i.status !== "superseded").map(i => i.id));
+    const disposed = new Set([...this.dispositions(chat)].filter(([, item]) => activeItems.has(item)).map(([event]) => event));
     const rows = this.db.prepare(`SELECT id FROM events WHERE coalesce(chat,'${MAIN_CHAT}')=? AND id<=?
       AND (kind='message' OR kind='decision') AND ${USER_SOURCE}
-      AND id NOT IN (${CHECKPOINTED}) AND id NOT IN (${UNSENT_REQUESTS}) ORDER BY id LIMIT 10001`)
-      .all(chat, through, chat, chat) as Row[];
-    return rows.map(r => this.event(Number(r.id))!);
+      AND id NOT IN (${UNSENT_REQUESTS}) ORDER BY id`).all(chat, through, chat) as Row[];
+    return rows.map(r => this.event(Number(r.id))!).filter(this.lineage(chat)).filter(e => !disposed.has(e.id)).slice(0, 10001);
   }
-  /** Governing user evidence after a snapshot. A newly queued request is not
-   * governing: it runs as its own turn after the current one. */
+  /** Queued requests are not governing until they may have reached a harness. */
   hasNewUserSources(chat: string, through: number): boolean {
-    return Boolean(this.db.prepare(`SELECT id FROM events WHERE coalesce(chat,'${MAIN_CHAT}')=? AND id>?
-      AND ${USER_SOURCE} AND id NOT IN (${UNSENT_REQUESTS}) LIMIT 1`).get(chat, through, chat));
+    const rows = this.db.prepare(`SELECT id FROM events WHERE coalesce(chat,'${MAIN_CHAT}')=? AND id>?
+      AND ${USER_SOURCE} AND id NOT IN (${UNSENT_REQUESTS})`).all(chat, through, chat) as Row[];
+    return rows.map(r => this.event(Number(r.id))!).some(this.lineage(chat));
   }
   /** Sources already placed in one native session by accepted packets. */
   delivered(bindingId: string, epoch: number): { messages: Set<number>; evidence: Set<number> } {
@@ -229,8 +242,10 @@ export class ContinuityStore {
     return decode(this.db.prepare("SELECT data FROM continuity_bindings WHERE id=?").get(id) as Row | undefined);
   }
   items(chat: string): ContextItem[] {
+    const visible = this.lineage(chat);
     return (this.db.prepare("SELECT data FROM continuity_items WHERE chat=? ORDER BY id").all(chat) as Row[])
-      .map(r => ContextItemV1.parse(JSON.parse(String(r.data))));
+      .map(r => ContextItemV1.parse(JSON.parse(String(r.data))))
+      .filter(item => item.sources.every(source => { const event = this.event(source.eventId); return event && visible(event); }));
   }
   putItem(item: ContextItem): void {
     this.assertOwner(); parseBounded(ContextItemV1, item);
@@ -289,10 +304,11 @@ export class ContinuityStore {
   observations(chat: string, since: number, through: number, limit: number): LoomEvent[] {
     const rows = this.db.prepare(`SELECT id FROM events WHERE coalesce(chat,'${MAIN_CHAT}')=? AND id>? AND id<=?
       AND kind IN ('message','tool_call','file_edit','turn_diff','run_complete','error') AND NOT (${USER_SOURCE})
-      ORDER BY id DESC LIMIT ?`).all(chat, since, through, limit) as Row[];
-    return rows.map(r => this.event(Number(r.id))!);
+      ORDER BY id DESC LIMIT ?`).all(chat, since, through, this.chatInfo(chat)?.branches ? -1 : limit) as Row[];
+    return rows.map(r => this.event(Number(r.id))!).filter(this.lineage(chat)).slice(0, limit < 0 ? undefined : limit);
   }
   countObservations(chat: string, since: number, through: number): number {
+    if (this.chatInfo(chat)?.branches) return this.observations(chat, since, through, -1).length;
     return Number((this.db.prepare(`SELECT count(*) AS n FROM events WHERE coalesce(chat,'${MAIN_CHAT}')=? AND id>? AND id<=?
       AND kind IN ('message','tool_call','file_edit','turn_diff','run_complete','error') AND NOT (${USER_SOURCE})`)
       .get(chat, since, through) as Row).n);
@@ -382,12 +398,12 @@ export class ContinuityStore {
     if (this.fts) {
       const match = words.map(w => `"${w.replaceAll('"', '""')}"`).join(" OR ");
       rows = this.db.prepare("SELECT rowid AS id FROM continuity_search WHERE chat=? AND continuity_search MATCH ? ORDER BY bm25(continuity_search) LIMIT ?")
-        .all(chat, match, Math.min(50, Math.max(1, limit))) as Row[];
+        .all(chat, match, this.chatInfo(chat)?.branches ? -1 : Math.min(50, Math.max(1, limit))) as Row[];
     } else {
       rows = this.db.prepare(`SELECT id FROM events WHERE coalesce(chat,'${MAIN_CHAT}')=? AND payload LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?`)
-        .all(chat, `%${words[0]!.replace(/[\\%_]/g, "\\$&")}%`, Math.min(50, Math.max(1, limit))) as Row[];
+        .all(chat, `%${words[0]!.replace(/[\\%_]/g, "\\$&")}%`, this.chatInfo(chat)?.branches ? -1 : Math.min(50, Math.max(1, limit))) as Row[];
     }
-    return rows.map(r => this.event(Number(r.id))!);
+    return rows.map(r => this.event(Number(r.id))!).filter(this.lineage(chat)).slice(0, Math.min(50, Math.max(1, limit)));
   }
   rebuildSearch(): void {
     this.assertOwner();

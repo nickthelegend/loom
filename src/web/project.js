@@ -9,6 +9,7 @@ import { createObservatory } from './project/observatory.js';
 import { createOrchestra } from './project/orchestra.js';
 import { createCrew } from './project/crew.js';
 import { createQueue } from './project/queue.js';
+import { createBranches } from './project/branches.js';
 import { createRoutes } from './project/routes.js';
 import { createTerminal } from './project/terminal.js';
 import { createThread } from './project/thread.js';
@@ -134,6 +135,9 @@ import { openMenu } from './menus.js';
       get onApprovalEvent() { return onApprovalEvent; },
       get onFleetEvent() { return onFleetEvent; }
     });
+    var branches = createBranches({ get pid() { return pid; }, get chatId() { return chatId; } });
+    state.loadHistory = function(){ return loadHistory(); };
+    state.loadBranches = function(){ return branches.load(); };
     var { autosizeBox, drawAttach, closeMenu, menuAway, openModelMenu, bindComposer, updateModelLabel, openPermMenu, composerPlaceholder, send, steer, steerTarget } = createComposer({
       get historyLoaded() { return historyLoaded; },
       get clearDraft() { return clearDraft; },
@@ -992,7 +996,7 @@ import { openMenu } from './menus.js';
       if (ua) {
         ev.preventDefault(); ev.stopPropagation();
         var um = ua.closest(".msg"), raw = decodeURIComponent((um && um.getAttribute("data-raw")) || "");
-        if (ua.classList.contains("uedit")) composeFor(raw, null, false);
+        if (ua.classList.contains("uedit")) { if (!branches.editAsBranch(um, raw)) composeFor(raw, null, false); }
         else if (ua.classList.contains("ucopy")) copyText(raw);
         else if (ua.classList.contains("ustar")) toggleStar(Number(um.getAttribute("data-id")) || 0);
         return;
@@ -1557,7 +1561,7 @@ import { openMenu } from './menus.js';
       } });
       if (mine) {
         var raw = decodeURIComponent(msgEl.getAttribute("data-raw") || "") || bubbleText(msgEl);
-        items.push({ label: "Edit & resend", icon: ICONS.pencil, run: function(){ composeFor(raw, null, false); } });
+        items.push({ label: "Edit as a new version", icon: ICONS.pencil, hint: "\u2039 \u203a to switch", run: function(){ if (!branches.editAsBranch(msgEl, raw)) composeFor(raw, null, false); } });
         items.push({ label: "Send again", icon: ICONS.refresh, run: function(){ composeFor(raw, null, true); } });
         items.push({ label: "Save as a prompt", icon: ICONS.bookmark, run: function(){
           api("/api/prompts", { method: "POST", body: JSON.stringify({ text: raw, title: raw.split("\n")[0].slice(0, 60) }) })
@@ -1566,7 +1570,7 @@ import { openMenu } from './menus.js';
         items.push({ sep: true });
       }
       if (prompt) {
-        items.push({ label: "Retry", icon: ICONS.refresh, hint: "same prompt", run: function(){ composeFor(prompt, agentId, true); } });
+        items.push({ label: "Retry", icon: ICONS.refresh, hint: agentId ? "a new version of this reply" : "same prompt", run: function(){ if (!(agentId && branches.retryAsBranch(msgEl))) composeFor(prompt, agentId, true); } });
         if (others.length) items.push({ label: "Retry with\u2026", icon: ICONS.agents, hint: others.length + " agents", run: function(){
           openMenu(Math.round(r.left), Math.round(r.bottom + 4), [{ head: "Send the same prompt to" }].concat(others.map(function(a){
             return { label: agentLabel(a.kind, a.id), icon: agentGlyph(a.kind, a.id), hint: a.busy ? "busy" : "", run: function(){ composeFor(prompt, a.id, true); } };

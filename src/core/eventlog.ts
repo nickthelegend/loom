@@ -5,6 +5,9 @@
  * Fallback store: JSONL (if node:sqlite is unavailable, or LOOM_STORE=jsonl).
  */
 
+import { chatLineage } from "./chat-branches.js";
+import { readProjectState } from "./registry.js";
+import { MAIN_CHAT } from "../types.js";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
@@ -21,7 +24,7 @@ export class EventLog implements EventJournal {
   private store: EventStore;
   private emitter = new EventEmitter();
 
-  private constructor(store: EventStore) {
+  private constructor(store: EventStore, private readonly projectDir: string) {
     this.store = store;
     this.emitter.setMaxListeners(100);
   }
@@ -45,7 +48,7 @@ export class EventLog implements EventJournal {
               `run Loom on Node 22.5 or newer (this is Node ${process.versions.node})`,
           );
         }
-        return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")));
+        return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")), path.dirname(loomDir));
       }
       // Deliberately outside the catch. If node:sqlite exists but the log won't
       // open — corrupt file, failed migration, bad permissions — falling back
@@ -57,9 +60,9 @@ export class EventLog implements EventJournal {
         throw new ContinuityError("unsupported", "legacy JSONL history needs explicit migration: stop the daemon and run loom brain:migrate (LOOM_STORE=jsonl still reads the original)");
       const store = new SqliteStore(sqlite, dbFile);
       try { store.verifyJsonl(jsonlFile); } catch (error) { store.close(); throw error; }
-      return new EventLog(store);
+      return new EventLog(store, path.dirname(loomDir));
     }
-    return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")));
+    return new EventLog(new JsonlStore(path.join(loomDir, "log.jsonl")), path.dirname(loomDir));
   }
 
   static async migrateJsonl(loomDir: string): Promise<{ imported: number; known: number; backup: string }> {
@@ -72,6 +75,7 @@ export class EventLog implements EventJournal {
 
   append(e: NewEvent): LoomEvent {
     if (this.closed) throw new Error("event log is closed");
+    const branch = e.branch ?? this.activeBranch(e.chat ?? MAIN_CHAT);
     const ev = this.store.append({
       ts: e.ts ?? Date.now(),
       kind: e.kind,
@@ -79,20 +83,31 @@ export class EventLog implements EventJournal {
       payload: JSON.parse(JSON.stringify(e.payload)) as Record<string, unknown>,
       ...(e.agentId ? { agentId: e.agentId } : {}),
       ...(e.chat ? { chat: e.chat } : {}),
+      ...(branch !== "0" || e.branch ? { branch } : {}),
     });
     this.emitter.emit("event", ev);
     return ev;
   }
 
-  list(opts?: ListOpts): LoomEvent[] {
+  activeBranch(chat: string): string {
+    return readProjectState(this.projectDir).chats?.find(c => c.id === chat)?.activeBranch ?? "0";
+  }
+
+  list(opts: ListOpts = {}): LoomEvent[] {
     if (this.closed) throw new Error("event log is closed");
-    return this.store.list(opts);
+    const chats = !opts.allBranches && (opts.chat !== undefined || opts.activeLineages)
+      ? readProjectState(this.projectDir).chats ?? [] : [];
+    const selected = chats.filter(c => c.branches && (opts.chat === undefined || c.id === opts.chat));
+    if (!selected.length) return this.store.list(opts);
+    const lineages = new Map(selected.map(c => [c.id, chatLineage(c)]));
+    const events = this.store.list({ ...opts, limit: undefined }).filter(e => lineages.get(e.chat ?? MAIN_CHAT)?.(e) ?? true);
+    return opts.limit ? events.slice(-opts.limit) : events;
   }
 
   /** How many events match, without reading them. */
   count(opts?: ListOpts): number {
     if (this.closed) throw new Error("event log is closed");
-    return this.store.count(opts);
+    return (opts?.chat !== undefined || opts?.activeLineages) && !opts?.allBranches ? this.list({ ...opts, limit: undefined }).length : this.store.count(opts);
   }
 
   lastId(): number {
@@ -111,7 +126,7 @@ export class EventLog implements EventJournal {
     const store = this.continuity;
     if (!store) throw new ContinuityError("unsupported", "native continuity requires SQLite; legacy JSONL is still readable");
     const result = store.capture(request, () => this.store.append({ ts: Date.now(), kind: "message",
-      chat: request.conversationId, payload: { text: request.text, author: request.source === "user" ? "user" : "loom", requestId: request.id } }));
+      chat: request.conversationId, branch: this.activeBranch(request.conversationId), payload: { text: request.text, author: request.source === "user" ? "user" : "loom", requestId: request.id } }));
     // Capture and its idempotency row commit together before clients see either.
     if (result.created) this.emitter.emit("event", result.event);
     return result;
@@ -119,7 +134,14 @@ export class EventLog implements EventJournal {
 
   lastReplyIds(): Map<string, number> {
     if (this.closed) throw new Error("event log is closed");
-    return this.store.lastReplyIds();
+    const ids = this.store.lastReplyIds();
+    for (const chat of readProjectState(this.projectDir).chats ?? []) {
+      if (!chat.branches) continue;
+      ids.delete(chat.id);
+      const reply = this.list({ chat: chat.id, kinds: ["message"] }).filter(e => e.agentId).at(-1);
+      if (reply) ids.set(chat.id, reply.id);
+    }
+    return ids;
   }
 
   size(): { bytes: number; events: number } {

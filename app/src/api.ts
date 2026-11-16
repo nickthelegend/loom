@@ -958,6 +958,15 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** Versions of a message (#375): sibling branches of a chat, and switching between them. */
+export interface ChatBranch { id: string; parent: string | null; forkEventId: number; createdAt: number }
+export interface BranchListing { branches: ChatBranch[]; active: string; siblingsByEventId: Record<string, string[]> }
+export const getBranches = (c: Creds, id: string, chat: string) =>
+  api<BranchListing>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/branches`);
+export const createBranch = (c: Creds, id: string, chat: string, body: { fromEventId: number; mode: "edit" | "retry"; text?: string }) =>
+  api<{ branch: ChatBranch }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/branches`, { method: "POST", body: JSON.stringify(body) });
+export const activateBranch = (c: Creds, id: string, chat: string, branch: string, rewindFiles = false) =>
+  api<{ active: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/branches/${encodeURIComponent(branch)}/activate`, { method: "POST", body: JSON.stringify(rewindFiles ? { rewindFiles: true } : {}) });
 /** My issues (#382): open issues assigned to you, and starting them as chats or Orchestra goals. */
 export interface IntakeIssue { source: "github" | "linear"; id: string; number?: number; identifier?: string; title: string; url: string; labels: string[]; started?: { chat?: string; run?: string } }
 export const getIntake = (c: Creds, id: string, source: "github" | "linear", label?: string) =>

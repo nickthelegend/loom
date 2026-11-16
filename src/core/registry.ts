@@ -223,6 +223,8 @@ export interface ProjectState {
    * and haven't said anything in yet, still exists.
    */
   chats?: ChatInfo[];
+  /** Branch fork checkpoints and provider cursors, keyed by chat then branch. */
+  branchSources?: Record<string, Record<string, import("./chat-branches.js").BranchSource>>;
   /** Standing guidance for one conversation (main included), sent with every turn in it. */
   chatInstructions?: Record<string, string>;
   /** One-shot history briefing, durable until the moved chat's first dispatch. */

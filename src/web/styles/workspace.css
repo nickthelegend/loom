@@ -705,3 +705,12 @@
   .cfhint{font-size:11.5px;color:var(--muted-foreground);line-height:1.45}
   .cfact{display:flex;justify-content:flex-end}
   .omodel{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--muted-foreground)}
+
+/* versions of a message (#375) */
+.brpager{display:inline-flex;align-items:center;gap:2px;margin-top:4px;font-size:11.5px;color:var(--muted-foreground);
+  border:1px solid var(--border);border-radius:999px;padding:0 3px}
+.msg.user .brpager{align-self:flex-end}
+.brpager button{border:0;background:none;color:var(--muted-foreground);cursor:pointer;font:inherit;font-size:14px;line-height:1;padding:1px 6px;border-radius:999px}
+.brpager button:hover:not(:disabled){color:var(--foreground);background:var(--secondary)}
+.brpager button:disabled{opacity:.35;cursor:default}
+.brpager .brn{font-variant-numeric:tabular-nums;min-width:26px;text-align:center}

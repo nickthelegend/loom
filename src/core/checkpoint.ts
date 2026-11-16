@@ -76,6 +76,8 @@ export interface RestoreResult {
   undo: Checkpoint;
   /** Paths whose content the working tree no longer agrees with. */
   changed: string[];
+  /** Patch from the saved undo tree to the restored tree, including untracked files. */
+  diff: string;
 }
 
 function run(args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
@@ -220,6 +222,24 @@ export async function find(dir: string, id: string): Promise<Checkpoint | null> 
   return (await list(dir)).find((c) => c.id === id) ?? null;
 }
 
+export interface RewindPreview { checkpoint: Checkpoint; changed: string[]; diff: string }
+
+/** Compare with a temporary index so untracked files are included without changing the real index or refs. */
+export async function preview(dir: string, id: string): Promise<RewindPreview> {
+  const checkpoint = await find(dir, id);
+  if (!checkpoint) throw new GitError(`no checkpoint "${id}" in this project`, "");
+  const index = tmpIndex(dir, newId());
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    await run(["read-tree", "HEAD"], dir, env);
+    await run(["add", "-A", "--", "."], dir, env);
+    const tree = (await run(["write-tree"], dir, env)).trim();
+    const changed = (await run(["diff", "--name-only", tree, checkpoint.commit], dir)).trim().split("\n").filter(Boolean);
+    const diff = await run(["diff", "--binary", "--no-ext-diff", tree, checkpoint.commit], dir);
+    return { checkpoint, changed, diff };
+  } finally { await fs.promises.rm(index, { force: true }); }
+}
+
 /**
  * Put the working tree back to a checkpoint.
  *
@@ -249,6 +269,7 @@ export async function restore(dir: string, id: string): Promise<RestoreResult> {
     .split("\n")
     .filter(Boolean);
 
+  const diff = await run(["diff", "--binary", "--no-ext-diff", undo.commit, target.commit], dir);
   await run(["read-tree", "-u", "--reset", target.commit], dir);
   await run(["clean", "-f", "-d", "--", "."], dir);
   // read-tree moved the index to the checkpoint's tree as well as the files,
@@ -257,7 +278,7 @@ export async function restore(dir: string, id: string): Promise<RestoreResult> {
   // HEAD leaves `git status` saying what it would say if you had made those
   // edits by hand: modified, and untracked. --mixed touches the index only.
   await quiet(["reset", "-q", "--mixed", "HEAD"], dir);
-  return { restored: target, undo, changed };
+  return { restored: target, undo, changed, diff };
 }
 
 /**

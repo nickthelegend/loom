@@ -82,7 +82,7 @@ interface Mounted {
 }
 
 /** The app, with an optional stand-in for one daemon route. */
-function mount(pid: string, stub?: (pathname: string) => Promise<Response> | null): Mounted {
+function mount(pid: string, stub?: (pathname: string) => Promise<Response> | null, options: { webview?: boolean; pane?: string; history?: string } = {}): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", (e: Error) => errors.push(e.message));
@@ -90,11 +90,13 @@ function mount(pid: string, stub?: (pathname: string) => Promise<Response> | nul
   let closed = false;
   const never = new Promise<never>(() => {});
   const dom = new JSDOM(APP_HTML, {
-    url: `${baseUrl}/app#p/${pid}`,
+    url: `${baseUrl}/app${options.pane ? "?pane=" + options.pane : ""}#p/${pid}`,
     runScripts: "dangerously",
     pretendToBeVisual: true,
     virtualConsole,
     beforeParse(window) {
+      if (options.webview !== undefined) (window as unknown as { loomNative: unknown }).loomNative = { webview: options.webview };
+      if (options.history) window.localStorage.setItem(`loomBrowHistory:${pid}:${options.pane || "main"}`, options.history);
       window.scrollTo = () => {};
       window.HTMLElement.prototype.scrollTo = () => {};
       window.HTMLElement.prototype.scrollIntoView = () => {};
@@ -173,7 +175,7 @@ async function openBrowser(m: Mounted) {
 async function typeAndGo(m: Mounted, url: string) {
   ($(m, "#browurl") as HTMLInputElement).value = url;
   click($(m, "#browgo"));
-  await waitUntil(() => !!frame(m), { timeoutMs: 15_000 });
+  await waitUntil(() => !!$(m, "#browframe iframe, #browframe webview"), { timeoutMs: 15_000 });
 }
 
 /** A message as the browser would deliver it: with who sent it, and from where. */
@@ -316,6 +318,136 @@ describe("web app · the Browser pane", () => {
     expect(text(m, "#browblock")).toContain("doesn’t allow being shown inside Loom");
     expect(text(m, "#browblock")).toContain("X-Frame-Options: DENY");
     expect($(m, "#browblockopen")).toBeTruthy();
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+});
+
+describe("desktop Browser pane", () => {
+  it("uses a persistent webview for external sites without probing framing headers", async () => {
+    let probes = 0;
+    const m = mount(projectA, (p) => {
+      if (p.endsWith("/preview/frameable")) probes++;
+      return null;
+    }, { webview: true });
+    await openBrowser(m);
+    await typeAndGo(m, "https://example.com/docs");
+    const guest = $(m, "#browframe webview")!;
+    expect(guest.getAttribute("partition")).toBe("persist:loom-browser");
+    expect(guest.getAttribute("src")).toBe("https://example.com/docs");
+    expect(guest.hasAttribute("preload")).toBe(false);
+    expect(guest.hasAttribute("allowpopups")).toBe(false);
+    expect(frame(m)).toBeNull();
+    expect(probes).toBe(0);
+    expect(($(m, "#browback") as HTMLButtonElement).disabled).toBe(true);
+    await typeAndGo(m, "https://example.org/next");
+    expect($(m, "#browframe webview")).toBe(guest);
+    expect(guest.getAttribute("src")).toBe("https://example.org/next");
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
+  it("follows guest navigation and persists bounded, deduplicated suggestions per pane", async () => {
+    const m = mount(projectA, undefined, { webview: true, pane: "left", history: '["https://saved.example/"]' });
+    await openBrowser(m);
+    expect($(m, '#browhistory option')!.getAttribute("value")).toBe("https://saved.example/");
+    await typeAndGo(m, "https://example.com/");
+    const guest = $(m, "webview")!;
+    const navigate = (url: string, kind = "did-navigate", isMainFrame = true) => {
+      const event = new m.window.Event(kind);
+      Object.assign(event, { url, isMainFrame });
+      guest.dispatchEvent(event);
+    };
+    navigate("https://example.com/docs");
+    expect(address(m)).toBe("https://example.com/docs");
+    navigate("https://example.com/docs#next", "did-navigate-in-page");
+    expect(address(m)).toBe("https://example.com/docs#next");
+    navigate("https://subframe.example/", "did-navigate-in-page", false);
+    navigate("file:///tmp/secret");
+    expect(address(m)).toBe("https://example.com/docs#next");
+    navigate("https://example.com/docs");
+    const key = `loomBrowHistory:${projectA}:left`;
+    expect(JSON.parse(m.window.localStorage.getItem(key)!)).toEqual([
+      "https://example.com/docs", "https://example.com/docs#next", "https://saved.example/",
+    ]);
+    expect(m.window.localStorage.getItem(`loomBrowHistory:${projectA}:right`)).toBeNull();
+    expect(m.window.localStorage.getItem(`loomBrowHistory:${projectB}:left`)).toBeNull();
+    expect($(m, "#browurl")!.getAttribute("list")).toBe("browhistory");
+    for (let i = 0; i < 105; i++) navigate(`https://example.com/${i}`);
+    expect(JSON.parse(m.window.localStorage.getItem(key)!)).toHaveLength(100);
+    expect($(m, "#browhistory")!.children).toHaveLength(100);
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
+  it("keeps localhost on the proxy iframe and replaces a guest when switching modes", async () => {
+    const m = mount(projectA, undefined, { webview: true, history: "not JSON" });
+    await openBrowser(m);
+    await typeAndGo(m, "https://example.com/");
+    const guest = $(m, "webview")!;
+    await typeAndGo(m, `http://localhost:${devPort}/about`);
+    await waitUntil(() => !!frame(m), { timeoutMs: 15_000 });
+    expect($(m, "webview")).toBeNull();
+    expect(frame(m)!.src).not.toContain(String(devPort));
+    expect(frame(m)!.getAttribute("sandbox")).toContain("allow-scripts");
+    const stale = new m.window.Event("did-navigate");
+    Object.assign(stale, { url: "https://stale.example/" });
+    guest.dispatchEvent(stale);
+    expect(address(m)).toBe(`http://localhost:${devPort}/about`);
+    await typeAndGo(m, "https://example.org/");
+    expect(frame(m)).toBeNull();
+    expect($(m, "webview")!.getAttribute("src")).toBe("https://example.org/");
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
+  it("wires native history and reload, and reports guest failures without blaming framing", async () => {
+    const m = mount(projectA, undefined, { webview: true });
+    await openBrowser(m);
+    await typeAndGo(m, "https://example.com/");
+    const guest = $(m, "webview")!;
+    const calls: string[] = [];
+    let back = true, forward = false;
+    // jsdom has no guest process; represent only Electron's element API.
+    Object.assign(guest, {
+      canGoBack: () => back, canGoForward: () => forward,
+      goBack: () => calls.push("back"), goForward: () => calls.push("forward"),
+      reload: () => calls.push("reload"),
+    });
+    guest.dispatchEvent(new m.window.Event("dom-ready"));
+    expect(($(m, "#browback") as HTMLButtonElement).disabled).toBe(false);
+    expect(($(m, "#browfwd") as HTMLButtonElement).disabled).toBe(true);
+    click($(m, "#browback"));
+    back = false; forward = true;
+    const nav = new m.window.Event("did-navigate");
+    Object.assign(nav, { url: "https://example.com/previous" });
+    guest.dispatchEvent(nav);
+    expect(($(m, "#browback") as HTMLButtonElement).disabled).toBe(true);
+    expect(($(m, "#browfwd") as HTMLButtonElement).disabled).toBe(false);
+    click($(m, "#browfwd"));
+    click($(m, "#browreload"));
+    expect(calls).toEqual(["back", "forward", "reload"]);
+    expect($(m, "webview")).toBe(guest);
+
+    const fail = (errorCode: number, isMainFrame: boolean) => {
+      const event = new m.window.Event("did-fail-load");
+      Object.assign(event, { errorCode, isMainFrame, errorDescription: "ERR_NAME_NOT_RESOLVED" });
+      guest.dispatchEvent(event);
+    };
+    fail(-3, true);
+    fail(-105, false);
+    expect(($(m, "#browblock") as HTMLElement).hidden).toBe(true);
+    fail(-105, true);
+    expect(text(m, "#browblock")).toContain("This page couldn’t load.");
+    expect(text(m, "#browblock")).toContain("ERR_NAME_NOT_RESOLVED");
+    guest.dispatchEvent(new m.window.Event("did-start-loading"));
+    expect(($(m, "#browblock") as HTMLElement).hidden).toBe(true);
+    expect(m.errors).toEqual([]);
+  }, 60_000);
+
+  it("keeps the iframe when the native bridge has no webview capability", async () => {
+    const m = mount(projectA, undefined, { webview: false });
+    await openBrowser(m);
+    await typeAndGo(m, "https://example.com/");
+    expect(frame(m)!.src).toBe("https://example.com/");
+    expect($(m, "webview")).toBeNull();
+    expect($(m, "#browhistory")).toBeNull();
     expect(m.errors).toEqual([]);
   }, 60_000);
 });

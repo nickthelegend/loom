@@ -28,6 +28,7 @@ export abstract class AgentBase {
   readonly kind: string;
   protected projectDir: string;
   protected nativeState: AgentStateStore;
+  private nativeScope = "";
   private listeners = new Set<EventCb>();
   private streamers = new Set<StreamCb>();
 
@@ -40,7 +41,14 @@ export abstract class AgentBase {
 
   /** Process-bound models must never resume another model instance's native state. */
   scopeNativeState(scope: string): void {
-    this.nativeState = new AgentStateStore(this.projectDir, `${this.id}:model:${scope}`);
+    this.nativeScope = `:model:${scope}`;
+    this.nativeState = new AgentStateStore(this.projectDir, `${this.id}${this.nativeScope}`);
+  }
+
+  /** Unbranched chats keep legacy state; forked conversations isolate every branch cursor. */
+  scopeConversation(chat: string, branch?: string): void {
+    const scope = branch === undefined || (chat === "main" && branch === "0") ? "" : `:chat:${chat}:branch:${branch}`;
+    this.nativeState = new AgentStateStore(this.projectDir, `${this.id}${this.nativeScope}${scope}`);
   }
 
   onEvent(cb: EventCb): () => void {

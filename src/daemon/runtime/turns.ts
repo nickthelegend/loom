@@ -1,3 +1,6 @@
+import { branchBriefing } from "../../core/chat-branches.js";
+import { readProjectState } from "../../core/registry.js";
+import { AgentBase } from "../../adapters/base.js";
 import { BatonManager, NotHolderError } from "../../core/baton.js";
 import path from "node:path";
 import { triage } from "../../core/review-triage.js";
@@ -144,7 +147,9 @@ export class RuntimeTurns {
    */
   lastTurnDiff = new Map<string, Promise<TurnDiff | null>>();
 
-  /** App-owned diff/commit writes finish before the next native writer starts. */
+  /** App-owned diff/commit writes finish before changing a branch or its files. */
+  async settleBranches(): Promise<void> { await Promise.all(this.postTurn.values()); }
+
   private readonly postTurn = new Map<string, Promise<void>>();
 
   // -------------------------------------------------------------------------
@@ -183,6 +188,7 @@ export class RuntimeTurns {
       this.turnCheckpoint.set(agentId, cp.id);
       this.host.log.append({
         kind: "checkpoint",
+        chat: this.turnChat.get(agentId) ?? MAIN_CHAT,
         agentId,
         payload: { id: cp.id, label: cp.label, at: cp.at, dirty: cp.dirty, branch: cp.branch, reason: "before_turn" },
       });
@@ -401,6 +407,18 @@ export class RuntimeTurns {
     }
   }
 
+  private branchInput(chat: string, agentId: string): Pick<SendInput, "branch" | "branchFork" | "briefing"> {
+    const state = readProjectState(this.host.info.dir);
+    const info = state.chats?.find(c => c.id === chat);
+    const branch = info?.activeBranch ?? "0";
+    if (!info?.branches) return {};
+    const branchFork = state.branchSources?.[chat]?.[branch]?.resumes[agentId];
+    const events = this.host.log.list({ chat, kinds: ["message"] });
+    // The current prompt is already logged. Only earlier messages belong in the briefing.
+    const prompt = events.filter(e => !e.agentId && e.payload.author === "user").at(-1);
+    return { branch, ...(branchFork ? { branchFork } : {}), briefing: branchBriefing(info, events, prompt?.id ?? Infinity) };
+  }
+
   private async send(
     text: string,
     agentId?: string,
@@ -506,6 +524,8 @@ export class RuntimeTurns {
       await this.host.ensureStarted(target);
       if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
 
+      const branchInput = this.branchInput(chat, target);
+      if (agent instanceof AgentBase && !(agent instanceof ProviderAgent)) agent.scopeConversation(chat, branchInput.branch);
       const pendingBriefing = [this.host.consumePendingBriefing(target), this.host.chatMoveBriefing(chat)].filter(Boolean).join("\n\n");
       // Prepend the enabled skills so every turn carries them, alongside any
       // one-shot handoff briefing. Empty when no skills are on.
@@ -513,7 +533,7 @@ export class RuntimeTurns {
       // saved under plans/ by the runtime. Other agents get Loom's briefing.
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
       const briefing =
-        [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
+        [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), pendingBriefing, branchInput.briefing, opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)]
           .filter(Boolean)
           .join("\n")
           .trim() || undefined;
@@ -527,6 +547,7 @@ export class RuntimeTurns {
       const input: SendInput = {
         text,
         chat,
+        ...branchInput,
         ...(nativePlan ? { interactionMode: "plan" as const } : {}),
         ...(opts.fresh ? { freshSession: true } : {}),
         ...(briefing ? { briefing } : {}),
@@ -663,7 +684,9 @@ export class RuntimeTurns {
       }
       runId = continuity.runId;
       this.preparing.delete(target);
-      const input: SendInput = { text, chat, continuity, ...(nativePlan ? { interactionMode: "plan" as const } : {}),
+      const branchInput = this.branchInput(chat, target);
+      if (agent instanceof AgentBase && !(agent instanceof ProviderAgent)) agent.scopeConversation(chat, branchInput.branch);
+      const input: SendInput = { text, chat, ...branchInput, continuity, ...(nativePlan ? { interactionMode: "plan" as const } : {}),
         ...(request.model ? { model: request.model } : {}), ...(request.effort ? { effort: request.effort } : {}), ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) };
       // Never consume a legacy handoff briefing into the new packet path.
       this.host.pendingBriefings.delete(target);

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState } from "react";
 import * as Clipboard from "expo-clipboard";
-import { Alert, Image, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Image, Platform, Pressable, ScrollView, Share, Text, TouchableOpacity, View } from "react-native";
 import { haptic } from "./haptics";
 import { actOnLoop, interrupt, stopShift, type Creds, type LoomEvent, type TaskItem } from "./api";
 import { useConnRoute } from "./brand";
@@ -432,9 +432,10 @@ export function LiveReplies(props: { live: LiveMap }) {
 }
 
 /** Long-press a message: copy it, or hand it to another app. */
-function messageActions(text: string, who: string): void {
+function messageActions(text: string, who: string, extra: Array<{ text: string; onPress: () => void }> = []): void {
   haptic.tap();
   Alert.alert(who, text.length > 140 ? text.slice(0, 140) + "…" : text, [
+    ...extra,
     { text: "Copy", onPress: () => void Clipboard.setStringAsync(text) },
     { text: "Share…", onPress: () => void Share.share({ message: text }).catch(() => {}) },
     { text: "Cancel", style: "cancel" },
@@ -446,7 +447,39 @@ function messageActions(text: string, who: string): void {
  * Which daemon and project the thread belongs to, so a picture in it can be
  * fetched with your token (an <img> can't send one on its own).
  */
-export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[] } | null>(null);
+export interface BranchCtx {
+  /** message event id → its versions (branch ids), original first */
+  siblings: Record<string, string[]>;
+  /** which of `choices` is showing now */
+  current: (choices: string[]) => number;
+  activate: (branch: string) => void;
+  edit: (eventId: number, text: string) => void;
+  retry: (eventId: number) => void;
+}
+export const ThreadCtx = createContext<{ creds: Creds; projectId: string; agents?: string[]; branches?: BranchCtx } | null>(null);
+
+/** ‹ n/m › under a message that has other versions (#375). */
+function BranchPager(props: { eventId: number; mine: boolean }) {
+  const ctx = useContext(ThreadCtx);
+  const choices = ctx?.branches?.siblings[String(props.eventId)];
+  if (!ctx?.branches || !choices || choices.length < 2) return null;
+  const i = ctx.branches.current(choices);
+  const go = (to: number) => { if (to >= 0 && to < choices.length) ctx.branches!.activate(choices[to]!); };
+  const arrow = (label: string, to: number, hint: string) => (
+    <TouchableOpacity onPress={() => go(to)} disabled={to < 0 || to >= choices.length} hitSlop={8} accessibilityRole="button" accessibilityLabel={hint}
+      style={{ paddingHorizontal: 8, paddingVertical: 2, opacity: to < 0 || to >= choices.length ? 0.3 : 1 }}>
+      <Text style={{ color: T.dim, fontSize: 16 }}>{label}</Text>
+    </TouchableOpacity>
+  );
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", alignSelf: props.mine ? "flex-end" : "flex-start", marginLeft: props.mine ? 0 : 30,
+      borderWidth: 1, borderColor: T.line, borderRadius: 999, marginTop: 2 }} accessibilityLabel={`version ${i + 1} of ${choices.length}`}>
+      {arrow("‹", i - 1, "previous version")}
+      <Text style={{ color: T.dim, fontSize: 12, fontVariant: ["tabular-nums"] }}>{i + 1}/{choices.length}</Text>
+      {arrow("›", i + 1, "next version")}
+    </View>
+  );
+}
 
 /**
  * A picture from the project: something you attached (.loom/attachments) or a
@@ -524,6 +557,12 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
   const { e } = props;
   const p = e.payload as Record<string, unknown>;
   const [open, setOpen] = useState(false);
+  const branchCtx = useContext(ThreadCtx)?.branches;
+  // a new version of your prompt (iOS can ask for the text in place), or of an agent's reply
+  const editVersion = (text: string) => branchCtx && Platform.OS === "ios"
+    ? [{ text: "Edit as a new version", onPress: () => Alert.prompt("Edit your message", undefined, (t) => { if (t?.trim() && t.trim() !== text.trim()) branchCtx.edit(e.id, t.trim()); }, "plain-text", text) }]
+    : [];
+  const retryVersion = branchCtx ? [{ text: "Retry as a new version", onPress: () => branchCtx.retry(e.id) }] : [];
 
   if (e.kind === "message") {
     const author = e.agentId ?? String(p.author ?? "user");
@@ -544,7 +583,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
               {files.map((f) => <Text key={f} style={{ color: T.dim, fontSize: 12, fontFamily: T.mono }}>📎 {f.split("/").pop()}</Text>)}
             </View>
             {rest ? (
-              <Pressable delayLongPress={350} onLongPress={() => messageActions(rest, "Your message")}
+              <Pressable delayLongPress={350} onLongPress={() => messageActions(rest, "Your message", editVersion(text))}
                 style={{ backgroundColor: T.panel, borderColor: T.line, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14 }}>
                 <Text style={{ color: T.text, fontSize: 14.5, lineHeight: 22 }}>{rest}</Text>
               </Pressable>
@@ -556,7 +595,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
       return (
         <Pressable
           delayLongPress={350}
-          onLongPress={() => messageActions(text, "Your message")}
+          onLongPress={() => messageActions(text, "Your message", editVersion(text))}
           accessibilityHint="long-press to copy or share"
           style={{
             alignSelf: "flex-end",
@@ -571,13 +610,14 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
           }}
         >
           <Text style={{ color: T.text, fontSize: 14.5, lineHeight: 22 }}>{text}</Text>
+          <BranchPager eventId={e.id} mine />
         </Pressable>
       );
     const kind = props.kindOf?.(author) ?? author;
     return (
       <Pressable
         delayLongPress={350}
-        onLongPress={() => messageActions(text, agentLabel(kind))}
+        onLongPress={() => messageActions(text, agentLabel(kind), retryVersion)}
         accessibilityHint="long-press to copy or share"
         style={{ marginTop: 10, marginBottom: 2, gap: 6 }}
       >
@@ -598,6 +638,7 @@ export function EventLine(props: { e: LoomEvent; kindOf?: (agentId: string) => s
               </>
             );
           })()}
+          <BranchPager eventId={e.id} mine={false} />
           {p.partial === true && (
             <Text style={{ color: T.faint, fontSize: 11, marginTop: 6 }}>stopped — this is what it had written</Text>
           )}

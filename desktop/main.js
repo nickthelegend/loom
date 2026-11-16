@@ -1,15 +1,17 @@
 // Loom desktop — a thin Electron shell around the daemon's web app.
 // Our own code: it starts the loom daemon and loads the same /app surface the
 // phone and browser use. No IDE, no editor — the continuity layer, on desktop.
+// BrowserView / webview-guard approach: Nuphos (Apache-2.0, © 2026 Zeabur Inc.).
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, screen, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, Notification, screen, session, shell } from "electron";
 import { daemonLogPath, prepareAppUrl, readDaemonConfig } from "./loom-app.js";
 import { failedPage, startingPage } from "./pages.js";
 import { createPet, petEnabled } from "./pet-window.js";
 import { checkForUpdates } from "./updater.js";
+import { attachGuard, BROWSER_PARTITION, guardBrowserSession, guardWebview } from "./webview-guard.js";
 
 const PRELOAD = fileURLToPath(new URL("./preload.cjs", import.meta.url));
 // The Loom mark. The packaged app gets its icon from electron-builder, but in
@@ -25,6 +27,11 @@ app.setName("Loom Desktop");
 const BG = "#0a0a0a";
 let win = null;
 let pet = null;
+
+// Guard guests at creation, before their first navigation can begin.
+app.on("web-contents-created", (_event, contents) => {
+  if (contents.getType() === "webview") guardWebview(contents);
+});
 
 // One Loom per machine: a second launch focuses the window that's already
 // open instead of racing it for the daemon.
@@ -99,8 +106,11 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       preload: PRELOAD,
+      webviewTag: true,
     },
   });
+
+  win.webContents.on("will-attach-webview", attachGuard);
 
   if (saved?.maximized) win.maximize();
   // the pet keeps a window open, so closing Loom's own has to mean quit off macOS
@@ -415,6 +425,7 @@ ipcMain.handle("loom:focused", () => {
 });
 
 app.whenReady().then(() => {
+  guardBrowserSession(session.fromPartition(BROWSER_PARTITION));
   if (process.platform === "darwin" && app.dock) {
     try {
       app.dock.setIcon(ICON);

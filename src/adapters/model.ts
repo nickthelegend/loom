@@ -134,6 +134,7 @@ const DEFAULT_MAX_TOKENS = 4096;
 export class ModelAdapter extends AdapterBase {
   private opts: ModelAdapterOptions;
   private history: WireMessage[] = [];
+  private readonly histories = new Map<string, WireMessage[]>();
   private abort: AbortController | null = null;
   /** Set when a turn is cut short by us, so the error isn't reported as one. */
   private interrupted = false;
@@ -301,6 +302,9 @@ export class ModelAdapter extends AdapterBase {
 
   async send(input: SendInput): Promise<void> {
     if (this._busy) throw new Error(`model agent "${this.id}" is busy`);
+    const key = JSON.stringify([input.chat ?? "main", input.branch ?? "0"]);
+    this.history = this.histories.get(key) ?? [];
+    this.histories.set(key, this.history);
     const p = this.provider();
     if (!p) {
       throw new Error(

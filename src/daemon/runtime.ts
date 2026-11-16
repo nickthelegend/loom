@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { ChatMoveError, packChatMove, type ChatMovePayload } from "../core/chat-move.js";
 import { buildBriefing } from "../core/projection.js";
+import { chatBranches, branchSessionKey, ChatBranchError, type BranchSource, type BranchListing } from "../core/chat-branches.js";
+import type { ChatBranch } from "../types.js";
 import { accountKey, accountLogin, configDirEnv, isAccountKind, resolveAgentAccount } from "../core/accounts.js";
 import { PrFeedback } from "./pr-feedback.js";
 import { recordOpenedPr, type PrFeedbackMode } from "../core/pr-feedback.js";
@@ -1236,7 +1238,7 @@ export class ProjectRuntime {
       try {
       const runId = typeof e.payload.loomRunId === "string" ? e.payload.loomRunId : undefined;
       const liveRun = runId ? this.continuity?.isLiveRun(runId) : true;
-      const chat = (runId ? this.continuity?.eventChat(runId) : undefined) ?? this.turns.turnChat.get(agent.id);
+      const chat = (runId ? this.continuity?.eventChat(runId) : undefined) ?? e.chat ?? this.turns.turnChat.get(agent.id);
       let payload = e.payload;
       // Enrich the completed turn so its gen_ai span carries system + model +
       // cost (adapters only put tokens on run_complete). The kind is known
@@ -1289,6 +1291,7 @@ export class ProjectRuntime {
       }
       const event = this.log.append({
         kind: e.kind,
+        ...(e.branch ? { branch: e.branch } : {}),
         agentId: agent.id,
         ...(chat ? { chat } : {}),
         payload,
@@ -1975,6 +1978,143 @@ export class ProjectRuntime {
     return chat.starred ?? [];
   }
 
+  private branchChanging = false;
+
+  private branchChat(id: string): ChatInfo {
+    const chat = this.conversations.chats().find(c => c.id === id);
+    if (!chat) throw new ChatBranchError("no such chat", 404);
+    return chat;
+  }
+
+  private checkBranchIdle(): void {
+    if (this.branchChanging || this.anyBusy() || this.queue.snapshot().items.length || this.continuity?.store.activeReceipts().length)
+      throw new ChatBranchError("finish turns and clear queued prompts before changing branches", 409);
+  }
+
+  branches(id: string): BranchListing {
+    const chat = this.branchChat(id), branches = chatBranches(chat);
+    const events = this.log.list({ chat: id, allBranches: true });
+    const sources = readProjectState(this.info.dir).branchSources?.[id] ?? {};
+    const siblingsByEventId: Record<string, string[]> = {};
+    for (const branch of branches.filter(b => b.parent !== null)) {
+      const peers = branches.filter(b => b.parent === branch.parent && b.forkEventId === branch.forkEventId);
+      const choices = [branch.parent!, ...peers.map(b => b.id)];
+      for (const choice of choices) {
+        const prompt = choice === branch.parent ? sources[branch.id]?.promptEventId
+          : events.find(e => (e.branch ?? "0") === choice && e.kind === "message" && e.payload.author === "user")?.id;
+        if (prompt === undefined) continue;
+        siblingsByEventId[prompt] = choices;
+        const nextPrompt = events.find(e => e.id > prompt && (e.branch ?? "0") === choice && e.kind === "message" && e.payload.author === "user");
+        const reply = events.find(e => e.id > prompt && (!nextPrompt || e.id < nextPrompt.id) && (e.branch ?? "0") === choice && e.kind === "message" && e.agentId && !e.payload.reasoning);
+        if (reply) siblingsByEventId[reply.id] = choices;
+      }
+    }
+    return { branches, active: chat.activeBranch ?? "0", siblingsByEventId };
+  }
+
+  async createBranch(id: string, fromEventId: number, mode: "edit" | "retry", text?: string): Promise<ChatBranch> {
+    const chat = this.branchChat(id);
+    if (!Number.isSafeInteger(fromEventId) || fromEventId <= 0 || !["edit", "retry"].includes(mode) ||
+      (mode === "edit" && (typeof text !== "string" || !text.trim())) || (text !== undefined && typeof text !== "string"))
+      throw new ChatBranchError("send {fromEventId, mode: edit | retry, text?}; edit requires text", 400);
+    this.checkBranchIdle();
+    const events = this.log.list({ chat: id });
+    const at = events.findIndex(e => e.id === fromEventId);
+    const selected = events[at];
+    if (!selected || selected.kind !== "message" || (mode === "edit" ? selected.payload.author !== "user" || Boolean(selected.agentId) : !selected.agentId || selected.payload.reasoning))
+      throw new ChatBranchError("select a visible user message to edit or agent reply to retry", 400);
+    const prompt = mode === "edit" ? selected : events.slice(0, at).reverse().find(e => e.kind === "message" && !e.agentId && e.payload.author === "user");
+    if (!prompt || typeof prompt.payload.text !== "string") throw new ChatBranchError("reply has no user prompt to retry", 400);
+    const branches = chatBranches(chat);
+    let parent = prompt.branch ?? "0";
+    const before = events.filter(e => e.id < prompt.id);
+    // turn_started is emitted just before the prompt and belongs to the replaced turn.
+    while (before.at(-1)?.kind === "status" && before.at(-1)?.payload.state === "turn_started") before.pop();
+    let forkEventId = before.at(-1)?.id ?? 0;
+    const owner = branches.find(b => b.id === parent);
+    if (owner?.parent && !events.some(e => e.id < prompt.id && (e.branch ?? "0") === parent && e.kind === "message" && e.payload.author === "user")) {
+      parent = owner.parent;
+      forkEventId = owner.forkEventId;
+    }
+    const branch: ChatBranch = { id: newId(8), parent, forkEventId, createdAt: Date.now() };
+    const nextPrompt = events.find(e => e.id > prompt.id && e.kind === "message" && e.payload.author === "user");
+    const checkpoint = events.find(e => e.id > prompt.id && (!nextPrompt || e.id < nextPrompt.id) && e.kind === "checkpoint" && e.payload.reason === "before_turn");
+    const resumes: BranchSource["resumes"] = {};
+    for (const [agentId, agent] of this.agents) {
+      if (!(agent instanceof ProviderAgent)) continue;
+      const cursor = agent.sideSource(branchSessionKey(id, parent)).resumeCursor;
+      if (typeof cursor !== "string") continue;
+      const retained = events.filter(e => e.id <= forkEventId && e.agentId === agentId);
+      const lastTurnId = retained.filter(e => e.kind === "run_complete").at(-1)?.payload.nativeTurnId;
+      const resumeSessionAt = retained.filter(e => typeof e.payload.nativeMessageId === "string").at(-1)?.payload.nativeMessageId;
+      resumes[agentId] = { resumeCursor: cursor,
+        ...(typeof lastTurnId === "string" ? { lastTurnId } : {}), ...(typeof resumeSessionAt === "string" ? { resumeSessionAt } : {}) };
+    }
+    this.branchChanging = true;
+    try {
+      await this.turns.settleBranches();
+      await this.sides.closeChat(id);
+      const state = readProjectState(this.info.dir);
+      const updated = { ...(state.chats?.find(c => c.id === id) ?? chat), branches: [...branches, branch], activeBranch: branch.id };
+      state.chats = [...(state.chats ?? []).filter(c => c.id !== id), updated];
+      const inherited = owner && owner.id !== parent ? state.branchSources?.[id]?.[owner.id] : undefined;
+      state.branchSources = { ...state.branchSources, [id]: { ...state.branchSources?.[id], [branch.id]: {
+        promptEventId: inherited?.promptEventId ?? prompt.id, resumes,
+        ...(checkpoint ? { checkpointId: String(checkpoint.payload.id) } : inherited?.checkpointId ? { checkpointId: inherited.checkpointId } : {}),
+      } } };
+      writeProjectState(this.info.dir, state);
+      this.briefings.cancelExtraction();
+      this.briefings.pendingBriefings.clear();
+      try {
+        await this.turns.sendMessage(mode === "edit" ? text! : prompt.payload.text, undefined, { chat: id });
+      } catch (error) {
+        // Keep any accepted events available for recovery, but restore the previous selection.
+        const failed = readProjectState(this.info.dir);
+        const row = failed.chats?.find(c => c.id === id);
+        if (row) row.activeBranch = chat.activeBranch ?? "0";
+        writeProjectState(this.info.dir, failed);
+        throw error;
+      }
+      return branch;
+    } finally { this.branchChanging = false; }
+  }
+
+  private branchCheckpoint(chat: ChatInfo, branchId: string): string {
+    if (!chatBranches(chat).some(b => b.id === branchId)) throw new ChatBranchError("no such branch", 404);
+    const sources = readProjectState(this.info.dir).branchSources?.[chat.id];
+    // Root has no fork of its own; returning to it rewinds the fork being left.
+    const checkpoint = sources?.[branchId === "0" ? chat.activeBranch ?? "0" : branchId]?.checkpointId;
+    if (!checkpoint) throw new ChatBranchError("no checkpoint is available at this fork", 409);
+    return checkpoint;
+  }
+
+  async branchRewindPreview(id: string, branchId: string): Promise<checkpoints.RewindPreview> {
+    try { return await checkpoints.preview(this.info.dir, this.branchCheckpoint(this.branchChat(id), branchId)); }
+    catch (error) { if (error instanceof ChatBranchError) throw error; throw new ChatBranchError((error as Error).message, 409); }
+  }
+
+  async activateBranch(id: string, branchId: string, rewindFiles = false): Promise<{ active: string; rewind?: checkpoints.RestoreResult }> {
+    const chat = this.branchChat(id);
+    if (!chatBranches(chat).some(b => b.id === branchId)) throw new ChatBranchError("no such branch", 404);
+    this.checkBranchIdle();
+    const checkpoint = rewindFiles ? this.branchCheckpoint(chat, branchId) : undefined;
+    this.branchChanging = true;
+    try {
+      await this.turns.settleBranches();
+      await this.sides.closeChat(id);
+      if (checkpoint && !await checkpoints.find(this.info.dir, checkpoint)) throw new ChatBranchError("fork checkpoint was pruned", 409);
+      const rewind = checkpoint ? await this.rewind(checkpoint) : undefined;
+      const state = readProjectState(this.info.dir);
+      const row = state.chats?.find(c => c.id === id);
+      if (row) row.activeBranch = branchId;
+      writeProjectState(this.info.dir, state);
+      this.briefings.cancelExtraction();
+      this.briefings.pendingBriefings.clear();
+      this.log.append({ kind: "status", chat: id, payload: { state: "branch_activated", activeBranch: branchId } });
+      return { active: branchId, ...(rewind ? { rewind } : {}) };
+    } finally { this.branchChanging = false; }
+  }
+
   createChat(title: string, opts: { agentId?: string; model?: string; effort?: string } = {}): ChatInfo {
     if (!opts.agentId && (opts.model || opts.effort)) throw new Error("model and effort need an agentId");
     const bound = opts.agentId ? this.bindable(opts.agentId, opts.model, opts.effort) : {};
@@ -2087,7 +2227,7 @@ export class ProjectRuntime {
     const config = this.config.agents.find(a => a.id === id && a.enabled !== false);
     if (!config) throw new SideChatError("parent chat has no available agent", 409);
     const parent = this.agents.get(config.id);
-    const native = parent instanceof ProviderAgent ? parent.sideSource(chat) : undefined;
+    const native = parent instanceof ProviderAgent ? parent.sideSource(branchSessionKey(chat, this.log.activeBranch(chat))) : undefined;
     const model = bound.model ?? native?.model ?? (typeof config.options?.model === "string" ? config.options.model : undefined);
     const messages = this.log.list({ chat, kinds: ["message"], limit: 200 }).filter(e =>
       typeof e.payload.text === "string" && !e.payload.reasoning && (e.payload.author === "user" || e.agentId));
@@ -2112,6 +2252,7 @@ export class ProjectRuntime {
 
   deleteChat(id: string): boolean {
     if (this.movingChats.has(id)) throw new ChatMoveError("busy: chat is moving");
+    if (this.branchChanging) throw new ChatBranchError("branch change in progress", 409);
     if (this.continuity && ([...this.turns.busySince.keys()].some(agent => this.turns.turnChat.get(agent) === id) ||
       this.queue.snapshot().items.some(item => item.chat === id)))
       throw new ContinuityError("conflict", "finish or remove queued/native turns before deleting their chat");
@@ -2477,6 +2618,8 @@ export class ProjectRuntime {
     for (const m of matches) {
       this.log.append({
         kind: "decision",
+        chat: event.chat ?? MAIN_CHAT,
+        branch: event.branch ?? "0",
         payload: { text: m[1]!.trim(), author: event.agentId, auto: true },
       });
     }
@@ -2534,6 +2677,8 @@ export class ProjectRuntime {
 
   /** Mine decisions from a completed turn, persist them, surface on the Timeline. */
   private async captureAgentDecisions(agentId: string): Promise<void> {
+    const chat = this.turns.turnChat.get(agentId) ?? MAIN_CHAT;
+    const branch = this.log.activeBranch(chat);
     const turnText = this.turns.turnText.get(agentId) ?? "";
     this.turns.turnText.delete(agentId);
     if (turnText.trim().length < 100) return;
@@ -2573,7 +2718,7 @@ export class ProjectRuntime {
       anthropicApiKey: process.env.ANTHROPIC_API_KEY,
       filesChanged,
     });
-    if (this.closed || !decisions.length) return;
+    if (this.closed || !decisions.length || this.log.activeBranch(chat) !== branch) return;
     this.storeDecisions(decisions);
     // Surface each on the Timeline / snapshots via a status event (no new EventKind,
     // and no collision with the brain's memory `decision` events). `source` rides
@@ -2754,7 +2899,7 @@ export class ProjectRuntime {
     await this.ensureStarted(agentId);
     this.turns.turnChat.set(agentId, chat);
     const bound = this.chatBinding(chat);
-    await agent.compact(chat, bound.agentId === agentId ? bound : {});
+    await agent.compact(chat, { ...(bound.agentId === agentId ? bound : {}), branch: this.log.activeBranch(chat) });
   }
 
   /**
@@ -2788,6 +2933,7 @@ export class ProjectRuntime {
 
   enqueue(input: QueueInput): QueueItem {
     this.assertChatWritable(input.chat ?? MAIN_CHAT);
+    if (this.branchChanging) throw new ChatBranchError("branch change in progress", 409);
     if (this.continuity) {
       this.queue.assertCanAdd(input);
       if (!this.chats().some(c => c.id === (input.chat ?? MAIN_CHAT)))
@@ -2870,6 +3016,7 @@ export class ProjectRuntime {
     agentId?: string,
     opts: TurnOptions = {},
   ): Promise<TurnResult> {
+    if (this.branchChanging) throw new ChatBranchError("branch change in progress", 409);
     // A queued follow-up can start before the watcher's next retry. Apply any
     // deferred edit at this safe boundary before the turn captures its agent.
     if (this.deferredAgents.size) this.reloadConfig();

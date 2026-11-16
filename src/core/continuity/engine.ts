@@ -127,7 +127,7 @@ export class ContinuityEngine {
   readSource(source: SourceRef, chat: string): string {
     if (source.projectId !== this.projectId) throw new ContinuityError("invalid", "source belongs to another project");
     const event = this.store.event(source.eventId);
-    if (!event || (event.chat ?? MAIN_CHAT) !== chat) throw new ContinuityError("invalid", "source is missing or outside this conversation");
+    if (!event || !this.store.lineage(chat)(event)) throw new ContinuityError("invalid", "source is missing or outside this conversation");
     if (event.payload.reasoning) throw new ContinuityError("unsupported", "native reasoning/private context is not portable evidence");
     const text = eventText(event);
     if (digest(text) !== source.hash) throw new ContinuityError("invalid", "source content hash does not match");
@@ -170,7 +170,9 @@ export class ContinuityEngine {
     // session), so a model change keeps the native session.
     const { model: _model, ...stable } = options;
     const fingerprint = digest(JSON.stringify([kind, stable, observed.workspace.id, "turn-input-v2"]));
-    const slot = digest(JSON.stringify([request.conversationId, request.agentInstanceId, observed.workspace.id, fingerprint]));
+    const branch = this.store.activeBranch(request.conversationId);
+    const slot = digest(JSON.stringify([request.conversationId, request.agentInstanceId, observed.workspace.id, fingerprint,
+      ...(branch !== "0" ? [branch] : [])]));
     const binding = this.store.binding(slot, () => ({ id: randomUUID(), conversationId: request.conversationId,
       agentInstanceId: request.agentInstanceId, harnessKind: kind, workspaceId: observed.workspace.id,
       compatibilityFingerprint: fingerprint, nativeSessionId: null, sessionEpoch: 1, retention: "unknown" }));

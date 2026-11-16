@@ -741,6 +741,8 @@ export function createThread(view) {
           if (go && go.pid === view.pid && go.chat === view.chatId) { state.pendingGo = null; if (go.id) setTimeout(function(){ if (!pageGone()) view.jumpToMessage(go.id); }, 60); }
           if (state.project) reconcileLive(state.project);
           toBottom();
+          // versions of a message (#375): the ‹ n/m › pagers, once the thread is on screen
+          if (state.loadBranches) state.loadBranches();
         })
         .catch(function(err){ if (request !== historyRequest) return; toast(err.message); flushPending(); });
     }
