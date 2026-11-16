@@ -3363,6 +3363,22 @@ async function sendWithHandoffConfirm(
 }
 
 program
+  .command("steer <text...>")
+  .description("add input to the running turn, or queue it when steering is unavailable")
+  .option("--chat <chat>", "which chat, by id or title (default: main)", "main")
+  .option("-a, --agent <id>", "address a specific agent")
+  .action(async (words: string[], opts: { chat: string; agent?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const chat = chats.find(c => c.id === opts.chat) ?? chats.find(c => c.title.toLowerCase() === opts.chat.trim().toLowerCase());
+    if (!chat) fail(`no chat "${opts.chat}" in ${project.name}`);
+    const result = await client.steer(project.id, words.join(" "), { chat: chat!.id, ...(opts.agent ? { agentId: opts.agent } : {}) });
+    console.log(result.steered ? pc.dim("→ steered the running turn")
+      : pc.dim(`→ queued (${result.queueId}, ${result.queued} waiting): ${result.reason}`));
+  });
+
+program
   .command("send <text...>")
   .description("send one message into the shared thread")
   .option("-a, --agent <id>", "address a specific agent (may require a handoff)")

@@ -711,6 +711,7 @@ detects at least two roles.
 | `loom init` | Make the current directory a Loom project (auto-detects agents); in a git repo it offers to add `.loom/` to `.gitignore` (`--gitignore` / `--no-gitignore` to skip the question) |
 | `loom chat` | Same thread as a plain line REPL (`/handoff`, `/interrupt`, `@agent`) |
 | `loom send <text>` | One-shot message (`-a <agent>` to address someone specific). `--wait` blocks until the turn ends and prints the reply and cost (`--json` for one object, `--timeout <s>`); it exits 0 done, 1 failed, 2 the agent asked a question, 124 timed out — so a script can drive an agent without reading `.loom/log.db`. Before resuming a session of 100k+ tokens whose prompt cache has likely expired, it warns with the re-read's estimated cost; `--fresh` starts the agent's session in that chat over |
+| `loom steer <text> [--chat <chat>]` | Add input to a running turn; otherwise queue it and explain why. `--agent <id>` overrides the chat binding |
 | `loom handoff <agent>` | Pass the baton — interrupts, projects memory, briefs the target |
 | `loom route <spec> "<task>"` | Run a pipeline (name, or `a,b,c` ids/roles); `--status` / `--abort` / `--detach` |
 | `loom routes` | List named pipelines defined for this project |
@@ -1644,6 +1645,12 @@ long turn could cross it. The same numbers are on every agent in
 
 ## The prompt queue — line up the next ones
 
+Use `loom steer "use the smaller change" [--chat <id-or-title>]` to add input
+to the running turn in that chat. Codex and Claude support steering; an idle
+chat or an agent without steering receives a normal queued prompt instead,
+and the CLI prints why. `--agent <id>` overrides the chat's agent. Accepted
+steering appears immediately as a user message in the conversation.
+
 Type while an agent is mid-turn, or while a goal is still running, and the
 prompt waits above the composer instead of being refused or lost. It stays
 yours until it's sent:
@@ -1677,6 +1684,31 @@ It survives a daemon restart (reloaded paused, so an hour-old queue doesn't
 start itself), and lives in the project's `.loom/queue.json`. Over the API:
 `GET/POST /api/projects/:id/queue`, `PATCH|DELETE .../queue/:itemId` (text,
 target, or `to` for its position), `POST .../queue/pause`, `DELETE .../queue`.
+
+Steering API (also exposed as `DaemonClient.steer` and `steerQueued`):
+
+- `POST /api/projects/:id/steer` with `{text, chat?, agentId?}`. Chat defaults
+  to `main`; the target is the explicit agent, the chat binding, the baton
+  holder, then the project's default adapter, in that order.
+- `POST /api/projects/:id/queue/:queueId/steer` with no body promotes that
+  item's current text in its own chat. Acceptance removes it from the queue.
+  Explicit promotion can bypass a pause or condition. A failed promotion
+  keeps the same item, position, target and condition. A promoted prompt uses
+  the running turn's mode; orchestra goals remain queued for their own run.
+- Both return `{steered:true}` on acceptance, or
+  `{steered:false, queued:number, queueId:string, reason:string}` on fallback.
+  `queued` is the queue size at acceptance; an idle queue can dispatch immediately.
+  No running turn is a normal fallback, not a 409. Missing queue items return
+  404; malformed steering bodies return 400. Transport errors with uncertain
+  delivery are errors, not an automatic resend; a promotion with an error
+  pauses the queue for review.
+- Every agent status includes `capabilities.steer: boolean`. Clients should
+  display the fallback `reason`. An accepted steer uses the ordinary `message`
+  event with `payload: {text, author:"user", steer:true}` in the requested chat.
+  The existing turn continues; there is no new turn or baton handoff.
+
+Approach inspired by Agent Orchestrator's `steer.go` and T3 Code's composer
+(Apache-2.0 / MIT). Web and phone steering controls can build on this API.
 
 ## Prompt manager
 

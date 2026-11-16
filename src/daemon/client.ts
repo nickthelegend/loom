@@ -13,6 +13,7 @@ import type {
   CostSummary,
   LoomEvent,
   ProjectStatus,
+  SteerResult,
   RouteState,
   RouteStepSpec,
   UnifiedMemory,
@@ -681,6 +682,15 @@ export class DaemonClient {
       ...(agentId ? { agentId } : {}),
       ...(opts.fresh ? { fresh: true } : {}),
     });
+  }
+
+  /** Add input to a running turn, falling back to the prompt queue with a reason. */
+  steer(id: string, text: string, opts: { chat?: string; agentId?: string } = {}): Promise<SteerResult> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/steer`, { text, ...opts });
+  }
+
+  steerQueued(id: string, queueId: string): Promise<SteerResult> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/queue/${encodeURIComponent(queueId)}/steer`, {});
   }
 
   /** How big an agent's session in a chat is, and whether resuming it would re-read it cold. */
