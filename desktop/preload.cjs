@@ -15,6 +15,7 @@ window.addEventListener("DOMContentLoaded", function () {
 // "New project". Deliberately the whole surface — no fs, no shell, no ipc
 // passthrough. The browser build just types the path instead.
 contextBridge.exposeInMainWorld("loomNative", {
+  webview: true,
   pickFolder: function () {
     return ipcRenderer.invoke("loom:pick-folder");
   },

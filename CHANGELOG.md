@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Desktop Browser tab (#363):** external sites use an isolated Electron webview, so framing restrictions no longer block them. Back, forward and reload use native page history, and URL suggestions persist per project and pane. Permissions, downloads, popups and non-HTTP(S) navigation are denied. Web/phone and proxied localhost previews keep their iframe. Approach credit: Nuphos (Apache-2.0).
+
 - **ACP agents receive the project's MCP servers.** New and loaded sessions now get enabled servers that pass health filtering, with arguments and environment for stdio and headers for HTTP/SSE. Remote servers are sent only when the agent advertises support for their transport.
 
 ### Added

@@ -96,6 +96,9 @@ Loom's local daemon (no hosted backend):
 - agents behind the Agent Client Protocol (`src/adapters/acp.ts`): one adapter kind for every
   ACP agent, with presets for the adapters and CLIs Nuphos runs (claude-agent-acp, codex-acp,
   Gemini, OpenCode, Grok). Loom's own Auto policy and approval cards answer permission requests.
+- desktop browsing (`src/web/preview.js`, `desktop/webview-guard.js`): the BrowserView /
+  webview-guard approach, implemented for Loom with an isolated persistent session, denied
+  permissions and downloads, guarded navigation, native history and per-pane URL suggestions.
 - the split workspace (`src/web/workspace.js`). **Code port:** `src/web/splits.js` is ported
   from Nuphos's `apps/desktop/src/app/workspace/splitLayout.ts` (split, remove, swap, drop and
   rectangle functions, the quarter-deep drop zones and the split shortcut test). Changes: rewritten
