@@ -872,6 +872,7 @@ loom agents:add acp --cmd "my-agent --acp" --as mine
 ```
 
 - **Sessions:** each Loom chat is one ACP session, and it resumes with `session/load` when the agent supports it.
+- **MCP servers:** enabled project servers that pass Loom's health filtering are sent when a session is created or loaded. Stdio servers include their arguments and environment; HTTP and SSE servers include their headers and are sent only when the agent advertises support for that transport.
 - **What you see:** the agent's thoughts, its plan, each tool call and the diffs it reports show
   up in the thread like any other agent's. Diffs appear as file edits.
 - **Permissions are Loom's:**
