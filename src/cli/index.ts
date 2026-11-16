@@ -500,6 +500,31 @@ program
   });
 
 program
+  .command("btw <question>")
+  .description("ask a private read-only side question without changing the main conversation")
+  .option("--chat <c>", "parent chat id", "main")
+  .action(async (question: string, opts: { chat: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { sideId } = await client.sendSide(project.id, opts.chat, question);
+    try {
+      const deadline = Date.now() + 6 * 60_000;
+      while (Date.now() < deadline) {
+        const side = await client.sideChat(project.id, opts.chat, sideId);
+        if (!side.busy) {
+          if (side.error) throw new Error(side.error);
+          console.log(side.messages.filter(m => m.role === "agent").at(-1)?.text ?? "");
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error("side chat timed out");
+    } finally {
+      await client.closeSide(project.id, opts.chat, sideId).catch(() => {});
+    }
+  });
+
+program
   .command("ask <words...>")
   .description("ask several models the same thing at once, a thread each")
   .option("--models <list>", "comma-separated model ids (provider/model, or just the model)")
@@ -691,6 +716,33 @@ program
       const who = e.agentId ? pc.cyan(e.agentId) : pc.dim("you");
       console.log(`${pc.dim(t)} ${who}  ${String(e.payload.text ?? e.payload.question ?? "").slice(0, 110)}`);
     }
+  });
+
+program
+  .command("prs")
+  .description("list this project's tracked PRs and their last state")
+  .option("--json", "print as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { prs } = await client.prs(project.id);
+    if (opts.json) return void console.log(JSON.stringify(prs, null, 2));
+    if (!prs.length) return void console.log("No tracked PRs — attach one with loom prs:watch <pr>.");
+    for (const pr of prs) console.log(`${pr.repo} #${pr.prNumber}  ${pr.state}  chat ${pr.chat}  ${pr.url}`);
+  });
+
+program
+  .command("prs:watch <pr>")
+  .description("attach a PR number or URL to a chat for CI and review feedback")
+  .option("--chat <chat>", "chat id or title", "main")
+  .action(async (pr: string, opts: { chat: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const chat = chats.find(c => c.id === opts.chat || c.title.toLowerCase() === opts.chat.toLowerCase());
+    if (!chat) fail(`no chat "${opts.chat}" here`);
+    const out = await client.watchPr(project.id, chat.id, pr).catch((e: Error) => fail(e.message));
+    console.log(`Watching ${out.pr.repo} #${out.pr.prNumber} in chat ${out.pr.chat}`);
   });
 
 program

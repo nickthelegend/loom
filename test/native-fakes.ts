@@ -146,6 +146,9 @@ process.stdin.on("end", async () => { if (running && !interrupted) await running
 }
 
 export interface FakeCodexOptions {
+  /** Simulate an older server without thread/fork. */
+  unsupportedFork?: boolean;
+  config?: Record<string, unknown>;
   /** Notifications and requests after each turn/start. Defaults to CODEX_OK. */
   script?: Step[];
   /** Per-turn scripts (turn 1, turn 2, …); a turn past the end uses `script`. */
@@ -190,7 +193,7 @@ export const CODEX_OK: Step[] = [
 /** A fake `codex` that serves `app-server`. Returns its path. */
 export function fakeCodex(options: FakeCodexOptions = {}): string {
   const dir = tmpDir("fake-codex"), bin = path.join(dir, "codex");
-  const config = { script: options.script ?? CODEX_OK, scripts: options.scripts ?? [], missingThread: options.missingThread ?? false,
+  const config = { settings: options.config ?? {}, unsupportedFork: options.unsupportedFork ?? false, script: options.script ?? CODEX_OK, scripts: options.scripts ?? [], missingThread: options.missingThread ?? false,
     refuseTurn: options.refuseTurn ?? null, dieAtStart: options.dieAtStart ?? null, model: options.model ?? "gpt-test",
     version: options.version ?? "codex-cli 0.155.0", models: options.models ?? null, turnReplyDelayMs: options.turnReplyDelayMs ?? 0,
     refuseSteer: options.refuseSteer ?? false, closeOnSteer: options.closeOnSteer ?? false };
@@ -231,8 +234,14 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   if (m.id === undefined) return; // a notification ("initialized")
   switch (m.method) {
     case "initialize": return reply(m.id, { userAgent: "fake-codex" });
+    case "config/read": return reply(m.id, { config: config.settings });
     case "thread/start":
       vars.THREAD = "thread-" + process.pid + "-" + Date.now();
+      return reply(m.id, { thread: { id: vars.THREAD }, model: config.model });
+    case "thread/fork":
+      if (config.unsupportedFork) return out({ id: m.id, error: { code: -32601, message: "unknown method thread/fork" } });
+      if (config.missingThread) return out({ id: m.id, error: { code: -32600, message: "no rollout found for thread id " + m.params.threadId } });
+      vars.THREAD = "fork-" + process.pid + "-" + Date.now();
       return reply(m.id, { thread: { id: vars.THREAD }, model: config.model });
     case "thread/resume":
       if (config.missingThread) return out({ id: m.id, error: { code: -32600, message: "no rollout found for thread id " + m.params.threadId } });

@@ -47,6 +47,7 @@ import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
+import { SideSheet } from "./side";
 import { NewProjectSheet } from "./new-project";
 import { TriggersView } from "./triggers";
 import { notifyApproval } from "./push";
@@ -1174,8 +1175,12 @@ export function ProjectScreen(props: {
     }
   };
 
+  // /btw <question>: a side chat, read-only and outside the thread (#376)
+  const [sideQ, setSideQ] = useState<string | null>(null);
   const send = async () => {
     if (stt.listening) void stt.toggle(); // stop dictation on send
+    const btw = /^\/btw(?:\s+([\s\S]*))?$/i.exec(text.trim());
+    if (btw) { setText(""); setSideQ(btw[1] ?? ""); return; }
     if (attach.uploading) return setErr("still uploading the picture…");
     // pictures lead the message as "[image] <path>" lines, as the desktop sends them
     const refs = attach.refs();
@@ -1521,6 +1526,15 @@ export function ProjectScreen(props: {
             project={project}
             onClose={() => setImporting(false)}
             onOpen={(id) => { setImporting(false); reloadChats(); setChatId(id); }}
+          />
+          <SideSheet
+            creds={creds}
+            projectId={project.id}
+            chat={chatId}
+            question={sideQ}
+            who={(chats.find((c) => c.id === chatId) as { agentId?: string } | undefined)?.agentId ?? selected ?? project.holder ?? undefined}
+            onClose={() => setSideQ(null)}
+            onBringBack={(quote) => { setText((t) => (t.trim() ? `${t.replace(/\s+$/, "")}\n\n` : "") + quote); setSideQ(null); }}
           />
           <NewChatSheet visible={newChatOpen} creds={creds} project={project} onClose={() => setNewChatOpen(false)} onCreated={chatCreated} />
           <ChatMenu
@@ -2263,7 +2277,7 @@ function ChatMenu(props: {
   onShareLive?: (role: "view" | "reply" | "approve") => void;
   onClose: () => void;
   onRename: (title: string) => void;
-  onFlags: (flags: { pinned?: boolean; archived?: boolean }) => void;
+  onFlags: (flags: { pinned?: boolean; archived?: boolean; prFeedback?: "off" | "ci" | "ci+reviews" }) => void;
   onDelete: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -2291,6 +2305,9 @@ function ChatMenu(props: {
           {props.onShareLive && row("Share live — they read along", () => props.onShareLive!("view"))}
           {props.onShareLive && row("Share live — they can talk to the agent", () => props.onShareLive!("reply"))}
           {props.onShareLive && row("Share live — talk and approve", () => props.onShareLive!("approve"))}
+          {/* the PRs this chat opens: what comes back when they need work (#378) — tap to cycle */}
+          {row(`PR feedback: ${({ off: "off", ci: "CI failures", "ci+reviews": "CI + reviews" } as const)[c.prFeedback ?? "ci"]}`, () =>
+            props.onFlags({ prFeedback: (({ ci: "ci+reviews", "ci+reviews": "off", off: "ci" } as const)[c.prFeedback ?? "ci"]) }))}
           {row(c.pinned ? "Unpin" : "Pin to the front", () => props.onFlags({ pinned: !c.pinned }))}
           {row(c.archived ? "Unarchive" : "Archive", () => props.onFlags({ archived: !c.archived }))}
           {row("Delete chat", () =>

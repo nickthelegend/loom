@@ -3,6 +3,7 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -28,6 +29,7 @@ import {
   readDaemonConfig,
   type DaemonConfig,
 } from "../core/registry.js";
+import type { SideView } from "../core/side-chats.js";
 import type { Memory } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
@@ -97,6 +99,19 @@ export class DaemonClient {
     return cfg ? new DaemonClient(cfg) : null;
   }
 
+  /** Opens or continues the parent's in-memory side drawer; poll sideChat or listen for WS type=side. */
+  sendSide(id: string, chat: string, text: string, sideId?: string): Promise<{ sideId: string; reply?: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side`, { text, ...(sideId ? { sideId } : {}) });
+  }
+
+  sideChat(id: string, chat: string, sideId: string): Promise<SideView> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+  }
+
+  closeSide(id: string, chat: string, sideId: string): Promise<{ deleted: boolean }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+  }
+
   get baseUrl(): string {
     return `http://${this.cfg.host}:${this.cfg.port}`;
   }
@@ -137,6 +152,18 @@ export class DaemonClient {
     if (opts.days) q.set("days", String(opts.days));
     if (opts.since) q.set("since", String(opts.since));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/turns?${q}`);
+  }
+
+  prs(id: string): Promise<{ prs: TrackedPr[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/prs`);
+  }
+
+  watchPr(id: string, chat: string, pr: number | string): Promise<{ pr: TrackedPr }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/prs`, { pr });
+  }
+
+  setPrFeedback(id: string, chat: string, prFeedback: PrFeedbackMode): Promise<{ chat: ChatInfo }> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}`, { prFeedback });
   }
 
   chats(id: string): Promise<{ chats: ChatInfo[] }> {

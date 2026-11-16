@@ -17,6 +17,7 @@
  *   - writes the live team context block for briefings (D48)
  */
 
+import { recordOpenedPr } from "../core/pr-feedback.js";
 import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -409,6 +410,7 @@ export class TeamBrain {
       } catch (e) {
         note = `pushed ${CANON_BRANCH}; couldn't open the PR with gh: ${e instanceof Error ? e.message : String(e)}`;
       }
+      if (prUrl) recordOpenedPr(dir, prUrl, { chat: "main", source: "delivery" });
       await this.announce("canon_proposed", { ids: entries.map((e) => e.id), ...(prUrl ? { prUrl } : {}) });
       return { branch: CANON_BRANCH, prUrl, added, ...(note ? { note } : {}) };
     } finally {
