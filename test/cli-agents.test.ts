@@ -17,7 +17,7 @@ let projectDir: string;
 
 function runCli(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(tsx, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), cli, ...args], { cwd: projectDir, env: process.env }, (err, stdout, stderr) => {
+    execFile(tsx, [path.join(root, "node_modules", "tsx", "dist", "cli.mjs"), cli, ...args], { cwd: projectDir, env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" } }, (err, stdout, stderr) => {
       if (err) reject(new Error(stderr || err.message));
       else resolve(stdout);
     });
