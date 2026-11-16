@@ -161,6 +161,8 @@ export class ProjectRuntime {
   readonly routes: RouteEngine;
   /** One orchestrator, many parallel workers — see core/orchestra.ts. */
   readonly orchestra: OrchestraEngine;
+  /** Set by the owning daemon after binding its HTTP listener. */
+  apiUrl = "";
   /** Agent Teams: crews of agents with roles, one goal at a time (core/crew.ts). */
   readonly crews: CrewEngine;
   /** Loop watch: an agent stuck re-running the same failing command (core/loops.ts). */
@@ -359,6 +361,7 @@ export class ProjectRuntime {
     });
 
     this.orchestra = new OrchestraEngine({
+      apiUrl: () => this.apiUrl,
       projectId: info.id,
       projectName: info.name,
       projectDir: info.dir,

@@ -91,6 +91,7 @@ export async function stopAllProviderSessions(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 interface AgentOptions {
+  env?: Record<string, string>;
   model?: string;
   /** Reasoning effort ("low" | "medium" | "high" | …, the provider's own words). */
   effort?: string;
@@ -240,10 +241,10 @@ export class ProviderAgent extends AdapterBase {
     if (attached) { releaseProviders(this.projectDir, providers); return { providers: attached, service: attached.service }; }
     const mcpServers = () => this.mcp?.servers ?? [];
     const adapter: ProviderAdapter = this.provider === "codex"
-      ? new CodexProviderAdapter(this.id, { ...(this.options.bin ? { bin: this.options.bin } : {}),
+      ? new CodexProviderAdapter(this.id, { env: this.options.env, ...(this.options.bin ? { bin: this.options.bin } : {}),
         ...(this.options.extraArgs ? { extraArgs: this.options.extraArgs } : {}), ...(this.options.sandbox ? { sandbox: this.options.sandbox } : {}),
         mcpConfig: () => Object.fromEntries(mcpServers().map(s => [`mcp_servers.${s.key}`, codexMcpServer(s.entry)])) })
-      : new ClaudeProviderAdapter(this.id, { ...(this.options.bin ? { bin: this.options.bin } : {}),
+      : new ClaudeProviderAdapter(this.id, { env: this.options.env, ...(this.options.bin ? { bin: this.options.bin } : {}),
         ...(this.options.extraArgs ? { extraArgs: this.options.extraArgs } : {}),
         ...(this.options.permissionMode ? { permissionMode: this.options.permissionMode } : {}),
         // looked up by project id: options stay plain data (native continuity clones them)

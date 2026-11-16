@@ -33,4 +33,17 @@ describe("run progress events", () => {
     expect(formatEvent(again[0]!, "api")).toMatch(/^\d\d:\d\d:\d\d api t2 \[codex\] running \(attempt 2\)$/);
     expect(formatEvent(runEvents(b, c)[1]!)).toMatch(/t1 \[codex\] done — 2 files$/);
   });
+  it("shows new reports even when task status and attempt stay unchanged", () => {
+    const first = { at: 100, kind: "checkpoint" as const, text: "Read code" };
+    const second = { at: 101, kind: "needs_input" as const, text: "Which\nversion?" };
+    const before = run("running", 1, [task("t1", "running", { reports: [first], lastReport: first })]);
+    const after = run("running", 1, [task("t1", "running", { reports: [first, second], lastReport: second })]);
+    const events = runEvents(before, after);
+    expect(events).toEqual([{ kind: "report", run: "r1", task: "t1", agent: "codex", report: second }]);
+    expect(formatEvent(events[0]!)).toMatch(/t1 \[codex\] needs_input: Which version\?$/);
+    expect(runEvents(after, after)).toEqual([]);
+    const capped = run("running", 1, [task("t1", "running", { reports: [second], lastReport: second })]);
+    expect(runEvents(before, capped)).toEqual(events);
+  });
+
 });
