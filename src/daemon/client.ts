@@ -21,7 +21,7 @@ import type {
   UnifiedMemory,
 } from "../types.js";
 import type { Checkpoint, RestoreResult } from "../core/checkpoint.js";
-import type { OrchestraRun } from "../core/orchestra.js";
+import type { CompareOptions, OrchestraRun } from "../core/orchestra.js";
 import type { QueueItem } from "../core/prompt-queue.js";
 import type { LogLine, ServerConfig, ServerStatus } from "../core/servers.js";
 import {
@@ -287,6 +287,15 @@ export class DaemonClient {
 
   orchestraRun(id: string, runId: string): Promise<{ run: OrchestraRun }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(runId)}`);
+  }
+
+  /** Ask 2–8 expanded entrants in separate worktrees; keep one with orchestraAction(..., "apply", { task }). */
+  compare(id: string, body: CompareOptions): Promise<{ run: OrchestraRun }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/compare`, { ...body });
+  }
+
+  orchestraTaskDiff(id: string, runId: string, taskId: string): Promise<{ patch: string }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(runId)}/tasks/${encodeURIComponent(taskId)}/diff`);
   }
 
   /** Start with agent[@model][:effort][xN] worker specs; run.workerDetails describes the expanded fleet. */

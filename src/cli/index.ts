@@ -1704,10 +1704,10 @@ function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<strin
     id: run.id, goal: run.goal, status: run.status, ...(run.status === "aborted" && (run as { interrupted?: unknown }).interrupted ? { resumable: true } : {}),
     // every outcome key, 0 when none: a script reads tasks.failed without checking it exists
     terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, done: 0, running: 0, pending: 0, needs_input: 0, conflict: 0, failed: 0, cancelled: 0, ...taskCounts(run) },
-    branch: run.branch, costUsd: run.costUsd,
+    branch: run.branch, costUsd: run.costUsd, race: run.race, compare: run.compare,
     orchestrator: run.orchestrator, workers: run.workers, workerDetails: run.workerDetails ?? [],
     // Keep outcome counts in tasks for existing scripts; taskDetails carries each selection.
-    taskDetails: run.tasks.map((t) => ({ id: t.id, title: t.title, agent: t.agent, kind: t.kind, model: t.model, effort: t.effort, status: t.status })),
+    taskDetails: run.tasks.map((t) => ({ id: t.id, title: t.title, agent: t.agent, kind: t.kind, model: t.model, effort: t.effort, status: t.status, result: t.result, files: t.files, diffStat: t.diffStat, costUsd: t.costUsd, startedAt: t.startedAt, finishedAt: t.finishedAt })),
     ...(run.landing?.pr ? { pr: run.landing.pr } : {}), ...(run.question ? { question: run.question } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
   };
 }
@@ -1754,6 +1754,24 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun, modes: Recor
     } else console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
   }
   if (run.race && run.applied?.task) console.log(`   ${pc.green("kept:")} ${run.applied.task} → ${run.applied.into}`);
+}
+
+/** One entrant per column, with the task id used by --keep directly below it. */
+function printComparison(run: import("../core/orchestra.js").OrchestraRun): void {
+  console.log(`${pc.bold(run.id)}  ${runStatus(run)}  ${run.goal}`);
+  const rows = [
+    ["agent@model", ...run.tasks.map((t) => t.agent.includes("@") ? t.agent : `${t.agent}@${t.model ?? "default"}`)],
+    ["task", ...run.tasks.map((t) => t.id)],
+    ["status", ...run.tasks.map((t) => t.status)],
+    ["time", ...run.tasks.map((t) => t.startedAt === undefined ? "—" : `${(Math.max(0, (t.finishedAt ?? Date.now()) - t.startedAt) / 1000).toFixed(1)}s`)],
+    ["cost", ...run.tasks.map((t) => t.costUsd === undefined ? "—" : fmtUsd(t.costUsd))],
+    ["files ±", ...run.tasks.map((t) => t.diffStat ? `${t.diffStat.files} files +${t.diffStat.insertions} -${t.diffStat.deletions}` : "—")],
+  ];
+  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
+  for (const row of rows) console.log(row.map((cell, i) => cell.padEnd(widths[i]!)).join(" | ").trimEnd());
+  for (const task of run.tasks) if (task.error) console.log(`${task.id}: ${task.error}`);
+  if (run.applied) console.log(`kept ${run.applied.task} → ${run.applied.into}`);
+  else console.log(pc.dim(`keep one: loom compare ${run.id} --keep <task>`));
 }
 
 /** Run options a chain takes for every line, and a line can override (`[-o grok-code --solo]`). */
@@ -2003,6 +2021,41 @@ async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projec
     await new Promise((r) => setTimeout(r, 1500));
   }
 }
+
+program
+  .command("compare <promptOrRun>")
+  .description("ask several agents in their own worktrees, or inspect/keep an existing comparison")
+  .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN] entrants (2–8 after expansion); starts a new comparison")
+  .option("--wait", "wait for all entrants, then print the comparison")
+  .option("--keep <task>", "wait and apply this task; without -w the argument is an existing run id")
+  .action(async (promptOrRun: string, opts: { workers?: string; wait?: boolean; keep?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      let run = opts.workers !== undefined
+        ? (await client.compare(project.id, { prompt: promptOrRun, entrants: opts.workers.split(",").map((w) => w.trim()) })).run
+        : (await client.orchestraRun(project.id, promptOrRun)).run;
+      if (!run.compare) throw new Error(`${run.id} is not a comparison`);
+      console.log(`comparison ${run.id}`);
+      if (opts.wait || opts.keep) {
+        holdWaiting("compare --wait");
+        while (!isTerminalStatus(run.status) && run.status !== "waiting_human") {
+          await new Promise((r) => setTimeout(r, 1000));
+          run = (await steady(() => client.orchestraRun(project.id, run.id))).run;
+        }
+      }
+      if (opts.keep) {
+        await client.orchestraAction(project.id, run.id, "apply", { task: opts.keep });
+        run = (await client.orchestraRun(project.id, run.id)).run;
+      }
+      printComparison(run);
+      if (run.status === "waiting_human") process.exitCode = 2;
+      else if (["failed", "aborted", "moved"].includes(run.status) || (run.status === "completed" && !run.tasks.some((t) => t.status === "done"))) process.exitCode = 1;
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command("report")

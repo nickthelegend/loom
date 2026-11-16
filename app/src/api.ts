@@ -1499,6 +1499,10 @@ export const startOrchestra = (
   opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean },
 ) => api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra`, { method: "POST", body: JSON.stringify(opts) });
 
+/** Ask several (#377): the same prompt to each entrant (agent or agent@model×N), side by side; keep one. */
+export const compareAgents = (c: Creds, id: string, opts: { prompt: string; entrants: string[]; chat?: string }) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/compare`, { method: "POST", body: JSON.stringify(opts) });
+
 /** Carry on a run Loom's restart stopped: its in-flight tasks pick up where they were. */
 export const resumeOrchestra = (c: Creds, id: string, runId: string) =>
   api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra/${encodeURIComponent(runId)}/resume`, { method: "POST", body: "{}" });
