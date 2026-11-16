@@ -248,6 +248,42 @@ run-detail responses retain `workers: string[]` of instance ids and add
 Absent selections mean provider defaults; older runs may lack `workerDetails`.
 Web and phone fleet controls can use these fields without parsing instance ids.
 
+**Ask several coding agents.** `loom compare` gives the same prompt to 2–8 entrants,
+each in its own worktree, using Orchestra's race mode. Names, kinds and aliases
+resolve to enabled agents in this project; `acp:gemini` selects a configured ACP
+agent with the Gemini preset. Repeated specs and `xN` count toward the eight-entry
+limit. Model and effort selections follow the fleet rules above.
+
+```sh
+loom compare "add OAuth login with tests" \
+  -w claude-code@claude-opus-5-5,codex@gpt-5.6-sol,acp:gemini --wait
+loom compare <run-id> --wait
+loom compare <run-id> --keep <task-id>
+```
+
+Without `--wait`, the command returns immediately with the run id and a snapshot.
+The comparison table shows each agent/model, task id, status, elapsed time, cost
+and files/lines changed. `--keep` waits and applies the chosen finished task using
+race apply; the other worktrees are removed, with branches retained for diff/history.
+It can also accompany a new prompt with `-w`. Inspect replies in
+`loom orchestra <run-id> --json` (`taskDetails`), or through the API.
+
+For composer and phone clients, `POST /api/projects/:id/compare` accepts
+`{ "prompt": "...", "entrants": ["codex@model", "acp:gemini"], "chat": "main" }`
+and returns `{ run }`, with `run.compare: true` and `run.race: true`. `chat` is
+optional; an existing chat keeps the run in that thread. Invalid specs, unknown
+agents and counts outside 2–8 return HTTP 400 with `{ error }`. Poll
+`GET /api/projects/:id/orchestra/:runId` or consume the existing `orchestra`
+WebSocket events. Each task has `agent`, `kind`, `model?`, `effort?`, `status`,
+`chat`, `result?`, `files?`, `costUsd?`, `startedAt?` and `finishedAt?` (Unix
+milliseconds), plus `diffStat: { files, insertions, deletions }` once its turn
+finishes. Unknown costs are omitted; binary files count as files with zero lines.
+`GET /api/projects/:id/orchestra/:runId/tasks/:taskId/diff` returns `{ patch }`,
+the unified diff against the run's base commit (capped at 400,000 characters).
+“Keep this one” is `POST /api/projects/:id/orchestra/:runId/apply` with
+`{ "task": "<task-id>" }`; only a `done` entrant can be picked, once per run.
+Approach credit: T3 Code's multi-model threads.
+
 Under the hood: [`src/core/orchestra.ts`](src/core/orchestra.ts).
 `node scripts/verify-orchestra.mjs` runs a real orchestra against your installed
 CLIs and checks the result on disk.
