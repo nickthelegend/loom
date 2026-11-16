@@ -9,17 +9,25 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { AcpAdapter } from "../src/adapters/acp.js";
 import { setApprovalBroker } from "../src/core/approvals.js";
-import type { AdapterEvent } from "../src/types.js";
+import { writeMcpSession, type McpSession } from "../src/core/mcp.js";
+import type { AdapterEvent, McpServerConfig } from "../src/types.js";
 import { tmpDir } from "./helpers.js";
 
 const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), "acp-fake-agent.mjs");
 const agents: AcpAdapter[] = [];
+const mcps: McpSession[] = [];
+
+function mcp(config: McpServerConfig[]) {
+  const session = writeMcpSession(config)!;
+  mcps.push(session);
+  return session;
+}
 
 function agent(mode: "bypass" | "auto" | "ask", extra: Record<string, unknown> = {}) {
   process.env.LOOM_HOME ??= tmpDir("home-acp");
   const dir = tmpDir("acp-proj");
   const logFile = path.join(dir, "acp.log");
-  const a = new AcpAdapter("gem", dir, { command: [process.execPath, fake], permissions: mode, env: { FAKE_ACP_LOG: logFile }, ...extra });
+  const a = new AcpAdapter("gem", dir, { command: [process.execPath, fake], permissions: mode, ...extra, env: { FAKE_ACP_LOG: logFile, ...(extra.env as Record<string, string> ?? {}) } });
   agents.push(a);
   const events: AdapterEvent[] = [];
   a.onEvent((e) => events.push(e));
@@ -28,9 +36,64 @@ function agent(mode: "bypass" | "auto" | "ask", extra: Record<string, unknown> =
 }
 const texts = (events: AdapterEvent[]) => events.filter((e) => e.kind === "message" && !(e.payload as { reasoning?: boolean }).reasoning).map((e) => String((e.payload as { text: string }).text));
 
-afterEach(async () => { setApprovalBroker(null); for (const a of agents.splice(0)) await a.stop(); });
+afterEach(async () => {
+  setApprovalBroker(null);
+  for (const a of agents.splice(0)) await a.stop();
+  for (const session of mcps.splice(0)) session.cleanup();
+});
 
 describe("ACP adapter", () => {
+  it.each([
+    undefined,
+    {},
+    { http: false, sse: false },
+    { http: true },
+    { sse: true },
+    { http: true, sse: true },
+  ])("passes MCP servers to new and loaded sessions with transport capabilities %j", async (mcpCapabilities) => {
+    const { a, calls, dir } = agent("bypass", { env: { FAKE_ACP_CAPABILITIES: JSON.stringify({ mcpCapabilities }) } });
+    const config = mcp([
+      { name: "Local Files", url: "", command: "node", args: ["server.mjs", "a path with spaces"], env: { TOKEN: "test token", EMPTY: "" } },
+      { name: "Bare", url: "", command: "bare-server" },
+      { name: "HTTP", url: "https://http.example/mcp", headers: { Authorization: "Bearer test", "X-Project": "loom" } },
+      { name: "HTTP no auth", url: "https://public.example/mcp" },
+      { name: "SSE", url: "https://sse.example/sse", headers: { "X-Key": "test" } },
+      { name: "SSE no auth", url: "https://public.example/sse" },
+      { name: "Disabled", url: "", command: "disabled-server", enabledForSession: false },
+      { name: "Placeholder", url: "" },
+    ]);
+    const expected = [
+      { name: "Local Files", command: "node", args: ["server.mjs", "a path with spaces"], env: [{ name: "TOKEN", value: "test token" }, { name: "EMPTY", value: "" }] },
+      { name: "Bare", command: "bare-server", args: [], env: [] },
+      ...(mcpCapabilities?.http ? [
+        { name: "HTTP", type: "http", url: "https://http.example/mcp", headers: [{ name: "Authorization", value: "Bearer test" }, { name: "X-Project", value: "loom" }] },
+        { name: "HTTP no auth", type: "http", url: "https://public.example/mcp", headers: [] },
+      ] : []),
+      ...(mcpCapabilities?.sse ? [
+        { name: "SSE", type: "sse", url: "https://sse.example/sse", headers: [{ name: "X-Key", value: "test" }] },
+        { name: "SSE no auth", type: "sse", url: "https://public.example/sse", headers: [] },
+      ] : []),
+    ];
+    expect(a.capabilities.mcp).toBe(true);
+    await a.send({ text: "first", mcp: config });
+    await a.send({ text: "second", mcp: config });
+    expect(calls().filter((c) => c.method === "session/new" || c.method === "session/load")).toEqual([
+      { method: "session/new", params: { cwd: dir, mcpServers: expected } },
+      { method: "session/load", params: { sessionId: "s1", cwd: dir, mcpServers: expected } },
+    ]);
+
+    // Loading takes this turn's servers, including removal of the whole list.
+    await a.send({ text: "without servers" });
+    expect(calls().filter((c) => c.method === "session/load").at(-1)!.params.mcpServers).toEqual([]);
+  });
+
+  it("sends an empty list when there are no MCP servers or only unsupported transports", async () => {
+    const { a, calls } = agent("bypass");
+    await a.send({ text: "none", chat: "empty" });
+    await a.send({ text: "remote", chat: "remote", mcp: mcp([{ name: "HTTP", url: "https://http.example/mcp" }]) });
+    expect(calls().filter((c) => c.method === "session/new").map((c) => c.params.mcpServers)).toEqual([[], []]);
+  });
+
   it("a turn: thoughts, plan, answer and usage arrive as Loom events; one session per chat, resumed", async () => {
     const { a, events, calls } = agent("bypass");
     expect(await a.available()).toBe(true);
@@ -56,9 +119,13 @@ describe("ACP adapter", () => {
     agents.push(again);
     const ev2: AdapterEvent[] = [];
     again.onEvent((e) => ev2.push(e));
-    await again.send({ text: "two", chat: "main" });
+    await again.send({ text: "two", chat: "main", mcp: mcp([{ name: "Local", url: "", command: "local-server", env: { TOKEN: "test" } }]) });
     // the fake's sessions died with it, so load fails and a fresh session is made — and nothing replayed leaks in
     expect(calls().filter((c) => c.method === "session/load").length).toBe(1);
+    expect(calls().filter((c) => c.method === "session/load" || c.method === "session/new").slice(-2).map((c) => ({ method: c.method, servers: c.params.mcpServers }))).toEqual([
+      { method: "session/load", servers: [{ name: "Local", command: "local-server", args: [], env: [{ name: "TOKEN", value: "test" }] }] },
+      { method: "session/new", servers: [{ name: "Local", command: "local-server", args: [], env: [{ name: "TOKEN", value: "test" }] }] },
+    ]);
     expect(texts(ev2).join()).not.toContain("REPLAYED");
     expect(texts(events)).toEqual(["Hello from ACP (s1): one"]);
   }, 30_000);

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **ACP agents receive the project's MCP servers.** New and loaded sessions now get enabled servers that pass health filtering, with arguments and environment for stdio and headers for HTTP/SSE. Remote servers are sent only when the agent advertises support for their transport.
+
 ### Added
 
 - Orchestra fleets accept `agent[@model][:effort][xN]` in CLI, API and chain options, with distinct worker ids and per-spawn model/effort overrides (#369). Selections survive restarts and appear in planner briefings, plan files, CLI text/JSON and API/events for web and phone clients. Approach credit: Agent Orchestrator's `ao spawn --agent --model --effort` (Apache-2.0).
@@ -15,11 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Orchestra races honor the parallel limit and keep task ids unique for repeated agents and long model names (#369).
 
+- **Phone: Triggers.** A Triggers tab lists each schedule and webhook with when it runs next and how its last runs went, with Run now and a Pause/Resume switch. The owner's own (unscoped) phone may now fire a trigger and switch it on or off; adding, editing and removing stay on the computer (#361).
+
 - **Phone: start a chat with any agent on any model.** New chat opens a sheet: an optional title, who answers (each agent's kind and current model), and the model, chosen from the agent's own list or typed. A project can hold a chat on Opus 5.5 next to one on GPT‑5.6 (#372).
 
 - Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
 
 ### Fixed
+
+- **Slack and Discord: live turn status and channel approvals.** A status message shows the current tool and is replaced by the final answer. Allow / Deny buttons let configured `approvers` (default: `users`) answer in the channel, with their names recorded in the audit trail. Configure approvers in Settings, the bridge API, or `loom bridge --approvers`.
 
 - Watch `.loom/config.json` for debounced edits and update running projects in place. Agent changes wait for their current turn to finish; applied changes and invalid edits are reported in the thread, with the last working config kept on errors (#358).
 

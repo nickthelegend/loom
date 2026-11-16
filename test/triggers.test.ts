@@ -128,4 +128,32 @@ describe("triggers on a real daemon", () => {
     await expect(client.addTrigger(projectId, { kind: "schedule", cron: "99 * * * *", prompt: "x" })).rejects.toThrow(/out of range/);
     await expect(client.addTrigger(projectId, { kind: "schedule", prompt: "x" })).rejects.toThrow(/needs cron or every/);
   }, 30_000);
+
+  it("the owner's own phone can run a trigger now and pause or resume it, but not change or remove it (#361)", async () => {
+    const admin = readDaemonConfig()!.adminToken;
+    const device = async (body: Record<string, unknown>) => {
+      const pair = await fetch(client.baseUrl + "/api/pair/new", { method: "POST", headers: { authorization: `Bearer ${admin}`, "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()) as { token: string };
+      return (await fetch(client.baseUrl + "/api/pair/claim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: pair.token, name: "dev" }) }).then((r) => r.json()) as { clientToken: string }).clientToken;
+    };
+    const phone = await device({});
+    const scoped = await device({ projects: ["someone-elses"] });
+    const { trigger } = await client.addTrigger(projectId, { kind: "schedule", every: "1h", prompt: "nightly check", name: "nightly" });
+    const as = (token: string, method: string, path: string, body?: unknown) => fetch(`${client.baseUrl}/api/projects/${projectId}/triggers/${trigger.id}${path}`, {
+      method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const paused = await as(phone, "PATCH", "", { enabled: false });
+    expect(paused.status).toBe(200);
+    expect(((await paused.json()) as { trigger: { enabled: boolean } }).trigger.enabled).toBe(false);
+    expect((await as(phone, "PATCH", "", { enabled: true })).status).toBe(200);
+    // anything beyond the switch is the computer's to do
+    expect((await as(phone, "PATCH", "", { enabled: true, prompt: "rm -rf" })).status).toBe(403);
+    expect((await as(phone, "PATCH", "", { name: "renamed" })).status).toBe(403);
+    expect((await as(phone, "DELETE", "")).status).toBe(403);
+    const fired = await as(phone, "POST", "/fire", {});
+    expect(fired.status).toBe(200);
+    // a device limited to other projects never gets this far
+    expect([401, 403, 404]).toContain((await as(scoped, "POST", "/fire", {})).status);
+    expect([401, 403, 404]).toContain((await as(scoped, "PATCH", "", { enabled: false })).status);
+    expect((await client.triggers(projectId)).triggers.find((t) => t.id === trigger.id)!.prompt).toBe("nightly check");
+  }, 30_000);
 });

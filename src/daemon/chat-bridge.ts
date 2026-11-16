@@ -6,8 +6,8 @@
  * Runs in the daemon with your own bot's tokens — Slack over Socket Mode, Discord over its
  * gateway — so nothing needs a public URL and no hosted service sits in between. Only people on
  * the allow-list are heard: everyone else, and other bots, are ignored. A bridged turn runs
- * this machine's agents as you, so approvals stay where they are (Loom, your phone); the
- * channel is told a turn is waiting on one.
+ * this machine's agents as you. Only configured approvers can answer tool approvals, and
+ * their names are recorded in the same audit trail as decisions in Loom.
  *
  * Approach credit: Nuphos (github.com/nuphos/nuphos, Apache-2.0, © Zeabur Inc.) — "add the same
  * agent to Slack or Discord" — and openab (MIT, openabdev), whose Socket Mode / gateway bots and
@@ -31,6 +31,8 @@ export interface BridgeConfig {
   appToken?: string;
   /** Who is heard (Slack user ids U…, Discord user ids). Empty hears nobody. */
   users: string[];
+  /** Who may answer approvals. Omitted: users; empty: nobody. */
+  approvers?: string[];
   /** Where (channel ids). Empty: any channel the bot is in. */
   channels: string[];
   /** The project its threads run in (name or id); default: the only project. */
@@ -88,10 +90,22 @@ interface Incoming {
   mentioned: boolean;
 }
 
+interface ApprovalClick {
+  platform: Platform;
+  channel: string;
+  message: string;
+  user: string;
+  userName: string;
+  action: string;
+}
+
+type DecideApproval = (projectId: string, chat: string, id: string, decision: "allow" | "deny", by: string) => boolean;
+
 interface PlatformClient {
   start(): Promise<void>;
   stop(): Promise<void>;
-  post(channel: string, thread: string, text: string): Promise<void>;
+  post(channel: string, thread: string, text: string, approvalId?: string): Promise<string>;
+  edit(channel: string, message: string, text: string): Promise<void>;
 }
 
 /** The platform-neutral half: who's heard, which Loom thread, and getting answers back. */
@@ -99,12 +113,12 @@ export class ChatBridges {
   private clients = new Map<Platform, PlatformClient>();
   private threads: ThreadRef[] = readThreads();
   private watching = new Map<string, () => void>();
-  /** chat key → the agent text gathered this turn, posted when the turn ends. */
-  private pending = new Map<string, string[]>();
+  private approvals = new Map<string, { ref: ThreadRef; message?: string }>();
   status: Partial<Record<Platform, { connected: boolean; error?: string; heard: number; ignored: number }>> = {};
 
   constructor(
     private runtime: (projectId: string) => Promise<ProjectRuntime>,
+    private decide: DecideApproval,
     private api = { slack: process.env.LOOM_SLACK_API || "https://slack.com/api", discord: process.env.LOOM_DISCORD_API || "https://discord.com/api/v10" },
   ) {}
 
@@ -121,8 +135,8 @@ export class ChatBridges {
     const st: { connected: boolean; error?: string; heard: number; ignored: number } = (this.status[p] = { connected: false, heard: 0, ignored: 0 });
     const on = (m: Incoming) => void this.incoming(cfg, m).catch((e) => logbook.warn("bridge", `${p} message failed`, String(e)));
     const client = p === "slack"
-      ? new SlackClient(this.api.slack, cfg, on, (ok, err) => { st.connected = ok; if (err) st.error = err; else delete st.error; })
-      : new DiscordClient(this.api.discord, cfg, on, (ok, err) => { st.connected = ok; if (err) st.error = err; else delete st.error; });
+      ? new SlackClient(this.api.slack, cfg, on, (click) => this.approve(click), (ok, err) => { st.connected = ok; if (err) st.error = err; else delete st.error; })
+      : new DiscordClient(this.api.discord, cfg, on, (click) => this.approve(click), (ok, err) => { st.connected = ok; if (err) st.error = err; else delete st.error; });
     this.clients.set(p, client);
     try { await client.start(); }
     catch (e) { st.error = (e as Error).message; logbook.warn("bridge", `${p} didn't connect`, st.error); throw e; }
@@ -131,10 +145,11 @@ export class ChatBridges {
   }
 
   async stopAll(): Promise<void> {
-    for (const c of this.clients.values()) await c.stop().catch(() => {});
-    this.clients.clear();
     for (const off of this.watching.values()) off();
     this.watching.clear();
+    this.approvals.clear();
+    for (const c of this.clients.values()) await c.stop().catch(() => {});
+    this.clients.clear();
   }
 
   private async incoming(cfg: BridgeConfig, m: Incoming): Promise<void> {
@@ -164,36 +179,110 @@ export class ChatBridges {
     rt.enqueue({ text: `${m.text.trim()}\n\n(from ${m.userName ?? m.user} on ${m.platform === "slack" ? "Slack" : "Discord"})`, chat: ref.chat, source: "user", target: { kind: "agent", agentId } });
   }
 
-  /** Follow a bridged chat: gather the agent's text, post it when the turn ends; say when it waits on someone. */
+  private approve(click: ApprovalClick): string {
+    const cfg = readBridges()[click.platform];
+    if (!cfg?.enabled || !(cfg.approvers ?? cfg.users).includes(click.user) ||
+        (cfg.channels.length && !cfg.channels.includes(click.channel))) return "You aren't allowed to answer approvals on this bridge.";
+    const action = /^loom:approval:(allow|deny):([a-f0-9]+)$/.exec(click.action);
+    const pending = action && this.approvals.get(action[2]!);
+    if (!pending || pending.ref.platform !== click.platform || pending.ref.channel !== click.channel || pending.message !== click.message) {
+      return "This approval is no longer available here.";
+    }
+    const decision = action![1] as "allow" | "deny";
+    const ok = this.decide(pending.ref.projectId, pending.ref.chat, action![2]!, decision, click.userName || click.user);
+    return ok ? `Approval ${decision === "allow" ? "allowed" : "denied"}.` : "This approval has already been answered.";
+  }
+
+  /** Keep writes in event order so a slow status edit cannot replace a finished answer. */
   private async watch(ref: ThreadRef): Promise<void> {
     const key = `${ref.projectId}:${ref.chat}`;
     if (this.watching.has(key)) return;
     const rt = await this.runtime(ref.projectId);
-    const post = (text: string) => {
-      const client = this.clients.get(ref.platform);
-      if (!client) return;
-      const max = ref.platform === "slack" ? 3800 : 1900;
-      void (async () => { for (const part of chunk(text, max)) await client.post(ref.channel, ref.thread, part); })()
-        .catch((e) => logbook.warn("bridge", `${ref.platform} reply failed`, String(e)));
+    if (this.watching.has(key)) return;
+    const max = ref.platform === "slack" ? 3800 : 1900;
+    let stopped = false;
+    let writes = Promise.resolve();
+    const write = (fn: (client: PlatformClient) => Promise<void>) => {
+      writes = writes.then(async () => {
+        const client = this.clients.get(ref.platform);
+        if (client && !stopped) await fn(client);
+      }).catch((e) => { logbook.warn("bridge", `${ref.platform} reply failed`, String(e)); });
+    };
+    const post = (text: string) => write(async (client) => {
+      for (const part of chunk(text, max)) await client.post(ref.channel, ref.thread, part);
+    });
+    type Turn = { message?: string; parts: string[]; status: string; timer?: ReturnType<typeof setTimeout> };
+    let turn: Turn | undefined;
+    const start = () => {
+      const next: Turn = { parts: [], status: "The agent is working…" };
+      turn = next;
+      write(async (client) => { next.message = await client.post(ref.channel, ref.thread, "The agent is working…"); });
+      return next;
+    };
+    const progress = (text: string) => {
+      const current = turn ?? start();
+      current.status = text.slice(0, max);
+      // Tool bursts need one current status, not a request for every tool event.
+      if (!current.timer) current.timer = setTimeout(() => {
+        current.timer = undefined;
+        const status = current.status;
+        write(async (client) => {
+          if (current.message) await client.edit(ref.channel, current.message, status);
+        });
+      }, 1_000);
     };
     const off = rt.log.onEvent((e: LoomEvent) => {
-      if ((e as { chat?: string }).chat !== ref.chat) return;
-      const p = (e.payload ?? {}) as Record<string, unknown>;
-      if (e.kind === "message" && e.agentId && typeof p.text === "string" && !p.reasoning) {
-        this.pending.set(key, [...(this.pending.get(key) ?? []), p.text]);
-      } else if (e.kind === "run_complete" && e.agentId) {
-        const parts = this.pending.get(key) ?? [];
-        this.pending.delete(key);
-        const err = typeof p.error === "string" ? p.error : "";
-        if (parts.length) post(parts.join("\n\n"));
-        else if (err) post(`${e.agentId} stopped: ${err}`);
+      if ((e.chat ?? "main") !== ref.chat) return;
+      const p = e.payload;
+      if (e.kind === "status" && p.state === "turn_started" && e.agentId) {
+        if (!turn) start();
+      } else if (e.kind === "message" && e.agentId && typeof p.text === "string" && !p.reasoning) {
+        (turn ?? start()).parts.push(p.text);
+      } else if (e.kind === "tool_call" && e.agentId) {
+        progress(`${e.agentId} is using ${String(p.tool ?? "a tool")}…`);
+      } else if (e.agentId && (e.kind === "run_complete" || e.kind === "error" || (e.kind === "status" && p.state === "interrupted"))) {
+        const current = turn;
+        turn = undefined;
+        if (current?.timer) clearTimeout(current.timer);
+        const err = e.kind === "error" ? String(p.message ?? "Unknown error") : typeof p.error === "string" ? p.error : "";
+        const ending = err ? `${e.agentId} stopped: ${err}` : p.state === "interrupted" ? `${e.agentId} was interrupted.` : "";
+        const text = [...(current?.parts ?? []), ...(ending ? [ending] : [])].join("\n\n") || `${e.agentId} finished.`;
+        write(async (client) => {
+          const parts = chunk(text, max);
+          if (current?.message) {
+            try { await client.edit(ref.channel, current.message, parts[0]!); parts.shift(); }
+            catch (e) { logbook.warn("bridge", `${ref.platform} final edit failed`, String(e)); }
+          }
+          for (const part of parts) await client.post(ref.channel, ref.thread, part);
+        });
       } else if (e.kind === "needs_input" && typeof p.question === "string") {
+        progress(`${e.agentId ?? "The agent"} is waiting for your reply…`);
         post(`${e.agentId ?? "The agent"} asks: ${p.question}`);
-      } else if (e.kind === "approval" && p.phase === "requested") {
-        post(`⏸ ${e.agentId ?? "The agent"} is waiting for approval to use ${String(p.tool ?? "a tool")} — approve it in Loom or on your phone.`);
+      } else if (e.kind === "approval" && typeof p.approvalId === "string") {
+        const id = p.approvalId;
+        if (p.phase === "requested") {
+          const pending = { ref, message: undefined as string | undefined };
+          this.approvals.set(id, pending);
+          progress(`${e.agentId ?? "The agent"} is waiting for approval to use ${String(p.tool ?? "a tool")}…`);
+          const text = `⏸ ${e.agentId ?? "The agent"} requests approval to use ${String(p.tool ?? "a tool")}.\n${String(p.input ?? "")}`;
+          const limit = Math.min(max, 2800);
+          const preview = text.length > limit ? text.slice(0, limit - 40) + "\n… Full request in Loom." : text;
+          write(async (client) => { pending.message = await client.post(ref.channel, ref.thread, preview, id); });
+        } else if (p.phase === "decided") {
+          const pending = this.approvals.get(id);
+          this.approvals.delete(id);
+          if (pending) write(async (client) => {
+            if (pending.message) await client.edit(ref.channel, pending.message, `${p.behavior === "allow" ? "Allowed" : "Denied"}: ${String(p.tool ?? "a tool")}${p.by ? ` by ${String(p.by)}` : ""}.${p.message ? ` ${String(p.message)}` : ""}`.slice(0, max));
+          });
+          if (turn) progress(`${e.agentId ?? "The agent"} is working…`);
+        }
       }
     });
-    this.watching.set(key, off);
+    this.watching.set(key, () => {
+      stopped = true;
+      if (turn?.timer) clearTimeout(turn.timer);
+      off();
+    });
   }
 }
 
@@ -201,13 +290,21 @@ export class ChatBridges {
 // Slack (Socket Mode)
 // ---------------------------------------------------------------------------
 
+interface SlackInteraction {
+  type?: string;
+  user?: { id?: string; name?: string; username?: string };
+  channel?: { id?: string };
+  message?: { ts?: string };
+  actions?: Array<{ action_id?: string }>;
+}
+
 class SlackClient implements PlatformClient {
   private ws: WebSocket | null = null;
   private stopped = false;
   private botUser = "";
   private retry = 1_000;
 
-  constructor(private api: string, private cfg: BridgeConfig, private on: (m: Incoming) => void, private state: (ok: boolean, err?: string) => void) {}
+  constructor(private api: string, private cfg: BridgeConfig, private on: (m: Incoming) => void, private approval: (click: ApprovalClick) => string, private state: (ok: boolean, err?: string) => void) {}
 
   private async call(method: string, token: string, body: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const res = await fetch(`${this.api}/${method}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json; charset=utf-8" }, body: JSON.stringify(body) });
@@ -228,10 +325,21 @@ class SlackClient implements PlatformClient {
     this.ws = ws;
     ws.on("open", () => { this.retry = 1_000; this.state(true); });
     ws.on("message", (data) => {
-      let env: { envelope_id?: string; type?: string; payload?: { event?: Record<string, unknown> } };
+      let env: { envelope_id?: string; type?: string; payload?: { event?: Record<string, unknown> } & SlackInteraction };
       try { env = JSON.parse(String(data)); } catch { return; }
       if (env.envelope_id) ws.send(JSON.stringify({ envelope_id: env.envelope_id }));
       if (env.type === "disconnect") { ws.close(); return; }
+      if (env.type === "interactive") {
+        const p = env.payload;
+        if (p?.type !== "block_actions" || !p.user?.id || !p.channel?.id || !p.message?.ts) return;
+        const action = p.actions?.[0]?.action_id;
+        if (typeof action !== "string" || !action.startsWith("loom:approval:")) return;
+        const text = this.approval({ platform: "slack", channel: p.channel.id, message: p.message.ts, user: p.user.id,
+          userName: p.user.name || p.user.username || p.user.id, action });
+        void this.call("chat.postEphemeral", this.cfg.botToken, { channel: p.channel.id, user: p.user.id, text })
+          .catch((e) => logbook.warn("bridge", "slack interaction reply failed", String(e)));
+        return;
+      }
       if (env.type !== "events_api") return;
       const ev = env.payload?.event ?? {};
       if (ev.bot_id || ev.subtype || typeof ev.text !== "string" || typeof ev.user !== "string") return;
@@ -254,8 +362,18 @@ class SlackClient implements PlatformClient {
     ws.on("error", (e) => this.state(false, e.message));
   }
 
-  async post(channel: string, thread: string, text: string): Promise<void> {
-    await this.call("chat.postMessage", this.cfg.botToken, { channel, thread_ts: thread, text });
+  async post(channel: string, thread: string, text: string, approvalId?: string): Promise<string> {
+    const blocks = approvalId ? [
+      { type: "section", text: { type: "plain_text", text } },
+      { type: "actions", elements: ["allow", "deny"].map((decision) => ({ type: "button", text: { type: "plain_text", text: decision === "allow" ? "Allow" : "Deny" },
+        action_id: `loom:approval:${decision}:${approvalId}`, style: decision === "allow" ? "primary" : "danger" })) },
+    ] : undefined;
+    const out = await this.call("chat.postMessage", this.cfg.botToken, { channel, thread_ts: thread, text, ...(blocks ? { blocks } : {}) });
+    return String(out.ts ?? "");
+  }
+
+  async edit(channel: string, message: string, text: string): Promise<void> {
+    await this.call("chat.update", this.cfg.botToken, { channel, ts: message, text, blocks: [] });
   }
 
   async stop(): Promise<void> {
@@ -271,6 +389,18 @@ class SlackClient implements PlatformClient {
 // GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
 const DISCORD_INTENTS = 1 | (1 << 9) | (1 << 12) | (1 << 15);
 
+interface DiscordUser { id: string; username?: string; global_name?: string }
+interface DiscordInteraction {
+  type?: number;
+  id?: string;
+  token?: string;
+  channel_id?: string;
+  message?: { id?: string };
+  member?: { user?: DiscordUser; nick?: string };
+  user?: DiscordUser;
+  data?: { component_type?: number; custom_id?: string };
+}
+
 class DiscordClient implements PlatformClient {
   private ws: WebSocket | null = null;
   private beat: ReturnType<typeof setInterval> | null = null;
@@ -279,12 +409,12 @@ class DiscordClient implements PlatformClient {
   private stopped = false;
   private retry = 1_000;
 
-  constructor(private api: string, private cfg: BridgeConfig, private on: (m: Incoming) => void, private state: (ok: boolean, err?: string) => void) {}
+  constructor(private api: string, private cfg: BridgeConfig, private on: (m: Incoming) => void, private approval: (click: ApprovalClick) => string, private state: (ok: boolean, err?: string) => void) {}
 
   private async rest(method: string, route: string, body?: unknown): Promise<Record<string, unknown>> {
     const res = await fetch(`${this.api}${route}`, { method, headers: { authorization: `Bot ${this.cfg.botToken}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const out = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!res.ok) throw new Error(`discord ${route}: ${String(out.message ?? res.status)}`);
+    if (!res.ok) throw new Error(`discord ${route.startsWith("/interactions/") ? "/interactions/…/callback" : route}: ${String(out.message ?? res.status)}`);
     return out;
   }
 
@@ -310,6 +440,18 @@ class DiscordClient implements PlatformClient {
       if (m.op === 7 || m.op === 9) { ws.close(); return; } // reconnect / invalid session
       if (m.op !== 0) return;
       if (m.t === "READY") { this.me = String((m.d?.user as { id?: string } | undefined)?.id ?? ""); this.retry = 1_000; this.state(true); return; }
+      if (m.t === "INTERACTION_CREATE") {
+        const d = m.d as DiscordInteraction | undefined;
+        const user = d?.member?.user ?? d?.user;
+        if (d?.type !== 3 || d.data?.component_type !== 2 || !d.id || !d.token || !d.channel_id || !d.message?.id || !user?.id ||
+            typeof d.data.custom_id !== "string" || !d.data.custom_id.startsWith("loom:approval:")) return;
+        const text = this.approval({ platform: "discord", channel: d.channel_id, message: d.message.id, user: user.id,
+          userName: d.member?.nick || user.global_name || user.username || user.id, action: d.data.custom_id });
+        void this.rest("POST", `/interactions/${encodeURIComponent(d.id)}/${encodeURIComponent(d.token)}/callback`,
+          { type: 4, data: { content: text, flags: 64, allowed_mentions: { parse: [] } } })
+          .catch((e) => logbook.warn("bridge", "discord interaction reply failed", String(e)));
+        return;
+      }
       if (m.t !== "MESSAGE_CREATE") return;
       const d = m.d as { id: string; channel_id: string; guild_id?: string; content?: string; author?: { id: string; username?: string; bot?: boolean }; mentions?: Array<{ id: string }> };
       if (!d.author || d.author.bot || typeof d.content !== "string") return;
@@ -330,8 +472,15 @@ class DiscordClient implements PlatformClient {
     ws.on("error", (e) => this.state(false, e.message));
   }
 
-  async post(channel: string, _thread: string, text: string): Promise<void> {
-    await this.rest("POST", `/channels/${channel}/messages`, { content: text, allowed_mentions: { parse: [] } });
+  async post(channel: string, _thread: string, text: string, approvalId?: string): Promise<string> {
+    const components = approvalId ? [{ type: 1, components: ["allow", "deny"].map((decision) => ({ type: 2,
+      label: decision === "allow" ? "Allow" : "Deny", style: decision === "allow" ? 3 : 4, custom_id: `loom:approval:${decision}:${approvalId}` })) }] : [];
+    const out = await this.rest("POST", `/channels/${channel}/messages`, { content: text, components, allowed_mentions: { parse: [] } });
+    return String(out.id ?? "");
+  }
+
+  async edit(channel: string, message: string, text: string): Promise<void> {
+    await this.rest("PATCH", `/channels/${channel}/messages/${message}`, { content: text, components: [], allowed_mentions: { parse: [] } });
   }
 
   async stop(): Promise<void> {
