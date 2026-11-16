@@ -85,6 +85,7 @@ describe("packaging · the desktop app", () => {
     // and the shell that reads that feed has to actually ship inside the app
     expect(build.files).toContain("updater.js");
     expect(build.files).toContain("updater-mac.js");
+    expect(build.files).toContain("webview-guard.js");
     expect(build.files).toContain("node_modules/**/*");
     expect(pkg.dependencies["electron-updater"]).toBeTruthy();
   });

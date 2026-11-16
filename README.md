@@ -596,6 +596,14 @@ or phone account screens are included.
 
 ## The Browser tab
 
+On **Loom Desktop**, external HTTP(S) pages open in an isolated browser guest,
+including sites that refuse iframe embedding. Back, forward and reload use the
+page’s own history; the address bar remembers visited URLs separately for each
+project and pane. Cookies and site storage persist in the dedicated
+`persist:loom-browser` session, separate from Loom. Permissions, downloads and
+popup windows are denied. Local dev-server previews still use Loom’s proxy and
+iframe; web and phone builds keep their existing iframe behavior.
+
 Agents write Playwright specs constantly and could never watch them run. The
 **Browser** tab (next to Console in the dock) lists the project's specs
 (`*.spec.*`, `*.e2e.*` — never inside `node_modules`), runs one on click with

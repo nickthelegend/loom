@@ -1,9 +1,14 @@
-/** Browser preview module. See README.md for ownership and startup. */
+/**
+ * Browser preview module. See README.md for ownership and startup.
+ * Desktop browsing approach: Nuphos's BrowserView / webview-guard
+ * (Apache-2.0, © 2026 Zeabur Inc.), implemented for Loom's existing preview.
+ */
 import { api } from './connection.js';
 import { esc } from './format.js';
 import { ICONS } from './icons.js';
 import { toast } from './notifications.js';
 import { state } from './state.js';
+import { paneId } from './workspace.js';
 
 
   // ---- Browser -------------------------------------------------------------
@@ -413,7 +418,70 @@ import { state } from './state.js';
 
   /** The frame the pane is showing, if any. */
   function browFrame(){
-    return document.querySelector("#browframe iframe");
+    return document.querySelector("#browframe iframe, #browframe webview");
+  }
+
+
+  function nativeBrowser(){
+    if (window.loomNative && window.loomNative.webview) return true;
+    // Split panes are same-origin frames; the preload belongs to their parent.
+    try { return !!(paneId() && window.parent.loomNative && window.parent.loomNative.webview); }
+    catch (e) { return false; }
+  }
+
+
+  function isWebview(frame){ return frame && frame.tagName === "WEBVIEW"; }
+
+
+  function browserHistoryKey(){
+    return "loomBrowHistory:" + brow.pid + ":" + (paneId() || "main");
+  }
+
+
+  function browserHistory(){
+    try {
+      var saved = JSON.parse(localStorage.getItem(browserHistoryKey()) || "[]");
+      return Array.isArray(saved) ? saved.filter(function(u){ return typeof u === "string" && /^https?:\/\//i.test(u); }).slice(0, 100) : [];
+    } catch (e) { return []; }
+  }
+
+
+  function drawBrowserHistory(){
+    if (!nativeBrowser()) return;
+    var input = document.getElementById("browurl");
+    if (!input) return;
+    var list = document.getElementById("browhistory");
+    if (!list) {
+      list = document.createElement("datalist");
+      list.id = "browhistory";
+      input.after(list);
+      input.setAttribute("list", list.id);
+    }
+    list.innerHTML = browserHistory().map(function(u){ return '<option value="' + esc(u) + '"></option>'; }).join("");
+  }
+
+
+  function rememberBrowserUrl(u){
+    if (!nativeBrowser()) return;
+    var urls = browserHistory().filter(function(x){ return x !== u; });
+    urls.unshift(u);
+    try { localStorage.setItem(browserHistoryKey(), JSON.stringify(urls.slice(0, 100))); } catch (e) {}
+    drawBrowserHistory();
+  }
+
+
+  function updateBrowserNavigation(){
+    if (!nativeBrowser()) return;
+    var frame = browFrame();
+    var back = document.getElementById("browback"), forward = document.getElementById("browfwd");
+    var canBack = brow.bridged, canForward = brow.bridged;
+    if (isWebview(frame)) {
+      canBack = false; canForward = false;
+      // Electron's navigation methods become available only after dom-ready.
+      try { canBack = frame.canGoBack(); canForward = frame.canGoForward(); } catch (e) {}
+    }
+    if (back) back.disabled = !canBack;
+    if (forward) forward.disabled = !canForward;
   }
 
 
@@ -544,6 +612,7 @@ import { state } from './state.js';
     brow.src = href;
     brow.url = toUpstream(href);
     setAddress(brow.url);
+    rememberBrowserUrl(brow.url);
   }
 
 
@@ -589,11 +658,12 @@ import { state } from './state.js';
     brow.proxy = "";
     brow.upstream = "";
     loadFrame(u, u);
-    if (!isLoopbackUrl(u)) watchFraming(u, brow.seq, state.pid);
+    if (!isWebview(browFrame()) && !isLoopbackUrl(u)) watchFraming(u, brow.seq, state.pid);
   }
 
 
   function loadFrame(src, shown){
+    if (brow.readyTimer) { clearTimeout(brow.readyTimer); brow.readyTimer = null; }
     brow.src = src;
     brow.url = shown;
     brow.ready = false;
@@ -605,6 +675,39 @@ import { state } from './state.js';
     setAddress(shown);
     var host = document.getElementById("browframe");
     if (!host) return;
+    if (nativeBrowser() && !brow.bridged && !isLoopbackUrl(src)) {
+      var guest = host.querySelector("webview");
+      if (!guest) {
+        host.innerHTML = '<webview partition="persist:loom-browser"></webview>' +
+          '<div class="browblock" id="browblock" hidden></div>';
+        guest = host.querySelector("webview");
+        var active = function(){ return browFrame() === guest; };
+        var navigated = function(ev){
+          if (!active() || ev.isMainFrame === false) return;
+          follow(ev.url);
+          hideBlocked();
+          updateBrowserNavigation();
+        };
+        guest.addEventListener("did-navigate", navigated);
+        guest.addEventListener("did-navigate-in-page", navigated);
+        guest.addEventListener("dom-ready", function(){ if (active()) updateBrowserNavigation(); });
+        guest.addEventListener("did-start-loading", function(){ if (active()) hideBlocked(); });
+        guest.addEventListener("did-stop-loading", function(){
+          if (!active()) return;
+          brow.loaded = true;
+          updateBrowserNavigation();
+        });
+        guest.addEventListener("did-fail-load", function(ev){
+          if (!active() || ev.isMainFrame === false || ev.errorCode === -3) return;
+          showBlocked(brow.url, ev.errorDescription || "it didn't load", true);
+        });
+      }
+      hideBlocked();
+      guest.setAttribute("src", src);
+      updateBrowserNavigation();
+      applyBrowWidth();
+      return;
+    }
     // Popups, alerts and downloads behave as they would in a tab. Same-origin
     // stays: the bridge's page needs its own storage and cookies — and the
     // proxy is its own origin, never the app's. The one address that WOULD be
@@ -620,6 +723,7 @@ import { state } from './state.js';
       frame.addEventListener("error", function(){ showBlocked(shown, "it didn't load"); });
     }
     applyBrowWidth();
+    updateBrowserNavigation();
   }
 
 
@@ -643,10 +747,10 @@ import { state } from './state.js';
   }
 
 
-  function showBlocked(u, why){
+  function showBlocked(u, why, failed){
     var el = document.getElementById("browblock");
     if (!el) return;
-    el.innerHTML = "<div><b>This site doesn’t allow being shown inside Loom.</b></div>" +
+    el.innerHTML = "<div><b>" + (failed ? "This page couldn’t load." : "This site doesn’t allow being shown inside Loom.") + "</b></div>" +
       (why ? '<div class="sub">' + esc(why) + "</div>" : "") +
       '<div class="sub">' + esc(u) + "</div>" +
       '<button class="btn" id="browblockopen">Open in browser</button>';
@@ -674,7 +778,15 @@ import { state } from './state.js';
 
   /** Back or forward in the page's own history — only the page can do it. */
   function historyGo(n){
-    if (!browFrame()) return toast("open a preview first");
+    var frame = browFrame();
+    if (!frame) return toast("open a preview first");
+    if (isWebview(frame)) {
+      try {
+        if (n < 0 && frame.canGoBack()) frame.goBack();
+        if (n > 0 && frame.canGoForward()) frame.goForward();
+      } catch (e) {}
+      return;
+    }
     if (!brow.bridged) return toast("back and forward work on pages previewed through Loom");
     tellPage({ source: "loom-app", kind: "history", go: n });
   }
@@ -685,6 +797,10 @@ import { state } from './state.js';
     var frame = browFrame();
     if (!brow.src) return;
     if (!frame) return loadFrame(brow.src, brow.url || brow.src);
+    if (isWebview(frame)) {
+      try { frame.reload(); } catch (e) {}
+      return;
+    }
     brow.ready = false;
     brow.loaded = false;
     frame.src = brow.src;
@@ -831,8 +947,10 @@ import { state } from './state.js';
     }
     // Same project, fresh markup (another chat, a re-render): the page you
     // were on comes back rather than the hint.
-    if (brow.src && host && !host.querySelector("iframe")) loadFrame(brow.src, brow.url || brow.src);
+    if (brow.src && host && !browFrame()) loadFrame(brow.src, brow.url || brow.src);
     else setAddress(brow.url);
+    drawBrowserHistory();
+    updateBrowserNavigation();
     pageLogTab(pg.tab);
     drawSpecOut();
     drawBrowser();
@@ -903,7 +1021,7 @@ import { state } from './state.js';
   /** The emulated width, scaled down when the pane is narrower than it. */
   function applyBrowWidth(){
     var host = document.getElementById("browframe");
-    var frame = host && host.querySelector("iframe");
+    var frame = browFrame();
     if (!frame) return;
     if (!brow.width) {
       frame.style.width = "100%";

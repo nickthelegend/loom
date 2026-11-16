@@ -28,6 +28,7 @@
     },
     "files": [
       "main.js",
+      "webview-guard.js",
       "loom-app.js",
       "pages.js",
       "updater.js",
