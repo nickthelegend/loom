@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **ACP agents receive the project's MCP servers.** New and loaded sessions now get enabled servers that pass health filtering, with arguments and environment for stdio and headers for HTTP/SSE. Remote servers are sent only when the agent advertises support for their transport.
+
 ### Added
 
 - Steer a running Codex or Claude turn with `loom steer <text> [--chat <chat>]`, or the steering API. Unsupported or idle agents fall back to the prompt queue with a reason; queued prompts can be promoted, and accepted steering appears as a user message in the same chat. Agent status exposes `capabilities.steer` for clients (#373).
@@ -16,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
 
 ### Fixed
+
+- **Slack and Discord: live turn status and channel approvals.** A status message shows the current tool and is replaced by the final answer. Allow / Deny buttons let configured `approvers` (default: `users`) answer in the channel, with their names recorded in the audit trail. Configure approvers in Settings, the bridge API, or `loom bridge --approvers`.
 
 - Watch `.loom/config.json` for debounced edits and update running projects in place. Agent changes wait for their current turn to finish; applied changes and invalid edits are reported in the thread, with the last working config kept on errors (#358).
 
