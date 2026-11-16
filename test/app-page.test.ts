@@ -195,7 +195,7 @@ describe("web app page", () => {
 
   it("keeps the New project flow (button, modal, native picker fallback)", () => {
     expect(APP_HTML).toContain('id="newproj"');
-    expect(APP_HTML).toContain("function openProjectModal()");
+    expect(APP_HTML).toContain("function openProjectModal(");
     // the Electron picker is optional: the browser build types a path instead
     expect(APP_HTML).toContain("window.loomNative && window.loomNative.pickFolder");
   });

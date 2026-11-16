@@ -564,6 +564,8 @@ export interface LiveText extends StreamDelta {
 
 export interface AgentCapabilities {
   tier: AgentTier;
+  /** Absent on older adapters means unsupported. */
+  steer?: boolean;
   /**
    * Does this agent's CLI really accept MCP server config for a turn?
    *
@@ -594,6 +596,8 @@ export interface BaseAgent {
 /** Full-duplex adapter — may hold the baton. */
 export interface Adapter extends BaseAgent {
   send(input: SendInput): Promise<void>;
+  /** Add input to this chat's active turn. False means not delivered; errors may mean delivery is unknown. */
+  steer?(chat: string, text: string): Promise<boolean>;
   interrupt(): Promise<void>;
   /** Working-tree changes attributable to the agent (porcelain-ish). */
   diff(): Promise<string>;
@@ -616,6 +620,7 @@ export function isAdapter(a: AnyAgent): a is Adapter {
 // ---------------------------------------------------------------------------
 
 export interface AgentStatus {
+  capabilities: { steer: boolean };
   id: string;
   kind: string;
   role: AgentRole;
@@ -646,6 +651,15 @@ export interface AgentStatus {
   /** Can answer but not change files (a model agent without --write): it holds the baton read-only (#257). */
   readOnly?: boolean;
 }
+
+/** Responses from both steering endpoints. A fallback stays editable in the normal prompt queue. */
+export type SteerResult = { steered: true } | {
+  steered: false;
+  queued: number;
+  queueId: string;
+  /** Display this when steering fell back, even if the queue can dispatch immediately. */
+  reason: string;
+};
 
 export interface AgentContextUsage {
   usedTokens: number;

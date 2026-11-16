@@ -17,10 +17,12 @@
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
 import WebSocket from "ws";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { readDaemonConfig } from "../src/core/registry.js";
+import { listProjects, readDaemonConfig, writeDaemonConfig } from "../src/core/registry.js";
 import { APP_HTML } from "../src/daemon/app-page.js";
 import { DaemonClient } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
@@ -808,6 +810,84 @@ describe("web app · chat folders and agent groups", () => {
     for (const id of [a, b, loose]) await fetch(`${baseUrl}/api/projects/${projectId}/chats/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
     expect(m.errors.join("\n")).toBe("");
   });
+});
+
+describe("web app · steer a running turn (#373)", () => {
+  it("shows Steer while a steerable turn runs, and puts the text into that turn", async () => {
+    const call = (method: string, p: string, body?: unknown) => fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+      method, headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}),
+    }).then((r) => r.json());
+    const status = () => call("GET", "") as Promise<{ project?: { agents: Array<{ id: string; busy: boolean }> }; agents?: Array<{ id: string; busy: boolean }> }>;
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    expect(($(m, "#steer") as HTMLElement).style.display).toBe("none");
+    const agent = ((await status()).project?.agents ?? (await status()).agents ?? [])[0]!.id;
+    await call("POST", "/messages", { text: "sleep:8000 long job", chat: "main", agentId: agent });
+    await waitUntil(() => ($(m, "#steer") as HTMLElement).style.display !== "none", { timeoutMs: 10_000 }).catch(async (e) => {
+      throw new Error(`${e.message}\nstatus: ${JSON.stringify(await status()).slice(0, 900)}\nstop: ${($(m, "#stop") as HTMLElement).style.display}`);
+    });
+    expect(text(m, "#hint")).toContain("Steer");
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    box.value = "also add a test";
+    click($(m, "#steer"));
+    await waitUntil(() => [...m.window.document.querySelectorAll(".msg.user")].some((u) => (u.textContent ?? "").includes("also add a test") && !!u.querySelector(".usteer")), { timeoutMs: 10_000 });
+    // the one turn answers with both, and nothing was left waiting in the queue
+    await waitUntil(() => [...m.window.document.querySelectorAll(".msg.agent .bubble")].some((b) => (b.textContent ?? "").includes("long job") && (b.textContent ?? "").includes("also add a test")), { timeoutMs: 15_000 });
+    expect(((await call("GET", "/queue")) as { queue?: unknown[]; items?: unknown[] }).items ?? []).toHaveLength(0);
+    await waitUntil(() => ($(m, "#steer") as HTMLElement).style.display === "none");
+    expect(m.errors.join("\n")).toBe("");
+  }, 40_000);
+});
+
+describe("web app · New project from anywhere (#371)", () => {
+  it("starts a project from a name, clones one from a URL, and still adds an existing folder", async () => {
+    // never the real ~/Loom Projects: point the daemon at a temp root first
+    const root = path.join(tmpDir("np-root"), "Loom Projects");
+    writeDaemonConfig({ ...readDaemonConfig()!, projectsRoot: root });
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, "#newproj");
+    click($(m, "#newproj"));
+    await waitUntil(() => !!$(m, ".npmodal"));
+    const tabs = [...m.window.document.querySelectorAll(".npseg [data-np]")].map((b) => b.textContent);
+    expect(tabs).toEqual(["New", "Clone", "Existing folder"]);
+    expect($(m, '.npseg [data-np="new"]')!.classList.contains("on")).toBe(true);
+    // a name is all it takes; an empty one is refused under the field
+    click($(m, "#pcreate"));
+    await waitUntil(() => text(m, "#nperr").length > 0);
+    ($(m, "#npname") as HTMLInputElement).value = "Landing Page";
+    click($(m, "#pcreate"));
+    await waitUntil(() => !$(m, ".npmodal"), { timeoutMs: 20_000 });
+    const made = listProjects().find((p) => p.dir === path.join(root, "landing-page"));
+    expect(made, "registered under the projects root").toBeTruthy();
+    expect(fs.existsSync(path.join(root, "landing-page", ".git"))).toBe(true);
+    expect(fs.readFileSync(path.join(root, "landing-page", "README.md"), "utf8")).toContain("Landing Page");
+
+    // Clone: a local bare repo stands in for GitHub
+    const src = makeProjectDir({ name: "cloneme" });
+    fs.writeFileSync(path.join(src, ".gitignore"), ".loom/\n");
+    const git = (args: string[], cwd: string) => execFileSync("git", args, { cwd, stdio: "pipe" });
+    git(["init", "-q"], src); git(["add", "."], src);
+    git(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "x"], src);
+    const bare = path.join(tmpDir("np-bare"), "widgets.git");
+    git(["clone", "-q", "--bare", src, bare], path.dirname(bare));
+    click($(m, "#newproj"));
+    await waitUntil(() => !!$(m, ".npmodal"));
+    click($(m, '.npseg [data-np="clone"]'));
+    expect(($(m, '.nppane[data-pane="clone"]') as HTMLElement).hidden).toBe(false);
+    expect(($(m, '.nppane[data-pane="new"]') as HTMLElement).hidden).toBe(true);
+    ($(m, "#npurl") as HTMLInputElement).value = pathToFileURL(bare).href;
+    click($(m, "#pcreate"));
+    await waitUntil(() => !$(m, ".npmodal"), { timeoutMs: 30_000 });
+    expect(listProjects().some((p) => p.dir === path.join(root, "widgets"))).toBe(true);
+
+    // and the folder you already have is one tab away, as before
+    click($(m, "#newproj"));
+    await waitUntil(() => !!$(m, ".npmodal"));
+    click($(m, '.npseg [data-np="folder"]'));
+    expect($(m, "#pdir")).toBeTruthy();
+    click($(m, "#pcancel"));
+    expect(m.errors.join("\n")).toBe("");
+  }, 60_000);
 });
 
 describe("web app · the sidebar collapses", () => {

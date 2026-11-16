@@ -379,6 +379,8 @@ import { shortModel } from './permissions.js';
           '<button type="button" class="uact ucopy" title="Copy" aria-label="copy your message">' + ICONS.copy + "</button>" +
           (e.id && state.starSet && state.starSet[e.id] ? '<span class="wstar" title="starred">' + ICONS.star + "</span>" : "") +
           '<button type="button" class="uact ustar" title="Star" aria-label="star your message">' + ICONS.star + "</button>" +
+          // a steer went into a turn that was already running, not a new one (#373)
+          (p.steer ? '<span class="usteer" title="sent into the turn that was running">steered</span>' : "") +
           '<span class="wt" data-rel="' + Number(e.ts || 0) + '" title="' + esc(new Date(Number(e.ts) || Date.now()).toLocaleString()) + '">' + relClock(e.ts) + "</span></div></div>";
       }
       var h = hue(e.agentId);

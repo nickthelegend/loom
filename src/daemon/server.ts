@@ -142,6 +142,7 @@ export class LoomDaemon {
   private wss: WebSocketServer | null = null;
   private auth: AuthManager;
   private runtimes = new Map<string, ProjectRuntime>();
+  private closeProjects: () => Promise<void> = async () => {};
   private sockets = new Map<WebSocket, { project?: string; scope?: string[] }>();
   private readonly delivery = new ClientDelivery(this.sockets, (socket) => socket.terminate());
   /** In-flight self-heal recheck timers, cleared on close. */
@@ -341,6 +342,7 @@ export class LoomDaemon {
       get specRunner() { return daemon.specRunner; },
       startHealLoop: (...args) => this.startHealLoop(...args),
       broadcastTerm: (...args) => this.broadcastTerm(...args),
+      broadcastProjects: (frame) => this.delivery.publish(frame, { kind: "admin" }),
       get approvals() { return daemon.approvals; },
     };
 
@@ -511,7 +513,7 @@ export class LoomDaemon {
     registerTeamRoutes(app, ctx);
     registerCloudRoutes(app, ctx);
     registerClientsRoutes(app, ctx);
-    registerProjectsRoutes(app, ctx);
+    this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
     registerObservabilityRoutes(app, withRuntime);
     registerAlertsRoutes(app, ctx);
@@ -1097,6 +1099,7 @@ export class LoomDaemon {
   }
 
   async close(): Promise<void> {
+    await this.closeProjects();
     this.triggers.stop();
     await this.bridges.stopAll().catch(() => { });
     // A broker pointing at a closed daemon would leave the next adapter
