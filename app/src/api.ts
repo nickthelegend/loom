@@ -950,6 +950,19 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** A schedule or webhook that starts a turn on its own (#346); the secret never leaves the computer. */
+export interface Trigger {
+  id: string; name: string; kind: "schedule" | "webhook"; cron?: string; everyMin?: number; prompt: string;
+  agent?: string; chat?: string; enabled: boolean; createdAt: number; lastFiredAt?: number; nextAt?: number | null; hasSecret?: boolean;
+}
+export interface TriggerRun { trigger: string; at: number; ok: boolean; note: string }
+export const getTriggers = (c: Creds, id: string) => api<{ triggers: Trigger[]; runs: TriggerRun[] }>(c, `/api/projects/${id}/triggers`);
+/** Run one now; the owner's own phone may (#361). */
+export const fireTrigger = (c: Creds, id: string, tid: string) =>
+  api<{ run: TriggerRun }>(c, `/api/projects/${id}/triggers/${encodeURIComponent(tid)}/fire`, { method: "POST", body: "{}" });
+/** Pause or resume — the one change the phone may make; editing stays on the computer. */
+export const setTriggerEnabled = (c: Creds, id: string, tid: string, enabled: boolean) =>
+  api<{ trigger: Trigger }>(c, `/api/projects/${id}/triggers/${encodeURIComponent(tid)}`, { method: "PATCH", body: JSON.stringify({ enabled }) });
 
 export async function pingDaemon(c: Creds): Promise<DaemonReachability> {
   const controller = new AbortController();
