@@ -178,6 +178,9 @@ function mount({
           ) as unknown as Promise<Response>;
         }
         const p = new URL(String(input), baseUrl).pathname;
+        if (p.endsWith("/agents/models")) {
+          return Promise.resolve(new Response(JSON.stringify({ models: ["test/model"] })));
+        }
         // A rotated daemon token: everything 401s until the page re-bootstraps,
         // at which point it is holding the new one and calls succeed again.
         if (stale && p.startsWith("/api/")) {
@@ -287,6 +290,26 @@ const mousedown = (m: Mounted, el: Element | null) => {
 };
 
 describe("web app · composer modes", () => {
+  it("chooses a model and count before adding Orchestra workers", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await ready(m, '#cmode [data-cmode="orch"]');
+    click($(m, '#cmode [data-cmode="orch"]'));
+    await ready(m, '#cowadd');
+    click($(m, '#cowadd'));
+    await ready(m, '.cfscrim form');
+    await waitUntil(() => !!$(m, '#addmodels option'));
+    expect(($(m, '#addmodels option') as HTMLOptionElement).value).toBe("test/model");
+    expect(($(m, '#addcount') as HTMLInputElement).value).toBe("1");
+    const model = $(m, '#addmodel') as HTMLInputElement;
+    expect(model.required).toBe(true);
+    click($(m, '.cfscrim [type="submit"]'));
+    expect(model.checkValidity()).toBe(false);
+    click($(m, '.cfscrim [data-cancel]'));
+    await waitUntil(() => !($(m, '#cowadd') as HTMLButtonElement).disabled);
+    expect($(m, '.cfscrim form')).toBeNull();
+    expect(m.errors.join("\n")).toBe("");
+  });
+
   it("Orchestrate swaps the agent picker for an orchestrator, workers and a parallel stepper", async () => {
     const m = mount({ hash: `#p/${projectId}` });
     await waitUntil(() => !!$(m, '#box[data-bound="1"]'));

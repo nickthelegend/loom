@@ -10,6 +10,7 @@ import { state } from '../state.js';
 import { openTaskModal } from '../tasks.js';
 import { permBadge,permOf } from '../permissions.js';
 import { relClock } from '../transcript.js';
+import { addAgents } from './add-agent.js';
 
 /** explorer behavior for one mounted project.
  * view contains live accessors to the owning project view's state and callbacks.
@@ -668,11 +669,12 @@ export function createExplorer(view) {
         Array.prototype.forEach.call(box.querySelectorAll(".addrow:not(.off)"), function(row){
           row.onclick = function(){
             var kind = row.getAttribute("data-add");
-            api("/api/projects/" + view.pid + "/agents", { method: "POST", body: JSON.stringify({ kind: kind }) })
+            addAgents(view.pid, kind)
               .then(function(a){
+                if (!a) return;
                 // The role is the kind until you say otherwise — a description,
                 // not an opinion. Click it to name the job you actually have.
-                toast(a.id + " added \u00b7 click its role to name the job");
+                toast((a.agents || [a]).map(function(agent){ return agent.id; }).join(", ") + " added \u00b7 click a role to name the job");
                 state.avail = null;
                 view.refresh();
               })

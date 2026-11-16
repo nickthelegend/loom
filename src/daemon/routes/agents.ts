@@ -2,6 +2,7 @@ import type { Express } from 'express';
 import { listModelsForKind } from '../system.js';
 import type { WithRuntime } from './context.js';
 import { MAIN_CHAT } from '../../types.js';
+import { knownAgentKinds } from '../../adapters/index.js';
 /** Register agents routes in the order established by LoomDaemon.routes(). */
 export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): void {
 
@@ -10,18 +11,44 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
   app.post(
     "/api/projects/:id/agents",
     withRuntime(async (rt, req, res) => {
-      const { kind, id, role, options } = (req.body ?? {}) as {
+      const { kind, id, as, role, options, model, count = 1 } = (req.body ?? {}) as {
         kind?: string;
         id?: string;
+        as?: string;
         role?: string;
         options?: Record<string, unknown>;
+        model?: string;
+        count?: number;
       };
-      if (!kind?.trim()) return void res.status(400).json({ error: "missing kind" });
+      if (typeof kind !== "string" || !kind.trim()) return void res.status(400).json({ error: "missing kind" });
+      if (!Number.isInteger(count) || count < 1 || count > 8) {
+        return void res.status(400).json({ error: "count must be an integer from 1 to 8" });
+      }
+      if (model !== undefined && typeof model !== "string") {
+        return void res.status(400).json({ error: "model must be a string" });
+      }
       try {
-        res.json(rt.addAgent(kind.trim(), { id, role, ...(options ? { options } : {}) }));
+        const agents = Array.from({ length: count }, () => rt.addAgent(kind.trim(), {
+          id: id ?? as,
+          role,
+          options: { ...options, ...(model !== undefined ? { model } : {}) },
+          ...(count > 1 ? { series: true } : {}),
+        }));
+        res.json({ ...agents[0], agents });
       } catch (err) {
         res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
       }
+    }),
+  );
+
+  // Model suggestions before the first instance of a kind has been added.
+  app.get(
+    "/api/projects/:id/agents/models",
+    withRuntime(async (_rt, req, res) => {
+      const kind = typeof req.query.kind === "string" ? req.query.kind.trim() : "";
+      if (!knownAgentKinds().includes(kind)) return void res.status(400).json({ error: `unknown agent kind "${kind}"` });
+      const { models, source } = await listModelsForKind(kind);
+      res.json({ kind, count: models.length, models, source });
     }),
   );
 
