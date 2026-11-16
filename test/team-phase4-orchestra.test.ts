@@ -5,6 +5,7 @@
  * origin, and a `gh` stub on PATH that records the PRs it's asked to open.
  */
 
+import { trackedPrs } from "../src/core/pr-feedback.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -170,6 +171,7 @@ describe("Phase 4 in the orchestra", () => {
     const r = rt.orchestra.get(run.id)!;
     const stack = r.landing!.stack!;
     expect(stack).toHaveLength(2);
+    expect(trackedPrs(rt.info.dir).filter(p => p.chat === r.chat).map(p => p.prNumber)).toEqual(stack.map(p => p.pr));
     const lower = `${r.branch.replace(/\/main$/, "")}/stack-1`;
     expect(stack[0]).toMatchObject({ branch: lower, base: "main" });
     expect(stack[1]).toMatchObject({ branch: r.branch, base: lower });

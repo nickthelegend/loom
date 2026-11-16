@@ -5,6 +5,8 @@
  * board views, phone surfaces) is a projection of it.
  */
 
+import type { PrFeedbackMode } from "./core/pr-feedback.js";
+
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -91,6 +93,8 @@ export type NewEvent = {
 
 /** A named conversation inside a project. */
 export interface ChatInfo {
+  /** PR feedback automation: absent means "ci". PATCH chats/:chat accepts off, ci, or ci+reviews. */
+  prFeedback?: PrFeedbackMode;
   id: string;
   title: string;
   createdAt: number;

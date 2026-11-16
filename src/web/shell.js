@@ -822,6 +822,18 @@ import { openTriggers } from './triggers-ui.js';
         setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
       } });
       items.push({ label: "Share live…", icon: ICONS.team, hint: "a teammate joins this chat", run: function(){ openShareLive(pid, cid, c.title); } });
+      // When a PR this chat opened fails CI or gets a review, the fix request comes back here (#378)
+      var PRF = { off: "off", ci: "CI failures", "ci+reviews": "CI + reviews" };
+      items.push({ label: "PR feedback…", icon: ICONS.pr, hint: PRF[c.prFeedback || "ci"], run: function(){
+          var row = document.querySelector('.crow[data-chat="' + cid + '"]');
+          var r = (row || document.body).getBoundingClientRect();
+          openMenu(Math.round(r.left + 24), Math.round(r.bottom), [
+            { head: "When this chat's PR needs work" },
+            { label: "Send CI failures back", icon: (c.prFeedback || "ci") === "ci" ? ICONS.check : ICONS.pr, hint: "default", run: function(){ setPrFeedback(pid, cid, "ci"); } },
+            { label: "CI failures and reviews", icon: c.prFeedback === "ci+reviews" ? ICONS.check : ICONS.pr, hint: "from people with write access", run: function(){ setPrFeedback(pid, cid, "ci+reviews"); } },
+            { label: "Off", icon: c.prFeedback === "off" ? ICONS.check : ICONS.x, run: function(){ setPrFeedback(pid, cid, "off"); } },
+          ]);
+        } });
       items.push({ label: "Instructions…", icon: ICONS.file, hint: "standing guidance for this chat", run: function(){
         api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/instructions").then(function(j){
           return askText("Instructions for “" + c.title + "”", { value: j.instructions || "", multiline: true, ok: "Save",
@@ -900,6 +912,12 @@ import { openTriggers } from './triggers-ui.js';
           refresh();
           toast(flags.folder ? "moved to " + flags.folder : flags.folder === null ? "out of the folder" : flags.pinned ? "pinned to the top" : flags.pinned === false ? "unpinned" : flags.archived ? "archived · under Archived in the sidebar" : "back in the list");
         })
+        .catch(function(err){ toast(err.message); });
+    }
+
+    function setPrFeedback(pid, cid, mode){
+      api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid), { method: "PATCH", body: JSON.stringify({ prFeedback: mode }) })
+        .then(function(){ refresh(); toast(mode === "off" ? "this chat won't hear about its PRs" : mode === "ci" ? "CI failures on this chat's PRs come back here" : "CI failures and reviews on this chat's PRs come back here"); })
         .catch(function(err){ toast(err.message); });
     }
 

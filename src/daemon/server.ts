@@ -1,3 +1,4 @@
+import { readPrRecords } from "../core/pr-feedback.js";
 import { ClientDelivery } from "./delivery.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import crypto from "node:crypto";
@@ -805,6 +806,12 @@ export class LoomDaemon {
     void this.team.start().catch(() => { });
     this.watchReleases();
     this.triggers.start();
+    // Resume PR watches even when no client has opened the project since restart.
+    for (const project of listProjects()) {
+      try {
+        if (readPrRecords(project.dir).some(pr => pr.state === "OPEN")) await this.runtime(project.id);
+      } catch (error) { logbook.warn("pr", "could not resume PR feedback", String(error), project.id); }
+    }
     void this.bridges.startAll().catch(() => { });
 
     return { host: this.host, port: this.port };

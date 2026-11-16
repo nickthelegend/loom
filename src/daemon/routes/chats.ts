@@ -1,5 +1,6 @@
 import type { Express, Request } from 'express';
 import { SideChatError } from "../../core/side-chats.js";
+import { trackedPrs, type PrFeedbackMode } from "../../core/pr-feedback.js";
 import fs from "node:fs";
 import path from "node:path";
 import { findChats, readChat, type ImportSource } from "../../core/chat-import.js";
@@ -46,6 +47,19 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.delete("/api/projects/:id/chats/:chatId/side/:sideId", privateSide(async (rt, req, res) => {
     await rt.sides.delete(String(req.params.chatId), String(req.params.sideId));
     res.json({ deleted: true });
+  }));
+
+  // See TrackedPr for the response shape. Completed rows remain visible as history.
+  app.get("/api/projects/:id/prs", withRuntime(async (rt, _req, res) => {
+    res.json({ prs: trackedPrs(rt.info.dir) });
+  }));
+  // Owner only: attaching a PR authorizes future unattended turns in this chat.
+  app.post("/api/projects/:id/chats/:chat/prs", withRuntime(async (rt, req, res) => {
+    if (!(req as typeof req & { isAdmin?: boolean }).isAdmin) return void res.status(403).json({ error: "only this machine's owner can attach a PR" });
+    const chat = String(req.params.chat);
+    if (!rt.chats().some(c => c.id === chat)) return void res.status(404).json({ error: "no such chat" });
+    try { res.json({ pr: await rt.prFeedback.attach(req.body?.pr, chat) }); }
+    catch (error) { res.status(400).json({ error: (error as Error).message }); }
   }));
 
   // A read-only link to a chat, for a teammate (#199): /share/<token>, expiring, revocable.
@@ -308,7 +322,10 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): voi
   app.patch(
     "/api/projects/:id/chats/:chatId",
     withRuntime(async (rt, req, res) => {
-      const body = (req.body ?? {}) as { pinned?: unknown; archived?: unknown; folder?: unknown };
+      const body = (req.body ?? {}) as { pinned?: unknown; archived?: unknown; folder?: unknown; prFeedback?: unknown };
+      if (body.prFeedback !== undefined && (typeof body.prFeedback !== "string" || !["off", "ci", "ci+reviews"].includes(body.prFeedback))) {
+        return void res.status(400).json({ error: "prFeedback must be off, ci, or ci+reviews" });
+      }
       const flags: { pinned?: boolean; archived?: boolean; folder?: string | null } = {};
       if (body.pinned !== undefined) flags.pinned = body.pinned === true;
       if (body.archived !== undefined) flags.archived = body.archived === true;
@@ -316,11 +333,13 @@ export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): voi
         if (body.folder !== null && typeof body.folder !== "string") return void res.status(400).json({ error: "folder is a name, or null to take it out" });
         flags.folder = body.folder as string | null;
       }
-      if (!Object.keys(flags).length) return void res.status(400).json({ error: "nothing to change: send pinned, archived or folder" });
-      if (String(req.params.chatId) === "main") {
+      if (!Object.keys(flags).length && body.prFeedback === undefined) return void res.status(400).json({ error: "nothing to change: send pinned, archived, folder or prFeedback" });
+      if (String(req.params.chatId) === "main" && Object.keys(flags).length) {
         return void res.status(400).json({ error: "Main is always first and always there, so it can't be pinned, archived or filed" });
       }
-      const chat = rt.setChatFlags(String(req.params.chatId), flags);
+      const id = String(req.params.chatId);
+      let chat = Object.keys(flags).length ? rt.setChatFlags(id, flags) : rt.chats().find(c => c.id === id);
+      if (chat && body.prFeedback !== undefined) chat = rt.setPrFeedback(id, body.prFeedback as PrFeedbackMode);
       if (!chat) return void res.status(404).json({ error: "no such thread" });
       res.json({ chat });
     }),

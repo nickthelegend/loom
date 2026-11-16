@@ -2277,7 +2277,7 @@ function ChatMenu(props: {
   onShareLive?: (role: "view" | "reply" | "approve") => void;
   onClose: () => void;
   onRename: (title: string) => void;
-  onFlags: (flags: { pinned?: boolean; archived?: boolean }) => void;
+  onFlags: (flags: { pinned?: boolean; archived?: boolean; prFeedback?: "off" | "ci" | "ci+reviews" }) => void;
   onDelete: () => void;
 }) {
   const [title, setTitle] = useState("");
@@ -2305,6 +2305,9 @@ function ChatMenu(props: {
           {props.onShareLive && row("Share live — they read along", () => props.onShareLive!("view"))}
           {props.onShareLive && row("Share live — they can talk to the agent", () => props.onShareLive!("reply"))}
           {props.onShareLive && row("Share live — talk and approve", () => props.onShareLive!("approve"))}
+          {/* the PRs this chat opens: what comes back when they need work (#378) — tap to cycle */}
+          {row(`PR feedback: ${({ off: "off", ci: "CI failures", "ci+reviews": "CI + reviews" } as const)[c.prFeedback ?? "ci"]}`, () =>
+            props.onFlags({ prFeedback: (({ ci: "ci+reviews", "ci+reviews": "off", off: "ci" } as const)[c.prFeedback ?? "ci"]) }))}
           {row(c.pinned ? "Unpin" : "Pin to the front", () => props.onFlags({ pinned: !c.pinned }))}
           {row(c.archived ? "Unarchive" : "Archive", () => props.onFlags({ archived: !c.archived }))}
           {row("Delete chat", () =>

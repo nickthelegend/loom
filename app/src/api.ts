@@ -142,6 +142,8 @@ export interface Chat {
   lastReplyId?: number;
   pinned?: boolean;
   archived?: boolean;
+  /** When a PR this chat opened fails CI or gets a review, the fix request comes back here (#378). */
+  prFeedback?: "off" | "ci" | "ci+reviews";
   /** What made it — an Orchestra run, race, crew or import — so its threads fold together. */
   group?: { kind: "orchestra" | "race" | "crew" | "import"; id: string; title: string; status?: string; at: number };
   /** Who answers in this chat, and on which model and effort (#370) — unset follows the baton / the agent's default. */
@@ -1042,7 +1044,7 @@ export const createChat = (c: Creds, id: string, title: string, opts: { agentId?
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats`, { method: "POST", body: JSON.stringify({ title, ...opts }) });
 export const renameChat = (c: Creds, id: string, chat: string, title: string) =>
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/rename`, { method: "POST", body: JSON.stringify({ title }) });
-export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned?: boolean; archived?: boolean }) =>
+export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned?: boolean; archived?: boolean; prFeedback?: "off" | "ci" | "ci+reviews" }) =>
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "PATCH", body: JSON.stringify(flags) });
 export const deleteChat = (c: Creds, id: string, chat: string) =>
   api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "DELETE" });
