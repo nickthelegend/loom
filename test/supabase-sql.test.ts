@@ -121,6 +121,7 @@ beforeAll(async () => {
     "0010_crew_coordination.sql",
     "0011_github_only.sql",
     "0012_hardening.sql",
+    "0013_chat_move.sql",
   ]) {
     psql(fs.readFileSync(path.join(root, "supabase", "migrations", m), "utf8"));
   }
@@ -381,8 +382,8 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL, 0007 (runners and jobs, D67–D78)
   let aliceRunner = "";
   let bobRunner = "";
   const sealed = '{"v":1,"c":"sealed"}';
-  const job = (user: string, dev: string, extra = "") =>
-    JSON.parse(asUser(user, `select to_jsonb(public.create_job('${team}', '{"repo":"acme/ops","kind":"start","sealed":${sealed},"deviceId":"${dev}"${extra}}'));`));
+  const job = (user: string, dev: string, extra = "", kind = "start") =>
+    JSON.parse(asUser(user, `select to_jsonb(public.create_job('${team}', '{"repo":"acme/ops","kind":"${kind}","sealed":${sealed},"deviceId":"${dev}"${extra}}'));`));
   const claim = (user: string, runner: string) =>
     JSON.parse(asUser(user, `select coalesce(to_jsonb(j), 'null') from public.claim_job('${team}', '${runner}') j where j.id is not null union all select 'null'::jsonb limit 1;`));
   const beat = (user: string, id: string, runner: string) =>
@@ -432,6 +433,17 @@ describe.skipIf(!hasPg)("hosted Team Hub SQL, 0007 (runners and jobs, D67–D78)
     expect(j).toMatchObject({ kind: "land", state: "queued", user_id: BOB, github: "bob", repo: "acme/ops" });
     expect(fails(() => asUser(BOB, `update public.jobs set state = 'done' where id = '${j.id}';`))).toMatch(/permission denied/);
     drain();
+  });
+
+  it("accepts sealed chat moves with the same runner ownership checks (0013)", () => {
+    drain();
+    const target = `,"target":"${aliceRunner}"`;
+    expect(fails(() => job(BOB, bobDev, target, "chat_move"))).toMatch(/isn't shared/);
+    const moved = job(ALICE, aliceDev, target, "chat_move");
+    expect(moved.kind).toBe("chat_move");
+    expect(claim(BOB, bobRunner)).toBeNull();
+    expect(claim(ALICE, aliceRunner)).toMatchObject({ id: moved.id, kind: "chat_move", state: "claimed" });
+    expect(finish(ALICE, moved.id, aliceRunner).state).toBe("done");
   });
 
   it("eligibility: own jobs, anyone's only when shared, a targeted job only for its runner (D68)", () => {

@@ -225,6 +225,8 @@ export interface ProjectState {
   chats?: ChatInfo[];
   /** Standing guidance for one conversation (main included), sent with every turn in it. */
   chatInstructions?: Record<string, string>;
+  /** One-shot history briefing, durable until the moved chat's first dispatch. */
+  chatMoveBriefings?: Record<string, string>;
   /** Work-in-progress limits per board column; a column over its limit warns. */
   boardLimits?: Record<string, number>;
   /** Task cards you wrote yourself. See BoardTask. */

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { ChatMoveError, packChatMove, type ChatMovePayload } from "../core/chat-move.js";
+import { buildBriefing } from "../core/projection.js";
 import { accountKey, accountLogin, configDirEnv, isAccountKind, resolveAgentAccount } from "../core/accounts.js";
 import { PrFeedback } from "./pr-feedback.js";
 import { recordOpenedPr, type PrFeedbackMode } from "../core/pr-feedback.js";
@@ -282,6 +285,9 @@ export class ProjectRuntime {
       kickQueue: () => this.kickQueue(),
       nativeOptions: (id) => this.policyOptions(this.config.agents.find(a => a.id === id)!),
       chatExists: (chat) => this.conversations.chats().some(c => c.id === chat),
+      assertChatWritable: chat => this.assertChatWritable(chat),
+      chatMoveBriefing: chat => readProjectState(this.info.dir).chatMoveBriefings?.[chat],
+      clearChatMoveBriefing: chat => this.clearChatMoveBriefing(chat),
       staleTurnMs: ProjectRuntime.STALE_TURN_MS,
       get closed() { return runtime.closed; },
       agentDir: (...args) => this.agentDir(...args),
@@ -1734,6 +1740,102 @@ export class ProjectRuntime {
   // Chats — several conversations, one brain
   // -------------------------------------------------------------------------
 
+  private readonly movingChats = new Set<string>();
+
+  assertChatWritable(chat: string): void {
+    const info = this.conversations.chats().find(c => c.id === chat);
+    if (info?.movedTo) throw new ChatMoveError(`moved to ${info.movedTo.name}`);
+    if (this.movingChats.has(chat)) throw new ChatMoveError("busy: chat is moving");
+  }
+
+  private clearChatMoveBriefing(chat: string): void {
+    const state = readProjectState(this.info.dir), brief = state.chatMoveBriefings?.[chat];
+    if (brief) {
+      delete state.chatMoveBriefings![chat];
+      writeProjectState(this.info.dir, state);
+    }
+  }
+
+  /** Reserve the chat before awaiting its turn. New sends and concurrent moves cannot race the snapshot. */
+  async moveChat(id: string, sameOwner: boolean, wait: boolean,
+    enqueue: (payload: ChatMovePayload) => Promise<NonNullable<ChatInfo["movedTo"]>>): Promise<ChatInfo> {
+    this.assertChatWritable(id);
+    if (!this.conversations.chats().some(c => c.id === id)) throw new ChatMoveError("no such chat", 404);
+    // Queued prompts have not entered history; silently leaving them behind would lose work.
+    if (this.queue.snapshot().items.some(item => (item.chat ?? MAIN_CHAT) === id))
+      throw new ChatMoveError("busy: send or remove queued prompts before moving this chat");
+    const busy = () => this.turns.sendingChats.has(id) || [...this.turns.busySince.keys()].some(agent => this.turns.turnChat.get(agent) === id);
+    if (!wait && busy()) throw new ChatMoveError("busy");
+    this.movingChats.add(id);
+    try {
+      while (busy()) {
+        if (this.closed) throw new ChatMoveError("daemon closed while waiting for the turn");
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      const info = this.chats().find(c => c.id === id);
+      if (!info) throw new ChatMoveError("no such chat", 404);
+      const events = this.log.list({ chat: id, kinds: ["message", "tool_call"] });
+      const lastAgent = [...events].reverse().find(e => e.agentId && this.config.agents.some(a => a.id === e.agentId))?.agentId;
+      const agentId = this.chatBinding(id).agentId ?? lastAgent ?? this.baton.holder() ?? this.defaultAdapterId();
+      const config = this.config.agents.find(a => a.id === agentId);
+      if (!config) throw new ChatMoveError("chat has no available agent");
+      const agent = this.agents.get(agentId);
+      const native = sameOwner && agent instanceof ProviderAgent ? agent.sideSource(id) : undefined;
+      const cursor = native?.resumeCursor;
+      const bindingSession = sameOwner && this.continuity ? [...events].reverse().map(e => e.payload.loomBindingId)
+        .filter((b): b is string => typeof b === "string").map(b => this.continuity!.store.bindingById(b))
+        .find(b => b?.agentInstanceId === agentId && b.harnessKind === config.kind && b.conversationId === id)?.nativeSessionId : undefined;
+      const legacySession = sameOwner && !this.continuity && isNativeKind(config.kind)
+        ? this.log.list({ chat: id, kinds: ["status"] }).reverse().find(e => e.agentId === agentId &&
+          e.payload.state === "turn_started" && typeof e.payload.session === "string")?.payload.session : undefined;
+      const nativeSessionId = bindingSession ?? (typeof legacySession === "string" ? legacySession : undefined);
+      const model = info.model ?? native?.model ?? (typeof config.options?.model === "string" ? config.options.model : undefined);
+      const effort = info.effort ?? (typeof config.options?.effort === "string" ? config.options.effort : undefined);
+      const payload = packChatMove({ chat: { ...info, agentId, model, effort, instructions: readProjectState(this.info.dir).chatInstructions?.[id] },
+        kind: config.kind, events, resume: cursor !== undefined && cursor !== null ? { kind: config.kind, resumeCursor: cursor }
+          : nativeSessionId ? { kind: config.kind, nativeSessionId } : null });
+      const movedTo = await enqueue(payload);
+      const state = readProjectState(this.info.dir);
+      const chat = { ...(state.chats?.find(c => c.id === id) ?? info), movedTo };
+      state.chats = [...(state.chats ?? []).filter(c => c.id !== id), chat];
+      writeProjectState(this.info.dir, state);
+      this.log.append({ kind: "status", chat: id, payload: { state: "chat_moved", text: `Moved to ${movedTo.name}`, movedTo } });
+      return chat;
+    } finally { this.movingChats.delete(id); }
+  }
+
+  /** Idempotent across runner retries. Imported ids remain provenance; local event ids are new. */
+  importMovedChat(payload: ChatMovePayload, jobId: string, sameOwner: boolean): ChatInfo {
+    const id = `move-${createHash("sha256").update(jobId).digest("hex").slice(0, 20)}`;
+    const existing = this.conversations.chats().find(c => c.id === id);
+    if (existing) return existing;
+    const agent = this.config.agents.find(a => a.id === payload.chat.agentId && a.kind === payload.kind && a.enabled !== false)
+      ?? this.config.agents.find(a => a.kind === payload.kind && a.enabled !== false);
+    const chat: ChatInfo = { id, title: payload.chat.title, createdAt: payload.chat.createdAt,
+      ...(agent ? { agentId: agent.id, model: payload.chat.model, effort: payload.chat.effort } : {}) };
+    const imported = this.log.list({ chat: id });
+    const seen = new Set(imported.filter(e => (e.payload.imported as { jobId?: string })?.jobId === jobId)
+      .map(e => (e.payload.imported as { eventId: number }).eventId));
+    for (const event of payload.events) {
+      if (seen.has(event.id) || !["message", "tool_call"].includes(event.kind)) continue;
+      this.log.append({ kind: event.kind, chat: id, ts: event.ts, agentId: event.agentId,
+        payload: { ...event.payload, imported: { jobId, eventId: event.id, chat: payload.chat.id } } });
+    }
+    // Native session files aren't shipped. Only a locally known provider cursor can be reused.
+    const target = agent && this.agents.get(agent.id);
+    if (sameOwner && !this.continuity && target instanceof ProviderAgent && payload.resume && payload.resume.kind === agent?.kind)
+      target.resumeMovedChat(id, payload.resume.resumeCursor ?? payload.resume.nativeSessionId);
+    const state = readProjectState(this.info.dir);
+    state.chats = [...(state.chats ?? []), chat];
+    if (payload.chat.instructions) state.chatInstructions = { ...state.chatInstructions, [id]: payload.chat.instructions };
+    // Keep a briefing even for a locally known cursor: native history may have been removed since it was last used.
+    state.chatMoveBriefings = { ...state.chatMoveBriefings, [id]: buildBriefing({ projectName: this.info.name,
+      config: this.config, events: payload.events, targetAgentId: agent?.id ?? "the selected agent", fromAgentId: payload.chat.agentId }) };
+    writeProjectState(this.info.dir, state);
+    this.log.append({ kind: "status", chat: id, payload: { state: "chat_imported", jobId, dropped: payload.dropped } });
+    return chat;
+  }
+
   /**
    * Every conversation in this project, main first. Main is implicit: it's
    * always there and it owns every event written before chats existed, so it
@@ -1977,6 +2079,7 @@ export class ProjectRuntime {
   }
 
   private createSide(chat: string) {
+    this.assertChatWritable(chat);
     if (!this.chats().some(c => c.id === chat)) throw new SideChatError("no such chat", 404);
     const bound = this.chatBinding(chat);
     const id = bound.agentId ?? this.baton.holder() ?? this.config.defaultAgent
@@ -2008,6 +2111,7 @@ export class ProjectRuntime {
   renameChat(id: string, title: string): ChatInfo | null { return this.conversations.renameChat(id, title); }
 
   deleteChat(id: string): boolean {
+    if (this.movingChats.has(id)) throw new ChatMoveError("busy: chat is moving");
     if (this.continuity && ([...this.turns.busySince.keys()].some(agent => this.turns.turnChat.get(agent) === id) ||
       this.queue.snapshot().items.some(item => item.chat === id)))
       throw new ContinuityError("conflict", "finish or remove queued/native turns before deleting their chat");
@@ -2535,6 +2639,7 @@ export class ProjectRuntime {
     opts: { chat?: string } = {},
   ): Promise<{ agentId: string; reply: string }> {
     const chat = opts.chat ?? MAIN_CHAT;
+    this.assertChatWritable(chat);
     const agent = this.agent(agentId);
     if (isAdapter(agent)) {
       throw new Error(`agent "${agentId}" takes turns — send to it normally`);
@@ -2682,6 +2787,7 @@ export class ProjectRuntime {
   onQueueChange(cb: (q: QueueState) => void): () => void { return this.queueCoordinator.onQueueChange(cb); }
 
   enqueue(input: QueueInput): QueueItem {
+    this.assertChatWritable(input.chat ?? MAIN_CHAT);
     if (this.continuity) {
       this.queue.assertCanAdd(input);
       if (!this.chats().some(c => c.id === (input.chat ?? MAIN_CHAT)))

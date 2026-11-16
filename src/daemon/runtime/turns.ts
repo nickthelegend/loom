@@ -67,6 +67,9 @@ export interface RuntimeTurnsHost {
   kickQueue: () => void;
   nativeOptions: (agentId: string) => Record<string, unknown>;
   chatExists: (chat: string) => boolean;
+  assertChatWritable: (chat: string) => void;
+  chatMoveBriefing: (chat: string) => string | undefined;
+  clearChatMoveBriefing: (chat: string) => void;
   agentDir: (agentId: string) => string;
   log: EventJournal;
   info: ProjectInfo;
@@ -360,6 +363,7 @@ export class RuntimeTurns {
     agentId: string; steered: boolean; reason: string;
   }> {
     const chat = opts.chat ?? MAIN_CHAT;
+    this.host.assertChatWritable(chat);
     if (!text.trim()) throw new Error("missing text");
     if (!this.host.chatExists(chat)) throw new Error("conversation is missing or deleted");
     const target = agentId ?? this.host.chatBinding(chat).agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
@@ -382,7 +386,22 @@ export class RuntimeTurns {
     return { agentId: target, steered: true, reason: "" };
   }
 
-  async sendMessage(
+  /** Include async dispatch preparation in a chat move's safe-point check. */
+  readonly sendingChats = new Map<string, number>();
+
+  async sendMessage(text: string, agentId?: string, opts: TurnOptions = {}): Promise<TurnResult> {
+    const chat = opts.chat ?? MAIN_CHAT;
+    this.host.assertChatWritable(chat);
+    this.sendingChats.set(chat, (this.sendingChats.get(chat) ?? 0) + 1);
+    try { return await this.send(text, agentId, opts); }
+    finally {
+      const remaining = this.sendingChats.get(chat)! - 1;
+      if (remaining) this.sendingChats.set(chat, remaining);
+      else this.sendingChats.delete(chat);
+    }
+  }
+
+  private async send(
     text: string,
     agentId?: string,
     opts: TurnOptions = {},
@@ -487,7 +506,7 @@ export class RuntimeTurns {
       await this.host.ensureStarted(target);
       if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
 
-      const pendingBriefing = this.host.consumePendingBriefing(target);
+      const pendingBriefing = [this.host.consumePendingBriefing(target), this.host.chatMoveBriefing(chat)].filter(Boolean).join("\n\n");
       // Prepend the enabled skills so every turn carries them, alongside any
       // one-shot handoff briefing. Empty when no skills are on.
       // A provider agent plans in its own plan mode; the plan it proposes is
@@ -534,6 +553,7 @@ export class RuntimeTurns {
       void Promise.resolve()
         .then(() => {
           if (!this.host.isCurrentAgent(agent)) throw new Error(`agent "${target}" is no longer active`);
+          this.host.clearChatMoveBriefing(chat);
           return agent.send(input);
         })
         .catch((error) => this.host.dispatchFailed(agent, chat, error))
@@ -614,7 +634,7 @@ export class RuntimeTurns {
       await this.checkpointBefore(target, text);
       assertPrepared();
       const nativePlan = Boolean(opts.plan) && agent instanceof ProviderAgent;
-      const supplement = [this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
+      const supplement = [this.host.chatMoveBriefing(chat), this.host.agentInstructions(target), this.host.chatInstructions(chat), this.host.activeSkillsBlock(), opts.plan && !nativePlan ? planModeBriefing(text) : "", lengthLine(opts.length)].filter(Boolean).join("\n");
       let prepared = await brain.prepare({ ...request, targetAddedTokens: opts.contextTarget ?? request.targetAddedTokens }, cfg.kind,
         this.host.agentDir(target), options, supplement);
       assertPrepared();
@@ -652,6 +672,7 @@ export class RuntimeTurns {
       void Promise.resolve().then(() => {
         if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))
           throw new NativeDispatchRejected("dispatch cancelled before native process launch");
+        this.host.clearChatMoveBriefing(chat);
         return agent.send(input);
       }).then(() => {
         if (!this.host.closed) brain.settled(continuity.runId);

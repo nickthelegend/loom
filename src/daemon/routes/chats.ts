@@ -1,3 +1,6 @@
+import { ChatMoveError } from "../../core/chat-move.js";
+import { HubError } from "../../core/team-hub.js";
+import type { TeamLink } from "../team.js";
 import type { Express, Request } from 'express';
 import { SideChatError } from "../../core/side-chats.js";
 import { trackedPrs, type PrFeedbackMode } from "../../core/pr-feedback.js";
@@ -12,7 +15,28 @@ import { threadReplay } from "../../core/replay.js";
 import { createShare, listShares, revokeShare } from "../../core/shares.js";
 import { MAIN_CHAT } from "../../types.js";
 /** Register chats routes in the order established by LoomDaemon.routes(). */
-export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): void {
+export function registerChatsRoutes(app: Express, withRuntime: WithRuntime, team: TeamLink): void {
+
+  /** Owner only. POST {to: runnerDeviceId, wait?: boolean} waits by default, then returns
+   * {chat: ChatInfo, jobId}. chat.movedTo is also on GET /chats. wait:false returns 409
+   * "busy" during a turn; sends to a moved chat return 409 "moved to <name>".
+   * Job completion is visible in GET /api/projects/:id/team/runners: result {projectId, chatId} on the target.
+   * Bring it back by moving the target chat to a runner on the original device.
+   */
+  app.post("/api/projects/:id/chats/:chat/move", withRuntime(async (rt, req, res) => {
+    // the owner, or their own phone (an unscoped paired device) — never a guest or a scoped token
+    const who = req as Request & { isAdmin?: boolean; guest?: unknown; projectScope?: string[] | null };
+    if (!who.isAdmin && (who.guest || who.projectScope))
+      return void res.status(403).json({ error: "only this machine's owner or their own devices can move a chat" });
+    const { to, wait } = req.body ?? {};
+    if (typeof to !== "string" || !to.trim() || (wait !== undefined && typeof wait !== "boolean"))
+      return void res.status(400).json({ error: "send {to: runnerDeviceId, wait?: boolean}" });
+    try { res.json(await team.moveChat(rt, String(req.params.chat), to, wait !== false)); }
+    catch (error) {
+      res.status(error instanceof ChatMoveError || error instanceof HubError ? error.status : 400)
+        .json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  }));
 
   // Side chats are private to owners and unscoped devices, including their HTTP snapshots.
   const privateSide: WithRuntime = handler => withRuntime(async (rt, req, res) => {

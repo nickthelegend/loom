@@ -93,6 +93,8 @@ export type NewEvent = {
 
 /** A named conversation inside a project. */
 export interface ChatInfo {
+  /** Source tombstone after POST chats/:chat/move. Continue on the named device. */
+  movedTo?: { device: string; name: string; at: number; jobId: string };
   /** PR feedback automation: absent means "ci". PATCH chats/:chat accepts off, ci, or ci+reviews. */
   prFeedback?: PrFeedbackMode;
   id: string;

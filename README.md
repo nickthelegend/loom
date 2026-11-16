@@ -1256,6 +1256,41 @@ Approach credit: [T3 Code](https://github.com/pingdotgg/t3code) (MIT), for
 per-thread provider and model selection. Web and phone picker updates are
 separate from this API and CLI support.
 
+## Move a chat to another machine
+
+`loom chat:move <chat> --to <runner>` accepts a chat id or title and a runner's
+exact label or device id. Pair the destination with `loom runner pair` / `join`
+first, and share the project with the team. `--no-wait` returns busy if the chat
+is running; `--json` prints `{ chat, jobId }`. A teammate's runner must be shared
+and the repo's reviewed `loom.team.json` must allow `runners.shared`.
+
+The owner-only API is `POST /api/projects/:id/chats/:chat/move` with
+`{ "to": "runnerDeviceId", "wait": true }` (`wait` defaults to true). It waits for
+the active turn, then returns `{ chat: ChatInfo, jobId }` once the sealed job is
+queued. Queued prompts must be sent or removed first. A competing move or send
+returns 409 while the move waits. `GET /api/projects/:id/chats` includes
+`movedTo: { device, name, at, jobId }` on the source, whose further sends return
+409 `moved to <name>`. `at` is epoch milliseconds.
+
+Poll `GET /api/projects/:id/team/runners` for the job's `state` and `error`;
+a completed `chat_move` job includes `result: { projectId, chatId }` identifying
+the chat on the destination daemon. A registered project with the same repo is used;
+otherwise the runner keeps a new clone as a normal project. The transfer does
+not copy uncommitted files. Bring a conversation back by moving the destination
+chat to a runner on the original machine; the old source remains readable.
+
+History and instructions travel encrypted to the team. Imported message/tool
+events retain text, authors and timestamps, with
+`payload.imported: { jobId, eventId, chat }` identifying their source. Payloads
+are capped at 2 MiB before sealing: raw tool output is omitted first, then oldest
+events, with the omitted-event count on the target's `chat_imported` status.
+The target selects its own agent of the same kind, model and effort when
+available. Native cursors are sent only to the same owner's machine. A locally
+known provider session from a moved chat can resume; otherwise the next turn
+gets a one-shot history briefing, which survives daemon restarts. Native session
+files and agent credentials are never transferred. Web and phone menus can use
+this API; they are not included in this change.
+
 ## Side questions
 
 `loom btw "why this approach?" [--chat c]` asks the parent chat's agent and model
@@ -2212,6 +2247,7 @@ loom runner join '<link>'           # on the always-on box (then: loom runner in
 loom runner token github_pat_…      # a fine-grained token: contents + pull requests
 loom runner goal "Add rate limiting"  # start a goal there
 loom runner move <runId>            # move a running goal; `loom runner back <runId>` to return it
+loom chat:move "Review" --to <device> # move a chat; waits for its running turn
 ```
 
 Or with Docker: `docker build -f Dockerfile.runner -t loom-runner .`

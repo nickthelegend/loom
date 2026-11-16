@@ -101,7 +101,7 @@ import {
 } from "./runtime.js";
 import { SpecRunner } from "./specs.js";
 import { BUILD_REV, DEFAULT_PORT, tailscaleIp } from './system.js';
-import { TeamLink } from "./team.js";
+import { TeamLink, type TeamLinkHost } from "./team.js";
 import { Onboarding } from "./onboard.js";
 import { addProjectAt } from "./routes/projects.js";
 import { registerCrewsRoutes } from "./routes/crews.js";
@@ -133,6 +133,8 @@ export interface DaemonOptions {
   relayTransport?: (channel: string) => Promise<RelayTransport>;
   /** Build the Team Hub client. Defaults to HTTP (`loom hub`); tests pass their own. */
   hubFactory?: (url: string, token: string) => HubClient;
+  /** Isolated team state and runner configuration for in-process daemon tests. */
+  teamOptions?: Pick<TeamLinkHost, "statePath" | "runnerConfig" | "runnerKinds" | "runnerCloneUrl" | "projects">;
   /** `loom runner exec` in a container: run this one claimed job, then call done (Phase 5, D70). */
   runnerExec?: { teamId: string; jobId: string; done(ok: boolean): void };
   /** Tests: GitHub without GitHub — `gh` for invites/grants, and the clone a join makes. */
@@ -286,6 +288,8 @@ export class LoomDaemon {
 
   constructor(opts: DaemonOptions = {}) {
     this.team = new TeamLink({
+      projects: listProjects,
+      ...opts.teamOptions,
       runtimes: () => [...this.runtimes.values()],
       broadcast: (frame) => {
         this.delivery.publish(frame, { kind: "admin" });
@@ -534,7 +538,7 @@ export class LoomDaemon {
     registerServersRoutes(app, withRuntime);
     registerTaskDeliveryRoutes(app, withRuntime);
     registerQueueRoutes(app, withRuntime);
-    registerChatsRoutes(app, withRuntime);
+    registerChatsRoutes(app, withRuntime, this.team);
     registerAgentSettingsRoutes(app, withRuntime);
     registerToolsRoutes(app, withRuntime);
     registerConfigRoutes(app, withRuntime);

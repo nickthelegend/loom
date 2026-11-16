@@ -36,6 +36,7 @@ import { ClaudeProviderAdapter, claudeBin } from "./claude/adapter.js";
 import { CodexProviderAdapter, codexBin } from "./codex/adapter.js";
 import type { ProviderKind, ProviderRuntimeEvent, ThreadId, TurnId } from "./contracts.js";
 import { runtimeModeFor } from "./contracts.js";
+import { readProjectState } from "../core/registry.js";
 import { FileSessionDirectory } from "./directory.js";
 import { isProviderError } from "./errors.js";
 import { RuntimeIngestion, type LiveDelta, type LiveItem } from "./ingestion.js";
@@ -173,6 +174,17 @@ export class ProviderAgent extends AdapterBase {
     const resumeCursor = live?.resumeCursor ?? binding?.resumeCursor ?? (chat === MAIN_CHAT ? this.nativeState.read().sessionId : undefined);
     const model = live?.model ?? binding?.runtimePayload?.model ?? this.options.model;
     return { cwd: live?.cwd ?? binding?.runtimePayload?.cwd ?? this.projectDir, resumeCursor, ...(model ? { model } : {}) };
+  }
+
+  /** Rebind only a cursor this account already knows locally; a foreign machine's id is not a session file. */
+  resumeMovedChat(chat: string, cursor: unknown): boolean {
+    if (typeof cursor !== "string" || !cursor) return false;
+    const directory = projects.get(path.resolve(this.projectDir))?.service.directory
+      ?? new FileSessionDirectory(path.join(this.projectDir, ".loom"));
+    const prior = directory.list().find(b => b.instanceId === this.id && b.provider === this.provider && b.resumeCursor === cursor);
+    if (!prior || !readProjectState(this.projectDir).chats?.find(c => c.id === prior.threadId)?.movedTo || projects.get(path.resolve(this.projectDir))?.busy.get(this.id)?.() === prior.threadId) return false;
+    directory.upsert({ ...prior, threadId: chat, status: "stopped" });
+    return true;
   }
 
   /** Streamed text as it arrives (not persisted; the completed message is). */

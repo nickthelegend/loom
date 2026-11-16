@@ -1,3 +1,4 @@
+import { ChatMoveError } from "../../core/chat-move.js";
 import type { Express } from 'express';
 import express from "express";
 import { parseCondition, parseTarget, QueueItemGone } from "../../core/prompt-queue.js";
@@ -50,7 +51,7 @@ export function registerQueueRoutes(app: Express, withRuntime: WithRuntime): voi
         recordRecent(b.text, { project: rt.info.name, mode: item.target.kind === "orchestra" ? "orchestrate" : "chat" });
         res.json({ item, ...queueView(rt) });
       } catch (err) {
-        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        res.status(err instanceof ChatMoveError ? err.status : 400).json({ error: err instanceof Error ? err.message : String(err) });
       }
     }),
   );

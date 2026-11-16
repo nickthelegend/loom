@@ -1,3 +1,4 @@
+import { ChatMoveError } from "../../core/chat-move.js";
 import { type Request, type Response } from "express";
 import { NotHolderError } from "../../core/baton.js";
 import { logbook } from "../../core/logbook.js";
@@ -15,6 +16,7 @@ export function createRuntimeHandler(ctx: Pick<RouteContext, "runtime">): WithRu
           const rt = await ctx.runtime(String(req.params.id));
           await handler(rt, req, res);
         } catch (err) {
+          if (err instanceof ChatMoveError) { res.status(err.status).json({ error: err.message }); return; }
           if (err instanceof NotHolderError) {
             res.status(409).json({
               error: "not_holder",

@@ -794,6 +794,22 @@ program
   });
 
 program
+  .command("chat:move <chat>")
+  .description("move a chat to a runner or device, waiting for its current turn")
+  .requiredOption("--to <runner>", "runner device id or exact label")
+  .option("--no-wait", "fail with busy if a turn is running")
+  .option("--json", "print the source chat and job id as JSON")
+  .action(async (name: string, opts: { to: string; wait: boolean; json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const found = chats.find(c => c.id === name) ?? chats.find(c => c.title.toLowerCase() === name.toLowerCase());
+    if (!found) fail(`no chat "${name}" in ${project.name}`);
+    const result = await client.moveChat(project.id, found!.id, opts.to, { wait: opts.wait });
+    console.log(opts.json ? JSON.stringify(result) : `${pc.green("✓")} ${result.chat.title}: moved to ${result.chat.movedTo!.name} — job ${result.jobId}`);
+  });
+
+program
   .command("chat:agent <chat> [agentId]")
   .description("replace a chat's agent/model/effort selection; --clear follows the baton")
   .option("--model <model>", "model for this chat (omitted: agent default)")

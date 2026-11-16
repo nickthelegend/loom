@@ -16,6 +16,7 @@
  * The hub never holds a readable team key.
  */
 
+import { ChatMoveError } from "../core/chat-move.js";
 import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -23,7 +24,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { crewRequests } from "../core/crew-requests.js";
 
-import { loomHome } from "../core/registry.js";
+import { loomHome, readProjectConfig } from "../core/registry.js";
 import { logbook } from "../core/logbook.js";
 import {
   newDeviceKeys,
@@ -58,7 +59,7 @@ import {
 import { HttpHubClient, hubErrorText, hubSignIn } from "../hub/client.js";
 import { hostedSignIn, openInBrowser, SupabaseHubClient, type HostedSession } from "../hub/supabase-client.js";
 import { hostedHubUrl, hostedSupabaseUrl, publishableKeyFor } from "../core/hosted.js";
-import type { LoomEvent } from "../types.js";
+import type { LoomEvent, ProjectInfo } from "../types.js";
 import type { ProjectRuntime } from "./runtime.js";
 import { DEPLOY_POLL_MS, Deploys } from "./deploys.js";
 import { defaultExec, Landing, type Exec } from "./landing.js";
@@ -147,6 +148,8 @@ export async function repoOf(dir: string): Promise<string | null> {
 export interface TeamLinkHost {
   /** Open project runtimes (only these can be shared/heartbeated). */
   runtimes(): ProjectRuntime[];
+  /** Registered projects on this machine, including ones not open yet. */
+  projects?(): ProjectInfo[];
   /** Fan a team frame out to connected UIs. */
   broadcast(frame: Record<string, unknown>): void;
   /** Tests inject a hub; production builds an HttpHubClient from state. */
@@ -868,6 +871,16 @@ export class TeamLink {
         feed: (teamId) => this.views.get(teamId)?.feed ?? [],
         presence: (teamId) => [...(this.views.get(teamId)?.presence.values() ?? [])],
         openProject: this.host.openProject.bind(this.host),
+        projectForRepo: async repo => {
+          for (const rt of this.host.runtimes()) if (!rt.runnerMode && await repoOf(rt.info.dir) === repo) return rt;
+          for (const project of this.host.projects?.() ?? []) {
+            // A goal's temporary clone can disappear when its runner job completes.
+            const config = readProjectConfig(project.dir) as { runner?: unknown } | null;
+            if (config && !config.runner && await repoOf(project.dir) === repo)
+              return this.host.openProject!(project.dir, project.name);
+          }
+          return null;
+        },
         closeProject: async (rt) => {
           this.detachRuntime(rt.info.id);
           await this.host.closeProject!(rt);
@@ -984,11 +997,11 @@ export class TeamLink {
         const p = openFromTeam<JobPayload>(keys, sealed);
         return {
           ...rest,
-          goal: (p?.goal ?? p?.record?.goal ?? (p?.task ? `${p.task.title} — part of “${p.task.goal}”` : "")).split("\n")[0]!.slice(0, 200),
+          goal: (p?.goal ?? p?.record?.goal ?? p?.chat?.title ?? (p?.task ? `${p.task.title} — part of “${p.task.goal}”` : "")).split("\n")[0]!.slice(0, 200),
           runId: p?.runId ?? p?.record?.id ?? null,
           progress: openFromTeam<JobProgress>(keys, progress) ?? null,
           mine: j.userId === me,
-          ...(result ? { hasResult: true } : {}),
+          ...(result ? { hasResult: true, ...(j.kind === "chat_move" ? { result: openFromTeam(keys, result) } : {}) } : {}),
         };
       }),
     };
@@ -1011,6 +1024,22 @@ export class TeamLink {
     const mine = runners.filter((r) => r.userId === this.state.hub?.userId && r.deviceId !== this.state.device?.id);
     if (!mine.length) throw new Error("you have no runner yet — `loom runner pair` here, then `loom runner join <link>` on the box");
     return (mine.sort((a, b) => b.lastSeen - a.lastSeen)[0] ?? mine[0]!).deviceId;
+  }
+
+  /** POST chats/:chat/move accepts a runner device id; CLI also resolves an exact runner label. */
+  async moveChat(rt: ProjectRuntime, chat: string, to: string, wait = true): Promise<{ chat: import("../types.js").ChatInfo; jobId: string }> {
+    const share = await this.jobShare(rt);
+    const runners = await this.hub().runners(share.teamId);
+    const matches = runners.filter(r => r.deviceId === to || r.label === to);
+    if (matches.length !== 1) throw new ChatMoveError(matches.length ? "runner name is ambiguous; use its device id" : `no runner "${to}"`, 400);
+    const runner = matches[0]!;
+    if (runner.deviceId === share.device) throw new ChatMoveError("chat is already on this device", 400);
+    const moved = await rt.moveChat(chat, runner.userId === this.state.hub?.userId, wait, async payload => {
+      const job = await this.hub().createJob(share.teamId, { repo: share.repo, kind: "chat_move", target: runner.deviceId,
+        sealed: sealForTeam(share.key, payload), deviceId: share.device });
+      return { device: runner.deviceId, name: runner.label, at: Date.now(), jobId: job.id };
+    });
+    return { chat: moved, jobId: moved.movedTo!.jobId };
   }
 
   /** Start a new goal on a runner (D69, D73). */

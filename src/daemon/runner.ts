@@ -6,6 +6,7 @@
  * owner's devices as a runner (D74) and claims jobs from the hub (D71):
  *   start     a new goal on this machine
  *   continue  a goal moved here mid-run (its branches on refs/loom/run/<id>/*)
+ *   chat_move import a conversation into a persistent project on this daemon
  *   fix       make the owner's goal PR green while they're away (D69)
  *   return    hand a goal back to the owner's laptop (D76 "Bring back")
  *   land      the owner clicked Land on a goal that lives here
@@ -16,6 +17,7 @@
  * progress snapshot, until its goal lands, fails or moves on (D76).
  */
 
+import { parseChatMove, type ChatMovePayload } from "../core/chat-move.js";
 import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -125,7 +127,7 @@ export function dockerCommand(opts: { jobId: string; teamId: string; image: stri
 
 // ── the job payload ──
 
-export interface JobPayload {
+export interface JobPayload extends Partial<ChatMovePayload> {
   nativeCrew?: boolean;
   crew?: CrewConfig & { agents: Array<Pick<AgentConfig, "id" | "kind">> };
   crewAction?: { jobId: string; action: "approve" | "say" | "pause" | "resume" | "stop" | "pick"; text?: string; to?: string };
@@ -194,6 +196,7 @@ export interface RunnerDeps {
   /** Open a directory as a project (registered, runtime attached to Team Link). */
   openProject(dir: string, name: string): Promise<ProjectRuntime>;
   closeProject(rt: ProjectRuntime): Promise<void>;
+  projectForRepo?(repo: string): Promise<ProjectRuntime | null>;
   share(rt: ProjectRuntime, teamId: string): Promise<void>;
   landing(rt: ProjectRuntime): Landing;
   /** Where to clone a repo from; defaults to GitHub. Tests point it at a bare repo. */
@@ -392,6 +395,22 @@ export class Runner {
     const a: Active = { job, teamId, payload, rt: null, dir: null, runId: null, lastBeat: 0 };
     try {
       if (job.kind === "return" || job.kind === "land") return await this.instant(a);
+      if (job.kind === "chat_move") {
+        const move = parseChatMove(payload);
+        this.active.set(job.id, a);
+        await this.beat(a);
+        a.rt = await this.deps.projectForRepo?.(job.repo) ?? null;
+        if (!a.rt) await this.prepare(a);
+        if (job.userId !== this.deps.userId() && !(await loadPolicy(a.rt!.info.dir)).runners.shared)
+          throw new Error(`${job.repo}'s loom.team.json doesn't allow shared runners (runners.shared)`);
+        const chat = a.rt!.importMovedChat(move, job.id, job.userId === this.deps.userId());
+        const projectId = a.rt!.info.id;
+        a.rt!.runnerMode = false;
+        // This is now an ordinary project with a chat the owner can continue, including after restart.
+        a.rt = null; a.dir = null;
+        await this.finish(a, "done", { projectId, chatId: chat.id });
+        return;
+      }
       // one task is one agent turn in a fresh clone — no container to stand up for it
       if (job.kind !== "task" && !opts.inline && (await this.useDocker())) return await this.dispatchDocker(teamId, job);
       this.active.set(job.id, a);
@@ -469,6 +488,7 @@ export class Runner {
       });
       await this.beat(a);
     } catch (e) {
+      if (job.kind === "chat_move" && !a.dir) a.rt = null;
       await this.finish(a, "failed", undefined, e instanceof Error ? e.message : String(e));
     }
   }
@@ -583,6 +603,12 @@ export class Runner {
     const base = path.join(loomHome(), "runner", "work", a.job.id);
     const name = a.job.repo.split("/")[1]!;
     const dir = path.join(base, name);
+    // A chat import may have succeeded just before its job acknowledgement was lost.
+    if (a.job.kind === "chat_move" && fs.existsSync(path.join(dir, ".loom", "config.json"))) {
+      a.rt = await this.deps.openProject(dir, `${name} (moved chat)`);
+      await this.deps.share(a.rt, a.teamId);
+      return;
+    }
     fs.mkdirSync(base, { recursive: true });
     const url = this.deps.cloneUrl?.(a.job.repo) ?? `https://github.com/${a.job.repo}.git`;
     // --no-hardlinks: a clone from a local path hardlinks objects, and on Windows that fails
@@ -603,7 +629,7 @@ export class Runner {
       agents: kinds.map((k, i) => ({ id: k, kind: k, role: i === 0 ? "orchestrator" : "worker" })),
       brain: { extractor: "off", ...(a.payload.nativeCrew ? { continuity: true } : {}) },
       git: { delivery: "pr" },
-      ...({ runner: { job: a.job.id, owner: a.job.github, label: c.label ?? os.hostname() } } as Record<string, unknown>),
+      ...(a.job.kind === "chat_move" ? {} : { runner: { job: a.job.id, owner: a.job.github, label: c.label ?? os.hostname() } }),
     } as Parameters<typeof writeProjectConfig>[1]);
     a.dir = base;
     a.rt = await this.deps.openProject(dir, `${name} (runner · ${a.job.github})`);
