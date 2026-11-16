@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Orchestra fleets accept `agent[@model][:effort][xN]` in CLI, API and chain options, with distinct worker ids and per-spawn model/effort overrides (#369). Selections survive restarts and appear in planner briefings, plan files, CLI text/JSON and API/events for web and phone clients. Approach credit: Agent Orchestrator's `ao spawn --agent --model --effort` (Apache-2.0).
+
+### Fixed
+
+- Orchestra races honor the parallel limit and keep task ids unique for repeated agents and long model names (#369).
+
 - **Phone: Triggers.** A Triggers tab lists each schedule and webhook with when it runs next and how its last runs went, with Run now and a Pause/Resume switch. The owner's own (unscoped) phone may now fire a trigger and switch it on or off; adding, editing and removing stay on the computer (#361).
 
 - **Phone: start a chat with any agent on any model.** New chat opens a sheet: an optional title, who answers (each agent's kind and current model), and the model, chosen from the agent's own list or typed. A project can hold a chat on Opus 5.5 next to one on GPT‑5.6 (#372).
