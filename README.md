@@ -1380,7 +1380,8 @@ loom triggers:off <id>   # or :on, :rm
 ## Slack and Discord: your agents in the team conversation
 
 Mention the bot in Slack or Discord and the message goes to a Loom thread. The agent's answer
-comes back in that Slack thread or Discord channel, and replies there need no mention.
+replaces a live status message in that Slack thread or Discord channel. During the turn, the
+status shows the current tool. Replies there need no mention.
 
 The bot runs inside your daemon with your own bot's tokens: Slack over Socket Mode, Discord over
 its gateway. Nothing needs a public URL, and no hosted service sits in between.
@@ -1393,11 +1394,18 @@ loom bridge slack --off   # or --remove to forget the tokens
 ```
 
 - **Who it hears:** only the people you list. Everyone else, and other bots, are ignored.
-- **Approvals:** these stay in Loom and on your phone. The channel is told when a turn is waiting on one.
+- **Approvals:** Allow / Deny buttons work in the channel, and decisions record the person
+  who answered. By default everyone in `--user` can decide. Set `--approvers U012ABC,U045DEF`
+  to choose a separate list, or `--approvers ""` to let nobody approve from the channel.
+  Settings ▸ Slack & Discord offers the same controls. Loom and your phone still work.
+  The bridge API accepts `approvers` as an array or comma-separated string; `null` restores
+  the default of `users`, while `[]` disables channel approvals.
 - **Slack app setup:** turn on Socket Mode and give the bot the `app_mentions:read`,
   `channels:history`, `chat:write` and `im:history` scopes, plus an app-level token with
-  `connections:write`.
-- **Discord bot setup:** turn on the Message Content intent.
+  `connections:write`. Enable Interactivity & Shortcuts; Socket Mode delivers button clicks
+  without a public request URL.
+- **Discord bot setup:** turn on the Message Content intent. Leave the Interactions Endpoint URL
+  unset so button interactions arrive over the gateway.
 
 ## What the agents cost this machine
 

@@ -432,6 +432,7 @@ export class RuntimeTurns {
     // everything this turn produces belongs to the chat you sent from
     this.turnChat.set(target, chat);
     this.busySince.set(target, Date.now()); // the stale-session clock starts
+    this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started" } });
     this.host.log.append({
       kind: "message",
       chat,
@@ -600,6 +601,7 @@ export class RuntimeTurns {
       // Never consume a legacy handoff briefing into the new packet path.
       this.host.pendingBriefings.delete(target);
       if (source === "user") { this.host.routes.onUserMessage(target); this.host.releaseQuestionHold(target); }
+      this.host.log.append({ kind: "status", agentId: target, chat, payload: { state: "turn_started" } });
       void Promise.resolve().then(() => {
         if (preparation.signal.aborted || this.host.closed || !this.host.isCurrentAgent(agent))
           throw new NativeDispatchRejected("dispatch cancelled before native process launch");

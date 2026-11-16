@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Slack and Discord: live turn status and channel approvals.** A status message shows the current tool and is replaced by the final answer. Allow / Deny buttons let configured `approvers` (default: `users`) answer in the channel, with their names recorded in the audit trail. Configure approvers in Settings, the bridge API, or `loom bridge --approvers`.
+
 ## [1.3.0] — 2026-10-26
 
 ### Added
