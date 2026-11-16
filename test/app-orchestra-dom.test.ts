@@ -708,6 +708,44 @@ describe("web app · accounts (#379)", () => {
   });
 });
 
+describe("web app · move a chat to another machine (#364)", () => {
+  it("offers your online runners, confirms, and moves the chat there", async () => {
+    const { chat } = await rest<{ chat: { id: string } }>("POST", "/chats", { title: "travelling chat", agentId: "plannerbot" });
+    try {
+      const m = mount({ hash: `#p/${projectId}` });
+      const moved: unknown[] = [];
+      const realFetch = m.window.fetch;
+      m.window.fetch = ((input: string, init?: RequestInit) => {
+        const u = String(input);
+        const json = (v: unknown) => Promise.resolve(new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } }));
+        if (u.endsWith("/team/runners")) return json({ runners: [
+          { deviceId: "dev-mini", label: "studio mini", online: true, mine: true, kinds: ["echo"], shared: false, lastSeen: Date.now(), github: "" },
+          { deviceId: "dev-off", label: "old laptop", online: false, mine: true, kinds: [], shared: false, lastSeen: 0, github: "" },
+          { deviceId: "dev-theirs", label: "priya's box", online: true, mine: false, kinds: [], shared: true, lastSeen: Date.now(), github: "priya" },
+        ], jobs: [] });
+        if (u.includes(`/chats/${chat.id}/move`)) { moved.push(JSON.parse(String(init?.body))); return json({ chat: { id: chat.id, movedTo: { device: "dev-mini", name: "studio mini", at: Date.now(), jobId: "j1" } }, jobId: "j1" }); }
+        return realFetch(input, init);
+      }) as typeof m.window.fetch;
+      await waitUntil(() => !!$(m, `.crow[data-chat="${chat.id}"]`));
+      $(m, `.crow[data-chat="${chat.id}"]`)!.dispatchEvent(new m.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await waitUntil(() => !!$(m, ".menupop"));
+      click([...m.window.document.querySelectorAll(".menupop .pickrow")].find((b) => (b.textContent ?? "").includes("Move to another machine")) as HTMLElement);
+      // only my own online machines: not the offline one, not a teammate's
+      await waitUntil(() => [...m.window.document.querySelectorAll(".menupop .pickrow")].some((b) => (b.textContent ?? "").includes("studio mini")));
+      const labels = [...m.window.document.querySelectorAll(".menupop .pickrow")].map((b) => b.textContent ?? "");
+      expect(labels.some((l) => l.includes("old laptop") || l.includes("priya"))).toBe(false);
+      // (the mount answers confirm() with yes)
+      click([...m.window.document.querySelectorAll(".menupop .pickrow")].find((b) => (b.textContent ?? "").includes("studio mini")) as HTMLElement);
+      await waitUntil(() => moved.length === 1);
+      expect(moved[0]).toEqual({ to: "dev-mini" });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await rest("DELETE", `/chats/${chat.id}`).catch(() => {});
+    }
+  });
+});
+
 describe("web app · Loom Cloud settings", () => {
   it("has its own section: what it is, the Supabase fields, and the switches", async () => {
     const m = mount();

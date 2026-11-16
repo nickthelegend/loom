@@ -113,7 +113,8 @@ export async function startHubServer(opts: HubServerOptions = {}): Promise<{
     })();
   });
 
-  app.use(express.json({ limit: "1mb" }));
+  // Sealed chat moves carry up to 2 MiB of history plus encryption/base64 overhead.
+  app.use(express.json({ limit: "4mb" }));
 
   app.get("/hub/health", (_req, res) => void res.json({ ok: true, name: "loom-hub", version: 1 }));
 

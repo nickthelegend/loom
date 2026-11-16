@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Move a chat between machines with `loom chat:move <chat> --to <runner>` and the owner-only chat move API (#364). Moves wait for the active turn, seal bounded history and eligible native resume cursors as team jobs, preserve imported authors/timestamps, and leave a source redirect. Targets retain the chat in a project and brief the next turn when native history is unavailable. Web and phone menus are separate work. Approach credit: Nuphos's runtime switcher.
+
 - **In-place chat branches (#375).** Edit a prompt or retry a reply through the daemon API and `loom chat:edit` / `loom chat:retry`; list and switch with `loom chat:branches` / `loom chat:branch`. History, replay and extraction follow active ancestry, native resume cursors stay with their branch, and file rewinds require an explicit request with a checkpoint diff preview. API sibling metadata supports upcoming web/phone arrow controls. Approach credit: Agent Orchestrator (Apache-2.0).
 
 - Start assigned GitHub or Linear issues in separate chats or queued orchestra goals with `loom intake` (#382). Owner/device APIs expose issue and session links; a durable ledger prevents repeat starts, PRs link back to their issues, and optional intake schedules are disabled by default. Linear supports environment or stored provider keys.

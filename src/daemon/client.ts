@@ -178,6 +178,11 @@ export class DaemonClient {
     return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}`, { prFeedback });
   }
 
+  /** Wait for the active turn, seal the history to a runner, and return the source tombstone. */
+  moveChat(id: string, chat: string, to: string, opts: { wait?: boolean } = {}): Promise<{ chat: ChatInfo; jobId: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/move`, { to, ...opts }, 24 * 60 * 60_000);
+  }
+
   chats(id: string): Promise<{ chats: ChatInfo[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats`);
   }

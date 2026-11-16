@@ -182,6 +182,17 @@ export class ProviderAgent extends AdapterBase {
     return { cwd: live?.cwd ?? binding?.runtimePayload?.cwd ?? this.projectDir, resumeCursor, ...(model ? { model } : {}) };
   }
 
+  /** Rebind only a cursor this account already knows locally; a foreign machine's id is not a session file. */
+  resumeMovedChat(chat: string, cursor: unknown): boolean {
+    if (typeof cursor !== "string" || !cursor) return false;
+    const directory = projects.get(path.resolve(this.projectDir))?.service.directory
+      ?? new FileSessionDirectory(path.join(this.projectDir, ".loom"));
+    const prior = directory.list().find(b => b.instanceId === this.id && b.provider === this.provider && b.resumeCursor === cursor);
+    if (!prior || !readProjectState(this.projectDir).chats?.find(c => c.id === prior.threadId)?.movedTo || projects.get(path.resolve(this.projectDir))?.busy.get(this.id)?.() === prior.threadId) return false;
+    directory.upsert({ ...prior, threadId: chat, status: "stopped" });
+    return true;
+  }
+
   /** Streamed text as it arrives (not persisted; the completed message is). */
   onLive(cb: (delta: LiveDelta) => void): () => void {
     this.liveListeners.add(cb);

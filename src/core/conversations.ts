@@ -10,7 +10,7 @@ export class ConversationStore {
   chats(): ChatInfo[] {
     const stored = readProjectState(this.projectDir).chats ?? [];
     return [
-      stored.find(c => c.id === MAIN_CHAT) ?? { id: MAIN_CHAT, title: "Main", createdAt: 0 },
+      { id: MAIN_CHAT, title: "Main", createdAt: 0, ...stored.find(c => c.id === MAIN_CHAT) },
       ...stored.filter((c) => c.id !== MAIN_CHAT),
     ];
   }

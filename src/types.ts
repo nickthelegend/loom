@@ -105,6 +105,8 @@ export interface ChatBranch {
 
 /** A named conversation inside a project. */
 export interface ChatInfo {
+  /** Source tombstone after POST chats/:chat/move. Continue on the named device. */
+  movedTo?: { device: string; name: string; at: number; jobId: string };
   branches?: ChatBranch[];
   /** Absent means the root branch "0". */
   activeBranch?: string;
