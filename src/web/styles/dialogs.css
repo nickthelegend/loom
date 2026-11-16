@@ -1528,3 +1528,12 @@
 .npmodal .field .npamodel,.npmodal .field .npacount{height:28px;padding:0 7px;font-size:12px}
 .npmodal .field .npacount{text-align:center;padding:0 2px}
 .npmodal .field .npatick .opt{font-size:11px;color:var(--muted-foreground)}
+/* Accounts (#379) */
+.acctrow{align-items:flex-start}
+.acctrow .acctacts{display:flex;gap:6px;flex:none}
+.acctrow .acctlogin:empty{display:none}
+.acctadd{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.acctadd select,.acctadd input{height:32px;border:1px solid var(--input);border-radius:var(--radius-md);background:transparent;color:var(--foreground);
+  font:inherit;font-size:12.5px;padding:0 9px}
+.acctadd #acctlabel{width:150px}
+.acctadd #acctdir{flex:1;min-width:180px}

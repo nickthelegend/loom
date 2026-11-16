@@ -54,6 +54,7 @@ import {
 } from "./relay.js";
 import { registerAgentDiscoveryRoutes } from './routes/agent-discovery.js';
 import { registerAgentSettingsRoutes } from './routes/agent-settings.js';
+import { registerAccountsRoutes } from "./routes/accounts.js";
 import { registerAgentsRoutes } from './routes/agents.js';
 import { registerAlertsRoutes } from './routes/alerts.js';
 import { registerApprovalsRoutes } from './routes/approvals.js';
@@ -513,6 +514,7 @@ export class LoomDaemon {
     });
     registerSetupRoutes(app, ctx);
     registerProvidersRoutes(app);
+    registerAccountsRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);
     registerPairingRoutes(app, ctx);

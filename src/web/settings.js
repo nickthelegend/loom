@@ -40,6 +40,7 @@ import { devMode, setDevMode } from './mode.js';
       { id: "preferences", label: "Preferences", icon: ICONS.gear },
       { id: "updates", label: "Updates", icon: ICONS.up },
       { id: "devices", label: "Devices", icon: ICONS.agents },
+      { id: "accounts", label: "Accounts", icon: ICONS.team },
       { id: "cloud", label: "Loom Cloud", icon: ICONS.cloud },
       { id: "team", label: "Team", icon: ICONS.team },
       { id: "bridges", label: "Slack & Discord", icon: ICONS.chat },
@@ -156,6 +157,67 @@ import { devMode, setDevMode } from './mode.js';
           '<span class="hintx">' + (s.ready ? "This machine can run agents." : "No agents installed yet.") + "</span></div>";
         pane.innerHTML = h;
         document.getElementById("setuprecheck").onclick = renderSetup;
+      }).catch(fail);
+    }
+
+    // ---- Accounts: more than one Claude or ChatGPT subscription (#379) -------
+    // Each account is a config home (CLAUDE_CONFIG_DIR / CODEX_HOME). Loom keeps only the path
+    // and a label — never a credential — and asks the CLI itself whether it's signed in.
+    var ACCOUNT_KINDS = [{ v: "claude-code", l: "Claude Code" }, { v: "codex", l: "Codex" }];
+    function renderAccounts(){
+      busy();
+      sapi("/api/accounts").then(function(r){
+        var list = (r && r.accounts) || [];
+        var h = '<div class="setphead">Accounts</div>' +
+          '<div class="setpsub">Two Claude or two ChatGPT subscriptions on one machine. Agents pick an account; when one hits its limit, Loom moves the work to another account of the same CLI before switching CLIs, and Orchestra spreads a fleet across them.</div>';
+        ACCOUNT_KINDS.forEach(function(k){
+          var mine = list.filter(function(a){ return a.kind === k.v; });
+          h += '<div class="sgrouph">' + brandMark(k.v) + " " + esc(k.l) + "</div>";
+          if (!mine.length) h += '<div class="snote">Only the default sign-in. Add an account to run a second subscription side by side.</div>';
+          mine.forEach(function(a){
+            var st = a.authed === true ? "ok" : a.authed === false ? "bad" : "warn";
+            h += '<div class="srow2 acctrow"><span class="sdot ' + st + '"></span><div class="sbody">' +
+              '<div class="st">' + esc(a.label) + ' <span class="sport">' + esc(a.id) + "</span></div>" +
+              '<div class="sd">' + (a.authed === true ? "signed in" : a.authed === false ? "signed out — sign in once, from a terminal" : "couldn\u2019t confirm it\u2019s signed in") + " \u00b7 <code>" + esc(a.configDir) + "</code></div>" +
+              '<div class="sd acctlogin" data-acctcmd="' + esc(a.id) + '"></div></div>' +
+              '<div class="acctacts"><button class="btn ghost sm" data-acctlogin="' + esc(a.id) + '">' + (a.authed === true ? "Sign in again" : "Sign in") + "</button>" +
+              '<button class="btn ghost sm" data-acctforget="' + esc(a.id) + '" title="removes it from Loom; its folder and sign-in stay on disk">Forget</button></div></div>';
+          });
+        });
+        h += '<div class="sgrouph">Add an account</div>' +
+          '<div class="acctadd"><select id="acctkind" aria-label="which CLI">' + ACCOUNT_KINDS.map(function(k){ return '<option value="' + k.v + '">' + esc(k.l) + "</option>"; }).join("") + "</select>" +
+          '<input id="acctlabel" placeholder="label, e.g. work" maxlength="40" spellcheck="false">' +
+          '<input id="acctdir" placeholder="config folder (optional \u2014 Loom makes one)" spellcheck="false">' +
+          '<button class="btn sm" id="acctadd">Add</button></div>' +
+          '<div class="hintx">Then pick it on an agent: <code>loom agents:add codex --account &lt;id&gt;</code>, or the account field when you add an agent.</div>';
+        pane.innerHTML = h;
+        document.getElementById("acctadd").onclick = function(){
+          var label = document.getElementById("acctlabel").value.trim();
+          if (!label) { document.getElementById("acctlabel").focus(); return; }
+          var dir = document.getElementById("acctdir").value.trim();
+          sapi("/api/accounts", { method: "POST", body: JSON.stringify({ kind: document.getElementById("acctkind").value, label: label, ...(dir ? { configDir: dir } : {}) }) })
+            .then(function(){ toast("account added \u2014 sign it in next"); renderAccounts(); }).catch(function(e){ toast(e.message); });
+        };
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-acctlogin]"), function(b){
+          b.onclick = function(){
+            var id = b.getAttribute("data-acctlogin");
+            sapi("/api/accounts/" + encodeURIComponent(id) + "/login", { method: "POST" }).then(function(j){
+              var box = pane.querySelector('[data-acctcmd="' + id + '"]');
+              if (box) box.innerHTML = 'Run this in a terminal, sign in, then Re-check: <code class="scmd">' + esc(j.command) + '</code> <button class="btn ghost xs" data-acctcopy>Copy</button> <button class="btn ghost xs" data-acctre>Re-check</button>';
+              var cp = box && box.querySelector("[data-acctcopy]"); if (cp) cp.onclick = function(){ copyText(j.command); };
+              var re = box && box.querySelector("[data-acctre]"); if (re) re.onclick = renderAccounts;
+            }).catch(function(e){ toast(e.message); });
+          };
+        });
+        Array.prototype.forEach.call(pane.querySelectorAll("[data-acctforget]"), function(b){
+          b.onclick = function(){
+            var id = b.getAttribute("data-acctforget");
+            askConfirm("Forget account " + id + "?\n\nIts folder and sign-in stay on disk; agents using it fall back to the default sign-in.", { ok: "Forget" }).then(function(ok){
+              if (!ok) return;
+              sapi("/api/accounts/" + encodeURIComponent(id), { method: "DELETE" }).then(renderAccounts).catch(function(e){ toast(e.message); });
+            });
+          };
+        });
       }).catch(fail);
     }
 
@@ -927,6 +989,7 @@ import { devMode, setDevMode } from './mode.js';
       else if (cur === "preferences") renderPrefs();
       else if (cur === "updates") renderUpdates();
       else if (cur === "devices") renderDevices();
+      else if (cur === "accounts") renderAccounts();
       else if (cur === "cloud") renderCloud();
       else if (cur === "bridges") renderBridges();
       else if (cur === "team") renderTeam();

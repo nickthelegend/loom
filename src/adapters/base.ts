@@ -321,10 +321,10 @@ export function agentEnv(): NodeJS.ProcessEnv {
 }
 
 /** A CLI's exit code and output (stdout, then stderr), or null when it couldn't be run. Bounded like cliAvailable. */
-export function cliOutput(cmd: string, args: string[], timeoutMs = 8_000): Promise<{ code: number | null; out: string } | null> {
+export function cliOutput(cmd: string, args: string[], timeoutMs = 8_000, env: NodeJS.ProcessEnv = {}): Promise<{ code: number | null; out: string } | null> {
   return new Promise((resolve) => {
     try {
-      const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
+      const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env, NO_COLOR: "1" } });
       let out = "";
       let err = "";
       child.stdout?.on("data", (d: Buffer) => { if (out.length < 20_000) out += d.toString(); });

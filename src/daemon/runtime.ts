@@ -1,5 +1,6 @@
 import { chatBranches, branchSessionKey, ChatBranchError, type BranchSource, type BranchListing } from "../core/chat-branches.js";
 import type { ChatBranch } from "../types.js";
+import { accountKey, accountLogin, configDirEnv, isAccountKind, resolveAgentAccount } from "../core/accounts.js";
 import { PrFeedback } from "./pr-feedback.js";
 import { recordOpenedPr, type PrFeedbackMode } from "../core/pr-feedback.js";
 import { execFileSync, execSync } from "node:child_process";
@@ -197,7 +198,10 @@ export class ProjectRuntime {
   /** Native harness reachability, polled while native continuity is on. */
   readonly harnesses: HarnessMonitor;
   /** Latest context and usage-limit readings from native harnesses. */
-  readonly nativeUsage = new NativeUsage();
+  readonly nativeUsage = new NativeUsage(id => {
+    const cfg = this.config.agents.find(a => a.id === id);
+    return cfg ? accountKey(cfg) : `agent:${id}`;
+  });
   private readonly agentLifecycle = new RuntimeAgents();
   private get agents(): ReadonlyMap<string, AnyAgent> { return this.agentLifecycle.agents; }
   private unwatchConfig: (() => void) | null = null;
@@ -426,6 +430,14 @@ export class ProjectRuntime {
 
     this.relay = new QuotaRelay({
       config: () => this.config,
+      addAccountAgent: (source, account) => {
+        const cfg = this.addAgent(source.kind, { id: `${source.id.slice(0, 24)}-relay`, series: true,
+          role: source.role, account: account.id, options: { ...source.options, configDir: account.configDir } });
+        cfg.instructions = source.instructions;
+        cfg.memoryFiles = source.memoryFiles;
+        this.saveConfig();
+        return cfg;
+      },
       busy: (id) => { const a = this.agents.get(id); return Boolean(a && isAdapter(a) && a.busy()) || this.turns.busySince.has(id); },
       turnChat: (id) => this.turns.turnChat.get(id),
       inSubtask: (id) => [...this.subtasks.values()].some((t) => t.agentId === id),
@@ -1069,7 +1081,7 @@ export class ProjectRuntime {
    */
   addAgent(
     kind: string,
-    opts: { id?: string; role?: string; options?: Record<string, unknown>; /** several at once: the name is a base, numbered */ series?: boolean } = {},
+    opts: { id?: string; role?: string; account?: string; options?: Record<string, unknown>; /** several at once: the name is a base, numbered */ series?: boolean } = {},
   ): AgentConfig {
     if (!knownAgentKinds().includes(kind)) {
       throw new Error(`unknown agent kind "${kind}" (known: ${knownAgentKinds().join(", ")})`);
@@ -1102,12 +1114,13 @@ export class ProjectRuntime {
     // A `model` agent with no model is an agent that refuses every turn, so
     // the options that make it work are settable as it's added rather than in
     // a second step nobody is told about.
-    const cfg: AgentConfig = {
+    const cfg: AgentConfig = resolveAgentAccount({
       id,
       kind,
+      ...(opts.account !== undefined ? { account: opts.account } : {}),
       role: (opts.role ?? kind).trim().slice(0, 40) || kind,
       ...(opts.options && Object.keys(opts.options).length ? { options: opts.options } : {}),
-    };
+    });
     // Build it before saving. A config entry with no live agent behind it makes
     // status() throw the moment anything asks — this.agent(id) doesn't find it —
     // so the project 500s on every poll and the roster you just changed becomes
@@ -3047,11 +3060,17 @@ export class ProjectRuntime {
 
   /** What status says about an agent's sign-in: a real failure beats the CLI's own (cached) check. */
   private signInState(agentId: string, kind: string): { signedOut?: string } {
+    const cfg = this.config.agents.find(a => a.id === agentId);
+    const selected = cfg && resolveAgentAccount(cfg);
+    const dir = selected?.options?.configDir;
+    const login = isAccountKind(kind) && typeof dir === "string"
+      ? accountLogin({ id: cfg?.account ?? "", kind, label: "", configDir: dir }).command : signInCommand(kind);
     const learned = this.signedOutAgents.get(agentId);
-    if (learned) return { signedOut: `${learned}${signInCommand(kind) ? ` — ${signInCommand(kind)}` : ""}` };
-    if (!signInCommand(kind) || process.env.LOOM_NO_AUTH_PROBE) return {};
-    const auth = knownAuth(kind);
-    return auth?.authed === false ? { signedOut: `${auth.detail ?? "not signed in"} — ${signInCommand(kind)}` } : {};
+    if (learned) return { signedOut: `${learned}${login ? ` — ${login}` : ""}` };
+    if (!login || process.env.LOOM_NO_AUTH_PROBE) return {};
+    const env = { ...(selected?.options?.env as Record<string, string> | undefined), ...configDirEnv(kind, dir) };
+    const auth = knownAuth(kind, 60_000, env);
+    return auth?.authed === false ? { signedOut: `${auth.detail ?? "not signed in"} — ${login}` } : {};
   }
 
   private shield(event: LoomEvent): void {
@@ -3664,6 +3683,9 @@ export class ProjectRuntime {
       this.config.agents.map(async (cfg) => {
         // The picker shows a tick next to the active model; "" means the
         // adapter's own default, which is the honest baseline.
+        const selected = resolveAgentAccount(cfg);
+        const account = { ...(selected.account ? { account: selected.account } : {}),
+          ...(typeof selected.options?.configDir === "string" ? { configDir: selected.options.configDir } : {}) };
         const model = (cfg.options?.model as string | undefined) ?? "";
         const live = this.agents.get(cfg.id);
         if (!live) {
@@ -3686,6 +3708,7 @@ export class ProjectRuntime {
             busy: false,
             holdsBaton: false,
             model,
+            ...account,
             permissions: permissionFor(cfg.kind, cfg.options),
             ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
             ...sampling(cfg),
@@ -3714,12 +3737,13 @@ export class ProjectRuntime {
           ...this.signInState(cfg.id, cfg.kind),
           ...(cfg.kind === "model" && !cfg.options?.write ? { readOnly: true } : {}),
           model,
+          ...account,
           permissions: permissionFor(cfg.kind, cfg.options),
           enabled: true,
           ...(cfg.instructions ? { instructions: cfg.instructions } : {}),
           ...sampling(cfg),
           ...(cfg.avatar ? { avatar: cfg.avatar } : {}),
-          ...(isNativeKind(cfg.kind) ? { context: this.nativeUsage.context(cfg.id), limits: this.nativeUsage.limitsFor(cfg.kind) } : {}),
+          ...(isNativeKind(cfg.kind) ? { context: this.nativeUsage.context(cfg.id), limits: this.nativeUsage.limitsFor(cfg.kind, cfg.id) } : {}),
           ...((f) => (f ? { forecast: f } : {}))(this.accounting.forecast(cfg.id)),
         };
       }),
@@ -3886,7 +3910,7 @@ export class ProjectRuntime {
   }
 
   private policyOptions(cfg: AgentConfig): Record<string, unknown> {
-    const opts: Record<string, unknown> = { ...(cfg.options ?? {}) };
+    const opts: Record<string, unknown> = { ...(resolveAgentAccount(cfg).options ?? {}) };
     if (this.runnerMode) {
       // A runner is its own trust tier (D70): agents bypass inside the sandbox,
       // capped by the team's runners.permissions rather than the laptop ceiling.

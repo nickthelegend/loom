@@ -176,9 +176,9 @@ export function readProjectConfig(projectDir: string, opts: { strict?: boolean }
   return cfg;
 }
 
-const AGENT_KEYS = new Set(["id", "kind", "role", "options", "memoryFiles", "enabled", "instructions", "avatar", "permissions"]);
+const AGENT_KEYS = new Set(["id", "kind", "role", "account", "options", "memoryFiles", "enabled", "instructions", "avatar", "permissions"]);
 /** Keys an adapter reads from options — someone writing one on the agent itself meant it there. */
-const OPTION_KEYS = new Set(["model", "bin", "extraArgs", "baseUrl", "env", "effort", "sandbox", "timeoutMs", "startTimeoutMs", "permissionMode", "mode", "args"]);
+const OPTION_KEYS = new Set(["model", "bin", "extraArgs", "baseUrl", "configDir", "env", "effort", "sandbox", "timeoutMs", "startTimeoutMs", "permissionMode", "mode", "args"]);
 
 /**
  * Keys on an agent in .loom/config.json that Loom doesn't read — a typo or a misplaced option

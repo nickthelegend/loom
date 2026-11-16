@@ -3,6 +3,7 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { Account, AccountKind, AccountLogin, AccountStatus } from "../core/accounts.js";
 import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
@@ -262,17 +263,25 @@ export class DaemonClient {
   addAgent(
     id: string,
     kind: string,
-    opts: { as?: string; role?: string; model?: string; count?: number; options?: Record<string, unknown> } = {},
+    opts: { as?: string; role?: string; account?: string; model?: string; count?: number; options?: Record<string, unknown> } = {},
   ): Promise<AgentConfig & { agents: AgentConfig[] }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents`, {
       kind,
       ...(opts.as ? { id: opts.as } : {}),
       ...(opts.role ? { role: opts.role } : {}),
+      ...(opts.account !== undefined ? { account: opts.account } : {}),
       ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.count !== undefined ? { count: opts.count } : {}),
       ...(opts.options ? { options: opts.options } : {}),
     });
   }
+
+  accounts(): Promise<{ accounts: AccountStatus[] }> { return this.request("GET", "/api/accounts"); }
+  addAccount(input: { kind: AccountKind; label: string; configDir?: string }): Promise<{ account: Account }> {
+    return this.request("POST", "/api/accounts", input);
+  }
+  removeAccount(id: string): Promise<{ forgotten: boolean }> { return this.request("DELETE", `/api/accounts/${encodeURIComponent(id)}`); }
+  accountLogin(id: string): Promise<AccountLogin> { return this.request("POST", `/api/accounts/${encodeURIComponent(id)}/login`, {}); }
 
   /** Which agents this machine can drive, and how many of each are here. */
   availableAgents(id: string): Promise<{
