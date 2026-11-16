@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Orchestra fleets accept `agent[@model][:effort][xN]` in CLI, API and chain options, with distinct worker ids and per-spawn model/effort overrides (#369). Selections survive restarts and appear in planner briefings, plan files, CLI text/JSON and API/events for web and phone clients. Approach credit: Agent Orchestrator's `ao spawn --agent --model --effort` (Apache-2.0).
+
 ### Fixed
 
+- Orchestra races honor the parallel limit and keep task ids unique for repeated agents and long model names (#369).
 - Routes keep the chat they were started in. A queued `auto` prompt now sends every hop and its route events to the original thread (#357).
 
 ## [1.3.0] — 2026-10-26

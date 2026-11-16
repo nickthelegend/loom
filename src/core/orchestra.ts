@@ -58,6 +58,67 @@ export const AGENT_ALIASES: Record<string, string> = {
   grok: "grok-code",
 };
 
+/** Model selection is provider-specific; absent fields use the provider's default. */
+export interface OrchestraModel {
+  model?: string;
+  effort?: string;
+}
+
+/** Public fleet metadata, keyed by the instance id in OrchestraRun.workers. */
+export interface OrchestraWorker extends OrchestraModel {
+  id: string;
+  kind: string;
+}
+
+/** Parse agent[@model][:effort][xN]. The team: prefix belongs to the agent name. */
+export function parseAgentSpec(value: string, rosterIds: string[] = []): OrchestraModel & { agent: string; count: number } {
+  let spec = value.trim();
+  if (rosterIds.some((id) => id.toLowerCase() === spec.toLowerCase())) return { agent: spec, count: 1 };
+  const copies = /[x×](\d+)$/.exec(spec);
+  const count = copies ? Number(copies[1]) : 1;
+  if (!Number.isSafeInteger(count) || count < 1 || count > 100) throw new Error("worker count must be an integer from 1 to 100");
+  if (copies) spec = spec.slice(0, copies.index);
+  const match = /^(team:)?([^@:#]+)(?:@([^@:#\s]+))?(?::([^@:#\s]+))?$/.exec(spec);
+  if (!match) throw new Error(`invalid agent spec "${value}" — use agent[@model][:effort][xN]`);
+  const agent = `${match[1] ?? ""}${match[2]!.trim()}`;
+  if (!agent || agent === "team:") throw new Error(`invalid agent spec "${value}"`);
+  return { agent, count, ...(match[3] ? { model: match[3] } : {}), ...(match[4] ? { effort: match[4] } : {}) };
+}
+
+function modelOf(cfg: AgentConfig): OrchestraModel {
+  return {
+    ...(typeof cfg.options?.model === "string" ? { model: cfg.options.model } : {}),
+    ...(typeof cfg.options?.effort === "string" ? { effort: cfg.options.effort } : {}),
+  };
+}
+
+function workerOf(cfg: AgentConfig): OrchestraWorker {
+  return { id: cfg.id, kind: cfg.kind, ...modelOf(cfg) };
+}
+
+/** Keep the selection fixed even if the roster changes before a queued task starts. */
+function pinModel(cfg: AgentConfig, selection: OrchestraModel): AgentConfig {
+  return { ...cfg, options: { ...cfg.options, model: selection.model, effort: selection.effort } };
+}
+
+/** Expand fleet specs without changing the roster. Repeated specs are additional instances. */
+export function expandWorkerSpecs(names: string[], resolve: (name: string) => AgentConfig | null, rosterIds: string[] = []): AgentConfig[] {
+  const workers: AgentConfig[] = [];
+  for (const name of names) {
+    const spec = parseAgentSpec(name, rosterIds);
+    const single = `${spec.agent}${spec.model ? `@${spec.model}` : ""}${spec.effort ? `:${spec.effort}` : ""}`;
+    const cfg = resolve(single);
+    if (!cfg) throw new Error(`unknown worker agent "${name}"`);
+    for (let i = 0; i < spec.count; i++) {
+      let id = cfg.id;
+      let n = 1;
+      while (workers.some((w) => w.id === id)) id = `${cfg.id}#${++n}`;
+      workers.push({ ...cfg, id, options: { ...cfg.options } });
+    }
+  }
+  return workers;
+}
+
 export type OrchestraStatus =
   | "starting"
   | "planning" // orchestrator's first turn
@@ -95,11 +156,11 @@ export interface TaskHold {
   checkedAt?: number;
 }
 
-export interface OrchestraTask {
+export interface OrchestraTask extends OrchestraModel {
   id: string;
   title: string;
   prompt: string;
-  /** Roster agent id (or kind) that runs it. */
+  /** Fleet instance id that runs it; model/effort are pinned when the task is planned. */
   agent: string;
   /** Adapter kind actually used. */
   kind: string;
@@ -136,9 +197,15 @@ export interface OrchestraTask {
 export interface OrchestraRun {
   id: string;
   goal: string;
-  orchestrator: { agent: string; kind: string };
-  /** Agents the orchestrator may assign work to (roster ids). */
+  orchestrator: { agent: string; kind: string } & OrchestraModel;
+  /** Instance ids the orchestrator may assign work to; retained for older clients. */
   workers: string[];
+  /**
+   * Resolved model/effort per worker, in workers order. GET/list/start responses
+   * and the started event include this. Missing only on runs saved before fleets.
+   * A missing model/effort means the provider default, not an inferred model.
+   */
+  workerDetails?: OrchestraWorker[];
   status: OrchestraStatus;
   /** The thread the orchestrator answers in. */
   chat: string;
@@ -254,9 +321,9 @@ export const BUDGET_WARN_AT = 0.8;
 
 export interface OrchestraStartOptions {
   goal: string;
-  /** Roster id (or kind) of the orchestrator. Defaults to the host's pick. */
+  /** agent[@model][:effort][x1]; exactly one orchestrator. Defaults to the host's pick. */
   orchestrator?: string;
-  /** Roster ids (or kinds) of allowed workers. Defaults to every adapter. */
+  /** Fleet rows as agent[@model][:effort][xN] (also ×N), N = 1..100. Defaults to the roster. */
   workers?: string[];
   maxParallel?: number;
   maxRounds?: number;
@@ -413,6 +480,9 @@ export type OrchestraAction =
       id?: string;
       title: string;
       agent: string;
+      /** Optional per-task overrides of the selected worker's model and effort. */
+      model?: string;
+      effort?: string;
       prompt: string;
       dependsOn?: string[];
       touches?: string[];
@@ -554,6 +624,8 @@ function normalizeAction(v: unknown): OrchestraAction | null {
         ...(id ? { id } : {}),
         title,
         agent,
+        ...(str(a.model) ? { model: str(a.model) } : {}),
+        ...(str(a.effort) ? { effort: str(a.effort) } : {}),
         prompt,
         dependsOn: deps,
         ...(touches.length ? { touches } : {}),
@@ -591,13 +663,13 @@ function normalizeAction(v: unknown): OrchestraAction | null {
 export function orchestratorBriefing(opts: {
   project: string;
   goal: string;
-  workers: Array<{ id: string; kind: string; role?: string }>;
+  workers: Array<OrchestraWorker & { role?: string }>;
   maxParallel: number;
   branch: string;
   planDir?: string;
 }): string {
   const roster = opts.workers
-    .map((w) => `- "${w.id}" — ${KIND_BLURBS[w.kind] ?? w.kind}${isRemoteWorker(w.id) ? " — on a teammate's machine" : w.role && w.role !== w.id ? ` (role: ${w.role})` : ""}`)
+    .map((w) => `- "${w.id}" — ${KIND_BLURBS[w.kind] ?? w.kind} — model: ${w.model ?? "provider default"}${w.effort ? `, effort: ${w.effort}` : ""}${isRemoteWorker(w.id) ? " — on a teammate's machine" : w.role && w.role !== w.id ? ` (role: ${w.role})` : ""}`)
     .join("\n");
   const team = opts.workers.some((w) => isRemoteWorker(w.id));
   return [
@@ -615,7 +687,8 @@ export function orchestratorBriefing(opts: {
     "- Prefer tasks that touch different files so parallel work merges cleanly. When one task needs",
     "  another's output, list it in dependsOn — it will start from a branch that already has it.",
     `- At most ${opts.maxParallel} tasks run at once; queue more and they start as slots free up.`,
-    "- Match tasks to agents' strengths, and spread work across agents when it helps.",
+    "- Match tasks to agents' strengths and models, and spread work across agents when it helps.",
+    '- Use the exact worker instance id. A spawn may set "model" and "effort" to override that worker for just that task.',
     '- Give each task "touches": the file globs it will change. Teammates\' agents see them to avoid collisions.',
     '- A task that will take long (a full browser audit, a big migration) can say "timeoutMin": 60 — a worker\'s turn is otherwise cut at its own limit (Antigravity: 30 min).',
     "",
@@ -672,7 +745,7 @@ export function renderPlanIndex(run: OrchestraRun): string {
   const rows = run.tasks
     .map(
       (t) =>
-        `| [${t.id}](${t.id}.md) | ${t.title.replace(/\|/g, "\\|")} | ${t.agent} | ${t.dependsOn.join(", ") || "—"} | ${t.status} |`,
+        `| [${t.id}](${t.id}.md) | ${t.title.replace(/\|/g, "\\|")} | ${t.agent} | ${t.model ?? "provider default"}${t.effort ? `:${t.effort}` : ""} | ${t.dependsOn.join(", ") || "—"} | ${t.status} |`,
     )
     .join("\n");
   return [
@@ -695,9 +768,9 @@ export function renderPlanIndex(run: OrchestraRun): string {
     "",
     "## Tasks",
     "",
-    "| id | task | agent | depends on | status |",
-    "|---|---|---|---|---|",
-    rows || "| — | (no tasks yet) | | | |",
+    "| id | task | agent | model | depends on | status |",
+    "|---|---|---|---|---|---|",
+    rows || "| — | (no tasks yet) | | | | |",
     "",
     "## How to use this plan",
     "",
@@ -719,6 +792,8 @@ export function renderTaskFile(run: OrchestraRun, t: OrchestraTask): string {
     `id: ${t.id}`,
     `title: ${yamlStr(t.title)}`,
     `agent: ${t.agent}`,
+    ...(t.model ? [`model: ${yamlStr(t.model)}`] : []),
+    ...(t.effort ? [`effort: ${yamlStr(t.effort)}`] : []),
     `depends_on: [${t.dependsOn.join(", ")}]`,
     `status: ${t.status}`,
     `plan: PLAN.md`,
@@ -985,19 +1060,25 @@ export class OrchestraEngine {
   /** Resolve a name the orchestrator (or user) gave into a runnable config. */
   resolveAgent(name: string): AgentConfig | null {
     const roster = this.host.roster();
-    const n = name.trim().toLowerCase();
-    // a teammate's agent (team auto-orchestration): runs on their machine, not this roster
-    if (isRemoteWorker(n)) {
-      const kind = n.slice(5).trim();
-      return kind ? { id: `team:${kind}`, kind, role: "teammate" } : null;
-    }
-    const byId = roster.find((a) => a.id.toLowerCase() === n);
-    if (byId) return byId;
+    // Exact roster ids win, including older ids containing spec punctuation.
+    const exact = roster.find((a) => a.id.toLowerCase() === name.trim().toLowerCase());
+    if (exact) return exact;
+    const instance = /#([2-9]|[1-9]\d+)$/.exec(name.trim());
+    const spec = parseAgentSpec(instance ? name.trim().slice(0, instance.index) : name, roster.map((a) => a.id));
+    if (spec.count !== 1) throw new Error("a single agent cannot have a count greater than 1; use workers for fleets");
+    const n = spec.agent.toLowerCase();
     const kind = AGENT_ALIASES[n] ?? n;
-    const byKind = roster.find((a) => a.kind === kind);
-    if (byKind) return byKind;
-    if (this.host.installedKinds().includes(kind)) return { id: kind, kind, role: kind };
-    return null;
+    const base = isRemoteWorker(n)
+      ? { id: n, kind: n.slice(5), role: "teammate" }
+      : roster.find((a) => a.id.toLowerCase() === n) ?? roster.find((a) => a.kind === kind) ??
+        (this.host.installedKinds().includes(kind) ? { id: kind, kind, role: kind } : null);
+    if (!base) return null;
+    if (isRemoteWorker(n) && (spec.model || spec.effort)) throw new Error("model and effort overrides require a local worker");
+    return {
+      ...base,
+      id: `${base.id}${spec.model ? `@${spec.model}` : ""}${spec.effort ? `:${spec.effort}` : ""}${instance ? instance[0] : ""}`,
+      options: { ...base.options, ...(spec.model ? { model: spec.model } : {}), ...(spec.effort ? { effort: spec.effort } : {}) },
+    };
   }
 
   // ── lifecycle ──
@@ -1028,12 +1109,7 @@ export class OrchestraEngine {
     if (!orchCfg) throw new Error(`no agent "${opts.orchestrator ?? ""}" can orchestrate here — add one first`);
 
     const workerNames = opts.workers?.length ? opts.workers : roster.map((a) => a.id);
-    const workers: AgentConfig[] = [];
-    for (const w of workerNames) {
-      const cfg = this.resolveAgent(w);
-      if (!cfg) throw new Error(`unknown worker agent "${w}"`);
-      if (!workers.some((x) => x.id === cfg.id)) workers.push(cfg);
-    }
+    const workers = expandWorkerSpecs(workerNames, (name) => this.resolveAgent(name), roster.map((a) => a.id));
     if (!workers.length) throw new Error("an orchestra needs at least one worker agent");
     // Team auto-orchestration: with teammates' shared runners online, their agents join the
     // run as team:<kind> workers — the orchestrator splits the goal across both machines.
@@ -1089,8 +1165,9 @@ export class OrchestraEngine {
     const run: OrchestraRun = {
       id,
       goal,
-      orchestrator: { agent: orchCfg.id, kind: orchCfg.kind },
+      orchestrator: { agent: orchCfg.id, kind: orchCfg.kind, ...modelOf(orchCfg) },
       workers: workers.map((w) => w.id),
+      workerDetails: workers.map(workerOf),
       status: "planning",
       chat: chat.id,
       ...(inPlace ? { inPlace: true } : {}),
@@ -1124,6 +1201,7 @@ export class OrchestraEngine {
       goal,
       orchestrator: run.orchestrator,
       workers: run.workers,
+      workerDetails: run.workerDetails,
       branch,
       maxParallel: run.maxParallel,
       ...(run.race ? { race: true } : {}),
@@ -1132,10 +1210,11 @@ export class OrchestraEngine {
 
     if (run.race) {
       // No plan and no orchestrator: every entrant gets the goal as it was
-      // typed, in its own worktree off the same commit, all at once.
-      run.maxParallel = Math.max(run.maxParallel, workers.length);
+      // typed, in its own worktree off the same commit, within the parallel cap.
       for (const w of workers) {
-        const id = `race-${w.id}`.replace(/[^\w-]+/g, "-").slice(0, 40);
+        const baseId = `race-${w.id}`.replace(/[^\w-]+/g, "-").slice(0, 40);
+        let id = baseId;
+        for (let n = 2; run.tasks.some((t) => t.id === id); n++) id = `${baseId}-${n}`;
         const chatInfo = this.host.createChat(`🏁 ${w.id} · ${goal}`.slice(0, 60), { agentId: w.id });
         const task: OrchestraTask = {
           id,
@@ -1143,6 +1222,7 @@ export class OrchestraEngine {
           prompt: goal,
           agent: w.id,
           kind: w.kind,
+          ...modelOf(w),
           dependsOn: [],
           status: "pending",
           chat: chatInfo.id,
@@ -1160,7 +1240,7 @@ export class OrchestraEngine {
     const briefing = orchestratorBriefing({
       project: this.host.projectName,
       goal,
-      workers: workers.map((w) => ({ id: w.id, kind: w.kind, role: w.role })),
+      workers: workers.map((w) => ({ ...workerOf(w), role: w.role })),
       maxParallel: run.maxParallel,
       branch,
       ...(run.plan ? { planDir: planDir(run) } : {}),
@@ -1174,7 +1254,9 @@ export class OrchestraEngine {
   private workersFor(run: OrchestraRun): AgentConfig[] {
     const cached = this.workerCfgs.get(run.id);
     if (cached) return cached;
-    const cfgs = run.workers.map((w) => this.resolveAgent(w)).filter((c): c is AgentConfig => !!c);
+    const cfgs = run.workerDetails
+      ? run.workerDetails.map((w) => pinModel(this.resolveAgent(w.id) ?? { id: w.id, kind: w.kind, role: "worker" }, w))
+      : run.workers.map((w) => this.resolveAgent(w)).filter((c): c is AgentConfig => !!c);
     this.workerCfgs.set(run.id, cfgs);
     return cfgs;
   }
@@ -1331,9 +1413,14 @@ export class OrchestraEngine {
       if (cfg && cfg.kind !== kind) swaps.push(`${agent} (${kind}) → ${cfg.id} (${cfg.kind})`);
       return cfg;
     };
-    const orchCfg = local(record.orchestrator.agent, record.orchestrator.kind, roster.find((a) => a.role === "orchestrator") ?? roster[0]);
+    const localOrch = local(record.orchestrator.agent, record.orchestrator.kind, roster.find((a) => a.role === "orchestrator") ?? roster[0]);
+    const orchCfg = localOrch && record.workerDetails ? pinModel(localOrch, record.orchestrator) : localOrch;
     if (!orchCfg) throw new Error("no agent here can orchestrate this goal");
-    const workerCfgs = record.workers.map((w) => this.resolveAgent(w)).filter((c): c is AgentConfig => !!c);
+    const workerCfgs = record.workers.flatMap((id) => {
+      const detail = record.workerDetails?.find((w) => w.id === id);
+      const cfg = this.resolveAgent(id) ?? (detail ? local(id, detail.kind, undefined) : null);
+      return cfg ? [detail ? pinModel(cfg, detail) : cfg] : [];
+    });
     const firstWorker = workerCfgs[0] ?? roster.find((a) => a.role !== "orchestrator") ?? roster[0];
     const tasks: OrchestraTask[] = [];
     await this.gitLock.run(async () => {
@@ -1364,8 +1451,9 @@ export class OrchestraEngine {
     if (!workerCfgs.length && firstWorker) workerCfgs.push(firstWorker);
     const run: OrchestraRun = {
       ...record,
-      orchestrator: { agent: orchCfg.id, kind: orchCfg.kind },
+      orchestrator: { agent: orchCfg.id, kind: orchCfg.kind, ...modelOf(orchCfg) },
       workers: workerCfgs.map((w) => w.id),
+      ...(record.workerDetails ? { workerDetails: workerCfgs.map(workerOf) } : {}),
       ...(swaps.length ? { notes: [...(record.notes ?? []), `Agents changed on the move: ${[...new Set(swaps)].join("; ")}`] } : {}),
       dir: integration,
       tasks,
@@ -1396,7 +1484,7 @@ export class OrchestraEngine {
     return orchestratorBriefing({
       project: this.host.projectName,
       goal: run.goal,
-      workers: this.workersFor(run).map((w) => ({ id: w.id, kind: w.kind, role: w.role })),
+      workers: this.workersFor(run).map((w) => ({ ...workerOf(w), role: w.role })),
       maxParallel: run.maxParallel,
       branch: run.branch,
       ...(run.plan ? { planDir: planDir(run) } : {}),
@@ -1653,7 +1741,8 @@ export class OrchestraEngine {
       kind: run.orchestrator.kind,
       role: "orchestrator",
     };
-    agent = this.host.makeAgent({ ...cfg, role: "orchestrator", options: orchestratorOptions(cfg) }, run.dir);
+    const pinned = run.workerDetails ? pinModel(cfg, run.orchestrator) : cfg;
+    agent = this.host.makeAgent({ ...pinned, role: "orchestrator", options: orchestratorOptions(pinned) }, run.dir);
     this.live.set(key, agent);
     this.wire(run, agent, cfg.id, run.chat, key);
     return agent;
@@ -1807,12 +1896,20 @@ export class OrchestraEngine {
 
   private addTask(run: OrchestraRun, a: Extract<OrchestraAction, { type: "spawn" }>): OrchestraTask {
     const allowed = this.workersFor(run);
-    const cfg =
-      allowed.find((w) => w.id.toLowerCase() === a.agent.toLowerCase()) ??
-      allowed.find((w) => w.kind === this.resolveAgent(a.agent)?.kind);
-    if (!cfg) {
+    const requested = this.resolveAgent(a.agent);
+    const worker = allowed.find((w) => w.id === a.agent) ??
+      allowed.find((w) => w.id === requested?.id) ??
+      (!/#\d+$/.test(a.agent) ? allowed.find((w) => w.kind === requested?.kind) : undefined);
+    if (!worker) {
       throw new Error(`agent "${a.agent}" is not one of this run's workers (${run.workers.join(", ")})`);
     }
+    const spec = parseAgentSpec(a.agent.replace(/#\d+$/, ""), this.host.roster().map((w) => w.id));
+    const selection = { ...modelOf(worker),
+      ...(spec.model ? { model: spec.model } : {}), ...(spec.effort ? { effort: spec.effort } : {}),
+      ...(a.model ? { model: a.model } : {}), ...(a.effort ? { effort: a.effort } : {}),
+    };
+    if (isRemoteWorker(worker.id) && (selection.model || selection.effort)) throw new Error("model and effort overrides require a local worker");
+    const cfg = pinModel(worker, selection);
     let id = (a.id || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16);
     // Re-sending a spawn for a task that hasn't started revises it: that's how
     // the orchestrator answers a hold (an overlap decision, narrower touches,
@@ -1823,6 +1920,8 @@ export class OrchestraEngine {
       unstarted.prompt = a.prompt;
       unstarted.agent = cfg.id;
       unstarted.kind = cfg.kind;
+      unstarted.model = selection.model;
+      unstarted.effort = selection.effort;
       if (a.touches?.length) unstarted.touches = a.touches;
       if (a.overlap) unstarted.overlap = a.overlap;
       if (a.dependsOn) unstarted.dependsOn = a.dependsOn.filter((d) => d !== id && run.tasks.some((t) => t.id === d));
@@ -1840,6 +1939,7 @@ export class OrchestraEngine {
       prompt: a.prompt,
       agent: cfg.id,
       kind: cfg.kind,
+      ...selection,
       dependsOn: deps,
       ...(a.touches?.length ? { touches: a.touches } : {}),
       ...(a.overlap ? { overlap: a.overlap } : {}),
@@ -2079,7 +2179,7 @@ export class OrchestraEngine {
   statusReport(run: OrchestraRun): string {
     const lines = [`Status of orchestra run ${run.id} (integration branch ${run.branch}):`];
     for (const t of run.tasks) {
-      const head = `\n### ${t.id} · ${t.title} — ${t.status.toUpperCase()} (worker: ${t.agent}, attempts: ${t.attempts})`;
+      const head = `\n### ${t.id} · ${t.title} — ${t.status.toUpperCase()} (worker: ${t.agent}, model: ${t.model ?? "provider default"}${t.effort ? `, effort: ${t.effort}` : ""}, attempts: ${t.attempts})`;
       lines.push(head);
       if (t.reported && (t.status === "done" || t.status === "cancelled")) {
         lines.push("(already reviewed)");
@@ -2132,7 +2232,7 @@ export class OrchestraEngine {
     task.error = undefined;
     this.save(run);
     this.emit(run, "task", { task: taskSummary(task) });
-    this.emit(run, "task_started", { taskId: task.id, agent: task.agent, title: task.title }, task.chat);
+    this.emit(run, "task_started", { taskId: task.id, agent: task.agent, title: task.title, model: task.model, effort: task.effort }, task.chat);
 
     const key = `${run.id}/${task.id}`;
     try {
@@ -2179,7 +2279,8 @@ export class OrchestraEngine {
     let agent = this.live.get(key);
     const freshSession = !agent;
     if (!agent) {
-      const cfg = this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
+      const base = this.workersFor(run).find((w) => w.id === task.agent) ?? this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
+      const cfg = run.workerDetails || task.model || task.effort ? pinModel(base, task) : base;
       agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
       this.live.set(key, agent);
       this.wire(run, agent, cfg.id, task.chat, key);
@@ -2587,6 +2688,8 @@ export function taskSummary(t: OrchestraTask): Record<string, unknown> {
     title: t.title,
     agent: t.agent,
     kind: t.kind,
+    ...(t.model ? { model: t.model } : {}),
+    ...(t.effort ? { effort: t.effort } : {}),
     status: t.status,
     dependsOn: t.dependsOn,
     chat: t.chat,

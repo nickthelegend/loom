@@ -214,6 +214,40 @@ loom orchestrate "add OAuth login with tests" -o claude-code -w codex,antigravit
   was interrupted. **Resume** (or `loom orchestra:resume <run>`) picks up the
   tasks that were running and briefs the orchestrator again.
 
+Use `agent[@model][:effort][xN]` to choose a model and build a fleet without
+adding roster entries. Agent names, kinds and aliases all work; `xN` (or `×N`)
+adds 1–100 instances per spec. The orchestrator takes the same syntax with count
+1. Model names and effort values are passed to the agent's provider unchanged.
+Omitted selections inherit the roster's options, then the provider's defaults.
+
+```sh
+loom orchestrate "implement and verify the feature" \
+  -o claude-code@claude-opus-5-5 \
+  -w claude-code@claude-opus-5-5x2,codex@gpt-5.6-sol:highx2,codex@gpt-6-solx2 -p 3
+
+# Chain lines accept the same specs, including with --check:
+# my-project :: [-o codex@gpt-6-sol -w codex@gpt-5.6-solx2 -p 2] implement the feature
+```
+
+Instances have distinct ids, such as `codex@gpt-5.6-sol:high#2`. Repeating a spec
+adds another instance. `-p` caps concurrent tasks across the fleet, including
+races. The planner sees each worker's model and can override a task with
+`{"type":"spawn","agent":"codex@gpt-6-sol","title":"review","prompt":"…","model":"gpt-5.6-sol","effort":"high"}`.
+These choices stay pinned through follow-ups and restarts, without changing the
+roster. Model and effort overrides currently apply to local workers; `team:<kind>`
+continues to use the teammate's configured agent.
+
+`loom orchestra <run>` shows the selections. Its `--json` output includes
+`orchestrator`, `workers`, `workerDetails` and `taskDetails`, while `tasks` retains
+its outcome counts. For API clients, `POST /api/projects/:id/orchestra` accepts
+`workers: string[]` of fleet specs and an `orchestrator` spec. Start, list and
+run-detail responses retain `workers: string[]` of instance ids and add
+`workerDetails: [{ id, kind, model?, effort? }]`; `orchestrator` and each entry in
+`run.tasks` also carry `model?` and `effort?`. The `started` event includes
+`workerDetails`, and task events and `/subagents` include task selections.
+Absent selections mean provider defaults; older runs may lack `workerDetails`.
+Web and phone fleet controls can use these fields without parsing instance ids.
+
 Under the hood: [`src/core/orchestra.ts`](src/core/orchestra.ts).
 `node scripts/verify-orchestra.mjs` runs a real orchestra against your installed
 CLIs and checks the result on disk.
@@ -2215,7 +2249,8 @@ Loom stands on good open-source work. Full license texts are in
   "coordinate, never implement" orchestrator rules, its worker rules and its
   worktree-per-worker isolation. Loom rebuilt the orchestration around a parsed
   action protocol and a dependency graph, so any agent can orchestrate any mix
-  of workers.
+  of workers. Its `ao spawn --agent --model --effort` also inspired Loom's
+  fleet specs and per-task model selection.
 - **[T3 Code](https://github.com/pingdotgg/t3code)** (MIT, © T3 Tools Inc.). Loom
   adapted its mobile connection patterns: the pairing secret in the URL fragment,
   resuming a stream from a known sequence, and a reconnect supervisor that forces

@@ -17,13 +17,14 @@ describe("subagents", () => {
   it("lists a live run's tasks as active and a finished run's as done, newest first", () => {
     const l = subagents(
       [
-        run("live", "running", [task("a", "running", { startedAt: 5000 }), task("b", "pending"), task("c", "needs_input")]),
+        run("live", "running", [task("a", "running", { startedAt: 5000, model: "worker-model", effort: "high" }), task("b", "pending"), task("c", "needs_input")]),
         run("old", "completed", [task("d", "done", { finishedAt: 3000, result: "made it" }), task("e", "pending")], { updatedAt: 500 }),
       ],
       [],
       new Map([["ch-c", 9000]]),
     );
     expect(l.active.map((s) => [s.name, s.status])).toEqual([["task c", "asks"], ["task a", "running"], ["task b", "pending"]]);
+    expect(l.active.find((s) => s.id === "o:live:a")).toMatchObject({ model: "worker-model", effort: "high" });
     // a task a finished run never started isn't listed
     expect(l.done.map((s) => [s.name, s.status, s.note])).toEqual([["task d", "done", "made it"]]);
   });

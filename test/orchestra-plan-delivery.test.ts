@@ -118,7 +118,7 @@ describe("plan mode", () => {
     expect(files).toEqual(expect.arrayContaining([`plans/${run.id}/PLAN.md`, `plans/${run.id}/t1.md`, `plans/${run.id}/t2.md`, "api.txt", "ui.txt"]));
     const plan = git(dir, "show", `${r.branch}:plans/${run.id}/PLAN.md`);
     expect(plan).toContain("loom-plan: 1");
-    expect(plan).toContain("| [t2](t2.md) | ui | beta | t1 | done |");
+    expect(plan).toContain("| [t2](t2.md) | ui | beta | provider default | t1 | done |");
     expect(plan).toContain("api and ui built");
     const spec = git(dir, "show", `${r.branch}:plans/${run.id}/t2.md`);
     expect(spec).toContain("depends_on: [t1]");
