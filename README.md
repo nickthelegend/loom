@@ -637,6 +637,30 @@ loom init          # detects the agents installed on this machine, assigns roles
 loom               # opens the TUI — a tabbed workspace (Thread · Board · Brain · Diff)
 ```
 
+To start somewhere new, run `loom new "My project"` or
+`loom clone https://github.com/you/repo.git --name "My project"` from any directory.
+Both print the registered project id. Folders go under `~/Loom Projects` on the
+daemon's machine; set `projectsRoot` to an absolute path in `~/.loom/daemon.json`
+to choose another location (`LOOM_HOME` overrides `~/.loom`). Names become lowercase
+slugs of up to 60 characters, and existing folders are always refused.
+
+`loom new` creates a README, ignores `.loom/`, initializes Git and makes a first
+commit, using Loom's identity if Git has none. Use `--no-git` to skip Git, or
+`--agent codex@your-modelx2 --agent opencode` to choose agents and counts (1–8 per
+entry; `×2` also works). Without `--agent`, Loom detects installed agents.
+
+Remote clients can use `POST /api/projects/new` with `{ name, agents?: [{ kind,
+model?, count? }], git?: boolean }`, returning `{ project, config }`, or
+`POST /api/projects/clone` with `{ url, name? }`, returning HTTP 202 `{ jobId, dir }`.
+Clones accept HTTPS, `git@host:path`, and SSH URLs. Poll
+`GET /api/projects/jobs/:jobId` for `{ status: "cloning" | "done" | "failed",
+project?, error?, progress? }`. Jobs last until daemon restart; recent completed
+jobs are retained for reconnecting clients. Failed clones remove their partial
+folder so the name can be retried. These endpoints require the owner token or an
+unscoped paired device; guests and scoped tokens receive 403.
+Their WebSockets receive `{ type: "project-job", jobId, dir, status, ... }` as
+progress changes and `{ type: "projects", project }` after registration.
+
 ```
   ██      ▄████▄  ▄████▄  ▄█▄▄█▄
   ██      ██  ██  ██  ██  ██▀▀██
@@ -743,6 +767,8 @@ detects at least two roles.
 |---|---|
 | `loom` | **The TUI** — tabbed workspace (Thread · Board · Brain · Diff), `shift+tab` switches view, `tab` shifts agents, `/`-commands + `ctrl+p` palette inline |
 | `loom init` | Make the current directory a Loom project (auto-detects agents); in a git repo it offers to add `.loom/` to `.gitignore` (`--gitignore` / `--no-gitignore` to skip the question) |
+| `loom new <name> [--agent kind[@model][xN] ...] [--no-git]` | Create and register a new folder in `projectsRoot`; print its project id |
+| `loom clone <url> [--name <name>]` | Clone into `projectsRoot`, wait for registration, and print its project id |
 | `loom chat` | Same thread as a plain line REPL (`/handoff`, `/interrupt`, `@agent`) |
 | `loom send <text>` | One-shot message (`-a <agent>` to address someone specific). `--wait` blocks until the turn ends and prints the reply and cost (`--json` for one object, `--timeout <s>`); it exits 0 done, 1 failed, 2 the agent asked a question, 124 timed out — so a script can drive an agent without reading `.loom/log.db`. Before resuming a session of 100k+ tokens whose prompt cache has likely expired, it warns with the re-read's estimated cost; `--fresh` starts the agent's session in that chat over |
 | `loom handoff <agent>` | Pass the baton — interrupts, projects memory, briefs the target |

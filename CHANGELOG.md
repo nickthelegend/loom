@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Create projects from any directory with `loom new <name> [--agent kind[@model][xN] ...] [--no-git]`, or clone with `loom clone <url> [--name <name>]`. The daemon's owner-only creation API also accepts unscoped paired devices, reports clone progress over WebSocket and polling, and uses a configurable `projectsRoot` (default `~/Loom Projects`) without overwriting existing folders.
+  - Credits: approach from T3 Code's AddProjectScreen (MIT).
+
 - Orchestra fleets accept `agent[@model][:effort][xN]` in CLI, API and chain options, with distinct worker ids and per-spawn model/effort overrides (#369). Selections survive restarts and appear in planner briefings, plan files, CLI text/JSON and API/events for web and phone clients. Approach credit: Agent Orchestrator's `ao spawn --agent --model --effort` (Apache-2.0).
 
 ### Fixed

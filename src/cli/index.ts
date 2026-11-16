@@ -327,6 +327,37 @@ async function printMachineAgents(json: boolean): Promise<void> {
 // ---------------------------------------------------------------------------
 
 program
+  .command("new <name>")
+  .description("create and register a project under the daemon's projectsRoot")
+  .option("--agent <spec...>", "agents: kind[@model][xN] (repeatable)")
+  .option("--no-git", "skip Git initialization and the first commit")
+  .action(async (name: string, opts: { agent?: string[]; git: boolean }) => {
+    const { parseProjectAgent } = await import("../core/project-creation.js");
+    const agents = opts.agent?.map(parseProjectAgent);
+    const client = await ensureDaemon();
+    const { project } = await client.newProject({ name, agents, git: opts.git });
+    console.log(project.id);
+  });
+
+program
+  .command("clone <url>")
+  .description("clone a repository into projectsRoot and register it")
+  .option("--name <name>", "destination folder and project name")
+  .action(async (url: string, opts: { name?: string }) => {
+    const client = await ensureDaemon();
+    const { jobId } = await client.cloneProject({ url, name: opts.name });
+    for (;;) {
+      const job = await client.projectJob(jobId);
+      if (job.status === "failed") throw new Error(job.error ?? "clone failed");
+      if (job.status === "done") {
+        console.log(job.project!.id);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  });
+
+program
   .command("init")
   .description("make the current directory a Loom project")
   .option("--name <name>", "project name (default: directory name)")

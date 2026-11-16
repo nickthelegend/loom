@@ -1502,3 +1502,29 @@
   .trsecret{font-size:12px;display:flex;flex-direction:column;gap:4px;background:var(--muted);padding:8px;border-radius:6px;overflow-wrap:anywhere}
   .tradd summary{cursor:pointer;font-size:13px;font-weight:600;padding:6px 0}
   .tradd textarea{font:inherit;font-size:13.5px;color:var(--foreground);background:var(--background);border:1px solid var(--input);border-radius:8px;padding:8px 10px;resize:vertical}
+
+/* New project: New / Clone / Existing folder (#371) */
+.npmodal .npseg{display:flex;width:100%;margin-bottom:14px}
+.npmodal .npseg button{flex:1;padding:7px 10px}
+.npmodal .nppane[hidden]{display:none}
+.npmodal .npagents{display:flex;flex-direction:column;gap:4px;max-height:240px;overflow:auto}
+.npmodal .nparow{display:grid;grid-template-columns:minmax(0,1fr) 150px 54px;gap:6px;align-items:center;
+  padding:5px 6px;border:1px solid var(--border);border-radius:var(--radius-md)}
+.npmodal .nparow.on{border-color:var(--ring,var(--foreground))}
+.npmodal .npatick{display:flex;align-items:center;gap:8px;min-width:0;cursor:pointer;font-size:13px}
+.npmodal .npatick .pic{display:inline-flex;width:18px;height:18px;flex:none}
+.npmodal .npalbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.npmodal .npamodel,.npmodal .npacount{height:28px;padding:0 7px;font-size:12px;min-width:0}
+.npmodal .npamodel:disabled,.npmodal .npacount:disabled{opacity:.45}
+@media (max-width:520px){
+  .npmodal .nparow{grid-template-columns:minmax(0,1fr) 54px}
+  .npmodal .npamodel{grid-column:1 / -1;grid-row:2}
+}
+/* the rows sit inside .field, so undo its label and input looks for them */
+.npmodal .field .npatick{font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;
+  color:var(--foreground);margin:0;font-family:inherit}
+.npmodal .field .npatick input[type=checkbox]{width:15px;height:15px;flex:none;margin:0;padding:0;
+  accent-color:var(--primary);border-radius:4px}
+.npmodal .field .npamodel,.npmodal .field .npacount{height:28px;padding:0 7px;font-size:12px}
+.npmodal .field .npacount{text-align:center;padding:0 2px}
+.npmodal .field .npatick .opt{font-size:11px;color:var(--muted-foreground)}
