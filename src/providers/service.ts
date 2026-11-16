@@ -124,7 +124,7 @@ export class ProviderService {
     const binding = this.directory.get(input.threadId, input.instanceId);
     const cursor = binding?.resumeCursor ?? undefined;
     const cwd = binding?.runtimePayload?.cwd ?? input.cwd;
-    const model = input.model ?? binding?.runtimePayload?.model;
+    const model = Object.hasOwn(input, "model") ? input.model : binding?.runtimePayload?.model;
     const launch = async (resumeCursor: unknown) => {
       this.directory.upsert({ threadId: input.threadId, instanceId: input.instanceId, provider: adapter.provider,
         status: "starting", resumeCursor: resumeCursor ?? null, runtimePayload: { cwd, ...(model ? { model } : {}) },

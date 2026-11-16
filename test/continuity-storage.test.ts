@@ -12,6 +12,21 @@ const capture = (brain: ContinuityEngine, id = "one") => brain.capture({ id, con
 async function setup() { const dir = tmpDir("continuity-storage"), log = await EventLog.open(dir); logs.push(log); return { dir, log, brain: new ContinuityEngine(log, "project") }; }
 
 describe("Brain migration and persistence failures", () => {
+  it("persists request effort and keeps old requests without it readable and retryable", async () => {
+    const { dir, log, brain } = await setup();
+    const old = capture(brain).request;
+    const selected = { ...old, id: "selected", model: "reasoner", effort: "high" };
+    brain.capture(selected);
+    expect(() => brain.capture({ ...selected, effort: "low" })).toThrow(/different content/);
+    log.close();
+    const again = await EventLog.open(dir); logs.push(again);
+    const reopened = new ContinuityEngine(again, "project");
+    expect(reopened.store.request("selected")).toEqual(selected);
+    expect(reopened.capture(selected).created).toBe(false);
+    expect(reopened.store.request(old.id)).toEqual(old);
+    expect(reopened.capture(old).created).toBe(false);
+  });
+
   it("imports backed-up JSONL with original IDs and Main history and restarts idempotently", async () => {
     const dir = tmpDir("jsonl-migrate"), file = path.join(dir, "log.jsonl");
     const original = [{ id: 2, ts: 1, kind: "message", payload: { text: "before chats" } },

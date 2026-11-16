@@ -694,6 +694,39 @@ program
   });
 
 program
+  .command("chat:create [title]")
+  .description("create a chat with its own agent, model and reasoning effort")
+  .option("--agent <id>", "agent that answers in this chat")
+  .option("--model <model>", "model for this chat")
+  .option("--effort <effort>", "reasoning effort, where supported")
+  .option("--json", "print the chat as JSON")
+  .action(async (title: string | undefined, opts: { agent?: string; model?: string; effort?: string; json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chat } = await client.createChat(project.id, title ?? "", { agentId: opts.agent, model: opts.model, effort: opts.effort });
+    console.log(opts.json ? JSON.stringify(chat) : `${pc.green("✓")} ${chat.title} (${chat.id})`);
+  });
+
+program
+  .command("chat:agent <chat> [agentId]")
+  .description("replace a chat's agent/model/effort selection; --clear follows the baton")
+  .option("--model <model>", "model for this chat (omitted: agent default)")
+  .option("--effort <effort>", "reasoning effort (omitted: agent default)")
+  .option("--clear", "clear the chat's agent, model and effort")
+  .option("--json", "print the chat as JSON")
+  .action(async (name: string, agentId: string | undefined, opts: { model?: string; effort?: string; clear?: boolean; json?: boolean }) => {
+    if (opts.clear && (agentId || opts.model || opts.effort)) fail("--clear cannot be combined with an agent, model or effort");
+    if (!opts.clear && !agentId) fail("name an agent, or use --clear");
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const found = chats.find(c => c.id === name) ?? chats.find(c => c.title.toLowerCase() === name.toLowerCase());
+    if (!found) fail(`no chat "${name}" in ${project.name}`);
+    const { chat } = await client.setChatAgent(project.id, found!.id, opts.clear ? null : agentId!, { model: opts.model, effort: opts.effort });
+    console.log(opts.json ? JSON.stringify(chat) : `${pc.green("✓")} ${chat.title}: ${chat.agentId ?? "follows the baton"}${chat.model ? ` · ${chat.model}` : ""}${chat.effort ? ` · ${chat.effort}` : ""}`);
+  });
+
+program
   .command("chat:instructions [text...]")
   .description("standing guidance for one conversation, sent with every turn in it whichever agent answers (approach: Nuphos). No text: show them")
   .option("--chat <chat>", "which chat, by id or title (default: main)", "main")

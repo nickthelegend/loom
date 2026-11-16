@@ -17,17 +17,18 @@ const ask = (params) => new Promise((resolve) => { const id = myId++; waiting.se
 process.stdout.write("a log line on stdout that isn't JSON\n");
 readline.createInterface({ input: process.stdin }).on("line", async (line) => {
   const m = JSON.parse(line);
-  if (m.method) log({ method: m.method, params: m.params });
+  if (m.method) log({ method: m.method, params: m.params, pid: process.pid, argv: process.argv });
   if (m.id !== undefined && !m.method) { waiting.get(m.id)?.(m.result); waiting.delete(m.id); return; }
   if (m.method === "session/cancel") { cancel?.(); return; }
   const reply = (result) => send({ id: m.id, result });
   switch (m.method) {
     case "initialize": return reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, ...(JSON.parse(process.env.FAKE_ACP_CAPABILITIES ?? "{}")) } });
-    case "session/new": { const id = `s${++n}`; sessions.add(id); return reply({ sessionId: id, modes: { currentModeId: "default", availableModes: [{ id: "default" }, { id: "bypassPermissions" }] } }); }
+    case "session/new": { const id = `s${++n}`; sessions.add(id); return reply({ sessionId: id, ...(process.env.FAKE_ACP_MODELS ? { models: { currentModelId: "default", availableModels: ["default", "fast", "deep"].map(modelId => ({ modelId })) } } : {}), modes: { currentModeId: "default", availableModes: [{ id: "default" }, { id: "bypassPermissions" }] } }); }
     case "session/load":
       if (!sessions.has(m.params.sessionId)) return send({ id: m.id, error: { code: -32000, message: "no such session" } });
       update(m.params.sessionId, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "REPLAYED HISTORY" } });
       return reply(null);
+    case "session/set_model":
     case "session/set_mode": return reply(null);
     case "session/prompt": {
       const sid = m.params.sessionId;

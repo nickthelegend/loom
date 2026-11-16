@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Orchestra workers report progress during a turn (#374).** `loom report` and fenced `loom-report` messages persist checkpoints, requests for input, blockers, and completion reports. Run-scoped worker credentials authorize the report API; reports reach orchestra events and CLI `--progress`, and requests for input or blockers notify the orchestrator in a batch. Approach credit: Agent Orchestrator’s report coordinator (Apache-2.0).
 
+- Per-chat agent, model and reasoning effort selection through the daemon API and `loom chat:create` / `loom chat:agent` (#370). Native providers and ACP use session selection where supported; process-bound adapters reuse separate model instances. Changing a chat leaves the running turn and agent defaults alone. Approach credit: T3 Code (MIT). Web and phone picker changes are separate.
+
 - Steer a running Codex or Claude turn with `loom steer <text> [--chat <chat>]`, or the steering API. Unsupported or idle agents fall back to the prompt queue with a reason; queued prompts can be promoted, and accepted steering appears as a user message in the same chat. Agent status exposes `capabilities.steer` for clients (#373).
 
 - Create projects from any directory with `loom new <name> [--agent kind[@model][xN] ...] [--no-git]`, or clone with `loom clone <url> [--name <name>]`. The daemon's owner-only creation API also accepts unscoped paired devices, reports clone progress over WebSocket and polling, and uses a configurable `projectsRoot` (default `~/Loom Projects`) without overwriting existing folders.
