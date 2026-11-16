@@ -157,10 +157,13 @@ export function projectLoomDir(projectDir: string): string {
   return path.join(projectDir, ".loom");
 }
 
-export function readProjectConfig(projectDir: string): ProjectConfig | null {
+export function readProjectConfig(projectDir: string, opts: { strict?: boolean } = {}): ProjectConfig | null {
   const file = path.join(projectLoomDir(projectDir), "config.json");
   if (!fs.existsSync(file)) return null;
-  const cfg = readJson<ProjectConfig>(file, { name: path.basename(projectDir), agents: [] });
+  // A running project must keep its last good config when an edit is incomplete.
+  const cfg = opts.strict
+    ? JSON.parse(fs.readFileSync(file, "utf8")) as ProjectConfig
+    : readJson<ProjectConfig>(file, { name: path.basename(projectDir), agents: [] });
   // An agent's mode lives in options.permissions; `"permissions": "bypass"` on the agent itself is
   // what a person writes by hand, and was silently ignored — codex stayed sandboxed in every
   // orchestra worker (field). Read it as the mode; an explicit options.permissions still wins.

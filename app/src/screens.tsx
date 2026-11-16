@@ -28,6 +28,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { NewChatSheet } from "./new-chat";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive } from "./api";
@@ -844,15 +845,14 @@ export function ProjectScreen(props: {
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
-  const newChat = async () => {
-    try {
-      const { chat } = await createChat(creds, project.id, "");
-      setChats((cs) => [...cs.filter((c) => c.id !== chat.id), chat]);
-      setChatId(chat.id);
-      haptic.tap();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
+  // New chat asks who answers and on which model (new-chat.tsx), then opens it
+  const [newChatOpen, setNewChatOpen] = useState(false);
+  const newChat = () => setNewChatOpen(true);
+  const chatCreated = (chat: Chat) => {
+    setNewChatOpen(false);
+    setChats((cs) => [...cs.filter((c) => c.id !== chat.id), chat]);
+    setChatId(chat.id);
+    haptic.tap();
   };
   // A chat opened from elsewhere (an Orchestra task) that isn't in the sidebar list.
   const [extraChat, setExtraChat] = useState<Chat | null>(
@@ -1394,7 +1394,7 @@ export function ProjectScreen(props: {
             >
               {/* first, so they're in reach however many chats there are: a new chat, or one brought in from an agent's own history */}
               <TouchableOpacity
-                onPress={() => void newChat()}
+                onPress={newChat}
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel="New chat"
@@ -1492,6 +1492,7 @@ export function ProjectScreen(props: {
             onClose={() => setImporting(false)}
             onOpen={(id) => { setImporting(false); reloadChats(); setChatId(id); }}
           />
+          <NewChatSheet visible={newChatOpen} creds={creds} project={project} onClose={() => setNewChatOpen(false)} onCreated={chatCreated} />
           <ChatMenu
             chat={chatMenu}
             onClose={() => setChatMenu(null)}

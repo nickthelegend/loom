@@ -12,9 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Create projects from any directory with `loom new <name> [--agent kind[@model][xN] ...] [--no-git]`, or clone with `loom clone <url> [--name <name>]`. The daemon's owner-only creation API also accepts unscoped paired devices, reports clone progress over WebSocket and polling, and uses a configurable `projectsRoot` (default `~/Loom Projects`) without overwriting existing folders.
   - Credits: approach from T3 Code's AddProjectScreen (MIT).
 
+- **Phone: start a chat with any agent on any model.** New chat opens a sheet: an optional title, who answers (each agent's kind and current model), and the model, chosen from the agent's own list or typed. A project can hold a chat on Opus 5.5 next to one on GPT‑5.6 (#372).
+
 - Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
 
 ### Fixed
+
+- Watch `.loom/config.json` for debounced edits and update running projects in place. Agent changes wait for their current turn to finish; applied changes and invalid edits are reported in the thread, with the last working config kept on errors (#358).
 
 - Routes keep the chat they were started in. A queued `auto` prompt now sends every hop and its route events to the original thread (#357).
 
