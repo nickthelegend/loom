@@ -264,6 +264,12 @@ describe("bridges on a real daemon", () => {
       before = messages().length;
       send("sleep:5000");
       await waitUntil(() => messages().length > before);
+      // the status message goes up at turn_started, a beat before the agent is busy — interrupting
+      // in that gap stops nothing (CI caught it), so wait until it's really working
+      await waitUntil(async () => {
+        const r = await (await api("GET", `/api/projects/${projectId}`)).json() as { project?: { agents?: Array<{ busy?: boolean }> } };
+        return Boolean(r.project?.agents?.some((a) => a.busy));
+      });
       await api("POST", `/api/projects/${projectId}/interrupt`);
       await waitUntil(() => messages().slice(before).some((m) => m.text === "echo was interrupted."));
       before = messages().length;
