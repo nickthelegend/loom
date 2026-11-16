@@ -1,3 +1,4 @@
+import { ChatBranchError } from "../../core/chat-branches.js";
 import type { Express, Request } from 'express';
 import { SideChatError } from "../../core/side-chats.js";
 import { trackedPrs, type PrFeedbackMode } from "../../core/pr-feedback.js";
@@ -13,6 +14,46 @@ import { createShare, listShares, revokeShare } from "../../core/shares.js";
 import { MAIN_CHAT } from "../../types.js";
 /** Register chats routes in the order established by LoomDaemon.routes(). */
 export function registerChatsRoutes(app: Express, withRuntime: WithRuntime): void {
+
+  const branchRoute: WithRuntime = handler => withRuntime(async (rt, req, res) => {
+    try { await handler(rt, req, res); }
+    catch (error) {
+      if (!(error instanceof ChatBranchError)) throw error;
+      res.status(error.status).json({ error: error.message });
+    }
+  });
+
+  /** {branches: ChatBranch[], active: string, siblingsByEventId: {[messageId]: branchId[]}}.
+   * Choices are ordered original first, then forks by creation. For nested active branches,
+   * walk parents to the first choice in this array; its index + 1 gives n/m.
+   * Event ids are durable across branches. Root is "0", including legacy events without branch.
+   */
+  app.get("/api/projects/:id/chats/:chat/branches", branchRoute(async (rt, req, res) => {
+    res.json(rt.branches(String(req.params.chat)));
+  }));
+  /** {fromEventId, mode: "edit" | "retry", text?} -> {branch: ChatBranch}.
+   * Edit targets a visible user message; retry targets its agent reply and repeats the prompt.
+   * Creates and activates the fork and submits a turn without rewinding files. Busy/queued work: 409.
+   */
+  app.post("/api/projects/:id/chats/:chat/branches", branchRoute(async (rt, req, res) => {
+    const { fromEventId, mode, text } = req.body ?? {};
+    res.json({ branch: await rt.createBranch(String(req.params.chat), fromEventId, mode, text) });
+  }));
+  /** Read-only diff preview before offering file rewind. Includes untracked files.
+   * {checkpoint, changed: string[], diff: string}; missing/pruned checkpoints cannot be restored.
+   */
+  app.get("/api/projects/:id/chats/:chat/branches/:branch/rewind", branchRoute(async (rt, req, res) => {
+    res.json(await rt.branchRewindPreview(String(req.params.chat), String(req.params.branch)));
+  }));
+  /** {rewindFiles?: boolean} -> {active, rewind?: {restored, undo, changed, diff}}.
+   * Default only changes history. Explicit true restores the fork checkpoint after the client
+   * shows GET .../rewind; returning to root uses the fork being left. Never moves Git HEAD.
+   */
+  app.post("/api/projects/:id/chats/:chat/branches/:branch/activate", branchRoute(async (rt, req, res) => {
+    if (req.body?.rewindFiles !== undefined && typeof req.body.rewindFiles !== "boolean")
+      return void res.status(400).json({ error: "rewindFiles must be a boolean" });
+    res.json(await rt.activateBranch(String(req.params.chat), String(req.params.branch), req.body?.rewindFiles === true));
+  }));
 
   // Side chats are private to owners and unscoped devices, including their HTTP snapshots.
   const privateSide: WithRuntime = handler => withRuntime(async (rt, req, res) => {

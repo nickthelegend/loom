@@ -111,6 +111,7 @@ export class ModelPool extends AdapterBase {
         this.watch(agent);
       }
       this.active = agent;
+      if (agent instanceof AdapterBase) agent.scopeConversation(input.chat ?? "main", input.branch);
       await this.startInstance(agent);
       if (this.stopped) throw new Error(`agent "${this.id}" is stopped`);
       if (this.interrupted) { this.emit({ kind: "status", payload: { state: "interrupted" } }); return; }

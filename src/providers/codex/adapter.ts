@@ -300,9 +300,17 @@ export class CodexProviderAdapter implements ProviderAdapter {
       const cursor = typeof input.resumeCursor === "string" && input.resumeCursor ? input.resumeCursor : undefined;
       let opened: Json;
       try {
-        opened = cursor
-          ? await session.rpc.request(input.forkSession ? "thread/fork" : "thread/resume", { threadId: cursor, ...params, excludeTurns: true })
-          : await session.rpc.request("thread/start", params);
+        const open = (lastTurnId?: string) => cursor
+          ? session.rpc.request(input.forkSession ? "thread/fork" : "thread/resume", { threadId: cursor, ...params, excludeTurns: true,
+            ...(input.forkSession && lastTurnId ? { lastTurnId } : {}) })
+          : session.rpc.request("thread/start", params);
+        try { opened = await open(input.lastTurnId); }
+        catch (error) {
+          // Older servers can fork a thread but reject the turn boundary. The branch briefing
+          // still identifies the divergence; never fall back on a timeout or a lost transport.
+          if (!input.forkSession || !input.lastTurnId || (error as RpcError).code !== -32602) throw error;
+          opened = await open();
+        }
       } catch (error) {
         const message = (error as Error).message;
         if (cursor && MISSING_THREAD.test(message)) throw fail("session_missing", `codex thread ${cursor} could not be resumed: ${message}`, error);

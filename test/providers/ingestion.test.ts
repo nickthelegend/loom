@@ -110,11 +110,12 @@ describe("ingestion · turns", () => {
     const { run } = ingest([]);
     const out = run([
       ev("turn.started", { model: "gpt-x" }, { createdAt: 10_000 }),
-      ev("item.completed", { itemType: "assistant_message", status: "completed", detail: "Which one?" }),
+      ev("item.completed", { itemType: "assistant_message", status: "completed", detail: "Which one?", nativeMessageId: "retained-message" }),
       ev("turn.completed", { state: "completed", totalCostUsd: 0.02, tokenUsage: { usageStatus: "complete", inputTokens: 100, outputTokens: 5 } }, { createdAt: 12_500 }),
     ]);
     expect(kinds(out)).toEqual(["status:turn_started", "message", "status:turn_cost", "needs_input", "run_complete"]);
-    expect(out.at(-1)!.payload).toEqual({ durationMs: 2500, model: "gpt-x", inputTokens: 100, outputTokens: 5 });
+    expect(out.find(e => e.kind === "message")!.payload.nativeMessageId).toBe("retained-message");
+    expect(out.at(-1)!.payload).toEqual({ nativeTurnId: "t1", durationMs: 2500, model: "gpt-x", inputTokens: 100, outputTokens: 5 });
   });
 
   it("a failed turn is an error, not a completion", () => {

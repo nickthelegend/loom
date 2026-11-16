@@ -24,13 +24,14 @@ export class JsonlStore implements EventStore {
     this.nextId = (this.cache[this.cache.length - 1]?.id ?? 0) + 1;
   }
 
-  append(e: Required<Omit<NewEvent, "agentId" | "chat">> & { agentId?: string; chat?: string }): LoomEvent {
+  append(e: Required<Omit<NewEvent, "agentId" | "chat" | "branch">> & { agentId?: string; chat?: string; branch?: string }): LoomEvent {
     const ev: LoomEvent = {
       id: this.nextId,
       ts: e.ts,
       kind: e.kind,
       ...(e.agentId ? { agentId: e.agentId } : {}),
       ...(e.chat ? { chat: e.chat } : {}),
+      ...(e.branch ? { branch: e.branch } : {}),
       payload: e.payload,
     };
     const serialized = JSON.stringify(ev);

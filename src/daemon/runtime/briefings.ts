@@ -95,7 +95,7 @@ export class RuntimeBriefings {
   }> {
     if (this.lifetime.signal.aborted) throw new Error("context runtime is closed");
     this.importMemories();
-    const events = this.host.log.list({ limit: PROJECTION_WINDOW });
+    const events = this.host.log.list({ activeLineages: true, limit: PROJECTION_WINDOW });
     const input = { projectName: this.host.info.name, config: this.host.config, events,
       targetAgentId: to, fromAgentId: from };
     const start = Date.now();
@@ -134,7 +134,7 @@ export class RuntimeBriefings {
     // or the Memory view and every briefing keep the text the repair just fixed (#325).
     const live = new Map<number, string>();
     for (const m of this.host.brain.all()) if (m.kind === "decision" && m.provenance?.eventId != null) live.set(Number(m.provenance.eventId), m.text);
-    const decisions = this.host.log.list({ kinds: ["decision"], limit: RECENT_DECISIONS * 2 }).map((e) => {
+    const decisions = this.host.log.list({ activeLineages: true, kinds: ["decision"], limit: RECENT_DECISIONS * 2 }).map((e) => {
       const text = live.get(Number(e.id));
       return text !== undefined && text !== e.payload.text ? { ...e, payload: { ...e.payload, text } } : e;
     });
@@ -320,7 +320,7 @@ export class RuntimeBriefings {
     if (turn.length < 40) return; // nothing substantial to learn from
     const model = this.host.config.brain?.model ?? "haiku";
     const engine = this.host.extractionEngine(model);
-    const recent = this.host.log.list({ limit: 80 }).filter((e) => (e.chat ?? MAIN_CHAT) === chat);
+    const recent = this.host.log.list({ chat, limit: 80 });
     void extractFromTurn(this.host.brain, turn, {
       engine,
       signal: this.extractionScope.signal,

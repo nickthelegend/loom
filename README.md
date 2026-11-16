@@ -1489,6 +1489,76 @@ next to GitHub in the status bar, or `git.delivery` in `.loom/config.json`.
 A failed push never un-finishes a run. The error is shown, and **Retry delivery**
 is one click.
 
+## Edit and retry as chat branches
+
+The daemon API and CLI support alternate turns inside a chat (#375). Editing a
+user message or retrying an agent reply activates a new sibling branch and sends
+its prompt. Later messages on the previous branch remain available. Web and phone
+branch controls are separate work; these commands work now:
+
+```sh
+loom chat:branches --chat main --json
+loom chat:edit 123 "Revised prompt" --chat main
+loom chat:retry 124 --chat main         # 124 is an agent reply event id
+loom chat:branch 0 --chat main          # original history; files stay as they are
+loom chat:branch abc123 --preview       # inspect the fork checkpoint's patch
+loom chat:branch abc123 --rewind-files  # show patch, confirm, then restore files
+```
+
+`--chat` accepts an id or title and defaults to `main`. Non-interactive file rewinds
+require `--yes`. Branch changes return HTTP 409 while work is running or prompts
+are queued. Clear the queue or let it finish before switching.
+
+API paths below start with `/api/projects/:id/chats/:chat`:
+
+| Method and suffix | Request / response |
+| --- | --- |
+| `GET /branches` | `{ branches, active, siblingsByEventId }` |
+| `POST /branches` | `{ fromEventId, mode: "edit", text }` or `{ fromEventId, mode: "retry" }` → `{ branch }` |
+| `GET /branches/:branchId/rewind` | Read-only `{ checkpoint, changed: string[], diff }` preview, including untracked files |
+| `POST /branches/:branchId/activate` | `{ rewindFiles?: boolean }` → `{ active, rewind?: { restored, undo, changed, diff } }` |
+
+Each branch is `{ id, parent: string|null, forkEventId, createdAt, label? }`;
+`createdAt` is epoch milliseconds. Root is `"0"`. `ChatInfo.branches` and
+`ChatInfo.activeBranch` are optional for legacy chats. Events optionally carry
+`branch`; its absence means root. A branch inherits its parent's events through
+`forkEventId`, inclusive, then its own events. Editing replaces the selected user
+turn; retrying repeats the user prompt that led to the selected agent reply. Both
+discard that turn and its later continuation from the new branch's visible history.
+Targets must be visible in the active branch. Existing event ids never change.
+
+`siblingsByEventId` maps the original and alternate prompt/reply event ids to an
+ordered array of branch ids, original first. For a **‹ n/m ›** control, walk from
+`active` up its parents until a choice matches, then use that choice's index + 1
+and the array's length. Activating a choice changes the whole chat's active history.
+Refetch `/events?chat=:chat` and `/branches` after switching; a `status` event with
+`state: "branch_activated"` announces explicit switches. Chat paging, replay,
+agent history and Brain extraction follow the same lineage. Project-wide audit
+and cost history still includes every branch.
+
+Switching defaults to history only. A client should show the rewind preview before
+sending `rewindFiles: true`. Rewinding restores the selected branch's fork checkpoint;
+returning to root restores the fork being left. It preserves Git HEAD and ignored
+files, saves an undo checkpoint, and returns the actual applied patch. Missing or
+pruned fork checkpoints return 409; switching history still works. Branches share
+the working tree, so a new agent turn can edit the current files regardless of the
+selected history.
+
+Native resume cursors are isolated by chat, branch and agent. Codex uses
+`thread/fork` with the last retained `lastTurnId`; Claude uses `resume`,
+`forkSession: true` and the last retained message UUID as `resumeSessionAt`.
+These fields were verified against the locally generated Codex app-server types
+and installed Claude Agent SDK types. Codex servers that reject the turn-boundary parameter fall back to a whole-session
+fork with the divergence briefing. Older histories without native boundary ids
+(including a fork before the first turn) use a separate session fork and an explicit
+text briefing of the divergence point; that fallback does not physically truncate
+the native transcript. Other adapters start an isolated branch session briefed
+with the visible history as text. Session cursors and branch metadata survive daemon
+restarts. Branching does not undo already extracted shared memories or external
+side effects.
+
+Approach credit: Agent Orchestrator's conversation branches (Apache-2.0).
+
 ## Rewind: put the work back the way it was
 
 An agent turn can touch forty files, and until now the honest answer to *undo

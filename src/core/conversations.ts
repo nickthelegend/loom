@@ -10,7 +10,7 @@ export class ConversationStore {
   chats(): ChatInfo[] {
     const stored = readProjectState(this.projectDir).chats ?? [];
     return [
-      { id: MAIN_CHAT, title: "Main", createdAt: 0 },
+      stored.find(c => c.id === MAIN_CHAT) ?? { id: MAIN_CHAT, title: "Main", createdAt: 0 },
       ...stored.filter((c) => c.id !== MAIN_CHAT),
     ];
   }
@@ -79,6 +79,7 @@ export class ConversationStore {
     const before = (state.chats ?? []).length;
     state.chats = (state.chats ?? []).filter((c) => c.id !== id);
     if (state.chats.length === before) return false;
+    if (state.branchSources) delete state.branchSources[id];
     writeProjectState(this.projectDir, state);
     return true;
   }

@@ -39,6 +39,7 @@ export class SqliteStore implements EventStore {
     if (!cols.some((c) => c.name === "chat")) {
       this.db.exec("ALTER TABLE events ADD COLUMN chat TEXT");
     }
+    if (!cols.some(c => c.name === "branch")) this.db.exec("ALTER TABLE events ADD COLUMN branch TEXT");
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_chat ON events(chat, id)");
     // time windows over one kind: today's spend, the cost/usage charts
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_events_kind_ts ON events(kind, ts)");
@@ -66,8 +67,8 @@ export class SqliteStore implements EventStore {
           if (!isDeepStrictEqual(prior, event)) throw new ContinuityError("conflict", `legacy event ID ${event.id} conflicts with SQLite; reconcile the two backups before import`);
           known++; continue;
         }
-        this.db.prepare("INSERT INTO events(id,ts,kind,agent_id,chat,payload) VALUES (?,?,?,?,?,?)")
-          .run(event.id, event.ts, event.kind, event.agentId ?? null, event.chat ?? null, JSON.stringify(event.payload));
+        this.db.prepare("INSERT INTO events(id,ts,kind,agent_id,chat,branch,payload) VALUES (?,?,?,?,?,?,?)")
+          .run(event.id, event.ts, event.kind, event.agentId ?? null, event.chat ?? null, event.branch ?? null, JSON.stringify(event.payload));
         imported++;
       }
       this.db.prepare("INSERT OR IGNORE INTO continuity_imports VALUES (?,?,?,?)").run(hash, path.basename(file), events.length, path.basename(backup));
@@ -81,9 +82,9 @@ export class SqliteStore implements EventStore {
       throw new ContinuityError("conflict", "SQLite and JSONL contain distinct histories; stop the daemon and run loom brain:migrate before continuing");
   }
   private eventById(id: number): LoomEvent | undefined {
-    const row = this.db.prepare("SELECT * FROM events WHERE id=?").get(id) as { id: number; ts: number; kind: EventKind; agent_id: string | null; chat: string | null; payload: string } | undefined;
+    const row = this.db.prepare("SELECT * FROM events WHERE id=?").get(id) as { id: number; ts: number; kind: EventKind; agent_id: string | null; chat: string | null; branch: string | null; payload: string } | undefined;
     return row ? { id: row.id, ts: row.ts, kind: row.kind, ...(row.agent_id ? { agentId: row.agent_id } : {}),
-      ...(row.chat ? { chat: row.chat } : {}), payload: JSON.parse(row.payload) } : undefined;
+      ...(row.chat ? { chat: row.chat } : {}), ...(row.branch ? { branch: row.branch } : {}), payload: JSON.parse(row.payload) } : undefined;
   }
   private readJsonl(file: string): LoomEvent[] {
     if (fs.statSync(file).size > 100_000_000) throw new ContinuityError("overflow", "legacy import exceeds the 100 MB offline import limit");
@@ -93,23 +94,24 @@ export class SqliteStore implements EventStore {
       try { event = JSON.parse(line) as LoomEvent; } catch { throw new ContinuityError("invalid", "malformed JSONL record; repair a copy before migration (original left intact)"); }
       if (!Number.isSafeInteger(event.id) || event.id <= last || !Number.isSafeInteger(event.ts) ||
         typeof event.kind !== "string" || !event.payload || typeof event.payload !== "object" || Array.isArray(event.payload) ||
-        (event.chat !== undefined && typeof event.chat !== "string") || (event.agentId !== undefined && typeof event.agentId !== "string"))
+        (event.branch !== undefined && typeof event.branch !== "string") || (event.chat !== undefined && typeof event.chat !== "string") || (event.agentId !== undefined && typeof event.agentId !== "string"))
         throw new ContinuityError("invalid", "invalid or duplicate/out-of-order legacy event");
       last = event.id;
-      return { id: event.id, ts: event.ts, kind: event.kind, ...(event.agentId ? { agentId: event.agentId } : {}), ...(event.chat ? { chat: event.chat } : {}), payload: event.payload };
+      return { id: event.id, ts: event.ts, kind: event.kind, ...(event.agentId ? { agentId: event.agentId } : {}), ...(event.chat ? { chat: event.chat } : {}), ...(event.branch ? { branch: event.branch } : {}), payload: event.payload };
     });
   }
 
-  append(e: Required<Omit<NewEvent, "agentId" | "chat">> & { agentId?: string; chat?: string }): LoomEvent {
+  append(e: Required<Omit<NewEvent, "agentId" | "chat" | "branch">> & { agentId?: string; chat?: string; branch?: string }): LoomEvent {
     this.continuity.guardEventWriter();
     const stmt = this.db.prepare(
-      "INSERT INTO events (ts, kind, agent_id, chat, payload) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO events (ts, kind, agent_id, chat, branch, payload) VALUES (?, ?, ?, ?, ?, ?)",
     );
     const res = stmt.run(
       e.ts,
       e.kind,
       e.agentId ?? null,
       e.chat ?? null,
+      e.branch ?? null,
       JSON.stringify(e.payload),
     );
     return {
@@ -118,6 +120,7 @@ export class SqliteStore implements EventStore {
       kind: e.kind,
       ...(e.agentId ? { agentId: e.agentId } : {}),
       ...(e.chat ? { chat: e.chat } : {}),
+      ...(e.branch ? { branch: e.branch } : {}),
       payload: e.payload,
     };
   }
@@ -181,6 +184,7 @@ export class SqliteStore implements EventStore {
       kind: string;
       agent_id: string | null;
       chat: string | null;
+      branch: string | null;
       payload: string;
     }>;
     return rows.map((r) => ({
@@ -189,6 +193,7 @@ export class SqliteStore implements EventStore {
       kind: r.kind as EventKind,
       ...(r.agent_id ? { agentId: r.agent_id } : {}),
       ...(r.chat ? { chat: r.chat } : {}),
+      ...(r.branch ? { branch: r.branch } : {}),
       payload: JSON.parse(r.payload) as Record<string, unknown>,
     }));
   }
