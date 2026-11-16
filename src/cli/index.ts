@@ -327,6 +327,37 @@ async function printMachineAgents(json: boolean): Promise<void> {
 // ---------------------------------------------------------------------------
 
 program
+  .command("new <name>")
+  .description("create and register a project under the daemon's projectsRoot")
+  .option("--agent <spec...>", "agents: kind[@model][xN] (repeatable)")
+  .option("--no-git", "skip Git initialization and the first commit")
+  .action(async (name: string, opts: { agent?: string[]; git: boolean }) => {
+    const { parseProjectAgent } = await import("../core/project-creation.js");
+    const agents = opts.agent?.map(parseProjectAgent);
+    const client = await ensureDaemon();
+    const { project } = await client.newProject({ name, agents, git: opts.git });
+    console.log(project.id);
+  });
+
+program
+  .command("clone <url>")
+  .description("clone a repository into projectsRoot and register it")
+  .option("--name <name>", "destination folder and project name")
+  .action(async (url: string, opts: { name?: string }) => {
+    const client = await ensureDaemon();
+    const { jobId } = await client.cloneProject({ url, name: opts.name });
+    for (;;) {
+      const job = await client.projectJob(jobId);
+      if (job.status === "failed") throw new Error(job.error ?? "clone failed");
+      if (job.status === "done") {
+        console.log(job.project!.id);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  });
+
+program
   .command("init")
   .description("make the current directory a Loom project")
   .option("--name <name>", "project name (default: directory name)")
@@ -1589,16 +1620,20 @@ function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<strin
     // every outcome key, 0 when none: a script reads tasks.failed without checking it exists
     terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, done: 0, running: 0, pending: 0, needs_input: 0, conflict: 0, failed: 0, cancelled: 0, ...taskCounts(run) },
     branch: run.branch, costUsd: run.costUsd,
+    orchestrator: run.orchestrator, workers: run.workers, workerDetails: run.workerDetails ?? [],
+    // Keep outcome counts in tasks for existing scripts; taskDetails carries each selection.
+    taskDetails: run.tasks.map((t) => ({ id: t.id, title: t.title, agent: t.agent, kind: t.kind, model: t.model, effort: t.effort, status: t.status })),
     ...(run.landing?.pr ? { pr: run.landing.pr } : {}), ...(run.question ? { question: run.question } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
   };
 }
 const isTerminalStatus = (s: string) => s === "completed" || s === "failed" || s === "aborted" || s === "moved";
 
 /** Each worker's access mode (bypass | auto | ask), from the project's roster, for showing beside the run. */
-function workerModes(run: { workers: string[] }, agents: Array<{ id: string; kind: string; permissions?: string }>): Record<string, string> {
+function workerModes(run: { workers: string[]; workerDetails?: Array<{ id: string; kind: string }> }, agents: Array<{ id: string; kind: string; permissions?: string }>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const w of run.workers) {
-    const a = agents.find((x) => x.id === w || x.kind === w);
+    const base = w.replace(/#\d+$/, "").split(/[@:]/)[0];
+    const a = agents.find((x) => x.id === w || x.id === base) ?? agents.find((x) => x.kind === (run.workerDetails?.find((d) => d.id === w)?.kind ?? w));
     if (a) out[w] = a.permissions ?? "default";
   }
   return out;
@@ -1612,13 +1647,15 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun, modes: Recor
           `round ${run.round}/${run.maxRounds} · ${fmtUsd(run.costUsd)} · ${pc.dim(run.branch)}`,
   );
   console.log(`   ${pc.dim("goal")} ${run.goal}`);
-  if (run.race) console.log(`   ${pc.dim("entrants")} ${run.workers.join(", ")}`);
-  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}  ${pc.dim("workers")} ${run.workers.map((w) => (modes[w] ? `${w} (${modes[w]})` : w)).join(", ")}`);
+  const selection = (s?: { model?: string; effort?: string }) => s?.model || s?.effort ? ` [${s.model ?? "provider default"}${s.effort ? `:${s.effort}` : ""}]` : "";
+  const workers = run.workers.map((w) => `${w}${modes[w] ? ` (${modes[w]})` : ""}${selection(run.workerDetails?.find((d) => d.id === w))}`).join(", ");
+  if (run.race) console.log(`   ${pc.dim("entrants")} ${workers}`);
+  else console.log(`   ${pc.dim("orchestrator")} ${run.orchestrator.agent}${selection(run.orchestrator)}  ${pc.dim("workers")} ${workers}`);
   for (const t of run.tasks) {
     const color = TASK_COLOR[t.status] ?? ((x: string) => x);
     const deps = t.dependsOn.length ? pc.dim(` after ${t.dependsOn.join(",")}`) : "";
     const files = t.files?.length ? pc.dim(` · ${t.files.length} file${t.files.length === 1 ? "" : "s"}`) : "";
-    console.log(`   ${color(t.status.padEnd(11))} ${pc.bold(t.id)} ${t.title} ${pc.dim(`→ ${t.agent}`)}${deps}${files}`);
+    console.log(`   ${color(t.status.padEnd(11))} ${pc.bold(t.id)} ${t.title} ${pc.dim(`→ ${t.agent}${selection(t)}`)}${deps}${files}`);
     if (t.hold) console.log(`               ${pc.yellow(`held (${t.hold.kind}):`)} ${t.hold.reason.slice(0, 200)}`);
     if (t.error) console.log(`               ${pc.red(t.error.split("\n")[0]!.slice(0, 160))}`);
   }
@@ -1770,7 +1807,7 @@ interface ChainCheck {
 async function checkChain(client: DaemonClient, projects: Array<{ id: string; name: string; dir: string }>, steps: Array<{ project: string; goal: string; flags: RunFlags }>, opts: RunFlags & { json?: boolean }): Promise<void> {
   const { execFileSync } = await import("node:child_process");
   const { agentConfigWarnings, readProjectConfig } = await import("../core/registry.js");
-  const { AGENT_ALIASES } = await import("../core/orchestra.js");
+  const { AGENT_ALIASES, parseAgentSpec, expandWorkerSpecs } = await import("../core/orchestra.js");
   const out: ChainCheck[] = [];
   for (const step of steps) {
     const c: ChainCheck = { project: step.project, ok: false, workers: [], errors: [], warnings: [] };
@@ -1790,22 +1827,32 @@ async function checkChain(client: DaemonClient, projects: Array<{ id: string; na
     const roster = project.agents.filter((a) => (a as { enabled?: boolean }).enabled !== false);
     const installed = new Set((await client.availableAgents(p.id)).ades.filter((a) => a.installed !== false).map((a) => a.kind));
     const find = (name: string) => {
-      const n = name.trim().toLowerCase();
-      if (n.startsWith("team:")) return { id: n, kind: n.slice(5), permissions: "teammate's" };
+      const spec = parseAgentSpec(name, roster.map((a) => a.id));
+      if (spec.count !== 1) throw new Error("an orchestrator must have count 1");
+      const n = spec.agent.toLowerCase();
+      if (n.startsWith("team:")) {
+        if (spec.model || spec.effort) throw new Error("model and effort overrides require a local worker");
+        return { id: n, kind: n.slice(5), role: "teammate", permissions: "teammate's" };
+      }
       const kind = AGENT_ALIASES[n] ?? n;
-      return roster.find((a) => a.id.toLowerCase() === n) ?? roster.find((a) => a.kind === kind) ??
+      const base = roster.find((a) => a.id.toLowerCase() === n) ?? roster.find((a) => a.kind === kind) ??
         (installed.has(kind) ? { id: kind, kind, permissions: undefined } : null);
+      return base ? { ...base, id: `${base.id}${spec.model ? `@${spec.model}` : ""}${spec.effort ? `:${spec.effort}` : ""}`, role: "worker", options: { model: spec.model, effort: spec.effort } } : null;
     };
     const flags = { ...opts, ...step.flags };
-    const orch = flags.orchestrator ? find(flags.orchestrator) : (roster.find((a) => a.kind === "claude-code") ?? roster[0] ?? null);
+    let orch;
+    try { orch = flags.orchestrator ? find(flags.orchestrator) : (roster.find((a) => a.kind === "claude-code") ?? roster[0] ?? null); }
+    catch (e) { c.errors.push((e as Error).message); }
     if (!orch) c.errors.push(flags.orchestrator ? `no agent "${flags.orchestrator}" to orchestrate here` : "no agents here to orchestrate");
     else c.orchestrator = flags.orchestrator ? orch.id : `${orch.id} (default)`;
     const names = flags.workers ? flags.workers.split(",").map((w) => w.trim()).filter(Boolean) : roster.map((a) => a.id);
-    for (const w of names) {
-      const a = find(w);
-      if (!a) { c.errors.push(`no worker "${w}" here — loom agents:add ${AGENT_ALIASES[w] ?? w}`); continue; }
-      c.workers.push({ agent: a.id, mode: a.permissions ?? "default" });
-    }
+    try {
+      const workers = expandWorkerSpecs(names, find, roster.map((a) => a.id));
+      for (const w of workers) {
+        const mode = find(w.id.replace(/#\d+$/, ""))?.permissions ?? "default";
+        c.workers.push({ agent: w.id, mode });
+      }
+    } catch (e) { c.errors.push((e as Error).message.replace("unknown worker agent", "no worker") + " here"); }
     if (!names.length) c.errors.push("no workers here");
     const sandboxed = c.workers.filter((w) => w.mode === "auto" && w.agent.startsWith("codex"));
     if (sandboxed.length) c.warnings.push(`${sandboxed.map((w) => w.agent).join(", ")} on auto: no network, read-only .git — loom agents:mode <id> bypass if its tasks need either`);
@@ -1871,8 +1918,8 @@ async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projec
 program
   .command("orchestrate <goal>")
   .description("one orchestrator plans the goal; many worker agents build it in parallel, each in its own worktree")
-  .option("-o, --orchestrator <agent>", "who plans and reviews (default: claude-code if present)")
-  .option("-w, --workers <agents>", "comma-separated worker agents (default: every agent in the project)")
+  .option("-o, --orchestrator <agent>", "agent[@model][:effort] who plans and reviews (default: claude-code if present)")
+  .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN] fleets (default: every agent in the project)")
   .option("-p, --parallel <n>", "tasks running at once (1-12, default 4)")
   .option("--rounds <n>", "orchestrator review rounds before giving up (default 10)")
   .option("--plan", "plan mode: write the plan as markdown specs under plans/<run>/ that any agent can pick up")
@@ -2940,7 +2987,7 @@ program
   .option("--keep-going", "carry on to the next project when one fails")
   .option("--json", "print a JSON summary at the end")
   .option("-o, --orchestrator <agent>", "who plans every run (a line can say otherwise: `<project> :: [-o grok-code] <goal>`)")
-  .option("-w, --workers <agents>", "comma-separated workers for every run")
+  .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN] fleets for every run")
   .option("-p, --parallel <n>", "tasks at once in each run")
   .option("--solo", "keep every run's tasks on this machine")
   .option("--max-usd <n>", "stop a run when it has spent this much")

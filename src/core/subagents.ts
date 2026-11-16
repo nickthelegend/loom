@@ -19,6 +19,9 @@ export interface Subagent {
   /** Roster agent id and adapter kind, for the logo. */
   agentId: string;
   kind: string;
+  /** Pinned orchestra task selection, when supplied. */
+  model?: string;
+  effort?: string;
   status: SubagentStatus;
   /** Its own thread. */
   chat?: string;
@@ -78,6 +81,8 @@ export function subagents(
         name: run.race ? `${t.agent}'s take` : t.title,
         agentId: t.agent,
         kind: t.kind,
+        ...(t.model ? { model: t.model } : {}),
+        ...(t.effort ? { effort: t.effort } : {}),
         status: taskStatus(t.status),
         chat: t.chat,
         source: run.race ? "race" : "orchestra",
