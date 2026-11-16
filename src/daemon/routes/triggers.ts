@@ -15,6 +15,15 @@ import { findWebhook, type TriggerRunner } from "../triggers.js";
 import type { WithRuntime } from "./context.js";
 
 const isAdmin = (req: Request) => Boolean((req as Request & { isAdmin?: boolean }).isAdmin);
+/**
+ * The owner's own phone: a paired device that isn't a guest and isn't limited to some projects.
+ * It may run a trigger now and pause or resume one (#361) — as it may mint a Share-live link —
+ * while adding, editing and removing stay on the computer.
+ */
+const isOwnDevice = (req: Request) => {
+  const r = req as Request & { isAdmin?: boolean; guest?: unknown; projectScope?: string[] | null };
+  return Boolean(r.isAdmin) || (!r.guest && !r.projectScope);
+};
 
 /** What a client may set on a trigger, checked; throws with a message a person can act on. */
 function patchFrom(b: Record<string, unknown>, kind: Trigger["kind"]): Partial<Trigger> {
@@ -68,11 +77,15 @@ export function registerTriggerRoutes(app: Express, withRuntime: WithRuntime, ru
   }));
 
   app.patch("/api/projects/:id/triggers/:tid", withRuntime(async (rt, req, res) => {
-    if (!isAdmin(req)) return void res.status(403).json({ error: "only this machine's owner can change a trigger" });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const pauseOnly = Object.keys(body).length === 1 && typeof body.enabled === "boolean";
+    if (!isAdmin(req) && !(pauseOnly && isOwnDevice(req))) {
+      return void res.status(403).json({ error: pauseOnly ? "only this machine's owner or their own phone can pause a trigger" : "only this machine's owner can change a trigger" });
+    }
     const data = readTriggers(rt.info.dir);
     const t = data.triggers.find((x) => x.id === req.params.tid);
     if (!t) return void res.status(404).json({ error: "no such trigger" });
-    try { Object.assign(t, patchFrom((req.body ?? {}) as Record<string, unknown>, t.kind)); } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
+    try { Object.assign(t, patchFrom(body, t.kind)); } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
     writeTriggers(rt.info.dir, data);
     res.json({ trigger: { ...publicTrigger(t), nextAt: nextFire(t) } });
   }));
@@ -88,7 +101,7 @@ export function registerTriggerRoutes(app: Express, withRuntime: WithRuntime, ru
 
   // Fire one now — to try it, or because you want it now. A webhook's can carry a test payload.
   app.post("/api/projects/:id/triggers/:tid/fire", withRuntime(async (rt, req, res) => {
-    if (!isAdmin(req)) return void res.status(403).json({ error: "only this machine's owner can fire a trigger" });
+    if (!isOwnDevice(req)) return void res.status(403).json({ error: "only this machine's owner or their own phone can fire a trigger" });
     const b = (req.body ?? {}) as { payload?: unknown };
     const run = await runner.fire(rt.info.id, rt.info.dir, String(req.params.tid), { kind: "manual", ...(b.payload !== undefined ? { body: b.payload } : {}) });
     res.status(run.note === "no such trigger" ? 404 : 200).json({ run });

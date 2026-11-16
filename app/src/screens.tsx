@@ -47,6 +47,7 @@ import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
+import { TriggersView } from "./triggers";
 import { notifyApproval } from "./push";
 import { ConnectionBadge, useConnRoute } from "./brand";
 import { describeLink, linkQuality, pushSample, sparkBars, type LinkSample } from "./link-model";
@@ -755,7 +756,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "tasks" | "changes" | "tools";
+type Tab = "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "triggers" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -776,6 +777,8 @@ const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "landing", label: "Landing", accent: T.warn },
   // Phase 5: goals on always-on runners, and deploys; shown with a team or once there are runners
   { key: "runners", label: "Runners", accent: T.primary },
+  // schedules and webhooks: run one now, pause or resume (#361)
+  { key: "triggers", label: "Triggers", accent: T.warn },
   { key: "tasks", label: "Tasks" },
   { key: "changes", label: "Changes" },
   { key: "tools", label: "Tools" },
@@ -1933,6 +1936,8 @@ export function ProjectScreen(props: {
         />
       ) : tab === "runners" ? (
         <TeamRunnersView creds={creds} project={project} pulse={orchPulse.n} onChanged={runners.update} />
+      ) : tab === "triggers" ? (
+        <TriggersView creds={creds} projectId={project.id} onOpenChat={(chat) => { setChatId(chat); setTab("thread"); }} />
       ) : tab === "tools" ? (
         <ToolsView
           creds={creds}
