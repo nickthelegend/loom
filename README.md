@@ -877,6 +877,22 @@ loom agents:add acp --cmd "my-agent --acp" --as mine
   - Always ask puts each request on an approval card in Loom and on your phone.
   - A request that fails or is interrupted is answered "cancelled", never allowed.
 
+### Several agents on one model
+
+Add up to eight sessions at once, each pinned to the same model:
+
+```sh
+loom agents:add claude-code --model claude-opus-5-5 --count 3 --as opus
+loom orchestrate "add OAuth login with tests" -o claude-code -w opus,opus-2,opus-3
+```
+
+This creates `opus`, `opus-2`, and `opus-3`, each with `options.model` set to
+`claude-opus-5-5`. Names already in use get the next free suffix. Omit `--as`
+to use the agent kind as the base name. `--model` works with any kind that
+accepts a model, including `claude-code`, `codex`, `opencode`, `grok-code`,
+`model`, and `acp`. In the app, Add agent offers a model field with suggestions
+and a count from 1–8; Orchestra's **+ model** uses the same picker.
+
 ## Agents that are models
 
 Every other agent in Loom wraps a CLI. A `model` agent is an HTTP endpoint:
