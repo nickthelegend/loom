@@ -1,3 +1,5 @@
+import { PrFeedback } from "./pr-feedback.js";
+import { recordOpenedPr, type PrFeedbackMode } from "../core/pr-feedback.js";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -206,6 +208,7 @@ export class ProjectRuntime {
   private journalFailure: Error | null = null;
   /** What you've lined up, run one at a time — see core/prompt-queue.ts. */
   readonly queue: PromptQueue;
+  readonly prFeedback: PrFeedback;
   /** This project's dev servers — see core/servers.ts. */
   readonly servers: Servers;
   /** One preview proxy per server — see core/preview-proxy.ts. */
@@ -579,6 +582,9 @@ export class ProjectRuntime {
       for (const cb of this.queueCoordinator.queueListeners) cb(q);
       this.watchClockConditions(q);
     });
+
+    this.prFeedback = new PrFeedback(this);
+    this.prFeedback.start();
 
     this.servers = new Servers({
       projectDir: info.dir,
@@ -1733,7 +1739,8 @@ export class ProjectRuntime {
         ? { ...c, ...(main.starred ? { starred: main.starred } : {}), ...(main.ratings ? { ratings: main.ratings } : {}) }
         : c;
       const g = c.id === MAIN_CHAT ? undefined : groups.get(c.id);
-      const withGroup = g ? { ...withMain, group: g } : withMain;
+      const feedback = stored.find(s => s.id === c.id)?.prFeedback ?? "ci";
+      const withGroup = { ...withMain, ...(g ? { group: g } : {}), prFeedback: feedback };
       return last.has(c.id) ? { ...withGroup, lastReplyId: last.get(c.id)! } : withGroup;
     });
   }
@@ -1760,6 +1767,18 @@ export class ProjectRuntime {
       if (!out.has(chat)) out.set(chat, { kind: "import", id: "imports", title: "Imported", at: 0 });
     }
     return out;
+  }
+
+  setPrFeedback(id: string, mode: PrFeedbackMode): ChatInfo | null {
+    const info = this.chats().find(c => c.id === id);
+    if (!info) return null;
+    const state = readProjectState(this.info.dir);
+    state.chats ??= [];
+    let chat = state.chats.find(c => c.id === id);
+    if (!chat) { chat = { id, title: info.title, createdAt: info.createdAt }; state.chats.push(chat); }
+    chat.prFeedback = mode;
+    writeProjectState(this.info.dir, state);
+    return this.chats().find(c => c.id === id)!;
   }
 
   /** Pin, archive or file a thread. Main is always first and always there. */
@@ -2065,6 +2084,7 @@ export class ProjectRuntime {
     });
     const url = (out.match(/https:\/\/\S+/) ?? [""])[0];
     if (!url) throw new Error(out.trim().slice(0, 300) || "gh didn't return a PR url");
+    recordOpenedPr(this.info.dir, url, { chat: MAIN_CHAT, source: "board", ...(task.agent ? { agentId: task.agent } : {}) });
     this.appendIfOpen({ kind: "status", payload: { state: "task_pr", task: task.id, branch: plan.branch, url } });
     return { url, branch: plan.branch };
   }
@@ -3811,6 +3831,7 @@ export class ProjectRuntime {
   }
 
   async close(): Promise<void> {
+    await this.prFeedback.stop();
     this.unwatchConfig?.();
     this.unwatchConfig = null;
     if (this.configTimer) { clearTimeout(this.configTimer); this.configTimer = null; }

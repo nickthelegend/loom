@@ -661,6 +661,35 @@ context switch, no second browser tab.
   <em>Linear is off until you connect it — and Loom tells you exactly how, because it holds no token of its own.</em>
 </p>
 
+PRs opened by Loom (orchestra delivery, crews, board cards and maintenance helpers)
+are recorded in the project's `.loom/prs.json`. Every two minutes, Loom checks open
+PRs with your `gh` CLI. A failed check queues “CI failed on PR #N (check): … — fix
+it and push.” in the owning chat, waiting for any running turn. Failures are sent
+once per check and commit; review comments are sent once per comment id, including
+inline replies. These signatures survive a restart. GitHub errors back off up to
+30 minutes. Tracked team PRs use this queue for CI fixes; older team goals without
+a tracking record retain their existing landing loop. Merges and unmerged closes
+add a status line and stop polling that PR.
+
+Use `loom prs [--json]` to list watches and their last state, or
+`loom prs:watch <number-or-url> [--chat <id-or-title>]` to attach an existing PR
+(default: Main). Attaching requires the machine owner's token. A PR has one owning
+chat; attaching it again to that chat is idempotent.
+
+Clients can use these API shapes (web and phone controls are separate work):
+
+- `GET /api/projects/:id/prs` → `{ prs: TrackedPr[] }`, including terminal history.
+  Each row has `prNumber`, `repo`, `chat`, optional `agentId`, `source`
+  (`delivery`, `board`, `orchestra`), `openedAt`, `state` (`OPEN`, `MERGED`, `CLOSED`),
+  `url`, and optional `mergeable`, `headRefOid`, `checkedAt`. Times are epoch ms.
+- `POST /api/projects/:id/chats/:chat/prs` with `{ pr: number | string }` →
+  `{ pr: TrackedPr }`. Strings are positive PR numbers or HTTPS PR URLs.
+- `PATCH /api/projects/:id/chats/:chat` with `{ prFeedback: "off" | "ci" | "ci+reviews" }`
+  → `{ chat: ChatInfo }`. Main is supported. Default is `ci`; `off` suppresses fix
+  prompts while merge/close notices still appear. `ci+reviews` also queues review
+  bodies, discussion comments and inline comments. Bots and Loom's own automated
+  review messages are skipped. The chat list exposes the effective setting.
+
 **Loom holds no token of its own.** GitHub goes through your `gh` CLI; Linear reads
 `LINEAR_API_KEY` from the daemon's own environment (you `export` it) and never stores,
 logs, or transmits it anywhere else. No key → an honest "not connected", never a dead
