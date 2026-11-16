@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **ACP agents receive the project's MCP servers.** New and loaded sessions now get enabled servers that pass health filtering, with arguments and environment for stdio and headers for HTTP/SSE. Remote servers are sent only when the agent advertises support for their transport.
+
 ## [1.3.0] — 2026-10-26
 
 ### Added
