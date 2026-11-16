@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Orchestra workers report progress during a turn (#374).** `loom report` and fenced `loom-report` messages persist checkpoints, requests for input, blockers, and completion reports. Run-scoped worker credentials authorize the report API; reports reach orchestra events and CLI `--progress`, and requests for input or blockers notify the orchestrator in a batch. Approach credit: Agent Orchestrator’s report coordinator (Apache-2.0).
 
+- **Phone: Triggers.** A Triggers tab lists each schedule and webhook with when it runs next and how its last runs went, with Run now and a Pause/Resume switch. The owner's own (unscoped) phone may now fire a trigger and switch it on or off; adding, editing and removing stay on the computer (#361).
+
 - **Phone: start a chat with any agent on any model.** New chat opens a sheet: an optional title, who answers (each agent's kind and current model), and the model, chosen from the agent's own list or typed. A project can hold a chat on Opus 5.5 next to one on GPT‑5.6 (#372).
 
 - Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
