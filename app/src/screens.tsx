@@ -47,6 +47,7 @@ import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
+import { IntakeSheet } from "./intake";
 import { NewProjectSheet } from "./new-project";
 import { TriggersView } from "./triggers";
 import { notifyApproval } from "./push";
@@ -870,6 +871,7 @@ export function ProjectScreen(props: {
   // Composer extras: plan mode and the prompt library.
   const [plan, setPlan] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
   // Bumped on every `orchestra` event so the Orchestra tab refetches that run.
   const [orchPulse, setOrchPulse] = useState<{ n: number; runId: string | null }>({ n: 0, runId: null });
   // Bumped on every `crew` event so the Crew tab refetches.
@@ -1949,6 +1951,8 @@ export function ProjectScreen(props: {
               </TouchableOpacity>
             </View>
           </View>
+          <IntakeSheet visible={intakeOpen} creds={creds} projectId={project.id} onClose={() => setIntakeOpen(false)}
+            onOpenChat={(chat) => { setIntakeOpen(false); reloadChats(); setChatId(chat); setTab("thread"); }} />
           <PromptsSheet
             creds={creds}
             visible={promptsOpen}
@@ -2052,6 +2056,11 @@ export function ProjectScreen(props: {
                 </Text>
               </TouchableOpacity>
             ))}
+            {/* My issues (#382): start work from what's assigned to you */}
+            <TouchableOpacity onPress={() => setIntakeOpen(true)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="My issues: start work from issues assigned to you"
+              style={{ borderColor: T.line, borderWidth: 1, borderRadius: radii.pill, paddingVertical: 5, paddingHorizontal: 13 }}>
+              <Text style={{ color: T.dim, fontSize: 12, fontWeight: "600" }}>Mine</Text>
+            </TouchableOpacity>
             {taskKind !== "board" && tasks?.available && (
               <Text
                 style={{ color: T.faint, fontFamily: T.mono, fontSize: 11, marginLeft: "auto", alignSelf: "center" }}
