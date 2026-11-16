@@ -115,6 +115,14 @@ export function createQueue(view) {
     }
 
 
+    function canSteer(it){
+      if (!it.target || it.target.kind !== "agent") return false;
+      var here = it.chat || "main";
+      return ((state.project || {}).agents || []).some(function(a){
+        return a.id === it.target.agentId && a.busy && (!a.chat || a.chat === here) && a.capabilities && a.capabilities.steer;
+      });
+    }
+
     function drawQueue(){
       if (pageGone()) return;
       var el = document.getElementById("cqueue");
@@ -154,6 +162,8 @@ export function createQueue(view) {
           '<div class="cqacts">' +
           '<button type="button" data-q="up" title="move up" aria-label="move up"' + (i === 0 ? " disabled" : "") + ">↑</button>" +
           '<button type="button" data-q="down" title="move down" aria-label="move down"' + (i === view.queue.items.length - 1 ? " disabled" : "") + ">↓</button>" +
+          // promote to a steer when the agent it's for is mid-turn in its chat and can take it (#373)
+          (canSteer(it) ? '<button type="button" class="cqsteer" data-q="steer" title="put this into the running turn now" aria-label="steer the running turn with this">Steer</button>' : "") +
           '<button type="button" data-q="rm" title="remove" aria-label="remove">' + ICONS.x + "</button>" +
           "</div></div>";
       });
@@ -233,6 +243,13 @@ export function createQueue(view) {
           qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ to: at + 1 }) });
         };
         find('[data-q="rm"]').onclick = function(){ qAct("/" + encodeURIComponent(id), { method: "DELETE" }); };
+        var steerBtn = find('[data-q="steer"]');
+        if (steerBtn) steerBtn.onclick = function(){
+          steerBtn.disabled = true;
+          api("/api/projects/" + view.pid + "/queue/" + encodeURIComponent(id) + "/steer", { method: "POST" })
+            .then(function(j){ toast(j && j.steered ? "steered into the running turn" : (j && j.reason) || "kept in the queue"); loadQueue(); })
+            .catch(function(err){ toast(err.message); loadQueue(); });
+        };
         var unhold = find('[data-q="unhold"]');
         if (unhold) unhold.onclick = function(){
           qAct("/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ when: null }) });

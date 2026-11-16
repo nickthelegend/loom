@@ -78,6 +78,12 @@ export function registerQueueRoutes(app: Express, withRuntime: WithRuntime): voi
     }),
   );
 
+  /** Same response as /steer. Uses the item's chat/target/text; removes it only on acceptance. */
+  app.post("/api/projects/:id/queue/:queueId/steer", withRuntime(async (rt, req, res) => {
+    try { res.json(await rt.steerQueued(String(req.params.queueId))); }
+    catch (err) { queueError(res, err); }
+  }));
+
   app.delete(
     "/api/projects/:id/queue/:itemId",
     withRuntime(async (rt, req, res) => {
@@ -94,8 +100,10 @@ export function registerQueueRoutes(app: Express, withRuntime: WithRuntime): voi
   app.delete(
     "/api/projects/:id/queue",
     withRuntime(async (rt, _req, res) => {
-      const dropped = rt.queue.clear();
-      res.json({ dropped, ...queueView(rt) });
+      try {
+        const dropped = rt.queue.clear();
+        res.json({ dropped, ...queueView(rt) });
+      } catch (err) { queueError(res, err); }
     }),
   );
 

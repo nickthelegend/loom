@@ -83,6 +83,8 @@ export type ApprovalDecision = "accept" | "acceptForSession" | "decline" | "canc
 export type UserInputAnswers = Record<string, unknown>;
 
 export interface AdapterCapabilities {
+  /** Whether input can be added to an already running turn. */
+  steer: boolean;
   /** Whether an existing session can change model without restarting. */
   sessionModelSwitch: "in-session" | "restart" | "unsupported";
   /** False when native conversation history cannot be rewound. */

@@ -351,6 +351,33 @@ export class RuntimeTurns {
     }
   }
 
+  /** Resolve the target exactly as a normal send does, without moving the baton. */
+  async steer(text: string, agentId?: string, opts: { chat?: string; by?: string } = {}): Promise<{
+    agentId: string; steered: boolean; reason: string;
+  }> {
+    const chat = opts.chat ?? MAIN_CHAT;
+    if (!text.trim()) throw new Error("missing text");
+    if (!this.host.chatExists(chat)) throw new Error("conversation is missing or deleted");
+    const target = agentId ?? this.host.chatBinding(chat).agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
+    const agent = this.host.agent(target);
+    if (!isAdapter(agent)) throw new Error(`agent "${target}" is a bridge (read-only) — it cannot take turns`);
+    this.host.enforceQuarantine(target);
+    this.host.enforceBudget(target);
+    const kind = this.host.config.agents.find(a => a.id === target)?.kind ?? "";
+    if (this.host.teamPolicy && !agentAllowed(this.host.teamPolicy, kind))
+      throw new Error(`team policy doesn't allow ${kind} on this repo (loom.team.json)`);
+    const fallback = (reason: string) => ({ agentId: target, steered: false, reason });
+    if (!this.busySince.has(target) || this.turnChat.get(target) !== chat)
+      return fallback("No turn is running in this chat; queued for a normal send.");
+    if (!agent.capabilities.steer || !agent.steer)
+      return fallback("This agent does not support steering; queued for its next turn.");
+    if (!await agent.steer(chat, text))
+      return fallback("The running turn did not accept steering; queued for a normal send.");
+    this.host.log.append({ kind: "message", chat,
+      payload: { text, author: "user", steer: true, ...(opts.by ? { by: opts.by } : {}) } });
+    return { agentId: target, steered: true, reason: "" };
+  }
+
   async sendMessage(
     text: string,
     agentId?: string,

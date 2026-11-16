@@ -215,7 +215,7 @@ interface Session {
 
 export class ClaudeProviderAdapter implements ProviderAdapter {
   readonly provider = "claude-code" as const;
-  readonly capabilities: AdapterCapabilities = { sessionModelSwitch: "in-session", supportsConversationRollback: false, manualCompaction: false };
+  readonly capabilities: AdapterCapabilities = { steer: true, sessionModelSwitch: "in-session", supportsConversationRollback: false, manualCompaction: false };
   private readonly sessions = new Map<ThreadId, Session>();
   private readonly hub = new EventHub<ProviderRuntimeEvent>();
 
@@ -479,6 +479,17 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       throw refuse("the claude session closed before the turn was sent", error);
     }
     return { threadId: input.threadId, turnId, resumeCursor: s.sessionId };
+  }
+
+  /** Feed the warm query without creating another Loom turn. */
+  async steer(chat: ThreadId, text: string): Promise<boolean> {
+    const s = this.sessions.get(chat);
+    if (!s || s.stopping || !s.turn) return false;
+    const pictures = attachedImages(text, s.info.cwd).map(im => ({
+      type: "image" as const, source: { type: "base64" as const, media_type: im.mime, data: fs.readFileSync(im.abs).toString("base64") } }));
+    s.prompts.push({ type: "user", message: { role: "user", content: [{ type: "text", text }, ...pictures] },
+      parent_tool_use_id: null, uuid: randomUUID() } as SDKUserMessage);
+    return true;
   }
 
   /** A hard boundary, as t3code has it: close the query and its process group. The next turn resumes. */

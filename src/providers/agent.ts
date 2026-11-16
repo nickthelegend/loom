@@ -131,7 +131,7 @@ function claudeMcpServer(entry: McpServerEntry): McpServerConfig {
 
 export class ProviderAgent extends AdapterBase {
   /** MCP servers are applied when a session starts; a change restarts (and resumes) it. */
-  override readonly capabilities: AgentCapabilities = { ...ADAPTER_CAPABILITIES, mcp: true };
+  override readonly capabilities: AgentCapabilities = { ...ADAPTER_CAPABILITIES, mcp: true, steer: true };
   private readonly options: AgentOptions;
   private providers: ProjectProviders | null = null;
   private adapter: ProviderAdapter | null = null;
@@ -167,6 +167,12 @@ export class ProviderAgent extends AdapterBase {
   onLiveItem(cb: (item: LiveItem) => void): () => void {
     this.itemListeners.add(cb);
     return () => this.itemListeners.delete(cb);
+  }
+
+  /** A steer belongs to the current chat and keeps the existing turn lifecycle. */
+  async steer(chat: ThreadId, text: string): Promise<boolean> {
+    if (!this._busy || this.current?.chat !== chat || !this.providers) return false;
+    return this.providers.service.steer(chat, this.id, text);
   }
 
   /** Answer a structured question the agent is waiting on (needs_input with a requestId). */

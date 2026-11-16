@@ -144,6 +144,14 @@ export function parseTarget(raw: unknown): QueueTarget {
 export class PromptQueue {
   private state: QueueState = { items: [], paused: false };
   private seq = 0;
+  private reserved = new Set<string>();
+
+  /** Keep an item unchanged while the provider acknowledges its promotion. */
+  reserve(id: string): () => void {
+    this.index(id);
+    this.reserved.add(id);
+    return () => { this.reserved.delete(id); };
+  }
 
   /** `file` null keeps it in memory (tests, projects with no .loom). */
   constructor(
@@ -245,6 +253,7 @@ export class PromptQueue {
   }
 
   clear(): number {
+    if (this.reserved.size) throw new Error("a queued prompt is being steered; try again when it finishes");
     const n = this.state.items.length;
     this.state = { items: [], paused: false };
     this.changed();
@@ -260,6 +269,7 @@ export class PromptQueue {
 
   /** Take the head to send it. */
   shift(): QueueItem | undefined {
+    if (this.state.items[0] && this.reserved.has(this.state.items[0].id)) return undefined;
     const item = this.state.items.shift();
     if (item) this.changed();
     return item;
@@ -276,6 +286,7 @@ export class PromptQueue {
   }
 
   private index(id: string): number {
+    if (this.reserved.has(id)) throw new Error("this queued prompt is being steered; try again when it finishes");
     const i = this.state.items.findIndex((x) => x.id === id);
     if (i < 0) throw new QueueItemGone(id);
     return i;

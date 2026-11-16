@@ -210,7 +210,8 @@ export class RuntimeQueue {
     // (Leaving it in place until the send returns would survive a crash
     // mid-dispatch, at the price of a prompt you can edit or remove after it
     // has already reached the agent — a worse thing to be wrong about.)
-    const item = this.host.queue.shift()!;
+    const item = this.host.queue.shift();
+    if (!item) { this.draining = false; return; }
     try {
       await this.dispatchQueued(item);
     } catch (err) {

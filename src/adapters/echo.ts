@@ -13,10 +13,19 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { SendInput } from "../types.js";
-import { AdapterBase } from "./base.js";
+import { ADAPTER_CAPABILITIES, AdapterBase } from "./base.js";
 
 export class EchoAdapter extends AdapterBase {
+  override readonly capabilities = { ...ADAPTER_CAPABILITIES, steer: true };
   private aborted = false;
+  private chat: string | null = null;
+  private steered: string[] = [];
+
+  async steer(chat: string, text: string): Promise<boolean> {
+    if (!this._busy || this.aborted || this.chat !== chat) return false;
+    this.steered.push(text);
+    return true;
+  }
 
   constructor(id: string, kind: string, dir: string, private readonly options: Record<string, unknown> = {}) {
     super(id, kind, dir);
@@ -38,6 +47,8 @@ export class EchoAdapter extends AdapterBase {
     if (this._busy) throw new Error(`echo agent "${this.id}" is busy`);
     this._busy = true;
     this.aborted = false;
+    this.chat = input.chat ?? "main";
+    this.steered = [];
     const started = Date.now();
     try {
       // run:<command> — report running that shell command (first, before any sleep:), so what Loom does
@@ -95,7 +106,7 @@ export class EchoAdapter extends AdapterBase {
       // attached pictures: say they arrived, each on its own line (where the thread shows it as the picture)
       const pics = input.text.split("\n").filter((l) => /^\[image\] \S+$/.test(l.trim()));
       const words = input.text.split("\n").filter((l) => !/^\[image\] \S+$/.test(l.trim())).join("\n").trim();
-      const text = /make a plan/i.test(input.text)
+      let text = /make a plan/i.test(input.text)
         ? `Here is the approach. 1) analyze 2) implement 3) verify. The plan is complete and ready to execute.${briefingNote}`
         : `echo(${this.id}): ${words}${briefingNote}` +
           (pics.length ? `\n\nreceived ${pics.length} image${pics.length === 1 ? "" : "s"}:\n\n${pics.map((l) => l.trim()).join("\n\n")}` : "");
@@ -115,6 +126,12 @@ export class EchoAdapter extends AdapterBase {
           return;
         }
       }
+      if (this.steered.length) {
+        const extra = "\n" + this.steered.join("\n");
+        if (streamMatch) this.streamText(extra);
+        text += extra;
+      }
+      this.chat = null;
       this.emit({ kind: "message", payload: { text } });
       // Lookbehind so "Task:" (…t-ask:) doesn't read as a question.
       const askMatch = input.text.match(/(?<![a-z])ask:\s*([^\n]+)/i);
@@ -132,6 +149,7 @@ export class EchoAdapter extends AdapterBase {
       });
     } finally {
       this._busy = false;
+      this.chat = null;
     }
   }
 

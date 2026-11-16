@@ -189,6 +189,12 @@ export class ProviderService {
     return this.activeTurns.get(sessionKey(threadId, instanceId));
   }
 
+  async steer(threadId: ThreadId, instanceId: InstanceId, text: string): Promise<boolean> {
+    const adapter = this.adapter(instanceId, "steer");
+    if (!adapter.capabilities.steer || !adapter.steer || !this.activeTurn(threadId, instanceId)) return false;
+    return adapter.steer(threadId, text);
+  }
+
   /** Interrupt the running turn. A session that isn't live has nothing to interrupt. */
   async interruptTurn(threadId: ThreadId, instanceId: InstanceId, turnId?: TurnId): Promise<void> {
     const adapter = this.adapter(instanceId, "interruptTurn");

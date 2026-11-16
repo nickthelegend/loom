@@ -68,6 +68,10 @@ export interface AgentStatus {
   permissions?: PermissionMode;
   /** What a turn here usually costs and takes, from its recent turns (absent until it has a few). */
   forecast?: import("./forecast-model").Forecast;
+  /** What the agent can do beyond a turn — steer: take more input into a running turn (#373). */
+  capabilities?: { steer?: boolean };
+  /** The chat its running turn is in, when the daemon says. */
+  chat?: string;
 }
 
 export interface RouteState {
@@ -950,6 +954,17 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** The agent CLIs on the paired computer — for choosing who works in a new project (#371). */
+export interface SetupAgent { kind: string; label: string; found: boolean; authed: boolean | null }
+export const getSetupAgents = (c: Creds) => api<{ agents: SetupAgent[] }>(c, "/api/setup");
+/** A brand-new project under the computer's Loom projects folder: git, a README, a first commit. */
+export const createProject = (c: Creds, name: string, agents?: Array<{ kind: string; model?: string; count?: number }>) =>
+  api<{ project: { id: string; name: string; dir: string } }>(c, "/api/projects/new", { method: "POST", body: JSON.stringify(agents?.length ? { name, agents } : { name }) });
+/** Clone a repo on the computer, in the background; poll the job until it's done. */
+export const cloneProject = (c: Creds, url: string, name?: string) =>
+  api<{ jobId: string; dir: string }>(c, "/api/projects/clone", { method: "POST", body: JSON.stringify(name ? { url, name } : { url }) });
+export const getProjectJob = (c: Creds, jobId: string) =>
+  api<{ status: "cloning" | "done" | "failed"; project?: { id: string; name: string; dir: string }; error?: string; progress?: string }>(c, `/api/projects/jobs/${encodeURIComponent(jobId)}`);
 /** A schedule or webhook that starts a turn on its own (#346); the secret never leaves the computer. */
 export interface Trigger {
   id: string; name: string; kind: "schedule" | "webhook"; cron?: string; everyMin?: number; prompt: string;
@@ -1099,6 +1114,11 @@ export const answerQuestion = (c: Creds, id: string, agentId: string, chat: stri
     body: JSON.stringify({ chat: chat ?? "main", requestId, answers }),
   });
 
+/** Put text into the turn running in `chat` (#373); when it can't take it, the daemon queues it and says why. */
+export const steerMessage = (c: Creds, id: string, text: string, chat: string, agentId?: string) =>
+  api<{ steered: boolean; queued?: number; queueId?: string; reason?: string }>(c, `/api/projects/${id}/steer`, {
+    method: "POST", body: JSON.stringify({ text, chat, ...(agentId ? { agentId } : {}) }),
+  });
 export const sendMessage = (
   c: Creds,
   id: string,
