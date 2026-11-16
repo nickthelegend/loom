@@ -946,6 +946,14 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** Side chats (#376): a private, read-only question beside a chat; none of it enters the thread. */
+export interface SideMessage { role: "user" | "agent"; text: string; at: number }
+export const askSide = (c: Creds, id: string, chat: string, text: string, sideId?: string) =>
+  api<{ sideId: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side`, { method: "POST", body: JSON.stringify(sideId ? { text, sideId } : { text }) });
+export const getSide = (c: Creds, id: string, chat: string, sideId: string) =>
+  api<{ messages: SideMessage[]; busy: boolean; error?: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+export const closeSide = (c: Creds, id: string, chat: string, sideId: string) =>
+  api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`, { method: "DELETE" });
 /** A schedule or webhook that starts a turn on its own (#346); the secret never leaves the computer. */
 export interface Trigger {
   id: string; name: string; kind: "schedule" | "webhook"; cron?: string; everyMin?: number; prompt: string;

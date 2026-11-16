@@ -47,6 +47,7 @@ import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
+import { SideSheet } from "./side";
 import { TriggersView } from "./triggers";
 import { notifyApproval } from "./push";
 import { ConnectionBadge, useConnRoute } from "./brand";
@@ -1145,8 +1146,12 @@ export function ProjectScreen(props: {
     }
   };
 
+  // /btw <question>: a side chat, read-only and outside the thread (#376)
+  const [sideQ, setSideQ] = useState<string | null>(null);
   const send = async () => {
     if (stt.listening) void stt.toggle(); // stop dictation on send
+    const btw = /^\/btw(?:\s+([\s\S]*))?$/i.exec(text.trim());
+    if (btw) { setText(""); setSideQ(btw[1] ?? ""); return; }
     if (attach.uploading) return setErr("still uploading the picture…");
     // pictures lead the message as "[image] <path>" lines, as the desktop sends them
     const refs = attach.refs();
@@ -1465,6 +1470,15 @@ export function ProjectScreen(props: {
             project={project}
             onClose={() => setImporting(false)}
             onOpen={(id) => { setImporting(false); reloadChats(); setChatId(id); }}
+          />
+          <SideSheet
+            creds={creds}
+            projectId={project.id}
+            chat={chatId}
+            question={sideQ}
+            who={(chats.find((c) => c.id === chatId) as { agentId?: string } | undefined)?.agentId ?? selected ?? project.holder ?? undefined}
+            onClose={() => setSideQ(null)}
+            onBringBack={(quote) => { setText((t) => (t.trim() ? `${t.replace(/\s+$/, "")}\n\n` : "") + quote); setSideQ(null); }}
           />
           <NewChatSheet visible={newChatOpen} creds={creds} project={project} onClose={() => setNewChatOpen(false)} onCreated={chatCreated} />
           <ChatMenu

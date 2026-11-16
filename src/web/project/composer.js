@@ -11,6 +11,7 @@ import { askConfirm,askText,fitMenu,toast } from '../notifications.js';
 import { KMOD,loadPermProfiles,PERM_MODES,PERM_NAMES,PERM_SHORT,permOf,permProfile,permSplit,shortModel } from '../permissions.js';
 import { state } from '../state.js';
 import { showContinuityOverflow } from './continuity.js';
+import { openSide } from './side.js';
 import { openTaskModal } from '../tasks.js';
 import { openProjectSettings } from '../settings.js';
 import { setTView,tview } from '../transcript.js';
@@ -38,6 +39,14 @@ export function createComposer(view) {
         return (a.kind === "image" ? "[image] " : "[file] ") + a.path;
       });
       var full = refs.length ? refs.join("\n") + (text ? "\n\n" + text : "") : text;
+
+      // /btw <question>: ask on the side — a read-only fork that never enters this thread (#376)
+      var btw = /^\/btw(?:\s+([\s\S]*))?$/i.exec(full);
+      if (btw) {
+        box.value = ""; autosizeBox(); view.attach = []; drawAttach(); view.clearDraft();
+        openSide(view.pid, view.chatId || "main", btw[1] || "", sideWho());
+        return;
+      }
 
       // Loom isn't answering: keep the words and send them when it's back,
       // rather than clearing the box for a request that can't land.
@@ -297,9 +306,23 @@ export function createComposer(view) {
     }
 
 
+    /** Who answers a side question here: the chat's own agent, else whoever the composer points at. */
+    function sideWho(){
+      var p = state.project || {}, here = view.chatId || "main";
+      var c = (p.chats || []).filter(function(x){ return x.id === here; })[0];
+      var id = (c && c.agentId) || state.selected || p.holder;
+      return id ? labelOf(id) : "";
+    }
+
     // Static, and every one runs something real — no decorative commands.
     function slashCommands(){
       return [
+        { label: "Ask on the side (/btw)", sub: "a quick question that stays out of this thread", icon: ICONS.chat, run: function(){
+            var box = document.getElementById("box");
+            var t = (box.value || "").trim();
+            box.value = ""; autosizeBox();
+            openSide(view.pid, view.chatId || "main", t, sideWho());
+          } },
         { label: "New task", sub: "hand work to one or more agents", icon: ICONS.tasks, run: function(){ openTaskModal(view.pid); } },
         { label: "Record a decision", sub: "save it to the brain", icon: ICONS.memory, run: function(){
             var box = document.getElementById("box");
