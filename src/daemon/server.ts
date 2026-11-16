@@ -952,7 +952,7 @@ export class LoomDaemon {
           view(msg.chat, msg.typing);
           return;
         }
-        if (!resolvedProject || !msg.term || wsGuest) return; // a guest never drives a terminal
+        if (!resolvedProject || !msg.term || wsGuest || wsScope) return; // a guest or a project-scoped token never drives a terminal
         const sess = this.terminals.get(resolvedProject, String(msg.term));
         if (!sess) return;
         if (msg.type === "term-input" && typeof msg.data === "string") sess.write(msg.data);
