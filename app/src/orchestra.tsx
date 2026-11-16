@@ -36,6 +36,7 @@ import {
   planPath,
   replyOrchestra,
   startOrchestra,
+  compareAgents,
   stopWaitingOrchestra,
   type Creds,
   type OrchestraRun,
@@ -415,9 +416,10 @@ function StartForm(props: {
       const all = [...workers, ...fleet.map(fleetSpec)];
       const entrants = workers.length + fleet.reduce((n, f) => n + f.count, 0);
       if (race && entrants < 2) throw new Error("a race needs at least two entrants — check another, or add a fleet");
-      const { run } = await startOrchestra(props.creds, props.project.id, race
-        ? { goal: goal.trim(), ...(orch ? { orchestrator: orch } : {}), workers: all, race: true }
-        : {
+      if (race && entrants > 8) throw new Error("up to eight entrants at once");
+      const { run } = race
+        ? await compareAgents(props.creds, props.project.id, { prompt: goal.trim(), entrants: all })
+        : await startOrchestra(props.creds, props.project.id, {
             goal: goal.trim(),
             ...(orch ? { orchestrator: orch } : {}),
             ...(all.length ? { workers: all } : {}),
@@ -440,7 +442,7 @@ function StartForm(props: {
   return (
     <View style={{ gap: spacing.md }}>
       <View style={{ flexDirection: "row", gap: 6 }}>
-        {([["plan", "Plan & split", "one agent plans, the team builds"], ["race", "Race", "everyone tries, you keep one"]] as const).map(([k, l, sub]) => {
+        {([["plan", "Plan & split", "one agent plans, the team builds"], ["race", "Ask several", "each tries it on its model, you keep one"]] as const).map(([k, l, sub]) => {
           const on = (k === "race") === race;
           return (
             <TouchableOpacity key={k} onPress={() => setRace(k === "race")} activeOpacity={0.7} accessibilityRole="radio" accessibilityState={{ selected: on }}

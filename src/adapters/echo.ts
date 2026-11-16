@@ -27,7 +27,7 @@ export class EchoAdapter extends AdapterBase {
     return true;
   }
 
-  constructor(id: string, kind: string, dir: string, private readonly options: Record<string, unknown> = {}) {
+  constructor(id: string, kind: string, dir: string, private readonly options: Record<string, unknown> = {}, private readonly readOnly = false) {
     super(id, kind, dir);
   }
 
@@ -96,7 +96,7 @@ export class EchoAdapter extends AdapterBase {
         return;
       }
       const writeMatch = input.text.match(/write:([\w./-]+)/);
-      if (writeMatch && !writeMatch[1]!.includes("..")) {
+      if (writeMatch && !this.readOnly && !writeMatch[1]!.includes("..")) {
         const target = path.join(this.projectDir, writeMatch[1]!);
         fs.mkdirSync(path.dirname(target), { recursive: true });
         fs.writeFileSync(target, `echo(${this.id}) wrote this\n`);

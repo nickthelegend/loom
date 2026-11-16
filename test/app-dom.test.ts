@@ -282,6 +282,8 @@ const click = (el: Element | null) => {
   (el as HTMLElement).dispatchEvent(new (el.ownerDocument.defaultView as Window & typeof globalThis).MouseEvent("click", { bubbles: true }));
 };
 
+
+
 describe("web app · boot", () => {
   it("an unpaired remote visitor gets the pairing screen, not a broken shell", async () => {
     // A phone on the tailnet: no stored token, and the local admin bootstrap 403s.
@@ -402,6 +404,8 @@ async function openBoard(): Promise<Mounted> {
   await ready(m, '.badd[data-add="needs-you"]');
   return m;
 }
+
+
 
 describe("web app · board", () => {
   it("draws every column, even with no GitHub to talk to", async () => {
@@ -810,6 +814,68 @@ describe("web app · chat folders and agent groups", () => {
     for (const id of [a, b, loose]) await fetch(`${baseUrl}/api/projects/${projectId}/chats/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
     expect(m.errors.join("\n")).toBe("");
   });
+});
+
+describe("web app · who's in a shared chat (#362)", () => {
+  it("shows a guest's initials in the header, and typing while they compose; gone when they leave", async () => {
+    const admin = readDaemonConfig()!.adminToken;
+    const made = await (await fetch(`${baseUrl}/api/pair/new`, {
+      method: "POST", headers: { Authorization: `Bearer ${admin}`, "content-type": "application/json" },
+      body: JSON.stringify({ guest: { project: projectId, chat: "main", role: "reply", name: "Priya Shah", hours: 1 } }),
+    })).json() as { token: string };
+    const claim = await (await fetch(`${baseUrl}/api/pair/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: made.token, name: "Priya Shah" }) })).json() as { clientToken: string };
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    expect(text(m, "#presence")).toBe("");
+    const guest = new WebSocket(`${baseUrl.replace("http", "ws")}/ws?project=${projectId}`, [`loom.bearer.${claim.clientToken}`]);
+    await new Promise<void>((resolve, reject) => { guest.once("open", () => resolve()); guest.once("error", reject); });
+    try {
+      await waitUntil(() => text(m, "#presence .presav") === "PS", { timeoutMs: 10_000 });
+      expect($(m, "#presence .presav")!.classList.contains("guest")).toBe(true);
+      // the owner's own window is never in its own row
+      expect(m.window.document.querySelectorAll("#presence .presav").length).toBe(1);
+      guest.send(JSON.stringify({ type: "presence", chat: "main", typing: true }));
+      await waitUntil(() => text(m, "#presence").includes("Priya Shah is typing"), { timeoutMs: 10_000 });
+      guest.send(JSON.stringify({ type: "presence", chat: "main", typing: false }));
+      await waitUntil(() => !text(m, "#presence").includes("typing"), { timeoutMs: 10_000 });
+    } finally {
+      guest.close();
+    }
+    await waitUntil(() => text(m, "#presence") === "", { timeoutMs: 10_000 });
+    expect(m.errors.join("\n")).toBe("");
+  }, 40_000);
+});
+
+describe("web app · side chats (#376)", () => {
+  it("/btw opens a side drawer the agent answers in, keeps it out of the thread, and Bring back quotes it", async () => {
+    const events = async () => ((await (await fetch(`${baseUrl}/api/projects/${projectId}/events?limit=200&chat=main`, { headers: { Authorization: `Bearer ${clientToken}` } })).json()) as { events: Array<{ kind: string; payload: { text?: string } }> }).events;
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    const before = (await events()).length;
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    box.value = "/btw what does the parser do?";
+    click($(m, "#send"));
+    await waitUntil(() => !!$(m, "#sidedrawer"));
+    expect(text(m, "#sidedrawer .sdq")).toBe("what does the parser do?");
+    expect(box.value).toBe("");
+    // echo answers on the side
+    await waitUntil(() => text(m, "#sidedrawer .sda .bubble").includes("what does the parser do?"), { timeoutMs: 15_000 });
+    // a follow-up in the same side chat
+    ($(m, "#sdbox") as HTMLTextAreaElement).value = "and the lexer?";
+    click($(m, "#sdsend"));
+    await waitUntil(() => m.window.document.querySelectorAll("#sidedrawer .sda:not(.live) .bubble").length === 2, { timeoutMs: 15_000 });
+    // nothing of it reached the thread's log
+    const after = await events();
+    expect(after.length).toBe(before);
+    expect(JSON.stringify(after)).not.toContain("what does the parser do?");
+    // Bring back quotes the answer into the main composer, unsent
+    click($(m, '#sidedrawer [data-sdback]'));
+    expect(box.value.startsWith("> ")).toBe(true);
+    expect((await events()).length).toBe(before);
+    click($(m, "#sdclose"));
+    await waitUntil(() => !$(m, "#sidedrawer"));
+    expect(m.errors.join("\n")).toBe("");
+  }, 40_000);
 });
 
 describe("web app · a chat's own model (#370)", () => {

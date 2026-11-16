@@ -534,6 +534,31 @@ program
   });
 
 program
+  .command("btw <question>")
+  .description("ask a private read-only side question without changing the main conversation")
+  .option("--chat <c>", "parent chat id", "main")
+  .action(async (question: string, opts: { chat: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { sideId } = await client.sendSide(project.id, opts.chat, question);
+    try {
+      const deadline = Date.now() + 6 * 60_000;
+      while (Date.now() < deadline) {
+        const side = await client.sideChat(project.id, opts.chat, sideId);
+        if (!side.busy) {
+          if (side.error) throw new Error(side.error);
+          console.log(side.messages.filter(m => m.role === "agent").at(-1)?.text ?? "");
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error("side chat timed out");
+    } finally {
+      await client.closeSide(project.id, opts.chat, sideId).catch(() => {});
+    }
+  });
+
+program
   .command("ask <words...>")
   .description("ask several models the same thing at once, a thread each")
   .option("--models <list>", "comma-separated model ids (provider/model, or just the model)")
@@ -1713,10 +1738,10 @@ function runJson(run: import("../core/orchestra.js").OrchestraRun): Record<strin
     id: run.id, goal: run.goal, status: run.status, ...(run.status === "aborted" && (run as { interrupted?: unknown }).interrupted ? { resumable: true } : {}),
     // every outcome key, 0 when none: a script reads tasks.failed without checking it exists
     terminal: isTerminalStatus(run.status), tasks: { total: run.tasks.length, done: 0, running: 0, pending: 0, needs_input: 0, conflict: 0, failed: 0, cancelled: 0, ...taskCounts(run) },
-    branch: run.branch, costUsd: run.costUsd,
+    branch: run.branch, costUsd: run.costUsd, race: run.race, compare: run.compare,
     orchestrator: run.orchestrator, workers: run.workers, workerDetails: run.workerDetails ?? [],
     // Keep outcome counts in tasks for existing scripts; taskDetails carries each selection.
-    taskDetails: run.tasks.map((t) => ({ id: t.id, title: t.title, agent: t.agent, kind: t.kind, model: t.model, effort: t.effort, status: t.status })),
+    taskDetails: run.tasks.map((t) => ({ id: t.id, title: t.title, agent: t.agent, kind: t.kind, model: t.model, effort: t.effort, status: t.status, result: t.result, files: t.files, diffStat: t.diffStat, costUsd: t.costUsd, startedAt: t.startedAt, finishedAt: t.finishedAt })),
     ...(run.landing?.pr ? { pr: run.landing.pr } : {}), ...(run.question ? { question: run.question } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
   };
 }
@@ -1763,6 +1788,24 @@ function printRun(run: import("../core/orchestra.js").OrchestraRun, modes: Recor
     } else console.log(pc.dim(`   apply it: loom orchestra:apply ${run.id}`));
   }
   if (run.race && run.applied?.task) console.log(`   ${pc.green("kept:")} ${run.applied.task} → ${run.applied.into}`);
+}
+
+/** One entrant per column, with the task id used by --keep directly below it. */
+function printComparison(run: import("../core/orchestra.js").OrchestraRun): void {
+  console.log(`${pc.bold(run.id)}  ${runStatus(run)}  ${run.goal}`);
+  const rows = [
+    ["agent@model", ...run.tasks.map((t) => t.agent.includes("@") ? t.agent : `${t.agent}@${t.model ?? "default"}`)],
+    ["task", ...run.tasks.map((t) => t.id)],
+    ["status", ...run.tasks.map((t) => t.status)],
+    ["time", ...run.tasks.map((t) => t.startedAt === undefined ? "—" : `${(Math.max(0, (t.finishedAt ?? Date.now()) - t.startedAt) / 1000).toFixed(1)}s`)],
+    ["cost", ...run.tasks.map((t) => t.costUsd === undefined ? "—" : fmtUsd(t.costUsd))],
+    ["files ±", ...run.tasks.map((t) => t.diffStat ? `${t.diffStat.files} files +${t.diffStat.insertions} -${t.diffStat.deletions}` : "—")],
+  ];
+  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
+  for (const row of rows) console.log(row.map((cell, i) => cell.padEnd(widths[i]!)).join(" | ").trimEnd());
+  for (const task of run.tasks) if (task.error) console.log(`${task.id}: ${task.error}`);
+  if (run.applied) console.log(`kept ${run.applied.task} → ${run.applied.into}`);
+  else console.log(pc.dim(`keep one: loom compare ${run.id} --keep <task>`));
 }
 
 /** Run options a chain takes for every line, and a line can override (`[-o grok-code --solo]`). */
@@ -2012,6 +2055,41 @@ async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projec
     await new Promise((r) => setTimeout(r, 1500));
   }
 }
+
+program
+  .command("compare <promptOrRun>")
+  .description("ask several agents in their own worktrees, or inspect/keep an existing comparison")
+  .option("-w, --workers <agents>", "comma-separated agent[@model][:effort][xN] entrants (2–8 after expansion); starts a new comparison")
+  .option("--wait", "wait for all entrants, then print the comparison")
+  .option("--keep <task>", "wait and apply this task; without -w the argument is an existing run id")
+  .action(async (promptOrRun: string, opts: { workers?: string; wait?: boolean; keep?: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    try {
+      let run = opts.workers !== undefined
+        ? (await client.compare(project.id, { prompt: promptOrRun, entrants: opts.workers.split(",").map((w) => w.trim()) })).run
+        : (await client.orchestraRun(project.id, promptOrRun)).run;
+      if (!run.compare) throw new Error(`${run.id} is not a comparison`);
+      console.log(`comparison ${run.id}`);
+      if (opts.wait || opts.keep) {
+        holdWaiting("compare --wait");
+        while (!isTerminalStatus(run.status) && run.status !== "waiting_human") {
+          await new Promise((r) => setTimeout(r, 1000));
+          run = (await steady(() => client.orchestraRun(project.id, run.id))).run;
+        }
+      }
+      if (opts.keep) {
+        await client.orchestraAction(project.id, run.id, "apply", { task: opts.keep });
+        run = (await client.orchestraRun(project.id, run.id)).run;
+      }
+      printComparison(run);
+      if (run.status === "waiting_human") process.exitCode = 2;
+      else if (["failed", "aborted", "moved"].includes(run.status) || (run.status === "completed" && !run.tasks.some((t) => t.status === "done"))) process.exitCode = 1;
+    } catch (err) {
+      console.error(pc.red(err instanceof Error ? err.message : String(err)));
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command("report")
@@ -3060,6 +3138,42 @@ program
   });
 
 program
+  .command("presence [chat]")
+  .description("who is viewing a chat (default: main), including who is typing")
+  .option("--watch", "join the chat and watch presence until Ctrl-C")
+  .option("--json", "print full snapshots as JSON")
+  .action(async (chat: string | undefined, opts: { watch?: boolean; json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let chatId = "main";
+    if (chat && chat !== "main") {
+      const { chats } = await client.chats(project.id);
+      const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
+      if (!hit) fail(`no chat "${chat}" here`);
+      chatId = hit.id;
+    }
+    const print = (snapshot: Awaited<ReturnType<typeof client.presence>>) => {
+      if (opts.json) return void console.log(JSON.stringify(snapshot));
+      console.log(snapshot.people.length
+        ? snapshot.people.map((p) => `${p.name} (${p.kind})${p.typing ? " — typing…" : ""}`).join("\n")
+        : pc.dim("nobody viewing this chat"));
+    };
+    print(await client.presence(project.id, chatId));
+    if (!opts.watch) return;
+    const view = client.watchPresence(project.id, chatId, print, (code, reason) => {
+      console.error(pc.red(`presence disconnected (${code})${reason ? `: ${reason}` : ""}`));
+      process.exitCode = 1;
+    });
+    const stop = () => {
+      view.close();
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+  });
+
+program
   .command("share [chat]")
   .description("a read-only link to a chat (default: main) for a teammate: prompts, replies, what ran and changed. It expires; --list shows yours, --revoke ends one (#199)")
   .option("--hours <n>", "how long the link works (1 to 720, default 24)")
@@ -3515,9 +3629,10 @@ async function sendWithHandoffConfirm(
   interactive = true,
   fresh = false,
   handoff = false,
+  selection: { model?: string; effort?: string } = {},
 ): Promise<{ agentId: string } | null> {
   try {
-    return await client.send(projectId, text, agentId, { fresh });
+    return await client.send(projectId, text, agentId, { fresh, ...selection });
   } catch (err) {
     if (err instanceof DaemonError && err.status === 409 && agentId) {
       const holder = String(err.body?.holder ?? "another agent");
@@ -3532,7 +3647,7 @@ async function sendWithHandoffConfirm(
         return null;
       }
       await client.handoff(projectId, agentId);
-      return await client.send(projectId, text, agentId, { fresh });
+      return await client.send(projectId, text, agentId, { fresh, ...selection });
     }
     throw err;
   }
@@ -3557,13 +3672,15 @@ program
 program
   .command("send <text...>")
   .description("send one message into the shared thread")
+  .option("--model <model>", "model for this message only")
+  .option("--effort <level>", "reasoning effort for this message only, where supported")
   .option("-a, --agent <id>", "address a specific agent (may require a handoff)")
   .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 75 interrupted (the daemon restarted), 124 timed out")
   .option("--json", "with --wait: print the outcome as one JSON object")
   .option("--timeout <seconds>", "with --wait: give up after this long", "1800")
   .option("--fresh", "start the agent's session in this chat over — a short question needn't re-read a long one")
   .option("--handoff", "with --agent: take the baton from whoever holds it, without asking")
-  .action(async (words: string[], opts: { agent?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean; handoff?: boolean }) => {
+  .action(async (words: string[], opts: { agent?: string; model?: string; effort?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean; handoff?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     // a long session whose prompt cache has gone cold is re-read in full: say so before spending it (#280)
@@ -3585,7 +3702,7 @@ program
     const since = opts.wait ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
     // a question needs a person at a terminal — not a script, and never --json output
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !opts.json;
-    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff));
+    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff), { model: opts.model, effort: opts.effort });
     if (!result) return;
     if (!opts.wait) return void console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
     const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;
@@ -3657,13 +3774,19 @@ program
       rl.prompt(true);
     }, project.id);
 
+    const presence = client.watchPresence(project.id, "main", () => {});
+    const typing = () => presence.setTyping(Boolean(rl.line));
+    if (process.stdin.isTTY) process.stdin.on("keypress", typing);
     const close = () => {
+      presence.close();
+      process.stdin.off("keypress", typing);
       unsubscribe();
       rl.close();
       process.exit(0);
     };
 
     rl.on("line", (line) => {
+      presence.setTyping(false);
       void (async () => {
         const text = line.trim();
         if (!text) return rl.prompt();

@@ -23,6 +23,7 @@
 import { configDirEnv } from "../core/accounts.js";
 import { autoPolicyFor } from "../core/auto-policy.js";
 import path from "node:path";
+import fs from "node:fs";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { AdapterBase, ADAPTER_CAPABILITIES, cliAvailable, cliOutput, firstLine, frameBriefing, type AgentCheck } from "../adapters/base.js";
 import { hasApprovalBroker } from "../core/approvals.js";
@@ -157,6 +158,21 @@ export class ProviderAgent extends AdapterBase {
       liveItem: item => { for (const cb of this.itemListeners) { try { cb(item); } catch { /* a viewer's problem */ } } },
       artifactDir: () => this.projectDir,
     });
+  }
+
+  /** Read the parent's cursor without attaching, migrating or advancing its session. */
+  sideSource(chat: string): { cwd: string; resumeCursor?: unknown; model?: string } {
+    const live = this.adapter?.listSessions().find(s => s.threadId === chat);
+    let binding = this.providers?.service.directory.get(chat, this.id);
+    if (!binding) {
+      try {
+        const file = JSON.parse(fs.readFileSync(path.join(this.projectDir, ".loom", "providers", "sessions.json"), "utf8"));
+        binding = file.bindings?.find((b: { threadId: string; instanceId: string }) => b.threadId === chat && b.instanceId === this.id);
+      } catch { /* no persisted provider session yet */ }
+    }
+    const resumeCursor = live?.resumeCursor ?? binding?.resumeCursor ?? (chat === MAIN_CHAT ? this.nativeState.read().sessionId : undefined);
+    const model = live?.model ?? binding?.runtimePayload?.model ?? this.options.model;
+    return { cwd: live?.cwd ?? binding?.runtimePayload?.cwd ?? this.projectDir, resumeCursor, ...(model ? { model } : {}) };
   }
 
   /** Streamed text as it arrives (not persisted; the completed message is). */

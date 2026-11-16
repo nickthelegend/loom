@@ -231,15 +231,18 @@ describe("bridges on a real daemon", () => {
 
     it(`${platform}: queued turns each get their own status and final answer`, async () => {
       const before = messages().length;
-      send("sleep:700 first queued turn");
-      await waitUntil(() => messages().length > before);
+      // long enough that the second message always arrives while the first still runs, even on a
+      // slow Windows runner — otherwise it isn't queued, and the test measures the runner
+      const slow = { timeoutMs: 60_000 };
+      send("sleep:3000 first queued turn");
+      await waitUntil(() => messages().length > before, slow);
       send("sleep:700 second queued turn");
-      await waitUntil(() => messages().length === before + 2);
+      await waitUntil(() => messages().length === before + 2, slow);
       const [first, second] = messages().slice(before);
       expect(first!.text).toContain("first queued turn");
       expect(first!.text).not.toContain("second queued turn");
       expect(second!.text).toBe("The agent is working…");
-      await waitUntil(() => second!.text.includes("second queued turn"));
+      await waitUntil(() => second!.text.includes("second queued turn"), slow);
       expect(messages()).toHaveLength(before + 2);
     });
 

@@ -3,6 +3,7 @@ import express from "express";
 import { bearerToken } from "../auth.js";
 import { recordRecent } from "../../core/prompts.js";
 import { subagents } from "../../core/subagents.js";
+import type { CompareOptions } from "../../core/orchestra.js";
 import type { WithRuntime } from './context.js';
 /** Register orchestra routes in the order established by LoomDaemon.routes(). */
 export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime): void {
@@ -20,6 +21,27 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
   // workerDetails. The started event includes it; task events include selections.
   const orchestraError = (res: express.Response, err: unknown) =>
     void res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+
+  // Ask several: { prompt, entrants: string[], chat? } -> { run }.
+  // 2–8 entrants after fleet expansion; ids, kinds/aliases and acp:<preset>
+  // resolve only to enabled project agents. run.compare and run.race are true.
+  // Read/poll via orchestra/:runId, or consume orchestra task events: tasks carry
+  // result, files, diffStat { files, insertions, deletions }, costUsd and timestamps
+  // in milliseconds. Missing cost means unknown. GET tasks/:taskId/diff returns
+  // { patch } (unified diff, capped at 400k chars). Keep this one uses POST
+  // orchestra/:runId/apply { task: taskId }; discarded worktrees are removed.
+  app.post(
+    "/api/projects/:id/compare",
+    withRuntime(async (rt, req, res) => {
+      try {
+        const run = await rt.orchestra.compare((req.body ?? {}) as CompareOptions);
+        recordRecent(run.goal, { project: rt.info.name, mode: "orchestrate" });
+        res.json({ run });
+      } catch (err) {
+        orchestraError(res, err);
+      }
+    }),
+  );
 
   app.get(
     "/api/projects/:id/orchestra",

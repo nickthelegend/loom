@@ -38,6 +38,8 @@ import { codexDeveloperInstructions } from "./instructions.js";
 import { CodexRpc, type Json, type RpcError } from "./rpc.js";
 
 export interface CodexAdapterOptions {
+  /** Side conversations cannot approve tools or escape the read-only sandbox. */
+  readOnly?: boolean;
   env?: Record<string, string>;
   /** Absolute path to the codex binary, when it's somewhere unusual. */
   bin?: string;
@@ -294,19 +296,21 @@ export class CodexProviderAdapter implements ProviderAdapter {
         capabilities: { experimentalApi: true, requestAttestation: false } });
       session.rpc.notify("initialized");
       const params = this.threadParams(input);
+      if (this.options.readOnly) params.config = await this.readOnlyConfig(session.rpc, input.cwd);
       const cursor = typeof input.resumeCursor === "string" && input.resumeCursor ? input.resumeCursor : undefined;
       let opened: Json;
       try {
         opened = cursor
-          ? await session.rpc.request("thread/resume", { threadId: cursor, ...params, excludeTurns: true })
+          ? await session.rpc.request(input.forkSession ? "thread/fork" : "thread/resume", { threadId: cursor, ...params, excludeTurns: true })
           : await session.rpc.request("thread/start", params);
       } catch (error) {
         const message = (error as Error).message;
         if (cursor && MISSING_THREAD.test(message)) throw fail("session_missing", `codex thread ${cursor} could not be resumed: ${message}`, error);
         throw fail("request", codexFailure(`codex could not open its thread: ${message}`, proc.stderr()), error);
       }
-      const threadId = String((opened.thread as Json | undefined)?.id ?? cursor ?? "");
+      const threadId = String((opened.thread as Json | undefined)?.id ?? (input.forkSession ? "" : cursor) ?? "");
       if (!threadId) throw fail("request", "codex app-server returned no thread id");
+      if (input.forkSession && threadId === cursor) throw fail("request", "codex did not create a separate fork");
       session.providerThreadId = threadId;
       session.info = { ...session.info, status: "ready", resumeCursor: threadId, updatedAt: Date.now(),
         ...(typeof opened.model === "string" && opened.model ? { model: opened.model } : {}),
@@ -372,11 +376,24 @@ export class CodexProviderAdapter implements ProviderAdapter {
     }
   }
 
+  /** MCP servers and hooks run outside the command sandbox, so side sessions disable them explicitly. */
+  private async readOnlyConfig(rpc: CodexRpc, cwd: string): Promise<Json> {
+    const result = await rpc.request("config/read", { cwd, includeLayers: false });
+    const config = result.config as Json | undefined;
+    if (!config) throw new Error("codex could not report its configuration for a read-only side chat");
+    const disabled = (value: unknown): Json => Object.fromEntries(
+      Object.entries((value ?? {}) as Json).map(([name, entry]) => [name, { ...(entry as Json), enabled: false }]),
+    );
+    return { mcp_servers: disabled(config.mcp_servers), plugins: disabled(config.plugins),
+      hooks: Object.fromEntries(Object.entries((config.hooks ?? {}) as Json).filter(([, value]) => Array.isArray(value)).map(([name]) => [name, []])),
+      notify: [], "features.apps": false, "features.multi_agent": false, "features.shell_snapshot": false };
+  }
+
   /** Thread settings from the runtime mode, applied on start and resume. */
   private threadParams(input: SessionStartInput): Json {
-    const { sandbox, approvalPolicy } = codexThreadPolicy(input.runtimeMode, this.options.sandbox);
+    const { sandbox, approvalPolicy } = codexThreadPolicy(input.runtimeMode, this.options.readOnly ? "read-only" : this.options.sandbox);
     const mcp = this.options.mcpConfig?.();
-    return { cwd: input.cwd, sandbox, approvalPolicy, approvalsReviewer: "user",
+    return { cwd: input.cwd, sandbox, approvalPolicy: this.options.readOnly ? "never" : approvalPolicy, approvalsReviewer: "user",
       ...(input.modelSelection?.model ? { model: input.modelSelection.model } : {}),
       ...(mcp && Object.keys(mcp).length ? { config: mcp } : {}) };
   }
@@ -766,7 +783,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
   }
 
   private ask(s: Session, method: string, params: Json): Promise<ApprovalDecision> {
-    if (s.stopping) return Promise.resolve("cancel");
+    if (s.stopping || this.options.readOnly) return Promise.resolve("cancel");
     const requestType = REQUEST_TYPES[method] ?? "unknown";
     const requestId = randomUUID();
     const turnId = typeof params.turnId === "string" ? params.turnId : s.info.activeTurnId;

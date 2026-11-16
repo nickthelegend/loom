@@ -288,6 +288,42 @@ run-detail responses retain `workers: string[]` of instance ids and add
 Absent selections mean provider defaults; older runs may lack `workerDetails`.
 Web and phone fleet controls can use these fields without parsing instance ids.
 
+**Ask several coding agents.** `loom compare` gives the same prompt to 2–8 entrants,
+each in its own worktree, using Orchestra's race mode. Names, kinds and aliases
+resolve to enabled agents in this project; `acp:gemini` selects a configured ACP
+agent with the Gemini preset. Repeated specs and `xN` count toward the eight-entry
+limit. Model and effort selections follow the fleet rules above.
+
+```sh
+loom compare "add OAuth login with tests" \
+  -w claude-code@claude-opus-5-5,codex@gpt-5.6-sol,acp:gemini --wait
+loom compare <run-id> --wait
+loom compare <run-id> --keep <task-id>
+```
+
+Without `--wait`, the command returns immediately with the run id and a snapshot.
+The comparison table shows each agent/model, task id, status, elapsed time, cost
+and files/lines changed. `--keep` waits and applies the chosen finished task using
+race apply; the other worktrees are removed, with branches retained for diff/history.
+It can also accompany a new prompt with `-w`. Inspect replies in
+`loom orchestra <run-id> --json` (`taskDetails`), or through the API.
+
+For composer and phone clients, `POST /api/projects/:id/compare` accepts
+`{ "prompt": "...", "entrants": ["codex@model", "acp:gemini"], "chat": "main" }`
+and returns `{ run }`, with `run.compare: true` and `run.race: true`. `chat` is
+optional; an existing chat keeps the run in that thread. Invalid specs, unknown
+agents and counts outside 2–8 return HTTP 400 with `{ error }`. Poll
+`GET /api/projects/:id/orchestra/:runId` or consume the existing `orchestra`
+WebSocket events. Each task has `agent`, `kind`, `model?`, `effort?`, `status`,
+`chat`, `result?`, `files?`, `costUsd?`, `startedAt?` and `finishedAt?` (Unix
+milliseconds), plus `diffStat: { files, insertions, deletions }` once its turn
+finishes. Unknown costs are omitted; binary files count as files with zero lines.
+`GET /api/projects/:id/orchestra/:runId/tasks/:taskId/diff` returns `{ patch }`,
+the unified diff against the run's base commit (capped at 400,000 characters).
+“Keep this one” is `POST /api/projects/:id/orchestra/:runId/apply` with
+`{ "task": "<task-id>" }`; only a `done` entrant can be picked, once per run.
+Approach credit: T3 Code's multi-model threads.
+
 Under the hood: [`src/core/orchestra.ts`](src/core/orchestra.ts).
 `node scripts/verify-orchestra.mjs` runs a real orchestra against your installed
 CLIs and checks the result on disk.
@@ -919,6 +955,7 @@ detects at least two roles.
 | `loom providers:set <id> [--key --base-url --header]` | Point Loom at a provider — the key goes to `~/.loom/providers.json` (0600) or the env, never a project |
 | `loom providers:rm <id>` | Forget a provider's key and settings |
 | `loom models [agentId] [--provider --free --refresh]` | With an agent: the models it reports. Without: what every configured provider has right now |
+| `loom btw "<question>" [--chat c]` | Ask a private read-only side question with the parent’s agent and model |
 | `loom ask "<text>" [--models a,b,c \| --free --limit n]` | One prompt to several models at once, a thread each, side by side |
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
@@ -1194,7 +1231,19 @@ three fields: omitted or empty model/effort values inherit the agent defaults;
 `{ "agentId": null }` clears all three. Model and effort require a bound agent.
 Main continues to follow the baton and cannot be pinned. An explicit send to
 another agent uses that agent's defaults. A change leaves an in-flight answer
-alone; queued native requests retain the selection captured when submitted.
+alone; queued messages retain the selection captured when submitted.
+
+Use `loom send "Review the changes" --model gpt-5.4 --effort high` to override
+the model or effort for just one message. The API accepts the same optional
+`model` and `effort` strings in `POST /api/projects/:id/messages`, alongside
+`text`, `chat`, and `agentId`. For example:
+`{ "text": "Review the changes", "chat": "<chat-id>", "effort": "high" }`.
+Each omitted or blank field inherits the chat selection (or the agent default
+when the chat does not bind that agent). Values are trimmed and validated just
+like chat bindings; invalid selections return HTTP 400. These overrides never
+change the stored chat or agent defaults. Queued message items carry `model`
+and `effort`, with `null` meaning agent defaults, so later chat edits do not
+change a waiting message's selection. This also survives a daemon restart.
 
 Effort is supported by Claude Code, Codex, and Antigravity CLI (and the test
 `echo` adapter). Unsupported effort choices are rejected. Model IDs are
@@ -1206,6 +1255,43 @@ either mechanism, a requested model fails before the prompt is sent.
 Approach credit: [T3 Code](https://github.com/pingdotgg/t3code) (MIT), for
 per-thread provider and model selection. Web and phone picker updates are
 separate from this API and CLI support.
+
+## Side questions
+
+`loom btw "why this approach?" [--chat c]` asks the parent chat's agent and model
+without interrupting its work. It prints the side reply and closes the side session.
+Main follows the baton; a pinned chat uses its bound agent and model. The selection
+is captured when the side opens. Side messages stay in daemon memory, never enter
+the project event log or brain, and disappear when closed or when the daemon stops.
+
+Claude and Codex fork the parent's native session in a separate process, in plan
+mode with read-only permissions. If there is no native session, or the provider
+cannot fork it, the last twenty parent messages supply context instead. Model
+endpoint agents use that context with read tools only; echo supports the same path
+for testing. Adapters without enforceable read-only execution (including OpenCode)
+return an explicit error. Side questions can run while the parent's turn is busy.
+
+The API is ready for web and phone drawers; their screens are separate work:
+
+- `POST /api/projects/:id/chats/:chatId/side` with `{ "text": "question" }`
+  returns `{ "sideId": "…" }` immediately. Posting again continues the open drawer.
+  An optional `sideId` targets that exact side and returns 404 if it was closed.
+  Concurrent sends to one side return 409; empty/non-string text or text over
+  32,000 characters returns 400.
+- `GET /api/projects/:id/chats/:chatId/side/:sideId` returns
+  `{ "messages": [{ "role": "user", "text": "question", "at": 123 }], "busy": true }`.
+  Replies have role `agent`; `at` is epoch milliseconds. A failed turn sets
+  `busy: false` and an `error` string. Close a failed side before reopening it.
+- `DELETE` at the same URL cancels and forgets the side, returning `{ "deleted": true }`.
+- WebSocket frames have `{ type: "side", projectId, chat, sideId }` plus one of
+  `delta` (text), `message` (the complete message), or `done: true` (optionally `error`).
+  A completed agent message replaces the accumulated deltas for that turn. GET is
+  the authoritative snapshot after reconnecting; side frames are not log events.
+
+Only owners and unscoped devices can access side HTTP endpoints or receive their
+frames; shared-chat guests and project-scoped devices cannot. “Bring back” should
+quote the selected answer into the main composer locally. It enters the main
+conversation only when the person submits that composer through the normal API.
 
 ## Asking several models at once
 
@@ -1589,6 +1675,38 @@ time with Settings ▸ Devices or `loom clients --revoke`.
 
 Their token reaches that one chat and nothing else on your machine: no other chats, terminals,
 files, git, settings or team. Over Loom Cloud it works from anywhere.
+
+Presence is kept in daemon memory, per project and chat. `loom presence [chat]` lists current
+viewers and who is typing; `--json` returns the snapshot and `--watch` joins the chat and streams
+changes until Ctrl-C. Chat may be an id or title and defaults to `main`. `loom chat` also announces
+its view and typing. Each guest socket and each announced owner/device view counts separately.
+Desktop, guest-page and phone presence displays can consume the API below; those displays are
+not included yet.
+
+For clients building a presence display:
+
+- Connect to `/ws?project=<projectId>` using the existing bearer authentication. Guest sockets
+  enter their shared chat automatically. Owner/device sockets enter when they first announce
+  `{ "type": "presence", "chat": "main", "typing": false }`.
+- Send that message on chat open, typing start/stop, and every **20 seconds**. Omitted `typing`
+  preserves its value (initially false). Announcing another chat moves the socket's view;
+  close the socket when leaving. Invalid chats and attempts by guests to switch chats are ignored.
+- Updates are full replacements shaped as
+  `{ "type": "presence", "projectId": "…", "chat": "main", "people": [{ "id": "…", "name": "Priya", "kind": "guest", "typing": false, "since": 1790000000000 }] }`.
+  `id` is an opaque per-socket id; `since` is the entry time in Unix milliseconds. `kind` is
+  `owner`, `device` or `guest`; names are `you`, the paired device's name or the Share-live name.
+  No tokens or IP addresses are included. An empty `people` array clears the display.
+- Owner/device project sockets and authorized unscoped sockets receive updates for their projects.
+  Unscoped sockets only observe; to announce a view, use a project socket. Guests receive only
+  their own chat's updates. Changes are coalesced to at most four broadcasts per second per chat.
+- Owners/devices can read `GET /api/projects/:id/chats/:chat/presence` without joining. Guests get
+  the same snapshot shape in the `presence` field of `GET /api/guest`.
+- Entries disappear on socket close or after **45 seconds** without an announcement, even when
+  the socket still answers transport pings. Restarting the daemon clears all presence.
+
+The shared TypeScript contracts and timing constants are in `src/core/presence.ts`, exported
+from the library entry point. `DaemonClient.presence()` reads a snapshot;
+`DaemonClient.watchPresence()` joins, maintains heartbeats and exposes `setTyping()` and `close()`.
 
 The approach comes from [Nuphos](https://github.com/nuphos/nuphos)'s shared sessions.
 

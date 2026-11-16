@@ -286,6 +286,21 @@ export function ModelPicker(props: { creds: Creds; projectId: string; agent: Age
       setBusy(null);
     }
   };
+  // Effort for this chat (#381): only the kinds that take one, only in a thread
+  const EFFORTS: Record<string, string[]> = { "claude-code": ["low", "medium", "high", "xhigh", "max"], codex: ["minimal", "low", "medium", "high", "xhigh"], "antigravity-cli": ["low", "medium", "high"] };
+  const efforts = thread ? EFFORTS[a.kind] ?? [] : [];
+  const setEffort = async (effort: string) => {
+    if (!thread) return;
+    setBusy(`effort:${effort || "default"}`);
+    try {
+      await setChatAgent(props.creds, props.projectId, thread.id, a.id, { ...(mine?.model ? { model: mine.model } : {}), ...(effort ? { effort } : {}) });
+      props.onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
   const needle = q.trim().toLowerCase();
   const shown = (models ?? []).filter((m) => !needle || m.toLowerCase().includes(needle)).slice(0, 80);
   const row = (label: string, value: string, on: boolean) => (
@@ -299,7 +314,7 @@ export function ModelPicker(props: { creds: Creds; projectId: string; agent: Age
     <>
       <TouchableOpacity onPress={() => setOpen(true)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`Model${thread ? " for this chat" : ""}: ${current ?? "default"}. Change model`}
         style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 34, paddingHorizontal: 11, borderRadius: radii.pill, borderWidth: 1, borderColor: T.line2, backgroundColor: T.raised, maxWidth: 170 }}>
-        <Text style={{ color: mine?.model ? T.text : T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>{current ? current.split("/").pop() : "Default"}</Text>
+        <Text style={{ color: mine?.model ? T.text : T.dim, fontSize: 12, fontFamily: T.mono }} numberOfLines={1}>{current ? current.split("/").pop() : "Default"}{mine?.effort ? ` · ${mine.effort}` : ""}</Text>
         <Text style={{ color: T.faint, fontSize: 10 }}>▼</Text>
       </TouchableOpacity>
       <Sheet title={`${agentLabel(a.kind)} · model${thread ? " · this chat" : ""}`} visible={open} onClose={() => setOpen(false)}>
@@ -307,6 +322,22 @@ export function ModelPicker(props: { creds: Creds; projectId: string; agent: Age
           style={{ color: T.text, backgroundColor: T.raised, borderRadius: radii.key, paddingHorizontal: 12, height: 40, fontSize: 14, marginBottom: 6 }} />}
         {err ? <Text style={{ color: T.err, fontSize: 12.5, marginBottom: 6 }}>{err}</Text> : null}
         {thread ? <Text style={{ color: T.faint, fontSize: 12, marginBottom: 6, lineHeight: 17 }}>For this chat only{mine ? "" : ` — it will answer with ${a.id}`}. Other chats keep their own.</Text> : null}
+        {efforts.length > 0 && !needle ? (
+          <View style={{ marginBottom: 8, gap: 6 }}>
+            <Text style={{ color: T.dim, fontSize: 11.5, fontWeight: "700", letterSpacing: 0.4 }}>EFFORT · THIS CHAT</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              {["", ...efforts].map((e) => {
+                const on = (mine?.effort ?? "") === e;
+                return (
+                  <TouchableOpacity key={e || "default"} onPress={() => void setEffort(e)} disabled={!!busy} accessibilityRole="radio" accessibilityState={{ selected: on }}
+                    style={{ minHeight: 32, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: on ? T.line2 : T.line, backgroundColor: on ? T.raised : "transparent", justifyContent: "center" }}>
+                    {busy === `effort:${e || "default"}` ? <ActivityIndicator color={T.dim} size="small" /> : <Text style={{ color: on ? T.text : T.dim, fontSize: 12.5, fontWeight: "600" }}>{e || "default"}</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
         {!needle ? row(thread ? `Default — ${a.model ? a.model.split("/").pop() : "the agent's own choice"}` : "Default — the agent's own choice", "", thread ? !mine?.model : !a.model) : null}
         {models == null && !err ? <ActivityIndicator color={T.dim} style={{ marginTop: 12 }} /> : shown.map((m) => row(m, m, (thread ? mine?.model : a.model) === m))}
         {models && shown.length === 80 ? <Text style={{ color: T.faint, fontSize: 11.5, marginTop: 6 }}>Showing 80 — type to narrow.</Text> : null}

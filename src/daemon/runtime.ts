@@ -13,6 +13,8 @@ import { type Hit, type RetrieveOpts } from "../core/brain-index.js";
 import { Brain } from "../core/brain.js";
 import { helperText } from "../core/provider-text.js";
 import { ConversationStore } from "../core/conversations.js";
+import { SideChats, SideChatError } from "../core/side-chats.js";
+import { sideDriver } from "./side.js";
 import * as checkpoints from "../core/checkpoint.js";
 import { renderProjection } from "../core/distill.js";
 import { EventLog } from "../core/eventlog.js";
@@ -162,6 +164,7 @@ export class ProjectRuntime {
   readonly log: EventLog;
   private readonly conversations: ConversationStore;
   readonly baton: BatonManager;
+  readonly sides = new SideChats(chat => this.createSide(chat));
   readonly routes: RouteEngine;
   /** One orchestrator, many parallel workers — see core/orchestra.ts. */
   readonly orchestra: OrchestraEngine;
@@ -287,6 +290,7 @@ export class ProjectRuntime {
       extractMemory: (...args) => this.extractMemory(...args),
       get config() { return runtime.config; },
       chatBinding: (...args) => this.chatBinding(...args),
+      bindable: (...args) => this.bindable(...args),
       validHolder: (...args) => this.validHolder(...args),
       defaultAdapterId: (...args) => this.defaultAdapterId(...args),
       agent: (...args) => this.agent(...args),
@@ -1972,6 +1976,23 @@ export class ProjectRuntime {
     return started;
   }
 
+  private createSide(chat: string) {
+    if (!this.chats().some(c => c.id === chat)) throw new SideChatError("no such chat", 404);
+    const bound = this.chatBinding(chat);
+    const id = bound.agentId ?? this.baton.holder() ?? this.config.defaultAgent
+      ?? this.config.agents.find(a => a.enabled !== false && tierForKind(a.kind) === "adapter")?.id;
+    const config = this.config.agents.find(a => a.id === id && a.enabled !== false);
+    if (!config) throw new SideChatError("parent chat has no available agent", 409);
+    const parent = this.agents.get(config.id);
+    const native = parent instanceof ProviderAgent ? parent.sideSource(chat) : undefined;
+    const model = bound.model ?? native?.model ?? (typeof config.options?.model === "string" ? config.options.model : undefined);
+    const messages = this.log.list({ chat, kinds: ["message"], limit: 200 }).filter(e =>
+      typeof e.payload.text === "string" && !e.payload.reasoning && (e.payload.author === "user" || e.agentId));
+    const context = messages.sort((a, b) => a.id - b.id).slice(-20).map(e =>
+      `${e.payload.author === "user" ? "user" : "agent"}: ${String(e.payload.text).slice(0, 8000)}`).join("\n\n");
+    return sideDriver({ config, cwd: native?.cwd ?? this.agentDir(config.id), model, resumeCursor: native?.resumeCursor, context });
+  }
+
   /** What a thread has pinned, if anything. */
   chatBinding(chat?: string): { agentId?: string; model?: string; effort?: string } {
     if (!chat || chat === MAIN_CHAT) return {};
@@ -1990,7 +2011,9 @@ export class ProjectRuntime {
     if (this.continuity && ([...this.turns.busySince.keys()].some(agent => this.turns.turnChat.get(agent) === id) ||
       this.queue.snapshot().items.some(item => item.chat === id)))
       throw new ContinuityError("conflict", "finish or remove queued/native turns before deleting their chat");
-    return this.conversations.deleteChat(id);
+    const deleted = this.conversations.deleteChat(id);
+    if (deleted) void this.sides.closeChat(id).catch(() => {});
+    return deleted;
   }
 
   // -------------------------------------------------------------------------
@@ -3855,6 +3878,7 @@ export class ProjectRuntime {
   }
 
   async close(): Promise<void> {
+    await this.sides.close();
     await this.prFeedback.stop();
     this.unwatchConfig?.();
     this.unwatchConfig = null;

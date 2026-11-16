@@ -77,7 +77,7 @@ export interface OrchestraWorker extends OrchestraModel {
   configDir?: string;
 }
 
-/** Parse agent[@model][:effort][xN]. The team: prefix belongs to the agent name. */
+/** Parse agent[@model][:effort][xN]. The team: and acp: prefixes belong to the agent name. */
 export function parseAgentSpec(value: string, rosterIds: string[] = []): OrchestraModel & { agent: string; count: number } {
   let spec = value.trim();
   if (rosterIds.some((id) => id.toLowerCase() === spec.toLowerCase())) return { agent: spec, count: 1 };
@@ -85,7 +85,7 @@ export function parseAgentSpec(value: string, rosterIds: string[] = []): Orchest
   const count = copies ? Number(copies[1]) : 1;
   if (!Number.isSafeInteger(count) || count < 1 || count > 100) throw new Error("worker count must be an integer from 1 to 100");
   if (copies) spec = spec.slice(0, copies.index);
-  const match = /^(team:)?([^@:#]+)(?:@([^@:#\s]+))?(?::([^@:#\s]+))?$/.exec(spec);
+  const match = /^(team:|acp:)?([^@:#]+)(?:@([^@:#\s]+))?(?::([^@:#\s]+))?$/.exec(spec);
   if (!match) throw new Error(`invalid agent spec "${value}" — use agent[@model][:effort][xN]`);
   const agent = `${match[1] ?? ""}${match[2]!.trim()}`;
   if (!agent || agent === "team:") throw new Error(`invalid agent spec "${value}"`);
@@ -235,6 +235,8 @@ export interface OrchestraTask extends OrchestraModel {
   lastReport?: OrchestraReport | null;
   result?: string;
   files?: string[];
+  /** Changes against the race's base commit. Binary files count as files, with zero lines. */
+  diffStat?: { files: number; insertions: number; deletions: number };
   error?: string;
   costUsd?: number;
   /** The integration branch's merge commit for this task, and the lines it changed (stacks, D59). */
@@ -312,6 +314,8 @@ export interface OrchestraRun {
   interrupted?: { at: number; tasks: string[]; phase: OrchestraStatus };
   /** A race (see OrchestraStartOptions.race); applied.task names the entrant you picked. */
   race?: boolean;
+  /** An Ask several comparison, using race tasks and the same pick/apply lifecycle. */
+  compare?: boolean;
   costUsd: number;
   createdAt: number;
   updatedAt: number;
@@ -390,6 +394,8 @@ export interface OrchestraStartOptions {
    * plans and nothing merges — you compare what came back and pick one.
    */
   race?: boolean;
+  /** A comparison requires 2–8 local entrants from the project's roster and implies race. */
+  compare?: boolean;
   /** The paths this goal expects to touch, when the caller already knows. */
   touches?: string[];
   /** false: keep every task on this machine, even with teammates' runners online. */
@@ -399,6 +405,14 @@ export interface OrchestraStartOptions {
    * of in a thread of its own, so orchestrating from Main leaves you in Main.
    * The caller proves the chat exists; an unknown one gets a new thread.
    */
+  chat?: string;
+}
+
+/** POST /api/projects/:id/compare. Entrants expand using agent[@model][:effort][xN]. */
+export interface CompareOptions {
+  prompt: string;
+  entrants: string[];
+  /** Existing composer thread; omitted or unknown creates a run thread. */
   chat?: string;
 }
 
@@ -1191,7 +1205,7 @@ export class OrchestraEngine {
   // ── agents ──
 
   /** Resolve a name the orchestrator (or user) gave into a runnable config. */
-  resolveAgent(name: string): AgentConfig | null {
+  resolveAgent(name: string, projectOnly = false): AgentConfig | null {
     const roster = this.host.roster();
     // Exact roster ids win, including older ids containing spec punctuation.
     const exact = roster.find((a) => a.id.toLowerCase() === name.trim().toLowerCase());
@@ -1201,10 +1215,12 @@ export class OrchestraEngine {
     if (spec.count !== 1) throw new Error("a single agent cannot have a count greater than 1; use workers for fleets");
     const n = spec.agent.toLowerCase();
     const kind = AGENT_ALIASES[n] ?? n;
-    const base = isRemoteWorker(n)
-      ? { id: n, kind: n.slice(5), role: "teammate" }
-      : roster.find((a) => a.id.toLowerCase() === n) ?? roster.find((a) => a.kind === kind) ??
-        (this.host.installedKinds().includes(kind) ? { id: kind, kind, role: kind } : null);
+    const base = roster.find((a) => a.id.toLowerCase() === n) ?? (n.startsWith("acp:")
+      ? roster.find((a) => a.kind === "acp" && a.options?.preset === n.slice(4)) ?? null
+      : isRemoteWorker(n)
+      ? (projectOnly ? null : { id: n, kind: n.slice(5), role: "teammate" })
+      : roster.find((a) => a.kind === kind) ??
+        (!projectOnly && this.host.installedKinds().includes(kind) ? { id: kind, kind, role: kind } : null));
     if (!base) return null;
     if (isRemoteWorker(n) && (spec.model || spec.effort)) throw new Error("model and effort overrides require a local worker");
     return {
@@ -1216,7 +1232,18 @@ export class OrchestraEngine {
 
   // ── lifecycle ──
 
+  /** Start a race without a planner; list/get and orchestra events expose the same run. */
+  async compare(opts: CompareOptions): Promise<OrchestraRun> {
+    if (typeof opts.prompt !== "string" || !opts.prompt.trim()) throw new Error("missing prompt");
+    if (!Array.isArray(opts.entrants) || !opts.entrants.length || opts.entrants.some((e) => typeof e !== "string" || !e.trim())) {
+      throw new Error("entrants must be an array of fleet specs (2–8 after expansion)");
+    }
+    if (opts.chat !== undefined && typeof opts.chat !== "string") throw new Error("chat must be a thread id");
+    return this.start({ goal: opts.prompt, workers: opts.entrants, chat: opts.chat, compare: true, race: true, team: false, maxParallel: 8 });
+  }
+
   async start(opts: OrchestraStartOptions): Promise<OrchestraRun> {
+    if (opts.compare) opts = { ...opts, race: true, team: false };
     const goal = opts.goal?.trim();
     if (!goal) throw new Error("an orchestra run needs a goal");
     // One goal at a time unless the project says otherwise — and then only
@@ -1236,13 +1263,13 @@ export class OrchestraEngine {
     }
 
     const roster = this.host.roster();
-    const orchCfg = opts.orchestrator
+    const workers = expandWorkerSpecs(opts.workers?.length ? opts.workers : roster.map((a) => a.id), (name) => this.resolveAgent(name, opts.compare), roster.map((a) => a.id));
+    if (opts.compare && (workers.length < 2 || workers.length > 8)) throw new Error("a comparison needs 2–8 entrants after expansion");
+    const orchCfg = opts.compare ? workers[0] : opts.orchestrator
       ? this.resolveAgent(opts.orchestrator)
       : (roster.find((a) => a.kind === "claude-code") ?? roster[0] ?? null);
     if (!orchCfg) throw new Error(`no agent "${opts.orchestrator ?? ""}" can orchestrate here — add one first`);
 
-    const workerNames = opts.workers?.length ? opts.workers : roster.map((a) => a.id);
-    const workers = expandWorkerSpecs(workerNames, (name) => this.resolveAgent(name), roster.map((a) => a.id));
     if (!workers.length) throw new Error("an orchestra needs at least one worker agent");
     // Team auto-orchestration: with teammates' shared runners online, their agents join the
     // run as team:<kind> workers — the orchestrator splits the goal across both machines.
@@ -1320,6 +1347,7 @@ export class OrchestraEngine {
       // A cap for this goal: what was asked for, else the project's default.
       ...(opts.maxUsd && opts.maxUsd > 0 ? { budgetUsd: opts.maxUsd } : {}),
       ...(opts.race ? { race: true } : {}),
+      ...(opts.compare ? { compare: true } : {}),
       costUsd: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1338,6 +1366,7 @@ export class OrchestraEngine {
       branch,
       maxParallel: run.maxParallel,
       ...(run.race ? { race: true } : {}),
+      ...(run.compare ? { compare: true } : {}),
       ...(dirty ? { note: "uncommitted changes in the project are not visible to workers — they start from the last commit" } : {}),
     });
 
@@ -1710,11 +1739,14 @@ export class OrchestraEngine {
     const into = (await git(["rev-parse", "--abbrev-ref", "HEAD"], dir)).trim();
     if (run.race) {
       // A race applies the one entrant you picked, never all of them.
+      if (run.tasks.some((t) => t.status === "running" || t.status === "pending")) {
+        throw new Error("wait for the entrants to finish or abort the run before picking one");
+      }
       const pick = run.tasks.find((t) => t.id === taskId);
       if (!pick) throw new Error(`pick an entrant to apply: ${run.tasks.map((t) => t.id).join(", ")}`);
       if (pick.status !== "done" || !pick.branch) throw new Error(`${pick.id} didn't finish, so there's nothing of it to apply`);
-      if (run.applied) throw new Error(`${run.applied.task ?? "an entrant"} was already applied from this race`);
       await this.gitLock.run(async () => {
+        if (run.applied) throw new Error(`${run.applied.task ?? "an entrant"} was already applied from this race`);
         try {
           await git(
             ["-c", "user.name=Loom Orchestra", "-c", "user.email=orchestra@loom.local", "merge", "--no-ff", "--no-edit", "-m", `Race ${run.id}: ${pick.agent}'s take on ${run.goal.slice(0, 50)}`, pick.branch!],
@@ -1724,11 +1756,19 @@ export class OrchestraEngine {
           await git(["merge", "--abort"], dir).catch(() => {});
           throw new Error(`merge into ${into} failed — ${(err as Error).message}`);
         }
+        run.applied = { at: Date.now(), into, task: pick.id };
       });
-      run.applied = { at: Date.now(), into, task: pick.id };
       run.summary = raceApplied(run);
       this.save(run);
       this.emit(run, "applied", { into, task: pick.id, agent: pick.agent });
+      // Keep the branches for diff/history, but release the discarded checkouts.
+      await this.gitLock.run(async () => {
+        for (const task of run.tasks) {
+          if (task.id !== pick.id && task.dir && fs.existsSync(task.dir)) {
+            await git(["worktree", "remove", "--force", task.dir], dir);
+          }
+        }
+      });
       return { merged: pick.branch!, into };
     }
     let already = false;
@@ -2397,6 +2437,7 @@ export class OrchestraEngine {
         await this.integrate(run, task);
       } else if (!(await this.runLocalTurn(run, task, key))) return;
     } catch (err) {
+      if (run.race) await this.snapshotRaceTask(run, task).catch(() => {});
       if ((task.status as TaskStatus) !== "cancelled") {
         task.status = "failed";
         task.error = (err as Error).message.slice(0, 1000);
@@ -2483,6 +2524,7 @@ export class OrchestraEngine {
     if (asked) {
       // Its work so far stays in the worktree, unmerged; the orchestrator
       // answers with a `send` (the task resumes there) or asks the human.
+      if (run.race) await this.snapshotRaceTask(run, task);
       task.status = "needs_input";
       task.result = `The worker stopped to ask: ${asked}${reply ? `\n\nWhat it said before asking:\n${task.result}` : ""}`;
       task.finishedAt = Date.now();
@@ -2499,6 +2541,7 @@ export class OrchestraEngine {
     // task depending on it must not start on top of it. (An error event
     // alongside a real report is a warning the orchestrator gets to read.)
     if (turnError && !reply) {
+      if (run.race) await this.snapshotRaceTask(run, task);
       task.status = "failed";
     } else if (task.queued.length) {
       // The orchestrator already queued a follow-up: keep going on the same
@@ -2542,17 +2585,32 @@ export class OrchestraEngine {
   /** `${run}/${task}` → the question a worker stopped to ask mid-turn. */
   private workerQuestion = new Map<string, string>();
 
+  /** Preserve partial answers too, so failed/question entrants have the same diff contract. */
+  private async snapshotRaceTask(run: OrchestraRun, task: OrchestraTask): Promise<void> {
+    if (!task.dir) {
+      task.diffStat = { files: 0, insertions: 0, deletions: 0 };
+      return;
+    }
+    const dir = task.dir;
+    await this.gitLock.run(async () => {
+      await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
+      task.files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir)).split("\n").filter(Boolean);
+      const stat = await git(["diff", "--shortstat", `${run.baseCommit}...HEAD`], dir);
+      task.diffStat = {
+        files: task.files.length,
+        insertions: Number(/(\d+) insertion/.exec(stat)?.[1] ?? 0),
+        deletions: Number(/(\d+) deletion/.exec(stat)?.[1] ?? 0),
+      };
+      task.lines = task.diffStat.insertions + task.diffStat.deletions;
+    });
+  }
+
   private async integrate(run: OrchestraRun, task: OrchestraTask): Promise<void> {
     const dir = task.dir!;
     if (run.race) {
       // An entrant's work stays on its own branch, to be compared, not merged.
-      await this.gitLock.run(async () => {
-        await commitAll(dir, taskCommitMessage(run, task, this.host.member?.() ?? null));
-        task.files = (await git(["diff", "--name-only", `${run.baseCommit}...HEAD`], dir).catch(() => "")).split("\n").filter(Boolean);
-        const stat = await git(["diff", "--shortstat", `${run.baseCommit}...HEAD`], dir).catch(() => "");
-        task.lines = [...stat.matchAll(/(\d+) (?:insertion|deletion)/g)].reduce((n, m) => n + Number(m[1]), 0);
-        task.status = "done";
-      });
+      await this.snapshotRaceTask(run, task);
+      task.status = "done";
       return;
     }
     await this.gitLock.run(async () => {
@@ -2700,6 +2758,7 @@ export class OrchestraEngine {
       tasks: run.tasks.map(taskSummary),
       costUsd: run.costUsd,
       ...(run.race ? { race: true } : {}),
+      ...(run.compare ? { compare: true } : {}),
     });
     if (summary && run.race) {
       // nobody led a race, so Loom says how it ended
@@ -2887,13 +2946,17 @@ export function taskSummary(t: OrchestraTask): Record<string, unknown> {
     chat: t.chat,
     attempts: t.attempts,
     files: t.files ?? [],
+    ...(t.diffStat ? { diffStat: t.diffStat } : {}),
+    ...(t.result !== undefined ? { result: t.result } : {}),
+    ...(t.startedAt !== undefined ? { startedAt: t.startedAt } : {}),
+    ...(t.finishedAt !== undefined ? { finishedAt: t.finishedAt } : {}),
     reports: t.reports ?? [],
     lastReport: t.lastReport ?? null,
     ...(t.touches?.length ? { touches: t.touches } : {}),
     ...(t.overlap ? { overlap: t.overlap } : {}),
     ...(t.hold ? { hold: t.hold } : {}),
     ...(t.error ? { error: t.error } : {}),
-    ...(t.costUsd ? { costUsd: t.costUsd } : {}),
+    ...(t.costUsd !== undefined ? { costUsd: t.costUsd } : {}),
   };
 }
 

@@ -13,6 +13,7 @@ import net from "node:net";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { sideDriver } from "../src/daemon/side.js";
 import { ModelAdapter } from "../src/adapters/model.js";
 import { MAX_HOPS, insideProject, runReadTool } from "../src/core/model-tools.js";
 import { setProvider } from "../src/core/providers.js";
@@ -363,6 +364,20 @@ describe("asking before it writes", () => {
     setProvider(id, { baseUrl: `http://127.0.0.1:${port}`, key: "k", label: "W" });
     return id;
   };
+
+  it("a side chat denies an invented write tool even when the parent bypasses approvals", async () => {
+    process.env.LOOM_HOME = tmpDir("home-side-write");
+    const dir = project();
+    const id = await writingProvider();
+    setApprovalBroker(async () => ({ behavior: "allow" }));
+    const side = sideDriver({ config: { id: "w", kind: "model", options: {
+      provider: id, model: "m", tools: true, write: true, permissions: "bypass",
+    } }, cwd: dir, model: "m", context: "user: explain this project" });
+    try {
+      expect(await side.send("add a note", () => {})).toContain("read-only");
+      expect(fs.existsSync(path.join(dir, "note.md"))).toBe(false);
+    } finally { await side.close(); }
+  });
 
   it("writes nothing when the person says no", async () => {
     process.env.LOOM_HOME = tmpDir("home-write-deny");

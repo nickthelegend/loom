@@ -433,7 +433,7 @@ describe("native continuity lifecycle", () => {
     await expect(runtime.close()).rejects.toThrow("cannot stop");
   });
   it("dispatches idempotently and queues switching to the captured target/model", async () => {
-    const claude = fakeCli("claude", 150), codex = fakeCli("codex");
+    const claude = fakeCli("claude", 1500), codex = fakeCli("codex"); // busy long enough that the second send queues, even on a slow box
     const dir = makeProjectDir({ brain: { continuity: true, extractor: "off" }, agents: [
       { id: "claude", kind: "claude-code", options: { bin: claude } }, { id: "codex", kind: "codex", options: { bin: codex } }] });
     const runtime = await ProjectRuntime.open({ id: "project", name: "test", dir }); open.push(runtime);
