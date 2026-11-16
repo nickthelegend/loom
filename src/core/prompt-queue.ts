@@ -53,7 +53,7 @@ export interface QueueItem {
   at: number;
   editedAt?: number;
   /** Native continuity freezes its target model and idempotency key at enqueue. */
-  continuity?: { requestId: string; model: string | null };
+  continuity?: { requestId: string; model: string | null; effort?: string | null };
   /** Hold it back until this is true — see QueueCondition. */
   when?: QueueCondition;
   /** A teammate in a shared chat (Share live) who sent it: their name stays on it when it's sent. */

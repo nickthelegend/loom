@@ -7,19 +7,21 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { createAgent } from "../src/adapters/index.js";
+import { isAdapter, type Adapter } from "../src/types.js";
 import { AcpAdapter } from "../src/adapters/acp.js";
 import { setApprovalBroker } from "../src/core/approvals.js";
 import type { AdapterEvent } from "../src/types.js";
-import { tmpDir } from "./helpers.js";
+import { tmpDir, waitUntil } from "./helpers.js";
 
 const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), "acp-fake-agent.mjs");
-const agents: AcpAdapter[] = [];
+const agents: Adapter[] = [];
 
 function agent(mode: "bypass" | "auto" | "ask", extra: Record<string, unknown> = {}) {
   process.env.LOOM_HOME ??= tmpDir("home-acp");
   const dir = tmpDir("acp-proj");
   const logFile = path.join(dir, "acp.log");
-  const a = new AcpAdapter("gem", dir, { command: [process.execPath, fake], permissions: mode, env: { FAKE_ACP_LOG: logFile }, ...extra });
+  const a = new AcpAdapter("gem", dir, { command: [process.execPath, fake], permissions: mode, ...extra, env: { FAKE_ACP_LOG: logFile, ...(extra.env as Record<string, string> ?? {}) } });
   agents.push(a);
   const events: AdapterEvent[] = [];
   a.onEvent((e) => events.push(e));
@@ -31,6 +33,51 @@ const texts = (events: AdapterEvent[]) => events.filter((e) => e.kind === "messa
 afterEach(async () => { setApprovalBroker(null); for (const a of agents.splice(0)) await a.stop(); });
 
 describe("ACP adapter", () => {
+  it("switches advertised session models before prompting and restores the session default", async () => {
+    const { a, calls } = agent("bypass", { env: { FAKE_ACP_MODELS: "1" } });
+    await a.send({ text: "first", chat: "a", model: "fast" });
+    await a.send({ text: "second", chat: "a", model: "deep" });
+    await a.send({ text: "other", chat: "b", model: "fast" });
+    await a.send({ text: "defaults", chat: "a" });
+    expect(calls().filter(c => c.method === "session/set_model").map(c => c.params)).toEqual([
+      { sessionId: "s1", modelId: "fast" }, { sessionId: "s1", modelId: "deep" },
+      { sessionId: "s2", modelId: "fast" }, { sessionId: "s1", modelId: "default" },
+    ]);
+    const methods = calls().map(c => c.method);
+    expect(methods.indexOf("session/set_model")).toBeLessThan(methods.indexOf("session/prompt"));
+    await expect(a.send({ text: "bad", chat: "a", model: "absent" })).rejects.toThrow(/isn't available/);
+    expect(calls().filter(c => c.method === "session/prompt")).toHaveLength(4);
+  });
+
+  it("refuses a model when neither session selection nor a startup flag is available", async () => {
+    const { a, calls } = agent("bypass");
+    await expect(a.send({ text: "hello", model: "fast" })).rejects.toThrow(/doesn't advertise session models/);
+    expect(calls().some(c => c.method === "session/set_model" || c.method === "session/prompt")).toBe(false);
+  });
+
+  it("keeps a process and native state per startup model, then reuses the previous process", async () => {
+    const dir = tmpDir("acp-pool"), logFile = path.join(dir, "calls.jsonl");
+    const a = createAgent({ id: "fixed", kind: "acp", options: { command: [process.execPath, fake], modelFlag: "--model", env: { FAKE_ACP_LOG: logFile } } }, dir, true);
+    if (!isAdapter(a)) throw new Error("expected adapter");
+    agents.push(a);
+    await a.start();
+    await a.send({ text: "one", chat: "same", model: "fast" });
+    await a.send({ text: "two", chat: "same", model: "deep" });
+    await a.send({ text: "three", chat: "same", model: "fast" });
+    const calls = fs.readFileSync(logFile, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    const starts = calls.filter(c => c.method === "initialize");
+    expect(starts).toHaveLength(2);
+    expect(starts.map(c => c.argv.slice(-2))).toEqual([["--model", "fast"], ["--model", "deep"]]);
+    expect(calls.filter(c => c.method === "session/load")).toHaveLength(1);
+    const prompts = calls.filter(c => c.method === "session/prompt");
+    expect(prompts[0].pid).toBe(prompts[2].pid);
+    expect(prompts[0].pid).not.toBe(prompts[1].pid);
+    await a.stop();
+    await waitUntil(() => starts.every(c => {
+      try { process.kill(c.pid, 0); return false; } catch { return true; }
+    }));
+  });
+
   it("a turn: thoughts, plan, answer and usage arrive as Loom events; one session per chat, resumed", async () => {
     const { a, events, calls } = agent("bypass");
     expect(await a.available()).toBe(true);

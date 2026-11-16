@@ -102,12 +102,10 @@ export interface ChatInfo {
    * agents. With it, switching threads switches who you're talking to.
    */
   agentId?: string;
-  /**
-   * The model for this thread, for agents that can change model per turn.
-   * Only the `model` kind can; binding one to an agent that can't is refused
-   * at the point of binding rather than ignored at the point of sending.
-   */
+  /** Overrides the bound agent's default model for this chat only. */
   model?: string;
+  /** Reasoning effort for this chat, where the agent supports it. */
+  effort?: string;
   /** Kept at the top of the sidebar, under Main. */
   pinned?: boolean;
   /** Out of the sidebar, not forgotten: its history stays in the log. */
@@ -486,14 +484,10 @@ export interface SendInput {
     nativeSessionId: string | null; context: string };
   /** One-shot handoff briefing injected alongside this turn. */
   briefing?: string;
-  /**
-   * Use this model for this turn.
-   *
-   * Only set for adapters that can honour it — the runtime checks before it
-   * sends, so an adapter receiving this can act on it rather than wonder. A
-   * CLI that bakes its model into a spawned process is never handed one.
-   */
+  /** This turn's model. Process-bound adapters are routed through a model instance pool. */
   model?: string;
+  /** This turn's reasoning effort, where supported. */
+  effort?: string;
   /**
    * The project's MCP servers, rendered for this turn (see core/mcp.ts). The
    * runtime builds it, the adapters that have a real flag for it pass it to

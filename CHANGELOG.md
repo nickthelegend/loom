@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-chat agent, model and reasoning effort selection through the daemon API and `loom chat:create` / `loom chat:agent` (#370). Native providers and ACP use session selection where supported; process-bound adapters reuse separate model instances. Changing a chat leaves the running turn and agent defaults alone. Approach credit: T3 Code (MIT). Web and phone picker changes are separate.
+
 ### Fixed
 
 - Routes keep the chat they were started in. A queued `auto` prompt now sends every hop and its route events to the original thread (#357).
