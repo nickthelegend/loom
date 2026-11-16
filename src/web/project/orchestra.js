@@ -28,7 +28,7 @@ export function createOrchestra(view) {
     // agent", and the next Orchestrate quietly ran agents you'd left out.
     var ORCH_KEY = "loomOrch:" + view.pid;
     function saveOrchCfg(c){
-      try { localStorage.setItem(ORCH_KEY, JSON.stringify({ orchestrator: c.orchestrator, off: c.off, parallel: c.parallel, race: !!c.race })); } catch (e) {}
+      try { localStorage.setItem(ORCH_KEY, JSON.stringify({ orchestrator: c.orchestrator, off: c.off, parallel: c.parallel, race: !!c.race, fleet: c.fleet || [] })); } catch (e) {}
     }
 
     function orchCfg(){
@@ -37,7 +37,8 @@ export function createOrchestra(view) {
         var saved = null;
         try { saved = JSON.parse(localStorage.getItem(ORCH_KEY) || "null"); } catch (e) { saved = null; }
         state.orchCfg = { pid: view.pid, orchestrator: (saved && saved.orchestrator) || null, off: (saved && saved.off) || {},
-          parallel: Math.max(1, Math.min(12, Number(saved && saved.parallel) || 4)), race: !!(saved && saved.race) };
+          parallel: Math.max(1, Math.min(12, Number(saved && saved.parallel) || 4)), race: !!(saved && saved.race),
+          fleet: Array.isArray(saved && saved.fleet) ? saved.fleet : [] };
       }
       var c = state.orchCfg;
       var ids = roster.map(function(a){ return a.id; });
@@ -53,6 +54,63 @@ export function createOrchestra(view) {
     function orchTerminal(st){ return st === "completed" || st === "failed" || st === "aborted" || st === "moved"; }
 
     function findOrchRun(id){ return (view.orch.runs || []).filter(function(r){ return r.id === id; })[0] || null; }
+
+    // ---- Fleets: N instances of an agent on a model, beside the checked roster (#369) ----
+    // A row { agent, model, count } goes to the daemon as agent@model×N; it expands there into
+    // distinct workers (codex@gpt-5.6-sol, codex@gpt-5.6-sol#2…) without touching the roster.
+    function fleetSpec(f){ return f.agent + (f.model ? "@" + f.model : "") + (f.count > 1 ? "x" + f.count : ""); }
+    function fleetChips(c){
+      return (c.fleet || []).map(function(f, i){
+        return '<button type="button" class="cowchip on cowfleet" data-fleet="' + i + '" title="' + esc(fleetSpec(f) + " \u2014 click to remove") + '">' +
+          agentGlyph(kindOfAgent(f.agent), f.agent) + '<span class="cwn">' + esc(f.agent) + "</span>" +
+          '<span class="cwset"><span class="cwmodel">' + esc(f.model || "default model") + "</span>" + (f.count > 1 ? '<span class="cwcount">\u00d7' + f.count + "</span>" : "") +
+          '<span class="cwx" aria-hidden="true">\u00d7</span></span></button>';
+      }).join("");
+    }
+    function kindOfAgent(id){
+      var a = orchRoster().filter(function(x){ return x.id === id; })[0];
+      return a ? a.kind : id;
+    }
+    function wireFleet(el, c){
+      Array.prototype.forEach.call(el.querySelectorAll("[data-fleet]"), function(b){
+        b.onclick = function(){ c.fleet.splice(Number(b.getAttribute("data-fleet")), 1); drawOrchControls(); };
+      });
+      var add = document.getElementById("cowfleetadd");
+      if (add) add.onclick = function(ev){ ev.stopPropagation(); openFleetMenu(); };
+    }
+    /** The fleet row editor: which agent, which model, how many — in the composer's menu. */
+    function openFleetMenu(){
+      var roster = orchRoster(), c = orchCfg();
+      var m = document.getElementById("cmenu"); if (!m || !roster.length) return;
+      view.menuState = { kind: "fleetmenu", at: 0, sel: 0, items: [] };
+      m.style.display = "block"; fitMenu(m); m.className = "cmenu cfleet";
+      m.innerHTML = '<div class="cmhead">add a fleet</div>' +
+        '<div class="cfrow"><label for="cfagent">Agent</label><select id="cfagent">' + roster.map(function(a){
+          return '<option value="' + esc(a.id) + '">' + esc(agentLabel(a.kind, a.id)) + (a.model ? " \u00b7 " + esc(a.model) : "") + "</option>";
+        }).join("") + "</select></div>" +
+        '<div class="cfrow"><label for="cfmodel">Model</label><input id="cfmodel" list="cfmodels" placeholder="its default \u2014 or e.g. claude-opus-5-5" autocomplete="off" spellcheck="false"><datalist id="cfmodels"></datalist></div>' +
+        '<div class="cfrow"><label for="cfcount">How many</label><select id="cfcount">' + [1, 2, 3, 4, 5, 6, 7, 8].map(function(n){ return '<option value="' + n + '"' + (n === 2 ? " selected" : "") + ">" + n + "</option>"; }).join("") + "</select></div>" +
+        '<div class="cfhint">Each is its own worker in the run, on that model. Mix as many rows as you like \u2014 two on Opus, two on GPT\u20115.6\u2026</div>' +
+        '<div class="cfact"><button type="button" class="btn sm primary" id="cfadd">Add to team</button></div>';
+      m.onmousedown = function(ev){ ev.stopPropagation(); };
+      var agentSel = document.getElementById("cfagent"), list = document.getElementById("cfmodels");
+      function suggest(){
+        list.innerHTML = "";
+        api("/api/projects/" + view.pid + "/agents/" + encodeURIComponent(agentSel.value) + "/models").then(function(r){
+          list.innerHTML = (r.models || []).slice(0, 40).map(function(x){ return '<option value="' + esc(x) + '">'; }).join("");
+        }).catch(function(){});
+      }
+      agentSel.onchange = suggest;
+      suggest();
+      document.getElementById("cfadd").onclick = function(){
+        var row = { agent: agentSel.value, model: document.getElementById("cfmodel").value.trim(), count: Number(document.getElementById("cfcount").value) || 1 };
+        if (/[\s@#]/.test(row.model)) { toast("a model id has no spaces, @ or #"); return; }
+        c.fleet = (c.fleet || []).concat([row]);
+        view.closeMenu();
+        drawOrchControls();
+      };
+      setTimeout(function(){ document.getElementById("cfmodel").focus(); document.addEventListener("mousedown", view.menuAway); }, 0);
+    }
 
     /** The run whose orchestrator thread this chat is, if it is one. */
     /**
@@ -117,14 +175,15 @@ export function createOrchestra(view) {
             var on = !c.off[a.id];
             return '<button type="button" class="cowchip' + (on ? " on" : "") + '" data-wk="' + esc(a.id) + '" aria-pressed="' + on + '"><span class="cwon">' + (on ? ICONS.check : "") + "</span>" +
               agentGlyph(a.kind, a.id) + '<span class="cwn">' + esc(agentLabel(a.kind, a.id)) + '</span><span class="cwset">' + modelBadge(a) + permBadge(permOf(a), a.id, a.kind) + "</span></button>";
-          }).join("") + "</span>";
+          }).join("") + fleetChips(c) +
+          '<button type="button" class="cowchip cowadd" id="cowfleetadd" title="race several of one agent, each on a model you choose">' + ICONS.plus + "fleet</button></span>";
         Array.prototype.forEach.call(el.querySelectorAll("[data-wk]"), function(b){
           b.onclick = function(){ var id = b.getAttribute("data-wk"); c.off[id] = !c.off[id]; drawOrchControls(); };
         });
         Array.prototype.forEach.call(el.querySelectorAll("[data-omode]"), function(b){
           b.onclick = function(){ c.race = b.getAttribute("data-omode") === "race"; drawOrchControls(); };
         });
-        wirePermBadges(el); wireModelBadges(el);
+        wirePermBadges(el); wireModelBadges(el); wireFleet(el, c);
         var osb = document.getElementById("orchsend"); if (osb) osb.title = "start the race";
         return;
       }
@@ -146,6 +205,9 @@ export function createOrchestra(view) {
           // A roster of CLIs is whatever you happen to have installed. An API
           // model is a name off a list, so it can be added here, in the row
           // where you are already deciding who runs the goal.
+          fleetChips(c) +
+          '<button type="button" class="cowchip cowadd" id="cowfleetadd" title="add N workers of one agent, each on a model you choose \u2014 e.g. two on Opus, two on GPT\u20115.6">' +
+            ICONS.plus + "fleet</button>" +
           '<button type="button" class="cowchip cowadd" id="cowadd" title="add an API model as a worker">' +
             ICONS.plus + "model</button>" + "</span>" +
         '<span class="colbl" title="how many tasks run at the same time">At once</span>' +
@@ -181,6 +243,7 @@ export function createOrchestra(view) {
       });
       wirePermBadges(el);
       wireModelBadges(el);
+      wireFleet(el, c);
     }
 
     /**
@@ -285,9 +348,10 @@ export function createOrchestra(view) {
       var roster = orchRoster(), c = orchCfg();
       if (!roster.length) { toast("no adapters in this project to orchestrate"); return; }
       var cast = roster.filter(function(a){ return !c.off[a.id]; });
-      var workers = cast.map(function(a){ return a.id; });
+      var workers = cast.map(function(a){ return a.id; }).concat((c.fleet || []).map(fleetSpec));
+      var seats = cast.length + (c.fleet || []).reduce(function(n, f){ return n + (f.count || 1); }, 0);
       if (!workers.length) { toast("pick at least one worker"); return; }
-      if (c.race && workers.length < 2) { toast("a race needs at least two agents — check another"); return; }
+      if (c.race && seats < 2) { toast("a race needs at least two agents — check another, or add a fleet"); return; }
       // A model agent with no model is a name for nothing. Catch it here, where
       // the chip that fixes it is on screen, rather than three tasks into a run.
       var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0];
@@ -761,7 +825,11 @@ export function createOrchestra(view) {
         '<div class="ometa">' + orchPill(run.status) +
           (run.race ? '<span class="omi"><span class="omk">Mode</span><span class="omv">' + ICONS.play + " Race</span></span>"
             : '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>") +
-          '<span class="omi"><span class="omk">Workers</span><span class="omv">' + (run.workers || []).map(function(w){ return agentGlyph(kindOf(w), w) + esc(labelOf(w)); }).join(", ") + "</span></span>" +
+          '<span class="omi"><span class="omk">Workers</span><span class="omv">' + (run.workers || []).map(function(w){
+            // a fleet worker says which model it's on (run.workerDetails, #369)
+            var d = (run.workerDetails || []).filter(function(x){ return x.id === w; })[0];
+            return agentGlyph(d ? d.kind : kindOf(w), w) + esc(labelOf(w)) + (d && d.model && w.indexOf("@") < 0 ? ' <span class="omodel">' + esc(d.model) + "</span>" : "");
+          }).join(", ") + "</span></span>" +
           (run.race ? "" : '<span class="omi"><span class="omk">Round</span><span class="omv">' + Number(run.round || 0) + "/" + Number(run.maxRounds || 0) + "</span></span>") +
           '<span class="omi"><span class="omk">Parallel</span><span class="omv">' + Number(run.maxParallel || 0) + "</span></span>" +
           '<span class="omi"><span class="omk">Cost</span><span class="omv">' + money(run.costUsd) + "</span></span>" +

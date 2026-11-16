@@ -581,4 +581,54 @@ describe("web app · Loom Cloud settings", () => {
     expect($(m, "#cloudst .updpill")).toBeTruthy();
     expect(m.errors.join("\n")).toBe("");
   });
+
+  it("a fleet row adds N workers of one agent on a model, is remembered, and goes out as agent@model×N (#369)", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    await ready(m, '#cmode [data-cmode="orch"]');
+    click($(m, '#cmode [data-cmode="orch"]'));
+    await waitUntil(() => shown($(m, "#corch")) && !!$(m, "#cowfleetadd"));
+    click($(m, "#cowfleetadd"));
+    await waitUntil(() => !!$(m, "#cmenu.cfleet #cfadd"));
+    ($(m, "#cfagent") as HTMLSelectElement).value = "execbot";
+    ($(m, "#cfmodel") as HTMLInputElement).value = "gpt-5.6-sol";
+    ($(m, "#cfcount") as HTMLSelectElement).value = "2";
+    click($(m, "#cfadd"));
+    await waitUntil(() => !!$(m, "#cowk .cowfleet"));
+    expect(text(m, "#cowk .cowfleet")).toContain("gpt-5.6-sol");
+    expect(text(m, "#cowk .cowfleet")).toContain("\u00d72");
+    expect(JSON.parse(m.window.localStorage.getItem(`loomOrch:${projectId}`) ?? "{}").fleet).toEqual([{ agent: "execbot", model: "gpt-5.6-sol", count: 2 }]);
+    // a chip click takes a row out again
+    click($(m, "#cowfleetadd"));
+    await waitUntil(() => !!$(m, "#cmenu.cfleet #cfadd"));
+    ($(m, "#cfmodel") as HTMLInputElement).value = "throwaway";
+    click($(m, "#cfadd"));
+    await waitUntil(() => m.window.document.querySelectorAll("#cowk .cowfleet").length === 2);
+    click(m.window.document.querySelectorAll("#cowk .cowfleet")[1]!);
+    await waitUntil(() => m.window.document.querySelectorAll("#cowk .cowfleet").length === 1);
+    // a bad model id is refused before it reaches the daemon
+    click($(m, "#cowfleetadd"));
+    await waitUntil(() => !!$(m, "#cmenu.cfleet #cfadd"));
+    ($(m, "#cfmodel") as HTMLInputElement).value = "has space";
+    click($(m, "#cfadd"));
+    expect(m.window.document.querySelectorAll("#cowk .cowfleet")).toHaveLength(1);
+    // starting the run sends the row as a spec: two pinned instances in the run
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    box.value = "fleet goal";
+    click($(m, "#orchsend"));
+    let run: { workers: string[]; workerDetails?: Array<{ id: string; model?: string }> } | undefined;
+    await waitUntil(async () => {
+      const { runs } = await rest<{ runs: Array<{ goal: string; workers: string[]; workerDetails?: Array<{ id: string; model?: string }> }> }>("GET", "/orchestra");
+      run = runs.find((r) => r.goal.includes("fleet goal"));
+      return Boolean(run);
+    });
+    expect(run!.workers.filter((w) => w.startsWith("execbot@gpt-5.6-sol"))).toHaveLength(2);
+    expect(run!.workerDetails!.filter((w) => w.model === "gpt-5.6-sol")).toHaveLength(2);
+    // leave nothing behind for the next test: the run aborted and settled, the fleet forgotten
+    const fleetRun = (await rest<{ runs: Array<{ id: string; goal: string }> }>("GET", "/orchestra")).runs.find((r) => r.goal.includes("fleet goal"))!;
+    await rest("POST", `/orchestra/${fleetRun.id}/abort`).catch(() => {});
+    await waitUntil(async () => !["running", "waiting_human", "planning"].includes((await runStatus(fleetRun.id)).status), { timeoutMs: 30_000 });
+    await waitUntil(async () => !(await rest<{ agents: Array<{ busy?: boolean }> }>("GET", "")).agents?.some((a) => a.busy));
+    m.window.localStorage.removeItem(`loomOrch:${projectId}`);
+  });
 });
