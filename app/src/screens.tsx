@@ -31,7 +31,7 @@ import {
 import { NewChatSheet } from "./new-chat";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive } from "./api";
+import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -1169,6 +1169,33 @@ export function ProjectScreen(props: {
     }
   };
 
+  // Steer (#373): hold Send while a turn runs here and what you typed goes into that turn now,
+  // not after it. Agents that can't take it (or a turn that just ended) queue it instead, and say so.
+  const steerable = project.agents.find((a) => a.tier === "adapter" && a.busy && (!a.chat || a.chat === chatId) && a.capabilities?.steer) ?? null;
+  const steer = async () => {
+    if (!steerable) return void send();
+    const refs = attach.refs();
+    const typed = text.trim();
+    const message = refs.length ? refs.join("\n") + (typed ? `\n\n${typed}` : "") : typed;
+    if (!message) return;
+    if (attach.uploading) return setErr("still uploading the picture…");
+    attach.clear();
+    haptic.tap();
+    setText("");
+    sttBase.current = "";
+    setErr(null);
+    try {
+      const res = await steerMessage(creds, project.id, message, chatId, steerable.id);
+      if (!res.steered) {
+        setErr(res.reason ?? "queued for the next turn");
+        void getQueue(creds, project.id).then(setQueue).catch(() => {});
+      }
+    } catch (e) {
+      setText(message); // keep what you wrote
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   // Night Shift: each line in the box is a task — they run while you sleep, and one report lands in Main
   const nightShift = () => {
     const tasks = text.split("\n").map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim()).filter(Boolean);
@@ -1855,8 +1882,16 @@ export function ProjectScreen(props: {
                   </Text>
                 </TouchableOpacity>
               )}
+              {steerable && armed ? (
+                <Text style={{ color: T.faint, fontSize: 11, marginRight: 2 }} accessibilityElementsHidden>hold to steer</Text>
+              ) : null}
               <TouchableOpacity
                 onPress={send}
+                onLongPress={steerable ? () => void steer() : undefined}
+                delayLongPress={350}
+                accessibilityRole="button"
+                accessibilityLabel={steerable ? "Send (queues after this turn)" : "Send"}
+                accessibilityHint={steerable ? `Hold to steer: ${steerable.id} takes it into the turn it's running now` : undefined}
                 activeOpacity={0.7}
                 style={{
                   width: 34,

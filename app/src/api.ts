@@ -68,6 +68,10 @@ export interface AgentStatus {
   permissions?: PermissionMode;
   /** What a turn here usually costs and takes, from its recent turns (absent until it has a few). */
   forecast?: import("./forecast-model").Forecast;
+  /** What the agent can do beyond a turn — steer: take more input into a running turn (#373). */
+  capabilities?: { steer?: boolean };
+  /** The chat its running turn is in, when the daemon says. */
+  chat?: string;
 }
 
 export interface RouteState {
@@ -1082,6 +1086,11 @@ export const answerQuestion = (c: Creds, id: string, agentId: string, chat: stri
     body: JSON.stringify({ chat: chat ?? "main", requestId, answers }),
   });
 
+/** Put text into the turn running in `chat` (#373); when it can't take it, the daemon queues it and says why. */
+export const steerMessage = (c: Creds, id: string, text: string, chat: string, agentId?: string) =>
+  api<{ steered: boolean; queued?: number; queueId?: string; reason?: string }>(c, `/api/projects/${id}/steer`, {
+    method: "POST", body: JSON.stringify({ text, chat, ...(agentId ? { agentId } : {}) }),
+  });
 export const sendMessage = (
   c: Creds,
   id: string,

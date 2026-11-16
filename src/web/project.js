@@ -134,7 +134,7 @@ import { openMenu } from './menus.js';
       get onApprovalEvent() { return onApprovalEvent; },
       get onFleetEvent() { return onFleetEvent; }
     });
-    var { autosizeBox, drawAttach, closeMenu, menuAway, openModelMenu, bindComposer, updateModelLabel, openPermMenu, composerPlaceholder, send } = createComposer({
+    var { autosizeBox, drawAttach, closeMenu, menuAway, openModelMenu, bindComposer, updateModelLabel, openPermMenu, composerPlaceholder, send, steer, steerTarget } = createComposer({
       get historyLoaded() { return historyLoaded; },
       get clearDraft() { return clearDraft; },
       get drawEmpty() { return drawEmpty; },
@@ -341,6 +341,8 @@ import { openMenu } from './menus.js';
         '<span class="ptrack"><i></i></span><span class="cplanlbl">Plan</span></button>' +
       '<button class="sendbtn" id="send" type="submit" title="send" aria-label="send">' + ICONS.up + "</button>" +
       '<button class="sendbtn orchsend" id="orchsend" type="button" title="plan this goal and run it in parallel" style="display:none">' + ICONS.orchestra + "Orchestrate</button>" +
+      // Steer (#373): while a turn runs, put what you typed into it rather than after it
+      '<button class="steerbtn" id="steer" type="button" title="steer the running turn \u2014 \u2325\u23ce" style="display:none">' + ICONS.up + "Steer</button>" +
       '<button class="sendbtn stopbtn" id="stop" type="button" title="interrupt" aria-label="interrupt" style="display:none">' +
       ICONS.stop + "</button></span>" +
       '</div>' +
@@ -520,6 +522,7 @@ import { openMenu } from './menus.js';
     bindTheme();
     var backBtn = document.getElementById("back");
     if (backBtn) backBtn.onclick = function(){ location.hash = ""; };
+    document.getElementById("steer").onclick = function(){ steer(); };
     document.getElementById("stop").onclick = function(){
       api("/api/projects/" + pid + "/interrupt", { method: "POST", body: JSON.stringify({ chat: chatId }) })
         .then(function(j){ toast(j.interrupted ? "interrupted " + j.interrupted : "nothing running"); })
