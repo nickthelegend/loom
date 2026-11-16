@@ -50,6 +50,8 @@ import { decideAuto, policyIn, refusalText, type AutoPolicy } from "../../core/a
 import { spawnHarness, stopHarness, type HarnessProcess } from "../process.js";
 
 export interface ClaudeAdapterOptions {
+  /** Side conversations expose only read tools, without settings, hooks or MCP servers. */
+  readOnly?: boolean;
   env?: Record<string, string>;
   /** Path to the claude binary, when it isn't `claude` on PATH. */
   bin?: string;
@@ -246,7 +248,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
     catch (error) { throw fail("validation", (error as Error).message); }
 
     const resume = typeof input.resumeCursor === "string" && input.resumeCursor ? input.resumeCursor : undefined;
-    const sessionId = resume ?? randomUUID();
+    const sessionId = input.forkSession ? randomUUID() : resume ?? randomUUID();
     const prompts = new PromptQueue();
     const model = input.modelSelection?.model;
     const mcpServers = this.options.mcpServers?.();
@@ -266,13 +268,18 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       settingSources: ["user", "project", "local"],
       includePartialMessages: true,
       ...this.permissions(session, input.runtimeMode),
-      ...(resume ? { resume } : { sessionId }),
+      ...(resume ? { resume, ...(input.forkSession ? { forkSession: true, sessionId } : {}) } : { sessionId }),
       ...(model ? { model } : {}),
       ...(input.modelSelection?.effort ? { effort: input.modelSelection.effort as NonNullable<Options["effort"]> } : {}),
       ...(mcpServers && Object.keys(mcpServers).length ? { mcpServers } : {}),
       // sibling folders the project lets agents read (readPaths), so Claude's own checks admit them too
       ...((dirs) => (dirs.length ? { additionalDirectories: dirs } : {}))(this.options.autoPolicy?.()?.readPaths ?? []),
       ...(extraArgs ? { extraArgs } : {}),
+      ...(this.options.readOnly ? {
+        settingSources: [], settings: { disableAllHooks: true }, tools: ["Read", "Glob", "Grep"], mcpServers: {}, strictMcpConfig: true,
+        permissionMode: "plan", allowDangerouslySkipPermissions: false,
+        canUseTool: async () => ({ behavior: "deny" as const, message: "Side chats are read-only." }),
+      } : {}),
       spawnClaudeCodeProcess: spawnOptions => {
         const proc = spawnHarness(spawnOptions.command, spawnOptions.args, { cwd: spawnOptions.cwd ?? input.cwd,
           env: { ...spawnOptions.env as NodeJS.ProcessEnv, ...this.options.env } });

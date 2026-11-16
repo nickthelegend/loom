@@ -262,6 +262,7 @@ export class RuntimeQueue {
     this.dispatching.add(item.id);
     setTimeout(() => this.dispatching.delete(item.id), 60_000).unref?.();
     await this.host.sendMessage(item.text, to, { source: item.source, chat: item.chat, fromQueue: true,
+      capturedModel: item.model, capturedEffort: item.effort,
       requestId: item.continuity?.requestId ?? (item.editedAt ? `queue:${item.id}:edit:${item.editedAt}` : `queue:${item.id}`),
       ...(item.continuity ? { capturedModel: item.continuity.model, capturedEffort: item.continuity.effort ?? null } : {}),
       ...(item.plan ? { plan: true } : {}),

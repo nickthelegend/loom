@@ -3,6 +3,7 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -28,12 +29,14 @@ import {
   readDaemonConfig,
   type DaemonConfig,
 } from "../core/registry.js";
+import type { SideView } from "../core/side-chats.js";
 import type { Memory } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
 import { VERSION } from "../version.js";
 import type { NewProjectInput, CloneProjectInput, CreatedProject, ProjectCloneJob } from "../core/project-creation.js";
 import { autoRestartEnabled, describeSwap, writeSwapNote } from "../core/daemon-swap.js";
+import { PRESENCE_HEARTBEAT_MS, type PresenceMessage, type PresenceSnapshot } from "../core/presence.js";
 
 export class DaemonError extends Error {
   constructor(
@@ -97,6 +100,19 @@ export class DaemonClient {
     return cfg ? new DaemonClient(cfg) : null;
   }
 
+  /** Opens or continues the parent's in-memory side drawer; poll sideChat or listen for WS type=side. */
+  sendSide(id: string, chat: string, text: string, sideId?: string): Promise<{ sideId: string; reply?: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side`, { text, ...(sideId ? { sideId } : {}) });
+  }
+
+  sideChat(id: string, chat: string, sideId: string): Promise<SideView> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+  }
+
+  closeSide(id: string, chat: string, sideId: string): Promise<{ deleted: boolean }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+  }
+
   get baseUrl(): string {
     return `http://${this.cfg.host}:${this.cfg.port}`;
   }
@@ -137,6 +153,18 @@ export class DaemonClient {
     if (opts.days) q.set("days", String(opts.days));
     if (opts.since) q.set("since", String(opts.since));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/turns?${q}`);
+  }
+
+  prs(id: string): Promise<{ prs: TrackedPr[] }> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/prs`);
+  }
+
+  watchPr(id: string, chat: string, pr: number | string): Promise<{ pr: TrackedPr }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/prs`, { pr });
+  }
+
+  setPrFeedback(id: string, chat: string, prFeedback: PrFeedbackMode): Promise<{ chat: ChatInfo }> {
+    return this.request("PATCH", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}`, { prFeedback });
   }
 
   chats(id: string): Promise<{ chats: ChatInfo[] }> {
@@ -709,11 +737,14 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/events${qs ? `?${qs}` : ""}`);
   }
 
-  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean } = {}): Promise<{ agentId: string }> {
+  /** Model and effort override the chat selection for this message only, including when queued. */
+  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string } = {}): Promise<{ agentId: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/messages`, {
       text,
       ...(agentId ? { agentId } : {}),
       ...(opts.fresh ? { fresh: true } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
     });
   }
 
@@ -957,6 +988,56 @@ export class DaemonClient {
   /** A Share-live link: a teammate let into one chat as view / reply / approve. */
   shareLive(guest: { project: string; chat: string; role: string; name: string; hours?: number }): Promise<{ link: string; guest?: { until: number } }> {
     return this.request("POST", "/api/pair/new", { guest });
+  }
+
+  /** Read a chat's current viewers without joining it. */
+  presence(projectId: string, chat = "main"): Promise<PresenceSnapshot> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(projectId)}/chats/${encodeURIComponent(chat)}/presence`);
+  }
+
+  /** Join a chat and receive full presence snapshots. Heartbeats run until
+   * close or disconnection; setTyping sends start/stop immediately. Like
+   * subscribe(), this does not reconnect: open a new view after disconnecting.
+   */
+  watchPresence(projectId: string, chat: string, onPresence: (snapshot: PresenceSnapshot) => void,
+    onClose?: (code: number, reason: string) => void): { setTyping(typing: boolean): void; close(): void } {
+    const params = new URLSearchParams({ project: projectId });
+    const ws = new WebSocket(`ws://${this.cfg.host}:${this.cfg.port}/ws?${params}`, [`loom.bearer.${this.cfg.adminToken}`]);
+    let typing = false;
+    let stopped = false;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const send = () => {
+      if (stopped || ws.readyState !== WebSocket.OPEN) return;
+      const message: PresenceMessage = { type: "presence", chat, typing };
+      ws.send(JSON.stringify(message));
+    };
+    ws.on("open", () => {
+      send();
+      if (!stopped) heartbeat = setInterval(send, PRESENCE_HEARTBEAT_MS);
+    });
+    ws.on("message", (data) => {
+      let frame: PresenceSnapshot;
+      try { frame = JSON.parse(String(data)) as PresenceSnapshot; } catch { return; }
+      if (!stopped && frame?.type === "presence" && frame.chat === chat && Array.isArray(frame.people)) onPresence(frame);
+    });
+    ws.on("error", () => {});
+    ws.on("close", (code, reason) => {
+      clearInterval(heartbeat);
+      if (!stopped) onClose?.(code, String(reason));
+    });
+    return {
+      setTyping(value) {
+        if (typing === value) return;
+        typing = value;
+        send();
+      },
+      close() {
+        stopped = true;
+        clearInterval(heartbeat);
+        if (ws.readyState === WebSocket.CONNECTING) ws.terminate();
+        else ws.close();
+      },
+    };
   }
 
   pairedClients(): Promise<{

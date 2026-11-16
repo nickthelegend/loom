@@ -219,6 +219,8 @@ async function member(who: "alice" | "bob") {
 /** The PRs the orchestra's own `gh pr create` opened (it runs the stub on PATH). */
 function trackPrs() {
   for (const m of Object.values(M)) {
+    // These scenarios cover legacy team PRs, opened before the chat feedback registry.
+    fs.rmSync(path.join(m.dir, ".loom", "prs.json"), { force: true });
     for (const r of m.rt.orchestra.list()) {
       const l = r.landing;
       if (l && !prs.has(l.pr) && !r.from) prs.set(l.pr, { n: l.pr, branch: m.rt.orchestra.prBranch(r), state: "OPEN" });

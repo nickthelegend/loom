@@ -59,17 +59,25 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
     }),
   );
 
+  /**
+   * {text, agentId?, chat?, model?, effort?, ...} sends one turn. Nonempty model
+   * and effort override the chat selection only for this message; omitted or
+   * blank values inherit it. Validation matches the chat binding's agent kind.
+   * Queued sends retain this selection without changing the stored chat.
+   */
   app.post(
     "/api/projects/:id/messages",
     withRuntime(async (rt, req, res) => {
       if (rt.continuity) {
         try { parseBounded(z.strictObject({ text: Text.min(1), agentId: Id.optional(), chat: Id.optional(),
+          model: z.string().optional(), effort: z.string().optional(),
           plan: z.boolean().optional(), fresh: z.boolean().optional(), requestId: Id.optional(), length: z.enum(["brief", "normal", "detailed"]).optional() }), req.body); }
         catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : "invalid continuity request", code: "invalid" }); return; }
       }
       const guest = (req as unknown as { guest?: { chat: string; name: string } }).guest;
-      const body = { ...(req.body ?? {}), ...(guest ? { chat: guest.chat, plan: false } : {}) };
-      const { text, agentId, chat, plan, fresh, requestId, length } = body as {
+      // a guest talks in their chat as it's set up — never on a model or effort of their choosing
+      const body = { ...(req.body ?? {}), ...(guest ? { chat: guest.chat, plan: false, model: undefined, effort: undefined } : {}) };
+      const { text, agentId, chat, plan, fresh, requestId, length, model, effort } = body as {
         text?: string;
         agentId?: string;
         chat?: string;
@@ -77,12 +85,16 @@ export function registerMessagesRoutes(app: Express, withRuntime: WithRuntime): 
         fresh?: boolean;
         requestId?: string;
         length?: string;
+        model?: string;
+        effort?: string;
       };
       if (!text?.trim()) return void res.status(400).json({ error: "missing text" });
       let result;
       try {
         result = await rt.sendMessage(text, agentId, {
           ...(chat ? { chat } : {}),
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { effort } : {}),
           ...(guest ? { by: guest.name } : {}),
           ...(plan ? { plan: true } : {}),
           ...(fresh ? { fresh: true } : {}),
