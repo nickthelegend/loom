@@ -653,6 +653,9 @@ loom route planner,executor "fix the flaky test"  # ad-hoc: roles…
 loom route claude-code,opencode,claude-code "…"   # …or agent ids, any length
 ```
 
+Routes started in a chat stay in that chat, including queued `auto` prompts: every
+hop, question and route update appears in the original thread.
+
 **`auto` is dynamic routing**: after every hop, a router looks at the task, the hop
 history, and the last replies, then picks the next agent — or declares the task done.
 The router is Claude (headless, small model, JSON out) with a deterministic
@@ -667,7 +670,7 @@ What happens per hop: interrupt-safe **handoff** → shared-memory **projection*
 - step finishes cleanly → Loom advances to the next agent automatically;
 - the agent asks a question → the route **pauses** (`waiting_human`), you get a
   notification, `loom route --status` and the board show the question; you answer in
-  the shared thread (`loom send "…"`) and the route **resumes by itself**;
+  the same thread (`loom send "…" --chat <chat>`) and the route **resumes by itself**;
 - an agent errors or a step times out (45 min default) → the route fails loudly —
   unless the step carries an [`onFail`](#routes-that-loop-and-steps-that-skip), which
   sends it back to an earlier step instead;
