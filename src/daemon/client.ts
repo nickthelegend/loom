@@ -250,6 +250,7 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/orchestra/${encodeURIComponent(runId)}`);
   }
 
+  /** Start with agent[@model][:effort][xN] worker specs; run.workerDetails describes the expanded fleet. */
   startOrchestra(
     id: string,
     body: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; maxRounds?: number; plan?: boolean; maxUsd?: number; race?: boolean; team?: boolean },

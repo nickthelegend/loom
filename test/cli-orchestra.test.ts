@@ -86,6 +86,21 @@ describe("loom orchestrate / orchestra", () => {
     expect((await runCli(["orchestra", runId, "--wait"])).code).toBe(1);
   });
 
+  it("accepts fleets and shows worker and task selections in text and JSON", async () => {
+    const started = await runCli(["orchestrate", "write:fleet.txt", "--race", "-o", "solo@Planner:high", "-w", "echo@Model-A:highx2,solo@Model-B", "-p", "1"]);
+    expect(started.code).toBe(0);
+    const run = (await client.orchestraRuns(projectId)).runs[0]!;
+    expect(run.workers).toEqual(["solo@Model-A:high", "solo@Model-A:high#2", "solo@Model-B"]);
+    const detail = await runCli(["orchestra", run.id]);
+    expect(detail.out).toContain("[Model-A:high]");
+    expect(detail.out).toContain("[Model-B]");
+    const json = JSON.parse((await runCli(["orchestra", run.id, "--json"])).out);
+    expect(json.orchestrator).toMatchObject({ model: "Planner", effort: "high" });
+    expect(json.workerDetails.map((w: { model: string }) => w.model)).toEqual(["Model-A", "Model-A", "Model-B"]);
+    expect(json.taskDetails.map((t: { model: string }) => t.model)).toEqual(["Model-A", "Model-A", "Model-B"]);
+    expect(json.tasks).toMatchObject({ total: 3, done: 3 });
+  });
+
   it("says why a run can't start", async () => {
     const r = await runCli(["orchestrate", "x", "-o", "nobody", "--no-watch"]);
     expect(r.code).not.toBe(0);
