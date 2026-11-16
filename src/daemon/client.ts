@@ -700,11 +700,14 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/events${qs ? `?${qs}` : ""}`);
   }
 
-  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean } = {}): Promise<{ agentId: string }> {
+  /** Model and effort override the chat selection for this message only, including when queued. */
+  send(id: string, text: string, agentId?: string, opts: { fresh?: boolean; model?: string; effort?: string } = {}): Promise<{ agentId: string }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/messages`, {
       text,
       ...(agentId ? { agentId } : {}),
       ...(opts.fresh ? { fresh: true } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
     });
   }
 

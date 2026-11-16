@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-message model and reasoning effort overrides through `POST /api/projects/:id/messages` and `loom send --model <model> --effort <level>` (#381). Overrides use chat-binding validation, leave chat and agent defaults unchanged, and stay with queued messages across chat edits and daemon restarts.
+
 - **Orchestra workers report progress during a turn (#374).** `loom report` and fenced `loom-report` messages persist checkpoints, requests for input, blockers, and completion reports. Run-scoped worker credentials authorize the report API; reports reach orchestra events and CLI `--progress`, and requests for input or blockers notify the orchestrator in a batch. Approach credit: Agent Orchestrator’s report coordinator (Apache-2.0).
 
 - Per-chat agent, model and reasoning effort selection through the daemon API and `loom chat:create` / `loom chat:agent` (#370). Native providers and ACP use session selection where supported; process-bound adapters reuse separate model instances. Changing a chat leaves the running turn and agent defaults alone. Approach credit: T3 Code (MIT). Web and phone picker changes are separate.
