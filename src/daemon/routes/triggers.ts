@@ -1,3 +1,4 @@
+import { intakeMode, intakeSource } from "../../core/intake.js";
 import type { Express, Request } from "express";
 import {
   newSecret,
@@ -36,7 +37,13 @@ function patchFrom(b: Record<string, unknown>, kind: Trigger["kind"]): Partial<T
   }
   if (b.agent !== undefined) out.agent = b.agent ? String(b.agent) : undefined;
   if (b.enabled !== undefined) out.enabled = Boolean(b.enabled);
-  if (kind === "schedule") {
+  if (kind === "intake" && b.intake !== undefined) {
+    if (!b.intake || typeof b.intake !== "object" || Array.isArray(b.intake)) throw new Error("intake needs source and mode");
+    const input = b.intake as Record<string, unknown>;
+    if (input.label !== undefined && typeof input.label !== "string") throw new Error("intake label must be a string");
+    out.intake = { source: intakeSource(input.source), mode: intakeMode(input.mode ?? "chat"), ...(typeof input.label === "string" ? { label: input.label } : {}) };
+  }
+  if (kind === "schedule" || kind === "intake") {
     if (b.cron) { parseCron(String(b.cron)); out.cron = String(b.cron).trim(); out.everyMin = undefined; }
     if (b.every) { out.everyMin = parseEvery(String(b.every)); out.cron = undefined; }
   }
@@ -59,15 +66,17 @@ export function registerTriggerRoutes(app: Express, withRuntime: WithRuntime, ru
   app.post("/api/projects/:id/triggers", withRuntime(async (rt, req, res) => {
     if (!isAdmin(req)) return void res.status(403).json({ error: "only this machine's owner can add a trigger" });
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const kind = b.kind === "webhook" ? "webhook" : "schedule";
+    if (b.kind !== undefined && !["webhook", "schedule", "intake"].includes(String(b.kind))) return void res.status(400).json({ error: "unknown trigger kind" });
+    const kind = b.kind === "intake" ? "intake" : b.kind === "webhook" ? "webhook" : "schedule";
     let patch: Partial<Trigger>;
     try { patch = patchFrom(b, kind); } catch (e) { return void res.status(400).json({ error: (e as Error).message }); }
-    if (!patch.prompt) return void res.status(400).json({ error: "a trigger needs a prompt" });
-    if (kind === "schedule" && !patch.cron && !patch.everyMin) return void res.status(400).json({ error: "a schedule needs cron or every (e.g. every: \"30m\")" });
+    if (kind === "intake" && !patch.intake) return void res.status(400).json({ error: "intake needs source and mode" });
+    if (kind !== "intake" && !patch.prompt) return void res.status(400).json({ error: "a trigger needs a prompt" });
+    if (kind !== "webhook" && !patch.cron && !patch.everyMin) return void res.status(400).json({ error: "a schedule needs cron or every (e.g. every: \"30m\")" });
     if (patch.agent && !rt.config.agents.some((a) => a.id === patch.agent)) return void res.status(400).json({ error: `no agent "${patch.agent}" in this project` });
     const secret = kind === "webhook" ? newSecret() : undefined;
-    const t: Trigger = { id: newTriggerId(), name: patch.name ?? (kind === "webhook" ? "webhook" : "schedule"), kind, prompt: patch.prompt,
-      ...patch, ...(secret ? { secret } : {}), enabled: patch.enabled ?? true, createdAt: Date.now() };
+    const t: Trigger = { id: newTriggerId(), name: patch.name ?? kind, kind, prompt: patch.prompt ?? "",
+      ...patch, ...(secret ? { secret } : {}), enabled: patch.enabled ?? (kind !== "intake"), createdAt: Date.now() };
     const data = readTriggers(rt.info.dir);
     if (data.triggers.length >= 50) return void res.status(400).json({ error: "50 triggers per project is the limit" });
     data.triggers.push(t);

@@ -956,6 +956,12 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** My issues (#382): open issues assigned to you, and starting them as chats or Orchestra goals. */
+export interface IntakeIssue { source: "github" | "linear"; id: string; number?: number; identifier?: string; title: string; url: string; labels: string[]; started?: { chat?: string; run?: string } }
+export const getIntake = (c: Creds, id: string, source: "github" | "linear", label?: string) =>
+  api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake?source=${source}${label ? `&label=${encodeURIComponent(label)}` : ""}`);
+export const startIntake = (c: Creds, id: string, body: { source: "github" | "linear"; ids: string[]; mode: "chat" | "orchestra"; agent?: string }) =>
+  api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake/start`, { method: "POST", body: JSON.stringify(body) });
 /** Files (#380): the project's own tree, read-only — the desktop's Explorer. */
 export interface FileEntry { name: string; path: string; dir: boolean }
 export const listFiles = (c: Creds, id: string, dir: string) =>

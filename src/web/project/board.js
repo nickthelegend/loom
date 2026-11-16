@@ -8,6 +8,7 @@ import { state } from '../state.js';
 import { openBoardTaskModal,openTaskModal } from '../tasks.js';
 import { openMenu } from '../menus.js';
 import { copyText } from '../clipboard.js';
+import { openIntake } from './intake.js';
 
 /** board behavior for one mounted project.
  * view contains live accessors to the owning project view's state and callbacks.
@@ -74,6 +75,7 @@ export function createBoard(view) {
         '<div class="qbox bq">' + ICONS.search +
           '<input id="bq" value="' + esc(view.board.q) + '" spellcheck="false" autocomplete="off"' +
           ' placeholder="search issues and PRs \u2014 is:pr is:open author:@me" aria-label="search issues and PRs"></div>' +
+        '<button class="btn outline xs" id="bintake" title="start work from issues assigned to you on GitHub or Linear">My issues</button>' +
         '<button class="btn outline xs" id="bnew" title="add a card of your own">+ Task</button>' +
         '<button class="iconbtn' + (view.board.loading ? " spin" : "") + '" id="brefresh" title="refresh" aria-label="refresh">' + ICONS.refresh + "</button></div>";
       // Wire the head even while loading: the gh round-trip is slow enough that
@@ -237,6 +239,8 @@ export function createBoard(view) {
         view.board.q = this.value.trim();
         loadBoard();
       };
+      var ik = document.getElementById("bintake");
+      if (ik) ik.onclick = function(){ openIntake(view.pid); };
       var n = document.getElementById("bnew");
       if (n) n.onclick = function(){ addTask("working"); };
       // add straight into a column — including Ready, if that's where it is

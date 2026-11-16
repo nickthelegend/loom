@@ -290,6 +290,7 @@ const mousedown = (m: Mounted, el: Element | null) => {
   el.dispatchEvent(new m.window.MouseEvent("mousedown", { bubbles: true }));
 };
 
+
 describe("web app · composer modes", () => {
   it("chooses a model and count before adding Orchestra workers", async () => {
     const m = mount({ hash: `#p/${projectId}` });
@@ -639,6 +640,49 @@ describe("web app · settings sections don't overwrite each other", () => {
     await new Promise((r) => setTimeout(r, 200)); // …and had its chance to paint
     expect($(m, "#setpane #cloudurl"), "the Cloud section survived the late Setup answer").toBeTruthy();
     expect(text(m, "#setpane")).not.toContain("What this machine still needs");
+  });
+});
+
+describe("web app · My issues (#382)", () => {
+  it("lists issues assigned to you, starts the ticked ones, and shows the already-started one as a link", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    const issues = [
+      { source: "github", id: "https://github.com/acme/app/issues/7", number: 7, title: "Fix the login race", url: "https://github.com/acme/app/issues/7", labels: ["loom"] },
+      { source: "github", id: "https://github.com/acme/app/issues/9", number: 9, title: "Dark mode", url: "https://github.com/acme/app/issues/9", labels: [], started: { chat: "c9" } },
+    ];
+    const posted: unknown[] = [];
+    // gh isn't ours to call in a test: answer the intake routes here, everything else for real
+    const realFetch = m.window.fetch;
+    m.window.fetch = ((input: string, init?: RequestInit) => {
+      const u = String(input);
+      if (u.includes("/intake/start")) {
+        posted.push(JSON.parse(String(init?.body)));
+        return Promise.resolve(new Response(JSON.stringify({ issues: [{ ...issues[0], started: { chat: "c7" } }] }), { headers: { "content-type": "application/json" } }));
+      }
+      if (u.includes("/intake")) return Promise.resolve(new Response(JSON.stringify({ issues }), { headers: { "content-type": "application/json" } }));
+      return realFetch(input, init);
+    }) as typeof m.window.fetch;
+    await ready(m, '.tab[data-tab="board"]');
+    click($(m, '.tab[data-tab="board"]'));
+    await waitUntil(() => !!$(m, "#bintake"), { timeoutMs: 20_000 });
+    click($(m, "#bintake"));
+    await waitUntil(() => m.window.document.querySelectorAll(".intakemodal .ikrow").length === 2);
+    expect(text(m, ".intakemodal")).toContain("Fix the login race");
+    // the started one can't be started twice; it opens its chat instead
+    expect($(m, '.intakemodal [data-ik="https://github.com/acme/app/issues/9"]')).toBeNull();
+    expect($(m, '.intakemodal [data-ikopen="c9"]')).toBeTruthy();
+    expect(($(m, "#ikstart") as HTMLButtonElement).disabled).toBe(true);
+    const cb = $(m, '.intakemodal [data-ik="https://github.com/acme/app/issues/7"]') as HTMLInputElement;
+    cb.checked = true; cb.dispatchEvent(new m.window.Event("change", { bubbles: true }));
+    click($(m, '#ikmode [data-mode="orchestra"]'));
+    expect(text(m, "#ikstart")).toBe("Start 1");
+    click($(m, "#ikstart"));
+    await waitUntil(() => posted.length === 1);
+    expect(posted[0]).toMatchObject({ source: "github", ids: ["https://github.com/acme/app/issues/7"], mode: "orchestra" });
+    // it reloads the list after starting; let that land before the window goes
+    await waitUntil(() => text(m, "#ikstart") === "Start" && m.window.document.querySelectorAll(".intakemodal .ikrow").length === 2);
+    await new Promise((r) => setTimeout(r, 200));
   });
 });
 

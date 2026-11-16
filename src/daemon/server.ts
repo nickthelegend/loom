@@ -61,6 +61,7 @@ import { registerApprovalsRoutes } from './routes/approvals.js';
 import { registerAssetsRoutes } from './routes/assets.js';
 import { registerBoardRoutes } from './routes/board.js';
 import { registerBrainRoutes } from './routes/brain.js';
+import { registerIntakeRoutes } from './routes/intake.js';
 import { registerChatsRoutes } from './routes/chats.js';
 import { registerClientsRoutes } from './routes/clients.js';
 import { registerCloudRoutes } from './routes/cloud.js';
@@ -535,6 +536,7 @@ export class LoomDaemon {
     registerTaskDeliveryRoutes(app, withRuntime);
     registerQueueRoutes(app, withRuntime);
     registerChatsRoutes(app, withRuntime);
+    registerIntakeRoutes(app, withRuntime);
     registerAgentSettingsRoutes(app, withRuntime);
     registerToolsRoutes(app, withRuntime);
     registerConfigRoutes(app, withRuntime);
