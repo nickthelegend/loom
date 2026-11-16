@@ -890,6 +890,30 @@ describe("web app · New project from anywhere (#371)", () => {
   }, 60_000);
 });
 
+describe("web app · PR feedback per chat (#378)", () => {
+  it("the chat menu sets what comes back when this chat's PR needs work", async () => {
+    const call = async (method: string, p: string, body?: unknown) => (await fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+      method, headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}),
+    })).json() as Promise<{ chat?: { id: string }; chats?: Array<{ id: string; prFeedback?: string }> }>;
+    const id = (await call("POST", "/chats", { title: "pr loop" })).chat!.id;
+    try {
+      const m = mount({ hash: `#p/${projectId}` });
+      await waitUntil(() => !!$(m, `.crow[data-chat="${id}"]`));
+      $(m, `.crow[data-chat="${id}"]`)!.dispatchEvent(new m.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await waitUntil(() => !!$(m, ".menupop"));
+      const item = [...m.window.document.querySelectorAll(".menupop .pickrow")].find((b) => (b.textContent ?? "").includes("PR feedback"));
+      expect(item?.textContent).toContain("CI failures");
+      click(item as HTMLElement);
+      await waitUntil(() => [...m.window.document.querySelectorAll(".menupop .pickrow")].some((b) => (b.textContent ?? "").includes("CI failures and reviews")));
+      click([...m.window.document.querySelectorAll(".menupop .pickrow")].find((b) => (b.textContent ?? "").includes("CI failures and reviews")) as HTMLElement);
+      await waitUntil(async () => ((await call("GET", "/chats")).chats ?? []).find((c) => c.id === id)?.prFeedback === "ci+reviews");
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await fetch(`${baseUrl}/api/projects/${projectId}/chats/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
+    }
+  });
+});
+
 describe("web app · the sidebar collapses", () => {
   it("gives each project a caret that hides and shows its chats, and remembers", async () => {
     const m = mount({ hash: `#p/${projectId}` });
