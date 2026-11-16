@@ -694,6 +694,30 @@ program
   });
 
 program
+  .command("intake")
+  .description("list assigned issues, or start each in its own chat or orchestra goal")
+  .option("--github", "use GitHub through gh login (default)")
+  .option("--linear", "use Linear through LINEAR_API_KEY")
+  .option("--label <label>", "only issues with this label")
+  .option("--start", "queue work for issues not previously started")
+  .option("--orchestra", "start orchestra goals instead of agent turns")
+  .option("--agent <id>", "agent or orchestrator for the work")
+  .option("--json", "print issues and their chat/run links as JSON")
+  .action(async (opts: { github?: boolean; linear?: boolean; label?: string; start?: boolean; orchestra?: boolean; agent?: string; json?: boolean }) => {
+    if (opts.github && opts.linear) fail("choose --github or --linear");
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const source = opts.linear ? "linear" : "github";
+    let { issues } = await client.intake(project.id, source, opts.label);
+    if (opts.start) ({ issues } = await client.startIntake(project.id, {
+      source, ids: issues.map(i => i.id), mode: opts.orchestra ? "orchestra" : "chat", ...(opts.agent ? { agent: opts.agent } : {}),
+    }));
+    if (opts.json) return void console.log(JSON.stringify(issues, null, 2));
+    if (!issues.length) return void console.log("No assigned issues match.");
+    for (const issue of issues) console.log(`${issue.number ? `#${issue.number}` : issue.identifier} ${issue.title}  ${issue.url}${issue.started ? `  chat ${issue.started.chat}${issue.started.run ? `  run ${issue.started.run}` : ""}` : ""}`);
+  });
+
+program
   .command("prs")
   .description("list this project's tracked PRs and their last state")
   .option("--json", "print as JSON")

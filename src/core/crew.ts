@@ -19,6 +19,7 @@
  * crews across people are later phases (§11).
  */
 
+import { intakePrBody } from "./intake.js";
 import { recordOpenedPr } from "./pr-feedback.js";
 import { execFile, shellInvocation, spawnContained } from "./process.js";
 import { runCommand } from "./run-command.js";
@@ -1294,7 +1295,7 @@ export class CrewEngine {
       if (!url) {
         const body = path.join(loomHome(), "crews", this.host.projectId, cfg.id, `pr-${g.id}.md`);
         fs.mkdirSync(path.dirname(body), { recursive: true });
-        fs.writeFileSync(body, `${g.summary ?? g.text}\n\n${g.cards.map(c => `- ${c.title}: ${c.stage}`).join("\n")}\n\nCreated by Loom crew ${cfg.name}. Human review and merge required.\n`);
+        fs.writeFileSync(body, intakePrBody(this.host.projectDir, st.channel, `${g.summary ?? g.text}\n\n${g.cards.map(c => `- ${c.title}: ${c.stage}`).join("\n")}\n\nCreated by Loom crew ${cfg.name}. Human review and merge required.\n`));
         const out = await exec("gh", ["pr", "create", "--head", g.branch, "--base", g.baseBranch, "--title", g.text.split("\n")[0]!.slice(0, 70), "--body-file", body], { cwd: g.dir, timeout: 60000 });
         url = String(out.stdout).match(/https:\/\/\S+/)?.[0];
       }

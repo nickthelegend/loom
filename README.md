@@ -1556,6 +1556,52 @@ loom triggers:off <id>   # or :on, :rm
 - **Who can manage triggers:** only this machine's owner can add, change or fire one, because a
   trigger runs your agents, as you, unattended.
 
+## Start work from assigned issues
+
+`loom intake` lists open GitHub issues assigned to your `gh` account in the current
+project's repository. Use `--linear` for your Linear assignments, excluding completed
+and canceled issues, and `--label loom` to filter either source.
+
+```sh
+loom intake --github --label loom
+loom intake --start --agent codex
+loom intake --linear --label loom --start --orchestra --agent planner
+loom intake --json
+```
+
+GitHub uses your existing `gh auth login`. Linear reads `LINEAR_API_KEY` from the
+daemon's environment, falling back to the `linear` entry in Loom's provider key
+store (`loom providers:set linear --key <key> --base-url https://api.linear.app/graphql`).
+Environment keys take precedence. Keys are never included in intake responses.
+
+`--start` creates a titled chat per issue and queues the quoted issue title, body
+(up to 8,000 characters), and URL as a work request. `--orchestra` queues a separate
+goal in each chat; goals wait for the project's existing concurrency rules. A paused
+queue stays paused. `.loom/intake.json` remembers each issue's chat and eventual run,
+so repeating intake, including after a daemon restart, does not start it twice.
+Loom-recorded PRs get a backlink comment on the source issue; failed comments are
+retried by the PR poller. GitHub intake goals also get `Closes #N` when Loom builds
+the PR body. PRs opened outside Loom can be attached with `loom prs:watch` and the
+intake chat's ID.
+
+The daemon API is available for web and phone clients (screens are separate):
+
+- `GET /api/projects/:id/intake?source=github|linear&label=loom` returns
+  `{ issues: [{ source, id, number?, identifier?, title, url, labels, started?: { chat?, run? } }] }`.
+  IDs are opaque strings (GitHub issue URLs, Linear UUIDs); labels are names.
+- `POST /api/projects/:id/intake/start` accepts
+  `{ source, ids: ["<id from GET>"], mode: "chat" | "orchestra", agent?: "agent-id" }`
+  and returns the same issue shape with chat links. Orchestra run IDs appear on
+  subsequent GETs after dispatch. Retrying the same IDs returns the original links,
+  including after a partial failure. Both endpoints require the owner or an unscoped
+  paired device; shared guests cannot read the owner's assignments.
+- Optional schedules use `POST /api/projects/:id/triggers` with
+  `{ kind: "intake", every: "1h", intake: { source: "github", label: "loom", mode: "chat" }, agent: "codex" }`.
+  Use `cron` instead of `every` for a cron schedule. No prompt is needed. Intake
+  triggers are **disabled by default**; enable explicitly with `loom triggers:on <id>`
+  or `PATCH /api/projects/:id/triggers/:id { enabled: true }`. Each fire starts only
+  new assignments. `loom triggers:fire <id>` runs one manually, even when paused.
+
 ## Slack and Discord: your agents in the team conversation
 
 Mention the bot in Slack or Discord and the message goes to a Loom thread. The agent's answer

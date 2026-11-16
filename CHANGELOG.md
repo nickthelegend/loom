@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Start assigned GitHub or Linear issues in separate chats or queued orchestra goals with `loom intake` (#382). Owner/device APIs expose issue and session links; a durable ledger prevents repeat starts, PRs link back to their issues, and optional intake schedules are disabled by default. Linear supports environment or stored provider keys.
+
 - PR feedback follows Loom-created PRs back to their owning chats (#378). Persistent watches queue CI failures and optional human review comments, including inline replies, with per-chat `off` / `ci` / `ci+reviews` settings. Merge and close notices end polling; owner-only attachment, listing APIs, `loom prs` and `loom prs:watch` support existing PRs. Approach credit: Agent Orchestrator lifecycle reactions (Apache-2.0).
 
 - **Orchestra workers report progress during a turn (#374).** `loom report` and fenced `loom-report` messages persist checkpoints, requests for input, blockers, and completion reports. Run-scoped worker credentials authorize the report API; reports reach orchestra events and CLI `--progress`, and requests for input or blockers notify the orchestrator in a batch. Approach credit: Agent Orchestrator’s report coordinator (Apache-2.0).

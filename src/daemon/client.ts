@@ -3,6 +3,7 @@
  * Also owns daemon lifecycle: autostart-on-demand, health, shutdown.
  */
 
+import type { IntakeIssue, IntakeMode, IntakeSource } from "../core/intake.js";
 import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
@@ -138,6 +139,15 @@ export class DaemonClient {
     if (opts.days) q.set("days", String(opts.days));
     if (opts.since) q.set("since", String(opts.since));
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/turns?${q}`);
+  }
+
+  intake(id: string, source: IntakeSource = "github", label?: string): Promise<{ issues: IntakeIssue[] }> {
+    const query = new URLSearchParams({ source, ...(label ? { label } : {}) });
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/intake?${query}`);
+  }
+
+  startIntake(id: string, input: { source: IntakeSource; ids: string[]; mode: IntakeMode; agent?: string }): Promise<{ issues: IntakeIssue[] }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/intake/start`, input);
   }
 
   prs(id: string): Promise<{ prs: TrackedPr[] }> {
