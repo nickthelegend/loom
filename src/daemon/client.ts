@@ -186,20 +186,22 @@ export class DaemonClient {
   }
 
   /**
-   * Add an agent to a project's roster.
+   * Add one or more agents to a project's roster.
    *
-   * `as` names the instance. Leave it off and the daemon picks the next free id
-   * for the kind, so asking twice gives you two sessions rather than an error.
+   * `as` supplies the base name (otherwise the kind). The daemon picks the next
+   * free suffix for each session and returns the first config plus all `agents`.
    */
   addAgent(
     id: string,
     kind: string,
-    opts: { as?: string; role?: string; options?: Record<string, unknown> } = {},
-  ): Promise<AgentConfig> {
+    opts: { as?: string; role?: string; model?: string; count?: number; options?: Record<string, unknown> } = {},
+  ): Promise<AgentConfig & { agents: AgentConfig[] }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/agents`, {
       kind,
       ...(opts.as ? { id: opts.as } : {}),
       ...(opts.role ? { role: opts.role } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.count !== undefined ? { count: opts.count } : {}),
       ...(opts.options ? { options: opts.options } : {}),
     });
   }
@@ -830,11 +832,12 @@ export class DaemonClient {
     id: string,
     task: string,
     spec?: string | RouteStepSpec[],
-    opts: { router?: "rules" | "llm"; maxHops?: number } = {},
+    opts: { router?: "rules" | "llm"; maxHops?: number; chat?: string } = {},
   ): Promise<{ route: RouteState }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/route`, {
       task,
       ...(spec !== undefined ? { spec } : {}),
+      ...(opts.chat ? { chat: opts.chat } : {}),
       ...(opts.router ? { router: opts.router } : {}),
       ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
     });

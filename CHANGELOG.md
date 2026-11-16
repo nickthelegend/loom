@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ACP agents receive the project's MCP servers.** New and loaded sessions now get enabled servers that pass health filtering, with arguments and environment for stdio and headers for HTTP/SSE. Remote servers are sent only when the agent advertises support for their transport.
 
+### Added
+
+- Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
+
+### Fixed
+
+- Routes keep the chat they were started in. A queued `auto` prompt now sends every hop and its route events to the original thread (#357).
+
 ## [1.3.0] — 2026-10-26
 
 ### Added

@@ -653,6 +653,9 @@ loom route planner,executor "fix the flaky test"  # ad-hoc: roles…
 loom route claude-code,opencode,claude-code "…"   # …or agent ids, any length
 ```
 
+Routes started in a chat stay in that chat, including queued `auto` prompts: every
+hop, question and route update appears in the original thread.
+
 **`auto` is dynamic routing**: after every hop, a router looks at the task, the hop
 history, and the last replies, then picks the next agent — or declares the task done.
 The router is Claude (headless, small model, JSON out) with a deterministic
@@ -667,7 +670,7 @@ What happens per hop: interrupt-safe **handoff** → shared-memory **projection*
 - step finishes cleanly → Loom advances to the next agent automatically;
 - the agent asks a question → the route **pauses** (`waiting_human`), you get a
   notification, `loom route --status` and the board show the question; you answer in
-  the shared thread (`loom send "…"`) and the route **resumes by itself**;
+  the same thread (`loom send "…" --chat <chat>`) and the route **resumes by itself**;
 - an agent errors or a step times out (45 min default) → the route fails loudly —
   unless the step carries an [`onFail`](#routes-that-loop-and-steps-that-skip), which
   sends it back to an earlier step instead;
@@ -877,6 +880,22 @@ loom agents:add acp --cmd "my-agent --acp" --as mine
   - Auto runs Loom's Auto policy on the call.
   - Always ask puts each request on an approval card in Loom and on your phone.
   - A request that fails or is interrupted is answered "cancelled", never allowed.
+
+### Several agents on one model
+
+Add up to eight sessions at once, each pinned to the same model:
+
+```sh
+loom agents:add claude-code --model claude-opus-5-5 --count 3 --as opus
+loom orchestrate "add OAuth login with tests" -o claude-code -w opus,opus-2,opus-3
+```
+
+This creates `opus`, `opus-2`, and `opus-3`, each with `options.model` set to
+`claude-opus-5-5`. Names already in use get the next free suffix. Omit `--as`
+to use the agent kind as the base name. `--model` works with any kind that
+accepts a model, including `claude-code`, `codex`, `opencode`, `grok-code`,
+`model`, and `acp`. In the app, Add agent offers a model field with suggestions
+and a count from 1–8; Orchestra's **+ model** uses the same picker.
 
 ## Agents that are models
 

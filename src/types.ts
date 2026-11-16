@@ -412,6 +412,8 @@ export type RouterKind = "rules" | "llm";
 
 export interface RouteState {
   id: string;
+  /** Conversation the route belongs to; omitted on older routes in main. */
+  chat?: string;
   name?: string;
   task: string;
   /** Resolved agent ids, in order. Dynamic routes grow this per hop. */

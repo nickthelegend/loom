@@ -18,6 +18,7 @@
  * failed rather than pretending nothing happened.
  */
 
+import { MAIN_CHAT } from "../types.js";
 import type {
   AgentRole,
   LoomEvent,
@@ -64,8 +65,8 @@ export interface RouteHost {
   projectDir: string;
   config: ProjectConfig;
   log: EventJournal;
-  handoff(to: string): Promise<HandoffOutcome>;
-  send(text: string, agentId: string): Promise<unknown>;
+  handoff(to: string, chat?: string): Promise<HandoffOutcome>;
+  send(text: string, agentId: string, chat?: string): Promise<unknown>;
   interrupt(): Promise<unknown>;
   isAdapterId(id: string): boolean;
   /** Lifetime project spend (USD) — used to attribute cost to routes. */
@@ -236,6 +237,7 @@ export class RouteEngine {
       this.write(r);
       this.host.log.append({
         kind: "route_failed",
+        chat: r.chat,
         payload: { routeId: r.id, reason: r.reason },
       });
     }
@@ -245,7 +247,7 @@ export class RouteEngine {
   // Lifecycle
   // ---------------------------------------------------------------------
 
-  async start(spec: RouteStepSpec[], task: string, name?: string): Promise<RouteState> {
+  async start(spec: RouteStepSpec[], task: string, name?: string, chat?: string): Promise<RouteState> {
     if (this.isActive()) throw new RouteActiveError();
     const resolved = resolveSteps(spec, this.host.config, this.host.isAdapterId);
     // The step's assigned role wins; fall back to the agent's own default role
@@ -257,6 +259,7 @@ export class RouteEngine {
       id: newId(4),
       ...(name ? { name } : {}),
       task,
+      ...(chat ? { chat } : {}),
       steps: resolved.ids,
       stepRoles,
       stepInstructions: resolved.instructions,
@@ -274,6 +277,7 @@ export class RouteEngine {
     this.write(route);
     this.host.log.append({
       kind: "route_started",
+      chat: route.chat,
       payload: { routeId: route.id, name: name ?? null, mode: "static", steps: resolved.ids, task },
     });
     await this.beginStep(route);
@@ -283,7 +287,7 @@ export class RouteEngine {
   /** Dynamic route: a router (LLM or rules) picks every next hop. */
   async startDynamic(
     task: string,
-    opts: { router?: RouterKind; maxHops?: number } = {},
+    opts: { router?: RouterKind; maxHops?: number; chat?: string } = {},
   ): Promise<RouteState> {
     if (this.isActive()) throw new RouteActiveError();
     const router = opts.router ?? "llm";
@@ -291,6 +295,7 @@ export class RouteEngine {
       id: newId(4),
       name: "auto",
       task,
+      ...(opts.chat ? { chat: opts.chat } : {}),
       steps: [],
       stepRoles: [],
       current: -1,
@@ -305,6 +310,7 @@ export class RouteEngine {
     this.write(route);
     this.host.log.append({
       kind: "route_started",
+      chat: route.chat,
       payload: { routeId: route.id, name: "auto", mode: "dynamic", router, task },
     });
     const decision = await this.decide(route);
@@ -322,7 +328,7 @@ export class RouteEngine {
       .filter((a) => this.host.isAdapterId(a.id))
       .map((a) => ({ id: a.id, role: a.role }));
     const recent = this.host.log
-      .list({ kinds: ["message"], limit: 12 })
+      .list({ kinds: ["message"], chat: r.chat ?? MAIN_CHAT, limit: 12 })
       .map((e) => ({
         author: e.agentId ?? String(e.payload.author ?? "user"),
         text: String(e.payload.text ?? ""),
@@ -368,20 +374,21 @@ export class RouteEngine {
   }
 
   /**
-   * A user message addressed to the current step's agent while the route is
-   * paused = the answer to the agent's question. Resume; the next
+   * A user message in the same chat, addressed to the current step's agent
+   * while paused, answers the agent's question. Resume; the next
    * run_complete advances the route.
    */
-  onUserMessage(targetAgentId: string): void {
+  onUserMessage(targetAgentId: string, chat = MAIN_CHAT): void {
     const r = this.read();
     if (!r || r.status !== "waiting_human") return;
-    if (targetAgentId !== r.steps[r.current]) return;
+    if (targetAgentId !== r.steps[r.current] || chat !== (r.chat ?? MAIN_CHAT)) return;
     this.sawNeedsInput = false;
     delete r.pendingQuestion;
     r.status = "running";
     this.write(r);
     this.host.log.append({
       kind: "route_resumed",
+      chat: r.chat,
       payload: { routeId: r.id, step: r.current, agent: targetAgentId },
     });
   }
@@ -390,6 +397,7 @@ export class RouteEngine {
   handleAgentEvent(event: LoomEvent): void {
     const r = this.read();
     if (!r || (r.status !== "running" && r.status !== "waiting_human")) return;
+    if ((event.chat ?? MAIN_CHAT) !== (r.chat ?? MAIN_CHAT)) return;
     const currentAgent = r.steps[r.current];
     if (!event.agentId || event.agentId !== currentAgent) return;
 
@@ -421,6 +429,7 @@ export class RouteEngine {
         this.write(r);
         this.host.log.append({
           kind: "route_step",
+          chat: r.chat,
           payload: {
             routeId: r.id,
             step: backTo,
@@ -449,6 +458,7 @@ export class RouteEngine {
         this.write(r);
         this.host.log.append({
           kind: "route_paused",
+          chat: r.chat,
           payload: {
             routeId: r.id,
             step: r.current,
@@ -489,6 +499,7 @@ export class RouteEngine {
     if (reviewing(lastAt)) for (let i = lastAt - 1; i >= 0; i--) if (!reviewing(i) && r.steps[i] !== r.steps[lastAt]) { giveBack = r.steps[i]; break; }
     this.host.log.append({
       kind: "route_completed",
+      chat: r.chat,
       payload: {
         routeId: r.id,
         steps: r.steps.length,
@@ -498,7 +509,7 @@ export class RouteEngine {
         ...(giveBack ? { batonTo: giveBack } : {}),
       },
     });
-    if (giveBack) void this.host.handoff(giveBack).catch(() => { /* the baton stays where it is: still a finished route */ });
+    if (giveBack) void this.host.handoff(giveBack, r.chat).catch(() => { /* the baton stays where it is: still a finished route */ });
     notify({
       title: `Loom · ${this.host.projectName}`,
       body: `route complete: ${r.steps.join(" → ")}`,
@@ -533,6 +544,7 @@ export class RouteEngine {
       if (!skip) break;
       this.host.log.append({
         kind: "route_step",
+        chat: r.chat,
         payload: {
           routeId: r.id,
           step: r.current,
@@ -580,6 +592,7 @@ export class RouteEngine {
     this.lastQuestion = undefined;
     this.host.log.append({
       kind: "route_step",
+      chat: r.chat,
       payload: {
         routeId: r.id,
         step: r.current,
@@ -590,7 +603,7 @@ export class RouteEngine {
     });
     this.armTimer(r.id, r.current);
     try {
-      const outcome = await this.host.handoff(agent);
+      const outcome = await this.host.handoff(agent, r.chat);
       // A conflicted merge leaves conflict markers in the tree this step was
       // about to work in. Prompting on top of that produces work nobody can
       // review, so the route stops here and names the files. The merge is
@@ -606,7 +619,7 @@ export class RouteEngine {
         );
         return;
       }
-      await this.host.send(this.instruction(r), agent);
+      await this.host.send(this.instruction(r), agent, r.chat);
     } catch (err) {
       const fresh = this.read();
       if (fresh && fresh.id === r.id) {
@@ -642,6 +655,7 @@ export class RouteEngine {
     this.write(r);
     this.host.log.append({
       kind: "route_failed",
+      chat: r.chat,
       payload: { routeId: r.id, reason, aborted: status === "aborted" },
     });
     if (status === "failed") {

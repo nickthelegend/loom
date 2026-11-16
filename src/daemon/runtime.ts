@@ -337,8 +337,8 @@ export class ProjectRuntime {
       projectDir: info.dir,
       config,
       log,
-      handoff: (to) => this.handoff(to, { source: "route" }),
-      send: (text, agentId) => this.sendMessage(text, agentId, { source: "route" }),
+      handoff: (to, chat) => this.handoff(to, { source: "route", chat }),
+      send: (text, agentId, chat) => this.sendMessage(text, agentId, { source: "route", chat }),
       interrupt: () => this.interrupt({ source: "route" }),
       costTotal: () => this.accounting.costs.totalUsd,
       turnFacts: (agentId) => this.turnFacts(agentId),
@@ -929,7 +929,7 @@ export class ProjectRuntime {
    */
   addAgent(
     kind: string,
-    opts: { id?: string; role?: string; options?: Record<string, unknown> } = {},
+    opts: { id?: string; role?: string; options?: Record<string, unknown>; /** several at once: the name is a base, numbered */ series?: boolean } = {},
   ): AgentConfig {
     if (!knownAgentKinds().includes(kind)) {
       throw new Error(`unknown agent kind "${kind}" (known: ${knownAgentKinds().join(", ")})`);
@@ -948,15 +948,16 @@ export class ProjectRuntime {
     // The roster has always been keyed by instance id with kind alongside it, so
     // two Claude Code sessions in one project were representable — but adding
     // one threw, because the id defaulted to the kind and the kind was taken. A
-    // caller who names the instance gets that name; a caller who doesn't gets
-    // the next free suffix, so "add another" needs no ceremony. Both sessions
-    // read and write the one project brain: memory import dedupes by file path,
-    // and units are project-scoped, so nothing has to change for them to share.
+    // caller who names one instance gets that name; a caller who doesn't — or
+    // asks for several (`--count 3 --as opus`: opus, opus-2, opus-3) — gets the
+    // next free suffix, so "add another" needs no ceremony. Sessions read and
+    // write the one project brain: memory import dedupes by file path, and units
+    // are project-scoped, so nothing has to change for them to share.
     const explicit = opts.id?.trim().slice(0, 40);
-    if (explicit && this.config.agents.some((a) => a.id === explicit)) {
+    if (explicit && !opts.series && this.config.agents.some((a) => a.id === explicit)) {
       throw new Error(`"${explicit}" is already in this project`);
     }
-    const id = explicit || this.nextInstanceId(kind);
+    const id = explicit && !opts.series ? explicit : this.nextInstanceId(explicit || kind);
     if (!id) throw new Error("an agent needs an id");
     // A `model` agent with no model is an agent that refuses every turn, so
     // the options that make it work are settable as it's added rather than in
@@ -979,7 +980,7 @@ export class ProjectRuntime {
   }
 
   /**
-   * The next free instance id for a kind: `codex`, then `codex-2`, `codex-3`.
+   * The next free instance id for a base name: `codex`, then `codex-2`, `codex-3`.
    *
    * The bare kind stays the first instance's id so existing projects, configs
    * and route specs that name `codex` keep meaning what they meant.
@@ -3130,7 +3131,7 @@ export class ProjectRuntime {
 
   async handoff(
     to: string,
-    opts: { source?: "user" | "route" } = {},
+    opts: { source?: "user" | "route"; chat?: string } = {},
   ): Promise<{ from: string | null; merge?: MergeOutcome }> {
     if (this.continuity?.store.activeReceipts().some(r => r.execution === "unknown"))
       throw new ContinuityError("recovery_required", "reconcile uncertain native writers before handoff or merge");
@@ -3175,7 +3176,7 @@ export class ProjectRuntime {
       // New context is assembled from the selected chat at dispatch, never
       // from global history or private bridge memory on a picker click.
       this.briefings.pendingBriefings.delete(to);
-      const { from } = this.baton.handoff(to, { ...handoffMeta, projected: false, continuity: 1 });
+      const { from } = this.baton.handoff(to, { ...handoffMeta, projected: false, continuity: 1 }, opts.chat);
       await this.ensureStarted(to);
       return { from, ...(merge ? { merge } : {}) };
     }
@@ -3186,14 +3187,14 @@ export class ProjectRuntime {
     writeMemoryFile(this.info.dir, to, prepared.memory);
     this.briefings.pendingBriefings.set(to, prepared.briefing);
     if (prepared.mode === "llm") {
-      this.log.append({ kind: "status", payload: { state: "projection", mode: "llm", ms: prepared.elapsedMs } });
+      this.log.append({ kind: "status", chat: opts.chat, payload: { state: "projection", mode: "llm", ms: prepared.elapsedMs } });
     }
     for (const bridge of prepared.bridges) {
       await this.agents.get(bridge.agentId)?.injectMemory(bridge.memory).catch(() => {});
     }
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");
 
-    const { from } = this.baton.handoff(to, handoffMeta);
+    const { from } = this.baton.handoff(to, handoffMeta, opts.chat);
     await this.ensureStarted(to);
     return { from, ...(merge ? { merge } : {}) };
   }
@@ -3246,11 +3247,13 @@ export class ProjectRuntime {
     spec?: string | RouteStepSpec[];
     router?: RouterKind;
     maxHops?: number;
+    chat?: string;
   }): Promise<RouteState> {
     if (this.continuity) throw new ContinuityError("unsupported", "autonomous route continuity is not verified; select a native agent directly");
     this.snapshotBeforeRoute();
     if (typeof opts.spec === "string" && opts.spec.trim() === "auto") {
       return this.routes.startDynamic(opts.task, {
+        ...(opts.chat ? { chat: opts.chat } : {}),
         ...(opts.router ? { router: opts.router } : {}),
         ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
       });
@@ -3281,7 +3284,7 @@ export class ProjectRuntime {
           .map((a) => a.id);
       }
     }
-    return this.routes.start(steps ?? [], opts.task, name);
+    return this.routes.start(steps ?? [], opts.task, name, opts.chat);
   }
 
   async abortRoute(): Promise<RouteState> {
