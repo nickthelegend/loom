@@ -11,6 +11,10 @@ export class ModelPool extends AdapterBase {
   private readonly starting = new Map<Adapter, Promise<void>>();
   private stopped = false;
   private interrupted = false;
+  /** The turn has been handed to an instance (vs. still starting it). */
+  private dispatched = false;
+  /** Which send owns _busy/dispatched: a new turn may start before the last one's finally runs. */
+  private turn = 0;
   private active: Adapter;
   private readonly defaultModel: unknown;
   private readonly defaultEffort: unknown;
@@ -69,13 +73,23 @@ export class ModelPool extends AdapterBase {
   override async injectMemory(projection: string): Promise<void> {
     await Promise.all([...this.instances.values()].map(agent => agent.injectMemory(projection)));
   }
+  /**
+   * Busy while starting an instance, then exactly as long as that instance is. The runtime reacts
+   * to the instance's completion event before this pool's own send() has unwound, and a stale
+   * "busy" there defers config edits and refuses the queued follow-up.
+   */
+  override busy(): boolean {
+    return this._busy && !(this.dispatched && !this.active.busy());
+  }
   async interrupt(): Promise<void> { this.interrupted = true; await this.active.interrupt(); }
   override diff(): Promise<string> { return this.active.diff(); }
 
   async send(input: SendInput): Promise<void> {
     if (this.stopped) throw new Error(`agent "${this.id}" is stopped`);
-    if (this._busy) throw new Error(`agent "${this.id}" is busy`);
+    if (this.busy()) throw new Error(`agent "${this.id}" is busy`);
     this._busy = true;
+    this.dispatched = false;
+    const mine = ++this.turn;
     this.interrupted = false;
     try {
       // OpenCode's continuity path can switch models in its native session.
@@ -94,7 +108,8 @@ export class ModelPool extends AdapterBase {
       if (this.interrupted) { this.emit({ kind: "status", payload: { state: "interrupted" } }); return; }
       // Process-bound choices were supplied at construction; only continuity consumes them per turn.
       const { model: _model, effort: _effort, ...turn } = input;
+      this.dispatched = true;
       await agent.send(input.continuity ? input : turn);
-    } finally { this._busy = false; }
+    } finally { if (this.turn === mine) { this._busy = false; this.dispatched = false; } }
   }
 }

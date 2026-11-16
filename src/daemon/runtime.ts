@@ -748,8 +748,9 @@ export class ProjectRuntime {
         else updated.push(id);
         // Construct all replacements before changing the roster, so a rejected
         // adapter option cannot leave half of an edit applied.
+        // pooled like at startup, so a reloaded agent still honours each chat's own model (#370)
         if (after && after.enabled !== false) prepared.set(id, createAgent(
-          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } }, this.agentDir(id),
+          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } }, this.agentDir(id), true,
         ));
       }
       const was = this.configOnDisk ?? this.config;
