@@ -3,6 +3,7 @@
  * Community adapters register here (or via the SDK entry point).
  */
 
+import { resolveAgentAccount } from "../core/accounts.js";
 import { turnGate } from "../core/turn-gate.js";
 import { isAdapter, type AgentConfig, type AnyAgent, type SendInput } from "../types.js";
 import { AntigravityCliAdapter } from "./antigravity-cli.js";
@@ -92,6 +93,7 @@ export function isWithdrawnKind(kind: string): boolean {
 
 /** The project runtime pools process-bound models; standalone callers keep the concrete adapter. */
 export function createAgent(cfg: AgentConfig, projectDir: string, poolModels = false): AnyAgent {
+  cfg = resolveAgentAccount(cfg);
   const factory = factories.get(cfg.kind);
   if (!factory) {
     throw new Error(

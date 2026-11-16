@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Several accounts per agent CLI (#379).** Register Claude Code and Codex accounts with `loom accounts add`, sign in with `loom accounts login`, and select them with `loom agents:add --account` or `options.configDir`. The owner/unscoped accounts API stores only labels and paths and asks CLIs for sign-in status. Quota Relay tries another account of the same CLI before switching kinds; Orchestra spreads fleet copies across accounts and persists the selection in `workerDetails`. Web and phone screens are separate. Approach credit: Agent Orchestrator's account switching (Apache-2.0).
+
 - Compare one prompt across 2–8 coding-agent fleet entrants with `loom compare "..." -w agent@model,... [--wait]` and `POST /api/projects/:id/compare` (#377). Uses Orchestra races, with isolated worktrees, replies, diffs, cost, time and change statistics. `loom compare <run> --keep <task>` applies one result and removes the other worktrees. API shapes and events are documented for composer/phone clients. Approach credit: T3 Code's multi-model threads.
 
 - **Share live: presence API and CLI.** The daemon tracks each guest socket and announced owner/device view in memory, with chat-scoped snapshots, typing updates, 20-second client heartbeats and 45-second expiry. `loom presence [chat] [--watch] [--json]` shows viewers; `loom chat` announces viewing and typing. Shared TypeScript contracts support the upcoming web and phone displays (#362).

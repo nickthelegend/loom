@@ -642,6 +642,28 @@ describe("web app · settings sections don't overwrite each other", () => {
   });
 });
 
+describe("web app · accounts (#379)", () => {
+  it("adds a second Codex account, shows the sign-in command for it, and forgets it", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, '.setnav [data-sec="accounts"]'));
+    click($(m, '.setnav [data-sec="accounts"]'));
+    await waitUntil(() => !!$(m, "#setpane #acctadd"));
+    ($(m, "#acctkind") as HTMLSelectElement).value = "codex";
+    ($(m, "#acctlabel") as HTMLInputElement).value = "work";
+    click($(m, "#acctadd"));
+    await waitUntil(() => !!$(m, "#setpane [data-acctlogin]"));
+    expect(text(m, "#setpane .acctrow .st")).toContain("work");
+    click($(m, "#setpane [data-acctlogin]"));
+    await waitUntil(() => text(m, "#setpane [data-acctcmd]").includes("CODEX_HOME"));
+    expect(text(m, "#setpane [data-acctcmd]")).toContain("codex login");
+    click($(m, "#setpane [data-acctforget]"));
+    await waitUntil(() => !$(m, "#setpane [data-acctlogin]"));
+    expect(m.errors.join("\n")).toBe("");
+  });
+});
+
 describe("web app · Loom Cloud settings", () => {
   it("has its own section: what it is, the Supabase fields, and the switches", async () => {
     const m = mount();
