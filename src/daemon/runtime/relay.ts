@@ -11,7 +11,8 @@
  * thread, so the record says who did what and why.
  */
 
-import { backAt, quotaHit, type QuotaHit } from "../../core/quota.js";
+import { accountKey, isAccountKind, listAccounts, type Account } from "../../core/accounts.js";
+import { backAt, quotaHit, sameCliAccounts, type QuotaHit } from "../../core/quota.js";
 import type { AgentConfig, EventKind, LoomEvent } from "../../types.js";
 import { MAIN_CHAT } from "../../types.js";
 import type { QueueInput } from "../../core/prompt-queue.js";
@@ -27,6 +28,8 @@ export interface RelayConfig {
 
 export interface RelayHost {
   config(): { relay?: RelayConfig; agents: AgentConfig[] };
+  /** Add a persistent instance without transferring the capped account's native session. */
+  addAccountAgent?(source: AgentConfig, account: Account): AgentConfig;
   busy(agentId: string): boolean;
   /** The chat an agent's current turn is in. */
   turnChat(agentId: string): string | undefined;
@@ -57,13 +60,21 @@ export class QuotaRelay {
 
   /** Is this agent out of quota right now? */
   cappedUntil(agentId: string, now = Date.now()): number | null {
-    const c = this.capped.get(agentId);
-    return c && c.resetAt > now ? c.resetAt : null;
+    const cfg = this.host.config().agents.find(a => a.id === agentId);
+    const key = cfg && isAccountKind(cfg.kind) ? accountKey(cfg) : undefined;
+    let until = this.capped.get(agentId)?.resetAt ?? 0;
+    if (key) for (const a of this.host.config().agents) {
+      if (accountKey(a) === key) until = Math.max(until, this.capped.get(a.id)?.resetAt ?? 0);
+    }
+    return until > now ? until : null;
   }
 
   /** Every agent out of quota, and until when — for status and the UI. */
   caps(now = Date.now()): Record<string, number> {
-    return Object.fromEntries([...this.capped].filter(([, c]) => c.resetAt > now).map(([id, c]) => [id, c.resetAt]));
+    return Object.fromEntries(this.host.config().agents.flatMap(a => {
+      const until = this.cappedUntil(a.id, now);
+      return until ? [[a.id, until]] : [];
+    }));
   }
 
   /**
@@ -161,12 +172,27 @@ export class QuotaRelay {
   private async next(from: string): Promise<string | null> {
     const cfg = this.host.config();
     const enabled = cfg.agents.filter((a) => a.enabled !== false && a.id !== from);
+    const source = cfg.agents.find(a => a.id === from);
+    const usable = async (a: AgentConfig) => !this.cappedUntil(a.id) && !this.host.busy(a.id) && await this.host.available(a.id).catch(() => false);
+    if (source) {
+      for (const a of sameCliAccounts(source, enabled)) if (await usable(a)) return a.id;
+      if (isAccountKind(source.kind) && this.host.addAccountAgent) {
+        for (const account of listAccounts().filter(a => a.kind === source.kind)) {
+          const candidate = { ...source, account: account.id, options: { ...source.options, configDir: account.configDir } };
+          const key = accountKey(candidate);
+          // An existing busy, disabled or capped instance is not permission to clone around it.
+          if (cfg.agents.some(a => accountKey(a) === key)) continue;
+          const added = this.host.addAccountAgent(source, account);
+          if (await usable(added)) return added.id;
+        }
+      }
+    }
     const order = cfg.relay?.to?.length
       ? cfg.relay.to.map((id) => enabled.find((a) => a.id === id)).filter((a): a is AgentConfig => Boolean(a))
       : enabled.filter((a) => CLI_KINDS.has(a.kind) || a.kind === "echo");
     for (const a of order) {
-      if (this.cappedUntil(a.id) || this.host.busy(a.id)) continue;
-      if (await this.host.available(a.id).catch(() => false)) return a.id;
+      if (source && isAccountKind(source.kind) && accountKey(a) === accountKey(source)) continue;
+      if (await usable(a)) return a.id;
     }
     return null;
   }

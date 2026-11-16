@@ -32,6 +32,7 @@
  */
 
 import { intakePrBody, recordIntakeRun } from "./intake.js";
+import { listAccounts, resolveAgentAccount, type Account } from "./accounts.js";
 import { recordOpenedPr } from "./pr-feedback.js";
 import { execFile } from "./process.js";
 import fs from "node:fs";
@@ -72,6 +73,9 @@ export interface OrchestraModel {
 export interface OrchestraWorker extends OrchestraModel {
   id: string;
   kind: string;
+  /** Account id and resolved path pinned at expansion; absent on older runs. */
+  account?: string;
+  configDir?: string;
 }
 
 /** Parse agent[@model][:effort][xN]. The team: and acp: prefixes belong to the agent name. */
@@ -97,7 +101,8 @@ function modelOf(cfg: AgentConfig): OrchestraModel {
 }
 
 function workerOf(cfg: AgentConfig): OrchestraWorker {
-  return { id: cfg.id, kind: cfg.kind, ...modelOf(cfg) };
+  return { id: cfg.id, kind: cfg.kind, ...modelOf(cfg), ...(cfg.account ? { account: cfg.account } : {}),
+    ...(typeof cfg.options?.configDir === "string" ? { configDir: cfg.options.configDir } : {}) };
 }
 
 /** Keep the selection fixed even if the roster changes before a queued task starts. */
@@ -105,8 +110,15 @@ function pinModel(cfg: AgentConfig, selection: OrchestraModel): AgentConfig {
   return { ...cfg, options: { ...cfg.options, model: selection.model, effort: selection.effort } };
 }
 
+function pinWorker(cfg: AgentConfig, selection: OrchestraWorker): AgentConfig {
+  const pinned = pinModel(cfg, selection);
+  return { ...pinned, account: selection.account,
+    options: { ...pinned.options, ...(selection.configDir ? { configDir: selection.configDir } : {}) } };
+}
+
 /** Expand fleet specs without changing the roster. Repeated specs are additional instances. */
-export function expandWorkerSpecs(names: string[], resolve: (name: string) => AgentConfig | null, rosterIds: string[] = []): AgentConfig[] {
+export function expandWorkerSpecs(names: string[], resolve: (name: string) => AgentConfig | null, rosterIds: string[] = [], accounts: Account[] = listAccounts()): AgentConfig[] {
+  const nextAccount = new Map<string, number>();
   const workers: AgentConfig[] = [];
   for (const name of names) {
     const spec = parseAgentSpec(name, rosterIds);
@@ -117,7 +129,19 @@ export function expandWorkerSpecs(names: string[], resolve: (name: string) => Ag
       let id = cfg.id;
       let n = 1;
       while (workers.some((w) => w.id === id)) id = `${cfg.id}#${++n}`;
-      workers.push({ ...cfg, id, options: { ...cfg.options } });
+      const choices = isRemoteWorker(cfg.id) ? [] : accounts.filter(a => a.kind === cfg.kind);
+      let worker = { ...cfg, id, options: { ...cfg.options } };
+      if (choices.length) {
+        const selected = choices.findIndex(a => a.id === cfg.account || a.label === cfg.account || a.configDir === cfg.options?.configDir);
+        const offset = nextAccount.get(cfg.kind) ?? Math.max(0, selected);
+        const account = choices[offset % choices.length]!;
+        // An explicitly named single instance keeps its account; copies share the fleet rotation.
+        if (spec.count > 1 || workers.some(w => w.id === cfg.id) || (!cfg.account && cfg.options?.configDir === undefined)) {
+          worker = { ...worker, account: account.id, options: { ...worker.options, configDir: account.configDir } };
+          nextAccount.set(cfg.kind, offset + 1);
+        } else if (selected >= 0) nextAccount.set(cfg.kind, selected + 1);
+      }
+      workers.push(resolveAgentAccount(worker));
     }
   }
   return workers;
@@ -1398,7 +1422,7 @@ export class OrchestraEngine {
     const cached = this.workerCfgs.get(run.id);
     if (cached) return cached;
     const cfgs = run.workerDetails
-      ? run.workerDetails.map((w) => pinModel(this.resolveAgent(w.id) ?? { id: w.id, kind: w.kind, role: "worker" }, w))
+      ? run.workerDetails.map((w) => pinWorker(this.resolveAgent(w.id) ?? { id: w.id, kind: w.kind, role: "worker" }, w))
       : run.workers.map((w) => this.resolveAgent(w)).filter((c): c is AgentConfig => !!c);
     this.workerCfgs.set(run.id, cfgs);
     return cfgs;
@@ -1563,7 +1587,7 @@ export class OrchestraEngine {
     const workerCfgs = record.workers.flatMap((id) => {
       const detail = record.workerDetails?.find((w) => w.id === id);
       const cfg = this.resolveAgent(id) ?? (detail ? local(id, detail.kind, undefined) : null);
-      return cfg ? [detail ? pinModel(cfg, detail) : cfg] : [];
+      return cfg ? [detail ? pinWorker(cfg, detail) : cfg] : [];
     });
     const firstWorker = workerCfgs[0] ?? roster.find((a) => a.role !== "orchestrator") ?? roster[0];
     const tasks: OrchestraTask[] = [];

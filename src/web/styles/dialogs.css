@@ -1544,3 +1544,12 @@
 .intakemodal .iklab{font-size:10.5px;border:1px solid var(--border);border-radius:6px;padding:0 5px;color:var(--muted-foreground);flex:none}
 .intakemodal .ikopts{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted-foreground)}
 .intakemodal #ikagent{height:30px;border:1px solid var(--input);border-radius:var(--radius-md);background:transparent;color:var(--foreground);font:inherit;font-size:12.5px}
+/* Accounts (#379) */
+.acctrow{align-items:flex-start}
+.acctrow .acctacts{display:flex;gap:6px;flex:none}
+.acctrow .acctlogin:empty{display:none}
+.acctadd{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.acctadd select,.acctadd input{height:32px;border:1px solid var(--input);border-radius:var(--radius-md);background:transparent;color:var(--foreground);
+  font:inherit;font-size:12.5px;padding:0 9px}
+.acctadd #acctlabel{width:150px}
+.acctadd #acctdir{flex:1;min-width:180px}

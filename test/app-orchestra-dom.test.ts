@@ -290,6 +290,7 @@ const mousedown = (m: Mounted, el: Element | null) => {
   el.dispatchEvent(new m.window.MouseEvent("mousedown", { bubbles: true }));
 };
 
+
 describe("web app · composer modes", () => {
   it("chooses a model and count before adding Orchestra workers", async () => {
     const m = mount({ hash: `#p/${projectId}` });
@@ -682,6 +683,27 @@ describe("web app · My issues (#382)", () => {
     // it reloads the list after starting; let that land before the window goes
     await waitUntil(() => text(m, "#ikstart") === "Start" && m.window.document.querySelectorAll(".intakemodal .ikrow").length === 2);
     await new Promise((r) => setTimeout(r, 200));
+  });
+});
+
+describe("web app · accounts (#379)", () => {
+  it("adds a second Codex account, shows the sign-in command for it, and forgets it", async () => {
+    const m = mount();
+    await waitUntil(() => !!$(m, ".sfoot #setupbtn"));
+    click($(m, "#setupbtn"));
+    await waitUntil(() => !!$(m, '.setnav [data-sec="accounts"]'));
+    click($(m, '.setnav [data-sec="accounts"]'));
+    await waitUntil(() => !!$(m, "#setpane #acctadd"));
+    ($(m, "#acctkind") as HTMLSelectElement).value = "codex";
+    ($(m, "#acctlabel") as HTMLInputElement).value = "work";
+    click($(m, "#acctadd"));
+    await waitUntil(() => !!$(m, "#setpane [data-acctlogin]"));
+    expect(text(m, "#setpane .acctrow .st")).toContain("work");
+    click($(m, "#setpane [data-acctlogin]"));
+    await waitUntil(() => text(m, "#setpane [data-acctcmd]").includes("CODEX_HOME"));
+    expect(text(m, "#setpane [data-acctcmd]")).toContain("codex login");
+    click($(m, "#setpane [data-acctforget]"));
+    await waitUntil(() => !$(m, "#setpane [data-acctlogin]"));
     expect(m.errors.join("\n")).toBe("");
   });
 });

@@ -10,7 +10,8 @@
  * (daemon/runtime/relay.ts) hands the work to the next agent.
  */
 
-import type { LoomEvent } from "../types.js";
+import { accountKey } from "./accounts.js";
+import type { AgentConfig, LoomEvent } from "../types.js";
 
 export interface QuotaHit {
   /** When the limit lifts (epoch ms), when the agent said; otherwise a guess an hour out. */
@@ -82,4 +83,10 @@ export function backAt(resetAt: number, now = Date.now()): string {
   const d = new Date(resetAt), today = new Date(now);
   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return d.toDateString() === today.toDateString() ? time : `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+}
+
+/** Another login of the same CLI comes before the cross-CLI fallback order. */
+export function sameCliAccounts(from: AgentConfig, agents: AgentConfig[]): AgentConfig[] {
+  const source = accountKey(from);
+  return agents.filter(a => a.enabled !== false && a.id !== from.id && a.kind === from.kind && accountKey(a) !== source);
 }

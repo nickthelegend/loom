@@ -110,21 +110,18 @@ const AUTH: Record<string, string> = {
  * Every probe here is free and offline-ish:
  *   codex     — `login status` reports without touching a model
  *   opencode  — `auth list` reads its own credentials file
- *   claude    — a `-p` probe; when signed out it refuses in ~30ms having called
- *               nothing. When signed IN it would cost a token or two, so it is
- *               capped hard and a slow answer counts as "signed in": only the
- *               instant refusal is diagnostic.
+ *   claude    — `auth status --json` reports without starting a model turn.
  *   grok      — no status command; its ~/.grok/auth.json session is read
  *               (shape only) instead.
  */
-async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail?: string }> {
+export async function probeAuth(kind: string, env: NodeJS.ProcessEnv = {}): Promise<{ authed: boolean | null; detail?: string }> {
   const run = (cmd: string, args: string[], ms: number): Promise<{ code: number | null; out: string }> =>
     new Promise((resolve) => {
       let done = false;
-      const child = execFile(cmd, args, { timeout: ms }, (_err, stdout, stderr) => {
+      const child = execFile(cmd, args, { timeout: ms, env: { ...process.env, ...env } }, (err, stdout, stderr) => {
         if (done) return;
         done = true;
-        resolve({ code: 0, out: `${stdout}${stderr}` });
+        resolve({ code: err ? (typeof err.code === "number" ? err.code : null) : 0, out: `${stdout}${stderr}` });
       });
       child.stdin?.end();
       child.on("error", () => {
@@ -163,16 +160,18 @@ async function probeAuth(kind: string): Promise<{ authed: boolean | null; detail
       return /●/.test(out) ? { authed: true } : { authed: null };
     }
     if (kind === "claude-code") {
-      // Signed out, this refuses instantly and for free. Signed in, it would
-      // start a real turn — so the timeout is the budget, and hitting it is a
-      // yes, not a maybe.
-      const { out } = await run("claude", ["-p", "hi", "--output-format", "json"], 6000);
-      if (/not logged in|please run \/login|invalid api key/i.test(out)) {
-        return { authed: false, detail: "the CLI says: Not logged in" };
-      }
-      return { authed: true };
+      const { code, out } = await run("claude", ["auth", "status", "--json"], 6000);
+      try {
+        const status = JSON.parse(out) as { loggedIn?: boolean };
+        if (typeof status.loggedIn === "boolean") return { authed: status.loggedIn };
+      } catch { /* older CLIs may not support auth status */ }
+      if (/not logged in|please run \/login|invalid api key/i.test(out)) return { authed: false };
+      return { authed: code === 0 && /logged in/i.test(out) ? true : null };
     }
+
     if (kind === "grok-code") {
+      // A custom home must not inherit the default account's credential-file verdict.
+      if (env.GROK_HOME) return { authed: null };
       // grok has no status command, but it keeps its session in ~/.grok/auth.json:
       // an entry with a refresh token is a session it can renew on its own. Only
       // the shape is read — no token leaves the file.
@@ -302,12 +301,13 @@ const authCache = new Map<string, { at: number; value?: Auth; pending?: Promise<
  * refreshed in the background once it's a minute old. A project's status is polled often, and a
  * probe spawns the CLI — it must never sit in that path (#251).
  */
-export function knownAuth(kind: string, ttlMs = 60_000): Auth | undefined {
-  const hit = authCache.get(kind) ?? { at: 0 };
+export function knownAuth(kind: string, ttlMs = 60_000, env: NodeJS.ProcessEnv = {}): Auth | undefined {
+  const key = JSON.stringify([kind, env]);
+  const hit = authCache.get(key) ?? { at: 0 };
   if (!hit.pending && Date.now() - hit.at >= ttlMs) {
-    hit.pending = probeAuth(kind).catch((): Auth => ({ authed: null }))
+    hit.pending = probeAuth(kind, env).catch((): Auth => ({ authed: null }))
       .then((value) => { hit.value = value; hit.at = Date.now(); hit.pending = undefined; });
-    authCache.set(kind, hit);
+    authCache.set(key, hit);
   }
   return hit.value;
 }

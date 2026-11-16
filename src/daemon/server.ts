@@ -54,6 +54,7 @@ import {
 } from "./relay.js";
 import { registerAgentDiscoveryRoutes } from './routes/agent-discovery.js';
 import { registerAgentSettingsRoutes } from './routes/agent-settings.js';
+import { registerAccountsRoutes } from "./routes/accounts.js";
 import { registerAgentsRoutes } from './routes/agents.js';
 import { registerAlertsRoutes } from './routes/alerts.js';
 import { registerApprovalsRoutes } from './routes/approvals.js';
@@ -514,6 +515,7 @@ export class LoomDaemon {
     });
     registerSetupRoutes(app, ctx);
     registerProvidersRoutes(app);
+    registerAccountsRoutes(app);
     registerUpdatesRoutes(app, ctx);
     registerIntegrationsRoutes(app);
     registerPairingRoutes(app, ctx);
@@ -952,7 +954,7 @@ export class LoomDaemon {
           view(msg.chat, msg.typing);
           return;
         }
-        if (!resolvedProject || !msg.term || wsGuest) return; // a guest never drives a terminal
+        if (!resolvedProject || !msg.term || wsGuest || wsScope) return; // a guest or a project-scoped token never drives a terminal
         const sess = this.terminals.get(resolvedProject, String(msg.term));
         if (!sess) return;
         if (msg.type === "term-input" && typeof msg.data === "string") sess.write(msg.data);

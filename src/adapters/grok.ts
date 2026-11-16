@@ -28,6 +28,7 @@
  * a persisted log; one event per token would turn a paragraph into 200 rows.
  */
 
+import { configDirEnv } from "../core/accounts.js";
 import { type ChildProcess } from "node:child_process";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
@@ -96,7 +97,7 @@ export class GrokAdapter extends AdapterBase {
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "grok-code", projectDir);
-    this.options = options as GrokOptions;
+    this.options = { ...options, env: { ...(options.env as Record<string, string> | undefined), ...configDirEnv("grok-code", options.configDir) } } as GrokOptions;
   }
 
   private get sessionId(): string | undefined {
