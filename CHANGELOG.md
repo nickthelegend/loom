@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Per-message model and reasoning effort overrides through `POST /api/projects/:id/messages` and `loom send --model <model> --effort <level>` (#381). Overrides use chat-binding validation, leave chat and agent defaults unchanged, and stay with queued messages across chat edits and daemon restarts.
+
 - **Private side questions (#376).** `loom btw "<question>" [--chat c]` and the side-chat API answer with the parent's agent and model without changing its log, memory or native cursor. Claude/Codex use separate read-only native forks, with recent-message context as a fallback. Side messages stream only to owners and unscoped devices. Web and phone drawer screens are separate work.
 
 - PR feedback follows Loom-created PRs back to their owning chats (#378). Persistent watches queue CI failures and optional human review comments, including inline replies, with per-chat `off` / `ci` / `ci+reviews` settings. Merge and close notices end polling; owner-only attachment, listing APIs, `loom prs` and `loom prs:watch` support existing PRs. Approach credit: Agent Orchestrator lifecycle reactions (Apache-2.0).

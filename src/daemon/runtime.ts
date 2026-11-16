@@ -286,6 +286,7 @@ export class ProjectRuntime {
       extractMemory: (...args) => this.extractMemory(...args),
       get config() { return runtime.config; },
       chatBinding: (...args) => this.chatBinding(...args),
+      bindable: (...args) => this.bindable(...args),
       validHolder: (...args) => this.validHolder(...args),
       defaultAdapterId: (...args) => this.defaultAdapterId(...args),
       agent: (...args) => this.agent(...args),

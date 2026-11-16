@@ -1136,7 +1136,19 @@ three fields: omitted or empty model/effort values inherit the agent defaults;
 `{ "agentId": null }` clears all three. Model and effort require a bound agent.
 Main continues to follow the baton and cannot be pinned. An explicit send to
 another agent uses that agent's defaults. A change leaves an in-flight answer
-alone; queued native requests retain the selection captured when submitted.
+alone; queued messages retain the selection captured when submitted.
+
+Use `loom send "Review the changes" --model gpt-5.4 --effort high` to override
+the model or effort for just one message. The API accepts the same optional
+`model` and `effort` strings in `POST /api/projects/:id/messages`, alongside
+`text`, `chat`, and `agentId`. For example:
+`{ "text": "Review the changes", "chat": "<chat-id>", "effort": "high" }`.
+Each omitted or blank field inherits the chat selection (or the agent default
+when the chat does not bind that agent). Values are trimmed and validated just
+like chat bindings; invalid selections return HTTP 400. These overrides never
+change the stored chat or agent defaults. Queued message items carry `model`
+and `effort`, with `null` meaning agent defaults, so later chat edits do not
+change a waiting message's selection. This also survives a daemon restart.
 
 Effort is supported by Claude Code, Codex, and Antigravity CLI (and the test
 `echo` adapter). Unsupported effort choices are rejected. Model IDs are
