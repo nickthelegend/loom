@@ -150,6 +150,8 @@ export interface Chat {
   agentId?: string;
   model?: string;
   effort?: string;
+  /** Where it went, when it was moved to another machine (#364). */
+  movedTo?: { device: string; name: string; at: number; jobId: string };
 }
 
 /** Per-agent cost + token rollup from the daemon's /metrics endpoint. */
@@ -2025,6 +2027,9 @@ export interface TeamRunners {
 export type RunnerAction = "start" | "continue" | "bring-back" | "land";
 
 export const getTeamRunners = (c: Creds, id: string) => api<TeamRunners>(c, `/api/projects/${id}/team/runners`);
+/** Move a chat to another of your machines (#364): after its current turn, history and the agent's place go too. */
+export const moveChat = (c: Creds, id: string, chat: string, to: string) =>
+  api<{ chat: Chat; jobId: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/move`, { method: "POST", body: JSON.stringify({ to }) });
 
 /**
  * start {goal, orchestrator?, workers?, plan?, runner?} · continue {runId, runner?}

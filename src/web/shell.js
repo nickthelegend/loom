@@ -7,6 +7,7 @@ import { esc,highlight,hue,money } from './format.js';
 import { ICONS,LOADER } from './icons.js';
 import { applyRail,applyWidths,cssPx,makeResizer,railOpen,shellEl,toggleRail } from './layout.js';
 import { openMenu } from './menus.js';
+import { onlineRunners,runnerName } from './team.js';
 import { askConfirm,askText,devicePref,isUnread,setDevicePref,toast } from './notifications.js';
 import { openPalette } from './palette.js';
 import { renderProject } from './project.js';
@@ -822,6 +823,10 @@ import { openTriggers } from './triggers-ui.js';
         setDevicePref("chatsByAgent", !devicePref("chatsByAgent", false)); drawList();
       } });
       items.push({ label: "Share live…", icon: ICONS.team, hint: "a teammate joins this chat", run: function(){ openShareLive(pid, cid, c.title); } });
+      // Pick the conversation up on another machine (#364): history and the agent's place go with it
+      if (!isMain) items.push(c.movedTo
+        ? { label: "Moved to " + c.movedTo.name, icon: ICONS.unpair, hint: "continue it there", run: function(){ toast("this chat continues on " + c.movedTo.name + " \u2014 move it back from there"); } }
+        : { label: "Move to another machine…", icon: ICONS.unpair, hint: "your runners", run: function(){ moveChatMenu(pid, cid, c.title); } });
       // When a PR this chat opened fails CI or gets a review, the fix request comes back here (#378)
       var PRF = { off: "off", ci: "CI failures", "ci+reviews": "CI + reviews" };
       items.push({ label: "PR feedback…", icon: ICONS.pr, hint: PRF[c.prFeedback || "ci"], run: function(){
@@ -919,6 +924,29 @@ import { openTriggers } from './triggers-ui.js';
       api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid), { method: "PATCH", body: JSON.stringify({ prFeedback: mode }) })
         .then(function(){ refresh(); toast(mode === "off" ? "this chat won't hear about its PRs" : mode === "ci" ? "CI failures on this chat's PRs come back here" : "CI failures and reviews on this chat's PRs come back here"); })
         .catch(function(err){ toast(err.message); });
+    }
+
+    /** Choose one of your online runners and move the chat there, after its current turn. */
+    function moveChatMenu(pid, cid, title){
+      var row = document.querySelector('.crow[data-chat="' + cid + '"]');
+      var r = (row || document.body).getBoundingClientRect();
+      var show = function(list){
+        var rs = (list || []).filter(function(x){ return x.online && x.mine; });
+        if (!rs.length) { toast("none of your runners is online \u2014 start one with loom runner, then try again"); return; }
+        openMenu(Math.round(r.left + 24), Math.round(r.bottom), [{ head: "Move \u201c" + title + "\u201d to" }].concat(rs.map(function(x){
+          return { label: runnerName(x), icon: ICONS.unpair, hint: x.platform || "", run: function(){
+            askConfirm("Move this chat to " + runnerName(x) + "?\n\nIt waits for the running turn, then its history and the agent's place go there. This copy stays as a record and stops taking messages.", { ok: "Move it" }).then(function(ok){
+              if (!ok) return;
+              toast("moving \u2014 waiting for the current turn\u2026");
+              api("/api/projects/" + pid + "/chats/" + encodeURIComponent(cid) + "/move", { method: "POST", body: JSON.stringify({ to: x.deviceId }) })
+                .then(function(){ refresh(); toast("moved to " + runnerName(x)); })
+                .catch(function(err){ toast(err.message); });
+            });
+          } };
+        })));
+      };
+      api("/api/projects/" + pid + "/team/runners").then(function(j){ show((j && j.runners) || []); })
+        .catch(function(){ show(onlineRunners(pid, true)); });
     }
 
     function bindChat(pid, cid, agentId){

@@ -31,7 +31,7 @@ import {
 import { NewChatSheet } from "./new-chat";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage } from "./api";
+import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage, getTeamRunners, moveChat } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -1543,6 +1543,18 @@ export function ProjectScreen(props: {
             onRename={(title) => chatMenu && void act(() => renameChat(creds, project.id, chatMenu.id, title))}
             onFlags={(flags) => chatMenu && void act(() => setChatFlags(creds, project.id, chatMenu.id, flags))}
             onDelete={() => chatMenu && void act(() => deleteChat(creds, project.id, chatMenu.id), chatMenu.id)}
+            onMove={chatMenu && chatMenu.id !== "main" ? () => {
+              const c = chatMenu;
+              setChatMenu(null);
+              void getTeamRunners(creds, project.id).then((r) => {
+                const mine = (r.runners ?? []).filter((x) => x.online && x.mine).slice(0, 3);
+                if (!mine.length) return Alert.alert("No runner online", "Start one of your machines with loom runner, then try again.");
+                Alert.alert(`Move "${c.title}"`, "After the current turn, its history and the agent's place go there; this copy stops taking messages.", [
+                  ...mine.map((x) => ({ text: x.label || x.deviceId, onPress: () => void act(() => moveChat(creds, project.id, c.id, x.deviceId)) })),
+                  { text: "Cancel", style: "cancel" as const },
+                ]);
+              }).catch((e: Error) => Alert.alert("Couldn't list your machines", e.message));
+            } : undefined}
             onShareLive={(role) => {
               const c = chatMenu;
               if (!c) return;
@@ -2279,6 +2291,8 @@ function ChatMenu(props: {
   onRename: (title: string) => void;
   onFlags: (flags: { pinned?: boolean; archived?: boolean; prFeedback?: "off" | "ci" | "ci+reviews" }) => void;
   onDelete: () => void;
+  /** Move to another of your machines (#364). */
+  onMove?: () => void;
 }) {
   const [title, setTitle] = useState("");
   useEffect(() => setTitle(props.chat?.title ?? ""), [props.chat]);
@@ -2308,6 +2322,7 @@ function ChatMenu(props: {
           {/* the PRs this chat opens: what comes back when they need work (#378) — tap to cycle */}
           {row(`PR feedback: ${({ off: "off", ci: "CI failures", "ci+reviews": "CI + reviews" } as const)[c.prFeedback ?? "ci"]}`, () =>
             props.onFlags({ prFeedback: (({ ci: "ci+reviews", "ci+reviews": "off", off: "ci" } as const)[c.prFeedback ?? "ci"]) }))}
+          {c.movedTo ? row(`Moved to ${c.movedTo.name} — continue it there`, () => {}, T.dim) : props.onMove ? row("Move to another machine…", props.onMove) : null}
           {row(c.pinned ? "Unpin" : "Pin to the front", () => props.onFlags({ pinned: !c.pinned }))}
           {row(c.archived ? "Unarchive" : "Archive", () => props.onFlags({ archived: !c.archived }))}
           {row("Delete chat", () =>
