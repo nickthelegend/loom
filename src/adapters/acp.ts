@@ -26,7 +26,7 @@ import { requestApproval } from "../core/approvals.js";
 import { autoPolicyFor, decideAuto, refusalText } from "../core/auto-policy.js";
 import { permissionFor } from "../core/permissions.js";
 import type { SendInput } from "../types.js";
-import { AdapterBase, agentEnv, cliAvailable } from "./base.js";
+import { ADAPTER_CAPABILITIES, AdapterBase, agentEnv, cliAvailable } from "./base.js";
 
 /** Ready-made commands for agents known to speak ACP. `command` in options wins. */
 export const ACP_PRESETS: Record<string, { command: string[]; label: string; modes?: Partial<Record<"bypass" | "auto" | "ask", string>> }> = {
@@ -67,6 +67,7 @@ function policyTool(kind: string | undefined, raw: Json): { tool: string; input:
 }
 
 export class AcpAdapter extends AdapterBase {
+  readonly capabilities = { ...ADAPTER_CAPABILITIES, mcp: true };
   private child: ChildProcess | null = null;
   private nextId = 1;
   private pending = new Map<number, Pending>();
@@ -228,10 +229,20 @@ export class AcpAdapter extends AdapterBase {
   }
 
   /** This chat's ACP session: resumed when the agent can load one, made otherwise. */
-  private async session(chat: string): Promise<string> {
+  private async session(chat: string, mcp: SendInput["mcp"]): Promise<string> {
     const sessions = (this.nativeState.read().sessions ?? {}) as Record<string, string>;
     const known = sessions[chat];
-    const params = { cwd: this.projectDir, mcpServers: [] };
+    const mcpServers: Json[] = [];
+    const mcpCaps = (this.caps.mcpCapabilities ?? {}) as Json;
+    for (const { name, entry } of mcp?.servers ?? []) {
+      if (entry.type === "stdio") {
+        mcpServers.push({ name, command: entry.command, args: entry.args ?? [], env: Object.entries(entry.env ?? {}).map(([name, value]) => ({ name, value })) });
+      } else if (mcpCaps[entry.type] === true) {
+        // Remote transports are optional in ACP; stdio is always supported.
+        mcpServers.push({ name, type: entry.type, url: entry.url, headers: Object.entries(entry.headers ?? {}).map(([name, value]) => ({ name, value })) });
+      }
+    }
+    const params = { cwd: this.projectDir, mcpServers };
     let id: string | undefined;
     if (known && this.caps.loadSession) {
       this.loading.add(known);
@@ -293,7 +304,7 @@ export class AcpAdapter extends AdapterBase {
     let idle: ReturnType<typeof setTimeout> | undefined;
     try {
       await this.boot();
-      const sessionId = await this.session(input.chat ?? "main");
+      const sessionId = await this.session(input.chat ?? "main", input.mcp);
       await this.selectModel(sessionId, input.model);
       this.current = { sessionId };
       const touch = () => {

@@ -1001,8 +1001,9 @@ export const importChat = (c: Creds, id: string, source: string, sessionId: stri
 
 export const getChats = (c: Creds, id: string) =>
   api<{ chats: Chat[] }>(c, `/api/projects/${id}/chats`);
-export const createChat = (c: Creds, id: string, title: string) =>
-  api<{ chat: Chat }>(c, `/api/projects/${id}/chats`, { method: "POST", body: JSON.stringify({ title }) });
+/** A new chat; `agentId` and `model` bind who answers in it, and on which model. */
+export const createChat = (c: Creds, id: string, title: string, opts: { agentId?: string; model?: string } = {}) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats`, { method: "POST", body: JSON.stringify({ title, ...opts }) });
 export const renameChat = (c: Creds, id: string, chat: string, title: string) =>
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/rename`, { method: "POST", body: JSON.stringify({ title }) });
 export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned?: boolean; archived?: boolean }) =>
