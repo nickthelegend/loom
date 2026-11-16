@@ -34,7 +34,7 @@ export function createRoutes(view) {
         if (!task) return toast("describe the task first");
         var spec = sel.value === "__custom" ? (document.getElementById("rsteps").value || "").trim() : sel.value;
         if (!spec) return toast("give steps like planner,executor");
-        api("/api/projects/" + view.pid + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: spec }) })
+        api("/api/projects/" + view.pid + "/route", { method: "POST", body: JSON.stringify({ task: task, spec: spec, chat: view.chatId }) })
           .then(function(){ view.refresh(); toast("route started"); if (after) after(); })
           .catch(function(err){ toast(err.message); });
       }

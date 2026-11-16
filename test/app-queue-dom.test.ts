@@ -10,12 +10,17 @@
 
 import { JSDOM, VirtualConsole } from "jsdom";
 import WebSocket from "ws";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { readDaemonConfig } from "../src/core/registry.js";
 import { APP_HTML } from "../src/daemon/app-page.js";
 import { DaemonClient } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
+
+// Auto routes use the real rules fallback; tests never launch an external router CLI.
+vi.mock("../src/core/claude-cli.js", () => ({
+  claudeText: async () => { throw new Error("router unavailable in tests"); },
+}));
 
 let daemon: LoomDaemon;
 let baseUrl: string;
@@ -73,7 +78,7 @@ interface Mounted {
   close: () => void;
 }
 
-function mount(): Mounted {
+function mount(chat?: string, mobile = false): Mounted {
   const errors: string[] = [];
   const virtualConsole = new VirtualConsole();
   virtualConsole.on("jsdomError", (e: Error) => errors.push(e.message));
@@ -83,7 +88,7 @@ function mount(): Mounted {
   const never = new Promise<never>(() => {});
 
   const dom = new JSDOM(APP_HTML, {
-    url: `${baseUrl}/app#p/${projectId}`,
+    url: `${baseUrl}/app#p/${projectId}${chat ? `/c/${chat}` : ""}`,
     runScripts: "dangerously",
     pretendToBeVisual: true,
     virtualConsole,
@@ -97,7 +102,7 @@ function mount(): Mounted {
         disconnect() {}
       } as unknown as typeof window.ResizeObserver;
       window.matchMedia = ((q: string) => ({
-        matches: /min-width/.test(q),
+        matches: !mobile && /min-width/.test(q),
         media: q,
         onchange: null,
         addListener() {},
@@ -170,6 +175,33 @@ async function ready(m: Mounted) {
 }
 
 describe("web app · the prompt queue", () => {
+  it.each(["composer", "picker"])("starts a route from the %s in the displayed chat", async (entry) => {
+    const chat = entry === "picker" ? "main" :
+      (await rest<{ chat: { id: string } }>("POST", "/chats", { title: "Route here" })).chat.id;
+    const m = mount(chat, entry === "picker");
+    await ready(m);
+    if (entry === "composer") {
+      click($(m, "#cagent"));
+      await waitUntil(() => !!$(m, "[data-auto]"));
+      $(m, "[data-auto]")!.dispatchEvent(new m.window.MouseEvent("mousedown", { bubbles: true }));
+      await sendPrompt(m, "route in this thread");
+    } else {
+      click($(m, "#routebtn"));
+      await waitUntil(() => !!$(m, "#rgo"));
+      ($(m, "#rsel") as HTMLSelectElement).value = "auto";
+      ($(m, "#rtask") as HTMLInputElement).value = "route from the picker";
+      click($(m, "#rgo"));
+    }
+    await waitUntil(async () => {
+      const { route } = await rest<{ route: { status: string; chat?: string } }>("GET", "/route");
+      return route?.status === "completed" && route.chat === chat;
+    });
+    const { events } = await rest<{ events: Array<{ kind: string; agentId?: string }> }>("GET", `/events?chat=${chat}`);
+    expect(events.filter((e) => e.kind === "message" && e.agentId)).toHaveLength(1);
+    expect(events.filter((e) => e.kind === "route_completed")).toHaveLength(1);
+    expect(m.errors).toEqual([]);
+  });
+
   it("lines up what you type while an agent is working, and shows who takes it", async () => {
     const m = mount();
     await ready(m);

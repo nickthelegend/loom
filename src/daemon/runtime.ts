@@ -347,8 +347,8 @@ export class ProjectRuntime {
       projectDir: info.dir,
       config,
       log,
-      handoff: (to) => this.handoff(to, { source: "route" }),
-      send: (text, agentId) => this.sendMessage(text, agentId, { source: "route" }),
+      handoff: (to, chat) => this.handoff(to, { source: "route", chat }),
+      send: (text, agentId, chat) => this.sendMessage(text, agentId, { source: "route", chat }),
       interrupt: () => this.interrupt({ source: "route" }),
       costTotal: () => this.accounting.costs.totalUsd,
       turnFacts: (agentId) => this.turnFacts(agentId),
@@ -3259,7 +3259,7 @@ export class ProjectRuntime {
 
   async handoff(
     to: string,
-    opts: { source?: "user" | "route" } = {},
+    opts: { source?: "user" | "route"; chat?: string } = {},
   ): Promise<{ from: string | null; merge?: MergeOutcome }> {
     if (this.continuity?.store.activeReceipts().some(r => r.execution === "unknown"))
       throw new ContinuityError("recovery_required", "reconcile uncertain native writers before handoff or merge");
@@ -3304,7 +3304,7 @@ export class ProjectRuntime {
       // New context is assembled from the selected chat at dispatch, never
       // from global history or private bridge memory on a picker click.
       this.briefings.pendingBriefings.delete(to);
-      const { from } = this.baton.handoff(to, { ...handoffMeta, projected: false, continuity: 1 });
+      const { from } = this.baton.handoff(to, { ...handoffMeta, projected: false, continuity: 1 }, opts.chat);
       await this.ensureStarted(to);
       return { from, ...(merge ? { merge } : {}) };
     }
@@ -3315,14 +3315,14 @@ export class ProjectRuntime {
     writeMemoryFile(this.info.dir, to, prepared.memory);
     this.briefings.pendingBriefings.set(to, prepared.briefing);
     if (prepared.mode === "llm") {
-      this.log.append({ kind: "status", payload: { state: "projection", mode: "llm", ms: prepared.elapsedMs } });
+      this.log.append({ kind: "status", chat: opts.chat, payload: { state: "projection", mode: "llm", ms: prepared.elapsedMs } });
     }
     for (const bridge of prepared.bridges) {
       await this.agents.get(bridge.agentId)?.injectMemory(bridge.memory).catch(() => {});
     }
     if (this.closed || this.agents.get(to) !== target) throw new Error("handoff target is no longer active");
 
-    const { from } = this.baton.handoff(to, handoffMeta);
+    const { from } = this.baton.handoff(to, handoffMeta, opts.chat);
     await this.ensureStarted(to);
     return { from, ...(merge ? { merge } : {}) };
   }
@@ -3375,11 +3375,13 @@ export class ProjectRuntime {
     spec?: string | RouteStepSpec[];
     router?: RouterKind;
     maxHops?: number;
+    chat?: string;
   }): Promise<RouteState> {
     if (this.continuity) throw new ContinuityError("unsupported", "autonomous route continuity is not verified; select a native agent directly");
     this.snapshotBeforeRoute();
     if (typeof opts.spec === "string" && opts.spec.trim() === "auto") {
       return this.routes.startDynamic(opts.task, {
+        ...(opts.chat ? { chat: opts.chat } : {}),
         ...(opts.router ? { router: opts.router } : {}),
         ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
       });
@@ -3410,7 +3412,7 @@ export class ProjectRuntime {
           .map((a) => a.id);
       }
     }
-    return this.routes.start(steps ?? [], opts.task, name);
+    return this.routes.start(steps ?? [], opts.task, name, opts.chat);
   }
 
   async abortRoute(): Promise<RouteState> {

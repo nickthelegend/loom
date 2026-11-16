@@ -7,7 +7,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { LoomEvent, ProjectConfig } from "../src/types.js";
 import { parseModelRef } from "../src/adapters/opencode.js";
 import { readDaemonConfig, writeProjectConfig } from "../src/core/registry.js";
@@ -15,6 +15,11 @@ import { resolveSteps } from "../src/core/routes.js";
 import { DaemonClient } from "../src/daemon/client.js";
 import { LoomDaemon } from "../src/daemon/server.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
+
+// A missing external helper exercises the real projection fallback without spawning a CLI.
+vi.mock("../src/core/claude-cli.js", () => ({
+  claudeText: async () => { throw new Error("helper unavailable in tests"); },
+}));
 
 let daemon: LoomDaemon;
 let client: DaemonClient;
