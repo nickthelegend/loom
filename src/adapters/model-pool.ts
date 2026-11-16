@@ -20,6 +20,8 @@ export class ModelPool extends AdapterBase {
   private readonly defaultEffort: unknown;
   /** Present only when the wrapped kind can answer questions — the runtime duck-types it. */
   respondToUserInput?: (chat: string, requestId: string, answers: Record<string, unknown>) => Promise<void>;
+  /** Present only when the wrapped kind can take input mid-turn (#373); goes to the running instance. */
+  steer?: (chat: string, text: string) => Promise<boolean>;
 
   constructor(private readonly cfg: AgentConfig, dir: string, private readonly initial: Adapter,
     private readonly build: (cfg: AgentConfig) => Adapter) {
@@ -30,6 +32,12 @@ export class ModelPool extends AdapterBase {
     this.defaultEffort = cfg.options?.effort;
     this.instances.set(this.key(cfg.options?.model, cfg.options?.effort), initial);
     this.watch(initial);
+    if (typeof initial.steer === "function") {
+      this.steer = (chat, text) => {
+        const run = this.active.steer;
+        return this.dispatched && run ? run.call(this.active, chat, text) : Promise.resolve(false);
+      };
+    }
     if (typeof initial.respondToUserInput === "function") {
       // the question belongs to whichever instance ran the turn that asked it
       this.respondToUserInput = (chat, requestId, answers) => {
