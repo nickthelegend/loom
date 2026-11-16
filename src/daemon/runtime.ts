@@ -1,6 +1,7 @@
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { createAgent, isWithdrawnKind, knownAgentKinds, tierForKind } from "../adapters/index.js";
 import { ModelAdapter } from "../adapters/model.js";
 import { ADES, detectAdes } from "../core/ades.js";
@@ -99,7 +100,7 @@ import type {
   UnifiedMemory
 } from "../types.js";
 import { GIT_DELIVERIES, MAIN_CHAT, isAdapter, type GitDelivery } from "../types.js";
-import { MAX_FANOUT, ServerFrame, TeamBrainHook, activityLine, configMtimeOf, withLoomAskTimeout } from './runtime-support.js';
+import { MAX_FANOUT, ServerFrame, TeamBrainHook, activityLine, withLoomAskTimeout } from './runtime-support.js';
 import { RuntimeAccounting } from './runtime/accounting.js';
 import { RuntimeAgents } from './runtime/agents.js';
 import { RuntimeBriefings } from './runtime/briefings.js';
@@ -189,7 +190,16 @@ export class ProjectRuntime {
   readonly nativeUsage = new NativeUsage();
   private readonly agentLifecycle = new RuntimeAgents();
   private get agents(): ReadonlyMap<string, AnyAgent> { return this.agentLifecycle.agents; }
-  private configMtime = 0;
+  private unwatchConfig: (() => void) | null = null;
+  private configTimer: ReturnType<typeof setTimeout> | null = null;
+  private configError: string | null = null;
+  private deferredAgents = new Map<string, { previous: AgentConfig; next?: AgentConfig }>();
+  /**
+   * The config as it was last read from (or written to) disk. Edits are diffed against this, not
+   * against `config`: the runtime fills in its agent configs as it runs, and comparing the file to
+   * those would see every agent as edited and rebuild them mid-turn.
+   */
+  private configOnDisk: ProjectConfig | null = null;
   private journalFailure: Error | null = null;
   /** What you've lined up, run one at a time — see core/prompt-queue.ts. */
   readonly queue: PromptQueue;
@@ -602,7 +612,6 @@ export class ProjectRuntime {
     let rt: ProjectRuntime;
     try { rt = new ProjectRuntime(info, config, log); }
     catch (error) { log.close(); throw error; }
-    rt.configMtime = configMtimeOf(info.dir);
     rt.rehydrateCosts();
     rt.rehydrateSignIns();
     // finished orchestra runs older than a week give their disk back (#295)
@@ -631,6 +640,8 @@ export class ProjectRuntime {
         rt.spawnAgent(cfg);
       }
     }
+    rt.configOnDisk = readProjectConfig(info.dir);
+    rt.watchConfig();
     return rt;
   }
   private rehydrateCosts(): void { return this.accounting.rehydrateCosts(); }
@@ -668,17 +679,129 @@ export class ProjectRuntime {
 
   unquarantine(agentId: string): { reason: string; since: number; displaced: boolean } | null { return this.accounting.unquarantine(agentId); }
 
-  /** Has .loom/config.json changed since this runtime was opened? */
-  configStale(): boolean {
-    return configMtimeOf(this.info.dir) > this.configMtime;
+  private watchConfig(): void {
+    // Poll the path: atomic editor saves replace its inode, and native watch
+    // handles can run out when many projects are loaded.
+    const file = path.join(projectLoomDir(this.info.dir), "config.json");
+    const changed = () => this.scheduleConfigReload();
+    fs.watchFile(file, { persistent: false, interval: 250 }, changed);
+    this.unwatchConfig = () => fs.unwatchFile(file, changed);
+  }
+
+  /** Soon after an edit (debounced); while an edit waits on a busy agent, every couple of seconds. */
+  private scheduleConfigReload(waiting = false): void {
+    if (!this.unwatchConfig || this.closed) return;
+    if (this.configTimer) clearTimeout(this.configTimer);
+    this.configTimer = setTimeout(() => {
+      this.configTimer = null;
+      this.reloadConfig();
+    }, waiting ? 2000 : 150);
+    this.configTimer.unref();
+  }
+
+  private reportConfigError(error: unknown): void {
+    const message = `Could not reload .loom/config.json; keeping the previous config: ${error instanceof Error ? error.message : String(error)}`;
+    if (this.closed || message === this.configError) return;
+    this.configError = message;
+    this.log.append({ kind: "error", chat: MAIN_CHAT, payload: { state: "config_reload_failed", message } });
+    logbook.warn("config", message, undefined, this.info.id);
+  }
+
+  private reloadConfig(): void {
+    if (this.closed) return;
+    try {
+      const next = readProjectConfig(this.info.dir, { strict: true });
+      if (!next) throw new Error("the file is missing");
+      if (typeof next.name !== "string" || !Array.isArray(next.agents)) throw new Error("config needs a name and an agents array");
+      const wanted = new Map<string, AgentConfig>();
+      for (const cfg of next.agents) {
+        // as tolerant as opening the project: an id and a known kind; a missing role is doctor's to mention
+        if (!cfg || typeof cfg.id !== "string" || !cfg.id.trim()) throw new Error("each agent needs an id");
+        if (cfg.role !== undefined && typeof cfg.role !== "string") throw new Error(`the role of "${cfg.id}" must be text`);
+        if (wanted.has(cfg.id)) throw new Error(`duplicate agent id "${cfg.id}"`);
+        if (!knownAgentKinds().includes(cfg.kind)) throw new Error(`unknown agent kind "${cfg.kind}"`);
+        if (cfg.instructions !== undefined && typeof cfg.instructions !== "string") throw new Error(`instructions for "${cfg.id}" must be text`);
+        if (cfg.options !== undefined && (!cfg.options || typeof cfg.options !== "object" || Array.isArray(cfg.options)))
+          throw new Error(`options for "${cfg.id}" must be an object`);
+        wanted.set(cfg.id, cfg);
+      }
+      const changingContinuity = Boolean(next.brain?.continuity) !== Boolean(this.continuity);
+      if (changingContinuity && (this.anyBusy() || this.continuity?.store.activeReceipts().length || this.queue.length)) {
+        this.scheduleConfigReload(true);
+        return;
+      }
+      const previous = new Map((this.configOnDisk ?? this.config).agents.map(a => [a.id, a]));
+      const inMemory = new Map(this.config.agents.map(a => [a.id, a]));
+      const deferred = new Map<string, { previous: AgentConfig; next?: AgentConfig }>();
+      const added: string[] = [], removed: string[] = [], updated: string[] = [];
+      const prepared = new Map<string, AnyAgent>();
+      for (const id of new Set([...previous.keys(), ...wanted.keys()])) {
+        const before = previous.get(id), after = wanted.get(id);
+        if (isDeepStrictEqual(before, after)) continue;
+        const live = this.agents.get(id);
+        if (before && (this.turns.busySince.has(id) || (live && isAdapter(live) && live.busy()))) {
+          deferred.set(id, { previous: structuredClone(before), next: after });
+          continue;
+        }
+        if (!before) added.push(id);
+        else if (!after) removed.push(id);
+        else updated.push(id);
+        // Construct all replacements before changing the roster, so a rejected
+        // adapter option cannot leave half of an edit applied.
+        if (after && after.enabled !== false) prepared.set(id, createAgent(
+          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } }, this.agentDir(id),
+        ));
+      }
+      const was = this.configOnDisk ?? this.config;
+      const fields = [...new Set([...Object.keys(was), ...Object.keys(next)])]
+        .filter(k => k !== "agents" && !isDeepStrictEqual(was[k as keyof ProjectConfig], next[k as keyof ProjectConfig]));
+      const report = added.length || removed.length || updated.length || fields.length || !isDeepStrictEqual(deferred, this.deferredAgents);
+      // unchanged agents keep the live config the runtime has been filling in
+      const agents = next.agents.map(a => deferred.has(a.id) || isDeepStrictEqual(previous.get(a.id), a) ? (inMemory.get(a.id) ?? a) : a);
+      for (const id of deferred.keys()) if (!wanted.has(id)) agents.push(inMemory.get(id) ?? previous.get(id)!);
+      if (changingContinuity) {
+        if (next.brain?.continuity) { this.continuity = new ContinuityEngine(this.log, this.info.id); this.harnesses.start(); }
+        else { this.continuity?.store.releaseOwner(); this.continuity = null; this.harnesses.stop(); }
+        this.briefings.cancelExtraction(); this.turns.turnText.clear(); this.briefings.pendingBriefings.clear();
+      }
+      // Routes and the other coordinators share this object by reference.
+      for (const key of Object.keys(this.config)) delete (this.config as unknown as Record<string, unknown>)[key];
+      Object.assign(this.config, next, { agents });
+      for (const id of [...removed, ...updated]) {
+        if (!prepared.has(id)) void this.agentLifecycle.retire(id).catch(error => this.reportConfigError(error));
+      }
+      for (const [id, agent] of prepared) this.spawnAgent(wanted.get(id)!, agent);
+      this.validHolder();
+      this.deferredAgents = deferred;
+      this.configError = null;
+      // what's on disk now, less the edits still waiting on a busy agent
+      this.configOnDisk = structuredClone({ ...next, agents: [
+        ...next.agents.filter(a => !deferred.has(a.id)),
+        ...[...deferred.values()].map(d => d.previous),
+      ] });
+      if (fields.includes("brain")) void this.briefings.configureSemantic(!this.continuity && this.config.brain?.semantic === true);
+      if (report) {
+        const changes = [
+          ...added.map(id => `added ${id}`), ...removed.map(id => `removed ${id}`),
+          ...updated.map(id => `updated ${id}`), ...fields.map(k => `updated ${k}`),
+          ...[...deferred.keys()].map(id => `deferred ${id} until its turn finishes`),
+        ];
+        const text = `.loom/config.json: ${changes.join("; ")}`;
+        this.log.append({ kind: "status", chat: MAIN_CHAT, payload: { state: "config_reloaded", text, added, removed, updated, fields, deferred: [...deferred.keys()] } });
+        logbook.info("config", text, undefined, this.info.id);
+      }
+      // Some adapters clear busy only after emitting their terminal event.
+      // Retry while an edit is deferred, always reading the latest file.
+      if (deferred.size) this.scheduleConfigReload(true);
+    } catch (error) {
+      this.reportConfigError(error);
+    }
   }
 
   /**
    * Rename an agent's job. Writes .loom/config.json (the source of truth) and
-   * updates this runtime in place — the generic hot-reload would do it too, but
-   * only once the project is quiet, and a label you just typed shouldn't wait
-   * on an agent's turn to finish. Nothing is torn down: a role is a name, not
-   * a capability, so no adapter needs restarting.
+   * updates this runtime in place. A label edited through the UI takes effect
+   * immediately, without waiting for the file watcher.
    */
   /** An agent's picture: a small PNG/JPEG/WebP data URL, or null to clear. */
   setAgentAvatar(agentId: string, dataUrl: string | null): { id: string; avatar: string | null } | null {
@@ -1057,10 +1180,10 @@ export class ProjectRuntime {
    * runtime must stream its events into the log the same way as one that was
    * there when the project opened.
    */
-  private spawnAgent(cfg: AgentConfig): AnyAgent {
+  private spawnAgent(cfg: AgentConfig, prepared?: AnyAgent): AnyAgent {
     // The project id rides along so an adapter can file approvals ("always
     // ask") against the right project — see core/approvals.ts.
-    const agent = createAgent(
+    const agent = prepared ?? createAgent(
       { ...cfg, options: { ...this.policyOptions(cfg), loomProject: this.info.id } },
       this.agentDir(cfg.id),
     );
@@ -1288,12 +1411,16 @@ export class ProjectRuntime {
     return cfg;
   }
 
-  /** Write the roster, without tripping our own staleness check. */
+  /** Keep deferred file edits when an unrelated setting is saved through the UI. */
   private saveConfig(): void {
-    writeProjectConfig(this.info.dir, this.config);
-    // we just wrote the file, so don't let configStale() see our own write and
-    // schedule a pointless reload
-    this.configMtime = configMtimeOf(this.info.dir);
+    const agents = this.config.agents.flatMap(cfg => {
+      const pending = this.deferredAgents.get(cfg.id);
+      if (!pending || !isDeepStrictEqual(cfg, pending.previous)) return [cfg];
+      return pending.next ? [pending.next] : [];
+    });
+    writeProjectConfig(this.info.dir, { ...this.config, agents });
+    // a deferred agent's edit is on disk but not yet applied: remember it as it was, so it still reads as an edit
+    this.configOnDisk = structuredClone({ ...this.config, agents: this.config.agents.map(cfg => this.deferredAgents.get(cfg.id)?.previous ?? cfg) });
   }
 
   // ── Skills (SKILL.md context blocks injected into the briefing) ──
@@ -2032,10 +2159,9 @@ export class ProjectRuntime {
     return true;
   }
 
-  /** Any adapter mid-turn? (Hot reloads are deferred while work is in flight.) */
+  /** Is foreground or coordinated work still in flight? */
   anyBusy(): boolean {
-    // A live orchestra run counts: reloading the project would close it, and
-    // closing aborts the run — a config edit must not kill a fleet mid-flight.
+    // Switching continuity modes must also wait for coordinated work to finish.
     if (this.orchestra.active() || this.routes.isActive() || this.turns.busySince.size > 0 || this.crews.list().some(c => c.busy)) return true;
     return [...this.agents.values()].some((a) => isAdapter(a) && a.busy());
   }
@@ -2542,6 +2668,9 @@ export class ProjectRuntime {
     agentId?: string,
     opts: TurnOptions = {},
   ): Promise<TurnResult> {
+    // A queued follow-up can start before the watcher's next retry. Apply any
+    // deferred edit at this safe boundary before the turn captures its agent.
+    if (this.deferredAgents.size) this.reloadConfig();
     // a person speaking in a chat is a new start: nobody there is "stuck" any more
     if ((opts.source ?? "user") === "user") {
       const chat = opts.chat ?? MAIN_CHAT;
@@ -3640,6 +3769,9 @@ export class ProjectRuntime {
   }
 
   async close(): Promise<void> {
+    this.unwatchConfig?.();
+    this.unwatchConfig = null;
+    if (this.configTimer) { clearTimeout(this.configTimer); this.configTimer = null; }
     this.unregisterAutoPolicy();
     await this.orchestra.shutdown().catch(() => { });
     this.relay.stop();
