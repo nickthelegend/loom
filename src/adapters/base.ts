@@ -27,7 +27,7 @@ export abstract class AgentBase {
   readonly id: string;
   readonly kind: string;
   protected projectDir: string;
-  protected readonly nativeState: AgentStateStore;
+  protected nativeState: AgentStateStore;
   private listeners = new Set<EventCb>();
   private streamers = new Set<StreamCb>();
 
@@ -36,6 +36,11 @@ export abstract class AgentBase {
     this.kind = kind;
     this.projectDir = projectDir;
     this.nativeState = new AgentStateStore(projectDir, id);
+  }
+
+  /** Process-bound models must never resume another model instance's native state. */
+  scopeNativeState(scope: string): void {
+    this.nativeState = new AgentStateStore(this.projectDir, `${this.id}:model:${scope}`);
   }
 
   onEvent(cb: EventCb): () => void {

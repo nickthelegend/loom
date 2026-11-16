@@ -42,7 +42,7 @@ export interface TurnOptions {
   fresh?: boolean;
   /** How long you asked this one answer to be. */
   length?: "brief" | "detailed";
-  requestId?: string; capturedModel?: string | null; resume?: boolean; contextTarget?: number;
+  requestId?: string; capturedModel?: string | null; capturedEffort?: string | null; resume?: boolean; contextTarget?: number;
 }
 /** How long you asked the answer to be, this once ("" for the usual). */
 function lengthLine(length: TurnOptions["length"]): string {
@@ -69,7 +69,7 @@ export interface RuntimeTurnsHost {
   info: ProjectInfo;
   extractMemory: (agentId: string, files: string[]) => void;
   config: ProjectConfig;
-  chatBinding: (chat?: string) => { agentId?: string; model?: string; };
+  chatBinding: (chat?: string) => { agentId?: string; model?: string; effort?: string; };
   validHolder: () => string | null;
   defaultAdapterId: () => string;
   agent: (id: string) => AnyAgent;
@@ -496,6 +496,7 @@ export class RuntimeTurns {
         ...(opts.fresh ? { freshSession: true } : {}),
         ...(briefing ? { briefing } : {}),
         ...(perTurnModel ? { model: perTurnModel } : {}),
+        ...(bound.agentId === target && bound.effort ? { effort: bound.effort } : {}),
         ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),
       };
       if (mcp) {
@@ -553,8 +554,10 @@ export class RuntimeTurns {
     const health = await this.host.harness(target);
     if (!health.available) throw new ContinuityError("unsupported", health.error ?? `${cfg.kind} CLI is not reachable`);
     if (this.busySince.size && (!opts.requestId || !brain.store.request(opts.requestId))) this.host.queue.assertCanAdd({ text });
+    const effort = opts.capturedEffort !== undefined ? opts.capturedEffort : bound.agentId === target ? bound.effort : undefined;
     const captured = brain.capture({ id: opts.requestId ?? randomUUID(), conversationId: chat, agentInstanceId: target,
-      text, source, model: opts.capturedModel !== undefined ? opts.capturedModel : bound.agentId === target ? bound.model ?? null : null,
+      text, source, ...(effort ? { effort } : {}),
+      model: opts.capturedModel !== undefined ? opts.capturedModel : bound.agentId === target ? bound.model ?? null : null,
       plan: Boolean(opts.plan), targetAddedTokens: 6000 });
     const request = captured.request;
     const previous = brain.store.receipts(request.id).at(-1);
@@ -572,7 +575,7 @@ export class RuntimeTurns {
     if (this.busySince.size) {
       if (opts.fromQueue) throw new ContinuityError("conflict", "another foreground turn is preparing or running");
       const item = this.host.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source,
-        ...(opts.plan ? { plan: true } : {}), ...(opts.length ? { length: opts.length } : {}), ...(opts.by ? { by: opts.by } : {}), continuity: { requestId: request.id, model: request.model } });
+        ...(opts.plan ? { plan: true } : {}), ...(opts.length ? { length: opts.length } : {}), ...(opts.by ? { by: opts.by } : {}), continuity: { requestId: request.id, model: request.model, effort: request.effort } });
       return { agentId: target, queued: this.host.queue.length, queueId: item.id, requestId: request.id };
     }
     this.busySince.set(target, Date.now()); this.turnChat.set(target, chat);
@@ -624,7 +627,7 @@ export class RuntimeTurns {
       runId = continuity.runId;
       this.preparing.delete(target);
       const input: SendInput = { text, chat, continuity, ...(nativePlan ? { interactionMode: "plan" as const } : {}),
-        ...(request.model ? { model: request.model } : {}), ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) };
+        ...(request.model ? { model: request.model } : {}), ...(request.effort ? { effort: request.effort } : {}), ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}) };
       // Never consume a legacy handoff briefing into the new packet path.
       this.host.pendingBriefings.delete(target);
       if (source === "user") { this.host.routes.onUserMessage(target, chat); this.host.releaseQuestionHold(target); }

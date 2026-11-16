@@ -15,7 +15,7 @@ export class ConversationStore {
     ];
   }
 
-  createChat(title: string, opts: { agentId?: string; model?: string } = {}): ChatInfo {
+  createChat(title: string, opts: { agentId?: string; model?: string; effort?: string } = {}): ChatInfo {
     const bound = opts.agentId ? opts : null;
     const state = readProjectState(this.projectDir);
     const chat: ChatInfo = {
@@ -26,18 +26,19 @@ export class ConversationStore {
       createdAt: Date.now(),
       ...(bound ? { agentId: bound.agentId } : {}),
       ...(bound?.model ? { model: bound.model } : {}),
+      ...(bound?.effort ? { effort: bound.effort } : {}),
     };
     state.chats = [...(state.chats ?? []), chat];
     writeProjectState(this.projectDir, state);
     return chat;
   }
 
-  setChatAgent(id: string, agentId: string | null, model?: string): ChatInfo | null {
+  setChatAgent(id: string, agentId: string | null, model?: string, effort?: string): ChatInfo | null {
     if (id === MAIN_CHAT) {
       // Main is where the baton answers; that's what makes it Main.
       throw new Error("the main thread follows the baton — make a new thread to pin an agent");
     }
-    const bound = agentId ? { agentId, model } : null;
+    const bound = agentId ? { agentId, model, effort } : null;
     const state = readProjectState(this.projectDir);
     const chat = (state.chats ?? []).find((c) => c.id === id);
     if (!chat) return null;
@@ -45,9 +46,12 @@ export class ConversationStore {
       chat.agentId = bound.agentId;
       if (bound.model) chat.model = bound.model;
       else delete chat.model;
+      if (bound.effort) chat.effort = bound.effort;
+      else delete chat.effort;
     } else {
       delete chat.agentId;
       delete chat.model;
+      delete chat.effort;
     }
     writeProjectState(this.projectDir, state);
     return chat;
