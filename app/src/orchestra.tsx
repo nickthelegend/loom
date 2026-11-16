@@ -49,6 +49,7 @@ import {
 import { AgentIcon, agentLabel } from "./agents";
 import { Badge, Callout, DiffView, Empty, Panel, SectionLabel, TAP, Unreachable, ago, dur, field } from "./components";
 import { Sheet } from "./observatory";
+import { FleetEditor, fleetSpec, type FleetRow } from "./orchestra-fleet";
 import { Markdown } from "./markdown";
 import { plainText } from "./markdown-model";
 import { TeamPolicyCard } from "./team-policy";
@@ -380,6 +381,8 @@ function StartForm(props: {
   const [orch, setOrch] = useState<string | null>(props.project.holder ?? adapters[0]?.id ?? null);
   const [workers, setWorkers] = useState<string[]>(adapters.map((a) => a.id));
   const [parallel, setParallel] = useState(3);
+  // fleets: N workers of one agent on one model, on top of the ticked agents (#369)
+  const [fleet, setFleet] = useState<FleetRow[]>([]);
   const [plan, setPlan] = useState(false);
   // a race: every checked agent gets the same prompt in its own worktree, and you keep one
   const [race, setRace] = useState(false);
@@ -394,13 +397,15 @@ function StartForm(props: {
     setErr(null);
     setBusy(true);
     try {
-      if (race && workers.length < 2) throw new Error("a race needs at least two agents — check another");
+      const all = [...workers, ...fleet.map(fleetSpec)];
+      const entrants = workers.length + fleet.reduce((n, f) => n + f.count, 0);
+      if (race && entrants < 2) throw new Error("a race needs at least two entrants — check another, or add a fleet");
       const { run } = await startOrchestra(props.creds, props.project.id, race
-        ? { goal: goal.trim(), ...(orch ? { orchestrator: orch } : {}), workers, race: true }
+        ? { goal: goal.trim(), ...(orch ? { orchestrator: orch } : {}), workers: all, race: true }
         : {
             goal: goal.trim(),
             ...(orch ? { orchestrator: orch } : {}),
-            ...(workers.length ? { workers } : {}),
+            ...(all.length ? { workers: all } : {}),
             maxParallel: parallel,
             ...(plan ? { plan: true } : {}),
           });
@@ -461,7 +466,7 @@ function StartForm(props: {
       </View>}
 
       <View style={{ gap: 6 }}>
-        <SectionLabel text={race ? `Entrants — ${workers.length} (two or more)` : `Workers — ${workers.length || "any"} selected`} />
+        <SectionLabel text={(() => { const n = workers.length + fleet.reduce((k, f) => k + f.count, 0); return race ? `Entrants — ${n} (two or more)` : `Workers — ${n || "any"} selected`; })()} />
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {adapters.map((a) => (
             <Chip
@@ -475,6 +480,9 @@ function StartForm(props: {
           ))}
         </View>
         {!adapters.length && <Empty text="This project has no enabled agents to orchestrate." />}
+        {adapters.length > 0 && (
+          <FleetEditor creds={props.creds} projectId={props.project.id} agents={adapters} rows={fleet} onChange={setFleet} />
+        )}
       </View>
 
       {race ? null : <>
