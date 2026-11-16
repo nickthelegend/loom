@@ -31,7 +31,7 @@ export interface RuntimeQueueHost {
   busySince: Map<string, number>;
   closed: boolean;
   appendIfOpen: (event: Parameters<EventJournal["append"]>[0]) => void;
-  startRoute: (opts: { task: string; spec?: string | RouteStepSpec[]; router?: RouterKind; maxHops?: number; }) => Promise<RouteState>;
+  startRoute: (opts: { task: string; spec?: string | RouteStepSpec[]; router?: RouterKind; maxHops?: number; chat?: string; }) => Promise<RouteState>;
   handoff: (to: string, opts?: { source?: "user" | "route"; }) => Promise<{ from: string | null; merge?: MergeOutcome; }>;
   sendMessage: (text: string, agentId?: string, opts?: TurnOptions) => Promise<TurnResult>;
 }
@@ -245,7 +245,7 @@ export class RuntimeQueue {
       return;
     }
     if (t.kind === "auto" && !item.plan) {
-      await this.host.startRoute({ task: item.text, spec: "auto" });
+      await this.host.startRoute({ task: item.text, spec: "auto", chat: item.chat });
       return;
     }
     // one agent: the baton moves to it first, as when you pick it and send

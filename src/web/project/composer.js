@@ -90,7 +90,7 @@ export function createComposer(view) {
       if (state.auto && !plan) {
         var achip = document.getElementById("cagent");
         if (achip) achip.classList.add("routing");
-        api("/api/projects/" + view.pid + "/route", { method: "POST", body: JSON.stringify({ task: full, spec: "auto" }) })
+        api("/api/projects/" + view.pid + "/route", { method: "POST", body: JSON.stringify({ task: full, spec: "auto", chat: view.chatId }) })
           .then(view.refresh).catch(function(err){ toast(err.message); })
           .then(function(){ if (achip) achip.classList.remove("routing"); });
         return;
