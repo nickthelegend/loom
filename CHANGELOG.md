@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Per-chat agent, model and reasoning effort selection through the daemon API and `loom chat:create` / `loom chat:agent` (#370). Native providers and ACP use session selection where supported; process-bound adapters reuse separate model instances. Changing a chat leaves the running turn and agent defaults alone. Approach credit: T3 Code (MIT). Web and phone picker changes are separate.
 
+- **Phone: Triggers.** A Triggers tab lists each schedule and webhook with when it runs next and how its last runs went, with Run now and a Pause/Resume switch. The owner's own (unscoped) phone may now fire a trigger and switch it on or off; adding, editing and removing stay on the computer (#361).
+
 - **Phone: start a chat with any agent on any model.** New chat opens a sheet: an optional title, who answers (each agent's kind and current model), and the model, chosen from the agent's own list or typed. A project can hold a chat on Opus 5.5 next to one on GPT‑5.6 (#372).
 
 - Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
