@@ -258,7 +258,12 @@ export class LoomDaemon {
   /** Schedules and webhooks that start turns on their own (daemon/triggers.ts). */
   private triggers = new TriggerRunner((id) => this.runtime(id));
   /** Slack / Discord (daemon/chat-bridge.ts). */
-  private bridges = new ChatBridges((id) => this.runtime(id));
+  private bridges = new ChatBridges((id) => this.runtime(id), (projectId, chat, id, decision, by) => {
+    const approval = this.approvals.get(id);
+    if (!approval || approval.projectId !== projectId || (approval.chat ?? "main") !== chat) return false;
+    approval.settle(decision === "allow" ? { behavior: "allow" } : { behavior: "deny", message: "Denied in the channel." }, by);
+    return true;
+  });
   /** The swap that started this daemon, when a newer CLI replaced the last one (core/daemon-swap.ts). */
   private swap: DaemonSwap | null = null;
   /** Loom Cloud relay, when enabled. See daemon/relay.ts. */

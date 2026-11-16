@@ -11,7 +11,7 @@ export function registerBridgeRoutes(app: Express, bridges: ChatBridges): void {
     const b = readBridges();
     const view = (p: Platform) => {
       const c = b[p];
-      return c ? { enabled: c.enabled, botToken: maskToken(c.botToken), ...(c.appToken ? { appToken: maskToken(c.appToken) } : {}), users: c.users, channels: c.channels,
+      return c ? { enabled: c.enabled, botToken: maskToken(c.botToken), ...(c.appToken ? { appToken: maskToken(c.appToken) } : {}), users: c.users, ...(c.approvers !== undefined ? { approvers: c.approvers } : {}), channels: c.channels,
         ...(c.project ? { project: c.project } : {}), ...(c.agent ? { agent: c.agent } : {}), status: bridges.status[p] ?? null } : null;
     };
     res.json({ slack: view("slack"), discord: view("discord") });
@@ -30,6 +30,7 @@ export function registerBridgeRoutes(app: Express, bridges: ChatBridges): void {
         botToken: typeof body.botToken === "string" && body.botToken ? body.botToken.trim() : cur.botToken ?? "",
         ...(p === "slack" ? { appToken: typeof body.appToken === "string" && body.appToken ? body.appToken.trim() : cur.appToken } : {}),
         users: body.users !== undefined ? ids(body.users) : cur.users ?? [],
+        ...(body.approvers === null ? {} : body.approvers !== undefined ? { approvers: ids(body.approvers) } : cur.approvers !== undefined ? { approvers: cur.approvers } : {}),
         channels: body.channels !== undefined ? ids(body.channels) : cur.channels ?? [],
         ...(body.project !== undefined ? (body.project ? { project: String(body.project) } : {}) : cur.project ? { project: cur.project } : {}),
         ...(body.agent !== undefined ? (body.agent ? { agent: String(body.agent) } : {}) : cur.agent ? { agent: cur.agent } : {}),
