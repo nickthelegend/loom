@@ -600,6 +600,9 @@ export class LoomDaemon {
     const existing = this.runtimes.get(info.id);
     if (existing) return existing;
     const rt = await ProjectRuntime.open(info);
+    rt.sides.onEvent(frame => {
+      this.delivery.publish({ type: "side", projectId: info.id, ...frame }, { kind: "private", projectId: info.id });
+    });
     const host = this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host;
     rt.apiUrl = `http://${host.includes(":") ? `[${host}]` : host}:${this.port}`;
     rt.onServerEvent((f) => {

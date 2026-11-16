@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Private side questions (#376).** `loom btw "<question>" [--chat c]` and the side-chat API answer with the parent's agent and model without changing its log, memory or native cursor. Claude/Codex use separate read-only native forks, with recent-message context as a fallback. Side messages stream only to owners and unscoped devices. Web and phone drawer screens are separate work.
+
 - PR feedback follows Loom-created PRs back to their owning chats (#378). Persistent watches queue CI failures and optional human review comments, including inline replies, with per-chat `off` / `ci` / `ci+reviews` settings. Merge and close notices end polling; owner-only attachment, listing APIs, `loom prs` and `loom prs:watch` support existing PRs. Approach credit: Agent Orchestrator lifecycle reactions (Apache-2.0).
 
 - **Orchestra workers report progress during a turn (#374).** `loom report` and fenced `loom-report` messages persist checkpoints, requests for input, blockers, and completion reports. Run-scoped worker credentials authorize the report API; reports reach orchestra events and CLI `--progress`, and requests for input or blockers notify the orchestrator in a batch. Approach credit: Agent Orchestrator’s report coordinator (Apache-2.0).

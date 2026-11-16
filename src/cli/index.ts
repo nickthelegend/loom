@@ -500,6 +500,31 @@ program
   });
 
 program
+  .command("btw <question>")
+  .description("ask a private read-only side question without changing the main conversation")
+  .option("--chat <c>", "parent chat id", "main")
+  .action(async (question: string, opts: { chat: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { sideId } = await client.sendSide(project.id, opts.chat, question);
+    try {
+      const deadline = Date.now() + 6 * 60_000;
+      while (Date.now() < deadline) {
+        const side = await client.sideChat(project.id, opts.chat, sideId);
+        if (!side.busy) {
+          if (side.error) throw new Error(side.error);
+          console.log(side.messages.filter(m => m.role === "agent").at(-1)?.text ?? "");
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error("side chat timed out");
+    } finally {
+      await client.closeSide(project.id, opts.chat, sideId).catch(() => {});
+    }
+  });
+
+program
   .command("ask <words...>")
   .description("ask several models the same thing at once, a thread each")
   .option("--models <list>", "comma-separated model ids (provider/model, or just the model)")

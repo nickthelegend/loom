@@ -29,6 +29,7 @@ import {
   readDaemonConfig,
   type DaemonConfig,
 } from "../core/registry.js";
+import type { SideView } from "../core/side-chats.js";
 import type { Memory } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
@@ -96,6 +97,19 @@ export class DaemonClient {
   static fromDisk(): DaemonClient | null {
     const cfg = readDaemonConfig();
     return cfg ? new DaemonClient(cfg) : null;
+  }
+
+  /** Opens or continues the parent's in-memory side drawer; poll sideChat or listen for WS type=side. */
+  sendSide(id: string, chat: string, text: string, sideId?: string): Promise<{ sideId: string; reply?: string }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side`, { text, ...(sideId ? { sideId } : {}) });
+  }
+
+  sideChat(id: string, chat: string, sideId: string): Promise<SideView> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+  }
+
+  closeSide(id: string, chat: string, sideId: string): Promise<{ deleted: boolean }> {
+    return this.request("DELETE", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
   }
 
   get baseUrl(): string {
