@@ -31,7 +31,7 @@ import {
 import { NewChatSheet } from "./new-chat";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
-import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage } from "./api";
+import { api, claim, clearCreds, getActivity, getApprovals, getChats, getCheckpoints, getImportable, importChat, type ImportableChat, gitCommit, gitPush, gitStage, rewindTo, type Checkpoint, createChat, deleteChat, renameChat, setChatFlags, getEvents, getProject, getProjects, getTasks, getTree, handoff, interrupt, openLiveStream, pingDaemon, saveCreds, sendMessage, getQueue, queueEdit, queueClear, queuePause, queueRemove, type QueueView, cloudFromLink, type Approval, type Chat, type Creds, type DaemonReachability, type LoomEvent, type Project, type TaskItem, type TaskResult, type WorkingTree, kv, startShift, shareLive, steerMessage, getBranches, createBranch, activateBranch, type BranchListing } from "./api";
 import { Btn, DiffView, EventLine, LiveReplies, Sys, TaskRow, ThreadCtx, ago, field } from "./components";
 import { applyEvent, applyStream, seed, type LiveMap, type StreamFrame } from "./live-model";
 import { haptic } from "./haptics";
@@ -1267,7 +1267,30 @@ export function ProjectScreen(props: {
     [events],
   );
   const kindOf = (id: string) => project.agents.find((a) => a.id === id)?.kind;
-  const threadCtx = useMemo(() => ({ creds, projectId: project.id, agents: project.agents.map((a) => a.id) }), [creds, project.id, project.agents]);
+  // versions of a message (#375): the chat's branches, and what switching or editing does
+  const [branchListing, setBranchListing] = useState<BranchListing | null>(null);
+  useEffect(() => {
+    let gone = false;
+    getBranches(creds, project.id, chatId).then((b) => { if (!gone) setBranchListing(b); }).catch(() => { if (!gone) setBranchListing(null); });
+    return () => { gone = true; };
+  }, [project.id, chatId, historyTry, events.length]);
+  const branchCtx = useMemo(() => {
+    if (!branchListing) return undefined;
+    const byId = new Map(branchListing.branches.map((b) => [b.id, b]));
+    const after = () => { setHistoryTry((n) => n + 1); };
+    return {
+      siblings: branchListing.siblingsByEventId ?? {},
+      current: (choices: string[]) => {
+        let id: string | null = branchListing.active; const seen = new Set<string>();
+        while (id !== null && !seen.has(id)) { seen.add(id); const at = choices.indexOf(id); if (at >= 0) return at; id = byId.get(id)?.parent ?? null; }
+        return 0;
+      },
+      activate: (branch: string) => void activateBranch(creds, project.id, chatId, branch).then(after).catch((e: Error) => setErr(e.message)),
+      edit: (eventId: number, text: string) => void createBranch(creds, project.id, chatId, { fromEventId: eventId, mode: "edit", text }).then(after).catch((e: Error) => setErr(e.message)),
+      retry: (eventId: number) => void createBranch(creds, project.id, chatId, { fromEventId: eventId, mode: "retry" }).then(after).catch((e: Error) => setErr(e.message)),
+    };
+  }, [branchListing, creds, project.id, chatId]);
+  const threadCtx = useMemo(() => ({ creds, projectId: project.id, agents: project.agents.map((a) => a.id), branches: branchCtx }), [creds, project.id, project.agents, branchCtx]);
   // one checklist per plan, and no tool line under a card that already says it
   const shownEvents = useMemo(() => {
     const gone = foldedEvents(events);
