@@ -956,6 +956,17 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** Files (#380): the project's own tree, read-only — the desktop's Explorer. */
+export interface FileEntry { name: string; path: string; dir: boolean }
+export const listFiles = (c: Creds, id: string, dir: string) =>
+  api<{ dir: string; entries: FileEntry[] }>(c, `/api/projects/${id}/files?dir=${encodeURIComponent(dir || ".")}`);
+export const readFile = (c: Creds, id: string, path: string) =>
+  api<{ path: string; content: string; truncated: boolean; size: number }>(c, `/api/projects/${id}/file?path=${encodeURIComponent(path)}`);
+/** Terminal (#380): a shell in the project, the same sessions the desktop's terminal uses. */
+export const openTerm = (c: Creds, id: string, term: string, cols: number, rows: number) =>
+  api<{ term: string; cwd: string; mode: string; reused: boolean; scrollback: string }>(c, `/api/projects/${id}/term/open`, { method: "POST", body: JSON.stringify({ term, cols, rows }) });
+export const termInput = (c: Creds, id: string, term: string, data: string) =>
+  api<{ ok: boolean }>(c, `/api/projects/${id}/term/input`, { method: "POST", body: JSON.stringify({ term, data }) });
 /** Side chats (#376): a private, read-only question beside a chat; none of it enters the thread. */
 export interface SideMessage { role: "user" | "agent"; text: string; at: number }
 export const askSide = (c: Creds, id: string, chat: string, text: string, sideId?: string) =>
