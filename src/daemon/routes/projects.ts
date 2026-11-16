@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Express, RequestHandler } from 'express';
 import { type Request } from "express";
 import fs from "node:fs";
 import path from "node:path";
@@ -6,6 +6,8 @@ import { buildDefaultRoutes, defaultAgentConfigs, detectAdes } from "../../core/
 import { ensureLoomHome, listProjects, projectLoomDir, readProjectConfig, registerProject, unregisterProject, writeProjectConfig } from "../../core/registry.js";
 import type { ProjectConfig, ProjectInfo } from "../../types.js";
 import type { RouteContext } from './context.js';
+import { ProjectCreationError } from "../../core/project-creation.js";
+import { ProjectCreation } from "../project-creation.js";
 
 /**
  * Make a directory a project: its config (detecting the agents on this
@@ -46,7 +48,36 @@ export async function addProjectAt(resolved: string, name?: string): Promise<{ i
 }
 
 /** Register projects routes in the order established by LoomDaemon.routes(). */
-export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "runtime" | "runtimes" | "specRunner" | "team">): void {
+export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "runtime" | "runtimes" | "specRunner" | "team" | "broadcastProjects">): () => Promise<void> {
+  const creation = new ProjectCreation(addProjectAt, ctx.broadcastProjects);
+
+  // Like Share-live minting, creating folders is available to the owner's
+  // unscoped devices, never a guest or a token limited to existing projects.
+  const ownerDevice: RequestHandler = (req, res, next) => {
+    const r = req as Request & { guest?: unknown; projectScope?: string[] | null };
+    if (r.guest || r.projectScope) return void res.status(403).json({ error: "project creation needs an owner or unscoped device" });
+    next();
+  };
+
+  app.post("/api/projects/new", ownerDevice, async (req, res) => {
+    try { res.json(await creation.create(req.body ?? {})); }
+    catch (error) {
+      res.status(error instanceof ProjectCreationError ? error.status : 500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post("/api/projects/clone", ownerDevice, (req, res) => {
+    try { res.status(202).json(creation.clone(req.body ?? {})); }
+    catch (error) {
+      res.status(error instanceof ProjectCreationError ? error.status : 500).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.get("/api/projects/jobs/:jobId", ownerDevice, (req, res) => {
+    const job = creation.job(String(req.params.jobId));
+    if (!job) return void res.status(404).json({ error: "no such project job" });
+    res.json(job);
+  });
 
   app.get("/api/projects", (req, res) => {
     void (async () => {
@@ -137,4 +168,5 @@ export function registerProjectsRoutes(app: Express, ctx: Pick<RouteContext, "ru
       res.json({ removed: true, project: info, keptOnDisk: projectLoomDir(info.dir) });
     })();
   });
+  return () => creation.close();
 }

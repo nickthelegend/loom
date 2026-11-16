@@ -347,6 +347,8 @@ export interface PairedClient {
 export interface DaemonConfig {
   host: string;
   port: number;
+  /** New projects and clones go here; defaults to ~/Loom Projects. */
+  projectsRoot?: string;
   adminToken: string;
   clients: PairedClient[];
   pid?: number;

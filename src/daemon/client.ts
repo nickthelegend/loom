@@ -30,6 +30,7 @@ import type { Memory } from "../core/brain.js";
 import type { BoardData } from "./board.js";
 import { BUILD_REV, DEFAULT_PORT } from "./server.js";
 import { VERSION } from "../version.js";
+import type { NewProjectInput, CloneProjectInput, CreatedProject, ProjectCloneJob } from "../core/project-creation.js";
 import { autoRestartEnabled, describeSwap, writeSwapNote } from "../core/daemon-swap.js";
 
 export class DaemonError extends Error {
@@ -167,6 +168,18 @@ export class DaemonClient {
 
   addProject(dir: string, name?: string): Promise<{ project: { id: string } }> {
     return this.request("POST", "/api/projects", { dir, ...(name ? { name } : {}) });
+  }
+
+  newProject(input: NewProjectInput): Promise<CreatedProject> {
+    return this.request("POST", "/api/projects/new", { ...input });
+  }
+
+  cloneProject(input: CloneProjectInput): Promise<{ jobId: string; dir: string }> {
+    return this.request("POST", "/api/projects/clone", { ...input });
+  }
+
+  projectJob(jobId: string): Promise<ProjectCloneJob> {
+    return this.request("GET", `/api/projects/jobs/${encodeURIComponent(jobId)}`);
   }
 
   /** Stop tracking a project. Registry-only — its .loom/ stays on disk. */

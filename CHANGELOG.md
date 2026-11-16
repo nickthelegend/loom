@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Create projects from any directory with `loom new <name> [--agent kind[@model][xN] ...] [--no-git]`, or clone with `loom clone <url> [--name <name>]`. The daemon's owner-only creation API also accepts unscoped paired devices, reports clone progress over WebSocket and polling, and uses a configurable `projectsRoot` (default `~/Loom Projects`) without overwriting existing folders.
+  - Credits: approach from T3 Code's AddProjectScreen (MIT).
+
 - Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
 
 ### Fixed
