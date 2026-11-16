@@ -363,6 +363,8 @@ import { openMenu } from './menus.js';
         // live on the sidebar row too, so nothing is lost with it.
         '<span id="tabsbox" style="display:contents"></span>' +
         '<span class="spacer"></span>' +
+        // Who else is in this chat right now — a guest you shared it with, your phone (#362)
+        '<span id="presence" class="presence"></span>' +
         // Tool calls waiting on you, from any thread of this project.
         '<button class="apbadge" id="apbadge" type="button" style="display:none"></button>' +
         // &#96; is a backtick — a literal one would close this template literal

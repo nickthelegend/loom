@@ -643,3 +643,15 @@
   .wsdrop[hidden]{display:none}
   .wszone{position:absolute;display:none;box-sizing:border-box;background:color-mix(in srgb, var(--ring) 22%, transparent);border:2px solid var(--ring);border-radius:6px;pointer-events:none;transition:all .08s ease}
   @media (prefers-reduced-motion:reduce){.wspane,.wszone{transition:none}}
+
+/* who's here (#362): initials, a ring while typing */
+.pres{display:inline-flex;align-items:center;gap:0;margin-right:6px}
+.presav{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  font-size:9.5px;font-weight:700;letter-spacing:.02em;color:#fff;background:hsl(var(--ph,210) 45% 42%);
+  border:2px solid var(--background);margin-left:-6px;flex:none}
+.presav:first-child{margin-left:0}
+.presav.guest{background:hsl(var(--ph,210) 55% 48%)}
+.presav.more{background:var(--secondary);color:var(--foreground)}
+.presav.typing{box-shadow:0 0 0 2px var(--thread)}
+.prestyping{margin-left:8px;font-size:11.5px;color:var(--muted-foreground);white-space:nowrap}
+.gpeople{display:inline-flex;align-items:center}
