@@ -6,6 +6,7 @@
 
 export * from "./types.js";
 export * from "./core/presence.js";
+export type { SideMessage, SideView, SideSocketFrame } from "./core/side-chats.js";
 export { EventLog } from "./core/eventlog.js";
 export { BatonManager, NotHolderError } from "./core/baton.js";
 export { buildBriefing, buildProjection } from "./core/projection.js";

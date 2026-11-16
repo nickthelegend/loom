@@ -1,3 +1,4 @@
+import { readPrRecords } from "../core/pr-feedback.js";
 import { ClientDelivery } from "./delivery.js";
 import { ChatPresenceTracker } from "./presence.js";
 import type { PresencePerson } from "../core/presence.js";
@@ -609,6 +610,9 @@ export class LoomDaemon {
     const existing = this.runtimes.get(info.id);
     if (existing) return existing;
     const rt = await ProjectRuntime.open(info);
+    rt.sides.onEvent(frame => {
+      this.delivery.publish({ type: "side", projectId: info.id, ...frame }, { kind: "private", projectId: info.id });
+    });
     const host = this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host;
     rt.apiUrl = `http://${host.includes(":") ? `[${host}]` : host}:${this.port}`;
     rt.onServerEvent((f) => {
@@ -812,6 +816,12 @@ export class LoomDaemon {
     void this.team.start().catch(() => { });
     this.watchReleases();
     this.triggers.start();
+    // Resume PR watches even when no client has opened the project since restart.
+    for (const project of listProjects()) {
+      try {
+        if (readPrRecords(project.dir).some(pr => pr.state === "OPEN")) await this.runtime(project.id);
+      } catch (error) { logbook.warn("pr", "could not resume PR feedback", String(error), project.id); }
+    }
     void this.bridges.startAll().catch(() => { });
 
     return { host: this.host, port: this.port };

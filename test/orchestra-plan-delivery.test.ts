@@ -13,6 +13,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { registerAgentKind } from "../src/adapters/index.js";
 import { AdapterBase } from "../src/adapters/base.js";
+import { trackedPrs } from "../src/core/pr-feedback.js";
 import { renderPlanIndex, renderTaskFile } from "../src/core/orchestra.js";
 import { clearRecent, listPrompts, recordRecent, savePrompt, updatePrompt, deletePrompt } from "../src/core/prompts.js";
 import { writeProjectConfig } from "../src/core/registry.js";
@@ -189,6 +190,7 @@ describe("git delivery", () => {
       const call = fs.readFileSync(log, "utf8");
       expect(call).toContain(`pr create --head ${r.branch} --base main --title add a`);
       expect(call).toContain("built a");
+      expect(trackedPrs(dir)).toEqual([expect.objectContaining({ prNumber: 42, repo: "acme/app", chat: r.chat, agentId: "conductor", source: "orchestra" })]);
       // the user's branch is untouched: the PR is the delivery
       expect(fs.existsSync(path.join(dir, "a.txt"))).toBe(false);
     } finally {

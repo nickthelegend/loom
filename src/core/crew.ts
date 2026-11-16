@@ -19,6 +19,7 @@
  * crews across people are later phases (§11).
  */
 
+import { recordOpenedPr } from "./pr-feedback.js";
 import { execFile, shellInvocation, spawnContained } from "./process.js";
 import { runCommand } from "./run-command.js";
 import { interruptProcess } from "../adapters/base.js";
@@ -1298,6 +1299,8 @@ export class CrewEngine {
         url = String(out.stdout).match(/https:\/\/\S+/)?.[0];
       }
       if (!url) throw new Error("GitHub did not return a PR URL; inspect the branch before retrying");
+      const agentId = cfg.teammates.find(t => t.role === "lead")?.agent;
+      recordOpenedPr(this.host.projectDir, url, { chat: st.channel, source: "delivery", ...(agentId ? { agentId } : {}) });
       g.pr = { url, at: Date.now() }; delete g.deliveryError; this.save(st);
       this.phase(cfg, st, "delivered", { url, branch: g.branch }); return { url };
     } catch (error) {

@@ -1,3 +1,5 @@
+import { PrFeedback } from "./pr-feedback.js";
+import { recordOpenedPr, type PrFeedbackMode } from "../core/pr-feedback.js";
 import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -10,6 +12,8 @@ import { type Hit, type RetrieveOpts } from "../core/brain-index.js";
 import { Brain } from "../core/brain.js";
 import { helperText } from "../core/provider-text.js";
 import { ConversationStore } from "../core/conversations.js";
+import { SideChats, SideChatError } from "../core/side-chats.js";
+import { sideDriver } from "./side.js";
 import * as checkpoints from "../core/checkpoint.js";
 import { renderProjection } from "../core/distill.js";
 import { EventLog } from "../core/eventlog.js";
@@ -159,6 +163,7 @@ export class ProjectRuntime {
   readonly log: EventLog;
   private readonly conversations: ConversationStore;
   readonly baton: BatonManager;
+  readonly sides = new SideChats(chat => this.createSide(chat));
   readonly routes: RouteEngine;
   /** One orchestrator, many parallel workers — see core/orchestra.ts. */
   readonly orchestra: OrchestraEngine;
@@ -206,6 +211,7 @@ export class ProjectRuntime {
   private journalFailure: Error | null = null;
   /** What you've lined up, run one at a time — see core/prompt-queue.ts. */
   readonly queue: PromptQueue;
+  readonly prFeedback: PrFeedback;
   /** This project's dev servers — see core/servers.ts. */
   readonly servers: Servers;
   /** One preview proxy per server — see core/preview-proxy.ts. */
@@ -280,6 +286,7 @@ export class ProjectRuntime {
       extractMemory: (...args) => this.extractMemory(...args),
       get config() { return runtime.config; },
       chatBinding: (...args) => this.chatBinding(...args),
+      bindable: (...args) => this.bindable(...args),
       validHolder: (...args) => this.validHolder(...args),
       defaultAdapterId: (...args) => this.defaultAdapterId(...args),
       agent: (...args) => this.agent(...args),
@@ -579,6 +586,9 @@ export class ProjectRuntime {
       for (const cb of this.queueCoordinator.queueListeners) cb(q);
       this.watchClockConditions(q);
     });
+
+    this.prFeedback = new PrFeedback(this);
+    this.prFeedback.start();
 
     this.servers = new Servers({
       projectDir: info.dir,
@@ -1733,7 +1743,8 @@ export class ProjectRuntime {
         ? { ...c, ...(main.starred ? { starred: main.starred } : {}), ...(main.ratings ? { ratings: main.ratings } : {}) }
         : c;
       const g = c.id === MAIN_CHAT ? undefined : groups.get(c.id);
-      const withGroup = g ? { ...withMain, group: g } : withMain;
+      const feedback = stored.find(s => s.id === c.id)?.prFeedback ?? "ci";
+      const withGroup = { ...withMain, ...(g ? { group: g } : {}), prFeedback: feedback };
       return last.has(c.id) ? { ...withGroup, lastReplyId: last.get(c.id)! } : withGroup;
     });
   }
@@ -1760,6 +1771,18 @@ export class ProjectRuntime {
       if (!out.has(chat)) out.set(chat, { kind: "import", id: "imports", title: "Imported", at: 0 });
     }
     return out;
+  }
+
+  setPrFeedback(id: string, mode: PrFeedbackMode): ChatInfo | null {
+    const info = this.chats().find(c => c.id === id);
+    if (!info) return null;
+    const state = readProjectState(this.info.dir);
+    state.chats ??= [];
+    let chat = state.chats.find(c => c.id === id);
+    if (!chat) { chat = { id, title: info.title, createdAt: info.createdAt }; state.chats.push(chat); }
+    chat.prFeedback = mode;
+    writeProjectState(this.info.dir, state);
+    return this.chats().find(c => c.id === id)!;
   }
 
   /** Pin, archive or file a thread. Main is always first and always there. */
@@ -1940,6 +1963,23 @@ export class ProjectRuntime {
     return started;
   }
 
+  private createSide(chat: string) {
+    if (!this.chats().some(c => c.id === chat)) throw new SideChatError("no such chat", 404);
+    const bound = this.chatBinding(chat);
+    const id = bound.agentId ?? this.baton.holder() ?? this.config.defaultAgent
+      ?? this.config.agents.find(a => a.enabled !== false && tierForKind(a.kind) === "adapter")?.id;
+    const config = this.config.agents.find(a => a.id === id && a.enabled !== false);
+    if (!config) throw new SideChatError("parent chat has no available agent", 409);
+    const parent = this.agents.get(config.id);
+    const native = parent instanceof ProviderAgent ? parent.sideSource(chat) : undefined;
+    const model = bound.model ?? native?.model ?? (typeof config.options?.model === "string" ? config.options.model : undefined);
+    const messages = this.log.list({ chat, kinds: ["message"], limit: 200 }).filter(e =>
+      typeof e.payload.text === "string" && !e.payload.reasoning && (e.payload.author === "user" || e.agentId));
+    const context = messages.sort((a, b) => a.id - b.id).slice(-20).map(e =>
+      `${e.payload.author === "user" ? "user" : "agent"}: ${String(e.payload.text).slice(0, 8000)}`).join("\n\n");
+    return sideDriver({ config, cwd: native?.cwd ?? this.agentDir(config.id), model, resumeCursor: native?.resumeCursor, context });
+  }
+
   /** What a thread has pinned, if anything. */
   chatBinding(chat?: string): { agentId?: string; model?: string; effort?: string } {
     if (!chat || chat === MAIN_CHAT) return {};
@@ -1958,7 +1998,9 @@ export class ProjectRuntime {
     if (this.continuity && ([...this.turns.busySince.keys()].some(agent => this.turns.turnChat.get(agent) === id) ||
       this.queue.snapshot().items.some(item => item.chat === id)))
       throw new ContinuityError("conflict", "finish or remove queued/native turns before deleting their chat");
-    return this.conversations.deleteChat(id);
+    const deleted = this.conversations.deleteChat(id);
+    if (deleted) void this.sides.closeChat(id).catch(() => {});
+    return deleted;
   }
 
   // -------------------------------------------------------------------------
@@ -2065,6 +2107,7 @@ export class ProjectRuntime {
     });
     const url = (out.match(/https:\/\/\S+/) ?? [""])[0];
     if (!url) throw new Error(out.trim().slice(0, 300) || "gh didn't return a PR url");
+    recordOpenedPr(this.info.dir, url, { chat: MAIN_CHAT, source: "board", ...(task.agent ? { agentId: task.agent } : {}) });
     this.appendIfOpen({ kind: "status", payload: { state: "task_pr", task: task.id, branch: plan.branch, url } });
     return { url, branch: plan.branch };
   }
@@ -3811,6 +3854,8 @@ export class ProjectRuntime {
   }
 
   async close(): Promise<void> {
+    await this.sides.close();
+    await this.prFeedback.stop();
     this.unwatchConfig?.();
     this.unwatchConfig = null;
     if (this.configTimer) { clearTimeout(this.configTimer); this.configTimer = null; }

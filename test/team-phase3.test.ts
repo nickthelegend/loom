@@ -14,6 +14,7 @@
  * names a teammate's open PR on the same files (D48).
  */
 
+import { trackedPrs } from "../src/core/pr-feedback.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -202,6 +203,7 @@ describe("Phase 3: one brain", () => {
     const confirmed = tb("bob").inbox().find((i) => i.type === "promote")!;
     const out = await tb("bob").promote([confirmed.a.id]);
     expect(out).toMatchObject({ branch: "loom/canon", prUrl: "https://github.com/acme/app/pull/42", added: 1 });
+    expect(trackedPrs(M.bob!.dir)).toEqual([expect.objectContaining({ prNumber: 42, chat: "main", source: "delivery" })]);
 
     const onBranch = git(origin, "show", "loom/canon:AGENTS.md");
     expect(onBranch).toContain("Run `npm test` before pushing."); // the human part is untouched

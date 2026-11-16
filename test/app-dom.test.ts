@@ -283,6 +283,7 @@ const click = (el: Element | null) => {
 };
 
 
+
 describe("web app · boot", () => {
   it("an unpaired remote visitor gets the pairing screen, not a broken shell", async () => {
     // A phone on the tailnet: no stored token, and the local admin bootstrap 403s.
@@ -403,6 +404,7 @@ async function openBoard(): Promise<Mounted> {
   await ready(m, '.badd[data-add="needs-you"]');
   return m;
 }
+
 
 
 describe("web app · board", () => {
@@ -844,6 +846,38 @@ describe("web app · who's in a shared chat (#362)", () => {
   }, 40_000);
 });
 
+describe("web app · side chats (#376)", () => {
+  it("/btw opens a side drawer the agent answers in, keeps it out of the thread, and Bring back quotes it", async () => {
+    const events = async () => ((await (await fetch(`${baseUrl}/api/projects/${projectId}/events?limit=200&chat=main`, { headers: { Authorization: `Bearer ${clientToken}` } })).json()) as { events: Array<{ kind: string; payload: { text?: string } }> }).events;
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    const before = (await events()).length;
+    const box = $(m, "#box") as HTMLTextAreaElement;
+    box.value = "/btw what does the parser do?";
+    click($(m, "#send"));
+    await waitUntil(() => !!$(m, "#sidedrawer"));
+    expect(text(m, "#sidedrawer .sdq")).toBe("what does the parser do?");
+    expect(box.value).toBe("");
+    // echo answers on the side
+    await waitUntil(() => text(m, "#sidedrawer .sda .bubble").includes("what does the parser do?"), { timeoutMs: 15_000 });
+    // a follow-up in the same side chat
+    ($(m, "#sdbox") as HTMLTextAreaElement).value = "and the lexer?";
+    click($(m, "#sdsend"));
+    await waitUntil(() => m.window.document.querySelectorAll("#sidedrawer .sda:not(.live) .bubble").length === 2, { timeoutMs: 15_000 });
+    // nothing of it reached the thread's log
+    const after = await events();
+    expect(after.length).toBe(before);
+    expect(JSON.stringify(after)).not.toContain("what does the parser do?");
+    // Bring back quotes the answer into the main composer, unsent
+    click($(m, '#sidedrawer [data-sdback]'));
+    expect(box.value.startsWith("> ")).toBe(true);
+    expect((await events()).length).toBe(before);
+    click($(m, "#sdclose"));
+    await waitUntil(() => !$(m, "#sidedrawer"));
+    expect(m.errors.join("\n")).toBe("");
+  }, 40_000);
+});
+
 describe("web app · a chat's own model (#370)", () => {
   it("Model & effort… pins a model and effort to one bound chat, and the sidebar shows it", async () => {
     const call = async (method: string, p: string, body?: unknown) => {
@@ -963,6 +997,30 @@ describe("web app · New project from anywhere (#371)", () => {
     click($(m, "#pcancel"));
     expect(m.errors.join("\n")).toBe("");
   }, 60_000);
+});
+
+describe("web app · PR feedback per chat (#378)", () => {
+  it("the chat menu sets what comes back when this chat's PR needs work", async () => {
+    const call = async (method: string, p: string, body?: unknown) => (await fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+      method, headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}),
+    })).json() as Promise<{ chat?: { id: string }; chats?: Array<{ id: string; prFeedback?: string }> }>;
+    const id = (await call("POST", "/chats", { title: "pr loop" })).chat!.id;
+    try {
+      const m = mount({ hash: `#p/${projectId}` });
+      await waitUntil(() => !!$(m, `.crow[data-chat="${id}"]`));
+      $(m, `.crow[data-chat="${id}"]`)!.dispatchEvent(new m.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await waitUntil(() => !!$(m, ".menupop"));
+      const item = [...m.window.document.querySelectorAll(".menupop .pickrow")].find((b) => (b.textContent ?? "").includes("PR feedback"));
+      expect(item?.textContent).toContain("CI failures");
+      click(item as HTMLElement);
+      await waitUntil(() => [...m.window.document.querySelectorAll(".menupop .pickrow")].some((b) => (b.textContent ?? "").includes("CI failures and reviews")));
+      click([...m.window.document.querySelectorAll(".menupop .pickrow")].find((b) => (b.textContent ?? "").includes("CI failures and reviews")) as HTMLElement);
+      await waitUntil(async () => ((await call("GET", "/chats")).chats ?? []).find((c) => c.id === id)?.prFeedback === "ci+reviews");
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await fetch(`${baseUrl}/api/projects/${projectId}/chats/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
+    }
+  });
 });
 
 describe("web app · the sidebar collapses", () => {

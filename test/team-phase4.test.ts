@@ -17,6 +17,7 @@
  * workflow the merge queue would stall on and opens the fix (D62).
  */
 
+import { trackedPrs } from "../src/core/pr-feedback.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -235,6 +236,8 @@ async function member(who: "alice" | "bob") {
 /** The PR the orchestra's own `gh pr create` opened (it runs the stub on PATH). */
 function trackPrs() {
   for (const m of Object.values(M)) {
+    // These scenarios cover legacy team PRs, opened before the chat feedback registry.
+    fs.rmSync(path.join(m.dir, ".loom", "prs.json"), { force: true });
     for (const r of m.rt.orchestra.list()) {
       const l = r.landing;
       if (l && !prs.has(l.pr) && !r.from) prs.set(l.pr, { n: l.pr, branch: r.branch, state: "OPEN", labels: [], base: "main" });
@@ -299,7 +302,7 @@ afterAll(async () => {
 describe("Phase 4: land safely", () => {
   let goal: OrchestraRun;
 
-  it("a goal delivered as a PR is tracked; a failing check is rerun once, then the log reopens the goal (D52–D55)", async () => {
+  it("a legacy team PR is tracked by landing; a failing check is rerun once, then the log reopens the goal (D52–D55)", async () => {
     scripts.alice.push(() => loom([{ type: "spawn", id: "t1", title: "feature", agent: "writer", prompt: "write:src/feature.ts:20", touches: ["src/feature.ts"] }]));
     scripts.alice.push(() => loom([{ type: "done", summary: "feature added" }]));
     goal = await M.alice!.rt.orchestra.start({ goal: "Add the feature", orchestrator: "conductor" });
@@ -497,6 +500,7 @@ describe("Phase 4: land safely", () => {
     expect(d.fixable).toEqual([".github/workflows/ci.yml"]);
     const fix = await L("alice").doctorFix();
     expect(fix.prUrl).toMatch(/\/pull\/\d+$/);
+    expect(trackedPrs(M.alice!.dir)).toEqual([expect.objectContaining({ url: fix.prUrl, chat: "main", source: "delivery" })]);
     expect(git(origin, "show", "loom/doctor-merge-group:.github/workflows/ci.yml")).toContain("  merge_group:\n");
     expect(git(origin, "show", "main:.github/workflows/ci.yml")).not.toContain("merge_group"); // settings and main untouched
   });

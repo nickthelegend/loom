@@ -68,6 +68,8 @@ interface WireMessage {
 }
 
 export interface ModelAdapterOptions {
+  /** Refuse mutation even if the model invents a tool that was not offered. */
+  readOnly?: boolean;
   provider?: string;
   model?: string;
   /** Tried in order when the provider says the pool is dry (402/429). */
@@ -240,6 +242,7 @@ export class ModelAdapter extends AdapterBase {
   private async runTool(call: ToolCall): Promise<ToolResult> {
     if (!isWriteTool(call.name)) return runReadTool(this.projectDir, call);
 
+    if (this.opts.readOnly) return { id: call.id, name: call.name, content: "Side chats are read-only.", summary: `${call.name} denied`, ok: false };
     const mode = permissionFor("model", this.opts as Record<string, unknown>);
     if (mode !== "bypass") {
       const summary =

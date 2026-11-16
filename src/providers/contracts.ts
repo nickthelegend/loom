@@ -59,6 +59,8 @@ export interface SessionStartInput {
   cwd: string;
   runtimeMode: RuntimeMode;
   modelSelection?: ModelSelection;
+  /** Fork resumeCursor into a separate native session; never advance the source cursor. */
+  forkSession?: boolean;
   /** Resume this native session instead of starting a new one. */
   resumeCursor?: unknown;
 }

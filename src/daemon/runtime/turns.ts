@@ -42,6 +42,9 @@ export interface TurnOptions {
   fresh?: boolean;
   /** How long you asked this one answer to be. */
   length?: "brief" | "detailed";
+  /** This turn only: nonempty values override the chat selection without saving it. */
+  model?: string;
+  effort?: string;
   requestId?: string; capturedModel?: string | null; capturedEffort?: string | null; resume?: boolean; contextTarget?: number;
 }
 /** How long you asked the answer to be, this once ("" for the usual). */
@@ -70,6 +73,7 @@ export interface RuntimeTurnsHost {
   extractMemory: (agentId: string, files: string[]) => void;
   config: ProjectConfig;
   chatBinding: (chat?: string) => { agentId?: string; model?: string; effort?: string; };
+  bindable: (agentId: string, model?: string, effort?: string) => { model?: string; effort?: string };
   validHolder: () => string | null;
   defaultAdapterId: () => string;
   agent: (id: string) => AnyAgent;
@@ -383,6 +387,15 @@ export class RuntimeTurns {
     agentId?: string,
     opts: TurnOptions = {},
   ): Promise<TurnResult> {
+    if (opts.model !== undefined || opts.effort !== undefined) {
+      const target = agentId ?? this.host.chatBinding(opts.chat).agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
+      try {
+        const selection = this.host.bindable(target, opts.model, opts.effort);
+        opts = { ...opts, model: selection.model, effort: selection.effort };
+      } catch (error) {
+        throw new ContinuityError("invalid", error instanceof Error ? error.message : String(error));
+      }
+    }
     if (this.host.continuity) return this.sendContinuity(text, agentId, opts);
     const source = opts.source ?? "user";
     const chat = opts.chat ?? MAIN_CHAT;
@@ -391,6 +404,8 @@ export class RuntimeTurns {
     // explicit target still wins: you asked for that one.
     const bound = this.host.chatBinding(chat);
     let target = agentId ?? bound.agentId ?? this.host.validHolder() ?? this.host.defaultAdapterId();
+    const model = opts.capturedModel !== undefined ? opts.capturedModel : opts.model ?? (bound.agentId === target ? bound.model : undefined);
+    const effort = opts.capturedEffort !== undefined ? opts.capturedEffort : opts.effort ?? (bound.agentId === target ? bound.effort : undefined);
     const agent = this.host.agent(target);
     if (!isAdapter(agent)) {
       throw new Error(`agent "${target}" is a bridge (read-only) — it cannot take turns`);
@@ -442,6 +457,8 @@ export class RuntimeTurns {
         target: { kind: "agent", agentId: target },
         chat,
         source,
+        model: model ?? null,
+        effort: effort ?? null,
         ...(opts.plan ? { plan: true } : {}),
         ...(opts.length ? { length: opts.length } : {}),
         ...(opts.by ? { by: opts.by } : {}),
@@ -488,15 +505,14 @@ export class RuntimeTurns {
       mcp = agent.capabilities.mcp ? writeMcpSession(this.host.healthyMcps()) : null;
       // The thread's model, only ever to an adapter that can act on it — see
       // bindable(), which is where a model that couldn't be honoured is refused.
-      const perTurnModel = bound.agentId === target ? bound.model : undefined;
       const input: SendInput = {
         text,
         chat,
         ...(nativePlan ? { interactionMode: "plan" as const } : {}),
         ...(opts.fresh ? { freshSession: true } : {}),
         ...(briefing ? { briefing } : {}),
-        ...(perTurnModel ? { model: perTurnModel } : {}),
-        ...(bound.agentId === target && bound.effort ? { effort: bound.effort } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(mcp ? { mcp: { configPath: mcp.configPath, servers: mcp.servers } } : {}),
       };
       if (mcp) {
@@ -554,10 +570,10 @@ export class RuntimeTurns {
     const health = await this.host.harness(target);
     if (!health.available) throw new ContinuityError("unsupported", health.error ?? `${cfg.kind} CLI is not reachable`);
     if (this.busySince.size && (!opts.requestId || !brain.store.request(opts.requestId))) this.host.queue.assertCanAdd({ text });
-    const effort = opts.capturedEffort !== undefined ? opts.capturedEffort : bound.agentId === target ? bound.effort : undefined;
+    const effort = opts.capturedEffort !== undefined ? opts.capturedEffort : opts.effort ?? (bound.agentId === target ? bound.effort : undefined);
     const captured = brain.capture({ id: opts.requestId ?? randomUUID(), conversationId: chat, agentInstanceId: target,
       text, source, ...(effort ? { effort } : {}),
-      model: opts.capturedModel !== undefined ? opts.capturedModel : bound.agentId === target ? bound.model ?? null : null,
+      model: opts.capturedModel !== undefined ? opts.capturedModel : opts.model ?? (bound.agentId === target ? bound.model ?? null : null),
       plan: Boolean(opts.plan), targetAddedTokens: 6000 });
     const request = captured.request;
     const previous = brain.store.receipts(request.id).at(-1);
@@ -575,6 +591,7 @@ export class RuntimeTurns {
     if (this.busySince.size) {
       if (opts.fromQueue) throw new ContinuityError("conflict", "another foreground turn is preparing or running");
       const item = this.host.queue.add({ text, target: { kind: "agent", agentId: target }, chat, source,
+        model: request.model, effort: request.effort ?? null,
         ...(opts.plan ? { plan: true } : {}), ...(opts.length ? { length: opts.length } : {}), ...(opts.by ? { by: opts.by } : {}), continuity: { requestId: request.id, model: request.model, effort: request.effort } });
       return { agentId: target, queued: this.host.queue.length, queueId: item.id, requestId: request.id };
     }

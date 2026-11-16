@@ -500,6 +500,31 @@ program
   });
 
 program
+  .command("btw <question>")
+  .description("ask a private read-only side question without changing the main conversation")
+  .option("--chat <c>", "parent chat id", "main")
+  .action(async (question: string, opts: { chat: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { sideId } = await client.sendSide(project.id, opts.chat, question);
+    try {
+      const deadline = Date.now() + 6 * 60_000;
+      while (Date.now() < deadline) {
+        const side = await client.sideChat(project.id, opts.chat, sideId);
+        if (!side.busy) {
+          if (side.error) throw new Error(side.error);
+          console.log(side.messages.filter(m => m.role === "agent").at(-1)?.text ?? "");
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error("side chat timed out");
+    } finally {
+      await client.closeSide(project.id, opts.chat, sideId).catch(() => {});
+    }
+  });
+
+program
   .command("ask <words...>")
   .description("ask several models the same thing at once, a thread each")
   .option("--models <list>", "comma-separated model ids (provider/model, or just the model)")
@@ -691,6 +716,33 @@ program
       const who = e.agentId ? pc.cyan(e.agentId) : pc.dim("you");
       console.log(`${pc.dim(t)} ${who}  ${String(e.payload.text ?? e.payload.question ?? "").slice(0, 110)}`);
     }
+  });
+
+program
+  .command("prs")
+  .description("list this project's tracked PRs and their last state")
+  .option("--json", "print as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { prs } = await client.prs(project.id);
+    if (opts.json) return void console.log(JSON.stringify(prs, null, 2));
+    if (!prs.length) return void console.log("No tracked PRs — attach one with loom prs:watch <pr>.");
+    for (const pr of prs) console.log(`${pr.repo} #${pr.prNumber}  ${pr.state}  chat ${pr.chat}  ${pr.url}`);
+  });
+
+program
+  .command("prs:watch <pr>")
+  .description("attach a PR number or URL to a chat for CI and review feedback")
+  .option("--chat <chat>", "chat id or title", "main")
+  .action(async (pr: string, opts: { chat: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const chat = chats.find(c => c.id === opts.chat || c.title.toLowerCase() === opts.chat.toLowerCase());
+    if (!chat) fail(`no chat "${opts.chat}" here`);
+    const out = await client.watchPr(project.id, chat.id, pr).catch((e: Error) => fail(e.message));
+    console.log(`Watching ${out.pr.repo} #${out.pr.prNumber} in chat ${out.pr.chat}`);
   });
 
 program
@@ -3488,9 +3540,10 @@ async function sendWithHandoffConfirm(
   interactive = true,
   fresh = false,
   handoff = false,
+  selection: { model?: string; effort?: string } = {},
 ): Promise<{ agentId: string } | null> {
   try {
-    return await client.send(projectId, text, agentId, { fresh });
+    return await client.send(projectId, text, agentId, { fresh, ...selection });
   } catch (err) {
     if (err instanceof DaemonError && err.status === 409 && agentId) {
       const holder = String(err.body?.holder ?? "another agent");
@@ -3505,7 +3558,7 @@ async function sendWithHandoffConfirm(
         return null;
       }
       await client.handoff(projectId, agentId);
-      return await client.send(projectId, text, agentId, { fresh });
+      return await client.send(projectId, text, agentId, { fresh, ...selection });
     }
     throw err;
   }
@@ -3530,13 +3583,15 @@ program
 program
   .command("send <text...>")
   .description("send one message into the shared thread")
+  .option("--model <model>", "model for this message only")
+  .option("--effort <level>", "reasoning effort for this message only, where supported")
   .option("-a, --agent <id>", "address a specific agent (may require a handoff)")
   .option("--wait", "wait for the turn to end; print the reply and cost; exit 0 done, 1 failed, 2 asked a question, 75 interrupted (the daemon restarted), 124 timed out")
   .option("--json", "with --wait: print the outcome as one JSON object")
   .option("--timeout <seconds>", "with --wait: give up after this long", "1800")
   .option("--fresh", "start the agent's session in this chat over — a short question needn't re-read a long one")
   .option("--handoff", "with --agent: take the baton from whoever holds it, without asking")
-  .action(async (words: string[], opts: { agent?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean; handoff?: boolean }) => {
+  .action(async (words: string[], opts: { agent?: string; model?: string; effort?: string; wait?: boolean; json?: boolean; timeout: string; fresh?: boolean; handoff?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
     // a long session whose prompt cache has gone cold is re-read in full: say so before spending it (#280)
@@ -3558,7 +3613,7 @@ program
     const since = opts.wait ? ((await client.events(project.id, undefined, 1)).events.at(-1)?.id ?? 0) : 0;
     // a question needs a person at a terminal — not a script, and never --json output
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !opts.json;
-    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff));
+    const result = await sendWithHandoffConfirm(client, project.id, words.join(" "), opts.agent, interactive, Boolean(opts.fresh), Boolean(opts.handoff), { model: opts.model, effort: opts.effort });
     if (!result) return;
     if (!opts.wait) return void console.log(pc.dim(`→ sent to ${result.agentId} (loom log --follow to watch)`));
     const deadline = Date.now() + Math.max(1, Number(opts.timeout) || 1800) * 1000;

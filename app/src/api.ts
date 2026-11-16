@@ -142,6 +142,8 @@ export interface Chat {
   lastReplyId?: number;
   pinned?: boolean;
   archived?: boolean;
+  /** When a PR this chat opened fails CI or gets a review, the fix request comes back here (#378). */
+  prFeedback?: "off" | "ci" | "ci+reviews";
   /** What made it — an Orchestra run, race, crew or import — so its threads fold together. */
   group?: { kind: "orchestra" | "race" | "crew" | "import"; id: string; title: string; status?: string; at: number };
   /** Who answers in this chat, and on which model and effort (#370) — unset follows the baton / the agent's default. */
@@ -954,6 +956,14 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** Side chats (#376): a private, read-only question beside a chat; none of it enters the thread. */
+export interface SideMessage { role: "user" | "agent"; text: string; at: number }
+export const askSide = (c: Creds, id: string, chat: string, text: string, sideId?: string) =>
+  api<{ sideId: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side`, { method: "POST", body: JSON.stringify(sideId ? { text, sideId } : { text }) });
+export const getSide = (c: Creds, id: string, chat: string, sideId: string) =>
+  api<{ messages: SideMessage[]; busy: boolean; error?: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+export const closeSide = (c: Creds, id: string, chat: string, sideId: string) =>
+  api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`, { method: "DELETE" });
 /** The agent CLIs on the paired computer — for choosing who works in a new project (#371). */
 export interface SetupAgent { kind: string; label: string; found: boolean; authed: boolean | null }
 export const getSetupAgents = (c: Creds) => api<{ agents: SetupAgent[] }>(c, "/api/setup");
@@ -1034,7 +1044,7 @@ export const createChat = (c: Creds, id: string, title: string, opts: { agentId?
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats`, { method: "POST", body: JSON.stringify({ title, ...opts }) });
 export const renameChat = (c: Creds, id: string, chat: string, title: string) =>
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/rename`, { method: "POST", body: JSON.stringify({ title }) });
-export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned?: boolean; archived?: boolean }) =>
+export const setChatFlags = (c: Creds, id: string, chat: string, flags: { pinned?: boolean; archived?: boolean; prFeedback?: "off" | "ci" | "ci+reviews" }) =>
   api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "PATCH", body: JSON.stringify(flags) });
 export const deleteChat = (c: Creds, id: string, chat: string) =>
   api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}`, { method: "DELETE" });

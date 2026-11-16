@@ -49,6 +49,9 @@ export interface QueueItem {
   plan?: boolean;
   /** The reply length it was sent with (brief / detailed). */
   length?: "brief" | "detailed";
+  /** Selection captured by a message send; null keeps agent defaults even if the chat changes. */
+  model?: string | null;
+  effort?: string | null;
   source: "user" | "route";
   at: number;
   editedAt?: number;
@@ -106,6 +109,8 @@ export interface QueueInput {
   chat?: string;
   plan?: boolean;
   length?: "brief" | "detailed";
+  model?: string | null;
+  effort?: string | null;
   source?: "user" | "route";
   when?: QueueCondition;
   continuity?: QueueItem["continuity"];
@@ -197,6 +202,8 @@ export class PromptQueue {
       chat: input.chat ?? "main",
       ...(input.plan ? { plan: true } : {}),
       ...(input.length ? { length: input.length } : {}),
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(input.effort !== undefined ? { effort: input.effort } : {}),
       source: input.source ?? "user",
       ...(input.continuity ? { continuity: { ...input.continuity } } : {}),
       at: Date.now(),
@@ -318,6 +325,9 @@ function validItem(x: unknown): x is QueueItem {
   if (!x || typeof x !== "object") return false;
   const i = x as QueueItem;
   if (typeof i.id !== "string" || typeof i.text !== "string" || !i.text.trim() || i.text.length > MAX_QUEUE_TEXT) return false;
+  for (const [value, max] of [[i.model, 200], [i.effort, 40]] as const) {
+    if (value !== undefined && value !== null && (typeof value !== "string" || value.length > max || /[\x00-\x1f\x7f]/.test(value))) return false;
+  }
   if (i.continuity && (typeof i.continuity.requestId !== "string" || !i.continuity.requestId || i.continuity.requestId.length > 256 ||
     !(i.continuity.model === null || (typeof i.continuity.model === "string" && i.continuity.model.length > 0 && i.continuity.model.length <= 256)))) return false;
   try {

@@ -796,6 +796,7 @@ export function createThread(view) {
           // the prompt queue changed — sent, edited, reordered, paused
           if (frame.type === "queue") { view.onQueueFrame(frame); return; }
           if (frame.type === "presence") { if (frame.chat === (view.chatId || "main")) { var pe = document.getElementById("presence"); if (pe) pe.innerHTML = presenceHtml(frame.people, state.presenceId || "you"); } return; }
+          if (frame.type === "side") { if (state.onSideFrame) state.onSideFrame(frame); return; }
           // a reply as it's being written (not logged; the message follows)
           if (frame.type === "stream") { if (view.historyLoaded) onStreamFrame(frame); else if (pendingStream.length < 2000) pendingStream.push(frame); return; }
           // a dev server started, stopped, crashed, or printed a line
