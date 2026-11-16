@@ -164,6 +164,8 @@ export class ProjectRuntime {
   readonly routes: RouteEngine;
   /** One orchestrator, many parallel workers — see core/orchestra.ts. */
   readonly orchestra: OrchestraEngine;
+  /** Set by the owning daemon after binding its HTTP listener. */
+  apiUrl = "";
   /** Agent Teams: crews of agents with roles, one goal at a time (core/crew.ts). */
   readonly crews: CrewEngine;
   /** Loop watch: an agent stuck re-running the same failing command (core/loops.ts). */
@@ -363,6 +365,7 @@ export class ProjectRuntime {
     });
 
     this.orchestra = new OrchestraEngine({
+      apiUrl: () => this.apiUrl,
       projectId: info.id,
       projectName: info.name,
       projectDir: info.dir,
@@ -755,8 +758,9 @@ export class ProjectRuntime {
         else updated.push(id);
         // Construct all replacements before changing the roster, so a rejected
         // adapter option cannot leave half of an edit applied.
+        // pooled like at startup, so a reloaded agent still honours each chat's own model (#370)
         if (after && after.enabled !== false) prepared.set(id, createAgent(
-          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } }, this.agentDir(id),
+          { ...after, options: { ...this.policyOptions(after), loomProject: this.info.id } }, this.agentDir(id), true,
         ));
       }
       const was = this.configOnDisk ?? this.config;
@@ -1193,6 +1197,7 @@ export class ProjectRuntime {
     const agent = prepared ?? createAgent(
       { ...cfg, options: { ...this.policyOptions(cfg), loomProject: this.info.id } },
       this.agentDir(cfg.id),
+      true,
     );
     // What this turn has typed since its last finished message. A turn that
     // is stopped (or dies) mid-reply never sends that message, and the words
@@ -1321,13 +1326,11 @@ export class ProjectRuntime {
   }
 
   /**
-   * Point an agent at a different model.
+   * Change an agent's default model. Chats with their own model keep that choice.
    *
-   * The model is read once, when the adapter is constructed (createAgent hands
-   * it cfg.options), so changing it means building a fresh adapter instance.
-   * Native resume data stays persisted; each adapter decides whether its harness
-   * can reuse it. Refused while a turn is preparing or running, because swapping
-   * the process out from under that turn would strand it.
+   * Global defaults rebuild the adapter because some CLIs read them only at
+   * startup. Native resume data stays persisted. Refused while a turn is
+   * preparing or running, because replacing its process would strand it.
    *
    * An empty model clears the override, so the CLI falls back to its own default
    * — the honest "Default" the picker offers.
@@ -1853,41 +1856,39 @@ export class ProjectRuntime {
     return chat.starred ?? [];
   }
 
-  createChat(title: string, opts: { agentId?: string; model?: string } = {}): ChatInfo {
-    const bound = opts.agentId ? this.bindable(opts.agentId, opts.model) : {};
+  createChat(title: string, opts: { agentId?: string; model?: string; effort?: string } = {}): ChatInfo {
+    if (!opts.agentId && (opts.model || opts.effort)) throw new Error("model and effort need an agentId");
+    const bound = opts.agentId ? this.bindable(opts.agentId, opts.model, opts.effort) : {};
     return this.conversations.createChat(title, bound);
   }
 
-  /**
-   * May this thread be bound to this agent (and model)?
-   *
-   * A model bound to an agent that bakes its model into a spawned process
-   * would be a setting that silently did nothing, so it is refused here —
-   * where the person can act on it — rather than dropped at send time.
-   */
-  private bindable(agentId: string, model?: string): { agentId: string; model?: string } {
+  private bindable(agentId: string, model?: string, effort?: string): { agentId: string; model?: string; effort?: string } {
     const agent = this.agents.get(agentId);
     if (!agent) throw new Error(`no agent "${agentId}" in this project`);
     if (!isAdapter(agent)) throw new Error(`"${agentId}" is a bridge — it can't answer in a thread`);
-    if (model && !this.switchesModelPerTurn(agentId)) {
-      throw new Error(
-        `"${agentId}" can't change model per thread — pin the model on the agent instead (loom model ${agentId} ${model}), or use a "model" agent`,
-      );
-    }
-    return { agentId, ...(model ? { model } : {}) };
+    const selection = (value: string | undefined, name: string, max: number) => {
+      if (value !== undefined && typeof value !== "string") throw new Error(`${name} must be a string`);
+      const next = value?.trim();
+      if (next && (next.length > max || /[\x00-\x1f\x7f]/.test(next))) throw new Error(`invalid ${name}`);
+      return next || undefined;
+    };
+    model = selection(model, "model", 200);
+    effort = selection(effort, "effort", 40);
+    if (effort && !["claude-code", "codex", "antigravity-cli", "echo"].includes(agent.kind))
+      throw new Error(`"${agentId}" doesn't support reasoning effort`);
+    if (effort && agent.kind === "claude-code" && !["low", "medium", "high", "xhigh", "max"].includes(effort))
+      throw new Error("Claude effort must be low, medium, high, xhigh or max");
+    if (effort && agent.kind === "codex" && !["none", "minimal", "low", "medium", "high", "xhigh"].includes(effort))
+      throw new Error("Codex effort must be none, minimal, low, medium, high or xhigh");
+    if (effort && agent.kind === "antigravity-cli" && !["low", "medium", "high"].includes(effort))
+      throw new Error("Antigravity effort must be low, medium or high");
+    return { agentId, ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
   }
 
-  /** Can this agent be handed a different model for one turn? */
-  private switchesModelPerTurn(agentId: string): boolean {
-    const kind = this.config.agents.find((a) => a.id === agentId)?.kind;
-    return kind === "model" || Boolean(this.continuity && kind && isNativeKind(kind));
-  }
-
-  /** Bind (or unbind) who answers in a thread. */
-  setChatAgent(id: string, agentId: string | null, model?: string): ChatInfo | null {
-    // Preserve Main's error before validating an optional target.
-    if (id !== MAIN_CHAT && agentId) this.bindable(agentId, model);
-    return this.conversations.setChatAgent(id, agentId, model);
+  /** Replaces the selection. Omitted model/effort inherit agent defaults; null agentId clears all three. */
+  setChatAgent(id: string, agentId: string | null, model?: string, effort?: string): ChatInfo | null {
+    const bound = id !== MAIN_CHAT && agentId ? this.bindable(agentId, model, effort) : { model: undefined, effort: undefined };
+    return this.conversations.setChatAgent(id, agentId, bound.model, bound.effort);
   }
 
   /**
@@ -1959,7 +1960,7 @@ export class ProjectRuntime {
   }
 
   /** What a thread has pinned, if anything. */
-  chatBinding(chat?: string): { agentId?: string; model?: string } {
+  chatBinding(chat?: string): { agentId?: string; model?: string; effort?: string } {
     if (!chat || chat === MAIN_CHAT) return {};
     const found = this.chats().find((c) => c.id === chat);
     if (!found?.agentId) return {};
@@ -1967,7 +1968,7 @@ export class ProjectRuntime {
     // the baton rather than failing: the conversation is still readable, and
     // the alternative is a thread nobody can type in.
     if (!this.agents.has(found.agentId)) return {};
-    return { agentId: found.agentId, ...(found.model ? { model: found.model } : {}) };
+    return { agentId: found.agentId, ...(found.model ? { model: found.model } : {}), ...(found.effort ? { effort: found.effort } : {}) };
   }
 
   renameChat(id: string, title: string): ChatInfo | null { return this.conversations.renameChat(id, title); }
@@ -2611,7 +2612,8 @@ export class ProjectRuntime {
     if (agent.busy() || this.turns.busySince.has(agentId)) throw new Error(`"${agentId}" is mid-turn — wait for it to finish, then compact`);
     await this.ensureStarted(agentId);
     this.turns.turnChat.set(agentId, chat);
-    await agent.compact(chat);
+    const bound = this.chatBinding(chat);
+    await agent.compact(chat, bound.agentId === agentId ? bound : {});
   }
 
   /**
@@ -2654,9 +2656,9 @@ export class ProjectRuntime {
       const cfg = this.config.agents.find(a => a.id === target);
       if (!cfg || !isNativeKind(cfg.kind)) throw new ContinuityError("unsupported", "queued native continuity needs a supported harness (Codex, Claude Code or OpenCode)");
       const captured = this.continuity.capture({ id: newId(16), text: input.text, conversationId: input.chat ?? MAIN_CHAT,
-        agentInstanceId: target, source: input.source ?? "user", model: bound.agentId === target ? bound.model ?? null : null,
+        agentInstanceId: target, source: input.source ?? "user", ...(bound.agentId === target && bound.effort ? { effort: bound.effort } : {}), model: bound.agentId === target ? bound.model ?? null : null,
         plan: Boolean(input.plan), targetAddedTokens: 6000 });
-      input = { ...input, target: { kind: "agent", agentId: target }, continuity: { requestId: captured.request.id, model: captured.request.model } };
+      input = { ...input, target: { kind: "agent", agentId: target }, continuity: { requestId: captured.request.id, model: captured.request.model, effort: captured.request.effort } };
     }
     return this.queueCoordinator.enqueue(input);
   }

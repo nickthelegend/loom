@@ -4,7 +4,6 @@
  */
 
 import type { PrFeedbackMode, TrackedPr } from "../core/pr-feedback.js";
-import type { ChatInfo } from "../types.js";
 import { spawn } from "../core/process.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -12,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import type {
   AgentConfig,
+  ChatInfo,
   CostSummary,
   LoomEvent,
   ProjectStatus,
@@ -154,6 +154,15 @@ export class DaemonClient {
 
   chats(id: string): Promise<{ chats: ChatInfo[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats`);
+  }
+
+  createChat(id: string, title: string, opts: { agentId?: string; model?: string; effort?: string } = {}): Promise<{ chat: ChatInfo }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats`, { title, ...opts });
+  }
+
+  /** Replaces the chat selection; null unbinds, omitted model/effort use agent defaults. */
+  setChatAgent(id: string, chat: string, agentId: string | null, opts: { model?: string; effort?: string } = {}): Promise<{ chat: ChatInfo }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/agent`, { agentId, ...opts });
   }
 
   /** One page of a chat's events, newest `limit`, before an id when paging back. */

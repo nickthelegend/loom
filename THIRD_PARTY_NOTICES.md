@@ -15,7 +15,9 @@ are reproduced here as those licenses require.
 - the orchestrator's standing rules: coordinate, never implement; ground tasks in
   the real repository; delegate every change to a worker;
 - the worker rules (stay scoped, verify, report blockers);
-- one git worktree per worker session.
+- one git worktree per worker session;
+- the report coordinator approach: workers report progress during a turn and
+  requests for input or blockers reach the orchestrator in a batch.
 
 The prompts were rewritten for Loom's action protocol, so this is a modified work.
 Loom's orchestrator answers in a parsed JSON action block instead of driving a

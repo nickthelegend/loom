@@ -413,6 +413,16 @@ export class LoomDaemon {
         return;
       }
       const token = bearerToken(req.headers.authorization);
+      // A worker credential admits only this method and exact report route.
+      const report = req.method === "POST" && /^\/api\/projects\/([^/]+)\/orchestra\/([^/]+)\/tasks\/([^/]+)\/report\/?$/.exec(req.path);
+      if (report) {
+        const project = findProject(decodeURIComponent(report[1]!));
+        if (project && this.runtimes.get(project.id)?.orchestra.acceptsReportToken(decodeURIComponent(report[2]!), token)) {
+          (req as Request & { projectScope?: string[] }).projectScope = [project.id];
+          next();
+          return;
+        }
+      }
       if (!this.auth.isAuthorized(token)) {
         res.status(401).json({ error: "unauthorized" });
         return;
@@ -590,6 +600,8 @@ export class LoomDaemon {
     const existing = this.runtimes.get(info.id);
     if (existing) return existing;
     const rt = await ProjectRuntime.open(info);
+    const host = this.host === "0.0.0.0" || this.host === "::" ? "127.0.0.1" : this.host;
+    rt.apiUrl = `http://${host.includes(":") ? `[${host}]` : host}:${this.port}`;
     rt.onServerEvent((f) => {
       this.broadcastFrame({ type: "server", projectId: info.id, ...f }, info.id);
     });

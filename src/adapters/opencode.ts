@@ -37,6 +37,7 @@ import { permissionFor } from "../core/permissions.js";
 import { NativeDispatchRejected, NativeQuiescenceUnknown, NativeSessionMissing } from "../core/continuity/contracts.js";
 
 interface OpenCodeOptions {
+  env?: Record<string, string>;
   /** Reuse an already-running server instead of spawning one. */
   baseUrl?: string;
   /** Extra args for `opencode serve`. */
@@ -341,7 +342,7 @@ export class OpenCodeAdapter extends AdapterBase {
         "opencode",
         ["serve", "--port", String(port), "--hostname", "127.0.0.1", ...(this.options.extraArgs ?? [])],
         { cwd: this.projectDir, stdio: ["ignore", "ignore", "pipe"],
-          env: { ...agentEnv(), ...opencodePermissionEnv(this.options), OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password } },
+          env: { ...agentEnv(), ...this.options.env, ...opencodePermissionEnv(this.options), OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password } },
       );
       this.child = child;
       // what it says on stderr, so a server that never comes up can say why

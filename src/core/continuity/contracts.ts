@@ -54,8 +54,9 @@ export const DeliveryReceiptV1 = z.strictObject({ version: z.literal(1), id: Id,
   status: z.enum(["prepared", "submitting", "accepted", "failed", "outcome_unknown"]),
   execution: z.enum(["idle", "running", "complete", "failed", "interrupted", "unknown"]),
   evidence: z.string().max(2000).nullable(), updatedAt: Counter });
+// Effort is optional so requests captured before per-chat effort keep their original hashes.
 export const RequestV1 = z.strictObject({ id: Id, conversationId: Id, agentInstanceId: Id,
-  text: Text.min(1), source: z.enum(["user", "route"]), model: Id.nullable(),
+  text: Text.min(1), source: z.enum(["user", "route"]), model: Id.nullable(), effort: Id.nullable().optional(),
   plan: z.boolean(), targetAddedTokens: z.number().int().min(128).max(100_000) });
 export type SourceRef = z.infer<typeof SourceRefV1>;
 export type ContextItem = z.infer<typeof ContextItemV1>;

@@ -12,7 +12,8 @@
  * Design lineage, credited: the orchestrator/worker split, the "coordinate,
  * never implement" orchestrator rules and the worktree-per-worker isolation
  * follow Agent Orchestrator (github.com/Untrivial-ai/agent-orchestrator,
- * Apache-2.0). What differs, on purpose:
+ * Apache-2.0). Live worker reporting also follows its report coordinator.
+ * What differs, on purpose:
  *
  *  - **The orchestrator never needs a shell tool.** AO's orchestrator drives a
  *    CLI (`ao spawn`, `ao send`) from its terminal, which fails for agents that
@@ -33,6 +34,7 @@
 import { recordOpenedPr } from "./pr-feedback.js";
 import { execFile } from "./process.js";
 import fs from "node:fs";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import { createWorktree } from "./worktrees.js";
 import type { TeamPolicy } from "./team-policy.js";
@@ -157,6 +159,29 @@ export interface TaskHold {
   checkedAt?: number;
 }
 
+/**
+ * Worker progress, independent of task status: even "done" waits for the turn and merge.
+ * `at` is a server timestamp in milliseconds. GET runs and WS task summaries carry
+ * the newest 20 reports in arrival order; lastReport is null until the first report.
+ */
+export interface OrchestraReport {
+  at: number;
+  kind: "checkpoint" | "needs_input" | "stuck" | "done";
+  text: string;
+}
+
+const WORKER_REPORT_BLOCK = /```loom-report[^\S\r\n]*\r?\n(checkpoint|needs_input|stuck|done):([^]*?)\r?\n```/g;
+
+export function parseWorkerReports(text: string): Omit<OrchestraReport, "at">[] {
+  const reports: Omit<OrchestraReport, "at">[] = [];
+  for (const match of text.matchAll(WORKER_REPORT_BLOCK)) {
+    const kind = match[1] as OrchestraReport["kind"];
+    const body = match[2]!.trim();
+    if ((body || kind === "done") && body.length <= 4000) reports.push({ kind, text: body });
+  }
+  return reports;
+}
+
 export interface OrchestraTask extends OrchestraModel {
   id: string;
   title: string;
@@ -182,6 +207,8 @@ export interface OrchestraTask extends OrchestraModel {
   attempts: number;
   /** Follow-up messages queued by the orchestrator, run after the current turn. */
   queued: string[];
+  reports?: OrchestraReport[];
+  lastReport?: OrchestraReport | null;
   result?: string;
   files?: string[];
   error?: string;
@@ -376,6 +403,8 @@ export const ORCHESTRA_KEEP_DAYS = 7;
 export interface OrchestraHost {
   projectId: string;
   projectName: string;
+  /** Reachable daemon origin for worker report commands. */
+  apiUrl?(): string;
   projectDir: string;
   /** `orchestra.worktreeDir` from the project's config, if set. */
   worktreeDir?(): string | undefined;
@@ -848,6 +877,11 @@ export function workerBriefing(opts: {
     "- Verify what you touched (run the relevant tests/build when there are any).",
     "- Do not commit, push, or open PRs — Loom commits and merges for you.",
     "- Finish with a short report: what you changed, how you verified it, anything left undone.",
+    "- Report progress as you work: loom report --checkpoint \"what changed\", --needs-input \"question\", --stuck \"blocker\", or --done (one flag per call).",
+    "  Loom supplies LOOM_API, LOOM_PROJECT_ID, LOOM_RUN_ID, LOOM_TASK_ID and LOOM_REPORT_TOKEN in your environment. Keep the token private.",
+    "  Without a shell, emit a fenced block: ```loom-report\ncheckpoint: what changed\n``` (also needs_input, stuck, done).",
+    "  needs_input and stuck notify the orchestrator in a batch; checkpoint and done only record progress.",
+    "  A done report does not end your turn or merge your work. Finish your reply when the work is ready.",
     "- If you cannot proceed without a decision, end your reply with the question.",
     ...(opts.planFile
       ? [
@@ -971,6 +1005,76 @@ export class OrchestraEngine {
   private gitLock = new Mutex();
   private turnText = new Map<string, string>();
   private orchestratorBusy = new Set<string>();
+  // Run-scoped credentials never belong in the persisted/public run record.
+  private reportTokens = new Map<string, string>();
+  private reportTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private pendingReports = new Map<string, Map<string, OrchestraReport[]>>();
+
+  private workerEnvironment(runId: string, taskId: string): Record<string, string> {
+    const run = this.mustGet(runId);
+    if (!run.tasks.some(t => t.id === taskId)) throw new Error("no such task in this run");
+    let token = this.reportTokens.get(runId);
+    if (!token) {
+      token = randomBytes(32).toString("hex");
+      this.reportTokens.set(runId, token);
+    }
+    return { LOOM_API: this.host.apiUrl?.() ?? "", LOOM_PROJECT_ID: this.host.projectId,
+      LOOM_RUN_ID: runId, LOOM_TASK_ID: taskId, LOOM_REPORT_TOKEN: token };
+  }
+
+  acceptsReportToken(runId: string, token: string | undefined): boolean {
+    const expected = this.reportTokens.get(runId);
+    if (!expected || !token || isTerminal(this.mustGet(runId).status)) return false;
+    const a = Buffer.from(expected), b = Buffer.from(token);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  /** Persist and broadcast progress without changing scheduling or merging work. */
+  report(runId: string, taskId: string, input: unknown): OrchestraReport {
+    const run = this.mustGet(runId);
+    const task = run.tasks.find(t => t.id === taskId);
+    if (!task) throw new Error("no such task in this run");
+    if (isTerminal(run.status) || run.moving || task.status !== "running") throw new Error("task is not running");
+    const b = input as Partial<OrchestraReport> | null;
+    if (!b || typeof b.kind !== "string" || !["checkpoint", "needs_input", "stuck", "done"].includes(b.kind) ||
+        (b.text !== undefined && typeof b.text !== "string")) throw new Error("invalid report kind or text");
+    const text = (b.text ?? "").trim();
+    if ((!text && b.kind !== "done") || text.length > 4000) throw new Error("report text must be 1–4000 characters (done may be empty)");
+    const report: OrchestraReport = { at: Math.max(Date.now(), (task.lastReport?.at ?? 0) + 1), kind: b.kind!, text };
+    task.reports = [...(task.reports ?? []), report].slice(-20);
+    task.lastReport = report;
+    this.save(run);
+    this.emit(run, "task_report", { taskId, report, task: taskSummary(task) });
+    if (!run.race && (report.kind === "needs_input" || report.kind === "stuck")) {
+      const pending = this.pendingReports.get(run.id) ?? new Map<string, OrchestraReport[]>();
+      pending.set(task.id, [...(pending.get(task.id) ?? []), report].slice(-20));
+      this.pendingReports.set(run.id, pending);
+      if (!this.reportTimers.has(run.id)) {
+        const timer = setTimeout(() => { this.reportTimers.delete(run.id); this.flushReports(run); }, 5000);
+        timer.unref?.();
+        this.reportTimers.set(run.id, timer);
+      }
+    }
+    return report;
+  }
+
+  private flushReports(run: OrchestraRun): void {
+    if (!this.pendingReports.has(run.id) || this.reportTimers.has(run.id) || this.orchestratorBusy.has(run.id) ||
+        run.status !== "running" || run.moving) return;
+    run.status = "reviewing";
+    this.save(run);
+    this.emit(run, "reviewing", { round: run.round + 1 });
+    void this.orchestratorTurn(run, "Workers need your attention while work continues. Use send to queue guidance, cancel to stop a task, or ask the human.");
+  }
+
+  private takeReports(run: OrchestraRun): string {
+    const reports = this.pendingReports.get(run.id);
+    if (!reports) return "";
+    this.pendingReports.delete(run.id);
+    clearTimeout(this.reportTimers.get(run.id));
+    this.reportTimers.delete(run.id);
+    return "\n\nWorker progress reports:\n" + [...reports].flatMap(([id, entries]) => entries.map(r => `${id} (${r.kind}): ${r.text}`)).join("\n");
+  }
 
   constructor(private host: OrchestraHost) {
     for (const run of this.loadRuns()) this.runs.set(run.id, run);
@@ -1007,6 +1111,10 @@ export class OrchestraEngine {
         const run = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as OrchestraRun;
         // a race applied before its summary was rewritten on apply still says "pick one"
         if (run.race && run.applied?.task && run.summary?.endsWith(PICK_ONE)) run.summary = raceApplied(run);
+        for (const task of run.tasks) {
+          task.reports ??= [];
+          task.lastReport ??= task.reports.at(-1) ?? null;
+        }
         out.push(run);
       } catch {
         /* a torn file is one lost run, not a dead project */
@@ -1229,6 +1337,8 @@ export class OrchestraEngine {
           chat: chatInfo.id,
           attempts: 0,
           queued: [],
+          reports: [],
+          lastReport: null,
         };
         run.tasks.push(task);
         this.emit(run, "task", { task: taskSummary(task) });
@@ -1379,6 +1489,7 @@ export class OrchestraEngine {
     run.status = "moved";
     run.movedTo = { where, at: Date.now() };
     this.save(run);
+    this.forgetRun(run.id);
     this.emit(run, "moved", { to: where, refs });
     return { record, refs };
   }
@@ -1427,7 +1538,7 @@ export class OrchestraEngine {
     await this.gitLock.run(async () => {
       await git(["worktree", "add", "-q", "-B", record.branch, integration, `refs/remotes/loom-run/${id}/main`], dir);
       for (const t of record.tasks) {
-        const copy: OrchestraTask = { ...t, queued: [...t.queued] };
+        const copy: OrchestraTask = { ...t, queued: [...t.queued], reports: [...(t.reports ?? [])], lastReport: t.lastReport ?? null };
         const wcfg = local(t.agent, t.kind, firstWorker);
         if (wcfg) {
           copy.agent = wcfg.id;
@@ -1757,6 +1868,7 @@ export class OrchestraEngine {
     if (run.round >= run.maxRounds) {
       return this.finish(run, "failed", `stopped after ${run.maxRounds} orchestrator rounds without "done"`);
     }
+    text += this.takeReports(run);
     run.round++;
     this.orchestratorBusy.add(run.id);
     this.save(run);
@@ -1806,6 +1918,7 @@ export class OrchestraEngine {
       return this.orchestratorTurn(run, `The human says: ${human.join("\n")}\n\n${this.statusReport(run)}`);
     }
     this.applyActions(run, actions);
+    this.flushReports(run);
   }
 
   private applyActions(run: OrchestraRun, actions: OrchestraAction[]): void {
@@ -1949,6 +2062,8 @@ export class OrchestraEngine {
       chat: chat.id,
       attempts: 0,
       queued: [],
+      reports: [],
+      lastReport: null,
     };
     run.tasks.push(task);
     this.emit(run, "task", { task: taskSummary(task) });
@@ -2182,6 +2297,7 @@ export class OrchestraEngine {
     for (const t of run.tasks) {
       const head = `\n### ${t.id} · ${t.title} — ${t.status.toUpperCase()} (worker: ${t.agent}, model: ${t.model ?? "provider default"}${t.effort ? `, effort: ${t.effort}` : ""}, attempts: ${t.attempts})`;
       lines.push(head);
+      if (t.lastReport) lines.push(`Latest progress (${t.lastReport.kind}): ${t.lastReport.text}`);
       if (t.reported && (t.status === "done" || t.status === "cancelled")) {
         lines.push("(already reviewed)");
         continue;
@@ -2282,7 +2398,14 @@ export class OrchestraEngine {
     if (!agent) {
       const base = this.workersFor(run).find((w) => w.id === task.agent) ?? this.resolveAgent(task.agent) ?? { id: task.agent, kind: task.kind, role: "worker" };
       const cfg = run.workerDetails || task.model || task.effort ? pinModel(base, task) : base;
-      agent = this.host.makeAgent({ ...cfg, role: "worker" }, task.dir!);
+      agent = this.host.makeAgent({
+        ...cfg,
+        role: "worker",
+        options: {
+          ...cfg.options,
+          env: { ...(cfg.options?.env as Record<string, string> | undefined), ...this.workerEnvironment(run.id, task.id) },
+        },
+      }, task.dir!);
       this.live.set(key, agent);
       this.wire(run, agent, cfg.id, task.chat, key);
       await agent.start();
@@ -2442,10 +2565,46 @@ export class OrchestraEngine {
   // ── event wiring ──
 
   private wire(run: OrchestraRun, agent: Adapter, agentId: string, chat: string, key: string): void {
-    agent.onStream?.((d) => this.host.stream?.({ agentId, chat, ...d }));
+    const task = run.tasks.find(t => `${run.id}/${t.id}` === key);
+    let stream = "";
+    let streamed: Omit<OrchestraReport, "at">[] = [];
+    let reportAttempt = task?.attempts;
+    const resetReportTurn = () => {
+      if (reportAttempt === task?.attempts) return;
+      reportAttempt = task?.attempts;
+      stream = "";
+      streamed = [];
+    };
+    const record = (report: Omit<OrchestraReport, "at">) => {
+      if (task && task.status === "running" && !isTerminal(run.status) && !run.moving) this.report(run.id, task.id, report);
+    };
+    agent.onStream?.((d) => {
+      this.host.stream?.({ agentId, chat, ...d });
+      if (!task || d.reasoning) return;
+      resetReportTurn();
+      stream += d.text;
+      let consumed = 0;
+      for (const block of stream.matchAll(WORKER_REPORT_BLOCK)) {
+        for (const report of parseWorkerReports(block[0])) { record(report); streamed.push(report); }
+        consumed = block.index! + block[0].length;
+      }
+      stream = stream.slice(consumed);
+      stream = stream.slice(-20_000);
+    });
     agent.onEvent((e) => {
       const p = e.payload as Record<string, unknown>;
       if (e.kind === "message" && !p.reasoning && p.role !== "user") {
+        if (task) {
+          resetReportTurn();
+          // The final message repeats streamed text; each occurrence counts only once.
+          for (const report of parseWorkerReports(String(p.text ?? ""))) {
+            const i = streamed.findIndex(r => r.kind === report.kind && r.text === report.text);
+            if (i >= 0) streamed.splice(i, 1);
+            else record(report);
+          }
+          stream = "";
+          streamed = [];
+        }
         const prev = this.turnText.get(key) ?? "";
         this.turnText.set(key, capTurnText(`${prev}\n${String(p.text ?? "")}`));
       }
@@ -2482,6 +2641,10 @@ export class OrchestraEngine {
 
   /** A finished or aborted run's per-turn scratch (reply text, errors, questions) goes with it. */
   private forgetRun(runId: string): void {
+    this.reportTokens.delete(runId);
+    clearTimeout(this.reportTimers.get(runId));
+    this.reportTimers.delete(runId);
+    this.pendingReports.delete(runId);
     const prefix = `${runId}/`;
     for (const map of [this.turnText, this.lastError, this.workerQuestion] as Map<string, string>[])
       for (const k of [...map.keys()]) if (k.startsWith(prefix)) map.delete(k);
@@ -2700,6 +2863,8 @@ export function taskSummary(t: OrchestraTask): Record<string, unknown> {
     chat: t.chat,
     attempts: t.attempts,
     files: t.files ?? [],
+    reports: t.reports ?? [],
+    lastReport: t.lastReport ?? null,
     ...(t.touches?.length ? { touches: t.touches } : {}),
     ...(t.overlap ? { overlap: t.overlap } : {}),
     ...(t.hold ? { hold: t.hold } : {}),
