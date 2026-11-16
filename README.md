@@ -214,6 +214,43 @@ loom orchestrate "add OAuth login with tests" -o claude-code -w codex,antigravit
   was interrupted. **Resume** (or `loom orchestra:resume <run>`) picks up the
   tasks that were running and briefs the orchestrator again.
 
+Workers can report progress during a turn with one command per update:
+
+```bash
+loom report --checkpoint "Implementation finished; running tests"
+loom report --needs-input "Which API version should I support?"
+loom report --stuck "The dependency is unavailable"
+loom report --done
+```
+
+Loom supplies `LOOM_API` (daemon origin), `LOOM_PROJECT_ID`, `LOOM_RUN_ID`,
+`LOOM_TASK_ID`, and a private `LOOM_REPORT_TOKEN` to each local worker process.
+The token grants only report POSTs for that run. A worker without a shell can
+emit the same report in its message; the transcript stays intact:
+
+````text
+```loom-report
+checkpoint: Implementation finished; running tests
+```
+````
+
+Use `checkpoint`, `needs_input`, `stuck`, or `done` in the fence. Reports appear
+in `loom orchestra <run> --wait --progress` (with `--json`, progress is JSON lines
+on stderr). `needs_input` and `stuck` are batched for five seconds into one note
+to the orchestrator, even while workers are running. A busy orchestrator receives
+the note on its next turn; a run waiting on a human stays paused. Checkpoints and
+`done` reports do not wake it. Reports do not change task status: a `done` report
+still waits for the worker's turn to end and its work to merge.
+
+API clients POST `{ "kind": "checkpoint", "text": "…" }` to
+`/api/projects/:id/orchestra/:run/tasks/:task/report`, authenticated with the run's
+report token or an owner/admin bearer token. Text is limited to 4,000 characters
+and required except for `done`. The response is `{ report: { at, kind, text } }`;
+`at` is server time in milliseconds. GET orchestra runs include each task's
+`reports` (latest 20, oldest first) and `lastReport` (`null` before any report).
+An `orchestra` WS event with phase `task_report` includes `runId`, `taskId`,
+`report`, and the updated `task` summary for clients to render live.
+
 Use `agent[@model][:effort][xN]` to choose a model and build a fleet without
 adding roster entries. Agent names, kinds and aliases all work; `xN` (or `×N`)
 adds 1–100 instances per spec. The orchestrator takes the same syntax with count

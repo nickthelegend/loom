@@ -54,6 +54,7 @@ export const HEADLESS_NOTE =
 const DEFAULT_TIMEOUT_MS = 30 * 60_000; // an e2e-sized turn ran past 15 min in the field
 
 interface AntigravityOptions {
+  env?: Record<string, string>;
   /** Model the CLI runs, e.g. "gemini-3.6-flash-medium" or "claude-sonnet-4-6". */
   model?: string;
   /** Reasoning effort the CLI accepts: low | medium | high. */
@@ -183,7 +184,7 @@ export class AntigravityCliAdapter extends AdapterBase {
     // The binary may resolve by absolute path while its own PATH lookups (git,
     // node, …) still need the login shell's dirs, so make sure agy's own bin dir
     // is reachable to whatever it shells out to.
-    const env = agentEnv();
+    const env = { ...agentEnv(), ...this.options.env };
     const binDir = path.dirname(bin === "agy" ? INSTALLED[0]! : bin);
     env.PATH = `${binDir}:${env.PATH ?? ""}`;
 

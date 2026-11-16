@@ -1,5 +1,6 @@
 import type { Express } from 'express';
 import express from "express";
+import { bearerToken } from "../auth.js";
 import { recordRecent } from "../../core/prompts.js";
 import { subagents } from "../../core/subagents.js";
 import type { WithRuntime } from './context.js';
@@ -22,6 +23,27 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
     "/api/projects/:id/orchestra",
     withRuntime(async (rt, _req, res) => {
       res.json({ runs: rt.orchestra.list(), active: rt.orchestra.active()?.id ?? null });
+    }),
+  );
+
+  /** POST { kind: "checkpoint" | "needs_input" | "stuck" | "done", text?: string }
+   * returns { report: { at, kind, text } }. Text is required except for done (max 4000).
+   * A report never changes task status. GET runs include reports (latest 20) and
+   * lastReport; WS orchestra phase "task_report" includes taskId, report and task.
+   * Only the run's worker token or an owner/admin token may post.
+   */
+  app.post(
+    "/api/projects/:id/orchestra/:runId/tasks/:taskId/report",
+    withRuntime(async (rt, req, res) => {
+      const runId = String(req.params.runId), taskId = String(req.params.taskId);
+      if (!(req as express.Request & { isAdmin?: boolean }).isAdmin &&
+          !rt.orchestra.acceptsReportToken(runId, bearerToken(req.headers.authorization))) {
+        return void res.status(403).json({ error: "report requires this run's worker token or an owner/admin token" });
+      }
+      const run = rt.orchestra.get(runId);
+      if (!run?.tasks.some(t => t.id === taskId)) return void res.status(404).json({ error: "no such task in this run" });
+      try { res.json({ report: rt.orchestra.report(runId, taskId, req.body) }); }
+      catch (err) { orchestraError(res, err); }
     }),
   );
 

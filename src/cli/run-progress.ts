@@ -4,9 +4,10 @@
  * orchestras printed nothing between them). Pure: the CLI polls, this diffs.
  */
 
-import type { OrchestraRun } from "../core/orchestra.js";
+import type { OrchestraReport, OrchestraRun } from "../core/orchestra.js";
 
 export type ProgressEvent =
+  | { kind: "report"; run: string; task: string; agent: string; report: OrchestraReport }
   | { kind: "run"; run: string; status: string; round: number }
   | { kind: "round"; run: string; round: number }
   | { kind: "planned"; run: string; task: string; agent: string; title: string }
@@ -23,6 +24,9 @@ export function runEvents(prev: OrchestraRun | null, next: OrchestraRun): Progre
   for (const t of next.tasks) {
     const was = before.get(t.id);
     if (!was) out.push({ kind: "planned", run, task: t.id, agent: t.agent, title: t.title });
+    for (const report of t.reports ?? []) {
+      if (report.at > (was?.lastReport?.at ?? 0)) out.push({ kind: "report", run, task: t.id, agent: t.agent, report });
+    }
     // a task that comes back for another attempt changes status through running again; say so
     if (was?.status === t.status && was.attempts === t.attempts) continue;
     if (!was && t.status === "pending") continue;
@@ -44,6 +48,7 @@ export function formatEvent(e: ProgressEvent, label = ""): string {
     case "round": return `${head}${e.run} review round ${e.round}`;
     case "daemon": return `${head}daemon swapped ${e.from} → ${e.to} — the run carries on`;
     case "planned": return `${head}${e.task} planned for ${e.agent}: ${e.title}`;
+    case "report": return `${head}${e.task} [${e.agent}] ${e.report.kind}${e.report.text ? `: ${e.report.text.replace(/\s+/g, " ")}` : ""}`;
     case "task": {
       const again = e.attempt > 1 && e.status === "running" ? ` (attempt ${e.attempt})` : "";
       const files = e.files !== undefined ? ` — ${e.files} file${e.files === 1 ? "" : "s"}` : "";

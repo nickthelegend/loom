@@ -1431,7 +1431,11 @@ export interface OrchestraTask {
   /** The orchestrator's answer to a teammate overlap: wait:<goal> | narrow | proceed:<reason>. */
   overlap?: string;
   hold?: OrchestraTaskHold;
+  /** What the worker has said about itself mid-turn (#374), newest last, and the newest one. */
+  reports?: OrchestraReport[];
+  lastReport?: OrchestraReport | null;
 }
+export interface OrchestraReport { at: number; kind: "checkpoint" | "needs_input" | "stuck" | "done"; text: string }
 
 /** One orchestrator, many parallel workers, one integration branch. */
 export interface OrchestraRun {

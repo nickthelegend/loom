@@ -1925,12 +1925,16 @@ function printApplyResult(r: ApplyResult): void {
   for (const s of r.secrets ?? []) console.log(pc.red(`    ${s.file}${s.line ? `:${s.line}` : ""} — ${s.what}`));
 }
 
-async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string): Promise<void> {
+async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projectId: string, runId: string, onProgress?: ProgressSink): Promise<void> {
   let last = "";
+  let seen: import("../core/orchestra.js").OrchestraRun | null = null;
   for (;;) {
     const { run } = await steady(() => client.orchestraRun(projectId, runId));
     const line = `${run.status}|${run.tasks.map((t) => `${t.id}:${t.status}`).join(",")}`;
-    if (line !== last) {
+    if (onProgress) {
+      for (const event of runEvents(seen, run)) onProgress(event);
+      seen = run;
+    } else if (line !== last) {
       last = line;
       const stamp = new Date().toLocaleTimeString();
       console.log(
@@ -1949,6 +1953,33 @@ async function watchRun(client: Awaited<ReturnType<typeof ensureDaemon>>, projec
 }
 
 program
+  .command("report")
+  .description("report progress from an Orchestra worker using its LOOM_* environment")
+  .option("--checkpoint <text>", "record progress")
+  .option("--needs-input <text>", "ask the orchestrator for a decision")
+  .option("--stuck <text>", "tell the orchestrator what is blocking work")
+  .option("--done", "report that the work is ready")
+  .action(async (opts: { checkpoint?: string; needsInput?: string; stuck?: string; done?: boolean }) => {
+    const reports = [
+      ...(opts.checkpoint !== undefined ? [{ kind: "checkpoint", text: opts.checkpoint }] : []),
+      ...(opts.needsInput !== undefined ? [{ kind: "needs_input", text: opts.needsInput }] : []),
+      ...(opts.stuck !== undefined ? [{ kind: "stuck", text: opts.stuck }] : []),
+      ...(opts.done ? [{ kind: "done", text: "" }] : []),
+    ];
+    if (reports.length !== 1) throw new Error("choose exactly one of --checkpoint, --needs-input, --stuck, --done");
+    const required = ["LOOM_API", "LOOM_PROJECT_ID", "LOOM_RUN_ID", "LOOM_TASK_ID", "LOOM_REPORT_TOKEN"] as const;
+    const missing = required.filter(key => !process.env[key]?.trim());
+    if (missing.length) throw new Error(`loom report requires an Orchestra worker environment; missing ${missing.join(", ")}`);
+    const [api, project, run, task, token] = required.map(key => process.env[key]!);
+    const url = `${api!.replace(/\/$/, "")}/api/projects/${encodeURIComponent(project!)}/orchestra/${encodeURIComponent(run!)}/tasks/${encodeURIComponent(task!)}/report`;
+    const res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(reports[0]), signal: AbortSignal.timeout(30_000) });
+    const body = await res.json() as { error?: string };
+    if (!res.ok) throw new Error(body.error ?? `report failed (HTTP ${res.status})`);
+    console.log(`reported ${reports[0]!.kind}`);
+  });
+
+program
   .command("orchestrate <goal>")
   .description("one orchestrator plans the goal; many worker agents build it in parallel, each in its own worktree")
   .option("-o, --orchestrator <agent>", "agent[@model][:effort] who plans and reviews (default: claude-code if present)")
@@ -1962,7 +1993,7 @@ program
   .option("--apply", "when the run completes, scan its changes for secrets and merge it into your branch (#340)")
   .option("--push", "with --apply: push the branch after merging")
   .option("--no-watch", "start it and return instead of following it to the end")
-  .option("--progress", "with --apply: one line per task event while it runs")
+  .option("--progress", "one line per task event and worker report while watching or applying")
   .action(async (goal: string, opts: { orchestrator?: string; workers?: string; parallel?: string; rounds?: string; plan?: boolean; maxUsd?: string; race?: boolean; solo?: boolean; apply?: boolean; push?: boolean; watch: boolean; progress?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
@@ -1987,7 +2018,7 @@ program
               `${run.workers.join(", ")} (${run.maxParallel} in parallel) on ${pc.dim(run.branch)}`,
       );
       if (opts.watch || opts.apply) holdWaiting("orchestrate");
-      if (opts.watch) await watchRun(client, project.id, run.id);
+      if (opts.watch) await watchRun(client, project.id, run.id, progressSink(opts));
       else if (!opts.apply) console.log(pc.dim(`  follow it: loom orchestra ${run.id} --watch`));
       if (opts.apply) {
         const res = await waitScanApply(client, project.id, project.dir, run.id, { push: Boolean(opts.push), onProgress: opts.watch ? undefined : progressSink(opts) });
@@ -2007,7 +2038,7 @@ program
   .option("--json", "print runs (or one run) as JSON")
   .option("--wait", "with a run id: wait until it's completed, failed or aborted (or asks you something); exit 0 completed, 1 failed/aborted, 2 waiting on you")
   .option("--timeout <seconds>", "with --wait: give up after this long (exit 124)", "7200")
-  .option("--progress", "with --wait: one line per task event while it runs (with --json: JSON lines on stderr)")
+  .option("--progress", "with --wait or --watch: task events and worker reports (with --json: JSON lines on stderr)")
   .action(async (runId: string | undefined, opts: { watch?: boolean; json?: boolean; wait?: boolean; timeout: string; progress?: boolean }) => {
     const client = await ensureDaemon();
     const project = await currentProject(client);
@@ -2030,7 +2061,7 @@ program
           process.exitCode = !done ? 124 : run.status === "completed" ? 0 : run.status === "waiting_human" ? 2 : 1;
           return void (opts.json ? console.log(JSON.stringify(runJson(run))) : printRun(run));
         }
-        if (opts.watch) return void (await watchRun(client, project.id, runId));
+        if (opts.watch) return void (await watchRun(client, project.id, runId, progressSink(opts)));
         const { run } = await client.orchestraRun(project.id, runId);
         // which access each worker runs with: "bypass on the agent" that doesn't reach a worker shows here
         const modes = workerModes(run, project.agents as Array<{ id: string; kind: string; permissions?: string }>);

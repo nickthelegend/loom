@@ -50,6 +50,7 @@ import { decideAuto, policyIn, refusalText, type AutoPolicy } from "../../core/a
 import { spawnHarness, stopHarness, type HarnessProcess } from "../process.js";
 
 export interface ClaudeAdapterOptions {
+  env?: Record<string, string>;
   /** Path to the claude binary, when it isn't `claude` on PATH. */
   bin?: string;
   /** Claude permission mode, overriding the runtime mode; e.g. "acceptEdits". */
@@ -274,7 +275,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
       ...(extraArgs ? { extraArgs } : {}),
       spawnClaudeCodeProcess: spawnOptions => {
         const proc = spawnHarness(spawnOptions.command, spawnOptions.args, { cwd: spawnOptions.cwd ?? input.cwd,
-          env: spawnOptions.env as NodeJS.ProcessEnv });
+          env: { ...spawnOptions.env as NodeJS.ProcessEnv, ...this.options.env } });
         session.proc = proc;
         guardNativeOutput(proc.child, error => {
           session.failure = error.message;
