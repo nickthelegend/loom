@@ -22,7 +22,7 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
   if (m.method === "session/cancel") { cancel?.(); return; }
   const reply = (result) => send({ id: m.id, result });
   switch (m.method) {
-    case "initialize": return reply({ protocolVersion: 1, agentCapabilities: { loadSession: true } });
+    case "initialize": return reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, ...(JSON.parse(process.env.FAKE_ACP_CAPABILITIES ?? "{}")) } });
     case "session/new": { const id = `s${++n}`; sessions.add(id); return reply({ sessionId: id, modes: { currentModeId: "default", availableModes: [{ id: "default" }, { id: "bypassPermissions" }] } }); }
     case "session/load":
       if (!sessions.has(m.params.sessionId)) return send({ id: m.id, error: { code: -32000, message: "no such session" } });

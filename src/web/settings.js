@@ -874,7 +874,7 @@ import { devMode, setDevMode } from './mode.js';
     }
     function drawBridges(b){
       var h = '<div class="setphead">Slack &amp; Discord</div>' +
-        '<div class="setpsub">Mention the bot and the agent answers in the thread. It runs on this computer with your own bot — nothing hosted in between, no public URL.</div>';
+        '<div class="setpsub">Mention the bot and follow its current tool in the thread, then its final answer. It runs on this computer with your own bot — nothing hosted in between, no public URL.</div>';
       [["slack", "Slack", "xoxb-…", true], ["discord", "Discord", "bot token", false]].forEach(function(x){
         var p = x[0], c = b[p], st = c && c.status;
         var pill = !c ? '<span class="updpill" style="color:var(--muted-foreground);background:var(--muted)">Not set up</span>'
@@ -885,6 +885,8 @@ import { devMode, setDevMode } from './mode.js';
           '<div class="field"><label>Bot token' + (c ? ' <span class="opt">— blank keeps ' + esc(c.botToken) + "</span>" : "") + '</label><input data-b="' + p + '-bot" type="password" placeholder="' + x[2] + '" autocomplete="off" spellcheck="false"></div>' +
           (x[3] ? '<div class="field"><label>App-level token (Socket Mode)' + (c && c.appToken ? ' <span class="opt">— blank keeps ' + esc(c.appToken) + "</span>" : "") + '</label><input data-b="slack-app" type="password" placeholder="xapp-…" autocomplete="off" spellcheck="false"></div>' : "") +
           '<div class="field"><label>Listens to <span class="opt">user ids, comma-separated — required</span></label><input data-b="' + p + '-users" value="' + esc(c ? (c.users || []).join(", ") : "") + '" spellcheck="false"></div>' +
+          '<label class="trsw"><input type="checkbox" data-b="' + p + '-same-approvers"' + (!c || c.approvers === undefined ? ' checked' : '') + '><span>Let everyone listed above answer approvals</span></label>' +
+          '<div class="field"><label>Approvers <span class="opt">user ids, comma-separated; empty = nobody</span></label><input data-b="' + p + '-approvers" value="' + esc(c ? (c.approvers || []).join(", ") : "") + '"' + (!c || c.approvers === undefined ? ' disabled' : '') + ' spellcheck="false"></div>' +
           '<div class="field"><label>In channels <span class="opt">ids; blank = any channel the bot is in</span></label><input data-b="' + p + '-channels" value="' + esc(c ? (c.channels || []).join(", ") : "") + '" spellcheck="false"></div>' +
           '<div class="field"><label>Project <span class="opt">blank = the only one</span></label><input data-b="' + p + '-project" value="' + esc((c && c.project) || "") + '" spellcheck="false"></div>' +
           "</div>" +
@@ -892,12 +894,17 @@ import { devMode, setDevMode } from './mode.js';
           (c && c.enabled ? '<button class="btn ghost sm" data-off="' + p + '">Turn off</button>' : "") +
           (c ? '<button class="btn ghost sm" data-forget="' + p + '">Forget</button>' : "") + "</div>";
       });
-      h += '<div class="snote">Slack: turn on Socket Mode, give the bot <code>app_mentions:read</code>, <code>channels:history</code>, <code>chat:write</code> and <code>im:history</code>, and make an app-level token with <code>connections:write</code>. Discord: turn on the Message Content intent. Only the people you list are heard; approvals stay in Loom and on your phone.</div>';
+      h += '<div class="snote">Slack: turn on Socket Mode, give the bot <code>app_mentions:read</code>, <code>channels:history</code>, <code>chat:write</code> and <code>im:history</code>, and make an app-level token with <code>connections:write</code>. Discord: turn on the Message Content intent. Enable Slack Interactivity &amp; Shortcuts for approval buttons. Only the people you list are heard; approvers can Allow / Deny in the channel, with their names recorded.</div>';
       pane.innerHTML = h;
       var val = function(k){ var i = pane.querySelector('[data-b="' + k + '"]'); return i ? i.value.trim() : ""; };
+      ["slack", "discord"].forEach(function(p){
+        var same = pane.querySelector('[data-b="' + p + '-same-approvers"]');
+        same.onchange = function(){ pane.querySelector('[data-b="' + p + '-approvers"]').disabled = same.checked; };
+      });
       Array.prototype.forEach.call(pane.querySelectorAll("[data-save]"), function(btn){
         btn.onclick = function(){
           var p = btn.getAttribute("data-save"), body = { enabled: true, users: val(p + "-users"), channels: val(p + "-channels"), project: val(p + "-project") };
+          body.approvers = pane.querySelector('[data-b="' + p + '-same-approvers"]').checked ? null : val(p + "-approvers");
           if (val(p + "-bot")) body.botToken = val(p + "-bot");
           if (p === "slack" && val("slack-app")) body.appToken = val("slack-app");
           btn.disabled = true;
