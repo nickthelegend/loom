@@ -676,6 +676,86 @@ import { openTriggers } from './triggers-ui.js';
       var pop = document.getElementById("chatpick");
       if (pop) pop.remove();
     }
+    /** Reasoning effort each agent kind takes, for the chat's Model & effort popover (#370). */
+    var CHAT_EFFORTS = {
+      "claude-code": ["low", "medium", "high", "xhigh", "max"],
+      codex: ["minimal", "low", "medium", "high", "xhigh"],
+      "antigravity-cli": ["low", "medium", "high"],
+      echo: ["low", "medium", "high"],
+    };
+    /**
+     * Which model (and effort) a bound chat runs on — two chats on one agent can sit on different
+     * models. Suggestions come from the agent's own CLI; any id can be typed. Empty means the
+     * agent's default, and the change applies from the next turn.
+     */
+    function openChatModelPick(anchor, proj, chat){
+      closeAgentPick();
+      var agent = ((proj && proj.agents) || []).filter(function(a){ return a.id === chat.agentId; })[0];
+      if (!agent) { toast("bind this chat to an agent first"); return; }
+      var efforts = CHAT_EFFORTS[agent.kind] || [];
+      var model = chat.model || "", effort = chat.effort || "";
+      var pop = document.createElement("div");
+      pop.className = "pickpop chatmodel"; pop.id = "chatpick";
+      pop.setAttribute("role", "dialog");
+      pop.innerHTML = '<div class="pickhead">model for this chat · ' + esc(agentLabel(agent.kind, agent.id)) + "</div>" +
+        '<div class="cmlist" id="cmlist"><div class="cmrow dim">loading models…</div></div>' +
+        '<input class="cmin" id="cmcustom" type="text" spellcheck="false" autocomplete="off" placeholder="or type a model id">' +
+        (efforts.length ? '<div class="pickhead">effort</div><div class="cmeff" id="cmeff">' +
+          [""].concat(efforts).map(function(e){
+            return '<button type="button" class="cmchip" data-eff="' + esc(e) + '">' + esc(e || "default") + "</button>";
+          }).join("") + "</div>" : "") +
+        '<div class="cmact"><button type="button" class="btn sm ghost" id="cmcancel">Cancel</button>' +
+        '<button type="button" class="btn sm primary" id="cmsave">Save</button></div>';
+      document.body.appendChild(pop);
+      var custom = pop.querySelector("#cmcustom");
+      function paint(){
+        Array.prototype.forEach.call(pop.querySelectorAll("[data-model]"), function(b){
+          b.classList.toggle("on", b.getAttribute("data-model") === (custom.value.trim() || model));
+        });
+        Array.prototype.forEach.call(pop.querySelectorAll("[data-eff]"), function(b){
+          b.classList.toggle("on", b.getAttribute("data-eff") === effort);
+        });
+      }
+      function fill(models){
+        if (model && models.indexOf(model) < 0) models = [model].concat(models);
+        pop.querySelector("#cmlist").innerHTML = [""].concat(models.slice(0, 12)).map(function(m){
+          return '<button type="button" class="pickrow cmrow" data-model="' + esc(m) + '">' +
+            (m ? esc(m) : "Agent's default" + (agent.model ? ' <span class="prole">' + esc(shortModel(agent.model)) + "</span>" : "")) + "</button>";
+        }).join("");
+        Array.prototype.forEach.call(pop.querySelectorAll("[data-model]"), function(b){
+          b.onclick = function(ev){ ev.stopPropagation(); model = b.getAttribute("data-model"); custom.value = ""; paint(); };
+        });
+        paint();
+      }
+      api("/api/projects/" + proj.id + "/agents/" + encodeURIComponent(agent.id) + "/models")
+        .then(function(r){ fill((r && r.models) || []); })
+        .catch(function(){ fill([]); });
+      Array.prototype.forEach.call(pop.querySelectorAll("[data-eff]"), function(b){
+        b.onclick = function(ev){ ev.stopPropagation(); effort = b.getAttribute("data-eff"); paint(); };
+      });
+      custom.oninput = paint;
+      custom.onkeydown = function(ev){ if (ev.key === "Enter") { ev.preventDefault(); save(); } if (ev.key === "Escape") closeAgentPick(); };
+      pop.querySelector("#cmcancel").onclick = function(){ closeAgentPick(); };
+      pop.querySelector("#cmsave").onclick = save;
+      function save(){
+        var next = custom.value.trim() || model;
+        var body = { agentId: agent.id };
+        if (next) body.model = next;
+        if (effort) body.effort = effort;
+        api("/api/projects/" + proj.id + "/chats/" + encodeURIComponent(chat.id) + "/agent", { method: "POST", body: JSON.stringify(body) })
+          .then(function(){
+            closeAgentPick(); refresh();
+            toast("this chat runs on " + (next || "the agent's default") + (effort ? " · " + effort : "") + " from the next turn");
+          })
+          .catch(function(err){ toast(err.message); });
+      }
+      var r = anchor.getBoundingClientRect();
+      pop.style.left = Math.round(Math.min(r.left, window.innerWidth - 300)) + "px";
+      pop.style.top = Math.round(r.bottom + 4) + "px";
+      var ph = pop.getBoundingClientRect().height;
+      if (r.bottom + 4 + ph > window.innerHeight) pop.style.top = Math.max(8, Math.round(r.top - ph - 4)) + "px";
+      setTimeout(function(){ document.addEventListener("mousedown", agentPickAway); }, 0);
+    }
     /**
      * Right-click a project: everything you can do to it, where you clicked.
      *
@@ -725,6 +805,11 @@ import { openTriggers } from './triggers-ui.js';
             openChatAgentPick(row || document.body, p, function(agentId){ bindChat(pid, cid, agentId); });
           } },
       ];
+      // A bound chat picks its own model and effort — the same agent can run Opus here and Sonnet there.
+      if (!isMain && c.agentId) items.push({ label: "Model & effort…", icon: ICONS.agents, hint: (c.model ? c.model.split("/").pop() : "agent default") + (c.effort ? " · " + c.effort : ""), run: function(){
+          var row = document.querySelector('.crow[data-chat="' + cid + '"]');
+          openChatModelPick(row || document.body, p, c);
+        } });
       // Main follows the baton and its name is not yours to change — the menu
       // says so by not offering, rather than by offering and refusing.
       if (!isMain) {
