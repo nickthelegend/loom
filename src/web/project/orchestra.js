@@ -8,6 +8,7 @@ import { modelBadge,permBadge,permOf } from '../permissions.js';
 import { state } from '../state.js';
 import { fleetSince,jobProgressText,loadTeam,onlineRunners,runnerAct,runnerName,teamGlobs,teamGoalOf,teamRunners } from '../team.js';
 import { durfmt,emptyArt,LAND_ST,landPill,ORCH_RUN_ST,ORCH_TASK_ST,plainPreview,settleQuestionCard } from '../transcript.js';
+import { addAgents } from './add-agent.js';
 
 /** orchestra behavior for one mounted project.
  * view contains live accessors to the owning project view's state and callbacks.
@@ -183,20 +184,14 @@ export function createOrchestra(view) {
       wireModelBadges(el);
     }
 
-    /**
-     * A model agent joins the cast with no model chosen, which is the one
-     * state it cannot run in — so adding one opens its model picker
-     * immediately rather than leaving a chip that fails on send.
-     */
+    /** Pick a model and fleet size before adding workers to the cast. */
     function addModelWorker(btn){
       btn.disabled = true;
-      api("/api/projects/" + view.pid + "/agents", { method: "POST", body: JSON.stringify({ kind: "model" }) })
+      addAgents(view.pid, "model")
         .then(function(a){
-          return view.refresh().then(function(){ return a; });
-        })
-        .then(function(a){
-          drawOrchControls();
-          if (a && a.id) view.openModelMenu(a.id);
+          if (!a) return;
+          state.avail = null;
+          return view.refresh().then(function(){ drawOrchControls(); });
         })
         .catch(function(e){ toast(e.message); })
         .then(function(){ var b = document.getElementById("cowadd"); if (b) b.disabled = false; });

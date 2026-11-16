@@ -2827,10 +2827,11 @@ program
 
 program
   .command("agents:add <kind>")
-  .description("add an agent session to this project (repeat for a second session of the same kind)")
+  .description("add agent sessions to this project")
   .option("--as <name>", "name this instance (default: the kind, then kind-2, kind-3…)")
   .option("--role <role>", "what this instance is for, e.g. planner or reviewer")
-  .option("--model <model>", "for --kind model: which model it runs (loom models)")
+  .option("--model <id>", "which model each session runs (any agent kind; loom models)")
+  .option("--count <n>", "number of sessions to add (1–8)", "1")
   .option("--provider <id>", "for --kind model: which provider (default openrouter)")
   .option("--tools", "for --kind model: let it read the project (read-only)")
   .option("--write", "for --kind model: let it write files too (every write asks you first)")
@@ -2844,6 +2845,7 @@ program
         as?: string;
         role?: string;
         model?: string;
+        count: string;
         provider?: string;
         tools?: boolean;
         write?: boolean;
@@ -2852,6 +2854,8 @@ program
         cmd?: string;
       },
     ) => {
+    const count = Number(opts.count);
+    if (!Number.isInteger(count) || count < 1 || count > 8) fail("--count must be an integer from 1 to 8");
     const client = await ensureDaemon();
     const project = await currentProject(client);
     // A model agent with no model refuses every turn, so it's set here rather
@@ -2882,13 +2886,16 @@ program
     try {
       const added = await client.addAgent(project.id, kind, {
         ...opts,
+        count,
         ...(Object.keys(options).length ? { options } : {}),
       });
       const siblings = project.agents.filter((a) => a.kind === kind).length;
-      console.log(
-        `${pc.green("+")} ${pc.bold(added.id)} ${pc.dim(`(${added.kind} · ${added.role})`)}` +
-          (siblings ? pc.dim(`  — session ${siblings + 1} of ${kind}, sharing this project's brain`) : ""),
-      );
+      (added.agents ?? [added]).forEach((agent, i) => {
+        console.log(
+          `${pc.green("+")} ${pc.bold(agent.id)} ${pc.dim(`(${agent.kind} · ${agent.role})`)}` +
+            (siblings + i ? pc.dim(`  — session ${siblings + i + 1} of ${kind}, sharing this project's brain`) : ""),
+        );
+      });
     } catch (err) {
       console.error(pc.red(err instanceof Error ? err.message : String(err)));
       process.exitCode = 1;

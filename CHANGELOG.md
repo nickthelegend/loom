@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Per-chat agent, model and reasoning effort selection through the daemon API and `loom chat:create` / `loom chat:agent` (#370). Native providers and ACP use session selection where supported; process-bound adapters reuse separate model instances. Changing a chat leaves the running turn and agent defaults alone. Approach credit: T3 Code (MIT). Web and phone picker changes are separate.
 
+- Add up to eight agent sessions at once, pinned to one model: `loom agents:add <kind> --model <id> --count <n> [--as <name>]`. The app's add-agent flows also offer a model picker and count for building Orchestra fleets.
+
 ### Fixed
 
 - Routes keep the chat they were started in. A queued `auto` prompt now sends every hop and its route events to the original thread (#357).

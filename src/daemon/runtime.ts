@@ -929,7 +929,7 @@ export class ProjectRuntime {
    */
   addAgent(
     kind: string,
-    opts: { id?: string; role?: string; options?: Record<string, unknown> } = {},
+    opts: { id?: string; role?: string; options?: Record<string, unknown>; /** several at once: the name is a base, numbered */ series?: boolean } = {},
   ): AgentConfig {
     if (!knownAgentKinds().includes(kind)) {
       throw new Error(`unknown agent kind "${kind}" (known: ${knownAgentKinds().join(", ")})`);
@@ -948,15 +948,16 @@ export class ProjectRuntime {
     // The roster has always been keyed by instance id with kind alongside it, so
     // two Claude Code sessions in one project were representable — but adding
     // one threw, because the id defaulted to the kind and the kind was taken. A
-    // caller who names the instance gets that name; a caller who doesn't gets
-    // the next free suffix, so "add another" needs no ceremony. Both sessions
-    // read and write the one project brain: memory import dedupes by file path,
-    // and units are project-scoped, so nothing has to change for them to share.
+    // caller who names one instance gets that name; a caller who doesn't — or
+    // asks for several (`--count 3 --as opus`: opus, opus-2, opus-3) — gets the
+    // next free suffix, so "add another" needs no ceremony. Sessions read and
+    // write the one project brain: memory import dedupes by file path, and units
+    // are project-scoped, so nothing has to change for them to share.
     const explicit = opts.id?.trim().slice(0, 40);
-    if (explicit && this.config.agents.some((a) => a.id === explicit)) {
+    if (explicit && !opts.series && this.config.agents.some((a) => a.id === explicit)) {
       throw new Error(`"${explicit}" is already in this project`);
     }
-    const id = explicit || this.nextInstanceId(kind);
+    const id = explicit && !opts.series ? explicit : this.nextInstanceId(explicit || kind);
     if (!id) throw new Error("an agent needs an id");
     // A `model` agent with no model is an agent that refuses every turn, so
     // the options that make it work are settable as it's added rather than in
@@ -979,7 +980,7 @@ export class ProjectRuntime {
   }
 
   /**
-   * The next free instance id for a kind: `codex`, then `codex-2`, `codex-3`.
+   * The next free instance id for a base name: `codex`, then `codex-2`, `codex-3`.
    *
    * The bare kind stays the first instance's id so existing projects, configs
    * and route specs that name `codex` keep meaning what they meant.
