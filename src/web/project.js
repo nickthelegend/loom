@@ -85,6 +85,7 @@ import { openMenu } from './menus.js';
     });
     var { routeFormHtml, bindRouteForm } = createRoutes({
       get pid() { return pid; },
+      get chatId() { return chatId; },
       get refresh() { return refresh; }
     });
     var { loadBoard, drawBoardPane } = createBoard({

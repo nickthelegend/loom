@@ -832,11 +832,12 @@ export class DaemonClient {
     id: string,
     task: string,
     spec?: string | RouteStepSpec[],
-    opts: { router?: "rules" | "llm"; maxHops?: number } = {},
+    opts: { router?: "rules" | "llm"; maxHops?: number; chat?: string } = {},
   ): Promise<{ route: RouteState }> {
     return this.request("POST", `/api/projects/${encodeURIComponent(id)}/route`, {
       task,
       ...(spec !== undefined ? { spec } : {}),
+      ...(opts.chat ? { chat: opts.chat } : {}),
       ...(opts.router ? { router: opts.router } : {}),
       ...(opts.maxHops ? { maxHops: opts.maxHops } : {}),
     });
