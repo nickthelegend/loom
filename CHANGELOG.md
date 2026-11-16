@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phone: start a chat with any agent on any model.** New chat opens a sheet: an optional title, who answers (each agent's kind and current model), and the model, chosen from the agent's own list or typed. A project can hold a chat on Opus 5.5 next to one on GPT‑5.6 (#372).
+
 ### Fixed
 
 - Routes keep the chat they were started in. A queued `auto` prompt now sends every hop and its route events to the original thread (#357).
