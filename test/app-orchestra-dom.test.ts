@@ -493,6 +493,62 @@ describe("web app · orchestra", () => {
     expect(m.errors.join("\n")).toBe("");
   }, 90_000);
 
+  it("Ask several sends the prompt to each entrant on its model; the cards show model and diff, and Keep this one applies it (#377)", async () => {
+    const m = mount({ hash: `#p/${projectId}` });
+    await waitUntil(() => !!$(m, '#box[data-bound="1"]'));
+    await ready(m, '#cmode [data-cmode="orch"]');
+    click($(m, '#cmode [data-cmode="orch"]'));
+    await ready(m, '[data-omode="race"]');
+    expect(text(m, '[data-omode="race"]')).toContain("Ask several");
+    click($(m, '[data-omode="race"]'));
+    // plannerbot as itself, plus execbot on a pinned model
+    click($(m, "#cowfleetadd"));
+    await waitUntil(() => !!$(m, "#cmenu.cfleet #cfadd"));
+    ($(m, "#cfagent") as HTMLSelectElement).value = "execbot";
+    ($(m, "#cfmodel") as HTMLInputElement).value = "gpt-5.6-sol";
+    ($(m, "#cfcount") as HTMLSelectElement).value = "1";
+    click($(m, "#cfadd"));
+    await waitUntil(() => m.window.document.querySelectorAll("#cowk .cowfleet").length === 1);
+    // only plannerbot ticked among the plain agents
+    // (chips redraw on every click, so look again each time)
+    for (let i = 0; i < 6; i++) {
+      const extra = [...m.window.document.querySelectorAll("#cowk [data-wk].on")].find((b) => b.getAttribute("data-wk") !== "plannerbot");
+      if (!extra) break;
+      click(extra);
+    }
+    const plain = $(m, '#cowk [data-wk="plannerbot"]');
+    if (plain && !plain.classList.contains("on")) click(plain);
+    (($(m, "#box")) as HTMLTextAreaElement).value = "write:compared.txt";
+    click($(m, "#orchsend"));
+    let runId = "";
+    await waitUntil(async () => {
+      const { runs } = await rest<{ runs: Array<Run & { compare?: boolean }> }>("GET", "/orchestra");
+      const hit = runs.find((r) => r.goal === "write:compared.txt");
+      if (hit) runId = hit.id;
+      return Boolean(hit?.compare);
+    }, { timeoutMs: 30_000 });
+    try {
+      await waitUntil(async () => (await runStatus(runId)).status === "completed", { timeoutMs: 60_000 });
+      click($(m, '.tab[data-tab="orchestra"]'));
+      await waitUntil(() => {
+        const row = Array.prototype.find.call(m.window.document.querySelectorAll(".orun"), (e: Element) => (e.textContent ?? "").includes("write:compared.txt"));
+        if (row && !$(m, "#pane-orchestra .raceboard")) click(row);
+        return m.window.document.querySelectorAll("#pane-orchestra .racecard").length === 2;
+      }, { timeoutMs: 20_000 });
+      expect(text(m, "#pane-orchestra .ometa")).toContain("Ask several");
+      expect(text(m, "#pane-orchestra .racecard .rmodel")).toBe("gpt-5.6-sol");
+      // the view catches up with the finished run (diffs and Keep arrive with its last refresh)
+      await waitUntil(() => !!$(m, "#pane-orchestra .racecard .rdiff .ins") && m.window.document.querySelectorAll("[data-racepick]").length === 2, { timeoutMs: 20_000 });
+      const keep = [...m.window.document.querySelectorAll("[data-racepick]")];
+      expect(keep.map((b) => b.textContent)).toEqual(["Keep this one", "Keep this one"]);
+      click(keep[0]!);
+      await waitUntil(() => !!$(m, "#pane-orchestra .racecard.picked .rpicked"), { timeoutMs: 20_000 });
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      m.window.localStorage.removeItem(`loomOrch:${projectId}`);
+    }
+  }, 120_000);
+
   it("renders orchestra events in the thread as sentences, not JSON", async () => {
     const goal = `thread rows ${Date.now()}`;
     const { run } = await rest<{ run: Run }>("POST", "/orchestra", { goal, maxParallel: 3 });

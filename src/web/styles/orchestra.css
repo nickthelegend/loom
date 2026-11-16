@@ -450,3 +450,8 @@
     display:flex;flex-direction:column;gap:3px}
   .fextra .fx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fextra .fx b{color:var(--thread-ink);font-weight:600}
+/* Ask several (#377): the entrant's model and its diff size */
+.racecard .rmodel{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-foreground);border:1px solid var(--border);
+  border-radius:5px;padding:0 5px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.racecard .rdiff .ins{color:var(--ok)}
+.racecard .rdiff .del{color:var(--err)}
