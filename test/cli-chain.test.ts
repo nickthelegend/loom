@@ -185,6 +185,22 @@ describe("loom chain (#340)", () => {
     }
   }, 120_000);
 
+  it("accepts fleet specs in line options, both in checks and execution", async () => {
+    const plan = "chain-c :: [-o c@Planner:high -w w@Worker:lowx2 -p 1] write fleet.txt fleet\n";
+    const checked = await runCli(["chain", "--check", "--json"], plan);
+    expect(checked.code).toBe(0);
+    const check = JSON.parse(checked.out.trim().split("\n").filter((l) => l.startsWith('{"ok"')).at(-1)!);
+    expect(check.steps[0]).toMatchObject({ orchestrator: "c@Planner:high", workers: [{ agent: "w@Worker:low" }, { agent: "w@Worker:low#2" }] });
+    const ran = await runCli(["chain", "--json"], plan);
+    expect(ran.code).toBe(0);
+    expect(fs.readFileSync(path.join(dirs.c!, "fleet.txt"), "utf8")).toBe("fleet\n");
+    const client = new DaemonClient(readDaemonConfig()!);
+    const project = (await client.listProjects()).projects.find((p) => p.name === "chain-c")!;
+    const run = (await client.orchestraRuns(project.id)).runs[0]!;
+    expect(run.orchestrator).toMatchObject({ model: "Planner", effort: "high" });
+    expect(run.tasks[0]).toMatchObject({ model: "Worker", effort: "low" });
+  }, 120_000);
+
   it("a run a worker already pushed to origin: local fast-forwards to it, says so, and nothing is merged beside it", async () => {
     const dir = makeProjectDir({ name: "chain-d", agents: [{ id: "c", kind: "chain-conductor", role: "orchestrator" }, { id: "w", kind: "chain-pusher", role: "worker" }], brain: { extractor: "off" } } as never);
     const origin = tmpDir("chain-d-origin");

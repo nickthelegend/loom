@@ -9,6 +9,12 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
   // ---- orchestra: one orchestrator, many parallel workers ---------------
   // See core/orchestra.ts. Every step is also an `orchestra` event on the
   // WebSocket, so clients render live from events and use these for actions.
+  // POST workers is string[]: each fleet row is agent[@model][:effort][xN]
+  // (×N also works, count 1..100). orchestrator accepts the same with count 1.
+  // Responses keep workers as instance ids and add workerDetails: [{ id, kind,
+  // model?, effort? }]. orchestrator and tasks also expose model?/effort?.
+  // Missing selections mean provider defaults; older saved runs may lack
+  // workerDetails. The started event includes it; task events include selections.
   const orchestraError = (res: express.Response, err: unknown) =>
     void res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
 

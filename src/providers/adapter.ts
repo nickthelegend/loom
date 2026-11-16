@@ -27,6 +27,8 @@ export interface ProviderAdapter {
   startSession(input: SessionStartInput): Promise<ProviderSession>;
   /** Start a turn on a live session. Resolves once the provider has accepted it. */
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
+  /** True on acceptance, false if not delivered. Throw on uncertain delivery; callers must not resend. */
+  steer?(chat: ThreadId, text: string): Promise<boolean>;
   /** Interrupt the active turn (or `turnId`). Resolves once the provider has acknowledged. */
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
   respondToRequest(threadId: ThreadId, requestId: RequestId, decision: ApprovalDecision): Promise<void>;

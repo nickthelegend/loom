@@ -1211,32 +1211,84 @@ import { devMode, setDevMode } from './mode.js';
   }
 
 
-  function openProjectModal(){
+  /**
+   * New project: start one from nothing, clone one, or point Loom at a folder that's already
+   * there (#371). New and Clone make the folder under your Loom projects folder on the daemon's
+   * machine, so they work from anywhere the app runs — no path to type. Approach after T3 Code's
+   * AddProjectScreen (MIT).
+   */
+  function openProjectModal(initial){
     if (document.querySelector(".scrim")) return;
     var native = !!(window.loomNative && window.loomNative.pickFolder);
+    var mode = initial === "clone" || initial === "folder" ? initial : "new";
+    var found = null; // agent CLIs on the daemon's machine, from /api/setup
+    var picks = {};   // kind -> { on, model, count }
     var scrim = document.createElement("div");
     scrim.className = "scrim";
-    scrim.innerHTML = '<div class="modal">' +
+    scrim.innerHTML = '<div class="modal npmodal">' +
       '<div class="modalhead">New project<button class="iconbtn" id="pclose" aria-label="close">' + ICONS.x + "</button></div>" +
       '<div class="modalbody">' +
-        '<div class="field"><label>Project folder</label>' +
-          '<div class="pickrow"><input id="pdir" spellcheck="false" autocomplete="off" placeholder="' +
-            (native ? "choose a folder\u2026" : "/path/to/repo on the daemon host") + '">' +
-            (native ? '<button class="btn outline" id="pbrowse">Choose\u2026</button>' : "") + "</div>" +
-          '<span class="ferr" id="perr" role="alert"></span>' +
-          '<span class="hintx">Loom writes a <code>.loom/</code> folder here and leaves the rest of the repo alone.</span></div>' +
-        '<div class="field"><label>Name <span class="opt">optional</span></label>' +
-          '<input id="pname" spellcheck="false" autocomplete="off" placeholder="defaults to the folder name"></div>' +
+        '<div class="seg npseg" role="tablist">' +
+          '<button type="button" role="tab" data-np="new">New</button>' +
+          '<button type="button" role="tab" data-np="clone">Clone</button>' +
+          '<button type="button" role="tab" data-np="folder">Existing folder</button></div>' +
+        '<div class="nppane" data-pane="new">' +
+          '<div class="field"><label>Name</label>' +
+            '<input id="npname" spellcheck="false" autocomplete="off" placeholder="e.g. landing page">' +
+            '<span class="ferr" id="nperr" role="alert"></span>' +
+            '<span class="hintx">A new folder under your Loom projects folder, with git and a first commit.</span></div>' +
+          '<div class="field"><label>Agents <span class="opt">who works here</span></label>' +
+            '<div class="npagents" id="npagents"><div class="obsub">looking for agent CLIs…</div></div>' +
+            '<span class="hintx">Tick none to use every agent found on this machine. Same agent twice? Raise the count — each gets its own name.</span></div>' +
+        "</div>" +
+        '<div class="nppane" data-pane="clone">' +
+          '<div class="field"><label>Repository URL</label>' +
+            '<input id="npurl" spellcheck="false" autocomplete="off" placeholder="https://github.com/you/repo.git">' +
+            '<span class="ferr" id="npcerr" role="alert"></span>' +
+            '<span class="hintx" id="npprog">Cloned on the daemon’s machine with its own git credentials.</span></div>' +
+          '<div class="field"><label>Name <span class="opt">optional</span></label>' +
+            '<input id="npcname" spellcheck="false" autocomplete="off" placeholder="defaults to the repo name"></div>' +
+        "</div>" +
+        '<div class="nppane" data-pane="folder">' +
+          '<div class="field"><label>Project folder</label>' +
+            '<div class="pickrow"><input id="pdir" spellcheck="false" autocomplete="off" placeholder="' +
+              (native ? "choose a folder…" : "/path/to/repo on the daemon host") + '">' +
+              (native ? '<button class="btn outline" id="pbrowse">Choose…</button>' : "") + "</div>" +
+            '<span class="ferr" id="perr" role="alert"></span>' +
+            '<span class="hintx">Loom writes a <code>.loom/</code> folder here and leaves the rest of the repo alone.</span></div>' +
+          '<div class="field"><label>Name <span class="opt">optional</span></label>' +
+            '<input id="pname" spellcheck="false" autocomplete="off" placeholder="defaults to the folder name"></div>' +
+        "</div>" +
       "</div>" +
       '<div class="modalfoot"><button class="btn ghost" id="pcancel">Cancel</button>' +
-      '<button class="btn primary" id="pcreate">Create project<span class="kbd">\u2318\u21b5</span></button></div>' +
+      '<button class="btn primary" id="pcreate">Create project<span class="kbd">⌘↵</span></button></div>' +
     "</div>";
     document.body.appendChild(scrim);
-    function close(){ scrim.remove(); document.removeEventListener("keydown", onKey); }
+    var closed = false;
+    function close(){ closed = true; scrim.remove(); document.removeEventListener("keydown", onKey); }
     scrim.addEventListener("click", function(ev){ if (ev.target === scrim) close(); });
     document.getElementById("pclose").onclick = close;
     document.getElementById("pcancel").onclick = close;
     var dirEl = document.getElementById("pdir");
+    var btn = document.getElementById("pcreate");
+    var label = { "new": "Create project", clone: "Clone project", folder: "Add project" };
+    function setMode(m){
+      mode = m;
+      Array.prototype.forEach.call(scrim.querySelectorAll("[data-np]"), function(b){
+        var on = b.getAttribute("data-np") === m;
+        b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      Array.prototype.forEach.call(scrim.querySelectorAll(".nppane"), function(p){ p.hidden = p.getAttribute("data-pane") !== m; });
+      if (!btn.disabled) btn.innerHTML = esc(label[m]) + '<span class="kbd">⌘↵</span>';
+      setTimeout(function(){
+        if (closed || !scrim.isConnected) return;
+        var f = document.getElementById(m === "new" ? "npname" : m === "clone" ? "npurl" : "pdir");
+        if (f) f.focus();
+      }, 30);
+    }
+    Array.prototype.forEach.call(scrim.querySelectorAll("[data-np]"), function(b){
+      b.onclick = function(){ setMode(b.getAttribute("data-np")); };
+    });
     if (native) document.getElementById("pbrowse").onclick = function(){
       window.loomNative.pickFolder().then(function(p){
         if (!p) return;
@@ -1245,46 +1297,119 @@ import { devMode, setDevMode } from './mode.js';
         if (!nm.value) nm.placeholder = p.split(/[\\/]/).filter(Boolean).pop() || "";
       }).catch(function(err){ toast(String(err.message || err)); });
     };
-    setTimeout(function(){ dirEl.focus(); }, 30);
-    // Errors belong under the field they're about, not in a toast behind the
-    // dialog where your eyes aren't.
-    function fieldErr(msg){
-      var e = document.getElementById("perr"); if (e) e.textContent = msg || "";
-      dirEl.classList.toggle("bad", !!msg);
-      if (msg) dirEl.focus();
+
+    // the agent rows: every CLI the daemon's machine has, each with a model and a count
+    function drawAgents(){
+      if (closed || !scrim.isConnected) return; // /api/setup can answer after the dialog has gone
+      var host = document.getElementById("npagents");
+      if (!host) return;
+      var list = (found || []).filter(function(a){ return a.found; });
+      if (!found) return;
+      if (!list.length) { host.innerHTML = '<div class="obsub">No agent CLIs found on this machine — the project starts with none; add one later.</div>'; return; }
+      host.innerHTML = list.map(function(a){
+        var p = picks[a.kind] || (picks[a.kind] = { on: false, model: "", count: 1 });
+        return '<div class="nparow' + (p.on ? " on" : "") + '" data-kind="' + esc(a.kind) + '">' +
+          '<label class="npatick"><input type="checkbox" data-np-on' + (p.on ? " checked" : "") + '>' +
+            '<span class="pic">' + brandMark(a.kind, "brand") + "</span>" +
+            '<span class="npalbl">' + esc(a.label || agentLabel(a.kind)) + (a.authed === false ? ' <span class="opt">not signed in</span>' : "") + "</span></label>" +
+          '<input class="npamodel" data-np-model spellcheck="false" autocomplete="off" placeholder="' + (a.kind === "model" ? "model id (needed)" : "default model") + '" value="' + esc(p.model) + '"' + (p.on ? "" : " disabled") + ">" +
+          '<input class="npacount" data-np-count type="number" min="1" max="8" value="' + p.count + '" aria-label="how many"' + (p.on ? "" : " disabled") + ">" +
+        "</div>";
+      }).join("");
+      Array.prototype.forEach.call(host.querySelectorAll(".nparow"), function(row){
+        var kind = row.getAttribute("data-kind"), p = picks[kind];
+        row.querySelector("[data-np-on]").onchange = function(e){ p.on = e.target.checked; drawAgents(); };
+        row.querySelector("[data-np-model]").oninput = function(e){ p.model = e.target.value; };
+        row.querySelector("[data-np-count]").oninput = function(e){ p.count = Math.max(1, Math.min(8, parseInt(e.target.value, 10) || 1)); };
+      });
     }
-    dirEl.addEventListener("input", function(){ fieldErr(""); });
-    function create(){
+    api("/api/setup").then(function(r){ found = (r && r.agents) || []; drawAgents(); })
+      .catch(function(){ found = []; drawAgents(); });
+
+    function fieldErr(id, input, msg){
+      var e = document.getElementById(id); if (e) e.textContent = msg || "";
+      if (input) { input.classList.toggle("bad", !!msg); if (msg) input.focus(); }
+    }
+    ["npname", "npurl", "pdir"].forEach(function(id){
+      var el = document.getElementById(id);
+      el.addEventListener("input", function(){ fieldErr(id === "npname" ? "nperr" : id === "npurl" ? "npcerr" : "perr", el, ""); });
+    });
+    function busy(text){ btn.disabled = true; btn.textContent = text; }
+    function idle(){ btn.disabled = false; btn.innerHTML = esc(label[mode]) + '<span class="kbd">⌘↵</span>'; }
+    function opened(p, config, verb){
+      if (!closed) close();
+      var agents = (config && config.agents) || [];
+      toast(agents.length
+        ? p.name + " " + verb + " · " + agents.length + " agent" + (agents.length === 1 ? "" : "s") + ": " + agents.map(function(a){
+          var m = a.options && a.options.model;
+          return (a.id !== a.kind ? a.id : agentLabel(a.kind, a.id)) + (m ? " on " + String(m).split("/").pop() : "");
+        }).join(", ")
+        : p.name + " " + verb + " · no agent CLIs found on this machine — install one, or add a model agent");
+      if (state.refreshProjects) state.refreshProjects();
+      if (p.id) { if (state.selectProject) state.selectProject(p.id); else location.hash = "#p/" + p.id; }
+    }
+    var cap = function(err){ return String(err.message || err).replace(/^./, function(c){ return c.toUpperCase(); }); };
+
+    function createNew(){
+      var nameEl = document.getElementById("npname");
+      var name = (nameEl.value || "").trim();
+      if (!name) return fieldErr("nperr", nameEl, "Give it a name.");
+      var agents = Object.keys(picks).filter(function(k){ return picks[k].on; }).map(function(k){
+        var p = picks[k], a = { kind: k };
+        if (p.model.trim()) a.model = p.model.trim();
+        if (p.count > 1) a.count = p.count;
+        return a;
+      });
+      // a model agent with no model refuses every turn: ask now, not at the first message
+      if (picks.model && picks.model.on && !picks.model.model.trim()) return fieldErr("nperr", null, "Model (API) needs a model id — e.g. openrouter/anthropic/claude-opus-5-5.");
+      busy("Creating…");
+      api("/api/projects/new", { method: "POST", body: JSON.stringify(agents.length ? { name: name, agents: agents } : { name: name }) })
+        .then(function(j){ opened(j.project || {}, j.config, "created"); })
+        .catch(function(err){ idle(); fieldErr("nperr", nameEl, cap(err)); });
+    }
+    function createClone(){
+      var urlEl = document.getElementById("npurl");
+      var url = (urlEl.value || "").trim();
+      if (!url) return fieldErr("npcerr", urlEl, "Paste the repository’s URL.");
+      var name = (document.getElementById("npcname").value || "").trim();
+      var prog = document.getElementById("npprog");
+      busy("Cloning…");
+      api("/api/projects/clone", { method: "POST", body: JSON.stringify(name ? { url: url, name: name } : { url: url }) })
+        .then(function(j){
+          var poll = function(){
+            if (closed || !scrim.isConnected) return; // the clone carries on; the project shows up in the list when it's done
+            api("/api/projects/jobs/" + encodeURIComponent(j.jobId)).then(function(job){
+              if (job.status === "done" && job.project) return opened(job.project, job.config, "cloned");
+              if (job.status === "failed") { idle(); prog.textContent = ""; return fieldErr("npcerr", urlEl, cap(job.error || "the clone failed")); }
+              if (job.progress && prog) prog.textContent = job.progress;
+              setTimeout(poll, 800);
+            }).catch(function(err){ idle(); fieldErr("npcerr", urlEl, cap(err)); });
+          };
+          poll();
+        })
+        .catch(function(err){ idle(); fieldErr("npcerr", urlEl, cap(err)); });
+    }
+    function addFolder(){
       var dir = (dirEl.value || "").trim();
-      if (!dir) return fieldErr(native ? "Choose a folder first." : "Enter the path to a folder on this machine.");
+      if (!dir) return fieldErr("perr", dirEl, native ? "Choose a folder first." : "Enter the path to a folder on this machine.");
       var name = (document.getElementById("pname").value || "").trim();
-      var btn = document.getElementById("pcreate");
-      if (btn.disabled) return; // a double-click is one project, not two requests
-      btn.disabled = true;
-      var was = btn.innerHTML; btn.textContent = "Creating…";
-      api("/api/projects", {
-        method: "POST",
-        body: JSON.stringify(name ? { dir: dir, name: name } : { dir: dir }),
-      }).then(function(j){
-        close();
-        var p = j.project || {};
+      busy("Adding…");
+      api("/api/projects", { method: "POST", body: JSON.stringify(name ? { dir: dir, name: name } : { dir: dir }) })
         // say what was actually detected rather than a bare "added"
-        // (The config carries kinds, not tiers — filtering on tier counted
-        // zero and told you no agents were found beside a roster of five.)
-        var found = (j.config && j.config.agents) || [];
-        toast(found.length
-          ? p.name + " added \u00b7 " + found.length + " agent" + (found.length === 1 ? "" : "s") + ": " + found.map(function(a){ return agentLabel(a.kind, a.id); }).join(", ")
-          : p.name + " added \u00b7 no agent CLIs found on this machine \u2014 install one, or add a model agent");
-        if (state.refreshProjects) state.refreshProjects();
-        if (p.id) { if (state.selectProject) state.selectProject(p.id); else location.hash = "#p/" + p.id; }
-      }).catch(function(err){ btn.disabled = false; btn.innerHTML = was; fieldErr(String(err.message || err).replace(/^./, function(c){ return c.toUpperCase(); })); });
+        .then(function(j){ opened(j.project || {}, j.config, "added"); })
+        .catch(function(err){ idle(); fieldErr("perr", dirEl, cap(err)); });
     }
-    document.getElementById("pcreate").onclick = create;
+    function create(){
+      if (btn.disabled) return; // a double-click is one project, not two requests
+      if (mode === "new") createNew(); else if (mode === "clone") createClone(); else addFolder();
+    }
+    btn.onclick = create;
     function onKey(e){
       if (e.key === "Escape") { e.preventDefault(); close(); }
-      // Enter in a one-line field submits, as it does everywhere else
-      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || e.target === dirEl || (e.target && e.target.id === "pname"))) { e.preventDefault(); create(); }
+      // Enter in a one-line text field submits, as it does everywhere else
+      else if (e.key === "Enter" && (e.metaKey || e.ctrlKey || (e.target && e.target.tagName === "INPUT" && e.target.type !== "checkbox"))) { e.preventDefault(); create(); }
     }
     document.addEventListener("keydown", onKey);
+    setMode(mode);
   }
 export { openProjectModal,openProjectSettings,openSettingsModal,openSetupModal };

@@ -27,3 +27,4 @@ export {
 export { ProjectRuntime } from "./daemon/runtime.js";
 export { LoomDaemon, DEFAULT_PORT, tailscaleIp } from "./daemon/server.js";
 export { DaemonClient, ensureDaemon, daemonRunning, stopDaemon } from "./daemon/client.js";
+export type { ProjectAgentInput, NewProjectInput, CloneProjectInput, CreatedProject, ProjectCloneJob } from "./core/project-creation.js";

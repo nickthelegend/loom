@@ -144,6 +144,7 @@ export class LoomDaemon {
   private wss: WebSocketServer | null = null;
   private auth: AuthManager;
   private runtimes = new Map<string, ProjectRuntime>();
+  private closeProjects: () => Promise<void> = async () => {};
   private sockets = new Map<WebSocket, { project?: string; scope?: string[] }>();
   private readonly delivery = new ClientDelivery(this.sockets, (socket) => socket.terminate());
   private readonly presence = new ChatPresenceTracker<WebSocket>((snapshot) =>
@@ -345,6 +346,7 @@ export class LoomDaemon {
       get specRunner() { return daemon.specRunner; },
       startHealLoop: (...args) => this.startHealLoop(...args),
       broadcastTerm: (...args) => this.broadcastTerm(...args),
+      broadcastProjects: (frame) => this.delivery.publish(frame, { kind: "admin" }),
       get approvals() { return daemon.approvals; },
     };
 
@@ -506,7 +508,7 @@ export class LoomDaemon {
     registerTeamRoutes(app, ctx);
     registerCloudRoutes(app, ctx);
     registerClientsRoutes(app, ctx);
-    registerProjectsRoutes(app, ctx);
+    this.closeProjects = registerProjectsRoutes(app, ctx);
     const withRuntime = createRuntimeHandler(ctx);
     app.get("/api/projects/:id/chats/:chat/presence", withRuntime(async (rt, req, res) => {
       const chat = String(req.params.chat);
@@ -1127,6 +1129,7 @@ export class LoomDaemon {
 
   async close(): Promise<void> {
     this.presence.close();
+    await this.closeProjects();
     this.triggers.stop();
     await this.bridges.stopAll().catch(() => { });
     // A broker pointing at a closed daemon would leave the next adapter

@@ -98,6 +98,11 @@ export function createThread(view) {
         sendBtn.style.display = orchMode || anyBusy ? "none" : "";
         stopBtn.style.display = !orchMode && anyBusy ? "" : "none";
       }
+      // Steer sits beside Stop only when the agent running here can take input mid-turn (#373);
+      // for the rest, Enter queues and the hint says so.
+      var steerBtn = document.getElementById("steer");
+      var steerable = !orchMode && adapters.some(function(a){ return a.busy && (!a.chat || a.chat === here) && a.capabilities && a.capabilities.steer; });
+      if (steerBtn) steerBtn.style.display = steerable ? "" : "none";
 
       var hint = document.getElementById("hint");
       var orun = view.orchRunForChat();
@@ -109,6 +114,10 @@ export function createThread(view) {
         ? "this is an orchestra thread \u00b7 what you send goes to its orchestrator"
         : orun && orun.status !== "aborted" && orun.status !== "moved"
         ? "this orchestra has finished \u00b7 sending reopens it with its orchestrator"
+        : steerable
+        ? "\u23ce queues for after this turn \u00b7 \u2325\u23ce or Steer puts it into the turn now"
+        : !orchMode && anyBusy
+        ? "\u23ce queues for after this turn"
         : view.planState
         ? "plan mode \u00b7 agent writes a plan to plans/\u2026, no code changes"
         // The resting state says nothing: who you're talking to is on the
