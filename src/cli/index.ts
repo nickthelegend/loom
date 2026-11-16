@@ -694,6 +694,33 @@ program
   });
 
 program
+  .command("prs")
+  .description("list this project's tracked PRs and their last state")
+  .option("--json", "print as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { prs } = await client.prs(project.id);
+    if (opts.json) return void console.log(JSON.stringify(prs, null, 2));
+    if (!prs.length) return void console.log("No tracked PRs — attach one with loom prs:watch <pr>.");
+    for (const pr of prs) console.log(`${pr.repo} #${pr.prNumber}  ${pr.state}  chat ${pr.chat}  ${pr.url}`);
+  });
+
+program
+  .command("prs:watch <pr>")
+  .description("attach a PR number or URL to a chat for CI and review feedback")
+  .option("--chat <chat>", "chat id or title", "main")
+  .action(async (pr: string, opts: { chat: string }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    const { chats } = await client.chats(project.id);
+    const chat = chats.find(c => c.id === opts.chat || c.title.toLowerCase() === opts.chat.toLowerCase());
+    if (!chat) fail(`no chat "${opts.chat}" here`);
+    const out = await client.watchPr(project.id, chat.id, pr).catch((e: Error) => fail(e.message));
+    console.log(`Watching ${out.pr.repo} #${out.pr.prNumber} in chat ${out.pr.chat}`);
+  });
+
+program
   .command("chat:instructions [text...]")
   .description("standing guidance for one conversation, sent with every turn in it whichever agent answers (approach: Nuphos). No text: show them")
   .option("--chat <chat>", "which chat, by id or title (default: main)", "main")

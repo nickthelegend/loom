@@ -30,6 +30,7 @@
  * task's agent output streams into that task's own chat.
  */
 
+import { recordOpenedPr } from "./pr-feedback.js";
 import { execFile } from "./process.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -2577,6 +2578,7 @@ export class OrchestraEngine {
         this.host.projectDir,
       );
       const url = out.match(/https:\/\/\S+/)?.[0] ?? "";
+      if (url) recordOpenedPr(this.host.projectDir, url, { chat: run.chat, agentId: run.orchestrator.agent, source: "orchestra" });
       stack.push({ pr: Number(/\/pull\/(\d+)/.exec(url)?.[1] ?? 0), url, branch, base: below });
       below = branch;
     }
@@ -2625,7 +2627,10 @@ export class OrchestraEngine {
             const prUrl = out.match(/https:\/\/\S+/)?.[0];
             run.delivered = { mode, pushed: run.branch, ...(prUrl ? { prUrl } : {}), at: Date.now() };
             const n = Number(/\/pull\/(\d+)/.exec(prUrl ?? "")?.[1]);
-            if (prUrl && n) run.landing = newLanding(n, prUrl);
+            if (prUrl && n) {
+              recordOpenedPr(this.host.projectDir, prUrl, { chat: run.chat, agentId: run.orchestrator.agent, source: "orchestra" });
+              run.landing = newLanding(n, prUrl);
+            }
           }
         }
       }

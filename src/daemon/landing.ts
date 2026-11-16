@@ -24,6 +24,7 @@
  * Everything outside git and the hub goes through `gh`, injectable for tests.
  */
 
+import { recordOpenedPr, readPrRecords } from "../core/pr-feedback.js";
 import { execFile } from "../core/process.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -237,6 +238,11 @@ export class Landing {
     const maxFix = policy?.landing.autoFixAttempts ?? 2;
     // a red check on its turn gives the lane back: the goal requeues once it's green (D82)
     if (sum.failing.length && run.landing!.slot) await this.releaseSlot(run, `"${sum.failing[0]!.name}" failed on its turn`);
+    // Tracked PRs use the chat queue for fixes. Keep the team's landing state,
+    // but do not ask its orchestrator to fix the same failure a second time.
+    if (sum.failing.length && readPrRecords(this.rt.info.dir).some(p => p.url === l.url)) {
+      return this.set(run, { state: "failing" });
+    }
     for (const c of sum.failing) {
       const k = `${sha}:${c.name}`;
       const verdict = failureVerdict(c.name, sha, run.landing!.reruns);
@@ -976,7 +982,9 @@ export class Landing {
       await this.git(["push", "-q", "-f", "origin", `HEAD:refs/heads/${branch}`], wt);
       const out = await this.gh(["pr", "create", "--base", d.branch, "--head", branch, "--title", "ci: run workflows in the merge queue",
         "--body", `Adds \`merge_group:\` to ${d.fixable.map((f) => `\`${f}\``).join(", ")} so required checks also run for PRs in the merge queue.\n\nOpened by \`loom team doctor --fix\` (Loom Teams D62). It changes no repo settings.`], wt);
-      return { prUrl: out.match(/https:\/\/\S+/)?.[0] ?? null, files: d.fixable };
+      const prUrl = out.match(/https:\/\/\S+/)?.[0] ?? null;
+      if (prUrl) recordOpenedPr(dir, prUrl, { chat: "main", source: "delivery" });
+      return { prUrl, files: d.fixable };
     } finally {
       await this.exec("git", ["worktree", "remove", "--force", wt], dir);
       fs.rmSync(tmp, { recursive: true, force: true });

@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- PR feedback follows Loom-created PRs back to their owning chats (#378). Persistent watches queue CI failures and optional human review comments, including inline replies, with per-chat `off` / `ci` / `ci+reviews` settings. Merge and close notices end polling; owner-only attachment, listing APIs, `loom prs` and `loom prs:watch` support existing PRs. Approach credit: Agent Orchestrator lifecycle reactions (Apache-2.0).
+
 - Steer a running Codex or Claude turn with `loom steer <text> [--chat <chat>]`, or the steering API. Unsupported or idle agents fall back to the prompt queue with a reason; queued prompts can be promoted, and accepted steering appears as a user message in the same chat. Agent status exposes `capabilities.steer` for clients (#373).
 
 - Create projects from any directory with `loom new <name> [--agent kind[@model][xN] ...] [--no-git]`, or clone with `loom clone <url> [--name <name>]`. The daemon's owner-only creation API also accepts unscoped paired devices, reports clone progress over WebSocket and polling, and uses a configurable `projectsRoot` (default `~/Loom Projects`) without overwriting existing folders.
