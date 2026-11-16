@@ -1,3 +1,4 @@
+import { flushIntakePrs } from "../core/intake.js";
 import { execFile } from "../core/process.js";
 import { logbook } from "../core/logbook.js";
 import { prFromUrl, readPrRecords, recordOpenedPr, savePrRecord, type PrRecord, type TrackedPr } from "../core/pr-feedback.js";
@@ -104,6 +105,7 @@ export class PrFeedback {
     this.polling = this.serial(async () => {
       if (Date.now() < this.retryAt) return;
       try {
+        await flushIntakePrs(this.rt.info.dir);
         for (const row of readPrRecords(this.rt.info.dir)) {
           if (this.stopped) break;
           if (row.state !== "OPEN") continue;

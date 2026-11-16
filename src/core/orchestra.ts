@@ -31,6 +31,7 @@
  * task's agent output streams into that task's own chat.
  */
 
+import { intakePrBody, recordIntakeRun } from "./intake.js";
 import { listAccounts, resolveAgentAccount, type Account } from "./accounts.js";
 import { recordOpenedPr } from "./pr-feedback.js";
 import { execFile } from "./process.js";
@@ -1355,9 +1356,11 @@ export class OrchestraEngine {
     this.workerCfgs.set(run.id, workers);
     this.runs.set(id, run);
     this.save(run);
+    const intake = recordIntakeRun(dir, run.chat, run.id);
     // A new thread starts empty, so the goal is replayed into it. The thread
     // you typed it in already has it — replaying would say it twice.
-    if (!inPlace) this.host.append({ kind: "message", chat: run.chat, payload: { text: goal, author: "user" } });
+    // Intake reserves a chat before enqueueing, so its first goal still needs a message.
+    if (!inPlace || intake) this.host.append({ kind: "message", chat: run.chat, payload: { text: goal, author: "user" } });
     this.emit(run, "started", {
       goal,
       orchestrator: run.orchestrator,
@@ -2820,7 +2823,7 @@ export class OrchestraEngine {
       const out = await gh(
         ["pr", "create", "--head", branch, "--base", below,
           "--title", `${run.goal.split("\n")[0]!.slice(0, 60)} (${i + 1}/${slices.length})`,
-          "--body", prBody(run, [`Part ${i + 1} of ${slices.length} of a stacked goal — tasks ${ids.join(", ")}. Land bottom-up.`, ""])],
+          "--body", intakePrBody(this.host.projectDir, run.chat, prBody(run, [`Part ${i + 1} of ${slices.length} of a stacked goal — tasks ${ids.join(", ")}. Land bottom-up.`, ""]))],
         this.host.projectDir,
       );
       const url = out.match(/https:\/\/\S+/)?.[0] ?? "";
@@ -2867,7 +2870,7 @@ export class OrchestraEngine {
           } else {
             const out = await gh(
               ["pr", "create", "--head", run.branch, ...(run.baseBranch ? ["--base", run.baseBranch] : []),
-                "--title", run.goal.split("\n")[0]!.slice(0, 70), "--body", prBody(run)],
+                "--title", run.goal.split("\n")[0]!.slice(0, 70), "--body", intakePrBody(this.host.projectDir, run.chat, prBody(run))],
               this.host.projectDir,
             );
             const prUrl = out.match(/https:\/\/\S+/)?.[0];

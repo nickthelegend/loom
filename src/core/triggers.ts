@@ -7,6 +7,7 @@
  * backend, the turn goes through the project's prompt queue like any other.
  */
 
+import type { IntakeMode, IntakeSource } from "./intake.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,7 +15,9 @@ import path from "node:path";
 export interface Trigger {
   id: string;
   name: string;
-  kind: "schedule" | "webhook";
+  kind: "schedule" | "webhook" | "intake";
+  /** intake: assigned issue source, optional label, and how to start work. No prompt needed. */
+  intake?: { source: IntakeSource; label?: string; mode: IntakeMode };
   /** schedule: 5-field cron (minute hour day-of-month month day-of-week), local time. */
   cron?: string;
   /** schedule: or a plain interval, in minutes. */
@@ -142,7 +145,7 @@ export function nextCron(c: Cron, from: Date): Date | null {
 
 /** Is this schedule due now? At most once per minute (cron) or per interval. */
 export function isDue(t: Trigger, now: Date): boolean {
-  if (!t.enabled || t.kind !== "schedule") return false;
+  if (!t.enabled || (t.kind !== "schedule" && t.kind !== "intake")) return false;
   const last = t.lastFiredAt ?? 0;
   if (t.everyMin) return now.getTime() - (t.lastFiredAt ?? t.createdAt) >= t.everyMin * 60_000;
   if (!t.cron) return false;
@@ -154,7 +157,7 @@ export function isDue(t: Trigger, now: Date): boolean {
 
 /** When it fires next, for showing. */
 export function nextFire(t: Trigger, now = new Date()): number | null {
-  if (t.kind !== "schedule" || !t.enabled) return null;
+  if ((t.kind !== "schedule" && t.kind !== "intake") || !t.enabled) return null;
   if (t.everyMin) return (t.lastFiredAt ?? t.createdAt) + t.everyMin * 60_000;
   try { return nextCron(parseCron(t.cron ?? ""), now)?.getTime() ?? null; } catch { return null; }
 }

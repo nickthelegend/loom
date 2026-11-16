@@ -47,6 +47,9 @@ import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
+import { IntakeSheet } from "./intake";
+import { FilesView } from "./files";
+import { TerminalView } from "./terminal";
 import { SideSheet } from "./side";
 import { NewProjectSheet } from "./new-project";
 import { TriggersView } from "./triggers";
@@ -786,7 +789,7 @@ export function BoardScreen(props: {
 // Project: Thread | Orchestra | Observatory | Ask | Tasks | Changes | Tools
 // ---------------------------------------------------------------------------
 
-type Tab = "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "triggers" | "tasks" | "changes" | "tools";
+type Tab = "terminal" | "files" | "thread" | "orchestra" | "crew" | "observatory" | "ask" | "memory" | "brain" | "landing" | "runners" | "triggers" | "tasks" | "changes" | "tools";
 
 /**
  * Six tabs no longer fit across a phone, so the strip scrolls. The labels stay
@@ -811,6 +814,9 @@ const TABS: ReadonlyArray<{ key: Tab; label: string; accent?: string }> = [
   { key: "triggers", label: "Triggers", accent: T.warn },
   { key: "tasks", label: "Tasks" },
   { key: "changes", label: "Changes" },
+  // the project's shell and its files, from the phone (#380)
+  { key: "files", label: "Files" },
+  { key: "terminal", label: "Terminal" },
   { key: "tools", label: "Tools" },
 ];
 
@@ -871,6 +877,7 @@ export function ProjectScreen(props: {
   // Composer extras: plan mode and the prompt library.
   const [plan, setPlan] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
   // Bumped on every `orchestra` event so the Orchestra tab refetches that run.
   const [orchPulse, setOrchPulse] = useState<{ n: number; runId: string | null }>({ n: 0, runId: null });
   // Bumped on every `crew` event so the Crew tab refetches.
@@ -1986,6 +1993,8 @@ export function ProjectScreen(props: {
               </TouchableOpacity>
             </View>
           </View>
+          <IntakeSheet visible={intakeOpen} creds={creds} projectId={project.id} onClose={() => setIntakeOpen(false)}
+            onOpenChat={(chat) => { setIntakeOpen(false); reloadChats(); setChatId(chat); setTab("thread"); }} />
           <PromptsSheet
             creds={creds}
             visible={promptsOpen}
@@ -2039,6 +2048,10 @@ export function ProjectScreen(props: {
         <TeamRunnersView creds={creds} project={project} pulse={orchPulse.n} onChanged={runners.update} />
       ) : tab === "triggers" ? (
         <TriggersView creds={creds} projectId={project.id} onOpenChat={(chat) => { setChatId(chat); setTab("thread"); }} />
+      ) : tab === "files" ? (
+        <FilesView creds={creds} projectId={project.id} />
+      ) : tab === "terminal" ? (
+        <TerminalView creds={creds} projectId={project.id} />
       ) : tab === "tools" ? (
         <ToolsView
           creds={creds}
@@ -2089,6 +2102,11 @@ export function ProjectScreen(props: {
                 </Text>
               </TouchableOpacity>
             ))}
+            {/* My issues (#382): start work from what's assigned to you */}
+            <TouchableOpacity onPress={() => setIntakeOpen(true)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="My issues: start work from issues assigned to you"
+              style={{ borderColor: T.line, borderWidth: 1, borderRadius: radii.pill, paddingVertical: 5, paddingHorizontal: 13 }}>
+              <Text style={{ color: T.dim, fontSize: 12, fontWeight: "600" }}>Mine</Text>
+            </TouchableOpacity>
             {taskKind !== "board" && tasks?.available && (
               <Text
                 style={{ color: T.faint, fontFamily: T.mono, fontSize: 11, marginLeft: "auto", alignSelf: "center" }}

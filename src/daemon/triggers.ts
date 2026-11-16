@@ -5,6 +5,7 @@
  * waiting there skips rather than piling up behind itself.
  */
 
+import { startIntake } from "./intake.js";
 import { logbook } from "../core/logbook.js";
 import { listProjects } from "../core/registry.js";
 import { isDue, readTriggers, renderPrompt, writeTriggers, type Trigger, type TriggerRun } from "../core/triggers.js";
@@ -70,6 +71,11 @@ export class TriggerRunner {
     let rt: ProjectRuntime;
     try { rt = await this.runtime(projectId); } catch (e) { return record(false, `project unavailable: ${(e as Error).message}`); }
     try {
+      if (t.kind === "intake") {
+        if (!t.intake) return record(false, "intake needs source and mode");
+        const issues = await startIntake(rt, t.intake.source, undefined, t.intake.mode, t.agent, t.intake.label);
+        return record(true, `intake checked ${issues.length} assigned issues`);
+      }
       let chat = t.chat && rt.chats().some((c) => c.id === t.chat) ? t.chat : undefined;
       if (!chat) {
         chat = rt.createChat(`⏱ ${t.name}`, t.agent ? { agentId: t.agent } : {}).id;
