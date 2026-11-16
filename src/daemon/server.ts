@@ -587,6 +587,9 @@ export class LoomDaemon {
     const existing = this.runtimes.get(info.id);
     if (existing) return existing;
     const rt = await ProjectRuntime.open(info);
+    rt.sides.onEvent(frame => {
+      this.delivery.publish({ type: "side", projectId: info.id, ...frame }, { kind: "private", projectId: info.id });
+    });
     rt.onServerEvent((f) => {
       this.broadcastFrame({ type: "server", projectId: info.id, ...f }, info.id);
     });

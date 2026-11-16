@@ -18,6 +18,10 @@ import { AdapterBase } from "./base.js";
 export class EchoAdapter extends AdapterBase {
   private aborted = false;
 
+  constructor(id: string, kind: string, projectDir: string, private readonly readOnly = false) {
+    super(id, kind, projectDir);
+  }
+
   async available(): Promise<boolean> {
     return true;
   }
@@ -81,7 +85,7 @@ export class EchoAdapter extends AdapterBase {
         return;
       }
       const writeMatch = input.text.match(/write:([\w./-]+)/);
-      if (writeMatch && !writeMatch[1]!.includes("..")) {
+      if (writeMatch && !this.readOnly && !writeMatch[1]!.includes("..")) {
         const target = path.join(this.projectDir, writeMatch[1]!);
         fs.mkdirSync(path.dirname(target), { recursive: true });
         fs.writeFileSync(target, `echo(${this.id}) wrote this\n`);

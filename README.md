@@ -733,6 +733,7 @@ detects at least two roles.
 | `loom providers:set <id> [--key --base-url --header]` | Point Loom at a provider — the key goes to `~/.loom/providers.json` (0600) or the env, never a project |
 | `loom providers:rm <id>` | Forget a provider's key and settings |
 | `loom models [agentId] [--provider --free --refresh]` | With an agent: the models it reports. Without: what every configured provider has right now |
+| `loom btw "<question>" [--chat c]` | Ask a private read-only side question with the parent’s agent and model |
 | `loom ask "<text>" [--models a,b,c \| --free --limit n]` | One prompt to several models at once, a thread each, side by side |
 | `loom up [--tailnet] [--restart]` / `loom down` / `loom daemon` | Daemon lifecycle (`--tailnet` binds to your Tailscale IP) |
 | `loom pair` | QR deep link that pairs a phone (single-use token) |
@@ -988,6 +989,43 @@ A thread may pin a **model** as well, for agents that can change model per turn
 (the `model` kind). Pinning one to an agent whose model is baked into a spawned
 process is refused at the point of pinning — a setting that silently does
 nothing is worse than an error.
+
+## Side questions
+
+`loom btw "why this approach?" [--chat c]` asks the parent chat's agent and model
+without interrupting its work. It prints the side reply and closes the side session.
+Main follows the baton; a pinned chat uses its bound agent and model. The selection
+is captured when the side opens. Side messages stay in daemon memory, never enter
+the project event log or brain, and disappear when closed or when the daemon stops.
+
+Claude and Codex fork the parent's native session in a separate process, in plan
+mode with read-only permissions. If there is no native session, or the provider
+cannot fork it, the last twenty parent messages supply context instead. Model
+endpoint agents use that context with read tools only; echo supports the same path
+for testing. Adapters without enforceable read-only execution (including OpenCode)
+return an explicit error. Side questions can run while the parent's turn is busy.
+
+The API is ready for web and phone drawers; their screens are separate work:
+
+- `POST /api/projects/:id/chats/:chatId/side` with `{ "text": "question" }`
+  returns `{ "sideId": "…" }` immediately. Posting again continues the open drawer.
+  An optional `sideId` targets that exact side and returns 404 if it was closed.
+  Concurrent sends to one side return 409; empty/non-string text or text over
+  32,000 characters returns 400.
+- `GET /api/projects/:id/chats/:chatId/side/:sideId` returns
+  `{ "messages": [{ "role": "user", "text": "question", "at": 123 }], "busy": true }`.
+  Replies have role `agent`; `at` is epoch milliseconds. A failed turn sets
+  `busy: false` and an `error` string. Close a failed side before reopening it.
+- `DELETE` at the same URL cancels and forgets the side, returning `{ "deleted": true }`.
+- WebSocket frames have `{ type: "side", projectId, chat, sideId }` plus one of
+  `delta` (text), `message` (the complete message), or `done: true` (optionally `error`).
+  A completed agent message replaces the accumulated deltas for that turn. GET is
+  the authoritative snapshot after reconnecting; side frames are not log events.
+
+Only owners and unscoped devices can access side HTTP endpoints or receive their
+frames; shared-chat guests and project-scoped devices cannot. “Bring back” should
+quote the selected answer into the main composer locally. It enters the main
+conversation only when the person submits that composer through the normal API.
 
 ## Asking several models at once
 
