@@ -13,6 +13,7 @@ import { GrokAdapter } from "./grok.js";
 import { AcpAdapter } from "./acp.js";
 import { ModelAdapter } from "./model.js";
 import { OpenCodeAdapter } from "./opencode.js";
+import { ModelPool } from "./model-pool.js";
 import { ProviderAgent } from "../providers/agent.js";
 
 export type AgentFactory = (
@@ -49,7 +50,7 @@ export function tierForKind(kind: string): "adapter" | "bridge" | null {
   return tiers.get(kind) ?? null;
 }
 
-registerAgentKind("echo", (cfg, dir) => new EchoAdapter(cfg.id, "echo", dir));
+registerAgentKind("echo", (cfg, dir) => new EchoAdapter(cfg.id, "echo", dir, cfg.options));
 // Codex and Claude Code run as warm provider sessions (src/providers/).
 registerAgentKind("claude-code", (cfg, dir) => new ProviderAgent(cfg.id, "claude-code", dir, cfg.options));
 registerAgentKind("codex", (cfg, dir) => new ProviderAgent(cfg.id, "codex", dir, cfg.options));
@@ -89,14 +90,23 @@ export function isWithdrawnKind(kind: string): boolean {
   return WITHDRAWN_KINDS.has(kind);
 }
 
-export function createAgent(cfg: AgentConfig, projectDir: string): AnyAgent {
+/** The project runtime pools process-bound models; standalone callers keep the concrete adapter. */
+export function createAgent(cfg: AgentConfig, projectDir: string, poolModels = false): AnyAgent {
   const factory = factories.get(cfg.kind);
   if (!factory) {
     throw new Error(
       `unknown agent kind "${cfg.kind}" (known: ${[...factories.keys()].join(", ")})`,
     );
   }
-  return gated(factory(cfg, projectDir), cfg, projectDir);
+  const agent = factory(cfg, projectDir);
+  if (poolModels && isAdapter(agent) && (!["claude-code", "codex", "model", "acp"].includes(cfg.kind) || (cfg.kind === "acp" && Boolean(cfg.options?.modelFlag)))) {
+    return gated(new ModelPool(cfg, projectDir, agent, next => {
+      const instance = factory(next, projectDir);
+      if (!isAdapter(instance)) throw new Error(`"${cfg.kind}" did not build an adapter`);
+      return instance;
+    }), cfg, projectDir);
+  }
+  return gated(agent, cfg, projectDir);
 }
 
 /**

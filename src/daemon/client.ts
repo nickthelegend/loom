@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import type {
   AgentConfig,
+  ChatInfo,
   CostSummary,
   LoomEvent,
   ProjectStatus,
@@ -139,8 +140,17 @@ export class DaemonClient {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/insights/turns?${q}`);
   }
 
-  chats(id: string): Promise<{ chats: Array<{ id: string; title: string }> }> {
+  chats(id: string): Promise<{ chats: ChatInfo[] }> {
     return this.request("GET", `/api/projects/${encodeURIComponent(id)}/chats`);
+  }
+
+  createChat(id: string, title: string, opts: { agentId?: string; model?: string; effort?: string } = {}): Promise<{ chat: ChatInfo }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats`, { title, ...opts });
+  }
+
+  /** Replaces the chat selection; null unbinds, omitted model/effort use agent defaults. */
+  setChatAgent(id: string, chat: string, agentId: string | null, opts: { model?: string; effort?: string } = {}): Promise<{ chat: ChatInfo }> {
+    return this.request("POST", `/api/projects/${encodeURIComponent(id)}/chats/${encodeURIComponent(chat)}/agent`, { agentId, ...opts });
   }
 
   /** One page of a chat's events, newest `limit`, before an id when paging back. */

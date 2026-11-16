@@ -38,6 +38,7 @@ import { AdapterBase, agentEnv, cliAvailable } from "./base.js";
 import { permissionFor } from "../core/permissions.js";
 
 interface GrokOptions {
+  env?: Record<string, string>;
   /**
    * grok permission mode for baton turns; default "bypassPermissions".
    *
@@ -160,7 +161,7 @@ export class GrokAdapter extends AdapterBase {
         const child = spawn(bin, args, {
           cwd: this.projectDir,
           stdio: ["ignore", "pipe", "pipe"],
-          env: agentEnv(),
+          env: { ...agentEnv(), ...this.options.env },
         });
         this.child = child;
         let stdout = "";

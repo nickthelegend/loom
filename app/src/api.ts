@@ -144,6 +144,10 @@ export interface Chat {
   archived?: boolean;
   /** What made it — an Orchestra run, race, crew or import — so its threads fold together. */
   group?: { kind: "orchestra" | "race" | "crew" | "import"; id: string; title: string; status?: string; at: number };
+  /** Who answers in this chat, and on which model and effort (#370) — unset follows the baton / the agent's default. */
+  agentId?: string;
+  model?: string;
+  effort?: string;
 }
 
 /** Per-agent cost + token rollup from the daemon's /metrics endpoint. */
@@ -1203,6 +1207,9 @@ export const forgetMemory = (c: Creds, id: string, mid: string, reason: string) 
 /** The models an agent can run (its CLI's own list, or the provider's). */
 export const getAgentModels = (c: Creds, id: string, agentId: string) =>
   api<{ kind: string; count: number; models: string[]; source?: string }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/models`);
+/** Pin one chat to an agent and (optionally) a model and effort; agentId null unbinds it (#370). */
+export const setChatAgent = (c: Creds, id: string, chat: string, agentId: string | null, opts: { model?: string; effort?: string } = {}) =>
+  api<{ chat: Chat }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/agent`, { method: "POST", body: JSON.stringify({ agentId, ...opts }) });
 /** Pin an agent to a model; "" goes back to its own default. */
 export const setAgentModel = (c: Creds, id: string, agentId: string, model: string) =>
   api<{ agent: unknown }>(c, `/api/projects/${id}/agents/${encodeURIComponent(agentId)}/model`, { method: "POST", body: JSON.stringify({ model }) });
@@ -1424,7 +1431,11 @@ export interface OrchestraTask {
   /** The orchestrator's answer to a teammate overlap: wait:<goal> | narrow | proceed:<reason>. */
   overlap?: string;
   hold?: OrchestraTaskHold;
+  /** What the worker has said about itself mid-turn (#374), newest last, and the newest one. */
+  reports?: OrchestraReport[];
+  lastReport?: OrchestraReport | null;
 }
+export interface OrchestraReport { at: number; kind: "checkpoint" | "needs_input" | "stuck" | "done"; text: string }
 
 /** One orchestrator, many parallel workers, one integration branch. */
 export interface OrchestraRun {

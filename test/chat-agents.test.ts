@@ -10,6 +10,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { readProjectConfig } from "../src/core/registry.js";
 import { ProjectRuntime } from "../src/daemon/runtime.js";
 import { makeProjectDir, tmpDir, waitUntil } from "./helpers.js";
 
@@ -117,17 +118,65 @@ describe("what a thread refuses to be bound to", () => {
     expect(() => r.createChat("x", { agentId: "watcher" })).toThrow(/bridge/);
   });
 
-  it("a model, when the agent can't change model per turn", async () => {
+  it("model or effort without an agent", async () => {
     const r = await project();
-    // echo bakes nothing per turn; binding a model here would be a setting
-    // that silently did nothing, so it's refused where it can be fixed.
-    expect(() => r.createChat("x", { agentId: "execbot", model: "gpt-9" })).toThrow(
-      /can't change model per thread/,
-    );
+    expect(() => r.createChat("x", { model: "echo-fast" })).toThrow(/need an agentId/);
+    expect(() => r.createChat("x", { effort: "high" })).toThrow(/need an agentId/);
   });
+
 });
 
 describe("a thread's model reaches the turn", () => {
+  it("isolates models and effort, reuses instances, and restores defaults without changing the roster", async () => {
+    const r = await project();
+    const before = readProjectConfig(r.info.dir);
+    const a = r.createChat("fast", { agentId: "execbot", model: "echo-fast", effort: "low" });
+    const b = r.createChat("deep", { agentId: "execbot", model: "echo-deep", effort: "high" });
+    const send = async (chat: string, count: number) => {
+      await r.sendMessage("hello", undefined, { chat });
+      await waitUntil(() => !r.anyBusy() && r.log.list({ kinds: ["run_complete"] }).length === count);
+      return r.log.list({ kinds: ["run_complete"] }).at(-1)!;
+    };
+    expect((await send(a.id, 1)).payload).toMatchObject({ model: "echo-fast", effort: "low" });
+    expect((await send(b.id, 2)).payload).toMatchObject({ model: "echo-deep", effort: "high" });
+    const starts = r.log.list({ kinds: ["status"] }).filter(e => e.agentId === "execbot" && e.payload.state === "started").length;
+    expect((await send(a.id, 3)).payload).toMatchObject({ model: "echo-fast", effort: "low" });
+    expect(r.log.list({ kinds: ["status"] }).filter(e => e.agentId === "execbot" && e.payload.state === "started")).toHaveLength(starts);
+    r.setChatAgent(a.id, "execbot");
+    expect((await send(a.id, 4)).payload.model).toBe("echo-1");
+    expect(r.chatBinding(b.id)).toEqual({ agentId: "execbot", model: "echo-deep", effort: "high" });
+    expect(readProjectConfig(r.info.dir)).toEqual(before);
+    const info = r.info;
+    await r.close();
+    rt = await ProjectRuntime.open(info);
+    expect(rt.chatBinding(b.id)).toEqual({ agentId: "execbot", model: "echo-deep", effort: "high" });
+    rt.setChatAgent(b.id, null);
+    expect(rt.chats().find(c => c.id === b.id)).not.toHaveProperty("effort");
+    expect(rt.chats().find(c => c.id === b.id)).not.toHaveProperty("model");
+  });
+
+  it("changing a chat selection mid-turn leaves that answer alone", async () => {
+    const r = await project();
+    const chat = r.createChat("switch", { agentId: "execbot", model: "old", effort: "low" });
+    await r.sendMessage("sleep:300", undefined, { chat: chat.id });
+    expect(r.setChatAgent(chat.id, "execbot", "new", "high")).toMatchObject({ model: "new", effort: "high" });
+    await waitUntil(() => !r.anyBusy());
+    expect(r.log.list({ kinds: ["run_complete"] }).at(-1)!.payload).toMatchObject({ model: "old", effort: "low" });
+    await r.sendMessage("next", undefined, { chat: chat.id });
+    await waitUntil(() => !r.anyBusy());
+    expect(r.log.list({ kinds: ["run_complete"] }).at(-1)!.payload).toMatchObject({ model: "new", effort: "high" });
+  });
+
+  it("an explicit other agent does not inherit the chat's model or effort", async () => {
+    const r = await project();
+    await r.handoff("plannerbot");
+    const chat = r.createChat("pinned", { agentId: "execbot", model: "special", effort: "high" });
+    await r.sendMessage("hi", "plannerbot", { chat: chat.id });
+    await waitUntil(() => !r.anyBusy());
+    expect(r.log.list({ kinds: ["run_complete"] }).at(-1)!.payload.model).toBe("echo-1");
+    expect(r.log.list({ kinds: ["run_complete"] }).at(-1)!.payload.effort).toBeUndefined();
+  });
+
   it("is handed to an adapter that can honour it", async () => {
     process.env.LOOM_HOME = tmpDir("home-chat-model");
     process.env.LOOM_NO_NOTIFY = "1";
@@ -184,10 +233,20 @@ describe("over the wire", () => {
 
       const made = await api(`/api/projects/${pid}/chats`, {
         method: "POST",
-        body: JSON.stringify({ title: "with exec", agentId: "execbot" }),
+        body: JSON.stringify({ title: "with exec", agentId: "execbot", model: "echo-fast", effort: "low" }),
       });
       const chat = (made.body as unknown as { chat: { id: string; agentId: string } }).chat;
-      expect(chat.agentId).toBe("execbot");
+      expect(chat).toMatchObject({ agentId: "execbot", model: "echo-fast", effort: "low" });
+
+      const sent = await api(`/api/projects/${pid}/messages`, {
+        method: "POST", body: JSON.stringify({ text: "hello over HTTP", chat: chat.id }),
+      });
+      expect(sent.status).toBe(200);
+      await waitUntil(async () => {
+        const events = await api(`/api/projects/${pid}/events?chat=${chat.id}`);
+        return (events.body as unknown as { events: Array<{ kind: string; agentId?: string; payload: Record<string, unknown> }> }).events
+          .some(e => e.kind === "run_complete" && e.agentId === "execbot" && e.payload.model === "echo-fast" && e.payload.effort === "low");
+      });
 
       const listed = await api(`/api/projects/${pid}/chats`);
       const rows = (listed.body as unknown as { chats: Array<{ id: string; agentId?: string }> }).chats;
@@ -195,15 +254,24 @@ describe("over the wire", () => {
 
       const rebound = await api(`/api/projects/${pid}/chats/${chat.id}/agent`, {
         method: "POST",
-        body: JSON.stringify({ agentId: "plannerbot" }),
+        body: JSON.stringify({ agentId: "plannerbot", model: "echo-deep", effort: "high" }),
       });
-      expect((rebound.body as unknown as { chat: { agentId: string } }).chat.agentId).toBe("plannerbot");
+      expect(rebound.body.chat).toMatchObject({ agentId: "plannerbot", model: "echo-deep", effort: "high" });
 
       const unbound = await api(`/api/projects/${pid}/chats/${chat.id}/agent`, {
         method: "POST",
         body: JSON.stringify({ agentId: null }),
       });
       expect((unbound.body as unknown as { chat: { agentId?: string } }).chat.agentId).toBeUndefined();
+
+      expect(unbound.body.chat).not.toHaveProperty("model");
+      expect(unbound.body.chat).not.toHaveProperty("effort");
+      for (const selection of [{ model: 1 }, { effort: ["high"] }, { model: "m".repeat(201) }]) {
+        const invalid = await api(`/api/projects/${pid}/chats/${chat.id}/agent`, {
+          method: "POST", body: JSON.stringify({ agentId: "execbot", ...selection }),
+        });
+        expect(invalid.status).toBe(400);
+      }
 
       const bad = await api(`/api/projects/${pid}/chats`, {
         method: "POST",

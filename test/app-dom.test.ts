@@ -282,6 +282,7 @@ const click = (el: Element | null) => {
   (el as HTMLElement).dispatchEvent(new (el.ownerDocument.defaultView as Window & typeof globalThis).MouseEvent("click", { bubbles: true }));
 };
 
+
 describe("web app · boot", () => {
   it("an unpaired remote visitor gets the pairing screen, not a broken shell", async () => {
     // A phone on the tailnet: no stored token, and the local admin bootstrap 403s.
@@ -402,6 +403,7 @@ async function openBoard(): Promise<Mounted> {
   await ready(m, '.badd[data-add="needs-you"]');
   return m;
 }
+
 
 describe("web app · board", () => {
   it("draws every column, even with no GitHub to talk to", async () => {
@@ -840,6 +842,49 @@ describe("web app · who's in a shared chat (#362)", () => {
     await waitUntil(() => text(m, "#presence") === "", { timeoutMs: 10_000 });
     expect(m.errors.join("\n")).toBe("");
   }, 40_000);
+});
+
+describe("web app · a chat's own model (#370)", () => {
+  it("Model & effort… pins a model and effort to one bound chat, and the sidebar shows it", async () => {
+    const call = async (method: string, p: string, body?: unknown) => {
+      const r = await fetch(`${baseUrl}/api/projects/${projectId}${p}`, {
+        method,
+        headers: { Authorization: `Bearer ${clientToken}`, "content-type": "application/json" },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      return (await r.json()) as { chat: { id: string; model?: string; effort?: string } };
+    };
+    const id = (await call("POST", "/chats", { title: "model pick", agentId: "plannerbot" })).chat.id;
+    try {
+      const m = mount({ hash: `#p/${projectId}` });
+      await waitUntil(() => !!$(m, `.crow[data-chat="${id}"]`));
+      const row = $(m, `.crow[data-chat="${id}"]`)!;
+      row.dispatchEvent(new m.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await waitUntil(() => !!$(m, ".menupop"));
+      const item = [...m.window.document.querySelectorAll(".menupop .pickrow")].find((b) => (b.textContent ?? "").includes("Model & effort"));
+      expect(item, "menu offers Model & effort").toBeTruthy();
+      expect(item!.textContent).toContain("agent default");
+      click(item as HTMLElement);
+      await waitUntil(() => !!$(m, "#chatpick.chatmodel [data-model]"));
+      // echo takes an effort, so the chips are there; type a model the list doesn't have
+      ($(m, "#cmcustom") as HTMLInputElement).value = "claude-opus-5-5";
+      click([...m.window.document.querySelectorAll("#cmeff [data-eff]")].find((b) => b.getAttribute("data-eff") === "high") as HTMLElement);
+      click($(m, "#cmsave")!);
+      await waitUntil(() => !$(m, "#chatpick"));
+      const chats = (await (await fetch(`${baseUrl}/api/projects/${projectId}/chats`, { headers: { Authorization: `Bearer ${clientToken}` } })).json()) as { chats: Array<{ id: string; model?: string; effort?: string }> };
+      const chat = chats.chats.find((c) => c.id === id)!;
+      expect(chat.model).toBe("claude-opus-5-5");
+      expect(chat.effort).toBe("high");
+      await waitUntil(() => text(m, `.crow[data-chat="${id}"] .cwho`).includes("claude-opus-5-5"));
+      // the Main thread follows the baton, so it never offers a model of its own
+      $(m, '.crow[data-chat="main"]')!.dispatchEvent(new m.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
+      await waitUntil(() => !!$(m, ".menupop"));
+      expect(text(m, ".menupop")).not.toContain("Model & effort");
+      expect(m.errors.join("\n")).toBe("");
+    } finally {
+      await fetch(`${baseUrl}/api/projects/${projectId}/chats/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${clientToken}` } });
+    }
+  });
 });
 
 describe("web app · steer a running turn (#373)", () => {
