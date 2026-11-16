@@ -110,7 +110,7 @@ export function createOrchestra(view) {
         view.closeMenu();
         drawOrchControls();
       };
-      setTimeout(function(){ document.getElementById("cfmodel").focus(); document.addEventListener("mousedown", view.menuAway); }, 0);
+      setTimeout(function(){ var f = document.getElementById("cfmodel"); if (f) f.focus(); document.addEventListener("mousedown", view.menuAway); }, 0);
     }
 
     /** The run whose orchestrator thread this chat is, if it is one. */
@@ -168,7 +168,7 @@ export function createOrchestra(view) {
       var lead = roster.filter(function(a){ return a.id === c.orchestrator; })[0] || roster[0];
       var modeSeg = '<span class="corace" role="group" aria-label="how to run the goal">' +
         '<button type="button" data-omode="plan" class="' + (c.race ? "" : "on") + '" title="one agent plans the goal and the team works it">Plan &amp; split</button>' +
-        '<button type="button" data-omode="race" class="' + (c.race ? "on" : "") + '" title="every checked agent gets the same prompt in its own worktree — you compare and pick one">' + ICONS.play + "Race</button></span>";
+        '<button type="button" data-omode="race" class="' + (c.race ? "on" : "") + '" title="every checked agent (and fleet) gets the same prompt in its own worktree — compare them side by side and keep one">' + ICONS.play + "Ask several</button></span>";
       if (c.race) {
         el.innerHTML = modeSeg +
           '<span class="colbl" title="each gets the same prompt, in its own worktree">Racers</span>' +
@@ -376,9 +376,15 @@ export function createOrchestra(view) {
         }).catch(function(err){ if (btn) btn.disabled = false; toast(err.message); });
         return;
       }
-      api("/api/projects/" + view.pid + "/orchestra", { method: "POST", body: JSON.stringify({
+      // Ask several (#377): every entrant — an agent, or agent@model×N — runs the same prompt in its
+      // own worktree, side by side, and you keep one. It's a race, started through /compare so each
+      // entrant also reports its diff size.
+      if (c.race && seats > 8) { if (btn) btn.disabled = false; toast("up to eight entrants at once"); return; }
+      api("/api/projects/" + view.pid + (c.race ? "/compare" : "/orchestra"), { method: "POST", body: JSON.stringify(c.race ? {
+        prompt: goal, entrants: workers, chat: view.chatId,
+      } : {
         goal: goal, orchestrator: c.orchestrator || undefined, workers: workers, maxParallel: c.parallel,
-        plan: view.planState || undefined, race: c.race || undefined,
+        plan: view.planState || undefined,
         // Orchestrate here, answer here. Without this the run opened a thread
         // of its own and walked you into it, leaving the goal you typed behind
         // in a thread that then said nothing at all (#100).
@@ -702,16 +708,19 @@ export function createOrchestra(view) {
         var files = (t.files || []).length;
         return '<div class="racecard' + (picked === t.id ? " picked" : "") + '">' +
           '<div class="rch">' + agentGlyph(t.kind, t.agent) + '<b>' + esc(agentLabel(t.kind, t.agent)) + "</b>" +
+            // which model this entrant ran on — the point of comparing (#377)
+            (t.model ? '<span class="rmodel" title="' + esc(t.model + (t.effort ? " \u00b7 " + t.effort : "")) + '">' + esc(String(t.model).split("/").pop()) + (t.effort ? " \u00b7 " + esc(t.effort) : "") + "</span>" : "") +
             '<span class="opill ' + s[1] + '"><span class="odot ' + s[1] + '"></span>' + esc(s[0]) + "</span>" +
             (fastest && fastest.id === t.id && tasks.length > 1 ? '<span class="rfast" title="finished first">fastest</span>' : "") + "</div>" +
-          '<div class="rcm"><span>' + esc(dur) + "</span><span>" + files + " file" + (files === 1 ? "" : "s") + "</span><span>" + Number(t.lines || 0) + " lines</span>" +
+          '<div class="rcm"><span>' + esc(dur) + "</span><span>" + (t.diffStat ? t.diffStat.files : files) + " file" + ((t.diffStat ? t.diffStat.files : files) === 1 ? "" : "s") + "</span>" +
+            (t.diffStat ? '<span class="rdiff"><span class="ins">+' + Number(t.diffStat.insertions) + '</span> <span class="del">\u2212' + Number(t.diffStat.deletions) + "</span></span>" : "<span>" + Number(t.lines || 0) + " lines</span>") +
             (t.costUsd ? "<span>" + money(t.costUsd) + "</span>" : "") + "</div>" +
           (t.result ? '<div class="rcr">' + esc(plainPreview(t.result, 260)) + "</div>" : t.error ? '<div class="rcr err">' + esc(t.error.slice(0, 200)) + "</div>" : "") +
           '<div class="rca">' +
             (t.status === "done" ? '<button type="button" class="btn xs outline" data-racediff="' + esc(t.id) + '">' + ICONS.tree + "Diff</button>" : "") +
             '<button type="button" class="btn xs ghost" data-racechat="' + esc(t.chat) + '">' + ICONS.thread + "Thread</button>" +
             (picked === t.id ? '<span class="rpicked">' + ICONS.check + "applied to " + esc(run.applied.into) + "</span>"
-              : !picked && t.status === "done" && orchTerminal(run.status) ? '<button type="button" class="btn xs primary" data-racepick="' + esc(t.id) + '">Pick this one</button>' : "") +
+              : !picked && t.status === "done" && orchTerminal(run.status) ? '<button type="button" class="btn xs primary" data-racepick="' + esc(t.id) + '">' + (run.compare ? "Keep this one" : "Pick this one") + "</button>" : "") +
           "</div></div>";
       }).join("") + "</div>";
     }
@@ -822,7 +831,7 @@ export function createOrchestra(view) {
       var h = '<div class="ocard">' +
         '<div class="ogoal">' + esc(run.goal) + "</div>" +
         '<div class="ometa">' + orchPill(run.status) +
-          (run.race ? '<span class="omi"><span class="omk">Mode</span><span class="omv">' + ICONS.play + " Race</span></span>"
+          (run.race ? '<span class="omi"><span class="omk">Mode</span><span class="omv">' + ICONS.play + (run.compare ? " Ask several" : " Race") + "</span></span>"
             : '<span class="omi"><span class="omk">Orchestrator</span>' + agentGlyph(o.kind, o.agent) + '<span class="omv">' + esc(agentLabel(o.kind, o.agent)) + "</span></span>") +
           '<span class="omi"><span class="omk">Workers</span><span class="omv">' + (run.workers || []).map(function(w){
             // a fleet worker says which model it's on (run.workerDetails, #369)

@@ -18,9 +18,11 @@ export const LAG_DROP_BYTES = 16 << 20;
 export type FrameAudience =
   | { kind: "project"; projectId?: string }
   | { kind: "log"; projectId?: string }
-  | { kind: "admin" };
+  | { kind: "admin" }
+  | { kind: "private"; projectId: string };
 
 function visible(scope: ClientScope, audience: FrameAudience): boolean {
+  if (audience.kind === "private") return !scope.scope && !scope.chat && (!scope.project || scope.project === audience.projectId);
   if (audience.kind === "admin") return !scope.scope;
   const project = audience.projectId;
   if (audience.kind === "log") {

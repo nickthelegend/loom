@@ -962,6 +962,14 @@ export const getIntake = (c: Creds, id: string, source: "github" | "linear", lab
   api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake?source=${source}${label ? `&label=${encodeURIComponent(label)}` : ""}`);
 export const startIntake = (c: Creds, id: string, body: { source: "github" | "linear"; ids: string[]; mode: "chat" | "orchestra"; agent?: string }) =>
   api<{ issues: IntakeIssue[] }>(c, `/api/projects/${id}/intake/start`, { method: "POST", body: JSON.stringify(body) });
+/** Side chats (#376): a private, read-only question beside a chat; none of it enters the thread. */
+export interface SideMessage { role: "user" | "agent"; text: string; at: number }
+export const askSide = (c: Creds, id: string, chat: string, text: string, sideId?: string) =>
+  api<{ sideId: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side`, { method: "POST", body: JSON.stringify(sideId ? { text, sideId } : { text }) });
+export const getSide = (c: Creds, id: string, chat: string, sideId: string) =>
+  api<{ messages: SideMessage[]; busy: boolean; error?: string }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`);
+export const closeSide = (c: Creds, id: string, chat: string, sideId: string) =>
+  api<{ deleted: boolean }>(c, `/api/projects/${id}/chats/${encodeURIComponent(chat)}/side/${encodeURIComponent(sideId)}`, { method: "DELETE" });
 /** The agent CLIs on the paired computer — for choosing who works in a new project (#371). */
 export interface SetupAgent { kind: string; label: string; found: boolean; authed: boolean | null }
 export const getSetupAgents = (c: Creds) => api<{ agents: SetupAgent[] }>(c, "/api/setup");
@@ -1496,6 +1504,10 @@ export const startOrchestra = (
   id: string,
   opts: { goal: string; orchestrator?: string; workers?: string[]; maxParallel?: number; plan?: boolean; race?: boolean },
 ) => api<{ run: OrchestraRun }>(c, `/api/projects/${id}/orchestra`, { method: "POST", body: JSON.stringify(opts) });
+
+/** Ask several (#377): the same prompt to each entrant (agent or agent@model×N), side by side; keep one. */
+export const compareAgents = (c: Creds, id: string, opts: { prompt: string; entrants: string[]; chat?: string }) =>
+  api<{ run: OrchestraRun }>(c, `/api/projects/${id}/compare`, { method: "POST", body: JSON.stringify(opts) });
 
 /** Carry on a run Loom's restart stopped: its in-flight tasks pick up where they were. */
 export const resumeOrchestra = (c: Creds, id: string, runId: string) =>

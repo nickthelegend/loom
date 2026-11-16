@@ -11,6 +11,7 @@
 import { api, logout } from "./connection.js";
 import { esc, mdToHtml } from "./format.js";
 import { ICONS, LOADER } from "./icons.js";
+import { presenceHtml, trackPresence } from "./presence.js";
 import { toast } from "./notifications.js";
 import { root, state } from "./state.js";
 
@@ -93,6 +94,7 @@ function draw(me) {
   document.title = me.chat.title + " · shared · Loom";
   root.innerHTML = '<div class="guest">' +
     '<header class="ghead"><div class="gtitle"><b>' + esc(me.chat.title) + '</b><span class="gsub">' + esc(me.project.name) + " · shared with you as " + esc(me.name) + "</span></div>" +
+    '<span id="gpeople" class="gpeople"></span>' +
     '<span class="grole">' + esc(me.role === "view" ? "reading along" : me.role === "reply" ? "can talk" : "can talk and approve") + "</span>" +
     '<button class="btn ghost" id="gleave">Leave</button></header>' +
     '<main class="gfeed" id="gfeed" aria-live="polite"></main>' +
@@ -101,6 +103,11 @@ function draw(me) {
     "</div>";
   document.getElementById("gleave").onclick = function(){ markGuest(false); logout(); };
   var feed = document.getElementById("gfeed"), seen = {}, decided = {};
+  // who else is here (#362): the owner, their devices, other guests — never you
+  var selfId = null;
+  function people(list){ var el = document.getElementById("gpeople"); if (el) el.innerHTML = presenceHtml((list || []).filter(function(p){ return !selfId ? true : p.id !== selfId; }), selfId ? "" : me.name); }
+  people(me.presence && me.presence.people);
+  var tracker = null;
 
   function add(e) {
     if (seen[e.id]) return;
@@ -142,8 +149,14 @@ function draw(me) {
 
   (function connect(){
     var ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?project=" + encodeURIComponent(pid), ["loom.bearer." + state.token]);
-    ws.onmessage = function(ev){ try { var f = JSON.parse(ev.data); if (f.type === "event" && f.event) add(f.event); } catch (e) {} };
-    ws.onclose = function(c){ if (c.code !== 4403 && document.getElementById("gfeed")) setTimeout(connect, 2000); };
+    ws.onopen = function(){ if (tracker) tracker.stop(); tracker = trackPresence(ws, function(){ return me.chat.id; }, document.getElementById("gbox")); };
+    ws.onmessage = function(ev){ try {
+      var f = JSON.parse(ev.data);
+      if (f.type === "hello" && f.presenceId) selfId = f.presenceId;
+      if (f.type === "event" && f.event) add(f.event);
+      else if (f.type === "presence" && f.chat === me.chat.id) people(f.people);
+    } catch (e) {} };
+    ws.onclose = function(c){ if (tracker) { tracker.stop(); tracker = null; } if (c.code !== 4403 && document.getElementById("gfeed")) setTimeout(connect, 2000); };
   })();
 
   if (canSend) {
@@ -152,6 +165,7 @@ function draw(me) {
       var text = box.value.trim();
       if (!text) return;
       box.value = "";
+      if (tracker) tracker.poke();
       api("/api/projects/" + pid + "/messages", { method: "POST", body: JSON.stringify({ text: text }) }).catch(function(e){ toast(e.message); box.value = text; });
     };
     document.getElementById("gsend").onclick = send;

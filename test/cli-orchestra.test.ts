@@ -108,6 +108,58 @@ describe("loom orchestrate / orchestra", () => {
   });
 });
 
+describe("loom compare", () => {
+  it("waits, prints entrant columns and keeps one from the existing run", async () => {
+    const compared = await runCli(["compare", "write:compared.txt", "-w", "solo@m1,echo@m2x2", "--wait"]);
+    expect(compared.code).toBe(0);
+    const run = (await client.orchestraRuns(projectId)).runs[0]!;
+    expect(run.compare).toBe(true);
+    expect(compared.out).toContain(run.id);
+    expect(compared.out).toMatch(/solo@m1\s+\| solo@m2\s+\| solo@m2#2/);
+    expect(compared.out).toContain("files ±");
+    expect(compared.out).toContain("1 files +1 -0");
+    expect(compared.out).toMatch(/time\s+\| \d+\.\ds/);
+    expect(compared.out).toMatch(/cost\s+\| \$/);
+    expect(fs.existsSync(path.join(projectDir, "compared.txt"))).toBe(false);
+    const pick = run.tasks[1]!;
+    const kept = await runCli(["compare", run.id, "--keep", pick.id]);
+    expect(kept.code).toBe(0);
+    expect(kept.out).toContain(`kept ${pick.id}`);
+    expect(fs.readFileSync(path.join(projectDir, "compared.txt"), "utf8")).toBe(`echo(${pick.agent}) wrote this\n`);
+    expect(fs.existsSync(run.tasks[0]!.dir!)).toBe(false);
+    const json = JSON.parse((await runCli(["orchestra", run.id, "--json"])).out);
+    expect(json).toMatchObject({ compare: true, race: true });
+    expect(json.taskDetails[0].diffStat).toEqual({ files: 1, insertions: 1, deletions: 0 });
+  });
+
+  it("starts without waiting and can follow the same run later", async () => {
+    const started = await runCli(["compare", "sleep:2000 hello", "-w", "solox2"]);
+    expect(started.code).toBe(0);
+    const run = (await client.orchestraRuns(projectId)).runs[0]!;
+    expect(started.out).toContain(run.id);
+    const waited = await runCli(["compare", run.id, "--wait"]);
+    expect(waited.code).toBe(0);
+    expect(waited.out).toContain("completed");
+    expect(waited.out).toContain("0 files +0 -0");
+  });
+
+  it("reports invalid fleets and failed entrants", async () => {
+    const invalid = await runCli(["compare", "hello", "-w", "solox9"]);
+    expect(invalid.code).toBe(1);
+    expect(invalid.out).toContain("2–8 entrants");
+    const failed = await runCli(["compare", "fail:unavailable", "-w", "solox2", "--wait"]);
+    expect(failed.code).toBe(1);
+    expect(failed.out).toContain("unavailable");
+  });
+
+  it("waits implicitly when keeping an entrant from a new comparison", async () => {
+    const kept = await runCli(["compare", "write:inline-keep.txt", "-w", "solo@m1,solo@m2", "--keep", "race-solo-m2"]);
+    expect(kept.code).toBe(0);
+    expect(kept.out).toContain("kept race-solo-m2");
+    expect(fs.readFileSync(path.join(projectDir, "inline-keep.txt"), "utf8")).toBe("echo(solo@m2) wrote this\n");
+  });
+});
+
 describe("loom cloud", () => {
   it("reports status, off by default, ready on Loom's hosted project", async () => {
     // One click: with no project of your own, Cloud relays through the hosted
