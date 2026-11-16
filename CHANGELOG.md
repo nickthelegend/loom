@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Share live: presence API and CLI.** The daemon tracks each guest socket and announced owner/device view in memory, with chat-scoped snapshots, typing updates, 20-second client heartbeats and 45-second expiry. `loom presence [chat] [--watch] [--json]` shows viewers; `loom chat` announces viewing and typing. Shared TypeScript contracts support the upcoming web and phone displays (#362).
+
 - Per-message model and reasoning effort overrides through `POST /api/projects/:id/messages` and `loom send --model <model> --effort <level>` (#381). Overrides use chat-binding validation, leave chat and agent defaults unchanged, and stay with queued messages across chat edits and daemon restarts.
 
 - **Private side questions (#376).** `loom btw "<question>" [--chat c]` and the side-chat API answer with the parent's agent and model without changing its log, memory or native cursor. Claude/Codex use separate read-only native forks, with recent-message context as a fallback. Side messages stream only to owners and unscoped devices. Web and phone drawer screens are separate work.

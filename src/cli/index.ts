@@ -3049,6 +3049,42 @@ program
   });
 
 program
+  .command("presence [chat]")
+  .description("who is viewing a chat (default: main), including who is typing")
+  .option("--watch", "join the chat and watch presence until Ctrl-C")
+  .option("--json", "print full snapshots as JSON")
+  .action(async (chat: string | undefined, opts: { watch?: boolean; json?: boolean }) => {
+    const client = await ensureDaemon();
+    const project = await currentProject(client);
+    let chatId = "main";
+    if (chat && chat !== "main") {
+      const { chats } = await client.chats(project.id);
+      const hit = chats.find((c) => c.id === chat || c.title.toLowerCase() === chat.toLowerCase());
+      if (!hit) fail(`no chat "${chat}" here`);
+      chatId = hit.id;
+    }
+    const print = (snapshot: Awaited<ReturnType<typeof client.presence>>) => {
+      if (opts.json) return void console.log(JSON.stringify(snapshot));
+      console.log(snapshot.people.length
+        ? snapshot.people.map((p) => `${p.name} (${p.kind})${p.typing ? " — typing…" : ""}`).join("\n")
+        : pc.dim("nobody viewing this chat"));
+    };
+    print(await client.presence(project.id, chatId));
+    if (!opts.watch) return;
+    const view = client.watchPresence(project.id, chatId, print, (code, reason) => {
+      console.error(pc.red(`presence disconnected (${code})${reason ? `: ${reason}` : ""}`));
+      process.exitCode = 1;
+    });
+    const stop = () => {
+      view.close();
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    };
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+  });
+
+program
   .command("share [chat]")
   .description("a read-only link to a chat (default: main) for a teammate: prompts, replies, what ran and changed. It expires; --list shows yours, --revoke ends one (#199)")
   .option("--hours <n>", "how long the link works (1 to 720, default 24)")
@@ -3649,13 +3685,19 @@ program
       rl.prompt(true);
     }, project.id);
 
+    const presence = client.watchPresence(project.id, "main", () => {});
+    const typing = () => presence.setTyping(Boolean(rl.line));
+    if (process.stdin.isTTY) process.stdin.on("keypress", typing);
     const close = () => {
+      presence.close();
+      process.stdin.off("keypress", typing);
       unsubscribe();
       rl.close();
       process.exit(0);
     };
 
     rl.on("line", (line) => {
+      presence.setTyping(false);
       void (async () => {
         const text = line.trim();
         if (!text) return rl.prompt();

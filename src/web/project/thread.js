@@ -6,6 +6,7 @@ import { esc,hue,mdToHtml,money,pageGone } from '../format.js';
 import { notifyDone,notifyNeedsInput,toast } from '../notifications.js';
 import { maybeReloadPreview,onServerFrame,onSpecFrame } from '../preview.js';
 import { state } from '../state.js';
+import { presenceHtml, trackPresence } from '../presence.js';
 import { drawStatusbar } from '../statusbar.js';
 import { onTeamFrame } from '../team.js';
 import { actSummary,avatarFor,durfmt,lineFor,relClock,settleCouncil,settleFinding,settleQuestionCard,untilText,whoHtml } from '../transcript.js';
@@ -86,6 +87,7 @@ export function createThread(view) {
       // busy *in this chat*: an agent working in another thread doesn't take
       // this one's Send away (a daemon too old to say which chat counts as here)
       var here = view.chatId || "main";
+      presenceFollow();
       var anyBusy = adapters.some(function(a){ return a.busy && (!a.chat || a.chat === here); });
       var sendBtn = document.getElementById("send");
       var stopBtn = document.getElementById("stop");
@@ -744,6 +746,16 @@ export function createThread(view) {
     }
 
 
+    var presenceChat = null;
+    /** A chat switch tells the daemon now, not at the next heartbeat; the old chat's row clears. */
+    function presenceFollow(){
+      var here = view.chatId || "main";
+      if (presenceChat === here || !state.presenceTracker) return;
+      presenceChat = here;
+      var pe = document.getElementById("presence"); if (pe) pe.innerHTML = "";
+      state.presenceTracker.poke();
+    }
+
     function connect(){
       var proto = location.protocol === "https:" ? "wss://" : "ws://";
       // Carry the bearer token in the subprotocol, not the URL — a query token
@@ -752,6 +764,10 @@ export function createThread(view) {
       state.ws = ws;
       ws.onopen = function(){
         state.wsLive = true; drawStatusbar();
+        // say which chat this window is in, so a shared chat's guests can see you're here (#362)
+        if (state.presenceTracker) state.presenceTracker.stop();
+        presenceChat = view.chatId || "main";
+        state.presenceTracker = trackPresence(ws, function(){ return view.chatId || "main"; }, document.getElementById("box"));
         // (re)read what's waiting: anything filed while the socket was down
         // arrived as events nobody heard
         view.loadApprovals();
@@ -767,6 +783,7 @@ export function createThread(view) {
           // The daemon says hello once this socket is subscribed. Anything the
           // queue did before then went out as a frame this page never got, so
           // read it again now (a reconnect lands here too).
+          if (frame.type === "hello" && frame.presenceId) state.presenceId = frame.presenceId;
           if (frame.type === "hello") { checkBuild(); view.loadQueue(); loadHistory(); return; }
           if (frame.type === "term") { view.onTermFrame(frame); return; }
           if (frame.type === "spec" || frame.type === "spec_done") { onSpecFrame(frame); return; }
@@ -778,6 +795,7 @@ export function createThread(view) {
           if (frame.type === "team") { onTeamFrame(frame); return; }
           // the prompt queue changed — sent, edited, reordered, paused
           if (frame.type === "queue") { view.onQueueFrame(frame); return; }
+          if (frame.type === "presence") { if (frame.chat === (view.chatId || "main")) { var pe = document.getElementById("presence"); if (pe) pe.innerHTML = presenceHtml(frame.people, state.presenceId || "you"); } return; }
           if (frame.type === "side") { if (state.onSideFrame) state.onSideFrame(frame); return; }
           // a reply as it's being written (not logged; the message follows)
           if (frame.type === "stream") { if (view.historyLoaded) onStreamFrame(frame); else if (pendingStream.length < 2000) pendingStream.push(frame); return; }

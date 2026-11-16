@@ -36,6 +36,7 @@ import { BUILD_REV, DEFAULT_PORT } from "./server.js";
 import { VERSION } from "../version.js";
 import type { NewProjectInput, CloneProjectInput, CreatedProject, ProjectCloneJob } from "../core/project-creation.js";
 import { autoRestartEnabled, describeSwap, writeSwapNote } from "../core/daemon-swap.js";
+import { PRESENCE_HEARTBEAT_MS, type PresenceMessage, type PresenceSnapshot } from "../core/presence.js";
 
 export class DaemonError extends Error {
   constructor(
@@ -978,6 +979,56 @@ export class DaemonClient {
   /** A Share-live link: a teammate let into one chat as view / reply / approve. */
   shareLive(guest: { project: string; chat: string; role: string; name: string; hours?: number }): Promise<{ link: string; guest?: { until: number } }> {
     return this.request("POST", "/api/pair/new", { guest });
+  }
+
+  /** Read a chat's current viewers without joining it. */
+  presence(projectId: string, chat = "main"): Promise<PresenceSnapshot> {
+    return this.request("GET", `/api/projects/${encodeURIComponent(projectId)}/chats/${encodeURIComponent(chat)}/presence`);
+  }
+
+  /** Join a chat and receive full presence snapshots. Heartbeats run until
+   * close or disconnection; setTyping sends start/stop immediately. Like
+   * subscribe(), this does not reconnect: open a new view after disconnecting.
+   */
+  watchPresence(projectId: string, chat: string, onPresence: (snapshot: PresenceSnapshot) => void,
+    onClose?: (code: number, reason: string) => void): { setTyping(typing: boolean): void; close(): void } {
+    const params = new URLSearchParams({ project: projectId });
+    const ws = new WebSocket(`ws://${this.cfg.host}:${this.cfg.port}/ws?${params}`, [`loom.bearer.${this.cfg.adminToken}`]);
+    let typing = false;
+    let stopped = false;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const send = () => {
+      if (stopped || ws.readyState !== WebSocket.OPEN) return;
+      const message: PresenceMessage = { type: "presence", chat, typing };
+      ws.send(JSON.stringify(message));
+    };
+    ws.on("open", () => {
+      send();
+      if (!stopped) heartbeat = setInterval(send, PRESENCE_HEARTBEAT_MS);
+    });
+    ws.on("message", (data) => {
+      let frame: PresenceSnapshot;
+      try { frame = JSON.parse(String(data)) as PresenceSnapshot; } catch { return; }
+      if (!stopped && frame?.type === "presence" && frame.chat === chat && Array.isArray(frame.people)) onPresence(frame);
+    });
+    ws.on("error", () => {});
+    ws.on("close", (code, reason) => {
+      clearInterval(heartbeat);
+      if (!stopped) onClose?.(code, String(reason));
+    });
+    return {
+      setTyping(value) {
+        if (typing === value) return;
+        typing = value;
+        send();
+      },
+      close() {
+        stopped = true;
+        clearInterval(heartbeat);
+        if (ws.readyState === WebSocket.CONNECTING) ws.terminate();
+        else ws.close();
+      },
+    };
   }
 
   pairedClients(): Promise<{

@@ -1581,6 +1581,38 @@ time with Settings ▸ Devices or `loom clients --revoke`.
 Their token reaches that one chat and nothing else on your machine: no other chats, terminals,
 files, git, settings or team. Over Loom Cloud it works from anywhere.
 
+Presence is kept in daemon memory, per project and chat. `loom presence [chat]` lists current
+viewers and who is typing; `--json` returns the snapshot and `--watch` joins the chat and streams
+changes until Ctrl-C. Chat may be an id or title and defaults to `main`. `loom chat` also announces
+its view and typing. Each guest socket and each announced owner/device view counts separately.
+Desktop, guest-page and phone presence displays can consume the API below; those displays are
+not included yet.
+
+For clients building a presence display:
+
+- Connect to `/ws?project=<projectId>` using the existing bearer authentication. Guest sockets
+  enter their shared chat automatically. Owner/device sockets enter when they first announce
+  `{ "type": "presence", "chat": "main", "typing": false }`.
+- Send that message on chat open, typing start/stop, and every **20 seconds**. Omitted `typing`
+  preserves its value (initially false). Announcing another chat moves the socket's view;
+  close the socket when leaving. Invalid chats and attempts by guests to switch chats are ignored.
+- Updates are full replacements shaped as
+  `{ "type": "presence", "projectId": "…", "chat": "main", "people": [{ "id": "…", "name": "Priya", "kind": "guest", "typing": false, "since": 1790000000000 }] }`.
+  `id` is an opaque per-socket id; `since` is the entry time in Unix milliseconds. `kind` is
+  `owner`, `device` or `guest`; names are `you`, the paired device's name or the Share-live name.
+  No tokens or IP addresses are included. An empty `people` array clears the display.
+- Owner/device project sockets and authorized unscoped sockets receive updates for their projects.
+  Unscoped sockets only observe; to announce a view, use a project socket. Guests receive only
+  their own chat's updates. Changes are coalesced to at most four broadcasts per second per chat.
+- Owners/devices can read `GET /api/projects/:id/chats/:chat/presence` without joining. Guests get
+  the same snapshot shape in the `presence` field of `GET /api/guest`.
+- Entries disappear on socket close or after **45 seconds** without an announcement, even when
+  the socket still answers transport pings. Restarting the daemon clears all presence.
+
+The shared TypeScript contracts and timing constants are in `src/core/presence.ts`, exported
+from the library entry point. `DaemonClient.presence()` reads a snapshot;
+`DaemonClient.watchPresence()` joins, maintains heartbeats and exposes `setTyping()` and `close()`.
+
 The approach comes from [Nuphos](https://github.com/nuphos/nuphos)'s shared sessions.
 
 ## Triggers: the next turn starts itself
