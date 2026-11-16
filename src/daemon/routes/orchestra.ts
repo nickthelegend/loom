@@ -13,7 +13,9 @@ export function registerOrchestraRoutes(app: Express, withRuntime: WithRuntime):
   // POST workers is string[]: each fleet row is agent[@model][:effort][xN]
   // (×N also works, count 1..100). orchestrator accepts the same with count 1.
   // Responses keep workers as instance ids and add workerDetails: [{ id, kind,
-  // model?, effort? }]. orchestrator and tasks also expose model?/effort?.
+  // model?, effort?, account?, configDir? }]. account is the machine-local registry
+  // id and configDir the pinned path. Fleet copies rotate through same-kind accounts.
+  // orchestrator and tasks also expose model?/effort?.
   // Missing selections mean provider defaults; older saved runs may lack
   // workerDetails. The started event includes it; task events include selections.
   const orchestraError = (res: express.Response, err: unknown) =>

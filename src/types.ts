@@ -159,6 +159,8 @@ export interface AgentConfig {
   /** Adapter kind, e.g. "claude-code" | "opencode" | "echo" | "antigravity". */
   kind: string;
   role: AgentRole;
+  /** Machine-local account id; options.configDir can select an unregistered config home. */
+  account?: string;
   options?: Record<string, unknown>;
   /** Override the ADE's native memory files to import into the shared brain. */
   memoryFiles?: string[];
@@ -617,6 +619,9 @@ export interface AgentStatus {
   capabilities: { steer: boolean };
   id: string;
   kind: string;
+  /** Selected machine-local account; configDir is also present for unregistered homes. */
+  account?: string;
+  configDir?: string;
   role: AgentRole;
   tier: AgentTier;
   available: boolean;

@@ -11,8 +11,9 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
   app.post(
     "/api/projects/:id/agents",
     withRuntime(async (rt, req, res) => {
-      const { kind, id, as, role, options, model, count = 1 } = (req.body ?? {}) as {
+      const { kind, id, as, role, options, model, account, count = 1 } = (req.body ?? {}) as {
         kind?: string;
+        account?: string;
         id?: string;
         as?: string;
         role?: string;
@@ -31,6 +32,7 @@ export function registerAgentsRoutes(app: Express, withRuntime: WithRuntime): vo
         const agents = Array.from({ length: count }, () => rt.addAgent(kind.trim(), {
           id: id ?? as,
           role,
+          account,
           options: { ...options, ...(model !== undefined ? { model } : {}) },
           ...(count > 1 ? { series: true } : {}),
         }));

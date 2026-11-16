@@ -20,6 +20,7 @@
  * turn, as in t3code.
  */
 
+import { configDirEnv } from "../core/accounts.js";
 import { autoPolicyFor } from "../core/auto-policy.js";
 import path from "node:path";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
@@ -149,7 +150,7 @@ export class ProviderAgent extends AdapterBase {
 
   constructor(id: string, readonly provider: ProviderKind, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, provider, projectDir);
-    this.options = options as AgentOptions;
+    this.options = { ...options, env: { ...(options.env as Record<string, string> | undefined), ...configDirEnv(provider, options.configDir) } } as AgentOptions;
     this.ingestion = new RuntimeIngestion({
       append: event => this.emit({ kind: event.kind, payload: event.payload }),
       live: delta => { for (const cb of this.liveListeners) { try { cb(delta); } catch { /* a viewer's problem */ } } },
@@ -210,12 +211,12 @@ export class ProviderAgent extends AdapterBase {
     const bin = this.bin;
     const name = this.provider === "codex" ? "codex" : "claude";
     if (!bin) return [{ name: "installed", ok: false, detail: `${name} CLI not found — install it${this.provider === "codex" ? " or open Codex.app once" : ""}` }];
-    const v = await cliOutput(bin, ["--version"]);
+    const v = await cliOutput(bin, ["--version"], 8000, this.options.env);
     const checks: AgentCheck[] = [
       { name: "installed", ok: v?.code === 0, detail: v?.code === 0 ? firstLine(v.out) || bin : `${name} didn't answer --version` },
     ];
     if (this.provider === "codex") {
-      const s = await cliOutput(bin, ["login", "status"]);
+      const s = await cliOutput(bin, ["login", "status"], 8000, this.options.env);
       checks.push({
         name: "signed in",
         ok: s?.code === 0,

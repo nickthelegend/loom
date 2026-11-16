@@ -99,8 +99,11 @@ stops: Claude Code parks the turn until the reset, and Codex ends it with
 
 The thread records each step ("claude hit its usage limit — codex carries on;
 claude is back around 19:00"), and your phone gets a push. By default only
-your other CLI agents take over, never a metered API model. Set the order
-with `relay.to`. `relay.auto: false` only reports the limit, and
+your other CLI agents take over, never a metered API model. Another account of
+the same CLI gets first choice: an enabled, idle instance on a different account,
+or a new instance using an unused registered account. Instances sharing a capped
+config directory share its cooldown. Busy or disabled instances aren't cloned
+around. `relay.to` sets the fallback order after these same-CLI accounts. `relay.auto: false` only reports the limit, and
 `relay.handBack: false` keeps the stand-in. Limits are read from what Claude
 and Codex report about their usage windows, and from the error text any CLI
 gives ("usage limit", "rate limited", "quota exceeded", with "try again at…"
@@ -498,6 +501,62 @@ brain**. Name them for their jobs (`--as reviewer --role reviewer`) and pick
 per message. Memory import dedupes by file and units are project-scoped, so
 what one session learns the others retrieve. One baton still rules them all:
 two sessions of a kind never means two writers at once.
+
+## Several accounts per CLI
+
+Register each Claude Code or Codex subscription with its own config directory:
+
+```sh
+loom accounts add codex --label personal
+loom accounts add codex --label work --dir ~/codex-work
+loom accounts                         # IDs, paths and CLI-reported sign-in status
+loom accounts login <id>              # interactive login in this terminal
+loom agents:add codex --account work  # accepts an ID or a label of this kind
+```
+
+Use `claude-code` instead of `codex` for Claude subscriptions. Without `--dir`,
+Loom creates a directory under `~/.loom/accounts/<id>` with mode 0700. `LOOM_HOME`
+relocates this registry and its default directories. `accounts.json` stores only
+`{ accounts: [{ id, kind, label, configDir }] }`; Loom never reads or copies the
+credentials inside those directories. Sign-in status comes from the CLI's own
+status command; `unknown` means it couldn't establish a verdict.
+
+An agent config can set `account: "<id>"` or `options.configDir: "/absolute/path"`.
+`~` is expanded; relative paths are rejected. A named account wins over
+`options.configDir`, which wins over the matching `options.env` variable.
+Claude gets `CLAUDE_CONFIG_DIR`, Codex gets `CODEX_HOME`. Unconfigured agents
+retain their normal CLI environment. Resolved paths are saved with agents added
+through Loom, so forgetting an account doesn't change their login.
+
+Quota Relay tries these accounts before switching CLIs. Orchestra distributes
+fleet copies round-robin across a kind's registered accounts: `codexx2` with two
+accounts runs one worker on each. A selected account starts the rotation; a
+single explicitly configured worker keeps its account. `workerDetails` records
+the account ID and resolved `configDir`, alongside model and effort, for clients
+and saved runs. Remote workers use their own machine's account configuration.
+
+`options.configDir` also maps to [Grok's `GROK_HOME`](https://docs.x.ai/build/settings)
+and [OpenCode's `OPENCODE_CONFIG_DIR`](https://github.com/anomalyco/opencode/issues/63129).
+OpenCode's config directory alone does not isolate its stored credentials; the
+accounts registry supports only Claude Code and Codex. Antigravity has no verified
+config-home override here.
+
+The daemon API is available to the owner and unscoped paired clients:
+
+| Endpoint | Request / response |
+| --- | --- |
+| `GET /api/accounts` | `{ accounts: [{ id, kind, label, configDir, authed }] }`; `authed` is `true`, `false`, or `null` |
+| `POST /api/accounts` | `{ kind, label, configDir? }` → `{ account: { id, kind, label, configDir } }` |
+| `DELETE /api/accounts/:id` | `{ forgotten: true }`; removes only the registry entry, never the directory |
+| `POST /api/accounts/:id/login` | `{ command, bin, args, env }`; displays a terminal command without running a login |
+
+The login display command uses POSIX shell syntax (PowerShell on Windows).
+Local clients can execute `bin` with `args` and merge `env` into their terminal
+environment without a shell. Project agent creation accepts `account` alongside
+`kind`, `role`, `options`, and `count`; successful responses contain the resolved
+account ID and `options.configDir`. Project agent status exposes `account?` and
+`configDir?`, and usage-limit readings are shared only within one account. No web
+or phone account screens are included.
 
 ## The Browser tab
 

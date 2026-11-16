@@ -1,3 +1,4 @@
+import { configDirEnv } from "../core/accounts.js";
 import { randomBytes } from "node:crypto";
 /**
  * OpenCode adapter — manages an `opencode serve` process per project and
@@ -253,7 +254,7 @@ export class OpenCodeAdapter extends AdapterBase {
 
   constructor(id: string, projectDir: string, options: Record<string, unknown> = {}) {
     super(id, "opencode", projectDir);
-    this.options = options as OpenCodeOptions;
+    this.options = { ...options, env: { ...(options.env as Record<string, string> | undefined), ...configDirEnv("opencode", options.configDir) } } as OpenCodeOptions;
   }
 
   private get sessionId(): string | undefined {
