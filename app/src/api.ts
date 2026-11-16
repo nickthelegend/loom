@@ -946,6 +946,17 @@ async function settle<T>(status: number, json: Record<string, unknown>): Promise
 }
 
 export const getProjects = (c: Creds) => api<{ projects: Project[] }>(c, "/api/projects");
+/** The agent CLIs on the paired computer — for choosing who works in a new project (#371). */
+export interface SetupAgent { kind: string; label: string; found: boolean; authed: boolean | null }
+export const getSetupAgents = (c: Creds) => api<{ agents: SetupAgent[] }>(c, "/api/setup");
+/** A brand-new project under the computer's Loom projects folder: git, a README, a first commit. */
+export const createProject = (c: Creds, name: string, agents?: Array<{ kind: string; model?: string; count?: number }>) =>
+  api<{ project: { id: string; name: string; dir: string } }>(c, "/api/projects/new", { method: "POST", body: JSON.stringify(agents?.length ? { name, agents } : { name }) });
+/** Clone a repo on the computer, in the background; poll the job until it's done. */
+export const cloneProject = (c: Creds, url: string, name?: string) =>
+  api<{ jobId: string; dir: string }>(c, "/api/projects/clone", { method: "POST", body: JSON.stringify(name ? { url, name } : { url }) });
+export const getProjectJob = (c: Creds, jobId: string) =>
+  api<{ status: "cloning" | "done" | "failed"; project?: { id: string; name: string; dir: string }; error?: string; progress?: string }>(c, `/api/projects/jobs/${encodeURIComponent(jobId)}`);
 
 export async function pingDaemon(c: Creds): Promise<DaemonReachability> {
   const controller = new AbortController();

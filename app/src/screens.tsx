@@ -46,6 +46,7 @@ import { QuestionEvent, answeredQuestions } from "./question";
 import { DeliveryChip } from "./delivery";
 import { PermissionChip } from "./permissions";
 import { PromptsSheet } from "./prompts";
+import { NewProjectSheet } from "./new-project";
 import { notifyApproval } from "./push";
 import { ConnectionBadge, useConnRoute } from "./brand";
 import { describeLink, linkQuality, pushSample, sparkBars, type LinkSample } from "./link-model";
@@ -431,6 +432,7 @@ export function BoardScreen(props: {
   accountButton?: React.ReactNode;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [daemon, setDaemon] = useState<DaemonReachability | null>(null);
@@ -678,12 +680,26 @@ export function BoardScreen(props: {
           </View>
         )}
 
-        {/* projects */}
+        {/* projects — and + Project, which starts or clones one on the computer (#371) */}
         <View>
-          <SectionLabel text="Projects" />
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <SectionLabel text="Projects" />
+            <TouchableOpacity
+              onPress={() => setNewProjectOpen(true)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="New project: start or clone one on your computer"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4, minHeight: 30, paddingHorizontal: 11, borderRadius: radii.pill,
+                borderWidth: 1, borderColor: T.line2, backgroundColor: T.raised, marginBottom: 6 }}
+            >
+              <Text style={{ color: T.text, fontSize: 15, fontWeight: "700", marginTop: -1 }}>+</Text>
+              <Text style={{ color: T.text, fontSize: 12.5, fontWeight: "700" }}>Project</Text>
+            </TouchableOpacity>
+          </View>
           <View style={{ gap: spacing.sm }}>
             {projects.length === 0 ? (
-              <Sys text="no projects yet — run loom init on your computer" />
+              <Sys text="no projects yet — tap + Project to start one, or clone a repo" />
             ) : (
               projects.map((p) => (
                 <ProjectCard key={p.id} p={p} onPress={() => props.onOpen(p)} />
@@ -738,6 +754,19 @@ export function BoardScreen(props: {
         </View>
       </ScrollView>
 
+      <NewProjectSheet
+        visible={newProjectOpen}
+        creds={props.creds}
+        onClose={() => setNewProjectOpen(false)}
+        onCreated={(id) => {
+          setNewProjectOpen(false);
+          void getProjects(props.creds).then(({ projects: fresh }) => {
+            setProjects(fresh);
+            const made = fresh.find((p) => p.id === id);
+            if (made) props.onOpen(made);
+          }).catch(() => void refresh());
+        }}
+      />
       <ApprovalsSheet
         creds={props.creds}
         projects={projects}
